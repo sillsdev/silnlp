@@ -1,0 +1,5 @@
+# omit IDE data
+.idea/
+
+# omit third-party libraries, tools, drivers, etc.
+vendors/
