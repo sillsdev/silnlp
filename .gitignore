@@ -1,5 +1,8 @@
 # omit IDE data
 .idea/
 
+# omit notebook data
+.ipynb_checkpoints/
+
 # omit third-party libraries, tools, drivers, etc.
 vendors/
