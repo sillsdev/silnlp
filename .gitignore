@@ -6,3 +6,6 @@
 
 # omit third-party libraries, tools, drivers, etc.
 vendors/
+
+# omit credentials file(s)
+credentials.py
