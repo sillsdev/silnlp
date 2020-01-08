@@ -39,14 +39,18 @@ is an attempt to document a particular setup that has worked so far.
 Download and install the following separately before creating any projects or
 starting any code, preferably in this order to avoid most warnings:
 
-1. Git
-1. Python 3.7 (latest minor version, ie 3.7.6, and not 3.8 just yet)
+1. [Git](https://git-scm.com/downloads)
+1. [Python 3.7](https://www.python.org/downloads/) (latest minor version, ie 3.7.6, and not 3.8 just yet, **not the
+Microsoft Store**)
 1. Pipenv via Windows Console _(not PowerShell)_ using the following command
-_(do not use `--user` option for pip)_:
+_(and do not use `--user` option for pip)_:
 
 ```
 C:>pip install -e git+https://github.com/pypa/pipenv.git@master#egg=pipenv
 ```
+
+_(Pip should work now if Python was properly installed.  If it does not work,
+you will need to go back and check on the Python 3.7 installation.)_
 
 #### Creating Project
 
