@@ -1,3 +1,6 @@
+# omit macOS meta
+.DS_Store
+
 # omit IDE data
 .idea/
 
