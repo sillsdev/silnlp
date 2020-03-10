@@ -3,6 +3,8 @@
 
 # omit IDE data
 .idea/
+.vscode/
+.env
 
 # omit notebook data
 .ipynb_checkpoints/
