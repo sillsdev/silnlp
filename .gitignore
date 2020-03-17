@@ -17,3 +17,6 @@ vendors/
 
 # omit credentials file(s)
 credentials.py
+
+# omit egg-info
+*.egg-info/
