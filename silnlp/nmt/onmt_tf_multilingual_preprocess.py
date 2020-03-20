@@ -1,27 +1,31 @@
 import os
 from glob import glob
+from itertools import chain
 
 import sentencepiece as sp
+from nlp.common.environment import paratextPreprocessedDir
 from opennmt import constants
 from opennmt.data import Vocab
 from sklearn.model_selection import train_test_split
 
-from nlp.common.environment import paratextPreprocessedDir
 
+def get_parallel_corpus(src_file_path, src_sentences, trg_file_path, trg_sentences, write_trg_token):
+    src_iso = get_iso(src_file_path)
+    trg_iso = get_iso(trg_file_path)
 
-def get_corpus(data_dir, write_trg_token, src_lang, trg_lang, lang):
-    file_path = os.path.join(data_dir, f"all-{src_lang}-{trg_lang}.{lang}")
-    if not os.path.exists(file_path):
-        file_path = os.path.join(data_dir, f"all-{trg_lang}-{src_lang}.{lang}")
+    if src_iso == trg_iso:
+        return
 
-    sentences = list()
-    with open(file_path, "r", encoding="utf-8") as file:
-        for line in file:
-            line = line.strip()
-            if write_trg_token and lang == src_lang:
-                line = f"<2{trg_lang}> " + line
-            sentences.append(line)
-    return sentences
+    with open(src_file_path, "r", encoding="utf-8") as src_file, open(trg_file_path, "r", encoding="utf-8") as trg_file:
+        for src_line, trg_line in zip(src_file, trg_file):
+            src_line = src_line.strip()
+            trg_line = trg_line.strip()
+            if len(src_line) == 0 or len(trg_line) == 0:
+                continue
+            if write_trg_token:
+                src_line = f"<2{trg_iso}> " + src_line
+            src_sentences.append(src_line)
+            trg_sentences.append(trg_line)
 
 
 def write_corpus(corpus_path, sentences):
@@ -40,30 +44,43 @@ def tokenize_sentences(spp, sentences):
         yield prefix + " ".join(spp.encode_as_pieces(sentence))
 
 
+def get_iso(file_path):
+    file_name = os.path.splitext(os.path.basename(file_path))[0]
+    parts = file_name.split("-")
+    return parts[0]
+
+
 def main():
     # name = "n-to-1"
     # src_langs = {"bru", "ctu", "cuk", "ifa", "kek", "mps", "nch", "qxn", "rop", "xon"}
     # trg_langs = {"en"}
 
-    name = "1-to-n"
-    src_langs = {"en"}
-    trg_langs = {"bru", "ctu", "cuk", "ifa", "kek", "mps", "nch", "qxn", "rop", "xon"}
+    # name = "1-to-n"
+    # src_langs = {"en"}
+    # trg_langs = {"bru", "ctu", "cuk", "ifa", "kek", "mps", "nch", "qxn", "rop", "xon"}
 
-    root_dir = os.path.join(paratextPreprocessedDir, name)
+    name = "n-to-m"
+    src_langs = {"bru", "ctu", "cuk", "ifa", "kek", "mps", "nch", "qxn", "rop", "xon"}
+    trg_langs = {"en", "es", "fr"}
+
+    root_dir = os.path.join(paratextPreprocessedDir, "tests", name)
     model_prefix = os.path.join(root_dir, "sp")
     write_trg_token = len(trg_langs) > 1
 
     os.makedirs(root_dir, exist_ok=True)
 
-    file_paths = list()
-    for file_path in glob(os.path.join(paratextPreprocessedDir, "all-*.*")):
-        file_name = os.path.splitext(os.path.basename(file_path))[0]
-        parts = file_name.split("-")
-        lang1 = parts[1]
-        lang2 = parts[2]
-        if (lang1 in src_langs and lang2 in trg_langs) or (lang1 in trg_langs and lang2 in src_langs):
-            file_paths.append(file_path)
-    joined_file_paths = ",".join(file_paths)
+    src_file_paths = list()
+    trg_file_paths = list()
+    for file_path in glob(os.path.join(paratextPreprocessedDir, "data", "*.txt")):
+        iso = get_iso(file_path)
+        if iso in src_langs:
+            src_file_paths.append(file_path)
+        if iso in trg_langs:
+            trg_file_paths.append(file_path)
+
+    src_file_paths.sort()
+    trg_file_paths.sort()
+    joined_file_paths = ",".join(chain(src_file_paths, trg_file_paths))
 
     sp_train_params = (
         f"--normalization_rule_name=nmt_nfkc_cf --input={joined_file_paths} --model_prefix={model_prefix}"
@@ -89,14 +106,9 @@ def main():
 
     src_sentences = list()
     trg_sentences = list()
-    for src_lang in src_langs:
-        for trg_lang in trg_langs:
-            if src_lang == trg_lang:
-                continue
-            src_corpus = get_corpus(paratextPreprocessedDir, write_trg_token, src_lang, trg_lang, src_lang)
-            src_sentences.extend(src_corpus)
-            trg_corpus = get_corpus(paratextPreprocessedDir, write_trg_token, src_lang, trg_lang, trg_lang)
-            trg_sentences.extend(trg_corpus)
+    for src_file_path in src_file_paths:
+        for trg_file_path in trg_file_paths:
+            get_parallel_corpus(src_file_path, src_sentences, trg_file_path, trg_sentences, write_trg_token)
 
     train_src_sentences, test_src_sentences, train_trg_sentences, test_trg_sentences = train_test_split(
         src_sentences, trg_sentences, test_size=2000, random_state=111
