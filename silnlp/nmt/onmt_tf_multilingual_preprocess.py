@@ -1,3 +1,4 @@
+import argparse
 import os
 from glob import glob
 from itertools import chain
@@ -51,17 +52,17 @@ def get_iso(file_path):
 
 
 def main():
-    # name = "n-to-1"
-    # src_langs = {"bru", "ctu", "cuk", "ifa", "kek", "mps", "nch", "qxn", "rop", "xon"}
-    # trg_langs = {"en"}
+    parser = argparse.ArgumentParser(
+        description="Preprocesses text corpora into a multilingual data set for OpenNMT-tf"
+    )
+    parser.add_argument("--task", required=True, help="Task name")
+    parser.add_argument("--src", nargs="+", metavar="lang", help="Source language")
+    parser.add_argument("--trg", nargs="+", metavar="lang", help="Target language")
+    args = parser.parse_args()
 
-    # name = "1-to-n"
-    # src_langs = {"en"}
-    # trg_langs = {"bru", "ctu", "cuk", "ifa", "kek", "mps", "nch", "qxn", "rop", "xon"}
-
-    name = "n-to-m"
-    src_langs = {"bru", "ctu", "cuk", "ifa", "kek", "mps", "nch", "qxn", "rop", "xon"}
-    trg_langs = {"en", "es", "fr"}
+    name = args.task
+    src_langs = set(args.src)
+    trg_langs = set(args.trg)
 
     root_dir = os.path.join(paratextPreprocessedDir, "tests", name)
     model_prefix = os.path.join(root_dir, "sp")

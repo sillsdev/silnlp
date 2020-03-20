@@ -5,6 +5,7 @@
 # 2. Run "dotnet tool install SIL.Machine.Translator -g"
 
 
+import argparse
 import os
 import subprocess
 import xml.etree.ElementTree as ET
@@ -43,15 +44,21 @@ def extract_corpus(output_dir, iso, project_dir):
 
 
 def main():
-    langs = {"en", "es", "fr", "bru", "ctu", "cuk", "ifa", "kek", "mps", "nch", "qxn", "rop", "xon"}
+    parser = argparse.ArgumentParser(description="Extracts text corpora from Paratext projects")
+    parser.add_argument("projects", nargs="*", metavar="name", help="Paratext project")
+    args = parser.parse_args()
+
+    projects = set(args.projects)
+
     output_dir = os.path.join(paratextPreprocessedDir, "data")
     os.makedirs(output_dir, exist_ok=True)
     for path in os.listdir(paratextUnzippedDir):
+        if path == "Ref" or (len(projects) > 0 and path not in projects):
+            continue
         project_dir = os.path.join(paratextUnzippedDir, path)
         if os.path.isdir(project_dir):
             iso = get_iso(project_dir)
-            if langs is None or iso in langs:
-                extract_corpus(output_dir, iso, project_dir)
+            extract_corpus(output_dir, iso, project_dir)
 
 
 if __name__ == "__main__":
