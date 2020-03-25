@@ -72,16 +72,17 @@ def main():
 
     src_file_paths = list()
     trg_file_paths = list()
-    for file_path in glob(os.path.join(paratextPreprocessedDir, "data", "*.txt")):
-        iso = get_iso(file_path)
+    for file_name in glob(os.path.join(paratextPreprocessedDir, "data", "*.txt")):
+        iso = get_iso(file_name)
         if iso in src_langs:
-            src_file_paths.append(file_path)
+            src_file_paths.append(file_name)
         if iso in trg_langs:
-            trg_file_paths.append(file_path)
+            trg_file_paths.append(file_name)
 
     src_file_paths.sort()
     trg_file_paths.sort()
     joined_file_paths = ",".join(chain(src_file_paths, trg_file_paths))
+
 
     sp_train_params = (
         f"--normalization_rule_name=nmt_nfkc_cf --input={joined_file_paths} --model_prefix={model_prefix}"
