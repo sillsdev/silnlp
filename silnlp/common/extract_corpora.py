@@ -50,16 +50,30 @@ def main():
 
     projects = set(args.projects)
 
-    output_dir = os.path.join(paratextPreprocessedDir, "data")
-    os.makedirs(output_dir, exist_ok=True)
+    # Which projects have data we can find?
+    projects_found = []
     for path in os.listdir(paratextUnzippedDir):
         if path == "Ref" or (len(projects) > 0 and path not in projects):
             continue
-        project_dir = os.path.join(paratextUnzippedDir, path)
-        if os.path.isdir(project_dir):
-            iso = get_iso(project_dir)
-            extract_corpus(output_dir, iso, project_dir)
+        else :
+            projects_found.append(os.path.join(paratextUnzippedDir, path))
 
+    # Process the projects that have data and tell the user.
+    if projects_found:
+        output_dir = os.path.join(paratextPreprocessedDir, "data")
+        os.makedirs(output_dir, exist_ok=True)
+        for project_dir in projects_found:
+            if os.path.isdir(project_dir):
+                iso = get_iso(project_dir)
+                extract_corpus(output_dir, iso, project_dir)
+                print(f"Processed: {project_dir}\nSaved in: {output_dir}")
+    else :
+        print(f"Couldn't find any data to process for any project.")
+
+    # Tell the user which projects couldn't be found.
+    for project  in projects:
+        if project not in projects_found:
+            print(f"Couldn't find project {project}")
 
 if __name__ == "__main__":
     main()
