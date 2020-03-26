@@ -59,6 +59,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Preprocesses text corpora into a multilingual data set for OpenNMT-tf"
     )
+    # Task is used as the name of the directory for the results.
     parser.add_argument("--task", required=True, help="Task name")
     parser.add_argument("--src", nargs="+", metavar="lang", help="Source language")
     parser.add_argument("--trg", nargs="+", metavar="lang", help="Target language")
