@@ -11,6 +11,7 @@
 
 # omit python cache
 __pycache__
+.mypy_cache/
 
 # omit third-party libraries, tools, drivers, etc.
 vendors/
