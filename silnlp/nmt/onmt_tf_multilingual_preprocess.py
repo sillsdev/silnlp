@@ -2,15 +2,19 @@ import argparse
 import os
 from glob import glob
 from itertools import chain
+from typing import Iterable, Iterator, List, Set
 
 import sentencepiece as sp
-from nlp.common.environment import paratextPreprocessedDir
 from opennmt import constants
 from opennmt.data import Vocab
 from sklearn.model_selection import train_test_split
 
+from nlp.common.environment import paratextPreprocessedDir
 
-def get_parallel_corpus(src_file_path, src_sentences, trg_file_path, trg_sentences, write_trg_token):
+
+def get_parallel_corpus(
+    src_file_path: str, src_sentences: List[str], trg_file_path: str, trg_sentences: List[str], write_trg_token: bool
+) -> None:
     src_iso = get_iso(src_file_path)
     trg_iso = get_iso(trg_file_path)
 
@@ -29,13 +33,13 @@ def get_parallel_corpus(src_file_path, src_sentences, trg_file_path, trg_sentenc
             trg_sentences.append(trg_line)
 
 
-def write_corpus(corpus_path, sentences):
+def write_corpus(corpus_path: str, sentences: Iterable[str]) -> None:
     with open(corpus_path, "w", encoding="utf-8") as file:
         for sentence in sentences:
             file.write(sentence + "\n")
 
 
-def tokenize_sentences(spp, sentences):
+def tokenize_sentences(spp: sp.SentencePieceProcessor, sentences: List[str]) -> Iterator[str]:
     for sentence in sentences:
         prefix = ""
         if sentence.startswith("<2"):
@@ -45,13 +49,13 @@ def tokenize_sentences(spp, sentences):
         yield prefix + " ".join(spp.encode_as_pieces(sentence))
 
 
-def get_iso(file_path):
+def get_iso(file_path: str) -> str:
     file_name = os.path.splitext(os.path.basename(file_path))[0]
     parts = file_name.split("-")
     return parts[0]
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Preprocesses text corpora into a multilingual data set for OpenNMT-tf"
     )
@@ -61,8 +65,8 @@ def main():
     args = parser.parse_args()
 
     name = args.task
-    src_langs = set(args.src)
-    trg_langs = set(args.trg)
+    src_langs: Set[str] = set(args.src)
+    trg_langs: Set[str] = set(args.trg)
 
     root_dir = os.path.join(paratextPreprocessedDir, "tests", name)
     model_prefix = os.path.join(root_dir, "sp")
@@ -70,19 +74,18 @@ def main():
 
     os.makedirs(root_dir, exist_ok=True)
 
-    src_file_paths = list()
-    trg_file_paths = list()
-    for file_name in glob(os.path.join(paratextPreprocessedDir, "data", "*.txt")):
-        iso = get_iso(file_name)
+    src_file_paths: List[str] = list()
+    trg_file_paths: List[str] = list()
+    for file_path in glob(os.path.join(paratextPreprocessedDir, "data", "*.txt")):
+        iso = get_iso(file_path)
         if iso in src_langs:
-            src_file_paths.append(file_name)
+            src_file_paths.append(file_path)
         if iso in trg_langs:
-            trg_file_paths.append(file_name)
+            trg_file_paths.append(file_path)
 
     src_file_paths.sort()
     trg_file_paths.sort()
     joined_file_paths = ",".join(chain(src_file_paths, trg_file_paths))
-
 
     sp_train_params = (
         f"--normalization_rule_name=nmt_nfkc_cf --input={joined_file_paths} --model_prefix={model_prefix}"
@@ -106,8 +109,8 @@ def main():
     spp = sp.SentencePieceProcessor()
     spp.load(f"{model_prefix}.model")
 
-    src_sentences = list()
-    trg_sentences = list()
+    src_sentences: List[str] = list()
+    trg_sentences: List[str] = list()
     for src_file_path in src_file_paths:
         for trg_file_path in trg_file_paths:
             get_parallel_corpus(src_file_path, src_sentences, trg_file_path, trg_sentences, write_trg_token)
