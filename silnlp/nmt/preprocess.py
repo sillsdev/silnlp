@@ -4,12 +4,38 @@ from glob import glob
 from itertools import chain
 from typing import Iterable, Iterator, List, Set
 
+import opennmt
 import sentencepiece as sp
-from opennmt import constants
-from opennmt.data import Vocab
 from sklearn.model_selection import train_test_split
 
 from nlp.common.environment import paratextPreprocessedDir
+from nlp.nmt.config import get_root_dir, load_config
+
+
+def build_vocab(
+    file_paths: List[str], vocab_size: int, model_prefix: str, vocab_path: str, trg_langs: Set[str] = None
+) -> None:
+    joined_file_paths = ",".join(file_paths)
+
+    sp_train_params = (
+        f"--normalization_rule_name=nmt_nfkc_cf --input={joined_file_paths} --model_prefix={model_prefix}"
+        f" --vocab_size={vocab_size} --character_coverage=1.0 --input_sentence_size=1000000"
+        " --shuffle_input_sentence=true"
+    )
+
+    if trg_langs is not None:
+        trg_tokens = list(map(lambda l: f"<2{l}>", trg_langs))
+        joined_trg_tokens = ",".join(trg_tokens)
+        sp_train_params += f" --control_symbols={joined_trg_tokens}"
+
+    sp.SentencePieceTrainer.train(sp_train_params)
+
+    special_tokens = [opennmt.PADDING_TOKEN, opennmt.START_OF_SENTENCE_TOKEN, opennmt.END_OF_SENTENCE_TOKEN]
+
+    vocab = opennmt.data.Vocab(special_tokens)
+    vocab.load(f"{model_prefix}.vocab", "sentencepiece")
+    vocab.pad_to_multiple(8)
+    vocab.serialize(vocab_path)
 
 
 def get_parallel_corpus(
@@ -85,23 +111,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Preprocesses text corpora into a multilingual data set for OpenNMT-tf"
     )
-    parser.add_argument("--task", required=True, help="Task name")
-    parser.add_argument("--src", nargs="+", metavar="lang", help="Source language")
-    parser.add_argument("--trg", nargs="+", metavar="lang", help="Target language")
-    parser.add_argument("--test-size", type=int, default=250, help="Test size for a language pair")
-    parser.add_argument("--val-size", type=int, default=250, help="Validation size for a language pair")
-    parser.add_argument("--vocab-size", type=int, default=24000, help="Shared vocabulary size")
+    parser.add_argument("task", help="Task name")
     args = parser.parse_args()
 
-    name = args.task
-    src_langs: Set[str] = set(args.src)
-    trg_langs: Set[str] = set(args.trg)
+    task_name = args.task
+    root_dir = get_root_dir(task_name)
+    config = load_config(task_name)
+    data_config: dict = config.get("data", {})
 
-    root_dir = os.path.join(paratextPreprocessedDir, "tests", name)
-    model_prefix = os.path.join(root_dir, "sp")
+    src_langs: Set[str] = set(data_config.get("src_langs", []))
+    trg_langs: Set[str] = set(data_config.get("trg_langs", []))
     write_trg_token = len(trg_langs) > 1
-
-    os.makedirs(root_dir, exist_ok=True)
 
     src_file_paths: List[str] = list()
     trg_file_paths: List[str] = list()
@@ -114,31 +134,28 @@ def main() -> None:
 
     src_file_paths.sort()
     trg_file_paths.sort()
-    joined_file_paths = ",".join(chain(src_file_paths, trg_file_paths))
 
-    sp_train_params = (
-        f"--normalization_rule_name=nmt_nfkc_cf --input={joined_file_paths} --model_prefix={model_prefix}"
-        f" --vocab_size={args.vocab_size} --character_coverage=1.0 --input_sentence_size=1000000"
-        " --shuffle_input_sentence=true"
+    print("Building source vocabulary...")
+    src_vocab_size: int = data_config.get("src_vocab_size", 8000)
+    src_model_prefix = os.path.join(root_dir, "src-sp")
+    src_vocab_path = os.path.join(root_dir, "src-onmt.vocab")
+    build_vocab(
+        src_file_paths,
+        src_vocab_size,
+        src_model_prefix,
+        src_vocab_path,
+        trg_langs=trg_langs if write_trg_token else None,
     )
 
-    if write_trg_token:
-        trg_tokens = list(map(lambda l: f"<2{l}>", trg_langs))
-        joined_trg_tokens = ",".join(trg_tokens)
-        sp_train_params += f" --control_symbols={joined_trg_tokens}"
+    print("Building target vocabulary...")
+    trg_vocab_size: int = data_config.get("trg_vocab_size", 8000)
+    trg_model_prefix = os.path.join(root_dir, "trg-sp")
+    trg_vocab_path = os.path.join(root_dir, "trg-onmt.vocab")
+    build_vocab(trg_file_paths, trg_vocab_size, trg_model_prefix, trg_vocab_path)
 
-    sp.SentencePieceTrainer.train(sp_train_params)
-
-    special_tokens = [constants.PADDING_TOKEN, constants.START_OF_SENTENCE_TOKEN, constants.END_OF_SENTENCE_TOKEN]
-
-    vocab = Vocab(special_tokens)
-    vocab.load(f"{model_prefix}.vocab", "sentencepiece")
-    vocab.pad_to_multiple(8)
-    vocab.serialize(os.path.join(root_dir, "onmt.vocab"))
-
-    spp = sp.SentencePieceProcessor()
-    spp.load(f"{model_prefix}.model")
-
+    print("Collecting data sets...")
+    test_size: int = data_config.get("test_size", 250)
+    val_size: int = data_config.get("val_size", 250)
     train_src_sentences: List[str] = list()
     train_trg_sentences: List[str] = list()
     test_src_sentences: List[str] = list()
@@ -157,19 +174,30 @@ def main() -> None:
                 val_src_sentences,
                 val_trg_sentences,
                 write_trg_token,
-                args.test_size,
-                args.val_size,
+                test_size,
+                val_size,
             )
 
-    write_corpus(os.path.join(root_dir, "train.src.txt"), tokenize_sentences(spp, train_src_sentences))
-    write_corpus(os.path.join(root_dir, "train.trg.txt"), tokenize_sentences(spp, train_trg_sentences))
+    src_spp = sp.SentencePieceProcessor()
+    src_spp.load(f"{src_model_prefix}.model")
 
-    write_corpus(os.path.join(root_dir, "test.src.txt"), tokenize_sentences(spp, test_src_sentences))
-    write_corpus(os.path.join(root_dir, "test.trg.txt"), tokenize_sentences(spp, test_trg_sentences))
+    trg_spp = sp.SentencePieceProcessor()
+    trg_spp.load(f"{trg_model_prefix}.model")
+
+    print("Writing train data set...")
+    write_corpus(os.path.join(root_dir, "train.src.txt"), tokenize_sentences(src_spp, train_src_sentences))
+    write_corpus(os.path.join(root_dir, "train.trg.txt"), tokenize_sentences(trg_spp, train_trg_sentences))
+
+    print("Writing test data set...")
+    write_corpus(os.path.join(root_dir, "test.src.txt"), tokenize_sentences(src_spp, test_src_sentences))
+    write_corpus(os.path.join(root_dir, "test.trg.txt"), tokenize_sentences(trg_spp, test_trg_sentences))
     write_corpus(os.path.join(root_dir, "test.trg.detok.txt"), test_trg_sentences)
 
-    write_corpus(os.path.join(root_dir, "val.src.txt"), tokenize_sentences(spp, val_src_sentences))
-    write_corpus(os.path.join(root_dir, "val.trg.txt"), tokenize_sentences(spp, val_trg_sentences))
+    print("Writing validation data set...")
+    write_corpus(os.path.join(root_dir, "val.src.txt"), tokenize_sentences(src_spp, val_src_sentences))
+    write_corpus(os.path.join(root_dir, "val.trg.txt"), tokenize_sentences(trg_spp, val_trg_sentences))
+
+    print("Preprocessing completed")
 
 
 if __name__ == "__main__":
