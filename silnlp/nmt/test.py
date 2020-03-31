@@ -43,6 +43,7 @@ def main() -> None:
     task_name = args.task
     root_dir = get_root_dir(task_name)
     config = load_config(task_name)
+    data_config: dict = config.get("data", {})
     runner = create_runner(config, mixed_precision=args.mixed_precision)
 
     print("Generating predictions...")
@@ -51,7 +52,7 @@ def main() -> None:
     runner.infer(features_file, predictions_file=predictions_file)
 
     print("Detokenizing predictions...")
-    model_file = os.path.join(root_dir, "trg-sp.model")
+    model_file = os.path.join(root_dir, "sp.model" if data_config.get("share_vocab", True) else "trg-sp.model")
     predictions_detok_file = os.path.join(root_dir, "test-predictions.trg.detok.txt")
     sys = detokenize(model_file, predictions_file, predictions_detok_file)
 

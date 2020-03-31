@@ -1,7 +1,6 @@
 import argparse
 import os
 from glob import glob
-from itertools import chain
 from typing import Iterable, Iterator, List, Set
 
 import opennmt
@@ -135,23 +134,47 @@ def main() -> None:
     src_file_paths.sort()
     trg_file_paths.sort()
 
-    print("Building source vocabulary...")
-    src_vocab_size: int = data_config.get("src_vocab_size", 8000)
-    src_model_prefix = os.path.join(root_dir, "src-sp")
-    src_vocab_path = os.path.join(root_dir, "src-onmt.vocab")
-    build_vocab(
-        src_file_paths,
-        src_vocab_size,
-        src_model_prefix,
-        src_vocab_path,
-        trg_langs=trg_langs if write_trg_token else None,
-    )
+    if data_config.get("share_vocab", True):
+        print("Building shared vocabulary...")
+        vocab_size: int = data_config.get("vocab_size", 24000)
+        model_prefix = os.path.join(root_dir, "sp")
+        vocab_path = os.path.join(root_dir, "onmt.vocab")
+        build_vocab(
+            src_file_paths + trg_file_paths,
+            vocab_size,
+            model_prefix,
+            vocab_path,
+            trg_langs=trg_langs if write_trg_token else None,
+        )
 
-    print("Building target vocabulary...")
-    trg_vocab_size: int = data_config.get("trg_vocab_size", 8000)
-    trg_model_prefix = os.path.join(root_dir, "trg-sp")
-    trg_vocab_path = os.path.join(root_dir, "trg-onmt.vocab")
-    build_vocab(trg_file_paths, trg_vocab_size, trg_model_prefix, trg_vocab_path)
+        src_spp = sp.SentencePieceProcessor()
+        src_spp.load(f"{model_prefix}.model")
+
+        trg_spp = src_spp
+    else:
+        print("Building source vocabulary...")
+        src_vocab_size: int = data_config.get("src_vocab_size", 8000)
+        src_model_prefix = os.path.join(root_dir, "src-sp")
+        src_vocab_path = os.path.join(root_dir, "src-onmt.vocab")
+        build_vocab(
+            src_file_paths,
+            src_vocab_size,
+            src_model_prefix,
+            src_vocab_path,
+            trg_langs=trg_langs if write_trg_token else None,
+        )
+
+        print("Building target vocabulary...")
+        trg_vocab_size: int = data_config.get("trg_vocab_size", 8000)
+        trg_model_prefix = os.path.join(root_dir, "trg-sp")
+        trg_vocab_path = os.path.join(root_dir, "trg-onmt.vocab")
+        build_vocab(trg_file_paths, trg_vocab_size, trg_model_prefix, trg_vocab_path)
+
+        src_spp = sp.SentencePieceProcessor()
+        src_spp.load(f"{src_model_prefix}.model")
+
+        trg_spp = sp.SentencePieceProcessor()
+        trg_spp.load(f"{trg_model_prefix}.model")
 
     print("Collecting data sets...")
     test_size: int = data_config.get("test_size", 250)
@@ -177,12 +200,6 @@ def main() -> None:
                 test_size,
                 val_size,
             )
-
-    src_spp = sp.SentencePieceProcessor()
-    src_spp.load(f"{src_model_prefix}.model")
-
-    trg_spp = sp.SentencePieceProcessor()
-    trg_spp.load(f"{trg_model_prefix}.model")
 
     print("Writing train data set...")
     write_corpus(os.path.join(root_dir, "train.src.txt"), tokenize_sentences(src_spp, train_src_sentences))

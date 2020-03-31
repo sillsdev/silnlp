@@ -40,8 +40,6 @@ def load_config(task_name: str) -> dict:
             "train_labels_file": os.path.join(root_dir, "train.trg.txt"),
             "eval_features_file": os.path.join(root_dir, "val.src.txt"),
             "eval_labels_file": os.path.join(root_dir, "val.trg.txt"),
-            "source_vocabulary": os.path.join(root_dir, "src-onmt.vocab"),
-            "target_vocabulary": os.path.join(root_dir, "trg-onmt.vocab"),
         },
         "train": {"average_last_checkpoints": 0},
         "eval": {
@@ -51,7 +49,15 @@ def load_config(task_name: str) -> dict:
         },
     }
 
-    return opennmt.load_config([config_path], config)
+    config = opennmt.load_config([config_path], config)
+    data_config: dict = config["data"]
+    if data_config.get("share_vocab", True):
+        data_config["source_vocabulary"] = os.path.join(root_dir, "onmt.vocab")
+        data_config["target_vocabulary"] = os.path.join(root_dir, "onmt.vocab")
+    else:
+        data_config["source_vocabulary"] = os.path.join(root_dir, "src-onmt.vocab")
+        data_config["target_vocabulary"] = os.path.join(root_dir, "trg-onmt.vocab")
+    return config
 
 
 def create_runner(config: dict, mixed_precision: bool = False, log_level: int = logging.INFO) -> opennmt.Runner:
@@ -82,22 +88,23 @@ def main() -> None:
     parser.add_argument("task", help="Task name")
     parser.add_argument("--src-langs", nargs="*", metavar="lang", default=[], help="Source language")
     parser.add_argument("--trg-langs", nargs="*", metavar="lang", default=[], help="Target language")
-    parser.add_argument("--src-vocab-size", type=int, default=8000, help="Source vocabulary size")
-    parser.add_argument("--trg-vocab-size", type=int, default=8000, help="Target vocabulary size")
+    parser.add_argument("--vocab-size", type=int, help="Shared vocabulary size")
+    parser.add_argument("--src-vocab-size", type=int, help="Source vocabulary size")
+    parser.add_argument("--trg-vocab-size", type=int, help="Target vocabulary size")
     args = parser.parse_args()
 
     root_dir = get_root_dir(args.task)
     os.makedirs(root_dir, exist_ok=True)
     config_path = os.path.join(root_dir, "config.yml")
 
-    config: dict = {
-        "data": {
-            "src_langs": args.src_langs,
-            "trg_langs": args.trg_langs,
-            "src_vocab_size": args.src_vocab_size,
-            "trg_vocab_size": args.trg_vocab_size,
-        }
-    }
+    config: dict = {"data": {"src_langs": args.src_langs, "trg_langs": args.trg_langs}}
+    data_config: dict = config["data"]
+    if args.vocab_size is not None:
+        data_config["vocab_size"] = args.vocab_size
+    elif args.src_vocab_size is not None and args.trg_vocab_size is not None:
+        data_config["share_vocab"] = False
+        data_config["src_vocab_size"] = args.src_vocab_size
+        data_config["trg_vocab_size"] = args.trg_vocab_size
     with open(config_path, "w", encoding="utf-8") as file:
         yaml.dump(config, file)
     print("Created config file")
