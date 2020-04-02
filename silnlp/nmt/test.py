@@ -69,13 +69,13 @@ def load_reference(input_file: str) -> List[str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Tests a NMT model using OpenNMT-tf")
-    parser.add_argument("task", help="Task name")
+    parser.add_argument("experiment", help="Experiment name")
     parser.add_argument("--mixed-precision", default=False, action="store_true", help="Enable mixed precision")
     args = parser.parse_args()
 
-    task_name = args.task
-    root_dir = get_root_dir(task_name)
-    config = load_config(task_name)
+    exp_name = args.experiment
+    root_dir = get_root_dir(exp_name)
+    config = load_config(exp_name)
     data_config: dict = config.get("data", {})
     src_langs = data_config.get("src_langs", [])
     trg_langs = data_config.get("trg_langs", [])

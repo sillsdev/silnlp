@@ -25,12 +25,12 @@ def set_log_level(log_level: int) -> None:
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = str(_PYTHON_TO_TENSORFLOW_LOGGING_LEVEL[log_level])
 
 
-def get_root_dir(task_name: str) -> str:
-    return os.path.join(paratextPreprocessedDir, "tests", task_name)
+def get_root_dir(exp_name: str) -> str:
+    return os.path.join(paratextPreprocessedDir, "tests", exp_name)
 
 
-def load_config(task_name: str) -> dict:
-    root_dir = get_root_dir(task_name)
+def load_config(exp_name: str) -> dict:
+    root_dir = get_root_dir(exp_name)
     config_path = os.path.join(root_dir, "config.yml")
 
     config: dict = {
@@ -90,21 +90,34 @@ def create_runner(config: dict, mixed_precision: bool = False, log_level: int = 
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Creates a NMT task config file")
-    parser.add_argument("task", help="Task name")
+    parser = argparse.ArgumentParser(description="Creates a NMT experiment config file")
+    parser.add_argument("experiment", help="Experiment name")
     parser.add_argument("--src-langs", nargs="*", metavar="lang", default=[], help="Source language")
     parser.add_argument("--trg-langs", nargs="*", metavar="lang", default=[], help="Target language")
     parser.add_argument("--vocab-size", type=int, help="Shared vocabulary size")
     parser.add_argument("--src-vocab-size", type=int, help="Source vocabulary size")
     parser.add_argument("--trg-vocab-size", type=int, help="Target vocabulary size")
+    parser.add_argument("--parent", type=str, help="Parent experiment name")
     args = parser.parse_args()
 
-    root_dir = get_root_dir(args.task)
+    root_dir = get_root_dir(args.experiment)
     os.makedirs(root_dir, exist_ok=True)
     config_path = os.path.join(root_dir, "config.yml")
 
     config: dict = {"data": {"src_langs": args.src_langs, "trg_langs": args.trg_langs}}
     data_config: dict = config["data"]
+    if args.parent is not None:
+        data_config["parent"] = args.parent
+        parent_config = load_config(args.parent)
+        parent_data_config: dict = parent_config["data"]
+        if "share_vocab" in parent_data_config:
+            data_config["share_vocab"] = parent_data_config["share_vocab"]
+        if "vocab_size" in parent_data_config:
+            data_config["vocab_size"] = parent_data_config["vocab_size"]
+        if "src_vocab_size" in parent_data_config:
+            data_config["src_vocab_size"] = parent_data_config["src_vocab_size"]
+        if "trg_vocab_size" in parent_data_config:
+            data_config["trg_vocab_size"] = parent_data_config["trg_vocab_size"]
     if args.vocab_size is not None:
         data_config["vocab_size"] = args.vocab_size
     elif args.src_vocab_size is not None and args.trg_vocab_size is not None:

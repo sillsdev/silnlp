@@ -1,14 +1,15 @@
 import argparse
 import os
+import shutil
 from glob import glob
-from typing import Dict, Iterable, Iterator, List, Set
+from typing import Dict, Iterable, Iterator, List, Optional, Set
 
 import opennmt
 import sentencepiece as sp
 from sklearn.model_selection import train_test_split
 
 from nlp.common.environment import paratextPreprocessedDir
-from nlp.nmt.config import get_root_dir, load_config
+from nlp.nmt.config import create_runner, get_root_dir, load_config
 
 
 class TestData:
@@ -24,6 +25,7 @@ def build_vocab(
 
     control_symbols = ["<range>"]
     if trg_langs is not None:
+        control_symbols.append("<2qaa>")
         control_symbols.extend(map(lambda l: f"<2{l}>", trg_langs))
     joined_control_symbols = ",".join(control_symbols)
 
@@ -60,6 +62,7 @@ def get_parallel_corpus(
     write_trg_token: bool,
     test_size: int,
     val_size: int,
+    has_parent: bool,
 ) -> None:
     src_iso = get_iso(src_file_path)
     trg_iso = get_iso(trg_file_path)
@@ -83,7 +86,8 @@ def get_parallel_corpus(
                 train_src[-1] = train_src[-1] + " " + src_line
             else:
                 if write_trg_token:
-                    src_line = f"<2{trg_iso}> " + src_line
+                    iso = "qaa" if has_parent else trg_iso
+                    src_line = f"<2{iso}> " + src_line
                 train_src.append(src_line)
                 train_trg.append(trg_line)
     train_src, test_src, train_trg, test_trg = train_test_split(
@@ -128,21 +132,47 @@ def get_iso(file_path: str) -> str:
     return parts[0]
 
 
+def copy_parent_vocab(prefix: str, parent_data_config: dict, parent_root_dir: str, root_dir: str) -> None:
+    if parent_data_config.get("share_vocab", True):
+        shutil.copy2(os.path.join(parent_root_dir, "onmt.vocab"), os.path.join(root_dir, f"{prefix}-onmt.vocab"))
+        shutil.copy2(os.path.join(parent_root_dir, "sp.vocab"), os.path.join(root_dir, f"{prefix}-sp.vocab"))
+        shutil.copy2(os.path.join(parent_root_dir, "sp.model"), os.path.join(root_dir, f"{prefix}-sp.model"))
+    else:
+        shutil.copy2(os.path.join(parent_root_dir, f"{prefix}-onmt.vocab"), root_dir)
+        shutil.copy2(os.path.join(parent_root_dir, f"{prefix}-sp.vocab"), root_dir)
+        shutil.copy2(os.path.join(parent_root_dir, f"{prefix}-sp.model"), root_dir)
+
+
+def update_vocab(parent_config: dict, root_dir: str, src_vocab_path: str, trg_vocab_path: str) -> None:
+    parent_runner = create_runner(parent_config)
+    parent_runner.update_vocab(os.path.join(root_dir, "parent"), src_vocab_path, trg_vocab_path)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Preprocesses text corpora into a multilingual data set for OpenNMT-tf"
     )
-    parser.add_argument("task", help="Task name")
+    parser.add_argument("experiment", help="Experiment name")
     args = parser.parse_args()
 
-    task_name = args.task
-    root_dir = get_root_dir(task_name)
-    config = load_config(task_name)
+    exp_name = args.experiment
+    root_dir = get_root_dir(exp_name)
+    config = load_config(exp_name)
     data_config: dict = config.get("data", {})
 
     src_langs: Set[str] = set(data_config.get("src_langs", []))
     trg_langs: Set[str] = set(data_config.get("trg_langs", []))
-    write_trg_token = len(trg_langs) > 1
+    parent: Optional[str] = data_config.get("parent")
+    parent_config = {}
+    parent_data_config = {}
+    parent_root_dir = ""
+    has_parent = False
+    if parent is not None:
+        parent_config = load_config(parent)
+        parent_data_config = parent_config["data"]
+        parent_root_dir = get_root_dir(parent)
+        has_parent = True
+    write_trg_token = len(trg_langs) > 1 or len(parent_data_config.get("trg_langs", [])) > 1
 
     src_file_paths: List[str] = list()
     trg_file_paths: List[str] = list()
@@ -169,28 +199,40 @@ def main() -> None:
             trg_langs=trg_langs if write_trg_token else None,
         )
 
+        if has_parent:
+            update_vocab(parent_config, root_dir, vocab_path, vocab_path)
+
         src_spp = sp.SentencePieceProcessor()
         src_spp.load(f"{model_prefix}.model")
 
         trg_spp = src_spp
     else:
-        print("Building source vocabulary...")
-        src_vocab_size: int = data_config.get("src_vocab_size", 8000)
         src_model_prefix = os.path.join(root_dir, "src-sp")
         src_vocab_path = os.path.join(root_dir, "src-onmt.vocab")
-        build_vocab(
-            src_file_paths,
-            src_vocab_size,
-            src_model_prefix,
-            src_vocab_path,
-            trg_langs=trg_langs if write_trg_token else None,
-        )
+        if src_langs == set(parent_data_config.get("src_langs", [])):
+            copy_parent_vocab("src", parent_data_config, parent_root_dir, root_dir)
+        else:
+            print("Building source vocabulary...")
+            src_vocab_size: int = data_config.get("src_vocab_size", 8000)
+            build_vocab(
+                src_file_paths,
+                src_vocab_size,
+                src_model_prefix,
+                src_vocab_path,
+                trg_langs=trg_langs if write_trg_token else None,
+            )
 
-        print("Building target vocabulary...")
-        trg_vocab_size: int = data_config.get("trg_vocab_size", 8000)
         trg_model_prefix = os.path.join(root_dir, "trg-sp")
         trg_vocab_path = os.path.join(root_dir, "trg-onmt.vocab")
-        build_vocab(trg_file_paths, trg_vocab_size, trg_model_prefix, trg_vocab_path)
+        if trg_langs == set(parent_data_config.get("trg_langs", [])):
+            copy_parent_vocab("trg", parent_config, parent_root_dir, root_dir)
+        else:
+            print("Building target vocabulary...")
+            trg_vocab_size: int = data_config.get("trg_vocab_size", 8000)
+            build_vocab(trg_file_paths, trg_vocab_size, trg_model_prefix, trg_vocab_path)
+
+        if has_parent:
+            update_vocab(parent_config, root_dir, src_vocab_path, trg_vocab_path)
 
         src_spp = sp.SentencePieceProcessor()
         src_spp.load(f"{src_model_prefix}.model")
@@ -219,6 +261,7 @@ def main() -> None:
                 write_trg_token,
                 test_size,
                 val_size,
+                has_parent,
             )
 
     print("Writing train data set...")
