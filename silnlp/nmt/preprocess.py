@@ -140,7 +140,7 @@ def main() -> None:
         model_prefix = os.path.join(root_dir, "sp")
         vocab_path = os.path.join(root_dir, "onmt.vocab")
         build_vocab(
-            src_file_paths + trg_file_paths,
+            list(set().union(src_file_paths, trg_file_paths)),
             vocab_size,
             model_prefix,
             vocab_path,
