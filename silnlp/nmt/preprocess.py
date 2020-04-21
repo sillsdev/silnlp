@@ -12,27 +12,33 @@ from nlp.nmt.config import get_root_dir, load_config
 
 
 def build_vocab(
-    file_paths: List[str], vocab_size: int, model_prefix: str, vocab_path: str, trg_langs: Set[str] = None
+    file_paths: Iterable[str], vocab_size: int, model_prefix: str, vocab_path: str, trg_langs: Set[str] = None
 ) -> None:
     joined_file_paths = ",".join(file_paths)
+
+    control_symbols = ["<range>"]
+    if trg_langs is not None:
+        control_symbols.extend(map(lambda l: f"<2{l}>", trg_langs))
+    joined_control_symbols = ",".join(control_symbols)
 
     sp_train_params = (
         f"--normalization_rule_name=nmt_nfkc_cf --input={joined_file_paths} --model_prefix={model_prefix}"
         f" --vocab_size={vocab_size} --character_coverage=1.0 --input_sentence_size=1000000"
-        " --shuffle_input_sentence=true"
+        f" --shuffle_input_sentence=true --control_symbols={joined_control_symbols}"
     )
-
-    if trg_langs is not None:
-        trg_tokens = list(map(lambda l: f"<2{l}>", trg_langs))
-        joined_trg_tokens = ",".join(trg_tokens)
-        sp_train_params += f" --control_symbols={joined_trg_tokens}"
 
     sp.SentencePieceTrainer.train(sp_train_params)
 
     special_tokens = [opennmt.PADDING_TOKEN, opennmt.START_OF_SENTENCE_TOKEN, opennmt.END_OF_SENTENCE_TOKEN]
 
     vocab = opennmt.data.Vocab(special_tokens)
-    vocab.load(f"{model_prefix}.vocab", "sentencepiece")
+    with open(f"{model_prefix}.vocab", "r", encoding="utf-8") as vocab_file:
+        for line in vocab_file:
+            token = line.rstrip("\r\n")
+            token, _ = token.split("\t")
+            if token in ("<unk>", "<s>", "</s>", "<range>"):  # Ignore special tokens
+                continue
+            vocab.add(token)
     vocab.pad_to_multiple(8)
     vocab.serialize(vocab_path)
 
@@ -64,10 +70,17 @@ def get_parallel_corpus(
             trg_line = trg_line.strip()
             if len(src_line) == 0 or len(trg_line) == 0:
                 continue
-            if write_trg_token:
-                src_line = f"<2{trg_iso}> " + src_line
-            train_src.append(src_line)
-            train_trg.append(trg_line)
+            if src_line == "<range>" and trg_line == "<range>":
+                continue
+            if src_line == "<range>":
+                train_trg[-1] = train_trg[-1] + " " + trg_line
+            elif trg_line == "<range>":
+                train_src[-1] = train_src[-1] + " " + src_line
+            else:
+                if write_trg_token:
+                    src_line = f"<2{trg_iso}> " + src_line
+                train_src.append(src_line)
+                train_trg.append(trg_line)
     train_src, test_src, train_trg, test_trg = train_test_split(
         train_src, train_trg, test_size=test_size, random_state=111
     )
@@ -140,7 +153,7 @@ def main() -> None:
         model_prefix = os.path.join(root_dir, "sp")
         vocab_path = os.path.join(root_dir, "onmt.vocab")
         build_vocab(
-            list(set().union(src_file_paths, trg_file_paths)),
+            set(src_file_paths).union(trg_file_paths),
             vocab_size,
             model_prefix,
             vocab_path,
