@@ -1,7 +1,7 @@
 import argparse
 import os
 from glob import glob
-from typing import Iterable, Iterator, List, Set
+from typing import Dict, Iterable, Iterator, List, Set
 
 import opennmt
 import sentencepiece as sp
@@ -9,6 +9,12 @@ from sklearn.model_selection import train_test_split
 
 from nlp.common.environment import paratextPreprocessedDir
 from nlp.nmt.config import get_root_dir, load_config
+
+
+class TestData:
+    def __init__(self):
+        self.src_sentences: List[str] = list()
+        self.trg_sentences: List[str] = list()
 
 
 def build_vocab(
@@ -48,8 +54,7 @@ def get_parallel_corpus(
     trg_file_path: str,
     train_src_sentences: List[str],
     train_trg_sentences: List[str],
-    test_src_sentences: List[str],
-    test_trg_sentences: List[str],
+    test_sentences: Dict[str, TestData],
     val_src_sentences: List[str],
     val_trg_sentences: List[str],
     write_trg_token: bool,
@@ -90,8 +95,12 @@ def get_parallel_corpus(
     train_src_sentences.extend(train_src)
     train_trg_sentences.extend(train_trg)
 
-    test_src_sentences.extend(test_src)
-    test_trg_sentences.extend(test_trg)
+    test_data = test_sentences.get(src_iso)
+    if test_data is None:
+        test_data = TestData()
+        test_sentences[src_iso] = test_data
+    test_data.src_sentences.extend(test_src)
+    test_data.trg_sentences.extend(test_trg)
 
     val_src_sentences.extend(val_src)
     val_trg_sentences.extend(val_trg)
@@ -194,8 +203,7 @@ def main() -> None:
     val_size: int = data_config.get("val_size", 250)
     train_src_sentences: List[str] = list()
     train_trg_sentences: List[str] = list()
-    test_src_sentences: List[str] = list()
-    test_trg_sentences: List[str] = list()
+    test_sentences: Dict[str, TestData] = dict()
     val_src_sentences: List[str] = list()
     val_trg_sentences: List[str] = list()
     for src_file_path in src_file_paths:
@@ -205,8 +213,7 @@ def main() -> None:
                 trg_file_path,
                 train_src_sentences,
                 train_trg_sentences,
-                test_src_sentences,
-                test_trg_sentences,
+                test_sentences,
                 val_src_sentences,
                 val_trg_sentences,
                 write_trg_token,
@@ -219,9 +226,10 @@ def main() -> None:
     write_corpus(os.path.join(root_dir, "train.trg.txt"), tokenize_sentences(trg_spp, train_trg_sentences))
 
     print("Writing test data set...")
-    write_corpus(os.path.join(root_dir, "test.src.txt"), tokenize_sentences(src_spp, test_src_sentences))
-    write_corpus(os.path.join(root_dir, "test.trg.txt"), tokenize_sentences(trg_spp, test_trg_sentences))
-    write_corpus(os.path.join(root_dir, "test.trg.detok.txt"), test_trg_sentences)
+    for src_iso, test_data in test_sentences.items():
+        prefix = "test" if len(test_sentences) == 1 else f"test.{src_iso}"
+        write_corpus(os.path.join(root_dir, f"{prefix}.src.txt"), tokenize_sentences(src_spp, test_data.src_sentences))
+        write_corpus(os.path.join(root_dir, f"{prefix}.trg.detok.txt"), test_data.trg_sentences)
 
     print("Writing validation data set...")
     write_corpus(os.path.join(root_dir, "val.src.txt"), tokenize_sentences(src_spp, val_src_sentences))
