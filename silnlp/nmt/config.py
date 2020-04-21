@@ -41,12 +41,18 @@ def load_config(task_name: str) -> dict:
             "eval_features_file": os.path.join(root_dir, "val.src.txt"),
             "eval_labels_file": os.path.join(root_dir, "val.trg.txt"),
         },
-        "train": {"average_last_checkpoints": 0},
+        "train": {
+            "average_last_checkpoints": 0,
+            "maximum_features_length": 150,
+            "maximum_labels_length": 150,
+            "keep_checkpoint_max": 3,
+        },
         "eval": {
             "external_evaluators": "bleu",
             "steps": 1000,
             "early_stopping": {"metric": "bleu", "min_improvement": 0.2, "steps": 4},
         },
+        "params": {"length_penalty": 0.2},
     }
 
     config = opennmt.load_config([config_path], config)
@@ -107,7 +113,7 @@ def main() -> None:
         data_config["trg_vocab_size"] = args.trg_vocab_size
     with open(config_path, "w", encoding="utf-8") as file:
         yaml.dump(config, file)
-    print("Created config file")
+    print("Config file created")
 
 
 if __name__ == "__main__":
