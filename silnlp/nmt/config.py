@@ -9,6 +9,7 @@ import yaml
 
 from nlp.common.environment import paratextPreprocessedDir
 from nlp.nmt.noise import WordDropout
+from nlp.nmt.runner import RunnerEx
 
 _PYTHON_TO_TENSORFLOW_LOGGING_LEVEL: Dict[int, int] = {
     logging.CRITICAL: 3,
@@ -21,6 +22,7 @@ _PYTHON_TO_TENSORFLOW_LOGGING_LEVEL: Dict[int, int] = {
 
 
 def set_log_level(log_level: int) -> None:
+    tf.get_logger().propagate = False
     tf.get_logger().setLevel(log_level)
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = str(_PYTHON_TO_TENSORFLOW_LOGGING_LEVEL[log_level])
 
@@ -66,8 +68,15 @@ def load_config(exp_name: str) -> dict:
     return config
 
 
-def create_runner(config: dict, mixed_precision: bool = False, log_level: int = logging.INFO) -> opennmt.Runner:
+def create_runner(
+    config: dict, mixed_precision: bool = False, log_level: int = logging.INFO, memory_growth: bool = False
+) -> RunnerEx:
     set_log_level(log_level)
+
+    if memory_growth:
+        gpus = tf.config.list_physical_devices(device_type="GPU")
+        for device in gpus:
+            tf.config.experimental.set_memory_growth(device, enable=True)
 
     data_config: dict = config.get("data", {})
     train_config: dict = config.get("train", {})
@@ -86,7 +95,7 @@ def create_runner(config: dict, mixed_precision: bool = False, log_level: int = 
         target_noiser.add(opennmt.data.WordPermutation(3))
         model.labels_inputter.set_noise(target_noiser, probability=1.0)
 
-    return opennmt.Runner(model, config, auto_config=True, mixed_precision=mixed_precision)
+    return RunnerEx(model, config, auto_config=True, mixed_precision=mixed_precision)
 
 
 def main() -> None:

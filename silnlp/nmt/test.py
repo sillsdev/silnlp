@@ -47,7 +47,9 @@ def load_test_data(
             iso = default_trg_iso
             if src_line.startswith("<2"):
                 index = src_line.index(">")
-                iso = src_line[2:index]
+                val = src_line[2:index]
+                if val != "qaa":
+                    iso = val
             if iso not in dataset:
                 dataset[iso] = (list(), list())
             dataset[iso][0].append(detok_pred_line)
@@ -71,6 +73,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Tests a NMT model using OpenNMT-tf")
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument("--mixed-precision", default=False, action="store_true", help="Enable mixed precision")
+    parser.add_argument("--memory-growth", default=False, action="store_true", help="Enable memory growth")
+    parser.add_argument("--checkpoint", type=str, help="Checkpoint to use")
     args = parser.parse_args()
 
     exp_name = args.experiment
@@ -79,7 +83,11 @@ def main() -> None:
     data_config: dict = config.get("data", {})
     src_langs = data_config.get("src_langs", [])
     trg_langs = data_config.get("trg_langs", [])
-    runner = create_runner(config, mixed_precision=args.mixed_precision)
+    runner = create_runner(config, mixed_precision=args.mixed_precision, memory_growth=args.memory_growth)
+
+    checkpoint_path = None
+    if args.checkpoint is not None:
+        checkpoint_path = os.path.join(config["model_dir"], f"ckpt-{args.checkpoint}")
 
     scores: List[TestResults] = list()
     overall_sys: List[str] = list()
@@ -90,7 +98,7 @@ def main() -> None:
         prefix = "test" if len(src_langs) == 1 else f"test.{src_iso}"
         features_file_path = os.path.join(root_dir, f"{prefix}.src.txt")
         predictions_file_path = os.path.join(root_dir, f"{prefix}.trg-predictions.txt")
-        runner.infer(features_file_path, predictions_file=predictions_file_path)
+        runner.infer(features_file_path, predictions_file=predictions_file_path, checkpoint_path=checkpoint_path)
 
         ref_file_path = os.path.join(root_dir, f"{prefix}.trg.detok.txt")
         predictions_detok_file_path = os.path.join(root_dir, f"{prefix}.trg-predictions.detok.txt")
