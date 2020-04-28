@@ -78,6 +78,7 @@ def main() -> None:
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument("--memory-growth", default=False, action="store_true", help="Enable memory growth")
     parser.add_argument("--checkpoint", type=str, help="Checkpoint to use")
+    parser.add_argument("--best", default=False, action="store_true", help="Test best evaluated model")
     args = parser.parse_args()
 
     exp_name = args.experiment
@@ -88,14 +89,9 @@ def main() -> None:
     trg_langs = data_config.get("trg_langs", [])
     runner = create_runner(config, memory_growth=args.memory_growth)
 
-    use_saved_model = False
     checkpoint_path = None
     if args.checkpoint is not None:
-        checkpoint = args.checkpoint.lower()
-        if checkpoint == "best":
-            use_saved_model = True
-        else:
-            checkpoint_path = os.path.join(config["model_dir"], f"ckpt-{args.checkpoint}")
+        checkpoint_path = os.path.join(config["model_dir"], f"ckpt-{args.checkpoint}")
 
     features_paths: List[str] = []
     predictions_paths: List[str] = []
@@ -109,7 +105,7 @@ def main() -> None:
         predictions_detok_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.detok.txt"))
 
     print("Inferencing...")
-    if use_saved_model:
+    if args.best:
         runner.saved_model_infer_multiple(features_paths, predictions_paths)
     else:
         runner.infer_multiple(features_paths, predictions_paths, checkpoint_path=checkpoint_path)
