@@ -1,5 +1,8 @@
 import argparse
+import logging
 import os
+
+logging.basicConfig()
 
 from nlp.nmt.config import create_runner, load_config
 

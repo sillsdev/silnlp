@@ -1,8 +1,10 @@
-from typing import List, Tuple
+import os
+from typing import Iterable, List, Tuple
 
 import numpy as np
 import opennmt
 import tensorflow as tf
+import tensorflow_addons as tfa
 
 
 class VariableUpdate:
@@ -126,6 +128,54 @@ def transfer_weights(
                 new_slot.assign(slot)
 
 
+def pad_tokens(max_length: int, all_tokens: List[List[str]], lengths: List[int]) -> None:
+    for tokens, length in zip(all_tokens, lengths):
+        if length < max_length:
+            tokens += [""] * (max_length - length)
+
+
+def load_serving_input(batch_size: int, path: str) -> Iterable[Tuple[List[List[str]], List[int]]]:
+    all_tokens: List[List[str]] = []
+    lengths: List[int] = []
+    max_length = 0
+
+    with open(path, "r", encoding="utf-8") as file:
+        for line in file:
+            line = line.strip()
+            tokens = line.split(" ")
+            length = len(tokens)
+            all_tokens.append(tokens)
+            lengths.append(length)
+            max_length = max(max_length, length)
+            if len(all_tokens) == batch_size:
+                pad_tokens(max_length, all_tokens, lengths)
+                yield all_tokens, lengths
+                all_tokens = []
+                lengths = []
+                max_length = 0
+
+    if len(all_tokens) > 0:
+        pad_tokens(max_length, all_tokens, lengths)
+        yield all_tokens, lengths
+
+
+def write_serving_output(path: str, all_tokens: np.ndarray, lengths: np.ndarray) -> None:
+    with open(path, "a", encoding="utf-8") as file:
+        for tokens, length in zip(all_tokens, lengths):
+            tokens = map(lambda t: t.decode("utf-8"), tokens[0][: length[0]].tolist())
+            file.write(" ".join(tokens) + "\n")
+
+
+def register_tfa_custom_ops() -> None:
+    # TensorFlow Addons lazily loads custom ops. So we call the op with invalid inputs
+    # just to trigger the registration.
+    # See also: https://github.com/tensorflow/addons/issues/1151.
+    try:
+        tfa.seq2seq.gather_tree(0, 0, 0, 0)
+    except tf.errors.InvalidArgumentError:
+        pass
+
+
 class RunnerEx(opennmt.Runner):
     def export_embeddings(self, side: str, output_path: str, checkpoint_path: str = None) -> None:
         config = self._finalize_config()
@@ -197,3 +247,60 @@ class RunnerEx(opennmt.Runner):
         transfer_weights(model, new_model, optimizer, new_optimizer, ignore_weights=updated_variables)
         new_optimizer.iterations.assign(optimizer.iterations)
         new_checkpoint.save()
+
+    def infer_multiple(
+        self, features_paths: List[str], predictions_paths: List[str], checkpoint_path: str = None
+    ) -> None:
+        config = self._finalize_config()
+        model = self._init_model(config)
+        checkpoint = opennmt.utils.checkpoint.Checkpoint.from_config(config, model)
+        checkpoint.restore(checkpoint_path=checkpoint_path, weights_only=True)
+        infer_config = config["infer"]
+        for features_path, predictions_path in zip(features_paths, predictions_paths):
+            dataset = model.examples_inputter.make_inference_dataset(
+                features_path,
+                infer_config["batch_size"],
+                length_bucket_width=infer_config["length_bucket_width"],
+                prefetch_buffer_size=infer_config.get("prefetch_buffer_size"),
+            )
+
+            with open(predictions_path, encoding="utf-8", mode="w") as stream:
+                infer_fn = tf.function(model.infer, input_signature=(dataset.element_spec,))
+                infer_fn.get_concrete_function()  # Trace the function now.
+
+                # Inference might return out-of-order predictions. The OrderRestorer utility is
+                # used to write predictions in their original order.
+                write_fn = lambda prediction: (model.print_prediction(prediction, params=infer_config, stream=stream))
+                index_fn = lambda prediction: prediction.get("index")
+                ordered_writer = opennmt.utils.misc.OrderRestorer(index_fn, write_fn)
+
+                for source in dataset:
+                    predictions = infer_fn(source)
+                    predictions = tf.nest.map_structure(lambda t: t.numpy(), predictions)
+                    for prediction in opennmt.utils.misc.extract_batches(predictions):
+                        ordered_writer.push(prediction)
+
+    def saved_model_infer_multiple(self, features_paths: List[str], predictions_paths: List[str]) -> None:
+        register_tfa_custom_ops()
+        config = self._finalize_config()
+        infer_config = config["infer"]
+        batch_size = infer_config.get("batch_size", 1)
+
+        export_path = os.path.join(config["model_dir"], "export")
+        best_model_path = next(
+            filter(lambda p: os.path.isdir(p), map(lambda p: os.path.join(export_path, p), os.listdir(export_path)))
+        )
+
+        saved_model = tf.saved_model.load(best_model_path)
+        translate_fn = saved_model.signatures["serving_default"]
+
+        for features_path, predictions_path in zip(features_paths, predictions_paths):
+            for all_tokens, lengths in load_serving_input(batch_size, features_path):
+                inputs = {
+                    "tokens": tf.constant(all_tokens, dtype=tf.string),
+                    "length": tf.constant(lengths, dtype=tf.int32),
+                }
+
+                outputs = translate_fn(**inputs)
+
+                write_serving_output(predictions_path, outputs["tokens"].numpy(), outputs["length"].numpy())

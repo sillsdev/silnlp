@@ -1,9 +1,13 @@
 import argparse
+import logging
 import os
-from typing import Dict, List, Tuple, IO
+from typing import IO, Dict, List, Tuple
+
+logging.basicConfig()
 
 import sacrebleu
 import sentencepiece as sp
+import tensorflow as tf
 
 from nlp.nmt.config import create_runner, get_root_dir, load_config
 
@@ -72,7 +76,6 @@ def load_reference(input_file: str) -> List[str]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Tests a NMT model using OpenNMT-tf")
     parser.add_argument("experiment", help="Experiment name")
-    parser.add_argument("--mixed-precision", default=False, action="store_true", help="Enable mixed precision")
     parser.add_argument("--memory-growth", default=False, action="store_true", help="Enable memory growth")
     parser.add_argument("--checkpoint", type=str, help="Checkpoint to use")
     args = parser.parse_args()
@@ -83,32 +86,44 @@ def main() -> None:
     data_config: dict = config.get("data", {})
     src_langs = data_config.get("src_langs", [])
     trg_langs = data_config.get("trg_langs", [])
-    runner = create_runner(config, mixed_precision=args.mixed_precision, memory_growth=args.memory_growth)
+    runner = create_runner(config, memory_growth=args.memory_growth)
 
+    use_saved_model = False
     checkpoint_path = None
     if args.checkpoint is not None:
-        checkpoint_path = os.path.join(config["model_dir"], f"ckpt-{args.checkpoint}")
+        checkpoint = args.checkpoint.lower()
+        if checkpoint == "best":
+            use_saved_model = True
+        else:
+            checkpoint_path = os.path.join(config["model_dir"], f"ckpt-{args.checkpoint}")
 
+    features_paths: List[str] = []
+    predictions_paths: List[str] = []
+    ref_paths: List[str] = []
+    predictions_detok_paths: List[str] = []
+    for src_iso in src_langs:
+        prefix = "test" if len(src_langs) == 1 else f"test.{src_iso}"
+        features_paths.append(os.path.join(root_dir, f"{prefix}.src.txt"))
+        predictions_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.txt"))
+        ref_paths.append(os.path.join(root_dir, f"{prefix}.trg.detok.txt"))
+        predictions_detok_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.detok.txt"))
+
+    print("Inferencing...")
+    if use_saved_model:
+        runner.saved_model_infer_multiple(features_paths, predictions_paths)
+    else:
+        runner.infer_multiple(features_paths, predictions_paths, checkpoint_path=checkpoint_path)
+
+    print("Scoring...")
     scores: List[TestResults] = list()
     overall_sys: List[str] = list()
     overall_ref: List[str] = list()
     model_file_path = os.path.join(root_dir, "sp.model" if data_config.get("share_vocab", True) else "trg-sp.model")
-    for src_iso in src_langs:
-        print(f'Testing source "{src_iso}" data set...')
-        prefix = "test" if len(src_langs) == 1 else f"test.{src_iso}"
-        features_file_path = os.path.join(root_dir, f"{prefix}.src.txt")
-        predictions_file_path = os.path.join(root_dir, f"{prefix}.trg-predictions.txt")
-        runner.infer(features_file_path, predictions_file=predictions_file_path, checkpoint_path=checkpoint_path)
-
-        ref_file_path = os.path.join(root_dir, f"{prefix}.trg.detok.txt")
-        predictions_detok_file_path = os.path.join(root_dir, f"{prefix}.trg-predictions.detok.txt")
+    for src_iso, features_path, predictions_path, ref_path, predictions_detok_path in zip(
+        src_langs, features_paths, predictions_paths, ref_paths, predictions_detok_paths
+    ):
         dataset = load_test_data(
-            model_file_path,
-            features_file_path,
-            predictions_file_path,
-            ref_file_path,
-            predictions_detok_file_path,
-            trg_langs[0],
+            model_file_path, features_path, predictions_path, ref_path, predictions_detok_path, trg_langs[0]
         )
 
         for trg_iso, data in dataset.items():

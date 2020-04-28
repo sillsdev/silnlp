@@ -3,6 +3,8 @@ import logging
 import os
 from typing import Dict, List
 
+logging.basicConfig()
+
 import opennmt
 import tensorflow as tf
 import yaml
@@ -22,7 +24,6 @@ _PYTHON_TO_TENSORFLOW_LOGGING_LEVEL: Dict[int, int] = {
 
 
 def set_log_level(log_level: int) -> None:
-    tf.get_logger().propagate = False
     tf.get_logger().setLevel(log_level)
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = str(_PYTHON_TO_TENSORFLOW_LOGGING_LEVEL[log_level])
 
@@ -53,6 +54,8 @@ def load_config(exp_name: str) -> dict:
             "external_evaluators": "bleu",
             "steps": 1000,
             "early_stopping": {"metric": "bleu", "min_improvement": 0.2, "steps": 4},
+            "export_on_best": "bleu",
+            "max_exports_to_keep": 1,
         },
         "params": {"length_penalty": 0.2},
     }

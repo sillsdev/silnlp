@@ -1,8 +1,11 @@
 import argparse
+import logging
 import os
 import shutil
 from glob import glob
 from typing import Dict, Iterable, Iterator, List, Optional, Set
+
+logging.basicConfig()
 
 import opennmt
 import sentencepiece as sp

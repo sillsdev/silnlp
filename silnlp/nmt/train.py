@@ -1,6 +1,11 @@
 import argparse
+import logging
 import os
 from typing import Optional
+
+logging.basicConfig()
+
+import tensorflow as tf
 
 from nlp.nmt.config import create_runner, get_root_dir, load_config
 
