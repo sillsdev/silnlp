@@ -110,6 +110,7 @@ def main() -> None:
     parser.add_argument("--src-vocab-size", type=int, help="Source vocabulary size")
     parser.add_argument("--trg-vocab-size", type=int, help="Target vocabulary size")
     parser.add_argument("--parent", type=str, help="Parent experiment name")
+    parser.add_argument("--mirror", default=False, action="store_true", help="Mirror train and validation data sets")
     args = parser.parse_args()
 
     root_dir = get_root_dir(args.experiment)
@@ -136,6 +137,8 @@ def main() -> None:
         data_config["share_vocab"] = False
         data_config["src_vocab_size"] = args.src_vocab_size
         data_config["trg_vocab_size"] = args.trg_vocab_size
+    if args.mirror:
+        data_config["mirror"] = True
     with open(config_path, "w", encoding="utf-8") as file:
         yaml.dump(config, file)
     print("Config file created")
