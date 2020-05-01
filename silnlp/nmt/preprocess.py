@@ -1,6 +1,7 @@
 import argparse
 import logging
 import os
+import random
 import shutil
 from glob import glob
 from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Set, Tuple
@@ -54,25 +55,69 @@ def build_vocab(
     vocab.serialize(vocab_path)
 
 
-def get_parallel_corpus(src_file_path: str, trg_file_path: str) -> Tuple[List[str], List[str]]:
+def get_parallel_corpus(
+    src_file_path: str,
+    trg_file_path: str,
+    val_size: int,
+    test_size: int,
+    val_indices: Set[int] = None,
+    test_indices: Set[int] = None,
+) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str]]:
     train_src: List[str] = []
     train_trg: List[str] = []
+    val_src: List[str] = []
+    val_trg: List[str] = []
+    test_src: List[str] = []
+    test_trg: List[str] = []
     with open(src_file_path, "r", encoding="utf-8") as src_file, open(trg_file_path, "r", encoding="utf-8") as trg_file:
+        index = 0
+        range_start = 0
         for src_line, trg_line in zip(src_file, trg_file):
             src_line = src_line.strip()
             trg_line = trg_line.strip()
-            if len(src_line) == 0 or len(trg_line) == 0:
-                continue
-            if src_line == "<range>" and trg_line == "<range>":
-                continue
-            if src_line == "<range>":
-                train_trg[-1] = train_trg[-1] + " " + trg_line
-            elif trg_line == "<range>":
-                train_src[-1] = train_src[-1] + " " + src_line
-            else:
-                train_src.append(src_line)
-                train_trg.append(trg_line)
-    return train_src, train_trg
+            if len(src_line) > 0 and len(trg_line) > 0 and (src_line != "<range>" or trg_line != "<range>"):
+                if src_line == "<range>":
+                    trg_list: List[str]
+                    if val_indices is not None and range_start in val_indices:
+                        trg_list = val_trg
+                    elif test_indices is not None and range_start in test_indices:
+                        trg_list = test_trg
+                    else:
+                        trg_list = train_trg
+                    trg_list[-1] = trg_list[-1] + " " + trg_line
+                elif trg_line == "<range>":
+                    src_list: List[str]
+                    if val_indices is not None and range_start in val_indices:
+                        src_list = val_src
+                    elif test_indices is not None and range_start in test_indices:
+                        src_list = test_src
+                    else:
+                        src_list = train_src
+                    src_list[-1] = src_list[-1] + " " + src_line
+                else:
+                    if val_indices is not None and index in val_indices:
+                        val_src.append(src_line)
+                        val_trg.append(trg_line)
+                    elif test_indices is not None and index in test_indices:
+                        test_src.append(src_line)
+                        test_trg.append(trg_line)
+                    else:
+                        train_src.append(src_line)
+                        train_trg.append(trg_line)
+                    range_start = index
+            index += 1
+
+    if test_indices is None:
+        train_src, test_src, train_trg, test_trg = train_test_split(
+            train_src, train_trg, test_size=test_size, random_state=111
+        )
+
+    if val_indices is None:
+        train_src, val_src, train_trg, val_trg = train_test_split(
+            train_src, train_trg, test_size=val_size, random_state=111
+        )
+
+    return train_src, train_trg, val_src, val_trg, test_src, test_trg
 
 
 def get_or_create(d: dict, key: Any, value_selector: Callable[[], Any]) -> Any:
@@ -85,7 +130,6 @@ def get_or_create(d: dict, key: Any, value_selector: Callable[[], Any]) -> Any:
 
 def insert_trg_tag(trg_iso: str, write_trg_tag: bool, has_parent: bool, sentences: Iterable[str]) -> Iterable[str]:
     if write_trg_tag:
-        trg_iso = "qaa" if has_parent else trg_iso
         for sentence in sentences:
             yield f"<2{trg_iso}> " + sentence
     else:
@@ -131,12 +175,22 @@ def update_vocab(parent_config: dict, root_dir: str, src_vocab_path: str, trg_vo
     parent_runner.update_vocab(os.path.join(root_dir, "parent"), src_vocab_path, trg_vocab_path)
 
 
+def get_sentence_count(file_path: str) -> int:
+    lines = 0
+    with open(file_path, "r", encoding="utf-8") as file:
+        for _ in file:
+            lines += 1
+    return lines
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Preprocesses text corpora into a multilingual data set for OpenNMT-tf"
     )
     parser.add_argument("experiment", help="Experiment name")
     args = parser.parse_args()
+
+    random.seed(111)
 
     exp_name = args.experiment
     root_dir = get_root_dir(exp_name)
@@ -170,7 +224,12 @@ def main() -> None:
         parent_root_dir = get_root_dir(parent)
         has_parent = True
 
-    write_trg_tag = len(trg_langs) > 1 or len(parent_data_config.get("trg_langs", [])) > 1 or mirror
+    write_trg_tag = (
+        len(trg_langs) > 1
+        or len(parent_data_config.get("trg_langs", [])) > 1
+        or mirror
+        or parent_data_config.get("mirror", False)
+    )
     tag_langs: Optional[Set[str]] = None
     if write_trg_tag:
         tag_langs = trg_langs.union(src_langs) if mirror else trg_langs
@@ -227,6 +286,25 @@ def main() -> None:
     print("Collecting data sets...")
     test_size: int = data_config.get("test_size", 250)
     val_size: int = data_config.get("val_size", 250)
+    disjoint_test: bool = data_config.get("disjoint_test", False)
+    disjoint_val: bool = data_config.get("disjoint_val", False)
+
+    test_indices: Optional[Set[int]] = None
+    val_indices: Optional[Set[int]] = None
+    if disjoint_test or disjoint_val:
+        sentence_count = get_sentence_count(src_file_paths[0])
+        sample_size = 0
+        if disjoint_test:
+            sample_size += test_size
+        if disjoint_val:
+            sample_size += val_size
+        samples = random.sample(range(sentence_count), sample_size)
+        if disjoint_test:
+            test_indices = set(samples[:test_size])
+            samples = samples[test_size:]
+        if disjoint_val:
+            val_indices = set(samples)
+
     train_src_sentences: List[str] = []
     train_trg_sentences: List[str] = []
     test_sentences: Dict[str, TestData] = {}
@@ -240,24 +318,22 @@ def main() -> None:
             if src_iso == trg_iso:
                 continue
 
-            train_src, train_trg = get_parallel_corpus(src_file_path, trg_file_path)
-
-            train_src, test_src, train_trg, test_trg = train_test_split(
-                train_src, train_trg, test_size=test_size, random_state=111
-            )
-            train_src, val_src, train_trg, val_trg = train_test_split(
-                train_src, train_trg, test_size=val_size, random_state=111
+            train_src, train_trg, val_src, val_trg, test_src, test_trg = get_parallel_corpus(
+                src_file_path, trg_file_path, val_size, test_size, val_indices, test_indices
             )
 
-            train_src_sentences.extend(insert_trg_tag(trg_iso, write_trg_tag, has_parent, train_src))
+            parent_trg_tags: Set[str] = set(parent_data_config.get("trg_langs", []))
+            tag_iso = "qaa" if has_parent and trg_iso not in parent_trg_tags else trg_iso
+
+            train_src_sentences.extend(insert_trg_tag(tag_iso, write_trg_tag, has_parent, train_src))
             train_trg_sentences.extend(train_trg)
 
-            test_data: TestData = get_or_create(test_sentences, src_iso, lambda: TestData())
-            test_data.src_sentences.extend(insert_trg_tag(trg_iso, write_trg_tag, has_parent, test_src))
-            test_data.trg_sentences.extend(test_trg)
-
-            val_src_sentences.extend(insert_trg_tag(trg_iso, write_trg_tag, has_parent, val_src))
+            val_src_sentences.extend(insert_trg_tag(tag_iso, write_trg_tag, has_parent, val_src))
             val_trg_sentences.extend(val_trg)
+
+            test_data: TestData = get_or_create(test_sentences, src_iso, lambda: TestData())
+            test_data.src_sentences.extend(insert_trg_tag(tag_iso, write_trg_tag, has_parent, test_src))
+            test_data.trg_sentences.extend(test_trg)
 
             if mirror:
                 train_src_sentences.extend(insert_trg_tag(src_iso, write_trg_tag, has_parent, train_trg))
@@ -270,15 +346,15 @@ def main() -> None:
     write_corpus(os.path.join(root_dir, "train.src.txt"), tokenize_sentences(src_spp, train_src_sentences))
     write_corpus(os.path.join(root_dir, "train.trg.txt"), tokenize_sentences(trg_spp, train_trg_sentences))
 
+    print("Writing validation data set...")
+    write_corpus(os.path.join(root_dir, "val.src.txt"), tokenize_sentences(src_spp, val_src_sentences))
+    write_corpus(os.path.join(root_dir, "val.trg.txt"), tokenize_sentences(trg_spp, val_trg_sentences))
+
     print("Writing test data set...")
     for src_iso, test_data in test_sentences.items():
         prefix = "test" if len(test_sentences) == 1 else f"test.{src_iso}"
         write_corpus(os.path.join(root_dir, f"{prefix}.src.txt"), tokenize_sentences(src_spp, test_data.src_sentences))
         write_corpus(os.path.join(root_dir, f"{prefix}.trg.detok.txt"), test_data.trg_sentences)
-
-    print("Writing validation data set...")
-    write_corpus(os.path.join(root_dir, "val.src.txt"), tokenize_sentences(src_spp, val_src_sentences))
-    write_corpus(os.path.join(root_dir, "val.trg.txt"), tokenize_sentences(trg_spp, val_trg_sentences))
 
     print("Preprocessing completed")
 
