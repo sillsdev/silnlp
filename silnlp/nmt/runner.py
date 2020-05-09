@@ -1,5 +1,5 @@
 import os
-from typing import Iterable, List, Tuple
+from typing import Iterable, List, Optional, Tuple
 
 import numpy as np
 import opennmt
@@ -42,9 +42,9 @@ def get_special_token_mapping(vocab_path: str, new_vocab_path: str) -> List[int]
 
 
 def update_variable(update: VariableUpdate, mapping: List[int]) -> tf.Variable:
-    """Update a vocabulary variable, possibly copying previous entries based on
-  mapping.
-  """
+    """
+    Update a vocabulary variable, possibly copying previous entries based on mapping.
+    """
     ref = update.ref_variable.numpy()
     new = update.initial
     if new is None:
@@ -250,7 +250,7 @@ class RunnerEx(opennmt.Runner):
 
     def infer_multiple(
         self, features_paths: List[str], predictions_paths: List[str], checkpoint_path: str = None
-    ) -> None:
+    ) -> int:
         config = self._finalize_config()
         model = self._init_model(config)
         checkpoint = opennmt.utils.checkpoint.Checkpoint.from_config(config, model)
@@ -279,22 +279,37 @@ class RunnerEx(opennmt.Runner):
                     predictions = tf.nest.map_structure(lambda t: t.numpy(), predictions)
                     for prediction in opennmt.utils.misc.extract_batches(predictions):
                         ordered_writer.push(prediction)
+        return (
+            checkpoint.last_saved_step
+            if checkpoint_path is None
+            else int(os.path.basename(checkpoint_path).split("-")[-1])
+        )
 
-    def saved_model_infer_multiple(self, features_paths: List[str], predictions_paths: List[str]) -> None:
+    def saved_model_infer_multiple(self, features_paths: List[str], predictions_paths: List[str]) -> int:
         register_tfa_custom_ops()
         config = self._finalize_config()
         infer_config = config["infer"]
         batch_size = infer_config.get("batch_size", 1)
 
         export_path = os.path.join(config["model_dir"], "export")
-        best_model_path = next(
-            filter(lambda p: os.path.isdir(p), map(lambda p: os.path.join(export_path, p), os.listdir(export_path)))
-        )
+        models = os.listdir(export_path)
+        best_model_path: Optional[str]
+        step = 0
+        for model in models:
+            path = os.path.join(export_path, model)
+            if os.path.isdir(path):
+                best_model_path = path
+                step = int(model)
+                break
+        if best_model_path is None:
+            raise RuntimeError("There is no saved models.")
 
-        saved_model = tf.saved_model.load(best_model_path)
+        saved_model = tf.keras.models.load_model(best_model_path)
         translate_fn = saved_model.signatures["serving_default"]
 
         for features_path, predictions_path in zip(features_paths, predictions_paths):
+            if os.path.isfile(predictions_path):
+                os.remove(predictions_path)
             for all_tokens, lengths in load_serving_input(batch_size, features_path):
                 inputs = {
                     "tokens": tf.constant(all_tokens, dtype=tf.string),
@@ -304,3 +319,4 @@ class RunnerEx(opennmt.Runner):
                 outputs = translate_fn(**inputs)
 
                 write_serving_output(predictions_path, outputs["tokens"].numpy(), outputs["length"].numpy())
+        return step

@@ -1,7 +1,7 @@
 import argparse
 import logging
 import os
-from typing import Dict, List
+from typing import Dict, Iterable, List, Set, Tuple
 
 logging.basicConfig()
 
@@ -101,6 +101,17 @@ def create_runner(
     return RunnerEx(model, config, auto_config=True, mixed_precision=mixed_precision)
 
 
+def parse_langs(langs: Iterable[str]) -> Tuple[Set[str], Dict[str, Set[str]]]:
+    isos: Set[str] = set()
+    lang_projects: Dict[str, Set[str]] = {}
+    for lang in langs:
+        parts = lang.split("-")
+        isos.add(parts[0])
+        if len(parts) == 2:
+            lang_projects[parts[0]] = set(parts[1].split(","))
+    return isos, lang_projects
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Creates a NMT experiment config file")
     parser.add_argument("experiment", help="Experiment name")
@@ -111,11 +122,16 @@ def main() -> None:
     parser.add_argument("--trg-vocab-size", type=int, help="Target vocabulary size")
     parser.add_argument("--parent", type=str, help="Parent experiment name")
     parser.add_argument("--mirror", default=False, action="store_true", help="Mirror train and validation data sets")
+    parser.add_argument("--force", default=False, action="store_true", help="Overwrite existing config file.")
     args = parser.parse_args()
 
     root_dir = get_root_dir(args.experiment)
-    os.makedirs(root_dir, exist_ok=True)
     config_path = os.path.join(root_dir, "config.yml")
+    if os.path.isfile(config_path) and not args.force:
+        print('The experiment config file already exists. Use "--force" if you want to overwrite the existing config.')
+        return
+
+    os.makedirs(root_dir, exist_ok=True)
 
     config: dict = {"data": {"src_langs": args.src_langs, "trg_langs": args.trg_langs}}
     data_config: dict = config["data"]
@@ -133,10 +149,18 @@ def main() -> None:
             data_config["trg_vocab_size"] = parent_data_config["trg_vocab_size"]
     if args.vocab_size is not None:
         data_config["vocab_size"] = args.vocab_size
-    elif args.src_vocab_size is not None and args.trg_vocab_size is not None:
+    elif args.src_vocab_size is not None or args.trg_vocab_size is not None:
         data_config["share_vocab"] = False
-        data_config["src_vocab_size"] = args.src_vocab_size
-        data_config["trg_vocab_size"] = args.trg_vocab_size
+        if args.src_vocab_size is not None:
+            data_config["src_vocab_size"] = args.src_vocab_size
+        elif "vocab_size" in data_config:
+            data_config["src_vocab_size"] = data_config["vocab_size"]
+            del data_config["vocab_size"]
+        if args.trg_vocab_size is not None:
+            data_config["trg_vocab_size"] = args.trg_vocab_size
+        elif "vocab_size" in data_config:
+            data_config["trg_vocab_size"] = data_config["vocab_size"]
+            del data_config["vocab_size"]
     if args.mirror:
         data_config["mirror"] = True
     with open(config_path, "w", encoding="utf-8") as file:

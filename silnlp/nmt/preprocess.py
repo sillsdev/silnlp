@@ -13,7 +13,7 @@ import sentencepiece as sp
 from sklearn.model_selection import train_test_split
 
 from nlp.common.environment import paratextPreprocessedDir
-from nlp.nmt.config import create_runner, get_root_dir, load_config
+from nlp.nmt.config import create_runner, get_root_dir, load_config, parse_langs
 
 
 class TestData:
@@ -22,37 +22,38 @@ class TestData:
         self.trg_sentences: List[str] = []
 
 
+def convert_vocab(sp_vocab_path: str, onmt_vocab_path: str, tag_langs: Set[str] = None) -> None:
+    special_tokens = [opennmt.PADDING_TOKEN, opennmt.START_OF_SENTENCE_TOKEN, opennmt.END_OF_SENTENCE_TOKEN]
+    if tag_langs is not None:
+        special_tokens.extend(map(lambda l: f"<2{l}>", tag_langs))
+
+    vocab = opennmt.data.Vocab(special_tokens)
+    with open(sp_vocab_path, "r", encoding="utf-8") as vocab_file:
+        for line in vocab_file:
+            token = line.rstrip("\r\n")
+            index = token.rindex("\t")
+            token = token[:index]
+            if token in ("<unk>", "<s>", "</s>", "<range>"):  # Ignore special tokens
+                continue
+            vocab.add(token)
+    vocab.pad_to_multiple(8)
+    vocab.serialize(onmt_vocab_path)
+
+
 def build_vocab(
     file_paths: Iterable[str], vocab_size: int, model_prefix: str, vocab_path: str, tag_langs: Set[str] = None
 ) -> None:
     joined_file_paths = ",".join(file_paths)
 
-    control_symbols = ["<range>"]
-    if tag_langs is not None:
-        control_symbols.append("<2qaa>")
-        control_symbols.extend(map(lambda l: f"<2{l}>", tag_langs))
-    joined_control_symbols = ",".join(control_symbols)
-
     sp_train_params = (
         f"--normalization_rule_name=nmt_nfkc_cf --input={joined_file_paths} --model_prefix={model_prefix}"
         f" --vocab_size={vocab_size} --character_coverage=1.0 --input_sentence_size=1000000"
-        f" --shuffle_input_sentence=true --control_symbols={joined_control_symbols}"
+        " --shuffle_input_sentence=true --control_symbols=<range>"
     )
 
     sp.SentencePieceTrainer.train(sp_train_params)
 
-    special_tokens = [opennmt.PADDING_TOKEN, opennmt.START_OF_SENTENCE_TOKEN, opennmt.END_OF_SENTENCE_TOKEN]
-
-    vocab = opennmt.data.Vocab(special_tokens)
-    with open(f"{model_prefix}.vocab", "r", encoding="utf-8") as vocab_file:
-        for line in vocab_file:
-            token = line.rstrip("\r\n")
-            token, _ = token.split("\t")
-            if token in ("<unk>", "<s>", "</s>", "<range>"):  # Ignore special tokens
-                continue
-            vocab.add(token)
-    vocab.pad_to_multiple(8)
-    vocab.serialize(vocab_path)
+    convert_vocab(f"{model_prefix}.vocab", vocab_path, tag_langs)
 
 
 def get_parallel_corpus(
@@ -153,21 +154,25 @@ def tokenize_sentences(spp: sp.SentencePieceProcessor, sentences: List[str]) -> 
         yield prefix + " ".join(spp.encode_as_pieces(sentence))
 
 
-def get_iso(file_path: str) -> str:
+def get_iso(file_path: str) -> Tuple[str, str]:
     file_name = os.path.splitext(os.path.basename(file_path))[0]
     parts = file_name.split("-")
-    return parts[0]
+    return parts[0], parts[1]
 
 
-def copy_parent_vocab(prefix: str, parent_data_config: dict, parent_root_dir: str, root_dir: str) -> None:
+def copy_parent_vocab(
+    prefix: str, parent_data_config: dict, parent_root_dir: str, root_dir: str, tag_langs: Set[str] = None
+) -> None:
+    sp_vocab_path = os.path.join(root_dir, f"{prefix}-sp.vocab")
+    onmt_vocab_path = os.path.join(root_dir, f"{prefix}-onmt.vocab")
     if parent_data_config.get("share_vocab", True):
-        shutil.copy2(os.path.join(parent_root_dir, "onmt.vocab"), os.path.join(root_dir, f"{prefix}-onmt.vocab"))
-        shutil.copy2(os.path.join(parent_root_dir, "sp.vocab"), os.path.join(root_dir, f"{prefix}-sp.vocab"))
+        shutil.copy2(os.path.join(parent_root_dir, "sp.vocab"), sp_vocab_path)
         shutil.copy2(os.path.join(parent_root_dir, "sp.model"), os.path.join(root_dir, f"{prefix}-sp.model"))
     else:
-        shutil.copy2(os.path.join(parent_root_dir, f"{prefix}-onmt.vocab"), root_dir)
         shutil.copy2(os.path.join(parent_root_dir, f"{prefix}-sp.vocab"), root_dir)
         shutil.copy2(os.path.join(parent_root_dir, f"{prefix}-sp.model"), root_dir)
+
+    convert_vocab(sp_vocab_path, onmt_vocab_path, tag_langs)
 
 
 def update_vocab(parent_config: dict, root_dir: str, src_vocab_path: str, trg_vocab_path: str) -> None:
@@ -181,6 +186,36 @@ def get_sentence_count(file_path: str) -> int:
         for _ in file:
             lines += 1
     return lines
+
+
+def is_corpus_in_langs(langs: Set[str], lang_projects: Dict[str, Set[str]], iso: str, project: str) -> bool:
+    if iso in langs:
+        projects = lang_projects.get(iso)
+        if projects is None or project in projects:
+            return True
+    return False
+
+
+def create_unshared_vocab(
+    root_dir: str,
+    data_config: dict,
+    parent_root_dir: str,
+    parent_data_config: dict,
+    langs: Set[str],
+    vocab_file_paths: Set[str],
+    side: str,
+    tag_langs: Set[str] = None,
+) -> None:
+    prefix = "src" if side == "source" else "trg"
+    model_prefix = os.path.join(root_dir, f"{prefix}-sp")
+    vocab_path = os.path.join(root_dir, f"{prefix}-onmt.vocab")
+    parent_langs, _ = parse_langs(parent_data_config.get(f"{prefix}_langs", []))
+    if langs == parent_langs:
+        copy_parent_vocab(prefix, parent_data_config, parent_root_dir, root_dir, tag_langs)
+    else:
+        print(f"Building {side} vocabulary...")
+        vocab_size: int = data_config.get(f"{prefix}_vocab_size", 8000)
+        build_vocab(vocab_file_paths, vocab_size, model_prefix, vocab_path, tag_langs)
 
 
 def main() -> None:
@@ -197,15 +232,15 @@ def main() -> None:
     config = load_config(exp_name)
     data_config: dict = config.get("data", {})
 
-    src_langs: Set[str] = set(data_config.get("src_langs", []))
-    trg_langs: Set[str] = set(data_config.get("trg_langs", []))
+    src_langs, src_lang_projects = parse_langs(data_config.get("src_langs", []))
+    trg_langs, trg_lang_projects = parse_langs(data_config.get("trg_langs", []))
     src_file_paths: List[str] = []
     trg_file_paths: List[str] = []
     for file_path in glob(os.path.join(paratextPreprocessedDir, "data", "*.txt")):
-        iso = get_iso(file_path)
-        if iso in src_langs:
+        iso, project = get_iso(file_path)
+        if is_corpus_in_langs(src_langs, src_lang_projects, iso, project):
             src_file_paths.append(file_path)
-        if iso in trg_langs:
+        if is_corpus_in_langs(trg_langs, trg_lang_projects, iso, project):
             trg_file_paths.append(file_path)
 
     src_file_paths.sort()
@@ -250,38 +285,40 @@ def main() -> None:
 
         trg_spp = src_spp
     else:
-        src_model_prefix = os.path.join(root_dir, "src-sp")
-        src_vocab_path = os.path.join(root_dir, "src-onmt.vocab")
-        if src_langs == set(parent_data_config.get("src_langs", [])):
-            copy_parent_vocab("src", parent_data_config, parent_root_dir, root_dir)
-        else:
-            print("Building source vocabulary...")
-            src_vocab_size: int = data_config.get("src_vocab_size", 8000)
-            src_vocab_file_paths: Set[str] = set(src_file_paths)
-            if mirror:
-                src_vocab_file_paths.update(trg_file_paths)
-            build_vocab(src_vocab_file_paths, src_vocab_size, src_model_prefix, src_vocab_path, tag_langs)
+        src_vocab_file_paths: Set[str] = set(src_file_paths)
+        if mirror:
+            src_vocab_file_paths.update(trg_file_paths)
+        create_unshared_vocab(
+            root_dir,
+            data_config,
+            parent_root_dir,
+            parent_data_config,
+            src_langs,
+            src_vocab_file_paths,
+            "source",
+            tag_langs=tag_langs,
+        )
 
-        trg_model_prefix = os.path.join(root_dir, "trg-sp")
-        trg_vocab_path = os.path.join(root_dir, "trg-onmt.vocab")
-        if trg_langs == set(parent_data_config.get("trg_langs", [])):
-            copy_parent_vocab("trg", parent_config, parent_root_dir, root_dir)
-        else:
-            print("Building target vocabulary...")
-            trg_vocab_size: int = data_config.get("trg_vocab_size", 8000)
-            trg_vocab_file_paths: Set[str] = set(trg_file_paths)
-            if mirror:
-                trg_vocab_file_paths.update(src_file_paths)
-            build_vocab(trg_vocab_file_paths, trg_vocab_size, trg_model_prefix, trg_vocab_path)
+        trg_vocab_file_paths: Set[str] = set(trg_file_paths)
+        if mirror:
+            trg_vocab_file_paths.update(src_file_paths)
+        create_unshared_vocab(
+            root_dir, data_config, parent_root_dir, parent_data_config, trg_langs, trg_vocab_file_paths, "target"
+        )
 
         if has_parent:
-            update_vocab(parent_config, root_dir, src_vocab_path, trg_vocab_path)
+            update_vocab(
+                parent_config,
+                root_dir,
+                os.path.join(root_dir, "src-onmt.vocab"),
+                os.path.join(root_dir, "trg-onmt.vocab"),
+            )
 
         src_spp = sp.SentencePieceProcessor()
-        src_spp.load(f"{src_model_prefix}.model")
+        src_spp.load(os.path.join(root_dir, "src-sp.model"))
 
         trg_spp = sp.SentencePieceProcessor()
-        trg_spp.load(f"{trg_model_prefix}.model")
+        trg_spp.load(os.path.join(root_dir, "trg-sp.model"))
 
     print("Collecting data sets...")
     test_size: int = data_config.get("test_size", 250)
@@ -312,8 +349,8 @@ def main() -> None:
     val_trg_sentences: List[str] = []
     for src_file_path in src_file_paths:
         for trg_file_path in trg_file_paths:
-            src_iso = get_iso(src_file_path)
-            trg_iso = get_iso(trg_file_path)
+            src_iso, _ = get_iso(src_file_path)
+            trg_iso, _ = get_iso(trg_file_path)
 
             if src_iso == trg_iso:
                 continue
@@ -322,17 +359,14 @@ def main() -> None:
                 src_file_path, trg_file_path, val_size, test_size, val_indices, test_indices
             )
 
-            parent_trg_tags: Set[str] = set(parent_data_config.get("trg_langs", []))
-            tag_iso = "qaa" if has_parent and trg_iso not in parent_trg_tags else trg_iso
-
-            train_src_sentences.extend(insert_trg_tag(tag_iso, write_trg_tag, has_parent, train_src))
+            train_src_sentences.extend(insert_trg_tag(trg_iso, write_trg_tag, has_parent, train_src))
             train_trg_sentences.extend(train_trg)
 
-            val_src_sentences.extend(insert_trg_tag(tag_iso, write_trg_tag, has_parent, val_src))
+            val_src_sentences.extend(insert_trg_tag(trg_iso, write_trg_tag, has_parent, val_src))
             val_trg_sentences.extend(val_trg)
 
             test_data: TestData = get_or_create(test_sentences, src_iso, lambda: TestData())
-            test_data.src_sentences.extend(insert_trg_tag(tag_iso, write_trg_tag, has_parent, test_src))
+            test_data.src_sentences.extend(insert_trg_tag(trg_iso, write_trg_tag, has_parent, test_src))
             test_data.trg_sentences.extend(test_trg)
 
             if mirror:

@@ -9,7 +9,7 @@ import sacrebleu
 import sentencepiece as sp
 import tensorflow as tf
 
-from nlp.nmt.config import create_runner, get_root_dir, load_config
+from nlp.nmt.config import create_runner, get_root_dir, load_config, parse_langs
 
 
 class TestResults:
@@ -85,8 +85,8 @@ def main() -> None:
     root_dir = get_root_dir(exp_name)
     config = load_config(exp_name)
     data_config: dict = config.get("data", {})
-    src_langs = data_config.get("src_langs", [])
-    trg_langs = data_config.get("trg_langs", [])
+    src_langs, _ = parse_langs(data_config.get("src_langs", []))
+    trg_langs, _ = parse_langs(data_config.get("trg_langs", []))
     runner = create_runner(config, memory_growth=args.memory_growth)
 
     checkpoint_path = None
@@ -105,12 +105,14 @@ def main() -> None:
         predictions_detok_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.detok.txt"))
 
     print("Inferencing...")
+    step: int
     if args.best:
-        runner.saved_model_infer_multiple(features_paths, predictions_paths)
+        step = runner.saved_model_infer_multiple(features_paths, predictions_paths)
     else:
-        runner.infer_multiple(features_paths, predictions_paths, checkpoint_path=checkpoint_path)
+        step = runner.infer_multiple(features_paths, predictions_paths, checkpoint_path=checkpoint_path)
 
     print("Scoring...")
+    default_trg_iso = next(iter(trg_langs))
     scores: List[TestResults] = list()
     overall_sys: List[str] = list()
     overall_ref: List[str] = list()
@@ -119,7 +121,7 @@ def main() -> None:
         src_langs, features_paths, predictions_paths, ref_paths, predictions_detok_paths
     ):
         dataset = load_test_data(
-            model_file_path, features_path, predictions_path, ref_path, predictions_detok_path, trg_langs[0]
+            model_file_path, features_path, predictions_path, ref_path, predictions_detok_path, default_trg_iso
         )
 
         for trg_iso, data in dataset.items():
@@ -130,12 +132,15 @@ def main() -> None:
             bleu = sacrebleu.corpus_bleu(sys, [ref], lowercase=True)
             scores.append(TestResults(src_iso, trg_iso, bleu, len(sys)))
 
+        os.replace(predictions_path, f"{predictions_path}.{step}")
+        os.replace(predictions_detok_path, f"{predictions_detok_path}.{step}")
+
     if len(src_langs) > 1 or len(trg_langs) > 1:
         bleu = sacrebleu.corpus_bleu(overall_sys, [overall_ref], lowercase=True)
         scores.append(TestResults("ALL", "ALL", bleu, len(overall_sys)))
 
     print("Test results")
-    with open(os.path.join(root_dir, "bleu.csv"), "w", encoding="utf-8") as bleu_file:
+    with open(os.path.join(root_dir, f"bleu-{step}.csv"), "w", encoding="utf-8") as bleu_file:
         bleu_file.write("src_iso,trg_iso,BLEU,BP,hyp_len,ref_len,sent_len\n")
         for results in scores:
             results.write(bleu_file)

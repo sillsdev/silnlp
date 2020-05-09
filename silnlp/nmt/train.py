@@ -24,7 +24,7 @@ def main() -> None:
 
     checkpoint_path: Optional[str] = None
     data_config: dict = config.get("data", {})
-    if "parent" in data_config:
+    if not os.path.isdir(os.path.join(root_dir, "run")) and "parent" in data_config:
         checkpoint_path = os.path.join(root_dir, "parent")
 
     print("Training...")
