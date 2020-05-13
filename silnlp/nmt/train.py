@@ -15,6 +15,7 @@ def main() -> None:
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument("--mixed-precision", default=False, action="store_true", help="Enable mixed precision")
     parser.add_argument("--memory-growth", default=False, action="store_true", help="Enable memory growth")
+    parser.add_argument("--num-devices", type=int, default=1, help="Number of devices to train on")
     args = parser.parse_args()
 
     exp_name = args.experiment
@@ -28,7 +29,7 @@ def main() -> None:
         checkpoint_path = os.path.join(root_dir, "parent")
 
     print("Training...")
-    runner.train(num_devices=1, with_eval=True, checkpoint_path=checkpoint_path)
+    runner.train(num_devices=args.num_devices, with_eval=True, checkpoint_path=checkpoint_path)
 
     print("Training completed")
 

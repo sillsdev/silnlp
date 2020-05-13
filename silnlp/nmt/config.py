@@ -122,7 +122,7 @@ def main() -> None:
     parser.add_argument("--trg-vocab-size", type=int, help="Target vocabulary size")
     parser.add_argument("--parent", type=str, help="Parent experiment name")
     parser.add_argument("--mirror", default=False, action="store_true", help="Mirror train and validation data sets")
-    parser.add_argument("--force", default=False, action="store_true", help="Overwrite existing config file.")
+    parser.add_argument("--force", default=False, action="store_true", help="Overwrite existing config file")
     args = parser.parse_args()
 
     root_dir = get_root_dir(args.experiment)
