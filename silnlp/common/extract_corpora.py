@@ -38,20 +38,29 @@ def extract_corpus(output_dir: str, iso: str, project_dir: str, include_texts: s
         f"pt,{ref_dir}",
         "-t",
         f"pt,{project_dir}",
-        "-to",
-        os.path.join(output_dir, f"{iso}-{name}.txt"),
         "-st",
         "null",
         "-tt",
         "null",
         "-as",
     ]
+    output_basename = f"{iso}-{name}"
     if len(include_texts) > 0:
         arg_list.append("-i")
         arg_list.append(include_texts)
+        for text in include_texts.split(","):
+            text = text.strip("*")
+            output_basename += f"+{text}"
     if len(exclude_texts) > 0:
         arg_list.append("-e")
         arg_list.append(exclude_texts)
+        for text in exclude_texts.split(","):
+            text = text.strip("*")
+            output_basename += f"-{text}"
+
+    arg_list.append("-to")
+    arg_list.append(os.path.join(output_dir, f"{output_basename}.txt"))
+
     subprocess.run(arg_list)
 
 

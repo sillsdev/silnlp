@@ -156,8 +156,8 @@ def tokenize_sentences(spp: sp.SentencePieceProcessor, sentences: List[str]) -> 
 
 def get_iso(file_path: str) -> Tuple[str, str]:
     file_name = os.path.splitext(os.path.basename(file_path))[0]
-    parts = file_name.split("-")
-    return parts[0], parts[1]
+    index = file_name.index("-")
+    return file_name[:index], file_name[index + 1 :]
 
 
 def copy_parent_vocab(

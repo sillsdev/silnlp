@@ -105,10 +105,14 @@ def parse_langs(langs: Iterable[str]) -> Tuple[Set[str], Dict[str, Set[str]]]:
     isos: Set[str] = set()
     lang_projects: Dict[str, Set[str]] = {}
     for lang in langs:
-        parts = lang.split("-")
-        isos.add(parts[0])
-        if len(parts) == 2:
-            lang_projects[parts[0]] = set(parts[1].split(","))
+        index = lang.find("-")
+        if index == -1:
+            isos.add(lang)
+        else:
+            iso = lang[:index]
+            projects = lang[index + 1 :]
+            isos.add(iso)
+            lang_projects[iso] = set(projects.split(","))
     return isos, lang_projects
 
 
