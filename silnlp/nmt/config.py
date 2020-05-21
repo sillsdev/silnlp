@@ -127,6 +127,7 @@ def main() -> None:
     parser.add_argument("--parent", type=str, help="Parent experiment name")
     parser.add_argument("--mirror", default=False, action="store_true", help="Mirror train and validation data sets")
     parser.add_argument("--force", default=False, action="store_true", help="Overwrite existing config file")
+    parser.add_argument("--seed", type=int, help="Randomization seed")
     args = parser.parse_args()
 
     root_dir = get_root_dir(args.experiment)
@@ -165,6 +166,10 @@ def main() -> None:
         elif "vocab_size" in data_config:
             data_config["trg_vocab_size"] = data_config["vocab_size"]
             del data_config["vocab_size"]
+    if args.seed is not None:
+        data_config["seed"] = args.seed
+    else:
+        data_config["seed"] = 111
     if args.mirror:
         data_config["mirror"] = True
     with open(config_path, "w", encoding="utf-8") as file:
