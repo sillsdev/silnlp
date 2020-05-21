@@ -63,6 +63,7 @@ def get_parallel_corpus(
     test_size: int,
     val_indices: Set[int] = None,
     test_indices: Set[int] = None,
+    random_seed: int = 111,
 ) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str]]:
     train_src: List[str] = []
     train_trg: List[str] = []
@@ -110,12 +111,12 @@ def get_parallel_corpus(
 
     if test_indices is None:
         train_src, test_src, train_trg, test_trg = train_test_split(
-            train_src, train_trg, test_size=test_size, random_state=111
+            train_src, train_trg, test_size=test_size, random_state=random_seed
         )
 
     if val_indices is None:
         train_src, val_src, train_trg, val_trg = train_test_split(
-            train_src, train_trg, test_size=val_size, random_state=111
+            train_src, train_trg, test_size=val_size, random_state=random_seed
         )
 
     return train_src, train_trg, val_src, val_trg, test_src, test_trg
@@ -156,8 +157,8 @@ def tokenize_sentences(spp: sp.SentencePieceProcessor, sentences: List[str]) -> 
 
 def get_iso(file_path: str) -> Tuple[str, str]:
     file_name = os.path.splitext(os.path.basename(file_path))[0]
-    parts = file_name.split("-")
-    return parts[0], parts[1]
+    index = file_name.index("-")
+    return file_name[:index], file_name[index + 1 :]
 
 
 def copy_parent_vocab(
@@ -248,6 +249,10 @@ def main() -> None:
 
     src_file_paths.sort()
     trg_file_paths.sort()
+
+    seed: Optional[int] = data_config.get("seed")
+    if seed is None:
+        seed = 111
 
     mirror: bool = data_config.get("mirror", False)
 
@@ -359,7 +364,7 @@ def main() -> None:
                 continue
 
             train_src, train_trg, val_src, val_trg, test_src, test_trg = get_parallel_corpus(
-                src_file_path, trg_file_path, val_size, test_size, val_indices, test_indices
+                src_file_path, trg_file_path, val_size, test_size, val_indices, test_indices, seed
             )
 
             train_src_sentences.extend(insert_trg_tag(trg_iso, write_trg_tag, has_parent, train_src))

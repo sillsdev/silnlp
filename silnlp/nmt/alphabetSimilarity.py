@@ -15,6 +15,9 @@ import seaborn as sns
 def computeSimilarity(file_names: List[str]) -> None:
     charSets = list()
     file_names.sort()
+    resourceDf = pd.DataFrame(columns=["CharCount", "Mean"])
+    resourceDf.reindex(file_names)
+
     for file_name in file_names:
         file_path = os.path.join(paratextPreprocessedDir, "data", f"{file_name}.txt")
         with open(file_path, "r", encoding="utf-8") as f:
@@ -25,6 +28,7 @@ def computeSimilarity(file_names: List[str]) -> None:
                 thisCharSet.append(text[i])
         thisCharSet.sort()
         print(f"Resource: {file_name:12}\t#chars: {len(thisCharSet)}")
+        resourceDf.at[file_name, "CharCount"] = len(thisCharSet)
         charSets.append({"resource": file_name, "chars": thisCharSet})
 
     # Create a matrix for storing the similarity metrics
@@ -53,7 +57,7 @@ def computeSimilarity(file_names: List[str]) -> None:
             # Calculate the similarity score
             similarity = (1 - (len(diff1v2) / len(l1))) * (1 - (len(diff2v1) / len(l2))) * 100
             totalSimilarity += similarity
-            print(f"Similarity ({file_name1:12} vs {file_name2:12}):\t{similarity:5.1f}")
+            #            print(f"Similarity ({file_name1:12} vs {file_name2:12}):\t{similarity:5.1f}")
 
             # Update similarity score in the dataframe
             similarityDf.at[file_name1, file_name2] = similarity
@@ -62,7 +66,11 @@ def computeSimilarity(file_names: List[str]) -> None:
     totalSimilarity = totalSimilarity / (len(file_names) * (len(file_names) - 1) / 2)
     print(f"Overall similarity: {totalSimilarity:5.1f}")
 
-    # Show the scores as a heatmap
+    # Summarize, sort, and display the mean similarity value for each language
+    resourceDf["Mean"] = similarityDf.mean(axis=1)
+    print(resourceDf.sort_values("Mean"))
+
+    # Show the per-language pair similarity scores as a heatmap
     similarityDf.fillna(0, inplace=True)
     fig, ax = plt.subplots(figsize=(6, 6))
     sns.heatmap(similarityDf, square=True, ax=ax)
