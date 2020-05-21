@@ -21,3 +21,4 @@ credentials.py
 
 # omit egg-info
 *.egg-info/
+nlp/checkdata/Recent/alphabet-quick.py
