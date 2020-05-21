@@ -223,9 +223,12 @@ def main() -> None:
         description="Preprocesses text corpora into a multilingual data set for OpenNMT-tf"
     )
     parser.add_argument("experiment", help="Experiment name")
+    parser.add_argument("--random_seed", type=int, default=111, help="Set random seed")
+
+
     args = parser.parse_args()
 
-    random.seed(111)
+    random.seed(args.random_seed)
 
     exp_name = args.experiment
     root_dir = get_root_dir(exp_name)
