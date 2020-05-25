@@ -224,17 +224,18 @@ def main() -> None:
         description="Preprocesses text corpora into a multilingual data set for OpenNMT-tf"
     )
     parser.add_argument("experiment", help="Experiment name")
-    parser.add_argument("--random_seed", type=int, default=111, help="Set random seed")
-
 
     args = parser.parse_args()
-
-    random.seed(args.random_seed)
 
     exp_name = args.experiment
     root_dir = get_root_dir(exp_name)
     config = load_config(exp_name)
     data_config: dict = config.get("data", {})
+
+    seed: Optional[int] = data_config.get("seed")
+    if seed is None:
+        seed = 111
+    random.seed(seed)
 
     src_langs, src_lang_projects = parse_langs(data_config.get("src_langs", []))
     trg_langs, trg_lang_projects = parse_langs(data_config.get("trg_langs", []))
@@ -249,10 +250,6 @@ def main() -> None:
 
     src_file_paths.sort()
     trg_file_paths.sort()
-
-    seed: Optional[int] = data_config.get("seed")
-    if seed is None:
-        seed = 111
 
     mirror: bool = data_config.get("mirror", False)
 
