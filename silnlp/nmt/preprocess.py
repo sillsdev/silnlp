@@ -9,17 +9,12 @@ from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Set,
 logging.basicConfig()
 
 import opennmt
+import pandas as pd
 import sentencepiece as sp
 from sklearn.model_selection import train_test_split
 
 from nlp.common.environment import paratextPreprocessedDir
 from nlp.nmt.config import create_runner, get_root_dir, load_config, parse_langs
-
-
-class TestData:
-    def __init__(self):
-        self.src_sentences: List[str] = []
-        self.trg_sentences: List[str] = []
 
 
 def convert_vocab(sp_vocab_path: str, onmt_vocab_path: str, tag_langs: Set[str] = None) -> None:
@@ -64,62 +59,41 @@ def get_parallel_corpus(
     val_indices: Set[int] = None,
     test_indices: Set[int] = None,
     random_seed: int = 111,
-) -> Tuple[List[str], List[str], List[str], List[str], List[str], List[str]]:
-    train_src: List[str] = []
-    train_trg: List[str] = []
-    val_src: List[str] = []
-    val_trg: List[str] = []
-    test_src: List[str] = []
-    test_trg: List[str] = []
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    src_sentences: List[str] = []
+    trg_sentences: List[str] = []
+    indices: List[int] = []
     with open(src_file_path, "r", encoding="utf-8") as src_file, open(trg_file_path, "r", encoding="utf-8") as trg_file:
         index = 0
-        range_start = 0
         for src_line, trg_line in zip(src_file, trg_file):
             src_line = src_line.strip()
             trg_line = trg_line.strip()
             if len(src_line) > 0 and len(trg_line) > 0 and (src_line != "<range>" or trg_line != "<range>"):
                 if src_line == "<range>":
-                    trg_list: List[str]
-                    if val_indices is not None and range_start in val_indices:
-                        trg_list = val_trg
-                    elif test_indices is not None and range_start in test_indices:
-                        trg_list = test_trg
-                    else:
-                        trg_list = train_trg
-                    trg_list[-1] = trg_list[-1] + " " + trg_line
+                    trg_sentences[-1] = trg_sentences[-1] + " " + trg_line
                 elif trg_line == "<range>":
-                    src_list: List[str]
-                    if val_indices is not None and range_start in val_indices:
-                        src_list = val_src
-                    elif test_indices is not None and range_start in test_indices:
-                        src_list = test_src
-                    else:
-                        src_list = train_src
-                    src_list[-1] = src_list[-1] + " " + src_line
+                    src_sentences[-1] = src_sentences[-1] + " " + src_line
                 else:
-                    if val_indices is not None and index in val_indices:
-                        val_src.append(src_line)
-                        val_trg.append(trg_line)
-                    elif test_indices is not None and index in test_indices:
-                        test_src.append(src_line)
-                        test_trg.append(trg_line)
-                    else:
-                        train_src.append(src_line)
-                        train_trg.append(trg_line)
-                    range_start = index
+                    src_sentences.append(src_line)
+                    trg_sentences.append(trg_line)
+                    indices.append(index)
             index += 1
 
+    train = pd.DataFrame({"source": src_sentences, "target": trg_sentences}, index=indices)
+
     if test_indices is None:
-        train_src, test_src, train_trg, test_trg = train_test_split(
-            train_src, train_trg, test_size=test_size, random_state=random_seed
-        )
+        train, test = train_test_split(train, test_size=test_size, random_state=random_seed)
+    else:
+        test = train.filter(test_indices, axis=0)
+        train.drop(test_indices, inplace=True, errors="ignore")
 
     if val_indices is None:
-        train_src, val_src, train_trg, val_trg = train_test_split(
-            train_src, train_trg, test_size=val_size, random_state=random_seed
-        )
+        train, val = train_test_split(train, test_size=val_size, random_state=random_seed)
+    else:
+        val = train.filter(val_indices, axis=0)
+        train.drop(val_indices, inplace=True, errors="ignore")
 
-    return train_src, train_trg, val_src, val_trg, test_src, test_trg
+    return train, val, test
 
 
 def get_or_create(d: dict, key: Any, value_selector: Callable[[], Any]) -> Any:
@@ -130,13 +104,8 @@ def get_or_create(d: dict, key: Any, value_selector: Callable[[], Any]) -> Any:
     return value
 
 
-def insert_trg_tag(trg_iso: str, write_trg_tag: bool, has_parent: bool, sentences: Iterable[str]) -> Iterable[str]:
-    if write_trg_tag:
-        for sentence in sentences:
-            yield f"<2{trg_iso}> " + sentence
-    else:
-        for sentence in sentences:
-            yield sentence
+def insert_trg_tag(trg_iso: str, sentences: pd.DataFrame) -> None:
+    sentences["source"] = sentences["source"].apply(lambda s: f"<2{trg_iso}> " + s)
 
 
 def write_corpus(corpus_path: str, sentences: Iterable[str]) -> None:
@@ -145,7 +114,7 @@ def write_corpus(corpus_path: str, sentences: Iterable[str]) -> None:
             file.write(sentence + "\n")
 
 
-def tokenize_sentences(spp: sp.SentencePieceProcessor, sentences: List[str]) -> Iterator[str]:
+def tokenize_sentences(spp: sp.SentencePieceProcessor, sentences: Iterable[str]) -> Iterator[str]:
     for sentence in sentences:
         prefix = ""
         if sentence.startswith("<2"):
@@ -347,11 +316,9 @@ def main() -> None:
         if disjoint_val:
             val_indices = set(samples)
 
-    train_src_sentences: List[str] = []
-    train_trg_sentences: List[str] = []
-    test_sentences: Dict[str, TestData] = {}
-    val_src_sentences: List[str] = []
-    val_trg_sentences: List[str] = []
+    train = pd.DataFrame(columns=["src_iso", "source", "target"])
+    test = pd.DataFrame(columns=["src_iso", "source", "target"])
+    val = pd.DataFrame(columns=["src_iso", "source", "target"])
     for src_file_path in src_file_paths:
         for trg_file_path in trg_file_paths:
             src_iso, _ = get_iso(src_file_path)
@@ -360,40 +327,50 @@ def main() -> None:
             if src_iso == trg_iso:
                 continue
 
-            train_src, train_trg, val_src, val_trg, test_src, test_trg = get_parallel_corpus(
+            cur_train, cur_val, cur_test = get_parallel_corpus(
                 src_file_path, trg_file_path, val_size, test_size, val_indices, test_indices, seed
             )
 
-            train_src_sentences.extend(insert_trg_tag(trg_iso, write_trg_tag, has_parent, train_src))
-            train_trg_sentences.extend(train_trg)
-
-            val_src_sentences.extend(insert_trg_tag(trg_iso, write_trg_tag, has_parent, val_src))
-            val_trg_sentences.extend(val_trg)
-
-            test_data: TestData = get_or_create(test_sentences, src_iso, lambda: TestData())
-            test_data.src_sentences.extend(insert_trg_tag(trg_iso, write_trg_tag, has_parent, test_src))
-            test_data.trg_sentences.extend(test_trg)
-
             if mirror:
-                train_src_sentences.extend(insert_trg_tag(src_iso, write_trg_tag, has_parent, train_trg))
-                train_trg_sentences.extend(train_src)
+                mirror_cur_train = cur_train.rename(columns={"source": "target", "target": "source"})
+                mirror_cur_train["src_iso"] = trg_iso
+                mirror_cur_val = cur_val.rename(columns={"source": "target", "target": "source"})
+                mirror_cur_val["src_iso"] = trg_iso
 
-                val_src_sentences.extend(insert_trg_tag(src_iso, write_trg_tag, has_parent, val_trg))
-                val_trg_sentences.extend(val_src)
+                if write_trg_tag:
+                    insert_trg_tag(src_iso, mirror_cur_train)
+                    insert_trg_tag(src_iso, mirror_cur_val)
+
+                train = pd.concat([train, mirror_cur_train])
+                val = pd.concat([val, mirror_cur_val])
+
+            cur_train["src_iso"] = src_iso
+            cur_val["src_iso"] = src_iso
+            cur_test["src_iso"] = src_iso
+
+            if write_trg_tag:
+                insert_trg_tag(trg_iso, cur_train)
+                insert_trg_tag(trg_iso, cur_val)
+                insert_trg_tag(trg_iso, cur_test)
+
+            train = pd.concat([train, cur_train])
+            val = pd.concat([val, cur_val])
+            test = pd.concat([test, cur_test])
 
     print("Writing train data set...")
-    write_corpus(os.path.join(root_dir, "train.src.txt"), tokenize_sentences(src_spp, train_src_sentences))
-    write_corpus(os.path.join(root_dir, "train.trg.txt"), tokenize_sentences(trg_spp, train_trg_sentences))
+    write_corpus(os.path.join(root_dir, "train.src.txt"), tokenize_sentences(src_spp, train["source"]))
+    write_corpus(os.path.join(root_dir, "train.trg.txt"), tokenize_sentences(trg_spp, train["target"]))
 
     print("Writing validation data set...")
-    write_corpus(os.path.join(root_dir, "val.src.txt"), tokenize_sentences(src_spp, val_src_sentences))
-    write_corpus(os.path.join(root_dir, "val.trg.txt"), tokenize_sentences(trg_spp, val_trg_sentences))
+    write_corpus(os.path.join(root_dir, "val.src.txt"), tokenize_sentences(src_spp, val["source"]))
+    write_corpus(os.path.join(root_dir, "val.trg.txt"), tokenize_sentences(trg_spp, val["target"]))
 
     print("Writing test data set...")
-    for src_iso, test_data in test_sentences.items():
-        prefix = "test" if len(test_sentences) == 1 else f"test.{src_iso}"
-        write_corpus(os.path.join(root_dir, f"{prefix}.src.txt"), tokenize_sentences(src_spp, test_data.src_sentences))
-        write_corpus(os.path.join(root_dir, f"{prefix}.trg.detok.txt"), test_data.trg_sentences)
+    grouped = test.groupby("src_iso")
+    for src_iso, group in grouped:
+        prefix = "test" if len(grouped) == 1 else f"test.{src_iso}"
+        write_corpus(os.path.join(root_dir, f"{prefix}.src.txt"), tokenize_sentences(src_spp, group["source"]))
+        write_corpus(os.path.join(root_dir, f"{prefix}.trg.detok.txt"), group["target"])
 
     print("Preprocessing completed")
 
