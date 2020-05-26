@@ -15,6 +15,7 @@ from sklearn.model_selection import train_test_split
 
 from nlp.common.environment import paratextPreprocessedDir
 from nlp.nmt.config import create_runner, get_root_dir, load_config, parse_langs
+from nlp.nmt.utils import alignment_scores, sp_tokenize, write_corpus
 
 
 def convert_vocab(sp_vocab_path: str, onmt_vocab_path: str, tag_langs: Set[str] = None) -> None:
@@ -52,6 +53,7 @@ def build_vocab(
 
 
 def get_parallel_corpus(
+    src_iso: str,
     src_file_path: str,
     trg_file_path: str,
     val_size: int,
@@ -59,6 +61,7 @@ def get_parallel_corpus(
     val_indices: Set[int] = None,
     test_indices: Set[int] = None,
     random_seed: int = 111,
+    prob_threshold: float = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     src_sentences: List[str] = []
     trg_sentences: List[str] = []
@@ -79,13 +82,22 @@ def get_parallel_corpus(
                     indices.append(index)
             index += 1
 
-    train = pd.DataFrame({"source": src_sentences, "target": trg_sentences}, index=indices)
+    data = {"src_iso": src_iso, "source": src_sentences, "target": trg_sentences}
+    if prob_threshold is not None:
+        probs = alignment_scores(src_sentences, trg_sentences)
+        data["prob"] = probs
+
+    train = pd.DataFrame(data, index=indices)
 
     if test_indices is None:
         train, test = train_test_split(train, test_size=test_size, random_state=random_seed)
     else:
         test = train.filter(test_indices, axis=0)
         train.drop(test_indices, inplace=True, errors="ignore")
+
+    if prob_threshold is not None:
+        prob_threshold = min(train["prob"].quantile(0.1), prob_threshold)
+        train = train[train["prob"] > prob_threshold]
 
     if val_indices is None:
         train, val = train_test_split(train, test_size=val_size, random_state=random_seed)
@@ -96,32 +108,8 @@ def get_parallel_corpus(
     return train, val, test
 
 
-def get_or_create(d: dict, key: Any, value_selector: Callable[[], Any]) -> Any:
-    value = d.get(key)
-    if value is None:
-        value = value_selector()
-        d[key] = value
-    return value
-
-
 def insert_trg_tag(trg_iso: str, sentences: pd.DataFrame) -> None:
-    sentences["source"] = sentences["source"].apply(lambda s: f"<2{trg_iso}> " + s)
-
-
-def write_corpus(corpus_path: str, sentences: Iterable[str]) -> None:
-    with open(corpus_path, "w", encoding="utf-8") as file:
-        for sentence in sentences:
-            file.write(sentence + "\n")
-
-
-def tokenize_sentences(spp: sp.SentencePieceProcessor, sentences: Iterable[str]) -> Iterator[str]:
-    for sentence in sentences:
-        prefix = ""
-        if sentence.startswith("<2"):
-            index = sentence.index(">")
-            prefix = sentence[0 : index + 2]
-            sentence = sentence[index + 2 :]
-        yield prefix + " ".join(spp.encode_as_pieces(sentence))
+    sentences.loc[:, "source"] = f"<2{trg_iso}> " + sentences.loc[:, "source"]
 
 
 def get_iso(file_path: str) -> Tuple[str, str]:
@@ -205,6 +193,8 @@ def main() -> None:
     if seed is None:
         seed = 111
     random.seed(seed)
+
+    prob_threshold: Optional[float] = data_config.get("prob_threshold")
 
     src_langs, src_lang_projects = parse_langs(data_config.get("src_langs", []))
     trg_langs, trg_lang_projects = parse_langs(data_config.get("trg_langs", []))
@@ -316,9 +306,9 @@ def main() -> None:
         if disjoint_val:
             val_indices = set(samples)
 
-    train = pd.DataFrame(columns=["src_iso", "source", "target"])
-    test = pd.DataFrame(columns=["src_iso", "source", "target"])
-    val = pd.DataFrame(columns=["src_iso", "source", "target"])
+    train = pd.DataFrame(columns=["src_iso", "source", "target", "score"])
+    val = pd.DataFrame(columns=["src_iso", "source", "target", "score"])
+    test = pd.DataFrame(columns=["src_iso", "source", "target", "score"])
     for src_file_path in src_file_paths:
         for trg_file_path in trg_file_paths:
             src_iso, _ = get_iso(src_file_path)
@@ -328,14 +318,22 @@ def main() -> None:
                 continue
 
             cur_train, cur_val, cur_test = get_parallel_corpus(
-                src_file_path, trg_file_path, val_size, test_size, val_indices, test_indices, seed
+                src_iso,
+                src_file_path,
+                trg_file_path,
+                val_size,
+                test_size,
+                val_indices,
+                test_indices,
+                seed,
+                prob_threshold,
             )
 
             if mirror:
                 mirror_cur_train = cur_train.rename(columns={"source": "target", "target": "source"})
-                mirror_cur_train["src_iso"] = trg_iso
+                mirror_cur_train.loc[:, "src_iso"] = trg_iso
                 mirror_cur_val = cur_val.rename(columns={"source": "target", "target": "source"})
-                mirror_cur_val["src_iso"] = trg_iso
+                mirror_cur_val.loc[:, "src_iso"] = trg_iso
 
                 if write_trg_tag:
                     insert_trg_tag(src_iso, mirror_cur_train)
@@ -343,10 +341,6 @@ def main() -> None:
 
                 train = pd.concat([train, mirror_cur_train])
                 val = pd.concat([val, mirror_cur_val])
-
-            cur_train["src_iso"] = src_iso
-            cur_val["src_iso"] = src_iso
-            cur_test["src_iso"] = src_iso
 
             if write_trg_tag:
                 insert_trg_tag(trg_iso, cur_train)
@@ -358,18 +352,18 @@ def main() -> None:
             test = pd.concat([test, cur_test])
 
     print("Writing train data set...")
-    write_corpus(os.path.join(root_dir, "train.src.txt"), tokenize_sentences(src_spp, train["source"]))
-    write_corpus(os.path.join(root_dir, "train.trg.txt"), tokenize_sentences(trg_spp, train["target"]))
+    write_corpus(os.path.join(root_dir, "train.src.txt"), sp_tokenize(src_spp, train["source"]))
+    write_corpus(os.path.join(root_dir, "train.trg.txt"), sp_tokenize(trg_spp, train["target"]))
 
     print("Writing validation data set...")
-    write_corpus(os.path.join(root_dir, "val.src.txt"), tokenize_sentences(src_spp, val["source"]))
-    write_corpus(os.path.join(root_dir, "val.trg.txt"), tokenize_sentences(trg_spp, val["target"]))
+    write_corpus(os.path.join(root_dir, "val.src.txt"), sp_tokenize(src_spp, val["source"]))
+    write_corpus(os.path.join(root_dir, "val.trg.txt"), sp_tokenize(trg_spp, val["target"]))
 
     print("Writing test data set...")
     grouped = test.groupby("src_iso")
     for src_iso, group in grouped:
         prefix = "test" if len(grouped) == 1 else f"test.{src_iso}"
-        write_corpus(os.path.join(root_dir, f"{prefix}.src.txt"), tokenize_sentences(src_spp, group["source"]))
+        write_corpus(os.path.join(root_dir, f"{prefix}.src.txt"), sp_tokenize(src_spp, group["source"]))
         write_corpus(os.path.join(root_dir, f"{prefix}.trg.detok.txt"), group["target"])
 
     print("Preprocessing completed")

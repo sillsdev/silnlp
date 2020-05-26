@@ -63,16 +63,6 @@ def load_test_data(
     return dataset
 
 
-def load_reference(input_file: str) -> List[str]:
-    sentences: List[str] = list()
-    with open(input_file, "r", encoding="utf-8") as in_file:
-        for line in in_file:
-            line = line.strip()
-            sentences.append(line)
-
-    return sentences
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Tests a NMT model using OpenNMT-tf")
     parser.add_argument("experiment", help="Experiment name")
