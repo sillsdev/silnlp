@@ -6,6 +6,10 @@
 .vscode/
 .env
 
+# omit R-related
+*.Rdata
+*.html
+
 # omit notebook data
 .ipynb_checkpoints/
 
