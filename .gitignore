@@ -9,6 +9,7 @@
 # omit R-related
 *.Rdata
 *.html
+!data/*.html
 
 # omit notebook data
 .ipynb_checkpoints/
