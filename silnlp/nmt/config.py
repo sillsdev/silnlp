@@ -1,7 +1,7 @@
 import argparse
 import logging
 import os
-from typing import Dict, Iterable, List, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 logging.basicConfig()
 
@@ -82,20 +82,30 @@ def create_runner(
             tf.config.experimental.set_memory_growth(device, enable=True)
 
     data_config: dict = config.get("data", {})
-    train_config: dict = config.get("train", {})
+    params_config: dict = config.get("params", {})
+
+    parent: Optional[str] = data_config.get("parent")
+    parent_data_config = {}
+    if parent:
+        parent_config = load_config(parent)
+        parent_data_config = parent_config["data"]
 
     model = opennmt.models.TransformerBase()
 
-    add_noise: bool = train_config.get("add_noise", False)
-    if add_noise:
-        single_target = len(data_config.get("trg_langs", [])) == 1
+    word_dropout: float = params_config.get("word_dropout", 0.0)
+    if word_dropout > 0:
+        write_trg_tag = (
+            len(data_config.get("trg_langs", [])) > 1
+            or len(parent_data_config.get("trg_langs", [])) > 1
+            or data_config.get("mirror", False)
+            or parent_data_config.get("mirror", False)
+        )
         source_noiser = opennmt.data.WordNoiser(subword_token="▁", is_spacer=True)
-        source_noiser.add(WordDropout(0.1, skip_first_word=not single_target))
+        source_noiser.add(WordDropout(word_dropout, skip_first_word=write_trg_tag))
         model.features_inputter.set_noise(source_noiser, probability=1.0)
 
         target_noiser = opennmt.data.WordNoiser(subword_token="▁", is_spacer=True)
-        target_noiser.add(WordDropout(0.1))
-        target_noiser.add(opennmt.data.WordPermutation(3))
+        target_noiser.add(WordDropout(word_dropout))
         model.labels_inputter.set_noise(target_noiser, probability=1.0)
 
     return RunnerEx(model, config, auto_config=True, mixed_precision=mixed_precision)
