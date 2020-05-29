@@ -1,4 +1,5 @@
 import argparse
+import bisect
 import logging
 import os
 import random
@@ -8,14 +9,20 @@ from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Set,
 
 logging.basicConfig()
 
+import numpy as np
 import opennmt
 import pandas as pd
 import sentencepiece as sp
-from sklearn.model_selection import train_test_split
 
 from nlp.common.environment import paratextPreprocessedDir
 from nlp.nmt.config import create_runner, get_root_dir, load_config, parse_langs
-from nlp.nmt.utils import alignment_scores, sp_tokenize, write_corpus
+from nlp.nmt.corpus import (
+    add_alignment_scores,
+    filter_parallel_corpus,
+    get_parallel_corpus,
+    split_parallel_corpus,
+    write_corpus,
+)
 
 
 def convert_vocab(sp_vocab_path: str, onmt_vocab_path: str, tag_langs: Set[str] = None) -> None:
@@ -52,60 +59,14 @@ def build_vocab(
     convert_vocab(f"{model_prefix}.vocab", vocab_path, tag_langs)
 
 
-def get_parallel_corpus(
-    src_iso: str,
-    src_file_path: str,
-    trg_file_path: str,
-    val_size: int,
-    test_size: int,
-    val_indices: Set[int] = None,
-    test_indices: Set[int] = None,
-    random_seed: int = 111,
-    prob_threshold: float = None,
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    src_sentences: List[str] = []
-    trg_sentences: List[str] = []
-    indices: List[int] = []
-    with open(src_file_path, "r", encoding="utf-8") as src_file, open(trg_file_path, "r", encoding="utf-8") as trg_file:
-        index = 0
-        for src_line, trg_line in zip(src_file, trg_file):
-            src_line = src_line.strip()
-            trg_line = trg_line.strip()
-            if len(src_line) > 0 and len(trg_line) > 0 and (src_line != "<range>" or trg_line != "<range>"):
-                if src_line == "<range>":
-                    trg_sentences[-1] = trg_sentences[-1] + " " + trg_line
-                elif trg_line == "<range>":
-                    src_sentences[-1] = src_sentences[-1] + " " + src_line
-                else:
-                    src_sentences.append(src_line)
-                    trg_sentences.append(trg_line)
-                    indices.append(index)
-            index += 1
-
-    data = {"src_iso": src_iso, "source": src_sentences, "target": trg_sentences}
-    if prob_threshold is not None:
-        probs = alignment_scores(src_sentences, trg_sentences)
-        data["prob"] = probs
-
-    train = pd.DataFrame(data, index=indices)
-
-    if test_indices is None:
-        train, test = train_test_split(train, test_size=test_size, random_state=random_seed)
-    else:
-        test = train.filter(test_indices, axis=0)
-        train.drop(test_indices, inplace=True, errors="ignore")
-
-    if prob_threshold is not None:
-        prob_threshold = min(train["prob"].quantile(0.1), prob_threshold)
-        train = train[train["prob"] > prob_threshold]
-
-    if val_indices is None:
-        train, val = train_test_split(train, test_size=val_size, random_state=random_seed)
-    else:
-        val = train.filter(val_indices, axis=0)
-        train.drop(val_indices, inplace=True, errors="ignore")
-
-    return train, val, test
+def sp_tokenize(spp: sp.SentencePieceProcessor, sentences: Iterable[str]) -> Iterator[str]:
+    for sentence in sentences:
+        prefix = ""
+        if sentence.startswith("<2"):
+            index = sentence.index(">")
+            prefix = sentence[0 : index + 2]
+            sentence = sentence[index + 2 :]
+        yield prefix + " ".join(spp.encode_as_pieces(sentence))
 
 
 def insert_trg_tag(trg_iso: str, sentences: pd.DataFrame) -> None:
@@ -176,6 +137,11 @@ def create_unshared_vocab(
         build_vocab(vocab_file_paths, vocab_size, model_prefix, vocab_path, tag_langs)
 
 
+def is_in_sorted(items: list, value: any) -> bool:
+    index = bisect.bisect_left(items, value)
+    return index < len(items) and items[index] == value
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Preprocesses text corpora into a multilingual data set for OpenNMT-tf"
@@ -193,22 +159,27 @@ def main() -> None:
     if seed is None:
         seed = 111
     random.seed(seed)
+    np.random.seed(seed)
 
-    prob_threshold: Optional[float] = data_config.get("prob_threshold")
+    score_threshold: Optional[float] = data_config.get("score_threshold")
 
     src_langs, src_lang_projects = parse_langs(data_config.get("src_langs", []))
     trg_langs, trg_lang_projects = parse_langs(data_config.get("trg_langs", []))
     src_file_paths: List[str] = []
     trg_file_paths: List[str] = []
+    test_only_trg_file_paths: List[str] = []
     for file_path in glob(os.path.join(paratextPreprocessedDir, "data", "*.txt")):
         iso, project = get_iso(file_path)
         if is_corpus_in_langs(src_langs, src_lang_projects, iso, project):
             src_file_paths.append(file_path)
         if is_corpus_in_langs(trg_langs, trg_lang_projects, iso, project):
             trg_file_paths.append(file_path)
+        elif iso in trg_langs:
+            test_only_trg_file_paths.append(file_path)
 
     src_file_paths.sort()
     trg_file_paths.sort()
+    test_only_trg_file_paths.sort()
 
     mirror: bool = data_config.get("mirror", False)
 
@@ -306,50 +277,89 @@ def main() -> None:
         if disjoint_val:
             val_indices = set(samples)
 
-    train = pd.DataFrame(columns=["src_iso", "source", "target", "score"])
-    val = pd.DataFrame(columns=["src_iso", "source", "target", "score"])
-    test = pd.DataFrame(columns=["src_iso", "source", "target", "score"])
+    train: Optional[pd.DataFrame] = None
+    val: Optional[pd.DataFrame] = None
+    test: Optional[pd.DataFrame] = None
+    pair_test_indices: Dict[Tuple[str, str], Set[int]] = {}
+    ref_indices: Dict[Tuple[str, str], Tuple[int, int]] = {}
+
     for src_file_path in src_file_paths:
-        for trg_file_path in trg_file_paths:
-            src_iso, _ = get_iso(src_file_path)
-            trg_iso, _ = get_iso(trg_file_path)
+        for trg_file_path in trg_file_paths + test_only_trg_file_paths:
+            src_iso, src_project = get_iso(src_file_path)
+            trg_iso, trg_project = get_iso(trg_file_path)
 
             if src_iso == trg_iso:
                 continue
 
-            cur_train, cur_val, cur_test = get_parallel_corpus(
-                src_iso,
-                src_file_path,
-                trg_file_path,
-                val_size,
-                test_size,
-                val_indices,
-                test_indices,
-                seed,
-                prob_threshold,
-            )
+            is_train_ref = not is_in_sorted(test_only_trg_file_paths, trg_file_path)
 
-            if mirror:
-                mirror_cur_train = cur_train.rename(columns={"source": "target", "target": "source"})
-                mirror_cur_train.loc[:, "src_iso"] = trg_iso
-                mirror_cur_val = cur_val.rename(columns={"source": "target", "target": "source"})
-                mirror_cur_val.loc[:, "src_iso"] = trg_iso
+            cur_train = get_parallel_corpus(src_file_path, trg_file_path)
+            if is_train_ref and score_threshold is not None:
+                add_alignment_scores(cur_train)
+
+            cur_train, cur_test = split_parallel_corpus(
+                cur_train, test_size, pair_test_indices.get((src_iso, trg_iso), test_indices)
+            )
+            if (src_iso, trg_iso) not in pair_test_indices:
+                pair_test_indices[(src_iso, trg_iso)] = set(cur_test.index)
+
+            if is_train_ref:
+                if score_threshold is not None:
+                    unfiltered_len = len(cur_train)
+                    cur_train = filter_parallel_corpus(cur_train, score_threshold)
+                    print(f"Filtered {unfiltered_len - len(cur_train)} verses from {src_project} -> {trg_project}.")
+
+                cur_train, cur_val = split_parallel_corpus(cur_train, val_size, val_indices)
+
+                if mirror:
+                    mirror_cur_train = cur_train.rename(columns={"source": "target", "target": "source"})
+                    mirror_cur_val = cur_val.rename(columns={"source": "target", "target": "source"})
+
+                    if write_trg_tag:
+                        insert_trg_tag(src_iso, mirror_cur_train)
+                        insert_trg_tag(src_iso, mirror_cur_val)
+
+                    train = pd.concat([train, mirror_cur_train], ignore_index=True)
+                    val = pd.concat([val, mirror_cur_val], ignore_index=True)
 
                 if write_trg_tag:
-                    insert_trg_tag(src_iso, mirror_cur_train)
-                    insert_trg_tag(src_iso, mirror_cur_val)
+                    insert_trg_tag(trg_iso, cur_train)
+                    insert_trg_tag(trg_iso, cur_val)
 
-                train = pd.concat([train, mirror_cur_train])
-                val = pd.concat([val, mirror_cur_val])
+                train = pd.concat([train, cur_train], ignore_index=True)
+                val = pd.concat([val, cur_val], ignore_index=True)
 
+            cur_test.drop("score", axis=1, inplace=True, errors="ignore")
+            cur_test.set_index(
+                pd.MultiIndex.from_tuples(
+                    map(lambda i: (src_iso, trg_iso, i), cur_test.index), names=["src_iso", "trg_iso", "index"]
+                ),
+                inplace=True,
+            )
             if write_trg_tag:
-                insert_trg_tag(trg_iso, cur_train)
-                insert_trg_tag(trg_iso, cur_val)
                 insert_trg_tag(trg_iso, cur_test)
 
-            train = pd.concat([train, cur_train])
-            val = pd.concat([val, cur_val])
-            test = pd.concat([test, cur_test])
+            ref_index, train_ref_count = ref_indices.get((src_iso, trg_iso), (-1, 0))
+            ref_index += 1
+            if is_train_ref:
+                train_ref_count += 1
+            ref_indices[(src_iso, trg_iso)] = (ref_index, train_ref_count)
+            cur_test = cur_test.rename(columns={"target": f"target_{ref_index}"})
+
+            test = cur_test if test is None else test.combine_first(cur_test)
+
+    test.fillna("", inplace=True)
+    test.sort_index(inplace=True)
+    # shuffle train references
+    for src_iso in src_langs:
+        for trg_iso in trg_langs:
+            _, train_ref_count = ref_indices.get((src_iso, trg_iso), (-1, 0))
+            if train_ref_count > 1:
+                rows = (src_iso, trg_iso, slice(None))
+                cols = list(map(lambda i: f"target_{i}", range(train_ref_count)))
+                test.loc[rows, cols] = test.loc[rows, cols].apply(
+                    lambda r: r.sample(frac=1), result_type="broadcast", axis=1,
+                )
 
     print("Writing train data set...")
     write_corpus(os.path.join(root_dir, "train.src.txt"), sp_tokenize(src_spp, train["source"]))
@@ -360,11 +370,18 @@ def main() -> None:
     write_corpus(os.path.join(root_dir, "val.trg.txt"), sp_tokenize(trg_spp, val["target"]))
 
     print("Writing test data set...")
-    grouped = test.groupby("src_iso")
+    for old_file_path in glob(os.path.join(root_dir, f"test.*.txt")):
+        os.remove(old_file_path)
+    grouped = test.groupby(level="src_iso")
     for src_iso, group in grouped:
         prefix = "test" if len(grouped) == 1 else f"test.{src_iso}"
         write_corpus(os.path.join(root_dir, f"{prefix}.src.txt"), sp_tokenize(src_spp, group["source"]))
-        write_corpus(os.path.join(root_dir, f"{prefix}.trg.detok.txt"), group["target"])
+
+        ref_index = 0
+        while f"target_{ref_index}" in test.columns:
+            trg_suffix = f".{ref_index}" if "target_1" in test.columns else ""
+            write_corpus(os.path.join(root_dir, f"{prefix}.trg.detok{trg_suffix}.txt"), group[f"target_{ref_index}"])
+            ref_index += 1
 
     print("Preprocessing completed")
 
