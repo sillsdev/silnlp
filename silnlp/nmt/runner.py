@@ -1,4 +1,5 @@
 import os
+import yaml
 from typing import Iterable, List, Optional, Tuple
 
 import numpy as np
@@ -320,3 +321,8 @@ class RunnerEx(opennmt.Runner):
 
                 write_serving_output(predictions_path, outputs["tokens"].numpy(), outputs["length"].numpy())
         return step
+
+    def save_effective_config(self, path: str, training: bool = False) -> None:
+        config = self._finalize_config(training=training)
+        with open(path, "w") as file:
+            yaml.dump(config, file)

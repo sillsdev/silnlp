@@ -22,6 +22,7 @@ def main() -> None:
     config = load_config(exp_name)
     root_dir = get_root_dir(exp_name)
     runner = create_runner(config, mixed_precision=args.mixed_precision, memory_growth=args.memory_growth)
+    runner.save_effective_config(os.path.join(root_dir, "effective-config.yml"), training=True)
 
     checkpoint_path: Optional[str] = None
     data_config: dict = config.get("data", {})
