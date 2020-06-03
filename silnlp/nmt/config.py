@@ -57,7 +57,7 @@ def load_config(exp_name: str) -> dict:
             "export_on_best": "bleu",
             "max_exports_to_keep": 1,
         },
-        "params": {"length_penalty": 0.2},
+        "params": {"length_penalty": 0.2, "dropout": 0.2, "word_dropout": 0.1},
     }
 
     config = opennmt.load_config([config_path], config)
