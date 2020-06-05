@@ -157,7 +157,11 @@ def split_parallel_corpus(
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     split: pd.DataFrame
     if split_indices is None:
-        corpus, split = train_test_split(corpus, test_size=split_size)
+        if split_size > len(corpus):
+            split = corpus
+            corpus = pd.DataFrame(columns=corpus.columns)
+        else:
+            corpus, split = train_test_split(corpus, test_size=split_size)
     else:
         split = corpus.filter(split_indices, axis=0)
         corpus.drop(split_indices, inplace=True, errors="ignore")

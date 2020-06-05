@@ -54,7 +54,7 @@ def build_vocab(
         " --shuffle_input_sentence=true --control_symbols=<range>"
     )
 
-    sp.SentencePieceTrainer.train(sp_train_params)
+    sp.SentencePieceTrainer.Train(sp_train_params)
 
     convert_vocab(f"{model_prefix}.vocab", vocab_path, tag_langs)
 
@@ -66,7 +66,7 @@ def sp_tokenize(spp: sp.SentencePieceProcessor, sentences: Iterable[str]) -> Ite
             index = sentence.index(">")
             prefix = sentence[0 : index + 2]
             sentence = sentence[index + 2 :]
-        yield prefix + " ".join(spp.encode_as_pieces(sentence))
+        yield prefix + " ".join(spp.EncodeAsPieces(sentence))
 
 
 def insert_trg_tag(trg_iso: str, sentences: pd.DataFrame) -> None:
@@ -110,7 +110,10 @@ def get_sentence_count(file_path: str) -> int:
 def is_corpus_in_langs(langs: Set[str], lang_projects: Dict[str, Set[str]], iso: str, project: str) -> bool:
     if iso in langs:
         projects = lang_projects.get(iso)
-        if projects is None or project in projects:
+        if projects is None:
+            # do not implicitly include subset corpora
+            return "+" not in project and "-" not in project
+        elif project in projects:
             return True
     return False
 
@@ -128,7 +131,7 @@ def create_unshared_vocab(
     prefix = "src" if side == "source" else "trg"
     model_prefix = os.path.join(root_dir, f"{prefix}-sp")
     vocab_path = os.path.join(root_dir, f"{prefix}-onmt.vocab")
-    parent_langs, _ = parse_langs(parent_data_config.get(f"{prefix}_langs", []))
+    parent_langs, _, _ = parse_langs(parent_data_config.get(f"{prefix}_langs", []))
     if langs == parent_langs:
         copy_parent_vocab(prefix, parent_data_config, parent_root_dir, root_dir, tag_langs)
     else:
@@ -137,7 +140,7 @@ def create_unshared_vocab(
         build_vocab(vocab_file_paths, vocab_size, model_prefix, vocab_path, tag_langs)
 
 
-def is_in_sorted(items: list, value: any) -> bool:
+def is_in_sorted(items: list, value: Any) -> bool:
     index = bisect.bisect_left(items, value)
     return index < len(items) and items[index] == value
 
@@ -163,22 +166,26 @@ def main() -> None:
 
     score_threshold: Optional[float] = data_config.get("score_threshold")
 
-    src_langs, src_lang_projects = parse_langs(data_config.get("src_langs", []))
-    trg_langs, trg_lang_projects = parse_langs(data_config.get("trg_langs", []))
+    src_langs, src_train_projects, _ = parse_langs(data_config.get("src_langs", []))
+    trg_langs, trg_train_projects, trg_test_projects = parse_langs(data_config.get("trg_langs", []))
     src_file_paths: List[str] = []
     trg_file_paths: List[str] = []
+    train_only_trg_file_paths: List[str] = []
     test_only_trg_file_paths: List[str] = []
     for file_path in glob(os.path.join(paratextPreprocessedDir, "data", "*.txt")):
         iso, project = get_iso(file_path)
-        if is_corpus_in_langs(src_langs, src_lang_projects, iso, project):
+        if is_corpus_in_langs(src_langs, src_train_projects, iso, project):
             src_file_paths.append(file_path)
-        if is_corpus_in_langs(trg_langs, trg_lang_projects, iso, project):
+        if is_corpus_in_langs(trg_langs, trg_train_projects, iso, project):
             trg_file_paths.append(file_path)
-        elif iso in trg_langs:
+            if iso in trg_test_projects and project not in trg_test_projects[iso]:
+                train_only_trg_file_paths.append(file_path)
+        elif is_corpus_in_langs(trg_langs, trg_test_projects, iso, project):
             test_only_trg_file_paths.append(file_path)
 
     src_file_paths.sort()
     trg_file_paths.sort()
+    train_only_trg_file_paths.sort()
     test_only_trg_file_paths.sort()
 
     mirror: bool = data_config.get("mirror", False)
@@ -216,7 +223,7 @@ def main() -> None:
             update_vocab(parent_config, root_dir, vocab_path, vocab_path)
 
         src_spp = sp.SentencePieceProcessor()
-        src_spp.load(f"{model_prefix}.model")
+        src_spp.Load(f"{model_prefix}.model")
 
         trg_spp = src_spp
     else:
@@ -250,10 +257,10 @@ def main() -> None:
             )
 
         src_spp = sp.SentencePieceProcessor()
-        src_spp.load(os.path.join(root_dir, "src-sp.model"))
+        src_spp.Load(os.path.join(root_dir, "src-sp.model"))
 
         trg_spp = sp.SentencePieceProcessor()
-        trg_spp.load(os.path.join(root_dir, "trg-sp.model"))
+        trg_spp.Load(os.path.join(root_dir, "trg-sp.model"))
 
     print("Collecting data sets...")
     test_size: int = data_config.get("test_size", 250)
@@ -292,16 +299,38 @@ def main() -> None:
                 continue
 
             is_train_ref = not is_in_sorted(test_only_trg_file_paths, trg_file_path)
+            is_test_ref = not is_in_sorted(train_only_trg_file_paths, trg_file_path)
 
             cur_train = get_parallel_corpus(src_file_path, trg_file_path)
             if is_train_ref and score_threshold is not None:
                 add_alignment_scores(cur_train)
 
-            cur_train, cur_test = split_parallel_corpus(
-                cur_train, test_size, pair_test_indices.get((src_iso, trg_iso), test_indices)
-            )
-            if (src_iso, trg_iso) not in pair_test_indices:
-                pair_test_indices[(src_iso, trg_iso)] = set(cur_test.index)
+            if is_test_ref:
+                cur_train, cur_test = split_parallel_corpus(
+                    cur_train, test_size, pair_test_indices.get((src_iso, trg_iso), test_indices)
+                )
+                if len(cur_test) > 0:
+                    if (src_iso, trg_iso) not in pair_test_indices:
+                        pair_test_indices[(src_iso, trg_iso)] = set(cur_test.index)
+
+                    cur_test.drop("score", axis=1, inplace=True, errors="ignore")
+                    cur_test.set_index(
+                        pd.MultiIndex.from_tuples(
+                            map(lambda i: (src_iso, trg_iso, i), cur_test.index), names=["src_iso", "trg_iso", "index"]
+                        ),
+                        inplace=True,
+                    )
+                    if write_trg_tag:
+                        insert_trg_tag(trg_iso, cur_test)
+
+                    ref_index, train_ref_count = ref_indices.get((src_iso, trg_iso), (-1, 0))
+                    ref_index += 1
+                    if is_train_ref:
+                        train_ref_count += 1
+                    ref_indices[(src_iso, trg_iso)] = (ref_index, train_ref_count)
+                    cur_test = cur_test.rename(columns={"target": f"target_{ref_index}"})
+
+                    test = cur_test if test is None else test.combine_first(cur_test)
 
             if is_train_ref:
                 if score_threshold is not None:
@@ -329,24 +358,8 @@ def main() -> None:
                 train = pd.concat([train, cur_train], ignore_index=True)
                 val = pd.concat([val, cur_val], ignore_index=True)
 
-            cur_test.drop("score", axis=1, inplace=True, errors="ignore")
-            cur_test.set_index(
-                pd.MultiIndex.from_tuples(
-                    map(lambda i: (src_iso, trg_iso, i), cur_test.index), names=["src_iso", "trg_iso", "index"]
-                ),
-                inplace=True,
-            )
-            if write_trg_tag:
-                insert_trg_tag(trg_iso, cur_test)
-
-            ref_index, train_ref_count = ref_indices.get((src_iso, trg_iso), (-1, 0))
-            ref_index += 1
-            if is_train_ref:
-                train_ref_count += 1
-            ref_indices[(src_iso, trg_iso)] = (ref_index, train_ref_count)
-            cur_test = cur_test.rename(columns={"target": f"target_{ref_index}"})
-
-            test = cur_test if test is None else test.combine_first(cur_test)
+    if train is None or val is None or test is None:
+        return
 
     test.fillna("", inplace=True)
     test.sort_index(inplace=True)

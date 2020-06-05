@@ -1,7 +1,7 @@
 import argparse
 import logging
 import os
-from typing import Dict, Iterable, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
 
 logging.basicConfig()
 
@@ -111,19 +111,31 @@ def create_runner(
     return RunnerEx(model, config, auto_config=True, mixed_precision=mixed_precision)
 
 
-def parse_langs(langs: Iterable[str]) -> Tuple[Set[str], Dict[str, Set[str]]]:
+def parse_langs(langs: Iterable[Union[str, dict]]) -> Tuple[Set[str], Dict[str, Set[str]], Dict[str, Set[str]]]:
     isos: Set[str] = set()
-    lang_projects: Dict[str, Set[str]] = {}
+    train_projects: Dict[str, Set[str]] = {}
+    test_projects: Dict[str, Set[str]] = {}
     for lang in langs:
-        index = lang.find("-")
-        if index == -1:
-            isos.add(lang)
+        if isinstance(lang, str):
+            index = lang.find("-")
+            if index == -1:
+                isos.add(lang)
+            else:
+                iso = lang[:index]
+                projects_str = lang[index + 1 :]
+                isos.add(iso)
+                train_projects[iso] = set(projects_str.split(","))
         else:
-            iso = lang[:index]
-            projects = lang[index + 1 :]
+            iso = lang["iso"]
             isos.add(iso)
-            lang_projects[iso] = set(projects.split(","))
-    return isos, lang_projects
+            train: Optional[Union[str, List[str]]] = lang.get("train")
+            if train is not None:
+                projects: List[str] = train.split(",") if isinstance(train, str) else train
+                train_projects[iso] = set(projects)
+            test: Optional[str] = lang.get("test")
+            if test is not None:
+                test_projects[iso] = {test}
+    return isos, train_projects, test_projects
 
 
 def main() -> None:

@@ -43,9 +43,9 @@ def load_test_data(
     num_refs: int,
 ) -> Dict[str, Tuple[List[str], List[List[str]]]]:
     spp = sp.SentencePieceProcessor()
-    spp.load(model_file)
+    spp.Load(model_file)
 
-    dataset: Dict[str, Tuple[List[str], List[str]]] = dict()
+    dataset: Dict[str, Tuple[List[str], List[List[str]]]] = {}
     with open(src_file_path, "r", encoding="utf-8") as src_file, open(
         pred_file_path, "r", encoding="utf-8"
     ) as pred_file, open(output_file_path, "w", encoding="utf-8") as out_file:
@@ -59,7 +59,7 @@ def load_test_data(
             for lines in zip(src_file, pred_file, *ref_files):
                 src_line = lines[0].strip()
                 pred_line = lines[1].strip()
-                detok_pred_line = spp.decode_pieces(pred_line.split(" "))
+                detok_pred_line = spp.DecodePieces(pred_line.split(" "))
                 iso = default_trg_iso
                 if src_line.startswith("<2"):
                     index = src_line.index(">")
@@ -67,13 +67,14 @@ def load_test_data(
                     if val != "qaa":
                         iso = val
                 if iso not in dataset:
-                    dataset[iso] = ([], [None] * len(ref_files))
-                dataset[iso][0].append(detok_pred_line)
+                    dataset[iso] = ([], [])
+                sys, refs = dataset[iso]
+                sys.append(detok_pred_line)
                 for ref_index in range(len(ref_files)):
                     ref_line = lines[ref_index + 2].strip()
-                    if dataset[iso][1][ref_index] is None:
-                        dataset[iso][1][ref_index] = []
-                    dataset[iso][1][ref_index].append(ref_line)
+                    if len(refs) == ref_index:
+                        refs.append([])
+                    refs[ref_index].append(ref_line)
                 out_file.write(detok_pred_line + "\n")
         finally:
             for ref_file in ref_files:
@@ -95,8 +96,8 @@ def main() -> None:
     root_dir = get_root_dir(exp_name)
     config = load_config(exp_name)
     data_config: dict = config.get("data", {})
-    src_langs, _ = parse_langs(data_config.get("src_langs", []))
-    trg_langs, _ = parse_langs(data_config.get("trg_langs", []))
+    src_langs, _, _ = parse_langs(data_config.get("src_langs", []))
+    trg_langs, _, _ = parse_langs(data_config.get("trg_langs", []))
     runner = create_runner(config, memory_growth=args.memory_growth)
 
     checkpoint_path = None
