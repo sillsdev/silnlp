@@ -5,12 +5,12 @@ import os
 import random
 import shutil
 from glob import glob
-from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Set, Tuple
 
 logging.basicConfig()
 
 import numpy as np
-import opennmt
+import opennmt.data
 import pandas as pd
 import sentencepiece as sp
 
@@ -383,7 +383,7 @@ def main() -> None:
     write_corpus(os.path.join(root_dir, "val.trg.txt"), sp_tokenize(trg_spp, val["target"]))
 
     print("Writing test data set...")
-    for old_file_path in glob(os.path.join(root_dir, f"test.*.txt")):
+    for old_file_path in glob(os.path.join(root_dir, "test.*.txt")):
         os.remove(old_file_path)
     grouped = test.groupby(level="src_iso")
     for src_iso, group in grouped:

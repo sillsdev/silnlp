@@ -8,14 +8,14 @@
 import argparse
 import os
 import subprocess
-import xml.etree.ElementTree as ET
 from typing import Optional
+from xml.etree import ElementTree
 
 from nlp.common.environment import paratextPreprocessedDir, paratextUnzippedDir
 
 
 def get_iso(project_dir: str) -> Optional[str]:
-    tree = ET.parse(os.path.join(project_dir, "Settings.xml"))
+    tree = ElementTree.parse(os.path.join(project_dir, "Settings.xml"))
     iso_elem = tree.getroot().find("LanguageIsoCode")
     if iso_elem is None:
         return None
@@ -100,7 +100,7 @@ def main() -> None:
                     extract_corpus(output_dir, iso, project_dir, args.include, args.exclude)
                     print(f"Processed: {project_dir}\nOutput saved in: {output_dir}")
     else:
-        print(f"Couldn't find any data to process for any project.")
+        print("Couldn't find any data to process for any project.")
 
     # Tell the user which projects couldn't be found.
     for project in projects:

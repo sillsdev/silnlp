@@ -1,15 +1,14 @@
 import argparse
 import os
 from glob import glob
-from typing import Iterable, Iterator, List, Set
-
-from nlp.common.environment import paratextPreprocessedDir
-from nlp.nmt.config import get_root_dir, load_config
-
-import pandas as pd
+from typing import List, Set
 
 import matplotlib.pyplot as plt
+import pandas as pd
 import seaborn as sns
+
+from nlp.common.environment import paratextPreprocessedDir
+from nlp.nmt.config import load_config
 
 
 def computeSimilarity(file_names: List[str]) -> None:
@@ -40,14 +39,14 @@ def computeSimilarity(file_names: List[str]) -> None:
         # Get the charset for resource 1 and make a set from it
         file_name1 = file_names[i]
         charSet1 = charSets[i]
-        l1 = charSet1.get("chars")
+        l1 = charSet1["chars"]
         l1set = set(l1)
 
         for j in range(i + 1, len(file_names)):
             # Get the charset for resource 2 and make a set from it.
             file_name2 = file_names[j]
             charSet2 = charSets[j]
-            l2 = charSet2.get("chars")
+            l2 = charSet2["chars"]
             l2set = set(l2)
 
             # Calculate the differences between sets 1 and 2
@@ -91,13 +90,11 @@ def main() -> None:
     args = parser.parse_args()
 
     task_name = args.task
-    root_dir = get_root_dir(task_name)
     config = load_config(task_name)
     data_config: dict = config.get("data", {})
 
     src_langs: Set[str] = set(data_config.get("src_langs", []))
     trg_langs: Set[str] = set(data_config.get("trg_langs", []))
-    write_trg_token = len(trg_langs) > 1
 
     src_file_names: List[str] = list()
     trg_file_names: List[str] = list()
@@ -113,7 +110,9 @@ def main() -> None:
     src_file_names.sort()
     trg_file_names.sort()
 
-    computeSimilarity(list(set().union(src_file_names, trg_file_names)))
+    all_file_names: Set[str] = set()
+    all_file_names.update(src_file_names, trg_file_names)
+    computeSimilarity(list(all_file_names))
 
 
 if __name__ == "__main__":

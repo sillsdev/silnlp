@@ -1,4 +1,4 @@
-import opennmt
+import opennmt.data
 import tensorflow as tf
 
 

@@ -4,7 +4,7 @@ import platform
 import subprocess
 import tempfile
 from statistics import mean
-from typing import Dict, Iterable, Iterator, List, Set, Tuple
+from typing import Dict, Iterable, List, Set, Tuple
 
 import pandas as pd
 from sklearn.model_selection import train_test_split

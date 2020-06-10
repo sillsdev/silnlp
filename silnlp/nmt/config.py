@@ -5,7 +5,9 @@ from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
 
 logging.basicConfig()
 
-import opennmt
+import opennmt.data
+import opennmt.models
+import opennmt.utils
 import sacrebleu
 import tensorflow as tf
 import yaml

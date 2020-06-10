@@ -7,7 +7,6 @@ from typing import IO, Dict, List, Tuple
 logging.basicConfig()
 
 import sacrebleu
-import tensorflow as tf
 
 from nlp.nmt.config import create_runner, decode_sp, get_root_dir, load_config, parse_langs
 
@@ -33,7 +32,6 @@ def get_ref_index(ref_file_path: str) -> int:
 
 
 def load_test_data(
-    model_file: str,
     src_file_path: str,
     pred_file_path: str,
     ref_files_path: str,
@@ -123,12 +121,10 @@ def main() -> None:
     scores: List[TestResults] = []
     overall_sys: List[str] = []
     overall_refs: List[List[str]] = []
-    model_file_path = os.path.join(root_dir, "sp.model" if data_config.get("share_vocab", True) else "trg-sp.model")
     for src_iso, features_path, predictions_path, refs_path, predictions_detok_path in zip(
         src_langs, features_paths, predictions_paths, refs_paths, predictions_detok_paths
     ):
         dataset = load_test_data(
-            model_file_path,
             features_path,
             predictions_path,
             refs_path,

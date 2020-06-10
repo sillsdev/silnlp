@@ -1,9 +1,11 @@
 import os
 import yaml
-from typing import Iterable, List, Optional, Tuple
+from typing import Any, Iterable, List, Optional, Tuple
 
 import numpy as np
-import opennmt
+import opennmt.data
+import opennmt.models
+import opennmt.utils
 import tensorflow as tf
 import tensorflow_addons as tfa
 
@@ -24,7 +26,7 @@ def load_vec(vec_path: str) -> Tuple[List[str], np.ndarray]:
     """
     with open(vec_path, "r") as vec:
         embed_dim = int(vec.readline().split()[1])
-        vocab = np.loadtxt(vec_path, dtype=str, comments=None, skiprows=1, usecols=0, encoding="utf-8").tolist()
+        vocab: Any = np.loadtxt(vec_path, dtype=str, comments=None, skiprows=1, usecols=0, encoding="utf-8").tolist()
         weight = np.loadtxt(
             vec_path, dtype=np.float32, comments=None, skiprows=1, usecols=range(1, embed_dim + 1), encoding="utf-8"
         )
@@ -77,8 +79,7 @@ def update_variable_and_slots(
     new_optimizer: tf.keras.optimizers.Optimizer,
 ) -> List[tf.Variable]:
     """Update a vocabulary variable and its associated optimizer slots (if any)."""
-    variables = []
-    variables.append(update_variable(update, mapping))
+    variables = [update_variable(update, mapping)]
     ref_slot_names = ref_optimizer.get_slot_names()
     new_slot_names = new_optimizer.get_slot_names()
     for slot_name in ref_slot_names:
@@ -178,17 +179,18 @@ def register_tfa_custom_ops() -> None:
 
 
 class RunnerEx(opennmt.Runner):
-    def export_embeddings(self, side: str, output_path: str, checkpoint_path: str = None) -> None:
+    def export_embeddings(self, side: str, output_path: str) -> None:
         config = self._finalize_config()
         model = self._init_model(config)
         optimizer = model.get_optimizer()
         cur_checkpoint = opennmt.utils.checkpoint.Checkpoint.from_config(config, model, optimizer=optimizer)
         cur_checkpoint.restore()
         model.create_variables(optimizer=optimizer)
+        vocab_file: str
         if side == "source":
             vocab_file = model.features_inputter.vocabulary_file
             embeddings_var = model.features_inputter.embedding
-        elif side == "target":
+        else:
             vocab_file = model.labels_inputter.vocabulary_file
             embeddings_var = model.labels_inputter.embedding
         vocab = opennmt.data.Vocab.from_file(vocab_file)
@@ -234,7 +236,7 @@ class RunnerEx(opennmt.Runner):
             updates = [
                 VariableUpdate(model.features_inputter.embedding, new_model.features_inputter.embedding, initial=weight)
             ]
-        elif side == "target":
+        else:
             mapping = get_special_token_mapping(
                 model.labels_inputter.vocabulary_file, new_model.labels_inputter.vocabulary_file
             )
@@ -271,9 +273,10 @@ class RunnerEx(opennmt.Runner):
 
                 # Inference might return out-of-order predictions. The OrderRestorer utility is
                 # used to write predictions in their original order.
-                write_fn = lambda prediction: (model.print_prediction(prediction, params=infer_config, stream=stream))
-                index_fn = lambda prediction: prediction.get("index")
-                ordered_writer = opennmt.utils.misc.OrderRestorer(index_fn, write_fn)
+                ordered_writer = opennmt.utils.misc.OrderRestorer(
+                    lambda pred: pred.get("index"),
+                    lambda pred: (model.print_prediction(pred, params=infer_config, stream=stream)),
+                )
 
                 for source in dataset:
                     predictions = infer_fn(source)
@@ -294,7 +297,7 @@ class RunnerEx(opennmt.Runner):
 
         export_path = os.path.join(config["model_dir"], "export")
         models = os.listdir(export_path)
-        best_model_path: Optional[str]
+        best_model_path: Optional[str] = None
         step = 0
         for model in models:
             path = os.path.join(export_path, model)
