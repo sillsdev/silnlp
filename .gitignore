@@ -26,7 +26,7 @@ credentials.py
 
 # omit egg-info
 *.egg-info/
-nlp/checkdata/Recent/alphabet-quick.py
+nlp/checkdata/Recent/alphabet.py
 nlp/checkdata/Recent/alphabet_nltk.py
 nlp/checkdata/Recent/alphabetSimilarity.py
 nlp/checkdata/Recent/iso with at least one missing folder.txt
