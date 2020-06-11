@@ -6,6 +6,7 @@ from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
 logging.basicConfig()
 
 import opennmt
+import sacrebleu
 import tensorflow as tf
 import yaml
 
@@ -21,6 +22,31 @@ _PYTHON_TO_TENSORFLOW_LOGGING_LEVEL: Dict[int, int] = {
     logging.DEBUG: 0,
     logging.NOTSET: 0,
 }
+
+
+def decode_sp(line: str) -> str:
+    return line.replace(" ", "").replace("\u2581", " ").lstrip()
+
+
+def decode_sp_lines(lines: Iterable[str]) -> Iterable[str]:
+    return map(lambda l: decode_sp(l), lines)
+
+
+@opennmt.utils.register_scorer(name="bleu_sp")
+class BLEUSentencepieceScorer(opennmt.utils.Scorer):
+    def __init__(self):
+        super(BLEUSentencepieceScorer, self).__init__("bleu_sp")
+
+    @property
+    def scores_name(self) -> Set[str]:
+        return {"bleu"}
+
+    def __call__(self, ref_path: str, hyp_path: str) -> float:
+        with tf.io.gfile.GFile(ref_path) as ref_stream, tf.io.gfile.GFile(hyp_path) as sys_stream:
+            sys = decode_sp_lines(sys_stream)
+            ref = decode_sp_lines(ref_stream)
+            bleu = sacrebleu.corpus_bleu(sys, [ref], lowercase=True)
+            return bleu.score
 
 
 def set_log_level(log_level: int) -> None:
@@ -51,7 +77,7 @@ def load_config(exp_name: str) -> dict:
             "keep_checkpoint_max": 3,
         },
         "eval": {
-            "external_evaluators": "bleu",
+            "external_evaluators": "bleu_sp",
             "steps": 1000,
             "early_stopping": {"metric": "bleu", "min_improvement": 0.2, "steps": 4},
             "export_on_best": "bleu",

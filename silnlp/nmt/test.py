@@ -7,10 +7,9 @@ from typing import IO, Dict, List, Tuple
 logging.basicConfig()
 
 import sacrebleu
-import sentencepiece as sp
 import tensorflow as tf
 
-from nlp.nmt.config import create_runner, get_root_dir, load_config, parse_langs
+from nlp.nmt.config import create_runner, decode_sp, get_root_dir, load_config, parse_langs
 
 
 class TestResults:
@@ -42,9 +41,6 @@ def load_test_data(
     default_trg_iso: str,
     num_refs: int,
 ) -> Dict[str, Tuple[List[str], List[List[str]]]]:
-    spp = sp.SentencePieceProcessor()
-    spp.Load(model_file)
-
     dataset: Dict[str, Tuple[List[str], List[List[str]]]] = {}
     with open(src_file_path, "r", encoding="utf-8") as src_file, open(
         pred_file_path, "r", encoding="utf-8"
@@ -59,7 +55,7 @@ def load_test_data(
             for lines in zip(src_file, pred_file, *ref_files):
                 src_line = lines[0].strip()
                 pred_line = lines[1].strip()
-                detok_pred_line = spp.DecodePieces(pred_line.split(" "))
+                detok_pred_line = decode_sp(pred_line)
                 iso = default_trg_iso
                 if src_line.startswith("<2"):
                     index = src_line.index(">")
