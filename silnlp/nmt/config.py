@@ -35,11 +35,7 @@ def decode_sp_lines(lines: Iterable[str]) -> Iterable[str]:
 @opennmt.utils.register_scorer(name="bleu_sp")
 class BLEUSentencepieceScorer(opennmt.utils.Scorer):
     def __init__(self):
-        super(BLEUSentencepieceScorer, self).__init__("bleu_sp")
-
-    @property
-    def scores_name(self) -> Set[str]:
-        return {"bleu"}
+        super(BLEUSentencepieceScorer, self).__init__("bleu")
 
     def __call__(self, ref_path: str, hyp_path: str) -> float:
         with tf.io.gfile.GFile(ref_path) as ref_stream, tf.io.gfile.GFile(hyp_path) as sys_stream:
