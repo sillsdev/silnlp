@@ -114,7 +114,7 @@ def create_runner(
         parent_config = load_config(parent)
         parent_data_config = parent_config["data"]
 
-    model = opennmt.models.TransformerBase()
+    model = opennmt.models.get_model_from_catalog(config.get("model", "TransformerBase"))
 
     word_dropout: float = params_config.get("word_dropout", 0.0)
     if word_dropout > 0:
@@ -174,6 +174,7 @@ def main() -> None:
     parser.add_argument("--mirror", default=False, action="store_true", help="Mirror train and validation data sets")
     parser.add_argument("--force", default=False, action="store_true", help="Overwrite existing config file")
     parser.add_argument("--seed", type=int, help="Randomization seed")
+    parser.add_argument("--model", type=str, default="TransformerBase", help="The neural network model")
     args = parser.parse_args()
 
     root_dir = get_root_dir(args.experiment)
