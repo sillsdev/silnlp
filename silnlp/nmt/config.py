@@ -1,6 +1,7 @@
 import argparse
 import logging
 import os
+import subprocess
 from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
 
 logging.basicConfig()
@@ -24,6 +25,10 @@ _PYTHON_TO_TENSORFLOW_LOGGING_LEVEL: Dict[int, int] = {
     logging.DEBUG: 0,
     logging.NOTSET: 0,
 }
+
+
+def get_git_revision_hash() -> str:
+    return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
 
 
 def decode_sp(line: str) -> str:
@@ -61,12 +66,21 @@ def load_config(exp_name: str) -> dict:
     config_path = os.path.join(root_dir, "config.yml")
 
     config: dict = {
+        "model": "TransformerBase",
         "model_dir": os.path.join(root_dir, "run"),
         "data": {
             "train_features_file": os.path.join(root_dir, "train.src.txt"),
             "train_labels_file": os.path.join(root_dir, "train.trg.txt"),
             "eval_features_file": os.path.join(root_dir, "val.src.txt"),
             "eval_labels_file": os.path.join(root_dir, "val.trg.txt"),
+            "share_vocab": True,
+            "mirror": False,
+            "seed": 111,
+            "test_size": 250,
+            "val_size": 250,
+            "disjoint_test": False,
+            "disjoint_val": False,
+            "score_threshold": 0,
         },
         "train": {
             "average_last_checkpoints": 0,
@@ -89,9 +103,15 @@ def load_config(exp_name: str) -> dict:
     if data_config.get("share_vocab", True):
         data_config["source_vocabulary"] = os.path.join(root_dir, "onmt.vocab")
         data_config["target_vocabulary"] = os.path.join(root_dir, "onmt.vocab")
+        if "vocab_size" not in data_config:
+            data_config["vocab_size"] = 24000
     else:
         data_config["source_vocabulary"] = os.path.join(root_dir, "src-onmt.vocab")
         data_config["target_vocabulary"] = os.path.join(root_dir, "trg-onmt.vocab")
+        if "src_vocab_size" not in data_config:
+            data_config["src_vocab_size"] = 8000
+        if "trg_vocab_size" not in data_config:
+            data_config["trg_vocab_size"] = 8000
     return config
 
 
@@ -105,8 +125,8 @@ def create_runner(
         for device in gpus:
             tf.config.experimental.set_memory_growth(device, enable=True)
 
-    data_config: dict = config.get("data", {})
-    params_config: dict = config.get("params", {})
+    data_config: dict = config["data"]
+    params_config: dict = config["params"]
 
     parent: Optional[str] = data_config.get("parent")
     parent_data_config = {}
@@ -114,14 +134,14 @@ def create_runner(
         parent_config = load_config(parent)
         parent_data_config = parent_config["data"]
 
-    model = opennmt.models.get_model_from_catalog(config.get("model", "TransformerBase"))
+    model = opennmt.models.get_model_from_catalog(config["model"])
 
-    word_dropout: float = params_config.get("word_dropout", 0.0)
+    word_dropout: float = params_config["word_dropout"]
     if word_dropout > 0:
         write_trg_tag = (
-            len(data_config.get("trg_langs", [])) > 1
+            len(data_config["trg_langs"]) > 1
             or len(parent_data_config.get("trg_langs", [])) > 1
-            or data_config.get("mirror", False)
+            or data_config["mirror"]
             or parent_data_config.get("mirror", False)
         )
         source_noiser = opennmt.data.WordNoiser(subword_token="▁", is_spacer=True)
@@ -174,8 +194,10 @@ def main() -> None:
     parser.add_argument("--mirror", default=False, action="store_true", help="Mirror train and validation data sets")
     parser.add_argument("--force", default=False, action="store_true", help="Overwrite existing config file")
     parser.add_argument("--seed", type=int, help="Randomization seed")
-    parser.add_argument("--model", type=str, default="TransformerBase", help="The neural network model")
+    parser.add_argument("--model", type=str, help="The neural network model")
     args = parser.parse_args()
+
+    print("Git commit:", get_git_revision_hash())
 
     root_dir = get_root_dir(args.experiment)
     config_path = os.path.join(root_dir, "config.yml")
@@ -186,6 +208,8 @@ def main() -> None:
     os.makedirs(root_dir, exist_ok=True)
 
     config: dict = {"data": {"src_langs": args.src_langs, "trg_langs": args.trg_langs}}
+    if args.model is not None:
+        config["model"] = args.model
     data_config: dict = config["data"]
     if args.parent is not None:
         data_config["parent"] = args.parent

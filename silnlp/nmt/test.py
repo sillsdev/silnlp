@@ -8,7 +8,7 @@ logging.basicConfig()
 
 import sacrebleu
 
-from nlp.nmt.config import create_runner, decode_sp, get_root_dir, load_config, parse_langs
+from nlp.nmt.config import create_runner, decode_sp, get_git_revision_hash, get_root_dir, load_config, parse_langs
 
 
 class TestResults:
@@ -86,12 +86,14 @@ def main() -> None:
     parser.add_argument("--num-refs", type=int, default=1, help="Number of references to test")
     args = parser.parse_args()
 
+    print("Git commit:", get_git_revision_hash())
+
     exp_name = args.experiment
     root_dir = get_root_dir(exp_name)
     config = load_config(exp_name)
-    data_config: dict = config.get("data", {})
-    src_langs, _, _ = parse_langs(data_config.get("src_langs", []))
-    trg_langs, _, _ = parse_langs(data_config.get("trg_langs", []))
+    data_config: dict = config["data"]
+    src_langs, _, _ = parse_langs(data_config["src_langs"])
+    trg_langs, _, _ = parse_langs(data_config["trg_langs"])
     runner = create_runner(config, memory_growth=args.memory_growth)
 
     checkpoint_path = None
@@ -125,12 +127,7 @@ def main() -> None:
         src_langs, features_paths, predictions_paths, refs_paths, predictions_detok_paths
     ):
         dataset = load_test_data(
-            features_path,
-            predictions_path,
-            refs_path,
-            predictions_detok_path,
-            default_trg_iso,
-            args.num_refs,
+            features_path, predictions_path, refs_path, predictions_detok_path, default_trg_iso, args.num_refs,
         )
 
         for trg_iso, data in dataset.items():

@@ -15,7 +15,7 @@ import pandas as pd
 import sentencepiece as sp
 
 from nlp.common.environment import paratextPreprocessedDir
-from nlp.nmt.config import create_runner, get_root_dir, load_config, parse_langs
+from nlp.nmt.config import create_runner, get_git_revision_hash, get_root_dir, load_config, parse_langs
 from nlp.nmt.corpus import (
     add_alignment_scores,
     filter_parallel_corpus,
@@ -84,7 +84,7 @@ def copy_parent_vocab(
 ) -> None:
     sp_vocab_path = os.path.join(root_dir, f"{prefix}-sp.vocab")
     onmt_vocab_path = os.path.join(root_dir, f"{prefix}-onmt.vocab")
-    if parent_data_config.get("share_vocab", True):
+    if parent_data_config["share_vocab"]:
         shutil.copy2(os.path.join(parent_root_dir, "sp.vocab"), sp_vocab_path)
         shutil.copy2(os.path.join(parent_root_dir, "sp.model"), os.path.join(root_dir, f"{prefix}-sp.model"))
     else:
@@ -136,7 +136,7 @@ def create_unshared_vocab(
         copy_parent_vocab(prefix, parent_data_config, parent_root_dir, root_dir, tag_langs)
     else:
         print(f"Building {side} vocabulary...")
-        vocab_size: int = data_config.get(f"{prefix}_vocab_size", 8000)
+        vocab_size: int = data_config[f"{prefix}_vocab_size"]
         build_vocab(vocab_file_paths, vocab_size, model_prefix, vocab_path, tag_langs)
 
 
@@ -150,24 +150,23 @@ def main() -> None:
         description="Preprocesses text corpora into a multilingual data set for OpenNMT-tf"
     )
     parser.add_argument("experiment", help="Experiment name")
-
     args = parser.parse_args()
+
+    print("Git commit:", get_git_revision_hash())
 
     exp_name = args.experiment
     root_dir = get_root_dir(exp_name)
     config = load_config(exp_name)
-    data_config: dict = config.get("data", {})
+    data_config: dict = config["data"]
 
-    seed: Optional[int] = data_config.get("seed")
-    if seed is None:
-        seed = 111
+    seed: int = data_config["seed"]
     random.seed(seed)
     np.random.seed(seed)
 
-    score_threshold: Optional[float] = data_config.get("score_threshold")
+    score_threshold: float = data_config["score_threshold"]
 
-    src_langs, src_train_projects, _ = parse_langs(data_config.get("src_langs", []))
-    trg_langs, trg_train_projects, trg_test_projects = parse_langs(data_config.get("trg_langs", []))
+    src_langs, src_train_projects, _ = parse_langs(data_config["src_langs"])
+    trg_langs, trg_train_projects, trg_test_projects = parse_langs(data_config["trg_langs"])
     src_file_paths: List[str] = []
     trg_file_paths: List[str] = []
     train_only_trg_file_paths: List[str] = []
@@ -188,7 +187,7 @@ def main() -> None:
     train_only_trg_file_paths.sort()
     test_only_trg_file_paths.sort()
 
-    mirror: bool = data_config.get("mirror", False)
+    mirror: bool = data_config["mirror"]
 
     parent: Optional[str] = data_config.get("parent")
     parent_config = {}
@@ -211,9 +210,9 @@ def main() -> None:
     if write_trg_tag:
         tag_langs = trg_langs.union(src_langs) if mirror else trg_langs
 
-    if data_config.get("share_vocab", True):
+    if data_config["share_vocab"]:
         print("Building shared vocabulary...")
-        vocab_size: int = data_config.get("vocab_size", 24000)
+        vocab_size: int = data_config["vocab_size"]
         model_prefix = os.path.join(root_dir, "sp")
         vocab_path = os.path.join(root_dir, "onmt.vocab")
         share_vocab_file_paths: Set[str] = set(src_file_paths).union(trg_file_paths)
@@ -263,10 +262,10 @@ def main() -> None:
         trg_spp.Load(os.path.join(root_dir, "trg-sp.model"))
 
     print("Collecting data sets...")
-    test_size: int = data_config.get("test_size", 250)
-    val_size: int = data_config.get("val_size", 250)
-    disjoint_test: bool = data_config.get("disjoint_test", False)
-    disjoint_val: bool = data_config.get("disjoint_val", False)
+    test_size: int = data_config["test_size"]
+    val_size: int = data_config["val_size"]
+    disjoint_test: bool = data_config["disjoint_test"]
+    disjoint_val: bool = data_config["disjoint_val"]
 
     test_indices: Optional[Set[int]] = None
     val_indices: Optional[Set[int]] = None
@@ -302,7 +301,7 @@ def main() -> None:
             is_test_ref = not is_in_sorted(train_only_trg_file_paths, trg_file_path)
 
             cur_train = get_parallel_corpus(src_file_path, trg_file_path)
-            if is_train_ref and score_threshold is not None:
+            if is_train_ref and score_threshold > 0:
                 add_alignment_scores(cur_train)
 
             if is_test_ref:
@@ -333,7 +332,7 @@ def main() -> None:
                     test = cur_test if test is None else test.combine_first(cur_test)
 
             if is_train_ref:
-                if score_threshold is not None:
+                if score_threshold > 0:
                     unfiltered_len = len(cur_train)
                     cur_train = filter_parallel_corpus(cur_train, score_threshold)
                     print(f"Filtered {unfiltered_len - len(cur_train)} verses from {src_project} -> {trg_project}.")

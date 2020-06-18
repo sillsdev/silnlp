@@ -1,3 +1,4 @@
+import logging
 import os
 import yaml
 from typing import Any, Iterable, List, Optional, Tuple
@@ -326,6 +327,9 @@ class RunnerEx(opennmt.Runner):
         return step
 
     def save_effective_config(self, path: str, training: bool = False) -> None:
+        level = tf.get_logger().level
+        tf.get_logger().setLevel(logging.WARN)
         config = self._finalize_config(training=training)
+        tf.get_logger().setLevel(level)
         with open(path, "w") as file:
             yaml.dump(config, file)
