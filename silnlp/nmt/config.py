@@ -28,7 +28,7 @@ _PYTHON_TO_TENSORFLOW_LOGGING_LEVEL: Dict[int, int] = {
 
 
 def get_git_revision_hash() -> str:
-    return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
+    return subprocess.check_output(["git", "rev-parse", "--short=10", "HEAD"], text=True).strip()
 
 
 def decode_sp(line: str) -> str:
