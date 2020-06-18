@@ -9,6 +9,7 @@ logging.basicConfig()
 import sacrebleu
 
 from nlp.nmt.config import create_runner, decode_sp, get_git_revision_hash, get_root_dir, load_config, parse_langs
+from nlp.nmt.runner import get_best_model_dir
 
 
 class TestResults:
@@ -114,7 +115,13 @@ def main() -> None:
     print("Inferencing...")
     step: int
     if args.best:
-        step = runner.saved_model_infer_multiple(features_paths, predictions_paths)
+        best_model_path, _ = get_best_model_dir(config)
+        if os.path.isfile(os.path.join(best_model_path, "ckpt.index")):
+            step = runner.infer_multiple(
+                features_paths, predictions_paths, checkpoint_path=os.path.join(best_model_path, "ckpt")
+            )
+        else:
+            step = runner.saved_model_infer_multiple(features_paths, predictions_paths)
     else:
         step = runner.infer_multiple(features_paths, predictions_paths, checkpoint_path=checkpoint_path)
 

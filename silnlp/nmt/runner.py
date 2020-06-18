@@ -11,6 +11,22 @@ import tensorflow as tf
 import tensorflow_addons as tfa
 
 
+def get_best_model_dir(config: dict) -> Tuple[str, int]:
+    export_path = os.path.join(config["model_dir"], "export")
+    models = os.listdir(export_path)
+    best_model_path: Optional[str] = None
+    step = 0
+    for model in sorted(models, key=lambda m: int(m), reverse=True):
+        path = os.path.join(export_path, model)
+        if os.path.isdir(path):
+            best_model_path = path
+            step = int(model)
+            break
+    if best_model_path is None:
+        raise RuntimeError("There is no exported models.")
+    return best_model_path, step
+
+
 class VariableUpdate:
     def __init__(
         self, ref_variable: tf.Variable, new_variable: tf.Variable, vocab_axis: int = 0, initial: np.ndarray = None
@@ -284,11 +300,15 @@ class RunnerEx(opennmt.Runner):
                     predictions = tf.nest.map_structure(lambda t: t.numpy(), predictions)
                     for prediction in opennmt.utils.misc.extract_batches(predictions):
                         ordered_writer.push(prediction)
-        return (
-            checkpoint.last_saved_step
-            if checkpoint_path is None
-            else int(os.path.basename(checkpoint_path).split("-")[-1])
-        )
+
+        if checkpoint_path is None:
+            return checkpoint.last_saved_step
+
+        parts = os.path.basename(checkpoint_path).split("-")
+        if len(parts) == 2:
+            return int(parts[-1])
+
+        return int(os.path.basename(os.path.dirname(checkpoint_path)))
 
     def saved_model_infer_multiple(self, features_paths: List[str], predictions_paths: List[str]) -> int:
         register_tfa_custom_ops()
@@ -296,19 +316,7 @@ class RunnerEx(opennmt.Runner):
         infer_config = config["infer"]
         batch_size = infer_config.get("batch_size", 1)
 
-        export_path = os.path.join(config["model_dir"], "export")
-        models = os.listdir(export_path)
-        best_model_path: Optional[str] = None
-        step = 0
-        for model in models:
-            path = os.path.join(export_path, model)
-            if os.path.isdir(path):
-                best_model_path = path
-                step = int(model)
-                break
-        if best_model_path is None:
-            raise RuntimeError("There is no saved models.")
-
+        best_model_path, step = get_best_model_dir(config)
         saved_model = tf.keras.models.load_model(best_model_path)
         translate_fn = saved_model.signatures["serving_default"]
 

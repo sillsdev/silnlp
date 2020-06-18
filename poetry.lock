@@ -402,7 +402,7 @@ description = "Neural machine translation and sequence learning using TensorFlow
 name = "opennmt-tf"
 optional = false
 python-versions = ">=3.5"
-version = "2.10.1"
+version = "2.11.0"
 
 [package.dependencies]
 ctranslate2 = ">=1.7,<2"
@@ -415,7 +415,7 @@ tensorflow = ">=2.2,<2.3"
 tensorflow-addons = ">=0.10,<0.11"
 
 [package.extras]
-tests = ["parameterized", "nose2"]
+tests = ["pylint (>=2.4.0,<2.5.0)", "parameterized", "nose2"]
 
 [[package]]
 category = "main"
@@ -961,7 +961,7 @@ docs = ["sphinx", "jaraco.packaging (>=3.2)", "rst.linker (>=1.9)"]
 testing = ["jaraco.itertools", "func-timeout"]
 
 [metadata]
-content-hash = "99067ce16e1cadf02bcc01d47921ad01995c70b33db0e6d3c34a0172aa3ec8a9"
+content-hash = "290bac894214a64397f9ecff81b4ff2bdecdf46a742ecaa4072778e7ab446e75"
 python-versions = "~3.7"
 
 [metadata.files]
@@ -1238,8 +1238,8 @@ oauthlib = [
     {file = "oauthlib-3.1.0.tar.gz", hash = "sha256:bee41cc35fcca6e988463cacc3bcb8a96224f470ca547e697b604cc697b2f889"},
 ]
 opennmt-tf = [
-    {file = "OpenNMT-tf-2.10.1.tar.gz", hash = "sha256:f1cc2fcdb3f15a05f9646541d09b2c2e9af2233af4e15cd54aa0a3f633466a7c"},
-    {file = "OpenNMT_tf-2.10.1-py2.py3-none-any.whl", hash = "sha256:4bfc1b5e84e729a564db4241b41cd8eb7e67fa10662341180a077fb71a13126d"},
+    {file = "OpenNMT-tf-2.11.0.tar.gz", hash = "sha256:d4ee55b94d5bbdffd799198cb853184e0cb50b980f5f21e5683a531352a7db3f"},
+    {file = "OpenNMT_tf-2.11.0-py2.py3-none-any.whl", hash = "sha256:feafd7033f084ebdcecac94b4e19b725310ea4fea5ccf010c9ef708931dfd5bc"},
 ]
 opt-einsum = [
     {file = "opt_einsum-3.2.1-py3-none-any.whl", hash = "sha256:96f819d46da2f937eaf326336a114aaeccbcbdb9de460d42e8b5f480a69adca7"},
