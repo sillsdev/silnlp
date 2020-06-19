@@ -39,6 +39,5 @@ docopt = "^0.6.2"
 
 [tool.poetry.dev-dependencies]
 mypy = "^0.780"
-rope = "^0.17.0"
 black = "^19.10b0"
 flake8 = "^3.8.3"

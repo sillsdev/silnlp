@@ -644,17 +644,6 @@ requests = ">=2.0.0"
 rsa = ["oauthlib (>=3.0.0)"]
 
 [[package]]
-category = "dev"
-description = "a python refactoring library..."
-name = "rope"
-optional = false
-python-versions = "*"
-version = "0.17.0"
-
-[package.extras]
-dev = ["pytest"]
-
-[[package]]
 category = "main"
 description = "Full Python ROUGE Score Implementation (not a wrapper)"
 name = "rouge"
@@ -961,7 +950,7 @@ docs = ["sphinx", "jaraco.packaging (>=3.2)", "rst.linker (>=1.9)"]
 testing = ["jaraco.itertools", "func-timeout"]
 
 [metadata]
-content-hash = "290bac894214a64397f9ecff81b4ff2bdecdf46a742ecaa4072778e7ab446e75"
+content-hash = "0ce18114069eda3b4943b3b49c46de018b5fc493c015aea74c208fbab12c8205"
 python-versions = "~3.7"
 
 [metadata.files]
@@ -1419,9 +1408,6 @@ requests-oauthlib = [
     {file = "requests-oauthlib-1.3.0.tar.gz", hash = "sha256:b4261601a71fd721a8bd6d7aa1cc1d6a8a93b4a9f5e96626f8e4d91e8beeaa6a"},
     {file = "requests_oauthlib-1.3.0-py2.py3-none-any.whl", hash = "sha256:7f71572defaecd16372f9006f33c2ec8c077c3cfa6f5911a9a90202beb513f3d"},
     {file = "requests_oauthlib-1.3.0-py3.7.egg", hash = "sha256:fa6c47b933f01060936d87ae9327fead68768b69c6c9ea2109c48be30f2d4dbc"},
-]
-rope = [
-    {file = "rope-0.17.0.tar.gz", hash = "sha256:658ad6705f43dcf3d6df379da9486529cf30e02d9ea14c5682aa80eb33b649e1"},
 ]
 rouge = [
     {file = "rouge-1.0.0-py3-none-any.whl", hash = "sha256:bd0503c5bc944815273ba566c51f9763e6840dc63cf4aaadf25626e4091cd1d2"},

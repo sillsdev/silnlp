@@ -136,7 +136,7 @@ def create_unshared_vocab(
         copy_parent_vocab(prefix, parent_data_config, parent_root_dir, root_dir, tag_langs)
     else:
         print(f"Building {side} vocabulary...")
-        vocab_size: int = data_config[f"{prefix}_vocab_size"]
+        vocab_size: int = data_config.get(f"{prefix}_vocab_size", data_config["vocab_size"])
         build_vocab(vocab_file_paths, vocab_size, model_prefix, vocab_path, tag_langs)
 
 
@@ -212,7 +212,16 @@ def main() -> None:
 
     if data_config["share_vocab"]:
         print("Building shared vocabulary...")
-        vocab_size: int = data_config["vocab_size"]
+        vocab_size: Optional[int] = data_config.get("vocab_size")
+        if vocab_size is None:
+            vocab_size = data_config.get("src_vocab_size")
+            if vocab_size is None:
+                vocab_size = data_config["trg_vocab_size"]
+            elif data_config.get("trg_vocab_size", vocab_size) != vocab_size:
+                raise RuntimeError(
+                    "The source and target vocab sizes cannot be different when creating a shared vocab."
+                )
+
         model_prefix = os.path.join(root_dir, "sp")
         vocab_path = os.path.join(root_dir, "onmt.vocab")
         share_vocab_file_paths: Set[str] = set(src_file_paths).union(trg_file_paths)

@@ -26,6 +26,28 @@ _PYTHON_TO_TENSORFLOW_LOGGING_LEVEL: Dict[int, int] = {
     logging.NOTSET: 0,
 }
 
+DEFAULT_NEW_CONFIG: dict = {
+    "data": {
+        "share_vocab": True,
+        "mirror": False,
+        "seed": 111,
+        "test_size": 250,
+        "val_size": 250,
+        "disjoint_test": False,
+        "disjoint_val": False,
+        "score_threshold": 0,
+    },
+    "train": {"maximum_features_length": 150, "maximum_labels_length": 150},
+    "params": {
+        "length_penalty": 0.2,
+        "dropout": 0.2,
+        "transformer_dropout": 0.1,
+        "transformer_attention_dropout": 0.1,
+        "transformer_ffn_dropout": 0.1,
+        "word_dropout": 0.1,
+    },
+}
+
 
 def get_git_revision_hash() -> str:
     return subprocess.check_output(["git", "rev-parse", "--short=10", "HEAD"], text=True).strip()
@@ -61,6 +83,26 @@ def get_root_dir(exp_name: str) -> str:
     return os.path.join(paratextPreprocessedDir, "tests", exp_name)
 
 
+def set_transformer_dropout(
+    root_layer: opennmt.models.Transformer,
+    dropout: float = 0.1,
+    attention_dropout: float = 0.1,
+    ffn_dropout: float = 0.1,
+):
+    for layer in (root_layer,) + root_layer.submodules:
+        name: str = layer.name
+        if name == "self_attention_encoder":
+            layer.dropout = dropout
+        elif name == "self_attention_decoder":
+            layer.dropout = dropout
+        elif name.startswith("transformer_layer_wrapper"):
+            layer.output_dropout = dropout
+        elif name.startswith("multi_head_attention"):
+            layer.dropout = attention_dropout
+        elif name.startswith("feed_forward_network"):
+            layer.dropout = ffn_dropout
+
+
 def load_config(exp_name: str) -> dict:
     root_dir = get_root_dir(exp_name)
     config_path = os.path.join(root_dir, "config.yml")
@@ -89,30 +131,41 @@ def load_config(exp_name: str) -> dict:
             "keep_checkpoint_max": 3,
         },
         "eval": {
-            "external_evaluators": "bleu_sp",
+            "external_evaluators": "bleu",
             "steps": 1000,
             "early_stopping": {"metric": "bleu", "min_improvement": 0.2, "steps": 4},
             "export_on_best": "bleu",
             "export_format": "checkpoint",
             "max_exports_to_keep": 1,
         },
-        "params": {"length_penalty": 0.2, "dropout": 0.2, "word_dropout": 0.1},
+        "params": {
+            "length_penalty": 0.2,
+            "transformer_dropout": 0.1,
+            "transformer_attention_dropout": 0.1,
+            "transformer_ffn_dropout": 0.1,
+            "word_dropout": 0,
+        },
     }
 
     config = opennmt.load_config([config_path], config)
     data_config: dict = config["data"]
-    if data_config.get("share_vocab", True):
+    if data_config["share_vocab"]:
         data_config["source_vocabulary"] = os.path.join(root_dir, "onmt.vocab")
         data_config["target_vocabulary"] = os.path.join(root_dir, "onmt.vocab")
-        if "vocab_size" not in data_config:
+        if (
+            "src_vocab_size" not in data_config
+            and "trg_vocab_size" not in data_config
+            and "vocab_size" not in data_config
+        ):
             data_config["vocab_size"] = 24000
     else:
         data_config["source_vocabulary"] = os.path.join(root_dir, "src-onmt.vocab")
         data_config["target_vocabulary"] = os.path.join(root_dir, "trg-onmt.vocab")
-        if "src_vocab_size" not in data_config:
-            data_config["src_vocab_size"] = 8000
-        if "trg_vocab_size" not in data_config:
-            data_config["trg_vocab_size"] = 8000
+        if "vocab_size" not in data_config:
+            if "src_vocab_size" not in data_config:
+                data_config["src_vocab_size"] = 8000
+            if "trg_vocab_size" not in data_config:
+                data_config["trg_vocab_size"] = 8000
     return config
 
 
@@ -136,6 +189,13 @@ def create_runner(
         parent_data_config = parent_config["data"]
 
     model = opennmt.models.get_model_from_catalog(config["model"])
+    if isinstance(model, opennmt.models.Transformer):
+        set_transformer_dropout(
+            model,
+            dropout=params_config["transformer_dropout"],
+            attention_dropout=params_config["transformer_attention_dropout"],
+            ffn_dropout=params_config["transformer_ffn_dropout"],
+        )
 
     word_dropout: float = params_config["word_dropout"]
     if word_dropout > 0:
@@ -153,7 +213,7 @@ def create_runner(
         target_noiser.add(WordDropout(word_dropout))
         model.labels_inputter.set_noise(target_noiser, probability=1.0)
 
-    return RunnerEx(model, config, auto_config=True, mixed_precision=mixed_precision)
+    return RunnerEx(model, config, auto_config=True, mixed_precision=mixed_precision, seed=data_config["seed"])
 
 
 def parse_langs(langs: Iterable[Union[str, dict]]) -> Tuple[Set[str], Dict[str, Set[str]], Dict[str, Set[str]]]:
@@ -208,10 +268,12 @@ def main() -> None:
 
     os.makedirs(root_dir, exist_ok=True)
 
-    config: dict = {"data": {"src_langs": args.src_langs, "trg_langs": args.trg_langs}}
+    config = DEFAULT_NEW_CONFIG.copy()
     if args.model is not None:
         config["model"] = args.model
     data_config: dict = config["data"]
+    data_config["src_langs"] = args.src_langs
+    data_config["trg_langs"] = args.trg_langs
     if args.parent is not None:
         data_config["parent"] = args.parent
         parent_config = load_config(args.parent)
@@ -238,10 +300,16 @@ def main() -> None:
         elif "vocab_size" in data_config:
             data_config["trg_vocab_size"] = data_config["vocab_size"]
             del data_config["vocab_size"]
+    if data_config["share_vocab"]:
+        if "vocab_size" not in data_config:
+            data_config["vocab_size"] = 24000
+    else:
+        if "src_vocab_size" not in data_config:
+            data_config["src_vocab_size"] = 8000
+        if "trg_vocab_size" not in data_config:
+            data_config["trg_vocab_size"] = 8000
     if args.seed is not None:
         data_config["seed"] = args.seed
-    else:
-        data_config["seed"] = 111
     if args.mirror:
         data_config["mirror"] = True
     with open(config_path, "w", encoding="utf-8") as file:
