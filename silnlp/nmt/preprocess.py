@@ -136,7 +136,7 @@ def create_unshared_vocab(
         copy_parent_vocab(prefix, parent_data_config, parent_root_dir, root_dir, tag_langs)
     else:
         print(f"Building {side} vocabulary...")
-        vocab_size: int = data_config.get(f"{prefix}_vocab_size", data_config["vocab_size"])
+        vocab_size: int = data_config.get(f"{prefix}_vocab_size", data_config.get("vocab_size"))
         build_vocab(vocab_file_paths, vocab_size, model_prefix, vocab_path, tag_langs)
 
 
