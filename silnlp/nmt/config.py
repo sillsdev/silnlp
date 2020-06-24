@@ -2,6 +2,7 @@ import argparse
 import logging
 import os
 import subprocess
+from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
 
 logging.basicConfig()
@@ -50,7 +51,11 @@ DEFAULT_NEW_CONFIG: dict = {
 
 
 def get_git_revision_hash() -> str:
-    return subprocess.check_output(["git", "rev-parse", "--short=10", "HEAD"], encoding="utf-8").strip()
+    script_path = Path(__file__)
+    repo_dir = script_path.parent.parent.parent
+    return subprocess.check_output(
+        ["git", "-C", str(repo_dir), "rev-parse", "--short=10", "HEAD"], encoding="utf-8"
+    ).strip()
 
 
 def decode_sp(line: str) -> str:
