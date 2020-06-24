@@ -50,7 +50,7 @@ DEFAULT_NEW_CONFIG: dict = {
 
 
 def get_git_revision_hash() -> str:
-    return subprocess.check_output(["git", "rev-parse", "--short=10", "HEAD"], text=True).strip()
+    return subprocess.check_output(["git", "rev-parse", "--short=10", "HEAD"], encoding="utf-8").strip()
 
 
 def decode_sp(line: str) -> str:
