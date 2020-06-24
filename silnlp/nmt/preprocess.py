@@ -294,9 +294,8 @@ def main() -> None:
 
     train: Optional[pd.DataFrame] = None
     val: Optional[pd.DataFrame] = None
-    test: Optional[pd.DataFrame] = None
+    test: Dict[Tuple[str, str], pd.DataFrame] = {}
     pair_test_indices: Dict[Tuple[str, str], Set[int]] = {}
-    ref_indices: Dict[Tuple[str, str], Tuple[int, int]] = {}
 
     for src_file_path in src_file_paths:
         for trg_file_path in trg_file_paths + test_only_trg_file_paths:
@@ -322,23 +321,12 @@ def main() -> None:
                         pair_test_indices[(src_iso, trg_iso)] = set(cur_test.index)
 
                     cur_test.drop("score", axis=1, inplace=True, errors="ignore")
-                    cur_test.set_index(
-                        pd.MultiIndex.from_tuples(
-                            map(lambda i: (src_iso, trg_iso, i), cur_test.index), names=["src_iso", "trg_iso", "index"]
-                        ),
-                        inplace=True,
-                    )
                     if write_trg_tag:
                         insert_trg_tag(trg_iso, cur_test)
 
-                    ref_index, train_ref_count = ref_indices.get((src_iso, trg_iso), (-1, 0))
-                    ref_index += 1
-                    if is_train_ref:
-                        train_ref_count += 1
-                    ref_indices[(src_iso, trg_iso)] = (ref_index, train_ref_count)
-                    cur_test = cur_test.rename(columns={"target": f"target_{ref_index}"})
-
-                    test = cur_test if test is None else test.combine_first(cur_test)
+                    cur_test = cur_test.rename(columns={"target": f"target_{trg_project}"})
+                    pair_test = test.get((src_iso, trg_iso))
+                    test[(src_iso, trg_iso)] = cur_test if pair_test is None else pair_test.combine_first(cur_test)
 
             if is_train_ref:
                 if score_threshold > 0:
@@ -369,19 +357,6 @@ def main() -> None:
     if train is None or val is None or test is None:
         return
 
-    test.fillna("", inplace=True)
-    test.sort_index(inplace=True)
-    # shuffle train references
-    for src_iso in src_langs:
-        for trg_iso in trg_langs:
-            _, train_ref_count = ref_indices.get((src_iso, trg_iso), (-1, 0))
-            if train_ref_count > 1:
-                rows = (src_iso, trg_iso, slice(None))
-                cols = list(map(lambda i: f"target_{i}", range(train_ref_count)))
-                test.loc[rows, cols] = test.loc[rows, cols].apply(
-                    lambda r: r.sample(frac=1), result_type="broadcast", axis=1,
-                )
-
     print("Writing train data set...")
     write_corpus(os.path.join(root_dir, "train.src.txt"), sp_tokenize(src_spp, train["source"]))
     write_corpus(os.path.join(root_dir, "train.trg.txt"), sp_tokenize(trg_spp, train["target"]))
@@ -393,16 +368,18 @@ def main() -> None:
     print("Writing test data set...")
     for old_file_path in glob(os.path.join(root_dir, "test.*.txt")):
         os.remove(old_file_path)
-    grouped = test.groupby(level="src_iso")
-    for src_iso, group in grouped:
-        prefix = "test" if len(grouped) == 1 else f"test.{src_iso}"
-        write_corpus(os.path.join(root_dir, f"{prefix}.src.txt"), sp_tokenize(src_spp, group["source"]))
 
-        ref_index = 0
-        while f"target_{ref_index}" in test.columns:
-            trg_suffix = f".{ref_index}" if "target_1" in test.columns else ""
-            write_corpus(os.path.join(root_dir, f"{prefix}.trg.detok{trg_suffix}.txt"), group[f"target_{ref_index}"])
-            ref_index += 1
+    for (src_iso, trg_iso), pair_test in test.items():
+        pair_test.fillna("", inplace=True)
+
+        prefix = "test" if len(test) == 1 else f"test.{src_iso}.{trg_iso}"
+        write_corpus(os.path.join(root_dir, f"{prefix}.src.txt"), sp_tokenize(src_spp, pair_test["source"]))
+
+        columns: List[str] = list(filter(lambda c: c.startswith("target_"), pair_test.columns))
+        for column in columns:
+            project = column[len("target_") :]
+            trg_suffix = "" if len(columns) == 1 else f".{project}"
+            write_corpus(os.path.join(root_dir, f"{prefix}.trg.detok{trg_suffix}.txt"), pair_test[column])
 
     print("Preprocessing completed")
 
