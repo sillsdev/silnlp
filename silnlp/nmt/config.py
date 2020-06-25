@@ -195,12 +195,13 @@ def create_runner(
 
     model = opennmt.models.get_model_from_catalog(config["model"])
     if isinstance(model, opennmt.models.Transformer):
-        set_transformer_dropout(
-            model,
-            dropout=params_config["transformer_dropout"],
-            attention_dropout=params_config["transformer_attention_dropout"],
-            ffn_dropout=params_config["transformer_ffn_dropout"],
-        )
+        dropout = params_config["transformer_dropout"]
+        attention_dropout = params_config["transformer_attention_dropout"]
+        ffn_dropout = params_config["transformer_ffn_dropout"]
+        if dropout != 0.1 or attention_dropout != 0.1 or ffn_dropout != 0.1:
+            set_transformer_dropout(
+                model, dropout=dropout, attention_dropout=attention_dropout, ffn_dropout=ffn_dropout
+            )
 
     word_dropout: float = params_config["word_dropout"]
     if word_dropout > 0:

@@ -27,18 +27,20 @@ class TestResults:
         )
 
 
-def parse_ref_file_path(ref_file_path: str) -> Tuple[str, str]:
+def parse_ref_file_path(ref_file_path: str, default_trg_iso: str) -> Tuple[str, str]:
     parts = os.path.basename(ref_file_path).split(".")
+    if len(parts) == 5:
+        return default_trg_iso, parts[3]
     return parts[2], parts[5]
 
 
-def is_ref_project(ref_projects: Set[str], ref_file_path: str) -> bool:
-    _, trg_project = parse_ref_file_path(ref_file_path)
+def is_ref_project(ref_projects: Set[str], ref_file_path: str, default_trg_iso: str) -> bool:
+    _, trg_project = parse_ref_file_path(ref_file_path, default_trg_iso)
     return trg_project in ref_projects
 
 
-def is_train_project(train_projects: Dict[str, Set[str]], ref_file_path: str) -> bool:
-    trg_iso, trg_project = parse_ref_file_path(ref_file_path)
+def is_train_project(train_projects: Dict[str, Set[str]], ref_file_path: str, default_trg_iso: str) -> bool:
+    trg_iso, trg_project = parse_ref_file_path(ref_file_path, default_trg_iso)
     projects = train_projects.get(trg_iso)
     return projects is None or trg_project in projects
 
@@ -59,11 +61,15 @@ def load_test_data(
         ref_file_paths = glob(ref_files_path)
         select_rand_ref_line = False
         if len(ref_file_paths) > 1:
-            filtered: List[str] = list(filter(lambda p: is_ref_project(ref_projects, p), ref_file_paths))
+            filtered: List[str] = list(
+                filter(lambda p: is_ref_project(ref_projects, p, default_trg_iso), ref_file_paths)
+            )
             if len(filtered) == 0:
                 # no refs specified, so randomly select verses from all available train refs to build one ref
                 select_rand_ref_line = True
-                ref_file_paths = list(filter(lambda p: is_train_project(train_projects, p), ref_file_paths))
+                ref_file_paths = list(
+                    filter(lambda p: is_train_project(train_projects, p, default_trg_iso), ref_file_paths)
+                )
             else:
                 # use specified refs only
                 ref_file_paths = filtered
