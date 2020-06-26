@@ -45,18 +45,20 @@ def extract_corpus(output_dir: str, iso: str, project_dir: str, include_texts: s
         "-as",
     ]
     output_basename = f"{iso}-{name}"
+    if len(include_texts) > 0 or len(exclude_texts) > 0:
+        output_basename += "_"
     if len(include_texts) > 0:
         arg_list.append("-i")
         arg_list.append(include_texts)
         for text in include_texts.split(","):
             text = text.strip("*")
-            output_basename += f"&{text}"
+            output_basename += f"+{text}"
     if len(exclude_texts) > 0:
         arg_list.append("-e")
         arg_list.append(exclude_texts)
         for text in exclude_texts.split(","):
             text = text.strip("*")
-            output_basename += f"!{text}"
+            output_basename += f"-{text}"
 
     arg_list.append("-to")
     arg_list.append(os.path.join(output_dir, f"{output_basename}.txt"))
