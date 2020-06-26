@@ -140,7 +140,7 @@ def load_config(exp_name: str) -> dict:
             "steps": 1000,
             "early_stopping": {"metric": "bleu", "min_improvement": 0.2, "steps": 4},
             "export_on_best": "bleu",
-            # "export_format": "checkpoint",
+            "export_format": "checkpoint",
             "max_exports_to_keep": 1,
         },
         "params": {

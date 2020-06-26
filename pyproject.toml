@@ -25,7 +25,7 @@ authors = ["SIL International"]
 
 [tool.poetry.dependencies]
 python = "~3.7"
-opennmt-tf = "2.10.1"
+opennmt-tf = "^2.11.1"
 pandas = "^1.0.4"
 sentencepiece = "^0.1.92"
 scikit-learn = "^0.23.1"
