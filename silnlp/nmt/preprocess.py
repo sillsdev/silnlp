@@ -109,12 +109,8 @@ def get_sentence_count(file_path: str) -> int:
 
 def is_corpus_in_langs(langs: Set[str], lang_projects: Dict[str, Set[str]], iso: str, project: str) -> bool:
     if iso in langs:
-        projects = lang_projects.get(iso)
-        if projects is None:
-            # do not implicitly include subset corpora
-            return "+" not in project and "-" not in project
-        elif project in projects:
-            return True
+        projects = lang_projects[iso]
+        return project in projects
     return False
 
 
@@ -145,6 +141,10 @@ def is_in_sorted(items: list, value: Any) -> bool:
     return index < len(items) and items[index] == value
 
 
+def get_corpus_path(iso: str, project: str) -> str:
+    return os.path.join(paratextPreprocessedDir, "data", f"{iso}-{project}.txt")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Preprocesses text corpora into a multilingual data set for OpenNMT-tf"
@@ -171,16 +171,21 @@ def main() -> None:
     trg_file_paths: List[str] = []
     train_only_trg_file_paths: List[str] = []
     test_only_trg_file_paths: List[str] = []
-    for file_path in glob(os.path.join(paratextPreprocessedDir, "data", "*.txt")):
-        iso, project = get_iso(file_path)
-        if is_corpus_in_langs(src_langs, src_train_projects, iso, project):
-            src_file_paths.append(file_path)
-        if is_corpus_in_langs(trg_langs, trg_train_projects, iso, project):
-            trg_file_paths.append(file_path)
-            if iso in trg_test_projects and project not in trg_test_projects[iso]:
-                train_only_trg_file_paths.append(file_path)
-        elif is_corpus_in_langs(trg_langs, trg_test_projects, iso, project):
-            test_only_trg_file_paths.append(file_path)
+    for src_iso in src_langs:
+        for src_train_project in src_train_projects[src_iso]:
+            src_file_paths.append(get_corpus_path(src_iso, src_train_project))
+
+    for trg_iso in trg_langs:
+        lang_train_projects = trg_train_projects[trg_iso]
+        lang_test_projects = trg_test_projects.get(trg_iso)
+        for trg_train_project in lang_train_projects:
+            trg_file_path = get_corpus_path(trg_iso, trg_train_project)
+            trg_file_paths.append(trg_file_path)
+            if lang_test_projects is not None and trg_train_project not in lang_test_projects:
+                train_only_trg_file_paths.append(trg_file_path)
+        if lang_test_projects is not None:
+            for trg_test_project in lang_test_projects.difference(lang_train_projects):
+                test_only_trg_file_paths.append(get_corpus_path(trg_iso, trg_test_project))
 
     src_file_paths.sort()
     trg_file_paths.sort()

@@ -230,19 +230,17 @@ def parse_langs(langs: Iterable[Union[str, dict]]) -> Tuple[Set[str], Dict[str, 
         if isinstance(lang, str):
             index = lang.find("-")
             if index == -1:
-                isos.add(lang)
-            else:
-                iso = lang[:index]
-                projects_str = lang[index + 1 :]
-                isos.add(iso)
-                train_projects[iso] = set(projects_str.split(","))
+                raise RuntimeError("A language project is not fully specified.")
+            iso = lang[:index]
+            projects_str = lang[index + 1 :]
+            isos.add(iso)
+            train_projects[iso] = set(projects_str.split(","))
         else:
             iso = lang["iso"]
             isos.add(iso)
-            train: Optional[Union[str, List[str]]] = lang.get("train")
-            if train is not None:
-                projects: List[str] = train.split(",") if isinstance(train, str) else train
-                train_projects[iso] = set(projects)
+            train: Union[str, List[str]] = lang["train"]
+            projects: List[str] = train.split(",") if isinstance(train, str) else train
+            train_projects[iso] = set(projects)
             test: Optional[str] = lang.get("test")
             if test is not None:
                 test_projects[iso] = {test}
