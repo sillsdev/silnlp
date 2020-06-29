@@ -243,7 +243,10 @@ def parse_langs(langs: Iterable[Union[str, dict]]) -> Tuple[Set[str], Dict[str, 
             train_projects[iso] = set(projects)
             test: Optional[str] = lang.get("test")
             if test is not None:
-                test_projects[iso] = {test}
+                if isinstance(test, str):
+                    test_projects[iso] = {test}
+                else:
+                    test_projects[iso] = set(test)
     return isos, train_projects, test_projects
 
 
