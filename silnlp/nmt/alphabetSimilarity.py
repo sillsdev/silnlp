@@ -8,17 +8,20 @@ import pandas as pd
 import seaborn as sns
 
 from nlp.common.environment import paratextPreprocessedDir
-from nlp.nmt.config import load_config
+from nlp.nmt.config import load_config, parse_langs
 
 
-def computeSimilarity(file_names: List[str]) -> None:
+def get_corpus_path(iso: str, project: str) -> str:
+    return os.path.join(paratextPreprocessedDir, "data", f"{iso}-{project}.txt")
+
+
+def computeSimilarity(file_paths: List[str]) -> None:
     charSets = list()
-    file_names.sort()
+    file_paths.sort()
     resourceDf = pd.DataFrame(columns=["CharCount", "Mean"])
-    resourceDf.reindex(file_names)
+    resourceDf.reindex(file_paths)
 
-    for file_name in file_names:
-        file_path = os.path.join(paratextPreprocessedDir, "data", f"{file_name}.txt")
+    for file_path in file_paths:
         with open(file_path, "r", encoding="utf-8") as f:
             text = f.read()
         thisCharSet = list()
@@ -26,25 +29,25 @@ def computeSimilarity(file_names: List[str]) -> None:
             if text[i] not in thisCharSet:
                 thisCharSet.append(text[i])
         thisCharSet.sort()
-        print(f"Resource: {file_name:12}\t#chars: {len(thisCharSet)}")
-        resourceDf.at[file_name, "CharCount"] = len(thisCharSet)
-        charSets.append({"resource": file_name, "chars": thisCharSet})
+        print(f"Resource: {file_path}\t#chars: {len(thisCharSet)}")
+        resourceDf.at[file_path, "CharCount"] = len(thisCharSet)
+        charSets.append({"resource": file_path, "chars": thisCharSet})
 
     # Create a matrix for storing the similarity metrics
-    similarityDf = pd.DataFrame(columns=[file_names])
-    similarityDf.reindex(file_names)
+    similarityDf = pd.DataFrame(columns=[file_paths])
+    similarityDf.reindex(file_paths)
 
     totalSimilarity = 0.0
-    for i in range(len(file_names) - 1):
+    for i in range(len(file_paths) - 1):
         # Get the charset for resource 1 and make a set from it
-        file_name1 = file_names[i]
+        file_name1 = file_paths[i]
         charSet1 = charSets[i]
         l1 = charSet1["chars"]
         l1set = set(l1)
 
-        for j in range(i + 1, len(file_names)):
+        for j in range(i + 1, len(file_paths)):
             # Get the charset for resource 2 and make a set from it.
-            file_name2 = file_names[j]
+            file_name2 = file_paths[j]
             charSet2 = charSets[j]
             l2 = charSet2["chars"]
             l2set = set(l2)
@@ -62,7 +65,7 @@ def computeSimilarity(file_names: List[str]) -> None:
             similarityDf.at[file_name1, file_name2] = similarity
             similarityDf.at[file_name2, file_name1] = similarity
 
-    totalSimilarity = totalSimilarity / (len(file_names) * (len(file_names) - 1) / 2)
+    totalSimilarity = totalSimilarity / (len(file_paths) * (len(file_paths) - 1) / 2)
     print(f"Overall similarity: {totalSimilarity:5.1f}")
 
     # Summarize, sort, and display the mean similarity value for each language
@@ -93,26 +96,30 @@ def main() -> None:
     config = load_config(task_name)
     data_config: dict = config.get("data", {})
 
-    src_langs: Set[str] = set(data_config.get("src_langs", []))
-    trg_langs: Set[str] = set(data_config.get("trg_langs", []))
+    src_langs, src_train_projects, _ = parse_langs(data_config["src_langs"])
+    trg_langs, trg_train_projects, trg_test_projects = parse_langs(data_config["trg_langs"])
+    src_file_paths: List[str] = []
+    trg_file_paths: List[str] = []
+    for src_iso in src_langs:
+        for src_train_project in src_train_projects[src_iso]:
+            src_file_paths.append(get_corpus_path(src_iso, src_train_project))
 
-    src_file_names: List[str] = list()
-    trg_file_names: List[str] = list()
-    for file_path in glob(os.path.join(paratextPreprocessedDir, "data", "*.txt")):
-        iso = get_iso(file_path)
-        if iso in src_langs:
-            file_name = os.path.splitext(os.path.basename(file_path))[0]
-            src_file_names.append(file_name)
-        if iso in trg_langs:
-            file_name = os.path.splitext(os.path.basename(file_path))[0]
-            trg_file_names.append(file_name)
+    for trg_iso in trg_langs:
+        lang_train_projects = trg_train_projects[trg_iso]
+        lang_test_projects = trg_test_projects.get(trg_iso)
+        for trg_train_project in lang_train_projects:
+            trg_file_path = get_corpus_path(trg_iso, trg_train_project)
+            trg_file_paths.append(trg_file_path)
+        if lang_test_projects is not None:
+            for trg_test_project in lang_test_projects.difference(lang_train_projects):
+                trg_file_paths.append(get_corpus_path(trg_iso, trg_test_project))
 
-    src_file_names.sort()
-    trg_file_names.sort()
+    src_file_paths.sort()
+    trg_file_paths.sort()
 
-    all_file_names: Set[str] = set()
-    all_file_names.update(src_file_names, trg_file_names)
-    computeSimilarity(list(all_file_names))
+    all_file_paths: Set[str] = set()
+    all_file_paths.update(src_file_paths, trg_file_paths)
+    computeSimilarity(list(all_file_paths))
 
 
 if __name__ == "__main__":
