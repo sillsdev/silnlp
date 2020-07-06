@@ -137,12 +137,12 @@ def main() -> None:
         checkpoint_path = os.path.join(config["model_dir"], f"ckpt-{args.checkpoint}")
 
     ref_project_lists: List[List[str]] = []
-    if args.num_projects == 0:
+    if args.num_refs == 0:
         ref_project_lists = [args.ref_projects]
     else:
-        if args.num_projects > len(args.ref_projects):
-            args.num_projects = len(args.ref_projects)
-        for i in range(0, args.num_projects):
+        if args.num_refs > len(args.ref_projects):
+            args.num_refs = len(args.ref_projects)
+        for i in range(0, args.num_refs):
             comb = combinations(args.ref_projects, i + 1)
             for c in comb:
                 ref_project_lists.append(c)
@@ -228,7 +228,7 @@ def main() -> None:
             bleu = sacrebleu.corpus_bleu(overall_sys, overall_refs, lowercase=True)
             scores.append(TestResults("ALL", "ALL", bleu, len(overall_sys), overall_refs))
 
-    print(f"Test results ({len(args.ref_projects)} reference(s), {args.num_projects} combinations)")
+    print(f"Test results ({len(args.ref_projects)} reference(s), {args.num_refs} combinations)")
     bleu_file_root = f"bleu-{step}"
     if len(args.ref_projects) > 0:
         ref_projects_suffix = "_".join(sorted(args.ref_projects))
