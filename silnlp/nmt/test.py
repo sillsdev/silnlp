@@ -4,6 +4,7 @@ import os
 import random
 from glob import glob
 from typing import IO, Dict, List, Set, Tuple
+import sys
 
 logging.basicConfig()
 
@@ -14,15 +15,19 @@ from nlp.nmt.runner import get_best_model_dir
 
 
 class TestResults:
-    def __init__(self, src_iso: str, trg_iso: str, bleu: sacrebleu.BLEU, sent_len: int) -> None:
+    def __init__(self, src_iso: str, trg_iso: str, bleu: sacrebleu.BLEU, sent_len: int, projects: List[str]) -> None:
         self.src_iso = src_iso
         self.trg_iso = trg_iso
         self.bleu = bleu
         self.sent_len = sent_len
+        self.num_refs = len(projects)
+        self.refs = "_".join(sorted(projects))
 
     def write(self, file: IO) -> None:
         file.write(
-            f"{self.src_iso},{self.trg_iso},{self.bleu.score:.2f},{self.bleu.bp:.3f},{self.bleu.sys_len:d},"
+            f"{self.src_iso},{self.trg_iso},{self.num_refs},{self.refs},{self.bleu.score:.2f},"
+            f"{self.bleu.precisions[0]:.2f},{self.bleu.precisions[1]:.2f},{self.bleu.precisions[2]:.2f},"
+            f"{self.bleu.precisions[3]:.2f},{self.bleu.bp:.3f},{self.bleu.sys_len:d},"
             f"{self.bleu.ref_len:d},{self.sent_len:d}\n"
         )
 
@@ -204,14 +209,14 @@ def main() -> None:
             for overall_ref in filter(lambda r: len(r) < len(overall_sys), overall_refs):
                 overall_ref.extend([""] * (len(overall_sys) - len(overall_ref)))
             bleu = sacrebleu.corpus_bleu(sys, refs, lowercase=True)
-            scores.append(TestResults(src_iso, trg_iso, bleu, len(sys)))
+            scores.append(TestResults(src_iso, trg_iso, bleu, len(sys), ref_projects))
 
         os.replace(predictions_path, f"{predictions_path}.{step}")
         os.replace(predictions_detok_path, f"{predictions_detok_path}.{step}")
 
     if len(src_langs) > 1 or len(trg_langs) > 1:
         bleu = sacrebleu.corpus_bleu(overall_sys, overall_refs, lowercase=True)
-        scores.append(TestResults("ALL", "ALL", bleu, len(overall_sys)))
+        scores.append(TestResults("ALL", "ALL", bleu, len(overall_sys), ref_projects))
 
     print(f"Test results ({len(overall_refs)} reference(s))")
     bleu_file_root = f"bleu-{step}"
@@ -219,10 +224,16 @@ def main() -> None:
         ref_projects_suffix = "_".join(sorted(ref_projects))
         bleu_file_root += f"-{ref_projects_suffix}"
     with open(os.path.join(root_dir, f"{bleu_file_root}.csv"), "w", encoding="utf-8") as bleu_file:
-        bleu_file.write("src_iso,trg_iso,BLEU,BP,hyp_len,ref_len,sent_len\n")
+        bleu_file.write(
+            "src_iso,trg_iso,num_refs,references,BLEU,1-gram,2-gram,3-gram,4-gram,BP,hyp_len,ref_len,sent_len\n"
+        )
         for results in scores:
             results.write(bleu_file)
-            print(f"{results.src_iso} -> {results.trg_iso}:", results.bleu)
+            print(
+                f"{results.src_iso} -> {results.trg_iso}: {results.bleu.score:.2f} {results.bleu.precisions[0]:.2f}"
+                f"/{results.bleu.precisions[1]:.2f}/{results.bleu.precisions[2]:.2f}/{results.bleu.precisions[3]:.2f}"
+                f"/{results.bleu.bp:.3f}"
+            )
 
 
 if __name__ == "__main__":
