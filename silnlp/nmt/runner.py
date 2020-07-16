@@ -1,7 +1,7 @@
 import logging
 import os
 import yaml
-from typing import Any, Iterable, List, Optional, Tuple
+from typing import Any, Iterable, List, Tuple
 
 import numpy as np
 import opennmt.data
@@ -10,21 +10,7 @@ import opennmt.utils
 import tensorflow as tf
 import tensorflow_addons as tfa
 
-
-def get_best_model_dir(config: dict) -> Tuple[str, int]:
-    export_path = os.path.join(config["model_dir"], "export")
-    models = os.listdir(export_path)
-    best_model_path: Optional[str] = None
-    step = 0
-    for model in sorted(models, key=lambda m: int(m), reverse=True):
-        path = os.path.join(export_path, model)
-        if os.path.isdir(path):
-            best_model_path = path
-            step = int(model)
-            break
-    if best_model_path is None:
-        raise RuntimeError("There is no exported models.")
-    return best_model_path, step
+from nlp.nmt.utils import get_best_model_dir
 
 
 class VariableUpdate:

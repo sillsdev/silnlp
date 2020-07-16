@@ -10,8 +10,8 @@ logging.basicConfig()
 
 import sacrebleu
 
-from nlp.nmt.config import create_runner, decode_sp, get_git_revision_hash, get_root_dir, load_config, parse_langs
-from nlp.nmt.runner import get_best_model_dir
+from nlp.nmt.config import get_root_dir, load_config, parse_langs
+from nlp.nmt.utils import decode_sp, get_git_revision_hash
 
 
 class TestResults:
@@ -37,7 +37,7 @@ def parse_ref_file_path(ref_file_path: str) -> Tuple[str, str]:
     return parts[2], parts[3]
 
 
-def is_ref_project(ref_projects: Set[str], ref_file_path: str) -> bool:
+def is_ref_project(ref_projects: List[str], ref_file_path: str) -> bool:
     _, trg_project = parse_ref_file_path(ref_file_path)
     return trg_project in ref_projects
 
@@ -54,7 +54,7 @@ def load_test_data(
     ref_files_path: str,
     output_file_path: str,
     default_trg_iso: str,
-    ref_projects: Set[str],
+    ref_projects: List[str],
     train_projects: Dict[str, Set[str]],
 ) -> Dict[str, Tuple[List[str], List[List[str]]]]:
     dataset: Dict[str, Tuple[List[str], List[List[str]]]] = {}
@@ -128,13 +128,8 @@ def main() -> None:
     data_config: dict = config["data"]
     src_langs, _, _ = parse_langs(data_config["src_langs"])
     trg_langs, trg_train_projects, _ = parse_langs(data_config["trg_langs"])
-    runner = create_runner(config, memory_growth=args.memory_growth)
 
     random.seed(data_config["seed"])
-
-    checkpoint_path = None
-    if args.checkpoint is not None:
-        checkpoint_path = os.path.join(config["model_dir"], f"ckpt-{args.checkpoint}")
 
     ref_project_lists: List[List[str]] = []
     if args.num_refs == 0:
@@ -145,7 +140,7 @@ def main() -> None:
         for i in range(0, args.num_refs):
             comb = combinations(args.ref_projects, i + 1)
             for c in comb:
-                ref_project_lists.append(c)
+                ref_project_lists.append(list(c))
 
     scores: List[TestResults] = []
     for ref_projects in ref_project_lists:

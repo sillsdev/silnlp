@@ -4,18 +4,17 @@ import os
 import random
 from glob import glob
 from typing import IO, Dict, List, Set, Tuple
-import sys
 
 logging.basicConfig()
 
 import sacrebleu
 
-from nlp.nmt.config import create_runner, decode_sp, get_git_revision_hash, get_root_dir, load_config, parse_langs
-from nlp.nmt.runner import get_best_model_dir
+from nlp.nmt.config import create_runner, get_root_dir, load_config, parse_langs
+from nlp.nmt.utils import decode_sp, get_best_model_dir, get_git_revision_hash
 
 
 class TestResults:
-    def __init__(self, src_iso: str, trg_iso: str, bleu: sacrebleu.BLEU, sent_len: int, projects: List[str]) -> None:
+    def __init__(self, src_iso: str, trg_iso: str, bleu: sacrebleu.BLEU, sent_len: int, projects: Set[str]) -> None:
         self.src_iso = src_iso
         self.trg_iso = trg_iso
         self.bleu = bleu

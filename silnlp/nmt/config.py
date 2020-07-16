@@ -1,8 +1,6 @@
 import argparse
 import logging
 import os
-import subprocess
-from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
 
 logging.basicConfig()
@@ -10,13 +8,13 @@ logging.basicConfig()
 import opennmt.data
 import opennmt.models
 import opennmt.utils
-import sacrebleu
 import tensorflow as tf
 import yaml
 
 from nlp.common.environment import paratextPreprocessedDir
 from nlp.nmt.noise import WordDropout
 from nlp.nmt.runner import RunnerEx
+from nlp.nmt.utils import get_git_revision_hash
 
 _PYTHON_TO_TENSORFLOW_LOGGING_LEVEL: Dict[int, int] = {
     logging.CRITICAL: 3,
@@ -39,6 +37,7 @@ DEFAULT_NEW_CONFIG: dict = {
         "score_threshold": 0,
     },
     "train": {"maximum_features_length": 150, "maximum_labels_length": 150},
+    "eval": {"multi_ref_eval": False},
     "params": {
         "length_penalty": 0.2,
         "dropout": 0.2,
@@ -48,35 +47,6 @@ DEFAULT_NEW_CONFIG: dict = {
         "word_dropout": 0.1,
     },
 }
-
-
-def get_git_revision_hash() -> str:
-    script_path = Path(__file__)
-    repo_dir = script_path.parent.parent.parent
-    return subprocess.check_output(
-        ["git", "-C", str(repo_dir), "rev-parse", "--short=10", "HEAD"], encoding="utf-8"
-    ).strip()
-
-
-def decode_sp(line: str) -> str:
-    return line.replace(" ", "").replace("\u2581", " ").lstrip()
-
-
-def decode_sp_lines(lines: Iterable[str]) -> Iterable[str]:
-    return map(lambda l: decode_sp(l), lines)
-
-
-@opennmt.utils.register_scorer(name="bleu_sp")
-class BLEUSentencepieceScorer(opennmt.utils.Scorer):
-    def __init__(self):
-        super(BLEUSentencepieceScorer, self).__init__("bleu")
-
-    def __call__(self, ref_path: str, hyp_path: str) -> float:
-        with tf.io.gfile.GFile(ref_path) as ref_stream, tf.io.gfile.GFile(hyp_path) as sys_stream:
-            sys = decode_sp_lines(sys_stream)
-            ref = decode_sp_lines(ref_stream)
-            bleu = sacrebleu.corpus_bleu(sys, [ref], lowercase=True)
-            return bleu.score
 
 
 def set_log_level(log_level: int) -> None:
@@ -136,12 +106,13 @@ def load_config(exp_name: str) -> dict:
             "keep_checkpoint_max": 3,
         },
         "eval": {
-            "external_evaluators": "bleu",
+            "external_evaluators": "bleu_multi_ref",
             "steps": 1000,
             "early_stopping": {"metric": "bleu", "min_improvement": 0.2, "steps": 4},
             "export_on_best": "bleu",
             "export_format": "checkpoint",
             "max_exports_to_keep": 1,
+            "multi_ref_eval": False,
         },
         "params": {
             "length_penalty": 0.2,

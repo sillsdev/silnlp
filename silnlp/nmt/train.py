@@ -5,7 +5,8 @@ from typing import Optional
 
 logging.basicConfig()
 
-from nlp.nmt.config import create_runner, get_git_revision_hash, get_root_dir, load_config
+from nlp.nmt.config import create_runner, get_root_dir, load_config
+from nlp.nmt.utils import get_git_revision_hash
 
 
 def main() -> None:

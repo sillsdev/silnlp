@@ -1,5 +1,6 @@
 import argparse
 import bisect
+import itertools
 import logging
 import os
 import random
@@ -23,6 +24,7 @@ from nlp.nmt.corpus import (
     split_parallel_corpus,
     write_corpus,
 )
+from nlp.nmt.utils import encode_sp, encode_sp_lines
 
 
 def convert_vocab(sp_vocab_path: str, onmt_vocab_path: str, tag_langs: Set[str] = None) -> None:
@@ -57,16 +59,6 @@ def build_vocab(
     sp.SentencePieceTrainer.Train(sp_train_params)
 
     convert_vocab(f"{model_prefix}.vocab", vocab_path, tag_langs)
-
-
-def sp_tokenize(spp: sp.SentencePieceProcessor, sentences: Iterable[str]) -> Iterator[str]:
-    for sentence in sentences:
-        prefix = ""
-        if sentence.startswith("<2"):
-            index = sentence.index(">")
-            prefix = sentence[0 : index + 2]
-            sentence = sentence[index + 2 :]
-        yield prefix + " ".join(spp.EncodeAsPieces(sentence))
 
 
 def insert_trg_tag(trg_iso: str, sentences: pd.DataFrame) -> None:
@@ -145,6 +137,47 @@ def get_corpus_path(iso: str, project: str) -> str:
     return os.path.join(paratextPreprocessedDir, "data", f"{iso}-{project}.txt")
 
 
+def add_to_eval_dataset(
+    src_iso: str,
+    trg_iso: str,
+    trg_project: str,
+    write_trg_tag: bool,
+    dataset: Dict[Tuple[str, str], pd.DataFrame],
+    pair_indices: Dict[Tuple[str, str], Set[int]],
+    new_data: pd.DataFrame,
+) -> None:
+    if len(new_data) == 0:
+        return
+
+    if write_trg_tag:
+        insert_trg_tag(trg_iso, new_data)
+
+    pair_data = dataset.get((src_iso, trg_iso))
+
+    if (src_iso, trg_iso) not in pair_indices:
+        pair_indices[(src_iso, trg_iso)] = set(new_data.index)
+
+    new_data = new_data.rename(columns={"target": f"target_{trg_project}"})
+    if pair_data is None:
+        pair_data = new_data
+    else:
+        pair_data = pair_data.combine_first(new_data)
+        pair_data.fillna("", inplace=True)
+
+    dataset[(src_iso, trg_iso)] = pair_data
+
+
+def get_trg_val_lines(spp: sp.SentencePieceProcessor, multi_ref_eval: bool, pair_val: pd.DataFrame) -> Iterator[str]:
+    columns: List[str] = list(filter(lambda c: c.startswith("target"), pair_val.columns))
+    for index in pair_val.index:
+        if multi_ref_eval:
+            yield " ||| ".join(map(lambda c: encode_sp(spp, pair_val.loc[index, c].strip()), columns))
+        else:
+            columns_with_data: List[str] = list(filter(lambda c: pair_val.loc[index, c].strip() != "", columns))
+            col = random.choice(columns_with_data)
+            yield encode_sp(spp, pair_val.loc[index, col].strip())
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Preprocesses text corpora into a multilingual data set for OpenNMT-tf"
@@ -158,6 +191,8 @@ def main() -> None:
     root_dir = get_root_dir(exp_name)
     config = load_config(exp_name)
     data_config: dict = config["data"]
+    eval_config: dict = config["eval"]
+    multi_ref_eval: bool = eval_config["multi_ref_eval"]
 
     seed: int = data_config["seed"]
     random.seed(seed)
@@ -298,8 +333,9 @@ def main() -> None:
             val_indices = set(samples)
 
     train: Optional[pd.DataFrame] = None
-    val: Optional[pd.DataFrame] = None
+    val: Dict[Tuple[str, str], pd.DataFrame] = {}
     test: Dict[Tuple[str, str], pd.DataFrame] = {}
+    pair_val_indices: Dict[Tuple[str, str], Set[int]] = {}
     pair_test_indices: Dict[Tuple[str, str], Set[int]] = {}
 
     for src_file_path in src_file_paths:
@@ -321,66 +357,63 @@ def main() -> None:
                 cur_train, cur_test = split_parallel_corpus(
                     cur_train, test_size, pair_test_indices.get((src_iso, trg_iso), test_indices)
                 )
-                if len(cur_test) > 0:
-                    if (src_iso, trg_iso) not in pair_test_indices:
-                        pair_test_indices[(src_iso, trg_iso)] = set(cur_test.index)
 
-                    cur_test.drop("score", axis=1, inplace=True, errors="ignore")
-                    if write_trg_tag:
-                        insert_trg_tag(trg_iso, cur_test)
-
-                    cur_test = cur_test.rename(columns={"target": f"target_{trg_project}"})
-                    pair_test = test.get((src_iso, trg_iso))
-                    test[(src_iso, trg_iso)] = cur_test if pair_test is None else pair_test.combine_first(cur_test)
+                cur_test.drop("score", axis=1, inplace=True, errors="ignore")
+                add_to_eval_dataset(src_iso, trg_iso, trg_project, write_trg_tag, test, pair_test_indices, cur_test)
 
             if is_train_ref:
                 if score_threshold > 0:
                     unfiltered_len = len(cur_train)
                     cur_train = filter_parallel_corpus(cur_train, score_threshold)
                     print(f"Filtered {unfiltered_len - len(cur_train)} verses from {src_project} -> {trg_project}.")
+                    cur_train.drop("score", axis=1, inplace=True, errors="ignore")
 
-                cur_train, cur_val = split_parallel_corpus(cur_train, val_size, val_indices)
+                cur_train, cur_val = split_parallel_corpus(
+                    cur_train, val_size, pair_val_indices.get((src_iso, trg_iso), val_indices)
+                )
 
                 if mirror:
                     mirror_cur_train = cur_train.rename(columns={"source": "target", "target": "source"})
                     mirror_cur_val = cur_val.rename(columns={"source": "target", "target": "source"})
 
+                    add_to_eval_dataset(
+                        trg_iso, src_iso, src_project, write_trg_tag, val, pair_val_indices, mirror_cur_val
+                    )
+
                     if write_trg_tag:
                         insert_trg_tag(src_iso, mirror_cur_train)
-                        insert_trg_tag(src_iso, mirror_cur_val)
-
                     train = pd.concat([train, mirror_cur_train], ignore_index=True)
-                    val = pd.concat([val, mirror_cur_val], ignore_index=True)
+
+                add_to_eval_dataset(src_iso, trg_iso, trg_project, write_trg_tag, val, pair_val_indices, cur_val)
 
                 if write_trg_tag:
                     insert_trg_tag(trg_iso, cur_train)
-                    insert_trg_tag(trg_iso, cur_val)
-
                 train = pd.concat([train, cur_train], ignore_index=True)
-                val = pd.concat([val, cur_val], ignore_index=True)
 
-    if train is None or val is None or test is None:
+    if train is None:
         return
 
     print("Writing train data set...")
-    write_corpus(os.path.join(root_dir, "train.src.txt"), sp_tokenize(src_spp, train["source"]))
-    write_corpus(os.path.join(root_dir, "train.trg.txt"), sp_tokenize(trg_spp, train["target"]))
+    write_corpus(os.path.join(root_dir, "train.src.txt"), encode_sp_lines(src_spp, train["source"]))
+    write_corpus(os.path.join(root_dir, "train.trg.txt"), encode_sp_lines(trg_spp, train["target"]))
 
     print("Writing validation data set...")
-    write_corpus(os.path.join(root_dir, "val.src.txt"), sp_tokenize(src_spp, val["source"]))
-    write_corpus(os.path.join(root_dir, "val.trg.txt"), sp_tokenize(trg_spp, val["target"]))
+    val_src = itertools.chain.from_iterable(map(lambda pair_val: pair_val["source"], val.values()))
+    write_corpus(os.path.join(root_dir, "val.src.txt"), encode_sp_lines(src_spp, val_src))
+    val_trg = itertools.chain.from_iterable(
+        map(lambda pair_val: get_trg_val_lines(trg_spp, multi_ref_eval, pair_val), val.values())
+    )
+    write_corpus(os.path.join(root_dir, "val.trg.txt"), val_trg)
 
     print("Writing test data set...")
     for old_file_path in glob(os.path.join(root_dir, "test.*.txt")):
         os.remove(old_file_path)
 
     for (src_iso, trg_iso), pair_test in test.items():
-        pair_test.fillna("", inplace=True)
-
         prefix = "test" if len(test) == 1 else f"test.{src_iso}.{trg_iso}"
-        write_corpus(os.path.join(root_dir, f"{prefix}.src.txt"), sp_tokenize(src_spp, pair_test["source"]))
+        write_corpus(os.path.join(root_dir, f"{prefix}.src.txt"), encode_sp_lines(src_spp, pair_test["source"]))
 
-        columns: List[str] = list(filter(lambda c: c.startswith("target_"), pair_test.columns))
+        columns: List[str] = list(filter(lambda c: c.startswith("target"), pair_test.columns))
         for column in columns:
             project = column[len("target_") :]
             trg_suffix = "" if len(columns) == 1 else f".{project}"

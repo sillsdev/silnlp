@@ -1,6 +1,5 @@
 import argparse
 import os
-from glob import glob
 from typing import List, Set
 
 import matplotlib.pyplot as plt
