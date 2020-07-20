@@ -3,11 +3,12 @@ import logging
 import os
 import random
 from glob import glob
-from typing import IO, Dict, List, Set, Tuple
+from typing import IO, Dict, List, Optional, Set, Tuple
 
 logging.basicConfig()
 
 import sacrebleu
+import yaml
 
 from nlp.nmt.config import create_runner, get_root_dir, load_config, parse_langs
 from nlp.nmt.utils import decode_sp, get_best_model_dir, get_git_revision_hash
@@ -113,6 +114,19 @@ def load_test_data(
     return dataset
 
 
+def get_step(model_dir: str, best: bool, checkpoint: Optional[int]) -> int:
+    if best:
+        return get_best_model_dir(model_dir)[1]
+    elif checkpoint is not None:
+        return checkpoint
+    else:
+        with open(os.path.join(model_dir, "checkpoint"), "r", encoding="utf-8") as file:
+            checkpoint_config = yaml.safe_load(file)
+            checkpoint_path: str = checkpoint_config["model_checkpoint_path"]
+            parts = os.path.basename(checkpoint_path).split("-")
+            return int(parts[-1])
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Tests a NMT model using OpenNMT-tf")
     parser.add_argument("experiment", help="Experiment name")
@@ -120,6 +134,7 @@ def main() -> None:
     parser.add_argument("--checkpoint", type=str, help="Checkpoint to use")
     parser.add_argument("--best", default=False, action="store_true", help="Test best evaluated model")
     parser.add_argument("--ref-projects", nargs="*", metavar="project", default=[], help="Reference projects")
+    parser.add_argument("--force-infer", default=False, action="store_true", help="Force inferencing")
     args = parser.parse_args()
 
     print("Git commit:", get_git_revision_hash())
@@ -127,16 +142,17 @@ def main() -> None:
     exp_name = args.experiment
     root_dir = get_root_dir(exp_name)
     config = load_config(exp_name)
+    model_dir: str = config["model_dir"]
     data_config: dict = config["data"]
     src_langs, _, _ = parse_langs(data_config["src_langs"])
     trg_langs, trg_train_projects, _ = parse_langs(data_config["trg_langs"])
-    runner = create_runner(config, memory_growth=args.memory_growth)
+    step = get_step(model_dir, args.best, args.checkpoint)
 
     random.seed(data_config["seed"])
 
     checkpoint_path = None
     if args.checkpoint is not None:
-        checkpoint_path = os.path.join(config["model_dir"], f"ckpt-{args.checkpoint}")
+        checkpoint_path = os.path.join(model_dir, f"ckpt-{args.checkpoint}")
 
     features_paths: List[str] = []
     predictions_paths: List[str] = []
@@ -148,30 +164,31 @@ def main() -> None:
         if os.path.isfile(src_features_path):
             # all target data is stored in a single file
             features_paths.append(src_features_path)
-            predictions_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.txt"))
+            predictions_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.txt.{step}"))
             refs_paths.append(os.path.join(root_dir, f"{prefix}.trg.detok*.txt"))
-            predictions_detok_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.detok.txt"))
+            predictions_detok_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.detok.txt.{step}"))
         else:
             # target data is split into separate files
             for trg_iso in sorted(trg_langs):
                 prefix = f"test.{src_iso}.{trg_iso}"
                 features_paths.append(os.path.join(root_dir, f"{prefix}.src.txt"))
-                predictions_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.txt"))
+                predictions_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.txt.{step}"))
                 refs_paths.append(os.path.join(root_dir, f"{prefix}.trg.detok*.txt"))
-                predictions_detok_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.detok.txt"))
+                predictions_detok_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.detok.txt.{step}"))
 
-    print("Inferencing...")
-    step: int
-    if args.best:
-        best_model_path, _ = get_best_model_dir(config)
-        if os.path.isfile(os.path.join(best_model_path, "ckpt.index")):
-            step = runner.infer_multiple(
-                features_paths, predictions_paths, checkpoint_path=os.path.join(best_model_path, "ckpt")
-            )
+    if args.force_infer or any(not os.path.isfile(f) for f in predictions_detok_paths):
+        runner = create_runner(config, memory_growth=args.memory_growth)
+        print("Inferencing...")
+        if args.best:
+            best_model_path, _ = get_best_model_dir(model_dir)
+            if os.path.isfile(os.path.join(best_model_path, "ckpt.index")):
+                runner.infer_multiple(
+                    features_paths, predictions_paths, checkpoint_path=os.path.join(best_model_path, "ckpt")
+                )
+            else:
+                runner.saved_model_infer_multiple(features_paths, predictions_paths)
         else:
-            step = runner.saved_model_infer_multiple(features_paths, predictions_paths)
-    else:
-        step = runner.infer_multiple(features_paths, predictions_paths, checkpoint_path=checkpoint_path)
+            runner.infer_multiple(features_paths, predictions_paths, checkpoint_path=checkpoint_path)
 
     print("Scoring...")
     ref_projects: Set[str] = set(args.ref_projects)
@@ -209,9 +226,6 @@ def main() -> None:
                 overall_ref.extend([""] * (len(overall_sys) - len(overall_ref)))
             bleu = sacrebleu.corpus_bleu(sys, refs, lowercase=True)
             scores.append(TestResults(src_iso, trg_iso, bleu, len(sys), ref_projects))
-
-        os.replace(predictions_path, f"{predictions_path}.{step}")
-        os.replace(predictions_detok_path, f"{predictions_detok_path}.{step}")
 
     if len(src_langs) > 1 or len(trg_langs) > 1:
         bleu = sacrebleu.corpus_bleu(overall_sys, overall_refs, lowercase=True)

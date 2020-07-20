@@ -256,7 +256,7 @@ class RunnerEx(opennmt.Runner):
 
     def infer_multiple(
         self, features_paths: List[str], predictions_paths: List[str], checkpoint_path: str = None
-    ) -> int:
+    ) -> None:
         config = self._finalize_config()
         model = self._init_model(config)
         checkpoint = opennmt.utils.checkpoint.Checkpoint.from_config(config, model)
@@ -287,22 +287,13 @@ class RunnerEx(opennmt.Runner):
                     for prediction in opennmt.utils.misc.extract_batches(predictions):
                         ordered_writer.push(prediction)
 
-        if checkpoint_path is None:
-            return checkpoint.last_saved_step
-
-        parts = os.path.basename(checkpoint_path).split("-")
-        if len(parts) == 2:
-            return int(parts[-1])
-
-        return int(os.path.basename(os.path.dirname(checkpoint_path)))
-
-    def saved_model_infer_multiple(self, features_paths: List[str], predictions_paths: List[str]) -> int:
+    def saved_model_infer_multiple(self, features_paths: List[str], predictions_paths: List[str]) -> None:
         register_tfa_custom_ops()
         config = self._finalize_config()
         infer_config = config["infer"]
         batch_size = infer_config.get("batch_size", 1)
 
-        best_model_path, step = get_best_model_dir(config)
+        best_model_path, _ = get_best_model_dir(config["model_dir"])
         saved_model = tf.keras.models.load_model(best_model_path)
         translate_fn = saved_model.signatures["serving_default"]
 
@@ -318,7 +309,6 @@ class RunnerEx(opennmt.Runner):
                 outputs = translate_fn(**inputs)
 
                 write_serving_output(predictions_path, outputs["tokens"].numpy(), outputs["length"].numpy())
-        return step
 
     def save_effective_config(self, path: str, training: bool = False) -> None:
         level = tf.get_logger().level

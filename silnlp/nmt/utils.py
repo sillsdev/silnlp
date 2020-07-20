@@ -30,8 +30,8 @@ def encode_sp_lines(spp: sp.SentencePieceProcessor, lines: Iterable[str]) -> Ite
     return map(lambda l: encode_sp(spp, l), lines)
 
 
-def get_best_model_dir(config: dict) -> Tuple[str, int]:
-    export_path = os.path.join(config["model_dir"], "export")
+def get_best_model_dir(model_dir: str) -> Tuple[str, int]:
+    export_path = os.path.join(model_dir, "export")
     models = os.listdir(export_path)
     best_model_path: Optional[str] = None
     step = 0
