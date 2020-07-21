@@ -125,6 +125,10 @@ def load_config(exp_name: str) -> dict:
 
     config = opennmt.load_config([config_path], config)
     data_config: dict = config["data"]
+    eval_config: dict = config["eval"]
+    multi_ref_eval: bool = eval_config["multi_ref_eval"]
+    if multi_ref_eval:
+        data_config["eval_labels_file"] = os.path.join(root_dir, "val.trg.txt.0")
     if data_config["share_vocab"]:
         data_config["source_vocabulary"] = os.path.join(root_dir, "onmt.vocab")
         data_config["target_vocabulary"] = os.path.join(root_dir, "onmt.vocab")

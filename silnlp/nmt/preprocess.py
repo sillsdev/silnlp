@@ -6,7 +6,7 @@ import os
 import random
 import shutil
 from glob import glob
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Set, Tuple
+from typing import IO, Any, Dict, Iterable, List, Optional, Set, Tuple
 
 logging.basicConfig()
 
@@ -167,15 +167,30 @@ def add_to_eval_dataset(
     dataset[(src_iso, trg_iso)] = pair_data
 
 
-def get_trg_val_lines(spp: sp.SentencePieceProcessor, multi_ref_eval: bool, pair_val: pd.DataFrame) -> Iterator[str]:
-    columns: List[str] = list(filter(lambda c: c.startswith("target"), pair_val.columns))
-    for index in pair_val.index:
-        if multi_ref_eval:
-            yield " ||| ".join(map(lambda c: encode_sp(spp, pair_val.loc[index, c].strip()), columns))
-        else:
-            columns_with_data: List[str] = list(filter(lambda c: pair_val.loc[index, c].strip() != "", columns))
-            col = random.choice(columns_with_data)
-            yield encode_sp(spp, pair_val.loc[index, col].strip())
+def write_val_corpora(
+    trg_spp: sp.SentencePieceProcessor, multi_ref_eval: bool, val: Dict[Tuple[str, str], pd.DataFrame], root_dir: str
+) -> None:
+    ref_files: List[IO] = []
+    try:
+        for pair_val in val.values():
+            columns: List[str] = list(filter(lambda c: c.startswith("target"), pair_val.columns))
+            for index in pair_val.index:
+                if multi_ref_eval:
+                    for ci in range(len(columns)):
+                        if len(ref_files) == ci:
+                            ref_files.append(open(os.path.join(root_dir, f"val.trg.txt.{ci}"), "w", encoding="utf-8"))
+                        col = columns[ci]
+                        ref_files[ci].write(encode_sp(trg_spp, pair_val.loc[index, col].strip()) + "\n")
+                else:
+                    if len(ref_files) == 0:
+                        ref_files.append(open(os.path.join(root_dir, "val.trg.txt"), "w", encoding="utf-8"))
+                    columns_with_data: List[str] = list(filter(lambda c: pair_val.loc[index, c].strip() != "", columns))
+                    col = random.choice(columns_with_data)
+                    ref_files[0].write(encode_sp(trg_spp, pair_val.loc[index, col].strip()) + "\n")
+
+    finally:
+        for ref_file in ref_files:
+            ref_file.close()
 
 
 def main() -> None:
@@ -400,10 +415,7 @@ def main() -> None:
     print("Writing validation data set...")
     val_src = itertools.chain.from_iterable(map(lambda pair_val: pair_val["source"], val.values()))
     write_corpus(os.path.join(root_dir, "val.src.txt"), encode_sp_lines(src_spp, val_src))
-    val_trg = itertools.chain.from_iterable(
-        map(lambda pair_val: get_trg_val_lines(trg_spp, multi_ref_eval, pair_val), val.values())
-    )
-    write_corpus(os.path.join(root_dir, "val.trg.txt"), val_trg)
+    write_val_corpora(trg_spp, multi_ref_eval, val, root_dir)
 
     print("Writing test data set...")
     for old_file_path in glob(os.path.join(root_dir, "test.*.txt")):

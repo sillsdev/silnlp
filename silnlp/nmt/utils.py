@@ -1,7 +1,7 @@
 import os
 import subprocess
 from pathlib import Path
-from typing import Iterable, Iterator, List, Optional, Tuple
+from typing import IO, Iterable, Iterator, List, Optional, Tuple
 
 import opennmt.utils
 import sacrebleu
@@ -72,15 +72,27 @@ class BLEUMultiRefScorer(opennmt.utils.Scorer):
     def __init__(self):
         super(BLEUMultiRefScorer, self).__init__("bleu")
 
-    def __call__(self, ref_path, hyp_path):
-        with tf.io.gfile.GFile(ref_path) as ref_stream, tf.io.gfile.GFile(hyp_path) as sys_stream:
-            refs: List[List[str]] = []
-            for line in ref_stream:
-                i = 0
-                for sentence in line.split(" ||| "):
-                    while len(refs) <= i:
-                        refs.append([])
-                    refs[i].append(sentence.strip())
-                    i += 1
-            bleu = sacrebleu.corpus_bleu(sys_stream, refs, force=True)
-            return bleu.score
+    def __call__(self, ref_path: str, hyp_path: str) -> float:
+        with tf.io.gfile.GFile(hyp_path) as sys_stream:
+            ref_streams: List[IO] = []
+            try:
+                if ref_path.endswith(".0"):
+                    prefix = ref_path[:-2]
+                    i = 0
+                    while os.path.isfile(f"{prefix}.{i}"):
+                        ref_streams.append(tf.io.gfile.GFile(f"{prefix}.{i}"))
+                        i += 1
+                else:
+                    ref_streams.append(tf.io.gfile.GFile(ref_path))
+                refs: List[List[str]] = []
+                for lines in zip(*ref_streams):
+                    for ref_index in range(len(ref_streams)):
+                        ref_line = lines[ref_index].strip()
+                        if len(refs) == ref_index:
+                            refs.append([])
+                        refs[ref_index].append(ref_line)
+                bleu = sacrebleu.corpus_bleu(sys_stream, refs, force=True)
+                return bleu.score
+            finally:
+                for ref_stream in ref_streams:
+                    ref_stream.close()
