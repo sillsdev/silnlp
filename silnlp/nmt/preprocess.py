@@ -91,14 +91,6 @@ def update_vocab(parent_config: dict, root_dir: str, src_vocab_path: str, trg_vo
     parent_runner.update_vocab(os.path.join(root_dir, "parent"), src_vocab_path, trg_vocab_path)
 
 
-def get_sentence_count(file_path: str) -> int:
-    lines = 0
-    with open(file_path, "r", encoding="utf-8") as file:
-        for _ in file:
-            lines += 1
-    return lines
-
-
 def is_corpus_in_langs(langs: Set[str], lang_projects: Dict[str, Set[str]], iso: str, project: str) -> bool:
     if iso in langs:
         projects = lang_projects[iso]
@@ -333,19 +325,6 @@ def main() -> None:
 
     test_indices: Optional[Set[int]] = None
     val_indices: Optional[Set[int]] = None
-    if disjoint_test or disjoint_val:
-        sentence_count = get_sentence_count(src_file_paths[0])
-        sample_size = 0
-        if disjoint_test:
-            sample_size += test_size
-        if disjoint_val:
-            sample_size += val_size
-        samples = random.sample(range(sentence_count), sample_size)
-        if disjoint_test:
-            test_indices = set(samples[:test_size])
-            samples = samples[test_size:]
-        if disjoint_val:
-            val_indices = set(samples)
 
     train: Optional[pd.DataFrame] = None
     val: Dict[Tuple[str, str], pd.DataFrame] = {}
@@ -369,6 +348,12 @@ def main() -> None:
                 add_alignment_scores(cur_train)
 
             if is_test_ref:
+                if disjoint_test and test_indices is None:
+                    indices: Set[int] = set(cur_train.index)
+                    if disjoint_val and val_indices is not None:
+                        indices.difference_update(val_indices)
+                    test_indices = set(random.sample(indices, min(test_size, len(indices))))
+
                 cur_train, cur_test = split_parallel_corpus(
                     cur_train, test_size, pair_test_indices.get((src_iso, trg_iso), test_indices)
                 )
@@ -382,6 +367,12 @@ def main() -> None:
                     cur_train = filter_parallel_corpus(cur_train, score_threshold)
                     print(f"Filtered {unfiltered_len - len(cur_train)} verses from {src_project} -> {trg_project}.")
                     cur_train.drop("score", axis=1, inplace=True, errors="ignore")
+
+                if disjoint_val and val_indices is None:
+                    indices = set(cur_train.index)
+                    if disjoint_test and test_indices is not None:
+                        indices.difference_update(test_indices)
+                    val_indices = set(random.sample(indices, min(val_size, len(indices))))
 
                 cur_train, cur_val = split_parallel_corpus(
                     cur_train, val_size, pair_val_indices.get((src_iso, trg_iso), val_indices)
