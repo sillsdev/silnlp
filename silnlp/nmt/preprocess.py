@@ -15,15 +15,15 @@ import opennmt.data
 import pandas as pd
 import sentencepiece as sp
 
-from nlp.common.environment import paratextPreprocessedDir
-from nlp.nmt.config import create_runner, get_git_revision_hash, get_root_dir, load_config, parse_langs
-from nlp.nmt.corpus import (
+from nlp.common.corpus import (
     add_alignment_scores,
     filter_parallel_corpus,
     get_parallel_corpus,
     split_parallel_corpus,
     write_corpus,
 )
+from nlp.common.corpus import get_corpus_path
+from nlp.nmt.config import create_runner, get_git_revision_hash, get_root_dir, load_config, parse_langs
 from nlp.nmt.utils import encode_sp, encode_sp_lines
 
 
@@ -123,10 +123,6 @@ def create_unshared_vocab(
 def is_in_sorted(items: list, value: Any) -> bool:
     index = bisect.bisect_left(items, value)
     return index < len(items) and items[index] == value
-
-
-def get_corpus_path(iso: str, project: str) -> str:
-    return os.path.join(paratextPreprocessedDir, "data", f"{iso}-{project}.txt")
 
 
 def add_to_eval_dataset(

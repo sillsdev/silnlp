@@ -32,6 +32,7 @@ def extract_corpus(output_dir: str, iso: str, project_dir: str, include_texts: s
     print("Extracting", name, f"({iso})")
     ref_dir = os.path.join(paratextUnzippedDir, "Ref")
     arg_list = [
+        "dotnet",
         "translator",
         "extract",
         "-s",

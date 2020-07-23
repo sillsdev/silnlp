@@ -45,6 +45,8 @@ starting any code, preferably in this order to avoid most warnings:
 (Invoke-WebRequest -Uri https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py -UseBasicParsing).Content | python
 ```
 
+5. [.NET Core SDK](https://dotnet.microsoft.com/download)
+
 #### PyCharm Setup
 
 First, you will need to install the Poetry plugin for PyCharm.
@@ -75,3 +77,11 @@ You will need to configure PyCharm to work properly with the project.
 4. In the `Python -> PEP 8 coding style violation` setting, ignore the errors `E402` and `E203`.
 
 Lastly, setup PyCharm to use the Black code formatter by following the instructions [here](https://black.readthedocs.io/en/stable/editor_integration.html#pycharm-intellij-idea).
+
+#### SIL.Machine.Translator Tool
+
+Many of the scripts in this repo use the [SIL.Machine.Translator](https://github.com/sillsdev/machine) tool. In order to install/update the tool, execute the following command from the repo directory:
+
+```
+dotnet tool restore
+```

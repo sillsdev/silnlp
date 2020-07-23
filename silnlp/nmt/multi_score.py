@@ -10,8 +10,9 @@ logging.basicConfig()
 
 import sacrebleu
 
+from nlp.common.utils import get_git_revision_hash
 from nlp.nmt.config import get_root_dir, load_config, parse_langs
-from nlp.nmt.utils import decode_sp, get_git_revision_hash
+from nlp.nmt.utils import decode_sp
 
 
 class TestResults:

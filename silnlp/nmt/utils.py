@@ -1,6 +1,4 @@
 import os
-import subprocess
-from pathlib import Path
 from typing import IO, Iterable, Iterator, List, Optional, Tuple
 
 import opennmt.utils
@@ -44,14 +42,6 @@ def get_best_model_dir(model_dir: str) -> Tuple[str, int]:
     if best_model_path is None:
         raise RuntimeError("There is no exported models.")
     return best_model_path, step
-
-
-def get_git_revision_hash() -> str:
-    script_path = Path(__file__)
-    repo_dir = script_path.parent.parent.parent
-    return subprocess.check_output(
-        ["git", "-C", str(repo_dir), "rev-parse", "--short=10", "HEAD"], encoding="utf-8"
-    ).strip()
 
 
 @opennmt.utils.register_scorer(name="bleu_sp")

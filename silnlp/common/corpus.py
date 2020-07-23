@@ -9,6 +9,8 @@ from typing import Dict, Iterable, List, Set, Tuple
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
+from nlp.common.environment import paratextPreprocessedDir
+
 
 def write_corpus(corpus_path: str, sentences: Iterable[str]) -> None:
     with open(corpus_path, "w", encoding="utf-8") as file:
@@ -37,6 +39,7 @@ def tokenize_parallel_corpus(src_sentences: Iterable[str], trg_sentences: Iterab
 
         subprocess.run(
             [
+                "dotnet",
                 "translator",
                 "extract",
                 "-s",
@@ -171,3 +174,7 @@ def split_parallel_corpus(
 def filter_parallel_corpus(corpus: pd.DataFrame, score_threshold: float) -> pd.DataFrame:
     score_threshold = min(corpus["score"].quantile(0.1), score_threshold)
     return corpus[corpus["score"] > score_threshold]
+
+
+def get_corpus_path(iso: str, project: str) -> str:
+    return os.path.join(paratextPreprocessedDir, "data", f"{iso}-{project}.txt")

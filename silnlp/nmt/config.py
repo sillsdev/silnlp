@@ -11,10 +11,9 @@ import opennmt.utils
 import tensorflow as tf
 import yaml
 
-from nlp.common.environment import paratextPreprocessedDir
+from nlp.common.utils import get_git_revision_hash, get_root_dir
 from nlp.nmt.noise import WordDropout
 from nlp.nmt.runner import RunnerEx
-from nlp.nmt.utils import get_git_revision_hash
 
 _PYTHON_TO_TENSORFLOW_LOGGING_LEVEL: Dict[int, int] = {
     logging.CRITICAL: 3,
@@ -52,10 +51,6 @@ DEFAULT_NEW_CONFIG: dict = {
 def set_log_level(log_level: int) -> None:
     tf.get_logger().setLevel(log_level)
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = str(_PYTHON_TO_TENSORFLOW_LOGGING_LEVEL[log_level])
-
-
-def get_root_dir(exp_name: str) -> str:
-    return os.path.join(paratextPreprocessedDir, "tests", exp_name)
 
 
 def set_transformer_dropout(
