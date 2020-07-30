@@ -30,9 +30,11 @@ def main() -> None:
                 "translator",
                 "translate",
                 engine_dir,
-                "-c",
+                "-s",
                 src_file_path,
-                "-t",
+                "-st",
+                "latin",
+                "-tt",
                 "latin",
                 "-o",
                 predictions_file_path,
@@ -41,6 +43,12 @@ def main() -> None:
 
     sys = load_corpus(predictions_file_path)
     ref = load_corpus(ref_file_path)
+
+    for i in range(len(sys) - 1, 0, -1):
+        if ref[i] == "" or sys[i] == "":
+            del sys[i]
+            del ref[i]
+
     bleu = sacrebleu.corpus_bleu(sys, [ref], lowercase=True)
     print(bleu)
 
