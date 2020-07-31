@@ -22,7 +22,7 @@ from nlp.common.corpus import (
     split_parallel_corpus,
     write_corpus,
 )
-from nlp.common.corpus import get_corpus_path
+from nlp.common.corpus import get_corpus_path, load_corpus
 from nlp.nmt.config import create_runner, get_git_revision_hash, get_root_dir, load_config, parse_langs
 from nlp.nmt.utils import encode_sp, encode_sp_lines
 
@@ -71,21 +71,6 @@ def get_iso(file_path: str) -> Tuple[str, str]:
     return file_name[:index], file_name[index + 1 :]
 
 
-def copy_parent_vocab(
-    prefix: str, parent_data_config: dict, parent_root_dir: str, root_dir: str, tag_langs: Set[str] = None
-) -> None:
-    sp_vocab_path = os.path.join(root_dir, f"{prefix}-sp.vocab")
-    onmt_vocab_path = os.path.join(root_dir, f"{prefix}-onmt.vocab")
-    if parent_data_config["share_vocab"]:
-        shutil.copy2(os.path.join(parent_root_dir, "sp.vocab"), sp_vocab_path)
-        shutil.copy2(os.path.join(parent_root_dir, "sp.model"), os.path.join(root_dir, f"{prefix}-sp.model"))
-    else:
-        shutil.copy2(os.path.join(parent_root_dir, f"{prefix}-sp.vocab"), root_dir)
-        shutil.copy2(os.path.join(parent_root_dir, f"{prefix}-sp.model"), root_dir)
-
-    convert_vocab(sp_vocab_path, onmt_vocab_path, tag_langs)
-
-
 def update_vocab(parent_config: dict, root_dir: str, src_vocab_path: str, trg_vocab_path: str) -> None:
     parent_runner = create_runner(parent_config)
     parent_runner.update_vocab(os.path.join(root_dir, "parent"), src_vocab_path, trg_vocab_path)
@@ -113,11 +98,38 @@ def create_unshared_vocab(
     vocab_path = os.path.join(root_dir, f"{prefix}-onmt.vocab")
     parent_langs, _, _ = parse_langs(parent_data_config.get(f"{prefix}_langs", []))
     if langs == parent_langs:
-        copy_parent_vocab(prefix, parent_data_config, parent_root_dir, root_dir, tag_langs)
-    else:
-        print(f"Building {side} vocabulary...")
-        vocab_size: int = data_config.get(f"{prefix}_vocab_size", data_config.get("vocab_size"))
-        build_vocab(vocab_file_paths, vocab_size, model_prefix, vocab_path, tag_langs)
+        parent_sp_prefix_path: str
+        parent_vocab_path: str
+        if parent_data_config["share_vocab"]:
+            parent_sp_prefix_path = os.path.join(parent_root_dir, "sp")
+            parent_vocab_path = os.path.join(parent_root_dir, "onmt.vocab")
+        else:
+            parent_sp_prefix_path = os.path.join(parent_root_dir, f"{prefix}-sp")
+            parent_vocab_path = os.path.join(parent_root_dir, f"{prefix}-onmt.vocab")
+
+        parent_spp = sp.SentencePieceProcessor()
+        parent_spp.Load(parent_sp_prefix_path + ".model")
+
+        parent_vocab = opennmt.data.Vocab()
+        parent_vocab.load(parent_vocab_path)
+
+        child_tokens: Set[str] = set()
+        for vocab_file_path in vocab_file_paths:
+            for line in encode_sp_lines(parent_spp, load_corpus(vocab_file_path)):
+                child_tokens.update(line.split())
+
+        # all tokens in the child corpora are in the parent vocab, so we can just use the parent vocab
+        if child_tokens.issubset(parent_vocab.words):
+            sp_vocab_path = os.path.join(root_dir, f"{prefix}-sp.vocab")
+            onmt_vocab_path = os.path.join(root_dir, f"{prefix}-onmt.vocab")
+            shutil.copy2(parent_sp_prefix_path + ".model", os.path.join(root_dir, f"{prefix}-sp.model"))
+            shutil.copy2(parent_sp_prefix_path + ".vocab", sp_vocab_path)
+            convert_vocab(sp_vocab_path, onmt_vocab_path, tag_langs)
+            return
+
+    print(f"Building {side} vocabulary...")
+    vocab_size: int = data_config.get(f"{prefix}_vocab_size", data_config.get("vocab_size"))
+    build_vocab(vocab_file_paths, vocab_size, model_prefix, vocab_path, tag_langs)
 
 
 def is_in_sorted(items: list, value: Any) -> bool:

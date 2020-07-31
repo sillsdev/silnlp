@@ -3,7 +3,7 @@
   "isRoot": true,
   "tools": {
     "sil.machine.translator": {
-      "version": "2.1.9",
+      "version": "2.1.10",
       "commands": [
         "translator"
       ]
