@@ -3,7 +3,7 @@ import logging
 import os
 import random
 from glob import glob
-from typing import IO, Dict, List, Optional, Set, Tuple
+from typing import IO, Dict, List, Set, Tuple
 
 logging.basicConfig()
 
@@ -15,7 +15,7 @@ from nlp.nmt.config import create_runner, get_root_dir, load_config, parse_langs
 from nlp.nmt.utils import decode_sp, get_best_model_dir
 
 
-class TestResults:
+class PairScore:
     def __init__(self, src_iso: str, trg_iso: str, bleu: sacrebleu.BLEU, sent_len: int, projects: Set[str]) -> None:
         self.src_iso = src_iso
         self.trg_iso = trg_iso
@@ -115,46 +115,18 @@ def load_test_data(
     return dataset
 
 
-def get_step(model_dir: str, best: bool, checkpoint: Optional[int]) -> int:
-    if best:
-        return get_best_model_dir(model_dir)[1]
-    elif checkpoint is not None:
-        return checkpoint
-    else:
-        with open(os.path.join(model_dir, "checkpoint"), "r", encoding="utf-8") as file:
-            checkpoint_config = yaml.safe_load(file)
-            checkpoint_path: str = checkpoint_config["model_checkpoint_path"]
-            parts = os.path.basename(checkpoint_path).split("-")
-            return int(parts[-1])
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Tests a NMT model using OpenNMT-tf")
-    parser.add_argument("experiment", help="Experiment name")
-    parser.add_argument("--memory-growth", default=False, action="store_true", help="Enable memory growth")
-    parser.add_argument("--checkpoint", type=str, help="Checkpoint to use")
-    parser.add_argument("--best", default=False, action="store_true", help="Test best evaluated model")
-    parser.add_argument("--ref-projects", nargs="*", metavar="project", default=[], help="Reference projects")
-    parser.add_argument("--force-infer", default=False, action="store_true", help="Force inferencing")
-    args = parser.parse_args()
-
-    print("Git commit:", get_git_revision_hash())
-
-    exp_name = args.experiment
-    root_dir = get_root_dir(exp_name)
-    config = load_config(exp_name)
-    model_dir: str = config["model_dir"]
-    data_config: dict = config["data"]
-    src_langs, _, _ = parse_langs(data_config["src_langs"])
-    trg_langs, trg_train_projects, _ = parse_langs(data_config["trg_langs"])
-    step = get_step(model_dir, args.best, args.checkpoint)
-
-    random.seed(data_config["seed"])
-
-    checkpoint_path = None
-    if args.checkpoint is not None:
-        checkpoint_path = os.path.join(model_dir, f"ckpt-{args.checkpoint}")
-
+def test_checkpoint(
+    root_dir: str,
+    config: dict,
+    src_langs: Set[str],
+    trg_langs: Set[str],
+    trg_train_projects: Dict[str, Set[str]],
+    force_infer: bool,
+    memory_growth: bool,
+    ref_projects: Set[str],
+    checkpoint_path: str,
+    step: int,
+) -> List[PairScore]:
     features_paths: List[str] = []
     predictions_paths: List[str] = []
     refs_paths: List[str] = []
@@ -177,25 +149,18 @@ def main() -> None:
                 refs_paths.append(os.path.join(root_dir, f"{prefix}.trg.detok*.txt"))
                 predictions_detok_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.detok.txt.{step}"))
 
-    if args.force_infer or any(not os.path.isfile(f) for f in predictions_detok_paths):
-        runner = create_runner(config, memory_growth=args.memory_growth)
-        print("Inferencing...")
-        if args.best:
-            best_model_path, _ = get_best_model_dir(model_dir)
-            if os.path.isfile(os.path.join(best_model_path, "ckpt.index")):
-                runner.infer_multiple(
-                    features_paths, predictions_paths, checkpoint_path=os.path.join(best_model_path, "ckpt")
-                )
-            else:
-                runner.saved_model_infer_multiple(features_paths, predictions_paths)
+    if force_infer or any(not os.path.isfile(f) for f in predictions_detok_paths):
+        runner = create_runner(config, memory_growth=memory_growth)
+        print(f"Inferencing checkpoint {step}...")
+        if os.path.basename(checkpoint_path) == "saved_model.pb":
+            runner.saved_model_infer_multiple(features_paths, predictions_paths)
         else:
             runner.infer_multiple(features_paths, predictions_paths, checkpoint_path=checkpoint_path)
 
-    print("Scoring...")
-    ref_projects: Set[str] = set(args.ref_projects)
+    print(f"Scoring checkpoint {step}...")
     default_src_iso = next(iter(src_langs))
     default_trg_iso = next(iter(trg_langs))
-    scores: List[TestResults] = []
+    scores: List[PairScore] = []
     overall_sys: List[str] = []
     overall_refs: List[List[str]] = []
     for features_path, predictions_path, refs_path, predictions_detok_path in zip(
@@ -226,13 +191,12 @@ def main() -> None:
             for overall_ref in filter(lambda r: len(r) < len(overall_sys), overall_refs):
                 overall_ref.extend([""] * (len(overall_sys) - len(overall_ref)))
             bleu = sacrebleu.corpus_bleu(sys, refs, lowercase=True)
-            scores.append(TestResults(src_iso, trg_iso, bleu, len(sys), ref_projects))
+            scores.append(PairScore(src_iso, trg_iso, bleu, len(sys), ref_projects))
 
     if len(src_langs) > 1 or len(trg_langs) > 1:
         bleu = sacrebleu.corpus_bleu(overall_sys, overall_refs, lowercase=True)
-        scores.append(TestResults("ALL", "ALL", bleu, len(overall_sys), ref_projects))
+        scores.append(PairScore("ALL", "ALL", bleu, len(overall_sys), ref_projects))
 
-    print(f"Test results ({len(overall_refs)} reference(s))")
     bleu_file_root = f"bleu-{step}"
     if len(ref_projects) > 0:
         ref_projects_suffix = "_".join(sorted(ref_projects))
@@ -243,10 +207,105 @@ def main() -> None:
         )
         for results in scores:
             results.write(bleu_file)
+    return scores
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Tests a NMT model using OpenNMT-tf")
+    parser.add_argument("experiment", help="Experiment name")
+    parser.add_argument("--memory-growth", default=False, action="store_true", help="Enable memory growth")
+    parser.add_argument("--checkpoint", type=str, help="Checkpoint to use")
+    parser.add_argument("--last", default=False, action="store_true", help="Test last checkpoint")
+    parser.add_argument("--best", default=False, action="store_true", help="Test best evaluated checkpoint")
+    parser.add_argument("--ref-projects", nargs="*", metavar="project", default=[], help="Reference projects")
+    parser.add_argument("--force-infer", default=False, action="store_true", help="Force inferencing")
+    args = parser.parse_args()
+
+    print("Git commit:", get_git_revision_hash())
+
+    exp_name = args.experiment
+    root_dir = get_root_dir(exp_name)
+    config = load_config(exp_name)
+    model_dir: str = config["model_dir"]
+    data_config: dict = config["data"]
+    src_langs, _, _ = parse_langs(data_config["src_langs"])
+    trg_langs, trg_train_projects, _ = parse_langs(data_config["trg_langs"])
+    ref_projects: Set[str] = set(args.ref_projects)
+
+    random.seed(data_config["seed"])
+
+    best_model_path, best_step = get_best_model_dir(model_dir)
+    results: Dict[int, List[PairScore]] = {}
+    if args.checkpoint is not None:
+        checkpoint_path = os.path.join(model_dir, f"ckpt-{args.checkpoint}")
+        step = int(args.checkpoint)
+        results[step] = test_checkpoint(
+            root_dir,
+            config,
+            src_langs,
+            trg_langs,
+            trg_train_projects,
+            args.force_infer,
+            args.memory_growth,
+            ref_projects,
+            checkpoint_path,
+            step,
+        )
+
+    if args.best:
+        step = best_step
+        checkpoint_path = os.path.join(best_model_path, "ckpt")
+        if not os.path.isfile(checkpoint_path + ".index"):
+            checkpoint_path = os.path.join(model_dir, "saved_model.pb")
+
+        if step not in results:
+            results[step] = test_checkpoint(
+                root_dir,
+                config,
+                src_langs,
+                trg_langs,
+                trg_train_projects,
+                args.force_infer,
+                args.memory_growth,
+                ref_projects,
+                checkpoint_path,
+                step,
+            )
+
+    if args.last or (not args.best and args.checkpoint is None):
+        with open(os.path.join(model_dir, "checkpoint"), "r", encoding="utf-8") as file:
+            checkpoint_config = yaml.safe_load(file)
+            checkpoint_prefix: str = checkpoint_config["model_checkpoint_path"]
+            parts = os.path.basename(checkpoint_prefix).split("-")
+            checkpoint_path = os.path.join(model_dir, checkpoint_prefix)
+            step = int(parts[-1])
+
+        if step not in results:
+            results[step] = test_checkpoint(
+                root_dir,
+                config,
+                src_langs,
+                trg_langs,
+                trg_train_projects,
+                args.force_infer,
+                args.memory_growth,
+                ref_projects,
+                checkpoint_path,
+                step,
+            )
+
+    for step in sorted(results.keys()):
+        num_refs = results[step][0].num_refs
+        if num_refs == 0:
+            num_refs = 1
+        checkpoint_str = "best " if step == best_step else ""
+        checkpoint_str += f"checkpoint {step}"
+        print(f"Test results for {checkpoint_str} ({num_refs} reference(s))")
+        for score in results[step]:
             print(
-                f"{results.src_iso} -> {results.trg_iso}: {results.bleu.score:.2f} {results.bleu.precisions[0]:.2f}"
-                f"/{results.bleu.precisions[1]:.2f}/{results.bleu.precisions[2]:.2f}/{results.bleu.precisions[3]:.2f}"
-                f"/{results.bleu.bp:.3f}"
+                f"{score.src_iso} -> {score.trg_iso}: {score.bleu.score:.2f} {score.bleu.precisions[0]:.2f}"
+                f"/{score.bleu.precisions[1]:.2f}/{score.bleu.precisions[2]:.2f}/{score.bleu.precisions[3]:.2f}"
+                f"/{score.bleu.bp:.3f}"
             )
 
 
