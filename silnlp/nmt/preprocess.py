@@ -6,6 +6,7 @@ import os
 import random
 import shutil
 from glob import glob
+from statistics import mean
 from typing import IO, Any, Dict, Iterable, List, Optional, Set, Tuple
 
 logging.basicConfig()
@@ -198,6 +199,7 @@ def main() -> None:
         description="Preprocesses text corpora into a multilingual data set for OpenNMT-tf"
     )
     parser.add_argument("experiment", help="Experiment name")
+    parser.add_argument("--stats", default=False, action="store_true", help="Output corpus statistics")
     args = parser.parse_args()
 
     print("Git commit:", get_git_revision_hash())
@@ -340,69 +342,91 @@ def main() -> None:
     pair_val_indices: Dict[Tuple[str, str], Set[int]] = {}
     pair_test_indices: Dict[Tuple[str, str], Set[int]] = {}
 
-    for src_file_path in src_file_paths:
-        for trg_file_path in trg_file_paths + test_only_trg_file_paths:
-            src_iso, src_project = get_iso(src_file_path)
-            trg_iso, trg_project = get_iso(trg_file_path)
+    stats_file: Optional[IO] = None
+    try:
+        if args.stats:
+            stats_file = open(os.path.join(root_dir, "corpus-stats.csv"), "w", encoding="utf-8")
+            stats_file.write("src_project,trg_project,count,align_score,filtered_count\n")
 
-            if src_iso == trg_iso:
-                continue
+        for src_file_path in src_file_paths:
+            for trg_file_path in trg_file_paths + test_only_trg_file_paths:
+                src_iso, src_project = get_iso(src_file_path)
+                trg_iso, trg_project = get_iso(trg_file_path)
 
-            is_train_ref = not is_in_sorted(test_only_trg_file_paths, trg_file_path)
-            is_test_ref = not is_in_sorted(train_only_trg_file_paths, trg_file_path)
+                if src_iso == trg_iso:
+                    continue
 
-            cur_train = get_parallel_corpus(src_file_path, trg_file_path)
-            if is_train_ref and score_threshold > 0:
-                add_alignment_scores(cur_train)
+                is_train_ref = not is_in_sorted(test_only_trg_file_paths, trg_file_path)
+                is_test_ref = not is_in_sorted(train_only_trg_file_paths, trg_file_path)
 
-            if is_test_ref:
-                if disjoint_test and test_indices is None:
-                    indices: Set[int] = set(cur_train.index)
-                    if disjoint_val and val_indices is not None:
-                        indices.difference_update(val_indices)
-                    test_indices = set(random.sample(indices, min(test_size, len(indices))))
+                cur_train = get_parallel_corpus(src_file_path, trg_file_path)
+                corpus_len = len(cur_train)
+                if is_train_ref and (stats_file is not None or score_threshold > 0):
+                    add_alignment_scores(cur_train)
 
-                cur_train, cur_test = split_parallel_corpus(
-                    cur_train, test_size, pair_test_indices.get((src_iso, trg_iso), test_indices)
-                )
+                if is_test_ref:
+                    if disjoint_test and test_indices is None:
+                        indices: Set[int] = set(cur_train.index)
+                        if disjoint_val and val_indices is not None:
+                            indices.difference_update(val_indices)
+                        test_indices = set(random.sample(indices, min(test_size, len(indices))))
 
-                cur_test.drop("score", axis=1, inplace=True, errors="ignore")
-                add_to_eval_dataset(src_iso, trg_iso, trg_project, write_trg_tag, test, pair_test_indices, cur_test)
-
-            if is_train_ref:
-                if score_threshold > 0:
-                    unfiltered_len = len(cur_train)
-                    cur_train = filter_parallel_corpus(cur_train, score_threshold)
-                    print(f"Filtered {unfiltered_len - len(cur_train)} verses from {src_project} -> {trg_project}.")
-                    cur_train.drop("score", axis=1, inplace=True, errors="ignore")
-
-                if disjoint_val and val_indices is None:
-                    indices = set(cur_train.index)
-                    if disjoint_test and test_indices is not None:
-                        indices.difference_update(test_indices)
-                    val_indices = set(random.sample(indices, min(val_size, len(indices))))
-
-                cur_train, cur_val = split_parallel_corpus(
-                    cur_train, val_size, pair_val_indices.get((src_iso, trg_iso), val_indices)
-                )
-
-                if mirror:
-                    mirror_cur_train = cur_train.rename(columns={"source": "target", "target": "source"})
-                    mirror_cur_val = cur_val.rename(columns={"source": "target", "target": "source"})
-
-                    add_to_eval_dataset(
-                        trg_iso, src_iso, src_project, write_trg_tag, val, pair_val_indices, mirror_cur_val
+                    cur_train, cur_test = split_parallel_corpus(
+                        cur_train, test_size, pair_test_indices.get((src_iso, trg_iso), test_indices)
                     )
 
+                    cur_test.drop("score", axis=1, inplace=True, errors="ignore")
+                    add_to_eval_dataset(src_iso, trg_iso, trg_project, write_trg_tag, test, pair_test_indices, cur_test)
+
+                if is_train_ref:
+                    alignment_score = mean(cur_train["score"]) if stats_file is not None else 0
+
+                    filtered_count = 0
+                    if score_threshold > 0:
+                        unfiltered_len = len(cur_train)
+                        cur_train = filter_parallel_corpus(cur_train, score_threshold)
+                        filtered_count = unfiltered_len - len(cur_train)
+
+                    if stats_file is not None:
+                        print(f"{src_project} -> {trg_project} stats")
+                        print(f"- count: {corpus_len}")
+                        print(f"- alignment: {alignment_score:.4f}")
+                        print(f"- filtered count: {filtered_count}")
+                        stats_file.write(
+                            f"{src_project},{trg_project},{corpus_len},{alignment_score:.4f},{filtered_count}"
+                        )
+                    cur_train.drop("score", axis=1, inplace=True, errors="ignore")
+
+                    if disjoint_val and val_indices is None:
+                        indices = set(cur_train.index)
+                        if disjoint_test and test_indices is not None:
+                            indices.difference_update(test_indices)
+                        val_indices = set(random.sample(indices, min(val_size, len(indices))))
+
+                    cur_train, cur_val = split_parallel_corpus(
+                        cur_train, val_size, pair_val_indices.get((src_iso, trg_iso), val_indices)
+                    )
+
+                    if mirror:
+                        mirror_cur_train = cur_train.rename(columns={"source": "target", "target": "source"})
+                        mirror_cur_val = cur_val.rename(columns={"source": "target", "target": "source"})
+
+                        add_to_eval_dataset(
+                            trg_iso, src_iso, src_project, write_trg_tag, val, pair_val_indices, mirror_cur_val
+                        )
+
+                        if write_trg_tag:
+                            insert_trg_tag(src_iso, mirror_cur_train)
+                        train = pd.concat([train, mirror_cur_train], ignore_index=True)
+
+                    add_to_eval_dataset(src_iso, trg_iso, trg_project, write_trg_tag, val, pair_val_indices, cur_val)
+
                     if write_trg_tag:
-                        insert_trg_tag(src_iso, mirror_cur_train)
-                    train = pd.concat([train, mirror_cur_train], ignore_index=True)
-
-                add_to_eval_dataset(src_iso, trg_iso, trg_project, write_trg_tag, val, pair_val_indices, cur_val)
-
-                if write_trg_tag:
-                    insert_trg_tag(trg_iso, cur_train)
-                train = pd.concat([train, cur_train], ignore_index=True)
+                        insert_trg_tag(trg_iso, cur_train)
+                    train = pd.concat([train, cur_train], ignore_index=True)
+    finally:
+        if stats_file is not None:
+            stats_file.close()
 
     if train is None:
         return

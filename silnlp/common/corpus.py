@@ -55,7 +55,8 @@ def tokenize_parallel_corpus(src_sentences: Iterable[str], trg_sentences: Iterab
                 src_output_path,
                 "-to",
                 trg_output_path,
-            ]
+            ],
+            stdout=subprocess.DEVNULL,
         )
 
         src_sentences = load_corpus(src_output_path)
