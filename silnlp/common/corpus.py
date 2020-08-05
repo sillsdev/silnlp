@@ -82,11 +82,12 @@ def compute_score(
     trg_words = trg_sentence.split(" ")
     probs: List[float] = [0] * len(trg_words)
     for pair in pairs:
-        parts = pair.split("-")
-        i = int(parts[0])
-        j = int(parts[1])
-        prob = prob_table.get((src_words[i], trg_words[j]), 1e-9)
-        probs[j] = prob if probs[j] == 0 else (probs[j] + prob) / 2
+        if pair != "":
+            parts = pair.split("-")
+            i = int(parts[0])
+            j = int(parts[1])
+            prob = prob_table.get((src_words[i], trg_words[j]), 1e-9)
+            probs[j] = prob if probs[j] == 0 else (probs[j] + prob) / 2
 
     for j in range(len(trg_words)):
         if probs[j] == 0:
