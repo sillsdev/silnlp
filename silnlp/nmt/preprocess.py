@@ -363,6 +363,8 @@ def main() -> None:
                 corpus_len = len(cur_train)
                 if is_train_ref and (stats_file is not None or score_threshold > 0):
                     add_alignment_scores(cur_train)
+                    if stats_file is not None:
+                        cur_train.to_csv(os.path.join(root_dir, f"{src_project}_{trg_project}.csv"), index=False)
 
                 if is_test_ref:
                     if disjoint_test and test_indices is None:
