@@ -6,6 +6,7 @@ from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
 logging.basicConfig()
 
 import opennmt.data
+import opennmt.inputters
 import opennmt.models
 import opennmt.utils
 import tensorflow as tf
@@ -46,6 +47,22 @@ DEFAULT_NEW_CONFIG: dict = {
         "word_dropout": 0.1,
     },
 }
+
+
+@opennmt.models.register_model_in_catalog
+class TransformerMedium(opennmt.models.Transformer):
+    def __init__(self):
+        super(TransformerMedium, self).__init__(
+            source_inputter=opennmt.inputters.WordEmbedder(embedding_size=512),
+            target_inputter=opennmt.inputters.WordEmbedder(embedding_size=512),
+            num_layers=3,
+            num_units=512,
+            num_heads=8,
+            ffn_inner_dim=2048,
+            dropout=0.1,
+            attention_dropout=0.1,
+            ffn_dropout=0.1,
+        )
 
 
 def set_log_level(log_level: int) -> None:
