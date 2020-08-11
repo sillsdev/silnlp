@@ -75,23 +75,37 @@ def load_prob_table(table_path: str) -> Dict[Tuple[str, str], float]:
 
 
 def compute_score(
-    prob_table: Dict[Tuple[str, str], float], src_sentence: str, trg_sentence: str, alignment: str
+    forward_prob_table: Dict[Tuple[str, str], float],
+    reverse_prob_table: Dict[Tuple[str, str], float],
+    src_sentence: str,
+    trg_sentence: str,
+    alignment: str,
 ) -> float:
     pairs = alignment.split(" ")
     src_words = src_sentence.split(" ")
     trg_words = trg_sentence.split(" ")
-    probs: List[float] = [0] * len(trg_words)
+    probs: List[float] = []
+    unaligned_trg_indices: Set[int] = set(range(len(trg_words)))
+    unaligned_src_indices: Set[int] = set(range(len(src_words)))
     for pair in pairs:
         if pair != "":
             parts = pair.split("-")
             i = int(parts[0])
             j = int(parts[1])
-            prob = prob_table.get((src_words[i], trg_words[j]), 1e-9)
-            probs[j] = prob if probs[j] == 0 else (probs[j] + prob) / 2
+            unaligned_src_indices.discard(i)
+            unaligned_trg_indices.discard(j)
+            src_word = src_words[i]
+            trg_word = trg_words[j]
+            forward_prob = forward_prob_table.get((src_word, trg_word), 1e-9)
+            reverse_prob = reverse_prob_table.get((trg_word, src_word), 1e-9)
+            prob = max(forward_prob, reverse_prob)
+            probs.append(prob)
 
-    for j in range(len(trg_words)):
-        if probs[j] == 0:
-            probs[j] = prob_table.get(("<eps>", trg_words[j]), 1e-9)
+    for j in unaligned_trg_indices:
+        probs.append(forward_prob_table.get(("<eps>", trg_words[j]), 1e-9))
+
+    for i in unaligned_src_indices:
+        probs.append(reverse_prob_table.get(("<eps>", src_words[i]), 1e-9))
 
     return mean(probs)
 
@@ -102,34 +116,65 @@ def wsl_path(win_path: str) -> str:
     return result.stdout.strip()
 
 
-def add_alignment_scores(corpus: pd.DataFrame) -> None:
+def execute_fast_align(input_path: str, output_path: str, prob_table_path: str, reverse: bool) -> None:
     fast_align_path = os.path.join(os.getenv("FAST_ALIGN_PATH", "."), "fast_align")
     if not os.path.isfile(fast_align_path):
         raise RuntimeError("fast_align is not installed.")
 
+    args: List[str]
+    if platform.system() == "Windows":
+        args = ["wsl", wsl_path(fast_align_path), "-i", wsl_path(input_path), "-p", wsl_path(prob_table_path)]
+    else:
+        args = [fast_align_path, "-i", input_path, "-p", prob_table_path]
+    args.extend(["-d", "-o", "-v"])
+    if reverse:
+        args.append("-r")
+
+    with open(output_path, "w") as output_file:
+        subprocess.run(args, stdout=output_file, stderr=subprocess.DEVNULL)
+
+
+def execute_atools(forward_align_path: str, reverse_align_path: str) -> str:
+    atools_path = os.path.join(os.getenv("FAST_ALIGN_PATH", "."), "atools")
+    if not os.path.isfile(atools_path):
+        raise RuntimeError("atools is not installed.")
+
+    args: List[str]
+    if platform.system() == "Windows":
+        args = ["wsl", wsl_path(atools_path), "-i", wsl_path(forward_align_path), "-j", wsl_path(reverse_align_path)]
+    else:
+        args = [atools_path, "-i", forward_align_path, "-j", reverse_align_path]
+    args.extend(["-c", "grow-diag-final-and"])
+
+    result = subprocess.run(args, capture_output=True, encoding="utf-8")
+    return result.stdout
+
+
+def add_alignment_scores(corpus: pd.DataFrame) -> None:
     src_sentences, trg_sentences = tokenize_parallel_corpus(corpus["source"], corpus["target"])
     with tempfile.TemporaryDirectory() as td:
         input_path = os.path.join(td, "align-input.txt")
-        prob_table_path = os.path.join(td, "prob-table.txt")
 
         with open(input_path, "w", encoding="utf-8", newline="\n") as file:
             for src_sentence, trg_sentence in zip(src_sentences, trg_sentences):
                 file.write(f"{src_sentence} ||| {trg_sentence}\n")
 
-        args: List[str]
-        if platform.system() == "Windows":
-            args = ["wsl", wsl_path(fast_align_path), "-i", wsl_path(input_path), "-p", wsl_path(prob_table_path)]
-        else:
-            args = [fast_align_path, "-i", input_path, "-p", prob_table_path]
-        args.extend(["-d", "-o", "-v"])
+        forward_align_path = os.path.join(td, "forward-align.txt")
+        forward_prob_table_path = os.path.join(td, "forward-prob-table.txt")
+        execute_fast_align(input_path, forward_align_path, forward_prob_table_path, reverse=False)
 
-        result = subprocess.run(args, capture_output=True, encoding="utf-8")
-        output: str = result.stdout
-        prob_table = load_prob_table(prob_table_path)
+        reverse_align_path = os.path.join(td, "reverse-align.txt")
+        reverse_prob_table_path = os.path.join(td, "reverse-prob-table.txt")
+        execute_fast_align(input_path, reverse_align_path, reverse_prob_table_path, reverse=True)
+
+        output = execute_atools(forward_align_path, reverse_align_path)
+
+        forward_prob_table = load_prob_table(forward_prob_table_path)
+        reverse_prob_table = load_prob_table(reverse_prob_table_path)
 
         scores: List[float] = []
         for src_sentence, trg_sentence, alignment in zip(src_sentences, trg_sentences, output.splitlines()):
-            scores.append(compute_score(prob_table, src_sentence, trg_sentence, alignment))
+            scores.append(compute_score(forward_prob_table, reverse_prob_table, src_sentence, trg_sentence, alignment))
         corpus["score"] = scores
 
 
