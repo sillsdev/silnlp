@@ -157,6 +157,7 @@ def test_checkpoint(
         else:
             runner.infer_multiple(features_paths, predictions_paths, checkpoint_path=checkpoint_path)
 
+    data_config: dict = config["data"]
     print(f"Scoring checkpoint {step}...")
     default_src_iso = next(iter(src_langs))
     default_trg_iso = next(iter(trg_langs))
@@ -190,7 +191,9 @@ def test_checkpoint(
             # ensure that all refs are the same length as the sys
             for overall_ref in filter(lambda r: len(r) < len(overall_sys), overall_refs):
                 overall_ref.extend([""] * (len(overall_sys) - len(overall_ref)))
-            bleu = sacrebleu.corpus_bleu(sys, refs, lowercase=True)
+            bleu = sacrebleu.corpus_bleu(
+                sys, refs, lowercase=True, tokenize=data_config.get("sacrebleu_tokenize", "13a")
+            )
             scores.append(PairScore(src_iso, trg_iso, bleu, len(sys), ref_projects))
 
     if len(src_langs) > 1 or len(trg_langs) > 1:

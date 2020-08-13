@@ -25,7 +25,7 @@ from nlp.common.corpus import (
 )
 from nlp.common.corpus import get_corpus_path, load_corpus
 from nlp.nmt.config import create_runner, get_git_revision_hash, get_root_dir, load_config, parse_langs
-from nlp.nmt.utils import encode_sp, encode_sp_lines
+from nlp.nmt.utils import decode_sp_lines, encode_sp, encode_sp_lines
 
 
 def convert_vocab(sp_vocab_path: str, onmt_vocab_path: str, tag_langs: Set[str] = None) -> None:
@@ -454,7 +454,10 @@ def main() -> None:
         for column in columns:
             project = column[len("target_") :]
             trg_suffix = "" if len(columns) == 1 else f".{project}"
-            write_corpus(os.path.join(root_dir, f"{prefix}.trg.detok{trg_suffix}.txt"), pair_test[column])
+            write_corpus(
+                os.path.join(root_dir, f"{prefix}.trg.detok{trg_suffix}.txt"),
+                decode_sp_lines(encode_sp_lines(trg_spp, pair_test[column])),
+            )
 
     print("Preprocessing completed")
 
