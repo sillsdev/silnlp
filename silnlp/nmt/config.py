@@ -150,6 +150,8 @@ def load_config(exp_name: str) -> dict:
             and "vocab_size" not in data_config
         ):
             data_config["vocab_size"] = 24000
+        if "src_casing" not in data_config and "trg_casing" not in data_config and "casing" not in data_config:
+            data_config["casing"] = "lower"
     else:
         data_config["source_vocabulary"] = os.path.join(root_dir, "src-onmt.vocab")
         data_config["target_vocabulary"] = os.path.join(root_dir, "trg-onmt.vocab")
@@ -158,6 +160,11 @@ def load_config(exp_name: str) -> dict:
                 data_config["src_vocab_size"] = 8000
             if "trg_vocab_size" not in data_config:
                 data_config["trg_vocab_size"] = 8000
+        if "casing" not in data_config:
+            if "src_casing" not in data_config:
+                data_config["src_casing"] = "lower"
+            if "trg_casing" not in data_config:
+                data_config["trg_casing"] = "lower"
     return config
 
 
@@ -237,6 +244,11 @@ def parse_langs(langs: Iterable[Union[str, dict]]) -> Tuple[Set[str], Dict[str, 
     return isos, train_projects, test_projects
 
 
+def copy_config_value(src: dict, trg: dict, key: str) -> None:
+    if key in src:
+        trg[key] = src[key]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Creates a NMT experiment config file")
     parser.add_argument("experiment", help="Experiment name")
@@ -272,14 +284,17 @@ def main() -> None:
         data_config["parent"] = args.parent
         parent_config = load_config(args.parent)
         parent_data_config: dict = parent_config["data"]
-        if "share_vocab" in parent_data_config:
-            data_config["share_vocab"] = parent_data_config["share_vocab"]
-        if "vocab_size" in parent_data_config:
-            data_config["vocab_size"] = parent_data_config["vocab_size"]
-        if "src_vocab_size" in parent_data_config:
-            data_config["src_vocab_size"] = parent_data_config["src_vocab_size"]
-        if "trg_vocab_size" in parent_data_config:
-            data_config["trg_vocab_size"] = parent_data_config["trg_vocab_size"]
+        for key in [
+            "share_vocab",
+            "vocab_size",
+            "src_vocab_size",
+            "trg_vocab_size",
+            "casing",
+            "src_casing",
+            "trg_casing",
+        ]:
+            if key in parent_data_config:
+                data_config[key] = parent_data_config[key]
     if args.vocab_size is not None:
         data_config["vocab_size"] = args.vocab_size
     elif args.src_vocab_size is not None or args.trg_vocab_size is not None:
@@ -297,11 +312,19 @@ def main() -> None:
     if data_config["share_vocab"]:
         if "vocab_size" not in data_config:
             data_config["vocab_size"] = 24000
+        if "casing" not in data_config:
+            data_config["casing"] = "lower"
     else:
         if "src_vocab_size" not in data_config:
             data_config["src_vocab_size"] = 8000
         if "trg_vocab_size" not in data_config:
             data_config["trg_vocab_size"] = 8000
+        if "src_casing" not in data_config:
+            data_config["src_casing"] = data_config.get("casing", "lower")
+        if "trg_casing" not in data_config:
+            data_config["trg_casing"] = data_config.get("casing", "lower")
+        if "casing" in data_config:
+            del data_config["casing"]
     if args.seed is not None:
         data_config["seed"] = args.seed
     if args.mirror:

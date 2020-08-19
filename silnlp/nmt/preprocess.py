@@ -47,12 +47,26 @@ def convert_vocab(sp_vocab_path: str, onmt_vocab_path: str, tag_langs: Set[str] 
 
 
 def build_vocab(
-    file_paths: Iterable[str], vocab_size: int, model_prefix: str, vocab_path: str, tag_langs: Set[str] = None
+    file_paths: Iterable[str],
+    vocab_size: int,
+    casing: str,
+    model_prefix: str,
+    vocab_path: str,
+    tag_langs: Set[str] = None,
 ) -> None:
     joined_file_paths = ",".join(file_paths)
 
+    casing = casing.lower()
+    normalization: str
+    if casing == "lower":
+        normalization = "nmt_nfkc_cf"
+    elif casing == "preserve":
+        normalization = "nmt_nfkc"
+    else:
+        raise RuntimeError("Invalid casing was specified in the config.")
+
     sp_train_params = (
-        f"--normalization_rule_name=nmt_nfkc_cf --input={joined_file_paths} --model_prefix={model_prefix}"
+        f"--normalization_rule_name={normalization} --input={joined_file_paths} --model_prefix={model_prefix}"
         f" --vocab_size={vocab_size} --character_coverage=1.0 --input_sentence_size=1000000"
         " --shuffle_input_sentence=true --control_symbols=<range>"
     )
@@ -130,7 +144,8 @@ def create_unshared_vocab(
 
     print(f"Building {side} vocabulary...")
     vocab_size: int = data_config.get(f"{prefix}_vocab_size", data_config.get("vocab_size"))
-    build_vocab(vocab_file_paths, vocab_size, model_prefix, vocab_path, tag_langs)
+    casing: str = data_config.get(f"{prefix}_casing", data_config.get("casing"))
+    build_vocab(vocab_file_paths, vocab_size, casing, model_prefix, vocab_path, tag_langs)
 
 
 def is_in_sorted(items: list, value: Any) -> bool:
@@ -277,10 +292,18 @@ def main() -> None:
                     "The source and target vocab sizes cannot be different when creating a shared vocab."
                 )
 
+        casing: Optional[str] = data_config.get("casing")
+        if casing is None:
+            casing = data_config.get("src_casing")
+            if casing is None:
+                casing = data_config["trg_casing"]
+            elif data_config.get("trg_casing", casing) != casing:
+                raise RuntimeError("The source and target casing cannot be different when creating a shared vocab.")
+
         model_prefix = os.path.join(root_dir, "sp")
         vocab_path = os.path.join(root_dir, "onmt.vocab")
         share_vocab_file_paths: Set[str] = set(src_file_paths).union(trg_file_paths)
-        build_vocab(share_vocab_file_paths, vocab_size, model_prefix, vocab_path, tag_langs)
+        build_vocab(share_vocab_file_paths, vocab_size, casing, model_prefix, vocab_path, tag_langs)
 
         if has_parent:
             update_vocab(parent_config, root_dir, vocab_path, vocab_path)
