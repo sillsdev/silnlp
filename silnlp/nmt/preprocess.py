@@ -11,7 +11,6 @@ from typing import IO, Any, Dict, Iterable, List, Optional, Set, Tuple
 
 logging.basicConfig()
 
-import numpy as np
 import opennmt.data
 import pandas as pd
 import sentencepiece as sp
@@ -24,6 +23,7 @@ from nlp.common.corpus import (
     write_corpus,
 )
 from nlp.common.corpus import get_corpus_path, load_corpus
+from nlp.common.utils import set_seed
 from nlp.nmt.config import create_runner, get_git_revision_hash, get_root_dir, load_config, parse_langs
 from nlp.nmt.utils import decode_sp_lines, encode_sp, encode_sp_lines
 
@@ -211,9 +211,7 @@ def main() -> None:
     eval_config: dict = config["eval"]
     multi_ref_eval: bool = eval_config["multi_ref_eval"]
 
-    seed: int = data_config["seed"]
-    random.seed(seed)
-    np.random.seed(seed)
+    set_seed(data_config["seed"])
 
     score_threshold: float = data_config["score_threshold"]
 

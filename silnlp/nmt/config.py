@@ -52,7 +52,7 @@ DEFAULT_NEW_CONFIG: dict = {
 @opennmt.models.register_model_in_catalog
 class TransformerMedium(opennmt.models.Transformer):
     def __init__(self):
-        super(TransformerMedium, self).__init__(
+        super().__init__(
             source_inputter=opennmt.inputters.WordEmbedder(embedding_size=512),
             target_inputter=opennmt.inputters.WordEmbedder(embedding_size=512),
             num_layers=3,
@@ -206,7 +206,7 @@ def create_runner(
         target_noiser.add(WordDropout(word_dropout))
         model.labels_inputter.set_noise(target_noiser, probability=1.0)
 
-    return RunnerEx(model, config, auto_config=True, mixed_precision=mixed_precision, seed=data_config["seed"])
+    return RunnerEx(model, config, auto_config=True, mixed_precision=mixed_precision)
 
 
 def parse_langs(langs: Iterable[Union[str, dict]]) -> Tuple[Set[str], Dict[str, Set[str]], Dict[str, Set[str]]]:

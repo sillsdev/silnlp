@@ -47,7 +47,7 @@ def get_best_model_dir(model_dir: str) -> Tuple[str, int]:
 @opennmt.utils.register_scorer(name="bleu_sp")
 class BLEUSentencepieceScorer(opennmt.utils.Scorer):
     def __init__(self):
-        super(BLEUSentencepieceScorer, self).__init__("bleu")
+        super().__init__("bleu")
 
     def __call__(self, ref_path: str, hyp_path: str) -> float:
         with tf.io.gfile.GFile(ref_path) as ref_stream, tf.io.gfile.GFile(hyp_path) as sys_stream:
@@ -60,7 +60,7 @@ class BLEUSentencepieceScorer(opennmt.utils.Scorer):
 @opennmt.utils.register_scorer(name="bleu_multi_ref")
 class BLEUMultiRefScorer(opennmt.utils.Scorer):
     def __init__(self):
-        super(BLEUMultiRefScorer, self).__init__("bleu")
+        super().__init__("bleu")
 
     def __call__(self, ref_path: str, hyp_path: str) -> float:
         with tf.io.gfile.GFile(hyp_path) as sys_stream:

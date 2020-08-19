@@ -5,8 +5,10 @@ from typing import Optional
 
 logging.basicConfig()
 
-from nlp.common.utils import get_git_revision_hash
+from nlp.common.utils import get_git_revision_hash, set_seed
 from nlp.nmt.config import create_runner, get_root_dir, load_config
+
+os.environ["TF_DETERMINISTIC_OPS"] = "1"
 
 
 def main() -> None:
@@ -22,12 +24,13 @@ def main() -> None:
 
     for exp_name in args.experiments:
         config = load_config(exp_name)
+        data_config: dict = config["data"]
+        set_seed(data_config["seed"])
         root_dir = get_root_dir(exp_name)
         runner = create_runner(config, mixed_precision=args.mixed_precision, memory_growth=args.memory_growth)
         runner.save_effective_config(os.path.join(root_dir, f"effective-config-{rev_hash}.yml"), training=True)
 
         checkpoint_path: Optional[str] = None
-        data_config: dict = config["data"]
         if not os.path.isdir(os.path.join(root_dir, "run")) and "parent" in data_config:
             checkpoint_path = os.path.join(root_dir, "parent")
 

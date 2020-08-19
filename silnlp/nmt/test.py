@@ -10,7 +10,7 @@ logging.basicConfig()
 import sacrebleu
 import yaml
 
-from nlp.common.utils import get_git_revision_hash
+from nlp.common.utils import get_git_revision_hash, set_seed
 from nlp.nmt.config import create_runner, get_root_dir, load_config, parse_langs
 from nlp.nmt.utils import decode_sp, get_best_model_dir
 
@@ -235,13 +235,12 @@ def main() -> None:
     trg_langs, trg_train_projects, _ = parse_langs(data_config["trg_langs"])
     ref_projects: Set[str] = set(args.ref_projects)
 
-    random.seed(data_config["seed"])
-
     best_model_path, best_step = get_best_model_dir(model_dir)
     results: Dict[int, List[PairScore]] = {}
     if args.checkpoint is not None:
         checkpoint_path = os.path.join(model_dir, f"ckpt-{args.checkpoint}")
         step = int(args.checkpoint)
+        set_seed(data_config["seed"])
         results[step] = test_checkpoint(
             root_dir,
             config,
