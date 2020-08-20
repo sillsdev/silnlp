@@ -367,7 +367,7 @@ def main() -> None:
     try:
         if args.stats:
             stats_file = open(os.path.join(root_dir, "corpus-stats.csv"), "w", encoding="utf-8")
-            stats_file.write("src_project,trg_project,count,align_score,filtered_count\n")
+            stats_file.write("src_project,trg_project,count,align_score,filtered_count,filtered_align_score\n")
 
         for src_file_path in src_file_paths:
             for trg_file_path in trg_file_paths + test_only_trg_file_paths:
@@ -405,18 +405,21 @@ def main() -> None:
                     alignment_score = mean(cur_train["score"]) if stats_file is not None else 0
 
                     filtered_count = 0
+                    filtered_alignment_score = alignment_score
                     if score_threshold > 0:
                         unfiltered_len = len(cur_train)
                         cur_train = filter_parallel_corpus(cur_train, score_threshold)
                         filtered_count = unfiltered_len - len(cur_train)
+                        filtered_alignment_score = mean(cur_train["score"]) if stats_file is not None else 0
 
                     if stats_file is not None:
                         print(f"{src_project} -> {trg_project} stats")
                         print(f"- count: {corpus_len}")
                         print(f"- alignment: {alignment_score:.4f}")
                         print(f"- filtered count: {filtered_count}")
+                        print(f"- alignment (filtered): {filtered_alignment_score:.4f}")
                         stats_file.write(
-                            f"{src_project},{trg_project},{corpus_len},{alignment_score:.4f},{filtered_count}"
+                            f"{src_project},{trg_project},{corpus_len},{alignment_score:.4f},{filtered_count},{filtered_alignment_score:.4f}"
                         )
                     cur_train.drop("score", axis=1, inplace=True, errors="ignore")
 

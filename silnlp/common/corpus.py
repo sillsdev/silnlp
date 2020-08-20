@@ -219,8 +219,15 @@ def split_parallel_corpus(
 
 
 def filter_parallel_corpus(corpus: pd.DataFrame, score_threshold: float) -> pd.DataFrame:
-    score_threshold = min(corpus["score"].quantile(0.1), score_threshold)
-    return corpus[corpus["score"] > score_threshold]
+    if score_threshold < 1:
+        # Filter the corpus entries with alignment scores less than the threshold
+        score_threshold = min(corpus["score"].quantile(0.1), score_threshold)
+        return corpus[corpus["score"] > score_threshold]
+    elif score_threshold < len(corpus):
+        # Filter <n> corpus entries with the lowest alignment scores (n = score_threshold)
+        return corpus.sort_values("score").iloc[int(score_threshold) :]
+
+    return corpus
 
 
 def get_corpus_path(iso: str, project: str) -> str:
