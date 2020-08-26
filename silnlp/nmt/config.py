@@ -29,6 +29,7 @@ DEFAULT_NEW_CONFIG: dict = {
     "data": {
         "share_vocab": True,
         "mirror": False,
+        "mixed_src": False,
         "seed": 111,
         "test_size": 250,
         "val_size": 250,
@@ -104,6 +105,7 @@ def load_config(exp_name: str) -> dict:
             "eval_labels_file": os.path.join(root_dir, "val.trg.txt"),
             "share_vocab": True,
             "mirror": False,
+            "mixed_src": False,
             "seed": 111,
             "test_size": 250,
             "val_size": 250,

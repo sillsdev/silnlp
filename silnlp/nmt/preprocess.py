@@ -173,7 +173,7 @@ def add_to_eval_dataset(
     if (src_iso, trg_iso) not in pair_indices:
         pair_indices[(src_iso, trg_iso)] = set(new_data.index)
 
-    new_data = new_data.rename(columns={"target": f"target_{trg_project}"})
+    new_data.rename(columns={"target": f"target_{trg_project}"}, inplace=True)
     if pair_data is None:
         pair_data = new_data
     else:
@@ -181,6 +181,21 @@ def add_to_eval_dataset(
         pair_data.fillna("", inplace=True)
 
     dataset[(src_iso, trg_iso)] = pair_data
+
+
+def add_to_train_dataset(
+    src_project: str, trg_project: str, mixed_src: bool, train: pd.DataFrame, cur_train: pd.DataFrame
+) -> pd.DataFrame:
+    if mixed_src:
+        cur_train.rename(columns={"source": f"source_{src_project}"}, inplace=True)
+        cur_train.set_index(
+            pd.MultiIndex.from_tuples(map(lambda i: (trg_project, i), cur_train.index), names=["trg_project", "index"]),
+            inplace=True,
+        )
+        train = cur_train if train is None else train.combine_first(cur_train)
+    else:
+        train = pd.concat([train, cur_train], ignore_index=True)
+    return train
 
 
 def write_val_corpora(
@@ -258,6 +273,7 @@ def main() -> None:
     test_only_trg_file_paths.sort()
 
     mirror: bool = data_config["mirror"]
+    mixed_src: bool = data_config["mixed_src"] and len(src_file_paths) > 1
 
     parent: Optional[str] = data_config.get("parent")
     parent_config = {}
@@ -419,7 +435,8 @@ def main() -> None:
                         print(f"- filtered count: {filtered_count}")
                         print(f"- alignment (filtered): {filtered_alignment_score:.4f}")
                         stats_file.write(
-                            f"{src_project},{trg_project},{corpus_len},{alignment_score:.4f},{filtered_count},{filtered_alignment_score:.4f}"
+                            f"{src_project},{trg_project},{corpus_len},{alignment_score:.4f},{filtered_count},"
+                            f"{filtered_alignment_score:.4f}"
                         )
                     cur_train.drop("score", axis=1, inplace=True, errors="ignore")
 
@@ -443,13 +460,15 @@ def main() -> None:
 
                         if write_trg_tag:
                             insert_trg_tag(src_iso, mirror_cur_train)
-                        train = pd.concat([train, mirror_cur_train], ignore_index=True)
+
+                        train = add_to_train_dataset(trg_project, src_project, mixed_src, train, mirror_cur_train)
 
                     add_to_eval_dataset(src_iso, trg_iso, trg_project, write_trg_tag, val, pair_val_indices, cur_val)
 
                     if write_trg_tag:
                         insert_trg_tag(trg_iso, cur_train)
-                    train = pd.concat([train, cur_train], ignore_index=True)
+
+                    train = add_to_train_dataset(src_project, trg_project, mixed_src, train, cur_train)
     finally:
         if stats_file is not None:
             stats_file.close()
@@ -458,6 +477,17 @@ def main() -> None:
         return
 
     print("Writing train data set...")
+    if mixed_src:
+        train.fillna("", inplace=True)
+        src_columns: List[str] = list(filter(lambda c: c.startswith("source"), train.columns))
+
+        def select_random_column(row: Any) -> pd.Series:
+            nonempty_src_columns: List[str] = list(filter(lambda c: row[c] != "", src_columns))
+            return row[random.choice(nonempty_src_columns)]
+
+        train["source"] = train[src_columns].apply(select_random_column, axis=1)
+        train.drop(src_columns, axis=1, inplace=True, errors="ignore")
+
     write_corpus(os.path.join(root_dir, "train.src.txt"), encode_sp_lines(src_spp, train["source"]))
     write_corpus(os.path.join(root_dir, "train.trg.txt"), encode_sp_lines(trg_spp, train["target"]))
 
