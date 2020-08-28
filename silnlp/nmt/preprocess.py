@@ -283,6 +283,13 @@ def main() -> None:
     if parent is not None:
         parent_config = load_config(parent)
         parent_data_config = parent_config["data"]
+        parent_params_config = parent_config["params"]
+        freeze_layers: Optional[List[str]] = parent_params_config.get("freeze_layers")
+        # do not freeze any word embeddings layer, because we will update them when we create the parent model
+        if freeze_layers is not None:
+            parent_params_config["freeze_layers"] = list(
+                filter(lambda l: not l.startswith("examples_inputter"), freeze_layers)
+            )
         parent_root_dir = get_root_dir(parent)
         has_parent = True
 
