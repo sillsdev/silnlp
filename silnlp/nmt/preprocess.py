@@ -443,7 +443,7 @@ def main() -> None:
                         print(f"- alignment (filtered): {filtered_alignment_score:.4f}")
                         stats_file.write(
                             f"{src_project},{trg_project},{corpus_len},{alignment_score:.4f},{filtered_count},"
-                            f"{filtered_alignment_score:.4f}"
+                            f"{filtered_alignment_score:.4f}\n"
                         )
                     cur_train.drop("score", axis=1, inplace=True, errors="ignore")
 
