@@ -6,7 +6,8 @@ from typing import Any, Iterable, List, Tuple
 import numpy as np
 import opennmt.data
 import opennmt.models
-import opennmt.utils
+import opennmt.utils.checkpoint
+import opennmt.utils.misc
 import tensorflow as tf
 import tensorflow_addons as tfa
 
@@ -253,6 +254,42 @@ class RunnerEx(opennmt.Runner):
         transfer_weights(model, new_model, optimizer, new_optimizer, ignore_weights=updated_variables)
         new_optimizer.iterations.assign(optimizer.iterations)
         new_checkpoint.save()
+
+    def update_vocab(
+        self,
+        output_dir: str,
+        src_vocab: str = None,
+        tgt_vocab: str = None,
+        checkpoint_path: str = None,
+        step: int = None,
+    ) -> str:
+        if not isinstance(self._model, opennmt.models.SequenceToSequence):
+            raise ValueError("Updating vocabularies is only supported for sequence to sequence models")
+        config: dict = self._finalize_config()
+        if src_vocab is None and tgt_vocab is None:
+            return config["model_dir"]
+
+        model: opennmt.models.Model = self._init_model(config)
+        optimizer = model.get_optimizer()
+        cur_checkpoint = opennmt.utils.checkpoint.Checkpoint.from_config(config, model, optimizer=optimizer)
+        cur_checkpoint.restore(checkpoint_path=checkpoint_path)
+        model.create_variables(optimizer=optimizer)
+
+        self._config["model_dir"] = output_dir
+        if src_vocab is not None:
+            self._config["data"]["source_vocabulary"] = src_vocab
+        if tgt_vocab is not None:
+            self._config["data"]["target_vocabulary"] = tgt_vocab
+        new_config: dict = self._finalize_config()
+        new_model: opennmt.models.Model = self._init_model(new_config)
+        new_optimizer = new_model.get_optimizer()
+        new_checkpoint = opennmt.utils.checkpoint.Checkpoint.from_config(new_config, new_model, optimizer=new_optimizer)
+        new_model.create_variables(optimizer=new_optimizer)
+
+        model.transfer_weights(new_model, new_optimizer=new_optimizer, optimizer=optimizer)
+        new_optimizer.iterations.assign(optimizer.iterations)
+        new_checkpoint.save(step=step)
+        return output_dir
 
     def infer_multiple(
         self, features_paths: List[str], predictions_paths: List[str], checkpoint_path: str = None

@@ -106,6 +106,7 @@ def load_config(exp_name: str) -> dict:
             "share_vocab": True,
             "mirror": False,
             "mixed_src": False,
+            "parent_use_best": False,
             "seed": 111,
             "test_size": 250,
             "val_size": 250,

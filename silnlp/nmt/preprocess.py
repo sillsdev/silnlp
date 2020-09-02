@@ -25,7 +25,7 @@ from nlp.common.corpus import (
 from nlp.common.corpus import get_corpus_path, load_corpus
 from nlp.common.utils import set_seed
 from nlp.nmt.config import create_runner, get_git_revision_hash, get_root_dir, load_config, parse_langs
-from nlp.nmt.utils import decode_sp_lines, encode_sp, encode_sp_lines
+from nlp.nmt.utils import decode_sp_lines, encode_sp, encode_sp_lines, get_best_model_dir
 
 
 def convert_vocab(sp_vocab_path: str, onmt_vocab_path: str, tag_langs: Set[str] = None) -> None:
@@ -86,9 +86,21 @@ def get_iso(file_path: str) -> Tuple[str, str]:
     return file_name[:index], file_name[index + 1 :]
 
 
-def update_vocab(parent_config: dict, root_dir: str, src_vocab_path: str, trg_vocab_path: str) -> None:
+def update_vocab(
+    parent_config: dict, root_dir: str, src_vocab_path: str, trg_vocab_path: str, parent_use_best: bool
+) -> None:
+    model_dir: str = parent_config["model_dir"]
+    checkpoint_path: Optional[str] = None
+    step: Optional[int] = None
+    if parent_use_best:
+        try:
+            best_model_dir, step = get_best_model_dir(model_dir)
+            checkpoint_path = os.path.join(best_model_dir, "ckpt")
+        except RuntimeError:
+            checkpoint_path = None
+            step = None
     parent_runner = create_runner(parent_config)
-    parent_runner.update_vocab(os.path.join(root_dir, "parent"), src_vocab_path, trg_vocab_path)
+    parent_runner.update_vocab(os.path.join(root_dir, "parent"), src_vocab_path, trg_vocab_path, checkpoint_path, step)
 
 
 def is_corpus_in_langs(langs: Set[str], lang_projects: Dict[str, Set[str]], iso: str, project: str) -> bool:
@@ -279,6 +291,7 @@ def main() -> None:
     parent_config = {}
     parent_data_config = {}
     parent_root_dir = ""
+    parent_use_best: bool = data_config["parent_use_best"]
     has_parent = False
     if parent is not None:
         parent_config = load_config(parent)
@@ -329,7 +342,7 @@ def main() -> None:
         build_vocab(share_vocab_file_paths, vocab_size, casing, model_prefix, vocab_path, tag_langs)
 
         if has_parent:
-            update_vocab(parent_config, root_dir, vocab_path, vocab_path)
+            update_vocab(parent_config, root_dir, vocab_path, vocab_path, parent_use_best)
 
         src_spp = sp.SentencePieceProcessor()
         src_spp.Load(f"{model_prefix}.model")
@@ -363,6 +376,7 @@ def main() -> None:
                 root_dir,
                 os.path.join(root_dir, "src-onmt.vocab"),
                 os.path.join(root_dir, "trg-onmt.vocab"),
+                parent_use_best,
             )
 
         src_spp = sp.SentencePieceProcessor()
