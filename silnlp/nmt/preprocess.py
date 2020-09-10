@@ -300,9 +300,7 @@ def main() -> None:
         freeze_layers: Optional[List[str]] = parent_params_config.get("freeze_layers")
         # do not freeze any word embeddings layer, because we will update them when we create the parent model
         if freeze_layers is not None:
-            parent_params_config["freeze_layers"] = list(
-                filter(lambda l: not l.startswith("examples_inputter") and not l.startswith("decoder"), freeze_layers)
-            )
+            parent_params_config["freeze_layers"] = list()
         parent_root_dir = get_root_dir(parent)
         has_parent = True
 
