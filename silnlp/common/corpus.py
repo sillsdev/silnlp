@@ -27,41 +27,30 @@ def load_corpus(input_file: str) -> List[str]:
     return sentences
 
 
-def tokenize_parallel_corpus(src_sentences: Iterable[str], trg_sentences: Iterable[str]) -> Tuple[List[str], List[str]]:
-    with tempfile.TemporaryDirectory() as td:
-        src_input_path = os.path.join(td, "tokenize-src-input-1.txt")
-        trg_input_path = os.path.join(td, "tokenize-trg-input-1.txt")
-        src_output_path = os.path.join(td, "tokenize-src-output-1.txt")
-        trg_output_path = os.path.join(td, "tokenize-trg-output-1.txt")
-
-        write_corpus(src_input_path, src_sentences)
-        write_corpus(trg_input_path, trg_sentences)
-
-        subprocess.run(
-            [
-                "dotnet",
-                "translator",
-                "extract",
-                "-s",
-                os.path.join(td, "tokenize-src-input-*.txt"),
-                "-t",
-                os.path.join(td, "tokenize-trg-input-*.txt"),
-                "-st",
-                "latin",
-                "-tt",
-                "latin",
-                "-l",
-                "-so",
-                src_output_path,
-                "-to",
-                trg_output_path,
-            ],
-            stdout=subprocess.DEVNULL,
-        )
-
-        src_sentences = load_corpus(src_output_path)
-        trg_sentences = load_corpus(trg_output_path)
-        return src_sentences, trg_sentences
+def tokenize_parallel_corpus(
+    src_input_path: str, trg_input_path: str, src_output_path: str, trg_output_path: str
+) -> None:
+    subprocess.run(
+        [
+            "dotnet",
+            "translator",
+            "extract",
+            "-s",
+            src_input_path,
+            "-t",
+            trg_input_path,
+            "-st",
+            "latin",
+            "-tt",
+            "latin",
+            "-l",
+            "-so",
+            src_output_path,
+            "-to",
+            trg_output_path,
+        ],
+        stdout=subprocess.DEVNULL,
+    )
 
 
 def load_prob_table(table_path: str) -> Dict[Tuple[str, str], float]:
@@ -74,7 +63,7 @@ def load_prob_table(table_path: str) -> Dict[Tuple[str, str], float]:
     return table
 
 
-def compute_score(
+def compute_alignment_score(
     forward_prob_table: Dict[Tuple[str, str], float],
     reverse_prob_table: Dict[Tuple[str, str], float],
     src_sentence: str,
@@ -134,7 +123,7 @@ def execute_fast_align(input_path: str, output_path: str, prob_table_path: str, 
         subprocess.run(args, stdout=output_file, stderr=subprocess.DEVNULL)
 
 
-def execute_atools(forward_align_path: str, reverse_align_path: str) -> str:
+def execute_atools(forward_align_path: str, reverse_align_path: str, output_path: str) -> None:
     atools_path = os.path.join(os.getenv("FAST_ALIGN_PATH", "."), "atools")
     if not os.path.isfile(atools_path):
         raise RuntimeError("atools is not installed.")
@@ -146,36 +135,60 @@ def execute_atools(forward_align_path: str, reverse_align_path: str) -> str:
         args = [atools_path, "-i", forward_align_path, "-j", reverse_align_path]
     args.extend(["-c", "grow-diag-final-and"])
 
-    result = subprocess.run(args, capture_output=True, encoding="utf-8")
-    return result.stdout
+    with open(output_path, "w") as output_file:
+        subprocess.run(args, stdout=output_file, stderr=subprocess.DEVNULL)
 
 
 def add_alignment_scores(corpus: pd.DataFrame) -> None:
-    src_sentences, trg_sentences = tokenize_parallel_corpus(corpus["source"], corpus["target"])
     with tempfile.TemporaryDirectory() as td:
-        input_path = os.path.join(td, "align-input.txt")
+        src_path = os.path.join(td, "src-input.txt")
+        trg_path = os.path.join(td, "trg-input.txt")
+        write_corpus(src_path, corpus["source"])
+        write_corpus(trg_path, corpus["target"])
+        scores = compute_alignment_scores(src_path, trg_path)
+        corpus["score"] = scores
 
-        with open(input_path, "w", encoding="utf-8", newline="\n") as file:
-            for src_sentence, trg_sentence in zip(src_sentences, trg_sentences):
-                file.write(f"{src_sentence} ||| {trg_sentence}\n")
+
+def compute_alignment_scores(src_input_path: str, trg_input_path: str) -> List[float]:
+    with tempfile.TemporaryDirectory() as td:
+        src_tok_output_path = os.path.join(td, "tokenize-src-output.txt")
+        trg_tok_output_path = os.path.join(td, "tokenize-trg-output.txt")
+
+        tokenize_parallel_corpus(src_input_path, trg_input_path, src_tok_output_path, trg_tok_output_path)
+
+        align_input_path = os.path.join(td, "align-input.txt")
+
+        with open(src_tok_output_path, "r", encoding="utf-8") as src_tok_output_file, open(
+            trg_tok_output_path, "r", encoding="utf-8"
+        ) as trg_tok_output_file, open(align_input_path, "w", encoding="utf-8", newline="\n") as align_input_file:
+            for src_sentence, trg_sentence in zip(src_tok_output_file, trg_tok_output_file):
+                align_input_file.write(f"{src_sentence.strip()} ||| {trg_sentence.strip()}\n")
 
         forward_align_path = os.path.join(td, "forward-align.txt")
         forward_prob_table_path = os.path.join(td, "forward-prob-table.txt")
-        execute_fast_align(input_path, forward_align_path, forward_prob_table_path, reverse=False)
+        execute_fast_align(align_input_path, forward_align_path, forward_prob_table_path, reverse=False)
 
         reverse_align_path = os.path.join(td, "reverse-align.txt")
         reverse_prob_table_path = os.path.join(td, "reverse-prob-table.txt")
-        execute_fast_align(input_path, reverse_align_path, reverse_prob_table_path, reverse=True)
+        execute_fast_align(align_input_path, reverse_align_path, reverse_prob_table_path, reverse=True)
 
-        output = execute_atools(forward_align_path, reverse_align_path)
+        sym_align_path = os.path.join(td, "sym-align.txt")
+        execute_atools(forward_align_path, reverse_align_path, sym_align_path)
 
         forward_prob_table = load_prob_table(forward_prob_table_path)
         reverse_prob_table = load_prob_table(reverse_prob_table_path)
 
         scores: List[float] = []
-        for src_sentence, trg_sentence, alignment in zip(src_sentences, trg_sentences, output.splitlines()):
-            scores.append(compute_score(forward_prob_table, reverse_prob_table, src_sentence, trg_sentence, alignment))
-        corpus["score"] = scores
+        with open(src_tok_output_path, "r", encoding="utf-8") as src_tok_output_file, open(
+            trg_tok_output_path, "r", encoding="utf-8"
+        ) as trg_tok_output_file, open(sym_align_path, "r", encoding="utf-8") as sym_align_file:
+            for src_sentence, trg_sentence, alignment in zip(src_tok_output_file, trg_tok_output_file, sym_align_file):
+                scores.append(
+                    compute_alignment_score(
+                        forward_prob_table, reverse_prob_table, src_sentence, trg_sentence, alignment
+                    )
+                )
+        return scores
 
 
 def get_parallel_corpus(src_file_path: str, trg_file_path: str) -> pd.DataFrame:
