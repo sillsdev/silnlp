@@ -27,28 +27,9 @@ def load_corpus(input_file: str) -> List[str]:
     return sentences
 
 
-def tokenize_parallel_corpus(
-    src_input_path: str, trg_input_path: str, src_output_path: str, trg_output_path: str
-) -> None:
+def tokenize_corpus(input_path: str, output_path: str) -> None:
     subprocess.run(
-        [
-            "dotnet",
-            "translator",
-            "extract",
-            "-s",
-            src_input_path,
-            "-t",
-            trg_input_path,
-            "-st",
-            "latin",
-            "-tt",
-            "latin",
-            "-l",
-            "-so",
-            src_output_path,
-            "-to",
-            trg_output_path,
-        ],
+        ["dotnet", "translator", "tokenize", "-c", input_path, "-t", "latin", "-l", "-o", output_path],
         stdout=subprocess.DEVNULL,
     )
 
@@ -154,7 +135,8 @@ def compute_alignment_scores(src_input_path: str, trg_input_path: str) -> List[f
         src_tok_output_path = os.path.join(td, "tokenize-src-output.txt")
         trg_tok_output_path = os.path.join(td, "tokenize-trg-output.txt")
 
-        tokenize_parallel_corpus(src_input_path, trg_input_path, src_tok_output_path, trg_tok_output_path)
+        tokenize_corpus(src_input_path, src_tok_output_path)
+        tokenize_corpus(trg_input_path, trg_tok_output_path)
 
         align_input_path = os.path.join(td, "align-input.txt")
 
