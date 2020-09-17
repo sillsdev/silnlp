@@ -3,7 +3,7 @@ import logging
 import os
 import random
 from glob import glob
-from typing import IO, Dict, List, Set, Tuple
+from typing import IO, Dict, Iterable, List, Set, Tuple, cast
 
 logging.basicConfig()
 
@@ -16,7 +16,9 @@ from nlp.nmt.utils import decode_sp, get_best_model_dir
 
 
 class PairScore:
-    def __init__(self, src_iso: str, trg_iso: str, bleu: sacrebleu.BLEU, sent_len: int, projects: Set[str]) -> None:
+    def __init__(
+        self, src_iso: str, trg_iso: str, bleu: sacrebleu.BLEUScore, sent_len: int, projects: Set[str]
+    ) -> None:
         self.src_iso = src_iso
         self.trg_iso = trg_iso
         self.bleu = bleu
@@ -192,12 +194,15 @@ def test_checkpoint(
             for overall_ref in filter(lambda r: len(r) < len(overall_sys), overall_refs):
                 overall_ref.extend([""] * (len(overall_sys) - len(overall_ref)))
             bleu = sacrebleu.corpus_bleu(
-                sys, refs, lowercase=True, tokenize=data_config.get("sacrebleu_tokenize", "13a")
+                sys,
+                cast(List[Iterable[str]], refs),
+                lowercase=True,
+                tokenize=data_config.get("sacrebleu_tokenize", "13a"),
             )
             scores.append(PairScore(src_iso, trg_iso, bleu, len(sys), ref_projects))
 
     if len(src_langs) > 1 or len(trg_langs) > 1:
-        bleu = sacrebleu.corpus_bleu(overall_sys, overall_refs, lowercase=True)
+        bleu = sacrebleu.corpus_bleu(overall_sys, cast(List[Iterable[str]], overall_refs), lowercase=True)
         scores.append(PairScore("ALL", "ALL", bleu, len(overall_sys), ref_projects))
 
     bleu_file_root = f"bleu-{step}"
