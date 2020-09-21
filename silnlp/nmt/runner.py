@@ -4,6 +4,7 @@ import yaml
 from typing import Any, Iterable, List, Tuple
 
 import numpy as np
+import opennmt
 import opennmt.data
 import opennmt.models
 import opennmt.utils.checkpoint

@@ -133,34 +133,36 @@ def test_checkpoint(
     predictions_paths: List[str] = []
     refs_paths: List[str] = []
     predictions_detok_paths: List[str] = []
+    step_str = "avg" if step == -1 else str(step)
     for src_iso in sorted(src_langs):
         prefix = "test" if len(src_langs) == 1 else f"test.{src_iso}"
         src_features_path = os.path.join(root_dir, f"{prefix}.src.txt")
         if os.path.isfile(src_features_path):
             # all target data is stored in a single file
             features_paths.append(src_features_path)
-            predictions_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.txt.{step}"))
+            predictions_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.txt.{step_str}"))
             refs_paths.append(os.path.join(root_dir, f"{prefix}.trg.detok*.txt"))
-            predictions_detok_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.detok.txt.{step}"))
+            predictions_detok_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.detok.txt.{step_str}"))
         else:
             # target data is split into separate files
             for trg_iso in sorted(trg_langs):
                 prefix = f"test.{src_iso}.{trg_iso}"
                 features_paths.append(os.path.join(root_dir, f"{prefix}.src.txt"))
-                predictions_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.txt.{step}"))
+                predictions_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.txt.{step_str}"))
                 refs_paths.append(os.path.join(root_dir, f"{prefix}.trg.detok*.txt"))
-                predictions_detok_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.detok.txt.{step}"))
+                predictions_detok_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.detok.txt.{step_str}"))
 
+    checkpoint_name = "averaged checkpoint" if step == -1 else f"checkpoint {step}"
     if force_infer or any(not os.path.isfile(f) for f in predictions_detok_paths):
         runner = create_runner(config, memory_growth=memory_growth)
-        print(f"Inferencing checkpoint {step}...")
+        print(f"Inferencing {checkpoint_name}...")
         if os.path.basename(checkpoint_path) == "saved_model.pb":
             runner.saved_model_infer_multiple(features_paths, predictions_paths)
         else:
             runner.infer_multiple(features_paths, predictions_paths, checkpoint_path=checkpoint_path)
 
     data_config: dict = config["data"]
-    print(f"Scoring checkpoint {step}...")
+    print(f"Scoring {checkpoint_name}...")
     default_src_iso = next(iter(src_langs))
     default_trg_iso = next(iter(trg_langs))
     scores: List[PairScore] = []
@@ -205,7 +207,7 @@ def test_checkpoint(
         bleu = sacrebleu.corpus_bleu(overall_sys, cast(List[Iterable[str]], overall_refs), lowercase=True)
         scores.append(PairScore("ALL", "ALL", bleu, len(overall_sys), ref_projects))
 
-    bleu_file_root = f"bleu-{step}"
+    bleu_file_root = f"bleu-{step_str}"
     if len(ref_projects) > 0:
         ref_projects_suffix = "_".join(sorted(ref_projects))
         bleu_file_root += f"-{ref_projects_suffix}"
@@ -218,6 +220,16 @@ def test_checkpoint(
     return scores
 
 
+def get_last_checkpoint(model_dir: str) -> Tuple[str, int]:
+    with open(os.path.join(model_dir, "checkpoint"), "r", encoding="utf-8") as file:
+        checkpoint_config = yaml.safe_load(file)
+        checkpoint_prefix: str = checkpoint_config["model_checkpoint_path"]
+        parts = os.path.basename(checkpoint_prefix).split("-")
+        checkpoint_path = os.path.join(model_dir, checkpoint_prefix)
+        step = int(parts[-1])
+        return (checkpoint_path, step)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Tests a NMT model using OpenNMT-tf")
     parser.add_argument("experiment", help="Experiment name")
@@ -225,6 +237,7 @@ def main() -> None:
     parser.add_argument("--checkpoint", type=str, help="Checkpoint to use")
     parser.add_argument("--last", default=False, action="store_true", help="Test last checkpoint")
     parser.add_argument("--best", default=False, action="store_true", help="Test best evaluated checkpoint")
+    parser.add_argument("--avg", default=False, action="store_true", help="Test averaged checkpoint")
     parser.add_argument("--ref-projects", nargs="*", metavar="project", default=[], help="Reference projects")
     parser.add_argument("--force-infer", default=False, action="store_true", help="Force inferencing")
     args = parser.parse_args()
@@ -242,10 +255,27 @@ def main() -> None:
 
     best_model_path, best_step = get_best_model_dir(model_dir)
     results: Dict[int, List[PairScore]] = {}
+    step: int
     if args.checkpoint is not None:
         checkpoint_path = os.path.join(model_dir, f"ckpt-{args.checkpoint}")
         step = int(args.checkpoint)
         set_seed(data_config["seed"])
+        results[step] = test_checkpoint(
+            root_dir,
+            config,
+            src_langs,
+            trg_langs,
+            trg_train_projects,
+            args.force_infer,
+            args.memory_growth,
+            ref_projects,
+            checkpoint_path,
+            step,
+        )
+
+    if args.avg:
+        checkpoint_path, _ = get_last_checkpoint(os.path.join(model_dir, "avg"))
+        step = -1
         results[step] = test_checkpoint(
             root_dir,
             config,
@@ -279,13 +309,8 @@ def main() -> None:
                 step,
             )
 
-    if args.last or (not args.best and args.checkpoint is None):
-        with open(os.path.join(model_dir, "checkpoint"), "r", encoding="utf-8") as file:
-            checkpoint_config = yaml.safe_load(file)
-            checkpoint_prefix: str = checkpoint_config["model_checkpoint_path"]
-            parts = os.path.basename(checkpoint_prefix).split("-")
-            checkpoint_path = os.path.join(model_dir, checkpoint_prefix)
-            step = int(parts[-1])
+    if args.last or (not args.best and args.checkpoint is None and not args.avg):
+        checkpoint_path, step = get_last_checkpoint(model_dir)
 
         if step not in results:
             results[step] = test_checkpoint(
@@ -305,9 +330,14 @@ def main() -> None:
         num_refs = results[step][0].num_refs
         if num_refs == 0:
             num_refs = 1
-        checkpoint_str = "best " if step == best_step else ""
-        checkpoint_str += f"checkpoint {step}"
-        print(f"Test results for {checkpoint_str} ({num_refs} reference(s))")
+        checkpoint_name: str
+        if step == -1:
+            checkpoint_name = "averaged checkpoint"
+        elif step == best_step:
+            checkpoint_name = f"best checkpoint {step}"
+        else:
+            checkpoint_name = f"checkpoint {step}"
+        print(f"Test results for {checkpoint_name} ({num_refs} reference(s))")
         for score in results[step]:
             print(
                 f"{score.src_iso} -> {score.trg_iso}: {score.bleu.score:.2f} {score.bleu.precisions[0]:.2f}"
