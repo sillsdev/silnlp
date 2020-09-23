@@ -153,6 +153,11 @@ def create_unshared_vocab(
             shutil.copy2(parent_sp_prefix_path + ".vocab", sp_vocab_path)
             convert_vocab(sp_vocab_path, onmt_vocab_path, tag_langs)
             return
+        else:
+            onmt_delta_vocab_path = os.path.join(root_dir, f"{prefix}-onmt-delta.vocab")
+            vocab_delta = child_tokens.difference(parent_vocab.words)
+            with open(onmt_delta_vocab_path, "w", encoding="utf-8") as f:
+                [f.write(f"{token}\n") for token in vocab_delta]
 
     print(f"Building {side} vocabulary...")
     vocab_size: int = data_config.get(f"{prefix}_vocab_size", data_config.get("vocab_size"))
