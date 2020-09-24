@@ -10,6 +10,7 @@ logging.basicConfig()
 import sacrebleu
 import yaml
 
+from nlp.common.metrics import compute_meteor_score
 from nlp.common.utils import get_git_revision_hash, set_seed
 from nlp.nmt.config import create_runner, get_root_dir, load_config, parse_langs
 from nlp.nmt.utils import decode_sp, get_best_model_dir
@@ -17,7 +18,13 @@ from nlp.nmt.utils import decode_sp, get_best_model_dir
 
 class PairScore:
     def __init__(
-        self, src_iso: str, trg_iso: str, bleu: sacrebleu.BLEUScore, sent_len: int, projects: Set[str]
+        self,
+        src_iso: str,
+        trg_iso: str,
+        bleu: sacrebleu.BLEUScore,
+        sent_len: int,
+        projects: Set[str],
+        meteor_score: float = None,
     ) -> None:
         self.src_iso = src_iso
         self.trg_iso = trg_iso
@@ -25,6 +32,7 @@ class PairScore:
         self.sent_len = sent_len
         self.num_refs = len(projects)
         self.refs = "_".join(sorted(projects))
+        self.meteor_score = meteor_score
 
     def write(self, file: IO) -> None:
         file.write(
@@ -201,7 +209,8 @@ def test_checkpoint(
                 lowercase=True,
                 tokenize=data_config.get("sacrebleu_tokenize", "13a"),
             )
-            scores.append(PairScore(src_iso, trg_iso, bleu, len(sys), ref_projects))
+            meteor_score = compute_meteor_score(trg_iso, sys, cast(List[Iterable[str]], refs))
+            scores.append(PairScore(src_iso, trg_iso, bleu, len(sys), ref_projects, meteor_score))
 
     if len(src_langs) > 1 or len(trg_langs) > 1:
         bleu = sacrebleu.corpus_bleu(overall_sys, cast(List[Iterable[str]], overall_refs), lowercase=True)
@@ -339,11 +348,14 @@ def main() -> None:
             checkpoint_name = f"checkpoint {step}"
         print(f"Test results for {checkpoint_name} ({num_refs} reference(s))")
         for score in results[step]:
+            print(f"{score.src_iso} -> {score.trg_iso}")
             print(
-                f"{score.src_iso} -> {score.trg_iso}: {score.bleu.score:.2f} {score.bleu.precisions[0]:.2f}"
+                f"-BLEU: {score.bleu.score:.2f} {score.bleu.precisions[0]:.2f}"
                 f"/{score.bleu.precisions[1]:.2f}/{score.bleu.precisions[2]:.2f}/{score.bleu.precisions[3]:.2f}"
                 f"/{score.bleu.bp:.3f}"
             )
+            if score.meteor_score is not None:
+                print(f"-METEOR: {score.meteor_score}")
 
 
 if __name__ == "__main__":
