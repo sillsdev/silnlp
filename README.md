@@ -81,16 +81,7 @@ Lastly, setup PyCharm to use the Black code formatter by following the instructi
 #### SIL.Machine.Translator Tool
 
 Many of the scripts in this repo use the [SIL.Machine.Translator](https://github.com/sillsdev/machine) tool. 
-
-In order to install/update the tool you first need to have the dotnet SDK installed.
-
-To install that on Linux issue this command:
-
-```
-$ sudo snap install dotnet-sdk --classic
-```
-
-Then execute the following command from the repo directory:
+Execute the following command from the repo directory:
 
 ```
 dotnet tool restore
