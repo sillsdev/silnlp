@@ -39,8 +39,12 @@ class PairScore:
             f"{self.src_iso},{self.trg_iso},{self.num_refs},{self.refs},{self.bleu.score:.2f},"
             f"{self.bleu.precisions[0]:.2f},{self.bleu.precisions[1]:.2f},{self.bleu.precisions[2]:.2f},"
             f"{self.bleu.precisions[3]:.2f},{self.bleu.bp:.3f},{self.bleu.sys_len:d},"
-            f"{self.bleu.ref_len:d},{self.sent_len:d}\n"
+            f"{self.bleu.ref_len:d},{self.sent_len:d}"
         )
+        if self.meteor_score is not None:
+            file.write(f",{self.meteor_score:.2f}\n")
+        else:
+            file.write("N/A\n")
 
 
 def parse_ref_file_path(ref_file_path: str, default_trg_iso: str) -> Tuple[str, str]:
@@ -222,7 +226,7 @@ def test_checkpoint(
         bleu_file_root += f"-{ref_projects_suffix}"
     with open(os.path.join(root_dir, f"{bleu_file_root}.csv"), "w", encoding="utf-8") as bleu_file:
         bleu_file.write(
-            "src_iso,trg_iso,num_refs,references,BLEU,1-gram,2-gram,3-gram,4-gram,BP,hyp_len,ref_len,sent_len\n"
+            "src_iso,trg_iso,num_refs,references,BLEU,1-gram,2-gram,3-gram,4-gram,BP,hyp_len,ref_len,sent_len,METEOR\n"
         )
         for results in scores:
             results.write(bleu_file)

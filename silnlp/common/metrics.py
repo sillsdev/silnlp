@@ -1,5 +1,6 @@
 import os
 import subprocess
+from subprocess import PIPE
 import tempfile
 from typing import Iterable, List, Optional
 
@@ -47,6 +48,7 @@ def compute_meteor_score(lang: str, hyps: Iterable[str], refs: List[Iterable[str
         ]
         env = os.environ.copy()
         env["LC_ALL"] = "C"
-        result = subprocess.run(meteor_cmd, env=env, capture_output=True, encoding="utf-8")
+        #        result = subprocess.run(meteor_cmd, env=env, capture_output=True, encoding="utf-8")
+        result = subprocess.run(meteor_cmd, env=env, stdout=subprocess.PIPE, stderr=PIPE, encoding="utf-8")
 
         return float(np.round(float(result.stdout.strip()) * 100, 2))
