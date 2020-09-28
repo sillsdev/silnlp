@@ -25,7 +25,14 @@ from nlp.common.corpus import (
 from nlp.common.corpus import get_corpus_path, load_corpus
 from nlp.common.utils import set_seed
 from nlp.nmt.config import create_runner, get_git_revision_hash, get_root_dir, load_config, parse_langs
-from nlp.nmt.utils import decode_sp_lines, encode_sp, encode_sp_lines, get_best_model_dir
+from nlp.nmt.utils import (
+    decode_sp_lines,
+    encode_sp,
+    encode_sp_lines,
+    get_best_model_dir,
+    get_checkpoint_path,
+    CheckpointType,
+)
 
 
 def convert_vocab(sp_vocab_path: str, onmt_vocab_path: str, tag_langs: Set[str] = None) -> None:
@@ -87,18 +94,22 @@ def get_iso(file_path: str) -> Tuple[str, str]:
 
 
 def update_vocab(
-    parent_config: dict, root_dir: str, src_vocab_path: str, trg_vocab_path: str, parent_use_best: bool
+    parent_config: dict, root_dir: str, src_vocab_path: str, trg_vocab_path: str, parentModelToUse: CheckpointType
 ) -> None:
     model_dir: str = parent_config["model_dir"]
     checkpoint_path: Optional[str] = None
     step: Optional[int] = None
-    if parent_use_best:
-        try:
-            best_model_dir, step = get_best_model_dir(model_dir)
-            checkpoint_path = os.path.join(best_model_dir, "ckpt")
-        except RuntimeError:
-            checkpoint_path = None
-            step = None
+    if parentModelToUse is CheckpointType.best or parentModelToUse is CheckpointType.average:
+        checkpoint_path, step = get_checkpoint_path(model_dir, parentModelToUse)
+    #       try:
+    #           best_model_dir, step = get_best_model_dir(model_dir)
+    #           checkpoint_path = os.path.join(best_model_dir, "ckpt")
+    #       except RuntimeError:
+    #           checkpoint_path = None
+    #           step = None
+    #   elif parentModelToUse is CheckpointType.average:
+    #       checkpoint_path, step = get_checkpoint_path(model_dir, parentModelToUse)
+
     parent_runner = create_runner(parent_config)
     parent_runner.update_vocab(os.path.join(root_dir, "parent"), src_vocab_path, trg_vocab_path, checkpoint_path, step)
 
@@ -296,7 +307,13 @@ def main() -> None:
     parent_config = {}
     parent_data_config = {}
     parent_root_dir = ""
-    parent_use_best: bool = data_config["parent_use_best"]
+    parentModelToUse = (
+        CheckpointType.best
+        if data_config["parent_use_best"]
+        else CheckpointType.average
+        if data_config["parent_use_average"]
+        else CheckpointType.last
+    )
     has_parent = False
     if parent is not None:
         parent_config = load_config(parent)
@@ -345,7 +362,7 @@ def main() -> None:
         build_vocab(share_vocab_file_paths, vocab_size, casing, model_prefix, vocab_path, tag_langs)
 
         if has_parent:
-            update_vocab(parent_config, root_dir, vocab_path, vocab_path, parent_use_best)
+            update_vocab(parent_config, root_dir, vocab_path, vocab_path, parentModelToUse)
 
         src_spp = sp.SentencePieceProcessor()
         src_spp.Load(f"{model_prefix}.model")
@@ -379,7 +396,7 @@ def main() -> None:
                 root_dir,
                 os.path.join(root_dir, "src-onmt.vocab"),
                 os.path.join(root_dir, "trg-onmt.vocab"),
-                parent_use_best,
+                parentModelToUse,
             )
 
         src_spp = sp.SentencePieceProcessor()
