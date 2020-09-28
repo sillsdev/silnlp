@@ -4,27 +4,25 @@ import os
 import random
 from glob import glob
 from typing import IO, Dict, Iterable, List, Set, Tuple, cast
+import sys
 
 logging.basicConfig()
 
+import numpy as np
 import sacrebleu
 import yaml
 
-from nlp.common.metrics import compute_meteor_score
+from nlp.common.metrics import compute_meteor_score, compute_ter_score, compute_wer_score
 from nlp.common.utils import get_git_revision_hash, set_seed
 from nlp.nmt.config import create_runner, get_root_dir, load_config, parse_langs
 from nlp.nmt.utils import decode_sp, get_best_model_dir
 
+SUPPORTED_SCORERS = {"bleu", "chrf3", "meteor", "wer", "ter"}
+
 
 class PairScore:
     def __init__(
-        self,
-        src_iso: str,
-        trg_iso: str,
-        bleu: sacrebleu.BLEUScore,
-        sent_len: int,
-        projects: Set[str],
-        meteor_score: float = None,
+        self, src_iso: str, trg_iso: str, bleu: sacrebleu.BLEUScore, sent_len: int, projects: Set[str],
     ) -> None:
         self.src_iso = src_iso
         self.trg_iso = trg_iso
@@ -32,19 +30,25 @@ class PairScore:
         self.sent_len = sent_len
         self.num_refs = len(projects)
         self.refs = "_".join(sorted(projects))
-        self.meteor_score = meteor_score
+        self.other_scores = dict()
+
+    def writeHeader(self, file: IO) -> None:
+        file.write("src_iso,trg_iso,num_refs,references,sent_len,scorer,score\n")
 
     def write(self, file: IO) -> None:
-        file.write(
-            f"{self.src_iso},{self.trg_iso},{self.num_refs},{self.refs},{self.bleu.score:.2f},"
-            f"{self.bleu.precisions[0]:.2f},{self.bleu.precisions[1]:.2f},{self.bleu.precisions[2]:.2f},"
-            f"{self.bleu.precisions[3]:.2f},{self.bleu.bp:.3f},{self.bleu.sys_len:d},"
-            f"{self.bleu.ref_len:d},{self.sent_len:d}"
-        )
-        if self.meteor_score is not None:
-            file.write(f",{self.meteor_score:.2f}\n")
-        else:
-            file.write("N/A\n")
+        if self.bleu is not None:
+            file.write(f"{self.src_iso},{self.trg_iso},{self.num_refs},{self.refs},{self.sent_len:d},")
+            file.write(
+                f"BLEU,{self.bleu.score:.2f}/{self.bleu.precisions[0]:.2f}/{self.bleu.precisions[1]:.2f}/"
+                f"{self.bleu.precisions[2]:.2f}/{self.bleu.precisions[3]:.2f}/{self.bleu.bp:.3f}/"
+                f"{self.bleu.sys_len:d}/{self.bleu.ref_len:d}\n"
+            )
+        for key, val in self.other_scores.items():
+            file.write(f"{self.src_iso},{self.trg_iso},{self.num_refs},{self.refs},{self.sent_len:d},")
+            file.write(f"{key},{val:.2f}\n")
+
+    def addScore(self, key: str, score: float) -> None:
+        self.other_scores[key] = score
 
 
 def parse_ref_file_path(ref_file_path: str, default_trg_iso: str) -> Tuple[str, str]:
@@ -140,6 +144,7 @@ def test_checkpoint(
     ref_projects: Set[str],
     checkpoint_path: str,
     step: int,
+    scorers: Set[str],
 ) -> List[PairScore]:
     features_paths: List[str] = []
     predictions_paths: List[str] = []
@@ -207,29 +212,49 @@ def test_checkpoint(
             # ensure that all refs are the same length as the sys
             for overall_ref in filter(lambda r: len(r) < len(overall_sys), overall_refs):
                 overall_ref.extend([""] * (len(overall_sys) - len(overall_ref)))
-            bleu = sacrebleu.corpus_bleu(
-                sys,
-                cast(List[Iterable[str]], refs),
-                lowercase=True,
-                tokenize=data_config.get("sacrebleu_tokenize", "13a"),
-            )
-            meteor_score = compute_meteor_score(trg_iso, sys, cast(List[Iterable[str]], refs))
-            scores.append(PairScore(src_iso, trg_iso, bleu, len(sys), ref_projects, meteor_score))
+            bleu_score = None
+            if "bleu" in scorers:
+                bleu_score = sacrebleu.corpus_bleu(
+                    sys,
+                    cast(List[Iterable[str]], refs),
+                    lowercase=True,
+                    tokenize=data_config.get("sacrebleu_tokenize", "13a"),
+                )
+            scores.append(PairScore(src_iso, trg_iso, bleu_score, len(sys), ref_projects))
+
+            if "chrf3" in scorers:
+                chrf3_score = sacrebleu.corpus_chrf(
+                    sys, cast(List[Iterable[str]], refs), order=6, beta=3, remove_whitespace=True
+                )
+                scores[len(scores) - 1].addScore("CHRF3", np.round(float(chrf3_score.score * 100), 2))
+
+            if "meteor" in scorers:
+                meteor_score = compute_meteor_score(trg_iso, sys, cast(List[Iterable[str]], refs))
+                scores[len(scores) - 1].addScore("METEOR", meteor_score)
+
+            if "wer" in scorers:
+                wer_score = compute_wer_score(trg_iso, sys, cast(List[str], refs))
+                if wer_score >= 0:
+                    scores[len(scores) - 1].addScore("WER", wer_score)
+
+            if "ter" in scorers:
+                ter_score = compute_ter_score(trg_iso, sys, cast(List[str], refs))
+                if ter_score >= 0:
+                    scores[len(scores) - 1].addScore("TER", ter_score)
 
     if len(src_langs) > 1 or len(trg_langs) > 1:
         bleu = sacrebleu.corpus_bleu(overall_sys, cast(List[Iterable[str]], overall_refs), lowercase=True)
         scores.append(PairScore("ALL", "ALL", bleu, len(overall_sys), ref_projects))
 
-    bleu_file_root = f"bleu-{step_str}"
+    scores_file_root = f"scores-{step_str}"
     if len(ref_projects) > 0:
         ref_projects_suffix = "_".join(sorted(ref_projects))
-        bleu_file_root += f"-{ref_projects_suffix}"
-    with open(os.path.join(root_dir, f"{bleu_file_root}.csv"), "w", encoding="utf-8") as bleu_file:
-        bleu_file.write(
-            "src_iso,trg_iso,num_refs,references,BLEU,1-gram,2-gram,3-gram,4-gram,BP,hyp_len,ref_len,sent_len,METEOR\n"
-        )
+        scores_file_root += f"-{ref_projects_suffix}"
+    with open(os.path.join(root_dir, f"{scores_file_root}.csv"), "w", encoding="utf-8") as scores_file:
+        if scores is not None:
+            scores[0].writeHeader(scores_file)
         for results in scores:
-            results.write(bleu_file)
+            results.write(scores_file)
     return scores
 
 
@@ -253,6 +278,8 @@ def main() -> None:
     parser.add_argument("--avg", default=False, action="store_true", help="Test averaged checkpoint")
     parser.add_argument("--ref-projects", nargs="*", metavar="project", default=[], help="Reference projects")
     parser.add_argument("--force-infer", default=False, action="store_true", help="Force inferencing")
+    parser.add_argument("--scorers", nargs="*", metavar="scorers", help=f"List of scorers - {SUPPORTED_SCORERS}")
+
     args = parser.parse_args()
 
     print("Git commit:", get_git_revision_hash())
@@ -265,6 +292,15 @@ def main() -> None:
     src_langs, _, _ = parse_langs(data_config["src_langs"])
     trg_langs, trg_train_projects, _ = parse_langs(data_config["trg_langs"])
     ref_projects: Set[str] = set(args.ref_projects)
+
+    if args.scorers is None:
+        scorers = {"bleu"}
+    else:
+        scorers = []
+        for scorer in set(args.scorers):
+            scorer = scorer.lower()
+            if scorer in SUPPORTED_SCORERS:
+                scorers.append(scorer)
 
     best_model_path, best_step = get_best_model_dir(model_dir)
     results: Dict[int, List[PairScore]] = {}
@@ -284,6 +320,7 @@ def main() -> None:
             ref_projects,
             checkpoint_path,
             step,
+            scorers,
         )
 
     if args.avg:
@@ -300,6 +337,7 @@ def main() -> None:
             ref_projects,
             checkpoint_path,
             step,
+            scorers,
         )
 
     if args.best:
@@ -320,6 +358,7 @@ def main() -> None:
                 ref_projects,
                 checkpoint_path,
                 step,
+                scorers,
             )
 
     if args.last or (not args.best and args.checkpoint is None and not args.avg):
@@ -337,6 +376,7 @@ def main() -> None:
                 ref_projects,
                 checkpoint_path,
                 step,
+                scorers,
             )
 
     for step in sorted(results.keys()):
@@ -352,14 +392,7 @@ def main() -> None:
             checkpoint_name = f"checkpoint {step}"
         print(f"Test results for {checkpoint_name} ({num_refs} reference(s))")
         for score in results[step]:
-            print(f"{score.src_iso} -> {score.trg_iso}")
-            print(
-                f"-BLEU: {score.bleu.score:.2f} {score.bleu.precisions[0]:.2f}"
-                f"/{score.bleu.precisions[1]:.2f}/{score.bleu.precisions[2]:.2f}/{score.bleu.precisions[3]:.2f}"
-                f"/{score.bleu.bp:.3f}"
-            )
-            if score.meteor_score is not None:
-                print(f"-METEOR: {score.meteor_score}")
+            score.write(sys.stdout)
 
 
 if __name__ == "__main__":

@@ -5,11 +5,49 @@ import tempfile
 from typing import Iterable, List, Optional
 
 import numpy as np
+
 import psutil
 
 from nlp.common.corpus import write_corpus
 
 METEOR_FULLY_SUPPORTED_LANGS = {"en", "cz", "de", "es", "fr", "ar"}
+
+from opennmt.utils.ter import ter
+from opennmt.utils.wer import wer
+
+
+def compute_ter_score(lang: str, hyps: Iterable[str], refs: Iterable[str]) -> Optional[float]:
+    with tempfile.TemporaryDirectory() as td:
+        hyps_path = os.path.join(td, "hyps.txt")
+        refs_path = os.path.join(td, "refs.txt")
+
+        write_corpus(hyps_path, hyps)
+        write_corpus(refs_path, (line for r in zip(*refs) for line in r))
+
+        try:
+            result = ter(hyps_path, refs_path)
+        except UnicodeDecodeError as e:
+            print("Unable to compute TER score")
+            result = -1
+
+        return float(np.round(float(result) * 100, 2))
+
+
+def compute_wer_score(lang: str, hyps: Iterable[str], refs: Iterable[str]) -> Optional[float]:
+    with tempfile.TemporaryDirectory() as td:
+        hyps_path = os.path.join(td, "hyps.txt")
+        refs_path = os.path.join(td, "refs.txt")
+
+        write_corpus(hyps_path, hyps)
+        write_corpus(refs_path, (line for r in zip(*refs) for line in r))
+
+        try:
+            result = wer(hyps_path, refs_path)
+        except UnicodeDecodeError as e:
+            print("Unable to compute WER score")
+            result = -1
+
+        return float(np.round(float(result) * 100, 2))
 
 
 def compute_meteor_score(lang: str, hyps: Iterable[str], refs: List[Iterable[str]]) -> Optional[float]:
