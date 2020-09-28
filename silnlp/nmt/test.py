@@ -16,7 +16,7 @@ import yaml
 
 from nlp.common.metrics import compute_meteor_score, compute_ter_score, compute_wer_score
 from nlp.common.utils import get_git_revision_hash, set_seed
-from nlp.nmt.config import create_runner, get_books, get_root_dir, load_config, parse_langs
+from nlp.nmt.config import create_runner, get_books, get_mt_root_dir, load_config, parse_langs
 from nlp.nmt.utils import decode_sp, get_best_model_dir
 
 SUPPORTED_SCORERS = {"bleu", "chrf3", "meteor", "wer", "ter"}
@@ -264,12 +264,12 @@ def test_checkpoint(
 
             if "wer" in scorers:
                 wer_score = compute_wer_score(pair_sys, cast(List[str], pair_refs))
-                if wer_score is not None and wer_score >= 0:
+                if wer_score >= 0:
                     other_scores["WER"] = wer_score
 
             if "ter" in scorers:
                 ter_score = compute_ter_score(pair_sys, cast(List[str], pair_refs))
-                if ter_score is not None and ter_score >= 0:
+                if ter_score >= 0:
                     other_scores["TER"] = ter_score
 
             scores.append(PairScore(src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores))
@@ -318,7 +318,7 @@ def main() -> None:
     print("Git commit:", get_git_revision_hash())
 
     exp_name = args.experiment
-    root_dir = get_root_dir(exp_name)
+    root_dir = get_mt_root_dir(exp_name)
     config = load_config(exp_name)
     model_dir: str = config["model_dir"]
     data_config: dict = config["data"]

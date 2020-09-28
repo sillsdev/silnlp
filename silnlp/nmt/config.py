@@ -13,7 +13,7 @@ import tensorflow as tf
 import yaml
 
 from nlp.common.canon import book_id_to_number
-from nlp.common.utils import get_git_revision_hash, get_root_dir
+from nlp.common.utils import get_git_revision_hash, get_mt_root_dir
 from nlp.nmt.noise import WordDropout
 from nlp.nmt.runner import RunnerEx
 
@@ -93,7 +93,7 @@ def set_transformer_dropout(
 
 
 def load_config(exp_name: str) -> dict:
-    root_dir = get_root_dir(exp_name)
+    root_dir = get_mt_root_dir(exp_name)
     config_path = os.path.join(root_dir, "config.yml")
 
     config: dict = {
@@ -256,7 +256,7 @@ def get_books(books: Union[str, List[str]]) -> Set[int]:
         books = books.split(",")
     book_set: Set[int] = set()
     for book_id in books:
-        book_id = book_id.upper()
+        book_id = book_id.strip().upper()
         if book_id == "NT":
             book_set.update(range(40, 67))
         elif book_id == "OT":
@@ -291,7 +291,7 @@ def main() -> None:
 
     print("Git commit:", get_git_revision_hash())
 
-    root_dir = get_root_dir(args.experiment)
+    root_dir = get_mt_root_dir(args.experiment)
     config_path = os.path.join(root_dir, "config.yml")
     if os.path.isfile(config_path) and not args.force:
         print('The experiment config file already exists. Use "--force" if you want to overwrite the existing config.')

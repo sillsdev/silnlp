@@ -2,10 +2,10 @@
   "version": 1,
   "isRoot": true,
   "tools": {
-    "sil.machine.translator": {
-      "version": "2.2.2",
+    "sil.machine.tool": {
+      "version": "2.3.1",
       "commands": [
-        "translator"
+        "machine"
       ]
     }
   }

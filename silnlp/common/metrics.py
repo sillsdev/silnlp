@@ -16,7 +16,7 @@ from opennmt.utils.ter import ter
 from opennmt.utils.wer import wer
 
 
-def compute_ter_score(hyps: Iterable[str], refs: Iterable[str]) -> Optional[float]:
+def compute_ter_score(hyps: Iterable[str], refs: Iterable[str]) -> float:
     with tempfile.TemporaryDirectory() as td:
         hyps_path = os.path.join(td, "hyps.txt")
         refs_path = os.path.join(td, "refs.txt")
@@ -33,7 +33,7 @@ def compute_ter_score(hyps: Iterable[str], refs: Iterable[str]) -> Optional[floa
         return float(np.round(float(result) * 100, 2))
 
 
-def compute_wer_score(hyps: Iterable[str], refs: Iterable[str]) -> Optional[float]:
+def compute_wer_score(hyps: Iterable[str], refs: Iterable[str]) -> float:
     with tempfile.TemporaryDirectory() as td:
         hyps_path = os.path.join(td, "hyps.txt")
         refs_path = os.path.join(td, "refs.txt")

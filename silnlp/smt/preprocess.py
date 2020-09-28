@@ -4,7 +4,8 @@ import os
 from typing import Tuple
 
 from nlp.common.corpus import get_corpus_path, get_parallel_corpus, split_parallel_corpus, write_corpus
-from nlp.common.utils import get_git_revision_hash, get_root_dir
+from nlp.common.environment import paratextPreprocessedDir
+from nlp.common.utils import get_git_revision_hash, get_mt_root_dir
 from nlp.smt.config import load_config
 
 
@@ -23,16 +24,17 @@ def main() -> None:
     print("Git commit:", get_git_revision_hash())
 
     exp_name = args.experiment
-    root_dir = get_root_dir(exp_name)
+    root_dir = get_mt_root_dir(exp_name)
     config = load_config(exp_name)
 
     src_iso, src_project = parse_lang(config["src_lang"])
     trg_iso, trg_project = parse_lang(config["trg_lang"])
 
+    vref_file_path = os.path.join(paratextPreprocessedDir, "data", "vref.txt")
     src_file_path = get_corpus_path(src_iso, src_project)
     trg_file_path = get_corpus_path(trg_iso, trg_project)
 
-    train = get_parallel_corpus(src_file_path, trg_file_path)
+    train = get_parallel_corpus(vref_file_path, src_file_path, trg_file_path)
 
     test_size: int = config["test_size"]
     train, test = split_parallel_corpus(train, test_size)

@@ -2,11 +2,11 @@ import argparse
 import os
 import subprocess
 
-from nlp.common.utils import get_git_revision_hash, get_root_dir
+from nlp.common.utils import get_git_revision_hash, get_mt_root_dir
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Trains a SMT model using SIL.Machine.Translator")
+    parser = argparse.ArgumentParser(description="Trains an SMT model using the Machine library")
     parser.add_argument("experiments", nargs="+", help="Experiment names")
     args = parser.parse_args()
 
@@ -14,7 +14,7 @@ def main() -> None:
 
     for exp_name in args.experiments:
         print(f"Training {exp_name}...")
-        root_dir = get_root_dir(exp_name)
+        root_dir = get_mt_root_dir(exp_name)
 
         src_file_path = os.path.join(root_dir, "train.src.txt")
         trg_file_path = os.path.join(root_dir, "train.trg.txt")
@@ -23,12 +23,11 @@ def main() -> None:
         subprocess.run(
             [
                 "dotnet",
-                "translator",
+                "machine",
                 "train",
+                "translation-model",
                 engine_dir,
-                "-s",
                 src_file_path,
-                "-t",
                 trg_file_path,
                 "-st",
                 "latin",

@@ -5,7 +5,7 @@ import subprocess
 import sacrebleu
 
 from nlp.common.corpus import load_corpus
-from nlp.common.utils import get_git_revision_hash, get_root_dir
+from nlp.common.utils import get_git_revision_hash, get_mt_root_dir
 from nlp.smt.config import load_config
 
 
@@ -15,14 +15,14 @@ def get_iso(lang: str) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Tests a SMT model using SIL.Machine.Translator")
+    parser = argparse.ArgumentParser(description="Tests an SMT model using the Machine library")
     parser.add_argument("experiment", help="Experiment name")
     args = parser.parse_args()
 
     print("Git commit:", get_git_revision_hash())
 
     exp_name = args.experiment
-    root_dir = get_root_dir(exp_name)
+    root_dir = get_mt_root_dir(exp_name)
     config = load_config(exp_name)
     src_iso = get_iso(config["src_lang"])
     trg_iso = get_iso(config["trg_lang"])
@@ -36,17 +36,15 @@ def main() -> None:
         subprocess.run(
             [
                 "dotnet",
-                "translator",
+                "machine",
                 "translate",
                 engine_dir,
-                "-s",
                 src_file_path,
+                predictions_file_path,
                 "-st",
                 "latin",
                 "-tt",
                 "latin",
-                "-o",
-                predictions_file_path,
             ]
         )
 

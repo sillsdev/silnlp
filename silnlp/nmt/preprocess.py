@@ -28,7 +28,7 @@ from nlp.common.corpus import (
 )
 from nlp.common.environment import paratextPreprocessedDir
 from nlp.common.utils import set_seed
-from nlp.nmt.config import create_runner, get_books, get_git_revision_hash, get_root_dir, load_config, parse_langs
+from nlp.nmt.config import create_runner, get_books, get_git_revision_hash, get_mt_root_dir, load_config, parse_langs
 from nlp.nmt.utils import (
     decode_sp_lines,
     encode_sp,
@@ -268,7 +268,7 @@ def main() -> None:
     print("Git commit:", get_git_revision_hash())
 
     exp_name = args.experiment
-    root_dir = get_root_dir(exp_name)
+    root_dir = get_mt_root_dir(exp_name)
     config = load_config(exp_name)
     data_config: dict = config["data"]
     eval_config: dict = config["eval"]
@@ -330,7 +330,7 @@ def main() -> None:
         # do not freeze any word embeddings layer, because we will update them when we create the parent model
         if freeze_layers is not None:
             parent_params_config["freeze_layers"] = list()
-        parent_root_dir = get_root_dir(parent)
+        parent_root_dir = get_mt_root_dir(parent)
         has_parent = True
 
     write_trg_tag = (

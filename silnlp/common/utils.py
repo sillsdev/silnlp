@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 import tensorflow as tf
 
-from nlp.common.environment import paratextPreprocessedDir
+from nlp.common.environment import align_experiments_dir, paratextPreprocessedDir
 
 
 def get_git_revision_hash() -> str:
@@ -18,8 +18,12 @@ def get_git_revision_hash() -> str:
     ).strip()
 
 
-def get_root_dir(exp_name: str) -> str:
+def get_mt_root_dir(exp_name: str) -> str:
     return os.path.join(paratextPreprocessedDir, "tests", exp_name)
+
+
+def get_align_root_dir(exp_name: str) -> str:
+    return os.path.join(align_experiments_dir, exp_name)
 
 
 def set_seed(seed: Any) -> None:
@@ -27,3 +31,18 @@ def set_seed(seed: Any) -> None:
     np.random.seed(seed)
     random.seed(seed)
     tf.random.set_seed(seed)
+
+
+def wsl_path(win_path: str) -> str:
+    win_path = os.path.normpath(win_path).replace("\\", "\\\\")
+    result = subprocess.run(["wsl", "wslpath", "-a", win_path], capture_output=True, encoding="utf-8")
+    return result.stdout.strip()
+
+
+def merge_dict(dict1: dict, dict2: dict) -> dict:
+    for key, value in dict2.items():
+        if isinstance(value, dict):
+            dict1[key] = merge_dict(dict1.get(key, {}), value)
+        else:
+            dict1[key] = value
+    return dict1
