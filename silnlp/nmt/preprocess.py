@@ -126,6 +126,7 @@ def create_unshared_vocab(
     data_config: dict,
     parent_root_dir: str,
     parent_data_config: dict,
+    parent_use_vocab: bool,
     langs: Set[str],
     vocab_file_paths: Set[str],
     side: str,
@@ -157,7 +158,8 @@ def create_unshared_vocab(
                 child_tokens.update(line.split())
 
         # all tokens in the child corpora are in the parent vocab, so we can just use the parent vocab
-        if child_tokens.issubset(parent_vocab.words):
+        # or, the user wants to reuse the parent vocab for this child experiment
+        if child_tokens.issubset(parent_vocab.words) or parent_use_vocab:
             sp_vocab_path = os.path.join(root_dir, f"{prefix}-sp.vocab")
             onmt_vocab_path = os.path.join(root_dir, f"{prefix}-onmt.vocab")
             shutil.copy2(parent_sp_prefix_path + ".model", os.path.join(root_dir, f"{prefix}-sp.model"))
@@ -315,10 +317,12 @@ def main() -> None:
         else CheckpointType.last
     )
     has_parent = False
+    parent_use_vocab = False
     if parent is not None:
         parent_config = load_config(parent)
         parent_data_config = parent_config["data"]
         parent_params_config = parent_config["params"]
+        parent_use_vocab = data_config["parent_use_vocab"]
         freeze_layers: Optional[List[str]] = parent_params_config.get("freeze_layers")
         # do not freeze any word embeddings layer, because we will update them when we create the parent model
         if freeze_layers is not None:
@@ -377,6 +381,7 @@ def main() -> None:
             data_config,
             parent_root_dir,
             parent_data_config,
+            parent_use_vocab,
             src_langs,
             src_vocab_file_paths,
             "source",
@@ -387,7 +392,14 @@ def main() -> None:
         if mirror:
             trg_vocab_file_paths.update(src_file_paths)
         create_unshared_vocab(
-            root_dir, data_config, parent_root_dir, parent_data_config, trg_langs, trg_vocab_file_paths, "target"
+            root_dir,
+            data_config,
+            parent_root_dir,
+            parent_data_config,
+            parent_use_vocab,
+            trg_langs,
+            trg_vocab_file_paths,
+            "target",
         )
 
         if has_parent:
