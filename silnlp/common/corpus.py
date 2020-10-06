@@ -202,7 +202,7 @@ def split_parallel_corpus(
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     split: pd.DataFrame
     if split_indices is None:
-        if split_size > len(corpus):
+        if split_size >= len(corpus):
             split = corpus
             corpus = pd.DataFrame(columns=corpus.columns)
         else:
