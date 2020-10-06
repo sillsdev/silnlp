@@ -1,4 +1,5 @@
 import math
+from nlp.common.verse_ref import VerseRef
 import os
 import platform
 import subprocess
@@ -173,27 +174,35 @@ def compute_alignment_scores(src_input_path: str, trg_input_path: str) -> List[f
         return scores
 
 
-def get_parallel_corpus(src_file_path: str, trg_file_path: str) -> pd.DataFrame:
+def get_parallel_corpus(vref_file_path: str, src_file_path: str, trg_file_path: str) -> pd.DataFrame:
+    vrefs: List[VerseRef] = []
     src_sentences: List[str] = []
     trg_sentences: List[str] = []
     indices: List[int] = []
-    with open(src_file_path, "r", encoding="utf-8") as src_file, open(trg_file_path, "r", encoding="utf-8") as trg_file:
+    with open(vref_file_path, "r", encoding="utf-8") as vref_file, open(
+        src_file_path, "r", encoding="utf-8"
+    ) as src_file, open(trg_file_path, "r", encoding="utf-8") as trg_file:
         index = 0
-        for src_line, trg_line in zip(src_file, trg_file):
+        for vref_line, src_line, trg_line in zip(vref_file, src_file, trg_file):
+            vref_line = vref_line.strip()
             src_line = src_line.strip()
             trg_line = trg_line.strip()
             if len(src_line) > 0 and len(trg_line) > 0 and (src_line != "<range>" or trg_line != "<range>"):
+                vref = VerseRef.from_string(vref_line)
                 if src_line == "<range>":
+                    vrefs[-1] = VerseRef.from_range(vrefs[-1].simplify(), vref)
                     trg_sentences[-1] = trg_sentences[-1] + " " + trg_line
                 elif trg_line == "<range>":
+                    vrefs[-1] = VerseRef.from_range(vrefs[-1].simplify(), vref)
                     src_sentences[-1] = src_sentences[-1] + " " + src_line
                 else:
+                    vrefs.append(vref)
                     src_sentences.append(src_line)
                     trg_sentences.append(trg_line)
                     indices.append(index)
             index += 1
 
-    data = {"source": src_sentences, "target": trg_sentences}
+    data = {"vref": vrefs, "source": src_sentences, "target": trg_sentences}
     return pd.DataFrame(data, index=indices)
 
 
@@ -227,3 +236,11 @@ def filter_parallel_corpus(corpus: pd.DataFrame, score_threshold: float) -> pd.D
 
 def get_corpus_path(iso: str, project: str) -> str:
     return os.path.join(paratextPreprocessedDir, "data", f"{iso}-{project}.txt")
+
+
+def include_books(corpus: pd.DataFrame, books: Set[int]) -> pd.DataFrame:
+    return corpus[corpus.apply(lambda r: r["vref"].book_num in books, axis=1)].copy()
+
+
+def exclude_books(corpus: pd.DataFrame, books: Set[int]) -> pd.DataFrame:
+    return corpus[corpus.apply(lambda r: r["vref"].book_num not in books, axis=1)].copy()
