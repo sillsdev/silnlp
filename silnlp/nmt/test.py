@@ -24,7 +24,13 @@ SUPPORTED_SCORERS = {"bleu", "chrf3", "meteor", "wer", "ter"}
 
 class PairScore:
     def __init__(
-        self, src_iso: str, trg_iso: str, bleu: Optional[sacrebleu.BLEUScore], sent_len: int, projects: Set[str],
+        self,
+        src_iso: str,
+        trg_iso: str,
+        bleu: Optional[sacrebleu.BLEUScore],
+        sent_len: int,
+        projects: Set[str],
+        other_scores: Dict[str, float] = {},
     ) -> None:
         self.src_iso = src_iso
         self.trg_iso = trg_iso
@@ -32,7 +38,7 @@ class PairScore:
         self.sent_len = sent_len
         self.num_refs = len(projects)
         self.refs = "_".join(sorted(projects))
-        self.other_scores: Dict[str, float] = dict()
+        self.other_scores = other_scores
 
     def writeHeader(self, file: IO) -> None:
         file.write("src_iso,trg_iso,num_refs,references,sent_len,scorer,score\n")
@@ -48,9 +54,6 @@ class PairScore:
         for key, val in self.other_scores.items():
             file.write(f"{self.src_iso},{self.trg_iso},{self.num_refs},{self.refs},{self.sent_len:d},")
             file.write(f"{key},{val:.2f}\n")
-
-    def addScore(self, key: str, score: float) -> None:
-        self.other_scores[key] = score
 
 
 def parse_ref_file_path(ref_file_path: str, default_trg_iso: str) -> Tuple[str, str]:
@@ -167,7 +170,7 @@ def test_checkpoint(
     predictions_paths: List[str] = []
     refs_paths: List[str] = []
     predictions_detok_paths: List[str] = []
-    suffix_str = "_".join(map(lambda n: book_number_to_id(n), books))
+    suffix_str = "_".join(map(lambda n: book_number_to_id(n), sorted(books)))
     if len(suffix_str) > 0:
         suffix_str += "-"
     suffix_str += "avg" if step == -1 else str(step)
@@ -246,28 +249,30 @@ def test_checkpoint(
                     lowercase=True,
                     tokenize=data_config.get("sacrebleu_tokenize", "13a"),
                 )
-            scores.append(PairScore(src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects))
 
+            other_scores: Dict[str, float] = {}
             if "chrf3" in scorers:
                 chrf3_score = sacrebleu.corpus_chrf(
                     pair_sys, cast(List[Iterable[str]], pair_refs), order=6, beta=3, remove_whitespace=True
                 )
-                scores[len(scores) - 1].addScore("CHRF3", np.round(float(chrf3_score.score * 100), 2))
+                other_scores["CHRF3"] = np.round(float(chrf3_score.score * 100), 2)
 
             if "meteor" in scorers:
                 meteor_score = compute_meteor_score(trg_iso, pair_sys, cast(List[Iterable[str]], pair_refs))
                 if meteor_score is not None:
-                    scores[len(scores) - 1].addScore("METEOR", meteor_score)
+                    other_scores["METEOR"] = meteor_score
 
             if "wer" in scorers:
-                wer_score = compute_wer_score(trg_iso, pair_sys, cast(List[str], pair_refs))
+                wer_score = compute_wer_score(pair_sys, cast(List[str], pair_refs))
                 if wer_score is not None and wer_score >= 0:
-                    scores[len(scores) - 1].addScore("WER", wer_score)
+                    other_scores["WER"] = wer_score
 
             if "ter" in scorers:
-                ter_score = compute_ter_score(trg_iso, pair_sys, cast(List[str], pair_refs))
+                ter_score = compute_ter_score(pair_sys, cast(List[str], pair_refs))
                 if ter_score is not None and ter_score >= 0:
-                    scores[len(scores) - 1].addScore("TER", ter_score)
+                    other_scores["TER"] = ter_score
+
+            scores.append(PairScore(src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores))
 
     if len(src_langs) > 1 or len(trg_langs) > 1:
         bleu = sacrebleu.corpus_bleu(overall_sys, cast(List[Iterable[str]], overall_refs), lowercase=True)
@@ -423,7 +428,7 @@ def main() -> None:
             checkpoint_name = f"best checkpoint {step}"
         else:
             checkpoint_name = f"checkpoint {step}"
-        books_str = "ALL" if len(books) == 0 else ", ".join(map(lambda n: book_number_to_id(n), books))
+        books_str = "ALL" if len(books) == 0 else ", ".join(map(lambda n: book_number_to_id(n), sorted(books)))
         print(f"Test results for {checkpoint_name} ({num_refs} reference(s), books: {books_str})")
         for score in results[step]:
             score.write(sys.stdout)
