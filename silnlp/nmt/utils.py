@@ -56,11 +56,12 @@ def get_best_model_dir(model_dir: str) -> Tuple[str, int]:
 def get_checkpoint_path(model_dir: str, checkpoint: CheckpointType) -> Tuple[str, int]:
     if checkpoint == CheckpointType.average:
         # Get the checkpoint path and step count for the averaged checkpoint
+        checkpoint_path = os.path.join(model_dir, "avg")
         checkpoints = glob.glob(os.path.join(model_dir, "avg", "ckpt-*.index"))
         for checkpoint in sorted(checkpoints, reverse=True):
             if os.path.isfile(checkpoint):
-                checkpoint_path = checkpoint
-                step = int(re.search(r"ckpt-(\d+).index", checkpoint_path).group(1))
+                #                checkpoint_path = checkpoint
+                step = int(re.search(r"ckpt-(\d+).index", checkpoint).group(1))
                 return checkpoint_path, step
         raise RuntimeError("There is no averaged checkpoint.")
     elif checkpoint == CheckpointType.best:
