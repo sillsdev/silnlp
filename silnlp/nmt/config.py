@@ -12,7 +12,8 @@ import opennmt.utils
 import tensorflow as tf
 import yaml
 
-from nlp.common.utils import get_git_revision_hash, get_root_dir
+from nlp.common.canon import book_id_to_number
+from nlp.common.utils import get_git_revision_hash, get_mt_root_dir
 from nlp.nmt.noise import WordDropout
 from nlp.nmt.runner import RunnerEx
 
@@ -92,7 +93,7 @@ def set_transformer_dropout(
 
 
 def load_config(exp_name: str) -> dict:
-    root_dir = get_root_dir(exp_name)
+    root_dir = get_mt_root_dir(exp_name)
     config_path = os.path.join(root_dir, "config.yml")
 
     config: dict = {
@@ -110,7 +111,6 @@ def load_config(exp_name: str) -> dict:
             "parent_use_average": False,
             "parent_use_vocab": False,
             "seed": 111,
-            "test_size": 250,
             "val_size": 250,
             "disjoint_test": False,
             "disjoint_val": False,
@@ -170,6 +170,8 @@ def load_config(exp_name: str) -> dict:
                 data_config["src_casing"] = "lower"
             if "trg_casing" not in data_config:
                 data_config["trg_casing"] = "lower"
+    if "test_size" not in data_config:
+        data_config["test_size"] = 0 if "test_books" in data_config else 250
     return config
 
 
@@ -249,6 +251,24 @@ def parse_langs(langs: Iterable[Union[str, dict]]) -> Tuple[Set[str], Dict[str, 
     return isos, train_projects, test_projects
 
 
+def get_books(books: Union[str, List[str]]) -> Set[int]:
+    if isinstance(books, str):
+        books = books.split(",")
+    book_set: Set[int] = set()
+    for book_id in books:
+        book_id = book_id.strip().upper()
+        if book_id == "NT":
+            book_set.update(range(40, 67))
+        elif book_id == "OT":
+            book_set.update(range(40))
+        else:
+            book_num = book_id_to_number(book_id)
+            if book_num is None:
+                raise RuntimeError("A specified book Id is invalid.")
+            book_set.add(book_num)
+    return book_set
+
+
 def copy_config_value(src: dict, trg: dict, key: str) -> None:
     if key in src:
         trg[key] = src[key]
@@ -271,7 +291,7 @@ def main() -> None:
 
     print("Git commit:", get_git_revision_hash())
 
-    root_dir = get_root_dir(args.experiment)
+    root_dir = get_mt_root_dir(args.experiment)
     config_path = os.path.join(root_dir, "config.yml")
     if os.path.isfile(config_path) and not args.force:
         print('The experiment config file already exists. Use "--force" if you want to overwrite the existing config.')

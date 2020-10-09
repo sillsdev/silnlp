@@ -3,7 +3,7 @@ import logging
 import os
 import random
 from glob import glob
-from typing import IO, Dict, List, Set, Tuple
+from typing import IO, Dict, Iterable, List, Set, Tuple, cast
 from itertools import combinations
 
 logging.basicConfig()
@@ -11,7 +11,7 @@ logging.basicConfig()
 import sacrebleu
 
 from nlp.common.utils import get_git_revision_hash
-from nlp.nmt.config import get_root_dir, load_config, parse_langs
+from nlp.nmt.config import get_mt_root_dir, load_config, parse_langs
 from nlp.nmt.utils import decode_sp
 
 
@@ -124,7 +124,7 @@ def main() -> None:
     print("Git commit:", get_git_revision_hash())
 
     exp_name = args.experiment
-    root_dir = get_root_dir(exp_name)
+    root_dir = get_mt_root_dir(exp_name)
     config = load_config(exp_name)
     data_config: dict = config["data"]
     src_langs, _, _ = parse_langs(data_config["src_langs"])
@@ -214,7 +214,7 @@ def main() -> None:
                 # ensure that all refs are the same length as the sys
                 for overall_ref in filter(lambda r: len(r) < len(overall_sys), overall_refs):
                     overall_ref.extend([""] * (len(overall_sys) - len(overall_ref)))
-                bleu = sacrebleu.corpus_bleu(sys, refs, lowercase=True)
+                bleu = sacrebleu.corpus_bleu(sys, cast(List[Iterable[str]], refs), lowercase=True)
                 scores.append(TestResults(src_iso, trg_iso, bleu, len(sys), ref_projects))
 
         #            os.replace(predictions_path, f"{predictions_path}.{step}")

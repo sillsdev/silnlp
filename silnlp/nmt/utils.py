@@ -1,6 +1,6 @@
 import os
 import glob
-from typing import IO, Iterable, Iterator, List, Optional, Tuple
+from typing import IO, Iterable, Iterator, List, Optional, Tuple, cast
 import enum
 import re
 
@@ -8,6 +8,7 @@ import opennmt.utils
 import sacrebleu
 import sentencepiece as sp
 import tensorflow as tf
+
 
 # Different types of parent model checkpoints (last, best, average)
 class CheckpointType(enum.Enum):
@@ -53,18 +54,20 @@ def get_best_model_dir(model_dir: str) -> Tuple[str, int]:
     return best_model_path, step
 
 
-def get_checkpoint_path(model_dir: str, checkpoint: CheckpointType) -> Tuple[str, int]:
-    if checkpoint == CheckpointType.average:
+def get_checkpoint_path(model_dir: str, checkpoint_type: CheckpointType) -> Tuple[str, int]:
+    if checkpoint_type == CheckpointType.average:
         # Get the checkpoint path and step count for the averaged checkpoint
-        checkpoint_path = os.path.join(model_dir, "avg")
         checkpoints = glob.glob(os.path.join(model_dir, "avg", "ckpt-*.index"))
         for checkpoint in sorted(checkpoints, reverse=True):
             if os.path.isfile(checkpoint):
-                #                checkpoint_path = checkpoint
-                step = int(re.search(r"ckpt-(\d+).index", checkpoint).group(1))
+                checkpoint_path = checkpoint
+                match = re.search(r"ckpt-(\d+).index", checkpoint_path)
+                if match is None:
+                    raise RuntimeError("The checkpoint index file is invalid.")
+                step = int(match.group(1))
                 return checkpoint_path, step
         raise RuntimeError("There is no averaged checkpoint.")
-    elif checkpoint == CheckpointType.best:
+    elif checkpoint_type == CheckpointType.best:
         # Get the checkpoint path and step count for the best checkpoint
         export_path = os.path.join(model_dir, "export")
         models = os.listdir(export_path)
@@ -76,7 +79,7 @@ def get_checkpoint_path(model_dir: str, checkpoint: CheckpointType) -> Tuple[str
                 return checkpoint_path, step
         raise RuntimeError("There are no exported models.")
     else:
-        raise RuntimeError(f"Unsupported checkpoint type: {checkpoint}")
+        raise RuntimeError(f"Unsupported checkpoint type: {checkpoint_type}")
 
 
 @opennmt.utils.register_scorer(name="bleu_sp")
@@ -116,7 +119,7 @@ class BLEUMultiRefScorer(opennmt.utils.Scorer):
                         if len(refs) == ref_index:
                             refs.append([])
                         refs[ref_index].append(ref_line)
-                bleu = sacrebleu.corpus_bleu(sys_stream, refs, force=True)
+                bleu = sacrebleu.corpus_bleu(sys_stream, cast(List[Iterable[str]], refs), force=True)
                 return bleu.score
             finally:
                 for ref_stream in ref_streams:

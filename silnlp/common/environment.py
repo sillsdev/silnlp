@@ -55,3 +55,8 @@ dbl_name = os.getenv("DBL_NAME")
 dbl_password = os.getenv("DBL_PASSWORD")
 
 scripture_api_key = os.getenv("SCRIPTURE_API_KEY")
+
+nlp_tools_path = os.getenv("NLP_TOOLS_PATH")
+nlp_tools_dir = Path(nlp_tools_path if nlp_tools_path is not None else nlpDir)
+align_gold_standards_dir = nlp_tools_dir / r"Gold Standards"
+align_experiments_dir = nlp_tools_dir / r"Experiments"

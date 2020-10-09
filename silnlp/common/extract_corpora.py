@@ -1,8 +1,8 @@
 # Extracts parallel corpora from Paratext projects.
-# This script is dependent on the SIL.Machine.Translator tool being installed.
+# This script is dependent on the Machine tool being installed.
 # To install:
 # 1. Install .NET Core SDK (https://dotnet.microsoft.com/download)
-# 2. Run "dotnet tool install SIL.Machine.Translator -g"
+# 2. Run "dotnet tool restore"
 
 
 import argparse
@@ -31,7 +31,7 @@ def extract_corpus(output_dir: str, iso: str, project_dir: str, include_texts: s
     name = os.path.basename(project_dir)
     print("Extracting", name, f"({iso})")
     ref_dir = os.path.join(paratextUnzippedDir, "Ref")
-    arg_list = ["dotnet", "translator", "extract", "-s", f"pt,{ref_dir}", "-t", f"pt,{project_dir}", "-as", "-ie"]
+    arg_list = ["dotnet", "machine", "extract", ref_dir, project_dir, "-sf", "pt", "-tf", "pt" "-as", "-ie"]
     output_basename = f"{iso}-{name}"
     if len(include_texts) > 0 or len(exclude_texts) > 0:
         output_basename += "_"

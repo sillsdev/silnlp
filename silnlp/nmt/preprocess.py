@@ -17,19 +17,22 @@ import sentencepiece as sp
 
 from nlp.common.corpus import (
     add_alignment_scores,
+    exclude_books,
     filter_parallel_corpus,
+    get_corpus_path,
     get_parallel_corpus,
+    include_books,
+    load_corpus,
     split_parallel_corpus,
     write_corpus,
 )
-from nlp.common.corpus import get_corpus_path, load_corpus
+from nlp.common.environment import paratextPreprocessedDir
 from nlp.common.utils import set_seed
-from nlp.nmt.config import create_runner, get_git_revision_hash, get_root_dir, load_config, parse_langs
+from nlp.nmt.config import create_runner, get_books, get_git_revision_hash, get_mt_root_dir, load_config, parse_langs
 from nlp.nmt.utils import (
     decode_sp_lines,
     encode_sp,
     encode_sp_lines,
-    get_best_model_dir,
     get_checkpoint_path,
     CheckpointType,
 )
@@ -94,13 +97,13 @@ def get_iso(file_path: str) -> Tuple[str, str]:
 
 
 def update_vocab(
-    parent_config: dict, root_dir: str, src_vocab_path: str, trg_vocab_path: str, parentModelToUse: CheckpointType
+    parent_config: dict, root_dir: str, src_vocab_path: str, trg_vocab_path: str, parent_model_to_use: CheckpointType
 ) -> None:
     model_dir: str = parent_config["model_dir"]
     checkpoint_path: Optional[str] = None
     step: Optional[int] = None
-    if parentModelToUse is CheckpointType.best or parentModelToUse is CheckpointType.average:
-        checkpoint_path, step = get_checkpoint_path(model_dir, parentModelToUse)
+    if parent_model_to_use is CheckpointType.best or parent_model_to_use is CheckpointType.average:
+        checkpoint_path, step = get_checkpoint_path(model_dir, parent_model_to_use)
     #       try:
     #           best_model_dir, step = get_best_model_dir(model_dir)
     #           checkpoint_path = os.path.join(best_model_dir, "ckpt")
@@ -265,7 +268,7 @@ def main() -> None:
     print("Git commit:", get_git_revision_hash())
 
     exp_name = args.experiment
-    root_dir = get_root_dir(exp_name)
+    root_dir = get_mt_root_dir(exp_name)
     config = load_config(exp_name)
     data_config: dict = config["data"]
     eval_config: dict = config["eval"]
@@ -309,7 +312,7 @@ def main() -> None:
     parent_config = {}
     parent_data_config = {}
     parent_root_dir = ""
-    parentModelToUse = (
+    parent_model_to_use = (
         CheckpointType.best
         if data_config["parent_use_best"]
         else CheckpointType.average
@@ -327,7 +330,7 @@ def main() -> None:
         # do not freeze any word embeddings layer, because we will update them when we create the parent model
         if freeze_layers is not None:
             parent_params_config["freeze_layers"] = list()
-        parent_root_dir = get_root_dir(parent)
+        parent_root_dir = get_mt_root_dir(parent)
         has_parent = True
 
     write_trg_tag = (
@@ -366,7 +369,7 @@ def main() -> None:
         build_vocab(share_vocab_file_paths, vocab_size, casing, model_prefix, vocab_path, tag_langs)
 
         if has_parent:
-            update_vocab(parent_config, root_dir, vocab_path, vocab_path, parentModelToUse)
+            update_vocab(parent_config, root_dir, vocab_path, vocab_path, parent_model_to_use)
 
         src_spp = sp.SentencePieceProcessor()
         src_spp.Load(f"{model_prefix}.model")
@@ -408,7 +411,7 @@ def main() -> None:
                 root_dir,
                 os.path.join(root_dir, "src-onmt.vocab"),
                 os.path.join(root_dir, "trg-onmt.vocab"),
-                parentModelToUse,
+                parent_model_to_use,
             )
 
         src_spp = sp.SentencePieceProcessor()
@@ -432,6 +435,10 @@ def main() -> None:
     pair_val_indices: Dict[Tuple[str, str], Set[int]] = {}
     pair_test_indices: Dict[Tuple[str, str], Set[int]] = {}
 
+    vref_file_path = os.path.join(paratextPreprocessedDir, "data", "vref.txt")
+    corpus_books = get_books(data_config.get("corpus_books", []))
+    test_books = get_books(data_config.get("test_books", []))
+
     stats_file: Optional[IO] = None
     try:
         if args.stats:
@@ -449,7 +456,16 @@ def main() -> None:
                 is_train_ref = not is_in_sorted(test_only_trg_file_paths, trg_file_path)
                 is_test_ref = not is_in_sorted(train_only_trg_file_paths, trg_file_path)
 
-                cur_train = get_parallel_corpus(src_file_path, trg_file_path)
+                corpus = get_parallel_corpus(vref_file_path, src_file_path, trg_file_path)
+                if len(corpus_books) > 0:
+                    cur_train = include_books(corpus, corpus_books)
+                    if len(corpus_books.intersection(test_books)) > 0:
+                        cur_train = exclude_books(cur_train, test_books)
+                elif len(test_books) > 0:
+                    cur_train = exclude_books(corpus, test_books)
+                else:
+                    cur_train = corpus
+
                 corpus_len = len(cur_train)
                 if is_train_ref and (stats_file is not None or score_threshold > 0):
                     add_alignment_scores(cur_train)
@@ -463,9 +479,16 @@ def main() -> None:
                             indices.difference_update(val_indices)
                         test_indices = set(random.sample(indices, min(test_size, len(indices))))
 
-                    cur_train, cur_test = split_parallel_corpus(
-                        cur_train, test_size, pair_test_indices.get((src_iso, trg_iso), test_indices)
-                    )
+                    if len(test_books) > 0:
+                        cur_test = include_books(corpus, test_books)
+                        if test_size > 0:
+                            _, cur_test = split_parallel_corpus(
+                                cur_test, test_size, pair_test_indices.get((src_iso, trg_iso), test_indices)
+                            )
+                    else:
+                        cur_train, cur_test = split_parallel_corpus(
+                            cur_train, test_size, pair_test_indices.get((src_iso, trg_iso), test_indices)
+                        )
 
                     cur_test.drop("score", axis=1, inplace=True, errors="ignore")
                     add_to_eval_dataset(src_iso, trg_iso, trg_project, write_trg_tag, test, pair_test_indices, cur_test)
@@ -555,6 +578,7 @@ def main() -> None:
 
     for (src_iso, trg_iso), pair_test in test.items():
         prefix = "test" if len(test) == 1 else f"test.{src_iso}.{trg_iso}"
+        write_corpus(os.path.join(root_dir, f"{prefix}.vref.txt"), map(lambda vr: str(vr), pair_test["vref"]))
         write_corpus(os.path.join(root_dir, f"{prefix}.src.txt"), encode_sp_lines(src_spp, pair_test["source"]))
 
         columns: List[str] = list(filter(lambda c: c.startswith("target"), pair_test.columns))

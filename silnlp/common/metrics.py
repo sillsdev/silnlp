@@ -16,7 +16,7 @@ from opennmt.utils.ter import ter
 from opennmt.utils.wer import wer
 
 
-def compute_ter_score(lang: str, hyps: Iterable[str], refs: Iterable[str]) -> Optional[float]:
+def compute_ter_score(hyps: Iterable[str], refs: Iterable[str]) -> float:
     with tempfile.TemporaryDirectory() as td:
         hyps_path = os.path.join(td, "hyps.txt")
         refs_path = os.path.join(td, "refs.txt")
@@ -26,14 +26,14 @@ def compute_ter_score(lang: str, hyps: Iterable[str], refs: Iterable[str]) -> Op
 
         try:
             result = ter(hyps_path, refs_path)
-        except UnicodeDecodeError as e:
+        except UnicodeDecodeError:
             print("Unable to compute TER score")
             result = -1
 
         return float(np.round(float(result) * 100, 2))
 
 
-def compute_wer_score(lang: str, hyps: Iterable[str], refs: Iterable[str]) -> Optional[float]:
+def compute_wer_score(hyps: Iterable[str], refs: Iterable[str]) -> float:
     with tempfile.TemporaryDirectory() as td:
         hyps_path = os.path.join(td, "hyps.txt")
         refs_path = os.path.join(td, "refs.txt")
@@ -43,7 +43,7 @@ def compute_wer_score(lang: str, hyps: Iterable[str], refs: Iterable[str]) -> Op
 
         try:
             result = wer(hyps_path, refs_path)
-        except UnicodeDecodeError as e:
+        except UnicodeDecodeError:
             print("Unable to compute WER score")
             result = -1
 

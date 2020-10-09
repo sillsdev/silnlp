@@ -1,9 +1,11 @@
 import argparse
 import logging
+from nlp.common.canon import book_number_to_id
+from nlp.common.verse_ref import VerseRef
 import os
 import random
 from glob import glob
-from typing import IO, Dict, Iterable, List, Set, Tuple, cast
+from typing import IO, Dict, Iterable, List, Optional, Set, Tuple, cast
 import sys
 
 logging.basicConfig()
@@ -14,7 +16,7 @@ import yaml
 
 from nlp.common.metrics import compute_meteor_score, compute_ter_score, compute_wer_score
 from nlp.common.utils import get_git_revision_hash, set_seed
-from nlp.nmt.config import create_runner, get_root_dir, load_config, parse_langs
+from nlp.nmt.config import create_runner, get_books, get_mt_root_dir, load_config, parse_langs
 from nlp.nmt.utils import decode_sp, get_best_model_dir
 
 SUPPORTED_SCORERS = {"bleu", "chrf3", "meteor", "wer", "ter"}
@@ -22,7 +24,13 @@ SUPPORTED_SCORERS = {"bleu", "chrf3", "meteor", "wer", "ter"}
 
 class PairScore:
     def __init__(
-        self, src_iso: str, trg_iso: str, bleu: sacrebleu.BLEUScore, sent_len: int, projects: Set[str],
+        self,
+        src_iso: str,
+        trg_iso: str,
+        bleu: Optional[sacrebleu.BLEUScore],
+        sent_len: int,
+        projects: Set[str],
+        other_scores: Dict[str, float] = {},
     ) -> None:
         self.src_iso = src_iso
         self.trg_iso = trg_iso
@@ -30,7 +38,7 @@ class PairScore:
         self.sent_len = sent_len
         self.num_refs = len(projects)
         self.refs = "_".join(sorted(projects))
-        self.other_scores = dict()
+        self.other_scores = other_scores
 
     def writeHeader(self, file: IO) -> None:
         file.write("src_iso,trg_iso,num_refs,references,sent_len,scorer,score\n")
@@ -46,9 +54,6 @@ class PairScore:
         for key, val in self.other_scores.items():
             file.write(f"{self.src_iso},{self.trg_iso},{self.num_refs},{self.refs},{self.sent_len:d},")
             file.write(f"{key},{val:.2f}\n")
-
-    def addScore(self, key: str, score: float) -> None:
-        self.other_scores[key] = score
 
 
 def parse_ref_file_path(ref_file_path: str, default_trg_iso: str) -> Tuple[str, str]:
@@ -70,6 +75,7 @@ def is_train_project(train_projects: Dict[str, Set[str]], ref_file_path: str, de
 
 
 def load_test_data(
+    vref_file_path: str,
     src_file_path: str,
     pred_file_path: str,
     ref_files_path: str,
@@ -77,6 +83,7 @@ def load_test_data(
     default_trg_iso: str,
     ref_projects: Set[str],
     train_projects: Dict[str, Set[str]],
+    books: Set[int],
 ) -> Dict[str, Tuple[List[str], List[List[str]]]]:
     dataset: Dict[str, Tuple[List[str], List[List[str]]]] = {}
     with open(src_file_path, "r", encoding="utf-8") as src_file, open(
@@ -96,10 +103,19 @@ def load_test_data(
                 # use specified refs only
                 ref_file_paths = filtered
         ref_files: List[IO] = []
+        vref_file: Optional[IO] = None
+        if len(books) > 0 and os.path.isfile(vref_file_path):
+            vref_file = open(vref_file_path, "r", encoding="utf-8")
         try:
             for ref_file_path in ref_file_paths:
                 ref_files.append(open(ref_file_path, "r", encoding="utf-8"))
             for lines in zip(src_file, pred_file, *ref_files):
+                if vref_file is not None:
+                    vref_line = vref_file.readline().strip()
+                    if vref_line != "":
+                        vref = VerseRef.from_string(vref_line)
+                        if vref.book_num not in books:
+                            continue
                 src_line = lines[0].strip()
                 pred_line = lines[1].strip()
                 detok_pred_line = decode_sp(pred_line)
@@ -127,6 +143,8 @@ def load_test_data(
                         refs[ref_index].append(ref_line)
                 out_file.write(detok_pred_line + "\n")
         finally:
+            if vref_file is not None:
+                vref_file.close()
             for ref_file in ref_files:
                 ref_file.close()
 
@@ -145,29 +163,38 @@ def test_checkpoint(
     checkpoint_path: str,
     step: int,
     scorers: Set[str],
+    books: Set[int],
 ) -> List[PairScore]:
+    vref_paths: List[str] = []
     features_paths: List[str] = []
     predictions_paths: List[str] = []
     refs_paths: List[str] = []
     predictions_detok_paths: List[str] = []
-    step_str = "avg" if step == -1 else str(step)
+    suffix_str = "_".join(map(lambda n: book_number_to_id(n), sorted(books)))
+    if len(suffix_str) > 0:
+        suffix_str += "-"
+    suffix_str += "avg" if step == -1 else str(step)
     for src_iso in sorted(src_langs):
         prefix = "test" if len(src_langs) == 1 else f"test.{src_iso}"
         src_features_path = os.path.join(root_dir, f"{prefix}.src.txt")
         if os.path.isfile(src_features_path):
             # all target data is stored in a single file
+            vref_paths.append(os.path.join(root_dir, f"{prefix}.vref.txt"))
             features_paths.append(src_features_path)
-            predictions_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.txt.{step_str}"))
+            predictions_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.txt.{suffix_str}"))
             refs_paths.append(os.path.join(root_dir, f"{prefix}.trg.detok*.txt"))
-            predictions_detok_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.detok.txt.{step_str}"))
+            predictions_detok_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.detok.txt.{suffix_str}"))
         else:
             # target data is split into separate files
             for trg_iso in sorted(trg_langs):
                 prefix = f"test.{src_iso}.{trg_iso}"
+                vref_paths.append(os.path.join(root_dir, f"{prefix}.vref.txt"))
                 features_paths.append(os.path.join(root_dir, f"{prefix}.src.txt"))
-                predictions_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.txt.{step_str}"))
+                predictions_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.txt.{suffix_str}"))
                 refs_paths.append(os.path.join(root_dir, f"{prefix}.trg.detok*.txt"))
-                predictions_detok_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.detok.txt.{step_str}"))
+                predictions_detok_paths.append(
+                    os.path.join(root_dir, f"{prefix}.trg-predictions.detok.txt.{suffix_str}")
+                )
 
     checkpoint_name = "averaged checkpoint" if step == -1 else f"checkpoint {step}"
     if force_infer or any(not os.path.isfile(f) for f in predictions_detok_paths):
@@ -185,14 +212,15 @@ def test_checkpoint(
     scores: List[PairScore] = []
     overall_sys: List[str] = []
     overall_refs: List[List[str]] = []
-    for features_path, predictions_path, refs_path, predictions_detok_path in zip(
-        features_paths, predictions_paths, refs_paths, predictions_detok_paths
+    for vref_path, features_path, predictions_path, refs_path, predictions_detok_path in zip(
+        vref_paths, features_paths, predictions_paths, refs_paths, predictions_detok_paths
     ):
         features_filename = os.path.basename(features_path)
         src_iso = default_src_iso
         if features_filename != "test.src.txt":
             src_iso = features_filename.split(".")[1]
         dataset = load_test_data(
+            vref_path,
             features_path,
             predictions_path,
             refs_path,
@@ -200,12 +228,13 @@ def test_checkpoint(
             default_trg_iso,
             ref_projects,
             trg_train_projects,
+            books,
         )
 
-        for trg_iso, (sys, refs) in dataset.items():
+        for trg_iso, (pair_sys, pair_refs) in dataset.items():
             start_index = len(overall_sys)
-            overall_sys.extend(sys)
-            for i, ref in enumerate(refs):
+            overall_sys.extend(pair_sys)
+            for i, ref in enumerate(pair_refs):
                 if i == len(overall_refs):
                     overall_refs.append([""] * start_index)
                 overall_refs[i].extend(ref)
@@ -215,38 +244,41 @@ def test_checkpoint(
             bleu_score = None
             if "bleu" in scorers:
                 bleu_score = sacrebleu.corpus_bleu(
-                    sys,
-                    cast(List[Iterable[str]], refs),
+                    pair_sys,
+                    cast(List[Iterable[str]], pair_refs),
                     lowercase=True,
                     tokenize=data_config.get("sacrebleu_tokenize", "13a"),
                 )
-            scores.append(PairScore(src_iso, trg_iso, bleu_score, len(sys), ref_projects))
 
+            other_scores: Dict[str, float] = {}
             if "chrf3" in scorers:
                 chrf3_score = sacrebleu.corpus_chrf(
-                    sys, cast(List[Iterable[str]], refs), order=6, beta=3, remove_whitespace=True
+                    pair_sys, cast(List[Iterable[str]], pair_refs), order=6, beta=3, remove_whitespace=True
                 )
-                scores[len(scores) - 1].addScore("CHRF3", np.round(float(chrf3_score.score * 100), 2))
+                other_scores["CHRF3"] = np.round(float(chrf3_score.score * 100), 2)
 
             if "meteor" in scorers:
-                meteor_score = compute_meteor_score(trg_iso, sys, cast(List[Iterable[str]], refs))
-                scores[len(scores) - 1].addScore("METEOR", meteor_score)
+                meteor_score = compute_meteor_score(trg_iso, pair_sys, cast(List[Iterable[str]], pair_refs))
+                if meteor_score is not None:
+                    other_scores["METEOR"] = meteor_score
 
             if "wer" in scorers:
-                wer_score = compute_wer_score(trg_iso, sys, cast(List[str], refs))
+                wer_score = compute_wer_score(pair_sys, cast(List[str], pair_refs))
                 if wer_score >= 0:
-                    scores[len(scores) - 1].addScore("WER", wer_score)
+                    other_scores["WER"] = wer_score
 
             if "ter" in scorers:
-                ter_score = compute_ter_score(trg_iso, sys, cast(List[str], refs))
+                ter_score = compute_ter_score(pair_sys, cast(List[str], pair_refs))
                 if ter_score >= 0:
-                    scores[len(scores) - 1].addScore("TER", ter_score)
+                    other_scores["TER"] = ter_score
+
+            scores.append(PairScore(src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores))
 
     if len(src_langs) > 1 or len(trg_langs) > 1:
         bleu = sacrebleu.corpus_bleu(overall_sys, cast(List[Iterable[str]], overall_refs), lowercase=True)
         scores.append(PairScore("ALL", "ALL", bleu, len(overall_sys), ref_projects))
 
-    scores_file_root = f"scores-{step_str}"
+    scores_file_root = f"scores-{suffix_str}"
     if len(ref_projects) > 0:
         ref_projects_suffix = "_".join(sorted(ref_projects))
         scores_file_root += f"-{ref_projects_suffix}"
@@ -278,29 +310,31 @@ def main() -> None:
     parser.add_argument("--avg", default=False, action="store_true", help="Test averaged checkpoint")
     parser.add_argument("--ref-projects", nargs="*", metavar="project", default=[], help="Reference projects")
     parser.add_argument("--force-infer", default=False, action="store_true", help="Force inferencing")
-    parser.add_argument("--scorers", nargs="*", metavar="scorers", help=f"List of scorers - {SUPPORTED_SCORERS}")
+    parser.add_argument("--scorers", nargs="*", metavar="scorer", help=f"List of scorers - {SUPPORTED_SCORERS}")
+    parser.add_argument("--books", nargs="*", metavar="book", default=[], help="Books")
 
     args = parser.parse_args()
 
     print("Git commit:", get_git_revision_hash())
 
     exp_name = args.experiment
-    root_dir = get_root_dir(exp_name)
+    root_dir = get_mt_root_dir(exp_name)
     config = load_config(exp_name)
     model_dir: str = config["model_dir"]
     data_config: dict = config["data"]
     src_langs, _, _ = parse_langs(data_config["src_langs"])
     trg_langs, trg_train_projects, _ = parse_langs(data_config["trg_langs"])
     ref_projects: Set[str] = set(args.ref_projects)
+    books = get_books(args.books)
 
+    scorers: Set[str] = set()
     if args.scorers is None:
-        scorers = {"bleu"}
+        scorers.add("bleu")
     else:
-        scorers = []
         for scorer in set(args.scorers):
             scorer = scorer.lower()
             if scorer in SUPPORTED_SCORERS:
-                scorers.append(scorer)
+                scorers.add(scorer)
 
     best_model_path, best_step = get_best_model_dir(model_dir)
     results: Dict[int, List[PairScore]] = {}
@@ -321,6 +355,7 @@ def main() -> None:
             checkpoint_path,
             step,
             scorers,
+            books,
         )
 
     if args.avg:
@@ -338,6 +373,7 @@ def main() -> None:
             checkpoint_path,
             step,
             scorers,
+            books,
         )
 
     if args.best:
@@ -359,6 +395,7 @@ def main() -> None:
                 checkpoint_path,
                 step,
                 scorers,
+                books,
             )
 
     if args.last or (not args.best and args.checkpoint is None and not args.avg):
@@ -377,6 +414,7 @@ def main() -> None:
                 checkpoint_path,
                 step,
                 scorers,
+                books,
             )
 
     for step in sorted(results.keys()):
@@ -390,7 +428,8 @@ def main() -> None:
             checkpoint_name = f"best checkpoint {step}"
         else:
             checkpoint_name = f"checkpoint {step}"
-        print(f"Test results for {checkpoint_name} ({num_refs} reference(s))")
+        books_str = "ALL" if len(books) == 0 else ", ".join(map(lambda n: book_number_to_id(n), sorted(books)))
+        print(f"Test results for {checkpoint_name} ({num_refs} reference(s), books: {books_str})")
         for score in results[step]:
             score.write(sys.stdout)
 
