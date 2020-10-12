@@ -28,12 +28,12 @@ _PYTHON_TO_TENSORFLOW_LOGGING_LEVEL: Dict[int, int] = {
 
 DEFAULT_NEW_CONFIG: dict = {
     "data": {
-        "share_vocab": True,
+        "share_vocab": False,
         "mirror": False,
         "mixed_src": False,
         "seed": 111,
-        "test_size": 250,
-        "val_size": 250,
+        "test_size": 1,
+        "val_size": 1,
         "disjoint_test": False,
         "disjoint_val": False,
         "score_threshold": 0,
