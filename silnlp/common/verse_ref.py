@@ -1,4 +1,4 @@
-from __future__ import annotations
+# from __future__ import annotations
 from typing import Iterable
 
 from nlp.common.canon import book_id_to_number, book_number_to_id
@@ -52,7 +52,7 @@ class VerseRef:
         self.has_multiple = verse.find(VERSE_RANGE_SEPARATOR) != -1 or verse.find(VERSE_SEQUENCE_INDICATOR) != -1
 
     @classmethod
-    def from_string(cls, verse_str: str) -> VerseRef:
+    def from_string(cls, verse_str: str) -> "VerseRef":
         b_cv = verse_str.strip().split(" ")
         if len(b_cv) != 2:
             raise ValueError("The verse reference is invalid.")
@@ -63,7 +63,7 @@ class VerseRef:
         return VerseRef(b_cv[0], c_v[0], c_v[1])
 
     @classmethod
-    def from_range(cls, start: VerseRef, end: VerseRef) -> VerseRef:
+    def from_range(cls, start: "VerseRef", end: "VerseRef") -> "VerseRef":
         if start.book_num != end.book_num or start.chapter_num != end.chapter_num:
             raise ValueError("The start and end verses are not in the same chapter.")
         if start.has_multiple:
@@ -81,7 +81,7 @@ class VerseRef:
     def chapter(self) -> str:
         return "" if self.chapter_num < 0 else str(self.chapter_num)
 
-    def all_verses(self) -> Iterable[VerseRef]:
+    def all_verses(self) -> Iterable["VerseRef"]:
         parts = self.verse.split(VERSE_SEQUENCE_INDICATOR)
         for part in parts:
             pieces = part.split(VERSE_RANGE_SEPARATOR)
@@ -94,7 +94,7 @@ class VerseRef:
                     yield VerseRef(self.book, self.chapter, str(verse_num))
                 yield last_verse
 
-    def simplify(self) -> VerseRef:
+    def simplify(self) -> "VerseRef":
         return VerseRef(self.book, self.chapter, str(self.verse_num))
 
     def __str__(self) -> str:
