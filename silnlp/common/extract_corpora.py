@@ -31,7 +31,7 @@ def extract_corpus(output_dir: str, iso: str, project_dir: str, include_texts: s
     name = os.path.basename(project_dir)
     print("Extracting", name, f"({iso})")
     ref_dir = os.path.join(paratextUnzippedDir, "Ref")
-    arg_list = ["dotnet", "machine", "extract", ref_dir, project_dir, "-sf", "pt", "-tf", "pt" "-as", "-ie"]
+    arg_list = ["dotnet", "machine", "extract", ref_dir, project_dir, "-sf", "pt", "-tf", "pt", "-as", "-ie"]
     output_basename = f"{iso}-{name}"
     if len(include_texts) > 0 or len(exclude_texts) > 0:
         output_basename += "_"
