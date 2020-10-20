@@ -12,6 +12,7 @@ logging.basicConfig()
 
 import numpy as np
 import sacrebleu
+from sacrebleu import BLEU, BLEUScore, DEFAULT_TOKENIZER, Namespace
 import yaml
 
 from nlp.common.metrics import compute_meteor_score, compute_ter_score, compute_wer_score
@@ -151,7 +152,39 @@ def load_test_data(
     return dataset
 
 
-def write_sentence_bleu(predictions_detok_path: str, preds: List[str], refs: List[List[str]]):
+def my_sentence_bleu(
+    hypothesis: str,
+    references: List[str],
+    smooth_method: str = "exp",
+    smooth_value: float = None,
+    lowercase: bool = False,
+    tokenize=DEFAULT_TOKENIZER,
+    use_effective_order: bool = False,
+) -> BLEUScore:
+    """
+    Substitute for the sacrebleu version of sentence_bleu, which uses settings that aren't consistent with
+    the values we use for corpus_bleu, and isn't fully parameterized
+    """
+    args = Namespace(
+        smooth_method=smooth_method,
+        smooth_value=smooth_value,
+        force=False,
+        short=False,
+        lc=lowercase,
+        tokenize=tokenize,
+    )
+
+    metric = BLEU(args)
+    return metric.sentence_score(hypothesis, references, use_effective_order=use_effective_order)
+
+
+def write_sentence_bleu(
+    predictions_detok_path: str,
+    preds: List[str],
+    refs: List[List[str]],
+    lowercase: bool = False,
+    tokenize=DEFAULT_TOKENIZER,
+):
     scores_path = predictions_detok_path + ".scores.csv"
     with open(scores_path, "w", encoding="utf-8-sig") as scores_file:
         scores_file.write("Verse\tBLEU\t1-gram\t2-gram\t3-gram\t4-gram\tBP\tPrediction")
@@ -163,7 +196,7 @@ def write_sentence_bleu(predictions_detok_path: str, preds: List[str], refs: Lis
             refList: List[str] = []
             for ref in refs:
                 refList.append(ref[verseNo])
-            bleu = sacrebleu.sentence_bleu(pred, refList)
+            bleu = my_sentence_bleu(pred, refList, lowercase=lowercase, tokenize=tokenize)
             scores_file.write(
                 f"{verseNo+1}\t{bleu.score:.2f}\t{bleu.precisions[0]:.2f}\t{bleu.precisions[1]:.2f}\t"
                 f"{bleu.precisions[2]:.2f}\t{bleu.precisions[3]:.2f}\t{bleu.bp:.3f}\t" + pred.rstrip("\n")
@@ -274,7 +307,13 @@ def test_checkpoint(
                 )
 
             if "sentencebleu" in scorers:
-                write_sentence_bleu(predictions_detok_path, pair_sys, cast(List[List[str]], pair_refs))
+                write_sentence_bleu(
+                    predictions_detok_path,
+                    pair_sys,
+                    cast(List[List[str]], pair_refs),
+                    lowercase=True,
+                    tokenize=data_config.get("sacrebleu_tokenize", "13a"),
+                )
 
             other_scores: Dict[str, float] = {}
             if "chrf3" in scorers:
