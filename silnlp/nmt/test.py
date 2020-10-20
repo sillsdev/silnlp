@@ -19,7 +19,7 @@ from nlp.common.utils import get_git_revision_hash, set_seed
 from nlp.nmt.config import create_runner, get_books, get_mt_root_dir, load_config, parse_langs
 from nlp.nmt.utils import decode_sp, get_best_model_dir
 
-SUPPORTED_SCORERS = {"bleu", "chrf3", "meteor", "wer", "ter"}
+SUPPORTED_SCORERS = {"bleu", "sentencebleu", "chrf3", "meteor", "wer", "ter"}
 
 
 class PairScore:
@@ -151,6 +151,29 @@ def load_test_data(
     return dataset
 
 
+def write_sentence_bleu(predictions_detok_path: str, preds: List[str], refs: List[List[str]]):
+    scores_path = predictions_detok_path + ".scores.csv"
+    with open(scores_path, "w", encoding="utf-8-sig") as scores_file:
+        scores_file.write("Verse\tBLEU\t1-gram\t2-gram\t3-gram\t4-gram\tBP\tPrediction")
+        for ref in refs:
+            scores_file.write("\tReference")
+        scores_file.write("\n")
+        verseNo = 0
+        for pred in preds:
+            refList: List[str] = []
+            for ref in refs:
+                refList.append(ref[verseNo])
+            bleu = sacrebleu.sentence_bleu(pred, refList)
+            scores_file.write(
+                f"{verseNo+1}\t{bleu.score:.2f}\t{bleu.precisions[0]:.2f}\t{bleu.precisions[1]:.2f}\t"
+                f"{bleu.precisions[2]:.2f}\t{bleu.precisions[3]:.2f}\t{bleu.bp:.3f}\t" + pred.rstrip("\n")
+            )
+            for ref in refList:
+                scores_file.write("\t" + ref.rstrip("\n"))
+            scores_file.write("\n")
+            verseNo += 1
+
+
 def test_checkpoint(
     root_dir: str,
     config: dict,
@@ -249,6 +272,9 @@ def test_checkpoint(
                     lowercase=True,
                     tokenize=data_config.get("sacrebleu_tokenize", "13a"),
                 )
+
+            if "sentencebleu" in scorers:
+                write_sentence_bleu(predictions_detok_path, pair_sys, cast(List[List[str]], pair_refs))
 
             other_scores: Dict[str, float] = {}
             if "chrf3" in scorers:
