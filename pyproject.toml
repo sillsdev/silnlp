@@ -36,6 +36,8 @@ seaborn = "^0.10.1"
 lxml = "^4.5.1"
 pandas-summary = "^0.0.7"
 docopt = "^0.6.2"
+morfessor = "^2.0.6"
+Morfessor-FlatCat = "^1.0.8"
 
 [tool.poetry.dev-dependencies]
 mypy = "^0.780"

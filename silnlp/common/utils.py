@@ -42,7 +42,11 @@ def wsl_path(win_path: str) -> str:
 def merge_dict(dict1: dict, dict2: dict) -> dict:
     for key, value in dict2.items():
         if isinstance(value, dict):
-            dict1[key] = merge_dict(dict1.get(key, {}), value)
+            dict1_value = dict1.get(key, {})
+            if isinstance(dict1_value, dict):
+                dict1[key] = merge_dict(dict1_value, value)
+            else:
+                dict1[key] = value
         else:
             dict1[key] = value
     return dict1

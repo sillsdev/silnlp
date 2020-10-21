@@ -330,6 +330,31 @@ python-versions = "*"
 version = "0.6.1"
 
 [[package]]
+category = "main"
+description = "Morfessor"
+name = "morfessor"
+optional = false
+python-versions = "*"
+version = "2.0.6"
+
+[package.extras]
+docs = ["sphinx", "sphinxcontrib-napoleon"]
+
+[[package]]
+category = "main"
+description = "Morfessor FlatCat"
+name = "morfessor-flatcat"
+optional = false
+python-versions = "*"
+version = "1.0.8"
+
+[package.dependencies]
+morfessor = ">=2.0.2alpha1"
+
+[package.extras]
+docs = ["sphinx", "sphinxcontrib-napoleon"]
+
+[[package]]
 category = "dev"
 description = "Optional static typing for Python"
 name = "mypy"
@@ -947,7 +972,8 @@ docs = ["sphinx", "jaraco.packaging (>=3.2)", "rst.linker (>=1.9)"]
 testing = ["jaraco.itertools", "func-timeout"]
 
 [metadata]
-content-hash = "95671fbae7a86e328ab0fc45dc9dbf194160bbd8df870e58e99877d35d5f1463"
+content-hash = "1808206273f466c11e03d3f790921885bcdb88414de74e5050506ee9561c20ae"
+lock-version = "1.0"
 python-versions = "~3.7"
 
 [metadata.files]
@@ -1172,6 +1198,14 @@ matplotlib = [
 mccabe = [
     {file = "mccabe-0.6.1-py2.py3-none-any.whl", hash = "sha256:ab8a6258860da4b6677da4bd2fe5dc2c659cff31b3ee4f7f5d64e79735b80d42"},
     {file = "mccabe-0.6.1.tar.gz", hash = "sha256:dd8d182285a0fe56bace7f45b5e7d1a6ebcbf524e8f3bd87eb0f125271b8831f"},
+]
+morfessor = [
+    {file = "Morfessor-2.0.6-py3-none-any.whl", hash = "sha256:7215e37909ebd2bafeeec5fdf4e339a25e61aee4895ff99317b9fb44eddab562"},
+    {file = "Morfessor-2.0.6.tar.gz", hash = "sha256:bb3beac234341724c5f640f65803071f62373a50dba854d5a398567f9aefbab2"},
+]
+morfessor-flatcat = [
+    {file = "Morfessor FlatCat-1.0.8.tar.gz", hash = "sha256:f5d142fbbe00d82faea87a886674e7f453b55f40143e5ee9bdb419da85b8a041"},
+    {file = "Morfessor_FlatCat-1.0.8-py2.py3-none-any.whl", hash = "sha256:a20e24266b7be7e092e00dcaee9fa41174568f9e4747976c8dbf47d6f8641c84"},
 ]
 mypy = [
     {file = "mypy-0.780-cp35-cp35m-macosx_10_6_x86_64.whl", hash = "sha256:d3b4941de44341227ece1caaf5b08b23e42ad4eeb8b603219afb11e9d4cfb437"},

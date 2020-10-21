@@ -1,18 +1,21 @@
 import argparse
 import json
+import logging
 import os
 from typing import List, Tuple
 
+logging.basicConfig(level=logging.INFO)
+
 from nltk.translate import Alignment
 
-from nlp.alignment.config import load_config
+from nlp.alignment.config import get_stemmer, load_config
 from nlp.common.corpus import write_corpus
 from nlp.common.environment import align_gold_standards_dir
-from nlp.common.utils import get_align_root_dir
+from nlp.common.utils import get_align_root_dir, set_seed
 
 
 class ParallelSegment:
-    def __init__(self, ref: str, source: str, target: str, alignment: Alignment) -> None:
+    def __init__(self, ref: str, source: List[str], target: List[str], alignment: Alignment) -> None:
         self.ref = ref
         self.source = source
         self.target = target
@@ -24,9 +27,9 @@ def get_ref(verse: dict) -> str:
     return id[:-4]
 
 
-def get_segment(segInfo: dict) -> str:
+def get_segment(segInfo: dict) -> List[str]:
     words: List[dict] = segInfo["words"]
-    return " ".join(map(lambda w: w["text"], words)).lower()
+    return list(map(lambda w: w["text"].lower(), words))
 
 
 def get_alignment(verse: dict) -> Alignment:
@@ -48,6 +51,9 @@ def main() -> None:
 
     root_dir = get_align_root_dir(args.experiment)
     config = load_config(args.experiment)
+
+    set_seed(config["seed"])
+
     corpus_name: str = config["corpus"]
 
     corpus_path = os.path.join(align_gold_standards_dir, corpus_name + ".alignment.json")
@@ -63,14 +69,21 @@ def main() -> None:
         alignment = get_alignment(verse)
         corpus.append(ParallelSegment(ref, source, target, alignment))
 
+    src_stemmer = get_stemmer(config["src_stemmer"])
+    src_stemmer.train(map(lambda s: s.source, corpus))
+
+    trg_stemmer = get_stemmer(config["trg_stemmer"])
+    trg_stemmer.train(map(lambda s: s.target, corpus))
+
     train_refs_path = os.path.join(root_dir, "refs.txt")
     write_corpus(train_refs_path, map(lambda s: s.ref, corpus))
 
     train_src_path = os.path.join(root_dir, "src.txt")
-    write_corpus(train_src_path, map(lambda s: s.source, corpus))
+    write_corpus(train_src_path, map(lambda s: " ".join(s.source), corpus))
 
     train_trg_path = os.path.join(root_dir, "trg.txt")
-    write_corpus(train_trg_path, map(lambda s: s.target, corpus))
+    write_corpus(train_trg_path, map(lambda s: " ".join(src_stemmer.stem(s.target)), corpus))
+    write_corpus(train_trg_path, map(lambda s: " ".join(trg_stemmer.stem(s.target)), corpus))
 
     test_alignments_path = os.path.join(root_dir, "alignments.gold.txt")
     write_corpus(test_alignments_path, map(lambda s: str(s.alignment), corpus))
