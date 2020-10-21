@@ -121,20 +121,35 @@ def get_parallel_corpus(vref_file_path: str, src_file_path: str, trg_file_path: 
             vref_line = vref_line.strip()
             src_line = src_line.strip()
             trg_line = trg_line.strip()
-            if len(src_line) > 0 and len(trg_line) > 0 and (src_line != "<range>" or trg_line != "<range>"):
-                vref = VerseRef.from_string(vref_line)
-                if src_line == "<range>":
-                    vrefs[-1] = VerseRef.from_range(vrefs[-1].simplify(), vref)
-                    trg_sentences[-1] = trg_sentences[-1] + " " + trg_line
-                elif trg_line == "<range>":
-                    vrefs[-1] = VerseRef.from_range(vrefs[-1].simplify(), vref)
-                    src_sentences[-1] = src_sentences[-1] + " " + src_line
-                else:
-                    vrefs.append(vref)
-                    src_sentences.append(src_line)
-                    trg_sentences.append(trg_line)
-                    indices.append(index)
+            vref = VerseRef.from_string(vref_line)
+            if src_line == "<range>" and trg_line == "<range>":
+                vrefs[-1] = VerseRef.from_range(vrefs[-1].simplify(), vref)
+            elif src_line == "<range>":
+                vrefs[-1] = VerseRef.from_range(vrefs[-1].simplify(), vref)
+                if len(trg_line) > 0:
+                    if len(trg_sentences[-1]) > 0:
+                        trg_sentences[-1] += " "
+                    trg_sentences[-1] += trg_line
+            elif trg_line == "<range>":
+                vrefs[-1] = VerseRef.from_range(vrefs[-1].simplify(), vref)
+                if len(src_line) > 0:
+                    if len(src_sentences[-1]) > 0:
+                        src_sentences[-1] += " "
+                    src_sentences[-1] += src_line
+            else:
+                vrefs.append(vref)
+                src_sentences.append(src_line)
+                trg_sentences.append(trg_line)
+                indices.append(index)
             index += 1
+
+    # remove empty sentences
+    for i in range(len(vrefs) - 1, -1, -1):
+        if len(src_sentences[i]) == 0 or len(trg_sentences[i]) == 0:
+            vrefs.pop(i)
+            src_sentences.pop(i)
+            trg_sentences.pop(i)
+            indices.pop(i)
 
     data = {"vref": vrefs, "source": src_sentences, "target": trg_sentences}
     return pd.DataFrame(data, index=indices)
