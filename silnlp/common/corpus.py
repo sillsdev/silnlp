@@ -165,6 +165,8 @@ def split_parallel_corpus(
             corpus = pd.DataFrame(columns=corpus.columns)
         else:
             corpus, split = train_test_split(corpus, test_size=split_size)
+            corpus = corpus.copy()
+            split = split.copy()
     else:
         split = corpus.filter(split_indices, axis=0)
         corpus.drop(split_indices, inplace=True, errors="ignore")
