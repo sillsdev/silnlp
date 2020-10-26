@@ -27,9 +27,9 @@ def get_ref(verse: dict) -> str:
     return id[:-4]
 
 
-def get_segment(segInfo: dict) -> List[str]:
+def get_segment(segInfo: dict, use_lemma: bool = False) -> List[str]:
     words: List[dict] = segInfo["words"]
-    return list(map(lambda w: w["text"].lower(), words))
+    return list(map(lambda w: w["lemma" if use_lemma else "text"].lower(), words))
 
 
 def get_alignment(verse: dict) -> Alignment:
@@ -61,10 +61,11 @@ def main() -> None:
     with open(corpus_path, "r", encoding="utf-8") as f:
         verses = json.load(f)
 
+    use_src_lemma: bool = config["use_src_lemma"]
     corpus: List[ParallelSegment] = []
     for verse in verses:
         ref = get_ref(verse)
-        source = get_segment(verse["manuscript"])
+        source = get_segment(verse["manuscript"], use_lemma=use_src_lemma)
         target = get_segment(verse["translation"])
         alignment = get_alignment(verse)
         corpus.append(ParallelSegment(ref, source, target, alignment))

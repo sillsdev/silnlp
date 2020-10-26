@@ -31,35 +31,40 @@ setup_morfessor_logging()
 
 
 class FlatCatStemmer(Stemmer):
-    def __init__(self, ppl_threshold: float = 100) -> None:
+    def __init__(self, corpus_weight: float = 1.0, ppl_threshold: float = 100) -> None:
+        self.morfessor_model = morfessor.BaselineModel(corpusweight=corpus_weight, forcesplit_list=["-"])
+
         props = flatcat.MorphUsageProperties(ppl_threshold=ppl_threshold)
-        self.model = flatcat.FlatcatModel(props, forcesplit=["-"], ml_emissions_epoch=0)
-        self.model.postprocessing.append(flatcat.HeuristicPostprocessor())
+        self.flatcat_model = flatcat.FlatcatModel(
+            props, corpusweight=corpus_weight, forcesplit=["-"], ml_emissions_epoch=0
+        )
+        self.flatcat_model.postprocessing.append(flatcat.HeuristicPostprocessor())
 
     def train(self, corpus: Iterable[List[str]]) -> None:
         print("Training Morfessor model...")
-        morfessor_model = morfessor.BaselineModel(forcesplit_list=["-"])
-        morfessor_model.load_data(convert_verses_to_morfessor_data(corpus), count_modifier=lambda x: 1)
-        morfessor_model.train_batch()
+        print("Hyperparameters:")
+        print(f"- corpusweight: {self.morfessor_model.get_corpus_coding_weight()}")
+        self.morfessor_model.load_data(convert_verses_to_morfessor_data(corpus), count_modifier=lambda x: 1)
+        self.morfessor_model.train_batch()
 
         print("Training FlatCat model...")
         print("Hyperparameters:")
-        params = self.model.get_params()
+        params = self.flatcat_model.get_params()
         for key, value in params.items():
             if isinstance(value, float):
                 value = round(value, 5)
             print(f"- {key}: {value}")
-        self.model.add_corpus_data(map(lambda s: (s[0], tuple(s[2])), morfessor_model.get_segmentations()))
-        self.model.initialize_hmm()
-        self.model.train_batch(max_epochs=4, min_epoch_cost_gain=None, max_resegment_iterations=2)
+        self.flatcat_model.add_corpus_data(map(lambda s: (s[0], tuple(s[2])), self.morfessor_model.get_segmentations()))
+        self.flatcat_model.initialize_hmm()
+        self.flatcat_model.train_batch(max_epochs=4, min_epoch_cost_gain=None, max_resegment_iterations=2)
         print("Done.")
 
     def stem(self, words: List[str]) -> List[str]:
         stems: List[str] = []
         for word in words:
-            constructions, _ = self.model.viterbi_analyze(word)
-            for processor in self.model.postprocessing:
-                constructions = processor.apply_to(constructions, self.model)
+            constructions, _ = self.flatcat_model.viterbi_analyze(word)
+            for processor in self.flatcat_model.postprocessing:
+                constructions = processor.apply_to(constructions, self.flatcat_model)
             stem = ""
             for construct in constructions:
                 if construct.category == "STM":

@@ -60,7 +60,7 @@ def load_config(exp_name: str) -> dict:
     root_dir = get_align_root_dir(exp_name)
     config_path = os.path.join(root_dir, "config.yml")
 
-    config: dict = {"seed": 111, "src_stemmer": "none", "trg_stemmer": "none"}
+    config: dict = {"seed": 111, "src_stemmer": "none", "trg_stemmer": "none", "use_src_lemma": False}
 
     with open(config_path, "r", encoding="utf-8") as file:
         loaded_config = yaml.safe_load(file)
