@@ -343,82 +343,85 @@ def main() -> None:
     if write_trg_tag:
         tag_langs = trg_langs.union(src_langs) if mirror else trg_langs
 
-    if data_config["share_vocab"]:
-        print("Building shared vocabulary...")
-        vocab_size: Optional[int] = data_config.get("vocab_size")
-        if vocab_size is None:
-            vocab_size = data_config.get("src_vocab_size")
+    src_spp: Optional[sp.SentencePieceProcessor] = None
+    trg_spp: Optional[sp.SentencePieceProcessor] = None
+    if data_config["tokenize"]:
+        if data_config["share_vocab"]:
+            print("Building shared vocabulary...")
+            vocab_size: Optional[int] = data_config.get("vocab_size")
             if vocab_size is None:
-                vocab_size = data_config["trg_vocab_size"]
-            elif data_config.get("trg_vocab_size", vocab_size) != vocab_size:
-                raise RuntimeError(
-                    "The source and target vocab sizes cannot be different when creating a shared vocab."
-                )
+                vocab_size = data_config.get("src_vocab_size")
+                if vocab_size is None:
+                    vocab_size = data_config["trg_vocab_size"]
+                elif data_config.get("trg_vocab_size", vocab_size) != vocab_size:
+                    raise RuntimeError(
+                        "The source and target vocab sizes cannot be different when creating a shared vocab."
+                    )
 
-        casing: Optional[str] = data_config.get("casing")
-        if casing is None:
-            casing = data_config.get("src_casing")
+            casing: Optional[str] = data_config.get("casing")
             if casing is None:
-                casing = data_config["trg_casing"]
-            elif data_config.get("trg_casing", casing) != casing:
-                raise RuntimeError("The source and target casing cannot be different when creating a shared vocab.")
+                casing = data_config.get("src_casing")
+                if casing is None:
+                    casing = data_config["trg_casing"]
+                elif data_config.get("trg_casing", casing) != casing:
+                    raise RuntimeError("The source and target casing cannot be different when creating a shared vocab.")
 
-        model_prefix = os.path.join(root_dir, "sp")
-        vocab_path = os.path.join(root_dir, "onmt.vocab")
-        share_vocab_file_paths: Set[str] = set(src_file_paths).union(trg_file_paths)
-        build_vocab(share_vocab_file_paths, vocab_size, casing, model_prefix, vocab_path, tag_langs)
+            model_prefix = os.path.join(root_dir, "sp")
+            vocab_path = os.path.join(root_dir, "onmt.vocab")
+            share_vocab_file_paths: Set[str] = set(src_file_paths).union(trg_file_paths)
+            build_vocab(share_vocab_file_paths, vocab_size, casing, model_prefix, vocab_path, tag_langs)
 
-        if has_parent:
-            update_vocab(parent_config, root_dir, vocab_path, vocab_path, parent_model_to_use)
+            if has_parent:
+                update_vocab(parent_config, root_dir, vocab_path, vocab_path, parent_model_to_use)
 
-        src_spp = sp.SentencePieceProcessor()
-        src_spp.Load(f"{model_prefix}.model")
+            src_spp = sp.SentencePieceProcessor()
+            src_spp.Load(f"{model_prefix}.model")
 
-        trg_spp = src_spp
-    else:
-        src_vocab_file_paths: Set[str] = set(src_file_paths)
-        if mirror:
-            src_vocab_file_paths.update(trg_file_paths)
-        create_unshared_vocab(
-            root_dir,
-            data_config,
-            parent_root_dir,
-            parent_data_config,
-            parent_use_vocab,
-            src_langs,
-            src_vocab_file_paths,
-            "source",
-            tag_langs=tag_langs,
-        )
-
-        trg_vocab_file_paths: Set[str] = set(trg_file_paths)
-        if mirror:
-            trg_vocab_file_paths.update(src_file_paths)
-        create_unshared_vocab(
-            root_dir,
-            data_config,
-            parent_root_dir,
-            parent_data_config,
-            parent_use_vocab,
-            trg_langs,
-            trg_vocab_file_paths,
-            "target",
-        )
-
-        if has_parent:
-            update_vocab(
-                parent_config,
+            trg_spp = src_spp
+        else:
+            src_vocab_file_paths: Set[str] = set(src_file_paths)
+            if mirror:
+                src_vocab_file_paths.update(trg_file_paths)
+            create_unshared_vocab(
                 root_dir,
-                os.path.join(root_dir, "src-onmt.vocab"),
-                os.path.join(root_dir, "trg-onmt.vocab"),
-                parent_model_to_use,
+                data_config,
+                parent_root_dir,
+                parent_data_config,
+                parent_use_vocab,
+                src_langs,
+                src_vocab_file_paths,
+                "source",
+                tag_langs=tag_langs,
             )
 
-        src_spp = sp.SentencePieceProcessor()
-        src_spp.Load(os.path.join(root_dir, "src-sp.model"))
+            trg_vocab_file_paths: Set[str] = set(trg_file_paths)
+            if mirror:
+                trg_vocab_file_paths.update(src_file_paths)
+            create_unshared_vocab(
+                root_dir,
+                data_config,
+                parent_root_dir,
+                parent_data_config,
+                parent_use_vocab,
+                trg_langs,
+                trg_vocab_file_paths,
+                "target",
+            )
 
-        trg_spp = sp.SentencePieceProcessor()
-        trg_spp.Load(os.path.join(root_dir, "trg-sp.model"))
+            if has_parent:
+                update_vocab(
+                    parent_config,
+                    root_dir,
+                    os.path.join(root_dir, "src-onmt.vocab"),
+                    os.path.join(root_dir, "trg-onmt.vocab"),
+                    parent_model_to_use,
+                )
+
+            src_spp = sp.SentencePieceProcessor()
+            src_spp.Load(os.path.join(root_dir, "src-sp.model"))
+
+            trg_spp = sp.SentencePieceProcessor()
+            trg_spp.Load(os.path.join(root_dir, "trg-sp.model"))
 
     print("Collecting data sets...")
     test_size: int = data_config["test_size"]
@@ -568,9 +571,10 @@ def main() -> None:
     write_corpus(os.path.join(root_dir, "train.trg.txt"), encode_sp_lines(trg_spp, train["target"]))
 
     print("Writing validation data set...")
-    val_src = itertools.chain.from_iterable(map(lambda pair_val: pair_val["source"], val.values()))
-    write_corpus(os.path.join(root_dir, "val.src.txt"), encode_sp_lines(src_spp, val_src))
-    write_val_corpora(trg_spp, multi_ref_eval, val, root_dir)
+    if len(val) > 0:
+        val_src = itertools.chain.from_iterable(map(lambda pair_val: pair_val["source"], val.values()))
+        write_corpus(os.path.join(root_dir, "val.src.txt"), encode_sp_lines(src_spp, val_src))
+        write_val_corpora(trg_spp, multi_ref_eval, val, root_dir)
 
     print("Writing test data set...")
     for old_file_path in glob(os.path.join(root_dir, "test.*.txt")):

@@ -25,7 +25,9 @@ def decode_sp_lines(lines: Iterable[str]) -> Iterable[str]:
     return map(decode_sp, lines)
 
 
-def encode_sp(spp: sp.SentencePieceProcessor, line: str) -> str:
+def encode_sp(spp: Optional[sp.SentencePieceProcessor], line: str) -> str:
+    if spp is None:
+        return line
     prefix = ""
     if line.startswith("<2"):
         index = line.index(">")
@@ -34,7 +36,7 @@ def encode_sp(spp: sp.SentencePieceProcessor, line: str) -> str:
     return prefix + " ".join(spp.EncodeAsPieces(line))
 
 
-def encode_sp_lines(spp: sp.SentencePieceProcessor, lines: Iterable[str]) -> Iterator[str]:
+def encode_sp_lines(spp: Optional[sp.SentencePieceProcessor], lines: Iterable[str]) -> Iterator[str]:
     return map(lambda l: encode_sp(spp, l), lines)
 
 

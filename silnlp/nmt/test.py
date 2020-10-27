@@ -191,20 +191,20 @@ def write_sentence_bleu(
         for ref in refs:
             scores_file.write("\tReference")
         scores_file.write("\n")
-        verseNo = 0
+        verse_num = 0
         for pred in preds:
-            refList: List[str] = []
+            sentences: List[str] = []
             for ref in refs:
-                refList.append(ref[verseNo])
-            bleu = my_sentence_bleu(pred, refList, lowercase=lowercase, tokenize=tokenize)
+                sentences.append(ref[verse_num])
+            bleu = my_sentence_bleu(pred, sentences, lowercase=lowercase, tokenize=tokenize)
             scores_file.write(
-                f"{verseNo+1}\t{bleu.score:.2f}\t{bleu.precisions[0]:.2f}\t{bleu.precisions[1]:.2f}\t"
+                f"{verse_num+1}\t{bleu.score:.2f}\t{bleu.precisions[0]:.2f}\t{bleu.precisions[1]:.2f}\t"
                 f"{bleu.precisions[2]:.2f}\t{bleu.precisions[3]:.2f}\t{bleu.bp:.3f}\t" + pred.rstrip("\n")
             )
-            for ref in refList:
-                scores_file.write("\t" + ref.rstrip("\n"))
+            for sentence in sentences:
+                scores_file.write("\t" + sentence.rstrip("\n"))
             scores_file.write("\n")
-            verseNo += 1
+            verse_num += 1
 
 
 def test_checkpoint(

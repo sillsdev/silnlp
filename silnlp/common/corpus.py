@@ -123,15 +123,18 @@ def get_parallel_corpus(vref_file_path: str, src_file_path: str, trg_file_path: 
             trg_line = trg_line.strip()
             vref = VerseRef.from_string(vref_line)
             if src_line == "<range>" and trg_line == "<range>":
-                vrefs[-1] = VerseRef.from_range(vrefs[-1].simplify(), vref)
+                if vref.chapter_num == vrefs[-1].chapter_num:
+                    vrefs[-1] = VerseRef.from_range(vrefs[-1].simplify(), vref)
             elif src_line == "<range>":
-                vrefs[-1] = VerseRef.from_range(vrefs[-1].simplify(), vref)
+                if vref.chapter_num == vrefs[-1].chapter_num:
+                    vrefs[-1] = VerseRef.from_range(vrefs[-1].simplify(), vref)
                 if len(trg_line) > 0:
                     if len(trg_sentences[-1]) > 0:
                         trg_sentences[-1] += " "
                     trg_sentences[-1] += trg_line
             elif trg_line == "<range>":
-                vrefs[-1] = VerseRef.from_range(vrefs[-1].simplify(), vref)
+                if vref.chapter_num == vrefs[-1].chapter_num:
+                    vrefs[-1] = VerseRef.from_range(vrefs[-1].simplify(), vref)
                 if len(src_line) > 0:
                     if len(src_sentences[-1]) > 0:
                         src_sentences[-1] += " "
@@ -160,7 +163,9 @@ def split_parallel_corpus(
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     split: pd.DataFrame
     if split_indices is None:
-        if split_size >= len(corpus):
+        if split_size == 0:
+            split = pd.DataFrame(columns=corpus.columns)
+        elif split_size >= len(corpus):
             split = corpus
             corpus = pd.DataFrame(columns=corpus.columns)
         else:

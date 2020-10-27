@@ -115,6 +115,7 @@ def load_config(exp_name: str) -> dict:
             "disjoint_test": False,
             "disjoint_val": False,
             "score_threshold": 0,
+            "tokenize": True,
         },
         "train": {
             "average_last_checkpoints": 0,
