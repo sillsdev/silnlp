@@ -1,24 +1,23 @@
 import argparse
 import logging
-from nlp.common.canon import book_number_to_id
-from nlp.common.verse_ref import VerseRef
 import os
 import random
+import sys
 from glob import glob
 from typing import IO, Dict, Iterable, List, Optional, Set, Tuple, cast
-import sys
 
 logging.basicConfig()
 
 import numpy as np
 import sacrebleu
-from sacrebleu import BLEU, BLEUScore, DEFAULT_TOKENIZER, Namespace
-import yaml
 
+from nlp.common.canon import book_number_to_id
 from nlp.common.metrics import compute_meteor_score, compute_ter_score, compute_wer_score
 from nlp.common.utils import get_git_revision_hash, set_seed
+from nlp.common.verse_ref import VerseRef
 from nlp.nmt.config import create_runner, get_books, get_mt_root_dir, load_config, parse_langs
-from nlp.nmt.utils import decode_sp, get_best_model_dir
+from nlp.nmt.utils import decode_sp, get_best_model_dir, get_last_checkpoint
+
 
 SUPPORTED_SCORERS = {"bleu", "sentencebleu", "chrf3", "meteor", "wer", "ter"}
 
@@ -158,14 +157,14 @@ def my_sentence_bleu(
     smooth_method: str = "exp",
     smooth_value: float = None,
     lowercase: bool = False,
-    tokenize=DEFAULT_TOKENIZER,
+    tokenize=sacrebleu.DEFAULT_TOKENIZER,
     use_effective_order: bool = False,
-) -> BLEUScore:
+) -> sacrebleu.BLEUScore:
     """
     Substitute for the sacrebleu version of sentence_bleu, which uses settings that aren't consistent with
     the values we use for corpus_bleu, and isn't fully parameterized
     """
-    args = Namespace(
+    args = sacrebleu.Namespace(
         smooth_method=smooth_method,
         smooth_value=smooth_value,
         force=False,
@@ -174,7 +173,7 @@ def my_sentence_bleu(
         tokenize=tokenize,
     )
 
-    metric = BLEU(args)
+    metric = sacrebleu.BLEU(args)
     return metric.sentence_score(hypothesis, references, use_effective_order=use_effective_order)
 
 
@@ -183,7 +182,7 @@ def write_sentence_bleu(
     preds: List[str],
     refs: List[List[str]],
     lowercase: bool = False,
-    tokenize=DEFAULT_TOKENIZER,
+    tokenize=sacrebleu.DEFAULT_TOKENIZER,
 ):
     scores_path = predictions_detok_path + ".scores.csv"
     with open(scores_path, "w", encoding="utf-8-sig") as scores_file:
@@ -353,16 +352,6 @@ def test_checkpoint(
         for results in scores:
             results.write(scores_file)
     return scores
-
-
-def get_last_checkpoint(model_dir: str) -> Tuple[str, int]:
-    with open(os.path.join(model_dir, "checkpoint"), "r", encoding="utf-8") as file:
-        checkpoint_config = yaml.safe_load(file)
-        checkpoint_prefix: str = checkpoint_config["model_checkpoint_path"]
-        parts = os.path.basename(checkpoint_prefix).split("-")
-        checkpoint_path = os.path.join(model_dir, checkpoint_prefix)
-        step = int(parts[-1])
-        return (checkpoint_path, step)
 
 
 def main() -> None:

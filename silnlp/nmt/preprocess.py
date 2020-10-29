@@ -1,5 +1,6 @@
 import argparse
 import bisect
+import enum
 import itertools
 import logging
 import os
@@ -14,6 +15,7 @@ logging.basicConfig()
 import opennmt.data
 import pandas as pd
 import sentencepiece as sp
+
 
 from nlp.common.corpus import (
     add_alignment_scores,
@@ -33,9 +35,16 @@ from nlp.nmt.utils import (
     decode_sp_lines,
     encode_sp,
     encode_sp_lines,
-    get_checkpoint_path,
-    CheckpointType,
+    get_best_model_dir,
+    get_last_checkpoint,
 )
+
+
+# Different types of parent model checkpoints (last, best, average)
+class CheckpointType(enum.Enum):
+    LAST = 1
+    BEST = 2
+    AVERAGE = 3
 
 
 def convert_vocab(sp_vocab_path: str, onmt_vocab_path: str, tag_langs: Set[str] = None) -> None:
@@ -96,23 +105,25 @@ def get_iso(file_path: str) -> Tuple[str, str]:
     return file_name[:index], file_name[index + 1 :]
 
 
+def get_checkpoint_path(model_dir: str, checkpoint_type: CheckpointType) -> Tuple[Optional[str], Optional[int]]:
+    if checkpoint_type == CheckpointType.AVERAGE:
+        # Get the checkpoint path and step count for the averaged checkpoint
+        return get_last_checkpoint(os.path.join(model_dir, "avg"))
+    elif checkpoint_type == CheckpointType.BEST:
+        # Get the checkpoint path and step count for the best checkpoint
+        best_model_dir, step = get_best_model_dir(model_dir)
+        return (os.path.join(best_model_dir, "ckpt"), step)
+    elif checkpoint_type == CheckpointType.LAST:
+        return (None, None)
+    else:
+        raise RuntimeError(f"Unsupported checkpoint type: {checkpoint_type}")
+
+
 def update_vocab(
     parent_config: dict, root_dir: str, src_vocab_path: str, trg_vocab_path: str, parent_model_to_use: CheckpointType
 ) -> None:
     model_dir: str = parent_config["model_dir"]
-    checkpoint_path: Optional[str] = None
-    step: Optional[int] = None
-    if parent_model_to_use is CheckpointType.best or parent_model_to_use is CheckpointType.average:
-        checkpoint_path, step = get_checkpoint_path(model_dir, parent_model_to_use)
-    #       try:
-    #           best_model_dir, step = get_best_model_dir(model_dir)
-    #           checkpoint_path = os.path.join(best_model_dir, "ckpt")
-    #       except RuntimeError:
-    #           checkpoint_path = None
-    #           step = None
-    #   elif parentModelToUse is CheckpointType.average:
-    #       checkpoint_path, step = get_checkpoint_path(model_dir, parentModelToUse)
-
+    checkpoint_path, step = get_checkpoint_path(model_dir, parent_model_to_use)
     parent_runner = create_runner(parent_config)
     parent_runner.update_vocab(os.path.join(root_dir, "parent"), src_vocab_path, trg_vocab_path, checkpoint_path, step)
 
@@ -313,11 +324,11 @@ def main() -> None:
     parent_data_config = {}
     parent_root_dir = ""
     parent_model_to_use = (
-        CheckpointType.best
+        CheckpointType.BEST
         if data_config["parent_use_best"]
-        else CheckpointType.average
+        else CheckpointType.AVERAGE
         if data_config["parent_use_average"]
-        else CheckpointType.last
+        else CheckpointType.LAST
     )
     has_parent = False
     parent_use_vocab = False

@@ -1,20 +1,11 @@
 import os
-import glob
 from typing import IO, Iterable, Iterator, List, Optional, Tuple, cast
-import enum
-import re
 
 import opennmt.utils
 import sacrebleu
 import sentencepiece as sp
 import tensorflow as tf
-
-
-# Different types of parent model checkpoints (last, best, average)
-class CheckpointType(enum.Enum):
-    last = 1
-    best = 2
-    average = 3
+import yaml
 
 
 def decode_sp(line: str) -> str:
@@ -43,45 +34,27 @@ def encode_sp_lines(spp: Optional[sp.SentencePieceProcessor], lines: Iterable[st
 def get_best_model_dir(model_dir: str) -> Tuple[str, int]:
     export_path = os.path.join(model_dir, "export")
     models = os.listdir(export_path)
-    best_model_path: Optional[str] = None
+    best_model_dir: Optional[str] = None
     step = 0
     for model in sorted(models, key=lambda m: int(m), reverse=True):
         path = os.path.join(export_path, model)
         if os.path.isdir(path):
-            best_model_path = path
+            best_model_dir = path
             step = int(model)
             break
-    if best_model_path is None:
-        raise RuntimeError("There is no exported models.")
-    return best_model_path, step
-
-
-def get_checkpoint_path(model_dir: str, checkpoint_type: CheckpointType) -> Tuple[str, int]:
-    if checkpoint_type == CheckpointType.average:
-        # Get the checkpoint path and step count for the averaged checkpoint
-        checkpoints = glob.glob(os.path.join(model_dir, "avg", "ckpt-*.index"))
-        for checkpoint in sorted(checkpoints, reverse=True):
-            if os.path.isfile(checkpoint):
-                checkpoint_path = checkpoint
-                match = re.search(r"ckpt-(\d+).index", checkpoint_path)
-                if match is None:
-                    raise RuntimeError("The checkpoint index file is invalid.")
-                step = int(match.group(1))
-                return checkpoint_path, step
-        raise RuntimeError("There is no averaged checkpoint.")
-    elif checkpoint_type == CheckpointType.best:
-        # Get the checkpoint path and step count for the best checkpoint
-        export_path = os.path.join(model_dir, "export")
-        models = os.listdir(export_path)
-        for model in sorted(models, key=lambda m: int(m), reverse=True):
-            path = os.path.join(export_path, model)
-            if os.path.isdir(path):
-                checkpoint_path = os.path.join(path, "ckpt")
-                step = int(model)
-                return checkpoint_path, step
+    if best_model_dir is None:
         raise RuntimeError("There are no exported models.")
-    else:
-        raise RuntimeError(f"Unsupported checkpoint type: {checkpoint_type}")
+    return best_model_dir, step
+
+
+def get_last_checkpoint(model_dir: str) -> Tuple[str, int]:
+    with open(os.path.join(model_dir, "checkpoint"), "r", encoding="utf-8") as file:
+        checkpoint_config = yaml.safe_load(file)
+        checkpoint_prefix: str = checkpoint_config["model_checkpoint_path"]
+        parts = os.path.basename(checkpoint_prefix).split("-")
+        checkpoint_path = os.path.join(model_dir, checkpoint_prefix)
+        step = int(parts[-1])
+        return (checkpoint_path, step)
 
 
 @opennmt.utils.register_scorer(name="bleu_sp")
