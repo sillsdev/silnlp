@@ -1,5 +1,5 @@
 # from __future__ import annotations
-from typing import Iterable
+from typing import Iterable, Union
 
 from nlp.common.canon import book_id_to_number, book_number_to_id
 
@@ -35,21 +35,31 @@ def get_verse_num(verse: str) -> int:
 
 
 class VerseRef:
-    def __init__(self, book: str, chapter: str, verse: str) -> None:
-        book_num = book_id_to_number(book)
-        if not chapter.isdigit():
-            raise ValueError("The chapter is invalid.")
-        chapter_num = int(chapter)
-        if chapter_num < 0:
-            raise ValueError("The chapter is invalid.")
-        if not is_verse_parseable(verse):
-            raise ValueError("The verse is invalid.")
+    def __init__(self, book: Union[str, int], chapter: Union[str, int], verse: Union[str, int]) -> None:
+        if isinstance(book, str):
+            self.book_num = book_id_to_number(book)
+        else:
+            self.book_num = book
 
-        self.book_num = book_num
-        self.chapter_num = int(chapter)
-        self.verse = verse
-        self.verse_num = get_verse_num(verse)
-        self.has_multiple = verse.find(VERSE_RANGE_SEPARATOR) != -1 or verse.find(VERSE_SEQUENCE_INDICATOR) != -1
+        if isinstance(chapter, str):
+            if not chapter.isdigit():
+                raise ValueError("The chapter is invalid.")
+            chapter_num = int(chapter)
+            if chapter_num < 0:
+                raise ValueError("The chapter is invalid.")
+            self.chapter_num = chapter_num
+        else:
+            self.chapter_num = chapter
+
+        if isinstance(verse, str):
+            if not is_verse_parseable(verse):
+                raise ValueError("The verse is invalid.")
+            self.verse = verse
+            self.verse_num = get_verse_num(verse)
+            self.has_multiple = verse.find(VERSE_RANGE_SEPARATOR) != -1 or verse.find(VERSE_SEQUENCE_INDICATOR) != -1
+        else:
+            self.verse = str(verse)
+            self.verse_num = verse
 
     @classmethod
     def from_string(cls, verse_str: str) -> "VerseRef":
@@ -72,6 +82,13 @@ class VerseRef:
             raise ValueError("This end verse contains multiple verses.")
 
         return VerseRef(start.book, start.chapter, f"{start.verse_num}-{end.verse_num}")
+
+    @classmethod
+    def from_bbbcccvvv(cls, bbbcccvvv: int) -> "VerseRef":
+        book = bbbcccvvv // 1000000
+        chapter = bbbcccvvv % 1000000 // 1000
+        verse = bbbcccvvv % 1000
+        return VerseRef(book, chapter, verse)
 
     @property
     def book(self) -> str:

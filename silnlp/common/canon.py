@@ -1,3 +1,6 @@
+from typing import List, Set, Union
+
+
 ALL_BOOK_IDS = [
     "GEN",
     "EXO",
@@ -139,3 +142,21 @@ def book_id_to_number(id: str) -> int:
     if num is None:
         raise ValueError("The book Id is invalid.")
     return num
+
+
+def get_books(books: Union[str, List[str]]) -> Set[int]:
+    if isinstance(books, str):
+        books = books.split(",")
+    book_set: Set[int] = set()
+    for book_id in books:
+        book_id = book_id.strip().upper()
+        if book_id == "NT":
+            book_set.update(range(40, 67))
+        elif book_id == "OT":
+            book_set.update(range(40))
+        else:
+            book_num = book_id_to_number(book_id)
+            if book_num is None:
+                raise RuntimeError("A specified book Id is invalid.")
+            book_set.add(book_num)
+    return book_set

@@ -2,7 +2,7 @@ import os
 import subprocess
 import tempfile
 from statistics import mean
-from typing import Dict, Iterable, List, Set, Tuple
+from typing import Dict, Iterable, Iterator, List, Set, Tuple
 
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -18,13 +18,11 @@ def write_corpus(corpus_path: str, sentences: Iterable[str], append: bool = Fals
             file.write(sentence + "\n")
 
 
-def load_corpus(input_file: str) -> List[str]:
-    sentences: List[str] = []
+def load_corpus(input_file: str) -> Iterator[str]:
     with open(input_file, "r", encoding="utf-8-sig") as in_file:
         for line in in_file:
             line = line.strip()
-            sentences.append(line)
-    return sentences
+            yield line
 
 
 def tokenize_corpus(input_path: str, output_path: str) -> None:

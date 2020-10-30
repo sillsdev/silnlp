@@ -48,8 +48,8 @@ def main() -> None:
             ]
         )
 
-    sys = load_corpus(predictions_file_path)
-    ref = load_corpus(ref_file_path)
+    sys = list(load_corpus(predictions_file_path))
+    ref = list(load_corpus(ref_file_path))
 
     for i in range(len(sys) - 1, 0, -1):
         if ref[i] == "" or sys[i] == "":
