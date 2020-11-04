@@ -29,6 +29,9 @@ def compute_ter_score(hyps: Iterable[str], refs: Iterable[str]) -> float:
         except UnicodeDecodeError:
             print("Unable to compute TER score")
             result = -1
+        except ZeroDivisionError:
+            print("Cannot divide by zero. Check for empty lines.")
+            result = -1
 
         return float(np.round(float(result) * 100, 2))
 
@@ -45,6 +48,9 @@ def compute_wer_score(hyps: Iterable[str], refs: Iterable[str]) -> float:
             result = wer(hyps_path, refs_path)
         except UnicodeDecodeError:
             print("Unable to compute WER score")
+            result = -1
+        except ZeroDivisionError:
+            print("Cannot divide by zero. Check for empty lines.")
             result = -1
 
         return float(np.round(float(result) * 100, 2))
