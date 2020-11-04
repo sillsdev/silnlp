@@ -2,12 +2,13 @@ import argparse
 import glob
 import math
 import os
-from typing import List, Optional, Tuple
+from typing import List, Optional, Set, Tuple
 
 import numpy as np
 
 from nlp.alignment.config import ALIGNERS, load_config
 from nlp.alignment.metrics import compute_metrics
+from nlp.common.canon import get_books
 from nlp.common.environment import align_experiments_dir
 from nlp.common.utils import get_align_root_dir, set_seed
 
@@ -25,19 +26,21 @@ def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
     return dot / (math.sqrt(obs_total) * math.sqrt(exp_total))
 
 
-def get_metrics(exp_name: str, test_size: Optional[int] = None) -> List[float]:
+def get_metrics(exp_name: str, books: Set[int] = set(), test_size: Optional[int] = None) -> List[float]:
     config = load_config(exp_name)
     set_seed(config["seed"])
-    df = compute_metrics(get_align_root_dir(exp_name), test_size)
+    df = compute_metrics(get_align_root_dir(exp_name), books, test_size)
     metrics = df["F-Score"].to_numpy().tolist()
     assert len(metrics) == len(ALIGNERS)
     return metrics
 
 
-def compute_similarity(experiments: List[str], base_metrics: List[float], test_size: int) -> Tuple[float, float]:
+def compute_similarity(
+    experiments: List[str], base_metrics: List[float], books: Set[int], test_size: int
+) -> Tuple[float, float]:
     metrics: List[float] = []
     for exp_name in experiments:
-        metrics.extend(get_metrics(exp_name, test_size))
+        metrics.extend(get_metrics(exp_name, books, test_size))
     similarity = cosine_similarity(base_metrics, metrics)
     correlation = np.corrcoef(base_metrics, metrics)[0, 1]
     return similarity, correlation
@@ -48,10 +51,14 @@ def main() -> None:
     parser.add_argument("testament", help="Testament")
     parser.add_argument("--threshold", type=float, help="Similarity threshold")
     parser.add_argument("--test-size", type=int, help="Test size")
+    parser.add_argument("--books", nargs="*", metavar="book", default=[], help="Books")
     args = parser.parse_args()
 
     testament: str = args.testament
     testament = testament.lower()
+
+    books = get_books(args.books)
+
     experiments: List[str] = []
     base_metrics: List[float] = []
     for path in glob.glob(os.path.join(align_experiments_dir, f"*.{testament}")):
@@ -65,7 +72,7 @@ def main() -> None:
     correlation: float
     if args.test_size is not None:
         test_size = args.test_size
-        similarity, correlation = compute_similarity(experiments, base_metrics, test_size)
+        similarity, correlation = compute_similarity(experiments, base_metrics, books, test_size)
     else:
         threshold = 0.999
         if args.threshold is not None:
@@ -75,7 +82,7 @@ def main() -> None:
         test_size = 0
         while similarity < threshold:
             test_size += 10
-            similarity, correlation = compute_similarity(experiments, base_metrics, test_size)
+            similarity, correlation = compute_similarity(experiments, base_metrics, books, test_size)
 
     print(f"Test size: {test_size}")
     print(f"Similarity: {similarity:.2%}")

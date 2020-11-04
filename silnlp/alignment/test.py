@@ -4,6 +4,7 @@ from typing import Optional
 
 from nlp.alignment.config import load_config
 from nlp.alignment.metrics import compute_metrics
+from nlp.common.canon import get_books
 from nlp.common.utils import get_align_root_dir, set_seed
 
 
@@ -11,7 +12,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Tests generated alignments against gold standard alignments")
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument("--test-size", type=int, help="Test size")
+    parser.add_argument("--books", nargs="*", metavar="book", default=[], help="Books")
     args = parser.parse_args()
+
+    books = get_books(args.books)
 
     root_dir = get_align_root_dir(args.experiment)
     config = load_config(args.experiment)
@@ -21,7 +25,7 @@ def main() -> None:
     if test_size is not None:
         print(f"Test size: {test_size}")
     print("Computing metrics...")
-    df = compute_metrics(root_dir, args.test_size)
+    df = compute_metrics(root_dir, books, test_size)
 
     for name, row in df.iterrows():
         aer: float = row["AER"]

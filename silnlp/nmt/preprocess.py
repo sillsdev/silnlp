@@ -17,6 +17,7 @@ import pandas as pd
 import sentencepiece as sp
 
 
+from nlp.common.canon import get_books
 from nlp.common.corpus import (
     add_alignment_scores,
     exclude_books,
@@ -30,7 +31,7 @@ from nlp.common.corpus import (
 )
 from nlp.common.environment import paratextPreprocessedDir
 from nlp.common.utils import set_seed
-from nlp.nmt.config import create_runner, get_books, get_git_revision_hash, get_mt_root_dir, load_config, parse_langs
+from nlp.nmt.config import create_runner, get_git_revision_hash, get_mt_root_dir, load_config, parse_langs
 from nlp.nmt.utils import (
     decode_sp_lines,
     encode_sp,
