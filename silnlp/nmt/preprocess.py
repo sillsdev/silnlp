@@ -465,7 +465,7 @@ def main() -> None:
                 src_iso, src_project = get_iso(src_file_path)
                 trg_iso, trg_project = get_iso(trg_file_path)
 
-                if src_iso == trg_iso:
+                if (len(src_file_paths) > 1 or len(trg_file_paths) > 1) and src_iso == trg_iso:
                     continue
 
                 is_train_ref = not is_in_sorted(test_only_trg_file_paths, trg_file_path)
