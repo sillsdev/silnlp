@@ -17,6 +17,7 @@ def get_iso(lang: str) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Tests an SMT model using the Machine library")
     parser.add_argument("experiment", help="Experiment name")
+    parser.add_argument("--force-infer", default=False, action="store_true", help="Force inferencing")
     args = parser.parse_args()
 
     print("Git commit:", get_git_revision_hash())
@@ -30,7 +31,7 @@ def main() -> None:
     ref_file_path = os.path.join(root_dir, "test.trg.txt")
     predictions_file_path = os.path.join(root_dir, "test.trg-predictions.txt")
 
-    if not os.path.isfile(predictions_file_path):
+    if args.force_infer or not os.path.isfile(predictions_file_path):
         src_file_path = os.path.join(root_dir, "test.src.txt")
         engine_dir = os.path.join(root_dir, f"engine{os.sep}")
         subprocess.run(
@@ -46,7 +47,7 @@ def main() -> None:
                 "-tt",
                 "latin",
                 "-mt",
-                config["model_type"],
+                config["model"],
             ]
         )
 

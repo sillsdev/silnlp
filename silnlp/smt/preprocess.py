@@ -14,7 +14,7 @@ from nlp.common.corpus import (
     write_corpus,
 )
 from nlp.common.environment import paratextPreprocessedDir
-from nlp.common.utils import get_git_revision_hash, get_mt_root_dir
+from nlp.common.utils import get_git_revision_hash, get_mt_root_dir, set_seed
 from nlp.smt.config import load_config
 
 
@@ -36,6 +36,8 @@ def main() -> None:
     exp_name = args.experiment
     root_dir = get_mt_root_dir(exp_name)
     config = load_config(exp_name)
+
+    set_seed(config["seed"])
 
     src_iso, src_project = parse_lang(config["src_lang"])
     trg_iso, trg_project = parse_lang(config["trg_lang"])
