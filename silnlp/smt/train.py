@@ -3,6 +3,7 @@ import os
 import subprocess
 
 from nlp.common.utils import get_git_revision_hash, get_mt_root_dir
+from nlp.smt.config import load_config
 
 
 def main() -> None:
@@ -15,6 +16,7 @@ def main() -> None:
     for exp_name in args.experiments:
         print(f"Training {exp_name}...")
         root_dir = get_mt_root_dir(exp_name)
+        config = load_config(exp_name)
 
         src_file_path = os.path.join(root_dir, "train.src.txt")
         trg_file_path = os.path.join(root_dir, "train.trg.txt")
@@ -33,6 +35,8 @@ def main() -> None:
                 "latin",
                 "-tt",
                 "latin",
+                "-mt",
+                config["model_type"],
             ]
         )
 

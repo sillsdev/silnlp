@@ -45,6 +45,8 @@ def main() -> None:
                 "latin",
                 "-tt",
                 "latin",
+                "-mt",
+                config["model_type"],
             ]
         )
 
