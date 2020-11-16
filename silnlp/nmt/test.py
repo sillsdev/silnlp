@@ -18,19 +18,19 @@ from nlp.common.verse_ref import VerseRef
 from nlp.nmt.config import create_runner, get_mt_root_dir, load_config, parse_langs
 from nlp.nmt.utils import decode_sp, get_best_model_dir, get_last_checkpoint
 
-
 SUPPORTED_SCORERS = {"bleu", "sentencebleu", "chrf3", "meteor", "wer", "ter"}
 
 
 class PairScore:
     def __init__(
-        self,
-        src_iso: str,
-        trg_iso: str,
-        bleu: Optional[sacrebleu.BLEUScore],
-        sent_len: int,
-        projects: Set[str],
-        other_scores: Dict[str, float] = {},
+            self,
+            book: str,
+            src_iso: str,
+            trg_iso: str,
+            bleu: Optional[sacrebleu.BLEUScore],
+            sent_len: int,
+            projects: Set[str],
+            other_scores: Dict[str, float] = {},
     ) -> None:
         self.src_iso = src_iso
         self.trg_iso = trg_iso
@@ -39,20 +39,21 @@ class PairScore:
         self.num_refs = len(projects)
         self.refs = "_".join(sorted(projects))
         self.other_scores = other_scores
+        self.book = book
 
     def writeHeader(self, file: IO) -> None:
-        file.write("src_iso,trg_iso,num_refs,references,sent_len,scorer,score\n")
+        file.write("book,src_iso,trg_iso,num_refs,references,sent_len,scorer,score\n")
 
     def write(self, file: IO) -> None:
         if self.bleu is not None:
-            file.write(f"{self.src_iso},{self.trg_iso},{self.num_refs},{self.refs},{self.sent_len:d},")
+            file.write(f"{self.book},{self.src_iso},{self.trg_iso},{self.num_refs},{self.refs},{self.sent_len:d},")
             file.write(
                 f"BLEU,{self.bleu.score:.2f}/{self.bleu.precisions[0]:.2f}/{self.bleu.precisions[1]:.2f}/"
                 f"{self.bleu.precisions[2]:.2f}/{self.bleu.precisions[3]:.2f}/{self.bleu.bp:.3f}/"
                 f"{self.bleu.sys_len:d}/{self.bleu.ref_len:d}\n"
             )
         for key, val in self.other_scores.items():
-            file.write(f"{self.src_iso},{self.trg_iso},{self.num_refs},{self.refs},{self.sent_len:d},")
+            file.write(f"{self.book},{self.src_iso},{self.trg_iso},{self.num_refs},{self.refs},{self.sent_len:d},")
             file.write(f"{key},{val:.2f}\n")
 
 
@@ -74,20 +75,158 @@ def is_train_project(train_projects: Dict[str, Set[str]], ref_file_path: str, de
     return trg_project in projects
 
 
+def score_individual_books(
+        book_dict: dict,
+        src_iso: str,
+        predictions_detok_path: str,
+        scorers: Set[str],
+        data_config: dict,
+        ref_projects: Set[str],
+):
+    overall_sys: List[str] = []
+    book_scores: List[PairScore] = []
+
+    for book, dict in book_dict.items():
+        for trg_iso, book_tuple in book_dict[book].items():
+            pair_sys = book_tuple[0]
+            pair_refs = book_tuple[1]
+            overall_sys.extend(pair_sys)
+
+            bleu_score = None
+            if "bleu" in scorers:
+                bleu_score = sacrebleu.corpus_bleu(
+                    pair_sys,
+                    pair_refs,
+                    lowercase=True,
+                    tokenize=data_config.get("sacrebleu_tokenize", "13a"),
+                )
+
+            if "sentencebleu" in scorers:
+                write_sentence_bleu(
+                    predictions_detok_path,
+                    pair_sys,
+                    pair_refs,
+                    lowercase=True,
+                    tokenize=data_config.get("sacrebleu_tokenize", "13a"),
+                )
+
+            other_scores: Dict[str, float] = {}
+            if "chrf3" in scorers:
+                chrf3_score = sacrebleu.corpus_chrf(
+                    pair_sys, pair_refs, order=6, beta=3, remove_whitespace=True
+                )
+                other_scores["CHRF3"] = np.round(float(chrf3_score.score * 100), 2)
+
+            if "meteor" in scorers:
+                meteor_score = compute_meteor_score(trg_iso, pair_sys, pair_refs)
+                if meteor_score is not None:
+                    other_scores["METEOR"] = meteor_score
+
+            if "wer" in scorers:
+                wer_score = compute_wer_score(pair_sys, cast(List[str], pair_refs))
+                if wer_score >= 0:
+                    other_scores["WER"] = wer_score
+
+            if "ter" in scorers:
+                ter_score = compute_ter_score(pair_sys, cast(List[str], pair_refs))
+                if ter_score >= 0:
+                    other_scores["TER"] = ter_score
+            score = PairScore(book, src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores)
+            book_scores.append(score)
+    return book_scores
+
+
+def process_individual_books(src_file_path: str,
+                             pred_file_path: str,
+                             ref_file_paths: str,
+                             vref_file_path: str,
+                             default_trg_iso: str,
+                             select_rand_ref_line: bool,
+                             books: Set[int],
+                             ):
+    # Output data structure
+    book_dict: Dict[str, dict] = {}
+    ref_files = []
+
+    try:
+        # Get all references
+        for ref_file_path in ref_file_paths:
+            file = open(ref_file_path, "r", encoding="utf-8")
+            ref_files.append(file)
+
+        with open(vref_file_path, "r", encoding="utf-8") as vref_file, open(
+                pred_file_path, "r", encoding="utf-8") as pred_file, open(
+            src_file_path, "r", encoding="utf-8") as src_file:
+            for lines in zip(pred_file, vref_file, src_file, *ref_files):
+                # Get file lines
+                pred_line = lines[0].strip()
+                detok_pred = decode_sp(pred_line)
+                vref = lines[1].strip()
+                src_line = lines[2].strip()
+                # Get book
+                if vref != "":
+                    vref = VerseRef.from_string(vref.strip())
+                    # Check if book in books
+                    if vref.book_num in books:
+                        # Get iso
+                        book_iso = default_trg_iso
+                        if src_line.startswith("<2"):
+                            index = src_line.index(">")
+                            val = src_line[2:index]
+                            if val != "qaa":
+                                book_iso = val
+                        # If book not in dictionary add the book
+                        if vref.book not in book_dict:
+                            book_dict[vref.book] = {}
+                        if book_iso not in book_dict[vref.book]:
+                            book_dict[vref.book][book_iso] = ([], [])
+                        book_pred, book_refs = book_dict[vref.book][book_iso]
+
+                        # Add detokenized prediction to nested dictionary
+                        book_pred.append(detok_pred)
+
+                        # Check if random ref line selected or not
+                        if select_rand_ref_line:
+                            ref_index = random.randint(0, len(ref_files) - 1)
+                            ref_line = lines[ref_index + 3].strip()
+                            if len(book_refs) == 0:
+                                book_refs.append([])
+                            book_refs[0].append(ref_line)
+                        else:
+                            # For each reference text, add to book_refs
+                            for ref_index in range(len(ref_files)):
+                                ref_line = lines[ref_index + 3].strip()
+                                if len(book_refs) == ref_index:
+                                    book_refs.append([])
+                                book_refs[ref_index].append(ref_line)
+    finally:
+        if vref_file is not None:
+            vref_file.close()
+        if src_file is not None:
+            src_file.close()
+        if pred_file is not None:
+            pred_file.close()
+        if ref_files is not None:
+            for ref_file in ref_files:
+                ref_file.close()
+    return book_dict
+
+
 def load_test_data(
-    vref_file_path: str,
-    src_file_path: str,
-    pred_file_path: str,
-    ref_files_path: str,
-    output_file_path: str,
-    default_trg_iso: str,
-    ref_projects: Set[str],
-    train_projects: Dict[str, Set[str]],
-    books: Set[int],
+        vref_file_path: str,
+        src_file_path: str,
+        pred_file_path: str,
+        ref_files_path: str,
+        output_file_path: str,
+        default_trg_iso: str,
+        ref_projects: Set[str],
+        train_projects: Dict[str, Set[str]],
+        books: Set[int],
+        by_book: bool,
 ) -> Dict[str, Tuple[List[str], List[List[str]]]]:
     dataset: Dict[str, Tuple[List[str], List[List[str]]]] = {}
     with open(src_file_path, "r", encoding="utf-8") as src_file, open(
-        pred_file_path, "r", encoding="utf-8"
+            pred_file_path, "r", encoding="utf-8"
     ) as pred_file, open(output_file_path, "w", encoding="utf-8") as out_file:
         ref_file_paths = glob(ref_files_path)
         select_rand_ref_line = False
@@ -142,23 +281,32 @@ def load_test_data(
                             refs.append([])
                         refs[ref_index].append(ref_line)
                 out_file.write(detok_pred_line + "\n")
+            book_dict: Dict[str, dict] = {}
+            if by_book:
+                book_dict = process_individual_books(src_file_path,
+                                                     pred_file_path,
+                                                     ref_file_paths,
+                                                     vref_file_path,
+                                                     default_trg_iso,
+                                                     select_rand_ref_line,
+                                                     books,
+                                                     )
         finally:
             if vref_file is not None:
                 vref_file.close()
             for ref_file in ref_files:
                 ref_file.close()
-
-    return dataset
+    return dataset, book_dict
 
 
 def my_sentence_bleu(
-    hypothesis: str,
-    references: List[str],
-    smooth_method: str = "exp",
-    smooth_value: float = None,
-    lowercase: bool = False,
-    tokenize=sacrebleu.DEFAULT_TOKENIZER,
-    use_effective_order: bool = False,
+        hypothesis: str,
+        references: List[str],
+        smooth_method: str = "exp",
+        smooth_value: float = None,
+        lowercase: bool = False,
+        tokenize=sacrebleu.DEFAULT_TOKENIZER,
+        use_effective_order: bool = False,
 ) -> sacrebleu.BLEUScore:
     """
     Substitute for the sacrebleu version of sentence_bleu, which uses settings that aren't consistent with
@@ -178,11 +326,11 @@ def my_sentence_bleu(
 
 
 def write_sentence_bleu(
-    predictions_detok_path: str,
-    preds: List[str],
-    refs: List[List[str]],
-    lowercase: bool = False,
-    tokenize=sacrebleu.DEFAULT_TOKENIZER,
+        predictions_detok_path: str,
+        preds: List[str],
+        refs: List[List[str]],
+        lowercase: bool = False,
+        tokenize=sacrebleu.DEFAULT_TOKENIZER,
 ):
     scores_path = predictions_detok_path + ".scores.csv"
     with open(scores_path, "w", encoding="utf-8-sig") as scores_file:
@@ -197,7 +345,7 @@ def write_sentence_bleu(
                 sentences.append(ref[verse_num])
             bleu = my_sentence_bleu(pred, sentences, lowercase=lowercase, tokenize=tokenize)
             scores_file.write(
-                f"{verse_num+1}\t{bleu.score:.2f}\t{bleu.precisions[0]:.2f}\t{bleu.precisions[1]:.2f}\t"
+                f"{verse_num + 1}\t{bleu.score:.2f}\t{bleu.precisions[0]:.2f}\t{bleu.precisions[1]:.2f}\t"
                 f"{bleu.precisions[2]:.2f}\t{bleu.precisions[3]:.2f}\t{bleu.bp:.3f}\t" + pred.rstrip("\n")
             )
             for sentence in sentences:
@@ -207,18 +355,19 @@ def write_sentence_bleu(
 
 
 def test_checkpoint(
-    root_dir: str,
-    config: dict,
-    src_langs: Set[str],
-    trg_langs: Set[str],
-    trg_train_projects: Dict[str, Set[str]],
-    force_infer: bool,
-    memory_growth: bool,
-    ref_projects: Set[str],
-    checkpoint_path: str,
-    step: int,
-    scorers: Set[str],
-    books: Set[int],
+        root_dir: str,
+        config: dict,
+        src_langs: Set[str],
+        trg_langs: Set[str],
+        trg_train_projects: Dict[str, Set[str]],
+        force_infer: bool,
+        by_book: bool,
+        memory_growth: bool,
+        ref_projects: Set[str],
+        checkpoint_path: str,
+        step: int,
+        scorers: Set[str],
+        books: Set[int],
 ) -> List[PairScore]:
     vref_paths: List[str] = []
     features_paths: List[str] = []
@@ -252,6 +401,7 @@ def test_checkpoint(
                 )
 
     checkpoint_name = "averaged checkpoint" if step == -1 else f"checkpoint {step}"
+
     if force_infer or any(not os.path.isfile(f) for f in predictions_detok_paths):
         runner = create_runner(config, memory_growth=memory_growth)
         print(f"Inferencing {checkpoint_name}...")
@@ -268,13 +418,13 @@ def test_checkpoint(
     overall_sys: List[str] = []
     overall_refs: List[List[str]] = []
     for vref_path, features_path, predictions_path, refs_path, predictions_detok_path in zip(
-        vref_paths, features_paths, predictions_paths, refs_paths, predictions_detok_paths
+            vref_paths, features_paths, predictions_paths, refs_paths, predictions_detok_paths
     ):
         features_filename = os.path.basename(features_path)
         src_iso = default_src_iso
         if features_filename != "test.src.txt":
             src_iso = features_filename.split(".")[1]
-        dataset = load_test_data(
+        dataset, book_dict = load_test_data(
             vref_path,
             features_path,
             predictions_path,
@@ -284,6 +434,7 @@ def test_checkpoint(
             ref_projects,
             trg_train_projects,
             books,
+            by_book,
         )
 
         for trg_iso, (pair_sys, pair_refs) in dataset.items():
@@ -336,8 +487,18 @@ def test_checkpoint(
                 if ter_score >= 0:
                     other_scores["TER"] = ter_score
 
-            scores.append(PairScore(src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores))
-
+            scores.append(PairScore("ALL", src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores))
+            if by_book is True:
+                if len(book_dict) != 0:
+                    book_scores = score_individual_books(book_dict,
+                                                         src_iso,
+                                                         predictions_detok_path,
+                                                         scorers,
+                                                         data_config,
+                                                         ref_projects)
+                    scores.extend(book_scores)
+                else:
+                    print("Error: book_dict did not load correctly. Not scoring individual books.")
     if len(src_langs) > 1 or len(trg_langs) > 1:
         bleu = sacrebleu.corpus_bleu(overall_sys, cast(List[Iterable[str]], overall_refs), lowercase=True)
         scores.append(PairScore("ALL", "ALL", bleu, len(overall_sys), ref_projects))
@@ -366,6 +527,7 @@ def main() -> None:
     parser.add_argument("--force-infer", default=False, action="store_true", help="Force inferencing")
     parser.add_argument("--scorers", nargs="*", metavar="scorer", help=f"List of scorers - {SUPPORTED_SCORERS}")
     parser.add_argument("--books", nargs="*", metavar="book", default=[], help="Books")
+    parser.add_argument("--by-book", default=False, action="store_true", help="Score individual books")
 
     args = parser.parse_args()
 
@@ -404,6 +566,7 @@ def main() -> None:
             trg_langs,
             trg_train_projects,
             args.force_infer,
+            args.by_book,
             args.memory_growth,
             ref_projects,
             checkpoint_path,
@@ -422,6 +585,7 @@ def main() -> None:
             trg_langs,
             trg_train_projects,
             args.force_infer,
+            args.by_book,
             args.memory_growth,
             ref_projects,
             checkpoint_path,
@@ -444,6 +608,7 @@ def main() -> None:
                 trg_langs,
                 trg_train_projects,
                 args.force_infer,
+                args.by_book,
                 args.memory_growth,
                 ref_projects,
                 checkpoint_path,
@@ -463,6 +628,7 @@ def main() -> None:
                 trg_langs,
                 trg_train_projects,
                 args.force_infer,
+                args.by_book,
                 args.memory_growth,
                 ref_projects,
                 checkpoint_path,
