@@ -3,7 +3,7 @@
   "isRoot": true,
   "tools": {
     "sil.machine.tool": {
-      "version": "2.3.8",
+      "version": "2.3.9",
       "commands": [
         "machine"
       ]

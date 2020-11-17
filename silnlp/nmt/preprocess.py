@@ -602,6 +602,9 @@ def main() -> None:
             project = column[len("target_") :]
             trg_suffix = "" if len(columns) == 1 else f".{project}"
             write_corpus(
+                os.path.join(root_dir, f"{prefix}.trg{trg_suffix}.txt"), encode_sp_lines(trg_spp, pair_test[column]),
+            )
+            write_corpus(
                 os.path.join(root_dir, f"{prefix}.trg.detok{trg_suffix}.txt"),
                 decode_sp_lines(encode_sp_lines(trg_spp, pair_test[column])),
             )
