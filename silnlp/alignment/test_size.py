@@ -7,7 +7,7 @@ from typing import List, Optional, Set, Tuple
 import numpy as np
 
 from nlp.alignment.config import ALIGNERS, load_config
-from nlp.alignment.metrics import compute_metrics
+from nlp.alignment.metrics import compute_metrics, load_all_alignments, load_vrefs
 from nlp.common.canon import get_books
 from nlp.common.environment import align_experiments_dir
 from nlp.common.utils import get_align_root_dir, set_seed
@@ -29,7 +29,14 @@ def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
 def get_metrics(exp_name: str, books: Set[int] = set(), test_size: Optional[int] = None) -> List[float]:
     config = load_config(exp_name)
     set_seed(config["seed"])
-    df = compute_metrics(get_align_root_dir(exp_name), books, test_size)
+    root_dir = get_align_root_dir(exp_name)
+
+    vref_file_path = os.path.join(root_dir, "refs.txt")
+    vrefs = load_vrefs(vref_file_path)
+
+    all_alignments = load_all_alignments(root_dir)
+
+    df = compute_metrics(vrefs, all_alignments, "ALL", books, test_size)
     metrics = df["F-Score"].to_numpy().tolist()
     assert len(metrics) == len(ALIGNERS)
     return metrics

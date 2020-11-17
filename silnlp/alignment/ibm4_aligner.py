@@ -140,7 +140,7 @@ def giza_to_pharaoh(model_prefix: str, output_file_path: str) -> None:
 
 class Ibm4Aligner(Aligner):
     def __init__(self, model_dir: str) -> None:
-        super().__init__("IBM-4", model_dir)
+        super().__init__("ibm4", model_dir)
 
     def align(self, src_file_path: str, trg_file_path: str, out_file_path: str) -> None:
         os.makedirs(self.model_dir, exist_ok=True)

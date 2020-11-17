@@ -1,14 +1,14 @@
 import glob
-from nlp.common.verse_ref import VerseRef
 import os
 import random
-from typing import Iterable, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 import pandas as pd
 from nltk.translate import Alignment
 
-from nlp.alignment.config import get_aligner
+from nlp.alignment.config import get_aligner_name
 from nlp.common.corpus import load_corpus
+from nlp.common.verse_ref import VerseRef
 
 
 def compute_aer(alignments: Iterable[Alignment], references: Iterable[Alignment]) -> float:
@@ -55,6 +55,18 @@ def load_alignments(input_file_path: str) -> List[Alignment]:
     return alignments
 
 
+def load_all_alignments(root_dir: str) -> Dict[str, List[Alignment]]:
+    results: Dict[str, List[Alignment]] = {}
+    for alignments_path in glob.glob(os.path.join(root_dir, "alignments.*.txt")):
+        file_name = os.path.basename(alignments_path)
+        parts = file_name.split(".")
+        id = parts[1]
+
+        alignments = load_alignments(alignments_path)
+        results[id] = alignments
+    return results
+
+
 def load_vrefs(vref_file_path: str) -> List[VerseRef]:
     vrefs: List[VerseRef] = []
     for line in load_corpus(vref_file_path):
@@ -83,12 +95,14 @@ def filter_alignments_by_index(alignments: List[Alignment], indices: List[int]) 
     return results
 
 
-def compute_metrics(root_dir: str, books: Set[int] = set(), test_size: Optional[int] = None) -> pd.DataFrame:
-    vref_file_path = os.path.join(root_dir, "refs.txt")
-    vrefs = load_vrefs(vref_file_path)
-
-    ref_file_path = os.path.join(root_dir, "alignments.gold.txt")
-    references = load_alignments(ref_file_path)
+def compute_metrics(
+    vrefs: List[VerseRef],
+    all_alignments: Dict[str, List[Alignment]],
+    label: str,
+    books: Set[int] = set(),
+    test_size: Optional[int] = None,
+) -> pd.DataFrame:
+    references = all_alignments["gold"]
     references = filter_alignments_by_book(vrefs, references, books)
     test_indices: List[int] = []
     if test_size is not None and len(references) > test_size:
@@ -100,29 +114,26 @@ def compute_metrics(root_dir: str, books: Set[int] = set(), test_size: Optional[
     f_scores: List[float] = []
     precisions: List[float] = []
     recalls: List[float] = []
-    for alignments_path in glob.glob(os.path.join(root_dir, "alignments.*.txt")):
-        if alignments_path == ref_file_path:
-            continue
-        file_name = os.path.basename(alignments_path)
-        parts = file_name.split(".")
-        id = parts[1]
-        aligner = get_aligner(id, root_dir)
+    if len(references) > 0:
+        for aligner_id, alignments in all_alignments.items():
+            if aligner_id == "gold":
+                continue
 
-        alignments = load_alignments(alignments_path)
-        alignments = filter_alignments_by_book(vrefs, alignments, books)
-        alignments = filter_alignments_by_index(alignments, test_indices)
+            aligner_name = get_aligner_name(aligner_id)
+            alignments = filter_alignments_by_book(vrefs, alignments, books)
+            alignments = filter_alignments_by_index(alignments, test_indices)
 
-        aer = compute_aer(alignments, references)
-        f_score, precision, recall = compute_f_score(alignments, references)
+            aer = compute_aer(alignments, references)
+            f_score, precision, recall = compute_f_score(alignments, references)
 
-        aligner_names.append(aligner.name)
-        aers.append(aer)
-        f_scores.append(f_score)
-        precisions.append(precision)
-        recalls.append(recall)
+            aligner_names.append(aligner_name)
+            aers.append(aer)
+            f_scores.append(f_score)
+            precisions.append(precision)
+            recalls.append(recall)
 
     return pd.DataFrame(
         {"AER": aers, "F-Score": f_scores, "Precision": precisions, "Recall": recalls},
         columns=["AER", "F-Score", "Precision", "Recall"],
-        index=aligner_names,
+        index=pd.MultiIndex.from_tuples(map(lambda a: (label, a), aligner_names), names=["Book", "Model"]),
     )

@@ -61,7 +61,7 @@ def load_prob_table(table_path: str) -> Dict[Tuple[str, str], float]:
 
 class FastAlign(Aligner):
     def __init__(self, model_dir: str) -> None:
-        super().__init__("FastAlign", model_dir)
+        super().__init__("fast_align", model_dir)
 
     @property
     def forward_prob_table_path(self) -> str:

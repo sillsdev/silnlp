@@ -23,14 +23,14 @@ SUPPORTED_SCORERS = {"bleu", "sentencebleu", "chrf3", "meteor", "wer", "ter"}
 
 class PairScore:
     def __init__(
-            self,
-            book: str,
-            src_iso: str,
-            trg_iso: str,
-            bleu: Optional[sacrebleu.BLEUScore],
-            sent_len: int,
-            projects: Set[str],
-            other_scores: Dict[str, float] = {},
+        self,
+        book: str,
+        src_iso: str,
+        trg_iso: str,
+        bleu: Optional[sacrebleu.BLEUScore],
+        sent_len: int,
+        projects: Set[str],
+        other_scores: Dict[str, float] = {},
     ) -> None:
         self.src_iso = src_iso
         self.trg_iso = trg_iso
@@ -76,12 +76,12 @@ def is_train_project(train_projects: Dict[str, Set[str]], ref_file_path: str, de
 
 
 def score_individual_books(
-        book_dict: dict,
-        src_iso: str,
-        predictions_detok_path: str,
-        scorers: Set[str],
-        data_config: dict,
-        ref_projects: Set[str],
+    book_dict: dict,
+    src_iso: str,
+    predictions_detok_path: str,
+    scorers: Set[str],
+    data_config: dict,
+    ref_projects: Set[str],
 ):
     overall_sys: List[str] = []
     book_scores: List[PairScore] = []
@@ -95,10 +95,7 @@ def score_individual_books(
             bleu_score = None
             if "bleu" in scorers:
                 bleu_score = sacrebleu.corpus_bleu(
-                    pair_sys,
-                    pair_refs,
-                    lowercase=True,
-                    tokenize=data_config.get("sacrebleu_tokenize", "13a"),
+                    pair_sys, pair_refs, lowercase=True, tokenize=data_config.get("sacrebleu_tokenize", "13a"),
                 )
 
             if "sentencebleu" in scorers:
@@ -112,9 +109,7 @@ def score_individual_books(
 
             other_scores: Dict[str, float] = {}
             if "chrf3" in scorers:
-                chrf3_score = sacrebleu.corpus_chrf(
-                    pair_sys, pair_refs, order=6, beta=3, remove_whitespace=True
-                )
+                chrf3_score = sacrebleu.corpus_chrf(pair_sys, pair_refs, order=6, beta=3, remove_whitespace=True)
                 other_scores["CHRF3"] = np.round(float(chrf3_score.score * 100), 2)
 
             if "meteor" in scorers:
@@ -136,14 +131,15 @@ def score_individual_books(
     return book_scores
 
 
-def process_individual_books(src_file_path: str,
-                             pred_file_path: str,
-                             ref_file_paths: str,
-                             vref_file_path: str,
-                             default_trg_iso: str,
-                             select_rand_ref_line: bool,
-                             books: Set[int],
-                             ):
+def process_individual_books(
+    src_file_path: str,
+    pred_file_path: str,
+    ref_file_paths: List[str],
+    vref_file_path: str,
+    default_trg_iso: str,
+    select_rand_ref_line: bool,
+    books: Set[int],
+):
     # Output data structure
     book_dict: Dict[str, dict] = {}
     ref_files = []
@@ -155,8 +151,8 @@ def process_individual_books(src_file_path: str,
             ref_files.append(file)
 
         with open(vref_file_path, "r", encoding="utf-8") as vref_file, open(
-                pred_file_path, "r", encoding="utf-8") as pred_file, open(
-            src_file_path, "r", encoding="utf-8") as src_file:
+            pred_file_path, "r", encoding="utf-8"
+        ) as pred_file, open(src_file_path, "r", encoding="utf-8") as src_file:
             for lines in zip(pred_file, vref_file, src_file, *ref_files):
                 # Get file lines
                 pred_line = lines[0].strip()
@@ -213,20 +209,20 @@ def process_individual_books(src_file_path: str,
 
 
 def load_test_data(
-        vref_file_path: str,
-        src_file_path: str,
-        pred_file_path: str,
-        ref_files_path: str,
-        output_file_path: str,
-        default_trg_iso: str,
-        ref_projects: Set[str],
-        train_projects: Dict[str, Set[str]],
-        books: Set[int],
-        by_book: bool,
-) -> Dict[str, Tuple[List[str], List[List[str]]]]:
+    vref_file_path: str,
+    src_file_path: str,
+    pred_file_path: str,
+    ref_files_path: str,
+    output_file_path: str,
+    default_trg_iso: str,
+    ref_projects: Set[str],
+    train_projects: Dict[str, Set[str]],
+    books: Set[int],
+    by_book: bool,
+) -> Tuple[Dict[str, Tuple[List[str], List[List[str]]]], Dict[str, dict]]:
     dataset: Dict[str, Tuple[List[str], List[List[str]]]] = {}
     with open(src_file_path, "r", encoding="utf-8") as src_file, open(
-            pred_file_path, "r", encoding="utf-8"
+        pred_file_path, "r", encoding="utf-8"
     ) as pred_file, open(output_file_path, "w", encoding="utf-8") as out_file:
         ref_file_paths = glob(ref_files_path)
         select_rand_ref_line = False
@@ -283,14 +279,15 @@ def load_test_data(
                 out_file.write(detok_pred_line + "\n")
             book_dict: Dict[str, dict] = {}
             if by_book:
-                book_dict = process_individual_books(src_file_path,
-                                                     pred_file_path,
-                                                     ref_file_paths,
-                                                     vref_file_path,
-                                                     default_trg_iso,
-                                                     select_rand_ref_line,
-                                                     books,
-                                                     )
+                book_dict = process_individual_books(
+                    src_file_path,
+                    pred_file_path,
+                    ref_file_paths,
+                    vref_file_path,
+                    default_trg_iso,
+                    select_rand_ref_line,
+                    books,
+                )
         finally:
             if vref_file is not None:
                 vref_file.close()
@@ -300,13 +297,13 @@ def load_test_data(
 
 
 def my_sentence_bleu(
-        hypothesis: str,
-        references: List[str],
-        smooth_method: str = "exp",
-        smooth_value: float = None,
-        lowercase: bool = False,
-        tokenize=sacrebleu.DEFAULT_TOKENIZER,
-        use_effective_order: bool = False,
+    hypothesis: str,
+    references: List[str],
+    smooth_method: str = "exp",
+    smooth_value: float = None,
+    lowercase: bool = False,
+    tokenize=sacrebleu.DEFAULT_TOKENIZER,
+    use_effective_order: bool = False,
 ) -> sacrebleu.BLEUScore:
     """
     Substitute for the sacrebleu version of sentence_bleu, which uses settings that aren't consistent with
@@ -326,11 +323,11 @@ def my_sentence_bleu(
 
 
 def write_sentence_bleu(
-        predictions_detok_path: str,
-        preds: List[str],
-        refs: List[List[str]],
-        lowercase: bool = False,
-        tokenize=sacrebleu.DEFAULT_TOKENIZER,
+    predictions_detok_path: str,
+    preds: List[str],
+    refs: List[List[str]],
+    lowercase: bool = False,
+    tokenize=sacrebleu.DEFAULT_TOKENIZER,
 ):
     scores_path = predictions_detok_path + ".scores.csv"
     with open(scores_path, "w", encoding="utf-8-sig") as scores_file:
@@ -355,19 +352,19 @@ def write_sentence_bleu(
 
 
 def test_checkpoint(
-        root_dir: str,
-        config: dict,
-        src_langs: Set[str],
-        trg_langs: Set[str],
-        trg_train_projects: Dict[str, Set[str]],
-        force_infer: bool,
-        by_book: bool,
-        memory_growth: bool,
-        ref_projects: Set[str],
-        checkpoint_path: str,
-        step: int,
-        scorers: Set[str],
-        books: Set[int],
+    root_dir: str,
+    config: dict,
+    src_langs: Set[str],
+    trg_langs: Set[str],
+    trg_train_projects: Dict[str, Set[str]],
+    force_infer: bool,
+    by_book: bool,
+    memory_growth: bool,
+    ref_projects: Set[str],
+    checkpoint_path: str,
+    step: int,
+    scorers: Set[str],
+    books: Set[int],
 ) -> List[PairScore]:
     vref_paths: List[str] = []
     features_paths: List[str] = []
@@ -418,7 +415,7 @@ def test_checkpoint(
     overall_sys: List[str] = []
     overall_refs: List[List[str]] = []
     for vref_path, features_path, predictions_path, refs_path, predictions_detok_path in zip(
-            vref_paths, features_paths, predictions_paths, refs_paths, predictions_detok_paths
+        vref_paths, features_paths, predictions_paths, refs_paths, predictions_detok_paths
     ):
         features_filename = os.path.basename(features_path)
         src_iso = default_src_iso
@@ -490,18 +487,15 @@ def test_checkpoint(
             scores.append(PairScore("ALL", src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores))
             if by_book is True:
                 if len(book_dict) != 0:
-                    book_scores = score_individual_books(book_dict,
-                                                         src_iso,
-                                                         predictions_detok_path,
-                                                         scorers,
-                                                         data_config,
-                                                         ref_projects)
+                    book_scores = score_individual_books(
+                        book_dict, src_iso, predictions_detok_path, scorers, data_config, ref_projects
+                    )
                     scores.extend(book_scores)
                 else:
                     print("Error: book_dict did not load correctly. Not scoring individual books.")
     if len(src_langs) > 1 or len(trg_langs) > 1:
         bleu = sacrebleu.corpus_bleu(overall_sys, cast(List[Iterable[str]], overall_refs), lowercase=True)
-        scores.append(PairScore("ALL", "ALL", bleu, len(overall_sys), ref_projects))
+        scores.append(PairScore("ALL", "ALL", "ALL", bleu, len(overall_sys), ref_projects))
 
     scores_file_root = f"scores-{suffix_str}"
     if len(ref_projects) > 0:

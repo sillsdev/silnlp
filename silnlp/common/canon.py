@@ -160,3 +160,15 @@ def get_books(books: Union[str, List[str]]) -> Set[int]:
                 raise RuntimeError("A specified book Id is invalid.")
             book_set.add(book_num)
     return book_set
+
+
+def is_nt(book_num: int) -> bool:
+    return book_num >= 40 and book_num < 67
+
+
+def is_ot(book_num: int) -> bool:
+    return book_num < 40
+
+
+def is_ot_nt(book_num: int) -> bool:
+    return is_ot(book_num) or is_nt(book_num)
