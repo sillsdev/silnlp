@@ -5,7 +5,7 @@ import time
 from datetime import timedelta
 from typing import Dict, List, Optional
 
-from nlp.alignment.config import ALIGNERS, get_aligner, get_all_book_paths, load_config
+from nlp.alignment.config import ALIGNERS, get_aligner, get_aligner_name, get_all_book_paths, load_config
 from nlp.common.utils import get_align_root_dir
 
 
@@ -31,17 +31,18 @@ def align(aligner_ids: List[str], root_dir: str, book: Optional[str] = None) -> 
         aligner = get_aligner(aligner_id, root_dir)
         if os.path.isdir(aligner.model_dir):
             shutil.rmtree(aligner.model_dir)
+        aligner_name = get_aligner_name(aligner_id)
         if book is None:
-            print(f"=== {aligner.name} ===")
+            print(f"=== {aligner_name} ===")
         else:
-            print(f"=== {aligner.name} ({book}) ===")
+            print(f"=== {aligner_name} ({book}) ===")
         method_out_file_path = os.path.join(root_dir, f"alignments.{aligner_id}.txt")
 
         start = time.perf_counter()
         aligner.align(train_src_path, train_trg_path, method_out_file_path)
         end = time.perf_counter()
         delta = timedelta(seconds=end - start)
-        times[aligner.name] = str(delta)
+        times[aligner_name] = str(delta)
         print(f"Duration: {delta}")
 
     with open(durations_path, "w", encoding="utf-8") as out_file:

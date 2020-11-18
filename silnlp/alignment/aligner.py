@@ -1,5 +1,4 @@
 import abc
-from nlp.alignment.config import get_aligner_name
 
 
 class Aligner(abc.ABC):
@@ -8,8 +7,8 @@ class Aligner(abc.ABC):
         self._model_dir = model_dir
 
     @property
-    def name(self) -> str:
-        return get_aligner_name(self._id)
+    def id(self) -> str:
+        return self._id
 
     @property
     def model_dir(self) -> str:
