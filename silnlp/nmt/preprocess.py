@@ -85,8 +85,11 @@ def build_vocab(
     else:
         raise RuntimeError("Invalid casing was specified in the config.")
 
+    # use custom normalization that does not convert ZWJ and ZWNJ to spaces
+    # allows properly handling of scripts like Devanagari
+    normalization_path = os.path.join(os.path.dirname(__file__), f"{normalization}.tsv")
     sp_train_params = (
-        f"--normalization_rule_name={normalization} --input={joined_file_paths} --model_prefix={model_prefix}"
+        f"--normalization_rule_tsv={normalization_path} --input={joined_file_paths} --model_prefix={model_prefix}"
         f" --vocab_size={vocab_size} --character_coverage=1.0 --input_sentence_size=1000000"
         " --shuffle_input_sentence=true --control_symbols=<range>"
     )
