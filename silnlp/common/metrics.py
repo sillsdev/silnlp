@@ -1,19 +1,15 @@
 import os
 import subprocess
-from subprocess import PIPE
 import tempfile
 from typing import Iterable, List, Optional
 
 import numpy as np
-
 import psutil
-
 from nlp.common.corpus import write_corpus
-
-METEOR_FULLY_SUPPORTED_LANGS = {"en", "cz", "de", "es", "fr", "ar"}
-
 from opennmt.utils.ter import ter
 from opennmt.utils.wer import wer
+
+METEOR_FULLY_SUPPORTED_LANGS = {"en", "cz", "de", "es", "fr", "ar"}
 
 
 def compute_ter_score(hyps: Iterable[str], refs: Iterable[str]) -> float:
@@ -93,6 +89,6 @@ def compute_meteor_score(lang: str, hyps: Iterable[str], refs: List[Iterable[str
         env = os.environ.copy()
         env["LC_ALL"] = "C"
         #        result = subprocess.run(meteor_cmd, env=env, capture_output=True, encoding="utf-8")
-        result = subprocess.run(meteor_cmd, env=env, stdout=subprocess.PIPE, stderr=PIPE, encoding="utf-8")
+        result = subprocess.run(meteor_cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8")
 
         return float(np.round(float(result.stdout.strip()) * 100, 2))
