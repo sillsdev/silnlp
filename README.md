@@ -36,8 +36,7 @@ Download and install the following separately before creating any projects or
 starting any code, preferably in this order to avoid most warnings:
 
 1. [Git](https://git-scm.com/downloads)
-1. [Python 3.7](https://www.python.org/downloads/) (latest minor version, ie 3.7.6, and not 3.8 just yet, **not the
-   Microsoft Store**)
+1. [Python 3.6](https://www.python.org/downloads/) (latest minor version, ie 3.6.8)
 1. Install [PyCharm 2020.1](https://www.jetbrains.com/pycharm/) or later
 1. Poetry via Powershell using the following command:
 
@@ -78,10 +77,10 @@ You will need to configure PyCharm to work properly with the project.
 
 Lastly, setup PyCharm to use the Black code formatter by following the instructions [here](https://black.readthedocs.io/en/stable/editor_integration.html#pycharm-intellij-idea).
 
-#### SIL.Machine.Translator Tool
+#### SIL.Machine.Tool
 
-Many of the scripts in this repo use the [SIL.Machine.Translator](https://github.com/sillsdev/machine) tool. 
-Execute the following command from the repo directory:
+Many of the scripts in this repo use [SIL.Machine.Tool](https://github.com/sillsdev/machine).
+Execute the following command from the repo directory to download it:
 
 ```
 dotnet tool restore
