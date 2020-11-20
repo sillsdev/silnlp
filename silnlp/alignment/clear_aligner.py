@@ -1,4 +1,4 @@
-from nlp.alignment.aligner import Aligner
+from .aligner import Aligner
 
 
 class ClearAligner(Aligner):

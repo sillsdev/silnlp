@@ -6,9 +6,9 @@ from typing import Dict, Iterable, List, Optional, Set, Tuple
 import pandas as pd
 from nltk.translate import Alignment
 
-from nlp.alignment.config import get_aligner_name
-from nlp.common.corpus import load_corpus
-from nlp.common.verse_ref import VerseRef
+from ..common.corpus import load_corpus
+from ..common.verse_ref import VerseRef
+from .config import get_aligner_name
 
 
 def compute_aer(alignments: Iterable[Alignment], references: Iterable[Alignment]) -> float:

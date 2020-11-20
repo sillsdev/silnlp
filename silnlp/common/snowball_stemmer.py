@@ -2,7 +2,7 @@ from typing import Iterable, List
 
 from nltk.stem import SnowballStemmer as NltkSnowballStemmer
 
-from nlp.common.stemmer import Stemmer
+from ..common.stemmer import Stemmer
 
 SUPPORTED_LANGS = {
     "ar": "arabic",

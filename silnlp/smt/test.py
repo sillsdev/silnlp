@@ -4,9 +4,9 @@ import subprocess
 
 import sacrebleu
 
-from nlp.common.corpus import load_corpus
-from nlp.common.utils import get_git_revision_hash, get_mt_root_dir
-from nlp.smt.config import load_config
+from ..common.corpus import load_corpus
+from ..common.utils import get_git_revision_hash, get_mt_root_dir
+from .config import load_config
 
 
 def get_iso(lang: str) -> str:

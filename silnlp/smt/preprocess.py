@@ -3,8 +3,8 @@ import os
 from statistics import mean
 from typing import Tuple
 
-from nlp.common.canon import get_books
-from nlp.common.corpus import (
+from ..common.canon import get_books
+from ..common.corpus import (
     add_alignment_scores,
     exclude_books,
     get_corpus_path,
@@ -13,9 +13,9 @@ from nlp.common.corpus import (
     split_parallel_corpus,
     write_corpus,
 )
-from nlp.common.environment import paratextPreprocessedDir
-from nlp.common.utils import get_git_revision_hash, get_mt_root_dir, set_seed
-from nlp.smt.config import load_config
+from ..common.environment import PT_PREPROCESSED_DIR
+from ..common.utils import get_git_revision_hash, get_mt_root_dir, set_seed
+from .config import load_config
 
 
 def parse_lang(lang: str) -> Tuple[str, str]:
@@ -42,7 +42,7 @@ def main() -> None:
     src_iso, src_project = parse_lang(config["src_lang"])
     trg_iso, trg_project = parse_lang(config["trg_lang"])
 
-    vref_file_path = os.path.join(paratextPreprocessedDir, "data", "vref.txt")
+    vref_file_path = os.path.join(PT_PREPROCESSED_DIR, "data", "vref.txt")
     src_file_path = get_corpus_path(src_iso, src_project)
     trg_file_path = get_corpus_path(trg_iso, trg_project)
 

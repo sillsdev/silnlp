@@ -6,9 +6,9 @@ from typing import List, Tuple
 
 from nltk.translate import Alignment
 
-from nlp.alignment.aligner import Aligner
-from nlp.alignment.fast_align import execute_atools
-from nlp.common.corpus import write_corpus
+from ..common.corpus import write_corpus
+from .aligner import Aligner
+from .fast_align import execute_atools
 
 
 def execute_plain2snt(src_file_path: str, trg_file_path: str, output_dir: str) -> Tuple[str, str]:

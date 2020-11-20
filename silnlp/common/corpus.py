@@ -7,9 +7,9 @@ from typing import Dict, Iterable, Iterator, List, Set, Tuple
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-from nlp.alignment.fast_align import FastAlign
-from nlp.common.environment import paratextPreprocessedDir
-from nlp.common.verse_ref import VerseRef
+from ..alignment.fast_align import FastAlign
+from .environment import PT_PREPROCESSED_DIR
+from .verse_ref import VerseRef
 
 
 def write_corpus(corpus_path: str, sentences: Iterable[str], append: bool = False) -> None:
@@ -189,7 +189,7 @@ def filter_parallel_corpus(corpus: pd.DataFrame, score_threshold: float) -> pd.D
 
 
 def get_corpus_path(iso: str, project: str) -> str:
-    return os.path.join(paratextPreprocessedDir, "data", f"{iso}-{project}.txt")
+    return os.path.join(PT_PREPROCESSED_DIR, "data", f"{iso}-{project}.txt")
 
 
 def include_books(corpus: pd.DataFrame, books: Set[int]) -> pd.DataFrame:

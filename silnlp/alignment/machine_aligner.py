@@ -2,7 +2,7 @@ import os
 import subprocess
 from typing import Optional
 
-from nlp.alignment.aligner import Aligner
+from .aligner import Aligner
 
 
 def train_alignment_model(

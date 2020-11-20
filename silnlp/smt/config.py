@@ -2,7 +2,7 @@ import argparse
 import os
 import yaml
 
-from nlp.common.utils import get_git_revision_hash, get_mt_root_dir, merge_dict
+from ..common.utils import get_git_revision_hash, get_mt_root_dir, merge_dict
 
 
 DEFAULT_NEW_CONFIG: dict = {"model": "hmm", "seed": 111, "test_size": 250}

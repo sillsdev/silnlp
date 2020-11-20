@@ -1,6 +1,6 @@
 from typing import Iterable, List
 
-from nlp.common.stemmer import Stemmer
+from ..common.stemmer import Stemmer
 
 
 class NullStemmer(Stemmer):

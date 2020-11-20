@@ -6,11 +6,11 @@ from typing import List, Optional, Set, Tuple
 
 import numpy as np
 
-from nlp.alignment.config import ALIGNERS, load_config
-from nlp.alignment.metrics import compute_metrics, load_all_alignments, load_vrefs
-from nlp.common.canon import get_books
-from nlp.common.environment import align_experiments_dir
-from nlp.common.utils import get_align_root_dir, set_seed
+from ..common.canon import get_books
+from ..common.environment import ALIGN_EXPERIMENTS_DIR
+from ..common.utils import get_align_root_dir, set_seed
+from .config import ALIGNERS, load_config
+from .metrics import compute_metrics, load_all_alignments, load_vrefs
 
 
 def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
@@ -68,7 +68,7 @@ def main() -> None:
 
     experiments: List[str] = []
     base_metrics: List[float] = []
-    for path in glob.glob(os.path.join(align_experiments_dir, f"*.{testament}")):
+    for path in glob.glob(os.path.join(ALIGN_EXPERIMENTS_DIR, f"*.{testament}")):
         if os.path.isdir(path):
             exp_name = os.path.basename(path)
             experiments.append(exp_name)

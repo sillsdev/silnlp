@@ -15,8 +15,9 @@ logging.basicConfig()
 import opennmt.data
 import pandas as pd
 import sentencepiece as sp
-from nlp.common.canon import get_books
-from nlp.common.corpus import (
+
+from ..common.canon import get_books
+from ..common.corpus import (
     add_alignment_scores,
     exclude_books,
     filter_parallel_corpus,
@@ -27,10 +28,10 @@ from nlp.common.corpus import (
     split_parallel_corpus,
     write_corpus,
 )
-from nlp.common.environment import paratextPreprocessedDir
-from nlp.common.utils import set_seed
-from nlp.nmt.config import create_runner, get_git_revision_hash, get_mt_root_dir, load_config, parse_langs
-from nlp.nmt.utils import decode_sp_lines, encode_sp, encode_sp_lines, get_best_model_dir, get_last_checkpoint
+from ..common.environment import PT_PREPROCESSED_DIR
+from ..common.utils import set_seed
+from .config import create_runner, get_git_revision_hash, get_mt_root_dir, load_config, parse_langs
+from .utils import decode_sp_lines, encode_sp, encode_sp_lines, get_best_model_dir, get_last_checkpoint
 
 
 # Different types of parent model checkpoints (last, best, average)
@@ -445,7 +446,7 @@ def main() -> None:
     pair_val_indices: Dict[Tuple[str, str], Set[int]] = {}
     pair_test_indices: Dict[Tuple[str, str], Set[int]] = {}
 
-    vref_file_path = os.path.join(paratextPreprocessedDir, "data", "vref.txt")
+    vref_file_path = os.path.join(PT_PREPROCESSED_DIR, "data", "vref.txt")
     corpus_books = get_books(data_config.get("corpus_books", []))
     test_books = get_books(data_config.get("test_books", []))
 

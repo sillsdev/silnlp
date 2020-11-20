@@ -4,10 +4,10 @@ from typing import Optional, Set
 
 import pandas as pd
 
-from nlp.alignment.config import get_all_book_paths, load_config
-from nlp.alignment.metrics import compute_metrics, load_all_alignments, load_vrefs
-from nlp.common.canon import ALL_BOOK_IDS, book_id_to_number, get_books, is_ot_nt
-from nlp.common.utils import get_align_root_dir, set_seed
+from ..common.canon import ALL_BOOK_IDS, book_id_to_number, get_books, is_ot_nt
+from ..common.utils import get_align_root_dir, set_seed
+from .config import get_all_book_paths, load_config
+from .metrics import compute_metrics, load_all_alignments, load_vrefs
 
 
 def test(root_dir: str, by_book: bool, books: Set[int], test_size: Optional[int]) -> None:
@@ -27,7 +27,7 @@ def test(root_dir: str, by_book: bool, books: Set[int], test_size: Optional[int]
             book_df = compute_metrics(vrefs, all_alignments, book_id, {book_num})
             df = pd.concat([df, book_df])
 
-    for book in set(df.index.get_level_values("Book")):
+    for book in sorted(set(df.index.get_level_values("Book")), key=lambda b: 0 if b == "ALL" else book_id_to_number(b)):
         if by_book:
             print(f"=== {book} ===")
         for index, row in df.loc[[book]].iterrows():

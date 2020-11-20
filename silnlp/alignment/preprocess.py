@@ -8,12 +8,12 @@ logging.basicConfig(level=logging.INFO)
 
 from nltk.translate import Alignment
 
-from nlp.alignment.config import get_all_book_paths, get_stemmer, load_config
-from nlp.common.corpus import write_corpus
-from nlp.common.environment import align_gold_standards_dir
-from nlp.common.stemmer import Stemmer
-from nlp.common.utils import get_align_root_dir, set_seed
-from nlp.common.verse_ref import VerseRef
+from ..common.corpus import write_corpus
+from ..common.environment import ALIGN_GOLD_STANDARDS_DIR
+from ..common.stemmer import Stemmer
+from ..common.utils import get_align_root_dir, set_seed
+from ..common.verse_ref import VerseRef
+from .config import get_all_book_paths, get_stemmer, load_config
 
 
 class ParallelSegment:
@@ -78,7 +78,7 @@ def main() -> None:
 
     corpus_name: str = config["corpus"]
 
-    corpus_path = os.path.join(align_gold_standards_dir, corpus_name + ".alignment.json")
+    corpus_path = os.path.join(ALIGN_GOLD_STANDARDS_DIR, corpus_name + ".alignment.json")
     verses: List[dict]
     with open(corpus_path, "r", encoding="utf-8") as f:
         verses = json.load(f)

@@ -1,6 +1,5 @@
 import logging
 import os
-import yaml
 from typing import Any, Iterable, List, Tuple
 
 import numpy as np
@@ -11,8 +10,9 @@ import opennmt.utils.checkpoint
 import opennmt.utils.misc
 import tensorflow as tf
 import tensorflow_addons as tfa
+import yaml
 
-from nlp.nmt.utils import get_best_model_dir
+from .utils import get_best_model_dir
 
 
 class VariableUpdate:

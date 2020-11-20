@@ -5,58 +5,27 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Root directory
-gutenberg_path = os.getenv("GUTENBERG_PATH")
-nlpDir = Path(gutenberg_path if gutenberg_path is not None else r"G:/Shared drives/Gutenberg")
+ROOT_DIR = Path.home() / r".silnlp"
 
-# API.Bible directories
-apiBibleDir = nlpDir / r"API.Bible"
-apiBibleAnalysisDir = apiBibleDir / r"Analysis"
 
-# Bible Technologies.net directories
-bibleTechDir = nlpDir / r"Bible Technologies.net"
-bibleTechAnalysisDir = bibleTechDir / r"Analysis"
+def get_data_dir() -> Path:
+    sil_nlp_data_path = os.getenv("SIL_NLP_DATA_PATH")
+    if sil_nlp_data_path is not None:
+        return Path(sil_nlp_data_path)
+    gutenberg_path = Path(r"G:/Shared drives/Gutenberg")
+    if gutenberg_path.exists():
+        return gutenberg_path
+    return ROOT_DIR / r"data"
 
-# Christodoulopoulos directories
-christoDir = nlpDir / r"Christodoulopoulos"
-christoResourceDir = christoDir / r"resources.CES"
-christoTextDir = christoDir / r"resources.txt"
-christoAnalysisDir = christoDir / r"Analysis"
 
-# Cysouw directories
-cysouwDir = nlpDir / r"Cysouw"
-cysouwAnalysisDir = cysouwDir / r"Analysis"
-
-# DBL directories
-dblDir = nlpDir / r"DBL"
-dblAnalysisDir = dblDir / r"Analysis"
+# Root data directory
+DATA_DIR = get_data_dir()
 
 # Paratext directories
-paratextDir = nlpDir / r"Paratext"
-paratextUnzippedDir = paratextDir / r"Paratext.unzipped"
-paratextRippedDir = paratextDir / r"Paratext.ripped"
-paratextAnalysisDir = paratextDir / r"Analysis"
-paratextPreprocessedDir = paratextDir / r"Paratext.preprocessed"
+PT_DIR = DATA_DIR / r"Paratext"
+PT_UNZIPPED_DIR = PT_DIR / r"Paratext.unzipped"
+PT_PREPROCESSED_DIR = PT_DIR / r"Paratext.preprocessed"
 
-# Reference data directories
-refDataDir = nlpDir / r"Reference Data"
-refDataEthnologueDir = refDataDir / r"Ethnologue"
-refDataIso639Dir = refDataDir / r"ISO639"
-refDataParatextDir = refDataDir / r"Paratext"
-
-# Scripture API directories
-scriptureApiDir = nlpDir / r"Scripture API"
-scriptureApiAnalysisDir = scriptureApiDir / r"Analysis"
-
-paratext_name = os.getenv("PARATEXT_NAME")
-paratext_password = os.getenv("PARATEXT_PASSWORD")
-
-dbl_name = os.getenv("DBL_NAME")
-dbl_password = os.getenv("DBL_PASSWORD")
-
-scripture_api_key = os.getenv("SCRIPTURE_API_KEY")
-
-nlp_tools_path = os.getenv("NLP_TOOLS_PATH")
-nlp_tools_dir = Path(nlp_tools_path if nlp_tools_path is not None else nlpDir)
-align_gold_standards_dir = nlp_tools_dir / r"Gold Standards"
-align_experiments_dir = nlp_tools_dir / r"Experiments"
+ALIGN_DIR = DATA_DIR / r"Alignment"
+ALIGN_GOLD_STANDARDS_DIR = ALIGN_DIR / r"Gold Standards"
+ALIGN_EXPERIMENTS_DIR = ALIGN_DIR / r"Experiments"

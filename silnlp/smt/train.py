@@ -2,8 +2,8 @@ import argparse
 import os
 import subprocess
 
-from nlp.common.utils import get_git_revision_hash, get_mt_root_dir
-from nlp.smt.config import load_config
+from ..common.utils import get_git_revision_hash, get_mt_root_dir
+from .config import load_config
 
 
 def main() -> None:

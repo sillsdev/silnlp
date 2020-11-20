@@ -3,7 +3,7 @@ from typing import Iterable, List
 from nltk import download, pos_tag
 from nltk.stem import WordNetLemmatizer
 
-from nlp.common.stemmer import Stemmer
+from ..common.stemmer import Stemmer
 
 
 def convert_treebank_tag_to_wordnet_tag(tag: str) -> str:

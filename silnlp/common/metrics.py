@@ -5,9 +5,10 @@ from typing import Iterable, List, Optional
 
 import numpy as np
 import psutil
-from nlp.common.corpus import write_corpus
 from opennmt.utils.ter import ter
 from opennmt.utils.wer import wer
+
+from ..common.corpus import write_corpus
 
 METEOR_FULLY_SUPPORTED_LANGS = {"en", "cz", "de", "es", "fr", "ar"}
 

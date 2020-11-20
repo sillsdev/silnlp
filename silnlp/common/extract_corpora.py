@@ -11,7 +11,7 @@ import subprocess
 from typing import Optional
 from xml.etree import ElementTree
 
-from nlp.common.environment import paratextPreprocessedDir, paratextUnzippedDir
+from ..common.environment import PT_PREPROCESSED_DIR, PT_UNZIPPED_DIR
 
 
 def get_iso(project_dir: str) -> Optional[str]:
@@ -30,7 +30,7 @@ def get_iso(project_dir: str) -> Optional[str]:
 def extract_corpus(output_dir: str, iso: str, project_dir: str, include_texts: str, exclude_texts: str) -> None:
     name = os.path.basename(project_dir)
     print("Extracting", name, f"({iso})")
-    ref_dir = os.path.join(paratextUnzippedDir, "Ref")
+    ref_dir = os.path.join(PT_UNZIPPED_DIR, "Ref")
     arg_list = ["dotnet", "machine", "extract", ref_dir, project_dir, "-sf", "pt", "-tf", "pt", "-as", "-ie"]
     output_basename = f"{iso}-{name}"
     if len(include_texts) > 0 or len(exclude_texts) > 0:
@@ -70,9 +70,9 @@ def main() -> None:
     # Which projects have data we can find?
     projects_found = []
 
-    output_dir = os.path.join(paratextPreprocessedDir, "data")
+    output_dir = os.path.join(PT_PREPROCESSED_DIR, "data")
     os.makedirs(output_dir, exist_ok=True)
-    for path in os.listdir(paratextUnzippedDir):
+    for path in os.listdir(PT_UNZIPPED_DIR):
         if path == "Ref" or (len(projects) > 0 and path not in projects):
             continue
         else:
@@ -80,10 +80,10 @@ def main() -> None:
 
     # Process the projects that have data and tell the user.
     if projects_found:
-        output_dir = os.path.join(paratextPreprocessedDir, "data")
+        output_dir = os.path.join(PT_PREPROCESSED_DIR, "data")
         os.makedirs(output_dir, exist_ok=True)
         for project in projects_found:
-            project_dir = os.path.join(paratextUnzippedDir, project)
+            project_dir = os.path.join(PT_UNZIPPED_DIR, project)
             if os.path.isdir(project_dir):
                 iso = get_iso(project_dir)
                 if iso is not None:

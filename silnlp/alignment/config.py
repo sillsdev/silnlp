@@ -1,19 +1,20 @@
-from nlp.common.canon import ALL_BOOK_IDS, book_id_to_number, is_ot_nt
 import os
 from typing import Dict, Iterable, Tuple, Type, Union
+
 import yaml
 
-from nlp.alignment.aligner import Aligner
-from nlp.alignment.clear_aligner import ClearAligner
-from nlp.alignment.fast_align import FastAlign
-from nlp.alignment.ibm4_aligner import Ibm4Aligner
-from nlp.alignment.machine_aligner import HmmAligner, Ibm1Aligner, Ibm2Aligner, ParatextAligner, SmtAligner
-from nlp.common.flatcat_stemmer import FlatCatStemmer
-from nlp.common.null_stemmer import NullStemmer
-from nlp.common.snowball_stemmer import SnowballStemmer
-from nlp.common.stemmer import Stemmer
-from nlp.common.utils import get_align_root_dir, merge_dict
-from nlp.common.wordnet_stemmer import WordNetStemmer
+from ..common.canon import ALL_BOOK_IDS, book_id_to_number, is_ot_nt
+from ..common.flatcat_stemmer import FlatCatStemmer
+from ..common.null_stemmer import NullStemmer
+from ..common.snowball_stemmer import SnowballStemmer
+from ..common.stemmer import Stemmer
+from ..common.utils import get_align_root_dir, merge_dict
+from ..common.wordnet_stemmer import WordNetStemmer
+from .aligner import Aligner
+from .clear_aligner import ClearAligner
+from .fast_align import FastAlign
+from .ibm4_aligner import Ibm4Aligner
+from .machine_aligner import HmmAligner, Ibm1Aligner, Ibm2Aligner, ParatextAligner, SmtAligner
 
 ALIGNERS: Dict[str, Tuple[Type[Aligner], str]] = {
     "fast_align": (FastAlign, "FastAlign"),

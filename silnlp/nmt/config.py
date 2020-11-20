@@ -12,9 +12,9 @@ import opennmt.utils
 import tensorflow as tf
 import yaml
 
-from nlp.common.utils import get_git_revision_hash, get_mt_root_dir
-from nlp.nmt.noise import WordDropout
-from nlp.nmt.runner import RunnerEx
+from ..common.utils import get_git_revision_hash, get_mt_root_dir
+from .noise import WordDropout
+from .runner import RunnerEx
 
 _PYTHON_TO_TENSORFLOW_LOGGING_LEVEL: Dict[int, int] = {
     logging.CRITICAL: 3,

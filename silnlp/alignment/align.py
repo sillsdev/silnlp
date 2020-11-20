@@ -5,8 +5,8 @@ import time
 from datetime import timedelta
 from typing import Dict, List, Optional
 
-from nlp.alignment.config import ALIGNERS, get_aligner, get_aligner_name, get_all_book_paths, load_config
-from nlp.common.utils import get_align_root_dir
+from ..common.utils import get_align_root_dir
+from .config import ALIGNERS, get_aligner, get_aligner_name, get_all_book_paths, load_config
 
 
 def align(aligner_ids: List[str], root_dir: str, book: Optional[str] = None) -> None:

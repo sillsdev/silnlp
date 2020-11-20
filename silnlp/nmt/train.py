@@ -5,8 +5,8 @@ from typing import Optional
 
 logging.basicConfig()
 
-from nlp.common.utils import get_git_revision_hash, set_seed
-from nlp.nmt.config import create_runner, get_mt_root_dir, load_config
+from ..common.utils import get_git_revision_hash, set_seed
+from .config import create_runner, get_mt_root_dir, load_config
 
 os.environ["TF_DETERMINISTIC_OPS"] = "1"
 

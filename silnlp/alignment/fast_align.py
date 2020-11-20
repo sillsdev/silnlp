@@ -4,8 +4,8 @@ import platform
 import subprocess
 from typing import Dict, List, Tuple
 
-from nlp.alignment.aligner import Aligner
-from nlp.common.utils import wsl_path
+from ..common.utils import wsl_path
+from .aligner import Aligner
 
 
 def execute_fast_align(input_path: str, output_path: str, prob_table_path: str, reverse: bool) -> None:

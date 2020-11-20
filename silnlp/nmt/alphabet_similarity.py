@@ -6,12 +6,12 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
-from nlp.common.environment import paratextPreprocessedDir
-from nlp.nmt.config import load_config, parse_langs
+from ..common.environment import PT_PREPROCESSED_DIR
+from .config import load_config, parse_langs
 
 
 def get_corpus_path(project: str) -> str:
-    return os.path.join(paratextPreprocessedDir, "data", f"{project}.txt")
+    return os.path.join(PT_PREPROCESSED_DIR, "data", f"{project}.txt")
 
 
 def computeSimilarity(projects: List[str]) -> None:

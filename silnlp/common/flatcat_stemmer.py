@@ -4,7 +4,7 @@ from typing import Any, Iterable, List, Tuple
 import flatcat
 import morfessor
 
-from nlp.common.stemmer import Stemmer
+from ..common.stemmer import Stemmer
 
 
 def convert_verses_to_morfessor_data(verses: Iterable[List[str]]) -> Iterable[Tuple[int, Any]]:

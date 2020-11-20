@@ -11,12 +11,12 @@ logging.basicConfig()
 import numpy as np
 import sacrebleu
 
-from nlp.common.canon import book_number_to_id, get_books
-from nlp.common.metrics import compute_meteor_score, compute_ter_score, compute_wer_score
-from nlp.common.utils import get_git_revision_hash, set_seed
-from nlp.common.verse_ref import VerseRef
-from nlp.nmt.config import create_runner, get_mt_root_dir, load_config, parse_langs
-from nlp.nmt.utils import decode_sp, get_best_model_dir, get_last_checkpoint
+from ..common.canon import book_number_to_id, get_books
+from ..common.metrics import compute_meteor_score, compute_ter_score, compute_wer_score
+from ..common.utils import get_git_revision_hash, set_seed
+from ..common.verse_ref import VerseRef
+from .config import create_runner, get_mt_root_dir, load_config, parse_langs
+from .utils import decode_sp, get_best_model_dir, get_last_checkpoint
 
 SUPPORTED_SCORERS = {"bleu", "sentencebleu", "chrf3", "meteor", "wer", "ter"}
 

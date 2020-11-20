@@ -1,7 +1,6 @@
-# from __future__ import annotations
 from typing import Iterable, Union
 
-from nlp.common.canon import book_id_to_number, book_number_to_id
+from ..common.canon import book_id_to_number, book_number_to_id
 
 VERSE_RANGE_SEPARATOR = "-"
 VERSE_SEQUENCE_INDICATOR = ","

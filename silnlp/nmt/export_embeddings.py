@@ -3,7 +3,7 @@ import logging
 
 logging.basicConfig()
 
-from nlp.nmt.config import create_runner, load_config
+from .config import create_runner, load_config
 
 
 def main() -> None:

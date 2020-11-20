@@ -3,9 +3,9 @@ from typing import Dict, List, Set
 
 import pandas as pd
 
-from nlp.alignment.config import get_all_book_paths
-from nlp.common.canon import ALL_BOOK_IDS, book_id_to_number
-from nlp.common.environment import align_experiments_dir
+from ..common.canon import ALL_BOOK_IDS, book_id_to_number
+from ..common.environment import ALIGN_EXPERIMENTS_DIR
+from .config import get_all_book_paths
 
 ALIGNERS = ["PT", "Clear-2", "FastAlign", "SMT", "IBM-4", "HMM", "IBM-1", "IBM-2"]
 METRICS = ["AER", "F-Score", "Precision", "Recall"]
@@ -18,7 +18,7 @@ def aggregate_testament_results(translations: List[str]) -> None:
         available_books: Set[str] = set()
         available_aligners: Set[str] = set()
         for translation in translations:
-            scores_path = os.path.join(align_experiments_dir, f"{translation}.{testament}", "scores.csv")
+            scores_path = os.path.join(ALIGN_EXPERIMENTS_DIR, f"{translation}.{testament}", "scores.csv")
             if os.path.isfile(scores_path):
                 df = pd.read_csv(scores_path, index_col=[0, 1])
                 data[translation] = df
@@ -27,7 +27,7 @@ def aggregate_testament_results(translations: List[str]) -> None:
         available_books.remove("ALL")
 
         for metric in METRICS:
-            output_path = os.path.join(align_experiments_dir, f"{testament}.all.{metric}.csv")
+            output_path = os.path.join(ALIGN_EXPERIMENTS_DIR, f"{testament}.all.{metric}.csv")
             with open(output_path, "w") as output_file:
                 output_file.write("Model," + ",".join(filter(lambda t: t in data, translations)) + "\n")
                 for aligner in ALIGNERS:
@@ -42,7 +42,7 @@ def aggregate_testament_results(translations: List[str]) -> None:
                     output_file.write("\n")
 
             for aligner in available_aligners:
-                output_path = os.path.join(align_experiments_dir, f"{testament}.all.{aligner}.{metric}.csv")
+                output_path = os.path.join(ALIGN_EXPERIMENTS_DIR, f"{testament}.all.{aligner}.{metric}.csv")
                 with open(output_path, "w") as output_file:
                     output_file.write("Book," + ",".join(filter(lambda t: t in data, translations)) + "\n")
                     for book_id in sorted(available_books, key=lambda b: book_id_to_number(b)):
@@ -63,7 +63,7 @@ def aggregate_book_results(translations: List[str]) -> None:
         available_translations: Set[str] = set()
         available_aligners: Set[str] = set()
         for translation in translations:
-            root_dir = os.path.join(align_experiments_dir, f"{translation}.{testament}-by-book")
+            root_dir = os.path.join(ALIGN_EXPERIMENTS_DIR, f"{translation}.{testament}-by-book")
             if not os.path.isdir(root_dir):
                 continue
             available_translations.add(translation)
@@ -78,7 +78,7 @@ def aggregate_book_results(translations: List[str]) -> None:
 
         for metric in METRICS:
             for aligner in available_aligners:
-                output_path = os.path.join(align_experiments_dir, f"{testament}.single.{aligner}.{metric}.csv")
+                output_path = os.path.join(ALIGN_EXPERIMENTS_DIR, f"{testament}.single.{aligner}.{metric}.csv")
                 with open(output_path, "w") as output_file:
                     output_file.write(
                         "Book," + ",".join(filter(lambda t: t in available_translations, translations)) + "\n"
