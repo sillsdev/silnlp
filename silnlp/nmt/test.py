@@ -519,7 +519,13 @@ def main() -> None:
     parser.add_argument("--avg", default=False, action="store_true", help="Test averaged checkpoint")
     parser.add_argument("--ref-projects", nargs="*", metavar="project", default=[], help="Reference projects")
     parser.add_argument("--force-infer", default=False, action="store_true", help="Force inferencing")
-    parser.add_argument("--scorers", nargs="*", metavar="scorer", help=f"List of scorers - {SUPPORTED_SCORERS}")
+    parser.add_argument(
+        "--scorers",
+        nargs="*",
+        metavar="scorer",
+        choices=SUPPORTED_SCORERS,
+        help=f"List of scorers - {SUPPORTED_SCORERS}",
+    )
     parser.add_argument("--books", nargs="*", metavar="book", default=[], help="Books")
     parser.add_argument("--by-book", default=False, action="store_true", help="Score individual books")
 
