@@ -106,7 +106,7 @@ def compute_alignment_scores(src_input_path: str, trg_input_path: str) -> List[f
         return scores
 
 
-def get_parallel_corpus(vref_file_path: str, src_file_path: str, trg_file_path: str) -> pd.DataFrame:
+def get_scripture_parallel_corpus(vref_file_path: str, src_file_path: str, trg_file_path: str) -> pd.DataFrame:
     vrefs: List[VerseRef] = []
     src_sentences: List[str] = []
     trg_sentences: List[str] = []

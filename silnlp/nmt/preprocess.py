@@ -1,4 +1,5 @@
 import argparse
+from argparse import Namespace
 import bisect
 import enum
 import itertools
@@ -22,7 +23,7 @@ from ..common.corpus import (
     exclude_books,
     filter_parallel_corpus,
     get_corpus_path,
-    get_parallel_corpus,
+    get_scripture_parallel_corpus,
     include_books,
     load_corpus,
     split_parallel_corpus,
@@ -265,177 +266,28 @@ def write_val_corpora(
             ref_file.close()
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Preprocesses text corpora into a multilingual data set for OpenNMT-tf"
-    )
-    parser.add_argument("experiment", help="Experiment name")
-    parser.add_argument("--stats", default=False, action="store_true", help="Output corpus statistics")
-    args = parser.parse_args()
-
-    print("Git commit:", get_git_revision_hash())
-
-    exp_name = args.experiment
-    root_dir = get_mt_root_dir(exp_name)
-    config = load_config(exp_name)
-    data_config: dict = config["data"]
-    eval_config: dict = config["eval"]
-    multi_ref_eval: bool = eval_config["multi_ref_eval"]
-
-    set_seed(data_config["seed"])
-
-    score_threshold: float = data_config["score_threshold"]
-
-    src_langs, src_train_projects, _ = parse_langs(data_config["src_langs"])
-    trg_langs, trg_train_projects, trg_test_projects = parse_langs(data_config["trg_langs"])
-    src_file_paths: List[str] = []
-    trg_file_paths: List[str] = []
-    train_only_trg_file_paths: List[str] = []
-    test_only_trg_file_paths: List[str] = []
-    for src_iso in src_langs:
-        for src_train_project in src_train_projects[src_iso]:
-            src_file_paths.append(get_corpus_path(src_iso, src_train_project))
-
-    for trg_iso in trg_langs:
-        lang_train_projects = trg_train_projects[trg_iso]
-        lang_test_projects = trg_test_projects.get(trg_iso)
-        for trg_train_project in lang_train_projects:
-            trg_file_path = get_corpus_path(trg_iso, trg_train_project)
-            trg_file_paths.append(trg_file_path)
-            if lang_test_projects is not None and trg_train_project not in lang_test_projects:
-                train_only_trg_file_paths.append(trg_file_path)
-        if lang_test_projects is not None:
-            for trg_test_project in lang_test_projects.difference(lang_train_projects):
-                test_only_trg_file_paths.append(get_corpus_path(trg_iso, trg_test_project))
-
-    src_file_paths.sort()
-    trg_file_paths.sort()
-    train_only_trg_file_paths.sort()
-    test_only_trg_file_paths.sort()
-
-    mirror: bool = data_config["mirror"]
-    mixed_src: bool = data_config["mixed_src"] and len(src_file_paths) > 1
-
-    parent: Optional[str] = data_config.get("parent")
-    parent_config = {}
-    parent_data_config = {}
-    parent_root_dir = ""
-    parent_model_to_use = (
-        CheckpointType.BEST
-        if data_config["parent_use_best"]
-        else CheckpointType.AVERAGE
-        if data_config["parent_use_average"]
-        else CheckpointType.LAST
-    )
-    has_parent = False
-    parent_use_vocab = False
-    if parent is not None:
-        parent_config = load_config(parent)
-        parent_data_config = parent_config["data"]
-        parent_params_config = parent_config["params"]
-        parent_use_vocab = data_config["parent_use_vocab"]
-        freeze_layers: Optional[List[str]] = parent_params_config.get("freeze_layers")
-        # do not freeze any word embeddings layer, because we will update them when we create the parent model
-        if freeze_layers is not None:
-            parent_params_config["freeze_layers"] = list()
-        parent_root_dir = get_mt_root_dir(parent)
-        has_parent = True
-
-    write_trg_tag = (
-        len(trg_langs) > 1
-        or len(parent_data_config.get("trg_langs", [])) > 1
-        or mirror
-        or parent_data_config.get("mirror", False)
-    )
-    tag_langs: Optional[Set[str]] = None
-    if write_trg_tag:
-        tag_langs = trg_langs.union(src_langs) if mirror else trg_langs
-
-    src_spp: Optional[sp.SentencePieceProcessor] = None
-    trg_spp: Optional[sp.SentencePieceProcessor] = None
-    if data_config["tokenize"]:
-        if data_config["share_vocab"]:
-            print("Building shared vocabulary...")
-            vocab_size: Optional[int] = data_config.get("vocab_size")
-            if vocab_size is None:
-                vocab_size = data_config.get("src_vocab_size")
-                if vocab_size is None:
-                    vocab_size = data_config["trg_vocab_size"]
-                elif data_config.get("trg_vocab_size", vocab_size) != vocab_size:
-                    raise RuntimeError(
-                        "The source and target vocab sizes cannot be different when creating a shared vocab."
-                    )
-
-            casing: Optional[str] = data_config.get("casing")
-            if casing is None:
-                casing = data_config.get("src_casing")
-                if casing is None:
-                    casing = data_config["trg_casing"]
-                elif data_config.get("trg_casing", casing) != casing:
-                    raise RuntimeError("The source and target casing cannot be different when creating a shared vocab.")
-
-            model_prefix = os.path.join(root_dir, "sp")
-            vocab_path = os.path.join(root_dir, "onmt.vocab")
-            share_vocab_file_paths: Set[str] = set(src_file_paths).union(trg_file_paths)
-            build_vocab(share_vocab_file_paths, vocab_size, casing, model_prefix, vocab_path, tag_langs)
-
-            if has_parent:
-                update_vocab(parent_config, root_dir, vocab_path, vocab_path, parent_model_to_use)
-
-            src_spp = sp.SentencePieceProcessor()
-            src_spp.Load(f"{model_prefix}.model")
-
-            trg_spp = src_spp
-        else:
-            src_vocab_file_paths: Set[str] = set(src_file_paths)
-            if mirror:
-                src_vocab_file_paths.update(trg_file_paths)
-            create_unshared_vocab(
-                root_dir,
-                data_config,
-                parent_root_dir,
-                parent_data_config,
-                parent_use_vocab,
-                src_langs,
-                src_vocab_file_paths,
-                "source",
-                tag_langs=tag_langs,
-            )
-
-            trg_vocab_file_paths: Set[str] = set(trg_file_paths)
-            if mirror:
-                trg_vocab_file_paths.update(src_file_paths)
-            create_unshared_vocab(
-                root_dir,
-                data_config,
-                parent_root_dir,
-                parent_data_config,
-                parent_use_vocab,
-                trg_langs,
-                trg_vocab_file_paths,
-                "target",
-            )
-
-            if has_parent:
-                update_vocab(
-                    parent_config,
-                    root_dir,
-                    os.path.join(root_dir, "src-onmt.vocab"),
-                    os.path.join(root_dir, "trg-onmt.vocab"),
-                    parent_model_to_use,
-                )
-
-            src_spp = sp.SentencePieceProcessor()
-            src_spp.Load(os.path.join(root_dir, "src-sp.model"))
-
-            trg_spp = sp.SentencePieceProcessor()
-            trg_spp.Load(os.path.join(root_dir, "trg-sp.model"))
-
+def preprocess_scripture(
+    root_dir: str,
+    config: dict,
+    args: Namespace,
+    src_file_paths: List[str],
+    trg_file_paths: List[str],
+    train_only_trg_file_paths: List[str],
+    test_only_trg_file_paths: List[str],
+    write_trg_tag: bool,
+    src_spp: Optional[sp.SentencePieceProcessor],
+    trg_spp: Optional[sp.SentencePieceProcessor],
+) -> None:
     print("Collecting data sets...")
+    data_config: dict = config["data"]
     test_size: int = data_config["test_size"]
     val_size: int = data_config["val_size"]
     disjoint_test: bool = data_config["disjoint_test"]
     disjoint_val: bool = data_config["disjoint_val"]
+    score_threshold: float = data_config["score_threshold"]
+    mixed_src: bool = data_config["mixed_src"] and len(src_file_paths) > 1
+    mirror: bool = data_config["mirror"]
+    multi_ref_eval: bool = config["eval"]["multi_ref_eval"]
 
     test_indices: Optional[Set[int]] = None
     val_indices: Optional[Set[int]] = None
@@ -467,7 +319,7 @@ def main() -> None:
                 is_train_ref = not is_in_sorted(test_only_trg_file_paths, trg_file_path)
                 is_test_ref = not is_in_sorted(train_only_trg_file_paths, trg_file_path)
 
-                corpus = get_parallel_corpus(vref_file_path, src_file_path, trg_file_path)
+                corpus = get_scripture_parallel_corpus(vref_file_path, src_file_path, trg_file_path)
                 if len(corpus_books) > 0:
                     cur_train = include_books(corpus, corpus_books)
                     if len(corpus_books.intersection(test_books)) > 0:
@@ -604,6 +456,329 @@ def main() -> None:
                 os.path.join(root_dir, f"{prefix}.trg.detok{trg_suffix}.txt"),
                 decode_sp_lines(encode_sp_lines(trg_spp, pair_test[column])),
             )
+
+
+def get_parallel_corpus_length(src_file_path: str, trg_file_path: str) -> int:
+    count = 0
+    with open(src_file_path, "r", encoding="utf-8") as src_file, open(trg_file_path, "r", encoding="utf-8") as trg_file:
+        for src_line, trg_line in zip(src_file, trg_file):
+            src_line = src_line.strip()
+            trg_line = trg_line.strip()
+            if len(src_line) > 0 and len(trg_line) > 0:
+                count += 1
+    return count
+
+
+def get_test_set_count(
+    src_file_paths: List[str],
+    trg_file_paths: List[str],
+    train_only_trg_file_paths: List[str],
+    test_only_trg_file_paths: List[str],
+) -> int:
+    count = 0
+    for src_file_path in src_file_paths:
+        for trg_file_path in trg_file_paths + test_only_trg_file_paths:
+            src_iso, _ = get_iso(src_file_path)
+            trg_iso, _ = get_iso(trg_file_path)
+
+            if (len(src_file_paths) > 1 or len(trg_file_paths) > 1) and src_iso == trg_iso:
+                continue
+
+            is_test_ref = not is_in_sorted(train_only_trg_file_paths, trg_file_path)
+            if is_test_ref:
+                count += 1
+    return count
+
+
+def preprocess_standard(
+    root_dir: str,
+    config: dict,
+    src_file_paths: List[str],
+    trg_file_paths: List[str],
+    train_only_trg_file_paths: List[str],
+    test_only_trg_file_paths: List[str],
+    write_trg_tag: bool,
+    src_spp: Optional[sp.SentencePieceProcessor],
+    trg_spp: Optional[sp.SentencePieceProcessor],
+) -> None:
+    data_config: dict = config["data"]
+    test_size: int = data_config["test_size"]
+    val_size: int = data_config["val_size"]
+    mirror: bool = data_config["mirror"]
+
+    test_set_count = get_test_set_count(
+        src_file_paths, trg_file_paths, train_only_trg_file_paths, test_only_trg_file_paths
+    )
+
+    print("Writing data sets...")
+    for old_file_path in glob(os.path.join(root_dir, "test.*.txt")):
+        os.remove(old_file_path)
+    with open(os.path.join(root_dir, "train.src.txt"), "w", encoding="utf-8", newline="\n") as train_src_file, open(
+        os.path.join(root_dir, "train.trg.txt"), "w", encoding="utf-8", newline="\n"
+    ) as train_trg_file, open(
+        os.path.join(root_dir, "val.src.txt"), "w", encoding="utf-8", newline="\n"
+    ) as val_src_file, open(
+        os.path.join(root_dir, "val.trg.txt"), "w", encoding="utf-8", newline="\n"
+    ) as val_trg_file:
+        for src_file_path in src_file_paths:
+            for trg_file_path in trg_file_paths + test_only_trg_file_paths:
+                src_iso, _ = get_iso(src_file_path)
+                trg_iso, _ = get_iso(trg_file_path)
+
+                if (len(src_file_paths) > 1 or len(trg_file_paths) > 1) and src_iso == trg_iso:
+                    continue
+
+                is_train_ref = not is_in_sorted(test_only_trg_file_paths, trg_file_path)
+                is_test_ref = not is_in_sorted(train_only_trg_file_paths, trg_file_path)
+
+                corpus_len = get_parallel_corpus_length(src_file_path, trg_file_path)
+
+                test_indices: Set[int] = set()
+                val_indices: Set[int] = set()
+                if is_test_ref:
+                    test_indices = set(random.sample(range(corpus_len), test_size))
+                if is_train_ref:
+                    population = (
+                        range(corpus_len)
+                        if len(test_indices) == 0
+                        else list(filter(lambda i: i not in test_indices, range(corpus_len)))
+                    )
+                    val_indices = set(random.sample(population, val_size))
+
+                test_prefix = "test" if test_set_count == 1 else f"test.{src_iso}.{trg_iso}"
+                with open(src_file_path, "r", encoding="utf-8") as src_file, open(
+                    trg_file_path, "r", encoding="utf-8"
+                ) as trg_file, open(
+                    os.path.join(root_dir, f"{test_prefix}.src.txt"), "a", encoding="utf-8", newline="\n"
+                ) as test_src_file, open(
+                    os.path.join(root_dir, f"{test_prefix}.trg.txt"), "a", encoding="utf-8", newline="\n"
+                ) as test_trg_file:
+                    index = 0
+                    for src_line, trg_line in zip(src_file, trg_file):
+                        src_line = src_line.strip()
+                        trg_line = trg_line.strip()
+                        if len(src_line) == 0 or len(trg_line) == 0:
+                            continue
+
+                        src_sentence = src_line
+                        if write_trg_tag:
+                            src_sentence = f"<2{trg_iso}> " + src_line
+                        trg_sentence = trg_line
+
+                        if index in test_indices:
+                            test_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
+                            test_trg_file.write(encode_sp(trg_spp, trg_sentence) + "\n")
+                        elif is_train_ref:
+                            if index in val_indices:
+                                val_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
+                                val_trg_file.write(encode_sp(trg_spp, trg_sentence) + "\n")
+                            else:
+                                train_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
+                                train_trg_file.write(encode_sp(trg_spp, trg_sentence) + "\n")
+
+                            if mirror:
+                                mirror_src_sentence = trg_line
+                                if write_trg_tag:
+                                    mirror_src_sentence = f"<2{src_iso}> " + trg_line
+                                mirror_trg_sentence = src_file
+                                mirror_src_spp = trg_spp
+                                mirror_trg_spp = src_spp
+                                if index in val_indices:
+                                    val_src_file.write(encode_sp(mirror_src_spp, mirror_src_sentence) + "\n")
+                                    val_trg_file.write(encode_sp(mirror_trg_spp, mirror_trg_sentence) + "\n")
+                                else:
+                                    train_src_file.write(encode_sp(mirror_src_spp, mirror_src_sentence) + "\n")
+                                    train_trg_file.write(encode_sp(mirror_trg_spp, mirror_trg_sentence) + "\n")
+
+                        index += 1
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Preprocesses text corpora into a multilingual data set for OpenNMT-tf"
+    )
+    parser.add_argument("experiment", help="Experiment name")
+    parser.add_argument("--stats", default=False, action="store_true", help="Output corpus statistics")
+    args = parser.parse_args()
+
+    print("Git commit:", get_git_revision_hash())
+
+    exp_name = args.experiment
+    root_dir = get_mt_root_dir(exp_name)
+    config = load_config(exp_name)
+    data_config: dict = config["data"]
+
+    set_seed(data_config["seed"])
+
+    src_langs, src_train_projects, _ = parse_langs(data_config["src_langs"])
+    trg_langs, trg_train_projects, trg_test_projects = parse_langs(data_config["trg_langs"])
+    src_file_paths: List[str] = []
+    trg_file_paths: List[str] = []
+    train_only_trg_file_paths: List[str] = []
+    test_only_trg_file_paths: List[str] = []
+    for src_iso in src_langs:
+        for src_train_project in src_train_projects[src_iso]:
+            src_file_paths.append(get_corpus_path(src_iso, src_train_project))
+
+    for trg_iso in trg_langs:
+        lang_train_projects = trg_train_projects[trg_iso]
+        lang_test_projects = trg_test_projects.get(trg_iso)
+        for trg_train_project in lang_train_projects:
+            trg_file_path = get_corpus_path(trg_iso, trg_train_project)
+            trg_file_paths.append(trg_file_path)
+            if lang_test_projects is not None and trg_train_project not in lang_test_projects:
+                train_only_trg_file_paths.append(trg_file_path)
+        if lang_test_projects is not None:
+            for trg_test_project in lang_test_projects.difference(lang_train_projects):
+                test_only_trg_file_paths.append(get_corpus_path(trg_iso, trg_test_project))
+
+    src_file_paths.sort()
+    trg_file_paths.sort()
+    train_only_trg_file_paths.sort()
+    test_only_trg_file_paths.sort()
+
+    mirror: bool = data_config["mirror"]
+
+    parent: Optional[str] = data_config.get("parent")
+    parent_config = {}
+    parent_data_config = {}
+    parent_root_dir = ""
+    parent_model_to_use = (
+        CheckpointType.BEST
+        if data_config["parent_use_best"]
+        else CheckpointType.AVERAGE
+        if data_config["parent_use_average"]
+        else CheckpointType.LAST
+    )
+    has_parent = False
+    parent_use_vocab = False
+    if parent is not None:
+        parent_config = load_config(parent)
+        parent_data_config = parent_config["data"]
+        parent_params_config = parent_config["params"]
+        parent_use_vocab = data_config["parent_use_vocab"]
+        freeze_layers: Optional[List[str]] = parent_params_config.get("freeze_layers")
+        # do not freeze any word embeddings layer, because we will update them when we create the parent model
+        if freeze_layers is not None:
+            parent_params_config["freeze_layers"] = list()
+        parent_root_dir = get_mt_root_dir(parent)
+        has_parent = True
+
+    write_trg_tag = (
+        len(trg_langs) > 1
+        or len(parent_data_config.get("trg_langs", [])) > 1
+        or mirror
+        or parent_data_config.get("mirror", False)
+    )
+    tag_langs: Optional[Set[str]] = None
+    if write_trg_tag:
+        tag_langs = trg_langs.union(src_langs) if mirror else trg_langs
+
+    src_spp: Optional[sp.SentencePieceProcessor] = None
+    trg_spp: Optional[sp.SentencePieceProcessor] = None
+    if data_config["tokenize"]:
+        if data_config["share_vocab"]:
+            print("Building shared vocabulary...")
+            vocab_size: Optional[int] = data_config.get("vocab_size")
+            if vocab_size is None:
+                vocab_size = data_config.get("src_vocab_size")
+                if vocab_size is None:
+                    vocab_size = data_config["trg_vocab_size"]
+                elif data_config.get("trg_vocab_size", vocab_size) != vocab_size:
+                    raise RuntimeError(
+                        "The source and target vocab sizes cannot be different when creating a shared vocab."
+                    )
+
+            casing: Optional[str] = data_config.get("casing")
+            if casing is None:
+                casing = data_config.get("src_casing")
+                if casing is None:
+                    casing = data_config["trg_casing"]
+                elif data_config.get("trg_casing", casing) != casing:
+                    raise RuntimeError("The source and target casing cannot be different when creating a shared vocab.")
+
+            model_prefix = os.path.join(root_dir, "sp")
+            vocab_path = os.path.join(root_dir, "onmt.vocab")
+            share_vocab_file_paths: Set[str] = set(src_file_paths).union(trg_file_paths)
+            build_vocab(share_vocab_file_paths, vocab_size, casing, model_prefix, vocab_path, tag_langs)
+
+            if has_parent:
+                update_vocab(parent_config, root_dir, vocab_path, vocab_path, parent_model_to_use)
+
+            src_spp = sp.SentencePieceProcessor()
+            src_spp.Load(f"{model_prefix}.model")
+
+            trg_spp = src_spp
+        else:
+            src_vocab_file_paths: Set[str] = set(src_file_paths)
+            if mirror:
+                src_vocab_file_paths.update(trg_file_paths)
+            create_unshared_vocab(
+                root_dir,
+                data_config,
+                parent_root_dir,
+                parent_data_config,
+                parent_use_vocab,
+                src_langs,
+                src_vocab_file_paths,
+                "source",
+                tag_langs=tag_langs,
+            )
+
+            trg_vocab_file_paths: Set[str] = set(trg_file_paths)
+            if mirror:
+                trg_vocab_file_paths.update(src_file_paths)
+            create_unshared_vocab(
+                root_dir,
+                data_config,
+                parent_root_dir,
+                parent_data_config,
+                parent_use_vocab,
+                trg_langs,
+                trg_vocab_file_paths,
+                "target",
+            )
+
+            if has_parent:
+                update_vocab(
+                    parent_config,
+                    root_dir,
+                    os.path.join(root_dir, "src-onmt.vocab"),
+                    os.path.join(root_dir, "trg-onmt.vocab"),
+                    parent_model_to_use,
+                )
+
+            src_spp = sp.SentencePieceProcessor()
+            src_spp.Load(os.path.join(root_dir, "src-sp.model"))
+
+            trg_spp = sp.SentencePieceProcessor()
+            trg_spp.Load(os.path.join(root_dir, "trg-sp.model"))
+
+    if data_config["scripture"]:
+        preprocess_scripture(
+            root_dir,
+            config,
+            args,
+            src_file_paths,
+            trg_file_paths,
+            train_only_trg_file_paths,
+            test_only_trg_file_paths,
+            write_trg_tag,
+            src_spp,
+            trg_spp,
+        )
+    else:
+        preprocess_standard(
+            root_dir,
+            config,
+            src_file_paths,
+            trg_file_paths,
+            train_only_trg_file_paths,
+            test_only_trg_file_paths,
+            write_trg_tag,
+            src_spp,
+            trg_spp,
+        )
 
     print("Preprocessing completed")
 
