@@ -38,7 +38,7 @@ First, you will need to install the Poetry plugin for PyCharm.
 Once the Poetry plugin is installed, you can clone the the repo using PyCharm. If you have already cloned the repo, you can open the folder in PyCharm and skip these steps.
 
 1. Go to `VCS -> Get from Version Control...`.
-2. Enter `https://github.com/andrewbulin/nlp_mt_testing.git` in the URL field.
+2. Enter `https://github.com/sillsdev/silnlp.git` in the URL field.
 3. Click the `Clone`.
 4. Enter your Github credentials if necessary.
 
