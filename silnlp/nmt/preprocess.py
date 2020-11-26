@@ -580,7 +580,7 @@ def preprocess_standard(
                                 mirror_src_sentence = trg_line
                                 if write_trg_tag:
                                     mirror_src_sentence = f"<2{src_iso}> " + trg_line
-                                mirror_trg_sentence = src_file
+                                mirror_trg_sentence = src_line
                                 mirror_src_spp = trg_spp
                                 mirror_trg_spp = src_spp
                                 if index in val_indices:
