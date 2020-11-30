@@ -25,8 +25,8 @@ def main() -> None:
 
     dup_count = 0
     with open(args.input, "r", encoding="utf-8") as input_file, open(
-        args.src_output, "w", encoding="utf-8"
-    ) as src_output_file, open(args.trg_output, "w", encoding="utf-8") as trg_output_file:
+        args.src_output, "w", encoding="utf-8", newline="\n"
+    ) as src_output_file, open(args.trg_output, "w", encoding="utf-8", newline="\n") as trg_output_file:
         for row in input_file:
             src_sentence, trg_sentence, hash, score_str = row.strip().split("\t")
             score = float(score_str)
