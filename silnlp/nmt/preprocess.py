@@ -32,7 +32,7 @@ from ..common.corpus import (
 from ..common.environment import PT_PREPROCESSED_DIR
 from ..common.utils import set_seed
 from .config import create_runner, get_git_revision_hash, get_mt_root_dir, load_config, parse_langs
-from .utils import decode_sp_lines, encode_sp, encode_sp_lines, get_best_model_dir, get_last_checkpoint
+from .utils import decode_sp, decode_sp_lines, encode_sp, encode_sp_lines, get_best_model_dir, get_last_checkpoint
 
 
 # Different types of parent model checkpoints (last, best, average)
@@ -555,7 +555,7 @@ def preprocess_standard(
                 ) as trg_file, open(
                     os.path.join(root_dir, f"{test_prefix}.src.txt"), "a", encoding="utf-8", newline="\n"
                 ) as test_src_file, open(
-                    os.path.join(root_dir, f"{test_prefix}.trg.txt"), "a", encoding="utf-8", newline="\n"
+                    os.path.join(root_dir, f"{test_prefix}.trg.detok.txt"), "a", encoding="utf-8", newline="\n"
                 ) as test_trg_file:
                     index = 0
                     for src_line, trg_line in zip(src_file, trg_file):
@@ -571,7 +571,7 @@ def preprocess_standard(
 
                         if index in test_indices:
                             test_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
-                            test_trg_file.write(encode_sp(trg_spp, trg_sentence) + "\n")
+                            test_trg_file.write(decode_sp(encode_sp(trg_spp, trg_sentence)) + "\n")
                         elif is_train_ref:
                             if index in val_indices:
                                 val_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
