@@ -158,20 +158,24 @@ def create_unshared_vocab(
             parent_sp_prefix_path = os.path.join(parent_root_dir, f"{prefix}-sp")
             parent_vocab_path = os.path.join(parent_root_dir, f"{prefix}-onmt.vocab")
 
-        parent_spp = sp.SentencePieceProcessor()
-        parent_spp.Load(parent_sp_prefix_path + ".model")
+        parent_vocab: Optional[opennmt.data.Vocab] = None
+        child_tokens: Optional[Set[str]] = None
+        if not parent_use_vocab:
+            parent_spp = sp.SentencePieceProcessor()
+            parent_spp.Load(parent_sp_prefix_path + ".model")
 
-        parent_vocab = opennmt.data.Vocab()
-        parent_vocab.load(parent_vocab_path)
+            parent_vocab = opennmt.data.Vocab()
+            parent_vocab.load(parent_vocab_path)
 
-        child_tokens: Set[str] = set()
-        for vocab_file_path in vocab_file_paths:
-            for line in encode_sp_lines(parent_spp, load_corpus(vocab_file_path)):
-                child_tokens.update(line.split())
+            child_tokens: Set[str] = set()
+            for vocab_file_path in vocab_file_paths:
+                for line in encode_sp_lines(parent_spp, load_corpus(vocab_file_path)):
+                    child_tokens.update(line.split())
+            parent_use_vocab = child_tokens.issubset(parent_vocab.words)
 
         # all tokens in the child corpora are in the parent vocab, so we can just use the parent vocab
         # or, the user wants to reuse the parent vocab for this child experiment
-        if child_tokens.issubset(parent_vocab.words) or parent_use_vocab:
+        if parent_use_vocab:
             sp_vocab_path = os.path.join(root_dir, f"{prefix}-sp.vocab")
             onmt_vocab_path = os.path.join(root_dir, f"{prefix}-onmt.vocab")
             shutil.copy2(parent_sp_prefix_path + ".model", os.path.join(root_dir, f"{prefix}-sp.model"))
