@@ -77,28 +77,13 @@ def add_alignment_scores(corpus: pd.DataFrame) -> None:
         corpus["score"] = scores
 
 
-def compute_alignment_scores(src_input_path: str, trg_input_path: str = None) -> List[float]:
+def compute_alignment_scores(src_input_path: str, trg_input_path: str) -> List[float]:
     with tempfile.TemporaryDirectory() as td:
         src_tok_output_path = os.path.join(td, "tokenize-src-output.txt")
         trg_tok_output_path = os.path.join(td, "tokenize-trg-output.txt")
 
-        if trg_input_path is None:
-            # The source and target sentences are in a single tab-separated file
-            tmp_src_input_file = os.path.join(td, "tmp-src-input.txt")
-            tmp_trg_input_file = os.path.join(td, "tmp-trg-input.txt")
-            with open(src_input_path, "r", encoding="utf-8") as input_file,\
-                 open(tmp_src_input_file, "w", encoding="utf-8") as src,\
-                 open(tmp_trg_input_file, "w", encoding="utf-8") as trg:
-                for sentences in input_file:
-                    src_sentence, trg_sentence = sentences.strip().split("\t")
-                    src.write(src_sentence + "\n")
-                    trg.write(trg_sentence + "\n")
-            tokenize_corpus(tmp_src_input_file, src_tok_output_path)
-            tokenize_corpus(tmp_trg_input_file, trg_tok_output_path)
-        else:
-            # THe source and target sentences are in separate files
-            tokenize_corpus(src_input_path, src_tok_output_path)
-            tokenize_corpus(trg_input_path, trg_tok_output_path)
+        tokenize_corpus(src_input_path, src_tok_output_path)
+        tokenize_corpus(trg_input_path, trg_tok_output_path)
 
         fast_align = FastAlign(td)
 
