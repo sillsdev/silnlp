@@ -28,6 +28,7 @@ _PYTHON_TO_TENSORFLOW_LOGGING_LEVEL: Dict[int, int] = {
 DEFAULT_NEW_CONFIG: dict = {
     "data": {
         "share_vocab": False,
+        "character_coverage": 1.0,
         "mirror": False,
         "mixed_src": False,
         "seed": 111,
@@ -104,6 +105,7 @@ def load_config(exp_name: str) -> dict:
             "eval_features_file": os.path.join(root_dir, "val.src.txt"),
             "eval_labels_file": os.path.join(root_dir, "val.trg.txt"),
             "share_vocab": True,
+            "character_coverage": 1.0,
             "mirror": False,
             "mixed_src": False,
             "parent_use_best": False,

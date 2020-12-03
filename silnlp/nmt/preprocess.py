@@ -64,6 +64,7 @@ def build_vocab(
     file_paths: Iterable[str],
     vocab_size: int,
     casing: str,
+    character_coverage: float,
     model_prefix: str,
     vocab_path: str,
     tag_langs: Set[str] = None,
@@ -84,7 +85,7 @@ def build_vocab(
     normalization_path = os.path.join(os.path.dirname(__file__), f"{normalization}.tsv")
     sp_train_params = (
         f"--normalization_rule_tsv={normalization_path} --input={joined_file_paths} --model_prefix={model_prefix}"
-        f" --vocab_size={vocab_size} --character_coverage=1.0 --input_sentence_size=1000000"
+        f" --vocab_size={vocab_size} --character_coverage={character_coverage:.4f} --input_sentence_size=1000000"
         " --shuffle_input_sentence=true --control_symbols=<range>"
     )
 
@@ -191,7 +192,8 @@ def create_unshared_vocab(
     print(f"Building {side} vocabulary...")
     vocab_size: int = data_config.get(f"{prefix}_vocab_size", data_config.get("vocab_size"))
     casing: str = data_config.get(f"{prefix}_casing", data_config.get("casing"))
-    build_vocab(vocab_file_paths, vocab_size, casing, model_prefix, vocab_path, tag_langs)
+    character_coverage: float = data_config.get(f"{prefix}_character_coverage", data_config.get("character_coverage"))
+    build_vocab(vocab_file_paths, vocab_size, casing, character_coverage, model_prefix, vocab_path, tag_langs)
 
 
 def is_in_sorted(items: list, value: Any) -> bool:
@@ -704,7 +706,8 @@ def main() -> None:
             model_prefix = os.path.join(root_dir, "sp")
             vocab_path = os.path.join(root_dir, "onmt.vocab")
             share_vocab_file_paths: Set[str] = set(src_file_paths).union(trg_file_paths)
-            build_vocab(share_vocab_file_paths, vocab_size, casing, model_prefix, vocab_path, tag_langs)
+            character_coverage = data_config.get("character_coverage", 1.0)
+            build_vocab(share_vocab_file_paths, vocab_size, casing, character_coverage, model_prefix, vocab_path, tag_langs)
 
             if has_parent:
                 update_vocab(parent_config, root_dir, vocab_path, vocab_path, parent_model_to_use)
