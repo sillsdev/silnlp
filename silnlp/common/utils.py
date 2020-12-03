@@ -1,4 +1,5 @@
 import os
+import sys
 import random
 import subprocess
 from pathlib import Path
@@ -35,7 +36,10 @@ def set_seed(seed: Any) -> None:
 
 def wsl_path(win_path: str) -> str:
     win_path = os.path.normpath(win_path).replace("\\", "\\\\")
-    result = subprocess.run(["wsl", "wslpath", "-a", win_path], capture_output=True, encoding="utf-8")
+    if sys.version_info < (3,7,0):
+        result = subprocess.run(["wsl", "wslpath", "-a", win_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8")
+    else:
+        result = subprocess.run(["wsl", "wslpath", "-a", win_path], capture_output=True, encoding="utf-8")
     return result.stdout.strip()
 
 
