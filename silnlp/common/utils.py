@@ -11,9 +11,13 @@ import tensorflow as tf
 from ..common.environment import ALIGN_EXPERIMENTS_DIR, PT_PREPROCESSED_DIR
 
 
-def get_git_revision_hash() -> str:
+def get_repo_dir() -> str:
     script_path = Path(__file__)
-    repo_dir = script_path.parent.parent.parent
+    return script_path.parent.parent.parent
+
+
+def get_git_revision_hash() -> str:
+    repo_dir = get_repo_dir()
     return subprocess.check_output(
         ["git", "-C", str(repo_dir), "rev-parse", "--short=10", "HEAD"], encoding="utf-8"
     ).strip()
@@ -36,8 +40,10 @@ def set_seed(seed: Any) -> None:
 
 def wsl_path(win_path: str) -> str:
     win_path = os.path.normpath(win_path).replace("\\", "\\\\")
-    if sys.version_info < (3,7,0):
-        result = subprocess.run(["wsl", "wslpath", "-a", win_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8")
+    if sys.version_info < (3, 7, 0):
+        result = subprocess.run(
+            ["wsl", "wslpath", "-a", win_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8"
+        )
     else:
         result = subprocess.run(["wsl", "wslpath", "-a", win_path], capture_output=True, encoding="utf-8")
     return result.stdout.strip()

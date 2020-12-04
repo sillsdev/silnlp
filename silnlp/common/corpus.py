@@ -8,6 +8,7 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 
 from ..alignment.fast_align import FastAlign
+from ..common.utils import get_repo_dir
 from .environment import PT_PREPROCESSED_DIR
 from .verse_ref import VerseRef
 
@@ -27,7 +28,9 @@ def load_corpus(input_file: str) -> Iterator[str]:
 
 def tokenize_corpus(input_path: str, output_path: str) -> None:
     subprocess.run(
-        ["dotnet", "machine", "tokenize", input_path, output_path, "-t", "latin", "-l"], stdout=subprocess.DEVNULL,
+        ["dotnet", "machine", "tokenize", input_path, output_path, "-t", "latin", "-l"],
+        stdout=subprocess.DEVNULL,
+        cwd=get_repo_dir(),
     )
 
 

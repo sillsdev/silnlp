@@ -2,6 +2,7 @@ import os
 import subprocess
 from typing import Optional
 
+from ..common.utils import get_repo_dir
 from .aligner import Aligner
 
 
@@ -30,7 +31,7 @@ def train_alignment_model(
     if plugin_file_path is not None:
         args.append("-mp")
         args.append(plugin_file_path)
-    subprocess.run(args)
+    subprocess.run(args, cwd=get_repo_dir())
 
 
 def align_parallel_corpus(
@@ -59,7 +60,7 @@ def align_parallel_corpus(
     if plugin_file_path is not None:
         args.append("-mp")
         args.append(plugin_file_path)
-    subprocess.run(args)
+    subprocess.run(args, cwd=get_repo_dir())
 
 
 class MachineAligner(Aligner):

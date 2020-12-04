@@ -12,6 +12,7 @@ from typing import Optional
 from xml.etree import ElementTree
 
 from ..common.environment import PT_PREPROCESSED_DIR, PT_UNZIPPED_DIR
+from ..common.utils import get_repo_dir
 
 
 def get_iso(project_dir: str) -> Optional[str]:
@@ -51,7 +52,7 @@ def extract_corpus(output_dir: str, iso: str, project_dir: str, include_texts: s
     arg_list.append("-to")
     arg_list.append(os.path.join(output_dir, f"{output_basename}.txt"))
 
-    subprocess.run(arg_list)
+    subprocess.run(arg_list, cwd=get_repo_dir())
 
 
 def main() -> None:
