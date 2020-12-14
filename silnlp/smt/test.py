@@ -61,7 +61,7 @@ def main() -> None:
                 src_file_path,
                 predictions_file_path,
                 "-t",
-                config["src_tokenizer"],
+                config["trg_tokenizer"],
                 "-rt",
                 config["trg_tokenizer"],
                 "-mt",
