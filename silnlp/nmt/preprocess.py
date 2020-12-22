@@ -1,5 +1,4 @@
 import argparse
-from argparse import Namespace
 import bisect
 import enum
 import itertools
@@ -13,6 +12,7 @@ from typing import IO, Any, Dict, Iterable, List, Optional, Set, Tuple
 
 logging.basicConfig()
 
+import opennmt
 import opennmt.data
 import pandas as pd
 import sentencepiece as sp
@@ -43,7 +43,12 @@ class CheckpointType(enum.Enum):
 
 
 def convert_vocab(sp_vocab_path: str, onmt_vocab_path: str, tag_langs: Set[str] = None) -> None:
-    special_tokens = [opennmt.PADDING_TOKEN, opennmt.START_OF_SENTENCE_TOKEN, opennmt.END_OF_SENTENCE_TOKEN, opennmt.UNKNOWN_TOKEN]
+    special_tokens = [
+        opennmt.PADDING_TOKEN,
+        opennmt.START_OF_SENTENCE_TOKEN,
+        opennmt.END_OF_SENTENCE_TOKEN,
+        opennmt.UNKNOWN_TOKEN,
+    ]
     if tag_langs is not None:
         special_tokens.extend(map(lambda l: f"<2{l}>", tag_langs))
 
@@ -275,7 +280,7 @@ def write_val_corpora(
 def preprocess_scripture(
     root_dir: str,
     config: dict,
-    args: Namespace,
+    args: argparse.Namespace,
     src_file_paths: List[str],
     trg_file_paths: List[str],
     train_only_trg_file_paths: List[str],
@@ -707,7 +712,9 @@ def main() -> None:
             vocab_path = os.path.join(root_dir, "onmt.vocab")
             share_vocab_file_paths: Set[str] = set(src_file_paths).union(trg_file_paths)
             character_coverage = data_config.get("character_coverage", 1.0)
-            build_vocab(share_vocab_file_paths, vocab_size, casing, character_coverage, model_prefix, vocab_path, tag_langs)
+            build_vocab(
+                share_vocab_file_paths, vocab_size, casing, character_coverage, model_prefix, vocab_path, tag_langs
+            )
 
             if has_parent:
                 update_vocab(parent_config, root_dir, vocab_path, vocab_path, parent_model_to_use)

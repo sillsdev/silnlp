@@ -124,6 +124,7 @@ def load_config(exp_name: str) -> dict:
             "maximum_features_length": 150,
             "maximum_labels_length": 150,
             "keep_checkpoint_max": 3,
+            "save_checkpoints_steps": 1000,
         },
         "eval": {
             "external_evaluators": "bleu_multi_ref",
