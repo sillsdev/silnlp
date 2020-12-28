@@ -38,7 +38,7 @@ def delete_random_token(line, probability):
     return " ".join(ret)
 
 
-def replace_random_token(line, probability, filler_token="BLANK"):
+def replace_random_token(line, probability, filler_token="[[BLANK]]"):
     """Replace random tokens in a String by a filler token with given probability
     Args:
         line: a String
@@ -77,8 +77,8 @@ def main() -> None:
                         help="Optional, the probability to replace each token with a filler token, default=0.1")
     parser.add_argument('--permutation_range', default=3, type=int,
                         help="Optional, Max range for token permutation, default=3")
-    parser.add_argument('--filler_token', default='<unk>',
-                        help="Optional, token to use for replacement function, default=<unk>")
+    parser.add_argument('--filler_token', default='[[BLANK]]',
+                        help="Optional, token to use for replacement function, default=[[BLANK]]")
     args = parser.parse_args()
 
     file_input = args.input

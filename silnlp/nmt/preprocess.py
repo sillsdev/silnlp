@@ -43,7 +43,7 @@ class CheckpointType(enum.Enum):
 
 
 def convert_vocab(sp_vocab_path: str, onmt_vocab_path: str, tag_langs: Set[str] = None) -> None:
-    special_tokens = [opennmt.PADDING_TOKEN, opennmt.START_OF_SENTENCE_TOKEN, opennmt.END_OF_SENTENCE_TOKEN]
+    special_tokens = [opennmt.PADDING_TOKEN, opennmt.START_OF_SENTENCE_TOKEN, opennmt.END_OF_SENTENCE_TOKEN, opennmt.UNKNOWN_TOKEN]
     if tag_langs is not None:
         special_tokens.extend(map(lambda l: f"<2{l}>", tag_langs))
 
@@ -86,7 +86,7 @@ def build_vocab(
     sp_train_params = (
         f"--normalization_rule_tsv={normalization_path} --input={joined_file_paths} --model_prefix={model_prefix}"
         f" --vocab_size={vocab_size} --character_coverage={character_coverage:.4f} --input_sentence_size=1000000"
-        " --shuffle_input_sentence=true --control_symbols=<range>"
+        " --shuffle_input_sentence=true --control_symbols=<range> --user_defined_symbols=[[BLANK]]"
     )
 
     sp.SentencePieceTrainer.Train(sp_train_params)
