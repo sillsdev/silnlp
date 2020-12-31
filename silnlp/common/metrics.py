@@ -5,7 +5,7 @@ from typing import Iterable, List, Optional
 
 import numpy as np
 import psutil
-from opennmt.utils.ter import ter
+import sacrebleu
 from opennmt.utils.wer import wer
 
 from ..common.corpus import write_corpus
@@ -13,24 +13,9 @@ from ..common.corpus import write_corpus
 METEOR_FULLY_SUPPORTED_LANGS = {"en", "cz", "de", "es", "fr", "ar"}
 
 
-def compute_ter_score(hyps: Iterable[str], refs: Iterable[str]) -> float:
-    with tempfile.TemporaryDirectory() as td:
-        hyps_path = os.path.join(td, "hyps.txt")
-        refs_path = os.path.join(td, "refs.txt")
-
-        write_corpus(hyps_path, hyps)
-        write_corpus(refs_path, (line for r in zip(*refs) for line in r))
-
-        try:
-            result = ter(hyps_path, refs_path)
-        except UnicodeDecodeError:
-            print("Unable to compute TER score")
-            result = -1
-        except ZeroDivisionError:
-            print("Cannot divide by zero. Check for empty lines.")
-            result = -1
-
-        return float(np.round(float(result) * 100, 2))
+def compute_ter_score(hyps: Iterable[str], refs: List[Iterable[str]]) -> float:
+    result = sacrebleu.corpus_ter(hyps,refs)
+    return float(np.round(float(result.score) * 100, 2))
 
 
 def compute_wer_score(hyps: Iterable[str], refs: Iterable[str]) -> float:

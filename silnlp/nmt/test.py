@@ -123,7 +123,7 @@ def score_individual_books(
                     other_scores["WER"] = wer_score
 
             if "ter" in scorers:
-                ter_score = compute_ter_score(pair_sys, cast(List[str], pair_refs))
+                ter_score = compute_ter_score(pair_sys, pair_refs)
                 if ter_score >= 0:
                     other_scores["TER"] = ter_score
             score = PairScore(book, src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores)
@@ -480,7 +480,7 @@ def test_checkpoint(
                     other_scores["WER"] = wer_score
 
             if "ter" in scorers:
-                ter_score = compute_ter_score(pair_sys, cast(List[str], pair_refs))
+                ter_score = compute_ter_score(pair_sys, pair_refs)
                 if ter_score >= 0:
                     other_scores["TER"] = ter_score
 
