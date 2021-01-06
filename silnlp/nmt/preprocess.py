@@ -43,12 +43,7 @@ class CheckpointType(enum.Enum):
 
 
 def convert_vocab(sp_vocab_path: str, onmt_vocab_path: str, tag_langs: Set[str] = None) -> None:
-    special_tokens = [
-        opennmt.PADDING_TOKEN,
-        opennmt.START_OF_SENTENCE_TOKEN,
-        opennmt.END_OF_SENTENCE_TOKEN,
-        opennmt.UNKNOWN_TOKEN,
-    ]
+    special_tokens = [opennmt.PADDING_TOKEN, opennmt.START_OF_SENTENCE_TOKEN, opennmt.END_OF_SENTENCE_TOKEN]
     if tag_langs is not None:
         special_tokens.extend(map(lambda l: f"<2{l}>", tag_langs))
 
