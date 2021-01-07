@@ -1,7 +1,7 @@
 import argparse
 import logging
 import os
-from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import Dict, Iterable, List, Optional, Union
 
 logging.basicConfig()
 
@@ -227,10 +227,15 @@ def create_runner(
     return RunnerEx(model, config, auto_config=True, mixed_precision=mixed_precision)
 
 
-def parse_langs(langs: Iterable[Union[str, dict]]) -> Tuple[Set[str], Dict[str, Set[str]], Dict[str, Set[str]]]:
-    isos: Set[str] = set()
-    train_projects: Dict[str, Set[str]] = {}
-    test_projects: Dict[str, Set[str]] = {}
+class Language:
+    def __init__(self, iso: str, train_projects: Iterable[str], test_projects: Optional[Iterable[str]] = None):
+        self.iso = iso
+        self.train_projects = set(train_projects)
+        self.test_projects = None if test_projects is None else set(test_projects)
+
+
+def parse_langs(langs: Iterable[Union[str, dict]]) -> Dict[str, Language]:
+    lang_infos: Dict[str, Language] = {}
     for lang in langs:
         if isinstance(lang, str):
             index = lang.find("-")
@@ -238,21 +243,20 @@ def parse_langs(langs: Iterable[Union[str, dict]]) -> Tuple[Set[str], Dict[str, 
                 raise RuntimeError("A language project is not fully specified.")
             iso = lang[:index]
             projects_str = lang[index + 1 :]
-            isos.add(iso)
-            train_projects[iso] = set(projects_str.split(","))
+            lang_infos[iso] = Language(iso, projects_str.split(","))
         else:
             iso = lang["iso"]
-            isos.add(iso)
             train: Union[str, List[str]] = lang["train"]
-            projects: List[str] = train.split(",") if isinstance(train, str) else train
-            train_projects[iso] = set(projects)
-            test: Optional[str] = lang.get("test")
+            train_projects: List[str] = train.split(",") if isinstance(train, str) else train
+            test: Optional[Union[str, List[str]]] = lang.get("test")
+            test_projects: List[str] = []
             if test is not None:
                 if isinstance(test, str):
-                    test_projects[iso] = {test}
+                    test_projects = [test]
                 else:
-                    test_projects[iso] = set(test)
-    return isos, train_projects, test_projects
+                    test_projects = test
+            lang_infos[iso] = Language(iso, train_projects, test_projects)
+    return lang_infos
 
 
 def copy_config_value(src: dict, trg: dict, key: str) -> None:
