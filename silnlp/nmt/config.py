@@ -228,10 +228,25 @@ def create_runner(
 
 
 class Language:
-    def __init__(self, iso: str, train_projects: Iterable[str], test_projects: Optional[Iterable[str]] = None):
+    def __init__(
+        self,
+        iso: str,
+        train_projects: Iterable[str] = [],
+        test_projects: Iterable[str] = [],
+        val_projects: Iterable[str] = [],
+    ):
         self.iso = iso
         self.train_projects = set(train_projects)
-        self.test_projects = None if test_projects is None else set(test_projects)
+        self.test_projects = set(test_projects)
+        self.val_projects = set(val_projects)
+
+
+def parse_projects(projects_value: Optional[Union[str, List[str]]], default: List[str] = []) -> List[str]:
+    if projects_value is None:
+        return default
+    if isinstance(projects_value, str):
+        return list(map(lambda p: p.strip(), projects_value.split(",")))
+    return projects_value
 
 
 def parse_langs(langs: Iterable[Union[str, dict]]) -> Dict[str, Language]:
@@ -243,19 +258,23 @@ def parse_langs(langs: Iterable[Union[str, dict]]) -> Dict[str, Language]:
                 raise RuntimeError("A language project is not fully specified.")
             iso = lang[:index]
             projects_str = lang[index + 1 :]
-            lang_infos[iso] = Language(iso, projects_str.split(","))
+            projects = list(map(lambda p: p.strip(), projects_str.split(",")))
+            train_projects = projects
+            test_projects = projects
+            val_projects = projects
         else:
             iso = lang["iso"]
-            train: Union[str, List[str]] = lang["train"]
-            train_projects: List[str] = train.split(",") if isinstance(train, str) else train
-            test: Optional[Union[str, List[str]]] = lang.get("test")
-            test_projects: List[str] = []
-            if test is not None:
-                if isinstance(test, str):
-                    test_projects = [test]
-                else:
-                    test_projects = test
-            lang_infos[iso] = Language(iso, train_projects, test_projects)
+            train_projects = parse_projects(lang.get("train"))
+            test_projects = parse_projects(lang.get("test"), default=train_projects)
+            val_projects = parse_projects(lang.get("val"), default=train_projects)
+
+        lang_info = lang_infos.get(iso)
+        if lang_info is None:
+            lang_info = Language(iso)
+            lang_infos[iso] = lang_info
+        lang_info.train_projects.update(train_projects)
+        lang_info.test_projects.update(test_projects)
+        lang_info.val_projects.update(val_projects)
     return lang_infos
 
 

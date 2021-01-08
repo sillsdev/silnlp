@@ -1,5 +1,4 @@
 import argparse
-import bisect
 import itertools
 import logging
 import os
@@ -98,12 +97,6 @@ def insert_trg_tag(trg_iso: str, sentences: pd.DataFrame) -> None:
     sentences.loc[:, "source"] = f"<2{trg_iso}> " + sentences.loc[:, "source"]
 
 
-def get_iso(file_path: str) -> Tuple[str, str]:
-    file_name = os.path.splitext(os.path.basename(file_path))[0]
-    index = file_name.index("-")
-    return file_name[:index], file_name[index + 1 :]
-
-
 def get_checkpoint_path(model_dir: str, checkpoint_type: CheckpointType) -> Tuple[Optional[str], Optional[int]]:
     if checkpoint_type == CheckpointType.AVERAGE:
         # Get the checkpoint path and step count for the averaged checkpoint
@@ -196,11 +189,6 @@ def create_unshared_vocab(
     build_vocab(vocab_file_paths, vocab_size, casing, character_coverage, model_prefix, vocab_path, tag_langs)
 
 
-def is_in_sorted(items: list, value: Any) -> bool:
-    index = bisect.bisect_left(items, value)
-    return index < len(items) and items[index] == value
-
-
 def add_to_eval_dataset(
     src_iso: str,
     trg_iso: str,
@@ -273,14 +261,20 @@ def write_val_corpora(
 
 
 class DataFileType(Flag):
+    NONE = 0
     TRAIN = auto()
     TEST = auto()
+    VAL = auto()
 
 
 class DataFile:
     def __init__(self, path: str, type: DataFileType):
         self.path = path
         self.type = type
+        file_name = os.path.splitext(os.path.basename(path))[0]
+        index = file_name.index("-")
+        self.iso = file_name[:index]
+        self.project = file_name[index + 1 :]
 
     @property
     def is_train(self):
@@ -290,20 +284,24 @@ class DataFile:
     def is_test(self):
         return (self.type & DataFileType.TEST) == DataFileType.TEST
 
+    @property
+    def is_val(self):
+        return (self.type & DataFileType.VAL) == DataFileType.VAL
+
 
 def get_data_files(langs: Dict[str, Language]) -> List[DataFile]:
     data_files: List[DataFile] = []
     for lang in langs.values():
-        for train_project in lang.train_projects:
-            file_path = get_corpus_path(lang.iso, train_project)
-            file_type = DataFileType.TRAIN
-            if lang.test_projects is None or train_project in lang.test_projects:
+        for project in lang.train_projects | lang.test_projects | lang.val_projects:
+            file_path = get_corpus_path(lang.iso, project)
+            file_type = DataFileType.NONE
+            if project in lang.train_projects:
+                file_type |= DataFileType.TRAIN
+            if project in lang.test_projects:
                 file_type |= DataFileType.TEST
+            if project in lang.val_projects:
+                file_type |= DataFileType.VAL
             data_files.append(DataFile(file_path, file_type))
-        if lang.test_projects is not None:
-            for test_project in lang.test_projects.difference(lang.train_projects):
-                file_path = get_corpus_path(lang.iso, test_project)
-                data_files.append(DataFile(file_path, DataFileType.TEST))
     data_files.sort(key=lambda df: df.path)
     return data_files
 
@@ -354,10 +352,7 @@ def preprocess_scripture(
 
         for src_file in src_files:
             for trg_file in trg_files:
-                src_iso, src_project = get_iso(src_file.path)
-                trg_iso, trg_project = get_iso(trg_file.path)
-
-                if (train_count(src_files) > 1 or train_count(trg_files) > 1) and src_iso == trg_iso:
+                if (train_count(src_files) > 1 or train_count(trg_files) > 1) and src_file.iso == trg_file.iso:
                     continue
 
                 corpus = get_scripture_parallel_corpus(vref_file_path, src_file.path, trg_file.path)
@@ -374,7 +369,9 @@ def preprocess_scripture(
                 if trg_file.is_train and (stats_file is not None or score_threshold > 0):
                     add_alignment_scores(cur_train)
                     if stats_file is not None:
-                        cur_train.to_csv(os.path.join(root_dir, f"{src_project}_{trg_project}.csv"), index=False)
+                        cur_train.to_csv(
+                            os.path.join(root_dir, f"{src_file.project}_{trg_file.project}.csv"), index=False
+                        )
 
                 if trg_file.is_test:
                     if disjoint_test and test_indices is None:
@@ -387,15 +384,17 @@ def preprocess_scripture(
                         cur_test = include_books(corpus, test_books)
                         if test_size > 0:
                             _, cur_test = split_parallel_corpus(
-                                cur_test, test_size, pair_test_indices.get((src_iso, trg_iso), test_indices)
+                                cur_test, test_size, pair_test_indices.get((src_file.iso, trg_file.iso), test_indices)
                             )
                     else:
                         cur_train, cur_test = split_parallel_corpus(
-                            cur_train, test_size, pair_test_indices.get((src_iso, trg_iso), test_indices)
+                            cur_train, test_size, pair_test_indices.get((src_file.iso, trg_file.iso), test_indices)
                         )
 
                     cur_test.drop("score", axis=1, inplace=True, errors="ignore")
-                    add_to_eval_dataset(src_iso, trg_iso, trg_project, write_trg_tag, test, pair_test_indices, cur_test)
+                    add_to_eval_dataset(
+                        src_file.iso, trg_file.iso, trg_file.project, write_trg_tag, test, pair_test_indices, cur_test
+                    )
 
                 if trg_file.is_train:
                     alignment_score = mean(cur_train["score"]) if stats_file is not None else 0
@@ -409,17 +408,18 @@ def preprocess_scripture(
                         filtered_alignment_score = mean(cur_train["score"]) if stats_file is not None else 0
 
                     if stats_file is not None:
-                        print(f"{src_project} -> {trg_project} stats")
+                        print(f"{src_file.project} -> {trg_file.project} stats")
                         print(f"- count: {corpus_len}")
                         print(f"- alignment: {alignment_score:.4f}")
                         print(f"- filtered count: {filtered_count}")
                         print(f"- alignment (filtered): {filtered_alignment_score:.4f}")
                         stats_file.write(
-                            f"{src_project},{trg_project},{corpus_len},{alignment_score:.4f},{filtered_count},"
-                            f"{filtered_alignment_score:.4f}\n"
+                            f"{src_file.project},{trg_file.project},{corpus_len},{alignment_score:.4f},"
+                            f"{filtered_count},{filtered_alignment_score:.4f}\n"
                         )
                     cur_train.drop("score", axis=1, inplace=True, errors="ignore")
 
+                if trg_file.is_val:
                     if disjoint_val and val_indices is None:
                         indices = set(cur_train.index)
                         if disjoint_test and test_indices is not None:
@@ -427,28 +427,38 @@ def preprocess_scripture(
                         val_indices = set(random.sample(indices, min(val_size, len(indices))))
 
                     cur_train, cur_val = split_parallel_corpus(
-                        cur_train, val_size, pair_val_indices.get((src_iso, trg_iso), val_indices)
+                        cur_train, val_size, pair_val_indices.get((src_file.iso, trg_file.iso), val_indices)
                     )
 
                     if mirror:
-                        mirror_cur_train = cur_train.rename(columns={"source": "target", "target": "source"})
                         mirror_cur_val = cur_val.rename(columns={"source": "target", "target": "source"})
-
                         add_to_eval_dataset(
-                            trg_iso, src_iso, src_project, write_trg_tag, val, pair_val_indices, mirror_cur_val
+                            trg_file.iso,
+                            src_file.iso,
+                            src_file.project,
+                            write_trg_tag,
+                            val,
+                            pair_val_indices,
+                            mirror_cur_val,
                         )
 
+                    add_to_eval_dataset(
+                        src_file.iso, trg_file.iso, trg_file.project, write_trg_tag, val, pair_val_indices, cur_val
+                    )
+
+                if trg_file.is_train:
+                    if mirror:
+                        mirror_cur_train = cur_train.rename(columns={"source": "target", "target": "source"})
                         if write_trg_tag:
-                            insert_trg_tag(src_iso, mirror_cur_train)
-
-                        train = add_to_train_dataset(trg_project, src_project, mixed_src, train, mirror_cur_train)
-
-                    add_to_eval_dataset(src_iso, trg_iso, trg_project, write_trg_tag, val, pair_val_indices, cur_val)
+                            insert_trg_tag(src_file.iso, mirror_cur_train)
+                        train = add_to_train_dataset(
+                            trg_file.project, src_file.project, mixed_src, train, mirror_cur_train
+                        )
 
                     if write_trg_tag:
-                        insert_trg_tag(trg_iso, cur_train)
+                        insert_trg_tag(trg_file.iso, cur_train)
 
-                    train = add_to_train_dataset(src_project, trg_project, mixed_src, train, cur_train)
+                    train = add_to_train_dataset(src_file.project, trg_file.project, mixed_src, train, cur_train)
     finally:
         if stats_file is not None:
             stats_file.close()
@@ -510,21 +520,6 @@ def get_parallel_corpus_length(src_file_path: str, trg_file_path: str) -> int:
     return count
 
 
-def get_test_set_count(src_files: List[DataFile], trg_files: List[DataFile]) -> int:
-    count = 0
-    for src_file in src_files:
-        for trg_file in trg_files:
-            src_iso, _ = get_iso(src_file.path)
-            trg_iso, _ = get_iso(trg_file.path)
-
-            if (train_count(src_files) > 1 or train_count(trg_files) > 1) and src_iso == trg_iso:
-                continue
-
-            if trg_file.is_test:
-                count += 1
-    return count
-
-
 def preprocess_standard(
     root_dir: str,
     config: dict,
@@ -539,7 +534,13 @@ def preprocess_standard(
     val_size: int = data_config["val_size"]
     mirror: bool = data_config["mirror"]
 
-    test_set_count = get_test_set_count(src_files, trg_files)
+    trg_files_by_project = {df.project: df for df in trg_files}
+    test_set_count = 0
+    for src_file in src_files:
+        if src_file.is_test:
+            trg_file = trg_files_by_project.get(src_file.project)
+            if trg_file is not None and trg_file.is_test:
+                test_set_count += 1
 
     print("Writing data sets...")
     for old_file_path in glob(os.path.join(root_dir, "test.*.txt")):
@@ -552,73 +553,74 @@ def preprocess_standard(
         os.path.join(root_dir, "val.trg.txt"), "w", encoding="utf-8", newline="\n"
     ) as val_trg_file:
         for src_file in src_files:
-            for trg_file in trg_files:
-                src_iso, _ = get_iso(src_file.path)
-                trg_iso, _ = get_iso(trg_file.path)
+            trg_file = trg_files_by_project.get(src_file.project)
+            if trg_file is None:
+                continue
 
-                if (train_count(src_files) > 1 or train_count(trg_files) > 1) and src_iso == trg_iso:
-                    continue
+            corpus_len = get_parallel_corpus_length(src_file.path, trg_file.path)
 
-                corpus_len = get_parallel_corpus_length(src_file.path, trg_file.path)
-
-                test_indices: Set[int] = set()
-                val_indices: Set[int] = set()
-                if trg_file.is_test:
+            test_indices: Optional[Set[int]] = set()
+            val_indices: Optional[Set[int]] = set()
+            if src_file.is_test and trg_file.is_test:
+                if test_size < 0 or test_size >= corpus_len:
+                    test_indices = None
+                else:
                     test_indices = set(random.sample(range(corpus_len), test_size))
-                if trg_file.is_train:
-                    population = (
-                        range(corpus_len)
-                        if len(test_indices) == 0
-                        else list(filter(lambda i: i not in test_indices, range(corpus_len)))
-                    )
+            if src_file.is_val and trg_file.is_val and test_indices is not None:
+                population = (
+                    range(corpus_len)
+                    if len(test_indices) == 0
+                    else list(filter(lambda i: i not in test_indices, range(corpus_len)))
+                )
+                if val_size < 0 or val_size >= len(population):
+                    val_indices = None
+                else:
                     val_indices = set(random.sample(population, val_size))
 
-                test_prefix = "test" if test_set_count == 1 else f"test.{src_iso}.{trg_iso}"
-                with open(src_file.path, "r", encoding="utf-8") as input_src_file, open(
-                    trg_file.path, "r", encoding="utf-8"
-                ) as input_trg_file, open(
-                    os.path.join(root_dir, f"{test_prefix}.src.txt"), "a", encoding="utf-8", newline="\n"
-                ) as test_src_file, open(
-                    os.path.join(root_dir, f"{test_prefix}.trg.detok.txt"), "a", encoding="utf-8", newline="\n"
-                ) as test_trg_file:
-                    index = 0
-                    for src_line, trg_line in zip(input_src_file, input_trg_file):
-                        src_line = src_line.strip()
-                        trg_line = trg_line.strip()
-                        if len(src_line) == 0 or len(trg_line) == 0:
-                            continue
+            test_prefix = "test" if test_set_count == 1 else f"test.{src_file.iso}.{trg_file.iso}"
+            with open(src_file.path, "r", encoding="utf-8") as input_src_file, open(
+                trg_file.path, "r", encoding="utf-8"
+            ) as input_trg_file, open(
+                os.path.join(root_dir, f"{test_prefix}.src.txt"), "a", encoding="utf-8", newline="\n"
+            ) as test_src_file, open(
+                os.path.join(root_dir, f"{test_prefix}.trg.detok.txt"), "a", encoding="utf-8", newline="\n"
+            ) as test_trg_file:
+                index = 0
+                for src_line, trg_line in zip(input_src_file, input_trg_file):
+                    src_line = src_line.strip()
+                    trg_line = trg_line.strip()
+                    if len(src_line) == 0 or len(trg_line) == 0:
+                        continue
 
-                        src_sentence = src_line
-                        if write_trg_tag:
-                            src_sentence = f"<2{trg_iso}> " + src_line
-                        trg_sentence = trg_line
+                    src_sentence = src_line
+                    if write_trg_tag:
+                        src_sentence = f"<2{trg_file.iso}> " + src_line
+                    trg_sentence = trg_line
 
-                        if index in test_indices:
-                            test_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
-                            test_trg_file.write(decode_sp(encode_sp(trg_spp, trg_sentence)) + "\n")
-                        elif trg_file.is_train:
-                            if index in val_indices:
-                                val_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
-                                val_trg_file.write(encode_sp(trg_spp, trg_sentence) + "\n")
-                            else:
-                                train_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
-                                train_trg_file.write(encode_sp(trg_spp, trg_sentence) + "\n")
+                    mirror_src_sentence = trg_line
+                    if write_trg_tag:
+                        mirror_src_sentence = f"<2{src_file.iso}> " + trg_line
+                    mirror_trg_sentence = src_line
+                    mirror_src_spp = trg_spp
+                    mirror_trg_spp = src_spp
 
-                            if mirror:
-                                mirror_src_sentence = trg_line
-                                if write_trg_tag:
-                                    mirror_src_sentence = f"<2{src_iso}> " + trg_line
-                                mirror_trg_sentence = src_line
-                                mirror_src_spp = trg_spp
-                                mirror_trg_spp = src_spp
-                                if index in val_indices:
-                                    val_src_file.write(encode_sp(mirror_src_spp, mirror_src_sentence) + "\n")
-                                    val_trg_file.write(encode_sp(mirror_trg_spp, mirror_trg_sentence) + "\n")
-                                else:
-                                    train_src_file.write(encode_sp(mirror_src_spp, mirror_src_sentence) + "\n")
-                                    train_trg_file.write(encode_sp(mirror_trg_spp, mirror_trg_sentence) + "\n")
+                    if test_indices is None or index in test_indices:
+                        test_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
+                        test_trg_file.write(decode_sp(encode_sp(trg_spp, trg_sentence)) + "\n")
+                    elif val_indices is None or index in val_indices:
+                        val_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
+                        val_trg_file.write(encode_sp(trg_spp, trg_sentence) + "\n")
+                        if mirror:
+                            val_src_file.write(encode_sp(mirror_src_spp, mirror_src_sentence) + "\n")
+                            val_trg_file.write(encode_sp(mirror_trg_spp, mirror_trg_sentence) + "\n")
+                    elif src_file.is_train and trg_file.is_train:
+                        train_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
+                        train_trg_file.write(encode_sp(trg_spp, trg_sentence) + "\n")
+                        if mirror:
+                            train_src_file.write(encode_sp(mirror_src_spp, mirror_src_sentence) + "\n")
+                            train_trg_file.write(encode_sp(mirror_trg_spp, mirror_trg_sentence) + "\n")
 
-                        index += 1
+                    index += 1
 
 
 def main() -> None:
