@@ -1,10 +1,12 @@
 import argparse
 import logging
 import os
-from typing import Dict, Iterable, List, Optional, Union
+from enum import Flag, auto
+from typing import Dict, Iterable, List, Optional, Set, Union
 
 logging.basicConfig()
 
+import opennmt
 import opennmt.data
 import opennmt.inputters
 import opennmt.models
@@ -12,6 +14,7 @@ import opennmt.utils
 import tensorflow as tf
 import yaml
 
+from ..common.corpus import get_corpus_path
 from ..common.utils import get_git_revision_hash, get_mt_root_dir
 from .noise import WordDropout
 from .runner import RunnerEx
@@ -227,26 +230,52 @@ def create_runner(
     return RunnerEx(model, config, auto_config=True, mixed_precision=mixed_precision)
 
 
+class DataFileType(Flag):
+    NONE = 0
+    TRAIN = auto()
+    TEST = auto()
+    VAL = auto()
+    SYNTH = auto()
+
+
+class DataFile:
+    def __init__(self, path: str, type: DataFileType):
+        self.path = path
+        self.type = type
+        file_name = os.path.splitext(os.path.basename(path))[0]
+        index = file_name.index("-")
+        self.iso = file_name[:index]
+        self.project = file_name[index + 1 :]
+
+    @property
+    def is_train(self):
+        return (self.type & DataFileType.TRAIN) == DataFileType.TRAIN
+
+    @property
+    def is_test(self):
+        return (self.type & DataFileType.TEST) == DataFileType.TEST
+
+    @property
+    def is_val(self):
+        return (self.type & DataFileType.VAL) == DataFileType.VAL
+
+    @property
+    def is_synth(self):
+        return (self.type & DataFileType.SYNTH) == DataFileType.SYNTH
+
+
 class Language:
-    def __init__(
-        self,
-        iso: str,
-        train_projects: Iterable[str] = [],
-        test_projects: Iterable[str] = [],
-        val_projects: Iterable[str] = [],
-    ):
+    def __init__(self, iso: str):
         self.iso = iso
-        self.train_projects = set(train_projects)
-        self.test_projects = set(test_projects)
-        self.val_projects = set(val_projects)
+        self.data_files: List[DataFile] = []
 
 
-def parse_projects(projects_value: Optional[Union[str, List[str]]], default: List[str] = []) -> List[str]:
+def parse_projects(projects_value: Optional[Union[str, List[str]]], default: Set[str] = set()) -> Set[str]:
     if projects_value is None:
         return default
     if isinstance(projects_value, str):
-        return list(map(lambda p: p.strip(), projects_value.split(",")))
-    return projects_value
+        return set(map(lambda p: p.strip(), projects_value.split(",")))
+    return set(projects_value)
 
 
 def parse_langs(langs: Iterable[Union[str, dict]]) -> Dict[str, Language]:
@@ -258,23 +287,37 @@ def parse_langs(langs: Iterable[Union[str, dict]]) -> Dict[str, Language]:
                 raise RuntimeError("A language project is not fully specified.")
             iso = lang[:index]
             projects_str = lang[index + 1 :]
-            projects = list(map(lambda p: p.strip(), projects_str.split(",")))
-            train_projects = projects
-            test_projects = projects
-            val_projects = projects
+            data_files: List[DataFile] = []
+            for project in projects_str.split(","):
+                project = project.strip()
+                project_path = get_corpus_path(iso, project)
+                data_files.append(DataFile(project_path, DataFileType.TRAIN | DataFileType.TEST | DataFileType.VAL))
+
         else:
             iso = lang["iso"]
             train_projects = parse_projects(lang.get("train"))
             test_projects = parse_projects(lang.get("test"), default=train_projects)
             val_projects = parse_projects(lang.get("val"), default=train_projects)
+            synth_projects = parse_projects(lang.get("synth"))
+            data_files: List[DataFile] = []
+            for project in train_projects | test_projects | val_projects | synth_projects:
+                file_path = get_corpus_path(iso, project)
+                file_type = DataFileType.NONE
+                if project in train_projects:
+                    file_type |= DataFileType.TRAIN
+                if project in test_projects:
+                    file_type |= DataFileType.TEST
+                if project in val_projects:
+                    file_type |= DataFileType.VAL
+                if project in synth_projects:
+                    file_type |= DataFileType.SYNTH | DataFileType.TRAIN
+                data_files.append(DataFile(file_path, file_type))
 
         lang_info = lang_infos.get(iso)
         if lang_info is None:
             lang_info = Language(iso)
             lang_infos[iso] = lang_info
-        lang_info.train_projects.update(train_projects)
-        lang_info.test_projects.update(test_projects)
-        lang_info.val_projects.update(val_projects)
+        lang_info.data_files.extend(data_files)
     return lang_infos
 
 

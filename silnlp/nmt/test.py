@@ -535,8 +535,8 @@ def main() -> None:
     config = load_config(exp_name)
     model_dir: str = config["model_dir"]
     data_config: dict = config["data"]
-    src_langs = parse_langs(data_config["src_langs"])
-    trg_langs = parse_langs(data_config["trg_langs"])
+    src_langs = set(parse_langs(data_config["src_langs"]).keys())
+    trg_langs = set(parse_langs(data_config["trg_langs"]).keys())
     ref_projects: Set[str] = set(args.ref_projects)
     books = get_books(args.books)
 

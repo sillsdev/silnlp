@@ -4,7 +4,7 @@ import logging
 import os
 import random
 import shutil
-from enum import Enum, Flag, auto
+from enum import Enum
 from glob import glob
 from statistics import mean
 from typing import IO, Any, Dict, Iterable, List, Optional, Set, Tuple
@@ -21,7 +21,6 @@ from ..common.corpus import (
     add_alignment_scores,
     exclude_books,
     filter_parallel_corpus,
-    get_corpus_path,
     get_scripture_parallel_corpus,
     include_books,
     load_corpus,
@@ -30,7 +29,7 @@ from ..common.corpus import (
 )
 from ..common.environment import PT_PREPROCESSED_DIR
 from ..common.utils import set_seed
-from .config import Language, create_runner, get_git_revision_hash, get_mt_root_dir, load_config, parse_langs
+from .config import DataFile, Language, create_runner, get_git_revision_hash, get_mt_root_dir, load_config, parse_langs
 from .utils import decode_sp, decode_sp_lines, encode_sp, encode_sp_lines, get_best_model_dir, get_last_checkpoint
 
 
@@ -260,48 +259,8 @@ def write_val_corpora(
             ref_file.close()
 
 
-class DataFileType(Flag):
-    NONE = 0
-    TRAIN = auto()
-    TEST = auto()
-    VAL = auto()
-
-
-class DataFile:
-    def __init__(self, path: str, type: DataFileType):
-        self.path = path
-        self.type = type
-        file_name = os.path.splitext(os.path.basename(path))[0]
-        index = file_name.index("-")
-        self.iso = file_name[:index]
-        self.project = file_name[index + 1 :]
-
-    @property
-    def is_train(self):
-        return (self.type & DataFileType.TRAIN) == DataFileType.TRAIN
-
-    @property
-    def is_test(self):
-        return (self.type & DataFileType.TEST) == DataFileType.TEST
-
-    @property
-    def is_val(self):
-        return (self.type & DataFileType.VAL) == DataFileType.VAL
-
-
 def get_data_files(langs: Dict[str, Language]) -> List[DataFile]:
-    data_files: List[DataFile] = []
-    for lang in langs.values():
-        for project in lang.train_projects | lang.test_projects | lang.val_projects:
-            file_path = get_corpus_path(lang.iso, project)
-            file_type = DataFileType.NONE
-            if project in lang.train_projects:
-                file_type |= DataFileType.TRAIN
-            if project in lang.test_projects:
-                file_type |= DataFileType.TEST
-            if project in lang.val_projects:
-                file_type |= DataFileType.VAL
-            data_files.append(DataFile(file_path, file_type))
+    data_files = [df for lang in langs.values() for df in lang.data_files]
     data_files.sort(key=lambda df: df.path)
     return data_files
 

@@ -100,14 +100,11 @@ def main() -> None:
     src_projects: List[str] = []
     trg_projects: List[str] = []
     for src_lang in src_langs.values():
-        for src_train_project in src_lang.train_projects:
-            src_projects.append(f"{src_lang.iso}-{src_train_project}")
+        for src_data_file in src_lang.data_files:
+            src_projects.append(f"{src_data_file.iso}-{src_data_file.project}")
     for trg_lang in trg_langs.values():
-        for trg_train_project in trg_lang.train_projects:
-            trg_projects.append(f"{trg_lang.iso}-{trg_train_project}")
-        if trg_lang.test_projects is not None:
-            for trg_test_project in trg_lang.test_projects.difference(trg_lang.train_projects):
-                trg_projects.append(f"{trg_lang.iso}-{trg_test_project}")
+        for trg_data_file in trg_lang.data_files:
+            trg_projects.append(f"{trg_data_file.iso}-{trg_data_file.project}")
 
     src_projects.sort()
     trg_projects.sort()
