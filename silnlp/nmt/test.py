@@ -352,8 +352,8 @@ def write_sentence_bleu(
 def test_checkpoint(
     root_dir: str,
     config: dict,
-    src_langs: Set[str],
-    trg_langs: Set[str],
+    src_langs: Dict[str, Language],
+    trg_langs: Dict[str, Language],
     force_infer: bool,
     by_book: bool,
     memory_growth: bool,
@@ -372,7 +372,7 @@ def test_checkpoint(
     if len(suffix_str) > 0:
         suffix_str += "-"
     suffix_str += "avg" if step == -1 else str(step)
-    for src_iso in sorted(src_langs):
+    for src_iso in sorted(src_langs.keys()):
         prefix = "test" if len(src_langs) == 1 else f"test.{src_iso}"
         src_features_path = os.path.join(root_dir, f"{prefix}.src.txt")
         if os.path.isfile(src_features_path):
@@ -384,7 +384,7 @@ def test_checkpoint(
             predictions_detok_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.detok.txt.{suffix_str}"))
         else:
             # target data is split into separate files
-            for trg_iso in sorted(trg_langs):
+            for trg_iso in sorted(trg_langs.keys()):
                 prefix = f"test.{src_iso}.{trg_iso}"
                 vref_paths.append(os.path.join(root_dir, f"{prefix}.vref.txt"))
                 features_paths.append(os.path.join(root_dir, f"{prefix}.src.txt"))
@@ -406,8 +406,8 @@ def test_checkpoint(
 
     data_config: dict = config["data"]
     print(f"Scoring {checkpoint_name}...")
-    default_src_iso = next(iter(src_langs))
-    default_trg_iso = next(iter(trg_langs))
+    default_src_iso = next(iter(src_langs.keys()))
+    default_trg_iso = next(iter(trg_langs.keys()))
     scores: List[PairScore] = []
     overall_sys: List[str] = []
     overall_refs: List[List[str]] = []
@@ -535,8 +535,8 @@ def main() -> None:
     config = load_config(exp_name)
     model_dir: str = config["model_dir"]
     data_config: dict = config["data"]
-    src_langs = set(parse_langs(data_config["src_langs"]).keys())
-    trg_langs = set(parse_langs(data_config["trg_langs"]).keys())
+    src_langs = parse_langs(data_config["src_langs"])
+    trg_langs = parse_langs(data_config["trg_langs"])
     ref_projects: Set[str] = set(args.ref_projects)
     books = get_books(args.books)
 
