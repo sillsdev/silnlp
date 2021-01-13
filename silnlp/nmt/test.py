@@ -72,7 +72,11 @@ def is_ref_project(ref_projects: Set[str], ref_file_path: str) -> bool:
 def is_train_project(trg_langs: Dict[str, Language], ref_file_path: str, default_trg_iso: str) -> bool:
     trg_iso, trg_project = parse_ref_file_path(ref_file_path, default_trg_iso)
     lang = trg_langs[trg_iso]
-    return trg_project in lang.train_projects
+    for df in lang.data_files:
+        if df.project == trg_project and df.is_train:
+            return True
+    return False
+#    return trg_project in lang.train_projects
 
 
 def score_individual_books(
