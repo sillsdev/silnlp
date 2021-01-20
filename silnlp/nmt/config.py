@@ -182,16 +182,7 @@ def load_config(exp_name: str) -> dict:
     return config
 
 
-def create_runner(
-    config: dict, mixed_precision: bool = False, log_level: int = logging.INFO, memory_growth: bool = False
-) -> RunnerEx:
-    set_log_level(log_level)
-
-    if memory_growth:
-        gpus = tf.config.list_physical_devices(device_type="GPU")
-        for device in gpus:
-            tf.config.experimental.set_memory_growth(device, enable=True)
-
+def create_model(config: dict) -> opennmt.models.Model:
     data_config: dict = config["data"]
     params_config: dict = config["params"]
 
@@ -226,6 +217,20 @@ def create_runner(
         target_noiser = opennmt.data.WordNoiser(subword_token="▁", is_spacer=True)
         target_noiser.add(WordDropout(word_dropout))
         model.labels_inputter.set_noise(target_noiser, probability=1.0)
+    return model
+
+
+def create_runner(
+    config: dict, mixed_precision: bool = False, log_level: int = logging.INFO, memory_growth: bool = False
+) -> RunnerEx:
+    set_log_level(log_level)
+
+    if memory_growth:
+        gpus = tf.config.list_physical_devices(device_type="GPU")
+        for device in gpus:
+            tf.config.experimental.set_memory_growth(device, enable=True)
+
+    model = create_model(config)
 
     return RunnerEx(model, config, auto_config=True, mixed_precision=mixed_precision)
 
