@@ -95,16 +95,21 @@ def main() -> None:
     config = load_config(task_name)
     data_config: dict = config.get("data", {})
 
-    src_langs = parse_langs(data_config["src_langs"])
-    trg_langs = parse_langs(data_config["trg_langs"])
+    src_langs, src_train_projects, _ = parse_langs(data_config["src_langs"])
+    trg_langs, trg_train_projects, trg_test_projects = parse_langs(data_config["trg_langs"])
     src_projects: List[str] = []
     trg_projects: List[str] = []
-    for src_lang in src_langs.values():
-        for src_data_file in src_lang.data_files:
-            src_projects.append(f"{src_data_file.iso}-{src_data_file.project}")
-    for trg_lang in trg_langs.values():
-        for trg_data_file in trg_lang.data_files:
-            trg_projects.append(f"{trg_data_file.iso}-{trg_data_file.project}")
+    for src_iso in src_langs:
+        for src_train_project in src_train_projects[src_iso]:
+            src_projects.append(f"{src_iso}-{src_train_project}")
+    for trg_iso in trg_langs:
+        lang_train_projects = trg_train_projects[trg_iso]
+        lang_test_projects = trg_test_projects.get(trg_iso)
+        for trg_train_project in lang_train_projects:
+            trg_projects.append(f"{trg_iso}-{trg_train_project}")
+        if lang_test_projects is not None:
+            for trg_test_project in lang_test_projects.difference(lang_train_projects):
+                trg_projects.append(f"{trg_iso}-{trg_test_project}")
 
     src_projects.sort()
     trg_projects.sort()
