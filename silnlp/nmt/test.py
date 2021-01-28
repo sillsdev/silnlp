@@ -15,7 +15,7 @@ from ..common.canon import book_number_to_id, get_books
 from ..common.metrics import compute_meteor_score, compute_ter_score, compute_wer_score
 from ..common.utils import get_git_revision_hash, set_seed
 from ..common.verse_ref import VerseRef
-from .config import create_runner, get_mt_root_dir, load_config, parse_langs
+from .config import Language, create_runner, get_mt_root_dir, load_config, parse_langs
 from .utils import decode_sp, get_best_model_dir, get_last_checkpoint
 
 SUPPORTED_SCORERS = {"bleu", "sentencebleu", "chrf3", "meteor", "wer", "ter"}
@@ -69,10 +69,14 @@ def is_ref_project(ref_projects: Set[str], ref_file_path: str) -> bool:
     return trg_project in ref_projects
 
 
-def is_train_project(train_projects: Dict[str, Set[str]], ref_file_path: str, default_trg_iso: str) -> bool:
+def is_train_project(trg_langs: Dict[str, Language], ref_file_path: str, default_trg_iso: str) -> bool:
     trg_iso, trg_project = parse_ref_file_path(ref_file_path, default_trg_iso)
-    projects = train_projects[trg_iso]
-    return trg_project in projects
+    lang = trg_langs[trg_iso]
+    for df in lang.data_files:
+        if df.project == trg_project and df.is_train:
+            return True
+    return False
+#    return trg_project in lang.train_projects
 
 
 def score_individual_books(
@@ -216,7 +220,7 @@ def load_test_data(
     output_file_path: str,
     default_trg_iso: str,
     ref_projects: Set[str],
-    train_projects: Dict[str, Set[str]],
+    trg_langs: Dict[str, Language],
     books: Set[int],
     by_book: bool,
 ) -> Tuple[Dict[str, Tuple[List[str], List[List[str]]]], Dict[str, dict]]:
@@ -231,9 +235,7 @@ def load_test_data(
             if len(filtered) == 0:
                 # no refs specified, so randomly select verses from all available train refs to build one ref
                 select_rand_ref_line = True
-                ref_file_paths = list(
-                    filter(lambda p: is_train_project(train_projects, p, default_trg_iso), ref_file_paths)
-                )
+                ref_file_paths = list(filter(lambda p: is_train_project(trg_langs, p, default_trg_iso), ref_file_paths))
             else:
                 # use specified refs only
                 ref_file_paths = filtered
@@ -354,9 +356,8 @@ def write_sentence_bleu(
 def test_checkpoint(
     root_dir: str,
     config: dict,
-    src_langs: Set[str],
-    trg_langs: Set[str],
-    trg_train_projects: Dict[str, Set[str]],
+    src_langs: Dict[str, Language],
+    trg_langs: Dict[str, Language],
     force_infer: bool,
     by_book: bool,
     memory_growth: bool,
@@ -375,7 +376,7 @@ def test_checkpoint(
     if len(suffix_str) > 0:
         suffix_str += "-"
     suffix_str += "avg" if step == -1 else str(step)
-    for src_iso in sorted(src_langs):
+    for src_iso in sorted(src_langs.keys()):
         prefix = "test" if len(src_langs) == 1 else f"test.{src_iso}"
         src_features_path = os.path.join(root_dir, f"{prefix}.src.txt")
         if os.path.isfile(src_features_path):
@@ -387,7 +388,7 @@ def test_checkpoint(
             predictions_detok_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.detok.txt.{suffix_str}"))
         else:
             # target data is split into separate files
-            for trg_iso in sorted(trg_langs):
+            for trg_iso in sorted(trg_langs.keys()):
                 prefix = f"test.{src_iso}.{trg_iso}"
                 vref_paths.append(os.path.join(root_dir, f"{prefix}.vref.txt"))
                 features_paths.append(os.path.join(root_dir, f"{prefix}.src.txt"))
@@ -409,8 +410,8 @@ def test_checkpoint(
 
     data_config: dict = config["data"]
     print(f"Scoring {checkpoint_name}...")
-    default_src_iso = next(iter(src_langs))
-    default_trg_iso = next(iter(trg_langs))
+    default_src_iso = next(iter(src_langs.keys()))
+    default_trg_iso = next(iter(trg_langs.keys()))
     scores: List[PairScore] = []
     overall_sys: List[str] = []
     overall_refs: List[List[str]] = []
@@ -429,7 +430,7 @@ def test_checkpoint(
             predictions_detok_path,
             default_trg_iso,
             ref_projects,
-            trg_train_projects,
+            trg_langs,
             books,
             by_book,
         )
@@ -538,8 +539,8 @@ def main() -> None:
     config = load_config(exp_name)
     model_dir: str = config["model_dir"]
     data_config: dict = config["data"]
-    src_langs, _, _ = parse_langs(data_config["src_langs"])
-    trg_langs, trg_train_projects, _ = parse_langs(data_config["trg_langs"])
+    src_langs = parse_langs(data_config["src_langs"])
+    trg_langs = parse_langs(data_config["trg_langs"])
     ref_projects: Set[str] = set(args.ref_projects)
     books = get_books(args.books)
 
@@ -564,7 +565,6 @@ def main() -> None:
             config,
             src_langs,
             trg_langs,
-            trg_train_projects,
             args.force_infer,
             args.by_book,
             args.memory_growth,
@@ -583,7 +583,6 @@ def main() -> None:
             config,
             src_langs,
             trg_langs,
-            trg_train_projects,
             args.force_infer,
             args.by_book,
             args.memory_growth,
@@ -606,7 +605,6 @@ def main() -> None:
                 config,
                 src_langs,
                 trg_langs,
-                trg_train_projects,
                 args.force_infer,
                 args.by_book,
                 args.memory_growth,
@@ -626,7 +624,6 @@ def main() -> None:
                 config,
                 src_langs,
                 trg_langs,
-                trg_train_projects,
                 args.force_infer,
                 args.by_book,
                 args.memory_growth,
