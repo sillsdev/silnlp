@@ -195,6 +195,10 @@ def get_corpus_path(iso: str, project: str) -> str:
     return os.path.join(PT_PREPROCESSED_DIR, "data", f"{iso}-{project}.txt")
 
 
+def get_names_path(iso: str, project: str) -> str:
+    return os.path.join(PT_PREPROCESSED_DIR, "data", f"{iso}-{project}-names.txt")
+
+
 def include_books(corpus: pd.DataFrame, books: Set[int]) -> pd.DataFrame:
     return corpus[corpus.apply(lambda r: r["vref"].book_num in books, axis=1)].copy()
 

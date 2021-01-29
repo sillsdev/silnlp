@@ -7,8 +7,9 @@
 
 import argparse
 import os
+import re
 import subprocess
-from typing import Optional
+from typing import Optional, Set, Tuple
 from xml.etree import ElementTree
 
 from ..common.environment import PT_PREPROCESSED_DIR, PT_UNZIPPED_DIR
@@ -55,6 +56,50 @@ def extract_corpus(output_dir: str, iso: str, project_dir: str, include_texts: s
     subprocess.run(arg_list, cwd=get_repo_dir())
 
 
+def extract_names(output_dir: str, iso: str, project_dir: str) -> None:
+    terms_path = os.path.join(project_dir, "ProjectBiblicalTerms.xml")
+    renderings_path = os.path.join(project_dir, "TermRenderings.xml")
+    if not os.path.isfile(terms_path) or not os.path.isfile(renderings_path):
+        return
+
+    name = os.path.basename(project_dir)
+    vern_names_path = os.path.join(output_dir, f"{iso}-{name}-names.txt")
+    en_names_path = os.path.join(output_dir, f"en-{name}-names.txt")
+
+    names: Set[Tuple[str, str]] = set()
+    with open(vern_names_path, "w", encoding="utf-8", newline="\n") as vern_names_file, open(
+        en_names_path, "w", encoding="utf-8", newline="\n"
+    ) as en_names_file:
+        terms_tree = ElementTree.parse(terms_path)
+        renderings_tree = ElementTree.parse(renderings_path)
+        for term_elem in terms_tree.getroot().findall("Term"):
+            cat = term_elem.findtext("Category")
+            if cat != "PN":
+                continue
+            id = term_elem.get("Id")
+            rendering_elem = renderings_tree.getroot().find(f"TermRendering[@Id='{id}']")
+            if rendering_elem is None:
+                continue
+            if rendering_elem.get("Guess") != "false":
+                continue
+            gloss_str = term_elem.findtext("Gloss")
+            if gloss_str is None:
+                continue
+            renderings_str = rendering_elem.findtext("Renderings")
+            if renderings_str is None:
+                continue
+            glosses = re.split("[;,/]", gloss_str.strip())
+            renderings = renderings_str.strip().split("||")
+            for gloss in glosses:
+                gloss = gloss.strip()
+                for rendering in renderings:
+                    rendering = rendering.strip()
+                    if (gloss, rendering) not in names:
+                        vern_names_file.write(rendering + "\n")
+                        en_names_file.write(gloss + "\n")
+                        names.add((gloss, rendering))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Extracts text corpora from Paratext projects")
     parser.add_argument("projects", nargs="*", metavar="name", help="Paratext project")
@@ -89,7 +134,8 @@ def main() -> None:
                 iso = get_iso(project_dir)
                 if iso is not None:
                     extract_corpus(output_dir, iso, project_dir, args.include, args.exclude)
-                    print(f"Processed: {project_dir}\nOutput saved in: {output_dir}")
+                    extract_names(output_dir, iso, project_dir)
+                    print(f"Extracted {os.path.basename(project_dir)}")
     else:
         print("Couldn't find any data to process for any project.")
 

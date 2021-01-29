@@ -21,6 +21,7 @@ from ..common.corpus import (
     add_alignment_scores,
     exclude_books,
     filter_parallel_corpus,
+    get_names_path,
     get_scripture_parallel_corpus,
     include_books,
     load_corpus,
@@ -29,7 +30,16 @@ from ..common.corpus import (
 )
 from ..common.environment import PT_PREPROCESSED_DIR
 from ..common.utils import set_seed
-from .config import DataFile, Language, create_runner, get_git_revision_hash, get_mt_root_dir, load_config, parse_langs
+from .config import (
+    DataFile,
+    DataFileType,
+    Language,
+    create_runner,
+    get_git_revision_hash,
+    get_mt_root_dir,
+    load_config,
+    parse_langs,
+)
 from .utils import decode_sp, decode_sp_lines, encode_sp, encode_sp_lines, get_best_model_dir, get_last_checkpoint
 
 
@@ -269,12 +279,46 @@ def train_count(data_files: List[DataFile]) -> int:
     return len([df for df in data_files if df.is_train])
 
 
+def get_names_files(src_files: List[DataFile], trg_langs: Dict[str, Language]) -> Tuple[List[DataFile], List[DataFile]]:
+    src_names_files: List[str] = []
+    trg_names_files: List[str] = []
+    for src_file in src_files:
+        if not src_file.is_train:
+            continue
+        src_names_path = get_names_path(src_file.iso, src_file.project)
+        if os.path.isfile(src_names_path):
+            for trg_iso in trg_langs.keys():
+                trg_names_path = get_names_path(trg_iso, src_file.project)
+                if os.path.isfile(trg_names_path):
+                    src_names_files.append(DataFile(src_names_path, DataFileType.TRAIN))
+                    trg_names_files.append(DataFile(trg_names_path, DataFileType.TRAIN))
+    return (src_names_files, trg_names_files)
+
+
+def get_names_corpus(src_names_path: str, trg_names_path: str) -> pd.DataFrame:
+    src_names: List[str] = []
+    trg_names: List[str] = []
+    with open(src_names_path, "r", encoding="utf-8") as src_file, open(
+        trg_names_path, "r", encoding="utf-8"
+    ) as trg_file:
+        for src_line, trg_line in zip(src_file, trg_file):
+            src_line = src_line.strip()
+            trg_line = trg_line.strip()
+            src_names.append(src_line)
+            trg_names.append(trg_line)
+
+    data = {"source": src_names, "target": trg_names}
+    return pd.DataFrame(data)
+
+
 def preprocess_scripture(
     root_dir: str,
     config: dict,
     args: argparse.Namespace,
     src_files: List[DataFile],
     trg_files: List[DataFile],
+    src_names_files: List[DataFile],
+    trg_names_files: List[DataFile],
     write_trg_tag: bool,
     src_spp: Optional[sp.SentencePieceProcessor],
     trg_spp: Optional[sp.SentencePieceProcessor],
@@ -298,6 +342,7 @@ def preprocess_scripture(
     test: Dict[Tuple[str, str], pd.DataFrame] = {}
     pair_val_indices: Dict[Tuple[str, str], Set[int]] = {}
     pair_test_indices: Dict[Tuple[str, str], Set[int]] = {}
+    names: Optional[pd.DataFrame] = None
 
     vref_file_path = os.path.join(PT_PREPROCESSED_DIR, "data", "vref.txt")
     corpus_books = get_books(data_config.get("corpus_books", []))
@@ -418,9 +463,23 @@ def preprocess_scripture(
                         insert_trg_tag(trg_file.iso, cur_train)
 
                     train = add_to_train_dataset(src_file.project, trg_file.project, mixed_src, train, cur_train)
+
     finally:
         if stats_file is not None:
             stats_file.close()
+
+    for src_names_file, trg_names_file in zip(src_names_files, trg_names_files):
+        cur_names = get_names_corpus(src_names_file.path, trg_names_file.path)
+        if mirror:
+            mirror_cur_names = cur_names.rename(columns={"source": "target", "target": "source"})
+            if write_trg_tag:
+                insert_trg_tag(src_names_file.iso, mirror_cur_names)
+            names = pd.concat([train, cur_names], ignore_index=True)
+
+        if write_trg_tag:
+            insert_trg_tag(trg_names_file.iso, cur_names)
+
+        names = pd.concat([train, cur_names], ignore_index=True)
 
     if train is None:
         return
@@ -436,6 +495,9 @@ def preprocess_scripture(
 
         train["source"] = train[src_columns].apply(select_random_column, axis=1)
         train.drop(src_columns, axis=1, inplace=True, errors="ignore")
+
+    if names is not None:
+        train = pd.concat([train, names], ignore_index=True)
 
     write_corpus(os.path.join(root_dir, "train.src.txt"), encode_sp_lines(src_spp, train["source"]))
     write_corpus(os.path.join(root_dir, "train.trg.txt"), encode_sp_lines(trg_spp, train["target"]))
@@ -596,6 +658,7 @@ def main() -> None:
     root_dir = get_mt_root_dir(exp_name)
     config = load_config(exp_name)
     data_config: dict = config["data"]
+    is_scripture: bool = data_config["scripture"]
 
     set_seed(data_config["seed"])
 
@@ -603,6 +666,10 @@ def main() -> None:
     trg_langs = parse_langs(data_config["trg_langs"])
     src_files = get_data_files(src_langs)
     trg_files = get_data_files(trg_langs)
+    src_names_files: List[DataFile] = []
+    trg_names_files: List[DataFile] = []
+    if is_scripture:
+        src_names_files, trg_names_files = get_names_files(src_files, trg_langs)
 
     mirror: bool = data_config["mirror"]
 
@@ -644,8 +711,8 @@ def main() -> None:
     src_spp: Optional[sp.SentencePieceProcessor] = None
     trg_spp: Optional[sp.SentencePieceProcessor] = None
     if data_config["tokenize"]:
-        src_file_paths: Set[str] = set(map(lambda df: df.path, src_files))
-        trg_file_paths: Set[str] = set(map(lambda df: df.path, trg_files))
+        src_file_paths: Set[str] = set(map(lambda df: df.path, itertools.chain(src_files, src_names_files)))
+        trg_file_paths: Set[str] = set(map(lambda df: df.path, itertools.chain(trg_files, trg_names_files)))
         if data_config["share_vocab"]:
             print("Building shared vocabulary...")
             vocab_size: Optional[int] = data_config.get("vocab_size")
@@ -727,7 +794,18 @@ def main() -> None:
             trg_spp.Load(os.path.join(root_dir, "trg-sp.model"))
 
     if data_config["scripture"]:
-        preprocess_scripture(root_dir, config, args, src_files, trg_files, write_trg_tag, src_spp, trg_spp)
+        preprocess_scripture(
+            root_dir,
+            config,
+            args,
+            src_files,
+            trg_files,
+            src_names_files,
+            trg_names_files,
+            write_trg_tag,
+            src_spp,
+            trg_spp,
+        )
     else:
         preprocess_standard(root_dir, config, src_files, trg_files, write_trg_tag, src_spp, trg_spp)
 

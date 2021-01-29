@@ -248,9 +248,9 @@ class DataFile:
         self.path = path
         self.type = type
         file_name = os.path.splitext(os.path.basename(path))[0]
-        index = file_name.index("-")
-        self.iso = file_name[:index]
-        self.project = file_name[index + 1 :]
+        parts = file_name.split("-")
+        self.iso = parts[0]
+        self.project = parts[1]
 
     @property
     def is_train(self):
