@@ -3,7 +3,7 @@ import copy
 import logging
 import os
 from glob import glob
-from typing import IO, Dict, Iterable, Iterator, List, Tuple
+from typing import IO, Dict, Iterable, Iterator, List, Optional, Sequence, Text, Tuple
 
 logging.basicConfig()
 
@@ -13,12 +13,15 @@ import opennmt.models
 import opennmt.runner
 import opennmt.utils.checkpoint
 import opennmt.utils.misc
+import sacrebleu
 import sentencepiece as sp
 import tensorflow as tf
 from lit_nlp import dev_server, server_flags
+from lit_nlp.api import components as lit_components
 from lit_nlp.api import dataset as lit_dataset
 from lit_nlp.api import model as lit_model
 from lit_nlp.api import types as lit_types
+from lit_nlp.components import index, metrics, pca, projection, similarity_searcher, umap, word_replacer
 
 from ..common.utils import get_git_revision_hash, get_mt_root_dir
 from .config import Language, create_model, load_config, parse_langs, set_log_level
@@ -51,10 +54,11 @@ def create_test_dataset(
     default_trg_iso = next(iter(trg_langs.keys()))
 
     spec = lit_types.JsonDict = {
-        "src": lit_types.TextSegment(),
+        "vref": lit_types.CategoryLabel(),
+        "src_text": lit_types.TextSegment(),
+        "ref_text": lit_types.TextSegment(),
         "src_iso": lit_types.CategoryLabel(),
         "trg_iso": lit_types.CategoryLabel(),
-        "vref": lit_types.CategoryLabel(),
     }
     examples: List[lit_types.JsonDict] = []
     for vref_path, features_path, refs_path in zip(vref_paths, features_paths, refs_paths):
@@ -81,14 +85,14 @@ def create_test_dataset(
                         if val != "qaa":
                             trg_iso = val
                     example: lit_types.JsonDict = {
-                        "src": decode_sp(src_line),
+                        "vref": vref_line,
+                        "src_text": decode_sp(src_line),
                         "src_iso": src_iso,
                         "trg_iso": trg_iso,
-                        "vref": vref_line,
                     }
                     for ref_index in range(len(ref_files)):
                         ref_line = lines[ref_index + 2].strip()
-                        ref_key = "ref" if ref_index == 0 else f"ref_{ref_index}"
+                        ref_key = "ref_text" if ref_index == 0 else f"ref_text_{ref_index}"
                         example[ref_key] = ref_line
                         if ref_key not in spec:
                             spec[ref_key] = lit_types.TextSegment()
@@ -100,6 +104,60 @@ def create_test_dataset(
     return lit_dataset.Dataset(spec, examples, description="test dataset")
 
 
+def create_train_dataset(
+    root_dir: str, src_langs: Dict[str, Language], trg_langs: Dict[str, Language]
+) -> lit_dataset.Dataset:
+    src_path = os.path.join(root_dir, "train.src.txt")
+    trg_path = os.path.join(root_dir, "train.trg.txt")
+    default_src_iso = next(iter(src_langs.keys()))
+    default_trg_iso = next(iter(trg_langs.keys()))
+    examples: List[lit_types.JsonDict] = []
+    with open(src_path, "r", encoding="utf-8") as src_file, open(trg_path, "r", encoding="utf-8") as trg_file:
+        for src_line, trg_line in zip(src_file, trg_file):
+            src_line = src_line.strip()
+            trg_line = trg_line.strip()
+            src_iso = default_src_iso
+            if len(src_langs) > 1:
+                src_iso = "?"
+            trg_iso = default_trg_iso
+            if src_line.startswith("<2"):
+                index = src_line.index(">")
+                val = src_line[2:index]
+                if val != "qaa":
+                    trg_iso = val
+            example: lit_types.JsonDict = {
+                "vref": "?",
+                "src_text": decode_sp(src_line),
+                "ref_text": decode_sp(trg_line),
+                "src_iso": src_iso,
+                "trg_iso": trg_iso,
+            }
+            examples.append(example)
+            if len(examples) == 2000:
+                break
+    spec: lit_types.JsonDict = {
+        "vref": lit_types.CategoryLabel(),
+        "src_text": lit_types.TextSegment(),
+        "ref_text": lit_types.TextSegment(),
+        "src_iso": lit_types.CategoryLabel(),
+        "trg_iso": lit_types.CategoryLabel(),
+    }
+    return lit_dataset.Dataset(spec, examples, description="train dataset")
+
+
+def masked_token_mean(vectors: tf.Tensor, masks: tf.Tensor) -> tf.Tensor:
+    """Mean over tokens.
+    Args:
+        vectors: <tf.float32>[batch_size, num_tokens, emb_dim]
+        masks: <tf.bool>[batch_size, num_tokens]
+    Returns:
+        <tf.float32>[batch_size, emb_dim]
+    """
+    masks = tf.cast(masks, tf.float32)
+    weights = masks / tf.reduce_sum(masks, axis=1, keepdims=True)
+    return tf.reduce_sum(vectors * tf.expand_dims(weights, axis=-1), axis=1)
+
+
 class NMTModel(lit_model.Model):
     def __init__(
         self,
@@ -107,11 +165,13 @@ class NMTModel(lit_model.Model):
         model: opennmt.models.Model,
         src_spp: sp.SentencePieceProcessor,
         trg_spp: sp.SentencePieceProcessor,
-        type: str,
         step: int,
         checkpoint_path: str,
+        type: str = None,
     ):
-        self.type = type
+        self.types: List[str] = []
+        if type is not None:
+            self.types.append(type)
         self.step = step
         # Configuration priority: user config > auto config > default config.
         new_config = copy.deepcopy(opennmt.runner._CONFIG_FALLBACK)
@@ -125,30 +185,30 @@ class NMTModel(lit_model.Model):
         self.trg_spp = trg_spp
         self.model = opennmt.utils.misc.clone_layer(model)
         self.model.initialize(self.config["data"], params=self.config["params"])
+        self._analyze_fn = None
 
         self.checkpoint_path = checkpoint_path
         self.checkpoint: opennmt.utils.checkpoint.Checkpoint = None
 
     def description(self) -> str:
-        return f"{self.type} checkpoint ({self.step})"
+        if self.step == -1:
+            return "averaged checkpoint"
+        desc = f"checkpoint {self.step}"
+        if len(self.types) > 0:
+            types_str = ", ".join(self.types)
+            desc += f" ({types_str})"
+        return desc
 
     def predict(self, inputs: Iterable[lit_types.JsonDict], scrub_arrays=True) -> Iterator[lit_types.JsonDict]:
-        features_list: List[str] = list(map(lambda input: encode_sp(self.src_spp, input["src"]), inputs))
-        if len(features_list) == 0:
+        inputs_list: List[str] = list(inputs)
+        if len(inputs_list) == 0:
             return []
 
         if self.checkpoint is None:
             self.checkpoint = opennmt.utils.checkpoint.Checkpoint.from_config(self.config, self.model)
             self.checkpoint.restore(checkpoint_path=self.checkpoint_path, weights_only=True)
 
-        predictions = self._infer(features_list)
-
-        labels_list: List[str] = list(map(lambda p: " ".join(p["trg_tokens"]), predictions))
-        top_k_list = self._get_top_k_tokens(features_list, labels_list)
-
-        for features, top_k, prediction in zip(features_list, top_k_list, predictions):
-            prediction["src_tokens"] = features.split()
-            opennmt.utils.misc.merge_dict(prediction, top_k)
+        predictions = self._analyze(inputs_list)
 
         if scrub_arrays:
             predictions = (lit_model.scrub_numpy_refs(res) for res in predictions)
@@ -157,7 +217,8 @@ class NMTModel(lit_model.Model):
     def predict_single(self, one_input: lit_types.JsonDict, **kw) -> lit_types.JsonDict:
         return list(self.predict([one_input], **kw))[0]
 
-    def _infer(self, features_list: List[str]) -> List[lit_types.JsonDict]:
+    def _analyze(self, inputs_list: List[lit_types.JsonDict]) -> List[lit_types.JsonDict]:
+        features_list: List[str] = list(map(lambda input: encode_sp(self.src_spp, input["src_text"]), inputs_list))
         infer_config: dict = self.config["infer"]
         dataset = self._make_inference_dataset(
             features_list,
@@ -166,61 +227,51 @@ class NMTModel(lit_model.Model):
             prefetch_buffer_size=infer_config.get("prefetch_buffer_size"),
         )
 
-        infer_fn = tf.function(self.model.infer, input_signature=(dataset.element_spec,))
-        if not tf.config.functions_run_eagerly():
-            tf.get_logger().info("Tracing and optimizing the inference graph...")
-            infer_fn.get_concrete_function()  # Trace the function now.
+        if self._analyze_fn is None:
+            self._analyze_fn = tf.function(self.model.analyze, input_signature=(dataset.element_spec,))
+            if not tf.config.functions_run_eagerly():
+                tf.get_logger().info("Tracing and optimizing the analyze graph...")
+                self._analyze_fn.get_concrete_function()  # Trace the function now.
 
         results: List[lit_types.JsonDict] = [None] * len(features_list)
         for features in dataset:
-            predictions = infer_fn(features)
+            predictions = self._analyze_fn(features)
+
+            top_k_probs, top_k_ids = tf.nn.top_k(tf.nn.softmax(predictions["logits"]), k=10)
+            del predictions["logits"]
+            predictions["top_k_probs"] = top_k_probs
+            predictions["top_k_ids"] = top_k_ids
+
+            masks = tf.sequence_mask(features["length"], maxlen=tf.shape(features["ids"])[1])
+            predictions["encoder_final_embedding"] = masked_token_mean(predictions["encoder_outputs"], masks)
+            del predictions["encoder_outputs"]
+
             predictions = tf.nest.map_structure(lambda t: t.numpy(), predictions)
             for prediction in opennmt.utils.misc.extract_batches(predictions):
-                target_length = prediction["length"][0]
-                tokens = prediction["tokens"][0][:target_length]
-                sentence = self.model.examples_inputter.labels_inputter.tokenizer.detokenize(tokens)
-                attention = prediction["alignment"][0][:target_length]
-                attention = np.delete(attention, attention.shape[1] - 1, axis=1)
-                results[prediction["index"]] = {
-                    "trg_tokens": list(map(lambda t: t.decode("utf-8"), tokens)),
-                    "trg": decode_sp(sentence),
+                index: int = prediction["index"]
+                target_length = prediction["length"]
+                trg_tokens = prediction["tokens"][:target_length]
+                tok_trg_text = self.model.labels_inputter.tokenizer.detokenize(trg_tokens)
+                trg_text = decode_sp(tok_trg_text)
+                attention = prediction["alignment"][:target_length]
+                probs = prediction["top_k_probs"]
+                ids = prediction["top_k_ids"]
+                pred_tokens = list(self._convert_top_k(ids, probs, target_length))
+                encoder_final_embedding = prediction["encoder_final_embedding"]
+                ref_text = inputs_list[index]["ref_text"]
+                tok_ref_text = encode_sp(self.trg_spp, ref_text)
+                ter_score = sacrebleu.sentence_ter(tok_trg_text, [tok_ref_text])
+                chrf_score = sacrebleu.sentence_chrf(trg_text, [ref_text], order=3)
+                results[index] = {
+                    "trg_tokens": list(map(lambda t: t.decode("utf-8"), trg_tokens)),
+                    "trg_text": trg_text,
                     "attention": np.expand_dims(attention, axis=0),
+                    "src_tokens": features_list[index].split(),
+                    "pred_tokens": pred_tokens,
+                    "encoder_final_embedding": encoder_final_embedding,
+                    "ter": ter_score.score,
+                    "chrf3": chrf_score.score,
                 }
-        return results
-
-    def _get_top_k_tokens(self, features_list: List[str], labels_list: List[str]) -> List[lit_types.JsonDict]:
-        infer_config: dict = self.config["infer"]
-        dataset = self._make_evaluation_dataset(
-            features_list,
-            labels_list,
-            infer_config["batch_size"],
-            length_bucket_width=infer_config["length_bucket_width"],
-            prefetch_buffer_size=infer_config.get("prefetch_buffer_size"),
-        )
-
-        call_fn = tf.function(self.model.call, input_signature=dataset.element_spec)
-        if not tf.config.functions_run_eagerly():
-            tf.get_logger().info("Tracing and optimizing the call graph...")
-            call_fn.get_concrete_function()  # Trace the function now.
-
-        results: List[lit_types.JsonDict] = [None] * len(features_list)
-        for features, labels in dataset:
-            outputs, _ = call_fn(features, labels)
-            outputs["length"] = labels["length"]
-            outputs["ids_out"] = labels["ids_out"]
-            top_k_probs, top_k_ids = tf.nn.top_k(tf.nn.softmax(outputs["logits"]), k=10)
-            outputs["top_k_probs"] = top_k_probs
-            outputs["top_k_ids"] = top_k_ids
-            outputs["index"] = features["index"]
-            outputs = tf.nest.map_structure(lambda t: t.numpy(), outputs)
-            for output in opennmt.utils.misc.extract_batches(outputs):
-                index = output["index"]
-                trg_len = output["length"] - 1
-                probs = output["top_k_probs"]
-                ids = output["top_k_ids"]
-                top_k = list(self._convert_top_k(ids, probs, trg_len))
-                results[index] = {"top_k_tokens": top_k}
-
         return results
 
     def _convert_top_k(
@@ -269,53 +320,59 @@ class NMTModel(lit_model.Model):
         )
         return dataset
 
-    def _make_evaluation_dataset(
-        self,
-        features_list: List[str],
-        labels_list: List[str],
-        batch_size,
-        batch_type="examples",
-        length_bucket_width=None,
-        num_threads=1,
-        prefetch_buffer_size=None,
-    ):
-        length_fn = [
-            self.model.features_inputter.get_length,
-            self.model.labels_inputter.get_length,
-        ]
-        map_fn = lambda *arg: self.model.examples_inputter.make_features(
-            element=opennmt.utils.misc.item_or_tuple(arg), training=False
-        )
-        transform_fns = [lambda dataset: dataset.map(map_fn, num_parallel_calls=num_threads or 1)]
-
-        dataset = tf.data.Dataset.from_tensor_slices(list(zip(features_list, labels_list)))
-        dataset = dataset.apply(
-            opennmt.data.inference_pipeline(
-                batch_size,
-                batch_type=batch_type,
-                transform_fns=transform_fns,
-                length_bucket_width=length_bucket_width,
-                length_fn=length_fn,
-                num_threads=num_threads,
-                prefetch_buffer_size=prefetch_buffer_size,
-            )
-        )
-        return dataset
-
     def predict_minibatch(self, inputs: List[lit_types.JsonDict], config) -> List[lit_types.JsonDict]:
         pass
 
     def input_spec(self) -> lit_types.Spec:
-        return {"src": lit_types.TextSegment(), "ref": lit_types.TextSegment()}
+        return {"src_text": lit_types.TextSegment(), "ref_text": lit_types.TextSegment()}
 
     def output_spec(self) -> lit_types.Spec:
         return {
-            "src_tokens": lit_types.Tokens(parent="src"),
-            "trg": lit_types.GeneratedText(parent="ref"),
-            "trg_tokens": lit_types.Tokens(parent="trg"),
+            "src_tokens": lit_types.Tokens(parent="src_text"),
+            "trg_text": lit_types.GeneratedText(parent="ref_text"),
+            "trg_tokens": lit_types.Tokens(parent="trg_text"),
             "attention": lit_types.AttentionHeads(align=("src_tokens", "trg_tokens")),
-            "top_k_tokens": lit_types.TokenTopKPreds(align="trg_tokens", parent="trg"),
+            "pred_tokens": lit_types.TokenTopKPreds(align="trg_tokens", parent="trg_text"),
+            "encoder_final_embedding": lit_types.Embeddings(),
+            "ter": lit_types.Scalar(),
+            "chrf3": lit_types.Scalar(),
         }
+
+
+class IndexerEx(index.Indexer):
+    def _get_index_path(self, index_key: str) -> str:
+        return super()._get_index_path(index_key.replace(":", "-"))
+
+    def _get_lookup_path(self, lookup_key: str) -> str:
+        return super()._get_lookup_path(lookup_key.replace(":", "-"))
+
+
+class BLEUMetrics(metrics.SimpleMetrics):
+    def __init__(self, data_config: dict):
+        self._data_config = data_config
+
+    def is_compatible(self, field_spec: lit_types.LitType) -> bool:
+        return isinstance(field_spec, lit_types.GeneratedText)
+
+    def compute(
+        self,
+        labels: Sequence[Text],
+        preds: Sequence[Text],
+        label_spec: lit_types.TextSegment,
+        pred_spec: lit_types.GeneratedText,
+        config: Optional[lit_types.JsonDict] = None,
+    ) -> Dict[Text, float]:
+        del label_spec
+        del pred_spec
+        del config
+
+        if not labels or not preds:
+            return {}
+
+        bleu_score = sacrebleu.corpus_bleu(
+            preds, [labels], lowercase=True, tokenize=self._data_config.get("sacrebleu_tokenize", "13a"),
+        )
+        return {"bleu": bleu_score.score}
 
 
 def main() -> None:
@@ -325,6 +382,10 @@ def main() -> None:
     parser.add_argument(
         "--eager-execution", default=False, action="store_true", help="Enable TensorFlow eager execution.",
     )
+    parser.add_argument("--checkpoint", type=str, help="Analyze checkpoint")
+    parser.add_argument("--last", default=False, action="store_true", help="Analyze last checkpoint")
+    parser.add_argument("--best", default=False, action="store_true", help="Analyze best evaluated checkpoint")
+    parser.add_argument("--avg", default=False, action="store_true", help="Analyze averaged checkpoint")
     args = parser.parse_args()
 
     print("Git commit:", get_git_revision_hash())
@@ -365,13 +426,54 @@ def main() -> None:
     model = create_model(config)
 
     last_checkpoint_path, last_step = get_last_checkpoint(model_dir)
-    best_model_path, best_step = get_best_model_dir(model_dir)
-    models: Dict[str, lit_model.Model] = {
-        "last": NMTModel(config, model, src_spp, trg_spp, "last", last_step, last_checkpoint_path),
-        "best": NMTModel(config, model, src_spp, trg_spp, "best", best_step, os.path.join(best_model_path, "ckpt")),
+
+    models: Dict[str, NMTModel] = {}
+
+    if args.avg:
+        checkpoint_path, _ = get_last_checkpoint(os.path.join(model_dir, "avg"))
+        models["avg"] = NMTModel(config, model, src_spp, trg_spp, -1, checkpoint_path, type="avg")
+    if args.checkpoint is not None:
+        checkpoint_path = os.path.join(model_dir, f"ckpt-{args.checkpoint}")
+        step = int(args.checkpoint)
+        models[args.checkpoint] = NMTModel(config, model, src_spp, trg_spp, step, checkpoint_path)
+    if args.last or (not args.best and args.checkpoint is None and not args.avg):
+        last_checkpoint_path, last_step = get_last_checkpoint(model_dir)
+        step_str = str(last_step)
+        if step_str in models:
+            models[step_str].types.append("last")
+        else:
+            models[str(last_step)] = NMTModel(
+                config, model, src_spp, trg_spp, last_step, last_checkpoint_path, type="last"
+            )
+    if args.best:
+        best_model_path, best_step = get_best_model_dir(model_dir)
+        step_str = str(best_step)
+        if step_str in models:
+            models[step_str].types.append("best")
+        else:
+            models[step_str] = NMTModel(
+                config, model, src_spp, trg_spp, best_step, os.path.join(best_model_path, "ckpt"), type="best"
+            )
+
+    index_datasets: Dict[str, lit_dataset.Dataset] = {"test": create_train_dataset(root_dir, src_langs, trg_langs)}
+    indexer = IndexerEx(
+        models, index_datasets, data_dir=os.path.join(root_dir, "lit-index"), initialize_new_indices=True
+    )
+
+    generators: Dict[str, lit_components.Generator] = {
+        "word_replacer": word_replacer.WordReplacer(),
+        "similarity_searcher": similarity_searcher.SimilaritySearcher(indexer),
     }
 
-    lit_server = dev_server.Server(models, datasets, **server_flags.get_flags())
+    interpreters: Dict[str, lit_components.Interpreter] = {
+        "metrics": lit_components.ComponentGroup({"bleu": BLEUMetrics(data_config)}),
+        "pca": projection.ProjectionManager(pca.PCAModel),
+        "umap": projection.ProjectionManager(umap.UmapModel),
+    }
+
+    lit_server = dev_server.Server(
+        models, datasets, generators=generators, interpreters=interpreters, **server_flags.get_flags()
+    )
     lit_server.serve()
 
 

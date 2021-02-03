@@ -9,8 +9,10 @@ logging.basicConfig()
 import opennmt
 import opennmt.data
 import opennmt.inputters
+import opennmt.layers
 import opennmt.models
 import opennmt.utils
+import opennmt.utils.misc
 import tensorflow as tf
 import yaml
 
@@ -54,8 +56,47 @@ DEFAULT_NEW_CONFIG: dict = {
 }
 
 
+class TransformerEx(opennmt.models.Transformer):
+    def analyze(self, features):
+        # Encode the source.
+        source_length = self.features_inputter.get_length(features)
+        source_inputs = self.features_inputter(features)
+        encoder_outputs, encoder_state, encoder_sequence_length = self.encoder(
+            source_inputs, sequence_length=source_length
+        )
+
+        predictions = self._dynamic_decode(features, encoder_outputs, encoder_state, encoder_sequence_length)
+
+        length = predictions["length"]
+        length = tf.squeeze(length, axis=[1])
+        tokens = predictions["tokens"]
+        tokens = tf.squeeze(tokens, axis=[1])
+        tokens = tf.where(tf.equal(tokens, "</s>"), tf.fill(tf.shape(tokens), ""), tokens)
+
+        ids = self.labels_inputter.tokens_to_ids.lookup(tokens)
+        if self.labels_inputter.mark_start or self.labels_inputter.mark_end:
+            ids, length = opennmt.inputters.add_sequence_controls(
+                ids,
+                length,
+                start_id=opennmt.START_OF_SENTENCE_ID if self.labels_inputter.mark_start else None,
+                end_id=opennmt.END_OF_SENTENCE_ID if self.labels_inputter.mark_end else None,
+            )
+        labels = {"ids_out": ids[:, 1:], "ids": ids[:, :-1], "length": length - 1}
+
+        outputs = self._decode_target(labels, encoder_outputs, encoder_state, encoder_sequence_length)
+
+        return {
+            "length": tf.squeeze(predictions["length"], axis=[1]),
+            "tokens": tf.squeeze(predictions["tokens"], axis=[1]),
+            "alignment": tf.squeeze(predictions["alignment"], axis=[1]),
+            "encoder_outputs": encoder_outputs,
+            "logits": outputs["logits"],
+            "index": features["index"],
+        }
+
+
 @opennmt.models.register_model_in_catalog
-class TransformerMedium(opennmt.models.Transformer):
+class TransformerMediumEx(TransformerEx):
     def __init__(self):
         super().__init__(
             source_inputter=opennmt.inputters.WordEmbedder(embedding_size=512),
@@ -68,6 +109,50 @@ class TransformerMedium(opennmt.models.Transformer):
             attention_dropout=0.1,
             ffn_dropout=0.1,
         )
+
+
+class _DefaultTransformerEx(TransformerEx):
+    def __init__(self, big=False, relative=False):
+        if big:
+            num_units = 1024
+            num_heads = 16
+            ffn_inner_dim = 4096
+        else:
+            num_units = 512
+            num_heads = 8
+            ffn_inner_dim = 2048
+        if relative:
+            position_encoder_class = None
+            maximum_relative_position = 20
+        else:
+            position_encoder_class = opennmt.layers.SinusoidalPositionEncoder
+            maximum_relative_position = None
+        super().__init__(
+            source_inputter=opennmt.inputters.WordEmbedder(embedding_size=num_units),
+            target_inputter=opennmt.inputters.WordEmbedder(embedding_size=num_units),
+            num_layers=6,
+            num_units=num_units,
+            num_heads=num_heads,
+            ffn_inner_dim=ffn_inner_dim,
+            dropout=0.1,
+            attention_dropout=0.1,
+            ffn_dropout=0.1,
+            position_encoder_class=position_encoder_class,
+            maximum_relative_position=maximum_relative_position,
+        )
+
+
+@opennmt.models.register_model_in_catalog
+class TransformerBaseEx(_DefaultTransformerEx):
+    """Defines a Transformer model as decribed in https://arxiv.org/abs/1706.03762."""
+
+
+@opennmt.models.register_model_in_catalog
+class TransformerBigEx(_DefaultTransformerEx):
+    """Defines a large Transformer model as decribed in https://arxiv.org/abs/1706.03762."""
+
+    def __init__(self):
+        super().__init__(big=True)
 
 
 def set_log_level(log_level: int) -> None:
@@ -192,7 +277,10 @@ def create_model(config: dict) -> opennmt.models.Model:
         parent_config = load_config(parent)
         parent_data_config = parent_config["data"]
 
-    model = opennmt.models.get_model_from_catalog(config["model"])
+    model_name: str = config["model"]
+    if model_name.startswith("Transformer"):
+        model_name += "Ex"
+    model = opennmt.models.get_model_from_catalog(model_name)
     if isinstance(model, opennmt.models.Transformer):
         dropout = params_config["transformer_dropout"]
         attention_dropout = params_config["transformer_attention_dropout"]

@@ -76,6 +76,8 @@ def is_train_project(trg_langs: Dict[str, Language], ref_file_path: str, default
         if df.project == trg_project and df.is_train:
             return True
     return False
+
+
 #    return trg_project in lang.train_projects
 
 
@@ -514,7 +516,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Tests a NMT model using OpenNMT-tf")
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument("--memory-growth", default=False, action="store_true", help="Enable memory growth")
-    parser.add_argument("--checkpoint", type=str, help="Checkpoint to use")
+    parser.add_argument("--checkpoint", type=str, help="Test checkpoint")
     parser.add_argument("--last", default=False, action="store_true", help="Test last checkpoint")
     parser.add_argument("--best", default=False, action="store_true", help="Test best evaluated checkpoint")
     parser.add_argument("--avg", default=False, action="store_true", help="Test averaged checkpoint")

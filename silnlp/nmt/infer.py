@@ -55,7 +55,6 @@ def infer_checkpoint(
             print(f"Inferenced {srcTokFile} to {trgTokFile} in {((end-start)/60):.2f} minutes")
 
 
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Tests a NMT model using OpenNMT-tf")
     parser.add_argument("experiment", help="Experiment name")
@@ -86,7 +85,7 @@ def main() -> None:
     srcFiles: List[str] = []
     trgFiles: List[str] = []
     cwd = os.getcwd()
-    for i in range(args.start_seq, args.end_seq+1):
+    for i in range(args.start_seq, args.end_seq + 1):
         fileNum = f"{i:04d}"
         srcFileName = os.path.join(cwd, f"{args.src_prefix}{fileNum}.txt")
         trgFileName = os.path.join(cwd, f"{args.trg_prefix}{fileNum}.txt")
