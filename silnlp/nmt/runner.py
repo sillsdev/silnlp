@@ -193,9 +193,7 @@ def make_inference_dataset(
     prefetch_buffer_size: int = None,
 ):
     def _map_fn(*arg):
-        features = model.examples_inputter.features_inputter.make_features(
-            element=opennmt.utils.misc.item_or_tuple(arg), training=False
-        )
+        features = model.features_inputter.make_features(element=opennmt.utils.misc.item_or_tuple(arg), training=False)
         if isinstance(features, (list, tuple)):
             # Special case for unsupervised inputters that always return a
             # tuple (features, labels).
@@ -204,7 +202,6 @@ def make_inference_dataset(
 
     transform_fns = [lambda dataset: dataset.map(_map_fn, num_parallel_calls=num_threads or 1)]
 
-    # dataset = tf.data.Dataset.from_generator(features_list, output_signature=tf.TensorSpec(shape=(), dtype=tf.string))
     dataset = tf.data.Dataset.from_tensor_slices(features_list)
     dataset = dataset.apply(
         opennmt.data.inference_pipeline(
@@ -212,41 +209,7 @@ def make_inference_dataset(
             batch_type=batch_type,
             transform_fns=transform_fns,
             length_bucket_width=length_bucket_width,
-            length_fn=model.examples_inputter.features_inputter.get_length,
-            num_threads=num_threads,
-            prefetch_buffer_size=prefetch_buffer_size,
-        )
-    )
-    return dataset
-
-
-def make_evaluation_dataset(
-    model: opennmt.models.Model,
-    features_list: List[str],
-    labels_list: List[str],
-    batch_size,
-    batch_type="examples",
-    length_bucket_width=None,
-    num_threads=1,
-    prefetch_buffer_size=None,
-):
-    length_fn = [
-        model.examples_inputter.features_inputter.get_length,
-        model.examples_inputter.labels_inputter.get_length,
-    ]
-    map_fn = lambda *arg: model.examples_inputter.make_features(
-        element=opennmt.utils.misc.item_or_tuple(arg), training=False
-    )
-    transform_fns = [lambda dataset: dataset.map(map_fn, num_parallel_calls=num_threads or 1)]
-
-    dataset = tf.data.Dataset.from_tensor_slices(list(zip(features_list, labels_list)))
-    dataset = dataset.apply(
-        opennmt.data.inference_pipeline(
-            batch_size,
-            batch_type=batch_type,
-            transform_fns=transform_fns,
-            length_bucket_width=length_bucket_width,
-            length_fn=length_fn,
+            length_fn=model.features_inputter.get_length,
             num_threads=num_threads,
             prefetch_buffer_size=prefetch_buffer_size,
         )
@@ -362,6 +325,44 @@ class RunnerEx(opennmt.Runner):
         new_optimizer.iterations.assign(optimizer.iterations)
         new_checkpoint.save(step=step)
         return output_dir
+
+    def infer_list(self, features_list: List[str], checkpoint_path: str = None) -> List[List[str]]:
+        config = self._finalize_config()
+        model: opennmt.models.Model = self._init_model(config)
+        checkpoint = opennmt.utils.checkpoint.Checkpoint.from_config(config, model)
+        checkpoint.restore(checkpoint_path=checkpoint_path, weights_only=True)
+        infer_config = config["infer"]
+        dataset = make_inference_dataset(
+            model,
+            features_list,
+            infer_config["batch_size"],
+            length_bucket_width=infer_config["length_bucket_width"],
+            prefetch_buffer_size=infer_config.get("prefetch_buffer_size"),
+        )
+
+        infer_fn = tf.function(model.infer, input_signature=(dataset.element_spec,))
+        if not tf.config.functions_run_eagerly():
+            tf.get_logger().info("Tracing and optimizing the inference graph...")
+            infer_fn.get_concrete_function()  # Trace the function now.
+
+        results: List[List[str]] = [None] * len(features_list)
+        for source in dataset:
+            predictions = infer_fn(source)
+            predictions = tf.nest.map_structure(lambda t: t.numpy(), predictions)
+            for prediction in opennmt.utils.misc.extract_batches(predictions):
+                index: int = prediction["index"]
+                num_hypotheses = len(prediction["log_probs"])
+                hypotheses: List[str] = []
+                for i in range(num_hypotheses):
+                    if "tokens" in prediction:
+                        target_length = prediction["length"][i]
+                        tokens = prediction["tokens"][i][:target_length]
+                        sentence = model.labels_inputter.tokenizer.detokenize(tokens)
+                    else:
+                        sentence = prediction["text"][i]
+                    hypotheses.append(sentence)
+                results[index] = hypotheses
+        return results
 
     def infer_multiple(
         self, features_paths: List[str], predictions_paths: List[str], checkpoint_path: str = None

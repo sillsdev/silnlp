@@ -25,6 +25,7 @@ from lit_nlp.components import index, metrics, pca, projection, similarity_searc
 
 from ..common.utils import get_git_revision_hash, get_mt_root_dir
 from .config import Language, create_model, load_config, parse_langs, set_log_level
+from .runner import make_inference_dataset
 from .utils import decode_sp, encode_sp, get_best_model_dir, get_last_checkpoint
 
 
@@ -179,6 +180,7 @@ class NMTModel(lit_model.Model):
         opennmt.utils.misc.merge_dict(new_config, config)
         new_config["params"].setdefault("num_hypotheses", new_config["infer"].get("n_best", 1))
         new_config["params"].setdefault("average_loss_in_time", new_config["train"]["batch_type"] == "tokens")
+        new_config["infer"]["n_best"] = 1
         self.config = new_config
 
         self.src_spp = src_spp
@@ -220,7 +222,8 @@ class NMTModel(lit_model.Model):
     def _analyze(self, inputs_list: List[lit_types.JsonDict]) -> List[lit_types.JsonDict]:
         features_list: List[str] = list(map(lambda input: encode_sp(self.src_spp, input["src_text"]), inputs_list))
         infer_config: dict = self.config["infer"]
-        dataset = self._make_inference_dataset(
+        dataset = make_inference_dataset(
+            self.model,
             features_list,
             infer_config["batch_size"],
             length_bucket_width=infer_config["length_bucket_width"],
@@ -284,41 +287,6 @@ class NMTModel(lit_model.Model):
             count += 1
             if count == trg_len:
                 break
-
-    def _make_inference_dataset(
-        self,
-        features_list: List[str],
-        batch_size: int,
-        batch_type: str = "examples",
-        length_bucket_width: int = None,
-        num_threads: int = 1,
-        prefetch_buffer_size: int = None,
-    ):
-        def _map_fn(*arg):
-            features = self.model.features_inputter.make_features(
-                element=opennmt.utils.misc.item_or_tuple(arg), training=False
-            )
-            if isinstance(features, (list, tuple)):
-                # Special case for unsupervised inputters that always return a
-                # tuple (features, labels).
-                return features[0]
-            return features
-
-        transform_fns = [lambda dataset: dataset.map(_map_fn, num_parallel_calls=num_threads or 1)]
-
-        dataset = tf.data.Dataset.from_tensor_slices(features_list)
-        dataset = dataset.apply(
-            opennmt.data.inference_pipeline(
-                batch_size,
-                batch_type=batch_type,
-                transform_fns=transform_fns,
-                length_bucket_width=length_bucket_width,
-                length_fn=self.model.features_inputter.get_length,
-                num_threads=num_threads,
-                prefetch_buffer_size=prefetch_buffer_size,
-            )
-        )
-        return dataset
 
     def predict_minibatch(self, inputs: List[lit_types.JsonDict], config) -> List[lit_types.JsonDict]:
         pass

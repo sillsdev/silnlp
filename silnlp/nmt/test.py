@@ -202,12 +202,6 @@ def process_individual_books(
                                     book_refs.append([])
                                 book_refs[ref_index].append(ref_line)
     finally:
-        if vref_file is not None:
-            vref_file.close()
-        if src_file is not None:
-            src_file.close()
-        if pred_file is not None:
-            pred_file.close()
         if ref_files is not None:
             for ref_file in ref_files:
                 ref_file.close()
