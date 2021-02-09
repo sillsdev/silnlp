@@ -22,9 +22,10 @@ from lit_nlp.api import dataset as lit_dataset
 from lit_nlp.api import model as lit_model
 from lit_nlp.api import types as lit_types
 from lit_nlp.components import index, metrics, pca, projection, similarity_searcher, umap, word_replacer
+from tensorflow.python.eager.def_function import Function
 
 from ..common.utils import get_git_revision_hash, get_mt_root_dir
-from .config import Language, create_model, load_config, parse_langs, set_log_level
+from .config import Language, TransformerEx, create_model, load_config, parse_langs, set_log_level
 from .runner import make_inference_dataset
 from .utils import decode_sp, encode_sp, get_best_model_dir, get_last_checkpoint
 
@@ -163,7 +164,7 @@ class NMTModel(lit_model.Model):
     def __init__(
         self,
         config: dict,
-        model: opennmt.models.Model,
+        model: TransformerEx,
         src_spp: sp.SentencePieceProcessor,
         trg_spp: sp.SentencePieceProcessor,
         step: int,
@@ -185,9 +186,9 @@ class NMTModel(lit_model.Model):
 
         self.src_spp = src_spp
         self.trg_spp = trg_spp
-        self.model = opennmt.utils.misc.clone_layer(model)
+        self.model: TransformerEx = opennmt.utils.misc.clone_layer(model)
         self.model.initialize(self.config["data"], params=self.config["params"])
-        self._analyze_fn = None
+        self._analyze_fn: Optional[Function] = None
 
         self.checkpoint_path = checkpoint_path
         self.checkpoint: opennmt.utils.checkpoint.Checkpoint = None
@@ -204,20 +205,19 @@ class NMTModel(lit_model.Model):
     def predict(self, inputs: Iterable[lit_types.JsonDict], scrub_arrays=True) -> Iterator[lit_types.JsonDict]:
         inputs_list: List[str] = list(inputs)
         if len(inputs_list) == 0:
-            return []
+            yield from ()
 
         if self.checkpoint is None:
             self.checkpoint = opennmt.utils.checkpoint.Checkpoint.from_config(self.config, self.model)
             self.checkpoint.restore(checkpoint_path=self.checkpoint_path, weights_only=True)
 
-        predictions = self._analyze(inputs_list)
-
+        predictions: Iterator[lit_types.JsonDict] = iter(self._analyze(inputs_list))
         if scrub_arrays:
             predictions = (lit_model.scrub_numpy_refs(res) for res in predictions)
         return predictions
 
     def predict_single(self, one_input: lit_types.JsonDict, **kw) -> lit_types.JsonDict:
-        return list(self.predict([one_input], **kw))[0]
+        return next(self.predict([one_input], **kw))
 
     def _analyze(self, inputs_list: List[lit_types.JsonDict]) -> List[lit_types.JsonDict]:
         features_list: List[str] = list(map(lambda input: encode_sp(self.src_spp, input["src_text"]), inputs_list))

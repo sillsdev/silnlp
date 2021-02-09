@@ -114,6 +114,17 @@ python-versions = ">=3.5"
 numpy = "*"
 
 [[package]]
+name = "ctranslate2"
+version = "1.18.1"
+description = "Fast inference engine for OpenNMT models"
+category = "main"
+optional = false
+python-versions = ">=3.5"
+
+[package.dependencies]
+numpy = "*"
+
+[[package]]
 name = "cycler"
 version = "0.10.0"
 description = "Composable style cycles"
@@ -520,23 +531,26 @@ signedtoken = ["cryptography", "pyjwt (>=1.0.0)"]
 
 [[package]]
 name = "opennmt-tf"
-version = "2.14.0"
+version = "2.15.0"
 description = "Neural machine translation and sequence learning using TensorFlow"
 category = "main"
 optional = false
 python-versions = ">=3.5"
 
 [package.dependencies]
-ctranslate2 = {version = ">=1.7,<2", markers = "platform_system == \"Linux\""}
-pyonmttok = {version = ">=1.18.1,<2", markers = "platform_system == \"Linux\""}
+ctranslate2 = [
+    {version = ">=1.17,<2", markers = "platform_system == \"Darwin\""},
+    {version = ">=1.7,<2", markers = "platform_system == \"Linux\""},
+]
+pyonmttok = {version = ">=1.23.0,<2", markers = "platform_system == \"Linux\" or platform_system == \"Darwin\""}
 pyyaml = ">=5.3,<5.4"
 rouge = ">=1.0,<2"
-sacrebleu = ">=1.4.14,<2"
+sacrebleu = ">=1.5.0,<1.6"
 tensorflow = ">=2.3,<2.5"
 tensorflow-addons = ">=0.12,<0.13"
 
 [package.extras]
-tests = ["pylint (>=2.4.0,<2.5.0)", "parameterized", "pytest-cov"]
+tests = ["black (==20.8b1)", "flake8 (>=3.8.0,<3.9.0)", "parameterized (==0.8.1)", "pytest-cov"]
 
 [[package]]
 name = "opt-einsum"
@@ -810,7 +824,7 @@ pyasn1 = ">=0.1.3"
 
 [[package]]
 name = "sacrebleu"
-version = "1.4.14"
+version = "1.5.0"
 description = "Hassle-free computation of shareable, comparable, and reproducible BLEU, chrF, and TER scores"
 category = "main"
 optional = false
@@ -820,7 +834,7 @@ python-versions = ">=3"
 portalocker = "*"
 
 [package.extras]
-ja = ["mecab-python3 (>=1.0,<2.0)", "ipadic (>=1.0,<2.0)"]
+ja = ["mecab-python3 (==1.0.3)", "ipadic (>=1.0,<2.0)"]
 
 [[package]]
 name = "scikit-image"
@@ -1127,7 +1141,7 @@ testing = ["jaraco.itertools", "func-timeout"]
 [metadata]
 lock-version = "1.1"
 python-versions = "~3.6.1"
-content-hash = "8340117dc87f5e5b1f3547bbf02a6a24048d4104546d1683b4f25513f012021e"
+content-hash = "32098eef576ff1beb580c899714679528ec9dc0e008df9254e4e24912c102323"
 
 [metadata.files]
 absl-py = [
@@ -1176,6 +1190,16 @@ ctranslate2 = [
     {file = "ctranslate2-1.16.2-cp37-cp37m-manylinux2010_x86_64.whl", hash = "sha256:7cddd1c1c3333053f00ac5903ca5cb8f9695b0a741040b17dd81ac5eed9fe179"},
     {file = "ctranslate2-1.16.2-cp38-cp38-manylinux2010_x86_64.whl", hash = "sha256:6d0c276a7f2117d5be7dee8a370fc467edc92a5ea47202af745c40ed81f11fee"},
     {file = "ctranslate2-1.16.2-cp39-cp39-manylinux2010_x86_64.whl", hash = "sha256:e3d7f9da068cb267f91f6adb7d4c3722bf0a09ebccb9eaccb2b4d1c64897a35a"},
+    {file = "ctranslate2-1.18.1-cp35-cp35m-macosx_10_9_x86_64.whl", hash = "sha256:916786c12bf061f66b24821846aabf75c673031b89ba69d891e9cac87cbf73a7"},
+    {file = "ctranslate2-1.18.1-cp35-cp35m-manylinux2014_x86_64.whl", hash = "sha256:f0c9c98625d84ecc8d795d1a818e176240c3b89ed22131a732cfd5ff745ce02e"},
+    {file = "ctranslate2-1.18.1-cp36-cp36m-macosx_10_9_x86_64.whl", hash = "sha256:b12c32facecddef55eb3ae16b176dc6e716d2d6636b956d88c9bde7bab2bed06"},
+    {file = "ctranslate2-1.18.1-cp36-cp36m-manylinux2014_x86_64.whl", hash = "sha256:9df823299dbecdc74e72da33e4d7c2b29b251270a563a30b05fd009a1ccc166a"},
+    {file = "ctranslate2-1.18.1-cp37-cp37m-macosx_10_9_x86_64.whl", hash = "sha256:dc1e5b58f66a18847109456d9dd17469f0c204ffe9a92fc06f938eaf3ef1668f"},
+    {file = "ctranslate2-1.18.1-cp37-cp37m-manylinux2014_x86_64.whl", hash = "sha256:6be0031d0311099aab5c6e6bffee2082d39b0830d2b7fa4cf2764f10c13968ae"},
+    {file = "ctranslate2-1.18.1-cp38-cp38-macosx_10_9_x86_64.whl", hash = "sha256:fbb9cc2251ca9a515271852e55807d99510869762517176117687004693d1309"},
+    {file = "ctranslate2-1.18.1-cp38-cp38-manylinux2014_x86_64.whl", hash = "sha256:e6b6d187c36f481f9be4ce69970d9e0bcc238c6e8a9e38ce5d3121c16bd65e17"},
+    {file = "ctranslate2-1.18.1-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:ec87da1b961a95de4d75941a447d47f5e091efcaef9637f9b25e7adebfaa2cf2"},
+    {file = "ctranslate2-1.18.1-cp39-cp39-manylinux2014_x86_64.whl", hash = "sha256:79251c94b78be05c79602359802410e9dd7d4aa71f5f403cc78e45d405730751"},
 ]
 cycler = [
     {file = "cycler-0.10.0-py2.py3-none-any.whl", hash = "sha256:1d8a5ae1ff6c5cf9b93e8811e581232ad8920aeec647c37316ceac982b08cb2d"},
@@ -1462,8 +1486,8 @@ oauthlib = [
     {file = "oauthlib-3.1.0.tar.gz", hash = "sha256:bee41cc35fcca6e988463cacc3bcb8a96224f470ca547e697b604cc697b2f889"},
 ]
 opennmt-tf = [
-    {file = "OpenNMT-tf-2.14.0.tar.gz", hash = "sha256:f4e4f0834d7ddbca8faffae5e7cad8b6a49dfd854456f07e82f4bc4bea4ae800"},
-    {file = "OpenNMT_tf-2.14.0-py3-none-any.whl", hash = "sha256:82f195c7e7ec5f3bc89812e054887c7d3640bf0cf300a5477147b345719a9021"},
+    {file = "OpenNMT-tf-2.15.0.tar.gz", hash = "sha256:54e8f52076db8caef1ab11b23de20b97da5db35b4a3e0ffbb52e1c7e1c71fd27"},
+    {file = "OpenNMT_tf-2.15.0-py3-none-any.whl", hash = "sha256:fbba8c7e3bb69e45b76a78ba2dce9ff5bd30069954cef2ef402b7d0d609732ac"},
 ]
 opt-einsum = [
     {file = "opt_einsum-3.3.0-py3-none-any.whl", hash = "sha256:2455e59e3947d3c275477df7f5205b30635e266fe6dc300e3d9f9646bfcea147"},
@@ -1729,8 +1753,9 @@ rsa = [
     {file = "rsa-4.6.tar.gz", hash = "sha256:109ea5a66744dd859bf16fe904b8d8b627adafb9408753161e766a92e7d681fa"},
 ]
 sacrebleu = [
-    {file = "sacrebleu-1.4.14-py3-none-any.whl", hash = "sha256:0f13a40a9e3cafca48dbd0f3ca178abbc42b1da86b5892c1e0809c76d985544d"},
-    {file = "sacrebleu-1.4.14.tar.gz", hash = "sha256:17eec489ead033e87e1ce6d32ad4811f5191df0fabafc1d74c4b907341d30e6b"},
+    {file = "sacrebleu-1.5.0-py3-none-any.whl", hash = "sha256:7c978b7fc47f26592f8c3213bf1fd66044c57e36c22449f3ad04b983d35b6527"},
+    {file = "sacrebleu-1.5.0-py3.8.egg", hash = "sha256:f5893d29729a237e83ceb56142c2cdce851556c8ad0a71bc5947d064c4e671fa"},
+    {file = "sacrebleu-1.5.0.tar.gz", hash = "sha256:c7465ad7f997130414f8f9b28e17759051607ee18bf2f85644d2e67dd6ccb8a6"},
 ]
 scikit-image = [
     {file = "scikit-image-0.17.2.tar.gz", hash = "sha256:bd954c0588f0f7e81d9763dc95e06950e68247d540476e06cb77bcbcd8c2d8b3"},

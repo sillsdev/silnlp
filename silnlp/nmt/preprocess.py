@@ -170,7 +170,7 @@ def create_unshared_vocab(
             parent_vocab = opennmt.data.Vocab()
             parent_vocab.load(parent_vocab_path)
 
-            child_tokens: Set[str] = set()
+            child_tokens = set()
             for vocab_file_path in vocab_file_paths:
                 for line in encode_sp_lines(parent_spp, load_corpus(vocab_file_path)):
                     child_tokens.update(line.split())
@@ -178,7 +178,7 @@ def create_unshared_vocab(
 
         # all tokens in the child corpora are in the parent vocab, so we can just use the parent vocab
         # or, the user wants to reuse the parent vocab for this child experiment
-        if parent_use_vocab:
+        if child_tokens is None or parent_vocab is None:
             sp_vocab_path = os.path.join(root_dir, f"{prefix}-sp.vocab")
             onmt_vocab_path = os.path.join(root_dir, f"{prefix}-onmt.vocab")
             shutil.copy2(parent_sp_prefix_path + ".model", os.path.join(root_dir, f"{prefix}-sp.model"))
@@ -280,8 +280,8 @@ def train_count(data_files: List[DataFile]) -> int:
 
 
 def get_names_files(src_files: List[DataFile], trg_langs: Dict[str, Language]) -> Tuple[List[DataFile], List[DataFile]]:
-    src_names_files: List[str] = []
-    trg_names_files: List[str] = []
+    src_names_files: List[DataFile] = []
+    trg_names_files: List[DataFile] = []
     for src_file in src_files:
         if not src_file.is_train:
             continue
@@ -591,7 +591,7 @@ def preprocess_standard(
                 population = (
                     range(corpus_len)
                     if len(test_indices) == 0
-                    else list(filter(lambda i: i not in test_indices, range(corpus_len)))
+                    else [i for i in range(corpus_len) if i not in test_indices]
                 )
                 if val_size < 0 or val_size >= len(population):
                     val_indices = None

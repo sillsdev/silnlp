@@ -32,9 +32,6 @@ class Schema(NamedTuple):
     fields: Mapping
 
 
-_schema = Schema
-
-
 def flag(v):
     """
     >>> flag('')
@@ -147,7 +144,7 @@ class parser(sfm.parser):
     '''
 
     def __init__(self, source, schema, error_level=sfm.ErrorLevel.Content):
-        if not isinstance(schema, _schema):
+        if not isinstance(schema, Schema):
             raise TypeError(f"arg 2 must be a 'Schema' not {schema!r}")
         self._mapping_type = type(schema.fields)
         self._schema = schema

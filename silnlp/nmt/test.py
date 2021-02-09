@@ -477,7 +477,7 @@ def test_checkpoint(
                     other_scores["WER"] = wer_score
 
             if "ter" in scorers:
-                ter_score = compute_ter_score(pair_sys, pair_refs)
+                ter_score = compute_ter_score(pair_sys, cast(List[Iterable[str]], pair_refs))
                 if ter_score >= 0:
                     other_scores["TER"] = ter_score
 

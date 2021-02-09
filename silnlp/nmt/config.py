@@ -374,13 +374,14 @@ def parse_projects(projects_value: Optional[Union[str, List[str]]], default: Set
 def parse_langs(langs: Iterable[Union[str, dict]]) -> Dict[str, Language]:
     lang_infos: Dict[str, Language] = {}
     for lang in langs:
+        data_files: List[DataFile]
         if isinstance(lang, str):
             index = lang.find("-")
             if index == -1:
                 raise RuntimeError("A language project is not fully specified.")
             iso = lang[:index]
             projects_str = lang[index + 1 :]
-            data_files: List[DataFile] = []
+            data_files = []
             for project in projects_str.split(","):
                 project = project.strip()
                 project_path = get_corpus_path(iso, project)
@@ -392,7 +393,7 @@ def parse_langs(langs: Iterable[Union[str, dict]]) -> Dict[str, Language]:
             test_projects = parse_projects(lang.get("test"), default=train_projects)
             val_projects = parse_projects(lang.get("val"), default=train_projects)
             synth_projects = parse_projects(lang.get("synth"))
-            data_files: List[DataFile] = []
+            data_files = []
             for project in train_projects | test_projects | val_projects | synth_projects:
                 file_path = get_corpus_path(iso, project)
                 file_type = DataFileType.NONE

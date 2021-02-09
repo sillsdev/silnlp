@@ -345,7 +345,7 @@ class RunnerEx(opennmt.Runner):
             tf.get_logger().info("Tracing and optimizing the inference graph...")
             infer_fn.get_concrete_function()  # Trace the function now.
 
-        results: List[List[str]] = [None] * len(features_list)
+        results: List[List[str]] = [[""]] * len(features_list)
         for source in dataset:
             predictions = infer_fn(source)
             predictions = tf.nest.map_structure(lambda t: t.numpy(), predictions)
@@ -449,7 +449,7 @@ class RunnerEx(opennmt.Runner):
             tf.get_logger().info("Tracing and optimizing the inference graph...")
             infer_fn.get_concrete_function()  # Trace the function now.
 
-        results: List[dict] = [None] * len(features_list)
+        results: List[dict] = [{}] * len(features_list)
         for source in dataset:
             predictions = infer_fn(source)
             predictions = tf.nest.map_structure(lambda t: t.numpy(), predictions)

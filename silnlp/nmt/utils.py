@@ -70,32 +70,45 @@ class BLEUSentencepieceScorer(opennmt.utils.Scorer):
             return bleu.score
 
 
+def load_ref_streams(ref_path: str) -> List[List[str]]:
+    ref_streams: List[IO] = []
+    try:
+        if ref_path.endswith(".0"):
+            prefix = ref_path[:-2]
+            i = 0
+            while os.path.isfile(f"{prefix}.{i}"):
+                ref_streams.append(tf.io.gfile.GFile(f"{prefix}.{i}"))
+                i += 1
+        else:
+            ref_streams.append(tf.io.gfile.GFile(ref_path))
+        refs: List[List[str]] = []
+        for lines in zip(*ref_streams):
+            for ref_index in range(len(ref_streams)):
+                ref_line = lines[ref_index].strip()
+                if len(refs) == ref_index:
+                    refs.append([])
+                refs[ref_index].append(ref_line)
+        return refs
+    finally:
+        for ref_stream in ref_streams:
+            ref_stream.close()
+
+
+def load_sys_stream(hyp_path: str) -> List[str]:
+    sys_stream = []
+    with tf.io.gfile.GFile(hyp_path) as f:
+        for line in f:
+            sys_stream.append(line.rstrip())
+    return sys_stream
+
+
 @opennmt.utils.register_scorer(name="bleu_multi_ref")
 class BLEUMultiRefScorer(opennmt.utils.Scorer):
     def __init__(self):
         super().__init__("bleu")
 
     def __call__(self, ref_path: str, hyp_path: str) -> float:
-        with tf.io.gfile.GFile(hyp_path) as sys_stream:
-            ref_streams: List[IO] = []
-            try:
-                if ref_path.endswith(".0"):
-                    prefix = ref_path[:-2]
-                    i = 0
-                    while os.path.isfile(f"{prefix}.{i}"):
-                        ref_streams.append(tf.io.gfile.GFile(f"{prefix}.{i}"))
-                        i += 1
-                else:
-                    ref_streams.append(tf.io.gfile.GFile(ref_path))
-                refs: List[List[str]] = []
-                for lines in zip(*ref_streams):
-                    for ref_index in range(len(ref_streams)):
-                        ref_line = lines[ref_index].strip()
-                        if len(refs) == ref_index:
-                            refs.append([])
-                        refs[ref_index].append(ref_line)
-                bleu = sacrebleu.corpus_bleu(sys_stream, cast(List[Iterable[str]], refs), force=True)
-                return bleu.score
-            finally:
-                for ref_stream in ref_streams:
-                    ref_stream.close()
+        ref_streams = load_ref_streams(ref_path)
+        sys_stream = load_sys_stream(hyp_path)
+        bleu = sacrebleu.corpus_bleu(sys_stream, cast(List[Iterable[str]], ref_streams), force=True)
+        return bleu.score

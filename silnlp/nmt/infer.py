@@ -233,7 +233,7 @@ def main() -> None:
             raise RuntimeError("An output file must be specified.")
 
         src_project: Optional[str] = args.src_project
-        if args.src_project is None:
+        if src_project is None:
             src_langs = parse_langs(data_config["src_langs"])
             src_project = next(iter(src_langs.values())).data_files[0].project
         infer_book(runner, src_spp, src_project, args.book, checkpoint_path, args.output_usfm, trg_iso)
