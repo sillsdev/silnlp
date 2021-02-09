@@ -63,13 +63,13 @@ def extract_names(output_dir: str, iso: str, project_dir: str) -> None:
         return
 
     name = os.path.basename(project_dir)
-    vern_names_path = os.path.join(output_dir, f"{iso}-{name}-names.txt")
-    en_names_path = os.path.join(output_dir, f"en-{name}-names.txt")
+    vern_terms_path = os.path.join(output_dir, f"{iso}-{name}-names.txt")
+    en_terms_path = os.path.join(output_dir, f"en-{name}-names.txt")
 
     names: Set[Tuple[str, str]] = set()
-    with open(vern_names_path, "w", encoding="utf-8", newline="\n") as vern_names_file, open(
-        en_names_path, "w", encoding="utf-8", newline="\n"
-    ) as en_names_file:
+    with open(vern_terms_path, "w", encoding="utf-8", newline="\n") as vern_terms_file, open(
+        en_terms_path, "w", encoding="utf-8", newline="\n"
+    ) as en_terms_file:
         terms_tree = ElementTree.parse(terms_path)
         renderings_tree = ElementTree.parse(renderings_path)
         for term_elem in terms_tree.getroot().findall("Term"):
@@ -94,9 +94,11 @@ def extract_names(output_dir: str, iso: str, project_dir: str) -> None:
                 gloss = gloss.strip()
                 for rendering in renderings:
                     rendering = rendering.strip()
+                    rendering = re.sub("\s*\(.*\)", "", rendering)
+                    rendering = rendering.strip("*")
                     if (gloss, rendering) not in names:
-                        vern_names_file.write(rendering + "\n")
-                        en_names_file.write(gloss + "\n")
+                        vern_terms_file.write(rendering + "\n")
+                        en_terms_file.write(gloss + "\n")
                         names.add((gloss, rendering))
 
 

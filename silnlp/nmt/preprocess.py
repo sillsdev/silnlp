@@ -474,12 +474,12 @@ def preprocess_scripture(
             mirror_cur_names = cur_names.rename(columns={"source": "target", "target": "source"})
             if write_trg_tag:
                 insert_trg_tag(src_names_file.iso, mirror_cur_names)
-            names = pd.concat([train, cur_names], ignore_index=True)
+            names = pd.concat([names, cur_names], ignore_index=True)
 
         if write_trg_tag:
             insert_trg_tag(trg_names_file.iso, cur_names)
 
-        names = pd.concat([train, cur_names], ignore_index=True)
+        names = pd.concat([names, cur_names], ignore_index=True)
 
     if train is None:
         return
