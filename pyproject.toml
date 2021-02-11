@@ -38,6 +38,7 @@ numpy = "1.19.3"
 OpenNMT-tf = "^2.15.0"
 lit-nlp = "^0.2"
 annoy = "^1.17.0"
+rbo = {git = "https://github.com/changyaochen/rbo.git", rev = "master"}
 
 [tool.poetry.dev-dependencies]
 mypy = "^0.780"

@@ -34,7 +34,7 @@ def main() -> None:
         if not os.path.isdir(os.path.join(root_dir, "run")) and "parent" in data_config:
             checkpoint_path = os.path.join(root_dir, "parent")
 
-        print(f"Training {exp_name}...")
+        print(f"=== Training ({exp_name}) ===")
         runner.train(num_devices=args.num_devices, with_eval=True, checkpoint_path=checkpoint_path)
         print("Training completed")
 

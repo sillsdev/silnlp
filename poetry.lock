@@ -104,17 +104,6 @@ python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
 
 [[package]]
 name = "ctranslate2"
-version = "1.16.2"
-description = "Fast inference engine for OpenNMT models"
-category = "main"
-optional = false
-python-versions = ">=3.5"
-
-[package.dependencies]
-numpy = "*"
-
-[[package]]
-name = "ctranslate2"
 version = "1.18.1"
 description = "Fast inference engine for OpenNMT models"
 category = "main"
@@ -760,6 +749,24 @@ optional = false
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
 
 [[package]]
+name = "rbo"
+version = "0.1"
+description = ""
+category = "main"
+optional = false
+python-versions = "*"
+develop = false
+
+[package.dependencies]
+numpy = "*"
+
+[package.source]
+type = "git"
+url = "https://github.com/changyaochen/rbo.git"
+reference = "master"
+resolved_reference = "2b2ff7b24534f342a5153573bf384c06317ec2de"
+
+[[package]]
 name = "regex"
 version = "2020.6.8"
 description = "Alternative regular expression module, to replace re."
@@ -1141,7 +1148,7 @@ testing = ["jaraco.itertools", "func-timeout"]
 [metadata]
 lock-version = "1.1"
 python-versions = "~3.6.1"
-content-hash = "32098eef576ff1beb580c899714679528ec9dc0e008df9254e4e24912c102323"
+content-hash = "e96e4e6220ca0c1813aeeb4ab33f120af87e0fda83a0a5b7a4ac351f640063fd"
 
 [metadata.files]
 absl-py = [
@@ -1185,11 +1192,6 @@ click = [
     {file = "click-7.1.2.tar.gz", hash = "sha256:d2b5255c7c6349bc1bd1e59e08cd12acbbd63ce649f2588755783aa94dfb6b1a"},
 ]
 ctranslate2 = [
-    {file = "ctranslate2-1.16.2-cp35-cp35m-manylinux2010_x86_64.whl", hash = "sha256:23ffaae1d7b0025aa30d2e9de9c035e4d7c81f227c65c5ccd834c03d29e461dd"},
-    {file = "ctranslate2-1.16.2-cp36-cp36m-manylinux2010_x86_64.whl", hash = "sha256:b2c5ab2f594f3cdf38cd0a62e7bc86b3228038e0c140261496c98d22203e774b"},
-    {file = "ctranslate2-1.16.2-cp37-cp37m-manylinux2010_x86_64.whl", hash = "sha256:7cddd1c1c3333053f00ac5903ca5cb8f9695b0a741040b17dd81ac5eed9fe179"},
-    {file = "ctranslate2-1.16.2-cp38-cp38-manylinux2010_x86_64.whl", hash = "sha256:6d0c276a7f2117d5be7dee8a370fc467edc92a5ea47202af745c40ed81f11fee"},
-    {file = "ctranslate2-1.16.2-cp39-cp39-manylinux2010_x86_64.whl", hash = "sha256:e3d7f9da068cb267f91f6adb7d4c3722bf0a09ebccb9eaccb2b4d1c64897a35a"},
     {file = "ctranslate2-1.18.1-cp35-cp35m-macosx_10_9_x86_64.whl", hash = "sha256:916786c12bf061f66b24821846aabf75c673031b89ba69d891e9cac87cbf73a7"},
     {file = "ctranslate2-1.18.1-cp35-cp35m-manylinux2014_x86_64.whl", hash = "sha256:f0c9c98625d84ecc8d795d1a818e176240c3b89ed22131a732cfd5ff745ce02e"},
     {file = "ctranslate2-1.18.1-cp36-cp36m-macosx_10_9_x86_64.whl", hash = "sha256:b12c32facecddef55eb3ae16b176dc6e716d2d6636b956d88c9bde7bab2bed06"},
@@ -1712,6 +1714,7 @@ pyyaml = [
     {file = "PyYAML-5.3.1-cp38-cp38-win_amd64.whl", hash = "sha256:95f71d2af0ff4227885f7a6605c37fd53d3a106fcab511b8860ecca9fcf400ee"},
     {file = "PyYAML-5.3.1.tar.gz", hash = "sha256:b8eac752c5e14d3eca0e6dd9199cd627518cb5ec06add0de9d32baeee6fe645d"},
 ]
+rbo = []
 regex = [
     {file = "regex-2020.6.8-cp27-cp27m-win32.whl", hash = "sha256:fbff901c54c22425a5b809b914a3bfaf4b9570eee0e5ce8186ac71eb2025191c"},
     {file = "regex-2020.6.8-cp27-cp27m-win_amd64.whl", hash = "sha256:112e34adf95e45158c597feea65d06a8124898bdeac975c9087fe71b572bd938"},

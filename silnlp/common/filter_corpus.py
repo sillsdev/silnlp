@@ -1,13 +1,21 @@
 import argparse
-from typing import List
 import os
 import tempfile
+from typing import List
 
 import numpy as np
 
-from .corpus import compute_alignment_scores
+from ..alignment.utils import compute_alignment_scores
 
-def filterTsvFile(tsv_path: str, scores_path: str, src_out_path: str, trg_out_path: str, threshold: float = None, percentage: float = None):
+
+def filterTsvFile(
+    tsv_path: str,
+    scores_path: str,
+    src_out_path: str,
+    trg_out_path: str,
+    threshold: float = None,
+    percentage: float = None,
+):
     # Load the scores
     scores: List[float] = []
     with open(scores_path, "r", encoding="utf-8") as scores_file:
@@ -22,12 +30,13 @@ def filterTsvFile(tsv_path: str, scores_path: str, src_out_path: str, trg_out_pa
     elif percentage is not None:
         threshold = np.quantile(scores, percentage)
         max_count = int(len(scores) * (1 - percentage))
+    assert threshold is not None
 
     # Write the line pairs with scores exceeding the threshold
     count: int = 0
-    with open(tsv_path, "r", encoding="utf-8") as input_file,\
-         open(src_out_path, "w", encoding="utf-8") as src_output_file,\
-         open(trg_out_path, "w", encoding="utf-8") as trg_output_file:
+    with open(tsv_path, "r", encoding="utf-8") as input_file, open(
+        src_out_path, "w", encoding="utf-8"
+    ) as src_output_file, open(trg_out_path, "w", encoding="utf-8") as trg_output_file:
         for sentences, score in zip(input_file, scores):
             if score > threshold:
                 src_sentence, trg_sentence = sentences.strip().split("\t")
@@ -37,6 +46,7 @@ def filterTsvFile(tsv_path: str, scores_path: str, src_out_path: str, trg_out_pa
                 if count == max_count:
                     break
 
+
 def check_sent_pair(src_sent: str, trg_sent: str) -> bool:
     if src_sent != "\n" and trg_sent != "\n":
         return True
@@ -44,9 +54,9 @@ def check_sent_pair(src_sent: str, trg_sent: str) -> bool:
 
 
 def split_and_filter_tsv(input_path: str, src_path: str, trg_path: str):
-    with open(input_path, "r", encoding="utf-8") as input_file,\
-         open(src_path, "w", encoding="utf-8") as src_output_file,\
-         open(trg_path, "w", encoding="utf-8") as trg_output_file:
+    with open(input_path, "r", encoding="utf-8") as input_file, open(
+        src_path, "w", encoding="utf-8"
+    ) as src_output_file, open(trg_path, "w", encoding="utf-8") as trg_output_file:
         for sentences in input_file:
             src_sent, trg_sent = sentences.strip().split("\t")
             if check_sent_pair(src_sent, trg_sent):
@@ -55,19 +65,21 @@ def split_and_filter_tsv(input_path: str, src_path: str, trg_path: str):
 
 
 def filter_src_trg_files(src_in_path: str, trg_in_path: str, src_out_path: str, trg_out_path: str):
-    with open(src_in_path, "r", encoding="utf-8") as src_file, \
-         open(trg_in_path, "r", encoding="utf-8") as trg_file, \
-         open(src_out_path, "w", encoding="utf-8") as tmp_src_file, \
-         open(trg_out_path, "w", encoding="utf-8") as tmp_trg_file:
+    with open(src_in_path, "r", encoding="utf-8") as src_file, open(
+        trg_in_path, "r", encoding="utf-8"
+    ) as trg_file, open(src_out_path, "w", encoding="utf-8") as tmp_src_file, open(
+        trg_out_path, "w", encoding="utf-8"
+    ) as tmp_trg_file:
         for src_sent, trg_sent in zip(src_file, trg_file):
             if check_sent_pair(src_sent, trg_sent):
                 tmp_src_file.write(src_sent)
                 tmp_trg_file.write(trg_sent)
 
+
 def write_scores_file(scores_out_path: str, scores: List[float], src_path: str, trg_path: str):
-    with open(src_path, "r", encoding="utf-8") as src_in, \
-         open(trg_path, "r", encoding="utf-8") as trg_in, \
-         open(scores_out_path, "w", encoding="utf-8") as scores_out:
+    with open(src_path, "r", encoding="utf-8") as src_in, open(trg_path, "r", encoding="utf-8") as trg_in, open(
+        scores_out_path, "w", encoding="utf-8"
+    ) as scores_out:
         for src_sent, trg_sent, score in zip(src_in, trg_in, scores):
             scores_out.write(f"{src_sent.strip()}\t{trg_sent.strip()}\t{score:.3f}\n")
 
@@ -126,10 +138,9 @@ def main() -> None:
 
         # Write the filtered results
         count: int = 0
-        with open(src_path, "r", encoding="utf-8") as src_in, \
-             open(trg_path, "r", encoding="utf-8") as trg_in, \
-             open(args.src_output, "w", encoding="utf-8") as src_out, \
-             open(args.trg_output, "w", encoding="utf-8") as trg_out:
+        with open(src_path, "r", encoding="utf-8") as src_in, open(trg_path, "r", encoding="utf-8") as trg_in, open(
+            args.src_output, "w", encoding="utf-8"
+        ) as src_out, open(args.trg_output, "w", encoding="utf-8") as trg_out:
             for src_sent, trg_sent, score in zip(src_in, trg_in, scores):
                 if score > threshold:
                     src_out.write(src_sent)

@@ -4,63 +4,7 @@ from typing import Optional
 
 from ..common.utils import get_repo_dir
 from .aligner import Aligner
-
-
-def train_alignment_model(
-    model_type: str,
-    smt_model_type: Optional[str],
-    plugin_file_path: Optional[str],
-    model_dir: str,
-    src_file_path: str,
-    trg_file_path: str,
-) -> None:
-    args = [
-        "dotnet",
-        "machine",
-        "train",
-        "alignment-model",
-        model_dir,
-        src_file_path,
-        trg_file_path,
-        "-mt",
-        model_type,
-    ]
-    if smt_model_type is not None:
-        args.append("-smt")
-        args.append(smt_model_type)
-    if plugin_file_path is not None:
-        args.append("-mp")
-        args.append(plugin_file_path)
-    subprocess.run(args, cwd=get_repo_dir())
-
-
-def align_parallel_corpus(
-    model_type: str,
-    smt_model_type: Optional[str],
-    plugin_file_path: Optional[str],
-    model_dir: str,
-    src_file_path: str,
-    trg_file_path: str,
-    output_file_path: str,
-) -> None:
-    args = [
-        "dotnet",
-        "machine",
-        "align",
-        model_dir,
-        src_file_path,
-        trg_file_path,
-        output_file_path,
-        "-mt",
-        model_type,
-    ]
-    if smt_model_type is not None:
-        args.append("-smt")
-        args.append(smt_model_type)
-    if plugin_file_path is not None:
-        args.append("-mp")
-        args.append(plugin_file_path)
-    subprocess.run(args, cwd=get_repo_dir())
+from .lexicon import Lexicon
 
 
 class MachineAligner(Aligner):
@@ -71,25 +15,116 @@ class MachineAligner(Aligner):
         model_dir: str,
         smt_model_type: Optional[str] = None,
         plugin_file_path: Optional[str] = None,
+        has_inverse_model: bool = True,
     ) -> None:
         super().__init__(id, model_dir)
         self.model_type = model_type
         self.smt_model_type = smt_model_type
         self._plugin_file_path = plugin_file_path
+        self._has_inverse_model = has_inverse_model
+
+    @property
+    def has_inverse_model(self) -> bool:
+        return self._has_inverse_model
 
     def align(self, src_file_path: str, trg_file_path: str, out_file_path: str) -> None:
-        train_alignment_model(
-            self.model_type, self.smt_model_type, self._plugin_file_path, self.model_dir, src_file_path, trg_file_path
-        )
-        align_parallel_corpus(
-            self.model_type,
-            self.smt_model_type,
-            self._plugin_file_path,
+        direct_lex_path = os.path.join(self.model_dir, "lexicon.direct.txt")
+        if os.path.isfile(direct_lex_path):
+            os.remove(direct_lex_path)
+        inverse_lex_path = os.path.join(self.model_dir, "lexicon.inverse.txt")
+        if os.path.isfile(inverse_lex_path):
+            os.remove(inverse_lex_path)
+        self._train_alignment_model(src_file_path, trg_file_path)
+        self._align_parallel_corpus(src_file_path, trg_file_path, out_file_path)
+
+    def extract_lexicon(self, out_file_path: str) -> None:
+        lexicon = self.get_direct_lexicon()
+        if self._has_inverse_model:
+            inverse_lexicon = self.get_inverse_lexicon()
+            print("Symmetrizing lexicons...", end="", flush=True)
+            lexicon = Lexicon.symmetrize(lexicon, inverse_lexicon)
+            print(" done.")
+        lexicon.write(out_file_path)
+
+    def get_direct_lexicon(self, include_special_tokens: bool = False) -> Lexicon:
+        direct_lex_path = os.path.join(self.model_dir, "lexicon.direct.txt")
+        if not os.path.isfile(direct_lex_path):
+            self._extract_lexicon("direct", direct_lex_path)
+        return Lexicon.load(direct_lex_path, include_special_tokens)
+
+    def get_inverse_lexicon(self, include_special_tokens: bool = False) -> Lexicon:
+        if not self._has_inverse_model:
+            raise RuntimeError("The aligner does not have an inverse model.")
+        inverse_lex_path = os.path.join(self.model_dir, "lexicon.inverse.txt")
+        if not os.path.isfile(inverse_lex_path):
+            self._extract_lexicon("inverse", inverse_lex_path)
+        return Lexicon.load(inverse_lex_path, include_special_tokens)
+
+    def _train_alignment_model(self, src_file_path: str, trg_file_path: str) -> None:
+        args = [
+            "dotnet",
+            "machine",
+            "train",
+            "alignment-model",
             self.model_dir,
             src_file_path,
             trg_file_path,
+            "-mt",
+            self.model_type,
+            "-l",
+        ]
+        if self.smt_model_type is not None:
+            args.append("-smt")
+            args.append(self.smt_model_type)
+        if self._plugin_file_path is not None:
+            args.append("-mp")
+            args.append(self._plugin_file_path)
+        subprocess.run(args, cwd=get_repo_dir())
+
+    def _align_parallel_corpus(self, src_file_path: str, trg_file_path: str, output_file_path: str) -> None:
+        args = [
+            "dotnet",
+            "machine",
+            "align",
+            self.model_dir,
+            src_file_path,
+            trg_file_path,
+            output_file_path,
+            "-mt",
+            self.model_type,
+            "-sh",
+            "grow-diag-final-and",
+            "-l",
+        ]
+        if self.smt_model_type is not None:
+            args.append("-smt")
+            args.append(self.smt_model_type)
+        if self._plugin_file_path is not None:
+            args.append("-mp")
+            args.append(self._plugin_file_path)
+        subprocess.run(args, cwd=get_repo_dir())
+
+    def _extract_lexicon(self, direction: str, out_file_path: str) -> None:
+        args = [
+            "dotnet",
+            "machine",
+            "extract-lexicon",
+            self.model_dir,
             out_file_path,
-        )
+            "-mt",
+            self.model_type,
+            "-p",
+            "-n",
+            "-d",
+            direction,
+        ]
+        if self.smt_model_type is not None:
+            args.append("-smt")
+            args.append(self.smt_model_type)
+        if self._plugin_file_path is not None:
+            args.append("-mp")
+            args.append(self._plugin_file_path)
+        subprocess.run(args, cwd=get_repo_dir())
 
 
 class Ibm1Aligner(MachineAligner):
@@ -107,9 +142,16 @@ class HmmAligner(MachineAligner):
         super().__init__("hmm", "hmm", model_dir)
 
 
+class FastAlign(MachineAligner):
+    def __init__(self, model_dir: str) -> None:
+        super().__init__("fast_align", "fast_align", model_dir)
+
+
 class ParatextAligner(MachineAligner):
     def __init__(self, model_dir: str) -> None:
-        super().__init__("pt", "betainv", model_dir, plugin_file_path=os.getenv("BETA_INV_PLUGIN_PATH"))
+        super().__init__(
+            "pt", "betainv", model_dir, plugin_file_path=os.getenv("BETA_INV_PLUGIN_PATH"), has_inverse_model=False
+        )
 
 
 class SmtAligner(MachineAligner):

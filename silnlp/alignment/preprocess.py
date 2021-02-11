@@ -2,6 +2,7 @@ import argparse
 import json
 import logging
 import os
+import unicodedata
 from typing import List, Tuple
 
 logging.basicConfig(level=logging.INFO)
@@ -14,6 +15,7 @@ from ..common.stemmer import Stemmer
 from ..common.utils import get_align_root_dir, set_seed
 from ..common.verse_ref import VerseRef
 from .config import get_all_book_paths, get_stemmer, load_config
+from .lexicon import Lexicon
 
 
 class ParallelSegment:
@@ -31,18 +33,22 @@ def get_ref(verse: dict) -> str:
 
 def get_segment(segInfo: dict, use_lemma: bool = False) -> List[str]:
     words: List[dict] = segInfo["words"]
-    return list(map(lambda w: w["lemma" if use_lemma else "text"].lower(), words))
+    return list(map(lambda w: unicodedata.normalize("NFC", w["lemma" if use_lemma else "text"].lower()), words))
 
 
-def get_alignment(verse: dict) -> Alignment:
+def get_alignment(verse: dict, primary_links_only: bool = False) -> Alignment:
     links: List[List[List[int]]] = verse["links"]
     pairs: List[Tuple[int, int]] = []
     for link in links:
         src_indices = link[0]
         trg_indices = link[1]
-        for src_index in src_indices:
-            for trg_index in trg_indices:
-                pairs.append((src_index, trg_index))
+        if primary_links_only:
+            if len(src_indices) > 0 and len(trg_indices) > 0:
+                pairs.append((src_indices[0], trg_indices[0]))
+        else:
+            for src_index in src_indices:
+                for trg_index in trg_indices:
+                    pairs.append((src_index, trg_index))
     return Alignment(pairs)
 
 
@@ -66,8 +72,15 @@ def is_in_book(segment: ParallelSegment, book: str) -> bool:
     return ref.book == book
 
 
+def add_alignment(lexicon: Lexicon, source: List[str], target: List[str], alignment: Alignment) -> None:
+    for src_index, trg_index in alignment:
+        src_word = source[src_index]
+        trg_word = target[trg_index]
+        lexicon.increment(src_word, trg_word)
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Preprocesses GBI gold standard alignments")
+    parser = argparse.ArgumentParser(description="Preprocesses Clear gold standard alignments")
     parser.add_argument("experiment", help="Experiment name")
     args = parser.parse_args()
 
@@ -85,12 +98,15 @@ def main() -> None:
 
     use_src_lemma: bool = config["use_src_lemma"]
     corpus: List[ParallelSegment] = []
+    lexicon = Lexicon()
     for verse in verses:
         ref_str = get_ref(verse)
         source = get_segment(verse["manuscript"], use_lemma=use_src_lemma)
         target = get_segment(verse["translation"])
         alignment = get_alignment(verse)
         corpus.append(ParallelSegment(ref_str, source, target, alignment))
+        add_alignment(lexicon, source, target, get_alignment(verse, primary_links_only=True))
+    lexicon.normalize()
 
     src_stemmer = get_stemmer(config["src_stemmer"])
     src_stemmer.train(map(lambda s: s.source, corpus))
@@ -106,6 +122,7 @@ def main() -> None:
                 write_datasets(book_root_dir, src_stemmer, trg_stemmer, book_corpus)
     else:
         write_datasets(root_dir, src_stemmer, trg_stemmer, corpus)
+        lexicon.write(os.path.join(root_dir, "lexicon.gold.txt"))
 
 
 if __name__ == "__main__":

@@ -17,3 +17,8 @@ class Aligner(abc.ABC):
     @abc.abstractmethod
     def align(self, src_file_path: str, trg_file_path: str, out_file_path: str) -> None:
         pass
+
+    @abc.abstractmethod
+    def extract_lexicon(self, out_file_path: str) -> None:
+        pass
+

@@ -14,7 +14,7 @@ def main() -> None:
     print("Git commit:", get_git_revision_hash())
 
     for exp_name in args.experiments:
-        print(f"Training {exp_name}...")
+        print(f"=== Training ({exp_name}) ===")
         root_dir = get_mt_root_dir(exp_name)
         config = load_config(exp_name)
 
@@ -37,6 +37,7 @@ def main() -> None:
                 config["trg_tokenizer"],
                 "-mt",
                 config["model"],
+                "-l",
             ],
             cwd=get_repo_dir(),
         )

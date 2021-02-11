@@ -1,13 +1,10 @@
 import os
 import subprocess
-import tempfile
-from statistics import mean
-from typing import Dict, Iterable, Iterator, List, Set, Tuple
+from typing import Iterable, Iterator, List, Set, Tuple
 
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-from ..alignment.fast_align import FastAlign
 from ..common.utils import get_repo_dir
 from .environment import PT_PREPROCESSED_DIR
 from .verse_ref import VerseRef
@@ -32,81 +29,6 @@ def tokenize_corpus(input_path: str, output_path: str) -> None:
         stdout=subprocess.DEVNULL,
         cwd=get_repo_dir(),
     )
-
-
-def compute_alignment_score(
-    forward_prob_table: Dict[Tuple[str, str], float],
-    reverse_prob_table: Dict[Tuple[str, str], float],
-    src_sentence: str,
-    trg_sentence: str,
-    alignment: str,
-) -> float:
-    pairs = alignment.split(" ")
-    src_words = src_sentence.split(" ")
-    trg_words = trg_sentence.split(" ")
-    probs: List[float] = []
-    unaligned_trg_indices: Set[int] = set(range(len(trg_words)))
-    unaligned_src_indices: Set[int] = set(range(len(src_words)))
-    for pair in pairs:
-        if pair != "":
-            parts = pair.split("-")
-            i = int(parts[0])
-            j = int(parts[1])
-            unaligned_src_indices.discard(i)
-            unaligned_trg_indices.discard(j)
-            src_word = src_words[i]
-            trg_word = trg_words[j]
-            forward_prob = forward_prob_table.get((src_word, trg_word), 1e-9)
-            reverse_prob = reverse_prob_table.get((trg_word, src_word), 1e-9)
-            prob = max(forward_prob, reverse_prob)
-            probs.append(prob)
-
-    for j in unaligned_trg_indices:
-        probs.append(forward_prob_table.get(("<eps>", trg_words[j]), 1e-9))
-
-    for i in unaligned_src_indices:
-        probs.append(reverse_prob_table.get(("<eps>", src_words[i]), 1e-9))
-
-    return mean(probs)
-
-
-def add_alignment_scores(corpus: pd.DataFrame) -> None:
-    with tempfile.TemporaryDirectory() as td:
-        src_path = os.path.join(td, "src-input.txt")
-        trg_path = os.path.join(td, "trg-input.txt")
-        write_corpus(src_path, corpus["source"])
-        write_corpus(trg_path, corpus["target"])
-        scores = compute_alignment_scores(src_path, trg_path)
-        corpus["score"] = scores
-
-
-def compute_alignment_scores(src_input_path: str, trg_input_path: str) -> List[float]:
-    with tempfile.TemporaryDirectory() as td:
-        src_tok_output_path = os.path.join(td, "tokenize-src-output.txt")
-        trg_tok_output_path = os.path.join(td, "tokenize-trg-output.txt")
-
-        tokenize_corpus(src_input_path, src_tok_output_path)
-        tokenize_corpus(trg_input_path, trg_tok_output_path)
-
-        fast_align = FastAlign(td)
-
-        sym_align_path = os.path.join(td, "sym-align.txt")
-        fast_align.align(src_tok_output_path, trg_tok_output_path, sym_align_path)
-
-        forward_prob_table = fast_align.get_forward_prob_table()
-        reverse_prob_table = fast_align.get_reverse_prob_table()
-
-        scores: List[float] = []
-        with open(src_tok_output_path, "r", encoding="utf-8") as src_tok_output_file, open(
-            trg_tok_output_path, "r", encoding="utf-8"
-        ) as trg_tok_output_file, open(sym_align_path, "r", encoding="utf-8") as sym_align_file:
-            for src_sentence, trg_sentence, alignment in zip(src_tok_output_file, trg_tok_output_file, sym_align_file):
-                scores.append(
-                    compute_alignment_score(
-                        forward_prob_table, reverse_prob_table, src_sentence, trg_sentence, alignment
-                    )
-                )
-        return scores
 
 
 def get_scripture_parallel_corpus(vref_file_path: str, src_file_path: str, trg_file_path: str) -> pd.DataFrame:

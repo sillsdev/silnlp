@@ -3,9 +3,9 @@ import os
 from statistics import mean
 from typing import Tuple
 
+from ..alignment.utils import add_alignment_scores
 from ..common.canon import get_books
 from ..common.corpus import (
-    add_alignment_scores,
     exclude_books,
     get_corpus_path,
     get_scripture_parallel_corpus,

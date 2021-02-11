@@ -12,9 +12,8 @@ from ..common.utils import get_align_root_dir, merge_dict
 from ..common.wordnet_stemmer import WordNetStemmer
 from .aligner import Aligner
 from .clear_aligner import ClearAligner
-from .fast_align import FastAlign
 from .ibm4_aligner import Ibm4Aligner
-from .machine_aligner import HmmAligner, Ibm1Aligner, Ibm2Aligner, ParatextAligner, SmtAligner
+from .machine_aligner import FastAlign, HmmAligner, Ibm1Aligner, Ibm2Aligner, ParatextAligner, SmtAligner
 
 ALIGNERS: Dict[str, Tuple[Type[Aligner], str]] = {
     "fast_align": (FastAlign, "FastAlign"),
@@ -40,7 +39,7 @@ def get_aligner(id: str, root_dir: str) -> Aligner:
     aligner = ALIGNERS.get(id)
     if aligner is None:
         raise RuntimeError("An invalid aligner Id was specified.")
-    aligner_cls = aligner[0]
+    aligner_cls: Type = aligner[0]
     return aligner_cls(os.path.join(root_dir, id + os.path.sep))
 
 

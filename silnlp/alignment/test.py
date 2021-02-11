@@ -7,7 +7,13 @@ import pandas as pd
 from ..common.canon import ALL_BOOK_IDS, book_id_to_number, get_books, is_ot_nt
 from ..common.utils import get_align_root_dir, set_seed
 from .config import get_all_book_paths, load_config
-from .metrics import compute_metrics, load_all_alignments, load_vrefs
+from .metrics import (
+    compute_alignment_metrics,
+    compute_lexicon_metrics,
+    load_all_alignments,
+    load_all_lexicons,
+    load_vrefs,
+)
 
 
 def test(root_dir: str, by_book: bool, books: Set[int], test_size: Optional[int]) -> None:
@@ -15,8 +21,10 @@ def test(root_dir: str, by_book: bool, books: Set[int], test_size: Optional[int]
     vrefs = load_vrefs(vref_file_path)
 
     all_alignments = load_all_alignments(root_dir)
+    df = compute_alignment_metrics(vrefs, all_alignments, "ALL", books, test_size)
 
-    df = compute_metrics(vrefs, all_alignments, "ALL", books, test_size)
+    all_lexicons = load_all_lexicons(root_dir)
+    df = df.join(compute_lexicon_metrics(root_dir, all_lexicons))
 
     if by_book:
         for book_id in ALL_BOOK_IDS:
@@ -24,7 +32,7 @@ def test(root_dir: str, by_book: bool, books: Set[int], test_size: Optional[int]
             if not is_ot_nt(book_num) or (len(books) > 0 and book_num not in books):
                 continue
 
-            book_df = compute_metrics(vrefs, all_alignments, book_id, {book_num})
+            book_df = compute_alignment_metrics(vrefs, all_alignments, book_id, {book_num})
             df = pd.concat([df, book_df])
 
     for book in sorted(set(df.index.get_level_values("Book")), key=lambda b: 0 if b == "ALL" else book_id_to_number(b)):
@@ -35,11 +43,33 @@ def test(root_dir: str, by_book: bool, books: Set[int], test_size: Optional[int]
             f_score: float = row["F-Score"]
             precision: float = row["Precision"]
             recall: float = row["Recall"]
-            print(index[1])
+            print(f"--- {index[1]} ---")
+            print("Alignments")
             print(f"- AER: {aer:.4f}")
             print(f"- F-Score: {f_score:.4f}")
             print(f"- Precision: {precision:.4f}")
             print(f"- Recall: {recall:.4f}")
+
+            if book == "ALL":
+                f_score_at_1: float = row["F-Score@1"]
+                precision_at_1: float = row["Precision@1"]
+                recall_at_1: float = row["Recall@1"]
+                f_score_at_3: float = row["F-Score@3"]
+                precision_at_3: float = row["Precision@3"]
+                recall_at_3: float = row["Recall@3"]
+                mean_avg_precision: float = row["MAP"]
+                ndcg: float = row["NDCG"]
+                rbo: float = row["RBO"]
+                print("Lexicon")
+                print(f"- F-Score@1: {f_score_at_1:.4f}")
+                print(f"- Precision@1: {precision_at_1:.4f}")
+                print(f"- Recall@1: {recall_at_1:.4f}")
+                print(f"- F-Score@3: {f_score_at_3:.4f}")
+                print(f"- Precision@3: {precision_at_3:.4f}")
+                print(f"- Recall@3: {recall_at_3:.4f}")
+                print(f"- MAP: {mean_avg_precision:.4f}")
+                print(f"- NDCG: {ndcg:.4f}")
+                print(f"- RBO: {rbo:.4f}")
 
     scores_file_name = "scores.csv"
     if test_size is not None:

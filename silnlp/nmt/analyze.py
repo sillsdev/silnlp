@@ -205,7 +205,7 @@ class NMTModel(lit_model.Model):
     def predict(self, inputs: Iterable[lit_types.JsonDict], scrub_arrays=True) -> Iterator[lit_types.JsonDict]:
         inputs_list: List[str] = list(inputs)
         if len(inputs_list) == 0:
-            yield from ()
+            return iter([])
 
         if self.checkpoint is None:
             self.checkpoint = opennmt.utils.checkpoint.Checkpoint.from_config(self.config, self.model)

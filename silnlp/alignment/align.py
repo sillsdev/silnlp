@@ -33,13 +33,13 @@ def align(aligner_ids: List[str], root_dir: str, book: Optional[str] = None) -> 
             shutil.rmtree(aligner.model_dir)
         aligner_name = get_aligner_name(aligner_id)
         if book is None:
-            print(f"=== {aligner_name} ===")
+            print(f"--- {aligner_name} ---")
         else:
-            print(f"=== {aligner_name} ({book}) ===")
-        method_out_file_path = os.path.join(root_dir, f"alignments.{aligner_id}.txt")
+            print(f"--- {aligner_name} ({book}) ---")
+        method_alignments_file_path = os.path.join(root_dir, f"alignments.{aligner_id}.txt")
 
         start = time.perf_counter()
-        aligner.align(train_src_path, train_trg_path, method_out_file_path)
+        aligner.align(train_src_path, train_trg_path, method_alignments_file_path)
         end = time.perf_counter()
         delta = timedelta(seconds=end - start)
         times[aligner_name] = str(delta)
@@ -51,6 +51,15 @@ def align(aligner_ids: List[str], root_dir: str, book: Optional[str] = None) -> 
             out_file.write(f"{aligner_name},{delta_str}\n")
 
 
+def extract_lexicons(aligner_ids: List[str], root_dir: str) -> None:
+    for aligner_id in aligner_ids:
+        aligner_id = aligner_id.strip().lower()
+        aligner = get_aligner(aligner_id, root_dir)
+        aligner_name = get_aligner_name(aligner_id)
+        print(f"--- {aligner_name} ---")
+        aligner.extract_lexicon(os.path.join(root_dir, f"lexicon.{aligner_id}.txt"))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Aligns the parallel corpus for an experiment")
     parser.add_argument("experiments", nargs="+", help="Experiment names")
@@ -60,7 +69,7 @@ def main() -> None:
     aligner_ids = list(ALIGNERS.keys() if len(args.aligners) == 0 else args.aligners)
 
     for exp_name in args.experiments:
-        print(f"Aligning {exp_name}...")
+        print(f"=== Aligning ({exp_name}) ===")
         root_dir = get_align_root_dir(exp_name)
         config = load_config(exp_name)
 
@@ -70,6 +79,9 @@ def main() -> None:
                     align(aligner_ids, book_root_dir, book)
         else:
             align(aligner_ids, root_dir)
+
+        print(f"=== Extracting lexicons ({exp_name}) ===")
+        extract_lexicons(aligner_ids, root_dir)
 
 
 if __name__ == "__main__":

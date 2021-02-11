@@ -10,7 +10,7 @@ from ..common.canon import get_books
 from ..common.environment import ALIGN_EXPERIMENTS_DIR
 from ..common.utils import get_align_root_dir, set_seed
 from .config import ALIGNERS, load_config
-from .metrics import compute_metrics, load_all_alignments, load_vrefs
+from .metrics import compute_alignment_metrics, load_all_alignments, load_vrefs
 
 
 def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
@@ -36,7 +36,7 @@ def get_metrics(exp_name: str, books: Set[int] = set(), test_size: Optional[int]
 
     all_alignments = load_all_alignments(root_dir)
 
-    df = compute_metrics(vrefs, all_alignments, "ALL", books, test_size)
+    df = compute_alignment_metrics(vrefs, all_alignments, "ALL", books, test_size)
     metrics = df["F-Score"].to_numpy().tolist()
     assert len(metrics) == len(ALIGNERS)
     return metrics

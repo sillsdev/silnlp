@@ -16,9 +16,9 @@ import opennmt.data
 import pandas as pd
 import sentencepiece as sp
 
+from ..alignment.utils import add_alignment_scores
 from ..common.canon import get_books
 from ..common.corpus import (
-    add_alignment_scores,
     exclude_books,
     filter_parallel_corpus,
     get_names_path,

@@ -66,6 +66,7 @@ def main() -> None:
                 config["trg_tokenizer"],
                 "-mt",
                 config["model"],
+                "-l",
             ],
             cwd=get_repo_dir(),
         )
@@ -101,7 +102,7 @@ def main() -> None:
                 scorer_name = "METEOR"
                 score_str = f"{meteor_score:.2f}"
             elif scorer == "wer":
-                wer_score = compute_wer_score(sys, [ref])
+                wer_score = compute_wer_score(sys, ref)
                 if wer_score == 0:
                     continue
                 scorer_name = "WER"
