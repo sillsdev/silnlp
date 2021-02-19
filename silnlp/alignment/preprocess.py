@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import unicodedata
-from typing import List, Tuple
+from typing import Iterable, List, Tuple
 
 logging.basicConfig(level=logging.INFO)
 
@@ -32,8 +32,8 @@ def get_ref(verse: dict) -> str:
 
 
 def get_segment(segInfo: dict, use_lemma: bool = False) -> List[str]:
-    words: List[dict] = segInfo["words"]
-    return list(map(lambda w: unicodedata.normalize("NFC", w["lemma" if use_lemma else "text"].lower()), words))
+    words: Iterable[str] = (w["lemma" if use_lemma else "text"] for w in segInfo["words"])
+    return [unicodedata.normalize("NFC", w.lower().replace(" ", "~")) for w in words]
 
 
 def get_alignment(verse: dict, primary_links_only: bool = False) -> Alignment:
