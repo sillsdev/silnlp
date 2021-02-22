@@ -1,6 +1,6 @@
 import os
 import subprocess
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from ..common.utils import get_repo_dir
 from .aligner import Aligner
@@ -16,12 +16,14 @@ class MachineAligner(Aligner):
         smt_model_type: Optional[str] = None,
         plugin_file_path: Optional[str] = None,
         has_inverse_model: bool = True,
+        params: Dict[str, Any] = {},
     ) -> None:
         super().__init__(id, model_dir)
         self.model_type = model_type
         self.smt_model_type = smt_model_type
         self._plugin_file_path = plugin_file_path
         self._has_inverse_model = has_inverse_model
+        self._params = params
 
     @property
     def has_inverse_model(self) -> bool:
@@ -79,6 +81,10 @@ class MachineAligner(Aligner):
         if self._plugin_file_path is not None:
             args.append("-mp")
             args.append(self._plugin_file_path)
+        if len(self._params) > 0:
+            args.append("-tp")
+            for key, value in self._params.items():
+                args.append(f"{key}={value}")
         subprocess.run(args, cwd=get_repo_dir())
 
     def _align_parallel_corpus(self, src_file_path: str, trg_file_path: str, output_file_path: str) -> None:
