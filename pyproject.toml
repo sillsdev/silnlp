@@ -39,6 +39,7 @@ OpenNMT-tf = "^2.15.0"
 lit-nlp = "^0.2"
 annoy = "^1.17.0"
 tensorflow = "^2.4.1"
+tensorboard = "^2.4.1"
 
 [tool.poetry.dev-dependencies]
 mypy = "^0.780"
