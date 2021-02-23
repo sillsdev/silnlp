@@ -16,7 +16,7 @@ from ..common.environment import PT_UNZIPPED_DIR
 from ..common.utils import get_git_revision_hash, set_seed
 from ..sfm import usfm
 from .config import create_runner, get_mt_root_dir, load_config, parse_langs
-from .runner import RunnerEx
+from .runner import SILRunner
 from .utils import decode_sp, decode_sp_lines, encode_sp, encode_sp_lines, get_best_model_dir, get_last_checkpoint
 
 
@@ -27,7 +27,7 @@ def insert_tag(text: str, trg_iso: Optional[str]) -> str:
 
 
 def infer_text_file(
-    runner: RunnerEx,
+    runner: SILRunner,
     src_spp: sp.SentencePieceProcessor,
     srcFiles: List[str],
     trgFiles: List[str],
@@ -127,7 +127,7 @@ def collect_segments(segments: List[Segment], cur_elem: sfm.Element, cur_segment
 
 
 def infer_book(
-    runner: RunnerEx,
+    runner: SILRunner,
     src_spp: sp.SentencePieceProcessor,
     src_project: str,
     book: str,

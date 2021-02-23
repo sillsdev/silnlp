@@ -1,11 +1,11 @@
 import os
 from typing import IO, Iterable, Iterator, List, Optional, Tuple, cast
 
-import opennmt.utils
 import sacrebleu
 import sentencepiece as sp
 import tensorflow as tf
 import yaml
+from opennmt.utils import Scorer, register_scorer
 
 
 def decode_sp(line: str) -> str:
@@ -57,8 +57,8 @@ def get_last_checkpoint(model_dir: str) -> Tuple[str, int]:
         return (checkpoint_path, step)
 
 
-@opennmt.utils.register_scorer(name="bleu_sp")
-class BLEUSentencepieceScorer(opennmt.utils.Scorer):
+@register_scorer(name="bleu_sp")
+class BLEUSentencepieceScorer(Scorer):
     def __init__(self):
         super().__init__("bleu")
 
@@ -102,8 +102,8 @@ def load_sys_stream(hyp_path: str) -> List[str]:
     return sys_stream
 
 
-@opennmt.utils.register_scorer(name="bleu_multi_ref")
-class BLEUMultiRefScorer(opennmt.utils.Scorer):
+@register_scorer(name="bleu_multi_ref")
+class BLEUMultiRefScorer(Scorer):
     def __init__(self):
         super().__init__("bleu")
 

@@ -11,10 +11,10 @@ from typing import IO, Any, Dict, Iterable, List, Optional, Set, Tuple
 
 logging.basicConfig()
 
-import opennmt
-import opennmt.data
 import pandas as pd
 import sentencepiece as sp
+from opennmt import END_OF_SENTENCE_TOKEN, PADDING_TOKEN, START_OF_SENTENCE_TOKEN
+from opennmt.data import Vocab
 
 from ..alignment.utils import add_alignment_scores
 from ..common.canon import get_books
@@ -51,11 +51,11 @@ class CheckpointType(Enum):
 
 
 def convert_vocab(sp_vocab_path: str, onmt_vocab_path: str, tag_langs: Set[str] = None) -> None:
-    special_tokens = [opennmt.PADDING_TOKEN, opennmt.START_OF_SENTENCE_TOKEN, opennmt.END_OF_SENTENCE_TOKEN]
+    special_tokens = [PADDING_TOKEN, START_OF_SENTENCE_TOKEN, END_OF_SENTENCE_TOKEN]
     if tag_langs is not None:
         special_tokens.extend(map(lambda l: f"<2{l}>", tag_langs))
 
-    vocab = opennmt.data.Vocab(special_tokens)
+    vocab = Vocab(special_tokens)
     with open(sp_vocab_path, "r", encoding="utf-8") as vocab_file:
         for line in vocab_file:
             token = line.rstrip("\r\n")
@@ -161,13 +161,13 @@ def create_unshared_vocab(
             parent_sp_prefix_path = os.path.join(parent_root_dir, f"{prefix}-sp")
             parent_vocab_path = os.path.join(parent_root_dir, f"{prefix}-onmt.vocab")
 
-        parent_vocab: Optional[opennmt.data.Vocab] = None
+        parent_vocab: Optional[Vocab] = None
         child_tokens: Optional[Set[str]] = None
         if not parent_use_vocab:
             parent_spp = sp.SentencePieceProcessor()
             parent_spp.Load(parent_sp_prefix_path + ".model")
 
-            parent_vocab = opennmt.data.Vocab()
+            parent_vocab = Vocab()
             parent_vocab.load(parent_vocab_path)
 
             child_tokens = set()

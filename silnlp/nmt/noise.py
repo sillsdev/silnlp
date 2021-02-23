@@ -1,8 +1,9 @@
-import opennmt.data
 import tensorflow as tf
+from opennmt.data import Noise
+from opennmt.data.noise import random_mask
 
 
-class WordDropout(opennmt.data.Noise):
+class WordDropout(Noise):
     def __init__(self, dropout, skip_first_word=False):
         self.dropout = dropout
         self.skip_first_word = skip_first_word
@@ -11,7 +12,7 @@ class WordDropout(opennmt.data.Noise):
         if self.dropout == 0:
             return tf.identity(words)
         num_words = tf.shape(words, out_type=tf.int64)[0]
-        keep_mask = opennmt.data.noise.random_mask([num_words], 1 - self.dropout)
+        keep_mask = random_mask([num_words], 1 - self.dropout)
         if self.skip_first_word:
             indices = tf.constant([[0]])
             updates = tf.constant([True])

@@ -3,14 +3,14 @@ import os
 from typing import Any, Iterable, List, Tuple
 
 import numpy as np
-import opennmt
-import opennmt.data
-import opennmt.models
-import opennmt.utils.checkpoint
-import opennmt.utils.misc
 import tensorflow as tf
 import tensorflow_addons as tfa
 import yaml
+from opennmt import Runner
+from opennmt.data import Vocab, inference_pipeline
+from opennmt.models import Model, SequenceToSequence
+from opennmt.utils.checkpoint import Checkpoint
+from opennmt.utils.misc import OrderRestorer, extract_batches, item_or_tuple
 
 from .utils import get_best_model_dir
 
@@ -39,8 +39,8 @@ def load_vec(vec_path: str) -> Tuple[List[str], np.ndarray]:
 
 
 def get_special_token_mapping(vocab_path: str, new_vocab_path: str) -> List[int]:
-    vocab = opennmt.data.Vocab.from_file(vocab_path)
-    new_vocab = opennmt.data.Vocab.from_file(new_vocab_path)
+    vocab = Vocab.from_file(vocab_path)
+    new_vocab = Vocab.from_file(new_vocab_path)
     mapping = [-1] * new_vocab.size
     mapping[0] = 0
     mapping[1] = 1
@@ -111,8 +111,8 @@ def map_variables(
 
 
 def transfer_weights(
-    model: opennmt.models.Model,
-    new_model: opennmt.models.Model,
+    model: Model,
+    new_model: Model,
     optimizer: tf.keras.optimizers.Optimizer,
     new_optimizer: tf.keras.optimizers.Optimizer,
     ignore_weights: list = None,
@@ -184,7 +184,7 @@ def register_tfa_custom_ops() -> None:
 
 
 def make_inference_dataset(
-    model: opennmt.models.Model,
+    model: Model,
     features_list: List[str],
     batch_size: int,
     batch_type: str = "examples",
@@ -193,7 +193,7 @@ def make_inference_dataset(
     prefetch_buffer_size: int = None,
 ):
     def _map_fn(*arg):
-        features = model.features_inputter.make_features(element=opennmt.utils.misc.item_or_tuple(arg), training=False)
+        features = model.features_inputter.make_features(element=item_or_tuple(arg), training=False)
         if isinstance(features, (list, tuple)):
             # Special case for unsupervised inputters that always return a
             # tuple (features, labels).
@@ -204,7 +204,7 @@ def make_inference_dataset(
 
     dataset = tf.data.Dataset.from_tensor_slices(features_list)
     dataset = dataset.apply(
-        opennmt.data.inference_pipeline(
+        inference_pipeline(
             batch_size,
             batch_type=batch_type,
             transform_fns=transform_fns,
@@ -217,12 +217,12 @@ def make_inference_dataset(
     return dataset
 
 
-class RunnerEx(opennmt.Runner):
+class SILRunner(Runner):
     def export_embeddings(self, side: str, output_path: str) -> None:
         config = self._finalize_config()
         model = self._init_model(config)
         optimizer = model.get_optimizer()
-        cur_checkpoint = opennmt.utils.checkpoint.Checkpoint.from_config(config, model, optimizer=optimizer)
+        cur_checkpoint = Checkpoint.from_config(config, model, optimizer=optimizer)
         cur_checkpoint.restore()
         model.create_variables(optimizer=optimizer)
         vocab_file: str
@@ -232,7 +232,7 @@ class RunnerEx(opennmt.Runner):
         else:
             vocab_file = model.labels_inputter.vocabulary_file
             embeddings_var = model.labels_inputter.embedding
-        vocab = opennmt.data.Vocab.from_file(vocab_file)
+        vocab = Vocab.from_file(vocab_file)
         embeddings = embeddings_var.numpy()
 
         with open(output_path, "w", encoding="utf-8") as file:
@@ -251,7 +251,7 @@ class RunnerEx(opennmt.Runner):
 
         model = self._init_model(config)
         optimizer = model.get_optimizer()
-        cur_checkpoint = opennmt.utils.checkpoint.Checkpoint.from_config(config, model, optimizer=optimizer)
+        cur_checkpoint = Checkpoint.from_config(config, model, optimizer=optimizer)
         cur_checkpoint.restore()
         model.create_variables(optimizer=optimizer)
 
@@ -263,7 +263,7 @@ class RunnerEx(opennmt.Runner):
         new_config = self._finalize_config()
         new_model = self._init_model(new_config)
         new_optimizer = new_model.get_optimizer()
-        new_checkpoint = opennmt.utils.checkpoint.Checkpoint.from_config(new_config, new_model, optimizer=new_optimizer)
+        new_checkpoint = Checkpoint.from_config(new_config, new_model, optimizer=new_optimizer)
         new_model.create_variables(optimizer=new_optimizer)
 
         mapping: List[int]
@@ -298,15 +298,15 @@ class RunnerEx(opennmt.Runner):
         checkpoint_path: str = None,
         step: int = None,
     ) -> str:
-        if not isinstance(self._model, opennmt.models.SequenceToSequence):
+        if not isinstance(self._model, SequenceToSequence):
             raise ValueError("Updating vocabularies is only supported for sequence to sequence models")
         config: dict = self._finalize_config()
         if src_vocab is None and tgt_vocab is None:
             return config["model_dir"]
 
-        model: opennmt.models.Model = self._init_model(config)
+        model: Model = self._init_model(config)
         optimizer = model.get_optimizer()
-        cur_checkpoint = opennmt.utils.checkpoint.Checkpoint.from_config(config, model, optimizer=optimizer)
+        cur_checkpoint = Checkpoint.from_config(config, model, optimizer=optimizer)
         cur_checkpoint.restore(checkpoint_path=checkpoint_path)
         model.create_variables(optimizer=optimizer)
 
@@ -316,9 +316,9 @@ class RunnerEx(opennmt.Runner):
         if tgt_vocab is not None:
             self._config["data"]["target_vocabulary"] = tgt_vocab
         new_config: dict = self._finalize_config()
-        new_model: opennmt.models.Model = self._init_model(new_config)
+        new_model: Model = self._init_model(new_config)
         new_optimizer = new_model.get_optimizer()
-        new_checkpoint = opennmt.utils.checkpoint.Checkpoint.from_config(new_config, new_model, optimizer=new_optimizer)
+        new_checkpoint = Checkpoint.from_config(new_config, new_model, optimizer=new_optimizer)
         new_model.create_variables(optimizer=new_optimizer)
 
         model.transfer_weights(new_model, new_optimizer=new_optimizer, optimizer=optimizer)
@@ -328,8 +328,8 @@ class RunnerEx(opennmt.Runner):
 
     def infer_list(self, features_list: List[str], checkpoint_path: str = None) -> List[List[str]]:
         config = self._finalize_config()
-        model: opennmt.models.Model = self._init_model(config)
-        checkpoint = opennmt.utils.checkpoint.Checkpoint.from_config(config, model)
+        model: Model = self._init_model(config)
+        checkpoint = Checkpoint.from_config(config, model)
         checkpoint.restore(checkpoint_path=checkpoint_path, weights_only=True)
         infer_config = config["infer"]
         dataset = make_inference_dataset(
@@ -349,7 +349,7 @@ class RunnerEx(opennmt.Runner):
         for source in dataset:
             predictions = infer_fn(source)
             predictions = tf.nest.map_structure(lambda t: t.numpy(), predictions)
-            for prediction in opennmt.utils.misc.extract_batches(predictions):
+            for prediction in extract_batches(predictions):
                 index: int = prediction["index"]
                 num_hypotheses = len(prediction["log_probs"])
                 hypotheses: List[str] = []
@@ -368,8 +368,8 @@ class RunnerEx(opennmt.Runner):
         self, features_paths: List[str], predictions_paths: List[str], checkpoint_path: str = None
     ) -> None:
         config = self._finalize_config()
-        model: opennmt.models.Model = self._init_model(config)
-        checkpoint = opennmt.utils.checkpoint.Checkpoint.from_config(config, model)
+        model: Model = self._init_model(config)
+        checkpoint = Checkpoint.from_config(config, model)
         checkpoint.restore(checkpoint_path=checkpoint_path, weights_only=True)
         infer_config = config["infer"]
         for features_path, predictions_path in zip(features_paths, predictions_paths):
@@ -388,7 +388,7 @@ class RunnerEx(opennmt.Runner):
 
                 # Inference might return out-of-order predictions. The OrderRestorer utility is
                 # used to write predictions in their original order.
-                ordered_writer = opennmt.utils.misc.OrderRestorer(
+                ordered_writer = OrderRestorer(
                     lambda pred: pred.get("index"),
                     lambda pred: (model.print_prediction(pred, params=infer_config, stream=stream)),
                 )
@@ -396,7 +396,7 @@ class RunnerEx(opennmt.Runner):
                 for source in dataset:
                     predictions = infer_fn(source)
                     predictions = tf.nest.map_structure(lambda t: t.numpy(), predictions)
-                    for prediction in opennmt.utils.misc.extract_batches(predictions):
+                    for prediction in extract_batches(predictions):
                         ordered_writer.push(prediction)
 
     def saved_model_infer_multiple(self, features_paths: List[str], predictions_paths: List[str]) -> None:
@@ -432,8 +432,8 @@ class RunnerEx(opennmt.Runner):
 
     def analyze(self, features_list: List[str], checkpoint_path: str = None) -> List[dict]:
         config = self._finalize_config()
-        model: opennmt.models.Model = self._init_model(config)
-        checkpoint = opennmt.utils.checkpoint.Checkpoint.from_config(config, model)
+        model: Model = self._init_model(config)
+        checkpoint = Checkpoint.from_config(config, model)
         checkpoint.restore(checkpoint_path=checkpoint_path, weights_only=True)
         infer_config = config["infer"]
         dataset = make_inference_dataset(
@@ -453,7 +453,7 @@ class RunnerEx(opennmt.Runner):
         for source in dataset:
             predictions = infer_fn(source)
             predictions = tf.nest.map_structure(lambda t: t.numpy(), predictions)
-            for prediction in opennmt.utils.misc.extract_batches(predictions):
+            for prediction in extract_batches(predictions):
                 target_length = prediction["length"][0]
                 tokens = prediction["tokens"][0][:target_length]
                 sentence = model.examples_inputter.labels_inputter.tokenizer.detokenize(tokens)

@@ -6,20 +6,17 @@ from typing import Dict, Iterable, List, Optional, Set, Union
 
 logging.basicConfig()
 
-import opennmt
-import opennmt.data
-import opennmt.inputters
-import opennmt.layers
-import opennmt.models
-import opennmt.utils
-import opennmt.utils.misc
 import tensorflow as tf
 import yaml
+from opennmt import load_config as onmt_load_config
+from opennmt.data import WordNoiser
+from opennmt.models import Model, get_model_from_catalog
 
 from ..common.corpus import get_corpus_path
 from ..common.utils import get_git_revision_hash, get_mt_root_dir
 from .noise import WordDropout
-from .runner import RunnerEx
+from .runner import SILRunner
+from .transformer import SILTransformer
 
 _PYTHON_TO_TENSORFLOW_LOGGING_LEVEL: Dict[int, int] = {
     logging.CRITICAL: 3,
@@ -56,115 +53,13 @@ DEFAULT_NEW_CONFIG: dict = {
 }
 
 
-class TransformerEx(opennmt.models.Transformer):
-    def analyze(self, features):
-        # Encode the source.
-        source_length = self.features_inputter.get_length(features)
-        source_inputs = self.features_inputter(features)
-        encoder_outputs, encoder_state, encoder_sequence_length = self.encoder(
-            source_inputs, sequence_length=source_length
-        )
-
-        predictions = self._dynamic_decode(features, encoder_outputs, encoder_state, encoder_sequence_length)
-
-        length = predictions["length"]
-        length = tf.squeeze(length, axis=[1])
-        tokens = predictions["tokens"]
-        tokens = tf.squeeze(tokens, axis=[1])
-        tokens = tf.where(tf.equal(tokens, "</s>"), tf.fill(tf.shape(tokens), ""), tokens)
-
-        ids = self.labels_inputter.tokens_to_ids.lookup(tokens)
-        if self.labels_inputter.mark_start or self.labels_inputter.mark_end:
-            ids, length = opennmt.inputters.add_sequence_controls(
-                ids,
-                length,
-                start_id=opennmt.START_OF_SENTENCE_ID if self.labels_inputter.mark_start else None,
-                end_id=opennmt.END_OF_SENTENCE_ID if self.labels_inputter.mark_end else None,
-            )
-        labels = {"ids_out": ids[:, 1:], "ids": ids[:, :-1], "length": length - 1}
-
-        outputs = self._decode_target(labels, encoder_outputs, encoder_state, encoder_sequence_length)
-
-        return {
-            "length": tf.squeeze(predictions["length"], axis=[1]),
-            "tokens": tf.squeeze(predictions["tokens"], axis=[1]),
-            "alignment": tf.squeeze(predictions["alignment"], axis=[1]),
-            "encoder_outputs": encoder_outputs,
-            "logits": outputs["logits"],
-            "index": features["index"],
-        }
-
-
-@opennmt.models.register_model_in_catalog
-class TransformerMediumEx(TransformerEx):
-    def __init__(self):
-        super().__init__(
-            source_inputter=opennmt.inputters.WordEmbedder(embedding_size=512),
-            target_inputter=opennmt.inputters.WordEmbedder(embedding_size=512),
-            num_layers=3,
-            num_units=512,
-            num_heads=8,
-            ffn_inner_dim=2048,
-            dropout=0.1,
-            attention_dropout=0.1,
-            ffn_dropout=0.1,
-        )
-
-
-class _DefaultTransformerEx(TransformerEx):
-    def __init__(self, big=False, relative=False):
-        if big:
-            num_units = 1024
-            num_heads = 16
-            ffn_inner_dim = 4096
-        else:
-            num_units = 512
-            num_heads = 8
-            ffn_inner_dim = 2048
-        if relative:
-            position_encoder_class = None
-            maximum_relative_position = 20
-        else:
-            position_encoder_class = opennmt.layers.SinusoidalPositionEncoder
-            maximum_relative_position = None
-        super().__init__(
-            source_inputter=opennmt.inputters.WordEmbedder(embedding_size=num_units),
-            target_inputter=opennmt.inputters.WordEmbedder(embedding_size=num_units),
-            num_layers=6,
-            num_units=num_units,
-            num_heads=num_heads,
-            ffn_inner_dim=ffn_inner_dim,
-            dropout=0.1,
-            attention_dropout=0.1,
-            ffn_dropout=0.1,
-            position_encoder_class=position_encoder_class,
-            maximum_relative_position=maximum_relative_position,
-        )
-
-
-@opennmt.models.register_model_in_catalog
-class TransformerBaseEx(_DefaultTransformerEx):
-    """Defines a Transformer model as decribed in https://arxiv.org/abs/1706.03762."""
-
-
-@opennmt.models.register_model_in_catalog
-class TransformerBigEx(_DefaultTransformerEx):
-    """Defines a large Transformer model as decribed in https://arxiv.org/abs/1706.03762."""
-
-    def __init__(self):
-        super().__init__(big=True)
-
-
 def set_log_level(log_level: int) -> None:
     tf.get_logger().setLevel(log_level)
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = str(_PYTHON_TO_TENSORFLOW_LOGGING_LEVEL[log_level])
 
 
 def set_transformer_dropout(
-    root_layer: opennmt.models.Transformer,
-    dropout: float = 0.1,
-    attention_dropout: float = 0.1,
-    ffn_dropout: float = 0.1,
+    root_layer: SILTransformer, dropout: float = 0.1, attention_dropout: float = 0.1, ffn_dropout: float = 0.1,
 ):
     for layer in (root_layer,) + root_layer.submodules:
         name: str = layer.name
@@ -185,7 +80,7 @@ def load_config(exp_name: str) -> dict:
     config_path = os.path.join(root_dir, "config.yml")
 
     config: dict = {
-        "model": "TransformerBase",
+        "model": "SILTransformerBase",
         "model_dir": os.path.join(root_dir, "run"),
         "data": {
             "train_features_file": os.path.join(root_dir, "train.src.txt"),
@@ -232,7 +127,7 @@ def load_config(exp_name: str) -> dict:
         },
     }
 
-    config = opennmt.load_config([config_path], config)
+    config = onmt_load_config([config_path], config)
     data_config: dict = config["data"]
     eval_config: dict = config["eval"]
     multi_ref_eval: bool = eval_config["multi_ref_eval"]
@@ -267,7 +162,7 @@ def load_config(exp_name: str) -> dict:
     return config
 
 
-def create_model(config: dict) -> opennmt.models.Model:
+def create_model(config: dict) -> Model:
     data_config: dict = config["data"]
     params_config: dict = config["params"]
 
@@ -279,9 +174,9 @@ def create_model(config: dict) -> opennmt.models.Model:
 
     model_name: str = config["model"]
     if model_name.startswith("Transformer"):
-        model_name += "Ex"
-    model = opennmt.models.get_model_from_catalog(model_name)
-    if isinstance(model, opennmt.models.Transformer):
+        model_name = "SIL" + model_name
+    model = get_model_from_catalog(model_name)
+    if isinstance(model, SILTransformer):
         dropout = params_config["transformer_dropout"]
         attention_dropout = params_config["transformer_attention_dropout"]
         ffn_dropout = params_config["transformer_ffn_dropout"]
@@ -298,11 +193,11 @@ def create_model(config: dict) -> opennmt.models.Model:
             or data_config["mirror"]
             or parent_data_config.get("mirror", False)
         )
-        source_noiser = opennmt.data.WordNoiser(subword_token="▁", is_spacer=True)
+        source_noiser = WordNoiser(subword_token="▁", is_spacer=True)
         source_noiser.add(WordDropout(word_dropout, skip_first_word=write_trg_tag))
         model.features_inputter.set_noise(source_noiser, probability=1.0)
 
-        target_noiser = opennmt.data.WordNoiser(subword_token="▁", is_spacer=True)
+        target_noiser = WordNoiser(subword_token="▁", is_spacer=True)
         target_noiser.add(WordDropout(word_dropout))
         model.labels_inputter.set_noise(target_noiser, probability=1.0)
     return model
@@ -310,7 +205,7 @@ def create_model(config: dict) -> opennmt.models.Model:
 
 def create_runner(
     config: dict, mixed_precision: bool = False, log_level: int = logging.INFO, memory_growth: bool = False
-) -> RunnerEx:
+) -> SILRunner:
     set_log_level(log_level)
 
     if memory_growth:
@@ -320,7 +215,7 @@ def create_runner(
 
     model = create_model(config)
 
-    return RunnerEx(model, config, auto_config=True, mixed_precision=mixed_precision)
+    return SILRunner(model, config, auto_config=True, mixed_precision=mixed_precision)
 
 
 class DataFileType(Flag):

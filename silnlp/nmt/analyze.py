@@ -8,11 +8,6 @@ from typing import IO, Dict, Iterable, Iterator, List, Optional, Sequence, Text,
 logging.basicConfig()
 
 import numpy as np
-import opennmt.data
-import opennmt.models
-import opennmt.runner
-import opennmt.utils.checkpoint
-import opennmt.utils.misc
 import sacrebleu
 import sentencepiece as sp
 import tensorflow as tf
@@ -22,11 +17,15 @@ from lit_nlp.api import dataset as lit_dataset
 from lit_nlp.api import model as lit_model
 from lit_nlp.api import types as lit_types
 from lit_nlp.components import index, metrics, pca, projection, similarity_searcher, umap, word_replacer
+from opennmt.runner import _CONFIG_FALLBACK
+from opennmt.utils.checkpoint import Checkpoint
+from opennmt.utils.misc import clone_layer, extract_batches, merge_dict
 from tensorflow.python.eager.def_function import Function
 
 from ..common.utils import get_git_revision_hash, get_mt_root_dir
-from .config import Language, TransformerEx, create_model, load_config, parse_langs, set_log_level
+from .config import Language, create_model, load_config, parse_langs, set_log_level
 from .runner import make_inference_dataset
+from .transformer import SILTransformer
 from .utils import decode_sp, encode_sp, get_best_model_dir, get_last_checkpoint
 
 
@@ -164,7 +163,7 @@ class NMTModel(lit_model.Model):
     def __init__(
         self,
         config: dict,
-        model: TransformerEx,
+        model: SILTransformer,
         src_spp: sp.SentencePieceProcessor,
         trg_spp: sp.SentencePieceProcessor,
         step: int,
@@ -176,9 +175,9 @@ class NMTModel(lit_model.Model):
             self.types.append(type)
         self.step = step
         # Configuration priority: user config > auto config > default config.
-        new_config = copy.deepcopy(opennmt.runner._CONFIG_FALLBACK)
-        opennmt.utils.misc.merge_dict(new_config, model.auto_config())
-        opennmt.utils.misc.merge_dict(new_config, config)
+        new_config = copy.deepcopy(_CONFIG_FALLBACK)
+        merge_dict(new_config, model.auto_config())
+        merge_dict(new_config, config)
         new_config["params"].setdefault("num_hypotheses", new_config["infer"].get("n_best", 1))
         new_config["params"].setdefault("average_loss_in_time", new_config["train"]["batch_type"] == "tokens")
         new_config["infer"]["n_best"] = 1
@@ -186,12 +185,12 @@ class NMTModel(lit_model.Model):
 
         self.src_spp = src_spp
         self.trg_spp = trg_spp
-        self.model: TransformerEx = opennmt.utils.misc.clone_layer(model)
+        self.model: SILTransformer = clone_layer(model)
         self.model.initialize(self.config["data"], params=self.config["params"])
         self._analyze_fn: Optional[Function] = None
 
         self.checkpoint_path = checkpoint_path
-        self.checkpoint: opennmt.utils.checkpoint.Checkpoint = None
+        self.checkpoint: Checkpoint = None
 
     def description(self) -> str:
         if self.step == -1:
@@ -208,7 +207,7 @@ class NMTModel(lit_model.Model):
             return iter([])
 
         if self.checkpoint is None:
-            self.checkpoint = opennmt.utils.checkpoint.Checkpoint.from_config(self.config, self.model)
+            self.checkpoint = Checkpoint.from_config(self.config, self.model)
             self.checkpoint.restore(checkpoint_path=self.checkpoint_path, weights_only=True)
 
         predictions: Iterator[lit_types.JsonDict] = iter(self._analyze(inputs_list))
@@ -250,7 +249,7 @@ class NMTModel(lit_model.Model):
             del predictions["encoder_outputs"]
 
             predictions = tf.nest.map_structure(lambda t: t.numpy(), predictions)
-            for prediction in opennmt.utils.misc.extract_batches(predictions):
+            for prediction in extract_batches(predictions):
                 index: int = prediction["index"]
                 target_length = prediction["length"]
                 trg_tokens = prediction["tokens"][:target_length]
