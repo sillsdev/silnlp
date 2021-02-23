@@ -749,24 +749,6 @@ optional = false
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
 
 [[package]]
-name = "rbo"
-version = "0.1"
-description = ""
-category = "main"
-optional = false
-python-versions = "*"
-develop = false
-
-[package.dependencies]
-numpy = "*"
-
-[package.source]
-type = "git"
-url = "https://github.com/changyaochen/rbo.git"
-reference = "master"
-resolved_reference = "2b2ff7b24534f342a5153573bf384c06317ec2de"
-
-[[package]]
 name = "regex"
 version = "2020.6.8"
 description = "Alternative regular expression module, to replace re."
@@ -1148,7 +1130,7 @@ testing = ["jaraco.itertools", "func-timeout"]
 [metadata]
 lock-version = "1.1"
 python-versions = "~3.6.1"
-content-hash = "e96e4e6220ca0c1813aeeb4ab33f120af87e0fda83a0a5b7a4ac351f640063fd"
+content-hash = "32098eef576ff1beb580c899714679528ec9dc0e008df9254e4e24912c102323"
 
 [metadata.files]
 absl-py = [
@@ -1714,7 +1696,6 @@ pyyaml = [
     {file = "PyYAML-5.3.1-cp38-cp38-win_amd64.whl", hash = "sha256:95f71d2af0ff4227885f7a6605c37fd53d3a106fcab511b8860ecca9fcf400ee"},
     {file = "PyYAML-5.3.1.tar.gz", hash = "sha256:b8eac752c5e14d3eca0e6dd9199cd627518cb5ec06add0de9d32baeee6fe645d"},
 ]
-rbo = []
 regex = [
     {file = "regex-2020.6.8-cp27-cp27m-win32.whl", hash = "sha256:fbff901c54c22425a5b809b914a3bfaf4b9570eee0e5ce8186ac71eb2025191c"},
     {file = "regex-2020.6.8-cp27-cp27m-win_amd64.whl", hash = "sha256:112e34adf95e45158c597feea65d06a8124898bdeac975c9087fe71b572bd938"},
