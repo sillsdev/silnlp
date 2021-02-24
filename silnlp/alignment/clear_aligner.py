@@ -33,6 +33,8 @@ class ClearAligner(Aligner):
             trg_words = trg_str.split()
             alignment = Alignment.fromstring(alignment_str)
             for src_index, trg_index in alignment:
+                if src_index >= len(src_words) or trg_index >= len(trg_words):
+                    continue
                 src_word = src_words[src_index]
                 trg_word = trg_words[trg_index]
                 lexicon.increment(src_word, trg_word)
