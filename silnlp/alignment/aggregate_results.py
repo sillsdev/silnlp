@@ -8,7 +8,7 @@ from ..common.environment import ALIGN_EXPERIMENTS_DIR
 from .config import get_all_book_paths
 
 ALIGNERS = ["PT", "Clear-2", "FastAlign", "HMM", "IBM-1", "IBM-2", "IBM-4"]
-METRICS = ["AER", "F-Score", "Precision", "Recall"]
+METRICS = ["F-Score", "Precision", "Recall", "RBO@1", "RBO", "F-Score@1", "Precision@1", "Recall@1", "MAP"]
 TESTAMENTS = ["nt", "ot"]
 
 
@@ -41,20 +41,21 @@ def aggregate_testament_results(translations: List[str]) -> None:
                             output_file.write(str(df.at[("ALL", aligner), metric]))
                     output_file.write("\n")
 
-            for aligner in available_aligners:
-                output_path = os.path.join(ALIGN_EXPERIMENTS_DIR, f"{testament}.all.{aligner}.{metric}.csv")
-                with open(output_path, "w") as output_file:
-                    output_file.write("Book," + ",".join(filter(lambda t: t in data, translations)) + "\n")
-                    for book_id in sorted(available_books, key=lambda b: book_id_to_number(b)):
-                        output_file.write(book_id)
-                        for translation in translations:
-                            df = data.get(translation)
-                            if df is None:
-                                continue
-                            output_file.write(",")
-                            if (book_id, aligner) in df.index:
-                                output_file.write(str(df.at[(book_id, aligner), metric]))
-                        output_file.write("\n")
+            if len(available_books) > 0:
+                for aligner in available_aligners:
+                    output_path = os.path.join(ALIGN_EXPERIMENTS_DIR, f"{testament}.all.{aligner}.{metric}.csv")
+                    with open(output_path, "w") as output_file:
+                        output_file.write("Book," + ",".join(filter(lambda t: t in data, translations)) + "\n")
+                        for book_id in sorted(available_books, key=lambda b: book_id_to_number(b)):
+                            output_file.write(book_id)
+                            for translation in translations:
+                                df = data.get(translation)
+                                if df is None:
+                                    continue
+                                output_file.write(",")
+                                if (book_id, aligner) in df.index:
+                                    output_file.write(str(df.at[(book_id, aligner), metric]))
+                            output_file.write("\n")
 
 
 def aggregate_book_results(translations: List[str]) -> None:

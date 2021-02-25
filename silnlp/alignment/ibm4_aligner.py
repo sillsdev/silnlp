@@ -143,7 +143,8 @@ class Ibm4Aligner(Aligner):
                 os.path.join(snt_dir, f"{prefix2}.vcb"),
                 "-o",
                 output_path,
-            ]
+            ],
+            stderr=subprocess.DEVNULL,
         )
 
     def _merge_alignment_parts(self, model_prefix: str, output_file_path: str) -> None:

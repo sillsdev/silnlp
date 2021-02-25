@@ -14,14 +14,14 @@ from .lexicon import Lexicon
 from .rbo import RankingSimilarity
 
 
-def compute_aer(alignments: Iterable[Alignment], references: Iterable[Alignment]) -> float:
+def corpus_aer(alignments: Iterable[Alignment], references: Iterable[Alignment]) -> float:
     a_count, s_count, pa_count, sa_count = get_alignment_counts(alignments, references)
     if s_count + a_count == 0:
         return 0
     return 1 - ((pa_count + sa_count) / (s_count + a_count))
 
 
-def compute_f_score(
+def corpus_f_score(
     alignments: Iterable[Alignment], references: Iterable[Alignment], alpha: float = 0.5
 ) -> Tuple[float, float, float]:
     a_count, s_count, pa_count, sa_count = get_alignment_counts(alignments, references)
@@ -125,10 +125,10 @@ def compute_alignment_metrics(
     references = filter_alignments_by_index(references, test_indices)
 
     aligner_names: List[str] = []
-    aers: List[float] = []
-    f_scores: List[float] = []
-    precisions: List[float] = []
-    recalls: List[float] = []
+    aer_list: List[float] = []
+    f_score_list: List[float] = []
+    precision_list: List[float] = []
+    recall_list: List[float] = []
     if len(references) > 0:
         for aligner_id, alignments in all_alignments.items():
             if aligner_id == "gold":
@@ -138,23 +138,23 @@ def compute_alignment_metrics(
             alignments = filter_alignments_by_book(vrefs, alignments, books)
             alignments = filter_alignments_by_index(alignments, test_indices)
 
-            aer = compute_aer(alignments, references)
-            f_score, precision, recall = compute_f_score(alignments, references)
+            aer = corpus_aer(alignments, references)
+            f_score, precision, recall = corpus_f_score(alignments, references)
 
             aligner_names.append(aligner_name)
-            aers.append(aer)
-            f_scores.append(f_score)
-            precisions.append(precision)
-            recalls.append(recall)
+            aer_list.append(aer)
+            f_score_list.append(f_score)
+            precision_list.append(precision)
+            recall_list.append(recall)
 
     return pd.DataFrame(
-        {"AER": aers, "F-Score": f_scores, "Precision": precisions, "Recall": recalls},
+        {"AER": aer_list, "F-Score": f_score_list, "Precision": precision_list, "Recall": recall_list},
         columns=["AER", "F-Score", "Precision", "Recall"],
         index=pd.MultiIndex.from_tuples(map(lambda a: (label, a), aligner_names), names=["Book", "Model"]),
     )
 
 
-def compute_precision_at_k(lexicon: Lexicon, reference: Lexicon, k: int) -> float:
+def corpus_precision_at_k(lexicon: Lexicon, reference: Lexicon, k: int) -> float:
     relevant_count: int = 0
     total_count: int = 0
 
@@ -170,7 +170,7 @@ def compute_precision_at_k(lexicon: Lexicon, reference: Lexicon, k: int) -> floa
     return 1 if total_count == 0 else relevant_count / total_count
 
 
-def compute_recall_at_k(lexicon: Lexicon, reference: Lexicon, k: int) -> float:
+def corpus_recall_at_k(lexicon: Lexicon, reference: Lexicon, k: int) -> float:
     relevant_count: int = 0
     total_count: int = 0
 
@@ -186,7 +186,7 @@ def compute_recall_at_k(lexicon: Lexicon, reference: Lexicon, k: int) -> float:
     return 1 if total_count == 0 else relevant_count / total_count
 
 
-def compute_mean_avg_precision(lexicon: Lexicon, reference: Lexicon) -> float:
+def corpus_mean_avg_precision(lexicon: Lexicon, reference: Lexicon) -> float:
     ap_sum: float = 0
     src_word_count: int = 0
 
@@ -208,23 +208,23 @@ def compute_mean_avg_precision(lexicon: Lexicon, reference: Lexicon) -> float:
     return 1 if src_word_count == 0 else ap_sum / src_word_count
 
 
-def compute_dcg(scores: List[float]) -> float:
+def dcg(scores: List[float]) -> float:
     return sum(map(lambda t: ((2 ** t[1]) - 1) / math.log2(t[0] + 2), enumerate(scores)))
 
 
-def compute_ndcg(lexicon: Lexicon, reference: Lexicon) -> float:
+def corpus_ndcg(lexicon: Lexicon, reference: Lexicon) -> float:
     dcg_sum: float = 0
     idcg_sum: float = 0
     for src_word in lexicon.source_words:
         scores = list(map(lambda tw: reference[src_word, tw], lexicon.get_target_words(src_word)))
-        dcg = compute_dcg(scores)
-        dcg_sum += dcg
-        idcg = compute_dcg(sorted(scores, reverse=True))
-        idcg_sum += idcg
+        word_dcg = dcg(scores)
+        dcg_sum += word_dcg
+        word_idcg = dcg(sorted(scores, reverse=True))
+        idcg_sum += word_idcg
     return 1 if idcg_sum == 0 else dcg_sum / idcg_sum
 
 
-def compute_rbo(lexicon: Lexicon, reference: Lexicon) -> float:
+def corpus_rbo_at_k(lexicon: Lexicon, reference: Lexicon, k: int, p: float = 1.0) -> float:
     rbo_sum: float = 0
     src_word_count: int = 0
     src_words: Set[str] = set(lexicon.source_words)
@@ -232,31 +232,45 @@ def compute_rbo(lexicon: Lexicon, reference: Lexicon) -> float:
     for src_word in src_words:
         words = list(lexicon.get_target_words(src_word))
         ref_words = list(reference.get_target_words(src_word))
-        rbo_sum += RankingSimilarity(words, ref_words).rbo_ext()
+        rbo_sum += RankingSimilarity(words, ref_words).rbo(k, p)
         src_word_count += 1
     return 1 if src_word_count == 0 else rbo_sum / src_word_count
 
 
-def compute_f_score_at_k(lexicon: Lexicon, reference: Lexicon, k: int) -> Tuple[float, float, float]:
-    precision_at_k = compute_precision_at_k(lexicon, reference, k)
-    recall_at_k = compute_recall_at_k(lexicon, reference, k)
+def corpus_rbo_ext(lexicon: Lexicon, reference: Lexicon, p: float = 0.9) -> float:
+    rbo_sum: float = 0
+    src_word_count: int = 0
+    src_words: Set[str] = set(lexicon.source_words)
+    src_words.update(reference.source_words)
+    for src_word in src_words:
+        words = list(lexicon.get_target_words(src_word))
+        ref_words = list(reference.get_target_words(src_word))
+        rbo_sum += RankingSimilarity(words, ref_words).rbo_ext(p)
+        src_word_count += 1
+    return 1 if src_word_count == 0 else rbo_sum / src_word_count
+
+
+def corpus_f_score_at_k(lexicon: Lexicon, reference: Lexicon, k: int) -> Tuple[float, float, float]:
+    precision_at_k = corpus_precision_at_k(lexicon, reference, k)
+    recall_at_k = corpus_recall_at_k(lexicon, reference, k)
     f_score_at_k = 2 * ((precision_at_k * recall_at_k) / (precision_at_k + recall_at_k))
     return (f_score_at_k, precision_at_k, recall_at_k)
 
 
-def compute_lexicon_metrics(root_dir: str, all_lexicons: Dict[str, Lexicon]) -> pd.DataFrame:
+def compute_lexicon_metrics(all_lexicons: Dict[str, Lexicon]) -> pd.DataFrame:
     reference = all_lexicons["gold"]
 
     aligner_names: List[str] = []
-    f_score_at_1: List[float] = []
-    precision_at_1: List[float] = []
-    recall_at_1: List[float] = []
-    f_score_at_3: List[float] = []
-    precision_at_3: List[float] = []
-    recall_at_3: List[float] = []
-    mean_avg_precision: List[float] = []
-    ndcg: List[float] = []
-    rbo: List[float] = []
+    f_score_at_1_list: List[float] = []
+    precision_at_1_list: List[float] = []
+    recall_at_1_list: List[float] = []
+    f_score_at_3_list: List[float] = []
+    precision_at_3_list: List[float] = []
+    recall_at_3_list: List[float] = []
+    mean_avg_precision_list: List[float] = []
+    ndcg_list: List[float] = []
+    rbo_list: List[float] = []
+    rbo_at_1_list: List[float] = []
     for aligner_id, lexicon in all_lexicons.items():
         if aligner_id == "gold":
             continue
@@ -264,33 +278,48 @@ def compute_lexicon_metrics(root_dir: str, all_lexicons: Dict[str, Lexicon]) -> 
         aligner_name = get_aligner_name(aligner_id)
         aligner_names.append(aligner_name)
 
-        f1, p1, r1 = compute_f_score_at_k(lexicon, reference, 1)
-        f_score_at_1.append(f1)
-        precision_at_1.append(p1)
-        recall_at_1.append(r1)
+        rbo_at_1_list.append(corpus_rbo_at_k(lexicon, reference, 1))
+        rbo_list.append(corpus_rbo_ext(lexicon, reference))
 
-        f3, p3, r3 = compute_f_score_at_k(lexicon, reference, 3)
-        f_score_at_3.append(f3)
-        precision_at_3.append(p3)
-        recall_at_3.append(r3)
+        f_score_at_1, precision_at_1, recall_at_1 = corpus_f_score_at_k(lexicon, reference, 1)
+        f_score_at_1_list.append(f_score_at_1)
+        precision_at_1_list.append(precision_at_1)
+        recall_at_1_list.append(recall_at_1)
 
-        mean_avg_precision.append(compute_mean_avg_precision(lexicon, reference))
-        ndcg.append(compute_ndcg(lexicon, reference))
-        rbo.append(compute_rbo(lexicon, reference))
+        f_score_at_3, precision_at_3, recall_at_3 = corpus_f_score_at_k(lexicon, reference, 3)
+        f_score_at_3_list.append(f_score_at_3)
+        precision_at_3_list.append(precision_at_3)
+        recall_at_3_list.append(recall_at_3)
+
+        mean_avg_precision_list.append(corpus_mean_avg_precision(lexicon, reference))
+
+        ndcg_list.append(corpus_ndcg(lexicon, reference))
 
     return pd.DataFrame(
         {
-            "F-Score@1": f_score_at_1,
-            "Precision@1": precision_at_1,
-            "Recall@1": recall_at_1,
-            "F-Score@3": f_score_at_3,
-            "Precision@3": precision_at_3,
-            "Recall@3": recall_at_3,
-            "MAP": mean_avg_precision,
-            "NDCG": ndcg,
-            "RBO": rbo,
+            "RBO@1": rbo_at_1_list,
+            "RBO": rbo_list,
+            "F-Score@1": f_score_at_1_list,
+            "Precision@1": precision_at_1_list,
+            "Recall@1": recall_at_1_list,
+            "F-Score@3": f_score_at_3_list,
+            "Precision@3": precision_at_3_list,
+            "Recall@3": recall_at_3_list,
+            "MAP": mean_avg_precision_list,
+            "NDCG": ndcg_list,
         },
-        columns=["F-Score@1", "Precision@1", "Recall@1", "F-Score@3", "Precision@3", "Recall@3", "MAP", "NDCG", "RBO"],
+        columns=[
+            "RBO@1",
+            "RBO",
+            "F-Score@1",
+            "Precision@1",
+            "Recall@1",
+            "F-Score@3",
+            "Precision@3",
+            "Recall@3",
+            "MAP",
+            "NDCG",
+        ],
         index=pd.MultiIndex.from_tuples(map(lambda a: ("ALL", a), aligner_names), names=["Book", "Model"]),
     )
 

@@ -24,7 +24,7 @@ def test(root_dir: str, by_book: bool, books: Set[int], test_size: Optional[int]
     df = compute_alignment_metrics(vrefs, all_alignments, "ALL", books, test_size)
 
     all_lexicons = load_all_lexicons(root_dir)
-    df = df.join(compute_lexicon_metrics(root_dir, all_lexicons))
+    df = df.join(compute_lexicon_metrics(all_lexicons))
 
     if by_book:
         for book_id in ALL_BOOK_IDS:
@@ -37,7 +37,7 @@ def test(root_dir: str, by_book: bool, books: Set[int], test_size: Optional[int]
 
     for book in sorted(set(df.index.get_level_values("Book")), key=lambda b: 0 if b == "ALL" else book_id_to_number(b)):
         if by_book:
-            print(f"=== {book} ===")
+            print(f"--- {book} ---")
         for index, row in df.loc[[book]].iterrows():
             aer: float = row["AER"]
             f_score: float = row["F-Score"]
@@ -51,6 +51,8 @@ def test(root_dir: str, by_book: bool, books: Set[int], test_size: Optional[int]
             print(f"- Recall: {recall:.4f}")
 
             if book == "ALL":
+                rbo_at_1: float = row["RBO@1"]
+                rbo: float = row["RBO"]
                 f_score_at_1: float = row["F-Score@1"]
                 precision_at_1: float = row["Precision@1"]
                 recall_at_1: float = row["Recall@1"]
@@ -59,8 +61,9 @@ def test(root_dir: str, by_book: bool, books: Set[int], test_size: Optional[int]
                 recall_at_3: float = row["Recall@3"]
                 mean_avg_precision: float = row["MAP"]
                 ndcg: float = row["NDCG"]
-                rbo: float = row["RBO"]
                 print("Lexicon")
+                print(f"- RBO@1: {rbo_at_1:.4f}")
+                print(f"- RBO: {rbo:.4f}")
                 print(f"- F-Score@1: {f_score_at_1:.4f}")
                 print(f"- Precision@1: {precision_at_1:.4f}")
                 print(f"- Recall@1: {recall_at_1:.4f}")
@@ -69,7 +72,6 @@ def test(root_dir: str, by_book: bool, books: Set[int], test_size: Optional[int]
                 print(f"- Recall@3: {recall_at_3:.4f}")
                 print(f"- MAP: {mean_avg_precision:.4f}")
                 print(f"- NDCG: {ndcg:.4f}")
-                print(f"- RBO: {rbo:.4f}")
 
     scores_file_name = "scores.csv"
     if test_size is not None:
@@ -79,29 +81,29 @@ def test(root_dir: str, by_book: bool, books: Set[int], test_size: Optional[int]
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Tests generated alignments against gold standard alignments")
-    parser.add_argument("experiment", help="Experiment name")
+    parser.add_argument("experiments", nargs="+", help="Experiment names")
     parser.add_argument("--test-size", type=int, help="Test size")
     parser.add_argument("--books", nargs="*", metavar="book", default=[], help="Books")
     parser.add_argument("--by-book", default=False, action="store_true", help="Score individual books")
     args = parser.parse_args()
 
     books = get_books(args.books)
-
-    root_dir = get_align_root_dir(args.experiment)
-    config = load_config(args.experiment)
-    set_seed(config["seed"])
     test_size: Optional[int] = args.test_size
-
     if test_size is not None:
         print(f"Test size: {test_size}")
-    print("Computing metrics...")
-    if config["by_book"]:
-        for book, book_root_dir in get_all_book_paths(root_dir):
-            if os.path.isdir(book_root_dir):
-                print(f"=== {book} ===")
-                test(book_root_dir, False, books, test_size)
-    else:
-        test(root_dir, args.by_book, books, test_size)
+
+    for exp_name in args.experiments:
+        print(f"=== Computing metrics ({exp_name}) ===")
+        root_dir = get_align_root_dir(exp_name)
+        config = load_config(exp_name)
+        set_seed(config["seed"])
+        if config["by_book"]:
+            for book, book_root_dir in get_all_book_paths(root_dir):
+                if os.path.isdir(book_root_dir):
+                    print(f"--- {book} ---")
+                    test(book_root_dir, False, books, test_size)
+        else:
+            test(root_dir, args.by_book, books, test_size)
 
 
 if __name__ == "__main__":
