@@ -17,6 +17,7 @@ from lit_nlp.api import dataset as lit_dataset
 from lit_nlp.api import model as lit_model
 from lit_nlp.api import types as lit_types
 from lit_nlp.components import index, metrics, pca, projection, similarity_searcher, umap, word_replacer
+from lit_nlp.lib import caching
 from opennmt.runner import _CONFIG_FALLBACK
 from opennmt.utils.checkpoint import Checkpoint
 from opennmt.utils.misc import clone_layer, extract_batches, merge_dict
@@ -298,7 +299,7 @@ class NMTModel(lit_model.Model):
             "src_tokens": lit_types.Tokens(parent="src_text"),
             "trg_text": lit_types.GeneratedText(parent="ref_text"),
             "trg_tokens": lit_types.Tokens(parent="trg_text"),
-            "attention": lit_types.AttentionHeads(align=("src_tokens", "trg_tokens")),
+            "attention": lit_types.AttentionHeads(align_in="src_tokens", align_out="trg_tokens"),
             "pred_tokens": lit_types.TokenTopKPreds(align="trg_tokens", parent="trg_text"),
             "encoder_final_embedding": lit_types.Embeddings(),
             "ter": lit_types.Scalar(),
@@ -424,7 +425,10 @@ def main() -> None:
 
     index_datasets: Dict[str, lit_dataset.Dataset] = {"test": create_train_dataset(root_dir, src_langs, trg_langs)}
     indexer = IndexerEx(
-        models, index_datasets, data_dir=os.path.join(root_dir, "lit-index"), initialize_new_indices=True
+        models,
+        lit_dataset.IndexedDataset.index_all(index_datasets, caching.input_hash),
+        data_dir=os.path.join(root_dir, "lit-index"),
+        initialize_new_indices=True,
     )
 
     generators: Dict[str, lit_components.Generator] = {
