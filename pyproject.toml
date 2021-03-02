@@ -35,10 +35,8 @@ Morfessor-FlatCat = "^1.0.8"
 psutil = "^5.7.3"
 scikit-learn = "^0.23.2"
 numpy = "1.19.3"
-OpenNMT-tf = "^2.15.0"
+OpenNMT-tf = "^2.16.0"
 annoy = "^1.17.0"
-tensorflow = "^2.4.1"
-tensorboard = "^2.4.1"
 lit-nlp = {url = "https://github.com/ddaspit/lit/releases/download/v0.2/lit_nlp-0.2-py3-none-any.whl"}
 
 [tool.poetry.dev-dependencies]
