@@ -3,7 +3,7 @@ import copy
 import logging
 import os
 from glob import glob
-from typing import IO, Dict, Iterable, Iterator, List, Optional, Sequence, Text, Tuple
+from typing import IO, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Text, Tuple
 
 logging.basicConfig()
 
@@ -343,6 +343,82 @@ class BLEUMetrics(metrics.SimpleMetrics):
         return {"bleu": bleu_score.score}
 
 
+def create_lit_args(exp_name: str, checkpoints: Set[str] = {"last"}) -> Tuple[tuple, dict]:
+    root_dir = get_mt_root_dir(exp_name)
+    config = load_config(exp_name)
+    model_dir: str = config["model_dir"]
+    data_config: dict = config["data"]
+    src_langs = parse_langs(data_config["src_langs"])
+    trg_langs = parse_langs(data_config["trg_langs"])
+
+    datasets: Dict[str, lit_dataset.Dataset] = {"test": create_test_dataset(root_dir, src_langs, trg_langs)}
+
+    if data_config["share_vocab"]:
+        model_prefix = os.path.join(root_dir, "sp")
+        src_spp = sp.SentencePieceProcessor()
+        src_spp.Load(f"{model_prefix}.model")
+
+        trg_spp = src_spp
+    else:
+        src_spp = sp.SentencePieceProcessor()
+        src_spp.Load(os.path.join(root_dir, "src-sp.model"))
+
+        trg_spp = sp.SentencePieceProcessor()
+        trg_spp.Load(os.path.join(root_dir, "trg-sp.model"))
+
+    model = create_model(config)
+
+    models: Dict[str, NMTModel] = {}
+
+    for checkpoint in checkpoints:
+        if checkpoint == "avg":
+            checkpoint_path, _ = get_last_checkpoint(os.path.join(model_dir, "avg"))
+            models["avg"] = NMTModel(config, model, src_spp, trg_spp, -1, checkpoint_path, type="avg")
+        elif checkpoint == "last":
+            last_checkpoint_path, last_step = get_last_checkpoint(model_dir)
+            step_str = str(last_step)
+            if step_str in models:
+                models[step_str].types.append("last")
+            else:
+                models[str(last_step)] = NMTModel(
+                    config, model, src_spp, trg_spp, last_step, last_checkpoint_path, type="last"
+                )
+        elif checkpoint == "best":
+            best_model_path, best_step = get_best_model_dir(model_dir)
+            step_str = str(best_step)
+            if step_str in models:
+                models[step_str].types.append("best")
+            else:
+                models[step_str] = NMTModel(
+                    config, model, src_spp, trg_spp, best_step, os.path.join(best_model_path, "ckpt"), type="best"
+                )
+        else:
+            checkpoint_path = os.path.join(model_dir, f"ckpt-{checkpoint}")
+            step = int(checkpoint)
+            models[checkpoint] = NMTModel(config, model, src_spp, trg_spp, step, checkpoint_path)
+
+    index_datasets: Dict[str, lit_dataset.Dataset] = {"test": create_train_dataset(root_dir, src_langs, trg_langs)}
+    indexer = IndexerEx(
+        models,
+        lit_dataset.IndexedDataset.index_all(index_datasets, caching.input_hash),
+        data_dir=os.path.join(root_dir, "lit-index"),
+        initialize_new_indices=True,
+    )
+
+    generators: Dict[str, lit_components.Generator] = {
+        "word_replacer": word_replacer.WordReplacer(),
+        "similarity_searcher": similarity_searcher.SimilaritySearcher(indexer),
+    }
+
+    interpreters: Dict[str, lit_components.Interpreter] = {
+        "metrics": lit_components.ComponentGroup({"bleu": BLEUMetrics(data_config)}),
+        "pca": projection.ProjectionManager(pca.PCAModel),
+        "umap": projection.ProjectionManager(umap.UmapModel),
+    }
+
+    return ((models, datasets), {"generators": generators, "interpreters": interpreters})
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Analyzes an NMT model using LIT")
     parser.add_argument("experiment", help="Experiment name")
@@ -368,83 +444,21 @@ def main() -> None:
         for device in gpus:
             tf.config.experimental.set_memory_growth(device, enable=True)
 
-    exp_name = args.experiment
-    root_dir = get_mt_root_dir(exp_name)
-    config = load_config(exp_name)
-    model_dir: str = config["model_dir"]
-    data_config: dict = config["data"]
-    src_langs = parse_langs(data_config["src_langs"])
-    trg_langs = parse_langs(data_config["trg_langs"])
-
-    datasets: Dict[str, lit_dataset.Dataset] = {"test": create_test_dataset(root_dir, src_langs, trg_langs)}
-
-    if data_config["share_vocab"]:
-        model_prefix = os.path.join(root_dir, "sp")
-        src_spp = sp.SentencePieceProcessor()
-        src_spp.Load(f"{model_prefix}.model")
-
-        trg_spp = src_spp
-    else:
-        src_spp = sp.SentencePieceProcessor()
-        src_spp.Load(os.path.join(root_dir, "src-sp.model"))
-
-        trg_spp = sp.SentencePieceProcessor()
-        trg_spp.Load(os.path.join(root_dir, "trg-sp.model"))
-
-    model = create_model(config)
-
-    last_checkpoint_path, last_step = get_last_checkpoint(model_dir)
-
-    models: Dict[str, NMTModel] = {}
-
+    checkpoints: Set[str] = set()
     if args.avg:
-        checkpoint_path, _ = get_last_checkpoint(os.path.join(model_dir, "avg"))
-        models["avg"] = NMTModel(config, model, src_spp, trg_spp, -1, checkpoint_path, type="avg")
+        checkpoints.add("avg")
     if args.checkpoint is not None:
-        checkpoint_path = os.path.join(model_dir, f"ckpt-{args.checkpoint}")
-        step = int(args.checkpoint)
-        models[args.checkpoint] = NMTModel(config, model, src_spp, trg_spp, step, checkpoint_path)
-    if args.last or (not args.best and args.checkpoint is None and not args.avg):
-        last_checkpoint_path, last_step = get_last_checkpoint(model_dir)
-        step_str = str(last_step)
-        if step_str in models:
-            models[step_str].types.append("last")
-        else:
-            models[str(last_step)] = NMTModel(
-                config, model, src_spp, trg_spp, last_step, last_checkpoint_path, type="last"
-            )
+        checkpoints.add(args.checkpoint)
+    if args.last:
+        checkpoints.add("last")
     if args.best:
-        best_model_path, best_step = get_best_model_dir(model_dir)
-        step_str = str(best_step)
-        if step_str in models:
-            models[step_str].types.append("best")
-        else:
-            models[step_str] = NMTModel(
-                config, model, src_spp, trg_spp, best_step, os.path.join(best_model_path, "ckpt"), type="best"
-            )
+        checkpoints.add("best")
+    if len(checkpoints) == 0:
+        checkpoints.add("last")
 
-    index_datasets: Dict[str, lit_dataset.Dataset] = {"test": create_train_dataset(root_dir, src_langs, trg_langs)}
-    indexer = IndexerEx(
-        models,
-        lit_dataset.IndexedDataset.index_all(index_datasets, caching.input_hash),
-        data_dir=os.path.join(root_dir, "lit-index"),
-        initialize_new_indices=True,
-    )
+    server_args, server_kw = create_lit_args(args.experiment, checkpoints)
 
-    generators: Dict[str, lit_components.Generator] = {
-        "word_replacer": word_replacer.WordReplacer(),
-        "similarity_searcher": similarity_searcher.SimilaritySearcher(indexer),
-    }
-
-    interpreters: Dict[str, lit_components.Interpreter] = {
-        "metrics": lit_components.ComponentGroup({"bleu": BLEUMetrics(data_config)}),
-        "pca": projection.ProjectionManager(pca.PCAModel),
-        "umap": projection.ProjectionManager(umap.UmapModel),
-    }
-
-    lit_server = dev_server.Server(
-        models, datasets, generators=generators, interpreters=interpreters, **server_flags.get_flags()
-    )
+    lit_server = dev_server.Server(*server_args, **server_kw, **server_flags.get_flags())
     lit_server.serve()
 
 
