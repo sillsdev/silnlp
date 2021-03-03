@@ -1,5 +1,6 @@
 import os
 from typing import IO, Iterable, Iterator, List, Optional, Tuple, cast
+import re
 
 import sacrebleu
 import sentencepiece as sp
@@ -20,8 +21,12 @@ def encode_sp(spp: Optional[sp.SentencePieceProcessor], line: str) -> str:
     if spp is None:
         return line
     prefix = ""
-    if line.startswith("<2"):
+    if re.match("<2\w+> ", line):
+#    if line.startswith("<2"):
+#        try:
         index = line.index(">")
+#        except ValueError:
+#            print(f'ValueError: substring not found (">"), string >>>{line}<<<')
         prefix = line[0 : index + 2]
         line = line[index + 2 :]
     return prefix + " ".join(spp.EncodeAsPieces(line))
