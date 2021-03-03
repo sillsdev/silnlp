@@ -1,8 +1,7 @@
 import glob
-import math
 import os
 import random
-from typing import Dict, Iterable, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import pandas as pd
 from nltk.translate import Alignment
@@ -11,7 +10,7 @@ from ..common.corpus import load_corpus
 from ..common.verse_ref import VerseRef
 from .config import get_aligner_name
 from .lexicon import Lexicon
-from .rbo import RankingSimilarity
+from .rbo import average_overlap, rbo_ext
 
 
 def corpus_aer(alignments: Iterable[Alignment], references: Iterable[Alignment]) -> float:
@@ -208,31 +207,32 @@ def corpus_mean_avg_precision(lexicon: Lexicon, reference: Lexicon) -> float:
     return 1 if src_word_count == 0 else ap_sum / src_word_count
 
 
-def dcg(scores: List[float]) -> float:
-    return sum(map(lambda t: ((2 ** t[1]) - 1) / math.log2(t[0] + 2), enumerate(scores)))
+def group_by_rank(word_probs: Iterable[Tuple[str, float]]) -> List[Union[str, Set[str]]]:
+    last_prob: float = -1
+    ranks: List[Union[str, Set[str]]] = []
+    for word, prob in word_probs:
+        if prob == last_prob:
+            last_rank = ranks[-1]
+            if isinstance(last_rank, str):
+                last_rank = {last_rank, word}
+                ranks[-1] = last_rank
+            else:
+                last_rank.add(word)
+        else:
+            ranks.append(word)
+        last_prob = prob
+    return ranks
 
 
-def corpus_ndcg(lexicon: Lexicon, reference: Lexicon) -> float:
-    dcg_sum: float = 0
-    idcg_sum: float = 0
-    for src_word in lexicon.source_words:
-        scores = list(map(lambda tw: reference[src_word, tw], lexicon.get_target_words(src_word)))
-        word_dcg = dcg(scores)
-        dcg_sum += word_dcg
-        word_idcg = dcg(sorted(scores, reverse=True))
-        idcg_sum += word_idcg
-    return 1 if idcg_sum == 0 else dcg_sum / idcg_sum
-
-
-def corpus_rbo_at_k(lexicon: Lexicon, reference: Lexicon, k: int, p: float = 1.0) -> float:
+def corpus_average_overlap_at_k(lexicon: Lexicon, reference: Lexicon, k: int) -> float:
     rbo_sum: float = 0
     src_word_count: int = 0
     src_words: Set[str] = set(lexicon.source_words)
     src_words.update(reference.source_words)
     for src_word in src_words:
-        words = list(lexicon.get_target_words(src_word))
-        ref_words = list(reference.get_target_words(src_word))
-        rbo_sum += RankingSimilarity(words, ref_words).rbo(k, p)
+        words = group_by_rank(lexicon.get_target_word_probs(src_word))
+        ref_words = group_by_rank(reference.get_target_word_probs(src_word))
+        rbo_sum += average_overlap(words, ref_words, depth=k)
         src_word_count += 1
     return 1 if src_word_count == 0 else rbo_sum / src_word_count
 
@@ -243,9 +243,9 @@ def corpus_rbo_ext(lexicon: Lexicon, reference: Lexicon, p: float = 0.9) -> floa
     src_words: Set[str] = set(lexicon.source_words)
     src_words.update(reference.source_words)
     for src_word in src_words:
-        words = list(lexicon.get_target_words(src_word))
-        ref_words = list(reference.get_target_words(src_word))
-        rbo_sum += RankingSimilarity(words, ref_words).rbo_ext(p)
+        words = group_by_rank(lexicon.get_target_word_probs(src_word))
+        ref_words = group_by_rank(reference.get_target_word_probs(src_word))
+        rbo_sum += rbo_ext(words, ref_words, p)
         src_word_count += 1
     return 1 if src_word_count == 0 else rbo_sum / src_word_count
 
@@ -268,9 +268,8 @@ def compute_lexicon_metrics(all_lexicons: Dict[str, Lexicon]) -> pd.DataFrame:
     precision_at_3_list: List[float] = []
     recall_at_3_list: List[float] = []
     mean_avg_precision_list: List[float] = []
-    ndcg_list: List[float] = []
     rbo_list: List[float] = []
-    rbo_at_1_list: List[float] = []
+    ao_at_1_list: List[float] = []
     for aligner_id, lexicon in all_lexicons.items():
         if aligner_id == "gold":
             continue
@@ -278,7 +277,7 @@ def compute_lexicon_metrics(all_lexicons: Dict[str, Lexicon]) -> pd.DataFrame:
         aligner_name = get_aligner_name(aligner_id)
         aligner_names.append(aligner_name)
 
-        rbo_at_1_list.append(corpus_rbo_at_k(lexicon, reference, 1))
+        ao_at_1_list.append(corpus_average_overlap_at_k(lexicon, reference, 1))
         rbo_list.append(corpus_rbo_ext(lexicon, reference))
 
         f_score_at_1, precision_at_1, recall_at_1 = corpus_f_score_at_k(lexicon, reference, 1)
@@ -293,12 +292,8 @@ def compute_lexicon_metrics(all_lexicons: Dict[str, Lexicon]) -> pd.DataFrame:
 
         mean_avg_precision_list.append(corpus_mean_avg_precision(lexicon, reference))
 
-        ndcg_list.append(corpus_ndcg(lexicon, reference))
-
     return pd.DataFrame(
         {
-            "RBO@1": rbo_at_1_list,
-            "RBO": rbo_list,
             "F-Score@1": f_score_at_1_list,
             "Precision@1": precision_at_1_list,
             "Recall@1": recall_at_1_list,
@@ -306,20 +301,10 @@ def compute_lexicon_metrics(all_lexicons: Dict[str, Lexicon]) -> pd.DataFrame:
             "Precision@3": precision_at_3_list,
             "Recall@3": recall_at_3_list,
             "MAP": mean_avg_precision_list,
-            "NDCG": ndcg_list,
+            "AO@1": ao_at_1_list,
+            "RBO": rbo_list,
         },
-        columns=[
-            "RBO@1",
-            "RBO",
-            "F-Score@1",
-            "Precision@1",
-            "Recall@1",
-            "F-Score@3",
-            "Precision@3",
-            "Recall@3",
-            "MAP",
-            "NDCG",
-        ],
+        columns=["F-Score@1", "Precision@1", "Recall@1", "F-Score@3", "Precision@3", "Recall@3", "MAP", "AO@1", "RBO"],
         index=pd.MultiIndex.from_tuples(map(lambda a: ("ALL", a), aligner_names), names=["Book", "Model"]),
     )
 

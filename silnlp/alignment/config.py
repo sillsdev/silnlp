@@ -23,7 +23,10 @@ ALIGNERS: Dict[str, Tuple[Type[Aligner], str]] = {
     "hmm": (HmmAligner, "HMM"),
     "smt": (SmtAligner, "SMT"),
     "pt": (ParatextAligner, "PT"),
-    "clear": (ClearAligner, "Clear-2"),
+    "clear2_fa": (ClearAligner, "Clear-2-FA"),
+    "clear2_hmm": (ClearAligner, "Clear-2-HMM"),
+    "clear3_fa": (ClearAligner, "Clear-3-FA"),
+    "clear3_hmm": (ClearAligner, "Clear-3-HMM"),
 }
 
 

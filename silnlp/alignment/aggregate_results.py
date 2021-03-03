@@ -7,8 +7,32 @@ from ..common.canon import ALL_BOOK_IDS, book_id_to_number
 from ..common.environment import ALIGN_EXPERIMENTS_DIR
 from .config import get_all_book_paths
 
-ALIGNERS = ["PT", "Clear-2", "FastAlign", "HMM", "IBM-1", "IBM-2", "IBM-4"]
-METRICS = ["F-Score", "Precision", "Recall", "RBO@1", "RBO", "F-Score@1", "Precision@1", "Recall@1", "MAP"]
+ALIGNERS = [
+    "PT",
+    "Clear-2-FA",
+    "Clear-2-HMM",
+    "Clear-3-FA",
+    "Clear-3-HMM",
+    "FastAlign",
+    "HMM",
+    "IBM-1",
+    "IBM-2",
+    "IBM-4",
+]
+METRICS = [
+    "F-Score",
+    "Precision",
+    "Recall",
+    "F-Score@1",
+    "Precision@1",
+    "Recall@1",
+    "F-Score@3",
+    "Precision@3",
+    "Recall@3",
+    "MAP",
+    "AO@1",
+    "RBO",
+]
 TESTAMENTS = ["nt", "ot"]
 
 

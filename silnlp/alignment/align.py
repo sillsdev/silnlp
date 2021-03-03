@@ -64,24 +64,29 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Aligns the parallel corpus for an experiment")
     parser.add_argument("experiments", nargs="+", help="Experiment names")
     parser.add_argument("--aligners", nargs="*", metavar="aligner", default=[], help="Aligners")
+    parser.add_argument("--skip-align", default=False, action="store_true", help="Skips aligning corpora")
+    parser.add_argument("--skip-extract-lexicon", default=False, action="store_true", help="Skips extracting lexicons")
     args = parser.parse_args()
 
     aligner_ids = list(ALIGNERS.keys() if len(args.aligners) == 0 else args.aligners)
 
     for exp_name in args.experiments:
-        print(f"=== Aligning ({exp_name}) ===")
         root_dir = get_align_root_dir(exp_name)
-        config = load_config(exp_name)
 
-        if config["by_book"]:
-            for book, book_root_dir in get_all_book_paths(root_dir):
-                if os.path.isdir(book_root_dir):
-                    align(aligner_ids, book_root_dir, book)
-        else:
-            align(aligner_ids, root_dir)
+        if not args.skip_align:
+            print(f"=== Aligning ({exp_name}) ===")
+            config = load_config(exp_name)
 
-        print(f"=== Extracting lexicons ({exp_name}) ===")
-        extract_lexicons(aligner_ids, root_dir)
+            if config["by_book"]:
+                for book, book_root_dir in get_all_book_paths(root_dir):
+                    if os.path.isdir(book_root_dir):
+                        align(aligner_ids, book_root_dir, book)
+            else:
+                align(aligner_ids, root_dir)
+
+        if not args.skip_extract_lexicon:
+            print(f"=== Extracting lexicons ({exp_name}) ===")
+            extract_lexicons(aligner_ids, root_dir)
 
 
 if __name__ == "__main__":

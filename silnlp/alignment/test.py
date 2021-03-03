@@ -51,8 +51,6 @@ def test(root_dir: str, by_book: bool, books: Set[int], test_size: Optional[int]
             print(f"- Recall: {recall:.4f}")
 
             if book == "ALL":
-                rbo_at_1: float = row["RBO@1"]
-                rbo: float = row["RBO"]
                 f_score_at_1: float = row["F-Score@1"]
                 precision_at_1: float = row["Precision@1"]
                 recall_at_1: float = row["Recall@1"]
@@ -60,10 +58,9 @@ def test(root_dir: str, by_book: bool, books: Set[int], test_size: Optional[int]
                 precision_at_3: float = row["Precision@3"]
                 recall_at_3: float = row["Recall@3"]
                 mean_avg_precision: float = row["MAP"]
-                ndcg: float = row["NDCG"]
+                ao_at_1: float = row["AO@1"]
+                rbo: float = row["RBO"]
                 print("Lexicon")
-                print(f"- RBO@1: {rbo_at_1:.4f}")
-                print(f"- RBO: {rbo:.4f}")
                 print(f"- F-Score@1: {f_score_at_1:.4f}")
                 print(f"- Precision@1: {precision_at_1:.4f}")
                 print(f"- Recall@1: {recall_at_1:.4f}")
@@ -71,7 +68,8 @@ def test(root_dir: str, by_book: bool, books: Set[int], test_size: Optional[int]
                 print(f"- Precision@3: {precision_at_3:.4f}")
                 print(f"- Recall@3: {recall_at_3:.4f}")
                 print(f"- MAP: {mean_avg_precision:.4f}")
-                print(f"- NDCG: {ndcg:.4f}")
+                print(f"- AO@1: {ao_at_1:.4f}")
+                print(f"- RBO: {rbo:.4f}")
 
     scores_file_name = "scores.csv"
     if test_size is not None:

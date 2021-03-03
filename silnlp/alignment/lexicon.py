@@ -67,10 +67,14 @@ class Lexicon:
         return trg_words
 
     def get_target_words(self, src_word: str) -> Iterable[str]:
+        for trg_word, _ in self.get_target_word_probs(src_word):
+            yield trg_word
+
+    def get_target_word_probs(self, src_word: str) -> Iterable[Tuple[str, float]]:
         src_entry = self._table.get(src_word)
         if src_entry is not None:
-            for trg_word, _ in sorted(src_entry.items(), key=lambda t: t[1], reverse=True):
-                yield trg_word
+            for trg_word, prob in sorted(src_entry.items(), key=lambda t: t[1], reverse=True):
+                yield (trg_word, prob)
 
     def increment(self, src_word: str, trg_word: str, n: float = 1) -> None:
         if n == 0:

@@ -50,16 +50,14 @@ class MachineAligner(Aligner):
 
     def get_direct_lexicon(self, include_special_tokens: bool = False) -> Lexicon:
         direct_lex_path = os.path.join(self.model_dir, "lexicon.direct.txt")
-        if not os.path.isfile(direct_lex_path):
-            self._extract_lexicon("direct", direct_lex_path)
+        self._extract_lexicon("direct", direct_lex_path)
         return Lexicon.load(direct_lex_path, include_special_tokens)
 
     def get_inverse_lexicon(self, include_special_tokens: bool = False) -> Lexicon:
         if not self._has_inverse_model:
             raise RuntimeError("The aligner does not have an inverse model.")
         inverse_lex_path = os.path.join(self.model_dir, "lexicon.inverse.txt")
-        if not os.path.isfile(inverse_lex_path):
-            self._extract_lexicon("inverse", inverse_lex_path)
+        self._extract_lexicon("inverse", inverse_lex_path)
         return Lexicon.load(inverse_lex_path, include_special_tokens)
 
     def _train_alignment_model(self, src_file_path: str, trg_file_path: str) -> None:
@@ -110,7 +108,7 @@ class MachineAligner(Aligner):
             args.append(self._plugin_file_path)
         subprocess.run(args, cwd=get_repo_dir())
 
-    def _extract_lexicon(self, direction: str, out_file_path: str) -> None:
+    def _extract_lexicon(self, direction: str, out_file_path: str, threshold: float = 0.01) -> None:
         args = [
             "dotnet",
             "machine",
@@ -121,6 +119,8 @@ class MachineAligner(Aligner):
             self.model_type,
             "-p",
             "-n",
+            "-t",
+            str(threshold),
             "-d",
             direction,
         ]
@@ -158,6 +158,11 @@ class ParatextAligner(MachineAligner):
         super().__init__(
             "pt", "betainv", model_dir, plugin_file_path=os.getenv("BETA_INV_PLUGIN_PATH"), has_inverse_model=False
         )
+
+    def get_direct_lexicon(self, include_special_tokens: bool = False) -> Lexicon:
+        direct_lex_path = os.path.join(self.model_dir, "lexicon.direct.txt")
+        self._extract_lexicon("direct", direct_lex_path, threshold=0)
+        return Lexicon.load(direct_lex_path, include_special_tokens)
 
 
 class SmtAligner(MachineAligner):
