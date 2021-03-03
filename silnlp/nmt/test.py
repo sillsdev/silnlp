@@ -385,14 +385,15 @@ def test_checkpoint(
         else:
             # target data is split into separate files
             for trg_iso in sorted(trg_langs.keys()):
-                prefix = f"test.{src_iso}.{trg_iso}"
-                vref_paths.append(os.path.join(root_dir, f"{prefix}.vref.txt"))
-                features_paths.append(os.path.join(root_dir, f"{prefix}.src.txt"))
-                predictions_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.txt.{suffix_str}"))
-                refs_paths.append(os.path.join(root_dir, f"{prefix}.trg.detok*.txt"))
-                predictions_detok_paths.append(
-                    os.path.join(root_dir, f"{prefix}.trg-predictions.detok.txt.{suffix_str}")
-                )
+                if src_iso != trg_iso:
+                    prefix = f"test.{src_iso}.{trg_iso}"
+                    vref_paths.append(os.path.join(root_dir, f"{prefix}.vref.txt"))
+                    features_paths.append(os.path.join(root_dir, f"{prefix}.src.txt"))
+                    predictions_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.txt.{suffix_str}"))
+                    refs_paths.append(os.path.join(root_dir, f"{prefix}.trg.detok*.txt"))
+                    predictions_detok_paths.append(
+                        os.path.join(root_dir, f"{prefix}.trg-predictions.detok.txt.{suffix_str}")
+                    )
 
     checkpoint_name = "averaged checkpoint" if step == -1 else f"checkpoint {step}"
 
