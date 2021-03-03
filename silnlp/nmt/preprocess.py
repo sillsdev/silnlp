@@ -555,13 +555,16 @@ def preprocess_standard(
     val_size: int = data_config["val_size"]
     mirror: bool = data_config["mirror"]
 
-    trg_files_by_project = {df.project: df for df in trg_files}
+#    trg_files_by_project = {df.project: df for df in trg_files}
     test_set_count = 0
     for src_file in src_files:
         if src_file.is_test:
-            trg_file = trg_files_by_project.get(src_file.project)
-            if trg_file is not None and trg_file.is_test:
-                test_set_count += 1
+            for trg_file in trg_files:
+                if src_file.project == trg_file.project and trg_file.is_test:
+                    test_set_count += 1
+    #            trg_file = trg_files_by_project.get(src_file.project)
+#            if trg_file is not None and trg_file.is_test:
+#                test_set_count += 1
 
     print("Writing data sets...")
     for old_file_path in glob(os.path.join(root_dir, "test.*.txt")):
@@ -574,74 +577,82 @@ def preprocess_standard(
         os.path.join(root_dir, "val.trg.txt"), "w", encoding="utf-8", newline="\n"
     ) as val_trg_file:
         for src_file in src_files:
-            trg_file = trg_files_by_project.get(src_file.project)
-            if trg_file is None:
-                continue
-
-            corpus_len = get_parallel_corpus_length(src_file.path, trg_file.path)
-
             test_indices: Optional[Set[int]] = set()
             val_indices: Optional[Set[int]] = set()
-            if src_file.is_test and trg_file.is_test:
-                if test_size < 0 or test_size >= corpus_len:
-                    test_indices = None
-                else:
-                    test_indices = set(random.sample(range(corpus_len), test_size))
-            if src_file.is_val and trg_file.is_val and test_indices is not None:
-                population = (
-                    range(corpus_len)
-                    if len(test_indices) == 0
-                    else [i for i in range(corpus_len) if i not in test_indices]
-                )
-                if val_size < 0 or val_size >= len(population):
-                    val_indices = None
-                else:
-                    val_indices = set(random.sample(population, val_size))
 
-            test_prefix = "test" if test_set_count == 1 else f"test.{src_file.iso}.{trg_file.iso}"
-            with open(src_file.path, "r", encoding="utf-8") as input_src_file, open(
-                trg_file.path, "r", encoding="utf-8"
-            ) as input_trg_file, open(
-                os.path.join(root_dir, f"{test_prefix}.src.txt"), "a", encoding="utf-8", newline="\n"
-            ) as test_src_file, open(
-                os.path.join(root_dir, f"{test_prefix}.trg.detok.txt"), "a", encoding="utf-8", newline="\n"
-            ) as test_trg_file:
-                index = 0
-                for src_line, trg_line in zip(input_src_file, input_trg_file):
-                    src_line = src_line.strip()
-                    trg_line = trg_line.strip()
-                    if len(src_line) == 0 or len(trg_line) == 0:
-                        continue
+            for trg_file in trg_files:
+                if (src_file.project != trg_file.project) or (src_file.iso == trg_file.iso):
+                    continue
 
-                    src_sentence = src_line
-                    if write_trg_tag:
-                        src_sentence = f"<2{trg_file.iso}> " + src_line
-                    trg_sentence = trg_line
+                print(f'Pairing {src_file.path} with {trg_file.path}; mirror: {mirror}')
 
-                    mirror_src_sentence = trg_line
-                    if write_trg_tag:
-                        mirror_src_sentence = f"<2{src_file.iso}> " + trg_line
-                    mirror_trg_sentence = src_line
-                    mirror_src_spp = trg_spp
-                    mirror_trg_spp = src_spp
+#            trg_file = trg_files_by_project.get(src_file.project)
+#            if trg_file is None:
+#                continue
 
-                    if test_indices is None or index in test_indices:
-                        test_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
-                        test_trg_file.write(decode_sp(encode_sp(trg_spp, trg_sentence)) + "\n")
-                    elif val_indices is None or index in val_indices:
-                        val_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
-                        val_trg_file.write(encode_sp(trg_spp, trg_sentence) + "\n")
-                        if mirror:
-                            val_src_file.write(encode_sp(mirror_src_spp, mirror_src_sentence) + "\n")
-                            val_trg_file.write(encode_sp(mirror_trg_spp, mirror_trg_sentence) + "\n")
-                    elif src_file.is_train and trg_file.is_train:
-                        train_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
-                        train_trg_file.write(encode_sp(trg_spp, trg_sentence) + "\n")
-                        if mirror:
-                            train_src_file.write(encode_sp(mirror_src_spp, mirror_src_sentence) + "\n")
-                            train_trg_file.write(encode_sp(mirror_trg_spp, mirror_trg_sentence) + "\n")
+                if len(test_indices) == 0 and len(val_indices) == 0:
+                    corpus_len = get_parallel_corpus_length(src_file.path, trg_file.path)
 
-                    index += 1
+                    if src_file.is_test and trg_file.is_test:
+                        if test_size < 0 or test_size >= corpus_len:
+                            test_indices = None
+                        else:
+                            test_indices = set(random.sample(range(corpus_len), test_size))
+                    if src_file.is_val and trg_file.is_val and test_indices is not None:
+                        population = (
+                            range(corpus_len)
+                            if len(test_indices) == 0
+                            else [i for i in range(corpus_len) if i not in test_indices]
+                        )
+                        if val_size < 0 or val_size >= len(population):
+                            val_indices = None
+                        else:
+                            val_indices = set(random.sample(population, val_size))
+
+                test_prefix = "test" if test_set_count == 1 else f"test.{src_file.iso}.{trg_file.iso}"
+                with open(src_file.path, "r", encoding="utf-8") as input_src_file, open(
+                    trg_file.path, "r", encoding="utf-8"
+                ) as input_trg_file, open(
+                    os.path.join(root_dir, f"{test_prefix}.src.txt"), "a", encoding="utf-8", newline="\n"
+                ) as test_src_file, open(
+                    os.path.join(root_dir, f"{test_prefix}.trg.detok.txt"), "a", encoding="utf-8", newline="\n"
+                ) as test_trg_file:
+                    index = 0
+                    for src_line, trg_line in zip(input_src_file, input_trg_file):
+                        src_line = src_line.strip()
+                        trg_line = trg_line.strip()
+                        if len(src_line) == 0 or len(trg_line) == 0:
+                            continue
+
+                        src_sentence = src_line
+                        if write_trg_tag:
+                            src_sentence = f"<2{trg_file.iso}> " + src_line
+                        trg_sentence = trg_line
+
+                        mirror_src_sentence = trg_line
+                        if write_trg_tag:
+                            mirror_src_sentence = f"<2{src_file.iso}> " + trg_line
+                        mirror_trg_sentence = src_line
+                        mirror_src_spp = trg_spp
+                        mirror_trg_spp = src_spp
+
+                        if test_indices is None or index in test_indices:
+                            test_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
+                            test_trg_file.write(decode_sp(encode_sp(trg_spp, trg_sentence)) + "\n")
+                        elif val_indices is None or index in val_indices:
+                            val_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
+                            val_trg_file.write(encode_sp(trg_spp, trg_sentence) + "\n")
+                            if mirror:
+                                val_src_file.write(encode_sp(mirror_src_spp, mirror_src_sentence) + "\n")
+                                val_trg_file.write(encode_sp(mirror_trg_spp, mirror_trg_sentence) + "\n")
+                        elif src_file.is_train and trg_file.is_train:
+                            train_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
+                            train_trg_file.write(encode_sp(trg_spp, trg_sentence) + "\n")
+                            if mirror:
+                                train_src_file.write(encode_sp(mirror_src_spp, mirror_src_sentence) + "\n")
+                                train_trg_file.write(encode_sp(mirror_trg_spp, mirror_trg_sentence) + "\n")
+
+                        index += 1
 
 
 def main() -> None:
