@@ -118,7 +118,7 @@ class MachineAligner(Aligner):
             "-mt",
             self.model_type,
             "-p",
-            "-n",
+            "-ss",
             "-t",
             str(threshold),
             "-d",
