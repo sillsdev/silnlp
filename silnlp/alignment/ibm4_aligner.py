@@ -1,5 +1,6 @@
 import glob
 import os
+from os.path import join
 import platform
 import subprocess
 from typing import List, Tuple
@@ -14,7 +15,7 @@ class Ibm4Aligner(Aligner):
     def __init__(self, model_dir: str) -> None:
         super().__init__("ibm4", model_dir)
 
-    def align(self, src_file_path: str, trg_file_path: str, out_file_path: str) -> None:
+    def train(self, src_file_path: str, trg_file_path: str) -> None:
         os.makedirs(self.model_dir, exist_ok=True)
 
         self._execute_mkcls(src_file_path)
@@ -36,7 +37,20 @@ class Ibm4Aligner(Aligner):
         trg_src_alignments_file_path = trg_src_output_prefix + ".A3.final.all"
         self._merge_alignment_parts(trg_src_output_prefix, trg_src_alignments_file_path)
 
-        self._symmetrize(src_trg_alignments_file_path, trg_src_alignments_file_path, out_file_path)
+    def align(self, out_file_path: str, sym_heuristic: str = "grow-diag-final-and") -> None:
+        src_trg_alignments_file_path = os.path.join(self.model_dir, "src_trg_invswm.A3.final.all")
+        trg_src_alignments_file_path = os.path.join(self.model_dir, "src_trg_swm.A3.final.all")
+        self._symmetrize(src_trg_alignments_file_path, trg_src_alignments_file_path, out_file_path, sym_heuristic)
+
+    def get_direct_lexicon(self, include_special_tokens: bool = False) -> Lexicon:
+        src_vocab = self._load_vocab("src")
+        trg_vocab = self._load_vocab("trg")
+        return self._load_lexicon(src_vocab, trg_vocab, "invswm", include_special_tokens=include_special_tokens)
+
+    def get_inverse_lexicon(self, include_special_tokens: bool = False) -> Lexicon:
+        src_vocab = self._load_vocab("src")
+        trg_vocab = self._load_vocab("trg")
+        return self._load_lexicon(trg_vocab, src_vocab, "swm", include_special_tokens=include_special_tokens)
 
     def extract_lexicon(self, out_file_path: str) -> None:
         direct_lexicon = self.get_direct_lexicon()
@@ -45,16 +59,6 @@ class Ibm4Aligner(Aligner):
         lexicon = Lexicon.symmetrize(direct_lexicon, inverse_lexicon)
         print(" done.")
         lexicon.write(out_file_path)
-
-    def get_direct_lexicon(self, include_null: bool = False) -> Lexicon:
-        src_vocab = self._load_vocab("src")
-        trg_vocab = self._load_vocab("trg")
-        return self._load_lexicon(src_vocab, trg_vocab, "invswm", include_null=include_null)
-
-    def get_inverse_lexicon(self, include_null: bool = False) -> Lexicon:
-        src_vocab = self._load_vocab("src")
-        trg_vocab = self._load_vocab("trg")
-        return self._load_lexicon(trg_vocab, src_vocab, "swm", include_null=include_null)
 
     def _execute_mkcls(self, input_file_path: str) -> None:
         mkcls_path = os.path.join(os.getenv("MGIZA_PATH", "."), "mkcls")
@@ -168,7 +172,9 @@ class Ibm4Aligner(Aligner):
 
         write_corpus(output_file_path, map(lambda a: str(a[1]), sorted(alignments, key=lambda a: a[0])))
 
-    def _symmetrize(self, direct_align_path: str, inverse_align_path: str, output_path: str) -> None:
+    def _symmetrize(
+        self, direct_align_path: str, inverse_align_path: str, output_path: str, sym_heuristic: str
+    ) -> None:
         args = [
             "dotnet",
             "machine",
@@ -177,7 +183,7 @@ class Ibm4Aligner(Aligner):
             inverse_align_path,
             output_path,
             "-sh",
-            "grow-diag-final-and",
+            sym_heuristic,
         ]
         subprocess.run(args, cwd=get_repo_dir())
 
@@ -191,15 +197,17 @@ class Ibm4Aligner(Aligner):
         return vocab
 
     def _load_lexicon(
-        self, src_vocab: List[str], trg_vocab: List[str], align_model: str, include_null: bool
+        self, src_vocab: List[str], trg_vocab: List[str], align_model: str, include_special_tokens: bool
     ) -> Lexicon:
         lexicon = Lexicon()
         model_path = os.path.join(self.model_dir, f"src_trg_{align_model}.t3.final")
         for line in load_corpus(model_path):
             src_index_str, trg_index_str, prob_str = line.split()
-            src_word = src_vocab[int(src_index_str)]
-            trg_word = trg_vocab[int(trg_index_str)]
-            if include_null or (src_word != "NULL" and trg_word != "NULL"):
+            src_index = int(src_index_str)
+            trg_index = int(trg_index_str)
+            if include_special_tokens or (src_index > 1 and trg_index > 1):
+                src_word = src_vocab[src_index]
+                trg_word = trg_vocab[trg_index]
                 lexicon[src_word, trg_word] = float(prob_str)
         return lexicon
 

@@ -63,7 +63,8 @@ def compute_alignment_scores(src_input_path: str, trg_input_path: str) -> List[f
         fast_align = FastAlign(td)
 
         sym_align_path = os.path.join(td, "sym-align.txt")
-        fast_align.align(src_tok_output_path, trg_tok_output_path, sym_align_path)
+        fast_align.train(src_tok_output_path, trg_tok_output_path)
+        fast_align.align(sym_align_path)
 
         direct_lexicon = fast_align.get_direct_lexicon(include_special_tokens=True)
         inverse_lexicon = fast_align.get_inverse_lexicon(include_special_tokens=True)

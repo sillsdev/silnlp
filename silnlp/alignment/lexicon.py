@@ -1,4 +1,4 @@
-from typing import Dict, Iterable, Set, Tuple
+from typing import Dict, Iterable, Iterator, Set, Tuple
 
 from ..common.corpus import load_corpus
 
@@ -55,6 +55,13 @@ class Lexicon:
             self._table[src_word] = src_entry
         src_entry[trg_word] = value
 
+    def __iter__(self) -> Iterator[Tuple[str, str, float]]:
+        return (
+            (src_word, trg_word, prob)
+            for (src_word, trg_words) in self._table.items()
+            for (trg_word, prob) in trg_words.items()
+        )
+
     @property
     def source_words(self) -> Iterable[str]:
         return self._table.keys()
@@ -96,6 +103,5 @@ class Lexicon:
 
     def write(self, file_path: str) -> None:
         with open(file_path, "w", encoding="utf-8", newline="\n") as file:
-            for src_word, entry in sorted(self._table.items(), key=lambda t: t[0]):
-                for trg_word, prob in sorted(entry.items(), key=lambda t: t[1], reverse=True):
-                    file.write(f"{src_word}\t{trg_word}\t{round(prob, 8)}\n")
+            for src_word, trg_word, prob in sorted(self, key=lambda t: (t[0], -t[2], t[1])):
+                file.write(f"{src_word}\t{trg_word}\t{round(prob, 8)}\n")

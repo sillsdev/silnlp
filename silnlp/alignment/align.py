@@ -39,7 +39,8 @@ def align(aligner_ids: List[str], root_dir: str, book: Optional[str] = None) -> 
         method_alignments_file_path = os.path.join(root_dir, f"alignments.{aligner_id}.txt")
 
         start = time.perf_counter()
-        aligner.align(train_src_path, train_trg_path, method_alignments_file_path)
+        aligner.train(train_src_path, train_trg_path)
+        aligner.align(method_alignments_file_path)
         end = time.perf_counter()
         delta = timedelta(seconds=end - start)
         times[aligner_name] = str(delta)

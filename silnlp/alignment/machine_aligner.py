@@ -16,6 +16,8 @@ class MachineAligner(Aligner):
         smt_model_type: Optional[str] = None,
         plugin_file_path: Optional[str] = None,
         has_inverse_model: bool = True,
+        threshold: float = 0.01,
+        direct_model_prefix: str = "src_trg_invswm",
         params: Dict[str, Any] = {},
     ) -> None:
         super().__init__(id, model_dir)
@@ -23,13 +25,15 @@ class MachineAligner(Aligner):
         self.smt_model_type = smt_model_type
         self._plugin_file_path = plugin_file_path
         self._has_inverse_model = has_inverse_model
+        self._threshold = threshold
+        self._direct_model_prefix = direct_model_prefix
         self._params = params
 
     @property
     def has_inverse_model(self) -> bool:
         return self._has_inverse_model
 
-    def align(self, src_file_path: str, trg_file_path: str, out_file_path: str) -> None:
+    def train(self, src_file_path: str, trg_file_path: str) -> None:
         direct_lex_path = os.path.join(self.model_dir, "lexicon.direct.txt")
         if os.path.isfile(direct_lex_path):
             os.remove(direct_lex_path)
@@ -37,7 +41,9 @@ class MachineAligner(Aligner):
         if os.path.isfile(inverse_lex_path):
             os.remove(inverse_lex_path)
         self._train_alignment_model(src_file_path, trg_file_path)
-        self._align_parallel_corpus(src_file_path, trg_file_path, out_file_path)
+
+    def align(self, out_file_path: str, sym_heuristic: str = "grow-diag-final-and") -> None:
+        self._align_parallel_corpus(out_file_path, sym_heuristic)
 
     def extract_lexicon(self, out_file_path: str) -> None:
         lexicon = self.get_direct_lexicon()
@@ -85,19 +91,19 @@ class MachineAligner(Aligner):
                 args.append(f"{key}={value}")
         subprocess.run(args, cwd=get_repo_dir())
 
-    def _align_parallel_corpus(self, src_file_path: str, trg_file_path: str, output_file_path: str) -> None:
+    def _align_parallel_corpus(self, output_file_path: str, sym_heuristic: str) -> None:
         args = [
             "dotnet",
             "machine",
             "align",
             self.model_dir,
-            src_file_path,
-            trg_file_path,
+            os.path.join(self.model_dir, self._direct_model_prefix + ".src"),
+            os.path.join(self.model_dir, self._direct_model_prefix + ".trg"),
             output_file_path,
             "-mt",
             self.model_type,
             "-sh",
-            "grow-diag-final-and",
+            sym_heuristic,
             "-l",
         ]
         if self.smt_model_type is not None:
@@ -108,7 +114,7 @@ class MachineAligner(Aligner):
             args.append(self._plugin_file_path)
         subprocess.run(args, cwd=get_repo_dir())
 
-    def _extract_lexicon(self, direction: str, out_file_path: str, threshold: float = 0.01) -> None:
+    def _extract_lexicon(self, direction: str, out_file_path: str) -> None:
         args = [
             "dotnet",
             "machine",
@@ -120,7 +126,7 @@ class MachineAligner(Aligner):
             "-p",
             "-ss",
             "-t",
-            str(threshold),
+            str(self._threshold),
             "-d",
             direction,
         ]
@@ -156,13 +162,14 @@ class FastAlign(MachineAligner):
 class ParatextAligner(MachineAligner):
     def __init__(self, model_dir: str) -> None:
         super().__init__(
-            "pt", "betainv", model_dir, plugin_file_path=os.getenv("BETA_INV_PLUGIN_PATH"), has_inverse_model=False
+            "pt",
+            "betainv",
+            model_dir,
+            plugin_file_path=os.getenv("BETA_INV_PLUGIN_PATH"),
+            has_inverse_model=False,
+            threshold=0,
+            direct_model_prefix="src_trg",
         )
-
-    def get_direct_lexicon(self, include_special_tokens: bool = False) -> Lexicon:
-        direct_lex_path = os.path.join(self.model_dir, "lexicon.direct.txt")
-        self._extract_lexicon("direct", direct_lex_path, threshold=0)
-        return Lexicon.load(direct_lex_path, include_special_tokens)
 
 
 class SmtAligner(MachineAligner):
