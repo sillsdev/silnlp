@@ -86,7 +86,7 @@ def extract_names(output_dir: str, iso: str, project_dir: str) -> None:
             if gloss_str is None:
                 continue
             renderings_str = rendering_elem.findtext("Renderings")
-            if renderings_str is None:
+            if renderings_str is None or renderings_str == '':
                 continue
             glosses = re.split("[;,/]", gloss_str.strip())
             renderings = renderings_str.strip().split("||")
