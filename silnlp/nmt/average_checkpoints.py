@@ -16,7 +16,7 @@ def main() -> None:
     exp_name = args.experiment
     config = load_config(exp_name)
     runner = create_runner(config)
-    output = os.path.join(config["model_dir"], "avg")
+    output = os.path.join(config.model_dir, "avg")
     runner.average_checkpoints(output, args.max_count)
 
 

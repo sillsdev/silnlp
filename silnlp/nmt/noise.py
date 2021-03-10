@@ -1,35 +1,92 @@
+from typing import List, Optional, Tuple, Union, cast
+from abc import ABC, abstractmethod
+import random
+
 import tensorflow as tf
-from opennmt.data import Noise
-from opennmt.data.noise import random_mask
+from opennmt.data import Noise, WordNoiser, tokens_to_words
 
 
-class WordDropout(Noise):
-    def __init__(self, dropout, skip_first_word=False):
-        self.dropout = dropout
-        self.skip_first_word = skip_first_word
+class SILWordNoiser(WordNoiser):
+    def __init__(
+        self,
+        noises: Optional[List[Noise]] = None,
+        subword_token: str = "￭",
+        is_spacer: Optional[bool] = None,
+        has_lang_tag: bool = False,
+    ) -> None:
+        super().__init__(noises=noises, subword_token=subword_token, is_spacer=is_spacer)
+        self.has_lang_tag = has_lang_tag
 
-    def _apply(self, words):
-        if self.dropout == 0:
-            return tf.identity(words)
-        num_words = tf.shape(words, out_type=tf.int64)[0]
-        keep_mask = random_mask([num_words], 1 - self.dropout)
-        if self.skip_first_word:
-            indices = tf.constant([[0]])
-            updates = tf.constant([True])
-            keep_mask = tf.tensor_scatter_nd_update(keep_mask, indices, updates)
-        keep_ind = tf.where(keep_mask)
-        # Keep at least one word.
-        keep_ind = tf.cond(
-            tf.equal(tf.shape(keep_ind)[0], 1 if self.skip_first_word else 0),
-            true_fn=lambda: self._get_rand_index(num_words),
-            false_fn=lambda: tf.squeeze(keep_ind, -1),
-        )
-        return tf.gather(words, keep_ind)
-
-    def _get_rand_index(self, num_words):
-        if self.skip_first_word:
-            keep_ind = tf.random.uniform([1], minval=1, maxval=num_words, dtype=tf.int64)
-            keep_ind = tf.concat([tf.constant([0], dtype=tf.int64), keep_ind], 0)
+    def _call(
+        self, tokens: tf.Tensor, sequence_length: Optional[Union[int, tf.Tensor]], keep_shape: bool
+    ) -> Tuple[tf.Tensor, Union[int, tf.Tensor]]:
+        rank = tokens.shape.rank
+        if rank == 1:
+            input_length = tf.shape(tokens)[0]
+            if sequence_length is not None:
+                tokens = tokens[:sequence_length]
+            else:
+                tokens = tokens[: tf.math.count_nonzero(tokens)]
+            words = tokens_to_words(tokens, subword_token=self.subword_token, is_spacer=self.is_spacer)
+            words = cast(tf.Tensor, words.to_tensor())
+            if self.has_lang_tag:
+                tag = words[:1]
+                words = words[1:]
+            for noise in self.noises:
+                words = noise(words)
+            if self.has_lang_tag:
+                words = tf.concat([tag, words], axis=0)
+            outputs = tf.RaggedTensor.from_tensor(words, padding="").flat_values
+            output_length = tf.shape(outputs)[0]
+            if keep_shape:
+                outputs = tf.pad(outputs, [[0, input_length - output_length]])
+            return outputs, output_length
         else:
-            keep_ind = tf.random.uniform([1], maxval=num_words, dtype=tf.int64)
-        return keep_ind
+            return super()._call(tokens, sequence_length=sequence_length, keep_shape=keep_shape)
+
+
+class NoiseMethod(ABC):
+    @abstractmethod
+    def __call__(self, tokens: List[str]) -> List[str]:
+        pass
+
+
+def random_bool(probability: float) -> bool:
+    """Returns True with given probability
+
+    Args:
+        probability: probability to return True
+
+    """
+    assert 0 <= probability <= 1, "probability needs to be >= 0 and <= 1"
+    return random.random() < probability
+
+
+class DeleteRandomToken(NoiseMethod):
+    def __init__(self, probability: float) -> None:
+        self.probability = probability
+
+    def __call__(self, tokens: List[str]) -> List[str]:
+        return [token for token in tokens if not random_bool(self.probability)]
+
+
+class ReplaceRandomToken(NoiseMethod):
+    def __init__(self, probability: float, filler_token: str = "<blank>") -> None:
+        self.probability = probability
+        self.filler_token = filler_token
+
+    def __call__(self, tokens: List[str]) -> List[str]:
+        new_tokens = tokens.copy()
+        for i in range(len(new_tokens)):
+            if random_bool(self.probability):
+                new_tokens[i] = self.filler_token
+        return new_tokens
+
+
+class RandomTokenPermutation(NoiseMethod):
+    def __init__(self, distance: int) -> None:
+        self.distance = distance
+
+    def __call__(self, tokens: List[str]) -> List[str]:
+        new_indices = [i + random.uniform(0, self.distance + 1) for i in range(len(tokens))]
+        return [x for _, x in sorted(zip(new_indices, tokens), key=lambda pair: pair[0])]

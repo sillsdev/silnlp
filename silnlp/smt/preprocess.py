@@ -14,7 +14,7 @@ from ..common.corpus import (
     write_corpus,
 )
 from ..common.environment import PT_PREPROCESSED_DIR
-from ..common.utils import get_git_revision_hash, get_mt_root_dir, set_seed
+from ..common.utils import get_git_revision_hash, get_mt_exp_dir, set_seed
 from .config import load_config
 
 
@@ -34,7 +34,7 @@ def main() -> None:
     print("Git commit:", get_git_revision_hash())
 
     exp_name = args.experiment
-    root_dir = get_mt_root_dir(exp_name)
+    root_dir = get_mt_exp_dir(exp_name)
     config = load_config(exp_name)
 
     set_seed(config["seed"])

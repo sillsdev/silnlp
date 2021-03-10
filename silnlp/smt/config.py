@@ -2,10 +2,10 @@ import argparse
 import os
 import yaml
 
-from ..common.utils import get_git_revision_hash, get_mt_root_dir, merge_dict
+from ..common.utils import get_git_revision_hash, get_mt_exp_dir, merge_dict
 
 
-DEFAULT_NEW_CONFIG: dict = {
+_BASE_CONFIG: dict = {
     "model": "hmm",
     "seed": 111,
     "test_size": 250,
@@ -13,14 +13,14 @@ DEFAULT_NEW_CONFIG: dict = {
     "trg_tokenizer": "latin",
 }
 
-SUPPORTED_TOKENIZERS = {"whitespace", "latin", "zwsp"}
+_SUPPORTED_TOKENIZERS = {"whitespace", "latin", "zwsp"}
+
 
 def load_config(exp_name: str) -> dict:
-    root_dir = get_mt_root_dir(exp_name)
+    root_dir = get_mt_exp_dir(exp_name)
     config_path = os.path.join(root_dir, "config.yml")
 
-#    config: dict = {"model": "hmm", "seed": 111, "test_size": 250}
-    config = DEFAULT_NEW_CONFIG.copy()
+    config = _BASE_CONFIG.copy()
 
     with open(config_path, "r", encoding="utf-8") as file:
         loaded_config = yaml.safe_load(file)
@@ -41,7 +41,7 @@ def main() -> None:
 
     print("Git commit:", get_git_revision_hash())
 
-    root_dir = get_mt_root_dir(args.experiment)
+    root_dir = get_mt_exp_dir(args.experiment)
     config_path = os.path.join(root_dir, "config.yml")
     if os.path.isfile(config_path) and not args.force:
         print('The experiment config file already exists. Use "--force" if you want to overwrite the existing config.')
@@ -49,14 +49,14 @@ def main() -> None:
 
     os.makedirs(root_dir, exist_ok=True)
 
-    config = DEFAULT_NEW_CONFIG.copy()
+    config = _BASE_CONFIG.copy()
     if args.model is not None:
         config["model"] = args.model
     config["src_lang"] = args.src_lang
     config["trg_lang"] = args.trg_lang
-    if args.src_tokenizer is not None and args.src_tokenizer in SUPPORTED_TOKENIZERS:
+    if args.src_tokenizer is not None and args.src_tokenizer in _SUPPORTED_TOKENIZERS:
         config["src_tokenizer"] = args.src_tokenizer
-    if args.trg_tokenizer is not None and args.trg_tokenizer in SUPPORTED_TOKENIZERS:
+    if args.trg_tokenizer is not None and args.trg_tokenizer in _SUPPORTED_TOKENIZERS:
         config["trg_tokenizer"] = args.trg_tokenizer
     if args.seed is not None:
         config["seed"] = args.seed

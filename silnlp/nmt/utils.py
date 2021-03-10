@@ -8,6 +8,8 @@ import tensorflow as tf
 import yaml
 from opennmt.utils import Scorer, register_scorer
 
+_TAG_PATTERN = re.compile("<2\w+> ")
+
 
 def decode_sp(line: str) -> str:
     return line.replace(" ", "").replace("\u2581", " ").lstrip()
@@ -21,14 +23,11 @@ def encode_sp(spp: Optional[sp.SentencePieceProcessor], line: str) -> str:
     if spp is None:
         return line
     prefix = ""
-    if re.match("<2\w+> ", line):
-#    if line.startswith("<2"):
-#        try:
-        index = line.index(">")
-#        except ValueError:
-#            print(f'ValueError: substring not found (">"), string >>>{line}<<<')
-        prefix = line[0 : index + 2]
-        line = line[index + 2 :]
+    match = _TAG_PATTERN.match(line)
+    if match is not None:
+        index = match.end(0)
+        prefix = line[:index]
+        line = line[index:]
     return prefix + " ".join(spp.EncodeAsPieces(line))
 
 
@@ -60,6 +59,12 @@ def get_last_checkpoint(model_dir: str) -> Tuple[str, int]:
         checkpoint_path = os.path.join(model_dir, checkpoint_prefix)
         step = int(parts[-1])
         return (checkpoint_path, step)
+
+
+def parse_data_file_path(data_file_path: str) -> Tuple[str, str]:
+    file_name = os.path.splitext(os.path.basename(data_file_path))[0]
+    index = file_name.index("-")
+    return (file_name[:index], file_name[index + 1 :])
 
 
 @register_scorer(name="bleu_sp")

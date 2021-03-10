@@ -23,38 +23,35 @@ from opennmt.utils.checkpoint import Checkpoint
 from opennmt.utils.misc import clone_layer, extract_batches, merge_dict
 from tensorflow.python.eager.def_function import Function
 
-from ..common.utils import get_git_revision_hash, get_mt_root_dir
-from .config import Language, create_model, load_config, parse_langs, set_log_level
+from ..common.utils import get_git_revision_hash
+from .config import Config, create_model, load_config, set_log_level
 from .runner import make_inference_dataset
 from .transformer import SILTransformer
 from .utils import decode_sp, encode_sp, get_best_model_dir, get_last_checkpoint
 
 
-def create_test_dataset(
-    root_dir: str, src_langs: Dict[str, Language], trg_langs: Dict[str, Language]
-) -> lit_dataset.Dataset:
+def create_test_dataset(config: Config) -> lit_dataset.Dataset:
     vref_paths: List[str] = []
     features_paths: List[str] = []
     refs_paths: List[str] = []
-    for src_iso in sorted(src_langs.keys()):
-        prefix = "test" if len(src_langs) == 1 else f"test.{src_iso}"
-        src_features_path = os.path.join(root_dir, f"{prefix}.src.txt")
+    for src_iso in sorted(config.src_isos):
+        prefix = "test" if len(config.src_isos) == 1 else f"test.{src_iso}"
+        src_features_path = os.path.join(config.exp_dir, f"{prefix}.src.txt")
         if os.path.isfile(src_features_path):
             # all target data is stored in a single file
-            vref_paths.append(os.path.join(root_dir, f"{prefix}.vref.txt"))
+            vref_paths.append(os.path.join(config.exp_dir, f"{prefix}.vref.txt"))
             features_paths.append(src_features_path)
-            refs_paths.append(os.path.join(root_dir, f"{prefix}.trg.detok*.txt"))
+            refs_paths.append(os.path.join(config.exp_dir, f"{prefix}.trg.detok*.txt"))
         else:
             # target data is split into separate files
-            for trg_iso in sorted(trg_langs.keys()):
+            for trg_iso in sorted(config.trg_isos):
                 prefix = f"test.{src_iso}.{trg_iso}"
-                vref_paths.append(os.path.join(root_dir, f"{prefix}.vref.txt"))
-                features_paths.append(os.path.join(root_dir, f"{prefix}.src.txt"))
-                refs_paths.append(os.path.join(root_dir, f"{prefix}.trg.detok*.txt"))
+                vref_paths.append(os.path.join(config.exp_dir, f"{prefix}.vref.txt"))
+                features_paths.append(os.path.join(config.exp_dir, f"{prefix}.src.txt"))
+                refs_paths.append(os.path.join(config.exp_dir, f"{prefix}.trg.detok*.txt"))
 
-    default_src_iso = next(iter(src_langs.keys()))
-    default_trg_iso = next(iter(trg_langs.keys()))
-
+    default_src_iso = config.default_src_iso
+    default_trg_iso = config.default_trg_iso
     spec = lit_types.JsonDict = {
         "vref": lit_types.CategoryLabel(),
         "src_text": lit_types.TextSegment(),
@@ -106,20 +103,18 @@ def create_test_dataset(
     return lit_dataset.Dataset(spec, examples, description="test dataset")
 
 
-def create_train_dataset(
-    root_dir: str, src_langs: Dict[str, Language], trg_langs: Dict[str, Language]
-) -> lit_dataset.Dataset:
-    src_path = os.path.join(root_dir, "train.src.txt")
-    trg_path = os.path.join(root_dir, "train.trg.txt")
-    default_src_iso = next(iter(src_langs.keys()))
-    default_trg_iso = next(iter(trg_langs.keys()))
+def create_train_dataset(config: Config) -> lit_dataset.Dataset:
+    src_path = os.path.join(config.exp_dir, "train.src.txt")
+    trg_path = os.path.join(config.exp_dir, "train.trg.txt")
+    default_src_iso = config.default_src_iso
+    default_trg_iso = config.default_trg_iso
     examples: List[lit_types.JsonDict] = []
     with open(src_path, "r", encoding="utf-8") as src_file, open(trg_path, "r", encoding="utf-8") as trg_file:
         for src_line, trg_line in zip(src_file, trg_file):
             src_line = src_line.strip()
             trg_line = trg_line.strip()
             src_iso = default_src_iso
-            if len(src_langs) > 1:
+            if len(config.src_isos) > 1:
                 src_iso = "?"
             trg_iso = default_trg_iso
             if src_line.startswith("<2"):
@@ -163,7 +158,7 @@ def masked_token_mean(vectors: tf.Tensor, masks: tf.Tensor) -> tf.Tensor:
 class NMTModel(lit_model.Model):
     def __init__(
         self,
-        config: dict,
+        config: Config,
         model: SILTransformer,
         src_spp: sp.SentencePieceProcessor,
         trg_spp: sp.SentencePieceProcessor,
@@ -178,7 +173,7 @@ class NMTModel(lit_model.Model):
         # Configuration priority: user config > auto config > default config.
         new_config = copy.deepcopy(_CONFIG_FALLBACK)
         merge_dict(new_config, model.auto_config())
-        merge_dict(new_config, config)
+        merge_dict(new_config, config.root)
         new_config["params"].setdefault("num_hypotheses", new_config["infer"].get("n_best", 1))
         new_config["params"].setdefault("average_loss_in_time", new_config["train"]["batch_type"] == "tokens")
         new_config["infer"]["n_best"] = 1
@@ -266,7 +261,7 @@ class NMTModel(lit_model.Model):
                 ter_score = sacrebleu.sentence_ter(tok_trg_text, [tok_ref_text])
                 chrf_score = sacrebleu.sentence_chrf(trg_text, [ref_text], order=3)
                 results[index] = {
-                    "trg_tokens": list(map(lambda t: t.decode("utf-8"), trg_tokens)),
+                    "trg_tokens": [t.decode("utf-8") for t in trg_tokens],
                     "trg_text": trg_text,
                     "attention": np.expand_dims(attention, axis=0),
                     "src_tokens": features_list[index].split(),
@@ -344,27 +339,11 @@ class BLEUMetrics(metrics.SimpleMetrics):
 
 
 def create_lit_args(exp_name: str, checkpoints: Set[str] = {"last"}) -> Tuple[tuple, dict]:
-    root_dir = get_mt_root_dir(exp_name)
     config = load_config(exp_name)
-    model_dir: str = config["model_dir"]
-    data_config: dict = config["data"]
-    src_langs = parse_langs(data_config["src_langs"])
-    trg_langs = parse_langs(data_config["trg_langs"])
 
-    datasets: Dict[str, lit_dataset.Dataset] = {"test": create_test_dataset(root_dir, src_langs, trg_langs)}
+    datasets: Dict[str, lit_dataset.Dataset] = {"test": create_test_dataset(config)}
 
-    if data_config["share_vocab"]:
-        model_prefix = os.path.join(root_dir, "sp")
-        src_spp = sp.SentencePieceProcessor()
-        src_spp.Load(f"{model_prefix}.model")
-
-        trg_spp = src_spp
-    else:
-        src_spp = sp.SentencePieceProcessor()
-        src_spp.Load(os.path.join(root_dir, "src-sp.model"))
-
-        trg_spp = sp.SentencePieceProcessor()
-        trg_spp.Load(os.path.join(root_dir, "trg-sp.model"))
+    src_spp, trg_spp = config.create_sp_processors()
 
     model = create_model(config)
 
@@ -372,10 +351,10 @@ def create_lit_args(exp_name: str, checkpoints: Set[str] = {"last"}) -> Tuple[tu
 
     for checkpoint in checkpoints:
         if checkpoint == "avg":
-            checkpoint_path, _ = get_last_checkpoint(os.path.join(model_dir, "avg"))
+            checkpoint_path, _ = get_last_checkpoint(os.path.join(config.model_dir, "avg"))
             models["avg"] = NMTModel(config, model, src_spp, trg_spp, -1, checkpoint_path, type="avg")
         elif checkpoint == "last":
-            last_checkpoint_path, last_step = get_last_checkpoint(model_dir)
+            last_checkpoint_path, last_step = get_last_checkpoint(config.model_dir)
             step_str = str(last_step)
             if step_str in models:
                 models[step_str].types.append("last")
@@ -384,7 +363,7 @@ def create_lit_args(exp_name: str, checkpoints: Set[str] = {"last"}) -> Tuple[tu
                     config, model, src_spp, trg_spp, last_step, last_checkpoint_path, type="last"
                 )
         elif checkpoint == "best":
-            best_model_path, best_step = get_best_model_dir(model_dir)
+            best_model_path, best_step = get_best_model_dir(config.model_dir)
             step_str = str(best_step)
             if step_str in models:
                 models[step_str].types.append("best")
@@ -393,15 +372,15 @@ def create_lit_args(exp_name: str, checkpoints: Set[str] = {"last"}) -> Tuple[tu
                     config, model, src_spp, trg_spp, best_step, os.path.join(best_model_path, "ckpt"), type="best"
                 )
         else:
-            checkpoint_path = os.path.join(model_dir, f"ckpt-{checkpoint}")
+            checkpoint_path = os.path.join(config.model_dir, f"ckpt-{checkpoint}")
             step = int(checkpoint)
             models[checkpoint] = NMTModel(config, model, src_spp, trg_spp, step, checkpoint_path)
 
-    index_datasets: Dict[str, lit_dataset.Dataset] = {"test": create_train_dataset(root_dir, src_langs, trg_langs)}
+    index_datasets: Dict[str, lit_dataset.Dataset] = {"test": create_train_dataset(config)}
     indexer = IndexerEx(
         models,
         lit_dataset.IndexedDataset.index_all(index_datasets, caching.input_hash),
-        data_dir=os.path.join(root_dir, "lit-index"),
+        data_dir=os.path.join(config.exp_dir, "lit-index"),
         initialize_new_indices=True,
     )
 
@@ -411,7 +390,7 @@ def create_lit_args(exp_name: str, checkpoints: Set[str] = {"last"}) -> Tuple[tu
     }
 
     interpreters: Dict[str, lit_components.Interpreter] = {
-        "metrics": lit_components.ComponentGroup({"bleu": BLEUMetrics(data_config)}),
+        "metrics": lit_components.ComponentGroup({"bleu": BLEUMetrics(config.data)}),
         "pca": projection.ProjectionManager(pca.PCAModel),
         "umap": projection.ProjectionManager(umap.UmapModel),
     }

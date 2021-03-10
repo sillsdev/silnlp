@@ -7,7 +7,8 @@ import pandas as pd
 import seaborn as sns
 
 from ..common.environment import PT_PREPROCESSED_DIR
-from .config import load_config, parse_langs
+from .config import load_config
+from .utils import parse_data_file_path
 
 
 def get_corpus_path(project: str) -> str:
@@ -93,18 +94,15 @@ def main() -> None:
 
     task_name = args.task
     config = load_config(task_name)
-    data_config: dict = config.get("data", {})
 
-    src_langs = parse_langs(data_config["src_langs"])
-    trg_langs = parse_langs(data_config["trg_langs"])
     src_projects: List[str] = []
     trg_projects: List[str] = []
-    for src_lang in src_langs.values():
-        for src_data_file in src_lang.data_files:
-            src_projects.append(f"{src_data_file.iso}-{src_data_file.project}")
-    for trg_lang in trg_langs.values():
-        for trg_data_file in trg_lang.data_files:
-            trg_projects.append(f"{trg_data_file.iso}-{trg_data_file.project}")
+    for src_file_path in config.src_file_paths:
+        iso, project = parse_data_file_path(src_file_path)
+        src_projects.append(f"{iso}-{project}")
+    for trg_file_path in config.trg_file_paths:
+        iso, project = parse_data_file_path(trg_file_path)
+        trg_projects.append(f"{iso}-{project}")
 
     src_projects.sort()
     trg_projects.sort()

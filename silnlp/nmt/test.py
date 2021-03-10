@@ -10,15 +10,17 @@ logging.basicConfig()
 
 import numpy as np
 import sacrebleu
+from sacrebleu.metrics import BLEU, BLEUScore
 
 from ..common.canon import book_number_to_id, get_books
 from ..common.metrics import compute_meteor_score, compute_ter_score, compute_wer_score
-from ..common.utils import get_git_revision_hash, set_seed
+from ..common.utils import get_git_revision_hash
 from ..common.verse_ref import VerseRef
-from .config import Language, create_runner, get_mt_root_dir, load_config, parse_langs
+from .config import Config, create_runner, load_config
+from .langs_config import LangsConfig
 from .utils import decode_sp, get_best_model_dir, get_last_checkpoint
 
-SUPPORTED_SCORERS = {"bleu", "sentencebleu", "chrf3", "meteor", "wer", "ter"}
+_SUPPORTED_SCORERS = {"bleu", "sentencebleu", "chrf3", "meteor", "wer", "ter"}
 
 
 class PairScore:
@@ -27,7 +29,7 @@ class PairScore:
         book: str,
         src_iso: str,
         trg_iso: str,
-        bleu: Optional[sacrebleu.BLEUScore],
+        bleu: Optional[BLEUScore],
         sent_len: int,
         projects: Set[str],
         other_scores: Dict[str, float] = {},
@@ -57,42 +59,18 @@ class PairScore:
             file.write(f"{key},{val:.2f}\n")
 
 
-def parse_ref_file_path(ref_file_path: str, default_trg_iso: str) -> Tuple[str, str]:
-    parts = os.path.basename(ref_file_path).split(".")
-    if len(parts) == 5:
-        return default_trg_iso, parts[3]
-    return parts[2], parts[5]
-
-
-def is_ref_project(ref_projects: Set[str], ref_file_path: str) -> bool:
-    _, trg_project = parse_ref_file_path(ref_file_path, "qaa")
-    return trg_project in ref_projects
-
-
-def is_train_project(trg_langs: Dict[str, Language], ref_file_path: str, default_trg_iso: str) -> bool:
-    trg_iso, trg_project = parse_ref_file_path(ref_file_path, default_trg_iso)
-    lang = trg_langs[trg_iso]
-    for df in lang.data_files:
-        if df.project == trg_project and df.is_train:
-            return True
-    return False
-
-
-#    return trg_project in lang.train_projects
-
-
 def score_individual_books(
     book_dict: dict,
     src_iso: str,
     predictions_detok_path: str,
     scorers: Set[str],
-    data_config: dict,
+    config: Config,
     ref_projects: Set[str],
 ):
     overall_sys: List[str] = []
     book_scores: List[PairScore] = []
 
-    for book, dict in book_dict.items():
+    for book in book_dict.keys():
         for trg_iso, book_tuple in book_dict[book].items():
             pair_sys = book_tuple[0]
             pair_refs = book_tuple[1]
@@ -101,7 +79,7 @@ def score_individual_books(
             bleu_score = None
             if "bleu" in scorers:
                 bleu_score = sacrebleu.corpus_bleu(
-                    pair_sys, pair_refs, lowercase=True, tokenize=data_config.get("sacrebleu_tokenize", "13a"),
+                    pair_sys, pair_refs, lowercase=True, tokenize=config.data.get("sacrebleu_tokenize", "13a"),
                 )
 
             if "sentencebleu" in scorers:
@@ -110,7 +88,7 @@ def score_individual_books(
                     pair_sys,
                     pair_refs,
                     lowercase=True,
-                    tokenize=data_config.get("sacrebleu_tokenize", "13a"),
+                    tokenize=config.data.get("sacrebleu_tokenize", "13a"),
                 )
 
             other_scores: Dict[str, float] = {}
@@ -214,9 +192,8 @@ def load_test_data(
     pred_file_path: str,
     ref_files_path: str,
     output_file_path: str,
-    default_trg_iso: str,
     ref_projects: Set[str],
-    trg_langs: Dict[str, Language],
+    config: Config,
     books: Set[int],
     by_book: bool,
 ) -> Tuple[Dict[str, Tuple[List[str], List[List[str]]]], Dict[str, dict]]:
@@ -226,15 +203,14 @@ def load_test_data(
     ) as pred_file, open(output_file_path, "w", encoding="utf-8") as out_file:
         ref_file_paths = glob(ref_files_path)
         select_rand_ref_line = False
-        if len(ref_file_paths) > 1:
-            filtered: List[str] = list(filter(lambda p: is_ref_project(ref_projects, p), ref_file_paths))
-            if len(filtered) == 0:
+        if isinstance(config, LangsConfig) and len(ref_file_paths) > 1:
+            if len(ref_projects) == 0:
                 # no refs specified, so randomly select verses from all available train refs to build one ref
                 select_rand_ref_line = True
-                ref_file_paths = list(filter(lambda p: is_train_project(trg_langs, p, default_trg_iso), ref_file_paths))
+                ref_file_paths = [p for p in ref_file_paths if config.is_train_project(p)]
             else:
                 # use specified refs only
-                ref_file_paths = filtered
+                ref_file_paths = [p for p in ref_file_paths if config.is_ref_project(ref_projects, p)]
         ref_files: List[IO] = []
         vref_file: Optional[IO] = None
         if len(books) > 0 and os.path.isfile(vref_file_path):
@@ -242,6 +218,7 @@ def load_test_data(
         try:
             for ref_file_path in ref_file_paths:
                 ref_files.append(open(ref_file_path, "r", encoding="utf-8"))
+            default_trg_iso = config.default_trg_iso
             for lines in zip(src_file, pred_file, *ref_files):
                 if vref_file is not None:
                     vref_line = vref_file.readline().strip()
@@ -294,7 +271,7 @@ def load_test_data(
     return dataset, book_dict
 
 
-def my_sentence_bleu(
+def sentence_bleu(
     hypothesis: str,
     references: List[str],
     smooth_method: str = "exp",
@@ -302,12 +279,12 @@ def my_sentence_bleu(
     lowercase: bool = False,
     tokenize=sacrebleu.DEFAULT_TOKENIZER,
     use_effective_order: bool = False,
-) -> sacrebleu.BLEUScore:
+) -> BLEUScore:
     """
     Substitute for the sacrebleu version of sentence_bleu, which uses settings that aren't consistent with
     the values we use for corpus_bleu, and isn't fully parameterized
     """
-    args = sacrebleu.Namespace(
+    args = argparse.Namespace(
         smooth_method=smooth_method,
         smooth_value=smooth_value,
         force=False,
@@ -316,7 +293,7 @@ def my_sentence_bleu(
         tokenize=tokenize,
     )
 
-    metric = sacrebleu.BLEU(args)
+    metric = BLEU(args)
     return metric.sentence_score(hypothesis, references, use_effective_order=use_effective_order)
 
 
@@ -338,7 +315,7 @@ def write_sentence_bleu(
             sentences: List[str] = []
             for ref in refs:
                 sentences.append(ref[verse_num])
-            bleu = my_sentence_bleu(pred, sentences, lowercase=lowercase, tokenize=tokenize)
+            bleu = sentence_bleu(pred, sentences, lowercase=lowercase, tokenize=tokenize)
             scores_file.write(
                 f"{verse_num + 1}\t{bleu.score:.2f}\t{bleu.precisions[0]:.2f}\t{bleu.precisions[1]:.2f}\t"
                 f"{bleu.precisions[2]:.2f}\t{bleu.precisions[3]:.2f}\t{bleu.bp:.3f}\t" + pred.rstrip("\n")
@@ -350,10 +327,7 @@ def write_sentence_bleu(
 
 
 def test_checkpoint(
-    root_dir: str,
-    config: dict,
-    src_langs: Dict[str, Language],
-    trg_langs: Dict[str, Language],
+    config: Config,
     force_infer: bool,
     by_book: bool,
     memory_growth: bool,
@@ -363,6 +337,7 @@ def test_checkpoint(
     scorers: Set[str],
     books: Set[int],
 ) -> List[PairScore]:
+    config.set_seed()
     vref_paths: List[str] = []
     features_paths: List[str] = []
     predictions_paths: List[str] = []
@@ -372,27 +347,30 @@ def test_checkpoint(
     if len(suffix_str) > 0:
         suffix_str += "-"
     suffix_str += "avg" if step == -1 else str(step)
-    for src_iso in sorted(src_langs.keys()):
-        prefix = "test" if len(src_langs) == 1 else f"test.{src_iso}"
-        src_features_path = os.path.join(root_dir, f"{prefix}.src.txt")
-        if os.path.isfile(src_features_path):
-            # all target data is stored in a single file
-            vref_paths.append(os.path.join(root_dir, f"{prefix}.vref.txt"))
-            features_paths.append(src_features_path)
-            predictions_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.txt.{suffix_str}"))
-            refs_paths.append(os.path.join(root_dir, f"{prefix}.trg.detok*.txt"))
-            predictions_detok_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.detok.txt.{suffix_str}"))
-        else:
-            # target data is split into separate files
-            for trg_iso in sorted(trg_langs.keys()):
-                if src_iso != trg_iso:
-                    prefix = f"test.{src_iso}.{trg_iso}"
-                    vref_paths.append(os.path.join(root_dir, f"{prefix}.vref.txt"))
-                    features_paths.append(os.path.join(root_dir, f"{prefix}.src.txt"))
-                    predictions_paths.append(os.path.join(root_dir, f"{prefix}.trg-predictions.txt.{suffix_str}"))
-                    refs_paths.append(os.path.join(root_dir, f"{prefix}.trg.detok*.txt"))
+
+    src_features_path = os.path.join(config.exp_dir, "test.src.txt")
+    if os.path.isfile(src_features_path):
+        # all test data is stored in a single file
+        vref_paths.append(os.path.join(config.exp_dir, "test.vref.txt"))
+        features_paths.append(src_features_path)
+        predictions_paths.append(os.path.join(config.exp_dir, f"test.trg-predictions.txt.{suffix_str}"))
+        refs_paths.append(os.path.join(config.exp_dir, "test.trg.detok*.txt"))
+        predictions_detok_paths.append(os.path.join(config.exp_dir, f"test.trg-predictions.detok.txt.{suffix_str}"))
+    else:
+        # test data is split into separate files
+        for src_iso in sorted(config.src_isos):
+            for trg_iso in sorted(config.trg_isos):
+                if src_iso == trg_iso:
+                    continue
+                prefix = f"test.{src_iso}.{trg_iso}"
+                src_features_path = os.path.join(config.exp_dir, f"{prefix}.src.txt")
+                if os.path.isfile(src_features_path):
+                    vref_paths.append(os.path.join(config.exp_dir, f"{prefix}.vref.txt"))
+                    features_paths.append(src_features_path)
+                    predictions_paths.append(os.path.join(config.exp_dir, f"{prefix}.trg-predictions.txt.{suffix_str}"))
+                    refs_paths.append(os.path.join(config.exp_dir, f"{prefix}.trg.detok*.txt"))
                     predictions_detok_paths.append(
-                        os.path.join(root_dir, f"{prefix}.trg-predictions.detok.txt.{suffix_str}")
+                        os.path.join(config.exp_dir, f"{prefix}.trg-predictions.detok.txt.{suffix_str}")
                     )
 
     checkpoint_name = "averaged checkpoint" if step == -1 else f"checkpoint {step}"
@@ -400,15 +378,10 @@ def test_checkpoint(
     if force_infer or any(not os.path.isfile(f) for f in predictions_detok_paths):
         runner = create_runner(config, memory_growth=memory_growth)
         print(f"Inferencing {checkpoint_name}...")
-        if os.path.basename(checkpoint_path) == "saved_model.pb":
-            runner.saved_model_infer_multiple(features_paths, predictions_paths)
-        else:
-            runner.infer_multiple(features_paths, predictions_paths, checkpoint_path=checkpoint_path)
+        runner.infer_multiple(features_paths, predictions_paths, checkpoint_path=checkpoint_path)
 
-    data_config: dict = config["data"]
     print(f"Scoring {checkpoint_name}...")
-    default_src_iso = next(iter(src_langs.keys()))
-    default_trg_iso = next(iter(trg_langs.keys()))
+    default_src_iso = config.default_src_iso
     scores: List[PairScore] = []
     overall_sys: List[str] = []
     overall_refs: List[List[str]] = []
@@ -425,9 +398,8 @@ def test_checkpoint(
             predictions_path,
             refs_path,
             predictions_detok_path,
-            default_trg_iso,
             ref_projects,
-            trg_langs,
+            config,
             books,
             by_book,
         )
@@ -448,7 +420,7 @@ def test_checkpoint(
                     pair_sys,
                     cast(List[Iterable[str]], pair_refs),
                     lowercase=True,
-                    tokenize=data_config.get("sacrebleu_tokenize", "13a"),
+                    tokenize=config.data.get("sacrebleu_tokenize", "13a"),
                 )
 
             if "sentencebleu" in scorers:
@@ -457,7 +429,7 @@ def test_checkpoint(
                     pair_sys,
                     cast(List[List[str]], pair_refs),
                     lowercase=True,
-                    tokenize=data_config.get("sacrebleu_tokenize", "13a"),
+                    tokenize=config.data.get("sacrebleu_tokenize", "13a"),
                 )
 
             other_scores: Dict[str, float] = {}
@@ -486,12 +458,12 @@ def test_checkpoint(
             if by_book is True:
                 if len(book_dict) != 0:
                     book_scores = score_individual_books(
-                        book_dict, src_iso, predictions_detok_path, scorers, data_config, ref_projects
+                        book_dict, src_iso, predictions_detok_path, scorers, config, ref_projects
                     )
                     scores.extend(book_scores)
                 else:
                     print("Error: book_dict did not load correctly. Not scoring individual books.")
-    if len(src_langs) > 1 or len(trg_langs) > 1:
+    if len(config.src_isos) > 1 or len(config.trg_isos) > 1:
         bleu = sacrebleu.corpus_bleu(overall_sys, cast(List[Iterable[str]], overall_refs), lowercase=True)
         scores.append(PairScore("ALL", "ALL", "ALL", bleu, len(overall_sys), ref_projects))
 
@@ -499,7 +471,7 @@ def test_checkpoint(
     if len(ref_projects) > 0:
         ref_projects_suffix = "_".join(sorted(ref_projects))
         scores_file_root += f"-{ref_projects_suffix}"
-    with open(os.path.join(root_dir, f"{scores_file_root}.csv"), "w", encoding="utf-8") as scores_file:
+    with open(os.path.join(config.exp_dir, f"{scores_file_root}.csv"), "w", encoding="utf-8") as scores_file:
         if scores is not None:
             scores[0].writeHeader(scores_file)
         for results in scores:
@@ -521,8 +493,8 @@ def main() -> None:
         "--scorers",
         nargs="*",
         metavar="scorer",
-        choices=SUPPORTED_SCORERS,
-        help=f"List of scorers - {SUPPORTED_SCORERS}",
+        choices=_SUPPORTED_SCORERS,
+        help=f"List of scorers - {_SUPPORTED_SCORERS}",
     )
     parser.add_argument("--books", nargs="*", metavar="book", default=[], help="Books")
     parser.add_argument("--by-book", default=False, action="store_true", help="Score individual books")
@@ -532,12 +504,7 @@ def main() -> None:
     print("Git commit:", get_git_revision_hash())
 
     exp_name = args.experiment
-    root_dir = get_mt_root_dir(exp_name)
     config = load_config(exp_name)
-    model_dir: str = config["model_dir"]
-    data_config: dict = config["data"]
-    src_langs = parse_langs(data_config["src_langs"])
-    trg_langs = parse_langs(data_config["trg_langs"])
     ref_projects: Set[str] = set(args.ref_projects)
     books = get_books(args.books)
 
@@ -547,21 +514,17 @@ def main() -> None:
     else:
         for scorer in set(args.scorers):
             scorer = scorer.lower()
-            if scorer in SUPPORTED_SCORERS:
+            if scorer in _SUPPORTED_SCORERS:
                 scorers.add(scorer)
 
-    best_model_path, best_step = get_best_model_dir(model_dir)
+    best_model_path, best_step = get_best_model_dir(config.model_dir)
     results: Dict[int, List[PairScore]] = {}
     step: int
     if args.checkpoint is not None:
-        checkpoint_path = os.path.join(model_dir, f"ckpt-{args.checkpoint}")
+        checkpoint_path = os.path.join(config.model_dir, f"ckpt-{args.checkpoint}")
         step = int(args.checkpoint)
-        set_seed(data_config["seed"])
         results[step] = test_checkpoint(
-            root_dir,
             config,
-            src_langs,
-            trg_langs,
             args.force_infer,
             args.by_book,
             args.memory_growth,
@@ -573,13 +536,10 @@ def main() -> None:
         )
 
     if args.avg:
-        checkpoint_path, _ = get_last_checkpoint(os.path.join(model_dir, "avg"))
+        checkpoint_path, _ = get_last_checkpoint(os.path.join(config.model_dir, "avg"))
         step = -1
         results[step] = test_checkpoint(
-            root_dir,
             config,
-            src_langs,
-            trg_langs,
             args.force_infer,
             args.by_book,
             args.memory_growth,
@@ -592,16 +552,10 @@ def main() -> None:
 
     if args.best:
         step = best_step
-        checkpoint_path = os.path.join(best_model_path, "ckpt")
-        if not os.path.isfile(checkpoint_path + ".index"):
-            checkpoint_path = os.path.join(model_dir, "saved_model.pb")
-
         if step not in results:
+            checkpoint_path = os.path.join(best_model_path, "ckpt")
             results[step] = test_checkpoint(
-                root_dir,
                 config,
-                src_langs,
-                trg_langs,
                 args.force_infer,
                 args.by_book,
                 args.memory_growth,
@@ -613,14 +567,11 @@ def main() -> None:
             )
 
     if args.last or (not args.best and args.checkpoint is None and not args.avg):
-        checkpoint_path, step = get_last_checkpoint(model_dir)
+        checkpoint_path, step = get_last_checkpoint(config.model_dir)
 
         if step not in results:
             results[step] = test_checkpoint(
-                root_dir,
                 config,
-                src_langs,
-                trg_langs,
                 args.force_infer,
                 args.by_book,
                 args.memory_growth,

@@ -1,9 +1,9 @@
-import abc
+from abc import ABC, abstractmethod
 
 from .lexicon import Lexicon
 
 
-class Aligner(abc.ABC):
+class Aligner(ABC):
     def __init__(self, id: str, model_dir: str) -> None:
         self._id = id
         self._model_dir = model_dir
@@ -20,23 +20,23 @@ class Aligner(abc.ABC):
     def has_inverse_model(self) -> bool:
         return True
 
-    @abc.abstractmethod
+    @abstractmethod
     def train(self, src_file_path: str, trg_file_path: str) -> None:
         pass
 
-    @abc.abstractmethod
+    @abstractmethod
     def align(self, out_file_path: str, sym_heuristic: str = "grow-diag-final-and") -> None:
         pass
 
-    @abc.abstractmethod
+    @abstractmethod
     def get_direct_lexicon(self, include_special_tokens: bool = False) -> Lexicon:
         pass
 
-    @abc.abstractmethod
+    @abstractmethod
     def get_inverse_lexicon(self, include_special_tokens: bool = False) -> Lexicon:
         pass
 
-    @abc.abstractmethod
+    @abstractmethod
     def extract_lexicon(self, out_file_path: str) -> None:
         pass
 

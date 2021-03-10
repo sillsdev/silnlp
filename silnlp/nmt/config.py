@@ -1,24 +1,26 @@
 import argparse
 import logging
 import os
-from pathlib import Path
-import sys
-from enum import Flag, auto
-from typing import Dict, Iterable, List, Optional, Set, Union
+import shutil
+from abc import ABC, abstractmethod
+from enum import Enum, Flag, auto
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 logging.basicConfig()
 
+import sentencepiece as sp
 import tensorflow as tf
 import yaml
-from opennmt import load_config as onmt_load_config
-from opennmt.data import WordNoiser
+from opennmt import END_OF_SENTENCE_TOKEN, PADDING_TOKEN, START_OF_SENTENCE_TOKEN
+from opennmt.data import Vocab, WordDropout
 from opennmt.models import Model, get_model_from_catalog
 
-from ..common.corpus import get_corpus_path
-from ..common.utils import get_git_revision_hash, get_mt_root_dir
-from .noise import WordDropout
+from ..common.corpus import load_corpus
+from ..common.utils import get_git_revision_hash, get_mt_exp_dir, merge_dict, set_seed
+from .noise import SILWordNoiser
 from .runner import SILRunner
 from .transformer import SILTransformer
+from .utils import encode_sp_lines, get_best_model_dir, get_last_checkpoint
 
 _PYTHON_TO_TENSORFLOW_LOGGING_LEVEL: Dict[int, int] = {
     logging.CRITICAL: 3,
@@ -29,7 +31,8 @@ _PYTHON_TO_TENSORFLOW_LOGGING_LEVEL: Dict[int, int] = {
     logging.NOTSET: 0,
 }
 
-DEFAULT_NEW_CONFIG: dict = {
+
+_DEFAULT_NEW_CONFIG: dict = {
     "data": {
         "share_vocab": False,
         "character_coverage": 1.0,
@@ -54,10 +57,387 @@ DEFAULT_NEW_CONFIG: dict = {
     },
 }
 
+# Different types of parent model checkpoints (last, best, average)
+class CheckpointType(Enum):
+    LAST = 1
+    BEST = 2
+    AVERAGE = 3
 
-def set_log_level(log_level: int) -> None:
-    tf.get_logger().setLevel(log_level)
-    os.environ["TF_CPP_MIN_LOG_LEVEL"] = str(_PYTHON_TO_TENSORFLOW_LOGGING_LEVEL[log_level])
+
+class DataFileType(Flag):
+    NONE = 0
+    TRAIN = auto()
+    TEST = auto()
+    VAL = auto()
+
+
+def convert_vocab(sp_vocab_path: str, onmt_vocab_path: str, tag_langs: Set[str] = None) -> None:
+    special_tokens = [PADDING_TOKEN, START_OF_SENTENCE_TOKEN, END_OF_SENTENCE_TOKEN]
+    if tag_langs is not None:
+        special_tokens.extend(map(lambda l: f"<2{l}>", tag_langs))
+
+    vocab = Vocab(special_tokens)
+    with open(sp_vocab_path, "r", encoding="utf-8") as vocab_file:
+        for line in vocab_file:
+            token = line.rstrip("\r\n")
+            index = token.rindex("\t")
+            token = token[:index]
+            if token in ("<unk>", "<s>", "</s>", "<range>"):  # Ignore special tokens
+                continue
+            vocab.add(token)
+    vocab.pad_to_multiple(8)
+    vocab.serialize(onmt_vocab_path)
+
+
+def build_vocab(
+    file_paths: Iterable[str],
+    vocab_size: int,
+    casing: str,
+    character_coverage: float,
+    model_prefix: str,
+    vocab_path: str,
+    tag_langs: Set[str] = None,
+) -> None:
+    joined_file_paths = ",".join(file_paths)
+
+    casing = casing.lower()
+    normalization: str
+    if casing == "lower":
+        normalization = "nmt_nfkc_cf"
+    elif casing == "preserve":
+        normalization = "nmt_nfkc"
+    else:
+        raise RuntimeError("Invalid casing was specified in the config.")
+
+    # use custom normalization that does not convert ZWJ and ZWNJ to spaces
+    # allows properly handling of scripts like Devanagari
+    normalization_path = os.path.join(os.path.dirname(__file__), f"{normalization}.tsv")
+    sp_train_params = (
+        f"--normalization_rule_tsv={normalization_path} --input={joined_file_paths} --model_prefix={model_prefix}"
+        f" --vocab_size={vocab_size} --character_coverage={character_coverage:.4f} --input_sentence_size=1000000"
+        " --shuffle_input_sentence=true --control_symbols=<range> --user_defined_symbols=<blank>"
+    )
+
+    sp.SentencePieceTrainer.Train(sp_train_params)
+
+    convert_vocab(f"{model_prefix}.vocab", vocab_path, tag_langs)
+
+
+def get_checkpoint_path(model_dir: str, checkpoint_type: CheckpointType) -> Tuple[Optional[str], Optional[int]]:
+    if checkpoint_type == CheckpointType.AVERAGE:
+        # Get the checkpoint path and step count for the averaged checkpoint
+        return get_last_checkpoint(os.path.join(model_dir, "avg"))
+    elif checkpoint_type == CheckpointType.BEST:
+        # Get the checkpoint path and step count for the best checkpoint
+        best_model_dir, step = get_best_model_dir(model_dir)
+        return (os.path.join(best_model_dir, "ckpt"), step)
+    elif checkpoint_type == CheckpointType.LAST:
+        return (None, None)
+    else:
+        raise RuntimeError(f"Unsupported checkpoint type: {checkpoint_type}")
+
+
+class Config(ABC):
+    def __init__(
+        self,
+        exp_dir: str,
+        config: dict,
+        src_isos: Set[str],
+        trg_isos: Set[str],
+        src_file_paths: Set[str],
+        trg_file_paths: Set[str],
+    ) -> None:
+        config = merge_dict(
+            {
+                "model": "SILTransformerBase",
+                "model_dir": os.path.join(exp_dir, "run"),
+                "data": {
+                    "train_features_file": os.path.join(exp_dir, "train.src.txt"),
+                    "train_labels_file": os.path.join(exp_dir, "train.trg.txt"),
+                    "eval_features_file": os.path.join(exp_dir, "val.src.txt"),
+                    "eval_labels_file": os.path.join(exp_dir, "val.trg.txt"),
+                    "share_vocab": True,
+                    "character_coverage": 1.0,
+                    "mirror": False,
+                    "parent_use_best": False,
+                    "parent_use_average": False,
+                    "parent_use_vocab": False,
+                    "seed": 111,
+                    "tokenize": True,
+                },
+                "train": {
+                    "average_last_checkpoints": 0,
+                    "maximum_features_length": 150,
+                    "maximum_labels_length": 150,
+                    "keep_checkpoint_max": 3,
+                    "save_checkpoints_steps": 1000,
+                },
+                "eval": {
+                    "external_evaluators": "bleu_multi_ref",
+                    "steps": 1000,
+                    "early_stopping": {"metric": "bleu", "min_improvement": 0.2, "steps": 4},
+                    "export_on_best": "bleu",
+                    "export_format": "checkpoint",
+                    "max_exports_to_keep": 1,
+                    "multi_ref_eval": False,
+                },
+                "params": {
+                    "length_penalty": 0.2,
+                    "transformer_dropout": 0.1,
+                    "transformer_attention_dropout": 0.1,
+                    "transformer_ffn_dropout": 0.1,
+                    "word_dropout": 0,
+                },
+            },
+            config,
+        )
+        data_config: dict = config["data"]
+        eval_config: dict = config["eval"]
+        multi_ref_eval: bool = eval_config["multi_ref_eval"]
+        if multi_ref_eval:
+            data_config["eval_labels_file"] = os.path.join(exp_dir, "val.trg.txt.0")
+        if data_config["share_vocab"]:
+            data_config["source_vocabulary"] = os.path.join(exp_dir, "onmt.vocab")
+            data_config["target_vocabulary"] = os.path.join(exp_dir, "onmt.vocab")
+            if (
+                "src_vocab_size" not in data_config
+                and "trg_vocab_size" not in data_config
+                and "vocab_size" not in data_config
+            ):
+                data_config["vocab_size"] = 24000
+            if "src_casing" not in data_config and "trg_casing" not in data_config and "casing" not in data_config:
+                data_config["casing"] = "lower"
+        else:
+            data_config["source_vocabulary"] = os.path.join(exp_dir, "src-onmt.vocab")
+            data_config["target_vocabulary"] = os.path.join(exp_dir, "trg-onmt.vocab")
+            if "vocab_size" not in data_config:
+                if "src_vocab_size" not in data_config:
+                    data_config["src_vocab_size"] = 8000
+                if "trg_vocab_size" not in data_config:
+                    data_config["trg_vocab_size"] = 8000
+            if "casing" not in data_config:
+                if "src_casing" not in data_config:
+                    data_config["src_casing"] = "lower"
+                if "trg_casing" not in data_config:
+                    data_config["trg_casing"] = "lower"
+
+        self.exp_dir = exp_dir
+        self.root = config
+        self.src_isos = src_isos
+        self.trg_isos = trg_isos
+        self.src_file_paths = src_file_paths
+        self.trg_file_paths = trg_file_paths
+
+        parent: Optional[str] = self.data.get("parent")
+        self.parent_config: Optional[Config] = None
+        if parent is not None:
+            self.parent_config = load_config(parent)
+            freeze_layers: Optional[List[str]] = self.parent_config.params.get("freeze_layers")
+            # do not freeze any word embeddings layer, because we will update them when we create the parent model
+            if freeze_layers is not None:
+                self.parent_config.params["freeze_layers"] = list()
+
+        self.write_trg_tag: bool = (
+            len(self.trg_isos) > 1
+            or self.mirror
+            or (self.parent_config is not None and self.parent_config.write_trg_tag)
+        )
+
+    @property
+    def default_src_iso(self) -> str:
+        return next(iter(self.src_isos))
+
+    @property
+    def default_trg_iso(self) -> str:
+        return next(iter(self.trg_isos))
+
+    @property
+    def model(self) -> str:
+        return self.root["model"]
+
+    @property
+    def model_dir(self) -> str:
+        return self.root["model_dir"]
+
+    @property
+    def params(self) -> dict:
+        return self.root["params"]
+
+    @property
+    def data(self) -> dict:
+        return self.root["data"]
+
+    @property
+    def mirror(self) -> bool:
+        return self.data["mirror"]
+
+    @property
+    def share_vocab(self) -> bool:
+        return self.data["share_vocab"]
+
+    @property
+    def has_parent(self) -> bool:
+        return "parent" in self.data
+
+    def set_seed(self) -> None:
+        set_seed(self.data["seed"])
+
+    def preprocess(self, stats: bool) -> None:
+        self._build_vocabs()
+        self._build_corpora(stats)
+
+    def create_sp_processors(self) -> Tuple[sp.SentencePieceProcessor, sp.SentencePieceProcessor]:
+        if self.share_vocab:
+            model_prefix = os.path.join(self.exp_dir, "sp")
+            src_spp = sp.SentencePieceProcessor()
+            src_spp.Load(f"{model_prefix}.model")
+
+            trg_spp = src_spp
+        else:
+            src_spp = sp.SentencePieceProcessor()
+            src_spp.Load(os.path.join(self.exp_dir, "src-sp.model"))
+
+            trg_spp = sp.SentencePieceProcessor()
+            trg_spp.Load(os.path.join(self.exp_dir, "trg-sp.model"))
+        return (src_spp, trg_spp)
+
+    def create_src_sp_processor(self) -> sp.SentencePieceProcessor:
+        src_spp = sp.SentencePieceProcessor()
+        src_spp.Load(os.path.join(self.exp_dir, "sp.model" if self.share_vocab else "src-sp.model"))
+        return src_spp
+
+    @abstractmethod
+    def _build_corpora(self, stats: bool) -> None:
+        pass
+
+    def _build_vocabs(self) -> None:
+        if not self.data["tokenize"]:
+            return
+
+        tag_isos: Optional[Set[str]] = None
+        if self.write_trg_tag:
+            tag_isos = self.trg_isos | self.src_isos if self.mirror else set(self.trg_isos)
+
+        if self.share_vocab:
+            print("Building shared vocabulary...")
+            vocab_size: Optional[int] = self.data.get("vocab_size")
+            if vocab_size is None:
+                vocab_size = self.data.get("src_vocab_size")
+                if vocab_size is None:
+                    vocab_size = self.data["trg_vocab_size"]
+                elif self.data.get("trg_vocab_size", vocab_size) != vocab_size:
+                    raise RuntimeError(
+                        "The source and target vocab sizes cannot be different when creating a shared vocab."
+                    )
+
+            casing: Optional[str] = self.data.get("casing")
+            if casing is None:
+                casing = self.data.get("src_casing")
+                if casing is None:
+                    casing = self.data["trg_casing"]
+                elif self.data.get("trg_casing", casing) != casing:
+                    raise RuntimeError("The source and target casing cannot be different when creating a shared vocab.")
+
+            model_prefix = os.path.join(self.exp_dir, "sp")
+            vocab_path = os.path.join(self.exp_dir, "onmt.vocab")
+            share_vocab_file_paths: Set[str] = self.src_file_paths | self.trg_file_paths
+            character_coverage = self.data.get("character_coverage", 1.0)
+            build_vocab(
+                share_vocab_file_paths, vocab_size, casing, character_coverage, model_prefix, vocab_path, tag_isos
+            )
+
+            self._update_vocab(vocab_path, vocab_path)
+        else:
+            src_vocab_file_paths: Set[str] = set(self.src_file_paths)
+            if self.mirror:
+                src_vocab_file_paths.update(self.trg_file_paths)
+            self._create_unshared_vocab(
+                self.src_isos, src_vocab_file_paths, "source", tag_langs=tag_isos,
+            )
+
+            trg_vocab_file_paths: Set[str] = set(self.trg_file_paths)
+            if self.mirror:
+                trg_vocab_file_paths.update(self.src_file_paths)
+            self._create_unshared_vocab(
+                self.trg_isos, trg_vocab_file_paths, "target",
+            )
+
+            self._update_vocab(
+                os.path.join(self.exp_dir, "src-onmt.vocab"), os.path.join(self.exp_dir, "trg-onmt.vocab")
+            )
+
+    def _update_vocab(self, src_vocab_path: str, trg_vocab_path: str) -> None:
+        if self.parent_config is None:
+            return
+
+        model_dir = self.parent_config.model_dir
+        parent_model_to_use = (
+            CheckpointType.BEST
+            if self.data["parent_use_best"]
+            else CheckpointType.AVERAGE
+            if self.data["parent_use_average"]
+            else CheckpointType.LAST
+        )
+        checkpoint_path, step = get_checkpoint_path(model_dir, parent_model_to_use)
+        parent_runner = create_runner(self.parent_config)
+        parent_runner.update_vocab(
+            os.path.join(self.exp_dir, "parent"), src_vocab_path, trg_vocab_path, checkpoint_path, step
+        )
+
+    def _create_unshared_vocab(
+        self, isos: Set[str], vocab_file_paths: Set[str], side: str, tag_langs: Set[str] = None,
+    ) -> None:
+        prefix = "src" if side == "source" else "trg"
+        model_prefix = os.path.join(self.exp_dir, f"{prefix}-sp")
+        vocab_path = os.path.join(self.exp_dir, f"{prefix}-onmt.vocab")
+        if self.parent_config is not None:
+            parent_isos = self.parent_config.src_isos if side == "source" else self.parent_config.trg_isos
+            if isos == parent_isos:
+                parent_sp_prefix_path: str
+                parent_vocab_path: str
+                if self.parent_config.share_vocab:
+                    parent_sp_prefix_path = os.path.join(self.parent_config.exp_dir, "sp")
+                    parent_vocab_path = os.path.join(self.parent_config.exp_dir, "onmt.vocab")
+                else:
+                    parent_sp_prefix_path = os.path.join(self.parent_config.exp_dir, f"{prefix}-sp")
+                    parent_vocab_path = os.path.join(self.parent_config.exp_dir, f"{prefix}-onmt.vocab")
+
+                parent_vocab: Optional[Vocab] = None
+                child_tokens: Optional[Set[str]] = None
+                parent_use_vocab: bool = self.data["parent_use_vocab"]
+                if not parent_use_vocab:
+                    parent_spp = sp.SentencePieceProcessor()
+                    parent_spp.Load(parent_sp_prefix_path + ".model")
+
+                    parent_vocab = Vocab()
+                    parent_vocab.load(parent_vocab_path)
+
+                    child_tokens = set()
+                    for vocab_file_path in vocab_file_paths:
+                        for line in encode_sp_lines(parent_spp, load_corpus(vocab_file_path)):
+                            child_tokens.update(line.split())
+                    parent_use_vocab = child_tokens.issubset(parent_vocab.words)
+
+                # all tokens in the child corpora are in the parent vocab, so we can just use the parent vocab
+                # or, the user wants to reuse the parent vocab for this child experiment
+                if parent_use_vocab:
+                    sp_vocab_path = os.path.join(self.exp_dir, f"{prefix}-sp.vocab")
+                    onmt_vocab_path = os.path.join(self.exp_dir, f"{prefix}-onmt.vocab")
+                    shutil.copy2(parent_sp_prefix_path + ".model", os.path.join(self.exp_dir, f"{prefix}-sp.model"))
+                    shutil.copy2(parent_sp_prefix_path + ".vocab", sp_vocab_path)
+                    convert_vocab(sp_vocab_path, onmt_vocab_path, tag_langs)
+                    return
+                elif child_tokens is not None and parent_vocab is not None:
+                    onmt_delta_vocab_path = os.path.join(self.exp_dir, f"{prefix}-onmt-delta.vocab")
+                    vocab_delta = child_tokens.difference(parent_vocab.words)
+                    with open(onmt_delta_vocab_path, "w", encoding="utf-8") as f:
+                        [f.write(f"{token}\n") for token in vocab_delta]
+
+        print(f"Building {side} vocabulary...")
+        vocab_size: int = self.data.get(f"{prefix}_vocab_size", self.data.get("vocab_size"))
+        casing: str = self.data.get(f"{prefix}_casing", self.data.get("casing"))
+        character_coverage: float = self.data.get(f"{prefix}_character_coverage", self.data.get("character_coverage"))
+        build_vocab(vocab_file_paths, vocab_size, casing, character_coverage, model_prefix, vocab_path, tag_langs)
 
 
 def set_transformer_dropout(
@@ -77,139 +457,39 @@ def set_transformer_dropout(
             layer.dropout = ffn_dropout
 
 
-def load_config(exp_name: str) -> dict:
-    root_dir = get_mt_root_dir(exp_name)
-    config_path = os.path.join(root_dir, "config.yml")
-    
-    if not Path(config_path).exists():
-        sys.exit(f'\nMissing config file:\n{Path(config_path)}\n')
-    
-    config: dict = {
-        "model": "SILTransformerBase",
-        "model_dir": os.path.join(root_dir, "run"),
-        "data": {
-            "train_features_file": os.path.join(root_dir, "train.src.txt"),
-            "train_labels_file": os.path.join(root_dir, "train.trg.txt"),
-            "eval_features_file": os.path.join(root_dir, "val.src.txt"),
-            "eval_labels_file": os.path.join(root_dir, "val.trg.txt"),
-            "share_vocab": True,
-            "character_coverage": 1.0,
-            "mirror": False,
-            "mixed_src": False,
-            "parent_use_best": False,
-            "parent_use_average": False,
-            "parent_use_vocab": False,
-            "seed": 111,
-            "val_size": 250,
-            "disjoint_test": False,
-            "disjoint_val": False,
-            "score_threshold": 0,
-            "scripture": True,
-            "tokenize": True,
-        },
-        "train": {
-            "average_last_checkpoints": 0,
-            "maximum_features_length": 150,
-            "maximum_labels_length": 150,
-            "keep_checkpoint_max": 3,
-            "save_checkpoints_steps": 1000,
-        },
-        "eval": {
-            "external_evaluators": "bleu_multi_ref",
-            "steps": 1000,
-            "early_stopping": {"metric": "bleu", "min_improvement": 0.2, "steps": 4},
-            "export_on_best": "bleu",
-            "export_format": "checkpoint",
-            "max_exports_to_keep": 1,
-            "multi_ref_eval": False,
-        },
-        "params": {
-            "length_penalty": 0.2,
-            "transformer_dropout": 0.1,
-            "transformer_attention_dropout": 0.1,
-            "transformer_ffn_dropout": 0.1,
-            "word_dropout": 0,
-        },
-    }
-
-    config = onmt_load_config([config_path], config)
-    data_config: dict = config["data"]
-    eval_config: dict = config["eval"]
-    multi_ref_eval: bool = eval_config["multi_ref_eval"]
-    if multi_ref_eval:
-        data_config["eval_labels_file"] = os.path.join(root_dir, "val.trg.txt.0")
-    if data_config["share_vocab"]:
-        data_config["source_vocabulary"] = os.path.join(root_dir, "onmt.vocab")
-        data_config["target_vocabulary"] = os.path.join(root_dir, "onmt.vocab")
-        if (
-            "src_vocab_size" not in data_config
-            and "trg_vocab_size" not in data_config
-            and "vocab_size" not in data_config
-        ):
-            data_config["vocab_size"] = 24000
-        if "src_casing" not in data_config and "trg_casing" not in data_config and "casing" not in data_config:
-            data_config["casing"] = "lower"
-    else:
-        data_config["source_vocabulary"] = os.path.join(root_dir, "src-onmt.vocab")
-        data_config["target_vocabulary"] = os.path.join(root_dir, "trg-onmt.vocab")
-        if "vocab_size" not in data_config:
-            if "src_vocab_size" not in data_config:
-                data_config["src_vocab_size"] = 8000
-            if "trg_vocab_size" not in data_config:
-                data_config["trg_vocab_size"] = 8000
-        if "casing" not in data_config:
-            if "src_casing" not in data_config:
-                data_config["src_casing"] = "lower"
-            if "trg_casing" not in data_config:
-                data_config["trg_casing"] = "lower"
-    if "test_size" not in data_config:
-        data_config["test_size"] = 0 if "test_books" in data_config else 250
-    return config
-
-
-def create_model(config: dict) -> Model:
-    data_config: dict = config["data"]
-    params_config: dict = config["params"]
-
-    parent: Optional[str] = data_config.get("parent")
-    parent_data_config = {}
-    if parent:
-        parent_config = load_config(parent)
-        parent_data_config = parent_config["data"]
-
-    model_name: str = config["model"]
+def create_model(config: Config) -> Model:
+    model_name = config.model
     if model_name.startswith("Transformer"):
         model_name = "SIL" + model_name
     model = get_model_from_catalog(model_name)
     if isinstance(model, SILTransformer):
-        dropout = params_config["transformer_dropout"]
-        attention_dropout = params_config["transformer_attention_dropout"]
-        ffn_dropout = params_config["transformer_ffn_dropout"]
+        dropout = config.params["transformer_dropout"]
+        attention_dropout = config.params["transformer_attention_dropout"]
+        ffn_dropout = config.params["transformer_ffn_dropout"]
         if dropout != 0.1 or attention_dropout != 0.1 or ffn_dropout != 0.1:
             set_transformer_dropout(
                 model, dropout=dropout, attention_dropout=attention_dropout, ffn_dropout=ffn_dropout
             )
 
-    word_dropout: float = params_config["word_dropout"]
+    word_dropout: float = config.params["word_dropout"]
     if word_dropout > 0:
-        write_trg_tag = (
-            len(data_config["trg_langs"]) > 1
-            or len(parent_data_config.get("trg_langs", [])) > 1
-            or data_config["mirror"]
-            or parent_data_config.get("mirror", False)
-        )
-        source_noiser = WordNoiser(subword_token="▁", is_spacer=True)
-        source_noiser.add(WordDropout(word_dropout, skip_first_word=write_trg_tag))
+        source_noiser = SILWordNoiser(subword_token="▁", has_lang_tag=config.write_trg_tag)
+        source_noiser.add(WordDropout(word_dropout))
         model.features_inputter.set_noise(source_noiser, probability=1.0)
 
-        target_noiser = WordNoiser(subword_token="▁", is_spacer=True)
+        target_noiser = SILWordNoiser(subword_token="▁")
         target_noiser.add(WordDropout(word_dropout))
         model.labels_inputter.set_noise(target_noiser, probability=1.0)
     return model
 
 
+def set_log_level(log_level: int) -> None:
+    tf.get_logger().setLevel(log_level)
+    os.environ["TF_CPP_MIN_LOG_LEVEL"] = str(_PYTHON_TO_TENSORFLOW_LOGGING_LEVEL[log_level])
+
+
 def create_runner(
-    config: dict, mixed_precision: bool = False, log_level: int = logging.INFO, memory_growth: bool = False
+    config: Config, mixed_precision: bool = False, log_level: int = logging.INFO, memory_growth: bool = False
 ) -> SILRunner:
     set_log_level(log_level)
 
@@ -220,99 +500,21 @@ def create_runner(
 
     model = create_model(config)
 
-    return SILRunner(model, config, auto_config=True, mixed_precision=mixed_precision)
+    return SILRunner(model, config.root, auto_config=True, mixed_precision=mixed_precision)
 
 
-class DataFileType(Flag):
-    NONE = 0
-    TRAIN = auto()
-    TEST = auto()
-    VAL = auto()
-    SYNTH = auto()
+def load_config(exp_name: str) -> Config:
+    exp_dir = get_mt_exp_dir(exp_name)
+    config_path = os.path.join(exp_dir, "config.yml")
 
+    with open(config_path, "r", encoding="utf-8") as file:
+        config = yaml.safe_load(file)
 
-class DataFile:
-    def __init__(self, path: str, type: DataFileType):
-        self.path = path
-        self.type = type
-        file_name = os.path.splitext(os.path.basename(path))[0]
-        parts = file_name.split("-")
-        self.iso = parts[0]
-        self.project = parts[1]
+    from .corpus_pairs_config import CorpusPairsConfig
+    from .langs_config import LangsConfig
 
-    @property
-    def is_train(self):
-        return (self.type & DataFileType.TRAIN) == DataFileType.TRAIN
-
-    @property
-    def is_test(self):
-        return (self.type & DataFileType.TEST) == DataFileType.TEST
-
-    @property
-    def is_val(self):
-        return (self.type & DataFileType.VAL) == DataFileType.VAL
-
-    @property
-    def is_synth(self):
-        return (self.type & DataFileType.SYNTH) == DataFileType.SYNTH
-
-
-class Language:
-    def __init__(self, iso: str):
-        self.iso = iso
-        self.data_files: List[DataFile] = []
-
-
-def parse_projects(projects_value: Optional[Union[str, List[str]]], default: Set[str] = set()) -> Set[str]:
-    if projects_value is None:
-        return default
-    if isinstance(projects_value, str):
-        return set(map(lambda p: p.strip(), projects_value.split(",")))
-    return set(projects_value)
-
-
-def parse_langs(langs: Iterable[Union[str, dict]]) -> Dict[str, Language]:
-    lang_infos: Dict[str, Language] = {}
-    for lang in langs:
-        data_files: List[DataFile]
-        if isinstance(lang, str):
-            index = lang.find("-")
-            if index == -1:
-                raise RuntimeError("A language project is not fully specified.")
-            iso = lang[:index]
-            projects_str = lang[index + 1 :]
-            data_files = []
-            for project in projects_str.split(","):
-                project = project.strip()
-                project_path = get_corpus_path(iso, project)
-                data_files.append(DataFile(project_path, DataFileType.TRAIN | DataFileType.TEST | DataFileType.VAL))
-
-        else:
-            iso = lang["iso"]
-            train_projects = parse_projects(lang.get("train"))
-            test_projects = parse_projects(lang.get("test"), default=train_projects)
-            val_projects = parse_projects(lang.get("val"), default=train_projects)
-            synth_projects = parse_projects(lang.get("synth"))
-            data_files = []
-            for project in train_projects | test_projects | val_projects | synth_projects:
-                file_path = get_corpus_path(iso, project)
-                file_type = DataFileType.NONE
-                if project in train_projects:
-                    file_type |= DataFileType.TRAIN
-                if project in test_projects:
-                    file_type |= DataFileType.TEST
-                if project in val_projects:
-                    file_type |= DataFileType.VAL
-                if project in synth_projects:
-                    file_type |= DataFileType.SYNTH | DataFileType.TRAIN
-                data_files.append(DataFile(file_path, file_type))
-
-        lang_info = lang_infos.get(iso)
-        if lang_info is None:
-            lang_info = Language(iso)
-            lang_infos[iso] = lang_info
-        lang_info.data_files.extend(data_files)
-    return lang_infos
+    config_class: Any = CorpusPairsConfig if "corpus_pairs" in config["data"] else LangsConfig
+    return config_class(exp_dir, config)
 
 
 def copy_config_value(src: dict, trg: dict, key: str) -> None:
@@ -337,7 +539,7 @@ def main() -> None:
 
     print("Git commit:", get_git_revision_hash())
 
-    root_dir = get_mt_root_dir(args.experiment)
+    root_dir = get_mt_exp_dir(args.experiment)
     config_path = os.path.join(root_dir, "config.yml")
     if os.path.isfile(config_path) and not args.force:
         print('The experiment config file already exists. Use "--force" if you want to overwrite the existing config.')
@@ -345,7 +547,7 @@ def main() -> None:
 
     os.makedirs(root_dir, exist_ok=True)
 
-    config = DEFAULT_NEW_CONFIG.copy()
+    config = _DEFAULT_NEW_CONFIG.copy()
     if args.model is not None:
         config["model"] = args.model
     data_config: dict = config["data"]
@@ -354,7 +556,6 @@ def main() -> None:
     if args.parent is not None:
         data_config["parent"] = args.parent
         parent_config = load_config(args.parent)
-        parent_data_config: dict = parent_config["data"]
         for key in [
             "share_vocab",
             "vocab_size",
@@ -364,8 +565,8 @@ def main() -> None:
             "src_casing",
             "trg_casing",
         ]:
-            if key in parent_data_config:
-                data_config[key] = parent_data_config[key]
+            if key in parent_config.data:
+                data_config[key] = parent_config.data[key]
     if args.vocab_size is not None:
         data_config["vocab_size"] = args.vocab_size
     elif args.src_vocab_size is not None or args.trg_vocab_size is not None:

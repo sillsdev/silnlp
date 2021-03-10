@@ -13,11 +13,19 @@ from .. import sfm
 from ..common.canon import book_id_to_number
 from ..common.corpus import load_corpus, write_corpus
 from ..common.environment import PT_UNZIPPED_DIR
-from ..common.utils import get_git_revision_hash, set_seed
+from ..common.utils import get_git_revision_hash
 from ..sfm import usfm
-from .config import create_runner, get_mt_root_dir, load_config, parse_langs
+from .config import create_runner, get_mt_exp_dir, load_config
 from .runner import SILRunner
-from .utils import decode_sp, decode_sp_lines, encode_sp, encode_sp_lines, get_best_model_dir, get_last_checkpoint
+from .utils import (
+    decode_sp,
+    decode_sp_lines,
+    encode_sp,
+    encode_sp_lines,
+    get_best_model_dir,
+    get_last_checkpoint,
+    parse_data_file_path,
+)
 
 
 def insert_tag(text: str, trg_iso: Optional[str]) -> str:
@@ -41,8 +49,8 @@ def infer_text_file(
     for srcFile, trgFile in zip(srcFiles, trgFiles):
         start = time.time()
 
-        sentences = encode_sp_lines(src_spp, map(lambda s: insert_tag(s, trg_iso), load_corpus(srcFile)))
-        translations = runner.infer_list(list(sentences), checkpoint_path=checkpoint_path)
+        sentences = list(encode_sp_lines(src_spp, (insert_tag(s, trg_iso) for s in load_corpus(srcFile))))
+        translations = runner.infer_list(sentences, checkpoint_path=checkpoint_path)
         write_corpus(trgFile, decode_sp_lines(map(lambda t: t[0], translations)))
 
         end = time.time()
@@ -190,12 +198,10 @@ def main() -> None:
     print("Git commit:", get_git_revision_hash())
 
     exp_name = args.experiment
-    root_dir = get_mt_root_dir(exp_name)
+    root_dir = get_mt_exp_dir(exp_name)
     config = load_config(exp_name)
-    model_dir: str = config["model_dir"]
-    data_config: dict = config["data"]
 
-    set_seed(data_config["seed"])
+    config.set_seed()
 
     checkpoint_path: str
     step: int
@@ -203,30 +209,28 @@ def main() -> None:
     if checkpoint is not None:
         checkpoint = checkpoint.lower()
     if checkpoint is None or checkpoint == "last":
-        checkpoint_path, step = get_last_checkpoint(model_dir)
+        checkpoint_path, step = get_last_checkpoint(config.model_dir)
     elif checkpoint == "best":
-        best_model_path, step = get_best_model_dir(model_dir)
+        best_model_path, step = get_best_model_dir(config.model_dir)
         checkpoint_path = os.path.join(best_model_path, "ckpt")
         if not os.path.isfile(checkpoint_path + ".index"):
-            checkpoint_path = os.path.join(model_dir, "saved_model.pb")
+            checkpoint_path = os.path.join(config.model_dir, "saved_model.pb")
     elif checkpoint == "avg":
-        checkpoint_path, _ = get_last_checkpoint(os.path.join(model_dir, "avg"))
+        checkpoint_path, _ = get_last_checkpoint(os.path.join(config.model_dir, "avg"))
         step = -1
     else:
-        checkpoint_path = os.path.join(model_dir, f"ckpt-{checkpoint}")
+        checkpoint_path = os.path.join(config.model_dir, f"ckpt-{checkpoint}")
         step = int(checkpoint)
 
     runner = create_runner(config, memory_growth=args.memory_growth)
 
-    src_spp = sp.SentencePieceProcessor()
-    src_spp.Load(os.path.join(root_dir, "sp.model" if data_config["share_vocab"] else "src-sp.model"))
+    src_spp = config.create_src_sp_processor()
 
     trg_iso: Optional[str] = None
-    trg_langs = parse_langs(data_config["trg_langs"])
-    if len(trg_langs) > 1:
+    if len(config.trg_isos) > 1:
         trg_iso = args.trg_lang
         if trg_iso is None:
-            trg_iso = next(iter(trg_langs.keys()))
+            trg_iso = config.default_trg_iso
 
     if args.book is not None:
         if args.output_usfm is None:
@@ -234,8 +238,8 @@ def main() -> None:
 
         src_project: Optional[str] = args.src_project
         if src_project is None:
-            src_langs = parse_langs(data_config["src_langs"])
-            src_project = next(iter(src_langs.values())).data_files[0].project
+            src_file_path = next(iter(config.src_file_paths))
+            _, src_project = parse_data_file_path(src_file_path)
         infer_book(runner, src_spp, src_project, args.book, checkpoint_path, args.output_usfm, trg_iso)
     elif args.src_prefix is not None:
         if args.trg_prefix is None:
