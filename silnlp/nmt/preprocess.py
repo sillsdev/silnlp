@@ -178,14 +178,14 @@ def create_unshared_vocab(
 
         # all tokens in the child corpora are in the parent vocab, so we can just use the parent vocab
         # or, the user wants to reuse the parent vocab for this child experiment
-        if child_tokens is None or parent_vocab is None:
+        if parent_use_vocab:
             sp_vocab_path = os.path.join(root_dir, f"{prefix}-sp.vocab")
             onmt_vocab_path = os.path.join(root_dir, f"{prefix}-onmt.vocab")
             shutil.copy2(parent_sp_prefix_path + ".model", os.path.join(root_dir, f"{prefix}-sp.model"))
             shutil.copy2(parent_sp_prefix_path + ".vocab", sp_vocab_path)
             convert_vocab(sp_vocab_path, onmt_vocab_path, tag_langs)
             return
-        else:
+        elif child_tokens is not None and parent_vocab is not None:
             onmt_delta_vocab_path = os.path.join(root_dir, f"{prefix}-onmt-delta.vocab")
             vocab_delta = child_tokens.difference(parent_vocab.words)
             with open(onmt_delta_vocab_path, "w", encoding="utf-8") as f:
