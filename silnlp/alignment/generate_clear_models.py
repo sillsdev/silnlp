@@ -22,6 +22,7 @@ def main() -> None:
 
         aligner.align(os.path.join(output_dir, "alignments.txt"), sym_heuristic="intersection")
 
+        print("Extracting translation model...", end="", flush=True)
         direct_lexicon = aligner.get_direct_lexicon()
         lexicon = Lexicon()
         if aligner.has_inverse_model:
@@ -46,6 +47,7 @@ def main() -> None:
                     if prob > 0.1:
                         lexicon[src_word, trg_word] = prob
         lexicon.write(os.path.join(output_dir, "transModel.tsv"))
+        print(" done.")
 
 
 if __name__ == "__main__":

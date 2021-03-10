@@ -555,16 +555,12 @@ def preprocess_standard(
     val_size: int = data_config["val_size"]
     mirror: bool = data_config["mirror"]
 
-#    trg_files_by_project = {df.project: df for df in trg_files}
     test_set_count = 0
     for src_file in src_files:
         if src_file.is_test:
             for trg_file in trg_files:
                 if src_file.project == trg_file.project and trg_file.is_test:
                     test_set_count += 1
-    #            trg_file = trg_files_by_project.get(src_file.project)
-#            if trg_file is not None and trg_file.is_test:
-#                test_set_count += 1
 
     print("Writing data sets...")
     for old_file_path in glob(os.path.join(root_dir, "test.*.txt")):
@@ -584,11 +580,7 @@ def preprocess_standard(
                 if (src_file.project != trg_file.project) or (src_file.iso == trg_file.iso):
                     continue
 
-                print(f'Pairing {src_file.path} with {trg_file.path}; mirror: {mirror}')
-
-#            trg_file = trg_files_by_project.get(src_file.project)
-#            if trg_file is None:
-#                continue
+                print(f"Pairing {src_file.path} with {trg_file.path}; mirror: {mirror}")
 
                 if len(test_indices) == 0 and len(val_indices) == 0:
                     corpus_len = get_parallel_corpus_length(src_file.path, trg_file.path)

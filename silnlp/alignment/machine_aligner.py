@@ -77,7 +77,6 @@ class MachineAligner(Aligner):
             trg_file_path,
             "-mt",
             self.model_type,
-            "-l",
         ]
         if self.smt_model_type is not None:
             args.append("-smt")
@@ -104,7 +103,6 @@ class MachineAligner(Aligner):
             self.model_type,
             "-sh",
             sym_heuristic,
-            "-l",
         ]
         if self.smt_model_type is not None:
             args.append("-smt")

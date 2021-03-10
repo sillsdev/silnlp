@@ -31,9 +31,19 @@ def get_ref(verse: dict) -> str:
     return id[:-4]
 
 
-def get_segment(segInfo: dict, use_lemma: bool = False) -> List[str]:
+def get_segment(segInfo: dict, casing: str, normalize: bool, use_lemma: bool = False) -> List[str]:
     words: Iterable[str] = (w["lemma" if use_lemma else "text"] for w in segInfo["words"])
-    return [unicodedata.normalize("NFC", w.lower().replace(" ", "~")) for w in words]
+    return [transform_token(w, casing, normalize) for w in words]
+
+
+def transform_token(token: str, casing: str, normalize: bool) -> str:
+    token = token.replace(" ", "~")
+    casing = casing.lower()
+    if casing == "lower":
+        token = token.lower()
+    if normalize:
+        token = unicodedata.normalize("NFC", token)
+    return token
 
 
 def get_alignment(verse: dict, primary_links_only: bool = False) -> Alignment:
@@ -81,48 +91,54 @@ def add_alignment(lexicon: Lexicon, source: List[str], target: List[str], alignm
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Preprocesses Clear gold standard alignments")
-    parser.add_argument("experiment", help="Experiment name")
+    parser.add_argument("experiments", nargs="+", help="Experiment names")
     args = parser.parse_args()
 
-    root_dir = get_align_root_dir(args.experiment)
-    config = load_config(args.experiment)
+    for exp_name in args.experiments:
+        print(f"=== Preprocessing ({exp_name}) ===")
+        root_dir = get_align_root_dir(exp_name)
+        config = load_config(exp_name)
 
-    set_seed(config["seed"])
+        set_seed(config["seed"])
 
-    corpus_name: str = config["corpus"]
+        corpus_name: str = config["corpus"]
 
-    corpus_path = os.path.join(ALIGN_GOLD_STANDARDS_DIR, corpus_name + ".alignment.json")
-    verses: List[dict]
-    with open(corpus_path, "r", encoding="utf-8") as f:
-        verses = json.load(f)
+        corpus_path = os.path.join(ALIGN_GOLD_STANDARDS_DIR, corpus_name + ".alignment.json")
+        verses: List[dict]
+        with open(corpus_path, "r", encoding="utf-8") as f:
+            verses = json.load(f)
 
-    use_src_lemma: bool = config["use_src_lemma"]
-    corpus: List[ParallelSegment] = []
-    lexicon = Lexicon()
-    for verse in verses:
-        ref_str = get_ref(verse)
-        source = get_segment(verse["manuscript"], use_lemma=use_src_lemma)
-        target = get_segment(verse["translation"])
-        alignment = get_alignment(verse)
-        corpus.append(ParallelSegment(ref_str, source, target, alignment))
-        add_alignment(lexicon, source, target, get_alignment(verse, primary_links_only=True))
-    lexicon.normalize()
+        use_src_lemma: bool = config["use_src_lemma"]
+        src_casing: str = config["src_casing"]
+        src_normalize: bool = config["src_normalize"]
+        trg_casing: str = config["trg_casing"]
+        trg_normalize: bool = config["trg_normalize"]
+        corpus: List[ParallelSegment] = []
+        lexicon = Lexicon()
+        for verse in verses:
+            ref_str = get_ref(verse)
+            source = get_segment(verse["manuscript"], src_casing, src_normalize, use_lemma=use_src_lemma)
+            target = get_segment(verse["translation"], trg_casing, trg_normalize)
+            alignment = get_alignment(verse)
+            corpus.append(ParallelSegment(ref_str, source, target, alignment))
+            add_alignment(lexicon, source, target, get_alignment(verse, primary_links_only=True))
+        lexicon.normalize()
 
-    src_stemmer = get_stemmer(config["src_stemmer"])
-    src_stemmer.train(map(lambda s: s.source, corpus))
+        src_stemmer = get_stemmer(config["src_stemmer"])
+        src_stemmer.train(map(lambda s: s.source, corpus))
 
-    trg_stemmer = get_stemmer(config["trg_stemmer"])
-    trg_stemmer.train(map(lambda s: s.target, corpus))
+        trg_stemmer = get_stemmer(config["trg_stemmer"])
+        trg_stemmer.train(map(lambda s: s.target, corpus))
 
-    if config["by_book"]:
-        for book, book_root_dir in get_all_book_paths(root_dir):
-            book_corpus = list(filter(lambda s: is_in_book(s, book), corpus))
-            if len(book_corpus) > 0:
-                os.makedirs(book_root_dir, exist_ok=True)
-                write_datasets(book_root_dir, src_stemmer, trg_stemmer, book_corpus)
-    else:
-        write_datasets(root_dir, src_stemmer, trg_stemmer, corpus)
-        lexicon.write(os.path.join(root_dir, "lexicon.gold.txt"))
+        if config["by_book"]:
+            for book, book_root_dir in get_all_book_paths(root_dir):
+                book_corpus = list(filter(lambda s: is_in_book(s, book), corpus))
+                if len(book_corpus) > 0:
+                    os.makedirs(book_root_dir, exist_ok=True)
+                    write_datasets(book_root_dir, src_stemmer, trg_stemmer, book_corpus)
+        else:
+            write_datasets(root_dir, src_stemmer, trg_stemmer, corpus)
+            lexicon.write(os.path.join(root_dir, "lexicon.gold.txt"))
 
 
 if __name__ == "__main__":

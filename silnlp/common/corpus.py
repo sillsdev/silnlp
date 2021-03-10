@@ -25,7 +25,7 @@ def load_corpus(input_file: str) -> Iterator[str]:
 
 def tokenize_corpus(input_path: str, output_path: str) -> None:
     subprocess.run(
-        ["dotnet", "machine", "tokenize", input_path, output_path, "-t", "latin", "-l"],
+        ["dotnet", "machine", "tokenize", input_path, output_path, "-t", "latin", "-l", "-nf", "nfc"],
         stdout=subprocess.DEVNULL,
         cwd=get_repo_dir(),
     )
