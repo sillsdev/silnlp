@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import sys
 import random
 import subprocess
@@ -24,7 +25,13 @@ def get_git_revision_hash() -> str:
 
 
 def get_mt_root_dir(exp_name: str) -> str:
-    return os.path.join(PT_PREPROCESSED_DIR, "tests", exp_name)
+    mt_root_dir = os.path.join(PT_PREPROCESSED_DIR, "tests", exp_name)
+    mt_root_path = Path(mt_root_dir)
+    if not mt_root_path.exists():
+        print(f"\nExperiement folder missing: {mt_root_path}\n")
+        exit()	
+    else :
+        return mt_root_dir
 
 
 def get_align_root_dir(exp_name: str) -> str:
