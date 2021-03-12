@@ -1,5 +1,7 @@
 import os
+from pathlib import Path
 import subprocess
+import sys
 from typing import Iterable, Iterator, List, Set, Tuple
 
 import pandas as pd
@@ -114,11 +116,22 @@ def filter_parallel_corpus(corpus: pd.DataFrame, score_threshold: float) -> pd.D
 
 
 def get_corpus_path(iso: str, project: str) -> str:
-    return os.path.join(PT_PREPROCESSED_DIR, "data", f"{iso}-{project}.txt")
+    corpus_dir = os.path.join(PT_PREPROCESSED_DIR, "data", f"{iso}-{project}.txt")
+    corpus_file = Path(corpus_dir)
+    if not corpus_file.exists():
+        sys.exit(f"\nCorpus file is missing:\n{corpus_file}\n")
+
+    return corpus_dir
 
 
 def get_names_path(iso: str, project: str) -> str:
-    return os.path.join(PT_PREPROCESSED_DIR, "data", f"{iso}-{project}-names.txt")
+    names_dir = os.path.join(PT_PREPROCESSED_DIR, "data", f"{iso}-{project}-names.txt")
+    names_file = Path(names_dir)
+
+    if not names_file.exists():
+        print(f"\nNames file is absent: ignoring:\n{names_file}\n")
+
+    return names_dir
 
 
 def include_books(corpus: pd.DataFrame, books: Set[int]) -> pd.DataFrame:

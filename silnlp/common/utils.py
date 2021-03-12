@@ -3,6 +3,7 @@ import sys
 import random
 import subprocess
 from pathlib import Path
+import sys
 from typing import Any
 
 import numpy as np
@@ -24,11 +25,23 @@ def get_git_revision_hash() -> str:
 
 
 def get_mt_root_dir(exp_name: str) -> str:
-    return os.path.join(PT_PREPROCESSED_DIR, "tests", exp_name)
+    mt_root_dir = os.path.join(PT_PREPROCESSED_DIR, "tests", exp_name)
+    mt_root_path = Path(mt_root_dir)
+
+    if not mt_root_path.exists():
+        sys.exit(f"\nExperiement folder missing: {mt_root_path}\n")	
+
+    return mt_root_dir
 
 
 def get_align_root_dir(exp_name: str) -> str:
-    return os.path.join(ALIGN_EXPERIMENTS_DIR, exp_name)
+    alignments_dir = os.path.join(ALIGN_EXPERIMENTS_DIR, exp_name)
+    alignments_path = Path(alignments_dir)
+    
+    if not alignments_path.exists():
+        sys.exit(f"\nAlignments folder missing:\n{alignments_path}\n")
+
+    return alignments_dir
 
 
 def set_seed(seed: Any) -> None:

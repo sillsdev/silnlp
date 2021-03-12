@@ -1,6 +1,8 @@
 import argparse
 import logging
 import os
+from pathlib import Path
+import sys
 from enum import Flag, auto
 from typing import Dict, Iterable, List, Optional, Set, Union
 
@@ -78,7 +80,10 @@ def set_transformer_dropout(
 def load_config(exp_name: str) -> dict:
     root_dir = get_mt_root_dir(exp_name)
     config_path = os.path.join(root_dir, "config.yml")
-
+    
+    if not Path(config_path).exists():
+        sys.exit(f'\nMissing config file:\n{Path(config_path)}\n')
+    
     config: dict = {
         "model": "SILTransformerBase",
         "model_dir": os.path.join(root_dir, "run"),
