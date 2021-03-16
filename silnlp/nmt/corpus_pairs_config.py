@@ -73,10 +73,10 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
         if type_strs is None:
             type_strs = ["train", "test", "val"]
         elif isinstance(type_strs, str):
-            type_strs = [type_strs]
+            type_strs = type_strs.split(",")
         type = DataFileType.NONE
         for type_str in type_strs:
-            type_str = type_str.lower()
+            type_str = type_str.strip().lower()
             if type_str == "train":
                 type |= DataFileType.TRAIN
             elif type_str == "test":
