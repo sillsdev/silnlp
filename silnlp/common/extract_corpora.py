@@ -100,6 +100,8 @@ def extract_names(output_dir: str, iso: str, project_dir: str) -> None:
                         vern_terms_file.write(rendering + "\n")
                         en_terms_file.write(gloss + "\n")
                         names.add((gloss, rendering))
+#                        print(f"--{gloss}--{rendering}--")
+    print(f"# of glosses extracted: {len(names)}")
 
 
 def main() -> None:
