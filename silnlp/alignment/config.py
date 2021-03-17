@@ -8,12 +8,13 @@ from ..common.flatcat_stemmer import FlatCatStemmer
 from ..common.null_stemmer import NullStemmer
 from ..common.snowball_stemmer import SnowballStemmer
 from ..common.stemmer import Stemmer
-from ..common.utils import get_align_root_dir, merge_dict
+from ..common.utils import merge_dict
 from ..common.wordnet_stemmer import WordNetStemmer
 from .aligner import Aligner
 from .clear_aligner import ClearAligner
 from .ibm4_aligner import Ibm4Aligner
 from .machine_aligner import FastAlign, HmmAligner, Ibm1Aligner, Ibm2Aligner, ParatextAligner, SmtAligner
+from .utils import get_align_exp_dir
 
 ALIGNERS: Dict[str, Tuple[Type[Aligner], str]] = {
     "fast_align": (FastAlign, "FastAlign"),
@@ -25,6 +26,7 @@ ALIGNERS: Dict[str, Tuple[Type[Aligner], str]] = {
     "pt": (ParatextAligner, "PT"),
     "clear2_fa": (ClearAligner, "Clear-2-FA"),
     "clear2_hmm": (ClearAligner, "Clear-2-HMM"),
+    "clear2_ibm4": (ClearAligner, "Clear-2-IBM-4"),
     "clear3_fa": (ClearAligner, "Clear-3-FA"),
     "clear3_hmm": (ClearAligner, "Clear-3-HMM"),
 }
@@ -38,12 +40,12 @@ STEMMERS: Dict[str, Type[Stemmer]] = {
 }
 
 
-def get_aligner(id: str, root_dir: str) -> Aligner:
+def get_aligner(id: str, testament_dir: str) -> Aligner:
     aligner = ALIGNERS.get(id)
     if aligner is None:
         raise RuntimeError("An invalid aligner Id was specified.")
     aligner_cls: Type = aligner[0]
-    return aligner_cls(os.path.join(root_dir, id + os.path.sep))
+    return aligner_cls(os.path.join(testament_dir, id + os.path.sep))
 
 
 def get_aligner_name(id: str) -> str:
@@ -68,9 +70,9 @@ def get_stemmer(stemmer_config: Union[dict, str]) -> Stemmer:
     return stemmer_cls(**kwargs)
 
 
-def load_config(exp_name: str) -> dict:
-    root_dir = get_align_root_dir(exp_name)
-    config_path = os.path.join(root_dir, "config.yml")
+def load_config(exp_name: str, testament: str) -> dict:
+    exp_dir = get_align_exp_dir(exp_name)
+    config_path = os.path.join(exp_dir, testament, "config.yml")
 
     config: dict = {
         "seed": 111,
@@ -89,10 +91,10 @@ def load_config(exp_name: str) -> dict:
         return merge_dict(config, loaded_config)
 
 
-def get_all_book_paths(root_dir: str) -> Iterable[Tuple[str, str]]:
+def get_all_book_paths(testament_dir: str) -> Iterable[Tuple[str, str]]:
     for book in ALL_BOOK_IDS:
         book_num = book_id_to_number(book)
         if not is_ot_nt(book_num):
             continue
-        book_root_dir = os.path.join(root_dir, str(book_num).zfill(3) + "-" + book)
-        yield book, book_root_dir
+        book_exp_dir = os.path.join(testament_dir, str(book_num).zfill(3) + "-" + book)
+        yield book, book_exp_dir

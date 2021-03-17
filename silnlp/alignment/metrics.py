@@ -57,9 +57,9 @@ def load_alignments(input_file_path: str) -> List[Alignment]:
     return alignments
 
 
-def load_all_alignments(root_dir: str) -> Dict[str, List[Alignment]]:
+def load_all_alignments(exp_dir: str) -> Dict[str, List[Alignment]]:
     results: Dict[str, List[Alignment]] = {}
-    for alignments_path in glob.glob(os.path.join(root_dir, "alignments.*.txt")):
+    for alignments_path in glob.glob(os.path.join(exp_dir, "alignments.*.txt")):
         file_name = os.path.basename(alignments_path)
         parts = file_name.split(".")
         id = parts[1]

@@ -1,4 +1,5 @@
 import os
+from silnlp.alignment.utils import get_align_exp_dir
 from typing import Dict, List, Set
 
 import pandas as pd
@@ -11,6 +12,7 @@ ALIGNERS = [
     "PT",
     "Clear-2-FA",
     "Clear-2-HMM",
+    "Clear-2-IBM-4",
     "Clear-3-FA",
     "Clear-3-HMM",
     "FastAlign",
@@ -33,7 +35,7 @@ METRICS = [
     "AO@1",
     "RBO",
 ]
-TESTAMENTS = ["nt", "ot"]
+TESTAMENTS = ["nt", "ot", "nt+ot"]
 
 
 def aggregate_testament_results(translations: List[str]) -> None:
@@ -42,7 +44,9 @@ def aggregate_testament_results(translations: List[str]) -> None:
         available_books: Set[str] = set()
         available_aligners: Set[str] = set()
         for translation in translations:
-            scores_path = os.path.join(ALIGN_EXPERIMENTS_DIR, f"{translation}.{testament}", "scores.csv")
+            exp_dir = get_align_exp_dir(translation)
+            testament_dir = exp_dir if testament == "nt+ot" else os.path.join(exp_dir, testament)
+            scores_path = os.path.join(testament_dir, "scores.csv")
             if os.path.isfile(scores_path):
                 df = pd.read_csv(scores_path, index_col=[0, 1])
                 data[translation] = df
@@ -84,15 +88,17 @@ def aggregate_testament_results(translations: List[str]) -> None:
 
 def aggregate_book_results(translations: List[str]) -> None:
     for testament in TESTAMENTS:
+        if testament == "nt+ot":
+            continue
         data: Dict[str, Dict[str, pd.DataFrame]] = {}
         available_translations: Set[str] = set()
         available_aligners: Set[str] = set()
         for translation in translations:
-            root_dir = os.path.join(ALIGN_EXPERIMENTS_DIR, f"{translation}.{testament}-by-book")
-            if not os.path.isdir(root_dir):
+            testament_dir = os.path.join(ALIGN_EXPERIMENTS_DIR, f"{translation}-by-book", testament)
+            if not os.path.isdir(testament_dir):
                 continue
             available_translations.add(translation)
-            for book_id, book_dir in get_all_book_paths(root_dir):
+            for book_id, book_dir in get_all_book_paths(testament_dir):
                 scores_path = os.path.join(book_dir, "scores.csv")
                 if os.path.isfile(scores_path):
                     df = pd.read_csv(scores_path, index_col=[0, 1])

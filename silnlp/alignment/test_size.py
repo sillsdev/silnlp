@@ -1,5 +1,4 @@
 import argparse
-import glob
 import math
 import os
 from typing import List, Optional, Set, Tuple
@@ -8,9 +7,10 @@ import numpy as np
 
 from ..common.canon import get_books
 from ..common.environment import ALIGN_EXPERIMENTS_DIR
-from ..common.utils import get_align_root_dir, set_seed
+from ..common.utils import set_seed
 from .config import ALIGNERS, load_config
 from .metrics import compute_alignment_metrics, load_all_alignments, load_vrefs
+from .utils import get_align_exp_dir
 
 
 def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
@@ -26,15 +26,15 @@ def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
     return dot / (math.sqrt(obs_total) * math.sqrt(exp_total))
 
 
-def get_metrics(exp_name: str, books: Set[int] = set(), test_size: Optional[int] = None) -> List[float]:
-    config = load_config(exp_name)
+def get_metrics(exp_name: str, testament: str, books: Set[int] = set(), test_size: Optional[int] = None) -> List[float]:
+    config = load_config(exp_name, testament)
     set_seed(config["seed"])
-    root_dir = get_align_root_dir(exp_name)
+    testament_dir = os.path.join(get_align_exp_dir(exp_name), testament)
 
-    vref_file_path = os.path.join(root_dir, "refs.txt")
+    vref_file_path = os.path.join(testament_dir, "refs.txt")
     vrefs = load_vrefs(vref_file_path)
 
-    all_alignments = load_all_alignments(root_dir)
+    all_alignments = load_all_alignments(testament_dir)
 
     df = compute_alignment_metrics(vrefs, all_alignments, "ALL", books, test_size)
     metrics = df["F-Score"].to_numpy().tolist()
@@ -43,11 +43,11 @@ def get_metrics(exp_name: str, books: Set[int] = set(), test_size: Optional[int]
 
 
 def compute_similarity(
-    experiments: List[str], base_metrics: List[float], books: Set[int], test_size: int
+    experiments: List[str], testament: str, base_metrics: List[float], books: Set[int], test_size: int
 ) -> Tuple[float, float]:
     metrics: List[float] = []
     for exp_name in experiments:
-        metrics.extend(get_metrics(exp_name, books, test_size))
+        metrics.extend(get_metrics(exp_name, testament, books, test_size))
     similarity = cosine_similarity(base_metrics, metrics)
     correlation = np.corrcoef(base_metrics, metrics)[0, 1]
     return similarity, correlation
@@ -68,18 +68,18 @@ def main() -> None:
 
     experiments: List[str] = []
     base_metrics: List[float] = []
-    for path in glob.glob(os.path.join(ALIGN_EXPERIMENTS_DIR, f"*.{testament}")):
-        if os.path.isdir(path):
-            exp_name = os.path.basename(path)
+    for exp_name in os.listdir(ALIGN_EXPERIMENTS_DIR):
+        testament_dir = os.path.join(get_align_exp_dir(exp_name), testament)
+        if os.path.isdir(testament_dir):
             experiments.append(exp_name)
-            base_metrics.extend(get_metrics(exp_name))
+            base_metrics.extend(get_metrics(exp_name, testament))
 
     test_size: int
     similarity: float
     correlation: float
     if args.test_size is not None:
         test_size = args.test_size
-        similarity, correlation = compute_similarity(experiments, base_metrics, books, test_size)
+        similarity, correlation = compute_similarity(experiments, testament, base_metrics, books, test_size)
     else:
         threshold = 0.999
         if args.threshold is not None:
@@ -89,7 +89,7 @@ def main() -> None:
         test_size = 0
         while similarity < threshold:
             test_size += 10
-            similarity, correlation = compute_similarity(experiments, base_metrics, books, test_size)
+            similarity, correlation = compute_similarity(experiments, testament, base_metrics, books, test_size)
 
     print(f"Test size: {test_size}")
     print(f"Similarity: {similarity:.2%}")

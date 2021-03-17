@@ -6,8 +6,13 @@ from typing import List, Set
 import pandas as pd
 
 from ..common.corpus import tokenize_corpus, write_corpus
+from ..common.environment import ALIGN_EXPERIMENTS_DIR
 from .lexicon import Lexicon
 from .machine_aligner import FastAlign
+
+
+def get_align_exp_dir(exp_name: str) -> str:
+    return os.path.join(ALIGN_EXPERIMENTS_DIR, exp_name)
 
 
 def compute_alignment_score(

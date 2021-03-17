@@ -101,6 +101,9 @@ class Lexicon:
             for trg_word in src_entry.keys():
                 src_entry[trg_word] /= src_entry_sum
 
+    def add(self, lexicon: "Lexicon") -> None:
+        self._table.update(lexicon._table)
+
     def write(self, file_path: str) -> None:
         with open(file_path, "w", encoding="utf-8", newline="\n") as file:
             for src_word, trg_word, prob in sorted(self, key=lambda t: (t[0], -t[2], t[1])):

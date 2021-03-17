@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 import tensorflow as tf
 
-from ..common.environment import ALIGN_EXPERIMENTS_DIR, PT_PREPROCESSED_DIR
+from ..common.environment import PT_PREPROCESSED_DIR
 
 
 def get_repo_dir() -> str:
@@ -25,10 +25,6 @@ def get_git_revision_hash() -> str:
 
 def get_mt_exp_dir(exp_name: str) -> str:
     return os.path.join(PT_PREPROCESSED_DIR, "tests", exp_name)
-
-
-def get_align_root_dir(exp_name: str) -> str:
-    return os.path.join(ALIGN_EXPERIMENTS_DIR, exp_name)
 
 
 def set_seed(seed: Any) -> None:
