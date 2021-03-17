@@ -1,7 +1,8 @@
+import itertools
 import os
-from pathlib import Path
 import subprocess
-from typing import Iterable, Iterator, List, Set, Tuple
+from glob import glob
+from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple
 
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -118,13 +119,64 @@ def get_corpus_path(iso: str, corpus: str) -> str:
     return os.path.join(PT_PREPROCESSED_DIR, "data", f"{iso}-{corpus}.txt")
 
 
-def get_names_path(iso: str, corpus: str) -> str:
-    return os.path.join(PT_PREPROCESSED_DIR, "data", f"{iso}-{corpus}-names.txt")
-
-
 def include_books(corpus: pd.DataFrame, books: Set[int]) -> pd.DataFrame:
     return corpus[corpus.apply(lambda r: r["vref"].book_num in books, axis=1)].copy()
 
 
 def exclude_books(corpus: pd.DataFrame, books: Set[int]) -> pd.DataFrame:
     return corpus[corpus.apply(lambda r: r["vref"].book_num not in books, axis=1)].copy()
+
+
+def get_terms_metadata_path(list_name: str) -> str:
+    return os.path.join(PT_PREPROCESSED_DIR, "terms", f"{list_name}-metadata.txt")
+
+
+def get_terms_glosses_path(list_name: str) -> str:
+    return os.path.join(PT_PREPROCESSED_DIR, "terms", f"en-{list_name}-glosses.txt")
+
+
+def get_terms_renderings_path(iso: str, project: str) -> Optional[str]:
+    terms_renderings_pattern = os.path.join(PT_PREPROCESSED_DIR, "terms", f"{iso}-{project}-*-renderings.txt")
+    matches = glob(terms_renderings_pattern)
+    if len(matches) == 0:
+        return None
+    assert len(matches) == 1
+    return matches[0]
+
+
+def get_terms_list(terms_renderings_path: str) -> str:
+    name, _ = os.path.splitext(os.path.basename(terms_renderings_path))
+    parts = name.split("-")
+    project = parts[1]
+    list_type = parts[2]
+    list_name = list_type
+    if list_type == "Project":
+        list_name = project
+    return list_name
+
+
+class Term:
+    def __init__(self, id: str, cat: str, domain: str, glosses: List[str], renderings: List[str]) -> None:
+        self.id = id
+        self.cat = cat
+        self.domain = domain
+        self.glosses = glosses
+        self.renderings = renderings
+
+
+def get_terms(terms_renderings_path: str) -> Dict[str, Term]:
+    list_name = get_terms_list(terms_renderings_path)
+    terms_metadata_path = get_terms_metadata_path(list_name)
+    terms_glosses_path = get_terms_glosses_path(list_name)
+    terms: Dict[str, Term] = {}
+    terms_metadata = load_corpus(terms_metadata_path)
+    terms_glosses = load_corpus(terms_glosses_path) if os.path.isfile(terms_glosses_path) else iter([])
+    terms_renderings = load_corpus(terms_renderings_path)
+    for metadata_line, glosses_line, renderings_line in itertools.zip_longest(
+        terms_metadata, terms_glosses, terms_renderings
+    ):
+        id, cat, domain = metadata_line.split("\t", maxsplit=3)
+        glosses = [] if glosses_line is None or len(glosses_line) == 0 else glosses_line.split("\t")
+        renderings = [] if len(renderings_line) == 0 else renderings_line.split("\t")
+        terms[id] = Term(id, cat, domain, glosses, renderings)
+    return terms

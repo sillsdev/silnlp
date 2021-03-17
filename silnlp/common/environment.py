@@ -25,6 +25,7 @@ DATA_DIR = get_data_dir()
 PT_DIR = DATA_DIR / r"Paratext"
 PT_UNZIPPED_DIR = PT_DIR / r"Paratext.unzipped"
 PT_PREPROCESSED_DIR = PT_DIR / r"Paratext.preprocessed"
+PT_BIBLICAL_TERMS_LISTS_DIR = PT_DIR / r"BiblicalTermsLists"
 
 ALIGN_DIR = DATA_DIR / r"Alignment"
 ALIGN_GOLD_STANDARDS_DIR = ALIGN_DIR / r"Gold Standards"
