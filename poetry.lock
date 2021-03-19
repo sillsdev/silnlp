@@ -1012,8 +1012,8 @@ testing = ["jaraco.itertools", "func-timeout"]
 
 [metadata]
 lock-version = "1.1"
-python-versions = ">=3.6.1,<3.8.0"
-content-hash = "31e9ad4806173e871eef82fb36f99aca14491ab68fe574efee2d3e830686ab02"
+python-versions = ">=3.7"
+content-hash = "ffd560ea6cb29d2fb854be939a16164c3ec2d25cb4b2198bb27d8adf54c4c245"
 
 [metadata.files]
 absl-py = [
