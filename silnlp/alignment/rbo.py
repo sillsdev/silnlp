@@ -59,9 +59,7 @@ def set_at_depth(lst, depth):
 
 
 def raw_overlap(list1, list2, depth):
-    """Overlap as defined in the article.
-
-    """
+    """Overlap as defined in the article."""
     set1, set2 = set_at_depth(list1, depth), set_at_depth(list2, depth)
     return len(set1.intersection(set2)), len(set1), len(set2)
 
@@ -189,16 +187,16 @@ def rbo_res(list1, list2, p):
 
     """
     S, L = sorted((list1, list2), key=len)
-    s, l = len(S), len(L)
-    x_l = overlap(list1, list2, l)
+    s_len, l_len = len(S), len(L)
+    x_l = overlap(list1, list2, l_len)
     # since overlap(...) can be fractional in the general case of ties and f
     # must be an integer --> math.ceil()
-    f = int(math.ceil(l + s - x_l))
+    f = int(math.ceil(l_len + s_len - x_l))
     # upper bound of range() is non-inclusive, therefore + 1 is needed
-    term1 = s * sum(p ** d / d for d in range(s + 1, f + 1))
-    term2 = l * sum(p ** d / d for d in range(l + 1, f + 1))
+    term1 = s_len * sum(p ** d / d for d in range(s_len + 1, f + 1))
+    term2 = l_len * sum(p ** d / d for d in range(l_len + 1, f + 1))
     term3 = x_l * (math.log(1 / (1 - p)) - sum(p ** d / d for d in range(1, f + 1)))
-    return p ** s + p ** l - p ** f - (1 - p) / p * (term1 + term2 + term3)
+    return p ** s_len + p ** l_len - p ** f - (1 - p) / p * (term1 + term2 + term3)
 
 
 def rbo_ext(list1, list2, p):
@@ -216,21 +214,21 @@ def rbo_ext(list1, list2, p):
 
     """
     S, L = sorted((list1, list2), key=len)
-    s, l = len(S), len(L)
-    if s == 0 and l == 0:
+    s_len, l_len = len(S), len(L)
+    if s_len == 0 and l_len == 0:
         return 1
-    if s == 0 or l == 0:
+    if s_len == 0 or l_len == 0:
         return 0
-    x_l = overlap(list1, list2, l)
-    x_s = overlap(list1, list2, s)
+    x_l = overlap(list1, list2, l_len)
+    x_s = overlap(list1, list2, s_len)
     # the paper says overlap(..., d) / d, but it should be replaced by
     # agreement(..., d) defined as per equation (28) so that ties are handled
     # properly (otherwise values > 1 will be returned)
     # sum1 = sum(p**d * overlap(list1, list2, d)[0] / d for d in range(1, l + 1))
-    sum1 = sum(p ** d * agreement(list1, list2, d) for d in range(1, l + 1))
-    sum2 = sum(p ** d * x_s * (d - s) / s / d for d in range(s + 1, l + 1))
+    sum1 = sum(p ** d * agreement(list1, list2, d) for d in range(1, l_len + 1))
+    sum2 = sum(p ** d * x_s * (d - s_len) / s_len / d for d in range(s_len + 1, l_len + 1))
     term1 = (1 - p) / p * (sum1 + sum2)
-    term2 = p ** l * ((x_l - x_s) / l + x_s / s)
+    term2 = p ** l_len * ((x_l - x_s) / l_len + x_s / s_len)
     return term1 + term2
 
 

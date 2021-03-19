@@ -307,4 +307,3 @@ def compute_lexicon_metrics(all_lexicons: Dict[str, Lexicon]) -> pd.DataFrame:
         columns=["F-Score@1", "Precision@1", "Recall@1", "F-Score@3", "Precision@3", "Recall@3", "MAP", "AO@1", "RBO"],
         index=pd.MultiIndex.from_tuples(map(lambda a: ("ALL", a), aligner_names), names=["Book", "Model"]),
     )
-

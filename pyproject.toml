@@ -40,6 +40,6 @@ annoy = "^1.17.0"
 lit-nlp = {url = "https://github.com/ddaspit/lit/releases/download/v0.2/lit_nlp-0.2-py3-none-any.whl"}
 
 [tool.poetry.dev-dependencies]
-mypy = "^0.780"
-black = "^19.10b0"
-flake8 = "^3.8.3"
+mypy = "^0.812"
+black = "^20.8b1"
+flake8 = "^3.9.0"

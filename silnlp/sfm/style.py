@@ -90,7 +90,7 @@ _fields = Marker(
         "TextProperties": (unique(sequence(CaselessStr)), set()),
         "TextType": (CaselessStr, "Unspecified"),
         "StyleType": (CaselessStr, None),
-        #'Attributes':       (sequence(str), None)
+        # 'Attributes':      (sequence(str), None)
         # 'Rank':            (int,   None),
         # 'FontSize':        (int,   None),
         # 'Regular':         (flag,  False),
@@ -127,7 +127,7 @@ def parse(source, error_level=ErrorLevel.Content):
     ... \\Bold
     ... \\Color 16384
     ... #!\\Attributes attr size ?ref""".splitlines(True))
-    >>> pprint((r, 
+    >>> pprint((r,
     ...         sorted(r['toc1']['occursunder']),
     ...         sorted(r['toc1']['textproperties'])))
     ... # doctest: +ELLIPSIS
@@ -171,7 +171,7 @@ def parse(source, error_level=ErrorLevel.Content):
     '''  # noqa
 
     # strip comments out
-    no_comments = (_comment.sub("", l) for l in source)
+    no_comments = (_comment.sub("", line) for line in source)
 
     with warnings.catch_warnings():
         warnings.simplefilter("always" if error_level > ErrorLevel.Content else "ignore")

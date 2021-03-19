@@ -14,7 +14,7 @@ METEOR_FULLY_SUPPORTED_LANGS = {"en", "cz", "de", "es", "fr", "ar"}
 
 
 def compute_ter_score(hyps: Iterable[str], refs: List[Iterable[str]]) -> float:
-    result = sacrebleu.corpus_ter(hyps,refs)
+    result = sacrebleu.corpus_ter(hyps, refs)
     return float(np.round(float(result.score) * 100, 2))
 
 

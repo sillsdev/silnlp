@@ -44,7 +44,7 @@ def main() -> None:
             print(f"Extracting {project}...")
             extract_project(project, args.include, args.exclude)
             extract_term_renderings(project)
-            print(f"Done.")
+            print("Done.")
     else:
         print("Couldn't find any data to process for any project.")
 

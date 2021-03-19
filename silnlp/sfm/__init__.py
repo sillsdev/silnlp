@@ -217,8 +217,8 @@ class Text(collections.UserString):
     def concat(iterable):
         i = iter(iterable)
         h = next(i)
-        l = [str(h)] + [str(s) for s in i]
-        return Text("".join(l), h.pos, h.parent)
+        line = [str(h)] + [str(s) for s in i]
+        return Text("".join(line), h.pos, h.parent)
         # return Text(''.join(chain([str(h)], i)), h.pos, h.parent)
 
     def split(self, sep=None, maxsplit=-1):
@@ -621,11 +621,11 @@ class parser(collections.Iterable):
 
     @staticmethod
     def __lexer(lines, tokeniser):
-        """ Return an iterator that returns tokens in a sequence:
-            marker, text, marker, text, ...
+        """Return an iterator that returns tokens in a sequence:
+        marker, text, marker, text, ...
         """
         lmss = enumerate(map(tokeniser.finditer, lines))
-        fs = (Text(m.group(), Position(l + 1, m.start() + 1)) for l, ms in lmss for m in ms)
+        fs = (Text(m.group(), Position(li + 1, m.start() + 1)) for li, ms in lmss for m in ms)
         gs = groupby(fs, operator.methodcaller("startswith", "\\"))
         return chain.from_iterable(g if istag else (Text.concat(g),) for istag, g in gs)
 

@@ -39,4 +39,3 @@ class Aligner(ABC):
     @abstractmethod
     def extract_lexicon(self, out_file_path: str) -> None:
         pass
-

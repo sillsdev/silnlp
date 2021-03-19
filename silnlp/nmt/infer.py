@@ -15,7 +15,7 @@ from ..common.corpus import load_corpus, write_corpus
 from ..common.environment import PT_UNZIPPED_DIR
 from ..common.utils import get_git_revision_hash
 from ..sfm import usfm
-from .config import create_runner, get_mt_exp_dir, load_config
+from .config import create_runner, load_config
 from .runner import SILRunner
 from .utils import (
     decode_sp,
@@ -198,7 +198,6 @@ def main() -> None:
     print("Git commit:", get_git_revision_hash())
 
     exp_name = args.experiment
-    root_dir = get_mt_exp_dir(exp_name)
     config = load_config(exp_name)
 
     config.set_seed()

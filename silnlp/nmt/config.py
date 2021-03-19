@@ -57,6 +57,7 @@ _DEFAULT_NEW_CONFIG: dict = {
     },
 }
 
+
 # Different types of parent model checkpoints (last, best, average)
 class CheckpointType(Enum):
     LAST = 1
@@ -352,14 +353,19 @@ class Config(ABC):
             if self.mirror:
                 src_vocab_file_paths.update(self.trg_file_paths)
             self._create_unshared_vocab(
-                self.src_isos, src_vocab_file_paths, "source", tag_langs=tag_isos,
+                self.src_isos,
+                src_vocab_file_paths,
+                "source",
+                tag_langs=tag_isos,
             )
 
             trg_vocab_file_paths: Set[str] = set(self.trg_file_paths)
             if self.mirror:
                 trg_vocab_file_paths.update(self.src_file_paths)
             self._create_unshared_vocab(
-                self.trg_isos, trg_vocab_file_paths, "target",
+                self.trg_isos,
+                trg_vocab_file_paths,
+                "target",
             )
 
             self._update_vocab(
@@ -385,7 +391,11 @@ class Config(ABC):
         )
 
     def _create_unshared_vocab(
-        self, isos: Set[str], vocab_file_paths: Set[str], side: str, tag_langs: Set[str] = None,
+        self,
+        isos: Set[str],
+        vocab_file_paths: Set[str],
+        side: str,
+        tag_langs: Set[str] = None,
     ) -> None:
         prefix = "src" if side == "source" else "trg"
         model_prefix = os.path.join(self.exp_dir, f"{prefix}-sp")
@@ -441,7 +451,10 @@ class Config(ABC):
 
 
 def set_transformer_dropout(
-    root_layer: SILTransformer, dropout: float = 0.1, attention_dropout: float = 0.1, ffn_dropout: float = 0.1,
+    root_layer: SILTransformer,
+    dropout: float = 0.1,
+    attention_dropout: float = 0.1,
+    ffn_dropout: float = 0.1,
 ):
     for layer in (root_layer,) + root_layer.submodules:
         name: str = layer.name

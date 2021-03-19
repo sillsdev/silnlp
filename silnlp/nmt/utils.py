@@ -8,7 +8,7 @@ import tensorflow as tf
 import yaml
 from opennmt.utils import Scorer, register_scorer
 
-_TAG_PATTERN = re.compile("<2\w+> ")
+_TAG_PATTERN = re.compile(r"<2\w+> ")
 
 
 def decode_sp(line: str) -> str:

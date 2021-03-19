@@ -1,6 +1,5 @@
 import glob
 import os
-from os.path import join
 import platform
 import subprocess
 from typing import List, Tuple
@@ -210,4 +209,3 @@ class Ibm4Aligner(Aligner):
                 trg_word = trg_vocab[trg_index]
                 lexicon[src_word, trg_word] = float(prob_str)
         return lexicon
-

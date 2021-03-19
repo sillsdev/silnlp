@@ -6,7 +6,6 @@ import pandas as pd
 from nltk.translate.api import Alignment
 
 from ..common.canon import ALL_BOOK_IDS, book_id_to_number, get_books, is_ot_nt
-from ..common.environment import ALIGN_EXPERIMENTS_DIR
 from ..common.utils import set_seed
 from ..common.verse_ref import VerseRef
 from .config import get_all_book_paths, load_config

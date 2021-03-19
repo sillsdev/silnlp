@@ -65,7 +65,7 @@ def escape_id(id: str) -> str:
 
 def clean_term(term_str: str) -> str:
     term_str = term_str.strip()
-    term_str = re.sub("\(.*?\)", "", term_str)
+    term_str = re.sub(r"\(.*?\)", "", term_str)
     return " ".join(term_str.split())
 
 
@@ -100,12 +100,12 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> None:
             if domain == "":
                 domain = "?"
             gloss_str = term_elem.findtext("Gloss", "")
-            match = re.match("\[(.+?)\]", gloss_str)
+            match = re.match(r"\[(.+?)\]", gloss_str)
             if match is not None:
                 gloss_str = match.group(1)
             gloss_str = gloss_str.replace("?", "")
             gloss_str = clean_term(gloss_str)
-            gloss_str = re.sub("\s+\d+(\.\d+)*$", "", gloss_str)
+            gloss_str = re.sub(r"\s+\d+(\.\d+)*$", "", gloss_str)
             glosses = re.split("[;,/]", gloss_str)
             glosses = [gloss.strip() for gloss in glosses if gloss.strip() != ""]
             terms_metadata_file.write(f"{id}\t{cat}\t{domain}\n")

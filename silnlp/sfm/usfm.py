@@ -267,7 +267,7 @@ class parser(sfm.parser):
     Traceback (most recent call last):
     ...
     SyntaxError: <string>: line 1,1: invalid end marker end-of-file: \\f (line 1,18) can only be closed with \\f*
-    """  # noqa: E501
+    """  # noqa: E501, W605
 
     default_meta = _default_meta
     numeric_re = re.compile(r"\s*(\d+(:?[-\u2010\2011]\d+)?)", re.UNICODE)
@@ -373,8 +373,6 @@ class parser(sfm.parser):
     _chapternumber_ = _ChapterNumber_
 
     def _VerseNumber_(self, verse_marker):
-        """
-        """
         tok = next(self._tokens)
         verse = self.verse_re.match(str(tok))
         if not verse:
@@ -479,4 +477,3 @@ def decorate_references(source):
     source = list(source)
     reduce(_g, source, None)
     return source
-

@@ -269,7 +269,12 @@ class LangsConfig(Config):
 
                         cur_test.drop("score", axis=1, inplace=True, errors="ignore")
                         self._add_to_eval_dataset(
-                            src_file.iso, trg_file.iso, trg_file.project, test, pair_test_indices, cur_test,
+                            src_file.iso,
+                            trg_file.iso,
+                            trg_file.project,
+                            test,
+                            pair_test_indices,
+                            cur_test,
                         )
 
                     if trg_file.is_train:
@@ -309,7 +314,12 @@ class LangsConfig(Config):
                         if self.mirror:
                             mirror_cur_val = cur_val.rename(columns={"source": "target", "target": "source"})
                             self._add_to_eval_dataset(
-                                trg_file.iso, src_file.iso, src_file.project, val, pair_val_indices, mirror_cur_val,
+                                trg_file.iso,
+                                src_file.iso,
+                                src_file.project,
+                                val,
+                                pair_val_indices,
+                                mirror_cur_val,
                             )
 
                         self._add_to_eval_dataset(

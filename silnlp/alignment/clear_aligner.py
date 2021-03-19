@@ -53,4 +53,3 @@ class ClearAligner(Aligner):
     def extract_lexicon(self, out_file_path: str) -> None:
         lexicon = self.get_direct_lexicon()
         lexicon.write(out_file_path)
-
