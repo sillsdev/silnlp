@@ -1,8 +1,7 @@
 import argparse
 import copy
 import logging
-import os
-from glob import glob
+from pathlib import Path
 from typing import IO, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Text, Tuple
 
 logging.basicConfig()
@@ -31,24 +30,24 @@ from .utils import decode_sp, encode_sp, get_best_model_dir, get_last_checkpoint
 
 
 def create_test_dataset(config: Config) -> lit_dataset.Dataset:
-    vref_paths: List[str] = []
-    features_paths: List[str] = []
-    refs_paths: List[str] = []
+    vref_file_names: List[str] = []
+    features_file_names: List[str] = []
+    refs_patterns: List[str] = []
     for src_iso in sorted(config.src_isos):
         prefix = "test" if len(config.src_isos) == 1 else f"test.{src_iso}"
-        src_features_path = os.path.join(config.exp_dir, f"{prefix}.src.txt")
-        if os.path.isfile(src_features_path):
+        features_file_name = f"{prefix}.src.txt"
+        if (config.exp_dir / features_file_name).is_file():
             # all target data is stored in a single file
-            vref_paths.append(os.path.join(config.exp_dir, f"{prefix}.vref.txt"))
-            features_paths.append(src_features_path)
-            refs_paths.append(os.path.join(config.exp_dir, f"{prefix}.trg.detok*.txt"))
+            vref_file_names.append(f"{prefix}.vref.txt")
+            features_file_names.append(features_file_name)
+            refs_patterns.append(f"{prefix}.trg.detok*.txt")
         else:
             # target data is split into separate files
             for trg_iso in sorted(config.trg_isos):
                 prefix = f"test.{src_iso}.{trg_iso}"
-                vref_paths.append(os.path.join(config.exp_dir, f"{prefix}.vref.txt"))
-                features_paths.append(os.path.join(config.exp_dir, f"{prefix}.src.txt"))
-                refs_paths.append(os.path.join(config.exp_dir, f"{prefix}.trg.detok*.txt"))
+                vref_file_names.append(f"{prefix}.vref.txt")
+                features_file_names.append(f"{prefix}.src.txt")
+                refs_patterns.append(f"{prefix}.trg.detok*.txt")
 
     default_src_iso = config.default_src_iso
     default_trg_iso = config.default_trg_iso
@@ -60,16 +59,15 @@ def create_test_dataset(config: Config) -> lit_dataset.Dataset:
         "trg_iso": lit_types.CategoryLabel(),
     }
     examples: List[lit_types.JsonDict] = []
-    for vref_path, features_path, refs_path in zip(vref_paths, features_paths, refs_paths):
-        features_filename = os.path.basename(features_path)
+    for vref_file_name, features_file_name, refs_pattern in zip(vref_file_names, features_file_names, refs_patterns):
         src_iso = default_src_iso
-        if features_filename != "test.src.txt":
-            src_iso = features_filename.split(".")[1]
+        if features_file_name != "test.src.txt":
+            src_iso = features_file_name.split(".")[1]
 
-        with open(features_path, "r", encoding="utf-8") as src_file, open(
-            vref_path, "r", encoding="utf-8"
+        with open(config.exp_dir / features_file_name, "r", encoding="utf-8") as src_file, open(
+            config.exp_dir / vref_file_name, "r", encoding="utf-8"
         ) as vref_file:
-            ref_file_paths = glob(refs_path)
+            ref_file_paths = config.exp_dir.glob(refs_pattern)
             ref_files: List[IO] = []
             try:
                 for ref_file_path in ref_file_paths:
@@ -104,8 +102,8 @@ def create_test_dataset(config: Config) -> lit_dataset.Dataset:
 
 
 def create_train_dataset(config: Config) -> lit_dataset.Dataset:
-    src_path = os.path.join(config.exp_dir, "train.src.txt")
-    trg_path = os.path.join(config.exp_dir, "train.trg.txt")
+    src_path = config.exp_dir / "train.src.txt"
+    trg_path = config.exp_dir / "train.trg.txt"
     default_src_iso = config.default_src_iso
     default_trg_iso = config.default_trg_iso
     examples: List[lit_types.JsonDict] = []
@@ -163,7 +161,7 @@ class NMTModel(lit_model.Model):
         src_spp: sp.SentencePieceProcessor,
         trg_spp: sp.SentencePieceProcessor,
         step: int,
-        checkpoint_path: str,
+        checkpoint_path: Path,
         type: str = None,
     ):
         self.types: List[str] = []
@@ -333,7 +331,10 @@ class BLEUMetrics(metrics.SimpleMetrics):
             return {}
 
         bleu_score = sacrebleu.corpus_bleu(
-            preds, [labels], lowercase=True, tokenize=self._data_config.get("sacrebleu_tokenize", "13a"),
+            preds,
+            [labels],
+            lowercase=True,
+            tokenize=self._data_config.get("sacrebleu_tokenize", "13a"),
         )
         return {"bleu": bleu_score.score}
 
@@ -351,7 +352,7 @@ def create_lit_args(exp_name: str, checkpoints: Set[str] = {"last"}) -> Tuple[tu
 
     for checkpoint in checkpoints:
         if checkpoint == "avg":
-            checkpoint_path, _ = get_last_checkpoint(os.path.join(config.model_dir, "avg"))
+            checkpoint_path, _ = get_last_checkpoint(config.model_dir / "avg")
             models["avg"] = NMTModel(config, model, src_spp, trg_spp, -1, checkpoint_path, type="avg")
         elif checkpoint == "last":
             last_checkpoint_path, last_step = get_last_checkpoint(config.model_dir)
@@ -369,10 +370,10 @@ def create_lit_args(exp_name: str, checkpoints: Set[str] = {"last"}) -> Tuple[tu
                 models[step_str].types.append("best")
             else:
                 models[step_str] = NMTModel(
-                    config, model, src_spp, trg_spp, best_step, os.path.join(best_model_path, "ckpt"), type="best"
+                    config, model, src_spp, trg_spp, best_step, best_model_path / "ckpt", type="best"
                 )
         else:
-            checkpoint_path = os.path.join(config.model_dir, f"ckpt-{checkpoint}")
+            checkpoint_path = config.model_dir / f"ckpt-{checkpoint}"
             step = int(checkpoint)
             models[checkpoint] = NMTModel(config, model, src_spp, trg_spp, step, checkpoint_path)
 
@@ -380,7 +381,7 @@ def create_lit_args(exp_name: str, checkpoints: Set[str] = {"last"}) -> Tuple[tu
     indexer = IndexerEx(
         models,
         lit_dataset.IndexedDataset.index_all(index_datasets, caching.input_hash),
-        data_dir=os.path.join(config.exp_dir, "lit-index"),
+        data_dir=str(config.exp_dir / "lit-index"),
         initialize_new_indices=True,
     )
 
@@ -403,7 +404,10 @@ def main() -> None:
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument("--memory-growth", default=False, action="store_true", help="Enable memory growth")
     parser.add_argument(
-        "--eager-execution", default=False, action="store_true", help="Enable TensorFlow eager execution.",
+        "--eager-execution",
+        default=False,
+        action="store_true",
+        help="Enable TensorFlow eager execution.",
     )
     parser.add_argument("--checkpoint", type=str, help="Analyze checkpoint")
     parser.add_argument("--last", default=False, action="store_true", help="Analyze last checkpoint")

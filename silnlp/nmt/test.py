@@ -1,9 +1,8 @@
 import argparse
 import logging
-import os
 import random
 import sys
-from glob import glob
+from pathlib import Path
 from typing import IO, Dict, Iterable, List, Optional, Set, Tuple, cast
 
 logging.basicConfig()
@@ -79,7 +78,10 @@ def score_individual_books(
             bleu_score = None
             if "bleu" in scorers:
                 bleu_score = sacrebleu.corpus_bleu(
-                    pair_sys, pair_refs, lowercase=True, tokenize=config.data.get("sacrebleu_tokenize", "13a"),
+                    pair_sys,
+                    pair_refs,
+                    lowercase=True,
+                    tokenize=config.data.get("sacrebleu_tokenize", "13a"),
                 )
 
             if "sentencebleu" in scorers:
@@ -116,10 +118,10 @@ def score_individual_books(
 
 
 def process_individual_books(
-    src_file_path: str,
-    pred_file_path: str,
-    ref_file_paths: List[str],
-    vref_file_path: str,
+    src_file_path: Path,
+    pred_file_path: Path,
+    ref_file_paths: List[Path],
+    vref_file_path: Path,
     default_trg_iso: str,
     select_rand_ref_line: bool,
     books: Set[int],
@@ -187,21 +189,23 @@ def process_individual_books(
 
 
 def load_test_data(
-    vref_file_path: str,
-    src_file_path: str,
-    pred_file_path: str,
-    ref_files_path: str,
-    output_file_path: str,
+    vref_file_name: str,
+    src_file_name: str,
+    pred_file_name: str,
+    ref_pattern: str,
+    output_file_name: str,
     ref_projects: Set[str],
     config: Config,
     books: Set[int],
     by_book: bool,
 ) -> Tuple[Dict[str, Tuple[List[str], List[List[str]]]], Dict[str, dict]]:
     dataset: Dict[str, Tuple[List[str], List[List[str]]]] = {}
+    src_file_path = config.exp_dir / src_file_name
+    pred_file_path = config.exp_dir / pred_file_name
     with open(src_file_path, "r", encoding="utf-8") as src_file, open(
         pred_file_path, "r", encoding="utf-8"
-    ) as pred_file, open(output_file_path, "w", encoding="utf-8") as out_file:
-        ref_file_paths = glob(ref_files_path)
+    ) as pred_file, open(config.exp_dir / output_file_name, "w", encoding="utf-8") as out_file:
+        ref_file_paths = list(config.exp_dir.glob(ref_pattern))
         select_rand_ref_line = False
         if isinstance(config, LangsConfig) and len(ref_file_paths) > 1:
             if len(ref_projects) == 0:
@@ -213,7 +217,8 @@ def load_test_data(
                 ref_file_paths = [p for p in ref_file_paths if config.is_ref_project(ref_projects, p)]
         ref_files: List[IO] = []
         vref_file: Optional[IO] = None
-        if len(books) > 0 and os.path.isfile(vref_file_path):
+        vref_file_path = config.exp_dir / vref_file_name
+        if len(books) > 0 and vref_file_path.is_file():
             vref_file = open(vref_file_path, "r", encoding="utf-8")
         try:
             for ref_file_path in ref_file_paths:
@@ -332,30 +337,30 @@ def test_checkpoint(
     by_book: bool,
     memory_growth: bool,
     ref_projects: Set[str],
-    checkpoint_path: str,
+    checkpoint_path: Path,
     step: int,
     scorers: Set[str],
     books: Set[int],
 ) -> List[PairScore]:
     config.set_seed()
     vref_paths: List[str] = []
-    features_paths: List[str] = []
-    predictions_paths: List[str] = []
-    refs_paths: List[str] = []
-    predictions_detok_paths: List[str] = []
+    features_file_names: List[str] = []
+    predictions_file_names: List[str] = []
+    refs_patterns: List[str] = []
+    predictions_detok_file_names: List[str] = []
     suffix_str = "_".join(map(lambda n: book_number_to_id(n), sorted(books)))
     if len(suffix_str) > 0:
         suffix_str += "-"
     suffix_str += "avg" if step == -1 else str(step)
 
-    src_features_path = os.path.join(config.exp_dir, "test.src.txt")
-    if os.path.isfile(src_features_path):
+    features_file_name = "test.src.txt"
+    if (config.exp_dir / features_file_name).is_file():
         # all test data is stored in a single file
-        vref_paths.append(os.path.join(config.exp_dir, "test.vref.txt"))
-        features_paths.append(src_features_path)
-        predictions_paths.append(os.path.join(config.exp_dir, f"test.trg-predictions.txt.{suffix_str}"))
-        refs_paths.append(os.path.join(config.exp_dir, "test.trg.detok*.txt"))
-        predictions_detok_paths.append(os.path.join(config.exp_dir, f"test.trg-predictions.detok.txt.{suffix_str}"))
+        vref_paths.append("test.vref.txt")
+        features_file_names.append(features_file_name)
+        predictions_file_names.append(f"test.trg-predictions.txt.{suffix_str}")
+        refs_patterns.append("test.trg.detok*.txt")
+        predictions_detok_file_names.append(f"test.trg-predictions.detok.txt.{suffix_str}")
     else:
         # test data is split into separate files
         for src_iso in sorted(config.src_isos):
@@ -363,41 +368,42 @@ def test_checkpoint(
                 if src_iso == trg_iso:
                     continue
                 prefix = f"test.{src_iso}.{trg_iso}"
-                src_features_path = os.path.join(config.exp_dir, f"{prefix}.src.txt")
-                if os.path.isfile(src_features_path):
-                    vref_paths.append(os.path.join(config.exp_dir, f"{prefix}.vref.txt"))
-                    features_paths.append(src_features_path)
-                    predictions_paths.append(os.path.join(config.exp_dir, f"{prefix}.trg-predictions.txt.{suffix_str}"))
-                    refs_paths.append(os.path.join(config.exp_dir, f"{prefix}.trg.detok*.txt"))
-                    predictions_detok_paths.append(
-                        os.path.join(config.exp_dir, f"{prefix}.trg-predictions.detok.txt.{suffix_str}")
-                    )
+                features_file_name = f"{prefix}.src.txt"
+                if (config.exp_dir / features_file_name).is_file():
+                    vref_paths.append(f"{prefix}.vref.txt")
+                    features_file_names.append(features_file_name)
+                    predictions_file_names.append(f"{prefix}.trg-predictions.txt.{suffix_str}")
+                    refs_patterns.append(f"{prefix}.trg.detok*.txt")
+                    predictions_detok_file_names.append(f"{prefix}.trg-predictions.detok.txt.{suffix_str}")
 
     checkpoint_name = "averaged checkpoint" if step == -1 else f"checkpoint {step}"
 
-    if force_infer or any(not os.path.isfile(f) for f in predictions_detok_paths):
+    if force_infer or any(not (config.exp_dir / f).is_file() for f in predictions_detok_file_names):
         runner = create_runner(config, memory_growth=memory_growth)
         print(f"Inferencing {checkpoint_name}...")
-        runner.infer_multiple(features_paths, predictions_paths, checkpoint_path=checkpoint_path)
+        runner.infer_multiple(
+            [str(config.exp_dir / f) for f in features_file_names],
+            [str(config.exp_dir / f) for f in predictions_file_names],
+            checkpoint_path=str(checkpoint_path),
+        )
 
     print(f"Scoring {checkpoint_name}...")
     default_src_iso = config.default_src_iso
     scores: List[PairScore] = []
     overall_sys: List[str] = []
     overall_refs: List[List[str]] = []
-    for vref_path, features_path, predictions_path, refs_path, predictions_detok_path in zip(
-        vref_paths, features_paths, predictions_paths, refs_paths, predictions_detok_paths
+    for vref_file_name, features_file_name, predictions_file_name, refs_pattern, predictions_detok_file_name in zip(
+        vref_paths, features_file_names, predictions_file_names, refs_patterns, predictions_detok_file_names
     ):
-        features_filename = os.path.basename(features_path)
         src_iso = default_src_iso
-        if features_filename != "test.src.txt":
-            src_iso = features_filename.split(".")[1]
+        if features_file_name != "test.src.txt":
+            src_iso = features_file_name.split(".")[1]
         dataset, book_dict = load_test_data(
-            vref_path,
-            features_path,
-            predictions_path,
-            refs_path,
-            predictions_detok_path,
+            vref_file_name,
+            features_file_name,
+            predictions_file_name,
+            refs_pattern,
+            predictions_detok_file_name,
             ref_projects,
             config,
             books,
@@ -425,7 +431,7 @@ def test_checkpoint(
 
             if "sentencebleu" in scorers:
                 write_sentence_bleu(
-                    predictions_detok_path,
+                    predictions_detok_file_name,
                     pair_sys,
                     cast(List[List[str]], pair_refs),
                     lowercase=True,
@@ -458,7 +464,7 @@ def test_checkpoint(
             if by_book is True:
                 if len(book_dict) != 0:
                     book_scores = score_individual_books(
-                        book_dict, src_iso, predictions_detok_path, scorers, config, ref_projects
+                        book_dict, src_iso, predictions_detok_file_name, scorers, config, ref_projects
                     )
                     scores.extend(book_scores)
                 else:
@@ -471,7 +477,7 @@ def test_checkpoint(
     if len(ref_projects) > 0:
         ref_projects_suffix = "_".join(sorted(ref_projects))
         scores_file_root += f"-{ref_projects_suffix}"
-    with open(os.path.join(config.exp_dir, f"{scores_file_root}.csv"), "w", encoding="utf-8") as scores_file:
+    with open(config.exp_dir / f"{scores_file_root}.csv", "w", encoding="utf-8") as scores_file:
         if scores is not None:
             scores[0].writeHeader(scores_file)
         for results in scores:
@@ -521,7 +527,7 @@ def main() -> None:
     results: Dict[int, List[PairScore]] = {}
     step: int
     if args.checkpoint is not None:
-        checkpoint_path = os.path.join(config.model_dir, f"ckpt-{args.checkpoint}")
+        checkpoint_path = config.model_dir / f"ckpt-{args.checkpoint}"
         step = int(args.checkpoint)
         results[step] = test_checkpoint(
             config,
@@ -536,7 +542,7 @@ def main() -> None:
         )
 
     if args.avg:
-        checkpoint_path, _ = get_last_checkpoint(os.path.join(config.model_dir, "avg"))
+        checkpoint_path, _ = get_last_checkpoint(config.model_dir / "avg")
         step = -1
         results[step] = test_checkpoint(
             config,
@@ -553,7 +559,7 @@ def main() -> None:
     if args.best:
         step = best_step
         if step not in results:
-            checkpoint_path = os.path.join(best_model_path, "ckpt")
+            checkpoint_path = best_model_path / "ckpt"
             results[step] = test_checkpoint(
                 config,
                 args.force_infer,

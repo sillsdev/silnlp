@@ -1,8 +1,8 @@
 import argparse
 import logging
-import os
 import string
 import time
+from pathlib import Path
 from typing import Iterable, List, Optional
 
 logging.basicConfig()
@@ -30,26 +30,24 @@ def insert_tag(text: str, trg_iso: Optional[str]) -> str:
 def infer_text_file(
     runner: SILRunner,
     src_spp: sp.SentencePieceProcessor,
-    srcFiles: List[str],
-    trgFiles: List[str],
-    checkpoint_path: str,
+    src_paths: List[Path],
+    trg_paths: List[Path],
+    checkpoint_path: Path,
     step: int,
     trg_iso: Optional[str],
 ):
     checkpoint_name = "averaged checkpoint" if step == -1 else f"checkpoint {step}"
     print(f"Inferencing {checkpoint_name}...")
 
-    for srcFile, trgFile in zip(srcFiles, trgFiles):
+    for src_path, trg_path in zip(src_paths, trg_paths):
         start = time.time()
 
-        sentences = list(encode_sp_lines(src_spp, (insert_tag(s, trg_iso) for s in load_corpus(srcFile))))
-        translations = runner.infer_list(sentences, checkpoint_path=checkpoint_path)
-        write_corpus(trgFile, decode_sp_lines(map(lambda t: t[0], translations)))
+        sentences = list(encode_sp_lines(src_spp, (insert_tag(s, trg_iso) for s in load_corpus(src_path))))
+        translations = runner.infer_list(sentences, checkpoint_path=str(checkpoint_path))
+        write_corpus(trg_path, decode_sp_lines(map(lambda t: t[0], translations)))
 
         end = time.time()
-        print(
-            f"Inferenced {os.path.basename(srcFile)} to {os.path.basename(trgFile)} in {((end-start)/60):.2f} minutes"
-        )
+        print(f"Inferenced {src_path.name} to {trg_path.name} in {((end-start)/60):.2f} minutes")
 
 
 class Paragraph:
@@ -132,8 +130,8 @@ def infer_book(
     src_spp: sp.SentencePieceProcessor,
     src_project: str,
     book: str,
-    checkpoint_path: str,
-    output_path: str,
+    checkpoint_path: Path,
+    output_path: Path,
     trg_iso: Optional[str],
 ) -> None:
     book_path = get_book_path(src_project, book)
@@ -147,7 +145,7 @@ def infer_book(
         segments.append(cur_segment)
 
     features_list: List[str] = list(map(lambda s: encode_sp(src_spp, insert_tag(s.text.strip(), trg_iso)), segments))
-    labels_list = runner.infer_list(features_list, checkpoint_path)
+    labels_list = runner.infer_list(features_list, str(checkpoint_path))
 
     for segment, hypotheses in zip(reversed(segments), reversed(labels_list)):
         first_para = segment.paras[0]
@@ -193,8 +191,6 @@ def main() -> None:
 
     config.set_seed()
 
-    checkpoint_path: str
-    step: int
     checkpoint: Optional[str] = args.checkpoint
     if checkpoint is not None:
         checkpoint = checkpoint.lower()
@@ -202,14 +198,12 @@ def main() -> None:
         checkpoint_path, step = get_last_checkpoint(config.model_dir)
     elif checkpoint == "best":
         best_model_path, step = get_best_model_dir(config.model_dir)
-        checkpoint_path = os.path.join(best_model_path, "ckpt")
-        if not os.path.isfile(checkpoint_path + ".index"):
-            checkpoint_path = os.path.join(config.model_dir, "saved_model.pb")
+        checkpoint_path = best_model_path / "ckpt"
     elif checkpoint == "avg":
-        checkpoint_path, _ = get_last_checkpoint(os.path.join(config.model_dir, "avg"))
+        checkpoint_path, _ = get_last_checkpoint(config.model_dir / "avg")
         step = -1
     else:
-        checkpoint_path = os.path.join(config.model_dir, f"ckpt-{checkpoint}")
+        checkpoint_path = config.model_dir / f"ckpt-{checkpoint}"
         step = int(checkpoint)
 
     runner = create_runner(config, memory_growth=args.memory_growth)
@@ -233,17 +227,15 @@ def main() -> None:
             src_project = next(iter(config.src_projects))
 
         step_str = "avg" if step == -1 else str(step)
-        default_output_dir = os.path.join(config.exp_dir, "infer", step_str)
-        output_path: Optional[str] = args.output_usfm
+        default_output_dir = config.exp_dir / "infer" / step_str
+        output_path: Optional[Path] = None if args.output_usfm is None else Path(args.output_usfm)
         if output_path is None:
             book_num = book_id_to_number(book)
-            output_path = os.path.join(default_output_dir, f"{book_num:02}{book}.SFM")
-        elif os.path.basename(output_path) == output_path:
-            output_path = os.path.join(default_output_dir, output_path)
+            output_path = default_output_dir / f"{book_num:02}{book}.SFM"
+        elif output_path.name == output_path:
+            output_path = default_output_dir / output_path
 
-        output_dir = os.path.dirname(output_path)
-        os.makedirs(output_dir, exist_ok=True)
-
+        output_path.parent.mkdir(exist_ok=True)
         infer_book(runner, src_spp, src_project, book, checkpoint_path, output_path, trg_iso)
     elif args.src_prefix is not None:
         if args.trg_prefix is None:
@@ -251,18 +243,18 @@ def main() -> None:
         if args.start_seq is None or args.end_seq is None:
             raise RuntimeError("Start and end sequence numbers must be specified.")
 
-        srcFiles: List[str] = []
-        trgFiles: List[str] = []
-        cwd = os.getcwd()
+        src_file_names: List[Path] = []
+        trg_file_names: List[Path] = []
+        cwd = Path.cwd()
         for i in range(args.start_seq, args.end_seq + 1):
-            fileNum = f"{i:04d}"
-            srcFileName = os.path.join(cwd, f"{args.src_prefix}{fileNum}.txt")
-            trgFileName = os.path.join(cwd, f"{args.trg_prefix}{fileNum}.txt")
-            if os.path.isfile(srcFileName) and not os.path.isfile(trgFileName):
-                srcFiles.append(srcFileName)
-                trgFiles.append(trgFileName)
+            file_num = f"{i:04d}"
+            src_file_path = cwd / f"{args.src_prefix}{file_num}.txt"
+            trg_file_path = cwd / f"{args.trg_prefix}{file_num}.txt"
+            if src_file_path.is_file() and not trg_file_path.is_file():
+                src_file_names.append(src_file_path)
+                trg_file_names.append(trg_file_path)
 
-        infer_text_file(runner, src_spp, srcFiles, trgFiles, checkpoint_path, step, trg_iso)
+        infer_text_file(runner, src_spp, src_file_names, trg_file_names, checkpoint_path, step, trg_iso)
     else:
         raise RuntimeError("A Scripture book or source file prefix must be specified.")
 

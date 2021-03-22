@@ -41,35 +41,33 @@ def main() -> None:
     scorers.sort()
 
     exp_name = args.experiment
-    root_dir = get_mt_exp_dir(exp_name)
+    exp_dir = get_mt_exp_dir(exp_name)
     config = load_config(exp_name)
     src_iso = get_iso(config["src_lang"])
     trg_iso = get_iso(config["trg_lang"])
 
-    ref_file_path = os.path.join(root_dir, "test.trg.txt")
-    predictions_file_path = os.path.join(root_dir, "test.trg-predictions.txt")
+    ref_file_path = exp_dir / "test.trg.txt"
+    predictions_file_path = exp_dir / "test.trg-predictions.txt"
 
-    if args.force_infer or not os.path.isfile(predictions_file_path):
-        src_file_path = os.path.join(root_dir, "test.src.txt")
-        engine_dir = os.path.join(root_dir, f"engine{os.sep}")
-        subprocess.run(
-            [
-                "dotnet",
-                "machine",
-                "translate",
-                engine_dir,
-                src_file_path,
-                predictions_file_path,
-                "-t",
-                config["trg_tokenizer"],
-                "-rt",
-                config["trg_tokenizer"],
-                "-mt",
-                config["model"],
-                "-l",
-            ],
-            cwd=get_repo_dir(),
-        )
+    if args.force_infer or not predictions_file_path.is_file():
+        src_file_path = exp_dir / "test.src.txt"
+        engine_dir = exp_dir / f"engine{os.sep}"
+        args_list: List[str] = [
+            "dotnet",
+            "machine",
+            "translate",
+            str(engine_dir),
+            str(src_file_path),
+            str(predictions_file_path),
+            "-t",
+            config["trg_tokenizer"],
+            "-rt",
+            config["trg_tokenizer"],
+            "-mt",
+            config["model"],
+            "-l",
+        ]
+        subprocess.run(args_list, cwd=get_repo_dir())
 
     sys = list(load_corpus(predictions_file_path))
     ref = list(load_corpus(ref_file_path))
@@ -81,7 +79,7 @@ def main() -> None:
 
     sent_len = len(sys)
     print("Test results")
-    with open(os.path.join(root_dir, "scores.csv"), "w", encoding="utf-8") as scores_file:
+    with open(exp_dir / "scores.csv", "w", encoding="utf-8") as scores_file:
         scores_file.write("src_iso,trg_iso,sent_len,scorer,score\n")
         for scorer in scorers:
             if scorer == "bleu":

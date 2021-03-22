@@ -1,18 +1,14 @@
 import logging
-import os
-from typing import Any, Iterable, List, Tuple
+from typing import Any, List, Optional, Tuple
 
 import numpy as np
 import tensorflow as tf
-import tensorflow_addons as tfa
 import yaml
 from opennmt import Runner
 from opennmt.data import Vocab, inference_pipeline
 from opennmt.models import Model, SequenceToSequence
 from opennmt.utils.checkpoint import Checkpoint
 from opennmt.utils.misc import OrderRestorer, extract_batches, item_or_tuple
-
-from .utils import get_best_model_dir
 
 
 class VariableUpdate:
@@ -135,54 +131,6 @@ def transfer_weights(
                 new_slot.assign(slot)
 
 
-def pad_tokens(max_length: int, all_tokens: List[List[str]], lengths: List[int]) -> None:
-    for tokens, length in zip(all_tokens, lengths):
-        if length < max_length:
-            tokens += [""] * (max_length - length)
-
-
-def load_serving_input(batch_size: int, path: str) -> Iterable[Tuple[List[List[str]], List[int]]]:
-    all_tokens: List[List[str]] = []
-    lengths: List[int] = []
-    max_length = 0
-
-    with open(path, "r", encoding="utf-8") as file:
-        for line in file:
-            line = line.strip()
-            tokens = line.split(" ")
-            length = len(tokens)
-            all_tokens.append(tokens)
-            lengths.append(length)
-            max_length = max(max_length, length)
-            if len(all_tokens) == batch_size:
-                pad_tokens(max_length, all_tokens, lengths)
-                yield all_tokens, lengths
-                all_tokens = []
-                lengths = []
-                max_length = 0
-
-    if len(all_tokens) > 0:
-        pad_tokens(max_length, all_tokens, lengths)
-        yield all_tokens, lengths
-
-
-def write_serving_output(path: str, all_tokens: np.ndarray, lengths: np.ndarray) -> None:
-    with open(path, "a", encoding="utf-8") as file:
-        for tokens, length in zip(all_tokens, lengths):
-            tokens = map(lambda t: t.decode("utf-8"), tokens[0][: length[0]].tolist())
-            file.write(" ".join(tokens) + "\n")
-
-
-def register_tfa_custom_ops() -> None:
-    # TensorFlow Addons lazily loads custom ops. So we call the op with invalid inputs
-    # just to trigger the registration.
-    # See also: https://github.com/tensorflow/addons/issues/1151.
-    try:
-        tfa.seq2seq.gather_tree(0, 0, 0, 0)
-    except tf.errors.InvalidArgumentError:
-        pass
-
-
 def make_inference_dataset(
     model: Model,
     features_list: List[str],
@@ -293,9 +241,9 @@ class SILRunner(Runner):
     def update_vocab(
         self,
         output_dir: str,
-        src_vocab: str = None,
-        tgt_vocab: str = None,
-        checkpoint_path: str = None,
+        src_vocab: Optional[str] = None,
+        tgt_vocab: Optional[str] = None,
+        checkpoint_path: Optional[str] = None,
         step: int = None,
     ) -> str:
         if not isinstance(self._model, SequenceToSequence):
@@ -326,7 +274,7 @@ class SILRunner(Runner):
         new_checkpoint.save(step=step)
         return output_dir
 
-    def infer_list(self, features_list: List[str], checkpoint_path: str = None) -> List[List[str]]:
+    def infer_list(self, features_list: List[str], checkpoint_path: Optional[str] = None) -> List[List[str]]:
         config = self._finalize_config()
         model: Model = self._init_model(config)
         checkpoint = Checkpoint.from_config(config, model)
@@ -365,7 +313,7 @@ class SILRunner(Runner):
         return results
 
     def infer_multiple(
-        self, features_paths: List[str], predictions_paths: List[str], checkpoint_path: str = None
+        self, features_paths: List[str], predictions_paths: List[str], checkpoint_path: Optional[str] = None
     ) -> None:
         config = self._finalize_config()
         model: Model = self._init_model(config)
@@ -399,29 +347,6 @@ class SILRunner(Runner):
                     for prediction in extract_batches(predictions):
                         ordered_writer.push(prediction)
 
-    def saved_model_infer_multiple(self, features_paths: List[str], predictions_paths: List[str]) -> None:
-        register_tfa_custom_ops()
-        config = self._finalize_config()
-        infer_config = config["infer"]
-        batch_size = infer_config.get("batch_size", 1)
-
-        best_model_path, _ = get_best_model_dir(config["model_dir"])
-        saved_model = tf.keras.models.load_model(best_model_path)
-        translate_fn = saved_model.signatures["serving_default"]
-
-        for features_path, predictions_path in zip(features_paths, predictions_paths):
-            if os.path.isfile(predictions_path):
-                os.remove(predictions_path)
-            for all_tokens, lengths in load_serving_input(batch_size, features_path):
-                inputs = {
-                    "tokens": tf.constant(all_tokens, dtype=tf.string),
-                    "length": tf.constant(lengths, dtype=tf.int32),
-                }
-
-                outputs = translate_fn(**inputs)
-
-                write_serving_output(predictions_path, outputs["tokens"].numpy(), outputs["length"].numpy())
-
     def save_effective_config(self, path: str, training: bool = False) -> None:
         level = tf.get_logger().level
         tf.get_logger().setLevel(logging.WARN)
@@ -429,40 +354,3 @@ class SILRunner(Runner):
         tf.get_logger().setLevel(level)
         with open(path, "w") as file:
             yaml.dump(config, file)
-
-    def analyze(self, features_list: List[str], checkpoint_path: str = None) -> List[dict]:
-        config = self._finalize_config()
-        model: Model = self._init_model(config)
-        checkpoint = Checkpoint.from_config(config, model)
-        checkpoint.restore(checkpoint_path=checkpoint_path, weights_only=True)
-        infer_config = config["infer"]
-        dataset = make_inference_dataset(
-            model,
-            features_list,
-            infer_config["batch_size"],
-            length_bucket_width=infer_config["length_bucket_width"],
-            prefetch_buffer_size=infer_config.get("prefetch_buffer_size"),
-        )
-
-        infer_fn = tf.function(model.infer, input_signature=(dataset.element_spec,))
-        if not tf.config.functions_run_eagerly():
-            tf.get_logger().info("Tracing and optimizing the inference graph...")
-            infer_fn.get_concrete_function()  # Trace the function now.
-
-        results: List[dict] = [{}] * len(features_list)
-        for source in dataset:
-            predictions = infer_fn(source)
-            predictions = tf.nest.map_structure(lambda t: t.numpy(), predictions)
-            for prediction in extract_batches(predictions):
-                target_length = prediction["length"][0]
-                tokens = prediction["tokens"][0][:target_length]
-                sentence = model.examples_inputter.labels_inputter.tokenizer.detokenize(tokens)
-                score = prediction["log_probs"][0]
-                attention = prediction["alignment"][0][:target_length]
-                results[prediction["index"]] = {
-                    "score": score,
-                    "tokens": list(map(lambda t: t.decode("utf-8"), tokens)),
-                    "text": sentence,
-                    "attention": attention,
-                }
-        return results

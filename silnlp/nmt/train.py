@@ -26,11 +26,11 @@ def main() -> None:
         config = load_config(exp_name)
         config.set_seed()
         runner = create_runner(config, mixed_precision=args.mixed_precision, memory_growth=args.memory_growth)
-        runner.save_effective_config(os.path.join(config.exp_dir, f"effective-config-{rev_hash}.yml"), training=True)
+        runner.save_effective_config(str(config.exp_dir / f"effective-config-{rev_hash}.yml"), training=True)
 
         checkpoint_path: Optional[str] = None
-        if not os.path.isdir(os.path.join(config.exp_dir, "run")) and config.has_parent:
-            checkpoint_path = os.path.join(config.exp_dir, "parent")
+        if not (config.exp_dir / "run").is_dir() and config.has_parent:
+            checkpoint_path = str(config.exp_dir / "parent")
 
         print(f"=== Training ({exp_name}) ===")
         runner.train(num_devices=args.num_devices, with_eval=True, checkpoint_path=checkpoint_path)

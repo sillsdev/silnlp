@@ -4,7 +4,8 @@ import os
 import shutil
 from abc import ABC, abstractmethod
 from enum import Enum, Flag, auto
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union, cast
 
 logging.basicConfig()
 
@@ -12,12 +13,11 @@ import sentencepiece as sp
 import tensorflow as tf
 import yaml
 from opennmt import END_OF_SENTENCE_TOKEN, PADDING_TOKEN, START_OF_SENTENCE_TOKEN
-from opennmt.data import Vocab, WordDropout
+from opennmt.data import Noise, Vocab, WordDropout, WordNoiser, tokens_to_words
 from opennmt.models import Model, get_model_from_catalog
 
 from ..common.corpus import load_corpus
 from ..common.utils import get_git_revision_hash, get_mt_exp_dir, merge_dict, set_seed
-from .noise import SILWordNoiser
 from .runner import SILRunner
 from .transformer import SILTransformer
 from .utils import encode_sp_lines, get_best_model_dir, get_last_checkpoint
@@ -72,7 +72,7 @@ class DataFileType(Flag):
     VAL = auto()
 
 
-def convert_vocab(sp_vocab_path: str, onmt_vocab_path: str, tag_langs: Set[str] = None) -> None:
+def convert_vocab(sp_vocab_path: Path, onmt_vocab_path: Path, tag_langs: Set[str] = None) -> None:
     special_tokens = [PADDING_TOKEN, START_OF_SENTENCE_TOKEN, END_OF_SENTENCE_TOKEN]
     if tag_langs is not None:
         special_tokens.extend(map(lambda l: f"<2{l}>", tag_langs))
@@ -91,15 +91,15 @@ def convert_vocab(sp_vocab_path: str, onmt_vocab_path: str, tag_langs: Set[str] 
 
 
 def build_vocab(
-    file_paths: Iterable[str],
+    file_paths: Iterable[Path],
     vocab_size: int,
     casing: str,
     character_coverage: float,
-    model_prefix: str,
-    vocab_path: str,
+    model_prefix: Path,
+    vocab_path: Path,
     tag_langs: Set[str] = None,
 ) -> None:
-    joined_file_paths = ",".join(file_paths)
+    joined_file_paths = ",".join(str(fp) for fp in file_paths)
 
     casing = casing.lower()
     normalization: str
@@ -112,7 +112,7 @@ def build_vocab(
 
     # use custom normalization that does not convert ZWJ and ZWNJ to spaces
     # allows properly handling of scripts like Devanagari
-    normalization_path = os.path.join(os.path.dirname(__file__), f"{normalization}.tsv")
+    normalization_path = Path(__file__).parent / f"{normalization}.tsv"
     sp_train_params = (
         f"--normalization_rule_tsv={normalization_path} --input={joined_file_paths} --model_prefix={model_prefix}"
         f" --vocab_size={vocab_size} --character_coverage={character_coverage:.4f} --input_sentence_size=1000000"
@@ -121,17 +121,17 @@ def build_vocab(
 
     sp.SentencePieceTrainer.Train(sp_train_params)
 
-    convert_vocab(f"{model_prefix}.vocab", vocab_path, tag_langs)
+    convert_vocab(model_prefix.with_suffix(".vocab"), vocab_path, tag_langs)
 
 
-def get_checkpoint_path(model_dir: str, checkpoint_type: CheckpointType) -> Tuple[Optional[str], Optional[int]]:
+def get_checkpoint_path(model_dir: Path, checkpoint_type: CheckpointType) -> Tuple[Optional[Path], Optional[int]]:
     if checkpoint_type == CheckpointType.AVERAGE:
         # Get the checkpoint path and step count for the averaged checkpoint
-        return get_last_checkpoint(os.path.join(model_dir, "avg"))
+        return get_last_checkpoint(model_dir / "avg")
     elif checkpoint_type == CheckpointType.BEST:
         # Get the checkpoint path and step count for the best checkpoint
         best_model_dir, step = get_best_model_dir(model_dir)
-        return (os.path.join(best_model_dir, "ckpt"), step)
+        return (best_model_dir / "ckpt", step)
     elif checkpoint_type == CheckpointType.LAST:
         return (None, None)
     else:
@@ -141,22 +141,22 @@ def get_checkpoint_path(model_dir: str, checkpoint_type: CheckpointType) -> Tupl
 class Config(ABC):
     def __init__(
         self,
-        exp_dir: str,
+        exp_dir: Path,
         config: dict,
         src_isos: Set[str],
         trg_isos: Set[str],
-        src_file_paths: Set[str],
-        trg_file_paths: Set[str],
+        src_file_paths: Set[Path],
+        trg_file_paths: Set[Path],
     ) -> None:
         config = merge_dict(
             {
                 "model": "SILTransformerBase",
-                "model_dir": os.path.join(exp_dir, "run"),
+                "model_dir": str(exp_dir / "run"),
                 "data": {
-                    "train_features_file": os.path.join(exp_dir, "train.src.txt"),
-                    "train_labels_file": os.path.join(exp_dir, "train.trg.txt"),
-                    "eval_features_file": os.path.join(exp_dir, "val.src.txt"),
-                    "eval_labels_file": os.path.join(exp_dir, "val.trg.txt"),
+                    "train_features_file": str(exp_dir / "train.src.txt"),
+                    "train_labels_file": str(exp_dir / "train.trg.txt"),
+                    "eval_features_file": str(exp_dir / "val.src.txt"),
+                    "eval_labels_file": str(exp_dir / "val.trg.txt"),
                     "share_vocab": True,
                     "character_coverage": 1.0,
                     "mirror": False,
@@ -196,10 +196,10 @@ class Config(ABC):
         eval_config: dict = config["eval"]
         multi_ref_eval: bool = eval_config["multi_ref_eval"]
         if multi_ref_eval:
-            data_config["eval_labels_file"] = os.path.join(exp_dir, "val.trg.txt.0")
+            data_config["eval_labels_file"] = str(exp_dir / "val.trg.txt.0")
         if data_config["share_vocab"]:
-            data_config["source_vocabulary"] = os.path.join(exp_dir, "onmt.vocab")
-            data_config["target_vocabulary"] = os.path.join(exp_dir, "onmt.vocab")
+            data_config["source_vocabulary"] = str(exp_dir / "onmt.vocab")
+            data_config["target_vocabulary"] = str(exp_dir / "onmt.vocab")
             if (
                 "src_vocab_size" not in data_config
                 and "trg_vocab_size" not in data_config
@@ -209,8 +209,8 @@ class Config(ABC):
             if "src_casing" not in data_config and "trg_casing" not in data_config and "casing" not in data_config:
                 data_config["casing"] = "lower"
         else:
-            data_config["source_vocabulary"] = os.path.join(exp_dir, "src-onmt.vocab")
-            data_config["target_vocabulary"] = os.path.join(exp_dir, "trg-onmt.vocab")
+            data_config["source_vocabulary"] = str(exp_dir / "src-onmt.vocab")
+            data_config["target_vocabulary"] = str(exp_dir / "trg-onmt.vocab")
             if "vocab_size" not in data_config:
                 if "src_vocab_size" not in data_config:
                     data_config["src_vocab_size"] = 8000
@@ -257,8 +257,8 @@ class Config(ABC):
         return self.root["model"]
 
     @property
-    def model_dir(self) -> str:
-        return self.root["model_dir"]
+    def model_dir(self) -> Path:
+        return Path(self.root["model_dir"])
 
     @property
     def params(self) -> dict:
@@ -289,22 +289,22 @@ class Config(ABC):
 
     def create_sp_processors(self) -> Tuple[sp.SentencePieceProcessor, sp.SentencePieceProcessor]:
         if self.share_vocab:
-            model_prefix = os.path.join(self.exp_dir, "sp")
+            model_prefix = self.exp_dir / "sp"
             src_spp = sp.SentencePieceProcessor()
-            src_spp.Load(f"{model_prefix}.model")
+            src_spp.Load(str(model_prefix.with_suffix(".model")))
 
             trg_spp = src_spp
         else:
             src_spp = sp.SentencePieceProcessor()
-            src_spp.Load(os.path.join(self.exp_dir, "src-sp.model"))
+            src_spp.Load(str(self.exp_dir / "src-sp.model"))
 
             trg_spp = sp.SentencePieceProcessor()
-            trg_spp.Load(os.path.join(self.exp_dir, "trg-sp.model"))
+            trg_spp.Load(str(self.exp_dir / "trg-sp.model"))
         return (src_spp, trg_spp)
 
     def create_src_sp_processor(self) -> sp.SentencePieceProcessor:
         src_spp = sp.SentencePieceProcessor()
-        src_spp.Load(os.path.join(self.exp_dir, "sp.model" if self.share_vocab else "src-sp.model"))
+        src_spp.Load(str(self.exp_dir / "sp.model" if self.share_vocab else "src-sp.model"))
         return src_spp
 
     @abstractmethod
@@ -339,9 +339,9 @@ class Config(ABC):
                 elif self.data.get("trg_casing", casing) != casing:
                     raise RuntimeError("The source and target casing cannot be different when creating a shared vocab.")
 
-            model_prefix = os.path.join(self.exp_dir, "sp")
-            vocab_path = os.path.join(self.exp_dir, "onmt.vocab")
-            share_vocab_file_paths: Set[str] = self.src_file_paths | self.trg_file_paths
+            model_prefix = self.exp_dir / "sp"
+            vocab_path = self.exp_dir / "onmt.vocab"
+            share_vocab_file_paths: Set[Path] = self.src_file_paths | self.trg_file_paths
             character_coverage = self.data.get("character_coverage", 1.0)
             build_vocab(
                 share_vocab_file_paths, vocab_size, casing, character_coverage, model_prefix, vocab_path, tag_isos
@@ -349,7 +349,7 @@ class Config(ABC):
 
             self._update_vocab(vocab_path, vocab_path)
         else:
-            src_vocab_file_paths: Set[str] = set(self.src_file_paths)
+            src_vocab_file_paths: Set[Path] = set(self.src_file_paths)
             if self.mirror:
                 src_vocab_file_paths.update(self.trg_file_paths)
             self._create_unshared_vocab(
@@ -359,7 +359,7 @@ class Config(ABC):
                 tag_langs=tag_isos,
             )
 
-            trg_vocab_file_paths: Set[str] = set(self.trg_file_paths)
+            trg_vocab_file_paths: Set[Path] = set(self.trg_file_paths)
             if self.mirror:
                 trg_vocab_file_paths.update(self.src_file_paths)
             self._create_unshared_vocab(
@@ -368,11 +368,9 @@ class Config(ABC):
                 "target",
             )
 
-            self._update_vocab(
-                os.path.join(self.exp_dir, "src-onmt.vocab"), os.path.join(self.exp_dir, "trg-onmt.vocab")
-            )
+            self._update_vocab(self.exp_dir / "src-onmt.vocab", self.exp_dir / "trg-onmt.vocab")
 
-    def _update_vocab(self, src_vocab_path: str, trg_vocab_path: str) -> None:
+    def _update_vocab(self, src_vocab_path: Path, trg_vocab_path: Path) -> None:
         if self.parent_config is None:
             return
 
@@ -387,40 +385,42 @@ class Config(ABC):
         checkpoint_path, step = get_checkpoint_path(model_dir, parent_model_to_use)
         parent_runner = create_runner(self.parent_config)
         parent_runner.update_vocab(
-            os.path.join(self.exp_dir, "parent"), src_vocab_path, trg_vocab_path, checkpoint_path, step
+            str(self.exp_dir / "parent"),
+            str(src_vocab_path),
+            str(trg_vocab_path),
+            None if checkpoint_path is None else str(checkpoint_path),
+            step,
         )
 
     def _create_unshared_vocab(
         self,
         isos: Set[str],
-        vocab_file_paths: Set[str],
+        vocab_file_paths: Set[Path],
         side: str,
         tag_langs: Set[str] = None,
     ) -> None:
         prefix = "src" if side == "source" else "trg"
-        model_prefix = os.path.join(self.exp_dir, f"{prefix}-sp")
-        vocab_path = os.path.join(self.exp_dir, f"{prefix}-onmt.vocab")
+        model_prefix = self.exp_dir / f"{prefix}-sp"
+        vocab_path = self.exp_dir / f"{prefix}-onmt.vocab"
         if self.parent_config is not None:
             parent_isos = self.parent_config.src_isos if side == "source" else self.parent_config.trg_isos
             if isos == parent_isos:
-                parent_sp_prefix_path: str
-                parent_vocab_path: str
                 if self.parent_config.share_vocab:
-                    parent_sp_prefix_path = os.path.join(self.parent_config.exp_dir, "sp")
-                    parent_vocab_path = os.path.join(self.parent_config.exp_dir, "onmt.vocab")
+                    parent_sp_prefix_path = self.parent_config.exp_dir / "sp"
+                    parent_vocab_path = self.parent_config.exp_dir / "onmt.vocab"
                 else:
-                    parent_sp_prefix_path = os.path.join(self.parent_config.exp_dir, f"{prefix}-sp")
-                    parent_vocab_path = os.path.join(self.parent_config.exp_dir, f"{prefix}-onmt.vocab")
+                    parent_sp_prefix_path = self.parent_config.exp_dir / f"{prefix}-sp"
+                    parent_vocab_path = self.parent_config.exp_dir / f"{prefix}-onmt.vocab"
 
                 parent_vocab: Optional[Vocab] = None
                 child_tokens: Optional[Set[str]] = None
                 parent_use_vocab: bool = self.data["parent_use_vocab"]
                 if not parent_use_vocab:
                     parent_spp = sp.SentencePieceProcessor()
-                    parent_spp.Load(parent_sp_prefix_path + ".model")
+                    parent_spp.Load(str(parent_sp_prefix_path.with_suffix(".model")))
 
                     parent_vocab = Vocab()
-                    parent_vocab.load(parent_vocab_path)
+                    parent_vocab.load(str(parent_vocab_path))
 
                     child_tokens = set()
                     for vocab_file_path in vocab_file_paths:
@@ -431,14 +431,14 @@ class Config(ABC):
                 # all tokens in the child corpora are in the parent vocab, so we can just use the parent vocab
                 # or, the user wants to reuse the parent vocab for this child experiment
                 if parent_use_vocab:
-                    sp_vocab_path = os.path.join(self.exp_dir, f"{prefix}-sp.vocab")
-                    onmt_vocab_path = os.path.join(self.exp_dir, f"{prefix}-onmt.vocab")
-                    shutil.copy2(parent_sp_prefix_path + ".model", os.path.join(self.exp_dir, f"{prefix}-sp.model"))
-                    shutil.copy2(parent_sp_prefix_path + ".vocab", sp_vocab_path)
+                    sp_vocab_path = self.exp_dir / f"{prefix}-sp.vocab"
+                    onmt_vocab_path = self.exp_dir / f"{prefix}-onmt.vocab"
+                    shutil.copy2(parent_sp_prefix_path.with_suffix(".model"), self.exp_dir / f"{prefix}-sp.model")
+                    shutil.copy2(parent_sp_prefix_path.with_suffix(".vocab"), sp_vocab_path)
                     convert_vocab(sp_vocab_path, onmt_vocab_path, tag_langs)
                     return
                 elif child_tokens is not None and parent_vocab is not None:
-                    onmt_delta_vocab_path = os.path.join(self.exp_dir, f"{prefix}-onmt-delta.vocab")
+                    onmt_delta_vocab_path = self.exp_dir / f"{prefix}-onmt-delta.vocab"
                     vocab_delta = child_tokens.difference(parent_vocab.words)
                     with open(onmt_delta_vocab_path, "w", encoding="utf-8") as f:
                         [f.write(f"{token}\n") for token in vocab_delta]
@@ -468,6 +468,45 @@ def set_transformer_dropout(
             layer.dropout = attention_dropout
         elif name.startswith("feed_forward_network"):
             layer.dropout = ffn_dropout
+
+
+class SILWordNoiser(WordNoiser):
+    def __init__(
+        self,
+        noises: Optional[List[Noise]] = None,
+        subword_token: str = "￭",
+        is_spacer: Optional[bool] = None,
+        has_lang_tag: bool = False,
+    ) -> None:
+        super().__init__(noises=noises, subword_token=subword_token, is_spacer=is_spacer)
+        self.has_lang_tag = has_lang_tag
+
+    def _call(
+        self, tokens: tf.Tensor, sequence_length: Optional[Union[int, tf.Tensor]], keep_shape: bool
+    ) -> Tuple[tf.Tensor, Union[int, tf.Tensor]]:
+        rank = tokens.shape.rank
+        if rank == 1:
+            input_length = tf.shape(tokens)[0]
+            if sequence_length is not None:
+                tokens = tokens[:sequence_length]
+            else:
+                tokens = tokens[: tf.math.count_nonzero(tokens)]
+            words = tokens_to_words(tokens, subword_token=self.subword_token, is_spacer=self.is_spacer)
+            words = cast(tf.Tensor, words.to_tensor())
+            if self.has_lang_tag:
+                tag = words[:1]
+                words = words[1:]
+            for noise in self.noises:
+                words = noise(words)
+            if self.has_lang_tag:
+                words = tf.concat([tag, words], axis=0)
+            outputs = tf.RaggedTensor.from_tensor(words, padding="").flat_values
+            output_length = tf.shape(outputs)[0]
+            if keep_shape:
+                outputs = tf.pad(outputs, [[0, input_length - output_length]])
+            return outputs, output_length
+        else:
+            return super()._call(tokens, sequence_length=sequence_length, keep_shape=keep_shape)
 
 
 def create_model(config: Config) -> Model:
@@ -518,7 +557,7 @@ def create_runner(
 
 def load_config(exp_name: str) -> Config:
     exp_dir = get_mt_exp_dir(exp_name)
-    config_path = os.path.join(exp_dir, "config.yml")
+    config_path = exp_dir / "config.yml"
 
     with open(config_path, "r", encoding="utf-8") as file:
         config = yaml.safe_load(file)
@@ -552,13 +591,13 @@ def main() -> None:
 
     print("Git commit:", get_git_revision_hash())
 
-    root_dir = get_mt_exp_dir(args.experiment)
-    config_path = os.path.join(root_dir, "config.yml")
-    if os.path.isfile(config_path) and not args.force:
+    exp_dir = get_mt_exp_dir(args.experiment)
+    config_path = exp_dir / "config.yml"
+    if config_path.is_file() and not args.force:
         print('The experiment config file already exists. Use "--force" if you want to overwrite the existing config.')
         return
 
-    os.makedirs(root_dir, exist_ok=True)
+    exp_dir.mkdir(exist_ok=True)
 
     config = _DEFAULT_NEW_CONFIG.copy()
     if args.model is not None:

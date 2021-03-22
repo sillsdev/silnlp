@@ -1,14 +1,14 @@
-import os
 import re
 import subprocess
 from collections import OrderedDict
+from pathlib import Path
 from typing import Dict, List, Optional
 from xml.etree import ElementTree
 from xml.sax.saxutils import escape
 
 from .canon import book_id_to_number
 from .corpus import get_terms_glosses_path, get_terms_metadata_path, load_corpus
-from .environment import PT_BIBLICAL_TERMS_LISTS_DIR, PT_PREPROCESSED_DIR, PT_UNZIPPED_DIR
+from .environment import MT_SCRIPTURE_DIR, MT_TERMS_DIR, PT_TERMS_DIR, PT_PROJECTS_DIR
 from .utils import get_repo_dir
 
 _TERMS_LISTS = {
@@ -20,8 +20,8 @@ _TERMS_LISTS = {
 }
 
 
-def get_project_dir(project: str) -> str:
-    return os.path.join(PT_UNZIPPED_DIR, project)
+def get_project_dir(project: str) -> Path:
+    return PT_PROJECTS_DIR / project
 
 
 def get_iso(settings_tree: ElementTree.ElementTree) -> str:
@@ -33,31 +33,43 @@ def get_iso(settings_tree: ElementTree.ElementTree) -> str:
 
 def extract_project(project: str, include_texts: str, exclude_texts: str) -> None:
     project_dir = get_project_dir(project)
-    settings_tree = ElementTree.parse(os.path.join(project_dir, "Settings.xml"))
+    settings_tree = ElementTree.parse(project_dir / "Settings.xml")
     iso = get_iso(settings_tree)
 
-    ref_dir = os.path.join(PT_UNZIPPED_DIR, "Ref")
-    arg_list = ["dotnet", "machine", "build-corpus", ref_dir, project_dir, "-sf", "pt", "-tf", "pt", "-as", "-ie"]
+    ref_dir = PT_PROJECTS_DIR / "Ref"
+    args: List[str] = [
+        "dotnet",
+        "machine",
+        "build-corpus",
+        str(ref_dir),
+        str(project_dir),
+        "-sf",
+        "pt",
+        "-tf",
+        "pt",
+        "-as",
+        "-ie",
+    ]
     output_basename = f"{iso}-{project}"
     if len(include_texts) > 0 or len(exclude_texts) > 0:
         output_basename += "_"
     if len(include_texts) > 0:
-        arg_list.append("-i")
-        arg_list.append(include_texts)
+        args.append("-i")
+        args.append(include_texts)
         for text in include_texts.split(","):
             text = text.strip("*")
             output_basename += f"+{text}"
     if len(exclude_texts) > 0:
-        arg_list.append("-e")
-        arg_list.append(exclude_texts)
+        args.append("-e")
+        args.append(exclude_texts)
         for text in exclude_texts.split(","):
             text = text.strip("*")
             output_basename += f"-{text}"
 
-    arg_list.append("-to")
-    arg_list.append(os.path.join(PT_PREPROCESSED_DIR, "data", f"{output_basename}.txt"))
+    args.append("-to")
+    args.append(str(MT_SCRIPTURE_DIR / f"{output_basename}.txt"))
 
-    subprocess.run(arg_list, cwd=get_repo_dir())
+    subprocess.run(args, cwd=get_repo_dir())
 
 
 def escape_id(id: str) -> str:
@@ -79,8 +91,8 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> None:
     if project is not None:
         list_name = project
 
-    dir = str(PT_BIBLICAL_TERMS_LISTS_DIR) if project is None else os.path.join(PT_UNZIPPED_DIR, project)
-    terms_xml_path = os.path.join(dir, list_file_name)
+    dir = PT_TERMS_DIR if project is None else PT_PROJECTS_DIR / project
+    terms_xml_path = dir / list_file_name
 
     terms_metadata_path = get_terms_metadata_path(list_name)
     terms_glosses_path = get_terms_glosses_path(list_name)
@@ -129,8 +141,8 @@ def extract_terms_list_from_renderings(project: str, renderings_tree: ElementTre
 
 def extract_term_renderings(project: str) -> None:
     project_dir = get_project_dir(project)
-    renderings_path = os.path.join(project_dir, "TermRenderings.xml")
-    if not os.path.isfile(renderings_path):
+    renderings_path = project_dir / "TermRenderings.xml"
+    if not renderings_path.is_file():
         return
 
     renderings_tree = ElementTree.parse(renderings_path)
@@ -142,7 +154,7 @@ def extract_term_renderings(project: str) -> None:
         id = escape_id(id)
         rendering_elems[id] = elem
 
-    settings_path = os.path.join(project_dir, "Settings.xml")
+    settings_path = project_dir / "Settings.xml"
     settings_tree = ElementTree.parse(settings_path)
     iso = get_iso(settings_tree)
     terms_setting = settings_tree.getroot().findtext("BiblicalTermsListSetting", "Major::BiblicalTerms.xml")
@@ -157,7 +169,7 @@ def extract_term_renderings(project: str) -> None:
         list_name = project
 
     terms_metadata_path = get_terms_metadata_path(list_name)
-    terms_renderings_path = os.path.join(PT_PREPROCESSED_DIR, "terms", f"{iso}-{project}-{list_type}-renderings.txt")
+    terms_renderings_path = MT_TERMS_DIR / f"{iso}-{project}-{list_type}-renderings.txt"
     count = 0
     with open(terms_renderings_path, "w", encoding="utf-8", newline="\n") as terms_renderings_file:
         for line in load_corpus(terms_metadata_path):
@@ -175,18 +187,18 @@ def extract_term_renderings(project: str) -> None:
             if len(renderings) > 0:
                 count += 1
     if count == 0:
-        os.remove(terms_renderings_path)
+        terms_renderings_path.unlink()
         if list_type == "Project":
-            os.remove(terms_metadata_path)
+            terms_metadata_path.unlink()
             terms_glosses_path = get_terms_glosses_path(list_name)
-            if os.path.isfile(terms_glosses_path):
-                os.remove(terms_glosses_path)
+            if terms_glosses_path.is_file():
+                terms_glosses_path.unlink()
     print(f"# of Terms written: {count}")
 
 
-def get_book_path(project: str, book: str) -> str:
+def get_book_path(project: str, book: str) -> Path:
     project_dir = get_project_dir(project)
-    settings_tree = ElementTree.parse(os.path.join(project_dir, "Settings.xml"))
+    settings_tree = ElementTree.parse(project_dir / "Settings.xml")
     naming_elem = settings_tree.find("Naming")
     assert naming_elem is not None
 
@@ -203,6 +215,6 @@ def get_book_path(project: str, book: str) -> str:
     else:
         book_name = book
 
-    book_filename = f"{pre_part}{book_name}{post_part}"
+    book_file_name = f"{pre_part}{book_name}{post_part}"
 
-    return os.path.join(PT_UNZIPPED_DIR, project, book_filename)
+    return PT_PROJECTS_DIR / project / book_file_name

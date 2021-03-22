@@ -1,5 +1,4 @@
 import argparse
-import os
 from statistics import mean
 from typing import Tuple
 
@@ -7,13 +6,13 @@ from ..alignment.utils import add_alignment_scores
 from ..common.canon import get_books
 from ..common.corpus import (
     exclude_books,
-    get_corpus_path,
+    get_scripture_path,
     get_scripture_parallel_corpus,
     include_books,
     split_parallel_corpus,
     write_corpus,
 )
-from ..common.environment import PT_PREPROCESSED_DIR
+from ..common.environment import MT_SCRIPTURE_DIR
 from ..common.utils import get_git_revision_hash, get_mt_exp_dir, set_seed
 from .config import load_config
 
@@ -33,8 +32,8 @@ def main() -> None:
 
     print("Git commit:", get_git_revision_hash())
 
-    exp_name = args.experiment
-    root_dir = get_mt_exp_dir(exp_name)
+    exp_name: str = args.experiment
+    exp_dir = get_mt_exp_dir(exp_name)
     config = load_config(exp_name)
 
     set_seed(config["seed"])
@@ -42,9 +41,9 @@ def main() -> None:
     src_iso, src_project = parse_lang(config["src_lang"])
     trg_iso, trg_project = parse_lang(config["trg_lang"])
 
-    vref_file_path = os.path.join(PT_PREPROCESSED_DIR, "data", "vref.txt")
-    src_file_path = get_corpus_path(src_iso, src_project)
-    trg_file_path = get_corpus_path(trg_iso, trg_project)
+    vref_file_path = MT_SCRIPTURE_DIR / "vref.txt"
+    src_file_path = get_scripture_path(src_iso, src_project)
+    trg_file_path = get_scripture_path(trg_iso, trg_project)
 
     corpus_books = get_books(config.get("corpus_books", []))
     test_books = get_books(config.get("test_books", []))
@@ -75,12 +74,12 @@ def main() -> None:
     else:
         train, test = split_parallel_corpus(train, test_size)
 
-    write_corpus(os.path.join(root_dir, "train.src.txt"), train["source"])
-    write_corpus(os.path.join(root_dir, "train.trg.txt"), train["target"])
+    write_corpus(exp_dir / "train.src.txt", train["source"])
+    write_corpus(exp_dir / "train.trg.txt", train["target"])
 
-    write_corpus(os.path.join(root_dir, "test.vref.txt"), map(lambda vr: str(vr), test["vref"]))
-    write_corpus(os.path.join(root_dir, "test.src.txt"), test["source"])
-    write_corpus(os.path.join(root_dir, "test.trg.txt"), test["target"])
+    write_corpus(exp_dir / "test.vref.txt", map(lambda vr: str(vr), test["vref"]))
+    write_corpus(exp_dir / "test.src.txt", test["source"])
+    write_corpus(exp_dir / "test.trg.txt", test["target"])
 
 
 if __name__ == "__main__":

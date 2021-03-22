@@ -1,5 +1,4 @@
 import argparse
-import os
 import yaml
 
 from ..common.utils import get_git_revision_hash, get_mt_exp_dir, merge_dict
@@ -17,8 +16,8 @@ _SUPPORTED_TOKENIZERS = {"whitespace", "latin", "zwsp"}
 
 
 def load_config(exp_name: str) -> dict:
-    root_dir = get_mt_exp_dir(exp_name)
-    config_path = os.path.join(root_dir, "config.yml")
+    exp_dir = get_mt_exp_dir(exp_name)
+    config_path = exp_dir / "config.yml"
 
     config = _BASE_CONFIG.copy()
 
@@ -41,13 +40,13 @@ def main() -> None:
 
     print("Git commit:", get_git_revision_hash())
 
-    root_dir = get_mt_exp_dir(args.experiment)
-    config_path = os.path.join(root_dir, "config.yml")
-    if os.path.isfile(config_path) and not args.force:
+    exp_dir = get_mt_exp_dir(args.experiment)
+    config_path = exp_dir / "config.yml"
+    if config_path.is_file() and not args.force:
         print('The experiment config file already exists. Use "--force" if you want to overwrite the existing config.')
         return
 
-    os.makedirs(root_dir, exist_ok=True)
+    exp_dir.mkdir(exist_ok=True)
 
     config = _BASE_CONFIG.copy()
     if args.model is not None:

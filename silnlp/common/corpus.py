@@ -1,39 +1,46 @@
 import itertools
-import os
 import subprocess
-from glob import glob
+from pathlib import Path
 from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple
 
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
 from ..common.utils import get_repo_dir
-from .environment import PT_PREPROCESSED_DIR
+from .environment import MT_SCRIPTURE_DIR, MT_TERMS_DIR
 from .verse_ref import VerseRef
 
 
-def write_corpus(corpus_path: str, sentences: Iterable[str], append: bool = False) -> None:
+def write_corpus(corpus_path: Path, sentences: Iterable[str], append: bool = False) -> None:
     with open(corpus_path, "a" if append else "w", encoding="utf-8", newline="\n") as file:
         for sentence in sentences:
             file.write(sentence + "\n")
 
 
-def load_corpus(input_file: str) -> Iterator[str]:
-    with open(input_file, "r", encoding="utf-8-sig") as in_file:
+def load_corpus(corpus_path: Path) -> Iterator[str]:
+    with open(corpus_path, "r", encoding="utf-8-sig") as in_file:
         for line in in_file:
             line = line.strip()
             yield line
 
 
-def tokenize_corpus(input_path: str, output_path: str) -> None:
-    subprocess.run(
-        ["dotnet", "machine", "tokenize", input_path, output_path, "-t", "latin", "-l", "-nf", "nfc"],
-        stdout=subprocess.DEVNULL,
-        cwd=get_repo_dir(),
-    )
+def tokenize_corpus(input_path: Path, output_path: Path) -> None:
+    args: List[str] = [
+        "dotnet",
+        "machine",
+        "tokenize",
+        str(input_path),
+        str(output_path),
+        "-t",
+        "latin",
+        "-l",
+        "-nf",
+        "nfc",
+    ]
+    subprocess.run(args, stdout=subprocess.DEVNULL, cwd=get_repo_dir())
 
 
-def get_scripture_parallel_corpus(vref_file_path: str, src_file_path: str, trg_file_path: str) -> pd.DataFrame:
+def get_scripture_parallel_corpus(vref_file_path: Path, src_file_path: Path, trg_file_path: Path) -> pd.DataFrame:
     vrefs: List[VerseRef] = []
     src_sentences: List[str] = []
     trg_sentences: List[str] = []
@@ -115,8 +122,8 @@ def filter_parallel_corpus(corpus: pd.DataFrame, score_threshold: float) -> pd.D
     return corpus
 
 
-def get_corpus_path(iso: str, corpus: str) -> str:
-    return os.path.join(PT_PREPROCESSED_DIR, "data", f"{iso}-{corpus}.txt")
+def get_scripture_path(iso: str, project: str) -> Path:
+    return MT_SCRIPTURE_DIR / f"{iso}-{project}.txt"
 
 
 def include_books(corpus: pd.DataFrame, books: Set[int]) -> pd.DataFrame:
@@ -127,25 +134,24 @@ def exclude_books(corpus: pd.DataFrame, books: Set[int]) -> pd.DataFrame:
     return corpus[corpus.apply(lambda r: r["vref"].book_num not in books, axis=1)].copy()
 
 
-def get_terms_metadata_path(list_name: str) -> str:
-    return os.path.join(PT_PREPROCESSED_DIR, "terms", f"{list_name}-metadata.txt")
+def get_terms_metadata_path(list_name: str) -> Path:
+    return MT_TERMS_DIR / f"{list_name}-metadata.txt"
 
 
-def get_terms_glosses_path(list_name: str) -> str:
-    return os.path.join(PT_PREPROCESSED_DIR, "terms", f"en-{list_name}-glosses.txt")
+def get_terms_glosses_path(list_name: str) -> Path:
+    return MT_TERMS_DIR / f"en-{list_name}-glosses.txt"
 
 
-def get_terms_renderings_path(iso: str, project: str) -> Optional[str]:
-    terms_renderings_pattern = os.path.join(PT_PREPROCESSED_DIR, "terms", f"{iso}-{project}-*-renderings.txt")
-    matches = glob(terms_renderings_pattern)
+def get_terms_renderings_path(iso: str, project: str) -> Optional[Path]:
+    matches = list(MT_TERMS_DIR.glob(f"{iso}-{project}-*-renderings.txt"))
     if len(matches) == 0:
         return None
     assert len(matches) == 1
     return matches[0]
 
 
-def get_terms_list(terms_renderings_path: str) -> str:
-    name, _ = os.path.splitext(os.path.basename(terms_renderings_path))
+def get_terms_list(terms_renderings_path: Path) -> str:
+    name = terms_renderings_path.stem
     parts = name.split("-")
     project = parts[1]
     list_type = parts[2]
@@ -164,13 +170,13 @@ class Term:
         self.renderings = renderings
 
 
-def get_terms(terms_renderings_path: str) -> Dict[str, Term]:
+def get_terms(terms_renderings_path: Path) -> Dict[str, Term]:
     list_name = get_terms_list(terms_renderings_path)
     terms_metadata_path = get_terms_metadata_path(list_name)
     terms_glosses_path = get_terms_glosses_path(list_name)
     terms: Dict[str, Term] = {}
     terms_metadata = load_corpus(terms_metadata_path)
-    terms_glosses = load_corpus(terms_glosses_path) if os.path.isfile(terms_glosses_path) else iter([])
+    terms_glosses = load_corpus(terms_glosses_path) if terms_glosses_path.is_file() else iter([])
     terms_renderings = load_corpus(terms_renderings_path)
     for metadata_line, glosses_line, renderings_line in itertools.zip_longest(
         terms_metadata, terms_glosses, terms_renderings

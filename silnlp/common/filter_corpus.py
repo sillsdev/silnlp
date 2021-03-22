@@ -1,6 +1,6 @@
 import argparse
-import os
 import tempfile
+from pathlib import Path
 from typing import List
 
 import numpy as np
@@ -53,7 +53,7 @@ def check_sent_pair(src_sent: str, trg_sent: str) -> bool:
     return False
 
 
-def split_and_filter_tsv(input_path: str, src_path: str, trg_path: str):
+def split_and_filter_tsv(input_path: Path, src_path: Path, trg_path: Path):
     with open(input_path, "r", encoding="utf-8") as input_file, open(
         src_path, "w", encoding="utf-8"
     ) as src_output_file, open(trg_path, "w", encoding="utf-8") as trg_output_file:
@@ -64,7 +64,7 @@ def split_and_filter_tsv(input_path: str, src_path: str, trg_path: str):
                 trg_output_file.write(trg_sent + "\n")
 
 
-def filter_src_trg_files(src_in_path: str, trg_in_path: str, src_out_path: str, trg_out_path: str):
+def filter_src_trg_files(src_in_path: Path, trg_in_path: Path, src_out_path: Path, trg_out_path: Path):
     with open(src_in_path, "r", encoding="utf-8") as src_file, open(
         trg_in_path, "r", encoding="utf-8"
     ) as trg_file, open(src_out_path, "w", encoding="utf-8") as tmp_src_file, open(
@@ -76,7 +76,7 @@ def filter_src_trg_files(src_in_path: str, trg_in_path: str, src_out_path: str, 
                 tmp_trg_file.write(trg_sent)
 
 
-def write_scores_file(scores_out_path: str, scores: List[float], src_path: str, trg_path: str):
+def write_scores_file(scores_out_path: Path, scores: List[float], src_path: Path, trg_path: Path):
     with open(src_path, "r", encoding="utf-8") as src_in, open(trg_path, "r", encoding="utf-8") as trg_in, open(
         scores_out_path, "w", encoding="utf-8"
     ) as scores_out:
@@ -112,8 +112,9 @@ def main() -> None:
         return
 
     with tempfile.TemporaryDirectory() as td:
-        src_path = os.path.join(td, "tmp_src.txt")
-        trg_path = os.path.join(td, "tmp_trg.txt")
+        temp_dir = Path(td)
+        src_path = temp_dir / "tmp_src.txt"
+        trg_path = temp_dir / "tmp_trg.txt"
 
         # Generate temporary src/trg files with basic filtering (empty sentences; length checks; etc)
         if args.input is not None:

@@ -1,6 +1,5 @@
 import argparse
 import logging
-import os
 
 logging.basicConfig()
 
@@ -16,8 +15,8 @@ def main() -> None:
     exp_name = args.experiment
     config = load_config(exp_name)
     runner = create_runner(config)
-    output = os.path.join(config.model_dir, "avg")
-    runner.average_checkpoints(output, args.max_count)
+    output = config.model_dir / "avg"
+    runner.average_checkpoints(str(output), args.max_count)
 
 
 if __name__ == "__main__":

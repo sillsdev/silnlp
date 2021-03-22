@@ -1,6 +1,7 @@
 import argparse
 import os
 import subprocess
+from typing import List
 
 from ..common.utils import get_git_revision_hash, get_mt_exp_dir, get_repo_dir
 from .config import load_config
@@ -15,32 +16,30 @@ def main() -> None:
 
     for exp_name in args.experiments:
         print(f"=== Training ({exp_name}) ===")
-        root_dir = get_mt_exp_dir(exp_name)
+        exp_dir = get_mt_exp_dir(exp_name)
         config = load_config(exp_name)
 
-        src_file_path = os.path.join(root_dir, "train.src.txt")
-        trg_file_path = os.path.join(root_dir, "train.trg.txt")
-        engine_dir = os.path.join(root_dir, f"engine{os.sep}")
+        src_file_path = exp_dir / "train.src.txt"
+        trg_file_path = exp_dir / "train.trg.txt"
+        engine_dir = exp_dir / f"engine{os.sep}"
 
-        subprocess.run(
-            [
-                "dotnet",
-                "machine",
-                "train",
-                "translation-model",
-                engine_dir,
-                src_file_path,
-                trg_file_path,
-                "-st",
-                config["src_tokenizer"],
-                "-tt",
-                config["trg_tokenizer"],
-                "-mt",
-                config["model"],
-                "-l",
-            ],
-            cwd=get_repo_dir(),
-        )
+        args_list: List[str] = [
+            "dotnet",
+            "machine",
+            "train",
+            "translation-model",
+            str(engine_dir),
+            str(src_file_path),
+            str(trg_file_path),
+            "-st",
+            config["src_tokenizer"],
+            "-tt",
+            config["trg_tokenizer"],
+            "-mt",
+            config["model"],
+            "-l",
+        ]
+        subprocess.run(args_list, cwd=get_repo_dir())
 
 
 if __name__ == "__main__":

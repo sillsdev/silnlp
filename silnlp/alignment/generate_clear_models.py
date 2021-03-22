@@ -1,5 +1,5 @@
 import argparse
-import os
+from pathlib import Path
 from typing import List, Set, cast
 
 from .config import get_aligner
@@ -27,12 +27,12 @@ def main() -> None:
     for exp_name in cast(List[str], args.experiments):
         for testament in testaments:
             print(f"=== Generating models ({exp_name.upper()} {testament.upper()}) ===")
-            testament_dir = os.path.join(get_align_exp_dir(exp_name), testament)
+            testament_dir = get_align_exp_dir(exp_name) / testament
             aligner = get_aligner(args.aligner, testament_dir)
-            output_dir: str = os.path.join(args.output, exp_name, testament)
-            os.makedirs(output_dir, exist_ok=True)
+            output_dir = Path(args.output, exp_name, testament)
+            output_dir.mkdir(exist_ok=True)
 
-            aligner.align(os.path.join(output_dir, "alignments.txt"), sym_heuristic="intersection")
+            aligner.align(output_dir / "alignments.txt", sym_heuristic="intersection")
 
             print("Extracting translation model...", end="", flush=True)
             direct_lexicon = aligner.get_direct_lexicon()
@@ -58,7 +58,7 @@ def main() -> None:
                     for trg_word, prob in direct_lexicon.get_target_word_probs(src_word):
                         if prob > 0.1:
                             lexicon[src_word, trg_word] = prob
-            lexicon.write(os.path.join(output_dir, "transModel.tsv"))
+            lexicon.write(output_dir / "transModel.tsv")
             print(" done.")
 
 

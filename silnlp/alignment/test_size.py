@@ -1,6 +1,5 @@
 import argparse
 import math
-import os
 from typing import List, Optional, Set, Tuple
 
 import numpy as np
@@ -29,9 +28,9 @@ def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
 def get_metrics(exp_name: str, testament: str, books: Set[int] = set(), test_size: Optional[int] = None) -> List[float]:
     config = load_config(exp_name, testament)
     set_seed(config["seed"])
-    testament_dir = os.path.join(get_align_exp_dir(exp_name), testament)
+    testament_dir = get_align_exp_dir(exp_name) / testament
 
-    vref_file_path = os.path.join(testament_dir, "refs.txt")
+    vref_file_path = testament_dir / "refs.txt"
     vrefs = load_vrefs(vref_file_path)
 
     all_alignments = load_all_alignments(testament_dir)
@@ -68,9 +67,12 @@ def main() -> None:
 
     experiments: List[str] = []
     base_metrics: List[float] = []
-    for exp_name in os.listdir(ALIGN_EXPERIMENTS_DIR):
-        testament_dir = os.path.join(get_align_exp_dir(exp_name), testament)
-        if os.path.isdir(testament_dir):
+    for exp_path in ALIGN_EXPERIMENTS_DIR.iterdir():
+        if not exp_path.is_dir():
+            continue
+        exp_name = exp_path.name
+        testament_dir = get_align_exp_dir(exp_name) / testament
+        if testament_dir.is_dir():
             experiments.append(exp_name)
             base_metrics.extend(get_metrics(exp_name, testament))
 

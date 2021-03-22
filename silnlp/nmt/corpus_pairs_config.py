@@ -1,17 +1,15 @@
-import os
 import random
-from glob import glob
+from pathlib import Path
 from typing import List, Optional, Set, Type, Union
 
-from ..common.environment import PT_PREPROCESSED_DIR
-from ..common.utils import is_set
+from ..common.environment import MT_CORPORA_DIR, MT_SCRIPTURE_DIR
+from ..common.utils import DeleteRandomToken, NoiseMethod, RandomTokenPermutation, ReplaceRandomToken, is_set
 from .config import Config, DataFileType
-from .noise import DeleteRandomToken, NoiseMethod, RandomTokenPermutation, ReplaceRandomToken
 from .utils import decode_sp, encode_sp
 
 
-def parse_iso(file_path: str) -> str:
-    file_name = os.path.basename(file_path)
+def parse_iso(file_path: Path) -> str:
+    file_name = file_path.name
     index = file_name.index("-")
     return file_name[:index]
 
@@ -19,8 +17,8 @@ def parse_iso(file_path: str) -> str:
 class CorpusPair:
     def __init__(
         self,
-        src_file_path: str,
-        trg_file_path: str,
+        src_file_path: Path,
+        trg_file_path: Path,
         type: DataFileType,
         src_noise: List[NoiseMethod],
         size: Union[float, int],
@@ -72,6 +70,13 @@ def create_noise_methods(params: List[dict]) -> List[NoiseMethod]:
     return methods
 
 
+def get_corpus_path(corpus: str) -> Path:
+    corpus_path = MT_CORPORA_DIR / f"{corpus}.txt"
+    if corpus_path.is_file():
+        return corpus_path
+    return MT_SCRIPTURE_DIR / f"{corpus}.txt"
+
+
 def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
     pairs: List[CorpusPair] = []
     for pair in corpus_pairs:
@@ -90,9 +95,9 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
             elif type_str == "val":
                 type |= DataFileType.VAL
         src: str = pair["src"]
-        src_file_path = os.path.join(PT_PREPROCESSED_DIR, "data", f"{src}.txt")
+        src_file_path = get_corpus_path(src)
         trg: str = pair["trg"]
-        trg_file_path = os.path.join(PT_PREPROCESSED_DIR, "data", f"{trg}.txt")
+        trg_file_path = get_corpus_path(trg)
         src_noise = create_noise_methods(pair.get("src_noise", []))
         size: Union[float, int] = pair.get("size", 1.0)
         test_size: Optional[Union[float, int]] = pair.get("test_size")
@@ -105,7 +110,7 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
     return pairs
 
 
-def get_parallel_corpus_size(src_file_path: str, trg_file_path: str) -> int:
+def get_parallel_corpus_size(src_file_path: Path, trg_file_path: Path) -> int:
     count = 0
     with open(src_file_path, "r", encoding="utf-8") as src_file, open(trg_file_path, "r", encoding="utf-8") as trg_file:
         for src_line, trg_line in zip(src_file, trg_file):
@@ -129,12 +134,12 @@ def split_corpus(corpus_size: int, split_size: Union[float, int], used_indices: 
 
 
 class CorpusPairsConfig(Config):
-    def __init__(self, exp_dir: str, config: dict) -> None:
+    def __init__(self, exp_dir: Path, config: dict) -> None:
         self.corpus_pairs = parse_corpus_pairs(config["data"]["corpus_pairs"])
         src_isos: Set[str] = set()
         trg_isos: Set[str] = set()
-        src_file_paths: Set[str] = set()
-        trg_file_paths: Set[str] = set()
+        src_file_paths: Set[Path] = set()
+        trg_file_paths: Set[Path] = set()
         for pair in self.corpus_pairs:
             src_isos.add(pair.src_iso)
             trg_isos.add(pair.trg_iso)
@@ -146,16 +151,14 @@ class CorpusPairsConfig(Config):
         test_iso_pairs = set((p.src_iso, p.trg_iso) for p in self.corpus_pairs if p.is_test)
         src_spp, trg_spp = self.create_sp_processors()
         print("Writing data sets...")
-        for old_file_path in glob(os.path.join(self.exp_dir, "test.*.txt")):
-            os.remove(old_file_path)
-        with open(
-            os.path.join(self.exp_dir, "train.src.txt"), "w", encoding="utf-8", newline="\n"
-        ) as train_src_file, open(
-            os.path.join(self.exp_dir, "train.trg.txt"), "w", encoding="utf-8", newline="\n"
+        for old_file_path in self.exp_dir.glob("test.*.txt"):
+            old_file_path.unlink()
+        with open(self.exp_dir / "train.src.txt", "w", encoding="utf-8", newline="\n") as train_src_file, open(
+            self.exp_dir / "train.trg.txt", "w", encoding="utf-8", newline="\n"
         ) as train_trg_file, open(
-            os.path.join(self.exp_dir, "val.src.txt"), "w", encoding="utf-8", newline="\n"
+            self.exp_dir / "val.src.txt", "w", encoding="utf-8", newline="\n"
         ) as val_src_file, open(
-            os.path.join(self.exp_dir, "val.trg.txt"), "w", encoding="utf-8", newline="\n"
+            self.exp_dir / "val.trg.txt", "w", encoding="utf-8", newline="\n"
         ) as val_trg_file:
             for pair in self.corpus_pairs:
                 corpus_size = get_parallel_corpus_size(pair.src_file_path, pair.trg_file_path)
@@ -179,9 +182,9 @@ class CorpusPairsConfig(Config):
                 with open(pair.src_file_path, "r", encoding="utf-8") as input_src_file, open(
                     pair.trg_file_path, "r", encoding="utf-8"
                 ) as input_trg_file, open(
-                    os.path.join(self.exp_dir, f"{test_prefix}.src.txt"), "a", encoding="utf-8", newline="\n"
+                    self.exp_dir / f"{test_prefix}.src.txt", "a", encoding="utf-8", newline="\n"
                 ) as test_src_file, open(
-                    os.path.join(self.exp_dir, f"{test_prefix}.trg.detok.txt"), "a", encoding="utf-8", newline="\n"
+                    self.exp_dir / f"{test_prefix}.trg.detok.txt", "a", encoding="utf-8", newline="\n"
                 ) as test_trg_file:
                     index = 0
                     for src_line, trg_line in zip(input_src_file, input_trg_file):

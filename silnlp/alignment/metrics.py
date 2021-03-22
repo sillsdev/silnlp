@@ -1,6 +1,5 @@
-import glob
-import os
 import random
+from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import pandas as pd
@@ -48,7 +47,7 @@ def get_alignment_counts(alignments: Iterable[Alignment], references: Iterable[A
     return (a_count, s_count, pa_count, sa_count)
 
 
-def load_alignments(input_file_path: str) -> List[Alignment]:
+def load_alignments(input_file_path: Path) -> List[Alignment]:
     alignments: List[Alignment] = []
     for line in load_corpus(input_file_path):
         if line.startswith("#"):
@@ -57,10 +56,10 @@ def load_alignments(input_file_path: str) -> List[Alignment]:
     return alignments
 
 
-def load_all_alignments(exp_dir: str) -> Dict[str, List[Alignment]]:
+def load_all_alignments(exp_dir: Path) -> Dict[str, List[Alignment]]:
     results: Dict[str, List[Alignment]] = {}
-    for alignments_path in glob.glob(os.path.join(exp_dir, "alignments.*.txt")):
-        file_name = os.path.basename(alignments_path)
+    for alignments_path in exp_dir.glob("alignments.*.txt"):
+        file_name = alignments_path.name
         parts = file_name.split(".")
         id = parts[1]
 
@@ -69,10 +68,10 @@ def load_all_alignments(exp_dir: str) -> Dict[str, List[Alignment]]:
     return results
 
 
-def load_all_lexicons(root_dir: str) -> Dict[str, Lexicon]:
+def load_all_lexicons(exp_dir: Path) -> Dict[str, Lexicon]:
     results: Dict[str, Lexicon] = {}
-    for lexicon_path in glob.glob(os.path.join(root_dir, "lexicon.*.txt")):
-        file_name = os.path.basename(lexicon_path)
+    for lexicon_path in exp_dir.glob("lexicon.*.txt"):
+        file_name = lexicon_path.name
         parts = file_name.split(".")
         id = parts[1]
 
@@ -81,7 +80,7 @@ def load_all_lexicons(root_dir: str) -> Dict[str, Lexicon]:
     return results
 
 
-def load_vrefs(vref_file_path: str) -> List[VerseRef]:
+def load_vrefs(vref_file_path: Path) -> List[VerseRef]:
     vrefs: List[VerseRef] = []
     for line in load_corpus(vref_file_path):
         vrefs.append(VerseRef.from_bbbcccvvv(int(line)))

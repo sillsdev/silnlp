@@ -1,4 +1,5 @@
 from typing import Dict, Iterable, Iterator, Set, Tuple
+from pathlib import Path
 
 from ..common.corpus import load_corpus
 
@@ -7,7 +8,7 @@ SPECIAL_TOKENS: Set[str] = {"NULL", "UNKNOWN_WORD", "<UNUSED_WORD>"}
 
 class Lexicon:
     @classmethod
-    def load(cls, file_path: str, include_special_tokens: bool = False) -> "Lexicon":
+    def load(cls, file_path: Path, include_special_tokens: bool = False) -> "Lexicon":
         lexicon = Lexicon()
         for line in load_corpus(file_path):
             if line.startswith("#"):
@@ -104,7 +105,7 @@ class Lexicon:
     def add(self, lexicon: "Lexicon") -> None:
         self._table.update(lexicon._table)
 
-    def write(self, file_path: str) -> None:
+    def write(self, file_path: Path) -> None:
         with open(file_path, "w", encoding="utf-8", newline="\n") as file:
             for src_word, trg_word, prob in sorted(self, key=lambda t: (t[0], -t[2], t[1])):
                 file.write(f"{src_word}\t{trg_word}\t{round(prob, 8)}\n")

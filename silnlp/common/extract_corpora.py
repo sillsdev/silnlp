@@ -6,9 +6,9 @@
 
 
 import argparse
-import os
+from typing import Set
 
-from ..common.environment import PT_PREPROCESSED_DIR, PT_UNZIPPED_DIR
+from ..common.environment import MT_SCRIPTURE_DIR, MT_TERMS_DIR, PT_PROJECTS_DIR
 from .paratext import extract_project, extract_term_renderings
 
 
@@ -23,23 +23,19 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    projects = set(args.projects)
+    projects: Set[str] = set(args.projects)
 
     # Which projects have data we can find?
-    projects_found = []
-
-    data_dir = os.path.join(PT_PREPROCESSED_DIR, "data")
-    os.makedirs(data_dir, exist_ok=True)
-    terms_dir = os.path.join(PT_PREPROCESSED_DIR, "terms")
-    os.makedirs(terms_dir, exist_ok=True)
-    for path in os.listdir(PT_UNZIPPED_DIR):
-        if path == "Ref" or (len(projects) > 0 and path not in projects):
-            continue
-        else:
-            projects_found.append(path)
+    projects_found: Set[str] = set()
+    for project in projects:
+        project_path = PT_PROJECTS_DIR / project
+        if project_path.is_dir():
+            projects_found.add(project)
 
     # Process the projects that have data and tell the user.
-    if projects_found:
+    if len(projects_found) > 0:
+        MT_SCRIPTURE_DIR.mkdir(exist_ok=True)
+        MT_TERMS_DIR.mkdir(exist_ok=True)
         for project in projects_found:
             print(f"Extracting {project}...")
             extract_project(project, args.include, args.exclude)

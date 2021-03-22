@@ -1,5 +1,5 @@
 import argparse
-import os
+from pathlib import Path
 from typing import Dict, List, Optional, Set, cast
 
 import pandas as pd
@@ -38,13 +38,15 @@ def add_lexicons(dest: Dict[str, Lexicon], src: Dict[str, Lexicon]) -> None:
             dest_lexicon.add(src_lexicon)
 
 
-def test(testament_dirs: List[str], by_book: bool, books: Set[int], test_size: Optional[int], output_dir: str) -> None:
+def test(
+    testament_dirs: List[Path], by_book: bool, books: Set[int], test_size: Optional[int], output_dir: Path
+) -> None:
     vrefs: List[VerseRef] = []
     all_alignments: Dict[str, List[Alignment]] = {}
     all_lexicons: Dict[str, Lexicon] = {}
     for testament_dir in testament_dirs:
-        vref_file_path = os.path.join(testament_dir, "refs.txt")
-        if not os.path.isfile(vref_file_path):
+        vref_file_path = testament_dir / "refs.txt"
+        if not vref_file_path.is_file():
             continue
         vrefs += load_vrefs(vref_file_path)
         add_alignments(all_alignments, load_all_alignments(testament_dir))
@@ -101,7 +103,7 @@ def test(testament_dirs: List[str], by_book: bool, books: Set[int], test_size: O
     scores_file_name = "scores.csv"
     if test_size is not None:
         scores_file_name = f"scores-{test_size}.csv"
-    scores_file_path = os.path.join(output_dir, scores_file_name)
+    scores_file_path = output_dir / scores_file_name
     df.to_csv(scores_file_path, float_format="%.4f")
 
 
@@ -134,22 +136,25 @@ def main() -> None:
     for exp_name in cast(List[str], args.experiments):
         exp_dir = get_align_exp_dir(exp_name)
         for testament in testaments:
-            print(f"=== Computing metrics ({exp_name.upper()} {testament.upper()}) ===")
             if testament == "nt+ot":
-                nt_dir = os.path.join(exp_dir, "nt")
-                ot_dir = os.path.join(exp_dir, "ot")
-                test([nt_dir, ot_dir], args.by_book, books, None, exp_dir)
+                nt_dir = exp_dir / "nt"
+                ot_dir = exp_dir / "ot"
+                if nt_dir.is_dir() and ot_dir.is_dir():
+                    print(f"=== Computing metrics ({exp_name.upper()} {testament.upper()}) ===")
+                    test([nt_dir, ot_dir], args.by_book, books, None, exp_dir)
             else:
-                testament_dir = os.path.join(exp_dir, testament)
-                config = load_config(exp_name, testament)
-                set_seed(config["seed"])
-                if config["by_book"]:
-                    for book, book_testament_dir in get_all_book_paths(testament_dir):
-                        if os.path.isdir(book_testament_dir):
-                            print(f"--- {book} ---")
-                            test([book_testament_dir], False, books, test_size, book_testament_dir)
-                else:
-                    test([testament_dir], args.by_book, books, test_size, testament_dir)
+                testament_dir = exp_dir / testament
+                if testament_dir.is_dir():
+                    print(f"=== Computing metrics ({exp_name.upper()} {testament.upper()}) ===")
+                    config = load_config(exp_name, testament)
+                    set_seed(config["seed"])
+                    if config["by_book"]:
+                        for book, book_testament_dir in get_all_book_paths(testament_dir):
+                            if book_testament_dir.is_dir():
+                                print(f"--- {book} ---")
+                                test([book_testament_dir], False, books, test_size, book_testament_dir)
+                    else:
+                        test([testament_dir], args.by_book, books, test_size, testament_dir)
 
 
 if __name__ == "__main__":

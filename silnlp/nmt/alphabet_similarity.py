@@ -1,18 +1,18 @@
 import argparse
-import os
+from pathlib import Path
 from typing import List, Set
 
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
-from ..common.environment import PT_PREPROCESSED_DIR
+from ..common.environment import MT_SCRIPTURE_DIR
 from .config import load_config
 from .langs_config import LangsConfig
 
 
-def get_corpus_path(project: str) -> str:
-    return os.path.join(PT_PREPROCESSED_DIR, "data", f"{project}.txt")
+def get_corpus_path(project: str) -> Path:
+    return MT_SCRIPTURE_DIR / f"{project}.txt"
 
 
 def computeSimilarity(projects: List[str]) -> None:
@@ -79,8 +79,8 @@ def computeSimilarity(projects: List[str]) -> None:
     plt.show()
 
 
-def get_iso(file_path: str) -> str:
-    file_name = os.path.splitext(os.path.basename(file_path))[0]
+def get_iso(file_path: Path) -> str:
+    file_name = file_path.name
     parts = file_name.split("-")
     return parts[0]
 

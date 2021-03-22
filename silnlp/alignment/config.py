@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from typing import Dict, Iterable, Tuple, Type, Union
 
 import yaml
@@ -40,12 +41,12 @@ STEMMERS: Dict[str, Type[Stemmer]] = {
 }
 
 
-def get_aligner(id: str, testament_dir: str) -> Aligner:
+def get_aligner(id: str, testament_dir: Path) -> Aligner:
     aligner = ALIGNERS.get(id)
     if aligner is None:
         raise RuntimeError("An invalid aligner Id was specified.")
     aligner_cls: Type = aligner[0]
-    return aligner_cls(os.path.join(testament_dir, id + os.path.sep))
+    return aligner_cls(testament_dir / (id + os.path.sep))
 
 
 def get_aligner_name(id: str) -> str:
@@ -91,10 +92,10 @@ def load_config(exp_name: str, testament: str) -> dict:
         return merge_dict(config, loaded_config)
 
 
-def get_all_book_paths(testament_dir: str) -> Iterable[Tuple[str, str]]:
+def get_all_book_paths(testament_dir: Path) -> Iterable[Tuple[str, Path]]:
     for book in ALL_BOOK_IDS:
         book_num = book_id_to_number(book)
         if not is_ot_nt(book_num):
             continue
-        book_exp_dir = os.path.join(testament_dir, str(book_num).zfill(3) + "-" + book)
+        book_exp_dir = testament_dir / (str(book_num).zfill(3) + "-" + book)
         yield book, book_exp_dir

@@ -1,8 +1,8 @@
 import argparse
 import json
 import logging
-import os
 import unicodedata
+from pathlib import Path
 from typing import Iterable, List, Tuple, cast
 
 logging.basicConfig(level=logging.INFO)
@@ -10,7 +10,7 @@ logging.basicConfig(level=logging.INFO)
 from nltk.translate import Alignment
 
 from ..common.corpus import write_corpus
-from ..common.environment import ALIGN_GOLD_STANDARDS_DIR
+from ..common.environment import ALIGN_GOLD_DIR
 from ..common.stemmer import Stemmer
 from ..common.utils import set_seed
 from ..common.verse_ref import VerseRef
@@ -63,18 +63,18 @@ def get_alignment(verse: dict, primary_links_only: bool = False) -> Alignment:
     return Alignment(pairs)
 
 
-def write_datasets(root_dir: str, src_stemmer: Stemmer, trg_stemmer: Stemmer, corpus: List[ParallelSegment]) -> None:
-    train_refs_path = os.path.join(root_dir, "refs.txt")
+def write_datasets(exp_dir: Path, src_stemmer: Stemmer, trg_stemmer: Stemmer, corpus: List[ParallelSegment]) -> None:
+    train_refs_path = exp_dir / "refs.txt"
     write_corpus(train_refs_path, map(lambda s: s.ref, corpus))
 
-    train_src_path = os.path.join(root_dir, "src.txt")
+    train_src_path = exp_dir / "src.txt"
     write_corpus(train_src_path, map(lambda s: " ".join(s.source), corpus))
 
-    train_trg_path = os.path.join(root_dir, "trg.txt")
+    train_trg_path = exp_dir / "trg.txt"
     write_corpus(train_trg_path, map(lambda s: " ".join(src_stemmer.stem(s.target)), corpus))
     write_corpus(train_trg_path, map(lambda s: " ".join(trg_stemmer.stem(s.target)), corpus))
 
-    test_alignments_path = os.path.join(root_dir, "alignments.gold.txt")
+    test_alignments_path = exp_dir / "alignments.gold.txt"
     write_corpus(test_alignments_path, map(lambda s: str(s.alignment), corpus))
 
 
@@ -108,14 +108,14 @@ def main() -> None:
     for exp_name in cast(List[str], args.experiments):
         for testament in testaments:
             print(f"=== Preprocessing ({exp_name.upper()} {testament.upper()}) ===")
-            testament_dir = os.path.join(get_align_exp_dir(exp_name), testament)
+            testament_dir = get_align_exp_dir(exp_name) / testament
             config = load_config(exp_name, testament)
 
             set_seed(config["seed"])
 
             corpus_name: str = config["corpus"]
 
-            corpus_path = os.path.join(ALIGN_GOLD_STANDARDS_DIR, corpus_name + ".alignment.json")
+            corpus_path = ALIGN_GOLD_DIR / (corpus_name + ".alignment.json")
             verses: List[dict]
             with open(corpus_path, "r", encoding="utf-8") as f:
                 verses = json.load(f)
@@ -146,11 +146,11 @@ def main() -> None:
                 for book, book_root_dir in get_all_book_paths(testament_dir):
                     book_corpus = list(filter(lambda s: is_in_book(s, book), corpus))
                     if len(book_corpus) > 0:
-                        os.makedirs(book_root_dir, exist_ok=True)
+                        book_root_dir.mkdir(exist_ok=True)
                         write_datasets(book_root_dir, src_stemmer, trg_stemmer, book_corpus)
             else:
                 write_datasets(testament_dir, src_stemmer, trg_stemmer, corpus)
-                lexicon.write(os.path.join(testament_dir, "lexicon.gold.txt"))
+                lexicon.write(testament_dir / "lexicon.gold.txt")
 
 
 if __name__ == "__main__":

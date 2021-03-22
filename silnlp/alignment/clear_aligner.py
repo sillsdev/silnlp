@@ -1,5 +1,5 @@
-import os
 import shutil
+from pathlib import Path
 from typing import Iterable
 
 from nltk.translate import Alignment
@@ -10,28 +10,28 @@ from .lexicon import Lexicon
 
 
 class ClearAligner(Aligner):
-    def __init__(self, model_dir: str) -> None:
+    def __init__(self, model_dir: Path) -> None:
         super().__init__("clear", model_dir)
 
     @property
     def has_inverse_model(self) -> bool:
         return False
 
-    def train(self, src_file_path: str, trg_file_path: str) -> None:
-        os.makedirs(self.model_dir, exist_ok=True)
-        shutil.copyfile(src_file_path, os.path.join(self.model_dir, "src.txt"))
-        shutil.copyfile(trg_file_path, os.path.join(self.model_dir, "trg.txt"))
+    def train(self, src_file_path: Path, trg_file_path: Path) -> None:
+        self.model_dir.mkdir(exist_ok=True)
+        shutil.copyfile(src_file_path, self.model_dir / "src.txt")
+        shutil.copyfile(trg_file_path, self.model_dir / "trg.txt")
 
-    def align(self, out_file_path: str, sym_heuristic: str = "grow-diag-final-and") -> None:
-        if os.path.isfile(out_file_path):
-            shutil.copyfile(out_file_path, os.path.join(self.model_dir, "alignments.txt"))
+    def align(self, out_file_path: Path, sym_heuristic: str = "grow-diag-final-and") -> None:
+        if out_file_path.is_file():
+            shutil.copyfile(out_file_path, self.model_dir / "alignments.txt")
 
     def get_direct_lexicon(self, include_special_tokens: bool = False) -> Lexicon:
         lexicon = Lexicon()
-        source: Iterable[str] = load_corpus(os.path.join(self.model_dir, "src.txt"))
-        target: Iterable[str] = load_corpus(os.path.join(self.model_dir, "trg.txt"))
+        source: Iterable[str] = load_corpus(self.model_dir / "src.txt")
+        target: Iterable[str] = load_corpus(self.model_dir / "trg.txt")
         alignments: Iterable[str] = filter(
-            lambda a: not a.startswith("#"), load_corpus(os.path.join(self.model_dir, "alignments.txt"))
+            lambda a: not a.startswith("#"), load_corpus(self.model_dir / "alignments.txt")
         )
 
         for src_str, trg_str, alignment_str in zip(source, target, alignments):
@@ -50,6 +50,6 @@ class ClearAligner(Aligner):
     def get_inverse_lexicon(self, include_special_tokens: bool = False) -> Lexicon:
         raise RuntimeError("The aligner does not have an inverse model.")
 
-    def extract_lexicon(self, out_file_path: str) -> None:
+    def extract_lexicon(self, out_file_path: Path) -> None:
         lexicon = self.get_direct_lexicon()
         lexicon.write(out_file_path)

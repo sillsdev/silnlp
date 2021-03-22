@@ -1,7 +1,6 @@
 import itertools
-import os
 import random
-from glob import glob
+from pathlib import Path
 from statistics import mean
 from typing import IO, Any, Dict, Iterable, List, Optional, Set, Tuple, Union
 
@@ -14,7 +13,7 @@ from ..common.corpus import (
     Term,
     exclude_books,
     filter_parallel_corpus,
-    get_corpus_path,
+    get_scripture_path,
     get_scripture_parallel_corpus,
     get_terms,
     get_terms_glosses_path,
@@ -24,20 +23,20 @@ from ..common.corpus import (
     split_parallel_corpus,
     write_corpus,
 )
-from ..common.environment import PT_PREPROCESSED_DIR
+from ..common.environment import MT_SCRIPTURE_DIR
 from ..common.utils import merge_dict
 from .config import Config, DataFileType
 from .utils import decode_sp_lines, encode_sp, encode_sp_lines
 
 
-def parse_data_file_path(data_file_path: str) -> Tuple[str, str]:
-    file_name = os.path.splitext(os.path.basename(data_file_path))[0]
+def parse_data_file_path(data_file_path: Path) -> Tuple[str, str]:
+    file_name = data_file_path.stem
     parts = file_name.split("-")
     return (parts[0], parts[1])
 
 
 class LangsDataFile:
-    def __init__(self, path: str, type: DataFileType):
+    def __init__(self, path: Path, type: DataFileType):
         self.path = path
         self.type = type
         self.iso, self.project = parse_data_file_path(path)
@@ -107,7 +106,7 @@ def parse_langs(langs: Iterable[Union[str, dict]]) -> List[LangsDataFile]:
             projects_str = lang[index + 1 :]
             for project in projects_str.split(","):
                 project = project.strip()
-                project_path = get_corpus_path(iso, project)
+                project_path = get_scripture_path(iso, project)
                 data_files.append(
                     LangsDataFile(project_path, DataFileType.TRAIN | DataFileType.TEST | DataFileType.VAL)
                 )
@@ -117,7 +116,7 @@ def parse_langs(langs: Iterable[Union[str, dict]]) -> List[LangsDataFile]:
             test_projects = parse_projects(lang.get("test"), default=train_projects)
             val_projects = parse_projects(lang.get("val"), default=train_projects)
             for project in train_projects | test_projects | val_projects:
-                file_path = get_corpus_path(iso, project)
+                file_path = get_scripture_path(iso, project)
                 file_type = DataFileType.NONE
                 if project in train_projects:
                     file_type |= DataFileType.TRAIN
@@ -131,9 +130,9 @@ def parse_langs(langs: Iterable[Union[str, dict]]) -> List[LangsDataFile]:
     return data_files
 
 
-def get_terms_files(files: List[LangsDataFile], other_isos: Set[str]) -> Tuple[List[LangsDataFile], Set[str]]:
+def get_terms_files(files: List[LangsDataFile], other_isos: Set[str]) -> Tuple[List[LangsDataFile], Set[Path]]:
     terms_files: List[LangsDataFile] = []
-    glosses_file_paths: Set[str] = set()
+    glosses_file_paths: Set[Path] = set()
     for file in files:
         if not file.is_train:
             continue
@@ -145,14 +144,14 @@ def get_terms_files(files: List[LangsDataFile], other_isos: Set[str]) -> Tuple[L
         if "en" in other_isos:
             list_name = get_terms_list(terms_path)
             glosses_path = get_terms_glosses_path(list_name)
-            if os.path.isfile(glosses_path):
+            if glosses_path.is_file():
                 glosses_file_paths.add(glosses_path)
 
     return (terms_files, glosses_file_paths)
 
 
 class LangsConfig(Config):
-    def __init__(self, exp_dir: str, config: dict) -> None:
+    def __init__(self, exp_dir: Path, config: dict) -> None:
         config = merge_dict(
             {
                 "data": {
@@ -179,8 +178,8 @@ class LangsConfig(Config):
         self.trg_projects: Set[str] = set(df.project for df in self.trg_files)
         self.src_terms_files, trg_glosses_file_paths = get_terms_files(self.src_files, trg_isos)
         self.trg_terms_files, src_glosses_file_paths = get_terms_files(self.trg_files, src_isos)
-        src_file_paths: Set[str] = set(df.path for df in itertools.chain(self.src_files, self.src_terms_files))
-        trg_file_paths: Set[str] = set(df.path for df in itertools.chain(self.trg_files, self.trg_terms_files))
+        src_file_paths: Set[Path] = set(df.path for df in itertools.chain(self.src_files, self.src_terms_files))
+        trg_file_paths: Set[Path] = set(df.path for df in itertools.chain(self.trg_files, self.trg_terms_files))
         if data_config["include_term_glosses"]:
             if "en" in src_isos:
                 src_file_paths.update(src_glosses_file_paths)
@@ -188,14 +187,14 @@ class LangsConfig(Config):
                 trg_file_paths.update(trg_glosses_file_paths)
         super().__init__(exp_dir, config, src_isos, trg_isos, src_file_paths, trg_file_paths)
 
-    def is_train_project(self, ref_file_path: str) -> bool:
+    def is_train_project(self, ref_file_path: Path) -> bool:
         trg_iso, trg_project = self._parse_ref_file_path(ref_file_path)
         for df in self.trg_files:
             if df.iso == trg_iso and df.project == trg_project and df.is_train:
                 return True
         return False
 
-    def is_ref_project(self, ref_projects: Set[str], ref_file_path: str) -> bool:
+    def is_ref_project(self, ref_projects: Set[str], ref_file_path: Path) -> bool:
         _, trg_project = self._parse_ref_file_path(ref_file_path)
         return trg_project in ref_projects
 
@@ -218,7 +217,7 @@ class LangsConfig(Config):
         pair_test_indices: Dict[Tuple[str, str], Set[int]] = {}
         terms: Optional[pd.DataFrame] = None
 
-        vref_file_path = os.path.join(PT_PREPROCESSED_DIR, "data", "vref.txt")
+        vref_file_path = MT_SCRIPTURE_DIR / "vref.txt"
         corpus_books = get_books(self.data.get("corpus_books", []))
         test_books = get_books(self.data.get("test_books", []))
 
@@ -227,7 +226,7 @@ class LangsConfig(Config):
         stats_file: Optional[IO] = None
         try:
             if stats:
-                stats_file = open(os.path.join(self.exp_dir, "corpus-stats.csv"), "w", encoding="utf-8")
+                stats_file = open(self.exp_dir / "corpus-stats.csv", "w", encoding="utf-8")
                 stats_file.write("src_project,trg_project,count,align_score,filtered_count,filtered_align_score\n")
 
             for src_file in self.src_files:
@@ -251,9 +250,7 @@ class LangsConfig(Config):
                     if trg_file.is_train and (stats_file is not None or score_threshold > 0):
                         add_alignment_scores(cur_train)
                         if stats_file is not None:
-                            cur_train.to_csv(
-                                os.path.join(self.exp_dir, f"{src_file.project}_{trg_file.project}.csv"), index=False
-                            )
+                            cur_train.to_csv(self.exp_dir / f"{src_file.project}_{trg_file.project}.csv", index=False)
 
                     if trg_file.is_test:
                         if disjoint_test and test_indices is None:
@@ -396,34 +393,34 @@ class LangsConfig(Config):
         if terms is not None:
             train = pd.concat([train, terms], ignore_index=True)
 
-        write_corpus(os.path.join(self.exp_dir, "train.src.txt"), encode_sp_lines(src_spp, train["source"]))
-        write_corpus(os.path.join(self.exp_dir, "train.trg.txt"), encode_sp_lines(trg_spp, train["target"]))
+        write_corpus(self.exp_dir / "train.src.txt", encode_sp_lines(src_spp, train["source"]))
+        write_corpus(self.exp_dir / "train.trg.txt", encode_sp_lines(trg_spp, train["target"]))
 
         print("Writing validation data set...")
         if len(val) > 0:
             val_src = itertools.chain.from_iterable(map(lambda pair_val: pair_val["source"], val.values()))
-            write_corpus(os.path.join(self.exp_dir, "val.src.txt"), encode_sp_lines(src_spp, val_src))
+            write_corpus(self.exp_dir / "val.src.txt", encode_sp_lines(src_spp, val_src))
             self._write_val_corpora(trg_spp, val)
 
         print("Writing test data set...")
-        for old_file_path in glob(os.path.join(self.exp_dir, "test.*.txt")):
-            os.remove(old_file_path)
+        for old_file_path in self.exp_dir.glob("test.*.txt"):
+            old_file_path.unlink()
 
         for (src_iso, trg_iso), pair_test in test.items():
             prefix = "test" if len(test) == 1 else f"test.{src_iso}.{trg_iso}"
-            write_corpus(os.path.join(self.exp_dir, f"{prefix}.vref.txt"), map(lambda vr: str(vr), pair_test["vref"]))
-            write_corpus(os.path.join(self.exp_dir, f"{prefix}.src.txt"), encode_sp_lines(src_spp, pair_test["source"]))
+            write_corpus(self.exp_dir / f"{prefix}.vref.txt", map(lambda vr: str(vr), pair_test["vref"]))
+            write_corpus(self.exp_dir / f"{prefix}.src.txt", encode_sp_lines(src_spp, pair_test["source"]))
 
             columns: List[str] = list(filter(lambda c: c.startswith("target"), pair_test.columns))
             for column in columns:
                 project = column[len("target_") :]
                 trg_suffix = "" if len(columns) == 1 else f".{project}"
                 write_corpus(
-                    os.path.join(self.exp_dir, f"{prefix}.trg{trg_suffix}.txt"),
+                    self.exp_dir / f"{prefix}.trg{trg_suffix}.txt",
                     encode_sp_lines(trg_spp, pair_test[column]),
                 )
                 write_corpus(
-                    os.path.join(self.exp_dir, f"{prefix}.trg.detok{trg_suffix}.txt"),
+                    self.exp_dir / f"{prefix}.trg.detok{trg_suffix}.txt",
                     decode_sp_lines(encode_sp_lines(trg_spp, pair_test[column])),
                 )
         print("Preprocessing completed")
@@ -504,14 +501,12 @@ class LangsConfig(Config):
                     if self.root["eval"]["multi_ref_eval"]:
                         for ci in range(len(columns)):
                             if len(ref_files) == ci:
-                                ref_files.append(
-                                    open(os.path.join(self.exp_dir, f"val.trg.txt.{ci}"), "w", encoding="utf-8")
-                                )
+                                ref_files.append(open(self.exp_dir / f"val.trg.txt.{ci}", "w", encoding="utf-8"))
                             col = columns[ci]
                             ref_files[ci].write(encode_sp(trg_spp, pair_val.loc[index, col].strip()) + "\n")
                     else:
                         if len(ref_files) == 0:
-                            ref_files.append(open(os.path.join(self.exp_dir, "val.trg.txt"), "w", encoding="utf-8"))
+                            ref_files.append(open(self.exp_dir / "val.trg.txt", "w", encoding="utf-8"))
                         columns_with_data: List[str] = list(
                             filter(lambda c: pair_val.loc[index, c].strip() != "", columns)
                         )
@@ -522,8 +517,8 @@ class LangsConfig(Config):
             for ref_file in ref_files:
                 ref_file.close()
 
-    def _parse_ref_file_path(self, ref_file_path: str) -> Tuple[str, str]:
-        parts = os.path.basename(ref_file_path).split(".")
+    def _parse_ref_file_path(self, ref_file_path: Path) -> Tuple[str, str]:
+        parts = ref_file_path.name.split(".")
         if len(parts) == 5:
             return self.default_trg_iso, parts[3]
         return parts[2], parts[5]

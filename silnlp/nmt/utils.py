@@ -1,6 +1,7 @@
 import os
-from typing import IO, Iterable, Iterator, List, Optional, Tuple, cast
 import re
+from pathlib import Path
+from typing import IO, Iterable, Iterator, List, Optional, Tuple, cast
 
 import sacrebleu
 import sentencepiece as sp
@@ -35,14 +36,14 @@ def encode_sp_lines(spp: Optional[sp.SentencePieceProcessor], lines: Iterable[st
     return map(lambda l: encode_sp(spp, l), lines)
 
 
-def get_best_model_dir(model_dir: str) -> Tuple[str, int]:
-    export_path = os.path.join(model_dir, "export")
-    models = os.listdir(export_path)
-    best_model_dir: Optional[str] = None
+def get_best_model_dir(model_dir: Path) -> Tuple[Path, int]:
+    export_path = model_dir / "export"
+    models = list(d.name for d in export_path.iterdir())
+    best_model_dir: Optional[Path] = None
     step = 0
     for model in sorted(models, key=lambda m: int(m), reverse=True):
-        path = os.path.join(export_path, model)
-        if os.path.isdir(path):
+        path = export_path / model
+        if path.is_dir():
             best_model_dir = path
             step = int(model)
             break
@@ -51,12 +52,12 @@ def get_best_model_dir(model_dir: str) -> Tuple[str, int]:
     return best_model_dir, step
 
 
-def get_last_checkpoint(model_dir: str) -> Tuple[str, int]:
-    with open(os.path.join(model_dir, "checkpoint"), "r", encoding="utf-8") as file:
+def get_last_checkpoint(model_dir: Path) -> Tuple[Path, int]:
+    with open(model_dir / "checkpoint", "r", encoding="utf-8") as file:
         checkpoint_config = yaml.safe_load(file)
-        checkpoint_prefix: str = checkpoint_config["model_checkpoint_path"]
-        parts = os.path.basename(checkpoint_prefix).split("-")
-        checkpoint_path = os.path.join(model_dir, checkpoint_prefix)
+        checkpoint_prefix = Path(checkpoint_config["model_checkpoint_path"])
+        parts = checkpoint_prefix.name.split("-")
+        checkpoint_path = model_dir / checkpoint_prefix
         step = int(parts[-1])
         return (checkpoint_path, step)
 

@@ -1,5 +1,5 @@
-import os
 import tempfile
+from pathlib import Path
 from statistics import mean
 from typing import List, Set
 
@@ -11,12 +11,16 @@ from .lexicon import Lexicon
 from .machine_aligner import FastAlign
 
 
-def get_align_exp_dir(exp_name: str) -> str:
-    return os.path.join(ALIGN_EXPERIMENTS_DIR, exp_name)
+def get_align_exp_dir(exp_name: str) -> Path:
+    return ALIGN_EXPERIMENTS_DIR / exp_name
 
 
 def compute_alignment_score(
-    direct_lexicon: Lexicon, inverse_lexicon: Lexicon, src_sentence: str, trg_sentence: str, alignment: str,
+    direct_lexicon: Lexicon,
+    inverse_lexicon: Lexicon,
+    src_sentence: str,
+    trg_sentence: str,
+    alignment: str,
 ) -> float:
     pairs = alignment.split(" ")
     src_words = src_sentence.split(" ")
@@ -49,25 +53,26 @@ def compute_alignment_score(
 
 def add_alignment_scores(corpus: pd.DataFrame) -> None:
     with tempfile.TemporaryDirectory() as td:
-        src_path = os.path.join(td, "src-input.txt")
-        trg_path = os.path.join(td, "trg-input.txt")
+        src_path = Path(td) / "src-input.txt"
+        trg_path = Path(td) / "trg-input.txt"
         write_corpus(src_path, corpus["source"])
         write_corpus(trg_path, corpus["target"])
         scores = compute_alignment_scores(src_path, trg_path)
         corpus["score"] = scores
 
 
-def compute_alignment_scores(src_input_path: str, trg_input_path: str) -> List[float]:
+def compute_alignment_scores(src_input_path: Path, trg_input_path: Path) -> List[float]:
     with tempfile.TemporaryDirectory() as td:
-        src_tok_output_path = os.path.join(td, "tokenize-src-output.txt")
-        trg_tok_output_path = os.path.join(td, "tokenize-trg-output.txt")
+        temp_dir = Path(td)
+        src_tok_output_path = temp_dir / "tokenize-src-output.txt"
+        trg_tok_output_path = temp_dir / "tokenize-trg-output.txt"
 
         tokenize_corpus(src_input_path, src_tok_output_path)
         tokenize_corpus(trg_input_path, trg_tok_output_path)
 
-        fast_align = FastAlign(td)
+        fast_align = FastAlign(temp_dir)
 
-        sym_align_path = os.path.join(td, "sym-align.txt")
+        sym_align_path = temp_dir / "sym-align.txt"
         fast_align.train(src_tok_output_path, trg_tok_output_path)
         fast_align.align(sym_align_path)
 
