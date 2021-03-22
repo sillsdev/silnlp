@@ -12,20 +12,13 @@ import sentencepiece as sp
 from .. import sfm
 from ..common.canon import book_id_to_number
 from ..common.corpus import load_corpus, write_corpus
-from ..common.environment import PT_UNZIPPED_DIR
+from ..common.paratext import get_book_path
 from ..common.utils import get_git_revision_hash
 from ..sfm import usfm
 from .config import create_runner, load_config
+from .langs_config import LangsConfig
 from .runner import SILRunner
-from .utils import (
-    decode_sp,
-    decode_sp_lines,
-    encode_sp,
-    encode_sp_lines,
-    get_best_model_dir,
-    get_last_checkpoint,
-    parse_data_file_path,
-)
+from .utils import decode_sp, decode_sp_lines, encode_sp, encode_sp_lines, get_best_model_dir, get_last_checkpoint
 
 
 def insert_tag(text: str, trg_iso: Optional[str]) -> str:
@@ -98,7 +91,7 @@ def get_char_style_text(elem: sfm.Element) -> str:
             text += get_char_style_text(child)
         elif isinstance(child, sfm.Text):
             text += str(child)
-    return child
+    return text
 
 
 def get_style(elem: sfm.Element) -> str:
@@ -143,9 +136,7 @@ def infer_book(
     output_path: str,
     trg_iso: Optional[str],
 ) -> None:
-    book_num = book_id_to_number(book)
-    book_filename = f"{book_num}{book}{src_project}.SFM"
-    book_path = os.path.join(PT_UNZIPPED_DIR, src_project, book_filename)
+    book_path = get_book_path(src_project, book)
     with open(book_path, mode="r", encoding="utf-8") as book_file:
         doc = list(usfm.parser(book_file))
 
@@ -231,15 +222,29 @@ def main() -> None:
         if trg_iso is None:
             trg_iso = config.default_trg_iso
 
-    if args.book is not None:
-        if args.output_usfm is None:
-            raise RuntimeError("An output file must be specified.")
-
+    book: Optional[str] = args.book
+    if book is not None:
+        if not isinstance(config, LangsConfig):
+            raise RuntimeError("The specified experiment has an unsupported configuration.")
         src_project: Optional[str] = args.src_project
         if src_project is None:
-            src_file_path = next(iter(config.src_file_paths))
-            _, src_project = parse_data_file_path(src_file_path)
-        infer_book(runner, src_spp, src_project, args.book, checkpoint_path, args.output_usfm, trg_iso)
+            if len(config.src_projects) > 1:
+                raise RuntimeError("A source project must be specified.")
+            src_project = next(iter(config.src_projects))
+
+        step_str = "avg" if step == -1 else str(step)
+        default_output_dir = os.path.join(config.exp_dir, "infer", step_str)
+        output_path: Optional[str] = args.output_usfm
+        if output_path is None:
+            book_num = book_id_to_number(book)
+            output_path = os.path.join(default_output_dir, f"{book_num:02}{book}.SFM")
+        elif os.path.basename(output_path) == output_path:
+            output_path = os.path.join(default_output_dir, output_path)
+
+        output_dir = os.path.dirname(output_path)
+        os.makedirs(output_dir, exist_ok=True)
+
+        infer_book(runner, src_spp, src_project, book, checkpoint_path, output_path, trg_iso)
     elif args.src_prefix is not None:
         if args.trg_prefix is None:
             raise RuntimeError("A target file prefix must be specified.")

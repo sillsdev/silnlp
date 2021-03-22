@@ -8,7 +8,7 @@ import seaborn as sns
 
 from ..common.environment import PT_PREPROCESSED_DIR
 from .config import load_config
-from .utils import parse_data_file_path
+from .langs_config import LangsConfig
 
 
 def get_corpus_path(project: str) -> str:
@@ -89,27 +89,22 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Calculates alphabet similarity between text corpora in a multilingual data set"
     )
-    parser.add_argument("task", help="Task name")
+    parser.add_argument("experiment", help="Experiment name")
     args = parser.parse_args()
 
-    task_name = args.task
-    config = load_config(task_name)
+    exp_name = args.experiment
+    config = load_config(exp_name)
 
-    src_projects: List[str] = []
-    trg_projects: List[str] = []
-    for src_file_path in config.src_file_paths:
-        iso, project = parse_data_file_path(src_file_path)
-        src_projects.append(f"{iso}-{project}")
-    for trg_file_path in config.trg_file_paths:
-        iso, project = parse_data_file_path(trg_file_path)
-        trg_projects.append(f"{iso}-{project}")
+    if not isinstance(config, LangsConfig):
+        raise RuntimeError("The specified experiment has an unsupported configuration.")
 
-    src_projects.sort()
-    trg_projects.sort()
+    projects: Set[str] = set()
+    for src_file in config.src_files:
+        projects.add(f"{src_file.iso}-{src_file.project}")
+    for trg_file in config.trg_files:
+        projects.add(f"{trg_file.iso}-{trg_file.project}")
 
-    all_projects: Set[str] = set()
-    all_projects.update(src_projects, trg_projects)
-    computeSimilarity(list(all_projects))
+    computeSimilarity(list(projects))
 
 
 if __name__ == "__main__":

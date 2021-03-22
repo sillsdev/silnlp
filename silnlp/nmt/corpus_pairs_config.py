@@ -7,7 +7,13 @@ from ..common.environment import PT_PREPROCESSED_DIR
 from ..common.utils import is_set
 from .config import Config, DataFileType
 from .noise import DeleteRandomToken, NoiseMethod, RandomTokenPermutation, ReplaceRandomToken
-from .utils import decode_sp, encode_sp, parse_data_file_path
+from .utils import decode_sp, encode_sp
+
+
+def parse_iso(file_path: str) -> str:
+    file_name = os.path.basename(file_path)
+    index = file_name.index("-")
+    return file_name[:index]
 
 
 class CorpusPair:
@@ -22,9 +28,9 @@ class CorpusPair:
         val_size: Optional[Union[float, int]],
     ) -> None:
         self.src_file_path = src_file_path
-        self.src_iso, _ = parse_data_file_path(src_file_path)
+        self.src_iso = parse_iso(src_file_path)
         self.trg_file_path = trg_file_path
-        self.trg_iso, _ = parse_data_file_path(trg_file_path)
+        self.trg_iso = parse_iso(trg_file_path)
         self.type = type
         self.src_noise = src_noise
         self.size = size

@@ -27,7 +27,13 @@ from ..common.corpus import (
 from ..common.environment import PT_PREPROCESSED_DIR
 from ..common.utils import merge_dict
 from .config import Config, DataFileType
-from .utils import decode_sp_lines, encode_sp, encode_sp_lines, parse_data_file_path
+from .utils import decode_sp_lines, encode_sp, encode_sp_lines
+
+
+def parse_data_file_path(data_file_path: str) -> Tuple[str, str]:
+    file_name = os.path.splitext(os.path.basename(data_file_path))[0]
+    parts = file_name.split("-")
+    return (parts[0], parts[1])
 
 
 class LangsDataFile:
@@ -169,6 +175,8 @@ class LangsConfig(Config):
         self.trg_files = parse_langs(data_config["trg_langs"])
         src_isos: Set[str] = set(df.iso for df in self.src_files)
         trg_isos: Set[str] = set(df.iso for df in self.trg_files)
+        self.src_projects: Set[str] = set(df.project for df in self.src_files)
+        self.trg_projects: Set[str] = set(df.project for df in self.trg_files)
         self.src_terms_files, trg_glosses_file_paths = get_terms_files(self.src_files, trg_isos)
         self.trg_terms_files, src_glosses_file_paths = get_terms_files(self.trg_files, src_isos)
         src_file_paths: Set[str] = set(df.path for df in itertools.chain(self.src_files, self.src_terms_files))

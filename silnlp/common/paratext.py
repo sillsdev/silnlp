@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 from xml.etree import ElementTree
 from xml.sax.saxutils import escape
 
+from .canon import book_id_to_number
 from .corpus import get_terms_glosses_path, get_terms_metadata_path, load_corpus
 from .environment import PT_BIBLICAL_TERMS_LISTS_DIR, PT_PREPROCESSED_DIR, PT_UNZIPPED_DIR
 from .utils import get_repo_dir
@@ -181,3 +182,27 @@ def extract_term_renderings(project: str) -> None:
             if os.path.isfile(terms_glosses_path):
                 os.remove(terms_glosses_path)
     print(f"# of Terms written: {count}")
+
+
+def get_book_path(project: str, book: str) -> str:
+    project_dir = get_project_dir(project)
+    settings_tree = ElementTree.parse(os.path.join(project_dir, "Settings.xml"))
+    naming_elem = settings_tree.find("Naming")
+    assert naming_elem is not None
+
+    pre_part = naming_elem.get("PrePart", "")
+    post_part = naming_elem.get("PostPart", "")
+    book_name_form = naming_elem.get("BookNameForm")
+    assert book_name_form is not None
+
+    book_num = book_id_to_number(book)
+    if book_name_form == "41MAT":
+        book_name = f"{book_num:02}{book}"
+    elif book_name_form == "41":
+        book_name = f"{book_num:02}"
+    else:
+        book_name = book
+
+    book_filename = f"{pre_part}{book_name}{post_part}"
+
+    return os.path.join(PT_UNZIPPED_DIR, project, book_filename)

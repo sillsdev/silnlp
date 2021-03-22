@@ -61,12 +61,6 @@ def get_last_checkpoint(model_dir: str) -> Tuple[str, int]:
         return (checkpoint_path, step)
 
 
-def parse_data_file_path(data_file_path: str) -> Tuple[str, str]:
-    file_name = os.path.splitext(os.path.basename(data_file_path))[0]
-    index = file_name.index("-")
-    return (file_name[:index], file_name[index + 1 :])
-
-
 @register_scorer(name="bleu_sp")
 class BLEUSentencepieceScorer(Scorer):
     def __init__(self):
