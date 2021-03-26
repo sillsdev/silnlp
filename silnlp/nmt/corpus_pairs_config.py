@@ -1,7 +1,10 @@
 import random
 from pathlib import Path
-from typing import List, Optional, Set, Type, Union
+from typing import IO, Iterable, List, Optional, Set, Type, Union
 
+import sentencepiece as sp
+
+from ..common.corpus import get_scripture_parallel_corpus
 from ..common.environment import MT_CORPORA_DIR, MT_SCRIPTURE_DIR
 from ..common.utils import DeleteRandomToken, NoiseMethod, RandomTokenPermutation, ReplaceRandomToken, is_set
 from .config import Config, DataFileType
@@ -46,6 +49,10 @@ class CorpusPair:
     @property
     def is_val(self):
         return is_set(self.type, DataFileType.VAL)
+
+    @property
+    def is_scripture(self):
+        return self.src_file_path.parent == MT_SCRIPTURE_DIR
 
 
 def create_noise_methods(params: List[dict]) -> List[NoiseMethod]:
@@ -148,7 +155,7 @@ class CorpusPairsConfig(Config):
         super().__init__(exp_dir, config, src_isos, trg_isos, src_file_paths, trg_file_paths)
 
     def _build_corpora(self, stats: bool) -> None:
-        test_iso_pairs = set((p.src_iso, p.trg_iso) for p in self.corpus_pairs if p.is_test)
+        test_iso_pairs_count = len(set((p.src_iso, p.trg_iso) for p in self.corpus_pairs if p.is_test))
         src_spp, trg_spp = self.create_sp_processors()
         print("Writing data sets...")
         for old_file_path in self.exp_dir.glob("test.*.txt"):
@@ -161,63 +168,149 @@ class CorpusPairsConfig(Config):
             self.exp_dir / "val.trg.txt", "w", encoding="utf-8", newline="\n"
         ) as val_trg_file:
             for pair in self.corpus_pairs:
-                corpus_size = get_parallel_corpus_size(pair.src_file_path, pair.trg_file_path)
+                if pair.is_scripture:
+                    self._write_scripture_data_sets(
+                        src_spp,
+                        trg_spp,
+                        train_src_file,
+                        train_trg_file,
+                        val_src_file,
+                        val_trg_file,
+                        test_iso_pairs_count,
+                        pair,
+                    )
+                else:
+                    self._write_standard_data_sets(
+                        src_spp,
+                        trg_spp,
+                        train_src_file,
+                        train_trg_file,
+                        val_src_file,
+                        val_trg_file,
+                        test_iso_pairs_count,
+                        pair,
+                    )
 
-                test_indices: Optional[Set[int]] = set()
-                if pair.is_test:
-                    test_size = pair.size if pair.test_size is None else pair.test_size
-                    test_indices = split_corpus(corpus_size, test_size)
+    def _write_scripture_data_sets(
+        self,
+        src_spp: sp.SentencePieceProcessor,
+        trg_spp: sp.SentencePieceProcessor,
+        train_src_file: IO,
+        train_trg_file: IO,
+        val_src_file: IO,
+        val_trg_file: IO,
+        test_iso_pairs_count: int,
+        pair: CorpusPair,
+    ) -> None:
+        corpus = get_scripture_parallel_corpus(pair.src_file_path, pair.trg_file_path)
+        self._write_data_sets(
+            src_spp,
+            trg_spp,
+            train_src_file,
+            train_trg_file,
+            val_src_file,
+            val_trg_file,
+            test_iso_pairs_count,
+            pair,
+            len(corpus),
+            corpus["source"],
+            corpus["target"],
+        )
 
-                val_indices: Optional[Set[int]] = set()
-                if pair.is_val and test_indices is not None:
-                    val_size = pair.size if pair.val_size is None else pair.val_size
-                    val_indices = split_corpus(corpus_size, val_size, test_indices)
+    def _write_standard_data_sets(
+        self,
+        src_spp: sp.SentencePieceProcessor,
+        trg_spp: sp.SentencePieceProcessor,
+        train_src_file: IO,
+        train_trg_file: IO,
+        val_src_file: IO,
+        val_trg_file: IO,
+        test_iso_pairs_count: int,
+        pair: CorpusPair,
+    ) -> None:
+        corpus_size = get_parallel_corpus_size(pair.src_file_path, pair.trg_file_path)
+        with open(pair.src_file_path, "r", encoding="utf-8") as input_src_file, open(
+            pair.trg_file_path, "r", encoding="utf-8"
+        ) as input_trg_file:
+            self._write_data_sets(
+                src_spp,
+                trg_spp,
+                train_src_file,
+                train_trg_file,
+                val_src_file,
+                val_trg_file,
+                test_iso_pairs_count,
+                pair,
+                corpus_size,
+                input_src_file,
+                input_trg_file,
+            )
 
-                train_indices: Optional[Set[int]] = set()
-                if pair.is_train and test_indices is not None and val_indices is not None:
-                    train_size = pair.size
-                    train_indices = split_corpus(corpus_size, train_size, test_indices | val_indices)
+    def _write_data_sets(
+        self,
+        src_spp: sp.SentencePieceProcessor,
+        trg_spp: sp.SentencePieceProcessor,
+        train_src_file: IO,
+        train_trg_file: IO,
+        val_src_file: IO,
+        val_trg_file: IO,
+        test_iso_pairs_count: int,
+        pair: CorpusPair,
+        corpus_size: int,
+        src_corpus: Iterable[str],
+        trg_corpus: Iterable[str],
+    ):
+        test_indices: Optional[Set[int]] = set()
+        if pair.is_test:
+            test_size = pair.size if pair.test_size is None else pair.test_size
+            test_indices = split_corpus(corpus_size, test_size)
 
-                test_prefix = "test" if len(test_iso_pairs) == 1 else f"test.{pair.src_iso}.{pair.trg_iso}"
-                with open(pair.src_file_path, "r", encoding="utf-8") as input_src_file, open(
-                    pair.trg_file_path, "r", encoding="utf-8"
-                ) as input_trg_file, open(
-                    self.exp_dir / f"{test_prefix}.src.txt", "a", encoding="utf-8", newline="\n"
-                ) as test_src_file, open(
-                    self.exp_dir / f"{test_prefix}.trg.detok.txt", "a", encoding="utf-8", newline="\n"
-                ) as test_trg_file:
-                    index = 0
-                    for src_line, trg_line in zip(input_src_file, input_trg_file):
-                        src_line = src_line.strip()
-                        trg_line = trg_line.strip()
-                        if len(src_line) == 0 or len(trg_line) == 0:
-                            continue
+        val_indices: Optional[Set[int]] = set()
+        if pair.is_val and test_indices is not None:
+            val_size = pair.size if pair.val_size is None else pair.val_size
+            val_indices = split_corpus(corpus_size, val_size, test_indices)
 
-                        src_sentence = self._insert_trg_tag(pair.trg_iso, src_line)
-                        trg_sentence = trg_line
+        train_indices: Optional[Set[int]] = set()
+        if pair.is_train and test_indices is not None and val_indices is not None:
+            train_size = pair.size
+            train_indices = split_corpus(corpus_size, train_size, test_indices | val_indices)
 
-                        mirror_src_sentence = self._insert_trg_tag(pair.src_iso, trg_line)
-                        mirror_trg_sentence = src_line
-                        mirror_src_spp = trg_spp
-                        mirror_trg_spp = src_spp
+        test_prefix = "test" if test_iso_pairs_count == 1 else f"test.{pair.src_iso}.{pair.trg_iso}"
+        with open(self.exp_dir / f"{test_prefix}.src.txt", "a", encoding="utf-8", newline="\n") as test_src_file, open(
+            self.exp_dir / f"{test_prefix}.trg.detok.txt", "a", encoding="utf-8", newline="\n"
+        ) as test_trg_file:
+            index = 0
+            for src_line, trg_line in zip(src_corpus, trg_corpus):
+                src_line = src_line.strip()
+                trg_line = trg_line.strip()
+                if len(src_line) == 0 or len(trg_line) == 0:
+                    continue
 
-                        if pair.is_test and (test_indices is None or index in test_indices):
-                            test_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
-                            test_trg_file.write(decode_sp(encode_sp(trg_spp, trg_sentence)) + "\n")
-                        elif pair.is_val and (val_indices is None or index in val_indices):
-                            val_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
-                            val_trg_file.write(encode_sp(trg_spp, trg_sentence) + "\n")
-                            if self.mirror:
-                                val_src_file.write(encode_sp(mirror_src_spp, mirror_src_sentence) + "\n")
-                                val_trg_file.write(encode_sp(mirror_trg_spp, mirror_trg_sentence) + "\n")
-                        elif pair.is_train and (train_indices is None or index in train_indices):
-                            train_src_file.write(encode_sp(src_spp, self._noise(pair.src_noise, src_sentence)) + "\n")
-                            train_trg_file.write(encode_sp(trg_spp, trg_sentence) + "\n")
-                            if self.mirror:
-                                train_src_file.write(encode_sp(mirror_src_spp, mirror_src_sentence) + "\n")
-                                train_trg_file.write(encode_sp(mirror_trg_spp, mirror_trg_sentence) + "\n")
+                src_sentence = self._insert_trg_tag(pair.trg_iso, src_line)
+                trg_sentence = trg_line
 
-                        index += 1
+                mirror_src_sentence = self._insert_trg_tag(pair.src_iso, trg_line)
+                mirror_trg_sentence = src_line
+                mirror_src_spp = trg_spp
+                mirror_trg_spp = src_spp
+
+                if pair.is_test and (test_indices is None or index in test_indices):
+                    test_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
+                    test_trg_file.write(decode_sp(encode_sp(trg_spp, trg_sentence)) + "\n")
+                elif pair.is_val and (val_indices is None or index in val_indices):
+                    val_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
+                    val_trg_file.write(encode_sp(trg_spp, trg_sentence) + "\n")
+                    if self.mirror:
+                        val_src_file.write(encode_sp(mirror_src_spp, mirror_src_sentence) + "\n")
+                        val_trg_file.write(encode_sp(mirror_trg_spp, mirror_trg_sentence) + "\n")
+                elif pair.is_train and (train_indices is None or index in train_indices):
+                    train_src_file.write(encode_sp(src_spp, self._noise(pair.src_noise, src_sentence)) + "\n")
+                    train_trg_file.write(encode_sp(trg_spp, trg_sentence) + "\n")
+                    if self.mirror:
+                        train_src_file.write(encode_sp(mirror_src_spp, mirror_src_sentence) + "\n")
+                        train_trg_file.write(encode_sp(mirror_trg_spp, mirror_trg_sentence) + "\n")
+
+                index += 1
 
     def _insert_trg_tag(self, trg_iso: str, src_sentence: str) -> str:
         if self.write_trg_tag:

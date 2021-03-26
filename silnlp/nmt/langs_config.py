@@ -23,7 +23,6 @@ from ..common.corpus import (
     split_parallel_corpus,
     write_corpus,
 )
-from ..common.environment import MT_SCRIPTURE_DIR
 from ..common.utils import merge_dict
 from .config import Config, DataFileType
 from .utils import decode_sp_lines, encode_sp, encode_sp_lines
@@ -217,7 +216,6 @@ class LangsConfig(Config):
         pair_test_indices: Dict[Tuple[str, str], Set[int]] = {}
         terms: Optional[pd.DataFrame] = None
 
-        vref_file_path = MT_SCRIPTURE_DIR / "vref.txt"
         corpus_books = get_books(self.data.get("corpus_books", []))
         test_books = get_books(self.data.get("test_books", []))
 
@@ -236,7 +234,7 @@ class LangsConfig(Config):
                     ) and src_file.iso == trg_file.iso:
                         continue
 
-                    corpus = get_scripture_parallel_corpus(vref_file_path, src_file.path, trg_file.path)
+                    corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path)
                     if len(corpus_books) > 0:
                         cur_train = include_books(corpus, corpus_books)
                         if len(corpus_books.intersection(test_books)) > 0:

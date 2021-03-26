@@ -40,12 +40,12 @@ def tokenize_corpus(input_path: Path, output_path: Path) -> None:
     subprocess.run(args, stdout=subprocess.DEVNULL, cwd=get_repo_dir())
 
 
-def get_scripture_parallel_corpus(vref_file_path: Path, src_file_path: Path, trg_file_path: Path) -> pd.DataFrame:
+def get_scripture_parallel_corpus(src_file_path: Path, trg_file_path: Path) -> pd.DataFrame:
     vrefs: List[VerseRef] = []
     src_sentences: List[str] = []
     trg_sentences: List[str] = []
     indices: List[int] = []
-    with open(vref_file_path, "r", encoding="utf-8") as vref_file, open(
+    with open(MT_SCRIPTURE_DIR / "vref.txt", "r", encoding="utf-8") as vref_file, open(
         src_file_path, "r", encoding="utf-8"
     ) as src_file, open(trg_file_path, "r", encoding="utf-8") as trg_file:
         index = 0
