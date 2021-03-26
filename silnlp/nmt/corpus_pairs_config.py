@@ -157,7 +157,6 @@ class CorpusPairsConfig(Config):
     def _build_corpora(self, stats: bool) -> None:
         test_iso_pairs_count = len(set((p.src_iso, p.trg_iso) for p in self.corpus_pairs if p.is_test))
         src_spp, trg_spp = self.create_sp_processors()
-        print("Writing data sets...")
         for old_file_path in self.exp_dir.glob("test.*.txt"):
             old_file_path.unlink()
         with open(self.exp_dir / "train.src.txt", "w", encoding="utf-8", newline="\n") as train_src_file, open(
@@ -260,6 +259,7 @@ class CorpusPairsConfig(Config):
         src_corpus: Iterable[str],
         trg_corpus: Iterable[str],
     ):
+        print(f"Writing {pair.src_file_path.stem} -> {pair.trg_file_path.stem}...")
         test_indices: Optional[Set[int]] = set()
         if pair.is_test:
             test_size = pair.size if pair.test_size is None else pair.test_size
@@ -311,6 +311,9 @@ class CorpusPairsConfig(Config):
                         train_trg_file.write(encode_sp(mirror_trg_spp, mirror_trg_sentence) + "\n")
 
                 index += 1
+        print(f"- train size: {corpus_size if train_indices is None else len(train_indices)}")
+        print(f"- val size: {corpus_size if val_indices is None else len(val_indices)}")
+        print(f"- test size: {corpus_size if test_indices is None else len(test_indices)}")
 
     def _insert_trg_tag(self, trg_iso: str, src_sentence: str) -> str:
         if self.write_trg_tag:
