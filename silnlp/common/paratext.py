@@ -76,9 +76,26 @@ def escape_id(id: str) -> str:
     return escape(id).replace("\n", "&#xA;")
 
 
+def strip_parens(term_str: str) -> str:
+    parens: int = 0
+    end: int = -1
+    for i in reversed(range(len(term_str))):
+        c = term_str[i]
+        if c == ")":
+            if parens == 0:
+                end = i + 1
+            parens += 1
+        elif c == "(":
+            parens -= 1
+            if parens == 0:
+                term_str = term_str[:i] + term_str[end:]
+                end = -1
+    return term_str
+
+
 def clean_term(term_str: str) -> str:
     term_str = term_str.strip()
-    term_str = re.sub(r"\(.*?\)", "", term_str)
+    term_str = strip_parens(term_str)
     return " ".join(term_str.split())
 
 
