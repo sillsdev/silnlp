@@ -123,7 +123,10 @@ def filter_parallel_corpus(corpus: pd.DataFrame, score_threshold: float) -> pd.D
 
 
 def get_scripture_path(iso: str, project: str) -> Path:
-    return MT_SCRIPTURE_DIR / f"{iso}-{project}.txt"
+    scripture_file = MT_SCRIPTURE_DIR / f"{iso}-{project}.txt"
+    if not scripture_file.exists():
+        raise RuntimeError(f"Can't find the Scripture file: '{scripture_file}'")
+    return scripture_file
 
 
 def include_books(corpus: pd.DataFrame, books: Set[int]) -> pd.DataFrame:
@@ -135,11 +138,17 @@ def exclude_books(corpus: pd.DataFrame, books: Set[int]) -> pd.DataFrame:
 
 
 def get_terms_metadata_path(list_name: str) -> Path:
-    return MT_TERMS_DIR / f"{list_name}-metadata.txt"
+    terms_dir = MT_TERMS_DIR / f"{list_name}-metadata.txt"
+    if not terms_dir.exists():
+        print(f"\nNo Terms folder found in: '{terms_dir}'\n")
+    return terms_dir
 
 
 def get_terms_glosses_path(list_name: str) -> Path:
-    return MT_TERMS_DIR / f"en-{list_name}-glosses.txt"
+    terms_file = MT_TERMS_DIR / f"en-{list_name}-glosses.txt"
+    if not terms_file.exists():
+        print(f"\nNo Terms file found in: '{terms_file}'\n")
+    return terms_file
 
 
 def get_terms_renderings_path(iso: str, project: str) -> Optional[Path]:

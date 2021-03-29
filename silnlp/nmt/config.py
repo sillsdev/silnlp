@@ -557,9 +557,12 @@ def create_runner(
 
 def load_config(exp_name: str) -> Config:
     exp_dir = get_mt_exp_dir(exp_name)
-    config_path = exp_dir / "config.yml"
+    config_file = exp_dir / "config.yml"
+    
+    if not config_file.exists():
+        raise RuntimeError(f"Can't find the Experiment's config file: '{config_file}'")
 
-    with open(config_path, "r", encoding="utf-8") as file:
+    with open(config_file, "r", encoding="utf-8") as file:
         config = yaml.safe_load(file)
 
     from .corpus_pairs_config import CorpusPairsConfig

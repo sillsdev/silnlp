@@ -25,7 +25,10 @@ def get_git_revision_hash() -> str:
 
 
 def get_mt_exp_dir(exp_name: str) -> Path:
-    return MT_EXPERIMENTS_DIR / exp_name
+    mt_exp_dir = MT_EXPERIMENTS_DIR / exp_name
+    if not mt_exp_dir.exists():
+        raise RuntimeError(f"Can't find the Experiment folder: '{mt_exp_dir}'")
+    return mt_exp_dir
 
 
 def set_seed(seed: Any) -> None:
