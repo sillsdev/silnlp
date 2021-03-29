@@ -1,11 +1,10 @@
-from typing import Dict, List, Set
+from typing import Dict, Set
 
 import pandas as pd
 
 from ..common.canon import ALL_BOOK_IDS, book_id_to_number
 from ..common.environment import ALIGN_EXPERIMENTS_DIR
 from .config import get_all_book_paths
-from .utils import get_align_exp_dir
 
 ALIGNERS = [
     "PT",
@@ -34,18 +33,35 @@ METRICS = [
     "AO@1",
     "RBO",
 ]
+TRANSLATIONS = [
+    "mcl",
+    "ccb",
+    "cuvmp",
+    "rcuv",
+    "esv",
+    "kjv",
+    "niv11",
+    "niv84",
+    "nrsv",
+    "rsv",
+    "hovr",
+    "shk",
+    "khov",
+    "nrt",
+]
 TESTAMENTS = ["nt", "ot", "nt+ot"]
+ROOT_DIR = ALIGN_EXPERIMENTS_DIR / "pab-nlp"
 
 
-def aggregate_testament_results(translations: List[str]) -> None:
+def aggregate_testament_results() -> None:
     for testament in TESTAMENTS:
         data: Dict[str, pd.DataFrame] = {}
         available_books: Set[str] = set()
         available_aligners: Set[str] = set()
-        for translation in translations:
-            exp_dir = get_align_exp_dir(translation)
-            testament_dir = exp_dir if testament == "nt+ot" else exp_dir / testament
-            scores_path = testament_dir / "scores.csv"
+        for translation in TRANSLATIONS:
+            translation_dir = ROOT_DIR / translation
+            exp_dir = translation_dir if testament == "nt+ot" else translation_dir / testament
+            scores_path = exp_dir / "scores.csv"
             if scores_path.is_file():
                 df = pd.read_csv(scores_path, index_col=[0, 1])
                 data[translation] = df
@@ -54,12 +70,12 @@ def aggregate_testament_results(translations: List[str]) -> None:
         available_books.remove("ALL")
 
         for metric in METRICS:
-            output_path = ALIGN_EXPERIMENTS_DIR / f"{testament}.all.{metric}.csv"
+            output_path = ROOT_DIR / f"{testament}.all.{metric}.csv"
             with open(output_path, "w") as output_file:
-                output_file.write("Model," + ",".join(filter(lambda t: t in data, translations)) + "\n")
+                output_file.write("Model," + ",".join(filter(lambda t: t in data, TRANSLATIONS)) + "\n")
                 for aligner in ALIGNERS:
                     output_file.write(aligner)
-                    for translation in translations:
+                    for translation in TRANSLATIONS:
                         df = data.get(translation)
                         if df is None:
                             continue
@@ -70,12 +86,12 @@ def aggregate_testament_results(translations: List[str]) -> None:
 
             if len(available_books) > 0:
                 for aligner in available_aligners:
-                    output_path = ALIGN_EXPERIMENTS_DIR / f"{testament}.all.{aligner}.{metric}.csv"
+                    output_path = ROOT_DIR / f"{testament}.all.{aligner}.{metric}.csv"
                     with open(output_path, "w") as output_file:
-                        output_file.write("Book," + ",".join(filter(lambda t: t in data, translations)) + "\n")
+                        output_file.write("Book," + ",".join(filter(lambda t: t in data, TRANSLATIONS)) + "\n")
                         for book_id in sorted(available_books, key=lambda b: book_id_to_number(b)):
                             output_file.write(book_id)
-                            for translation in translations:
+                            for translation in TRANSLATIONS:
                                 df = data.get(translation)
                                 if df is None:
                                     continue
@@ -85,19 +101,19 @@ def aggregate_testament_results(translations: List[str]) -> None:
                             output_file.write("\n")
 
 
-def aggregate_book_results(translations: List[str]) -> None:
+def aggregate_book_results() -> None:
     for testament in TESTAMENTS:
         if testament == "nt+ot":
             continue
         data: Dict[str, Dict[str, pd.DataFrame]] = {}
         available_translations: Set[str] = set()
         available_aligners: Set[str] = set()
-        for translation in translations:
-            testament_dir = ALIGN_EXPERIMENTS_DIR / f"{translation}-by-book" / testament
-            if not testament_dir.is_dir():
+        for translation in TRANSLATIONS:
+            exp_dir = ROOT_DIR / f"{translation}-by-book" / testament
+            if not exp_dir.is_dir():
                 continue
             available_translations.add(translation)
-            for book_id, book_dir in get_all_book_paths(testament_dir):
+            for book_id, book_dir in get_all_book_paths(exp_dir):
                 scores_path = book_dir / "scores.csv"
                 if scores_path.is_file():
                     df = pd.read_csv(scores_path, index_col=[0, 1])
@@ -108,17 +124,17 @@ def aggregate_book_results(translations: List[str]) -> None:
 
         for metric in METRICS:
             for aligner in available_aligners:
-                output_path = ALIGN_EXPERIMENTS_DIR / f"{testament}.single.{aligner}.{metric}.csv"
+                output_path = ROOT_DIR / f"{testament}.single.{aligner}.{metric}.csv"
                 with open(output_path, "w") as output_file:
                     output_file.write(
-                        "Book," + ",".join(filter(lambda t: t in available_translations, translations)) + "\n"
+                        "Book," + ",".join(filter(lambda t: t in available_translations, TRANSLATIONS)) + "\n"
                     )
                     for book_id in ALL_BOOK_IDS:
                         book_dict = data.get(book_id, {})
                         if len(book_dict) == 0:
                             continue
                         output_file.write(book_id)
-                        for translation in translations:
+                        for translation in TRANSLATIONS:
                             if translation not in available_translations:
                                 continue
                             df = book_dict.get(translation)
@@ -129,25 +145,8 @@ def aggregate_book_results(translations: List[str]) -> None:
 
 
 def main() -> None:
-    translations = [
-        "mcl",
-        "ccb",
-        "cuvmp",
-        "rcuv",
-        "esv",
-        "kjv",
-        "niv11",
-        "niv84",
-        "nrsv",
-        "rsv",
-        "hovr",
-        "shk",
-        "khov",
-        "nrt",
-    ]
-
-    aggregate_testament_results(translations)
-    aggregate_book_results(translations)
+    aggregate_testament_results()
+    aggregate_book_results()
 
 
 if __name__ == "__main__":

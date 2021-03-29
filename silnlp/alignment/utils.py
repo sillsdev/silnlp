@@ -1,5 +1,5 @@
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePath
 from statistics import mean
 from typing import List, Set
 
@@ -11,8 +11,17 @@ from .lexicon import Lexicon
 from .machine_aligner import FastAlign
 
 
-def get_align_exp_dir(exp_name: str) -> Path:
-    return ALIGN_EXPERIMENTS_DIR / exp_name
+def get_experiment_dirs(exp_pattern: str) -> List[Path]:
+    exp_dirs: List[Path] = []
+    for path in ALIGN_EXPERIMENTS_DIR.glob(str(PurePath(exp_pattern) / "**" / "config.yml")):
+        dir = path.parent
+        if len(list(dir.rglob("config.yml"))) == 1:
+            exp_dirs.append(dir)
+    return exp_dirs
+
+
+def get_experiment_name(exp_dir: Path) -> str:
+    return exp_dir.as_posix()[len(ALIGN_EXPERIMENTS_DIR.as_posix()) + 1 :]
 
 
 def compute_alignment_score(

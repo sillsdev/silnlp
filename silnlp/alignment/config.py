@@ -5,6 +5,7 @@ from typing import Dict, Iterable, Tuple, Type, Union
 import yaml
 
 from ..common.canon import ALL_BOOK_IDS, book_id_to_number, is_ot_nt
+from ..common.environment import ALIGN_EXPERIMENTS_DIR
 from ..common.flatcat_stemmer import FlatCatStemmer
 from ..common.null_stemmer import NullStemmer
 from ..common.snowball_stemmer import SnowballStemmer
@@ -15,7 +16,6 @@ from .aligner import Aligner
 from .clear_aligner import ClearAligner
 from .ibm4_aligner import Ibm4Aligner
 from .machine_aligner import FastAlign, HmmAligner, Ibm1Aligner, Ibm2Aligner, ParatextAligner, SmtAligner
-from .utils import get_align_exp_dir
 
 ALIGNERS: Dict[str, Tuple[Type[Aligner], str]] = {
     "fast_align": (FastAlign, "FastAlign"),
@@ -41,12 +41,12 @@ STEMMERS: Dict[str, Type[Stemmer]] = {
 }
 
 
-def get_aligner(id: str, testament_dir: Path) -> Aligner:
+def get_aligner(id: str, exp_dir: Path) -> Aligner:
     aligner = ALIGNERS.get(id)
     if aligner is None:
         raise RuntimeError("An invalid aligner Id was specified.")
     aligner_cls: Type = aligner[0]
-    return aligner_cls(testament_dir / (id + os.path.sep))
+    return aligner_cls(exp_dir / (id + os.path.sep))
 
 
 def get_aligner_name(id: str) -> str:
@@ -71,25 +71,29 @@ def get_stemmer(stemmer_config: Union[dict, str]) -> Stemmer:
     return stemmer_cls(**kwargs)
 
 
-def load_config(exp_name: str, testament: str) -> dict:
-    exp_dir = get_align_exp_dir(exp_name)
-    config_path = os.path.join(exp_dir, testament, "config.yml")
-
-    config: dict = {
-        "seed": 111,
-        "src_stemmer": "none",
-        "trg_stemmer": "none",
-        "use_src_lemma": False,
-        "by_book": False,
-        "src_casing": "lower",
-        "trg_casing": "lower",
-        "src_normalize": True,
-        "trg_normalize": True,
-    }
-
-    with open(config_path, "r", encoding="utf-8") as file:
-        loaded_config = yaml.safe_load(file)
-        return merge_dict(config, loaded_config)
+def load_config(exp_dir: Path) -> dict:
+    config: dict = {}
+    while exp_dir != ALIGN_EXPERIMENTS_DIR:
+        config_path = exp_dir / "config.yml"
+        if config_path.is_file():
+            with open(config_path, "r", encoding="utf-8") as file:
+                loaded_config = yaml.safe_load(file)
+                config = merge_dict(loaded_config, config)
+        exp_dir = exp_dir.parent
+    return merge_dict(
+        {
+            "seed": 111,
+            "src_stemmer": "none",
+            "trg_stemmer": "none",
+            "use_src_lemma": False,
+            "by_book": False,
+            "src_casing": "lower",
+            "trg_casing": "lower",
+            "src_normalize": True,
+            "trg_normalize": True,
+        },
+        config,
+    )
 
 
 def get_all_book_paths(testament_dir: Path) -> Iterable[Tuple[str, Path]]:

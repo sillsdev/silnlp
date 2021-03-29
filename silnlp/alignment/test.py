@@ -1,6 +1,7 @@
 import argparse
 from pathlib import Path
-from typing import Dict, List, Optional, Set, cast
+from silnlp.common.environment import ALIGN_EXPERIMENTS_DIR
+from typing import Dict, List, Optional, Set
 
 import pandas as pd
 from nltk.translate.api import Alignment
@@ -17,7 +18,7 @@ from .metrics import (
     load_all_lexicons,
     load_vrefs,
 )
-from .utils import get_align_exp_dir
+from .utils import get_experiment_dirs, get_experiment_name
 
 
 def add_alignments(dest: Dict[str, List[Alignment]], src: Dict[str, List[Alignment]]) -> None:
@@ -38,19 +39,17 @@ def add_lexicons(dest: Dict[str, Lexicon], src: Dict[str, Lexicon]) -> None:
             dest_lexicon.add(src_lexicon)
 
 
-def test(
-    testament_dirs: List[Path], by_book: bool, books: Set[int], test_size: Optional[int], output_dir: Path
-) -> None:
+def test(exp_dirs: List[Path], by_book: bool, books: Set[int], test_size: Optional[int], output_dir: Path) -> None:
     vrefs: List[VerseRef] = []
     all_alignments: Dict[str, List[Alignment]] = {}
     all_lexicons: Dict[str, Lexicon] = {}
-    for testament_dir in testament_dirs:
-        vref_file_path = testament_dir / "refs.txt"
+    for exp_dir in exp_dirs:
+        vref_file_path = exp_dir / "refs.txt"
         if not vref_file_path.is_file():
             continue
         vrefs += load_vrefs(vref_file_path)
-        add_alignments(all_alignments, load_all_alignments(testament_dir))
-        add_lexicons(all_lexicons, load_all_lexicons(testament_dir))
+        add_alignments(all_alignments, load_all_alignments(exp_dir))
+        add_lexicons(all_lexicons, load_all_lexicons(exp_dir))
 
     df = compute_alignment_metrics(vrefs, all_alignments, "ALL", books, test_size)
     df = df.join(compute_lexicon_metrics(all_lexicons))
@@ -109,52 +108,46 @@ def test(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Tests generated alignments against gold standard alignments")
-    parser.add_argument("experiments", nargs="+", help="Experiment names")
-    parser.add_argument("--nt", default=False, action="store_true", help="Test NT")
-    parser.add_argument("--ot", default=False, action="store_true", help="Test OT")
-    parser.add_argument("--nt-ot", default=False, action="store_true", help="Test NT and OT combined")
+    parser.add_argument("experiments", type=str, help="Experiment pattern")
+    parser.add_argument("--combine-pattern", type=str, default="*", help="Combine pattern")
     parser.add_argument("--test-size", type=int, help="Test size")
     parser.add_argument("--books", nargs="*", metavar="book", default=[], help="Books")
     parser.add_argument("--by-book", default=False, action="store_true", help="Score individual books")
     args = parser.parse_args()
-
-    testaments: List[str] = []
-    if args.nt:
-        testaments.append("nt")
-    if args.ot:
-        testaments.append("ot")
-    if args.nt_ot:
-        testaments.append("nt+ot")
-    if len(testaments) == 0:
-        testaments.extend(["nt", "ot", "nt+ot"])
 
     books = get_books(args.books)
     test_size: Optional[int] = args.test_size
     if test_size is not None:
         print(f"Test size: {test_size}")
 
-    for exp_name in cast(List[str], args.experiments):
-        exp_dir = get_align_exp_dir(exp_name)
-        for testament in testaments:
-            if testament == "nt+ot":
-                nt_dir = exp_dir / "nt"
-                ot_dir = exp_dir / "ot"
-                if nt_dir.is_dir() and ot_dir.is_dir():
-                    print(f"=== Computing metrics ({exp_name.upper()} {testament.upper()}) ===")
-                    test([nt_dir, ot_dir], args.by_book, books, None, exp_dir)
-            else:
-                testament_dir = exp_dir / testament
-                if testament_dir.is_dir():
-                    print(f"=== Computing metrics ({exp_name.upper()} {testament.upper()}) ===")
-                    config = load_config(exp_name, testament)
-                    set_seed(config["seed"])
-                    if config["by_book"]:
-                        for book, book_testament_dir in get_all_book_paths(testament_dir):
-                            if book_testament_dir.is_dir():
-                                print(f"--- {book} ---")
-                                test([book_testament_dir], False, books, test_size, book_testament_dir)
-                    else:
-                        test([testament_dir], args.by_book, books, test_size, testament_dir)
+    combine_pattern: str = args.combine_pattern
+    combinations: Dict[Path, List[str]] = {}
+    for exp_dir in get_experiment_dirs(args.experiments):
+        exp_name = get_experiment_name(exp_dir)
+        print(f"=== Computing metrics ({exp_name}) ===")
+        config = load_config(exp_dir)
+        set_seed(config["seed"])
+        if config["by_book"]:
+            for book, book_exp_dir in get_all_book_paths(exp_dir):
+                if book_exp_dir.is_dir():
+                    print(f"--- {book} ---")
+                    test([book_exp_dir], False, books, test_size, book_exp_dir)
+        else:
+            test([exp_dir], args.by_book, books, test_size, exp_dir)
+        if exp_dir.parent != ALIGN_EXPERIMENTS_DIR and exp_dir.match(combine_pattern):
+            combination = combinations.get(exp_dir.parent)
+            if combination is None:
+                combination = []
+                combinations[exp_dir.parent] = combination
+            combination.append(exp_dir.name)
+
+    for parent_dir, combination in combinations.items():
+        if len(combination) <= 1:
+            continue
+        exp_name = get_experiment_name(parent_dir) + "/" + "+".join(combination)
+        print(f"=== Computing metrics ({exp_name}) ===")
+        exp_dirs = [parent_dir / name for name in combination]
+        test(exp_dirs, args.by_book, books, None, parent_dir)
 
 
 if __name__ == "__main__":

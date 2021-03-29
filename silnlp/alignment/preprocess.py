@@ -3,7 +3,7 @@ import json
 import logging
 import unicodedata
 from pathlib import Path
-from typing import Iterable, List, Tuple, cast
+from typing import Iterable, List, Tuple
 
 logging.basicConfig(level=logging.INFO)
 
@@ -16,7 +16,7 @@ from ..common.utils import set_seed
 from ..common.verse_ref import VerseRef
 from .config import get_all_book_paths, get_stemmer, load_config
 from .lexicon import Lexicon
-from .utils import get_align_exp_dir
+from .utils import get_experiment_dirs, get_experiment_name
 
 
 class ParallelSegment:
@@ -92,65 +92,54 @@ def add_alignment(lexicon: Lexicon, source: List[str], target: List[str], alignm
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Preprocesses Clear gold standard alignments")
-    parser.add_argument("experiments", nargs="+", help="Experiment names")
-    parser.add_argument("--nt", default=False, action="store_true", help="Preprocess NT")
-    parser.add_argument("--ot", default=False, action="store_true", help="Preprocess OT")
+    parser.add_argument("experiments", type=str, help="Experiment pattern")
     args = parser.parse_args()
 
-    testaments: List[str] = []
-    if args.nt:
-        testaments.append("nt")
-    if args.ot:
-        testaments.append("ot")
-    if len(testaments) == 0:
-        testaments.extend(["nt", "ot"])
+    for exp_dir in get_experiment_dirs(args.experiments):
+        exp_name = get_experiment_name(exp_dir)
+        print(f"=== Preprocessing ({exp_name}) ===")
+        config = load_config(exp_dir)
 
-    for exp_name in cast(List[str], args.experiments):
-        for testament in testaments:
-            print(f"=== Preprocessing ({exp_name.upper()} {testament.upper()}) ===")
-            testament_dir = get_align_exp_dir(exp_name) / testament
-            config = load_config(exp_name, testament)
+        set_seed(config["seed"])
 
-            set_seed(config["seed"])
+        corpus_name: str = config["corpus"]
 
-            corpus_name: str = config["corpus"]
+        corpus_path = ALIGN_GOLD_DIR / (corpus_name + ".alignment.json")
+        verses: List[dict]
+        with open(corpus_path, "r", encoding="utf-8") as f:
+            verses = json.load(f)
 
-            corpus_path = ALIGN_GOLD_DIR / (corpus_name + ".alignment.json")
-            verses: List[dict]
-            with open(corpus_path, "r", encoding="utf-8") as f:
-                verses = json.load(f)
+        use_src_lemma: bool = config["use_src_lemma"]
+        src_casing: str = config["src_casing"]
+        src_normalize: bool = config["src_normalize"]
+        trg_casing: str = config["trg_casing"]
+        trg_normalize: bool = config["trg_normalize"]
+        corpus: List[ParallelSegment] = []
+        lexicon = Lexicon()
+        for verse in verses:
+            ref_str = get_ref(verse)
+            source = get_segment(verse["manuscript"], src_casing, src_normalize, use_lemma=use_src_lemma)
+            target = get_segment(verse["translation"], trg_casing, trg_normalize)
+            alignment = get_alignment(verse)
+            corpus.append(ParallelSegment(ref_str, source, target, alignment))
+            add_alignment(lexicon, source, target, get_alignment(verse, primary_links_only=True))
+        lexicon.normalize()
 
-            use_src_lemma: bool = config["use_src_lemma"]
-            src_casing: str = config["src_casing"]
-            src_normalize: bool = config["src_normalize"]
-            trg_casing: str = config["trg_casing"]
-            trg_normalize: bool = config["trg_normalize"]
-            corpus: List[ParallelSegment] = []
-            lexicon = Lexicon()
-            for verse in verses:
-                ref_str = get_ref(verse)
-                source = get_segment(verse["manuscript"], src_casing, src_normalize, use_lemma=use_src_lemma)
-                target = get_segment(verse["translation"], trg_casing, trg_normalize)
-                alignment = get_alignment(verse)
-                corpus.append(ParallelSegment(ref_str, source, target, alignment))
-                add_alignment(lexicon, source, target, get_alignment(verse, primary_links_only=True))
-            lexicon.normalize()
+        src_stemmer = get_stemmer(config["src_stemmer"])
+        src_stemmer.train(map(lambda s: s.source, corpus))
 
-            src_stemmer = get_stemmer(config["src_stemmer"])
-            src_stemmer.train(map(lambda s: s.source, corpus))
+        trg_stemmer = get_stemmer(config["trg_stemmer"])
+        trg_stemmer.train(map(lambda s: s.target, corpus))
 
-            trg_stemmer = get_stemmer(config["trg_stemmer"])
-            trg_stemmer.train(map(lambda s: s.target, corpus))
-
-            if config["by_book"]:
-                for book, book_root_dir in get_all_book_paths(testament_dir):
-                    book_corpus = list(filter(lambda s: is_in_book(s, book), corpus))
-                    if len(book_corpus) > 0:
-                        book_root_dir.mkdir(exist_ok=True)
-                        write_datasets(book_root_dir, src_stemmer, trg_stemmer, book_corpus)
-            else:
-                write_datasets(testament_dir, src_stemmer, trg_stemmer, corpus)
-                lexicon.write(testament_dir / "lexicon.gold.txt")
+        if config["by_book"]:
+            for book, book_exp_dir in get_all_book_paths(exp_dir):
+                book_corpus = list(filter(lambda s: is_in_book(s, book), corpus))
+                if len(book_corpus) > 0:
+                    book_exp_dir.mkdir(exist_ok=True)
+                    write_datasets(book_exp_dir, src_stemmer, trg_stemmer, book_corpus)
+        else:
+            write_datasets(exp_dir, src_stemmer, trg_stemmer, corpus)
+            lexicon.write(exp_dir / "lexicon.gold.txt")
 
 
 if __name__ == "__main__":

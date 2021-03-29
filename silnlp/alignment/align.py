@@ -3,17 +3,17 @@ import shutil
 import time
 from datetime import timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, cast
+from typing import Dict, List, Optional
 
 from .config import ALIGNERS, get_aligner, get_aligner_name, get_all_book_paths, load_config
-from .utils import get_align_exp_dir
+from .utils import get_experiment_dirs, get_experiment_name
 
 
-def align(aligner_ids: List[str], testament_dir: Path, book: Optional[str] = None) -> None:
-    train_src_path = testament_dir / "src.txt"
-    train_trg_path = testament_dir / "trg.txt"
+def align(aligner_ids: List[str], exp_dir: Path, book: Optional[str] = None) -> None:
+    train_src_path = exp_dir / "src.txt"
+    train_trg_path = exp_dir / "trg.txt"
 
-    durations_path = testament_dir / "duration.csv"
+    durations_path = exp_dir / "duration.csv"
     times: Dict[str, str] = {}
     if durations_path.is_file():
         with open(durations_path, "r", encoding="utf-8") as in_file:
@@ -28,7 +28,7 @@ def align(aligner_ids: List[str], testament_dir: Path, book: Optional[str] = Non
 
     for aligner_id in aligner_ids:
         aligner_id = aligner_id.strip().lower()
-        aligner = get_aligner(aligner_id, testament_dir)
+        aligner = get_aligner(aligner_id, exp_dir)
         if aligner.model_dir.is_dir():
             shutil.rmtree(aligner.model_dir)
         aligner_name = get_aligner_name(aligner_id)
@@ -36,7 +36,7 @@ def align(aligner_ids: List[str], testament_dir: Path, book: Optional[str] = Non
             print(f"--- {aligner_name} ---")
         else:
             print(f"--- {aligner_name} ({book}) ---")
-        method_alignments_file_path = testament_dir / f"alignments.{aligner_id}.txt"
+        method_alignments_file_path = exp_dir / f"alignments.{aligner_id}.txt"
 
         start = time.perf_counter()
         aligner.train(train_src_path, train_trg_path)
@@ -52,55 +52,41 @@ def align(aligner_ids: List[str], testament_dir: Path, book: Optional[str] = Non
             out_file.write(f"{aligner_name},{delta_str}\n")
 
 
-def extract_lexicons(aligner_ids: List[str], testament_dir: Path) -> None:
+def extract_lexicons(aligner_ids: List[str], exp_dir: Path) -> None:
     for aligner_id in aligner_ids:
         aligner_id = aligner_id.strip().lower()
-        aligner = get_aligner(aligner_id, testament_dir)
+        aligner = get_aligner(aligner_id, exp_dir)
         aligner_name = get_aligner_name(aligner_id)
         print(f"--- {aligner_name} ---")
-        aligner.extract_lexicon(testament_dir / f"lexicon.{aligner_id}.txt")
+        aligner.extract_lexicon(exp_dir / f"lexicon.{aligner_id}.txt")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Aligns the parallel corpus for an experiment")
-    parser.add_argument("experiments", nargs="+", help="Experiment names")
-    parser.add_argument("--nt", default=False, action="store_true", help="Align NT")
-    parser.add_argument("--ot", default=False, action="store_true", help="Align OT")
+    parser.add_argument("experiments", type=str, help="Experiment pattern")
     parser.add_argument("--aligners", nargs="*", metavar="aligner", default=[], help="Aligners")
     parser.add_argument("--skip-align", default=False, action="store_true", help="Skips aligning corpora")
     parser.add_argument("--skip-extract-lexicon", default=False, action="store_true", help="Skips extracting lexicons")
     args = parser.parse_args()
 
-    testaments: List[str] = []
-    if args.nt:
-        testaments.append("nt")
-    if args.ot:
-        testaments.append("ot")
-    if len(testaments) == 0:
-        testaments.extend(["nt", "ot"])
-
     aligner_ids = list(ALIGNERS.keys() if len(args.aligners) == 0 else args.aligners)
 
-    for exp_name in cast(List[str], args.experiments):
-        for testament in testaments:
-            testament_dir = get_align_exp_dir(exp_name) / testament
-            if not testament_dir.is_dir():
-                continue
+    for exp_dir in get_experiment_dirs(args.experiments):
+        exp_name = get_experiment_name(exp_dir)
+        if not args.skip_align:
+            print(f"=== Aligning ({exp_name}) ===")
+            config = load_config(exp_dir)
 
-            if not args.skip_align:
-                print(f"=== Aligning ({exp_name.upper()} {testament.upper()}) ===")
-                config = load_config(exp_name, testament)
+            if config["by_book"]:
+                for book, book_exp_dir in get_all_book_paths(exp_dir):
+                    if book_exp_dir.is_dir():
+                        align(aligner_ids, book_exp_dir, book)
+            else:
+                align(aligner_ids, exp_dir)
 
-                if config["by_book"]:
-                    for book, book_root_dir in get_all_book_paths(testament_dir):
-                        if book_root_dir.is_dir():
-                            align(aligner_ids, book_root_dir, book)
-                else:
-                    align(aligner_ids, testament_dir)
-
-            if not args.skip_extract_lexicon:
-                print(f"=== Extracting lexicons ({exp_name.upper()} {testament.upper()}) ===")
-                extract_lexicons(aligner_ids, testament_dir)
+        if not args.skip_extract_lexicon:
+            print(f"=== Extracting lexicons ({exp_name}) ===")
+            extract_lexicons(aligner_ids, exp_dir)
 
 
 if __name__ == "__main__":

@@ -275,6 +275,9 @@ class CorpusPairsConfig(Config):
             train_size = pair.size
             train_indices = split_corpus(corpus_size, train_size, test_indices | val_indices)
 
+        train_count = 0
+        val_count = 0
+        test_count = 0
         test_prefix = "test" if test_iso_pairs_count == 1 else f"test.{pair.src_iso}.{pair.trg_iso}"
         with open(self.exp_dir / f"{test_prefix}.src.txt", "a", encoding="utf-8", newline="\n") as test_src_file, open(
             self.exp_dir / f"{test_prefix}.trg.detok.txt", "a", encoding="utf-8", newline="\n"
@@ -297,23 +300,28 @@ class CorpusPairsConfig(Config):
                 if pair.is_test and (test_indices is None or index in test_indices):
                     test_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
                     test_trg_file.write(decode_sp(encode_sp(trg_spp, trg_sentence)) + "\n")
+                    test_count += 1
                 elif pair.is_val and (val_indices is None or index in val_indices):
                     val_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
                     val_trg_file.write(encode_sp(trg_spp, trg_sentence) + "\n")
+                    val_count += 1
                     if self.mirror:
                         val_src_file.write(encode_sp(mirror_src_spp, mirror_src_sentence) + "\n")
                         val_trg_file.write(encode_sp(mirror_trg_spp, mirror_trg_sentence) + "\n")
+                        val_count += 1
                 elif pair.is_train and (train_indices is None or index in train_indices):
                     train_src_file.write(encode_sp(src_spp, self._noise(pair.src_noise, src_sentence)) + "\n")
                     train_trg_file.write(encode_sp(trg_spp, trg_sentence) + "\n")
+                    train_count += 1
                     if self.mirror:
                         train_src_file.write(encode_sp(mirror_src_spp, mirror_src_sentence) + "\n")
                         train_trg_file.write(encode_sp(mirror_trg_spp, mirror_trg_sentence) + "\n")
+                        train_count += 1
 
                 index += 1
-        print(f"- train size: {corpus_size if train_indices is None else len(train_indices)}")
-        print(f"- val size: {corpus_size if val_indices is None else len(val_indices)}")
-        print(f"- test size: {corpus_size if test_indices is None else len(test_indices)}")
+        print(f"- train size: {train_count}")
+        print(f"- val size: {val_count}")
+        print(f"- test size: {test_count}")
 
     def _insert_trg_tag(self, trg_iso: str, src_sentence: str) -> str:
         if self.write_trg_tag:
