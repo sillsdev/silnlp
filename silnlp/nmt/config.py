@@ -304,7 +304,7 @@ class Config(ABC):
 
     def create_src_sp_processor(self) -> sp.SentencePieceProcessor:
         src_spp = sp.SentencePieceProcessor()
-        src_spp.Load(str(self.exp_dir / "sp.model" if self.share_vocab else "src-sp.model"))
+        src_spp.Load(str(self.exp_dir / "sp.model" if self.share_vocab else self.exp_dir / "src-sp.model"))
         return src_spp
 
     @abstractmethod
