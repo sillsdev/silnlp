@@ -18,7 +18,7 @@ Download and install the following separately before creating any projects or
 starting any code, preferably in this order to avoid most warnings:
 
 1. [Git](https://git-scm.com/downloads)
-1. [Python 3.6](https://www.python.org/downloads/) (latest minor version, ie 3.6.8)
+1. [Python 3.7](https://www.python.org/downloads/) (latest minor version, ie 3.7.9)
 1. Install [PyCharm 2020.1](https://www.jetbrains.com/pycharm/) or later
 1. Poetry via Powershell using the following command:
 
