@@ -48,7 +48,7 @@ def main() -> None:
     corpus_books = get_books(config.get("corpus_books", []))
     test_books = get_books(config.get("test_books", []))
 
-    corpus = get_scripture_parallel_corpus(vref_file_path, src_file_path, trg_file_path)
+    corpus = get_scripture_parallel_corpus(src_file_path, trg_file_path)
     if len(corpus_books) > 0:
         train = include_books(corpus, corpus_books)
         if len(corpus_books.intersection(test_books)) > 0:
