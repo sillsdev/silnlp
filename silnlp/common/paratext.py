@@ -156,8 +156,8 @@ def extract_terms_list_from_renderings(project: str, renderings_tree: ElementTre
             terms_metadata_file.write(f"{id}\t?\t?\n")
 
 
-def extract_term_renderings(project: str) -> None:
-    project_dir = get_project_dir(project)
+def extract_term_renderings(project_folder: str) -> None:
+    project_dir = get_project_dir(project_folder)
     renderings_path = project_dir / "TermRenderings.xml"
     if not renderings_path.is_file():
         return
@@ -174,19 +174,20 @@ def extract_term_renderings(project: str) -> None:
     settings_path = project_dir / "Settings.xml"
     settings_tree = ElementTree.parse(settings_path)
     iso = get_iso(settings_tree)
+    project_name = settings_tree.getroot().findtext("Name", project_folder)
     terms_setting = settings_tree.getroot().findtext("BiblicalTermsListSetting", "Major::BiblicalTerms.xml")
 
     list_type, terms_project, _ = terms_setting.split(":", maxsplit=3)
     list_name = list_type
     if list_type == "Project":
-        if terms_project == project:
-            extract_terms_list(list_type, project)
+        if terms_project == project_name:
+            extract_terms_list(list_type, project_folder)
         else:
-            extract_terms_list_from_renderings(project, renderings_tree)
-        list_name = project
+            extract_terms_list_from_renderings(project_folder, renderings_tree)
+        list_name = project_folder
 
     terms_metadata_path = get_terms_metadata_path(list_name)
-    terms_renderings_path = MT_TERMS_DIR / f"{iso}-{project}-{list_type}-renderings.txt"
+    terms_renderings_path = MT_TERMS_DIR / f"{iso}-{project_folder}-{list_type}-renderings.txt"
     count = 0
     with open(terms_renderings_path, "w", encoding="utf-8", newline="\n") as terms_renderings_file:
         for line in load_corpus(terms_metadata_path):
