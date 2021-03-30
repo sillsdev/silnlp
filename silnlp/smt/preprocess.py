@@ -12,7 +12,6 @@ from ..common.corpus import (
     split_parallel_corpus,
     write_corpus,
 )
-from ..common.environment import MT_SCRIPTURE_DIR
 from ..common.utils import get_git_revision_hash, get_mt_exp_dir, set_seed
 from .config import load_config
 
@@ -41,7 +40,6 @@ def main() -> None:
     src_iso, src_project = parse_lang(config["src_lang"])
     trg_iso, trg_project = parse_lang(config["trg_lang"])
 
-    vref_file_path = MT_SCRIPTURE_DIR / "vref.txt"
     src_file_path = get_scripture_path(src_iso, src_project)
     trg_file_path = get_scripture_path(trg_iso, trg_project)
 

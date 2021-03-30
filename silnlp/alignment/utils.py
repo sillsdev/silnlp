@@ -8,7 +8,7 @@ import pandas as pd
 from ..common.corpus import tokenize_corpus, write_corpus
 from ..common.environment import ALIGN_EXPERIMENTS_DIR
 from .lexicon import Lexicon
-from .machine_aligner import FastAlign
+from .machine_aligner import FastAlignMachineAligner
 
 
 def get_experiment_dirs(exp_pattern: str) -> List[Path]:
@@ -79,7 +79,7 @@ def compute_alignment_scores(src_input_path: Path, trg_input_path: Path) -> List
         tokenize_corpus(src_input_path, src_tok_output_path)
         tokenize_corpus(trg_input_path, trg_tok_output_path)
 
-        fast_align = FastAlign(temp_dir)
+        fast_align = FastAlignMachineAligner(temp_dir)
 
         sym_align_path = temp_dir / "sym-align.txt"
         fast_align.train(src_tok_output_path, trg_tok_output_path)

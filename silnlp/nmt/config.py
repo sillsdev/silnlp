@@ -281,7 +281,9 @@ class Config(ABC):
         return "parent" in self.data
 
     def set_seed(self) -> None:
-        set_seed(self.data["seed"])
+        seed = self.data["seed"]
+        set_seed(seed)
+        tf.random.set_seed(seed)
 
     def preprocess(self, stats: bool) -> None:
         self._build_vocabs()

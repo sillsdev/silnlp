@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any, List
 
 import numpy as np
-import tensorflow as tf
 
 from ..common.environment import MT_EXPERIMENTS_DIR
 
@@ -32,7 +31,6 @@ def set_seed(seed: Any) -> None:
     os.environ["PYTHONHASHSEED"] = str(seed)
     np.random.seed(seed)
     random.seed(seed)
-    tf.random.set_seed(seed)
 
 
 def merge_dict(dict1: dict, dict2: dict) -> dict:

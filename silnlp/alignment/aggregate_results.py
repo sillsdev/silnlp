@@ -8,16 +8,16 @@ from .config import get_all_book_paths
 
 ALIGNERS = [
     "PT",
+    "IBM-1",
+    "IBM-2",
+    "FastAlign",
+    "Giza-HMM",
+    "Giza-IBM-4",
+    "Clear-2-IBM-1",
+    "Clear-2-IBM-2",
     "Clear-2-FA",
     "Clear-2-HMM",
     "Clear-2-IBM-4",
-    "Clear-3-FA",
-    "Clear-3-HMM",
-    "FastAlign",
-    "HMM",
-    "IBM-1",
-    "IBM-2",
-    "IBM-4",
 ]
 METRICS = [
     "F-Score",
@@ -74,7 +74,7 @@ def aggregate_testament_results() -> None:
             with open(output_path, "w") as output_file:
                 output_file.write("Model," + ",".join(filter(lambda t: t in data, TRANSLATIONS)) + "\n")
                 for aligner in ALIGNERS:
-                    output_file.write(aligner)
+                    output_file.write(aligner.replace("Giza-", ""))
                     for translation in TRANSLATIONS:
                         df = data.get(translation)
                         if df is None:

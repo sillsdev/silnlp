@@ -2,7 +2,7 @@ import os
 import platform
 import subprocess
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from ..common.corpus import load_corpus, write_corpus
 from ..common.utils import get_repo_dir
@@ -10,15 +10,45 @@ from .aligner import Aligner
 from .lexicon import Lexicon
 
 
-class Ibm4Aligner(Aligner):
-    def __init__(self, model_dir: Path) -> None:
-        super().__init__("ibm4", model_dir)
+class GizaAligner(Aligner):
+    def __init__(
+        self,
+        id: str,
+        model_dir: Path,
+        m1: Optional[int] = None,
+        m2: Optional[int] = None,
+        mh: Optional[int] = None,
+        m3: Optional[int] = None,
+        m4: Optional[int] = None,
+        threshold: float = 0.01,
+    ) -> None:
+        super().__init__(id, model_dir)
+        self.m1 = m1
+        self.m2 = m2
+        self.mh = mh
+        self.m3 = m3
+        self.m4 = m4
+        self.threshold = threshold
+
+    @property
+    def file_suffix(self) -> str:
+        suffix = ""
+        if self.m3 is None or self.m3 > 0 or self.m4 is None or self.m4 > 0:
+            suffix = "3.final"
+        elif self.mh is None or self.mh > 0:
+            suffix = f"hmm.{5 if self.mh is None else self.mh}"
+        elif self.m2 is not None and self.m2 > 0:
+            suffix = f"2.{self.m2}"
+        elif self.m1 is None or self.m1 > 0:
+            suffix = f"1.{5 if self.m1 is None else self.m1}"
+        return suffix
 
     def train(self, src_file_path: Path, trg_file_path: Path) -> None:
         self.model_dir.mkdir(exist_ok=True)
 
-        self._execute_mkcls(src_file_path)
-        self._execute_mkcls(trg_file_path)
+        if self.m4 is None or self.m4 > 0:
+            self._execute_mkcls(src_file_path)
+            self._execute_mkcls(trg_file_path)
 
         src_trg_snt_file_path, trg_src_snt_file_path = self._execute_plain2snt(src_file_path, trg_file_path)
 
@@ -28,17 +58,17 @@ class Ibm4Aligner(Aligner):
         src_trg_prefix = src_trg_snt_file_path.with_suffix("")
         src_trg_output_prefix = src_trg_prefix.parent / (src_trg_prefix.name + "_invswm")
         self._execute_mgiza(src_trg_snt_file_path, src_trg_output_prefix)
-        src_trg_alignments_file_path = src_trg_output_prefix.with_suffix(".A3.final.all")
+        src_trg_alignments_file_path = src_trg_output_prefix.with_suffix(f".A{self.file_suffix}.all")
         self._merge_alignment_parts(src_trg_output_prefix, src_trg_alignments_file_path)
 
         trg_src_output_prefix = src_trg_prefix.parent / (src_trg_prefix.name + "_swm")
         self._execute_mgiza(trg_src_snt_file_path, trg_src_output_prefix)
-        trg_src_alignments_file_path = trg_src_output_prefix.with_suffix(".A3.final.all")
+        trg_src_alignments_file_path = trg_src_output_prefix.with_suffix(f".A{self.file_suffix}.all")
         self._merge_alignment_parts(trg_src_output_prefix, trg_src_alignments_file_path)
 
     def align(self, out_file_path: Path, sym_heuristic: str = "grow-diag-final-and") -> None:
-        src_trg_alignments_file_path = self.model_dir / "src_trg_invswm.A3.final.all"
-        trg_src_alignments_file_path = self.model_dir / "src_trg_swm.A3.final.all"
+        src_trg_alignments_file_path = self.model_dir / f"src_trg_invswm.A{self.file_suffix}.all"
+        trg_src_alignments_file_path = self.model_dir / f"src_trg_swm.A{self.file_suffix}.all"
         self._symmetrize(src_trg_alignments_file_path, trg_src_alignments_file_path, out_file_path, sym_heuristic)
 
     def get_direct_lexicon(self, include_special_tokens: bool = False) -> Lexicon:
@@ -145,11 +175,29 @@ class Ibm4Aligner(Aligner):
             "-o",
             str(output_path),
         ]
+        if self.m1 is not None:
+            args.extend(["-m1", str(self.m1)])
+        if self.m2 is not None:
+            args.extend(["-m2", str(self.m2)])
+        if self.mh is not None:
+            args.extend(["-mh", str(self.mh)])
+        if self.m3 is not None:
+            args.extend(["-m3", str(self.m3)])
+        if self.m4 is not None:
+            args.extend(["-m4", str(self.m4)])
+
+        if self.m3 == 0 and self.m4 == 0:
+            if self.mh is None or self.mh > 0:
+                args.extend(["-th", str(5 if self.mh is None else self.mh)])
+            elif self.m2 is not None and self.m2 > 0:
+                args.extend(["-t2", str(self.m2)])
+            elif self.m1 is None or self.m1 > 0:
+                args.extend(["-t1", str(5 if self.m1 is None else self.m1)])
         subprocess.run(args, stderr=subprocess.DEVNULL)
 
     def _merge_alignment_parts(self, model_prefix: Path, output_file_path: Path) -> None:
         alignments: List[Tuple[int, str]] = []
-        for input_file_path in model_prefix.parent.glob(model_prefix.name + ".A3.final.part*"):
+        for input_file_path in model_prefix.parent.glob(model_prefix.name + f".A{self.file_suffix}.part*"):
             with open(input_file_path, "r", encoding="utf-8") as in_file:
                 line_index = 0
                 segment_index = 0
@@ -196,13 +244,35 @@ class Ibm4Aligner(Aligner):
         self, src_vocab: List[str], trg_vocab: List[str], align_model: str, include_special_tokens: bool
     ) -> Lexicon:
         lexicon = Lexicon()
-        model_path = self.model_dir / f"src_trg_{align_model}.t3.final"
+        model_path = self.model_dir / f"src_trg_{align_model}.t{self.file_suffix}"
         for line in load_corpus(model_path):
-            src_index_str, trg_index_str, prob_str = line.split()
+            src_index_str, trg_index_str, prob_str = line.split(maxsplit=3)
             src_index = int(src_index_str)
             trg_index = int(trg_index_str)
             if include_special_tokens or (src_index > 1 and trg_index > 1):
                 src_word = src_vocab[src_index]
                 trg_word = trg_vocab[trg_index]
-                lexicon[src_word, trg_word] = float(prob_str)
+                prob = float(prob_str)
+                if prob > self.threshold:
+                    lexicon[src_word, trg_word] = prob
         return lexicon
+
+
+class Ibm1GizaAligner(GizaAligner):
+    def __init__(self, model_dir: Path) -> None:
+        super().__init__("giza_ibm1", model_dir, mh=0, m3=0, m4=0)
+
+
+class Ibm2GizaAligner(GizaAligner):
+    def __init__(self, model_dir: Path) -> None:
+        super().__init__("giza_ibm2", model_dir, m2=5, mh=0, m3=0, m4=0)
+
+
+class HmmGizaAligner(GizaAligner):
+    def __init__(self, model_dir: Path) -> None:
+        super().__init__("giza_hmm", model_dir, m3=0, m4=0)
+
+
+class Ibm4GizaAligner(GizaAligner):
+    def __init__(self, model_dir: Path) -> None:
+        super().__init__("giza_ibm4", model_dir, threshold=0)

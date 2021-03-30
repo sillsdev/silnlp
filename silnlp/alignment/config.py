@@ -14,19 +14,31 @@ from ..common.utils import merge_dict
 from ..common.wordnet_stemmer import WordNetStemmer
 from .aligner import Aligner
 from .clear_aligner import ClearAligner
-from .ibm4_aligner import Ibm4Aligner
-from .machine_aligner import FastAlign, HmmAligner, Ibm1Aligner, Ibm2Aligner, ParatextAligner, SmtAligner
+from .giza_aligner import HmmGizaAligner, Ibm1GizaAligner, Ibm2GizaAligner, Ibm4GizaAligner
+from .machine_aligner import (
+    FastAlignMachineAligner,
+    HmmMachineAligner,
+    Ibm1MachineAligner,
+    Ibm2MachineAligner,
+    ParatextMachineAligner,
+    SmtMachineAligner,
+)
 
 ALIGNERS: Dict[str, Tuple[Type[Aligner], str]] = {
-    "fast_align": (FastAlign, "FastAlign"),
-    "ibm1": (Ibm1Aligner, "IBM-1"),
-    "ibm2": (Ibm2Aligner, "IBM-2"),
-    "ibm4": (Ibm4Aligner, "IBM-4"),
-    "hmm": (HmmAligner, "HMM"),
-    "smt": (SmtAligner, "SMT"),
-    "pt": (ParatextAligner, "PT"),
+    "fast_align": (FastAlignMachineAligner, "FastAlign"),
+    "ibm1": (Ibm1MachineAligner, "IBM-1"),
+    "ibm2": (Ibm2MachineAligner, "IBM-2"),
+    "hmm": (HmmMachineAligner, "HMM"),
+    "smt": (SmtMachineAligner, "SMT"),
+    "pt": (ParatextMachineAligner, "PT"),
+    "giza_ibm1": (Ibm1GizaAligner, "Giza-IBM-1"),
+    "giza_ibm2": (Ibm2GizaAligner, "Giza-IBM-2"),
+    "giza_hmm": (HmmGizaAligner, "Giza-HMM"),
+    "giza_ibm4": (Ibm4GizaAligner, "Giza-IBM-4"),
     "clear2_fa": (ClearAligner, "Clear-2-FA"),
     "clear2_hmm": (ClearAligner, "Clear-2-HMM"),
+    "clear2_ibm1": (ClearAligner, "Clear-2-IBM-1"),
+    "clear2_ibm2": (ClearAligner, "Clear-2-IBM-2"),
     "clear2_ibm4": (ClearAligner, "Clear-2-IBM-4"),
     "clear3_fa": (ClearAligner, "Clear-3-FA"),
     "clear3_hmm": (ClearAligner, "Clear-3-HMM"),

@@ -73,7 +73,7 @@ class MachineAligner(Aligner):
             "machine",
             "train",
             "alignment-model",
-            str(self.model_dir),
+            str(self.model_dir) + os.sep,
             str(src_file_path),
             str(trg_file_path),
             "-mt",
@@ -138,27 +138,27 @@ class MachineAligner(Aligner):
         subprocess.run(args, cwd=get_repo_dir())
 
 
-class Ibm1Aligner(MachineAligner):
+class Ibm1MachineAligner(MachineAligner):
     def __init__(self, model_dir: Path) -> None:
         super().__init__("ibm1", "ibm1", model_dir)
 
 
-class Ibm2Aligner(MachineAligner):
+class Ibm2MachineAligner(MachineAligner):
     def __init__(self, model_dir: Path) -> None:
         super().__init__("ibm2", "ibm2", model_dir)
 
 
-class HmmAligner(MachineAligner):
+class HmmMachineAligner(MachineAligner):
     def __init__(self, model_dir: Path) -> None:
         super().__init__("hmm", "hmm", model_dir)
 
 
-class FastAlign(MachineAligner):
+class FastAlignMachineAligner(MachineAligner):
     def __init__(self, model_dir: Path) -> None:
         super().__init__("fast_align", "fast_align", model_dir)
 
 
-class ParatextAligner(MachineAligner):
+class ParatextMachineAligner(MachineAligner):
     def __init__(self, model_dir: Path) -> None:
         super().__init__(
             "pt",
@@ -171,6 +171,6 @@ class ParatextAligner(MachineAligner):
         )
 
 
-class SmtAligner(MachineAligner):
+class SmtMachineAligner(MachineAligner):
     def __init__(self, model_dir: Path) -> None:
         super().__init__("smt", "smt", model_dir, smt_model_type="hmm")
