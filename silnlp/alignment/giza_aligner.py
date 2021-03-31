@@ -273,6 +273,11 @@ class HmmGizaAligner(GizaAligner):
         super().__init__("giza_hmm", model_dir, m3=0, m4=0)
 
 
+class Ibm3GizaAligner(GizaAligner):
+    def __init__(self, model_dir: Path) -> None:
+        super().__init__("giza_ibm3", model_dir, m4=0, threshold=0)
+
+
 class Ibm4GizaAligner(GizaAligner):
     def __init__(self, model_dir: Path) -> None:
         super().__init__("giza_ibm4", model_dir, threshold=0)

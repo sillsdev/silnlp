@@ -14,7 +14,8 @@ from ..common.utils import merge_dict
 from ..common.wordnet_stemmer import WordNetStemmer
 from .aligner import Aligner
 from .clear_aligner import ClearAligner
-from .giza_aligner import HmmGizaAligner, Ibm1GizaAligner, Ibm2GizaAligner, Ibm4GizaAligner
+from .fast_align import FastAlign
+from .giza_aligner import HmmGizaAligner, Ibm1GizaAligner, Ibm2GizaAligner, Ibm3GizaAligner, Ibm4GizaAligner
 from .machine_aligner import (
     FastAlignMachineAligner,
     HmmMachineAligner,
@@ -34,6 +35,7 @@ ALIGNERS: Dict[str, Tuple[Type[Aligner], str]] = {
     "giza_ibm1": (Ibm1GizaAligner, "Giza-IBM-1"),
     "giza_ibm2": (Ibm2GizaAligner, "Giza-IBM-2"),
     "giza_hmm": (HmmGizaAligner, "Giza-HMM"),
+    "giza_ibm3": (Ibm3GizaAligner, "Giza-IBM-3"),
     "giza_ibm4": (Ibm4GizaAligner, "Giza-IBM-4"),
     "clear2_fa": (ClearAligner, "Clear-2-FA"),
     "clear2_hmm": (ClearAligner, "Clear-2-HMM"),
@@ -42,6 +44,7 @@ ALIGNERS: Dict[str, Tuple[Type[Aligner], str]] = {
     "clear2_ibm4": (ClearAligner, "Clear-2-IBM-4"),
     "clear3_fa": (ClearAligner, "Clear-3-FA"),
     "clear3_hmm": (ClearAligner, "Clear-3-HMM"),
+    "clab_fast_align": (FastAlign, "clab-FastAlign"),
 }
 
 
