@@ -69,8 +69,7 @@ def get_terms_corpus(src_terms: Dict[str, Term], trg_terms: Dict[str, Term], cat
 
         for src_rendering in src_term.renderings:
             for trg_rendering in trg_term.renderings:
-                if (src_rendering, trg_rendering) not in data:
-                    data.add((src_rendering, trg_rendering))
+                data.add((src_rendering, trg_rendering))
     return pd.DataFrame(data, columns=["source", "target"])
 
 
@@ -81,8 +80,7 @@ def get_terms_data_frame(terms: Dict[str, Term], cats: Optional[Set[str]]) -> pd
             continue
         for rendering in term.renderings:
             for gloss in term.glosses:
-                if (rendering, gloss) not in data:
-                    data.add((rendering, gloss))
+                data.add((rendering, gloss))
     return pd.DataFrame(data, columns=["rendering", "gloss"])
 
 
