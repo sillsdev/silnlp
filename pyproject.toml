@@ -38,6 +38,8 @@ numpy = "1.19.3"
 OpenNMT-tf = "^2.16.0"
 annoy = "^1.17.0"
 lit-nlp = {url = "https://github.com/ddaspit/lit/releases/download/v0.2/lit_nlp-0.2-py3-none-any.whl"}
+tensorflow = "^2.4.1"
+google-cloud-translate = "^3.0.2"
 
 [tool.poetry.dev-dependencies]
 mypy = "^0.812"
