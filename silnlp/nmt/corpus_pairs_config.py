@@ -192,8 +192,8 @@ class CorpusPairsConfig(Config):
 
     def _write_scripture_data_sets(
         self,
-        src_spp: sp.SentencePieceProcessor,
-        trg_spp: sp.SentencePieceProcessor,
+        src_spp: Optional[sp.SentencePieceProcessor],
+        trg_spp: Optional[sp.SentencePieceProcessor],
         train_src_file: IO,
         train_trg_file: IO,
         val_src_file: IO,
@@ -218,8 +218,8 @@ class CorpusPairsConfig(Config):
 
     def _write_standard_data_sets(
         self,
-        src_spp: sp.SentencePieceProcessor,
-        trg_spp: sp.SentencePieceProcessor,
+        src_spp: Optional[sp.SentencePieceProcessor],
+        trg_spp: Optional[sp.SentencePieceProcessor],
         train_src_file: IO,
         train_trg_file: IO,
         val_src_file: IO,
@@ -247,8 +247,8 @@ class CorpusPairsConfig(Config):
 
     def _write_data_sets(
         self,
-        src_spp: sp.SentencePieceProcessor,
-        trg_spp: sp.SentencePieceProcessor,
+        src_spp: Optional[sp.SentencePieceProcessor],
+        trg_spp: Optional[sp.SentencePieceProcessor],
         train_src_file: IO,
         train_trg_file: IO,
         val_src_file: IO,

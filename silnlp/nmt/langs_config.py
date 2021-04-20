@@ -488,7 +488,9 @@ class LangsConfig(Config):
         if self.write_trg_tag:
             sentences.loc[:, "source"] = f"<2{trg_iso}> " + sentences.loc[:, "source"]
 
-    def _write_val_corpora(self, trg_spp: sp.SentencePieceProcessor, val: Dict[Tuple[str, str], pd.DataFrame]) -> None:
+    def _write_val_corpora(
+        self, trg_spp: Optional[sp.SentencePieceProcessor], val: Dict[Tuple[str, str], pd.DataFrame]
+    ) -> None:
         ref_files: List[IO] = []
         try:
             for pair_val in val.values():

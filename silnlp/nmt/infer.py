@@ -29,7 +29,7 @@ def insert_tag(text: str, trg_iso: Optional[str]) -> str:
 
 def infer_text_file(
     runner: SILRunner,
-    src_spp: sp.SentencePieceProcessor,
+    src_spp: Optional[sp.SentencePieceProcessor],
     src_paths: List[Path],
     trg_paths: List[Path],
     checkpoint_path: Path,
@@ -127,7 +127,7 @@ def collect_segments(segments: List[Segment], cur_elem: sfm.Element, cur_segment
 
 def infer_book(
     runner: SILRunner,
-    src_spp: sp.SentencePieceProcessor,
+    src_spp: Optional[sp.SentencePieceProcessor],
     src_project: str,
     book: str,
     checkpoint_path: Path,

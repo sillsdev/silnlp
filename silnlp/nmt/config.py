@@ -289,7 +289,9 @@ class Config(ABC):
         self._build_vocabs()
         self._build_corpora(stats)
 
-    def create_sp_processors(self) -> Tuple[sp.SentencePieceProcessor, sp.SentencePieceProcessor]:
+    def create_sp_processors(self) -> Tuple[Optional[sp.SentencePieceProcessor], Optional[sp.SentencePieceProcessor]]:
+        if not self.data["tokenize"]:
+            return (None, None)
         if self.share_vocab:
             model_prefix = self.exp_dir / "sp"
             src_spp = sp.SentencePieceProcessor()
@@ -304,7 +306,9 @@ class Config(ABC):
             trg_spp.Load(str(self.exp_dir / "trg-sp.model"))
         return (src_spp, trg_spp)
 
-    def create_src_sp_processor(self) -> sp.SentencePieceProcessor:
+    def create_src_sp_processor(self) -> Optional[sp.SentencePieceProcessor]:
+        if not self.data["tokenize"]:
+            return None
         src_spp = sp.SentencePieceProcessor()
         src_spp.Load(str(self.exp_dir / "sp.model" if self.share_vocab else self.exp_dir / "src-sp.model"))
         return src_spp
