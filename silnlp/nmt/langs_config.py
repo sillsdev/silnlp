@@ -391,12 +391,15 @@ class LangsConfig(Config):
 
         write_corpus(self.exp_dir / "train.src.txt", encode_sp_lines(src_spp, train["source"]))
         write_corpus(self.exp_dir / "train.trg.txt", encode_sp_lines(trg_spp, train["target"]))
+        write_corpus(self.exp_dir / "train.vref.txt", map(lambda vr: str(vr), train["vref"]))
 
         print("Writing validation data set...")
         if len(val) > 0:
             val_src = itertools.chain.from_iterable(map(lambda pair_val: pair_val["source"], val.values()))
             write_corpus(self.exp_dir / "val.src.txt", encode_sp_lines(src_spp, val_src))
             self._write_val_corpora(trg_spp, val)
+            val_vref = itertools.chain.from_iterable(map(lambda pair_val: pair_val["vref"], val.values()))
+            write_corpus(self.exp_dir / "val.vref.txt", map(lambda vr: str(vr), val_vref))
 
         print("Writing test data set...")
         for old_file_path in self.exp_dir.glob("test.*.txt"):
@@ -415,10 +418,11 @@ class LangsConfig(Config):
                     self.exp_dir / f"{prefix}.trg{trg_suffix}.txt",
                     encode_sp_lines(trg_spp, pair_test[column]),
                 )
-                write_corpus(
-                    self.exp_dir / f"{prefix}.trg.detok{trg_suffix}.txt",
-                    decode_sp_lines(encode_sp_lines(trg_spp, pair_test[column])),
-                )
+                if trg_spp is not None:
+                    write_corpus(
+                        self.exp_dir / f"{prefix}.trg.detok{trg_suffix}.txt",
+                        decode_sp_lines(encode_sp_lines(trg_spp, pair_test[column])),
+                    )
         print("Preprocessing completed")
 
     def _add_to_train_dataset(
