@@ -34,8 +34,8 @@ def main() -> None:
 
     # Process the projects that have data and tell the user.
     if len(projects_found) > 0:
-        MT_SCRIPTURE_DIR.mkdir(exist_ok=True)
-        MT_TERMS_DIR.mkdir(exist_ok=True)
+        MT_SCRIPTURE_DIR.mkdir(exist_ok=True, parents=True)
+        MT_TERMS_DIR.mkdir(exist_ok=True, parents=True)
         for project in projects_found:
             print(f"Extracting {project}...")
             extract_project(project, args.include, args.exclude)

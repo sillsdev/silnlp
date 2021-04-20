@@ -218,11 +218,9 @@ def main() -> None:
 
     book: Optional[str] = args.book
     if book is not None:
-        if not isinstance(config, LangsConfig):
-            raise RuntimeError("The specified experiment has an unsupported configuration.")
         src_project: Optional[str] = args.src_project
         if src_project is None:
-            if len(config.src_projects) > 1:
+            if not isinstance(config, LangsConfig) or len(config.src_projects) > 1:
                 raise RuntimeError("A source project must be specified.")
             src_project = next(iter(config.src_projects))
 
@@ -235,7 +233,7 @@ def main() -> None:
         elif output_path.name == output_path:
             output_path = default_output_dir / output_path
 
-        output_path.parent.mkdir(exist_ok=True)
+        output_path.parent.mkdir(exist_ok=True, parents=True)
         infer_book(runner, src_spp, src_project, book, checkpoint_path, output_path, trg_iso)
     elif args.src_prefix is not None:
         if args.trg_prefix is None:

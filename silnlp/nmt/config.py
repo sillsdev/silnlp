@@ -599,7 +599,7 @@ def main() -> None:
         print('The experiment config file already exists. Use "--force" if you want to overwrite the existing config.')
         return
 
-    exp_dir.mkdir(exist_ok=True)
+    exp_dir.mkdir(exist_ok=True, parents=True)
 
     config = _DEFAULT_NEW_CONFIG.copy()
     if args.model is not None:
