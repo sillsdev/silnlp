@@ -22,7 +22,6 @@ from .machine_aligner import (
     Ibm1MachineAligner,
     Ibm2MachineAligner,
     ParatextMachineAligner,
-    SmtMachineAligner,
 )
 
 ALIGNERS: Dict[str, Tuple[Type[Aligner], str]] = {
@@ -30,7 +29,6 @@ ALIGNERS: Dict[str, Tuple[Type[Aligner], str]] = {
     "ibm1": (Ibm1MachineAligner, "IBM-1"),
     "ibm2": (Ibm2MachineAligner, "IBM-2"),
     "hmm": (HmmMachineAligner, "HMM"),
-    "smt": (SmtMachineAligner, "SMT"),
     "pt": (ParatextMachineAligner, "PT"),
     "giza_ibm1": (Ibm1GizaAligner, "Giza-IBM-1"),
     "giza_ibm2": (Ibm2GizaAligner, "Giza-IBM-2"),

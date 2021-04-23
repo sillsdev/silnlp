@@ -14,7 +14,6 @@ class MachineAligner(Aligner):
         id: str,
         model_type: str,
         model_dir: Path,
-        smt_model_type: Optional[str] = None,
         plugin_file_path: Optional[Path] = None,
         has_inverse_model: bool = True,
         threshold: float = 0.01,
@@ -23,7 +22,6 @@ class MachineAligner(Aligner):
     ) -> None:
         super().__init__(id, model_dir)
         self.model_type = model_type
-        self.smt_model_type = smt_model_type
         self._plugin_file_path = plugin_file_path
         self._has_inverse_model = has_inverse_model
         self._threshold = threshold
@@ -79,9 +77,6 @@ class MachineAligner(Aligner):
             "-mt",
             self.model_type,
         ]
-        if self.smt_model_type is not None:
-            args.append("-smt")
-            args.append(self.smt_model_type)
         if self._plugin_file_path is not None:
             args.append("-mp")
             args.append(str(self._plugin_file_path))
@@ -105,9 +100,6 @@ class MachineAligner(Aligner):
             "-sh",
             sym_heuristic,
         ]
-        if self.smt_model_type is not None:
-            args.append("-smt")
-            args.append(self.smt_model_type)
         if self._plugin_file_path is not None:
             args.append("-mp")
             args.append(str(self._plugin_file_path))
@@ -129,9 +121,6 @@ class MachineAligner(Aligner):
             "-d",
             direction,
         ]
-        if self.smt_model_type is not None:
-            args.append("-smt")
-            args.append(self.smt_model_type)
         if self._plugin_file_path is not None:
             args.append("-mp")
             args.append(str(self._plugin_file_path))
@@ -169,8 +158,3 @@ class ParatextMachineAligner(MachineAligner):
             threshold=0,
             direct_model_prefix="src_trg",
         )
-
-
-class SmtMachineAligner(MachineAligner):
-    def __init__(self, model_dir: Path) -> None:
-        super().__init__("smt", "smt", model_dir, smt_model_type="hmm")
