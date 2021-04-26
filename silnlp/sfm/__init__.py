@@ -957,7 +957,11 @@ def generate(doc):
                 sep = os.linesep
             elif not body.startswith(("\r\n", "\n", "|")):
                 sep = " "
-            elif styletype != "Character" and not body.endswith((" ", "\r\n", "\n")):
+            elif (
+                styletype != "Character"
+                and e.meta.get("EndMarker") is not None
+                and not body.endswith((" ", "\r\n", "\n"))
+            ):
                 end = "*"
         elif styletype == "Character":
             body = " "

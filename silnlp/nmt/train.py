@@ -12,7 +12,7 @@ os.environ["TF_DETERMINISTIC_OPS"] = "1"
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Trains a NMT model using OpenNMT-tf")
+    parser = argparse.ArgumentParser(description="Trains an NMT model")
     parser.add_argument("experiments", nargs="+", help="Experiment names")
     parser.add_argument("--mixed-precision", default=False, action="store_true", help="Enable mixed precision")
     parser.add_argument("--memory-growth", default=False, action="store_true", help="Enable memory growth")

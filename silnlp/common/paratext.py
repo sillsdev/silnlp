@@ -214,6 +214,20 @@ def extract_term_renderings(project_folder: str) -> None:
     print(f"# of Terms written: {count}")
 
 
+def book_file_name_digits(book_num: int) -> str:
+    if book_num < 10:
+        return f"0{book_num}"
+    if book_num < 40:
+        return str(book_num)
+    if book_num < 100:
+        return str(book_num + 1)
+    if book_num < 110:
+        return f"A{book_num - 100}"
+    if book_num < 120:
+        return f"B{book_num - 110}"
+    return f"C{book_num - 120}"
+
+
 def get_book_path(project: str, book: str) -> Path:
     project_dir = get_project_dir(project)
     settings_tree = ElementTree.parse(project_dir / "Settings.xml")
@@ -226,12 +240,12 @@ def get_book_path(project: str, book: str) -> Path:
     assert book_name_form is not None
 
     book_num = book_id_to_number(book)
-    if book_name_form == "41MAT":
-        book_name = f"{book_num:02}{book}"
-    elif book_name_form == "41":
-        book_name = f"{book_num:02}"
-    else:
+    if book_name_form == "MAT":
         book_name = book
+    elif book_name_form == "40" or book_name_form == "41":
+        book_name = book_file_name_digits(book_num)
+    else:
+        book_name = f"{book_file_name_digits(book_num)}{book}"
 
     book_file_name = f"{pre_part}{book_name}{post_part}"
 

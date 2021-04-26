@@ -7,7 +7,7 @@ from .config import create_runner, load_config
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Replace embeddings in an OpenNMT-tf model")
+    parser = argparse.ArgumentParser(description="Replace embeddings in an NMT model")
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument("--side", type=str, default="target", choices=["source", "target"], help="Word embedding side")
     parser.add_argument("--embedding", type=str, required=True, help="Input word2vec file")
