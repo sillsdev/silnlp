@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -39,7 +40,10 @@ class MachineAligner(Aligner):
         inverse_lex_path = self.model_dir / "lexicon.inverse.txt"
         if inverse_lex_path.is_file():
             inverse_lex_path.unlink()
-        self._train_alignment_model(src_file_path, trg_file_path)
+        self.model_dir.mkdir(exist_ok=True)
+        shutil.copyfile(src_file_path, self.model_dir / "src.txt")
+        shutil.copyfile(trg_file_path, self.model_dir / "trg.txt")
+        self._train_alignment_model()
 
     def align(self, out_file_path: Path, sym_heuristic: str = "grow-diag-final-and") -> None:
         self._align_parallel_corpus(out_file_path, sym_heuristic)
@@ -65,15 +69,15 @@ class MachineAligner(Aligner):
         self._extract_lexicon("inverse", inverse_lex_path)
         return Lexicon.load(inverse_lex_path, include_special_tokens)
 
-    def _train_alignment_model(self, src_file_path: Path, trg_file_path: Path) -> None:
+    def _train_alignment_model(self) -> None:
         args: List[str] = [
             "dotnet",
             "machine",
             "train",
             "alignment-model",
             str(self.model_dir) + os.sep,
-            str(src_file_path),
-            str(trg_file_path),
+            str(self.model_dir / "src.txt"),
+            str(self.model_dir / "trg.txt"),
             "-mt",
             self.model_type,
         ]
@@ -92,8 +96,8 @@ class MachineAligner(Aligner):
             "machine",
             "align",
             str(self.model_dir),
-            str(self.model_dir / (self._direct_model_prefix + ".src")),
-            str(self.model_dir / (self._direct_model_prefix + ".trg")),
+            str(self.model_dir / "src.txt"),
+            str(self.model_dir / "trg.txt"),
             str(output_file_path),
             "-mt",
             self.model_type,
