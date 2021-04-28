@@ -31,7 +31,7 @@ def get_iso(settings_tree: ElementTree.ElementTree) -> str:
     return iso[:index]
 
 
-def extract_project(project: str, include_texts: str, exclude_texts: str) -> None:
+def extract_project(project: str, include_texts: str, exclude_texts: str, include_markers: bool) -> None:
     project_dir = get_project_dir(project)
     settings_tree = ElementTree.parse(project_dir / "Settings.xml")
     iso = get_iso(settings_tree)
@@ -46,7 +46,7 @@ def extract_project(project: str, include_texts: str, exclude_texts: str) -> Non
         "-sf",
         "pt",
         "-tf",
-        "pt",
+        "pt-m" if include_markers else "pt",
         "-as",
         "-ie",
     ]
@@ -65,6 +65,9 @@ def extract_project(project: str, include_texts: str, exclude_texts: str) -> Non
         for text in exclude_texts.split(","):
             text = text.strip("*")
             output_basename += f"-{text}"
+
+    if include_markers:
+        output_basename += "_m"
 
     args.append("-to")
     args.append(str(MT_SCRIPTURE_DIR / f"{output_basename}.txt"))
