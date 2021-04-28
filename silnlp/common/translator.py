@@ -11,35 +11,41 @@ from .paratext import get_book_path, get_iso, get_project_dir
 
 
 class Paragraph:
-    def __init__(self, elem: sfm.Element, child_indices: Iterable[int] = [], add_nl: bool = False):
+    def __init__(self, elem: sfm.Element, child_indices: Iterable[int] = [], text: str = ""):
         self.elem = elem
         self.child_indices = list(child_indices)
-        self.add_nl = add_nl
+        self.text = text
+
+    def add_text(self, index: int, text: str) -> None:
+        self.child_indices.append(index)
+        self.text += text
 
     def copy(self) -> "Paragraph":
-        return Paragraph(self.elem, self.child_indices, self.add_nl)
+        return Paragraph(self.elem, self.child_indices, self.text)
 
 
 class Segment:
-    def __init__(self, paras: Iterable[Paragraph] = [], text: str = ""):
+    def __init__(self, paras: Iterable[Paragraph] = []):
         self.paras = list(paras)
-        self.text = text
 
     @property
     def is_empty(self) -> bool:
         return self.text == ""
 
+    @property
+    def text(self) -> str:
+        return "".join(p.text for p in self.paras)
+
     def add_text(self, index: int, text: str) -> None:
-        self.paras[-1].child_indices.append(index)
-        self.paras[-1].add_nl = text.endswith("\n")
-        self.text += text
+        if len(text) == 0:
+            return
+        self.paras[-1].add_text(index, text)
 
     def reset(self) -> None:
         self.paras.clear()
-        self.text = ""
 
     def copy(self) -> "Segment":
-        return Segment(map(lambda p: p.copy(), filter(lambda p: len(p.child_indices) > 0, self.paras)), self.text)
+        return Segment(p.copy() for p in self.paras if len(p.child_indices) > 0)
 
 
 def get_char_style_text(elem: sfm.Element) -> str:
@@ -74,7 +80,7 @@ def collect_segments_from_paragraph(segments: List[Segment], cur_elem: sfm.Eleme
             elif child.meta["StyleType"] == "Character" and child.name != "fig":
                 cur_segment.add_text(i, get_char_style_text(child))
         elif isinstance(child, sfm.Text) and cur_elem.name != "id":
-            if len(child) > 0 and child != "\n":
+            if i > 0 or child != "\n":
                 cur_segment.add_text(i, str(child))
 
     cur_child_segment = Segment()
@@ -87,43 +93,57 @@ def collect_segments_from_paragraph(segments: List[Segment], cur_elem: sfm.Eleme
 
 def collect_segments(doc: List[sfm.Element]) -> List[Segment]:
     segments: List[Segment] = []
-    cur_segment = Segment()
-    collect_segments_from_paragraph(segments, doc[0], cur_segment)
-    if not cur_segment.is_empty:
-        segments.append(cur_segment)
+    for root in doc:
+        cur_segment = Segment()
+        collect_segments_from_paragraph(segments, root, cur_segment)
+        if not cur_segment.is_empty:
+            segments.append(cur_segment)
     return segments
 
 
 def update_segments(segments: List[Segment], translations: List[str]) -> None:
     for segment, translation in zip(reversed(segments), reversed(translations)):
-        first_para = segment.paras[0]
         if segment.text.endswith(" "):
             translation += " "
 
-        for child_index in reversed(first_para.child_indices):
-            first_para.elem.pop(child_index)
+        lines = translation.splitlines()
+        if len(lines) == len(segment.paras):
+            for para, line in zip(reversed(segment.paras), reversed(lines)):
+                for child_index in reversed(para.child_indices):
+                    para.elem.pop(child_index)
+                if para.text.endswith("\n"):
+                    insert_nl_index = para.child_indices[0]
+                    for i in range(len(para.child_indices) - 1):
+                        if para.child_indices[i] != para.child_indices[i + 1] - 1:
+                            insert_nl_index += 1
+                    para.elem.insert(insert_nl_index, sfm.Text("\n", parent=para.elem))
+                para.elem.insert(para.child_indices[0], sfm.Text(line, parent=para.elem))
+        else:
+            first_para = segment.paras[0]
+            for child_index in reversed(first_para.child_indices):
+                first_para.elem.pop(child_index)
 
-        insert_nl_index = first_para.child_indices[0]
-        for para in reversed(segment.paras[1:]):
-            for child_index in reversed(para.child_indices):
-                para.elem.pop(child_index)
+            insert_nl_index = first_para.child_indices[0]
+            for para in reversed(segment.paras[1:]):
+                for child_index in reversed(para.child_indices):
+                    para.elem.pop(child_index)
 
-            child: Union[sfm.Element, sfm.Text]
-            for child in para.elem:
-                child.parent = first_para.elem
-                first_para.elem.insert(first_para.child_indices[0], child)
-                insert_nl_index += 1
-
-            parent: sfm.Element = para.elem.parent
-            parent.remove(para.elem)
-
-        if segment.text.endswith("\n"):
-            for i in range(len(first_para.child_indices) - 1):
-                if first_para.child_indices[i] != first_para.child_indices[i + 1] - 1:
+                child: Union[sfm.Element, sfm.Text]
+                for child in para.elem:
+                    child.parent = first_para.elem
+                    first_para.elem.insert(first_para.child_indices[0], child)
                     insert_nl_index += 1
-            first_para.elem.insert(insert_nl_index, sfm.Text("\n", parent=first_para.elem))
 
-        first_para.elem.insert(first_para.child_indices[0], sfm.Text(translation, parent=first_para.elem))
+                parent: sfm.Element = para.elem.parent
+                parent.remove(para.elem)
+
+            if segment.text.endswith("\n"):
+                for i in range(len(first_para.child_indices) - 1):
+                    if first_para.child_indices[i] != first_para.child_indices[i + 1] - 1:
+                        insert_nl_index += 1
+                first_para.elem.insert(insert_nl_index, sfm.Text("\n", parent=first_para.elem))
+
+            first_para.elem.insert(first_para.child_indices[0], sfm.Text(translation, parent=first_para.elem))
 
 
 class Translator(ABC):
