@@ -185,7 +185,8 @@ class LangsConfig(Config):
                 src_file_paths.update(src_glosses_file_paths)
             if "en" in trg_isos:
                 trg_file_paths.update(trg_glosses_file_paths)
-        super().__init__(exp_dir, config, src_isos, trg_isos, src_file_paths, trg_file_paths)
+        src_tags: Set[str] = set()
+        super().__init__(exp_dir, config, src_isos, trg_isos, src_file_paths, trg_file_paths, src_tags)
 
     def is_train_project(self, ref_file_path: Path) -> bool:
         trg_iso, trg_project = self._parse_ref_file_path(ref_file_path)
