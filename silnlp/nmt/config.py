@@ -287,7 +287,8 @@ class Config(ABC):
 
     def preprocess(self, stats: bool) -> None:
         self._build_vocabs()
-        self._build_corpora(stats)
+        src_spp, trg_spp = self.create_sp_processors()
+        self._build_corpora(src_spp, trg_spp, stats)
 
     def create_sp_processors(self) -> Tuple[Optional[sp.SentencePieceProcessor], Optional[sp.SentencePieceProcessor]]:
         if not self.data["tokenize"]:
@@ -314,7 +315,9 @@ class Config(ABC):
         return src_spp
 
     @abstractmethod
-    def _build_corpora(self, stats: bool) -> None:
+    def _build_corpora(
+        self, src_spp: Optional[sp.SentencePieceProcessor], trg_spp: Optional[sp.SentencePieceProcessor], stats: bool
+    ) -> None:
         pass
 
     def _build_vocabs(self) -> None:

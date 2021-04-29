@@ -21,14 +21,14 @@ def main() -> None:
 
         src_file_path = exp_dir / "train.src.txt"
         trg_file_path = exp_dir / "train.trg.txt"
-        engine_dir = exp_dir / f"engine{os.sep}"
+        engine_dir = exp_dir / "engine"
 
         args_list: List[str] = [
             "dotnet",
             "machine",
             "train",
             "translation-model",
-            str(engine_dir),
+            str(engine_dir) + os.sep,
             str(src_file_path),
             str(trg_file_path),
             "-st",

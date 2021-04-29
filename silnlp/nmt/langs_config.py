@@ -13,17 +13,20 @@ from ..common.corpus import (
     Term,
     exclude_books,
     filter_parallel_corpus,
-    get_scripture_path,
     get_scripture_parallel_corpus,
+    get_scripture_path,
     get_terms,
     get_terms_glosses_path,
     get_terms_list,
     get_terms_renderings_path,
     include_books,
+    load_corpus,
     split_parallel_corpus,
     write_corpus,
 )
-from ..common.utils import merge_dict
+from ..common.environment import MT_SCRIPTURE_DIR
+from ..common.utils import get_mt_exp_dir, merge_dict
+from ..common.verse_ref import VerseRef
 from .config import Config, DataFileType
 from .utils import decode_sp_lines, encode_sp, encode_sp_lines
 
@@ -195,7 +198,9 @@ class LangsConfig(Config):
         _, trg_project = self._parse_ref_file_path(ref_file_path)
         return trg_project in ref_projects
 
-    def _build_corpora(self, stats: bool) -> None:
+    def _build_corpora(
+        self, src_spp: Optional[sp.SentencePieceProcessor], trg_spp: Optional[sp.SentencePieceProcessor], stats: bool
+    ) -> None:
         print("Collecting data sets...")
         test_size: int = self.data["test_size"]
         val_size: int = self.data["val_size"]
@@ -214,10 +219,10 @@ class LangsConfig(Config):
         pair_test_indices: Dict[Tuple[str, str], Set[int]] = {}
         terms: Optional[pd.DataFrame] = None
 
+        self._populate_pair_test_indices(pair_test_indices)
+
         corpus_books = get_books(self.data.get("corpus_books", []))
         test_books = get_books(self.data.get("test_books", []))
-
-        src_spp, trg_spp = self.create_sp_processors()
 
         stats_file: Optional[IO] = None
         try:
@@ -410,7 +415,7 @@ class LangsConfig(Config):
             write_corpus(self.exp_dir / f"{prefix}.vref.txt", map(lambda vr: str(vr), pair_test["vref"]))
             write_corpus(self.exp_dir / f"{prefix}.src.txt", encode_sp_lines(src_spp, pair_test["source"]))
 
-            columns: List[str] = list(filter(lambda c: c.startswith("target"), pair_test.columns))
+            columns: List[str] = [c for c in pair_test.columns if c.startswith("target")]
             for column in columns:
                 project = column[len("target_") :]
                 trg_suffix = "" if len(columns) == 1 else f".{project}"
@@ -524,3 +529,28 @@ class LangsConfig(Config):
         if len(parts) == 5:
             return self.default_trg_iso, parts[3]
         return parts[2], parts[5]
+
+    def _populate_pair_test_indices(self, pair_test_indices: Dict[Tuple[str, str], Set[int]]) -> None:
+        exp_name = self.data.get("use_test_set_from")
+        if exp_name is None:
+            return
+
+        vrefs: Dict[str, int] = {}
+        for i, vref_str in enumerate(load_corpus(MT_SCRIPTURE_DIR / "vref.txt")):
+            vrefs[vref_str] = i
+
+        exp_dir = get_mt_exp_dir(exp_name)
+        for vref_path in exp_dir.glob("test*.vref.txt"):
+            stem = vref_path.stem
+            test_indices: Set[int] = set()
+            if stem == "test.vref":
+                pair_test_indices[(self.default_src_iso, self.default_trg_iso)] = test_indices
+            else:
+                _, src_iso, trg_iso, _ = stem.split(".", maxsplit=4)
+                pair_test_indices[(src_iso, trg_iso)] = test_indices
+
+            for vref_str in load_corpus(vref_path):
+                vref = VerseRef.from_string(vref_str)
+                if vref.has_multiple:
+                    vref = vref.simplify()
+                test_indices.add(vrefs[str(vref)])

@@ -154,9 +154,10 @@ class CorpusPairsConfig(Config):
             trg_file_paths.add(pair.trg_file_path)
         super().__init__(exp_dir, config, src_isos, trg_isos, src_file_paths, trg_file_paths)
 
-    def _build_corpora(self, stats: bool) -> None:
+    def _build_corpora(
+        self, src_spp: Optional[sp.SentencePieceProcessor], trg_spp: Optional[sp.SentencePieceProcessor], stats: bool
+    ) -> None:
         test_iso_pairs_count = len(set((p.src_iso, p.trg_iso) for p in self.corpus_pairs if p.is_test))
-        src_spp, trg_spp = self.create_sp_processors()
         for old_file_path in self.exp_dir.glob("test.*.txt"):
             old_file_path.unlink()
         with open(self.exp_dir / "train.src.txt", "w", encoding="utf-8", newline="\n") as train_src_file, open(
@@ -332,6 +333,7 @@ class CorpusPairsConfig(Config):
         if len(src_noise) == 0:
             return src_sentence
         tokens = src_sentence.split()
+        tag: List[str] = []
         if self.write_trg_tag:
             tag = tokens[:1]
             tokens = tokens[1:]
