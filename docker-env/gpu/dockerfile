@@ -1,0 +1,57 @@
+ARG PYTHON_VERSION=3.8
+ARG UBUNTU_VERSION=focal
+ARG DOTNET_VERSION=5.0.5
+ARG CUDA_VERSION=11.3.0-devel-ubuntu20.04
+ARG BASE=amd64/ubuntu
+
+# Installer image
+FROM amd64/buildpack-deps:$UBUNTU_VERSION-curl as dotnet_builder
+ARG DOTNET_VERSION
+
+# Retrieve .NET
+RUN curl -SL --output dotnet.tar.gz https://dotnetcli.azureedge.net/dotnet/Runtime/$DOTNET_VERSION/dotnet-runtime-$DOTNET_VERSION-linux-x64.tar.gz \
+    && dotnet_sha512='ce9d3778c9a331b35cf18d7b64f9eec8fc37d9088f1a2208488577f611b2ab0f8b3a82b7f559b331d584ac86e1f09153ee2e255e617239fe9a9382373f873237' \
+    && echo "$dotnet_sha512 dotnet.tar.gz" | sha512sum -c - \
+    && mkdir -p /dotnet \
+    && tar -ozxf dotnet.tar.gz -C /dotnet \
+    && rm dotnet.tar.gz
+
+FROM mcr.microsoft.com/dotnet/sdk:5.0-$UBUNTU_VERSION-amd64 as tool_installer
+
+RUN dotnet tool install -g --version 2.4.8 sil.machine.tool
+
+FROM nvidia/cuda:$CUDA_VERSION
+ARG PYTHON_VERSION
+
+#install dotnet runtime deps
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    ca-certificates \
+    \
+    # .NET Core dependencies
+    libc6 \
+    libgcc1 \
+    libgssapi-krb5-2 \
+    libicu66 \
+    libssl1.1 \
+    libstdc++6 \
+    zlib1g \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV \
+    # Configure web servers to bind to port 80 when present
+    ASPNETCORE_URLS=http://+:80 \
+    # Enable detection of running in a container
+    DOTNET_RUNNING_IN_CONTAINER=true
+
+#Install dotnet from the builder
+COPY --from=dotnet_builder ["/dotnet","/usr/share/dotnet"]
+RUN ln -s /usr/share/dotnet/dotnet /usr/bin/dotnet
+
+#Install sil.machine.tool 
+COPY --from=tool_installer /root/.dotnet/tools/ /opt/bin
+
+#Install python
+RUN apt-get update -y && apt-get install python$PYTHON_VERSION -y
+
+
