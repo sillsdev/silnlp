@@ -40,6 +40,9 @@ annoy = "^1.17.0"
 lit-nlp = {url = "https://github.com/ddaspit/lit/releases/download/v0.2/lit_nlp-0.2-py3-none-any.whl"}
 tensorflow = "^2.4.1"
 google-cloud-translate = "^3.0.2"
+clearml = {extras = ["s3"], version = ">=0.17.5"}
+smart-open = {extras = ["s3"], version = ">=5.0.0"}
+s3path = ">=0.2.203"
 
 [tool.poetry.dev-dependencies]
 mypy = "^0.812"
