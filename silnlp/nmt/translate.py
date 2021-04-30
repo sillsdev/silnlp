@@ -6,6 +6,8 @@ from typing import Iterable, Optional
 
 logging.basicConfig()
 
+import tensorflow as tf
+
 from ..common.canon import book_id_to_number
 from ..common.paratext import book_file_name_digits
 from ..common.translator import Translator
@@ -51,9 +53,18 @@ def main() -> None:
     parser.add_argument("--book", default=None, type=str, help="The book to translate")
     parser.add_argument("--trg-lang", default=None, type=str, help="The target language to translate into")
     parser.add_argument("--output-usfm", default=None, type=str, help="The output USFM file path")
+    parser.add_argument(
+        "--eager-execution",
+        default=False,
+        action="store_true",
+        help="Enable TensorFlow eager execution.",
+    )
     args = parser.parse_args()
 
     print("Git commit:", get_git_revision_hash())
+
+    if args.eager_execution:
+        tf.config.run_functions_eagerly(True)
 
     exp_name = args.experiment
     config = load_config(exp_name)

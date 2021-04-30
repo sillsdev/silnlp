@@ -1,4 +1,7 @@
+from typing import List, Optional
+
 import tensorflow as tf
+import tensorflow_addons as tfa
 from opennmt import END_OF_SENTENCE_ID, START_OF_SENTENCE_ID
 from opennmt.decoders import SelfAttentionDecoder
 from opennmt.encoders import ParallelEncoder, SelfAttentionEncoder
@@ -11,7 +14,31 @@ from opennmt.layers import (
     SinusoidalPositionEncoder,
     TransformerLayerWrapper,
 )
+from opennmt.layers.reducer import align_in_time
 from opennmt.models import EmbeddingsSharingLevel, Transformer, register_model_in_catalog
+from opennmt.models.sequence_to_sequence import _add_noise, replace_unknown_target
+from opennmt.utils.decoding import BeamSearch, DecodingStrategy, Sampler
+from opennmt.utils.misc import shape_list
+from pygtrie import Trie
+
+from .decoding import DictionaryGuidedBeamSearch
+
+
+@tf.function
+def find_dict_trg_words(dictionary: Trie, src_ids: tf.Tensor) -> tf.RaggedTensor:
+    src_ids_np = src_ids.numpy()
+    i = 0
+    trg_words: List[tf.Tensor] = []
+    while i < len(src_ids_np):
+        result = dictionary.longest_prefix(src_ids_np[i:])
+        if result.is_set:
+            trg_words.append(result.value)
+            i += len(result.key)
+        else:
+            trg_words.append(tf.constant([], dtype=tf.int64))
+            i += 1
+    output: tf.RaggedTensor = tf.ragged.stack(trg_words)
+    return output.with_row_splits_dtype(tf.int64)
 
 
 class SILTransformerLayerWrapper(TransformerLayerWrapper):
@@ -41,7 +68,10 @@ class SILSelfAttentionEncoderLayer(SelfAttentionEncoderLayer):
     ):
         super(SelfAttentionEncoderLayer, self).__init__(**kwargs)
         self.self_attention = MultiHeadAttention(
-            num_heads, num_units, dropout=attention_dropout, maximum_relative_position=maximum_relative_position,
+            num_heads,
+            num_units,
+            dropout=attention_dropout,
+            maximum_relative_position=maximum_relative_position,
         )
         self.self_attention = SILTransformerLayerWrapper(
             self.self_attention, dropout, residual_connection=self_attention_residual_connection
@@ -130,7 +160,9 @@ class SILTransformer(Transformer):
         ]
         if len(encoders) > 1:
             encoder = ParallelEncoder(
-                encoders if not share_encoders else encoders[0], outputs_reducer=None, states_reducer=None,
+                encoders if not share_encoders else encoders[0],
+                outputs_reducer=None,
+                states_reducer=None,
             )
         else:
             encoder = encoders[0]
@@ -161,9 +193,29 @@ class SILTransformer(Transformer):
                 or (not self._with_relative_position and position_encoder_class == SinusoidalPositionEncoder)
             )
         )
+        self._dictionary: Optional[Trie] = None
         super(Transformer, self).__init__(
-            source_inputter, target_inputter, encoder, decoder, share_embeddings=share_embeddings,
+            source_inputter,
+            target_inputter,
+            encoder,
+            decoder,
+            share_embeddings=share_embeddings,
         )
+
+    def initialize(self, data_config, params=None):
+        super().initialize(data_config, params=params)
+        src_dict_path: Optional[str] = data_config.get("src_dictionary")
+        trg_dict_path: Optional[str] = data_config.get("trg_dictionary")
+        if src_dict_path is not None and trg_dict_path is not None:
+            self.labels_inputter.set_decoder_mode(enable=False, mark_start=False, mark_end=False)
+            dictionary = Trie()
+            with tf.io.gfile.GFile(src_dict_path) as src_dict, tf.io.gfile.GFile(trg_dict_path) as trg_dict:
+                for src_entry, trg_entry in zip(src_dict, trg_dict):
+                    src_tokens = self.features_inputter.make_features(tf.constant(src_entry.strip()))
+                    trg_tokens = self.labels_inputter.make_features(tf.constant(trg_entry.strip()))
+                    dictionary[src_tokens["ids"].numpy()] = trg_tokens["ids"]
+            self._dictionary = dictionary
+            self.labels_inputter.set_decoder_mode(mark_start=True, mark_end=True)
 
     def analyze(self, features):
         # Encode the source.
@@ -201,6 +253,112 @@ class SILTransformer(Transformer):
             "logits": outputs["logits"],
             "index": features["index"],
         }
+
+    def _dynamic_decode(self, features, encoder_outputs, encoder_state, encoder_sequence_length):
+        params = self.params
+        batch_size = tf.shape(tf.nest.flatten(encoder_outputs)[0])[0]
+        start_ids = tf.fill([batch_size], START_OF_SENTENCE_ID)
+        beam_size = params.get("beam_width", 1)
+
+        if beam_size > 1:
+            # Tile encoder outputs to prepare for beam search.
+            encoder_outputs = tfa.seq2seq.tile_batch(encoder_outputs, beam_size)
+            encoder_sequence_length = tfa.seq2seq.tile_batch(encoder_sequence_length, beam_size)
+            encoder_state = tf.nest.map_structure(
+                lambda state: tfa.seq2seq.tile_batch(state, beam_size) if state is not None else None,
+                encoder_state,
+            )
+
+        decoding_strategy = DecodingStrategy.from_params(params)
+        if self._dictionary is not None and isinstance(decoding_strategy, BeamSearch):
+            ids: tf.Tensor = features["ids"]
+            dict_trg_words: tf.RaggedTensor = tf.map_fn(
+                lambda s: find_dict_trg_words(self._dictionary, s),
+                ids,
+                fn_output_signature=tf.RaggedTensorSpec(shape=(None, None), dtype=tf.int64),
+            )
+            decoding_strategy = DictionaryGuidedBeamSearch(
+                dict_trg_words,
+                decoding_strategy.beam_size,
+                decoding_strategy.length_penalty,
+                decoding_strategy.coverage_penalty,
+            )
+
+        # Dynamically decodes from the encoder outputs.
+        initial_state = self.decoder.initial_state(
+            memory=encoder_outputs,
+            memory_sequence_length=encoder_sequence_length,
+            initial_state=encoder_state,
+        )
+        (sampled_ids, sampled_length, log_probs, alignment, _,) = self.decoder.dynamic_decode(
+            self.labels_inputter,
+            start_ids,
+            initial_state=initial_state,
+            decoding_strategy=decoding_strategy,
+            sampler=Sampler.from_params(params),
+            maximum_iterations=params.get("maximum_decoding_length", 250),
+            minimum_iterations=params.get("minimum_decoding_length", 0),
+        )
+        target_tokens = self.labels_inputter.ids_to_tokens.lookup(tf.cast(sampled_ids, tf.int64))
+
+        # Maybe replace unknown targets by the source tokens with the highest attention weight.
+        if params.get("replace_unknown_target", False):
+            if alignment is None:
+                raise TypeError(
+                    "replace_unknown_target is not compatible with decoders " "that don't return alignment history"
+                )
+            if not isinstance(self.features_inputter, WordEmbedder):
+                raise TypeError("replace_unknown_target is only defined when the source " "inputter is a WordEmbedder")
+            source_tokens = features["tokens"]
+            if beam_size > 1:
+                source_tokens = tfa.seq2seq.tile_batch(source_tokens, beam_size)
+            # Merge batch and beam dimensions.
+            original_shape = tf.shape(target_tokens)
+            target_tokens = tf.reshape(target_tokens, [-1, original_shape[-1]])
+            align_shape = shape_list(alignment)
+            attention = tf.reshape(
+                alignment,
+                [align_shape[0] * align_shape[1], align_shape[2], align_shape[3]],
+            )
+            # We don't have attention for </s> but ensure that the attention time dimension matches
+            # the tokens time dimension.
+            attention = align_in_time(attention, tf.shape(target_tokens)[1])
+            replaced_target_tokens = replace_unknown_target(target_tokens, source_tokens, attention)
+            target_tokens = tf.reshape(replaced_target_tokens, original_shape)
+
+        # Maybe add noise to the predictions.
+        decoding_noise = params.get("decoding_noise")
+        if decoding_noise:
+            target_tokens, sampled_length = _add_noise(
+                target_tokens,
+                sampled_length,
+                decoding_noise,
+                params.get("decoding_subword_token", "￭"),
+                params.get("decoding_subword_token_is_spacer"),
+            )
+            alignment = None  # Invalidate alignments.
+
+        predictions = {"log_probs": log_probs}
+        if self.labels_inputter.tokenizer.in_graph:
+            detokenized_text = self.labels_inputter.tokenizer.detokenize(
+                tf.reshape(target_tokens, [batch_size * beam_size, -1]),
+                sequence_length=tf.reshape(sampled_length, [batch_size * beam_size]),
+            )
+            predictions["text"] = tf.reshape(detokenized_text, [batch_size, beam_size])
+        else:
+            predictions["tokens"] = target_tokens
+            predictions["length"] = sampled_length
+            if alignment is not None:
+                predictions["alignment"] = alignment
+
+        # Maybe restrict the number of returned hypotheses based on the user parameter.
+        num_hypotheses = params.get("num_hypotheses", 1)
+        if num_hypotheses > 0:
+            if num_hypotheses > beam_size:
+                raise ValueError("n_best cannot be greater than beam_width")
+            for key, value in predictions.items():
+                predictions[key] = value[:, :num_hypotheses]
+        return predictions
 
 
 @register_model_in_catalog
