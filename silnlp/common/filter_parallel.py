@@ -1,355 +1,423 @@
-'''
-Original source: www.aclweb.org/anthology/D19-1430: Exploiting Monolingual Data at Scale for Neural Machine Translation
-                 Lijun Wu, Yiren Wang, Yingce Xia, Tao Qin, Jianhuang Lai, Tei-Yan Liu
+"""
+Adapted from: www.aclweb.org/anthology/D19-1430: Exploiting Monolingual Data at Scale for Neural Machine Translation
+              by  Lijun Wu, Yiren Wang, Yingce Xia, Tao Qin, Jianhuang Lai, Tei-Yan Liu
+"""
 
-Usage:
-"python preprocess.py source_file target_file"
-
-Parallel data filtering hard rules, including:
-1. duplicated sentences
-2. same source and target sentences
-3. sentences with '/', '|', '-' > 5
-4. sentences with digital numbers/characters > 0.5
-5. sentences contains word composed by more than 40 characters
-6. sentences with average characters for word > 20 or <4
-7. sentences with punctuations > 15
-8. sentences with punctuations/characters > 0.5
-9. src punctuations/tgt punctuations > 5 or 1/5
-10. sentences with html address and html tags
-11. optional: non english characters > 0.25
-12. optional: src characters / tgt characters > 3 or 1/3
-'''
-import sys
 import re
+import os
 import argparse
 from string import punctuation
+import yaml
+import json
+import urllib3
+import time
+from typing import Dict, List
 
-parser = argparse.ArgumentParser()
-parser.add_argument('src', help='source file')
-parser.add_argument('tgt', help='target file')
-parser.add_argument('--soft_html', action='store_true', default=False, help='only remove html tag, not the sentence')
-args = parser.parse_args()
-f1 = args.src
-f2 = args.tgt
+from ..common.utils import get_git_revision_hash, merge_dict
 
-min_tok = 4
-max_top = 200
-src_tgt_words_ratio = 1.8
-max_words_per_sent = 150
-avg_word_len_lb = 3
-avg_word_len_ub = 20
-min_punct_threshold = 3
-punc_max_num = 12
-punc_ratio = 3
-src_tgt_char_ratio = 3
-lattin_ratio = 0.25
+_DEFAULT_FILTER_CONFIG: dict = {
+    "filter": {
+        "dup_toggle": True,
+        "src_trg_same_toggle": True,
+        "sentence_word_num_toggle": True,
+        "sentence_words_ratio_toggle": True,
+        "specific_punct_toggle": True,
+        "characs_toggle": True,
+        "special_char_toggle": True,
+        "punctuation_toggle": True,
+        "html_toggle": True,
+        "characs_sum_toggle": True,
+        "latin_toggle": False,
+        "scripts_toggle": True,
+        "min_tok": 4,
+        "max_tok": 200,
+        "src_trg_words_ratio": 2.0,
+        "max_words_per_sent": 150,
+        "avg_word_len_lb": 2.8,
+        "avg_word_len_ub": 20,
+        "specific_punct_limit": 5,
+        "min_punct_threshold": 3,
+        "punct_max_num": 12,
+        "src_trg_punct_ratio": 3,
+        "punct_text_ratio": 0.5,
+        "src_trg_char_ratio": 3,
+        "latin_ratio": 0.25,
+        "valid_scripts": "latin common"
+    },
+}
+
+
+def load_config(config_file_name: str) -> dict:
+    config = _DEFAULT_FILTER_CONFIG.copy()
+
+    if config_file_name is None:
+        config_path = os.path.join(".", "config.yml")
+    else:
+        config_path = os.path.join(".", config_file_name)
+
+    if not os.path.isfile(config_path):
+        print(f"Warning: config file {config_path} not found; using defaults")
+        return config
+
+    with open(config_path, "r", encoding="utf-8") as file:
+        loaded_config = yaml.safe_load(file)
+        return merge_dict(config, loaded_config)
+
+
+def show_config(config: dict):
+    print(json.dumps(config, indent=2))
+
+
+all_lines = set()
+
 
 # Duplicated sentences remove
-def dup_remove(x_in, y_in):
-  tok = 'lijun_wu'
-  # all_lines = [x.strip() for x in x_in]
-  all_lines = []
-  for idx, (x, y) in enumerate(zip(x_in, y_in)):
-    all_lines.append(x.strip() + tok + y.strip())  # [src+tok+tgt]
-  all_lines = set(all_lines)  # make as set
+def dup_check(src: str, trg: str) -> bool:
+    this_line = src + '<averyunlikelytoken-xyzzy>' + trg
+    if this_line in all_lines:
+        return True
+    all_lines.add(this_line)
+    return False
 
-  x_out = []
-  y_out = []
-  for sent in all_lines:
-    segs = sent.split(tok)
-    x_out.append(segs[0])
-    y_out.append(segs[1])
-  assert len(x_out) == len(y_out)
-  print('After removing duplicated sentences, %i pairs remain' % len(x_out))
-  return x_out, y_out
 
 # Same source and target sentence remove
-def src_tgt_same_remove(x_in, y_in):
-  x_out = []
-  y_out = []
-  for (x,y) in zip(x_in, y_in):
-    if x.strip() == y.strip():
-      continue
-    x_out.append(x.strip())
-    y_out.append(y.strip())
+def src_trg_same_check(src: str, trg: str) -> bool:
+    return src == trg
 
-  assert len(x_out) == len(y_out)
-  print('After removing same source and target sentence, %i pairs remain' % len(x_out))
-  return x_out, y_out
 
 # Sentence words number remove
-def sentence_word_num_remove(x_in, y_in):
+def sentence_word_num_check(src: str, trg: str, min_tok: int, max_tok: int) -> bool:
 
-  def check_word_num(sent):
-    segs = sent.strip().split()
-    if len(segs) < min_tok or len(segs) > max_top:
-      return False
-    return True
+    def check_word_num(sent):
+        segs = sent.strip().split()
+        if len(segs) < min_tok or len(segs) > max_tok:
+            return True
+        return False
 
-  x_out = []
-  y_out = []
-
-  with open("dump.tsv", "w", encoding="utf-8") as f:
-    for (x, y) in zip(x_in, y_in):
-      if check_word_num(x) and check_word_num(y):
-        x_out.append(x.strip())
-        y_out.append(y.strip())
-      else:
-        f.write(f"{x}\t{y}\n")
-
-  assert len(x_out) == len(y_out)
-  print('After removing sentences with too few or too many words, %i pairs remain' % len(x_out))
-  return x_out, y_out
+    return check_word_num(src) or check_word_num(trg)
 
 
 # Sentence pair words ratio exceeded remove
-def sentence_words_ratio_remove(x_in, y_in):
-  x_out = []
-  y_out = []
+def sentence_words_ratio_check(src: str, trg: str, src_trg_words_ratio: float) -> bool:
+    m_x = len(src.split())
+    m_y = len(trg.split())
 
-  for (x, y) in zip(x_in, y_in):
-    m_x = len(x.strip().split())
-    m_y = len(y.strip().split())
+    return m_x / m_y > src_trg_words_ratio or m_y / m_x > src_trg_words_ratio
 
-    if m_x / m_y > src_tgt_words_ratio or m_y / m_x > src_tgt_words_ratio:
-      continue
-    x_out.append(x.strip())
-    y_out.append(y.strip())
-
-  assert len(x_out) == len(y_out)
-  print('After removing sentence pair exceeds length ratio, %i pairs remain' % len(x_out))
-  return x_out, y_out
 
 # Specific punctuation number exceeded sentence remove
-def specific_punc_remove(x_in, y_in):
+def specific_punct_check(src: str, trg: str, specific_punct_limit: int) -> bool:
 
-  def hot_fix_filter(sent):
-    sent = sent.strip()
-    if sent.count("/") > 5:
-      return False
-    if sent.count("|") > 5:
-      return False 
-    if sent.count("-") > 5:
-      return False
-    if len(re.findall("[\d\-\|/]", sent)) / len(sent) > 0.5:
-      return False
-    return True
+    def hot_fix_filter(sent):
+        if sent.count("/") > specific_punct_limit:
+            return True
+        if sent.count("|") > specific_punct_limit:
+            return True
+        if sent.count("-") > specific_punct_limit:
+            return True
+        if len(re.findall("[\d\-\|/]", sent)) / len(sent) > 0.5:
+            return True
+        return False
 
-  x_out = []
-  y_out = []
-
-  for (x, y) in zip(x_in, y_in):
-    if hot_fix_filter(x) and hot_fix_filter(y):
-      x_out.append(x.strip())
-      y_out.append(y.strip())
-
-  assert len(x_out) == len(y_out)
-  print('After removing sentences with too many specific punctuations, %i pairs remain' % len(x_out))
-  return x_out, y_out
+    return hot_fix_filter(src) or hot_fix_filter(trg)
 
 
 # Characters condition remove
-def characs_remove(x_in, y_in):
+def characs_check(src: str, trg: str, max_words_per_sent: int, avg_word_len_lb: float, avg_word_len_ub: float) -> bool:
 
-  def filter_by_len(sent):
-    segs = sent.strip().split()
-    for x in segs:
-      if len(x) > max_words_per_sent:
+    def filter_by_len(sent):
+        segs = sent.split()
+        for x in segs:
+            if len(x) > max_words_per_sent:
+                return True
+        m_char = sum([len(x) for x in segs])
+        m_word = len(segs)
+        ratio = m_char * 1. / (m_word + 1e-9)
+        if ratio > avg_word_len_ub or ratio < avg_word_len_lb:
+            return True
         return False
-    m_char = sum([len(x) for x in segs])
-    m_word = len(segs)
-    ratio = m_char * 1. / (m_word + 1e-9)
-    if ratio > avg_word_len_ub or ratio < avg_word_len_lb:
-      return False
-    return True
 
-  x_out = []
-  y_out = []
-
-  for (x, y) in zip(x_in, y_in):
-    if filter_by_len(x) and filter_by_len(y):
-      x_out.append(x.strip())
-      y_out.append(y.strip())
-
-  assert len(x_out) == len(y_out)
-  print('After removing sentence with characters condition, %i pairs remain' % len(x_out))
-  return x_out, y_out
+    return filter_by_len(src) or filter_by_len(trg)
 
 
 # Punctuation condition remove
-def punctuation_remove(x_in, y_in):
-  x_out = []
-  y_out = []
+punctuation_set = set(punctuation)
 
-  count_func = lambda l1,l2: sum([1 for x in l1 if x in l2])
 
-  punctuation_set = set(punctuation)
-  punct_density = 0
-  punct_max_limit = 0
-  punct_ratio = 0
-  for (x, y) in zip(x_in, y_in):
-    m_punc_x = count_func(x.strip(), set(punctuation_set))
-    m_punc_y = count_func(y.strip(), set(punctuation_set))
-    if m_punc_x >= min_punct_threshold and m_punc_y >= min_punct_threshold:
-      if m_punc_x / (len(x.strip()) + 1e-9) > 0.5 or \
-         m_punc_y / (len(y.strip()) + 1e-9) > 0.5:
-          punct_density += 1
-          continue
-      elif m_punc_x > punc_max_num or m_punc_y > punc_max_num:
-          punct_max_limit += 1
-          continue
-      elif m_punc_x / (m_punc_y + 1e-9) > punc_ratio or \
-           m_punc_y/ (m_punc_x + 1e-9) > punc_ratio:
-          punct_ratio += 1
-          continue
-    x_out.append(x.strip())
-    y_out.append(y.strip())
-  assert len(x_out) == len(y_out)
-  print(f'After removing sentences with too much punctuation, {len(x_out)} pairs remain')
-  print(f'-- Punctuation-related sentence removal counts:')
-  print(f'---- Exceeds punct. density: {punct_density}')
-  print(f'---- Exceeds max. punct. limit ({punc_max_num}): {punct_max_limit}')
-  print(f'---- Src/target punctuation ratio ({punc_ratio}): {punct_ratio}')
-  return x_out, y_out
-'''      if m_punc_x / (len(x.strip()) + 1e-9) > 0.5 or \
-         m_punc_y / (len(y.strip()) + 1e-9) > 0.5 or \
-         m_punc_x > punc_max_num or \
-         m_punc_y > punc_max_num or \
-         m_punc_x / (m_punc_y + 1e-9) > punc_ratio or \
-         m_punc_y/ (m_punc_x + 1e-9) > punc_ratio:
-        continue
-'''
+def punctuation_check(src: str,
+                      trg: str,
+                      min_punct_threshold: int,
+                      punct_max_num: int,
+                      src_trg_punct_ratio: float,
+                      punct_text_ratio: float) -> bool:
+    count_func = lambda l1,l2: sum([1 for x in l1 if x in l2])
+
+    m_punct_src = count_func(src, set(punctuation_set))
+    m_punct_trg = count_func(trg, set(punctuation_set))
+
+    if m_punct_src < min_punct_threshold or m_punct_trg < min_punct_threshold:
+        return False
+
+    if m_punct_src > punct_max_num or m_punct_trg > punct_max_num:
+        return True
+    if m_punct_src / (len(src) + 1e-9) > punct_text_ratio or \
+       m_punct_trg / (len(trg) + 1e-9) > punct_text_ratio:
+        return True
+    if m_punct_src / (m_punct_trg + 1e-9) > src_trg_punct_ratio or \
+       m_punct_trg / (m_punct_src + 1e-9) > src_trg_punct_ratio:
+        return True
+
+    return False
 
 
 # Html address or tags contained sentence remove
-def html_remove(x_in, y_in):
-  x_out = []
-  y_out = []
+def html_check(src: str, trg: str) -> bool:
+    def filter_by_html(sent):
+        detector = re.compile('<.*?>')
+        html_tag = re.findall(detector, sent)
+        if html_tag or 'https://' in sent or 'http://' in sent:
+            return True
+        return False
 
-  def filter_by_html(sentence):
-    sen = sentence.strip()
-    detector = re.compile('<.*?>')
-    html_tag = re.findall(detector, sen)
-    if html_tag or 'https://' in sen or 'http://' in sen:
-      return False
-    return True
-
-  def soft_filter_by_html(sent):
-    sent = sent.strip()
-    detector = re.compile('<.*?>')
-    sent = re.sub(detector, '', sent)
-    sent = re.sub('https?:\/\/.*[ \r\n]', '', x, flags=re.MULTILINE)
-    return sent
-
-  for (x, y) in zip(x_in, y_in):
-    if args.soft_html:
-      x_out.append(soft_filter_by_html(x))
-      y_out.append(soft_filter_by_html(y))
-    else:
-      if filter_by_html(x) or filter_by_html(y):
-        x_out.append(x.strip())
-        y_out.append(y.strip())
-
-  assert len(x_out) == len(y_out)
-  print('After removing sentences with html address or tags, %i pairs remain' % len(x_out))
-  return x_out, y_out
+    return filter_by_html(src) or filter_by_html(trg)
 
 
-# From Teacher Xia, special chars (hard to print)
-def special_char_remove(x_in, y_in):
-  x_out = []
-  y_out = []
-
-  for (x, y) in zip(x_in, y_in):
-    if r"\x" in x or r"\x" in y:
-      continue
-    x_out.append(x.strip())
-    y_out.append(y.strip())
-
-  assert len(x_out) == len(y_out)
-  print('After removing sentences with special characters, %i pairs remain' % len(x_out))
-  return x_out, y_out
+# Special chars (hard to print)
+def special_char_check(src: str, trg: str) -> bool:
+    return r"\x" in src or r"\x" in trg
 
 
-# Optional: Src/tgt chars ratio exceeded remove
-def characs_sum_remove(x_in, y_in):
-  x_out = []
-  y_out = []
+# Optional: Src/trg chars ratio exceeded remove
+def characs_sum_check(src: str, trg: str, src_trg_char_ratio: float) -> bool:
+    segs_src = src.split()
+    m_char_src = sum([len(x) for x in segs_src])
 
-  for (x, y) in zip(x_in, y_in):
-    segs_x = x.strip().split()
-    m_char_x = sum([len(x) for x in segs_x])
+    segs_trg = trg.split()
+    m_char_trg = sum([len(y) for y in segs_trg])
 
-    segs_y = y.strip().split()
-    m_char_y = sum([len(y) for y in segs_y])
-
-    if m_char_x / m_char_y > src_tgt_char_ratio or m_char_y / m_char_x > src_tgt_char_ratio:
-      continue
-    x_out.append(x.strip())
-    y_out.append(y.strip())
-
-  assert len(x_out) == len(y_out)
-  print('After removing sentence with characters ratio condition, %i pairs remain' % len(x_out))
-  return x_out, y_out
+    return m_char_src / m_char_trg > src_trg_char_ratio or m_char_trg / m_char_src > src_trg_char_ratio
 
 
-# Optional: Latin letter contained sentence remove
-def latin_remove(x_in, y_in):
+# Optional: Remove sentences with too many non-Latin characters
+def latin_check(src: str, trg: str, latin_ratio: float) -> bool:
   
-  def count_latin(sent):
-    if len(re.findall("[^a-zA-Z]", sent)) / len(sent) > lattin_ratio:
-      return False
-    return True
+    def count_latin(sent):
+        if len(re.findall("[^a-zA-Z]", sent)) / len(sent) > latin_ratio:
+            return False
+        return True
 
-  x_out = []
-  y_out = []
-  for (x, y) in zip(x_in, y_in):
-    if count_latin(x.strip()) and count_latin(y.strip()):
-      x_out.append(x.strip())
-      y_out.append(y.strip())
-
-  assert len(x_out) == len(y_out)
-  print('After removing sentences with too many latin characters, %i pairs remain' % len(x_out))
-  return x_out, y_out
+    return count_latin(src) or count_latin(trg)
 
 
-filter_1 = []
-filter_2 = []
+#
+# Script checking code
+#
 
-fr_1 = open(f1, "r", encoding="utf8") 
-fr_2 = open(f2, "r", encoding="utf8") 
-
-f1_all_lines = fr_1.readlines()
-f2_all_lines = fr_2.readlines()
-
-filter_1, filter_2 = dup_remove(f1_all_lines, f2_all_lines)
-filter_1, filter_2 = src_tgt_same_remove(filter_1, filter_2)
-filter_1, filter_2 = sentence_word_num_remove(filter_1, filter_2)
-filter_1, filter_2 = sentence_words_ratio_remove(filter_1, filter_2)
-filter_1, filter_2 = specific_punc_remove(filter_1, filter_2)
-filter_1, filter_2 = characs_remove(filter_1, filter_2)
-filter_1, filter_2 = special_char_remove(filter_1, filter_2)
-filter_1, filter_2 = punctuation_remove(filter_1, filter_2)
-filter_1, filter_2 = html_remove(filter_1, filter_2)
-filter_1, filter_2 = characs_sum_remove(filter_1, filter_2)
-#filter_1, filter_2 = latin_remove(filter_1, filter_2)
-
-fr_1.close()
-fr_2.close()
+script_dict: Dict = {}
+scripts_url = "http://www.unicode.org/Public/UNIDATA/Scripts.txt"
 
 
-fw_1 = open(f1 + ".clean", "w", encoding="utf8")
-fw_2 = open(f2 + ".clean", "w", encoding="utf8")
+def add_single(hex_str: str, script_name: str):
+    s = script_name.lower()
+    code_val = int(hex_str, 16)
+    if s in script_dict.keys():
+        script_dict[s].add(code_val)
+    else:
+        script_dict[s] = {code_val}
 
-assert len(filter_1) == len(filter_2)
-print('After all filtering rules, remain %i pairs' % len(filter_1))
 
-for x in filter_1:
-  print(x, file=fw_1)
+def add_range(start_hex_str: str, end_hex_str: str, script_name: str):
+    s = script_name.lower()
+    start_code_val = int(start_hex_str, 16)
+    end_code_val = int(end_hex_str, 16)
+    if s in script_dict.keys():
+        script_dict[s].update(set(range(start_code_val, end_code_val+1)))
+    else:
+        script_dict[s] = set(range(start_code_val, end_code_val+1))
 
-for y in filter_2:
-  print(y, file=fw_2)
 
-fw_1.close()
-fw_2.close()
+def load_script_dict():
+    unicode_re = re.compile(r"^([0-9A-F]{4,5})(..([0-9A-F]{4,5})){0,1}\s+;\s+([\w]+)\s+#")
+    http = urllib3.PoolManager()
 
+    start_time = time.time()
+    print(f'Loading scripts data from {scripts_url}')
+    r = http.request('GET', scripts_url, preload_content=False)
+
+    while True:
+        data = r.readline()
+        if not data:
+            break
+        line = data.decode('utf-8').strip()
+        if line != "" and not line.startswith('#'):
+            parts = unicode_re.match(line)
+            if parts.group(3) is None:
+                add_single(parts.group(1), parts.group(4))
+            else:
+                add_range(parts.group(1), parts.group(3), parts.group(4))
+    r.release_conn()
+    end_time = time.time()
+    print(f'Loaded in {(end_time-start_time):.4f} seconds')
+#    print("\n".join(f"{k}\t{v}" for k, v in script_dict.items()))
+
+
+def script_check(src: str, trg: str, valid_scripts: List[str]) -> bool:
+
+    def check_line(line: str, scripts: List[str]) -> bool:
+        for c in line:
+            char_code = ord(c)
+
+            match = False
+            for s in scripts:
+                if char_code in script_dict[s]:
+                    match = True
+                    break
+
+            # Character c wasn't part of one of the valid scripts
+            if not match:
+                return False
+
+        # Successfully checked all the characters in the line
+        return True
+
+    return not check_line(src, valid_scripts) or not check_line(trg, valid_scripts)
+
+
+def log_error(log_flag: bool, logfile, label: str, src: str, trg:str):
+    if log_flag:
+        logfile.write(f"{label}\t{src}\t{trg}\n")
+
+
+def main() -> None:
+
+    def ratio_string(count: int, total: int) -> str:
+        return f'{count: >10} ({(100*count/total):6.2f}%)'
+
+    parser = argparse.ArgumentParser(description="Filtering for noisy parallel corpora")
+    parser.add_argument('src', type=str, help='source file')
+    parser.add_argument('trg', type=str, help='target file')
+    parser.add_argument('--config', type=str, default='config.yml', help='config file')
+    parser.add_argument('--errors', default=False, action="store_true", help="log errors")
+    parser.add_argument('--max_lines', type=int, default=-1, help='max lines to process')
+    args = parser.parse_args()
+
+    print("Git commit:", get_git_revision_hash())
+
+    config = load_config(args.config)
+    filter_config = config.get("filter")
+    show_config(filter_config)
+    max_lines = args.max_lines
+
+    # Initialize counters
+    original_line_count = final_line_count = 0
+    count_duplicates = count_src_trg_same = count_word_num = count_words_ratio = count_specific_punc = 0
+    count_characs = count_special_char = count_punctuation = count_html = count_characs_sum = count_latin = 0
+    count_script = 0
+
+    # Initialize toggles
+    dup_toggle = filter_config.get("dup_toggle")
+    src_trg_same_toggle = filter_config.get("src_trg_same_toggle")
+    sentence_word_num_toggle = filter_config.get("sentence_word_num_toggle")
+    sentence_words_ratio_toggle = filter_config.get("sentence_words_ratio_toggle")
+    specific_punct_toggle = filter_config.get("specific_punct_toggle")
+    characs_toggle = filter_config.get("characs_toggle")
+    special_char_toggle = filter_config.get("special_char_toggle")
+    punctuation_toggle = filter_config.get("punctuation_toggle")
+    html_toggle = filter_config.get("html_toggle")
+    characs_sum_toggle = filter_config.get("characs_sum_toggle")
+    latin_toggle = filter_config.get("latin_toggle")
+    scripts_toggle = filter_config.get("scripts_toggle")
+
+    # Initialize settings
+    min_tok = filter_config.get('min_tok')
+    max_tok = filter_config.get('max_tok')
+    src_trg_words_ratio = filter_config.get('src_trg_words_ratio')
+    specific_punct_limit = filter_config.get('specific_punct_limit')
+    max_words_per_sent = filter_config.get('max_words_per_sent')
+    avg_word_len_lb = filter_config.get('avg_word_len_lb')
+    avg_word_len_ub = filter_config.get('avg_word_len_ub')
+    min_punct_threshold = filter_config.get('min_punct_threshold')
+    punct_max_num = filter_config.get('punct_max_num')
+    src_trg_punct_ratio = filter_config.get('src_trg_punct_ratio')
+    punct_text_ratio = filter_config.get('punct_text_ratio')
+    src_trg_char_ratio = filter_config.get('src_trg_char_ratio')
+    latin_ratio = filter_config.get('latin_ratio', 0.25)
+    valid_scripts = [s.lower() for s in filter_config.get('valid_scripts').split()]
+
+    # Initial setup (if needed)
+    if scripts_toggle:
+        load_script_dict()
+
+    with open(args.src, "r", encoding="utf-8") as src_in, \
+         open(args.trg, "r", encoding="utf-8") as trg_in, \
+         open(f"{args.src}.clean", "w", encoding="utf-8") as src_out, \
+         open(f"{args.trg}.clean", "w", encoding="utf-8") as trg_out, \
+         open(f"{args.src}.errors", "w", encoding="utf-8") as error_log:
+        for src_line, trg_line in zip(src_in, trg_in):
+            src_line = src_line.strip()
+            trg_line = trg_line.strip()
+            original_line_count += 1
+
+            if dup_toggle and dup_check(src_line, trg_line):
+                count_duplicates += 1
+                log_error(args.errors, error_log, "dup_check", src_line, trg_line)
+            elif src_trg_same_toggle and src_trg_same_check(src_line, trg_line):
+                count_src_trg_same += 1
+                log_error(args.errors, error_log, "src_trg_same_check", src_line, trg_line)
+            elif sentence_word_num_toggle and sentence_word_num_check(src_line, trg_line, min_tok, max_tok):
+                count_word_num += 1
+                log_error(args.errors, error_log, "sentence_word_num_check", src_line, trg_line)
+            elif sentence_words_ratio_toggle and sentence_words_ratio_check(src_line, trg_line, src_trg_words_ratio):
+                count_words_ratio += 1
+                log_error(args.errors, error_log, "sentence_words_ratio_check", src_line, trg_line)
+            elif specific_punct_toggle and specific_punct_check(src_line, trg_line, specific_punct_limit):
+                count_specific_punc += 1
+                log_error(args.errors, error_log, "specific_punct_check", src_line, trg_line)
+            elif characs_toggle and characs_check(src_line, trg_line, max_words_per_sent, avg_word_len_lb, avg_word_len_ub):
+                count_characs += 1
+                log_error(args.errors, error_log, "characs_check", src_line, trg_line)
+            elif special_char_toggle and special_char_check(src_line, trg_line):
+                count_special_char += 1
+                log_error(args.errors, error_log, "special_char_check", src_line, trg_line)
+            elif punctuation_toggle and punctuation_check(src_line, trg_line, min_punct_threshold, punct_max_num,
+                                                          src_trg_punct_ratio, punct_text_ratio):
+                count_punctuation += 1
+                log_error(args.errors, error_log, "punctuation_check", src_line, trg_line)
+            elif html_toggle and html_check(src_line, trg_line):
+                count_html += 1
+                log_error(args.errors, error_log, "html_check", src_line, trg_line)
+            elif characs_sum_toggle and characs_sum_check(src_line, trg_line, src_trg_char_ratio):
+                count_characs_sum += 1
+                log_error(args.errors, error_log, "characs_sum_check", src_line, trg_line)
+            elif latin_toggle and latin_check(src_line, trg_line, latin_ratio):
+                count_latin += 1
+                log_error(args.errors, error_log, "latin_check", src_line, trg_line)
+            elif scripts_toggle and script_check(src_line, trg_line, valid_scripts):
+                count_script += 1
+                log_error(args.errors, error_log, "script_check", src_line, trg_line)
+            else:
+                print(src_line, file=src_out)
+                print(trg_line, file=trg_out)
+                final_line_count += 1
+
+            if max_lines != -1 and original_line_count >= max_lines:
+                break
+
+    print(f'  {original_line_count:>10}\tOriginal sentences')
+    print(f'- {ratio_string(count_duplicates,original_line_count)}\tduplicate src/trg sentence pairs')
+    print(f'- {ratio_string(count_src_trg_same,original_line_count)}\tsame src/trg sentence')
+    print(f'- {ratio_string(count_word_num,original_line_count)}\tword count < {min_tok} or > {max_tok}')
+    print(f'- {ratio_string(count_words_ratio,original_line_count)}\texceeded src/trg word ratio ({src_trg_words_ratio})')
+    print(f'- {ratio_string(count_specific_punc,original_line_count)}\texceeded specific punct. limit ({specific_punct_limit})')
+    print(f'- {ratio_string(count_characs,original_line_count)}\texceeded max words ({max_words_per_sent}) or avg word length bounds ({avg_word_len_lb}/{avg_word_len_ub})')
+    print(f'- {ratio_string(count_special_char,original_line_count)}\tspecial characters')
+    print(f'- {ratio_string(count_punctuation,original_line_count)}\tmax. punct ({punct_max_num}), src/trg punct. ratio ({src_trg_punct_ratio}), text/punct ratio ({punct_text_ratio})')
+    print(f'- {ratio_string(count_html,original_line_count)}\tHTML')
+    print(f'- {ratio_string(count_characs_sum,original_line_count)}\tsrc/trg character ratio ({src_trg_char_ratio})')
+    print(f'- {ratio_string(count_latin,original_line_count)}\tLatin ratio ({latin_ratio})')
+    print(f'- {ratio_string(count_script,original_line_count)}\tInvalid scripts ({valid_scripts})')
+    print(f'= {ratio_string(final_line_count,original_line_count)}\tRemaining sentences')
+
+
+if __name__ == "__main__":
+    main()

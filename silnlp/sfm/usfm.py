@@ -106,6 +106,7 @@ def resolve_milestones(sheet):
 
 
 default_stylesheet = resolve_milestones(_load_cached_stylesheet("usfm.sty"))
+relaxed_stylesheet = resolve_milestones(_load_cached_stylesheet("usfm_relaxed.sty"))
 
 _default_meta = style.Marker(
     TextType=style.CaselessStr("Milestone"), OccursUnder={None}, Endmarker=None, StyleType=None
@@ -359,14 +360,17 @@ class parser(sfm.parser):
                 tok,
                 chapter=chapter_marker.args[0],
             )
-        tok = tok.lstrip()
-        if tok:
-            if tok[0] == "\\":
-                self._tokens.put_back(tok)
-            else:
-                self._error(ErrorLevel.Structure, "text cannot follow chapter marker '{0}'", tok, chapter_marker)
-                chapter_marker.append(sfm.Element(None, meta=self.default_meta, content=[tok]))
-                tok = None
+        if tok == "\n":
+            chapter_marker.append(tok)
+        else:
+            tok = tok.lstrip()
+            if tok:
+                if tok[0] == "\\":
+                    self._tokens.put_back(tok)
+                else:
+                    self._error(ErrorLevel.Structure, "text cannot follow chapter marker '{0}'", tok, chapter_marker)
+                    chapter_marker.append(sfm.Element(None, meta=self.default_meta, content=[tok]))
+                    tok = None
 
         return self._default_(chapter_marker)
 

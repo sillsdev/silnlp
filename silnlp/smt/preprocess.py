@@ -1,24 +1,50 @@
 import argparse
 from statistics import mean
-from typing import Tuple
+from typing import Dict, Optional, Set, Tuple
 
 from ..alignment.utils import add_alignment_scores
 from ..common.canon import get_books
 from ..common.corpus import (
     exclude_books,
-    get_scripture_path,
     get_scripture_parallel_corpus,
+    get_scripture_path,
     include_books,
+    load_corpus,
     split_parallel_corpus,
     write_corpus,
 )
+from ..common.environment import MT_SCRIPTURE_DIR
 from ..common.utils import get_git_revision_hash, get_mt_exp_dir, set_seed
 from .config import load_config
+from ..common.verse_ref import VerseRef
 
 
 def parse_lang(lang: str) -> Tuple[str, str]:
     index = lang.find("-")
     return lang[:index], lang[index + 1 :]
+
+
+def get_test_indices(config: dict) -> Optional[Set[int]]:
+    exp_name = config.get("use_test_set_from")
+    if exp_name is None:
+        return None
+
+    exp_dir = get_mt_exp_dir(exp_name)
+    vref_path = exp_dir / "test.vref.txt"
+    if not vref_path.is_file():
+        return None
+
+    vrefs: Dict[str, int] = {}
+    for i, vref_str in enumerate(load_corpus(MT_SCRIPTURE_DIR / "vref.txt")):
+        vrefs[vref_str] = i
+
+    test_indices: Set[int] = set()
+    for vref_str in load_corpus(vref_path):
+        vref = VerseRef.from_string(vref_str)
+        if vref.has_multiple:
+            vref = vref.simplify()
+        test_indices.add(vrefs[str(vref)])
+    return test_indices
 
 
 def main() -> None:
@@ -64,18 +90,19 @@ def main() -> None:
         print(f"- count: {corpus_len}")
         print(f"- alignment: {alignment_score:.4f}")
 
+    test_indices = get_test_indices(config)
     test_size: int = config["test_size"]
     if len(test_books) > 0:
         test = include_books(corpus, test_books)
         if test_size > 0:
-            _, test = split_parallel_corpus(test, test_size)
+            _, test = split_parallel_corpus(test, test_size, test_indices)
     else:
-        train, test = split_parallel_corpus(train, test_size)
+        train, test = split_parallel_corpus(train, test_size, test_indices)
 
     write_corpus(exp_dir / "train.src.txt", train["source"])
     write_corpus(exp_dir / "train.trg.txt", train["target"])
 
-    write_corpus(exp_dir / "test.vref.txt", map(lambda vr: str(vr), test["vref"]))
+    write_corpus(exp_dir / "test.vref.txt", (str(vr) for vr in test["vref"]))
     write_corpus(exp_dir / "test.src.txt", test["source"])
     write_corpus(exp_dir / "test.trg.txt", test["target"])
 

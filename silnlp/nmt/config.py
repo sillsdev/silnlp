@@ -74,8 +74,8 @@ class DataFileType(Flag):
 
 def convert_vocab(sp_vocab_path: Path, onmt_vocab_path: Path, tag_langs: Set[str] = None) -> None:
     special_tokens = [PADDING_TOKEN, START_OF_SENTENCE_TOKEN, END_OF_SENTENCE_TOKEN]
-    if tag_langs is not None:
-        special_tokens.extend(map(lambda l: f"<2{l}>", tag_langs))
+#    if tag_langs is not None:
+#        special_tokens.extend(map(lambda l: f"<2{l}>", tag_langs))
 
     vocab = Vocab(special_tokens)
     with open(sp_vocab_path, "r", encoding="utf-8") as vocab_file:
@@ -100,6 +100,10 @@ def build_vocab(
     tag_langs: Set[str] = None,
 ) -> None:
     joined_file_paths = ",".join(str(fp) for fp in file_paths)
+    user_defined_symbols = "<blank>"
+    if tag_langs is not None:
+        for tag in tag_langs:
+            user_defined_symbols += "," + f"<2{tag}>"
 
     casing = casing.lower()
     normalization: str
@@ -116,7 +120,7 @@ def build_vocab(
     sp_train_params = (
         f"--normalization_rule_tsv={normalization_path} --input={joined_file_paths} --model_prefix={model_prefix}"
         f" --vocab_size={vocab_size} --character_coverage={character_coverage:.4f} --input_sentence_size=1000000"
-        " --shuffle_input_sentence=true --control_symbols=<range> --user_defined_symbols=<blank>"
+        f" --shuffle_input_sentence=true --control_symbols=<range> --user_defined_symbols={user_defined_symbols}"
     )
 
     sp.SentencePieceTrainer.Train(sp_train_params)
@@ -147,6 +151,7 @@ class Config(ABC):
         trg_isos: Set[str],
         src_file_paths: Set[Path],
         trg_file_paths: Set[Path],
+        src_tags: Set[str],
     ) -> None:
         config = merge_dict(
             {
@@ -228,6 +233,7 @@ class Config(ABC):
         self.trg_isos = trg_isos
         self.src_file_paths = src_file_paths
         self.trg_file_paths = trg_file_paths
+        self.src_tags = src_tags
 
         parent: Optional[str] = self.data.get("parent")
         self.parent_config: Optional[Config] = None
@@ -287,7 +293,8 @@ class Config(ABC):
 
     def preprocess(self, stats: bool) -> None:
         self._build_vocabs()
-        self._build_corpora(stats)
+        src_spp, trg_spp = self.create_sp_processors()
+        self._build_corpora(src_spp, trg_spp, stats)
 
     def create_sp_processors(self) -> Tuple[Optional[sp.SentencePieceProcessor], Optional[sp.SentencePieceProcessor]]:
         if not self.data["tokenize"]:
@@ -314,16 +321,21 @@ class Config(ABC):
         return src_spp
 
     @abstractmethod
-    def _build_corpora(self, stats: bool) -> None:
+    def _build_corpora(
+        self, src_spp: Optional[sp.SentencePieceProcessor], trg_spp: Optional[sp.SentencePieceProcessor], stats: bool
+    ) -> None:
         pass
 
     def _build_vocabs(self) -> None:
         if not self.data["tokenize"]:
             return
 
-        tag_isos: Optional[Set[str]] = None
+        tag_isos: Optional[Set[str]] = set()
         if self.write_trg_tag:
             tag_isos = self.trg_isos | self.src_isos if self.mirror else set(self.trg_isos)
+        if self.src_tags is not None:
+            for tag in self.src_tags:
+                tag_isos.add(tag)
 
         if self.share_vocab:
             print("Building shared vocabulary...")

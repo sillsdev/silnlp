@@ -486,7 +486,7 @@ def test_checkpoint(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Tests a NMT model using OpenNMT-tf")
+    parser = argparse.ArgumentParser(description="Tests an NMT model")
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument("--memory-growth", default=False, action="store_true", help="Enable memory growth")
     parser.add_argument("--checkpoint", type=str, help="Test checkpoint")

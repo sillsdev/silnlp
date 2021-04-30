@@ -24,6 +24,7 @@ class CorpusPair:
         trg_file_path: Path,
         type: DataFileType,
         src_noise: List[NoiseMethod],
+        src_tags: List[str],
         size: Union[float, int],
         test_size: Optional[Union[float, int]],
         val_size: Optional[Union[float, int]],
@@ -34,6 +35,7 @@ class CorpusPair:
         self.trg_iso = parse_iso(trg_file_path)
         self.type = type
         self.src_noise = src_noise
+        self.src_tags = src_tags
         self.size = size
         self.test_size = test_size
         self.val_size = val_size
@@ -105,6 +107,11 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
         src_file_path = get_corpus_path(src)
         trg: str = pair["trg"]
         trg_file_path = get_corpus_path(trg)
+        src_tag_str = pair.get("src_tags")
+        if src_tag_str is None:
+            src_tags: List[str] = []
+        else:
+            src_tags = src_tag_str.split(",")
         src_noise = create_noise_methods(pair.get("src_noise", []))
         size: Union[float, int] = pair.get("size", 1.0)
         test_size: Optional[Union[float, int]] = pair.get("test_size")
@@ -113,7 +120,7 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
         val_size: Optional[Union[float, int]] = pair.get("val_size")
         if val_size is None and is_set(type, DataFileType.TRAIN | DataFileType.VAL):
             val_size = 250
-        pairs.append(CorpusPair(src_file_path, trg_file_path, type, src_noise, size, test_size, val_size))
+        pairs.append(CorpusPair(src_file_path, trg_file_path, type, src_noise, src_tags, size, test_size, val_size))
     return pairs
 
 
@@ -147,16 +154,20 @@ class CorpusPairsConfig(Config):
         trg_isos: Set[str] = set()
         src_file_paths: Set[Path] = set()
         trg_file_paths: Set[Path] = set()
+        src_tags: Set[str] = set()
         for pair in self.corpus_pairs:
             src_isos.add(pair.src_iso)
             trg_isos.add(pair.trg_iso)
             src_file_paths.add(pair.src_file_path)
             trg_file_paths.add(pair.trg_file_path)
-        super().__init__(exp_dir, config, src_isos, trg_isos, src_file_paths, trg_file_paths)
+            for src_tag in pair.src_tags:
+                src_tags.add(src_tag)
+        super().__init__(exp_dir, config, src_isos, trg_isos, src_file_paths, trg_file_paths, src_tags)
 
-    def _build_corpora(self, stats: bool) -> None:
+    def _build_corpora(
+        self, src_spp: Optional[sp.SentencePieceProcessor], trg_spp: Optional[sp.SentencePieceProcessor], stats: bool
+    ) -> None:
         test_iso_pairs_count = len(set((p.src_iso, p.trg_iso) for p in self.corpus_pairs if p.is_test))
-        src_spp, trg_spp = self.create_sp_processors()
         for old_file_path in self.exp_dir.glob("test.*.txt"):
             old_file_path.unlink()
         with open(self.exp_dir / "train.src.txt", "w", encoding="utf-8", newline="\n") as train_src_file, open(
@@ -279,6 +290,9 @@ class CorpusPairsConfig(Config):
         val_count = 0
         test_count = 0
         test_prefix = "test" if test_iso_pairs_count == 1 else f"test.{pair.src_iso}.{pair.trg_iso}"
+        src_prefix = self._get_src_tags(pair.trg_iso, pair.src_tags)
+        mirror_prefix = self._get_src_tags(pair.src_iso, pair.src_tags)
+
         with open(self.exp_dir / f"{test_prefix}.src.txt", "a", encoding="utf-8", newline="\n") as test_src_file, open(
             self.exp_dir / f"{test_prefix}.trg.detok.txt", "a", encoding="utf-8", newline="\n"
         ) as test_trg_file:
@@ -289,10 +303,12 @@ class CorpusPairsConfig(Config):
                 if len(src_line) == 0 or len(trg_line) == 0:
                     continue
 
-                src_sentence = self._insert_trg_tag(pair.trg_iso, src_line)
+#                src_sentence = self._insert_trg_tag(pair.trg_iso, src_line)
+                src_sentence = src_prefix + src_line
                 trg_sentence = trg_line
 
-                mirror_src_sentence = self._insert_trg_tag(pair.src_iso, trg_line)
+#                mirror_src_sentence = self._insert_trg_tag(pair.src_iso, trg_line)
+                mirror_src_sentence = mirror_prefix + trg_line
                 mirror_trg_sentence = src_line
                 mirror_src_spp = trg_spp
                 mirror_trg_spp = src_spp
@@ -328,10 +344,19 @@ class CorpusPairsConfig(Config):
             src_sentence = f"<2{trg_iso}> " + src_sentence
         return src_sentence
 
+    def _get_src_tags(self, trg_iso: str, src_tags: List[str]) -> str:
+        tags = ""
+        if self.write_trg_tag:
+            tags = f"<2{trg_iso}> "
+        if len(src_tags) > 0:
+            tags = ' '.join(map(lambda x: '<2' + str(x) + '>', src_tags)) + ' ' + tags
+        return tags
+
     def _noise(self, src_noise: List[NoiseMethod], src_sentence: str) -> str:
         if len(src_noise) == 0:
             return src_sentence
         tokens = src_sentence.split()
+        tag: List[str] = []
         if self.write_trg_tag:
             tag = tokens[:1]
             tokens = tokens[1:]

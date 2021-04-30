@@ -21,6 +21,7 @@ def main() -> None:
     parser.add_argument(
         "--exclude", metavar="texts", default="", help="The texts to exclude; e.g., '*NT*', '*OT*', 'GEN,EXO'"
     )
+    parser.add_argument("--markers", default=False, action="store_true", help="Include USFM markers")
     args = parser.parse_args()
 
     projects: Set[str] = set(args.projects)
@@ -38,7 +39,7 @@ def main() -> None:
         MT_TERMS_DIR.mkdir(exist_ok=True, parents=True)
         for project in projects_found:
             print(f"Extracting {project}...")
-            extract_project(project, args.include, args.exclude)
+            extract_project(project, args.include, args.exclude, args.markers)
             extract_term_renderings(project)
             print("Done.")
     else:
