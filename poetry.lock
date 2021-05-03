@@ -124,7 +124,7 @@ python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
 
 [[package]]
 name = "clearml"
-version = "0.17.5"
+version = "1.0.0"
 description = "ClearML - Auto-Magical Experiment Manager, Version Control, and MLOps for AI"
 category = "main"
 optional = false
@@ -1098,26 +1098,6 @@ optional = false
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*"
 
 [[package]]
-name = "smart-open"
-version = "5.0.0"
-description = "Utils for streaming large files (S3, HDFS, GCS, Azure Blob Storage, gzip, bz2...)"
-category = "main"
-optional = false
-python-versions = ">=3.6.*"
-
-[package.dependencies]
-boto3 = {version = "*", optional = true, markers = "extra == \"s3\""}
-
-[package.extras]
-all = ["boto3", "google-cloud-storage", "azure-storage-blob", "azure-common", "azure-core", "requests"]
-azure = ["azure-storage-blob", "azure-common", "azure-core"]
-gcs = ["google-cloud-storage"]
-http = ["requests"]
-s3 = ["boto3"]
-test = ["boto3", "google-cloud-storage", "azure-storage-blob", "azure-common", "azure-core", "requests", "mock", "moto[server] (==1.3.14)", "pathlib2", "responses", "paramiko", "parameterizedtestcase", "pytest", "pytest-rerunfailures"]
-webhdfs = ["requests"]
-
-[[package]]
 name = "tensorboard"
 version = "2.5.0"
 description = "TensorBoard lets you watch Tensors Flow"
@@ -1336,7 +1316,7 @@ testing = ["pytest (>=4.6)", "pytest-checkdocs (>=1.2.3)", "pytest-flake8", "pyt
 [metadata]
 lock-version = "1.1"
 python-versions = ">=3.7"
-content-hash = "29a37e9c4d53c6b0bb27ce4b82dc724b92f5952903d84f1dd7ca19f75fe34f13"
+content-hash = "7d6bc1222cbf2086706eb09e9d7af9e369e130c456572fc532962bfe829a49b7"
 
 [metadata.files]
 absl-py = [
@@ -1383,7 +1363,7 @@ chardet = [
     {file = "chardet-4.0.0.tar.gz", hash = "sha256:0d6f53a15db4120f2b08c94f11e7d93d2c911ee118b6b30a04ec3ee8310179fa"},
 ]
 clearml = [
-    {file = "clearml-0.17.5-py2.py3-none-any.whl", hash = "sha256:253466514c9b3111bafb3088e854c23fdcdbff004ac47b184bf11711e88383f5"},
+    {file = "clearml-1.0.0-py2.py3-none-any.whl", hash = "sha256:00dcf1e7a41faabe2813ba1edf331508eb3021a4b3f77f27c94106c58634d3c7"},
 ]
 click = [
     {file = "click-7.1.2-py2.py3-none-any.whl", hash = "sha256:dacca89f4bfadd5de3d7489b7c8a566eee0d3676333fbb50030263894c38c0dc"},
@@ -2162,10 +2142,6 @@ sentencepiece = [
 six = [
     {file = "six-1.15.0-py2.py3-none-any.whl", hash = "sha256:8b74bedcbbbaca38ff6d7491d76f2b06b3592611af620f8426e82dddb04a5ced"},
     {file = "six-1.15.0.tar.gz", hash = "sha256:30639c035cdb23534cd4aa2dd52c3bf48f06e5f4a941509c8bafd8ce11080259"},
-]
-smart-open = [
-    {file = "smart_open-5.0.0-py3-none-any.whl", hash = "sha256:ed310ac51a797051b42f9437a566ac8149a3abf8c80ab994a8bd92d96fb7cf44"},
-    {file = "smart_open-5.0.0.tar.gz", hash = "sha256:02e5e02207d955a1f9fd924c37900ac272536bd24393ae731b6945d4f766015f"},
 ]
 tensorboard = [
     {file = "tensorboard-2.5.0-py3-none-any.whl", hash = "sha256:e167460085b6528956b33bab1c970c989cdce47a6616273880733f5e7bde452e"},
