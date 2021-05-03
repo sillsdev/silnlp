@@ -67,7 +67,7 @@ def extract_project(project: str, include_texts: str, exclude_texts: str, includ
             output_basename += f"-{text}"
 
     if include_markers:
-        output_basename += "_m"
+        output_basename += "-m"
 
     args.append("-to")
     args.append(str(MT_SCRIPTURE_DIR / f"{output_basename}.txt"))
