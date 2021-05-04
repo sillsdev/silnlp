@@ -89,9 +89,9 @@ def compute_alignment_scores(src_input_path: Path, trg_input_path: Path) -> List
         inverse_lexicon = fast_align.get_inverse_lexicon(include_special_tokens=True)
 
         scores: List[float] = []
-        with open(src_tok_output_path, "r", encoding="utf-8") as src_tok_output_file, open(
-            trg_tok_output_path, "r", encoding="utf-8"
-        ) as trg_tok_output_file, open(sym_align_path, "r", encoding="utf-8") as sym_align_file:
+        with src_tok_output_path.open("r", encoding="utf-8") as src_tok_output_file, trg_tok_output_path.open(
+            "r", encoding="utf-8"
+        ) as trg_tok_output_file, sym_align_path.open("r", encoding="utf-8") as sym_align_file:
             for src_sentence, trg_sentence, alignment in zip(src_tok_output_file, trg_tok_output_file, sym_align_file):
                 scores.append(
                     compute_alignment_score(direct_lexicon, inverse_lexicon, src_sentence, trg_sentence, alignment)

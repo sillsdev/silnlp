@@ -22,7 +22,7 @@ def computeSimilarity(projects: List[str]) -> None:
     resourceDf.reindex(projects)
 
     for project in projects:
-        with open(get_corpus_path(project), "r", encoding="utf-8") as f:
+        with (get_corpus_path(project)).open("r", encoding="utf-8") as f:
             text = f.read()
         thisCharSet = list()
         for i in range(len(text)):

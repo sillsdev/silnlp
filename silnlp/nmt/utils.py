@@ -9,6 +9,8 @@ import tensorflow as tf
 import yaml
 from opennmt.utils import Scorer, register_scorer
 
+from ..common.environment import get_ml_path
+
 _TAG_PATTERN = re.compile(r"<2\w+> ")
 
 
@@ -53,9 +55,9 @@ def get_best_model_dir(model_dir: Path) -> Tuple[Path, int]:
 
 
 def get_last_checkpoint(model_dir: Path) -> Tuple[Path, int]:
-    with open(model_dir / "checkpoint", "r", encoding="utf-8") as file:
+    with (model_dir / "checkpoint").open("r", encoding="utf-8") as file:
         checkpoint_config = yaml.safe_load(file)
-        checkpoint_prefix = Path(checkpoint_config["model_checkpoint_path"])
+        checkpoint_prefix = get_ml_path(checkpoint_config["model_checkpoint_path"])
         parts = checkpoint_prefix.name.split("-")
         checkpoint_path = model_dir / checkpoint_prefix
         step = int(parts[-1])

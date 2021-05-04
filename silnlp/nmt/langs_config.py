@@ -228,7 +228,7 @@ class LangsConfig(Config):
         stats_file: Optional[IO] = None
         try:
             if stats:
-                stats_file = open(self.exp_dir / "corpus-stats.csv", "w", encoding="utf-8")
+                stats_file = (self.exp_dir / "corpus-stats.csv").open("w", encoding="utf-8")
                 stats_file.write("src_project,trg_project,count,align_score,filtered_count,filtered_align_score\n")
 
             for src_file in self.src_files:

@@ -89,7 +89,7 @@ def load_config(exp_dir: Path) -> dict:
     while exp_dir != ALIGN_EXPERIMENTS_DIR:
         config_path = exp_dir / "config.yml"
         if config_path.is_file():
-            with open(config_path, "r", encoding="utf-8") as file:
+            with config_path.open("r", encoding="utf-8") as file:
                 loaded_config = yaml.safe_load(file)
                 config = merge_dict(loaded_config, config)
         exp_dir = exp_dir.parent

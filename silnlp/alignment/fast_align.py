@@ -29,7 +29,7 @@ def execute_fast_align(input_path: Path, output_path: Path, prob_table_path: Pat
     if reverse:
         args.append("-r")
 
-    with open(output_path, "w") as output_file:
+    with output_path.open("w") as output_file:
         subprocess.run(args, stdout=output_file, stderr=subprocess.DEVNULL)
 
 
@@ -52,13 +52,13 @@ def execute_atools(forward_align_path: Path, reverse_align_path: Path, output_pa
         args = [str(atools_path), "-i", str(forward_align_path), "-j", str(reverse_align_path)]
     args.extend(["-c", sym_heuristic])
 
-    with open(output_path, "w") as output_file:
+    with output_path.open("w") as output_file:
         subprocess.run(args, stdout=output_file, stderr=subprocess.DEVNULL)
 
 
 def load_prob_table(table_path: Path, include_special_tokens: bool) -> Lexicon:
     lexicon = Lexicon()
-    with open(table_path, "r", encoding="utf-8") as in_file:
+    with table_path.open("r", encoding="utf-8") as in_file:
         for line in in_file:
             line = line.strip()
             src_word, trg_word, prob_str = line.split("\t", maxsplit=3)
@@ -85,9 +85,9 @@ class FastAlign(Aligner):
         self.model_dir.mkdir(exist_ok=True)
         align_input_path = self.model_dir / "align-input.txt"
 
-        with open(src_file_path, "r", encoding="utf-8") as src_tok_output_file, open(
-            trg_file_path, "r", encoding="utf-8"
-        ) as trg_tok_output_file, open(align_input_path, "w", encoding="utf-8", newline="\n") as align_input_file:
+        with src_file_path.open("r", encoding="utf-8") as src_tok_output_file, trg_file_path.open(
+            "r", encoding="utf-8"
+        ) as trg_tok_output_file, align_input_path.open("w", encoding="utf-8", newline="\n") as align_input_file:
             for src_sentence, trg_sentence in zip(src_tok_output_file, trg_tok_output_file):
                 align_input_file.write(f"{src_sentence.strip()} ||| {trg_sentence.strip()}\n")
 

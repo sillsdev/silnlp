@@ -11,6 +11,9 @@ from typing import Set
 from ..common.environment import MT_SCRIPTURE_DIR, MT_TERMS_DIR, PT_PROJECTS_DIR
 from .paratext import extract_project, extract_term_renderings
 
+from clearml import Task, Logger
+import datetime
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Extracts text corpora from Paratext projects")
@@ -25,6 +28,10 @@ def main() -> None:
     args = parser.parse_args()
 
     projects: Set[str] = set(args.projects)
+
+    task = Task.init(
+        project_name="LangTech_ExtractCorpora", task_name=str(args.projects) + "_" + str(datetime.datetime.now())
+    )
 
     # Which projects have data we can find?
     projects_found: Set[str] = set()

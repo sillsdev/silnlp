@@ -106,7 +106,7 @@ def main() -> None:
 
         corpus_path = ALIGN_GOLD_DIR / (corpus_name + ".alignment.json")
         verses: List[dict]
-        with open(corpus_path, "r", encoding="utf-8") as f:
+        with corpus_path.open("r", encoding="utf-8") as f:
             verses = json.load(f)
 
         use_src_lemma: bool = config["use_src_lemma"]

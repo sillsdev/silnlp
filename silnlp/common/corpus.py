@@ -12,13 +12,13 @@ from .verse_ref import VerseRef
 
 
 def write_corpus(corpus_path: Path, sentences: Iterable[str], append: bool = False) -> None:
-    with open(corpus_path, "a" if append else "w", encoding="utf-8", newline="\n") as file:
+    with corpus_path.open("a" if append else "w", encoding="utf-8", newline="\n") as file:
         for sentence in sentences:
             file.write(sentence + "\n")
 
 
 def load_corpus(corpus_path: Path) -> Iterator[str]:
-    with open(corpus_path, "r", encoding="utf-8-sig") as in_file:
+    with corpus_path.open("r", encoding="utf-8-sig") as in_file:
         for line in in_file:
             line = line.strip()
             yield line
@@ -45,9 +45,9 @@ def get_scripture_parallel_corpus(src_file_path: Path, trg_file_path: Path) -> p
     src_sentences: List[str] = []
     trg_sentences: List[str] = []
     indices: List[int] = []
-    with open(MT_SCRIPTURE_DIR / "vref.txt", "r", encoding="utf-8") as vref_file, open(
-        src_file_path, "r", encoding="utf-8"
-    ) as src_file, open(trg_file_path, "r", encoding="utf-8") as trg_file:
+    with (MT_SCRIPTURE_DIR / "vref.txt").open("r", encoding="utf-8") as vref_file, src_file_path.open(
+        "r", encoding="utf-8"
+    ) as src_file, trg_file_path.open("r", encoding="utf-8") as trg_file:
         index = 0
         for vref_line, src_line, trg_line in zip(vref_file, src_file, trg_file):
             vref_line = vref_line.strip()

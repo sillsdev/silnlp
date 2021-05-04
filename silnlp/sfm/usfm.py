@@ -69,7 +69,7 @@ def _cached_stylesheet(path):
     import pickletools
 
     with contextlib.closing(bz2.BZ2File(cached_path, "wb")) as zf:
-        zf.write(pickletools.optimize(pickle.dumps(style.parse(open(source_path, "r")))))
+        zf.write(pickletools.optimize(pickle.dumps(style.parse(source_path.open("r")))))
     return cached_path
 
 
@@ -91,7 +91,7 @@ def _load_cached_stylesheet(path):
             os.unlink(cached_path)
             raise
     except OSError:
-        return style.parse(open(_source_path(path), "r"))
+        return style.parse((_source_path(path)).open("r"))
 
 
 def resolve_milestones(sheet):

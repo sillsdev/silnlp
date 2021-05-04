@@ -25,7 +25,7 @@ def load_vec(vec_path: str) -> Tuple[List[str], np.ndarray]:
     """
     Load vocabulary and weight matrix from .vec file.
     """
-    with open(vec_path, "r") as vec:
+    with vec_path.open("r") as vec:
         embed_dim = int(vec.readline().split()[1])
         vocab: Any = np.loadtxt(vec_path, dtype=str, comments=None, skiprows=1, usecols=0, encoding="utf-8").tolist()
         weight = np.loadtxt(
@@ -183,7 +183,7 @@ class SILRunner(Runner):
         vocab = Vocab.from_file(vocab_file)
         embeddings = embeddings_var.numpy()
 
-        with open(output_path, "w", encoding="utf-8") as file:
+        with output_path.open("w", encoding="utf-8") as file:
             file.write(f"{embeddings.shape[0] - 1} {embeddings.shape[1]}\n")
             for word, embedding in zip(vocab.words, embeddings):
                 file.write(word)
@@ -328,7 +328,7 @@ class SILRunner(Runner):
                 prefetch_buffer_size=infer_config.get("prefetch_buffer_size"),
             )
 
-            with open(predictions_path, encoding="utf-8", mode="w") as stream:
+            with predictions_path.open(encoding="utf-8", mode="w") as stream:
                 infer_fn = tf.function(model.infer, input_signature=(dataset.element_spec,))
                 if not tf.config.functions_run_eagerly():
                     tf.get_logger().info("Tracing and optimizing the inference graph...")
@@ -352,5 +352,5 @@ class SILRunner(Runner):
         tf.get_logger().setLevel(logging.WARN)
         config = self._finalize_config(training=training)
         tf.get_logger().setLevel(level)
-        with open(path, "w") as file:
+        with path.open("w") as file:
             yaml.dump(config, file)

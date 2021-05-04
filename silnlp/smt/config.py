@@ -21,7 +21,7 @@ def load_config(exp_name: str) -> dict:
 
     config = _BASE_CONFIG.copy()
 
-    with open(config_path, "r", encoding="utf-8") as file:
+    with config_path.open("r", encoding="utf-8") as file:
         loaded_config = yaml.safe_load(file)
         return merge_dict(config, loaded_config)
 
@@ -59,7 +59,7 @@ def main() -> None:
         config["trg_tokenizer"] = args.trg_tokenizer
     if args.seed is not None:
         config["seed"] = args.seed
-    with open(config_path, "w", encoding="utf-8") as file:
+    with config_path.open("w", encoding="utf-8") as file:
         yaml.dump(config, file)
     print("Config file created")
 

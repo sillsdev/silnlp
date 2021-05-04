@@ -42,6 +42,7 @@ tensorflow = "^2.4.1"
 google-cloud-translate = "^3.0.2"
 clearml = {extras = ["s3"], version = ">=0.17.5"}
 s3path = ">=0.2.203"
+ipykernel = "^5.5.3"
 
 [tool.poetry.dev-dependencies]
 mypy = "^0.812"

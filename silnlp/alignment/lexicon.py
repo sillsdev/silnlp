@@ -106,6 +106,6 @@ class Lexicon:
         self._table.update(lexicon._table)
 
     def write(self, file_path: Path) -> None:
-        with open(file_path, "w", encoding="utf-8", newline="\n") as file:
+        with file_path.open("w", encoding="utf-8", newline="\n") as file:
             for src_word, trg_word, prob in sorted(self, key=lambda t: (t[0], -t[2], t[1])):
                 file.write(f"{src_word}\t{trg_word}\t{round(prob, 8)}\n")

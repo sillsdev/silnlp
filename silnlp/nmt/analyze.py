@@ -64,14 +64,14 @@ def create_test_dataset(config: Config) -> lit_dataset.Dataset:
         if features_file_name != "test.src.txt":
             src_iso = features_file_name.split(".")[1]
 
-        with open(config.exp_dir / features_file_name, "r", encoding="utf-8") as src_file, open(
+        with (config.exp_dir / features_file_name).open("r", encoding="utf-8") as src_file, open(
             config.exp_dir / vref_file_name, "r", encoding="utf-8"
         ) as vref_file:
             ref_file_paths = config.exp_dir.glob(refs_pattern)
             ref_files: List[IO] = []
             try:
                 for ref_file_path in ref_file_paths:
-                    ref_files.append(open(ref_file_path, "r", encoding="utf-8"))
+                    ref_files.append(ref_file_path.open("r", encoding="utf-8"))
                 for lines in zip(src_file, vref_file, *ref_files):
                     src_line = lines[0].strip()
                     vref_line = lines[1].strip()
@@ -107,7 +107,7 @@ def create_train_dataset(config: Config) -> lit_dataset.Dataset:
     default_src_iso = config.default_src_iso
     default_trg_iso = config.default_trg_iso
     examples: List[lit_types.JsonDict] = []
-    with open(src_path, "r", encoding="utf-8") as src_file, open(trg_path, "r", encoding="utf-8") as trg_file:
+    with src_path.open("r", encoding="utf-8") as src_file, trg_path.open("r", encoding="utf-8") as trg_file:
         for src_line, trg_line in zip(src_file, trg_file):
             src_line = src_line.strip()
             trg_line = trg_line.strip()

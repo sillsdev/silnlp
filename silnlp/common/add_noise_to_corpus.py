@@ -11,7 +11,7 @@ from .utils import DeleteRandomToken, NoiseMethod, RandomTokenPermutation, Repla
 
 
 def count_lines(file_path: str) -> int:
-    return sum(1 for _ in open(file_path, "r", encoding="utf-8"))
+    return sum(1 for _ in file_path.open("r", encoding="utf-8"))
 
 
 def main() -> None:
@@ -54,8 +54,8 @@ def main() -> None:
         RandomTokenPermutation(args.permutation_range),
     ]
 
-    with open(file_input, "r", encoding="utf-8") as corpus, open(
-        file_output, "w", encoding="utf-8", newline="\n"
+    with file_input.open("r", encoding="utf-8") as corpus, file_output.open(
+        "w", encoding="utf-8", newline="\n"
     ) as output:
         # You can remove a noise function here, modify its parameters or add your own (writing it in noise_functions.py)
         for line in cast(Iterable[str], tqdm(corpus, total=lines_number)):

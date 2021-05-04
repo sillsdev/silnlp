@@ -4,7 +4,7 @@ from typing import Dict
 
 def get_best_scores(input_path: str) -> Dict[str, float]:
     scores: Dict[str, float] = {}
-    with open(input_path, "r", encoding="utf-8") as input_file:
+    with input_path.open("r", encoding="utf-8") as input_file:
         for row in input_file:
             _, _, hash, score_str = row.strip().split("\t")
             score = float(score_str)

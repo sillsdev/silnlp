@@ -71,7 +71,7 @@ def aggregate_testament_results() -> None:
 
         for metric in METRICS:
             output_path = ROOT_DIR / f"{testament}.all.{metric}.csv"
-            with open(output_path, "w") as output_file:
+            with output_path.open("w") as output_file:
                 output_file.write("Model," + ",".join(filter(lambda t: t in data, TRANSLATIONS)) + "\n")
                 for aligner in ALIGNERS:
                     output_file.write(aligner.replace("Giza-", ""))
@@ -87,7 +87,7 @@ def aggregate_testament_results() -> None:
             if len(available_books) > 0:
                 for aligner in available_aligners:
                     output_path = ROOT_DIR / f"{testament}.all.{aligner}.{metric}.csv"
-                    with open(output_path, "w") as output_file:
+                    with output_path.open("w") as output_file:
                         output_file.write("Book," + ",".join(filter(lambda t: t in data, TRANSLATIONS)) + "\n")
                         for book_id in sorted(available_books, key=lambda b: book_id_to_number(b)):
                             output_file.write(book_id)
@@ -125,7 +125,7 @@ def aggregate_book_results() -> None:
         for metric in METRICS:
             for aligner in available_aligners:
                 output_path = ROOT_DIR / f"{testament}.single.{aligner}.{metric}.csv"
-                with open(output_path, "w") as output_file:
+                with output_path.open("w") as output_file:
                     output_file.write(
                         "Book," + ",".join(filter(lambda t: t in available_translations, TRANSLATIONS)) + "\n"
                     )

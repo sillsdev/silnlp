@@ -1,17 +1,44 @@
 import os
+import logging
 from pathlib import Path
 
+from s3path import S3Path
 from dotenv import load_dotenv
+
+LOGGER = logging.getLogger(__name__)
 
 load_dotenv()
 
 ROOT_DIR = Path.home() / ".silnlp"
 
 
+class MTPath(S3Path):
+    def mkdir(self, mode=0o777, parents=False, exist_ok=False):
+        pass
+
+
+def get_ml_path(filename):
+    if filename.startswith("s3"):
+        mtpath = MTPath(filename[4:])  # strip off 's3:/'
+        if mtpath is None:
+            LOGGER.error(
+                "s3 bucket did not initialize correctly from env. variable SIL_NLP_DATA_PATH: " + sil_nlp_data_path
+            )
+        return mtpath
+    else:
+        return Path(filename)
+
+
 def get_data_dir() -> Path:
     sil_nlp_data_path = os.getenv("SIL_NLP_DATA_PATH")
     if sil_nlp_data_path is not None:
         return Path(sil_nlp_data_path)
+    try:
+        s3_aqua_path = MTPath("/aqua-ml-data")
+        if s3_aqua_path.isdir():
+            return s3_aqua_path
+    except:
+        pass
     gutenberg_path = Path("G:/Shared drives/Gutenberg")
     if gutenberg_path.is_dir():
         return gutenberg_path

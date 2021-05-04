@@ -133,12 +133,12 @@ def process_individual_books(
     try:
         # Get all references
         for ref_file_path in ref_file_paths:
-            file = open(ref_file_path, "r", encoding="utf-8")
+            file = ref_file_path.open("r", encoding="utf-8")
             ref_files.append(file)
 
-        with open(vref_file_path, "r", encoding="utf-8") as vref_file, open(
-            pred_file_path, "r", encoding="utf-8"
-        ) as pred_file, open(src_file_path, "r", encoding="utf-8") as src_file:
+        with vref_file_path.open("r", encoding="utf-8") as vref_file, pred_file_path.open(
+            "r", encoding="utf-8"
+        ) as pred_file, src_file_path.open("r", encoding="utf-8") as src_file:
             for lines in zip(pred_file, vref_file, src_file, *ref_files):
                 # Get file lines
                 pred_line = lines[0].strip()
@@ -202,9 +202,9 @@ def load_test_data(
     dataset: Dict[str, Tuple[List[str], List[List[str]]]] = {}
     src_file_path = config.exp_dir / src_file_name
     pred_file_path = config.exp_dir / pred_file_name
-    with open(src_file_path, "r", encoding="utf-8") as src_file, open(
-        pred_file_path, "r", encoding="utf-8"
-    ) as pred_file, open(config.exp_dir / output_file_name, "w", encoding="utf-8") as out_file:
+    with src_file_path.open("r", encoding="utf-8") as src_file, pred_file_path.open(
+        "r", encoding="utf-8"
+    ) as pred_file, (config.exp_dir / output_file_name).open("w", encoding="utf-8") as out_file:
         ref_file_paths = list(config.exp_dir.glob(ref_pattern))
         select_rand_ref_line = False
         if isinstance(config, LangsConfig) and len(ref_file_paths) > 1:
@@ -219,10 +219,10 @@ def load_test_data(
         vref_file: Optional[IO] = None
         vref_file_path = config.exp_dir / vref_file_name
         if len(books) > 0 and vref_file_path.is_file():
-            vref_file = open(vref_file_path, "r", encoding="utf-8")
+            vref_file = vref_file_path.open("r", encoding="utf-8")
         try:
             for ref_file_path in ref_file_paths:
-                ref_files.append(open(ref_file_path, "r", encoding="utf-8"))
+                ref_files.append(ref_file_path.open("r", encoding="utf-8"))
             default_trg_iso = config.default_trg_iso
             for lines in zip(src_file, pred_file, *ref_files):
                 if vref_file is not None:
@@ -310,7 +310,7 @@ def write_sentence_bleu(
     tokenize=sacrebleu.DEFAULT_TOKENIZER,
 ):
     scores_path = predictions_detok_path + ".scores.csv"
-    with open(scores_path, "w", encoding="utf-8-sig") as scores_file:
+    with scores_path.open("w", encoding="utf-8-sig") as scores_file:
         scores_file.write("Verse\tBLEU\t1-gram\t2-gram\t3-gram\t4-gram\tBP\tPrediction")
         for ref in refs:
             scores_file.write("\tReference")
@@ -477,7 +477,7 @@ def test_checkpoint(
     if len(ref_projects) > 0:
         ref_projects_suffix = "_".join(sorted(ref_projects))
         scores_file_root += f"-{ref_projects_suffix}"
-    with open(config.exp_dir / f"{scores_file_root}.csv", "w", encoding="utf-8") as scores_file:
+    with (config.exp_dir / f"{scores_file_root}.csv").open("w", encoding="utf-8") as scores_file:
         if scores is not None:
             scores[0].writeHeader(scores_file)
         for results in scores:

@@ -126,7 +126,7 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
 
 def get_parallel_corpus_size(src_file_path: Path, trg_file_path: Path) -> int:
     count = 0
-    with open(src_file_path, "r", encoding="utf-8") as src_file, open(trg_file_path, "r", encoding="utf-8") as trg_file:
+    with src_file_path.open("r", encoding="utf-8") as src_file, trg_file_path.open("r", encoding="utf-8") as trg_file:
         for src_line, trg_line in zip(src_file, trg_file):
             src_line = src_line.strip()
             trg_line = trg_line.strip()
@@ -170,7 +170,7 @@ class CorpusPairsConfig(Config):
         test_iso_pairs_count = len(set((p.src_iso, p.trg_iso) for p in self.corpus_pairs if p.is_test))
         for old_file_path in self.exp_dir.glob("test.*.txt"):
             old_file_path.unlink()
-        with open(self.exp_dir / "train.src.txt", "w", encoding="utf-8", newline="\n") as train_src_file, open(
+        with (self.exp_dir / "train.src.txt").open("w", encoding="utf-8", newline="\n") as train_src_file, open(
             self.exp_dir / "train.trg.txt", "w", encoding="utf-8", newline="\n"
         ) as train_trg_file, open(
             self.exp_dir / "val.src.txt", "w", encoding="utf-8", newline="\n"
@@ -239,7 +239,7 @@ class CorpusPairsConfig(Config):
         pair: CorpusPair,
     ) -> None:
         corpus_size = get_parallel_corpus_size(pair.src_file_path, pair.trg_file_path)
-        with open(pair.src_file_path, "r", encoding="utf-8") as input_src_file, open(
+        with (pair.src_file_path).open("r", encoding="utf-8") as input_src_file, open(
             pair.trg_file_path, "r", encoding="utf-8"
         ) as input_trg_file:
             self._write_data_sets(
@@ -293,7 +293,7 @@ class CorpusPairsConfig(Config):
         src_prefix = self._get_src_tags(pair.trg_iso, pair.src_tags)
         mirror_prefix = self._get_src_tags(pair.src_iso, pair.src_tags)
 
-        with open(self.exp_dir / f"{test_prefix}.src.txt", "a", encoding="utf-8", newline="\n") as test_src_file, open(
+        with (self.exp_dir / f"{test_prefix}.src.txt").open("a", encoding="utf-8", newline="\n") as test_src_file, open(
             self.exp_dir / f"{test_prefix}.trg.detok.txt", "a", encoding="utf-8", newline="\n"
         ) as test_trg_file:
             index = 0
@@ -303,11 +303,11 @@ class CorpusPairsConfig(Config):
                 if len(src_line) == 0 or len(trg_line) == 0:
                     continue
 
-#                src_sentence = self._insert_trg_tag(pair.trg_iso, src_line)
+                #                src_sentence = self._insert_trg_tag(pair.trg_iso, src_line)
                 src_sentence = src_prefix + src_line
                 trg_sentence = trg_line
 
-#                mirror_src_sentence = self._insert_trg_tag(pair.src_iso, trg_line)
+                #                mirror_src_sentence = self._insert_trg_tag(pair.src_iso, trg_line)
                 mirror_src_sentence = mirror_prefix + trg_line
                 mirror_trg_sentence = src_line
                 mirror_src_spp = trg_spp
@@ -349,7 +349,7 @@ class CorpusPairsConfig(Config):
         if self.write_trg_tag:
             tags = f"<2{trg_iso}> "
         if len(src_tags) > 0:
-            tags = ' '.join(map(lambda x: '<2' + str(x) + '>', src_tags)) + ' ' + tags
+            tags = " ".join(map(lambda x: "<2" + str(x) + ">", src_tags)) + " " + tags
         return tags
 
     def _noise(self, src_noise: List[NoiseMethod], src_sentence: str) -> str:

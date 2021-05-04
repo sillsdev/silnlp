@@ -16,6 +16,7 @@ from opennmt import END_OF_SENTENCE_TOKEN, PADDING_TOKEN, START_OF_SENTENCE_TOKE
 from opennmt.data import Noise, Vocab, WordDropout, WordNoiser, tokens_to_words
 from opennmt.models import Model, get_model_from_catalog
 
+from ..common.environment import get_ml_path
 from ..common.corpus import load_corpus
 from ..common.utils import get_git_revision_hash, get_mt_exp_dir, merge_dict, set_seed
 from .runner import SILRunner
@@ -74,11 +75,11 @@ class DataFileType(Flag):
 
 def convert_vocab(sp_vocab_path: Path, onmt_vocab_path: Path, tag_langs: Set[str] = None) -> None:
     special_tokens = [PADDING_TOKEN, START_OF_SENTENCE_TOKEN, END_OF_SENTENCE_TOKEN]
-#    if tag_langs is not None:
-#        special_tokens.extend(map(lambda l: f"<2{l}>", tag_langs))
+    #    if tag_langs is not None:
+    #        special_tokens.extend(map(lambda l: f"<2{l}>", tag_langs))
 
     vocab = Vocab(special_tokens)
-    with open(sp_vocab_path, "r", encoding="utf-8") as vocab_file:
+    with sp_vocab_path.open("r", encoding="utf-8") as vocab_file:
         for line in vocab_file:
             token = line.rstrip("\r\n")
             index = token.rindex("\t")
@@ -264,7 +265,7 @@ class Config(ABC):
 
     @property
     def model_dir(self) -> Path:
-        return Path(self.root["model_dir"])
+        return get_ml_path(self.root["model_dir"])
 
     @property
     def params(self) -> dict:
@@ -458,7 +459,7 @@ class Config(ABC):
                 elif child_tokens is not None and parent_vocab is not None:
                     onmt_delta_vocab_path = self.exp_dir / f"{prefix}-onmt-delta.vocab"
                     vocab_delta = child_tokens.difference(parent_vocab.words)
-                    with open(onmt_delta_vocab_path, "w", encoding="utf-8") as f:
+                    with onmt_delta_vocab_path.open("w", encoding="utf-8") as f:
                         [f.write(f"{token}\n") for token in vocab_delta]
 
         print(f"Building {side} vocabulary...")
@@ -577,7 +578,7 @@ def load_config(exp_name: str) -> Config:
     exp_dir = get_mt_exp_dir(exp_name)
     config_path = exp_dir / "config.yml"
 
-    with open(config_path, "r", encoding="utf-8") as file:
+    with config_path.open("r", encoding="utf-8") as file:
         config = yaml.safe_load(file)
 
     from .corpus_pairs_config import CorpusPairsConfig
@@ -671,7 +672,7 @@ def main() -> None:
         data_config["seed"] = args.seed
     if args.mirror:
         data_config["mirror"] = True
-    with open(config_path, "w", encoding="utf-8") as file:
+    with config_path.open("w", encoding="utf-8") as file:
         yaml.dump(config, file)
     print("Config file created")
 
