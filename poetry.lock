@@ -947,7 +947,7 @@ optional = false
 python-versions = "*"
 
 [package.dependencies]
-pywin32 = {version = "!=226", markers = "platform_system == \"Windows\""}
+pywin32 = {version = "!=226", markers = "sys_platform == \"win32\""}
 
 [package.extras]
 docs = ["sphinx (>=1.7.1)"]
