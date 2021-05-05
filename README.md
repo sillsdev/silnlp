@@ -61,9 +61,39 @@ Lastly, setup PyCharm to use the Black code formatter by following the instructi
 
 #### SIL.Machine.Tool
 
-Many of the scripts in this repo use [SIL.Machine.Tool](https://github.com/sillsdev/machine).
-Execute the following command from the repo directory to download it:
+Many of the scripts in this repo require [SIL.Machine.Tool](https://github.com/sillsdev/machine). SIL.Machine.Tool is a dotnet program and it requires the __.NET core sdk__.
+##### To install SIL.Machine.Tool
+1. You'll need to choose the correct .NET core SDK according to the OS you are using.  
+2. Open 
+3. Download and install the __.NET core sdk__ from [Microsoft](https://dotnet.microsoft.com/download)
+4. To Install SIL.Machine.Tool:
+   __Open the repo directory `silnlp`__ and execute the following command from that folder:
+   ```
+   dotnet tool restore
+   ```
+   When dotnet can't find the manifest file: `dotnet-tools.json` which is in the .config subdirectory of the silnlp repo it will report an error message:
 
-```
-dotnet tool restore
-```
+   ```
+   C:\Users\username>dotnet tool restore
+   Cannot find a manifest file.
+   For a list of locations searched, specify the "-d" option before the tool name.
+   No tools were restored.
+   ```
+Change the current working directory to the the repo and then dotnet should restore the sil Machine tool.
+
+The -d option is useful to show where dotnet is looking for the manifest file:
+   ```
+   D:\GitHub>dotnet -d tool restore
+   Telemetry is: Enabled
+   The list of searched paths:
+           D:\GitHub\.config\dotnet-tools.json
+           D:\GitHub\dotnet-tools.json
+           D:\.config\dotnet-tools.json
+           D:\dotnet-tools.json
+   Cannot find a manifest file.
+   For a list of locations searched, specify the "-d" option before the tool name.
+   No tools were restored.
+
+   D:\GitHub>
+   ```
+
