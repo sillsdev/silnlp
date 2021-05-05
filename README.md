@@ -79,9 +79,9 @@ Many of the scripts in this repo require [SIL.Machine.Tool](https://github.com/s
    For a list of locations searched, specify the "-d" option before the tool name.
    No tools were restored.
    ```
-Change the current working directory to the the repo and then dotnet should restore the sil Machine tool.
+   Change the current working directory to the the repo and then dotnet should restore the sil Machine tool.
 
-The -d option is useful to show where dotnet is looking for the manifest file:
+   The -d option is useful to show where dotnet is looking for the manifest file:
    ```
    D:\GitHub>dotnet -d tool restore
    Telemetry is: Enabled
