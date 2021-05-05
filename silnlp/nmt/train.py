@@ -5,6 +5,8 @@ from typing import Optional
 
 logging.basicConfig()
 
+import tensorflow as tf
+
 from ..common.utils import get_git_revision_hash
 from .config import create_runner, load_config
 
@@ -17,10 +19,19 @@ def main() -> None:
     parser.add_argument("--mixed-precision", default=False, action="store_true", help="Enable mixed precision")
     parser.add_argument("--memory-growth", default=False, action="store_true", help="Enable memory growth")
     parser.add_argument("--num-devices", type=int, default=1, help="Number of devices to train on")
+    parser.add_argument(
+        "--eager-execution",
+        default=False,
+        action="store_true",
+        help="Enable TensorFlow eager execution.",
+    )
     args = parser.parse_args()
 
     rev_hash = get_git_revision_hash()
     print("Git commit:", rev_hash)
+
+    if args.eager_execution:
+        tf.config.run_functions_eagerly(True)
 
     for exp_name in args.experiments:
         config = load_config(exp_name)

@@ -7,12 +7,16 @@ from opennmt.decoders import SelfAttentionDecoder
 from opennmt.encoders import ParallelEncoder, SelfAttentionEncoder
 from opennmt.inputters import WordEmbedder, add_sequence_controls
 from opennmt.layers import (
+    Dense,
     FeedForwardNetwork,
     LayerNorm,
+    LayerWrapper,
     MultiHeadAttention,
     SelfAttentionEncoderLayer,
     SinusoidalPositionEncoder,
     TransformerLayerWrapper,
+    dropout,
+    future_mask,
 )
 from opennmt.layers.reducer import align_in_time
 from opennmt.models import EmbeddingsSharingLevel, Transformer, register_model_in_catalog
@@ -119,6 +123,215 @@ class SILSelfAttentionEncoder(SelfAttentionEncoder):
         ]
 
 
+class AlignmentAttention(tf.keras.layers.Layer):
+    def __init__(self, num_units, **kwargs):
+        super().__init__(**kwargs)
+        self.num_units = num_units
+        self.linear_queries = Dense(self.num_units)
+        self.linear_keys = Dense(self.num_units)
+
+    def call(self, inputs, memory=None, mask=None, cache=None):
+        # Compute queries.
+        queries = self.linear_queries(inputs)
+        queries *= self.num_units ** -0.5
+
+        # Compute keys.
+        if cache:
+            keys = tf.cond(
+                tf.equal(tf.shape(cache)[1], 0),
+                true_fn=lambda: self.linear_keys(memory),
+                false_fn=lambda: cache,
+            )
+        else:
+            keys = self.linear_keys(memory)
+
+        cache = keys
+
+        # Dot product attention.
+        dot = tf.matmul(queries, keys, transpose_b=True)
+        if mask is not None:
+            mask = tf.cast(mask, tf.float32)
+            if mask.shape.rank == 2:
+                mask = tf.expand_dims(mask, 1)  # Broadcast on time dimension.
+            dot = tf.cast(
+                tf.cast(dot, tf.float32) * mask + ((1.0 - mask) * tf.float32.min),
+                dot.dtype,
+            )
+        attn = tf.cast(tf.nn.softmax(tf.cast(dot, tf.float32)), dot.dtype)
+        return attn, cache
+
+
+class SILSelfAttentionDecoderLayer(tf.keras.layers.Layer):
+    def __init__(
+        self,
+        num_units,
+        num_heads,
+        ffn_inner_dim,
+        num_sources=1,
+        dropout=0.1,
+        attention_dropout=0.1,
+        ffn_dropout=0.1,
+        ffn_activation=tf.nn.relu,
+        maximum_relative_position=None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.self_attention = MultiHeadAttention(
+            num_heads,
+            num_units,
+            dropout=attention_dropout,
+            maximum_relative_position=maximum_relative_position,
+        )
+        self.self_attention = TransformerLayerWrapper(self.self_attention, dropout)
+        self.attention = []
+        for i in range(num_sources):
+            attention = MultiHeadAttention(num_heads, num_units, dropout=attention_dropout)
+            attention = TransformerLayerWrapper(attention, dropout)
+            self.attention.append(attention)
+        self.alignment_attention = AlignmentAttention(num_units // num_heads)
+        self.alignment_attention = LayerWrapper(self.alignment_attention, normalize_input=True)
+        self.ffn = FeedForwardNetwork(ffn_inner_dim, num_units, dropout=ffn_dropout, activation=ffn_activation)
+        self.ffn = TransformerLayerWrapper(self.ffn, dropout)
+
+    def call(
+        self,
+        inputs,
+        mask=None,
+        memory=None,
+        memory_mask=None,
+        cache=None,
+        training=None,
+    ):
+        """Runs the decoder layer."""
+        if cache is None:
+            cache = {}
+
+        outputs, self_kv = self.self_attention(inputs, mask=mask, cache=cache.get("self_kv"), training=training)
+
+        attention = None
+        memory_kv = []
+        alignment_memory_k = None
+        if memory is not None:
+            memory_kv_cache = cache.get("memory_kv")
+            if memory_kv_cache is None:
+                memory_kv_cache = [None] * len(self.attention)
+            for layer, mem, mem_mask, mem_cache in zip(self.attention, memory, memory_mask, memory_kv_cache):
+                result = layer(
+                    outputs,
+                    memory=mem,
+                    mask=mem_mask,
+                    cache=mem_cache,
+                    training=training,
+                )
+                outputs, memory_kv_i = result
+                memory_kv.append(memory_kv_i)
+
+            attention, alignment_memory_k = self.alignment_attention(
+                outputs, memory=memory[0], mask=memory_mask[0], cache=cache.get("alignment_memory_k")
+            )
+
+        outputs = self.ffn(outputs, training=training)
+        cache = dict(self_kv=self_kv, memory_kv=memory_kv, alignment_memory_k=alignment_memory_k)
+        return outputs, cache, attention
+
+
+class SILSelfAttentionDecoder(SelfAttentionDecoder):
+    def __init__(
+        self,
+        num_layers,
+        num_units=512,
+        num_heads=8,
+        ffn_inner_dim=2048,
+        dropout=0.1,
+        attention_dropout=0.1,
+        ffn_dropout=0.1,
+        ffn_activation=tf.nn.relu,
+        position_encoder_class=SinusoidalPositionEncoder,
+        num_sources=1,
+        maximum_relative_position=None,
+        **kwargs,
+    ):
+        super(SelfAttentionDecoder, self).__init__(num_sources=num_sources, **kwargs)
+        self.num_units = num_units
+        self.num_heads = num_heads
+        self.dropout = dropout
+        self.position_encoder = None
+        if position_encoder_class is not None:
+            self.position_encoder = position_encoder_class()
+        self.layer_norm = LayerNorm()
+        self.layers = [
+            SILSelfAttentionDecoderLayer(
+                self.num_units,
+                self.num_heads,
+                ffn_inner_dim,
+                num_sources=num_sources,
+                dropout=dropout,
+                attention_dropout=attention_dropout,
+                ffn_dropout=ffn_dropout,
+                ffn_activation=ffn_activation,
+                maximum_relative_position=maximum_relative_position,
+            )
+            for i in range(num_layers)
+        ]
+
+    def _run(
+        self,
+        inputs,
+        sequence_length=None,
+        cache=None,
+        memory=None,
+        memory_sequence_length=None,
+        step=None,
+        training=None,
+    ):
+        # Process inputs.
+        inputs *= self.num_units ** 0.5
+        if self.position_encoder is not None:
+            inputs = self.position_encoder(inputs, position=step + 1 if step is not None else None)
+        inputs = dropout(inputs, self.dropout, training=training)
+
+        # Prepare query mask.
+        mask = None
+        if step is None:
+            maximum_length = tf.shape(inputs)[1]
+            if sequence_length is None:
+                batch_size = tf.shape(inputs)[0]
+                sequence_length = tf.fill([batch_size], maximum_length)
+            mask = future_mask(sequence_length, maximum_length=maximum_length)
+
+        # Prepare memory mask.
+        memory_mask = None
+        if memory is not None:
+            if not isinstance(memory, (list, tuple)):
+                memory = (memory,)
+        if memory_sequence_length is not None:
+            if not isinstance(memory_sequence_length, (list, tuple)):
+                memory_sequence_length = (memory_sequence_length,)
+            memory_mask = [
+                tf.sequence_mask(mem_length, maxlen=tf.shape(mem)[1])
+                for mem, mem_length in zip(memory, memory_sequence_length)
+            ]
+
+        # Run each layer.
+        new_cache = []
+        layer_attention = []
+        for i, layer in enumerate(self.layers):
+            inputs, layer_cache, attn = layer(
+                inputs,
+                mask=mask,
+                memory=memory,
+                memory_mask=memory_mask,
+                cache=cache[i] if cache is not None else None,
+                training=training,
+            )
+            new_cache.append(layer_cache)
+            layer_attention.append(attn)
+        outputs = self.layer_norm(inputs)
+        attention = tf.stack(layer_attention, axis=-1)
+        attention = tf.math.reduce_mean(attention, axis=-1)
+        return outputs, new_cache, attention
+
+
 class SILTransformer(Transformer):
     def __init__(
         self,
@@ -166,7 +379,7 @@ class SILTransformer(Transformer):
             )
         else:
             encoder = encoders[0]
-        decoder = SelfAttentionDecoder(
+        decoder = SILSelfAttentionDecoder(
             num_decoder_layers,
             num_units=num_units,
             num_heads=num_heads,
