@@ -10,7 +10,7 @@ SIL NLP provides a set of pipelines for performing experiments on various NLP ta
 
 ## Environment Setup
 
-### Windows 10 + PyCharm + Poetry
+### Windows 10 + .NET core SDK + SIL.Machine.Tool + PyCharm + Poetry
 
 #### Prep-Work
 
@@ -27,6 +27,7 @@ starting any code, preferably in this order to avoid most warnings:
 ```
 
 5. [.NET Core SDK](https://dotnet.microsoft.com/download)
+6. SIL.Machine.Tool
 
 #### PyCharm Setup
 
