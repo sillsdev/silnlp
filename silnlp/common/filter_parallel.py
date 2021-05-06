@@ -12,6 +12,7 @@ import json
 import urllib3
 import time
 from typing import Dict, List
+from tqdm import tqdm
 
 from ..common.utils import get_git_revision_hash, merge_dict
 
@@ -31,9 +32,9 @@ _DEFAULT_FILTER_CONFIG: dict = {
         "scripts_toggle": True,
         "min_tok": 4,
         "max_tok": 200,
-        "src_trg_words_ratio": 2.0,
+        "src_trg_words_ratio": 1.8,
         "max_words_per_sent": 150,
-        "avg_word_len_lb": 2.8,
+        "avg_word_len_lb": 3.0,
         "avg_word_len_ub": 20,
         "specific_punct_limit": 5,
         "min_punct_threshold": 3,
@@ -353,7 +354,7 @@ def main() -> None:
          open(f"{args.src}.clean", "w", encoding="utf-8") as src_out, \
          open(f"{args.trg}.clean", "w", encoding="utf-8") as trg_out, \
          open(f"{args.src}.errors", "w", encoding="utf-8") as error_log:
-        for src_line, trg_line in zip(src_in, trg_in):
+        for src_line, trg_line in tqdm(zip(src_in, trg_in)):
             src_line = src_line.strip()
             trg_line = trg_line.strip()
             original_line_count += 1
@@ -415,7 +416,7 @@ def main() -> None:
     print(f'- {ratio_string(count_html,original_line_count)}\tHTML')
     print(f'- {ratio_string(count_characs_sum,original_line_count)}\tsrc/trg character ratio ({src_trg_char_ratio})')
     print(f'- {ratio_string(count_latin,original_line_count)}\tLatin ratio ({latin_ratio})')
-    print(f'- {ratio_string(count_script,original_line_count)}\tInvalid scripts ({valid_scripts})')
+    print(f'- {ratio_string(count_script,original_line_count)}\tNot in valid script list ({valid_scripts})')
     print(f'= {ratio_string(final_line_count,original_line_count)}\tRemaining sentences')
 
 
