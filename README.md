@@ -7,29 +7,77 @@ SIL NLP provides a set of pipelines for performing experiments on various NLP ta
 - Neural Machine Translation
 - Statistical Machine Translation
 - Word Alignment
+---
+
+## SILNLP Prerequisites
+These are the main requirements for the SILNLP code to run on a local machine. Using PyCharm is another way to configure the environment and instructions for that method are included later.
+The SILNLP repo itself is hosted on Github, mainly written in Python and calls SIL.Machine.Tool. 'Machine' as we tend to call it, is a .NET application that has many functions for manipulating USFM data. Most of the language data we have for low resource languages in USFM format. Since Machine is a .Net application it depends upon the __.NET core SDK__ which works on Windows and Linux. Since there are many python packages that need to be used, with complex versioning requirements we use a Python package called Poetry to mangage all of those. So here is a rough heirarchy of SILNLP with the major dependencies.
+
+|Requirement          | Reason                                                          |
+|---------------------|-----------------------------------------------------------------|
+|GIT                  |to get the repo from [github](https://github.com/sillsdev/silnlp)|
+|Python               |to run the silnlp code                                           |
+|Poetry               |to manage all the Python packages and versions                   |
+|SIL.Machine.Tool     |to support many functions for data manipulation                  |
+|.Net core SDK        |Required by SIL.Machine.Tool                                     |
+|NVIDIA GPU           |Required to run on a local machine                               |
+|Nvidia drivers       |Required for the GPU                                             |
+|CUDA Toolkit         |Required for the Machine learning with the GPU                   |
+|Environment variables|To tell SILNLP where to find the data, etc.                      |
 
 ## Environment Setup
-
-### Windows 10 + PyCharm + Poetry
-
 #### Prep-Work
 
-Download and install the following separately before creating any projects or
-starting any code, preferably in this order to avoid most warnings:
+__Download and install__ the following before creating any projects or starting any code, preferably in this order to avoid most warnings:
 
 1. [Git](https://git-scm.com/downloads)
-1. [Python 3.7](https://www.python.org/downloads/) (latest minor version, ie 3.7.9)
-1. Install [PyCharm 2020.1](https://www.jetbrains.com/pycharm/) or later
-1. Poetry via Powershell using the following command:
-
+2. [Python 3.7](https://www.python.org/downloads/) (latest minor version, ie 3.7.9)
+3. Poetry via Powershell using the following command:
 ```
 (Invoke-WebRequest -Uri https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py -UseBasicParsing).Content | python
 ```
+4. [.NET Core SDK](https://dotnet.microsoft.com/download)
+5. SIL.Machine.Tool
+---
+#### SIL.Machine.Tool
 
-5. [.NET Core SDK](https://dotnet.microsoft.com/download)
+Many of the scripts in this repo require [SIL.Machine.Tool](https://github.com/sillsdev/machine). SIL.Machine.Tool is a dotnet program and it requires the __.NET core sdk__.
+##### To install SIL.Machine.Tool
+1. You'll need to choose the correct .NET core SDK according to your Operating system. 
+1. Download and install the __.NET core sdk__ from [Microsoft](https://dotnet.microsoft.com/download)
+1. To Install SIL.Machine.Tool:
+   __Open the repo directory `silnlp`__ and execute the following command from that folder:
+   ```
+   dotnet tool restore
+   ```
+   When dotnet can't find the manifest file: `dotnet-tools.json` which is in the .config subdirectory of the silnlp repo it will report an error message:
 
-#### PyCharm Setup
+   ```
+   C:\Users\username>dotnet tool restore
+   Cannot find a manifest file.
+   For a list of locations searched, specify the "-d" option before the tool name.
+   No tools were restored.
+   ```
+   Change the current working directory to the the repo and then dotnet should restore the sil Machine tool.
 
+   The -d option is useful to show where dotnet is looking for the manifest file:
+   ```
+   D:\GitHub>dotnet -d tool restore
+   Telemetry is: Enabled
+   The list of searched paths:
+           D:\GitHub\.config\dotnet-tools.json
+           D:\GitHub\dotnet-tools.json
+           D:\.config\dotnet-tools.json
+           D:\dotnet-tools.json
+   Cannot find a manifest file.
+   For a list of locations searched, specify the "-d" option before the tool name.
+   No tools were restored.
+
+   D:\GitHub>
+   ```
+---
+#### Optional: PyCharm Setup
+If you wish, you can use [PyCharm 2020.1](https://www.jetbrains.com/pycharm/) as your Python IDE.
 First, you will need to install the Poetry plugin for PyCharm.
 
 1. Go to `File -> Settings -> Plugins`.
@@ -59,11 +107,3 @@ You will need to configure PyCharm to work properly with the project.
 
 Lastly, setup PyCharm to use the Black code formatter by following the instructions [here](https://black.readthedocs.io/en/stable/editor_integration.html#pycharm-intellij-idea).
 
-#### SIL.Machine.Tool
-
-Many of the scripts in this repo use [SIL.Machine.Tool](https://github.com/sillsdev/machine).
-Execute the following command from the repo directory to download it:
-
-```
-dotnet tool restore
-```
