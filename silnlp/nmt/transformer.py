@@ -25,24 +25,7 @@ from opennmt.utils.decoding import BeamSearch, DecodingStrategy, Sampler
 from opennmt.utils.misc import shape_list
 from pygtrie import Trie
 
-from .decoding import DictionaryGuidedBeamSearch
-
-
-@tf.function
-def find_dict_trg_words(dictionary: Trie, src_ids: tf.Tensor) -> tf.RaggedTensor:
-    src_ids_np = src_ids.numpy()
-    i = 0
-    trg_words: List[tf.Tensor] = []
-    while i < len(src_ids_np):
-        result = dictionary.longest_prefix(src_ids_np[i:])
-        if result.is_set:
-            trg_words.append(result.value)
-            i += len(result.key)
-        else:
-            trg_words.append(tf.constant([], dtype=tf.int64))
-            i += 1
-    output: tf.RaggedTensor = tf.ragged.stack(trg_words)
-    return output.with_row_splits_dtype(tf.int64)
+from .decoding import DictionaryGuidedBeamSearch, dynamic_decode
 
 
 class SILTransformerLayerWrapper(TransformerLayerWrapper):
@@ -123,7 +106,7 @@ class SILSelfAttentionEncoder(SelfAttentionEncoder):
         ]
 
 
-class AlignmentAttention(tf.keras.layers.Layer):
+class AlignmentAttentionHead(tf.keras.layers.Layer):
     def __init__(self, num_units, **kwargs):
         super().__init__(**kwargs)
         self.num_units = num_units
@@ -136,7 +119,7 @@ class AlignmentAttention(tf.keras.layers.Layer):
         queries *= self.num_units ** -0.5
 
         # Compute keys.
-        if cache:
+        if cache is not None:
             keys = tf.cond(
                 tf.equal(tf.shape(cache)[1], 0),
                 true_fn=lambda: self.linear_keys(memory),
@@ -188,8 +171,8 @@ class SILSelfAttentionDecoderLayer(tf.keras.layers.Layer):
             attention = MultiHeadAttention(num_heads, num_units, dropout=attention_dropout)
             attention = TransformerLayerWrapper(attention, dropout)
             self.attention.append(attention)
-        self.alignment_attention = AlignmentAttention(num_units // num_heads)
-        self.alignment_attention = LayerWrapper(self.alignment_attention, normalize_input=True)
+        self.alignment_attention_head = AlignmentAttentionHead(num_units // num_heads)
+        self.alignment_attention_head = LayerWrapper(self.alignment_attention_head, normalize_input=True)
         self.ffn = FeedForwardNetwork(ffn_inner_dim, num_units, dropout=ffn_dropout, activation=ffn_activation)
         self.ffn = TransformerLayerWrapper(self.ffn, dropout)
 
@@ -226,7 +209,7 @@ class SILSelfAttentionDecoderLayer(tf.keras.layers.Layer):
                 outputs, memory_kv_i = result
                 memory_kv.append(memory_kv_i)
 
-            attention, alignment_memory_k = self.alignment_attention(
+            attention, alignment_memory_k = self.alignment_attention_head(
                 outputs, memory=memory[0], mask=memory_mask[0], cache=cache.get("alignment_memory_k")
             )
 
@@ -330,6 +313,52 @@ class SILSelfAttentionDecoder(SelfAttentionDecoder):
         attention = tf.stack(layer_attention, axis=-1)
         attention = tf.math.reduce_mean(attention, axis=-1)
         return outputs, new_cache, attention
+
+    def dynamic_decode(
+        self,
+        embeddings,
+        start_ids,
+        end_id=END_OF_SENTENCE_ID,
+        initial_state=None,
+        decoding_strategy=None,
+        sampler=None,
+        maximum_iterations=None,
+        minimum_iterations=0,
+    ):
+        if isinstance(embeddings, WordEmbedder):
+            input_fn = lambda ids: embeddings({"ids": ids})
+        else:
+            input_fn = lambda ids: tf.nn.embedding_lookup(embeddings, ids)
+
+        # TODO: find a better way to pass the state reorder flags.
+        if hasattr(decoding_strategy, "_set_state_reorder_flags"):
+            state_reorder_flags = self._get_state_reorder_flags()
+            decoding_strategy._set_state_reorder_flags(state_reorder_flags)
+
+        return dynamic_decode(
+            lambda ids, step, state: self(input_fn(ids), step, state),
+            start_ids,
+            end_id=end_id,
+            initial_state=initial_state,
+            decoding_strategy=decoding_strategy,
+            sampler=sampler,
+            maximum_iterations=maximum_iterations,
+            minimum_iterations=minimum_iterations,
+            attention_history=self.support_alignment_history,
+            attention_size=tf.shape(self.memory)[1] if self.support_alignment_history else None,
+        )
+
+    def _get_initial_state(self, batch_size, dtype, initial_state=None):
+        cache = super()._get_initial_state(batch_size, dtype, initial_state)
+        for layer_cache in cache:
+            layer_cache["alignment_memory_k"] = tf.zeros([batch_size, 0, self.num_units // self.num_heads], dtype=dtype)
+        return cache
+
+    def _get_state_reorder_flags(self):
+        reorder_flags = super()._get_state_reorder_flags()
+        for flag in reorder_flags:
+            flag["alignment_memory_k"] = False
+        return reorder_flags
 
 
 class SILTransformer(Transformer):
@@ -485,11 +514,7 @@ class SILTransformer(Transformer):
         decoding_strategy = DecodingStrategy.from_params(params)
         if self._dictionary is not None and isinstance(decoding_strategy, BeamSearch):
             ids: tf.Tensor = features["ids"]
-            dict_trg_words: tf.RaggedTensor = tf.map_fn(
-                lambda s: find_dict_trg_words(self._dictionary, s),
-                ids,
-                fn_output_signature=tf.RaggedTensorSpec(shape=(None, None), dtype=tf.int64),
-            )
+            dict_trg_words = self.create_dict_trg_words(ids)
             decoding_strategy = DictionaryGuidedBeamSearch(
                 dict_trg_words,
                 decoding_strategy.beam_size,
@@ -572,6 +597,31 @@ class SILTransformer(Transformer):
             for key, value in predictions.items():
                 predictions[key] = value[:, :num_hypotheses]
         return predictions
+
+    def create_dict_trg_words(self, ids: tf.Tensor) -> tf.RaggedTensor:
+        dict_trg_words: tf.RaggedTensor = tf.map_fn(
+            lambda s: tf.RaggedTensor.from_tensor(tf.py_function(self.find_dict_trg_words, [s], tf.int64), padding=0),
+            ids,
+            fn_output_signature=tf.RaggedTensorSpec(shape=(None, None), dtype=tf.int64),
+        )
+        return dict_trg_words
+
+    def find_dict_trg_words(self, src_ids: tf.Tensor) -> tf.Tensor:
+        if self._dictionary is None:
+            raise ValueError("The dictionary must be initialized.")
+        src_ids_np = src_ids.numpy()
+        i = 0
+        trg_words: List[tf.Tensor] = []
+        while i < len(src_ids_np):
+            result = self._dictionary.longest_prefix(src_ids_np[i:])
+            if result.is_set:
+                trg_words.append(result.value)
+                i += len(result.key)
+            else:
+                trg_words.append(tf.constant([], dtype=tf.int64))
+                i += 1
+        output: tf.RaggedTensor = tf.ragged.stack(trg_words)
+        return output.to_tensor()
 
 
 @register_model_in_catalog
