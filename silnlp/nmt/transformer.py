@@ -1,6 +1,7 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import tensorflow as tf
+from tensorflow.python.framework.tensor_spec import TensorSpec
 import tensorflow_addons as tfa
 from opennmt import END_OF_SENTENCE_ID, START_OF_SENTENCE_ID
 from opennmt.decoders import SelfAttentionDecoder
@@ -23,9 +24,9 @@ from opennmt.models import EmbeddingsSharingLevel, Transformer, register_model_i
 from opennmt.models.sequence_to_sequence import _add_noise, replace_unknown_target
 from opennmt.utils.decoding import BeamSearch, DecodingStrategy, Sampler
 from opennmt.utils.misc import shape_list
-from pygtrie import Trie
 
 from .decoding import DictionaryGuidedBeamSearch, dynamic_decode
+from .trie import Trie
 
 
 class SILTransformerLayerWrapper(TransformerLayerWrapper):
@@ -106,7 +107,7 @@ class SILSelfAttentionEncoder(SelfAttentionEncoder):
         ]
 
 
-class AlignmentAttentionHead(tf.keras.layers.Layer):
+class AlignmentHead(tf.keras.layers.Layer):
     def __init__(self, num_units, **kwargs):
         super().__init__(**kwargs)
         self.num_units = num_units
@@ -156,6 +157,7 @@ class SILSelfAttentionDecoderLayer(tf.keras.layers.Layer):
         ffn_dropout=0.1,
         ffn_activation=tf.nn.relu,
         maximum_relative_position=None,
+        alignment_head_num_units=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -168,11 +170,19 @@ class SILSelfAttentionDecoderLayer(tf.keras.layers.Layer):
         self.self_attention = TransformerLayerWrapper(self.self_attention, dropout)
         self.attention = []
         for i in range(num_sources):
-            attention = MultiHeadAttention(num_heads, num_units, dropout=attention_dropout)
+            attention = MultiHeadAttention(
+                num_heads,
+                num_units,
+                dropout=attention_dropout,
+                return_attention=alignment_head_num_units is None and i == 0,
+            )
             attention = TransformerLayerWrapper(attention, dropout)
             self.attention.append(attention)
-        self.alignment_attention_head = AlignmentAttentionHead(num_units // num_heads)
-        self.alignment_attention_head = LayerWrapper(self.alignment_attention_head, normalize_input=True)
+        if alignment_head_num_units is None:
+            self.alignment_head = None
+        else:
+            self.alignment_head = AlignmentHead(alignment_head_num_units)
+            self.alignment_head = LayerWrapper(self.alignment_head, normalize_input=True)
         self.ffn = FeedForwardNetwork(ffn_inner_dim, num_units, dropout=ffn_dropout, activation=ffn_activation)
         self.ffn = TransformerLayerWrapper(self.ffn, dropout)
 
@@ -206,15 +216,22 @@ class SILSelfAttentionDecoderLayer(tf.keras.layers.Layer):
                     cache=mem_cache,
                     training=training,
                 )
-                outputs, memory_kv_i = result
+                if len(result) == 3:
+                    outputs, memory_kv_i, attention = result
+                    attention = attention[:, 0]  # Use the first head for the attention vector.
+                else:
+                    outputs, memory_kv_i = result
                 memory_kv.append(memory_kv_i)
 
-            attention, alignment_memory_k = self.alignment_attention_head(
-                outputs, memory=memory[0], mask=memory_mask[0], cache=cache.get("alignment_memory_k")
-            )
+            if self.alignment_head is not None:
+                attention, alignment_memory_k = self.alignment_head(
+                    outputs, memory=memory[0], mask=memory_mask[0], cache=cache.get("alignment_memory_k")
+                )
 
         outputs = self.ffn(outputs, training=training)
-        cache = dict(self_kv=self_kv, memory_kv=memory_kv, alignment_memory_k=alignment_memory_k)
+        cache = dict(self_kv=self_kv, memory_kv=memory_kv)
+        if self.alignment_head is not None:
+            cache["alignment_memory_k"] = alignment_memory_k
         return outputs, cache, attention
 
 
@@ -232,6 +249,7 @@ class SILSelfAttentionDecoder(SelfAttentionDecoder):
         position_encoder_class=SinusoidalPositionEncoder,
         num_sources=1,
         maximum_relative_position=None,
+        alignment_head_num_units=None,
         **kwargs,
     ):
         super(SelfAttentionDecoder, self).__init__(num_sources=num_sources, **kwargs)
@@ -241,6 +259,7 @@ class SILSelfAttentionDecoder(SelfAttentionDecoder):
         self.position_encoder = None
         if position_encoder_class is not None:
             self.position_encoder = position_encoder_class()
+        self.alignment_head_num_units = alignment_head_num_units
         self.layer_norm = LayerNorm()
         self.layers = [
             SILSelfAttentionDecoderLayer(
@@ -253,6 +272,7 @@ class SILSelfAttentionDecoder(SelfAttentionDecoder):
                 ffn_dropout=ffn_dropout,
                 ffn_activation=ffn_activation,
                 maximum_relative_position=maximum_relative_position,
+                alignment_head_num_units=alignment_head_num_units,
             )
             for i in range(num_layers)
         ]
@@ -350,14 +370,18 @@ class SILSelfAttentionDecoder(SelfAttentionDecoder):
 
     def _get_initial_state(self, batch_size, dtype, initial_state=None):
         cache = super()._get_initial_state(batch_size, dtype, initial_state)
-        for layer_cache in cache:
-            layer_cache["alignment_memory_k"] = tf.zeros([batch_size, 0, self.num_units // self.num_heads], dtype=dtype)
+        if self.alignment_head_num_units is not None:
+            for layer_cache in cache:
+                layer_cache["alignment_memory_k"] = tf.zeros(
+                    [batch_size, 0, self.alignment_head_num_units], dtype=dtype
+                )
         return cache
 
     def _get_state_reorder_flags(self):
         reorder_flags = super()._get_state_reorder_flags()
-        for flag in reorder_flags:
-            flag["alignment_memory_k"] = False
+        if self.alignment_head_num_units is not None:
+            for flag in reorder_flags:
+                flag["alignment_memory_k"] = False
         return reorder_flags
 
 
@@ -379,6 +403,7 @@ class SILTransformer(Transformer):
         share_encoders=False,
         maximum_relative_position=None,
         drop_encoder_self_attention_residual_connections=set(),
+        alignment_head_num_units=None,
     ):
         if isinstance(num_layers, (list, tuple)):
             num_encoder_layers, num_decoder_layers = num_layers
@@ -420,6 +445,7 @@ class SILTransformer(Transformer):
             position_encoder_class=position_encoder_class,
             num_sources=source_inputter.num_outputs,
             maximum_relative_position=maximum_relative_position,
+            alignment_head_num_units=alignment_head_num_units,
         )
 
         self._num_units = num_units
@@ -450,12 +476,13 @@ class SILTransformer(Transformer):
         trg_dict_path: Optional[str] = data_config.get("trg_dictionary")
         if src_dict_path is not None and trg_dict_path is not None:
             self.labels_inputter.set_decoder_mode(enable=False, mark_start=False, mark_end=False)
-            dictionary = Trie()
+            dictionary = Trie(self.features_inputter.vocabulary_size)
             with tf.io.gfile.GFile(src_dict_path) as src_dict, tf.io.gfile.GFile(trg_dict_path) as trg_dict:
                 for src_entry, trg_entry in zip(src_dict, trg_dict):
                     src_tokens = self.features_inputter.make_features(tf.constant(src_entry.strip()))
                     trg_tokens = self.labels_inputter.make_features(tf.constant(trg_entry.strip()))
-                    dictionary[src_tokens["ids"].numpy()] = trg_tokens["ids"]
+                    dictionary.add(src_tokens["ids"], trg_tokens["ids"])
+            dictionary.compile()
             self._dictionary = dictionary
             self.labels_inputter.set_decoder_mode(mark_start=True, mark_end=True)
 
@@ -513,10 +540,11 @@ class SILTransformer(Transformer):
 
         decoding_strategy = DecodingStrategy.from_params(params)
         if self._dictionary is not None and isinstance(decoding_strategy, BeamSearch):
-            ids: tf.Tensor = features["ids"]
-            dict_trg_words = self.create_dict_trg_words(ids)
+            src_ids: tf.Tensor = features["ids"]
+            src_entry_indices, trg_entries = self.batch_find_trg_entries(src_ids)
             decoding_strategy = DictionaryGuidedBeamSearch(
-                dict_trg_words,
+                src_entry_indices,
+                trg_entries,
                 decoding_strategy.beam_size,
                 decoding_strategy.length_penalty,
                 decoding_strategy.coverage_penalty,
@@ -598,30 +626,47 @@ class SILTransformer(Transformer):
                 predictions[key] = value[:, :num_hypotheses]
         return predictions
 
-    def create_dict_trg_words(self, ids: tf.Tensor) -> tf.RaggedTensor:
-        dict_trg_words: tf.RaggedTensor = tf.map_fn(
-            lambda s: tf.RaggedTensor.from_tensor(tf.py_function(self.find_dict_trg_words, [s], tf.int64), padding=0),
-            ids,
-            fn_output_signature=tf.RaggedTensorSpec(shape=(None, None), dtype=tf.int64),
+    def batch_find_trg_entries(self, src_ids: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+        src_entry_indices, trg_entries = tf.map_fn(
+            lambda src_ids: self.find_trg_entries(src_ids),
+            src_ids,
+            fn_output_signature=(
+                tf.TensorSpec((None), dtype=tf.int32),
+                tf.RaggedTensorSpec(shape=(None, None), dtype=tf.int32, row_splits_dtype=tf.int32),
+            ),
         )
-        return dict_trg_words
+        return src_entry_indices, trg_entries.to_tensor()
 
-    def find_dict_trg_words(self, src_ids: tf.Tensor) -> tf.Tensor:
+    @tf.function
+    def find_trg_entries(self, src_ids: tf.Tensor) -> Tuple[tf.Tensor, tf.RaggedTensor]:
         if self._dictionary is None:
             raise ValueError("The dictionary must be initialized.")
-        src_ids_np = src_ids.numpy()
+        length = tf.shape(src_ids)[0]
+        src_entry_indices = tf.TensorArray(tf.int32, size=length)
+        trg_entries = tf.TensorArray(tf.int32, size=0, dynamic_size=True, infer_shape=False)
+        trg_entry_lengths = tf.TensorArray(tf.int32, size=0, dynamic_size=True)
+        trg_entries = trg_entries.write(0, tf.constant([], dtype=tf.int32))
+        trg_entry_lengths = trg_entry_lengths.write(0, 0)
         i = 0
-        trg_words: List[tf.Tensor] = []
-        while i < len(src_ids_np):
-            result = self._dictionary.longest_prefix(src_ids_np[i:])
-            if result.is_set:
-                trg_words.append(result.value)
-                i += len(result.key)
-            else:
-                trg_words.append(tf.constant([], dtype=tf.int64))
+        j = 1
+        while i < length:
+            trg_entry = self._dictionary.longest_prefix(src_ids[i:])
+            trg_entry_length = tf.shape(trg_entry)[0]
+            if trg_entry_length == 0:
+                src_entry_indices = src_entry_indices.write(i, 0)
                 i += 1
-        output: tf.RaggedTensor = tf.ragged.stack(trg_words)
-        return output.to_tensor()
+            else:
+                trg_entries = trg_entries.write(j, trg_entry)
+                trg_entry_lengths = trg_entry_lengths.write(j, trg_entry_length)
+                end = i + trg_entry_length
+                while i < end:
+                    src_entry_indices = src_entry_indices.write(i, j)
+                    i += 1
+                j += 1
+
+        return src_entry_indices.stack(), tf.RaggedTensor.from_row_lengths(
+            trg_entries.concat(), trg_entry_lengths.stack()
+        )
 
 
 @register_model_in_catalog
@@ -649,6 +694,22 @@ class SILTransformerBase(SILTransformer):
             num_units=512,
             num_heads=8,
             ffn_inner_dim=2048,
+        )
+
+
+@register_model_in_catalog
+class SILTransformerBaseAlignmentEnhanced(SILTransformer):
+    """Defines a Transformer model as decribed in https://arxiv.org/abs/1706.03762."""
+
+    def __init__(self):
+        super().__init__(
+            source_inputter=WordEmbedder(embedding_size=512),
+            target_inputter=WordEmbedder(embedding_size=512),
+            num_layers=6,
+            num_units=512,
+            num_heads=8,
+            ffn_inner_dim=2048,
+            alignment_head_num_units=64,
         )
 
 
