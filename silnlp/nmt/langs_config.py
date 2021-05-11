@@ -488,7 +488,7 @@ class LangsConfig(Config):
         if self.mirror:
             mirror_cur_terms = cur_terms.rename(columns={"source": "target", "target": "source"})
             self._insert_trg_tag(src_iso, mirror_cur_terms)
-            terms = pd.concat([terms, cur_terms], ignore_index=True)
+            terms = pd.concat([terms, mirror_cur_terms], ignore_index=True)
 
         self._insert_trg_tag(trg_iso, cur_terms)
 

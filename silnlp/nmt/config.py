@@ -74,8 +74,8 @@ class DataFileType(Flag):
 
 def convert_vocab(sp_vocab_path: Path, onmt_vocab_path: Path, tag_langs: Set[str] = None) -> None:
     special_tokens = [PADDING_TOKEN, START_OF_SENTENCE_TOKEN, END_OF_SENTENCE_TOKEN]
-#    if tag_langs is not None:
-#        special_tokens.extend(map(lambda l: f"<2{l}>", tag_langs))
+    #    if tag_langs is not None:
+    #        special_tokens.extend(map(lambda l: f"<2{l}>", tag_langs))
 
     vocab = Vocab(special_tokens)
     with open(sp_vocab_path, "r", encoding="utf-8") as vocab_file:
@@ -97,7 +97,7 @@ def build_vocab(
     character_coverage: float,
     model_prefix: Path,
     vocab_path: Path,
-    tag_langs: Set[str] = None,
+    tag_langs: Optional[Set[str]] = None,
 ) -> None:
     joined_file_paths = ",".join(str(fp) for fp in file_paths)
     user_defined_symbols = "<blank>"
@@ -330,7 +330,7 @@ class Config(ABC):
         if not self.data["tokenize"]:
             return
 
-        tag_isos: Optional[Set[str]] = set()
+        tag_isos: Set[str] = set()
         if self.write_trg_tag:
             tag_isos = self.trg_isos | self.src_isos if self.mirror else set(self.trg_isos)
         if self.src_tags is not None:
@@ -415,7 +415,7 @@ class Config(ABC):
         isos: Set[str],
         vocab_file_paths: Set[Path],
         side: str,
-        tag_langs: Set[str] = None,
+        tag_langs: Optional[Set[str]] = None,
     ) -> None:
         prefix = "src" if side == "source" else "trg"
         model_prefix = self.exp_dir / f"{prefix}-sp"
