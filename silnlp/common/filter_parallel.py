@@ -5,6 +5,7 @@ Adapted from: www.aclweb.org/anthology/D19-1430: Exploiting Monolingual Data at 
 
 import re
 import os
+import sys
 import argparse
 from string import punctuation
 import yaml
@@ -43,7 +44,8 @@ _DEFAULT_FILTER_CONFIG: dict = {
         "punct_text_ratio": 0.5,
         "src_trg_char_ratio": 3,
         "latin_ratio": 0.25,
-        "valid_scripts": "latin common"
+        "valid_scripts": "latin common",
+        "script_error_threshold": 1,
     },
 }
 
@@ -63,6 +65,11 @@ def load_config(config_file_name: str) -> dict:
     with open(config_path, "r", encoding="utf-8") as file:
         loaded_config = yaml.safe_load(file)
         return merge_dict(config, loaded_config)
+
+
+def write_config(config_file_name: str, config: dict):
+    with open(config_file_name, "w") as file:
+        yaml.dump(config, file)
 
 
 def show_config(config: dict):
@@ -262,9 +269,10 @@ def load_script_dict():
 #    print("\n".join(f"{k}\t{v}" for k, v in script_dict.items()))
 
 
-def script_check(src: str, trg: str, valid_scripts: List[str]) -> bool:
+def script_check(src: str, trg: str, valid_scripts: List[str], threshold: int) -> bool:
 
     def check_line(line: str, scripts: List[str]) -> bool:
+        error_count = 0
         for c in line:
             char_code = ord(c)
 
@@ -276,7 +284,9 @@ def script_check(src: str, trg: str, valid_scripts: List[str]) -> bool:
 
             # Character c wasn't part of one of the valid scripts
             if not match:
-                return False
+                error_count += 1
+                if error_count >= threshold:
+                    return False
 
         # Successfully checked all the characters in the line
         return True
@@ -294,6 +304,31 @@ def main() -> None:
     def ratio_string(count: int, total: int) -> str:
         return f'{count: >10} ({(100*count/total):6.2f}%)'
 
+    def print_counters(out_file):
+        out_file.write(f'  {original_line_count:>10}\tOriginal sentences\n')
+        out_file.write(f'- {ratio_string(count_duplicates, original_line_count)}\tduplicate src/trg sentence pairs\n')
+        out_file.write(f'- {ratio_string(count_src_trg_same, original_line_count)}\tsame src/trg sentence\n')
+        out_file.write(f'- {ratio_string(count_word_num, original_line_count)}\t'
+                       f'word count < {min_tok} or > {max_tok}\n')
+        out_file.write(f'- {ratio_string(count_words_ratio, original_line_count)}\t'
+                       f'exceeded src/trg word ratio ({src_trg_words_ratio})\n')
+        out_file.write(f'- {ratio_string(count_specific_punc, original_line_count)}\t'
+                       f'exceeded specific punct. limit ({specific_punct_limit})\n')
+        out_file.write(f'- {ratio_string(count_characs, original_line_count)}\t'
+                       f'exceeded max words ({max_words_per_sent}) or avg word length bounds '
+                       f'({avg_word_len_lb}/{avg_word_len_ub})\n')
+        out_file.write(f'- {ratio_string(count_special_char, original_line_count)}\tspecial characters\n')
+        out_file.write(f'- {ratio_string(count_punctuation, original_line_count)}\t'
+                       f'max. punct ({punct_max_num}), src/trg punct. ratio ({src_trg_punct_ratio}),'
+                       f' text/punct ratio ({punct_text_ratio})\n')
+        out_file.write(f'- {ratio_string(count_html, original_line_count)}\tHTML\n')
+        out_file.write(f'- {ratio_string(count_characs_sum, original_line_count)}\t'
+                       f'src/trg character ratio ({src_trg_char_ratio})\n')
+        out_file.write(f'- {ratio_string(count_latin, original_line_count)}\tLatin ratio ({latin_ratio})\n')
+        out_file.write(f'- {ratio_string(count_script, original_line_count)}\t'
+                       f'>={script_error_threshold} chars not in valid script list ({valid_scripts})\n')
+        out_file.write(f'= {ratio_string(final_line_count, original_line_count)}\tRemaining sentences\n')
+
     parser = argparse.ArgumentParser(description="Filtering for noisy parallel corpora")
     parser.add_argument('src', type=str, help='source file')
     parser.add_argument('trg', type=str, help='target file')
@@ -302,11 +337,12 @@ def main() -> None:
     parser.add_argument('--max_lines', type=int, default=-1, help='max lines to process')
     args = parser.parse_args()
 
-    print("Git commit:", get_git_revision_hash())
+    rev_hash = get_git_revision_hash()
+    print("Git commit:", rev_hash)
 
     config = load_config(args.config)
     filter_config = config.get("filter")
-    show_config(filter_config)
+    write_config(f"effective_config-{rev_hash}.yml", filter_config)
     max_lines = args.max_lines
 
     # Initialize counters
@@ -344,16 +380,20 @@ def main() -> None:
     src_trg_char_ratio = filter_config.get('src_trg_char_ratio')
     latin_ratio = filter_config.get('latin_ratio', 0.25)
     valid_scripts = [s.lower() for s in filter_config.get('valid_scripts').split()]
+    script_error_threshold = filter_config.get('script_error_threshold')
 
     # Initial setup (if needed)
     if scripts_toggle:
         load_script_dict()
 
+    src_out_file_name = f"{os.path.splitext(args.src)[0]}_clean{os.path.splitext(args.src)[1]}"
+    src_err_file_name = f"{os.path.splitext(args.src)[0]}_errors{os.path.splitext(args.src)[1]}"
+    trg_out_file_name = f"{os.path.splitext(args.trg)[0]}_clean{os.path.splitext(args.trg)[1]}"
     with open(args.src, "r", encoding="utf-8") as src_in, \
          open(args.trg, "r", encoding="utf-8") as trg_in, \
-         open(f"{args.src}.clean", "w", encoding="utf-8") as src_out, \
-         open(f"{args.trg}.clean", "w", encoding="utf-8") as trg_out, \
-         open(f"{args.src}.errors", "w", encoding="utf-8") as error_log:
+         open(src_out_file_name, "w", encoding="utf-8") as src_out, \
+         open(trg_out_file_name, "w", encoding="utf-8") as trg_out, \
+         open(src_err_file_name, "w", encoding="utf-8") as error_log:
         for src_line, trg_line in tqdm(zip(src_in, trg_in)):
             src_line = src_line.strip()
             trg_line = trg_line.strip()
@@ -393,7 +433,7 @@ def main() -> None:
             elif latin_toggle and latin_check(src_line, trg_line, latin_ratio):
                 count_latin += 1
                 log_error(args.errors, error_log, "latin_check", src_line, trg_line)
-            elif scripts_toggle and script_check(src_line, trg_line, valid_scripts):
+            elif scripts_toggle and script_check(src_line, trg_line, valid_scripts, script_error_threshold):
                 count_script += 1
                 log_error(args.errors, error_log, "script_check", src_line, trg_line)
             else:
@@ -404,20 +444,9 @@ def main() -> None:
             if max_lines != -1 and original_line_count >= max_lines:
                 break
 
-    print(f'  {original_line_count:>10}\tOriginal sentences')
-    print(f'- {ratio_string(count_duplicates,original_line_count)}\tduplicate src/trg sentence pairs')
-    print(f'- {ratio_string(count_src_trg_same,original_line_count)}\tsame src/trg sentence')
-    print(f'- {ratio_string(count_word_num,original_line_count)}\tword count < {min_tok} or > {max_tok}')
-    print(f'- {ratio_string(count_words_ratio,original_line_count)}\texceeded src/trg word ratio ({src_trg_words_ratio})')
-    print(f'- {ratio_string(count_specific_punc,original_line_count)}\texceeded specific punct. limit ({specific_punct_limit})')
-    print(f'- {ratio_string(count_characs,original_line_count)}\texceeded max words ({max_words_per_sent}) or avg word length bounds ({avg_word_len_lb}/{avg_word_len_ub})')
-    print(f'- {ratio_string(count_special_char,original_line_count)}\tspecial characters')
-    print(f'- {ratio_string(count_punctuation,original_line_count)}\tmax. punct ({punct_max_num}), src/trg punct. ratio ({src_trg_punct_ratio}), text/punct ratio ({punct_text_ratio})')
-    print(f'- {ratio_string(count_html,original_line_count)}\tHTML')
-    print(f'- {ratio_string(count_characs_sum,original_line_count)}\tsrc/trg character ratio ({src_trg_char_ratio})')
-    print(f'- {ratio_string(count_latin,original_line_count)}\tLatin ratio ({latin_ratio})')
-    print(f'- {ratio_string(count_script,original_line_count)}\tNot in valid script list ({valid_scripts})')
-    print(f'= {ratio_string(final_line_count,original_line_count)}\tRemaining sentences')
+    print_counters(sys.stdout)
+    with open("log.out", "w", encoding="utf-8") as f:
+        print_counters(f)
 
 
 if __name__ == "__main__":
