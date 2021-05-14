@@ -478,10 +478,13 @@ class SILTransformer(Transformer):
             self.labels_inputter.set_decoder_mode(enable=False, mark_start=False, mark_end=False)
             dictionary = Trie(self.features_inputter.vocabulary_size)
             with tf.io.gfile.GFile(src_dict_path) as src_dict, tf.io.gfile.GFile(trg_dict_path) as trg_dict:
-                for src_entry, trg_entry in zip(src_dict, trg_dict):
-                    src_tokens = self.features_inputter.make_features(tf.constant(src_entry.strip()))
-                    trg_tokens = self.labels_inputter.make_features(tf.constant(trg_entry.strip()))
-                    dictionary.add(src_tokens["ids"], trg_tokens["ids"])
+                for src_entry_str, trg_entry_str in zip(src_dict, trg_dict):
+                    src_entry = src_entry_str.strip().split("\t")
+                    src_ids = [self.features_inputter.make_features(tf.constant(se.strip()))["ids"] for se in src_entry]
+                    trg_entry = trg_entry_str.strip().split("\t")
+                    trg_ids = [self.labels_inputter.make_features(tf.constant(te.strip()))["ids"] for te in trg_entry]
+                    for src_variant_ids in src_ids:
+                        dictionary.add(src_variant_ids, trg_ids)
             dictionary.compile()
             self._dictionary = dictionary
             self.labels_inputter.set_decoder_mode(mark_start=True, mark_end=True)
@@ -632,7 +635,7 @@ class SILTransformer(Transformer):
             src_ids,
             fn_output_signature=(
                 tf.TensorSpec((None), dtype=tf.int32),
-                tf.RaggedTensorSpec(shape=(None, None), dtype=tf.int32, row_splits_dtype=tf.int32),
+                tf.RaggedTensorSpec(shape=(None, None, None), dtype=tf.int32, row_splits_dtype=tf.int32),
             ),
         )
         return src_entry_indices, trg_entries.to_tensor()
@@ -643,29 +646,36 @@ class SILTransformer(Transformer):
             raise ValueError("The dictionary must be initialized.")
         length = tf.shape(src_ids)[0]
         src_entry_indices = tf.TensorArray(tf.int32, size=length)
-        trg_entries = tf.TensorArray(tf.int32, size=0, dynamic_size=True, infer_shape=False)
         trg_entry_lengths = tf.TensorArray(tf.int32, size=0, dynamic_size=True)
-        trg_entries = trg_entries.write(0, tf.constant([], dtype=tf.int32))
+        trg_variants = tf.TensorArray(tf.int32, size=0, dynamic_size=True, infer_shape=False)
+        trg_variant_lengths = tf.TensorArray(tf.int32, size=0, dynamic_size=True)
+
         trg_entry_lengths = trg_entry_lengths.write(0, 0)
         i = 0
         j = 1
+        k = 0
         while i < length:
-            trg_entry = self._dictionary.longest_prefix(src_ids[i:])
-            trg_entry_length = tf.shape(trg_entry)[0]
-            if trg_entry_length == 0:
+            trg_entry, prefix_len = self._dictionary.longest_prefix(src_ids[i:])
+            if prefix_len == 0:
                 src_entry_indices = src_entry_indices.write(i, 0)
                 i += 1
             else:
-                trg_entries = trg_entries.write(j, trg_entry)
-                trg_entry_lengths = trg_entry_lengths.write(j, trg_entry_length)
-                end = i + trg_entry_length
+                num_variants = trg_entry.nrows()
+                trg_entry_lengths = trg_entry_lengths.write(j, num_variants)
+                end = i + prefix_len
                 while i < end:
                     src_entry_indices = src_entry_indices.write(i, j)
                     i += 1
                 j += 1
-
-        return src_entry_indices.stack(), tf.RaggedTensor.from_row_lengths(
-            trg_entries.concat(), trg_entry_lengths.stack()
+                for vi in tf.range(num_variants):
+                    trg_variant = trg_entry[vi]
+                    trg_variants = trg_variants.write(k, trg_variant)
+                    trg_variant_lengths = trg_variant_lengths.write(k, tf.shape(trg_variant)[0])
+                    k += 1
+        if k == 0:
+            trg_variants = trg_variants.write(0, tf.constant([], dtype=tf.int32))
+        return src_entry_indices.stack(), tf.RaggedTensor.from_nested_row_lengths(
+            trg_variants.concat(), [trg_entry_lengths.stack(), trg_variant_lengths.stack()]
         )
 
 

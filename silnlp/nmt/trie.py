@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import numpy as np
 import tensorflow as tf
@@ -10,18 +10,20 @@ class Trie:
         self.vocab_size = vocab_size
         self.num_states = 0
         self.build_matrix: Optional[dok_matrix] = dok_matrix((1, self.vocab_size), dtype=np.int32)
-        self.build_states: Optional[List[tf.Tensor]] = [tf.constant([], dtype=tf.int32)]
+        self.build_states: Optional[List[tf.RaggedTensor]] = [
+            tf.RaggedTensor.from_tensor(tf.zeros((0, 0), dtype=tf.int32), row_splits_dtype=tf.int32)
+        ]
 
         self.data: Optional[tf.Tensor] = None
         self.indices: Optional[tf.Tensor] = None
         self.indptr: Optional[tf.Tensor] = None
         self.states: Optional[tf.RaggedTensor] = None
 
-    def add(self, ids: tf.Tensor, value: tf.Tensor) -> None:
+    def add(self, ids: tf.Tensor, values: List[tf.Tensor]) -> None:
         if self.build_matrix is None or self.build_states is None:
             raise RuntimeError("The trie is immutable.")
 
-        value = tf.cast(value, tf.int32)
+        value = tf.cast(tf.ragged.stack(values), tf.int32)
         np_ids = ids.numpy()
         cur_state: int = 0
         for i, id in enumerate(np_ids):
@@ -29,7 +31,11 @@ class Trie:
             if next_state == 0:
                 num_states = len(self.build_states)
                 self.build_matrix.resize((num_states + 1, self.vocab_size))
-                cur_value = tf.constant([], dtype=tf.int32) if i < len(np_ids) - 1 else value
+                cur_value = (
+                    tf.RaggedTensor.from_tensor(tf.zeros((0, 0), dtype=tf.int32), row_splits_dtype=tf.int32)
+                    if i < len(np_ids) - 1
+                    else value
+                )
                 self.build_states.append(cur_value)
                 self.num_states += 1
                 next_state = num_states
@@ -50,14 +56,18 @@ class Trie:
         self.states = tf.ragged.stack(self.build_states)
         self.build_states = None
 
-    def longest_prefix(self, ids: tf.Tensor) -> tf.Tensor:
+    def longest_prefix(self, ids: tf.Tensor) -> Tuple[tf.RaggedTensor, tf.Tensor]:
         if self.data is None or self.indices is None or self.indptr is None or self.states is None:
             raise RuntimeError("The trie must be compiled.")
 
         cur_state = 0
-        value: tf.Tensor = tf.constant([], dtype=tf.int32)
+        value: tf.RaggedTensor = tf.RaggedTensor.from_tensor(
+            tf.zeros((0, 0), dtype=tf.int32), row_splits_dtype=tf.int32
+        )
+        prefix_len = 0
+        i = 0
         for id in ids:
-            tf.autograph.experimental.set_loop_options(shape_invariants=[(value, tf.TensorShape([None]))])
+            tf.autograph.experimental.set_loop_options(shape_invariants=[(value, tf.TensorShape((None, None)))])
             col_start = self.indptr[id]
             col_end = self.indptr[id + 1]
             if col_start == col_end:
@@ -69,7 +79,9 @@ class Trie:
             if cur_state == 0:
                 break
             else:
-                cur_value = self.states[cur_state]
-                if tf.shape(cur_value)[0] != 0:
+                cur_value: tf.RaggedTensor = self.states[cur_state]
+                if cur_value.nrows() != 0:
                     value = cur_value
-        return value
+                    prefix_len = i + 1
+            i += 1
+        return value, prefix_len

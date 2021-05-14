@@ -26,14 +26,14 @@ class DictionaryGuidedBeamSearch(BeamSearch):
         super().__init__(beam_size, length_penalty=length_penalty, coverage_penalty=coverage_penalty)
         self.src_entry_indices = src_entry_indices
         self.trg_entries = trg_entries
-        self.trg_entry_length = tf.shape(self.trg_entries)[2]
+        self.trg_variant_length = tf.shape(self.trg_entries)[-1]
 
     def initialize(self, start_ids, attention_size=None):
         batch_size = tf.shape(start_ids)[0]
         start_ids, finished, initial_log_probs, extra_vars = super().initialize(start_ids, attention_size)
 
         extra_vars["active_trg_entries"] = tf.zeros(
-            (batch_size * self.beam_size, self.trg_entry_length), dtype=tf.int32
+            (batch_size * self.beam_size, self.trg_variant_length), dtype=tf.int32
         )
         extra_vars["used_trg_entry_indices"] = tf.sparse.from_dense(
             tf.zeros((batch_size * self.beam_size, 0), dtype=tf.int32)
@@ -46,17 +46,13 @@ class DictionaryGuidedBeamSearch(BeamSearch):
         active_trg_entries: tf.Tensor = kwargs["active_trg_entries"]
         used_trg_entry_indices = tf.sparse.SparseTensor = kwargs["used_trg_entry_indices"]
 
-        log_probs, step_trg_entries, step_trg_entry_indices = tf.cond(
-            self.trg_entry_length > 0,
-            true_fn=lambda: self._update_log_probs_from_dict(
+        if self.trg_variant_length > 0:
+            log_probs, step_trg_entries, step_trg_entry_indices = self._update_log_probs_from_dict(
                 log_probs, attention, active_trg_entries, used_trg_entry_indices
-            ),
-            false_fn=lambda: (
-                log_probs,
-                tf.zeros((self.beam_size, self.trg_entry_length), dtype=tf.int32),
-                tf.zeros((self.beam_size, 1), dtype=tf.int32),
-            ),
-        )
+            )
+        else:
+            step_trg_entries = tf.zeros((self.beam_size, self.trg_variant_length), dtype=tf.int32)
+            step_trg_entry_indices = tf.zeros((self.beam_size, 1), dtype=tf.int32)
 
         if self.coverage_penalty != 0:
             if attention is None:
@@ -97,13 +93,10 @@ class DictionaryGuidedBeamSearch(BeamSearch):
         finished = tf.gather(finished, beam_indices)
         sequence_lengths = tf.gather(sequence_lengths, beam_indices)
 
-        active_trg_entries, used_trg_entry_indices = tf.cond(
-            self.trg_entry_length > 0,
-            true_fn=lambda: self._reorder_dict_state(
+        if self.trg_variant_length > 0:
+            active_trg_entries, used_trg_entry_indices = self._reorder_dict_state(
                 word_ids, beam_indices, step_trg_entries, step_trg_entry_indices, used_trg_entry_indices
-            ),
-            false_fn=lambda: (active_trg_entries, used_trg_entry_indices),
-        )
+            )
 
         parent_ids = parent_ids.write(step, beam_ids)
         extra_vars = {
@@ -129,25 +122,33 @@ class DictionaryGuidedBeamSearch(BeamSearch):
         aligned_src_indices = tf.math.argmax(attn, axis=2)
         step_trg_entry_indices = tf.gather(self.src_entry_indices, aligned_src_indices, axis=1, batch_dims=1)
         step_trg_entries: tf.Tensor = tf.gather(self.trg_entries, step_trg_entry_indices, axis=1, batch_dims=1)
-        step_trg_entries = tf.reshape(step_trg_entries, (-1, self.trg_entry_length))
+
+        batch_size = tf.shape(step_trg_entries)[0]
+        step_trg_entries = tf.reshape(step_trg_entries, (batch_size * self.beam_size, -1, self.trg_variant_length))
+
         step_trg_entry_indices = tf.reshape(step_trg_entry_indices, (-1, 1))
         intersection = tf.sets.intersection(step_trg_entry_indices, used_trg_entry_indices)
         intersection_sizes = tf.sets.size(intersection)
         nonzero_count = tf.math.count_nonzero(active_trg_entries, axis=1, dtype=tf.int32)
-        use_step_trg_entries = tf.reshape((intersection_sizes + nonzero_count) == 0, (-1, 1))
-        step_trg_entries = tf.where(use_step_trg_entries, step_trg_entries, active_trg_entries)
+        use_step_trg_entries = tf.reshape((intersection_sizes + nonzero_count) == 0, (-1, 1, 1))
 
-        first_word: tf.Tensor = step_trg_entries[:, :1]
+        step_trg_entries = tf.where(use_step_trg_entries, step_trg_entries, tf.expand_dims(active_trg_entries, 1))
+
+        first_token: tf.Tensor = step_trg_entries[:, :, 0]
+        _, best_first_token_indices = tf.math.top_k(tf.gather(log_probs, first_token, batch_dims=1))
+        step_trg_entries = tf.squeeze(tf.gather(step_trg_entries, best_first_token_indices, batch_dims=1), axis=1)
+        best_first_token = step_trg_entries[:, :1]
         indices: tf.Tensor = tf.concat(
-            [tf.reshape(tf.range(tf.shape(first_word)[0], dtype=tf.int32), (-1, 1)), first_word], axis=1
+            [tf.reshape(tf.range(tf.shape(best_first_token)[0], dtype=tf.int32), (-1, 1)), best_first_token], axis=1
         )
         indices = tf.boolean_mask(indices, tf.reduce_min(indices[:, 1:], axis=1) > 0)
-        log_probs = tf.cond(
-            tf.shape(indices)[0] > 0,
-            true_fn=lambda: tf.tensor_scatter_nd_update(log_probs, indices, tf.zeros(tf.shape(indices)[0])),
-            false_fn=lambda: log_probs,
-        )
-
+        if tf.shape(indices)[0] > 0:
+            num_updates = tf.shape(indices)[0]
+            vocab_size = tf.shape(log_probs)[1]
+            log_probs = tf.tensor_scatter_nd_update(
+                log_probs, indices[:, :1], tf.fill((num_updates, vocab_size), -float("inf"))
+            )
+            log_probs = tf.tensor_scatter_nd_update(log_probs, indices, tf.zeros(num_updates))
         return log_probs, step_trg_entries, step_trg_entry_indices
 
     @tf.autograph.experimental.do_not_convert
