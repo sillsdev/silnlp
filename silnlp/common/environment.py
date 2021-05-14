@@ -12,6 +12,9 @@ def get_data_dir() -> Path:
     sil_nlp_data_path = os.getenv("SIL_NLP_DATA_PATH")
     if sil_nlp_data_path is not None:
         return Path(sil_nlp_data_path)
+    auqa_ml_path = Path("/data/aqua-ml-data")
+    if auqa_ml_path.is_dir():
+        return auqa_ml_path
     gutenberg_path = Path("G:/Shared drives/Gutenberg")
     if gutenberg_path.is_dir():
         return gutenberg_path
