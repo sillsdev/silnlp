@@ -392,12 +392,12 @@ class LangsConfig(Config):
             train["source"] = train[src_columns].apply(select_random_column, axis=1)
             train.drop(src_columns, axis=1, inplace=True, errors="ignore")
 
-        if terms is not None:
-            train = pd.concat([train, terms], ignore_index=True)
-
         write_corpus(self.exp_dir / "train.src.txt", encode_sp_lines(src_spp, train["source"]))
         write_corpus(self.exp_dir / "train.trg.txt", encode_sp_lines(trg_spp, train["target"]))
-        write_corpus(self.exp_dir / "train.vref.txt", map(lambda vr: str(vr), train["vref"]))
+        write_corpus(self.exp_dir / "train.vref.txt", (str(vr) for vr in train["vref"]))
+
+        if terms is not None:
+            self._write_terms(src_spp, trg_spp, terms)
 
         print("Writing validation data set...")
         if len(val) > 0:
@@ -555,3 +555,29 @@ class LangsConfig(Config):
                 if vref.has_multiple:
                     vref = vref.simplify()
                 test_indices.add(vrefs[str(vref)])
+
+    def _write_terms(
+        self,
+        src_spp: Optional[sp.SentencePieceProcessor],
+        trg_spp: Optional[sp.SentencePieceProcessor],
+        terms: pd.DataFrame,
+    ) -> None:
+        with open(self.exp_dir / "train.src.txt", "a", encoding="utf-8", newline="\n") as src_file, open(
+            self.exp_dir / "train.trg.txt", "a", encoding="utf-8", newline="\n"
+        ) as trg_file, open(self.exp_dir / "train.vref.txt", "a", encoding="utf-8", newline="\n") as vref_file:
+            for _, term in terms.iterrows():
+                src_term: str = term["source"]
+                trg_term: str = term["target"]
+                src_term_variants = [
+                    encode_sp(src_spp, src_term, add_dummy_prefix=True),
+                    encode_sp(src_spp, src_term, add_dummy_prefix=False),
+                ]
+                trg_term_variants = [
+                    encode_sp(trg_spp, trg_term, add_dummy_prefix=True),
+                    encode_sp(trg_spp, trg_term, add_dummy_prefix=False),
+                ]
+                for stv in src_term_variants:
+                    for ttv in trg_term_variants:
+                        src_file.write(stv + "\n")
+                        trg_file.write(ttv + "\n")
+                        vref_file.write("\n")
