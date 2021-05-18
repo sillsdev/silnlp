@@ -1,7 +1,6 @@
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 import tensorflow as tf
-from tensorflow.python.framework.tensor_spec import TensorSpec
 import tensorflow_addons as tfa
 from opennmt import END_OF_SENTENCE_ID, START_OF_SENTENCE_ID
 from opennmt.decoders import SelfAttentionDecoder
@@ -13,11 +12,13 @@ from opennmt.layers import (
     LayerNorm,
     LayerWrapper,
     MultiHeadAttention,
+    MultiHeadAttentionReduction,
     SelfAttentionEncoderLayer,
     SinusoidalPositionEncoder,
     TransformerLayerWrapper,
     dropout,
     future_mask,
+    split_heads,
 )
 from opennmt.layers.reducer import align_in_time
 from opennmt.models import EmbeddingsSharingLevel, Transformer, register_model_in_catalog
@@ -115,19 +116,25 @@ class AlignmentHead(tf.keras.layers.Layer):
         self.linear_keys = Dense(self.num_units)
 
     def call(self, inputs, memory=None, mask=None, cache=None):
+        def _compute_k(x):
+            keys = self.linear_keys(x)
+            keys = split_heads(keys, 1)
+            return keys
+
         # Compute queries.
         queries = self.linear_queries(inputs)
+        queries = split_heads(queries, 1)
         queries *= self.num_units ** -0.5
 
         # Compute keys.
         if cache is not None:
             keys = tf.cond(
-                tf.equal(tf.shape(cache)[1], 0),
-                true_fn=lambda: self.linear_keys(memory),
+                tf.equal(tf.shape(cache)[2], 0),
+                true_fn=lambda: _compute_k(memory),
                 false_fn=lambda: cache,
             )
         else:
-            keys = self.linear_keys(memory)
+            keys = _compute_k(memory)
 
         cache = keys
 
@@ -137,6 +144,7 @@ class AlignmentHead(tf.keras.layers.Layer):
             mask = tf.cast(mask, tf.float32)
             if mask.shape.rank == 2:
                 mask = tf.expand_dims(mask, 1)  # Broadcast on time dimension.
+            mask = tf.expand_dims(mask, 1)  # Broadcast on head dimension.
             dot = tf.cast(
                 tf.cast(dot, tf.float32) * mask + ((1.0 - mask) * tf.float32.min),
                 dot.dtype,
@@ -169,12 +177,12 @@ class SILSelfAttentionDecoderLayer(tf.keras.layers.Layer):
         )
         self.self_attention = TransformerLayerWrapper(self.self_attention, dropout)
         self.attention = []
-        for i in range(num_sources):
+        for _ in range(num_sources):
             attention = MultiHeadAttention(
                 num_heads,
                 num_units,
                 dropout=attention_dropout,
-                return_attention=alignment_head_num_units is None and i == 0,
+                return_attention=alignment_head_num_units is None,
             )
             attention = TransformerLayerWrapper(attention, dropout)
             self.attention.append(attention)
@@ -185,6 +193,7 @@ class SILSelfAttentionDecoderLayer(tf.keras.layers.Layer):
             self.alignment_head = LayerWrapper(self.alignment_head, normalize_input=True)
         self.ffn = FeedForwardNetwork(ffn_inner_dim, num_units, dropout=ffn_dropout, activation=ffn_activation)
         self.ffn = TransformerLayerWrapper(self.ffn, dropout)
+        self._mixed_precision = mixed_precision_enabled()
 
     def call(
         self,
@@ -201,7 +210,7 @@ class SILSelfAttentionDecoderLayer(tf.keras.layers.Layer):
 
         outputs, self_kv = self.self_attention(inputs, mask=mask, cache=cache.get("self_kv"), training=training)
 
-        attention = None
+        attention = []
         memory_kv = []
         alignment_memory_k = None
         if memory is not None:
@@ -217,16 +226,17 @@ class SILSelfAttentionDecoderLayer(tf.keras.layers.Layer):
                     training=training,
                 )
                 if len(result) == 3:
-                    outputs, memory_kv_i, attention = result
-                    attention = attention[:, 0]  # Use the first head for the attention vector.
+                    outputs, memory_kv_i, attention_i = result
+                    attention.append(attention_i)
                 else:
                     outputs, memory_kv_i = result
                 memory_kv.append(memory_kv_i)
 
             if self.alignment_head is not None:
-                attention, alignment_memory_k = self.alignment_head(
+                attention_0, alignment_memory_k = self.alignment_head(
                     outputs, memory=memory[0], mask=memory_mask[0], cache=cache.get("alignment_memory_k")
                 )
+                attention.append(attention_0)
 
         outputs = self.ffn(outputs, training=training)
         cache = dict(self_kv=self_kv, memory_kv=memory_kv)
@@ -249,6 +259,7 @@ class SILSelfAttentionDecoder(SelfAttentionDecoder):
         position_encoder_class=SinusoidalPositionEncoder,
         num_sources=1,
         maximum_relative_position=None,
+        attention_reduction=MultiHeadAttentionReduction.FIRST_HEAD_LAST_LAYER,
         alignment_head_num_units=None,
         **kwargs,
     ):
@@ -256,6 +267,7 @@ class SILSelfAttentionDecoder(SelfAttentionDecoder):
         self.num_units = num_units
         self.num_heads = num_heads
         self.dropout = dropout
+        self.attention_reduction = attention_reduction
         self.position_encoder = None
         if position_encoder_class is not None:
             self.position_encoder = position_encoder_class()
@@ -317,9 +329,9 @@ class SILSelfAttentionDecoder(SelfAttentionDecoder):
 
         # Run each layer.
         new_cache = []
-        layer_attention = []
+        attention = []
         for i, layer in enumerate(self.layers):
-            inputs, layer_cache, attn = layer(
+            inputs, layer_cache, layer_attention = layer(
                 inputs,
                 mask=mask,
                 memory=memory,
@@ -327,11 +339,20 @@ class SILSelfAttentionDecoder(SelfAttentionDecoder):
                 cache=cache[i] if cache is not None else None,
                 training=training,
             )
+            attention.append(layer_attention)
             new_cache.append(layer_cache)
-            layer_attention.append(attn)
         outputs = self.layer_norm(inputs)
-        attention = tf.stack(layer_attention, axis=-1)
-        attention = tf.math.reduce_mean(attention, axis=-1)
+
+        # Convert list of shape num_layers x num_sources to num_sources x num_layers
+        attention = list(map(list, zip(*attention)))
+        if attention:
+            attention = MultiHeadAttentionReduction.reduce(
+                attention[0],  # Get attention to the first source.
+                self.attention_reduction,
+            )
+        else:
+            attention = None
+
         return outputs, new_cache, attention
 
     def dynamic_decode(
@@ -373,7 +394,7 @@ class SILSelfAttentionDecoder(SelfAttentionDecoder):
         if self.alignment_head_num_units is not None:
             for layer_cache in cache:
                 layer_cache["alignment_memory_k"] = tf.zeros(
-                    [batch_size, 0, self.alignment_head_num_units], dtype=dtype
+                    [batch_size, 1, 0, self.alignment_head_num_units], dtype=dtype
                 )
         return cache
 
@@ -402,6 +423,7 @@ class SILTransformer(Transformer):
         share_embeddings=EmbeddingsSharingLevel.NONE,
         share_encoders=False,
         maximum_relative_position=None,
+        attention_reduction=MultiHeadAttentionReduction.FIRST_HEAD_LAST_LAYER,
         drop_encoder_self_attention_residual_connections=set(),
         alignment_head_num_units=None,
     ):
@@ -445,6 +467,7 @@ class SILTransformer(Transformer):
             position_encoder_class=position_encoder_class,
             num_sources=source_inputter.num_outputs,
             maximum_relative_position=maximum_relative_position,
+            attention_reduction=attention_reduction,
             alignment_head_num_units=alignment_head_num_units,
         )
 
@@ -472,8 +495,8 @@ class SILTransformer(Transformer):
 
     def initialize(self, data_config, params=None):
         super().initialize(data_config, params=params)
-        src_dict_path: Optional[str] = data_config.get("src_dictionary")
-        trg_dict_path: Optional[str] = data_config.get("trg_dictionary")
+        src_dict_path: Optional[str] = data_config.get("source_dictionary")
+        trg_dict_path: Optional[str] = data_config.get("target_dictionary")
         if src_dict_path is not None and trg_dict_path is not None:
             self.labels_inputter.set_decoder_mode(enable=False, mark_start=False, mark_end=False)
             dictionary = Trie(self.features_inputter.vocabulary_size)
@@ -719,6 +742,7 @@ class SILTransformerBaseAlignmentEnhanced(SILTransformer):
             num_units=512,
             num_heads=8,
             ffn_inner_dim=2048,
+            attention_reduction=MultiHeadAttentionReduction.AVERAGE_ALL_LAYERS,
             alignment_head_num_units=64,
         )
 

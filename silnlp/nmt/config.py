@@ -2,6 +2,7 @@ import argparse
 import logging
 import os
 import shutil
+import tempfile
 from abc import ABC, abstractmethod
 from enum import Enum, Flag, auto
 from pathlib import Path
@@ -16,6 +17,7 @@ from opennmt import END_OF_SENTENCE_TOKEN, PADDING_TOKEN, START_OF_SENTENCE_TOKE
 from opennmt.data import Noise, Vocab, WordDropout, WordNoiser, tokens_to_words
 from opennmt.models import Model, get_model_from_catalog
 
+from ..alignment.machine_aligner import FastAlignMachineAligner
 from ..common.corpus import load_corpus
 from ..common.utils import get_git_revision_hash, get_mt_exp_dir, merge_dict, set_seed
 from .runner import SILRunner
@@ -170,6 +172,7 @@ class Config(ABC):
                     "parent_use_vocab": False,
                     "seed": 111,
                     "tokenize": True,
+                    "guided_alignment": False,
                 },
                 "train": {
                     "average_last_checkpoints": 0,
@@ -193,6 +196,8 @@ class Config(ABC):
                     "transformer_attention_dropout": 0.1,
                     "transformer_ffn_dropout": 0.1,
                     "word_dropout": 0,
+                    "guided_alignment_type": "mse",
+                    "guided_alignment_weight": 0.3,
                 },
             },
             config,
@@ -226,6 +231,13 @@ class Config(ABC):
                     data_config["src_casing"] = "lower"
                 if "trg_casing" not in data_config:
                     data_config["trg_casing"] = "lower"
+
+        model: str = config["model"]
+        if model.endswith("AlignmentEnhanced"):
+            data_config["guided_alignment"] = True
+
+        if data_config["guided_alignment"]:
+            data_config["train_alignments"] = str(exp_dir / "train.alignments.txt")
 
         self.exp_dir = exp_dir
         self.root = config
@@ -295,6 +307,10 @@ class Config(ABC):
         self._build_vocabs()
         src_spp, trg_spp = self.create_sp_processors()
         self._build_corpora(src_spp, trg_spp, stats)
+        if self.data["guided_alignment"]:
+            print("Generating train alignments...")
+            self._create_train_alignments()
+        print("Preprocessing completed")
 
     def create_sp_processors(self) -> Tuple[Optional[sp.SentencePieceProcessor], Optional[sp.SentencePieceProcessor]]:
         if not self.data["tokenize"]:
@@ -466,6 +482,13 @@ class Config(ABC):
         casing: str = self.data.get(f"{prefix}_casing", self.data.get("casing"))
         character_coverage: float = self.data.get(f"{prefix}_character_coverage", self.data.get("character_coverage"))
         build_vocab(vocab_file_paths, vocab_size, casing, character_coverage, model_prefix, vocab_path, tag_langs)
+
+    def _create_train_alignments(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            temp_dir = Path(td)
+            aligner = FastAlignMachineAligner(temp_dir)
+            aligner.train(self.exp_dir / "train.src.txt", self.exp_dir / "train.trg.txt")
+            aligner.align(self.exp_dir / "train.alignments.txt")
 
 
 def set_transformer_dropout(

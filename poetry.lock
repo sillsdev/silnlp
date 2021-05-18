@@ -561,7 +561,7 @@ signedtoken = ["cryptography", "pyjwt (>=1.0.0)"]
 
 [[package]]
 name = "opennmt-tf"
-version = "2.17.1"
+version = "2.18.1"
 description = "Neural machine translation and sequence learning using TensorFlow"
 category = "main"
 optional = false
@@ -1545,8 +1545,8 @@ oauthlib = [
     {file = "oauthlib-3.1.0.tar.gz", hash = "sha256:bee41cc35fcca6e988463cacc3bcb8a96224f470ca547e697b604cc697b2f889"},
 ]
 opennmt-tf = [
-    {file = "OpenNMT-tf-2.17.1.tar.gz", hash = "sha256:ce8212c974b06914c5f4a433289b70f14b8627b8810b9296ae7e2809067bf81b"},
-    {file = "OpenNMT_tf-2.17.1-py3-none-any.whl", hash = "sha256:7be460b1d969f242ca819473b3ab85f12cba023f20c9731c8043cdd4589e5526"},
+    {file = "OpenNMT-tf-2.18.1.tar.gz", hash = "sha256:53c0db58774745964b7dbd7f7f243b57e920d7bfbbfba53a9ef6218e80f5895e"},
+    {file = "OpenNMT_tf-2.18.1-py3-none-any.whl", hash = "sha256:4e949d1aad4d2e5dda6176cceb07636cd375802bd5743b488a055d155538d219"},
 ]
 opt-einsum = [
     {file = "opt_einsum-3.3.0-py3-none-any.whl", hash = "sha256:2455e59e3947d3c275477df7f5205b30635e266fe6dc300e3d9f9646bfcea147"},
