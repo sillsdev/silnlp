@@ -202,7 +202,7 @@ class NMTModel(lit_model.Model):
 
         if self.checkpoint is None:
             self.checkpoint = Checkpoint.from_config(self.config, self.model)
-            self.checkpoint.restore(checkpoint_path=self.checkpoint_path, weights_only=True)
+            self.checkpoint.restore(checkpoint_path=str(self.checkpoint_path), weights_only=True)
 
         predictions: Iterator[lit_types.JsonDict] = iter(self._analyze(inputs_list))
         if scrub_arrays:

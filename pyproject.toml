@@ -33,13 +33,14 @@ seaborn = "^0.10.1"
 morfessor = "^2.0.6"
 Morfessor-FlatCat = "^1.0.8"
 psutil = "^5.7.3"
-scikit-learn = "^0.23.2"
-numpy = "1.19.3"
+scikit-learn = "0.22.2.post1"
+numpy = "1.19.5"
 OpenNMT-tf = "^2.16.0"
 annoy = "^1.17.0"
-lit-nlp = {url = "https://github.com/ddaspit/lit/releases/download/v0.2/lit_nlp-0.2-py3-none-any.whl"}
-tensorflow = "^2.4.1"
+lit-nlp = "^0.3"
+tensorflow = "2.4.1"
 google-cloud-translate = "^3.0.2"
+scipy = "1.4.1"
 
 [tool.poetry.dev-dependencies]
 mypy = "^0.812"
