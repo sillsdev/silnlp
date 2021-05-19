@@ -69,9 +69,15 @@ def main() -> None:
     parser.add_argument("--mixed-precision", default=False, action="store_true", help="Enable mixed precision")
     parser.add_argument("--memory-growth", default=False, action="store_true", help="Enable memory growth")
     parser.add_argument("--num-devices", type=int, default=1, help="Number of devices to train on")
+    parser.add_argument("--clearml", default=False, action="store_true", help="Record experiment in ClearML")
     args = parser.parse_args()
 
-    exp = SILExperiment(
+    if args.clearml:
+        ExpClass = SILExperimentCML
+    else:
+        ExpClass = SILExperiment
+
+    exp = ExpClass(
         name=args.experiment,
         make_stats=args.stats,
         mixed_precision=args.mixed_precision,
