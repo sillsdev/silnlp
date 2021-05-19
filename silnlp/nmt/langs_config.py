@@ -162,7 +162,7 @@ class LangsConfig(Config):
                     "val_size": 250,
                     "terms": {
                         "train": True,
-                        "guided_decoding": False,
+                        "dictionary": False,
                         "categories": "PN",
                         "include_glosses": True,
                     },
@@ -174,7 +174,7 @@ class LangsConfig(Config):
         data_config: dict = config["data"]
         if "test_size" not in data_config:
             data_config["test_size"] = 0 if "test_books" in data_config else 250
-        if data_config["terms"]["guided_decoding"]:
+        if data_config["terms"]["dictionary"]:
             data_config["source_dictionary"] = str(exp_dir / "dict.src.txt")
             data_config["target_dictionary"] = str(exp_dir / "dict.trg.txt")
 
@@ -357,7 +357,7 @@ class LangsConfig(Config):
                 stats_file.close()
 
         terms_config = self.data["terms"]
-        if terms_config["train"] or terms_config["guided_decoding"]:
+        if terms_config["train"] or terms_config["dictionary"]:
             term_cats: Optional[Union[str, List[str]]] = terms_config["categories"]
             if isinstance(term_cats, str):
                 term_cats = [cat.strip() for cat in term_cats.split(",")]
@@ -584,7 +584,7 @@ class LangsConfig(Config):
                 train_trg_file = open(self.exp_dir / "train.trg.txt", "a", encoding="utf-8", newline="\n")
                 train_vref_file = open(self.exp_dir / "train.vref.txt", "a", encoding="utf-8", newline="\n")
 
-            if terms_config["guided_decoding"]:
+            if terms_config["dictionary"]:
                 dict_src_file = open(self.exp_dir / "dict.src.txt", "w", encoding="utf-8", newline="\n")
                 dict_trg_file = open(self.exp_dir / "dict.trg.txt", "w", encoding="utf-8", newline="\n")
 

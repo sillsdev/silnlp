@@ -43,10 +43,11 @@ def clip_attention_probs(attention: tf.Tensor, mask: tf.Tensor) -> tf.Tensor:
 
 
 class SILTransformerLayerWrapper(TransformerLayerWrapper):
-    def __init__(self, layer, output_dropout, residual_connection=True, **kwargs):
+    def __init__(self, layer, output_dropout, pre_norm=True, residual_connection=True, **kwargs):
         super(TransformerLayerWrapper, self).__init__(
             layer,
-            normalize_input=True,
+            normalize_input=pre_norm,
+            normalize_output=not pre_norm,
             output_dropout=output_dropout,
             residual_connection=residual_connection,
             **kwargs,
@@ -64,6 +65,7 @@ class SILSelfAttentionEncoderLayer(SelfAttentionEncoderLayer):
         ffn_dropout=0.1,
         ffn_activation=tf.nn.relu,
         maximum_relative_position=None,
+        pre_norm=True,
         self_attention_residual_connection=True,
         **kwargs,
     ):
@@ -75,10 +77,10 @@ class SILSelfAttentionEncoderLayer(SelfAttentionEncoderLayer):
             maximum_relative_position=maximum_relative_position,
         )
         self.self_attention = SILTransformerLayerWrapper(
-            self.self_attention, dropout, residual_connection=self_attention_residual_connection
+            self.self_attention, dropout, pre_norm=pre_norm, residual_connection=self_attention_residual_connection
         )
         self.ffn = FeedForwardNetwork(ffn_inner_dim, num_units, dropout=ffn_dropout, activation=ffn_activation)
-        self.ffn = SILTransformerLayerWrapper(self.ffn, dropout)
+        self.ffn = SILTransformerLayerWrapper(self.ffn, dropout, pre_norm=pre_norm)
 
 
 class SILSelfAttentionEncoder(SelfAttentionEncoder):
@@ -94,6 +96,7 @@ class SILSelfAttentionEncoder(SelfAttentionEncoder):
         ffn_activation=tf.nn.relu,
         position_encoder_class=SinusoidalPositionEncoder,
         maximum_relative_position=None,
+        pre_norm=True,
         drop_self_attention_residual_connections=set(),
         **kwargs,
     ):
@@ -103,7 +106,7 @@ class SILSelfAttentionEncoder(SelfAttentionEncoder):
         self.position_encoder = None
         if position_encoder_class is not None:
             self.position_encoder = position_encoder_class()
-        self.layer_norm = LayerNorm()
+        self.layer_norm = LayerNorm() if pre_norm else None
         self.layers = [
             SILSelfAttentionEncoderLayer(
                 num_units,
@@ -114,6 +117,7 @@ class SILSelfAttentionEncoder(SelfAttentionEncoder):
                 ffn_dropout=ffn_dropout,
                 ffn_activation=ffn_activation,
                 maximum_relative_position=maximum_relative_position,
+                pre_norm=pre_norm,
                 self_attention_residual_connection=i not in drop_self_attention_residual_connections,
             )
             for i in range(num_layers)
@@ -177,6 +181,7 @@ class SILSelfAttentionDecoderLayer(tf.keras.layers.Layer):
         ffn_dropout=0.1,
         ffn_activation=tf.nn.relu,
         maximum_relative_position=None,
+        pre_norm=True,
         alignment_head_num_units=None,
         **kwargs,
     ):
@@ -187,7 +192,7 @@ class SILSelfAttentionDecoderLayer(tf.keras.layers.Layer):
             dropout=attention_dropout,
             maximum_relative_position=maximum_relative_position,
         )
-        self.self_attention = TransformerLayerWrapper(self.self_attention, dropout)
+        self.self_attention = TransformerLayerWrapper(self.self_attention, dropout, pre_norm=pre_norm)
         self.attention = []
         for _ in range(num_sources):
             attention = MultiHeadAttention(
@@ -196,15 +201,17 @@ class SILSelfAttentionDecoderLayer(tf.keras.layers.Layer):
                 dropout=attention_dropout,
                 return_attention=alignment_head_num_units is None,
             )
-            attention = TransformerLayerWrapper(attention, dropout)
+            attention = TransformerLayerWrapper(attention, dropout, pre_norm=pre_norm)
             self.attention.append(attention)
         if alignment_head_num_units is None:
             self.alignment_head = None
         else:
             self.alignment_head = AlignmentHead(alignment_head_num_units)
-            self.alignment_head = LayerWrapper(self.alignment_head, normalize_input=True)
+            self.alignment_head = SILTransformerLayerWrapper(
+                self.alignment_head, 0, pre_norm=pre_norm, residual_connection=False
+            )
         self.ffn = FeedForwardNetwork(ffn_inner_dim, num_units, dropout=ffn_dropout, activation=ffn_activation)
-        self.ffn = TransformerLayerWrapper(self.ffn, dropout)
+        self.ffn = TransformerLayerWrapper(self.ffn, dropout, pre_norm=pre_norm)
 
     def call(
         self,
@@ -273,6 +280,7 @@ class SILSelfAttentionDecoder(SelfAttentionDecoder):
         num_sources=1,
         maximum_relative_position=None,
         attention_reduction=MultiHeadAttentionReduction.FIRST_HEAD_LAST_LAYER,
+        pre_norm=True,
         alignment_head_num_units=None,
         **kwargs,
     ):
@@ -285,7 +293,7 @@ class SILSelfAttentionDecoder(SelfAttentionDecoder):
         if position_encoder_class is not None:
             self.position_encoder = position_encoder_class()
         self.alignment_head_num_units = alignment_head_num_units
-        self.layer_norm = LayerNorm()
+        self.layer_norm = LayerNorm() if pre_norm else None
         self.layers = [
             SILSelfAttentionDecoderLayer(
                 self.num_units,
@@ -297,9 +305,10 @@ class SILSelfAttentionDecoder(SelfAttentionDecoder):
                 ffn_dropout=ffn_dropout,
                 ffn_activation=ffn_activation,
                 maximum_relative_position=maximum_relative_position,
+                pre_norm=pre_norm,
                 alignment_head_num_units=alignment_head_num_units,
             )
-            for i in range(num_layers)
+            for _ in range(num_layers)
         ]
 
     def _run(
@@ -354,7 +363,7 @@ class SILSelfAttentionDecoder(SelfAttentionDecoder):
             )
             attention.append(layer_attention)
             new_cache.append(layer_cache)
-        outputs = self.layer_norm(inputs)
+        outputs = self.layer_norm(inputs) if self.layer_norm is not None else inputs
 
         # Convert list of shape num_layers x num_sources to num_sources x num_layers
         attention = list(map(list, zip(*attention)))
@@ -437,6 +446,7 @@ class SILTransformer(Transformer):
         share_encoders=False,
         maximum_relative_position=None,
         attention_reduction=MultiHeadAttentionReduction.FIRST_HEAD_LAST_LAYER,
+        pre_norm=True,
         drop_encoder_self_attention_residual_connections=set(),
         alignment_head_num_units=None,
     ):
@@ -456,6 +466,7 @@ class SILTransformer(Transformer):
                 ffn_activation=ffn_activation,
                 position_encoder_class=position_encoder_class,
                 maximum_relative_position=maximum_relative_position,
+                pre_norm=pre_norm,
                 drop_self_attention_residual_connections=drop_encoder_self_attention_residual_connections,
             )
             for _ in range(source_inputter.num_outputs)
@@ -481,6 +492,7 @@ class SILTransformer(Transformer):
             num_sources=source_inputter.num_outputs,
             maximum_relative_position=maximum_relative_position,
             attention_reduction=attention_reduction,
+            pre_norm=pre_norm,
             alignment_head_num_units=alignment_head_num_units,
         )
 
