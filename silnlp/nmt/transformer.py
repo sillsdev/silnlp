@@ -29,6 +29,18 @@ from opennmt.utils.misc import shape_list
 from .decoding import DictionaryGuidedBeamSearch, dynamic_decode
 from .trie import Trie
 
+EPSILON: float = 1e-07
+
+
+def clip_attention_probs(attention: tf.Tensor, mask: tf.Tensor) -> tf.Tensor:
+    attention = tf.clip_by_value(attention, EPSILON, 1.0 - EPSILON)
+    mask = tf.cast(mask, attention.dtype)
+    if mask.shape.rank == 2:
+        mask = tf.expand_dims(mask, 1)  # Broadcast on time dimension.
+    mask = tf.expand_dims(mask, 1)  # Broadcast on head dimension.
+    attention = tf.multiply(attention, mask)
+    return attention
+
 
 class SILTransformerLayerWrapper(TransformerLayerWrapper):
     def __init__(self, layer, output_dropout, residual_connection=True, **kwargs):
@@ -193,7 +205,6 @@ class SILSelfAttentionDecoderLayer(tf.keras.layers.Layer):
             self.alignment_head = LayerWrapper(self.alignment_head, normalize_input=True)
         self.ffn = FeedForwardNetwork(ffn_inner_dim, num_units, dropout=ffn_dropout, activation=ffn_activation)
         self.ffn = TransformerLayerWrapper(self.ffn, dropout)
-        self._mixed_precision = mixed_precision_enabled()
 
     def call(
         self,
@@ -236,6 +247,8 @@ class SILSelfAttentionDecoderLayer(tf.keras.layers.Layer):
                 attention_0, alignment_memory_k = self.alignment_head(
                     outputs, memory=memory[0], mask=memory_mask[0], cache=cache.get("alignment_memory_k")
                 )
+                # clip the probs to ensure that model does not diverge with loss = NaN
+                attention_0 = clip_attention_probs(attention_0, memory_mask[0])
                 attention.append(attention_0)
 
         outputs = self.ffn(outputs, training=training)
