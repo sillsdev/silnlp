@@ -145,10 +145,11 @@ class DictionaryGuidedBeamSearch(BeamSearch):
         if tf.shape(indices)[0] > 0:
             num_updates = tf.shape(indices)[0]
             vocab_size = tf.shape(log_probs)[1]
+            log_probs_preserve = tf.gather_nd(log_probs, indices)
             log_probs = tf.tensor_scatter_nd_update(
                 log_probs, indices[:, :1], tf.fill((num_updates, vocab_size), -float("inf"))
             )
-            log_probs = tf.tensor_scatter_nd_update(log_probs, indices, tf.zeros(num_updates))
+            log_probs = tf.tensor_scatter_nd_update(log_probs, indices, log_probs_preserve)
         return log_probs, step_trg_entries, step_trg_entry_indices
 
     @tf.autograph.experimental.do_not_convert
