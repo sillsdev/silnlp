@@ -237,6 +237,8 @@ class Config(ABC):
             data_config["guided_alignment"] = True
 
         if data_config["guided_alignment"]:
+            if config["params"]["word_dropout"] > 0:
+                raise RuntimeError("Guided alignment will not work with word dropout enabled.")
             data_config["train_alignments"] = str(exp_dir / "train.alignments.txt")
 
         self.exp_dir = exp_dir

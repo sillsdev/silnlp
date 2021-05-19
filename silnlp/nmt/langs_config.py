@@ -175,8 +175,6 @@ class LangsConfig(Config):
         if "test_size" not in data_config:
             data_config["test_size"] = 0 if "test_books" in data_config else 250
         if data_config["terms"]["guided_decoding"]:
-            if config["params"]["word_dropout"] > 0:
-                raise RuntimeError("Dictionary-guided decoding will not work with word dropout enabled.")
             data_config["source_dictionary"] = str(exp_dir / "dict.src.txt")
             data_config["target_dictionary"] = str(exp_dir / "dict.trg.txt")
 
