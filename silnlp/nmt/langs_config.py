@@ -160,15 +160,23 @@ class LangsConfig(Config):
                     "disjoint_val": False,
                     "score_threshold": 0,
                     "val_size": 250,
-                    "term_cats": "PN",
-                    "include_term_glosses": True,
+                    "terms": {
+                        "train": True,
+                        "dictionary": False,
+                        "categories": "PN",
+                        "include_glosses": True,
+                    },
                 }
             },
             config,
         )
+
         data_config: dict = config["data"]
         if "test_size" not in data_config:
             data_config["test_size"] = 0 if "test_books" in data_config else 250
+        if data_config["terms"]["dictionary"]:
+            data_config["source_dictionary"] = str(exp_dir / "dict.src.txt")
+            data_config["target_dictionary"] = str(exp_dir / "dict.trg.txt")
 
         self.src_files = parse_langs(data_config["src_langs"])
         self.trg_files = parse_langs(data_config["trg_langs"])
@@ -180,7 +188,7 @@ class LangsConfig(Config):
         self.trg_terms_files, src_glosses_file_paths = get_terms_files(self.trg_files, src_isos)
         src_file_paths: Set[Path] = set(df.path for df in itertools.chain(self.src_files, self.src_terms_files))
         trg_file_paths: Set[Path] = set(df.path for df in itertools.chain(self.trg_files, self.trg_terms_files))
-        if data_config["include_term_glosses"]:
+        if data_config["terms"]["include_glosses"]:
             if "en" in src_isos:
                 src_file_paths.update(src_glosses_file_paths)
             if "en" in trg_isos:
@@ -348,34 +356,36 @@ class LangsConfig(Config):
             if stats_file is not None:
                 stats_file.close()
 
-        term_cats: Optional[Union[str, List[str]]] = self.data["term_cats"]
-        if isinstance(term_cats, str):
-            term_cats = [cat.strip() for cat in term_cats.split(",")]
-        if term_cats is None or len(term_cats) > 0:
-            term_cats_set: Optional[Set[str]] = None if term_cats is None else set(term_cats)
-            all_src_terms = [
-                (src_terms_file, get_terms(src_terms_file.path)) for src_terms_file in self.src_terms_files
-            ]
-            all_trg_terms = [
-                (trg_terms_file, get_terms(trg_terms_file.path)) for trg_terms_file in self.trg_terms_files
-            ]
-            for src_terms_file, src_terms in all_src_terms:
-                for trg_terms_file, trg_terms in all_trg_terms:
-                    if src_terms_file.iso == trg_terms_file.iso:
-                        continue
-                    cur_terms = get_terms_corpus(src_terms, trg_terms, term_cats_set)
-                    terms = self._add_to_terms_dataset(src_terms_file.iso, trg_terms_file.iso, terms, cur_terms)
-            if self.data["include_term_glosses"]:
-                if "en" in self.trg_isos:
-                    for src_terms_file, src_terms in all_src_terms:
-                        cur_terms = get_terms_data_frame(src_terms, term_cats_set)
-                        cur_terms = cur_terms.rename(columns={"rendering": "source", "gloss": "target"})
-                        terms = self._add_to_terms_dataset(src_terms_file.iso, "en", terms, cur_terms)
-                if "en" in self.src_isos:
+        terms_config = self.data["terms"]
+        if terms_config["train"] or terms_config["dictionary"]:
+            term_cats: Optional[Union[str, List[str]]] = terms_config["categories"]
+            if isinstance(term_cats, str):
+                term_cats = [cat.strip() for cat in term_cats.split(",")]
+            if term_cats is None or len(term_cats) > 0:
+                term_cats_set: Optional[Set[str]] = None if term_cats is None else set(term_cats)
+                all_src_terms = [
+                    (src_terms_file, get_terms(src_terms_file.path)) for src_terms_file in self.src_terms_files
+                ]
+                all_trg_terms = [
+                    (trg_terms_file, get_terms(trg_terms_file.path)) for trg_terms_file in self.trg_terms_files
+                ]
+                for src_terms_file, src_terms in all_src_terms:
                     for trg_terms_file, trg_terms in all_trg_terms:
-                        cur_terms = get_terms_data_frame(trg_terms, term_cats_set)
-                        cur_terms = cur_terms.rename(columns={"rendering": "target", "gloss": "source"})
-                        terms = self._add_to_terms_dataset("en", trg_terms_file.iso, terms, cur_terms)
+                        if src_terms_file.iso == trg_terms_file.iso:
+                            continue
+                        cur_terms = get_terms_corpus(src_terms, trg_terms, term_cats_set)
+                        terms = self._add_to_terms_dataset(src_terms_file.iso, trg_terms_file.iso, terms, cur_terms)
+                if terms_config["include_glosses"]:
+                    if "en" in self.trg_isos:
+                        for src_terms_file, src_terms in all_src_terms:
+                            cur_terms = get_terms_data_frame(src_terms, term_cats_set)
+                            cur_terms = cur_terms.rename(columns={"rendering": "source", "gloss": "target"})
+                            terms = self._add_to_terms_dataset(src_terms_file.iso, "en", terms, cur_terms)
+                    if "en" in self.src_isos:
+                        for trg_terms_file, trg_terms in all_trg_terms:
+                            cur_terms = get_terms_data_frame(trg_terms, term_cats_set)
+                            cur_terms = cur_terms.rename(columns={"rendering": "target", "gloss": "source"})
+                            terms = self._add_to_terms_dataset("en", trg_terms_file.iso, terms, cur_terms)
 
         if train is None:
             return
@@ -392,12 +402,12 @@ class LangsConfig(Config):
             train["source"] = train[src_columns].apply(select_random_column, axis=1)
             train.drop(src_columns, axis=1, inplace=True, errors="ignore")
 
-        if terms is not None:
-            train = pd.concat([train, terms], ignore_index=True)
-
         write_corpus(self.exp_dir / "train.src.txt", encode_sp_lines(src_spp, train["source"]))
         write_corpus(self.exp_dir / "train.trg.txt", encode_sp_lines(trg_spp, train["target"]))
-        write_corpus(self.exp_dir / "train.vref.txt", map(lambda vr: str(vr), train["vref"]))
+        write_corpus(self.exp_dir / "train.vref.txt", (str(vr) for vr in train["vref"]))
+
+        if terms is not None:
+            self._write_terms(src_spp, trg_spp, terms)
 
         print("Writing validation data set...")
         if len(val) > 0:
@@ -429,7 +439,6 @@ class LangsConfig(Config):
                         self.exp_dir / f"{prefix}.trg.detok{trg_suffix}.txt",
                         decode_sp_lines(encode_sp_lines(trg_spp, pair_test[column])),
                     )
-        print("Preprocessing completed")
 
     def _add_to_train_dataset(
         self,
@@ -555,3 +564,61 @@ class LangsConfig(Config):
                 if vref.has_multiple:
                     vref = vref.simplify()
                 test_indices.add(vrefs[str(vref)])
+
+    def _write_terms(
+        self,
+        src_spp: Optional[sp.SentencePieceProcessor],
+        trg_spp: Optional[sp.SentencePieceProcessor],
+        terms: pd.DataFrame,
+    ) -> None:
+        train_src_file: Optional[IO] = None
+        train_trg_file: Optional[IO] = None
+        train_vref_file: Optional[IO] = None
+
+        dict_src_file: Optional[IO] = None
+        dict_trg_file: Optional[IO] = None
+        try:
+            terms_config = self.data["terms"]
+            if terms_config["train"]:
+                train_src_file = open(self.exp_dir / "train.src.txt", "a", encoding="utf-8", newline="\n")
+                train_trg_file = open(self.exp_dir / "train.trg.txt", "a", encoding="utf-8", newline="\n")
+                train_vref_file = open(self.exp_dir / "train.vref.txt", "a", encoding="utf-8", newline="\n")
+
+            if terms_config["dictionary"]:
+                dict_src_file = open(self.exp_dir / "dict.src.txt", "w", encoding="utf-8", newline="\n")
+                dict_trg_file = open(self.exp_dir / "dict.trg.txt", "w", encoding="utf-8", newline="\n")
+
+            for _, term in terms.iterrows():
+                src_term: str = term["source"]
+                trg_term: str = term["target"]
+                src_term_variants = [
+                    encode_sp(src_spp, src_term, add_dummy_prefix=True),
+                    encode_sp(src_spp, src_term, add_dummy_prefix=False),
+                ]
+                trg_term_variants = [
+                    encode_sp(trg_spp, trg_term, add_dummy_prefix=True),
+                    encode_sp(trg_spp, trg_term, add_dummy_prefix=False),
+                ]
+
+                if train_src_file is not None and train_trg_file is not None and train_vref_file is not None:
+                    for stv in src_term_variants:
+                        for ttv in trg_term_variants:
+                            train_src_file.write(stv + "\n")
+                            train_trg_file.write(ttv + "\n")
+                            train_vref_file.write("\n")
+
+                if dict_src_file is not None and dict_trg_file is not None:
+                    dict_src_file.write("\t".join(src_term_variants) + "\n")
+                    dict_trg_file.write("\t".join(trg_term_variants) + "\n")
+        finally:
+            if train_src_file is not None:
+                train_src_file.close()
+            if train_trg_file is not None:
+                train_trg_file.close()
+            if train_vref_file is not None:
+                train_vref_file.close()
+
+            if dict_src_file is not None:
+                dict_src_file.close()
+            if dict_trg_file is not None:
+                dict_trg_file.close()
