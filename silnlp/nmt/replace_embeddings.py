@@ -1,7 +1,6 @@
 import argparse
 import logging
 
-logging.basicConfig()
 
 from .config import create_runner, load_config
 

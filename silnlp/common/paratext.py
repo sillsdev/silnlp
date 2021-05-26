@@ -227,7 +227,7 @@ def extract_term_renderings(project_folder: str) -> None:
             terms_glosses_path = get_terms_glosses_path(list_name)
             if terms_glosses_path.is_file():
                 terms_glosses_path.unlink()
-    print(f"# of Terms written: {count}")
+    LOGGER.info(f"# of Terms written: {count}")
 
 
 def book_file_name_digits(book_num: int) -> str:

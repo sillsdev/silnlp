@@ -8,7 +8,6 @@ from enum import Enum, Flag, auto
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union, cast
 
-logging.basicConfig()
 
 import sentencepiece as sp
 import tensorflow as tf
@@ -582,15 +581,13 @@ def create_model(config: Config) -> Model:
     return model
 
 
-def set_log_level(log_level: int) -> None:
+def set_tf_log_level(log_level: int = logging.INFO) -> None:
     tf.get_logger().setLevel(log_level)
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = str(_PYTHON_TO_TENSORFLOW_LOGGING_LEVEL[log_level])
 
 
-def create_runner(
-    config: Config, mixed_precision: bool = False, log_level: int = logging.INFO, memory_growth: bool = False
-) -> SILRunner:
-    set_log_level(log_level)
+def create_runner(config: Config, mixed_precision: bool = False, memory_growth: bool = False) -> SILRunner:
+    set_tf_log_level()
 
     if memory_growth:
         gpus = tf.config.list_physical_devices(device_type="GPU")

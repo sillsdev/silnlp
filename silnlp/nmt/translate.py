@@ -4,7 +4,6 @@ import time
 from pathlib import Path
 from typing import Iterable, Optional
 
-logging.basicConfig()
 
 import tensorflow as tf
 

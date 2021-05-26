@@ -2,7 +2,6 @@ import argparse
 import logging
 from typing import Iterable, Optional
 
-logging.basicConfig()
 
 from google.cloud import translate_v2 as translate
 

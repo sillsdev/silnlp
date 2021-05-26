@@ -6,10 +6,13 @@
 
 
 import argparse
+import logging
 from typing import Set
 
 from ..common.environment import MT_SCRIPTURE_DIR, MT_TERMS_DIR, PT_PROJECTS_DIR
 from .paratext import extract_project, extract_term_renderings
+
+LOGGER = logging.getLogger(__package__ + ".extract_corpora")
 
 
 def main() -> None:
@@ -49,17 +52,17 @@ def main() -> None:
         MT_SCRIPTURE_DIR.mkdir(exist_ok=True, parents=True)
         MT_TERMS_DIR.mkdir(exist_ok=True, parents=True)
         for project in projects_found:
-            print(f"Extracting {project}...")
+            LOGGER.info(f"Extracting {project}...")
             extract_project(project, args.include, args.exclude, args.markers)
             extract_term_renderings(project)
-            print("Done.")
+            LOGGER.info("Done.")
     else:
-        print("Couldn't find any data to process for any project.")
+        LOGGER.warning("Couldn't find any data to process for any project.")
 
     # Tell the user which projects couldn't be found.
     for project in projects:
         if project not in projects_found:
-            print(f"Couldn't find project {project}")
+            LOGGER.warning(f"Couldn't find project {project}")
 
 
 if __name__ == "__main__":

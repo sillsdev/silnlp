@@ -4,7 +4,6 @@ import logging
 from pathlib import Path
 from typing import IO, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Text, Tuple
 
-logging.basicConfig()
 
 import numpy as np
 import sacrebleu
@@ -23,7 +22,7 @@ from opennmt.utils.misc import clone_layer, extract_batches, merge_dict
 from tensorflow.python.eager.def_function import Function
 
 from ..common.utils import get_git_revision_hash
-from .config import Config, create_model, load_config, set_log_level
+from .config import Config, create_model, load_config, set_tf_log_level
 from .runner import make_inference_dataset
 from .transformer import SILTransformer
 from .utils import decode_sp, encode_sp, get_best_model_dir, get_last_checkpoint
@@ -417,7 +416,7 @@ def main() -> None:
 
     print("Git commit:", get_git_revision_hash())
 
-    set_log_level(logging.INFO)
+    set_tf_log_level()
 
     if args.eager_execution:
         tf.config.run_functions_eagerly(True)

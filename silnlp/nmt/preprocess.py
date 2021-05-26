@@ -1,7 +1,6 @@
 import argparse
 import logging
 
-logging.basicConfig()
 
 from .config import get_git_revision_hash, load_config
 

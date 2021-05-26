@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 from typing import IO, Dict, Iterable, List, Optional, Set, Tuple, cast
 
-logging.basicConfig()
 
 import numpy as np
 import sacrebleu
