@@ -1,5 +1,6 @@
 import re
 import subprocess
+import logging
 from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -20,6 +21,7 @@ _TERMS_LISTS = {
 }
 
 parser_utf8 = etree.XMLParser(encoding="UTF-8")
+LOGGER = logging.getLogger(__name__)
 
 
 def get_project_dir(project: str) -> Path:
@@ -72,9 +74,19 @@ def extract_project(project: str, include_texts: str, exclude_texts: str, includ
         output_basename += "-m"
 
     args.append("-to")
-    args.append(str(MT_SCRIPTURE_DIR / f"{output_basename}.txt"))
+    output_filename = MT_SCRIPTURE_DIR / f"{output_basename}.txt"
+    args.append(str(output_filename))
 
     subprocess.run(args, cwd=get_repo_dir())
+
+    # check if the number of lines in the file is correct (the same as vref.txt - 31104 ending at REV 22:21)
+    number_of_lines_written = len(output_filename.open(encoding="utf-8").readlines())
+    if number_of_lines_written != 31104:
+        LOGGER.error(
+            "The number of terms written is "
+            + str(number_of_lines_written)
+            + " but should be 31104 (number of verses in the Bible)."
+        )
 
 
 def escape_id(id: str) -> str:
