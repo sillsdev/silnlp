@@ -2,7 +2,7 @@ import string
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Iterable, List, Optional, Union
-from xml.etree import ElementTree
+from lxml.etree import ElementTree
 
 from .. import sfm
 from ..sfm import usfm
