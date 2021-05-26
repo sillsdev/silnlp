@@ -414,7 +414,7 @@ def main() -> None:
     parser.add_argument("--avg", default=False, action="store_true", help="Analyze averaged checkpoint")
     args = parser.parse_args()
 
-    print("Git commit:", get_git_revision_hash())
+    get_git_revision_hash()
 
     set_tf_log_level()
 

@@ -38,7 +38,7 @@ def main() -> None:
     parser.add_argument("--model", type=str, help="The word alignment model")
     args = parser.parse_args()
 
-    print("Git commit:", get_git_revision_hash())
+    get_git_revision_hash()
 
     exp_dir = get_mt_exp_dir(args.experiment)
     config_path = exp_dir / "config.yml"

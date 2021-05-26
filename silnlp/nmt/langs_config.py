@@ -1,5 +1,6 @@
 import itertools
 import random
+import logging
 from pathlib import Path
 from statistics import mean
 from typing import IO, Any, Dict, Iterable, List, Optional, Set, Tuple, Union
@@ -29,6 +30,8 @@ from ..common.utils import get_mt_exp_dir, merge_dict
 from ..common.verse_ref import VerseRef
 from .config import Config, DataFileType
 from .utils import decode_sp_lines, encode_sp, encode_sp_lines
+
+LOGGER = logging.getLogger(__name__)
 
 
 def parse_data_file_path(data_file_path: Path) -> Tuple[str, str]:
@@ -210,7 +213,7 @@ class LangsConfig(Config):
     def _build_corpora(
         self, src_spp: Optional[sp.SentencePieceProcessor], trg_spp: Optional[sp.SentencePieceProcessor], stats: bool
     ) -> None:
-        print("Collecting data sets...")
+        LOGGER.info("Collecting data sets...")
         test_size: int = self.data["test_size"]
         val_size: int = self.data["val_size"]
         disjoint_test: bool = self.data["disjoint_test"]
@@ -304,11 +307,11 @@ class LangsConfig(Config):
                             filtered_alignment_score = mean(cur_train["score"]) if stats_file is not None else 0
 
                         if stats_file is not None:
-                            print(f"{src_file.project} -> {trg_file.project} stats")
-                            print(f"- count: {corpus_len}")
-                            print(f"- alignment: {alignment_score:.4f}")
-                            print(f"- filtered count: {filtered_count}")
-                            print(f"- alignment (filtered): {filtered_alignment_score:.4f}")
+                            LOGGER.info(f"{src_file.project} -> {trg_file.project} stats")
+                            LOGGER.info(f"- count: {corpus_len}")
+                            LOGGER.info(f"- alignment: {alignment_score:.4f}")
+                            LOGGER.info(f"- filtered count: {filtered_count}")
+                            LOGGER.info(f"- alignment (filtered): {filtered_alignment_score:.4f}")
                             stats_file.write(
                                 f"{src_file.project},{trg_file.project},{corpus_len},{alignment_score:.4f},"
                                 f"{filtered_count},{filtered_alignment_score:.4f}\n"
@@ -390,7 +393,7 @@ class LangsConfig(Config):
         if train is None:
             return
 
-        print("Writing train data set...")
+        LOGGER.info("Writing train data set...")
         if mixed_src:
             train.fillna("", inplace=True)
             src_columns: List[str] = list(filter(lambda c: c.startswith("source"), train.columns))
@@ -409,7 +412,7 @@ class LangsConfig(Config):
         if terms is not None:
             self._write_terms(src_spp, trg_spp, terms)
 
-        print("Writing validation data set...")
+        LOGGER.info("Writing validation data set...")
         if len(val) > 0:
             val_src = itertools.chain.from_iterable(map(lambda pair_val: pair_val["source"], val.values()))
             write_corpus(self.exp_dir / "val.src.txt", encode_sp_lines(src_spp, val_src))
@@ -417,7 +420,7 @@ class LangsConfig(Config):
             val_vref = itertools.chain.from_iterable(map(lambda pair_val: pair_val["vref"], val.values()))
             write_corpus(self.exp_dir / "val.vref.txt", map(lambda vr: str(vr), val_vref))
 
-        print("Writing test data set...")
+        LOGGER.info("Writing test data set...")
         for old_file_path in self.exp_dir.glob("test.*.txt"):
             old_file_path.unlink()
 

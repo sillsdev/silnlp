@@ -1,6 +1,7 @@
 import os
 import random
 import subprocess
+import logging
 from abc import ABC, abstractmethod
 from enum import Flag
 from pathlib import Path
@@ -10,6 +11,8 @@ import numpy as np
 
 from ..common.environment import MT_EXPERIMENTS_DIR
 
+LOGGER = logging.getLogger(__name__)
+
 
 def get_repo_dir() -> Path:
     script_path = Path(__file__)
@@ -18,9 +21,11 @@ def get_repo_dir() -> Path:
 
 def get_git_revision_hash() -> str:
     repo_dir = get_repo_dir()
-    return subprocess.check_output(
+    git_hash = subprocess.check_output(
         ["git", "-C", str(repo_dir), "rev-parse", "--short=10", "HEAD"], encoding="utf-8"
     ).strip()
+    LOGGER.info("Git commit: " + git_hash)
+    return git_hash
 
 
 def get_mt_exp_dir(exp_name: str) -> Path:

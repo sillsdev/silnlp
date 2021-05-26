@@ -55,7 +55,7 @@ def main() -> None:
     parser.add_argument("--stats", default=False, action="store_true", help="Output corpus statistics")
     args = parser.parse_args()
 
-    print("Git commit:", get_git_revision_hash())
+    get_git_revision_hash()
 
     exp_name: str = args.experiment
     exp_dir = get_mt_exp_dir(exp_name)
