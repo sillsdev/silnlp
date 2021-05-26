@@ -3,7 +3,6 @@ import logging
 import os
 from typing import Optional
 
-logging.basicConfig()
 
 import tensorflow as tf
 
