@@ -33,6 +33,8 @@ _PYTHON_TO_TENSORFLOW_LOGGING_LEVEL: Dict[int, int] = {
 }
 
 
+LOGGER = logging.getLogger(__package__ + ".config")
+
 _DEFAULT_NEW_CONFIG: dict = {
     "data": {
         "share_vocab": False,
@@ -313,9 +315,9 @@ class Config(ABC):
         src_spp, trg_spp = self.create_sp_processors()
         self._build_corpora(src_spp, trg_spp, stats)
         if self.data["guided_alignment"]:
-            print("Generating train alignments...")
+            LOGGER.info("Generating train alignments...")
             self._create_train_alignments()
-        print("Preprocessing completed")
+        LOGGER.info("Preprocessing completed")
 
     def create_sp_processors(self) -> Tuple[Optional[sp.SentencePieceProcessor], Optional[sp.SentencePieceProcessor]]:
         if not self.data["tokenize"]:
@@ -359,7 +361,7 @@ class Config(ABC):
                 tag_isos.add(tag)
 
         if self.share_vocab:
-            print("Building shared vocabulary...")
+            LOGGER.info("Building shared vocabulary...")
             vocab_size: Optional[int] = self.data.get("vocab_size")
             if vocab_size is None:
                 vocab_size = self.data.get("src_vocab_size")
@@ -482,7 +484,7 @@ class Config(ABC):
                     with open(onmt_delta_vocab_path, "w", encoding="utf-8") as f:
                         [f.write(f"{token}\n") for token in vocab_delta]
 
-        print(f"Building {side} vocabulary...")
+        LOGGER.info(f"Building {side} vocabulary...")
         vocab_size: int = self.data.get(f"{prefix}_vocab_size", self.data.get("vocab_size"))
         casing: str = self.data.get(f"{prefix}_casing", self.data.get("casing"))
         character_coverage: float = self.data.get(f"{prefix}_character_coverage", self.data.get("character_coverage"))
@@ -633,12 +635,14 @@ def main() -> None:
     parser.add_argument("--model", type=str, help="The neural network model")
     args = parser.parse_args()
 
-    print("Git commit:", get_git_revision_hash())
+    get_git_revision_hash()
 
     exp_dir = get_mt_exp_dir(args.experiment)
     config_path = exp_dir / "config.yml"
     if config_path.is_file() and not args.force:
-        print('The experiment config file already exists. Use "--force" if you want to overwrite the existing config.')
+        LOGGER.warning(
+            'The experiment config file already exists. Use "--force" if you want to overwrite the existing config.'
+        )
         return
 
     exp_dir.mkdir(exist_ok=True, parents=True)
@@ -699,7 +703,7 @@ def main() -> None:
         data_config["mirror"] = True
     with open(config_path, "w", encoding="utf-8") as file:
         yaml.dump(config, file)
-    print("Config file created")
+    LOGGER.info("Config file created")
 
 
 if __name__ == "__main__":

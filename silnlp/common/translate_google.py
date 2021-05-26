@@ -37,7 +37,7 @@ def main() -> None:
     parser.add_argument("--trg-lang", default=None, type=str, help="ISO-639-1 code for target language (e.g., 'en')")
     args = parser.parse_args()
 
-    print("Git commit:", get_git_revision_hash())
+    get_git_revision_hash()
 
     root_dir = get_mt_exp_dir(args.experiment)
     src_project: str = args.src_project

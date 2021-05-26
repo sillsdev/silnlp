@@ -12,7 +12,7 @@ def main() -> None:
     parser.add_argument("experiments", nargs="+", help="Experiment names")
     args = parser.parse_args()
 
-    print("Git commit:", get_git_revision_hash())
+    get_git_revision_hash()
 
     for exp_name in args.experiments:
         print(f"=== Training ({exp_name}) ===")

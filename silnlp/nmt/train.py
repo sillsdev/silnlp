@@ -27,7 +27,6 @@ def main() -> None:
     args = parser.parse_args()
 
     rev_hash = get_git_revision_hash()
-    print("Git commit:", rev_hash)
 
     if args.eager_execution:
         tf.config.run_functions_eagerly(True)

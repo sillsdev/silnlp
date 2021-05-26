@@ -338,7 +338,6 @@ def main() -> None:
     args = parser.parse_args()
 
     rev_hash = get_git_revision_hash()
-    print("Git commit:", rev_hash)
 
     config = load_config(args.config)
     filter_config = config.get("filter")

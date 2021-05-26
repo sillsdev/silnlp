@@ -31,7 +31,7 @@ def main() -> None:
     parser.add_argument("--force-infer", default=False, action="store_true", help="Force inferencing")
     args = parser.parse_args()
 
-    print("Git commit:", get_git_revision_hash())
+    get_git_revision_hash()
 
     scorers: List[str] = []
     if args.scorers is None:

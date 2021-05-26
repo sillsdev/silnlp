@@ -506,7 +506,7 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    print("Git commit:", get_git_revision_hash())
+    get_git_revision_hash()
 
     exp_name = args.experiment
     config = load_config(exp_name)
