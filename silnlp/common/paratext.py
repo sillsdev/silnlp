@@ -3,7 +3,7 @@ import subprocess
 from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, List, Optional
-from xml.etree import ElementTree
+from lxml import etree
 from xml.sax.saxutils import escape
 
 from .canon import book_id_to_number
@@ -24,7 +24,7 @@ def get_project_dir(project: str) -> Path:
     return PT_PROJECTS_DIR / project
 
 
-def get_iso(settings_tree: ElementTree.ElementTree) -> str:
+def get_iso(settings_tree: etree.ElementTree) -> str:
     iso = settings_tree.getroot().findtext("LanguageIsoCode")
     assert iso is not None
     index = iso.index(":")
@@ -33,7 +33,7 @@ def get_iso(settings_tree: ElementTree.ElementTree) -> str:
 
 def extract_project(project: str, include_texts: str, exclude_texts: str, include_markers: bool) -> None:
     project_dir = get_project_dir(project)
-    settings_tree = ElementTree.parse(project_dir / "Settings.xml")
+    settings_tree = etree.parse(str(project_dir / "Settings.xml"))
     iso = get_iso(settings_tree)
 
     ref_dir = PT_PROJECTS_DIR / "Ref"
@@ -120,7 +120,7 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> None:
     with open(terms_metadata_path, "w", encoding="utf-8", newline="\n") as terms_metadata_file, open(
         terms_glosses_path, "w", encoding="utf-8", newline="\n"
     ) as terms_glosses_file:
-        terms_tree = ElementTree.parse(terms_xml_path)
+        terms_tree = etree.parse(str(terms_xml_path))
         for term_elem in terms_tree.getroot().findall("Term"):
             id = term_elem.get("Id")
             if id is None:
@@ -145,7 +145,7 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> None:
             terms_glosses_file.write("\t".join(OrderedDict.fromkeys(glosses)) + "\n")
 
 
-def extract_terms_list_from_renderings(project: str, renderings_tree: ElementTree.ElementTree) -> None:
+def extract_terms_list_from_renderings(project: str, renderings_tree: etree.ElementTree) -> None:
     terms_metadata_path = get_terms_metadata_path(project)
     with open(terms_metadata_path, "w", encoding="utf-8", newline="\n") as terms_metadata_file:
         for rendering_elem in renderings_tree.getroot().findall("TermRendering"):
@@ -165,8 +165,8 @@ def extract_term_renderings(project_folder: str) -> None:
     if not renderings_path.is_file():
         return
 
-    renderings_tree = ElementTree.parse(renderings_path)
-    rendering_elems: Dict[str, ElementTree.Element] = {}
+    renderings_tree = etree.parse(str(renderings_path))
+    rendering_elems: Dict[str, etree.Element] = {}
     for elem in renderings_tree.getroot().findall("TermRendering"):
         id = elem.get("Id")
         if id is None:
@@ -174,8 +174,7 @@ def extract_term_renderings(project_folder: str) -> None:
         id = escape_id(id)
         rendering_elems[id] = elem
 
-    settings_path = project_dir / "Settings.xml"
-    settings_tree = ElementTree.parse(settings_path)
+    settings_tree = etree.parse(str(project_dir / "Settings.xml"))
     iso = get_iso(settings_tree)
     project_name = settings_tree.getroot().findtext("Name", project_folder)
     terms_setting = settings_tree.getroot().findtext("BiblicalTermsListSetting", "Major::BiblicalTerms.xml")
@@ -233,7 +232,7 @@ def book_file_name_digits(book_num: int) -> str:
 
 def get_book_path(project: str, book: str) -> Path:
     project_dir = get_project_dir(project)
-    settings_tree = ElementTree.parse(project_dir / "Settings.xml")
+    settings_tree = etree.parse(str(project_dir / "Settings.xml"))
     naming_elem = settings_tree.find("Naming")
     assert naming_elem is not None
 
