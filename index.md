@@ -7,7 +7,6 @@ SIL NLP provides a set of pipelines for performing experiments on various NLP ta
 - Neural Machine Translation
 - Statistical Machine Translation
 - Word Alignment
----
 
 ## SILNLP Prerequisites
 These are the main requirements for the SILNLP code to run on a local machine. Using PyCharm is another way to configure the environment and instructions for that method are included later.
@@ -38,7 +37,7 @@ __Download and install__ the following before creating any projects or starting 
 ```
 4. [.NET Core SDK](https://dotnet.microsoft.com/download)
 5. SIL.Machine.Tool
----
+
 #### SIL.Machine.Tool
 
 Many of the scripts in this repo require [SIL.Machine.Tool](https://github.com/sillsdev/machine). SIL.Machine.Tool is a dotnet program and it requires the __.NET core sdk__.
