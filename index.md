@@ -1,3 +1,12 @@
+---
+title: "Getting started with SILNLP"
+keywords: homepage
+tags: [getting_started]
+last_updated: June 1, 2021
+sidebar: home_sidebar
+permalink: index.html
+summary: SIL NLP provides a set of pipelines for performing experiments on various NLP tasks with a focus on resource-poor and minority languages.
+---
 # SIL NLP
 
 SIL NLP provides a set of pipelines for performing experiments on various NLP tasks with a focus on resource-poor and minority languages.
@@ -7,25 +16,26 @@ SIL NLP provides a set of pipelines for performing experiments on various NLP ta
 - Neural Machine Translation
 - Statistical Machine Translation
 - Word Alignment
+---
 
 ## SILNLP Prerequisites
 These are the main requirements for the SILNLP code to run on a local machine. Using PyCharm is another way to configure the environment and instructions for that method are included later.
 The SILNLP repo itself is hosted on Github, mainly written in Python and calls SIL.Machine.Tool. 'Machine' as we tend to call it, is a .NET application that has many functions for manipulating USFM data. Most of the language data we have for low resource languages in USFM format. Since Machine is a .Net application it depends upon the __.NET core SDK__ which works on Windows and Linux. Since there are many python packages that need to be used, with complex versioning requirements we use a Python package called Poetry to mangage all of those. So here is a rough heirarchy of SILNLP with the major dependencies.
 
-|Requirement          | Reason                                                          |
-|---------------------|-----------------------------------------------------------------|
-|GIT                  |to get the repo from [github](https://github.com/sillsdev/silnlp)|
-|Python               |to run the silnlp code                                           |
-|Poetry               |to manage all the Python packages and versions                   |
-|SIL.Machine.Tool     |to support many functions for data manipulation                  |
-|.Net core SDK        |Required by SIL.Machine.Tool                                     |
-|NVIDIA GPU           |Required to run on a local machine                               |
-|Nvidia drivers       |Required for the GPU                                             |
-|CUDA Toolkit         |Required for the Machine learning with the GPU                   |
-|Environment variables|To tell SILNLP where to find the data, etc.                      |
+| Requirement           | Reason                                                            |
+| --------------------- | ----------------------------------------------------------------- |
+| GIT                   | to get the repo from [github](https://github.com/sillsdev/silnlp) |
+| Python                | to run the silnlp code                                            |
+| Poetry                | to manage all the Python packages and versions                    |
+| SIL.Machine.Tool      | to support many functions for data manipulation                   |
+| .Net core SDK         | Required by SIL.Machine.Tool                                      |
+| NVIDIA GPU            | Required to run on a local machine                                |
+| Nvidia drivers        | Required for the GPU                                              |
+| CUDA Toolkit          | Required for the Machine learning with the GPU                    |
+| Environment variables | To tell SILNLP where to find the data, etc.                       |
 
 ## Environment Setup
-#### Prep-Work
+### Prep-Work
 
 __Download and install__ the following before creating any projects or starting any code, preferably in this order to avoid most warnings:
 
@@ -37,11 +47,11 @@ __Download and install__ the following before creating any projects or starting 
 ```
 4. [.NET Core SDK](https://dotnet.microsoft.com/download)
 5. SIL.Machine.Tool
-
-#### SIL.Machine.Tool
+---
+### SIL.Machine.Tool
 
 Many of the scripts in this repo require [SIL.Machine.Tool](https://github.com/sillsdev/machine). SIL.Machine.Tool is a dotnet program and it requires the __.NET core sdk__.
-##### To install SIL.Machine.Tool
+#### To install SIL.Machine.Tool
 1. You'll need to choose the correct .NET core SDK according to your Operating system. 
 1. Download and install the __.NET core sdk__ from [Microsoft](https://dotnet.microsoft.com/download)
 1. To Install SIL.Machine.Tool:
@@ -75,7 +85,7 @@ Many of the scripts in this repo require [SIL.Machine.Tool](https://github.com/s
    D:\GitHub>
    ```
 ---
-#### Optional: PyCharm Setup
+### Optional: PyCharm Setup
 If you wish, you can use [PyCharm 2020.1](https://www.jetbrains.com/pycharm/) as your Python IDE.
 First, you will need to install the Poetry plugin for PyCharm.
 
@@ -106,3 +116,4 @@ You will need to configure PyCharm to work properly with the project.
 
 Lastly, setup PyCharm to use the Black code formatter by following the instructions [here](https://black.readthedocs.io/en/stable/editor_integration.html#pycharm-intellij-idea).
 
+{% include links.html %}

@@ -1,0 +1,61 @@
+# This is the sidebar TOC. The sidebar code loops through sections here and provides the appropriate formatting.
+
+entries:
+- title: sidebar
+  product: SIL NLP
+  version: 0.x.y
+  folders:
+
+  - title:
+    output: pdf
+    type: frontmatter
+    folderitems:
+    - title:
+      url: /titlepage.html
+      output: pdf
+      type: frontmatter
+    - title:
+      url: /tocpage.html
+      output: pdf
+      type: frontmatter
+
+  - title: Overview
+    output: web, pdf
+    folderitems:
+
+    - title: Get started
+      url: /index.html
+      output: web, pdf
+      type: homepage
+
+    - title: Introduction
+      url: /introduction.html
+      output: web, pdf
+
+    - title: About the theme author
+      url: /about.html
+      output: web, pdf
+
+  - title: Paratext Extraction
+    output: web, pdf
+    folderitems:
+
+    - title: Extract Corpora
+      url: /extract_corpora.html
+      output: web, pdf
+
+  - title: Neural Machine Translation
+    output: web, pdf
+    folderitems:
+
+    - title: Preprocess
+      url: /nmt_preprocess.html
+      output: web, pdf
+
+    - title: Train
+      url: /nmt_train.html
+      output: web, pdf
+
+    - title: Test
+      url: /nmt_test.html
+      output: web, pdf

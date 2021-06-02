@@ -1,0 +1,9 @@
+{
+    "python.pythonPath": "C:\\Users\\JohnLambert\\AppData\\Local\\pypoetry\\Cache\\virtualenvs\\silnlp-hbFJ5FQN-py3.8\\Scripts\\python.exe",
+    "python.linting.enabled": true,
+    "python.linting.pylintEnabled": false,
+    "python.linting.flake8Enabled": true,
+    "files.associations": {
+        "*.html": "liquid"
+    }
+}
