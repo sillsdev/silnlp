@@ -12,7 +12,7 @@ site_title: SIL Natural Language Processing
 company_name: SIL LSDev
 # this appears in the footer
 
-github_editme_path: sillsdev/silnlp/tree/gh-pages
+github_editme_path: sillsdev/silnlp/tree/gh-pages/
 # if you're using Github, provide the basepath to the branch you've created for reviews, following the sample here. if not, leave this value blank.
 
 # gitlab_editme_path: tomjoht/documentation-theme-jekyll/blob/gh-pages/
@@ -33,9 +33,9 @@ exclude:
   - vendor
 # these are the files and directories that jekyll will exclude from the build
 
-feedback_subject_line: Jekyll documentation theme
+feedback_subject_line: SIL NLP
 
-feedback_email: tomjoht@gmail.com
+feedback_email: john_lambert@sil.org
 # used as a contact email for the Feedback link in the top navigation bar
 
 # feedback_disable: true
