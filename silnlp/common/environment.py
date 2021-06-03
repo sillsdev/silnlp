@@ -11,7 +11,18 @@ ROOT_DIR = Path.home() / ".silnlp"
 def get_data_dir() -> Path:
     sil_nlp_data_path = os.getenv("SIL_NLP_DATA_PATH")
     if sil_nlp_data_path is not None:
-        return Path(sil_nlp_data_path)
+        temp_path = Path(sil_nlp_data_path)
+        if temp_path.is_dir():
+            return Path(sil_nlp_data_path)
+        else:
+            raise Exception(
+                "The path defined by environment variable SIL_NLP_DATA_PATH ("
+                + sil_nlp_data_path
+                + ") is not a directory."
+            )
+    auqa_ml_path = Path("G:/Shared drives/AQUA")
+    if auqa_ml_path.is_dir():
+        return auqa_ml_path
     gutenberg_path = Path("G:/Shared drives/Gutenberg")
     if gutenberg_path.is_dir():
         return gutenberg_path

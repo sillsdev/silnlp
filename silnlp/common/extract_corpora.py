@@ -22,9 +22,20 @@ def main() -> None:
         "--exclude", metavar="texts", default="", help="The texts to exclude; e.g., '*NT*', '*OT*', 'GEN,EXO'"
     )
     parser.add_argument("--markers", default=False, action="store_true", help="Include USFM markers")
+
+    parser.add_argument("--clearml", default=False, action="store_true", help="Register Extraction in ClearML")
+
     args = parser.parse_args()
 
     projects: Set[str] = set(args.projects)
+
+    if args.clearml:
+        from clearml import Task
+        import datetime
+
+        task = Task.init(
+            project_name="LangTech_ExtractCorpora", task_name=str(args.projects) + "_" + str(datetime.datetime.now())
+        )
 
     # Which projects have data we can find?
     projects_found: Set[str] = set()

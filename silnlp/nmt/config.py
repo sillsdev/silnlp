@@ -101,7 +101,6 @@ def build_vocab(
     vocab_path: Path,
     tag_langs: Optional[Set[str]] = None,
 ) -> None:
-    joined_file_paths = ",".join(str(fp) for fp in file_paths)
     user_defined_symbols = "<blank>"
     if tag_langs is not None:
         for tag in tag_langs:
@@ -119,13 +118,18 @@ def build_vocab(
     # use custom normalization that does not convert ZWJ and ZWNJ to spaces
     # allows properly handling of scripts like Devanagari
     normalization_path = Path(__file__).parent / f"{normalization}.tsv"
-    sp_train_params = (
-        f"--normalization_rule_tsv={normalization_path} --input={joined_file_paths} --model_prefix={model_prefix}"
-        f" --vocab_size={vocab_size} --character_coverage={character_coverage:.4f} --input_sentence_size=1000000"
-        f" --shuffle_input_sentence=true --control_symbols=<range> --user_defined_symbols={user_defined_symbols}"
-    )
 
-    sp.SentencePieceTrainer.Train(sp_train_params)
+    sp.SentencePieceTrainer.Train(
+        normalization_rule_tsv=normalization_path,
+        input=[fp for fp in file_paths],
+        model_prefix=model_prefix,
+        vocab_size=vocab_size,
+        user_defined_symbols=user_defined_symbols,
+        character_coverage="%.4f" % character_coverage,
+        input_sentence_size=1000000,
+        shuffle_input_sentence=True,
+        control_symbols="<range>",
+    )
 
     convert_vocab(model_prefix.with_suffix(".vocab"), vocab_path, tag_langs)
 
