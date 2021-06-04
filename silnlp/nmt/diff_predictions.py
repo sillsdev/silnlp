@@ -198,6 +198,26 @@ def apply_diff_formatting(df: pd.DataFrame, workbook, sheet, histogram_offset: i
                 sheet.write_comment(f'E{histogram_offset+index+2}', p2)
 
 
+def add_training_corpora(writer, exp1_dir: Path, col_width: int):
+    sheet_name = 'Training Data'
+
+    vref_file = os.path.join(exp1_dir, 'train.vref.txt')
+    if not os.path.exists(vref_file):
+        print(f'No verse reference file {vref_file}; training corpora is not included in spreadsheet')
+        return
+
+    vrefs = load_corpus(Path(vref_file))
+    srcs = decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, 'train.src.txt'))))
+    trgs = decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, 'train.trg.txt'))))
+
+    df = pd.DataFrame(list(zip(vrefs, srcs, trgs)), columns=['Verse_Ref', 'Source', 'Target'])
+    df.to_excel(writer, index=False, sheet_name=sheet_name)
+
+    sheet = writer.sheets[sheet_name]
+    sheet.set_column(1, 2, col_width, wrap_format)
+    sheet.autofilter(0, 0, df.shape[0] - 1, df.shape[1] - 1)
+
+
 def main() -> None:
     global wrap_format
     global normal_format
@@ -216,6 +236,8 @@ def main() -> None:
                         help="Show difference (prediction vs reference")
     parser.add_argument("--show-unknown", default=False, action="store_true",
                         help="Show unknown words in source verse")
+    parser.add_argument("--include-train", default=False, action="store_true",
+                        help="Include the src/trg training corpora in the spreadsheet")
     parser.add_argument("--preserve-case", default=False, action="store_true",
                         help="Score predictions with case preserved")
     parser.add_argument("--tokenize", type=str, default="13a",
@@ -299,8 +321,12 @@ def main() -> None:
             adjust_column_widths(df, sheet, text_wrap_column_width)
             add_histogram(df, sheet, f'{args.exp1}{exp1_checkpoint}', f'{args.exp2}{exp2_checkpoint}')
 
+    if args.include_train:
+        add_training_corpora(writer, exp1_dir, text_wrap_column_width+20)
+
     writer.save()
 #    os.remove(exp1_graph)
+    print(f'Output is in {exp1_xls}')
 
 
 if __name__ == "__main__":
