@@ -168,15 +168,27 @@ def wordChecks(folder: str, writer: pd.ExcelWriter, corpus: str,
     val_similar_words = {}
     test_similar_words = {}
 
+    # Load the training data
     train_file = os.path.join(folder, f"train.{corpus}.txt")
-    val_file = os.path.join(folder, f"val.{corpus}.txt")
-    test_file = os.path.join(folder, f"test.{corpus}.txt")
-
     train_word_counts = load_word_counts(train_file)
+
+    # Load the validation data
+    val_file = os.path.join(folder, f"val.{corpus}.txt")
     val_word_counts = load_word_counts(val_file)
     unk_val_word_counts = unknown_word_counts(train_word_counts, val_word_counts)
-    test_word_counts = load_word_counts(test_file)
+
+    # Load the test data
+    test_file = os.path.join(folder, f"test.{corpus}.txt")
+    if os.path.exists(test_file):
+        test_word_counts = load_word_counts(test_file)
+    elif corpus == "trg":
+        test_file = os.path.join(folder, f"test.{corpus}.detok.txt")
+        test_word_counts = load_word_counts(test_file, False)
+    else:
+        print(f'No test data for corpus {corpus}')
+        return
     unk_test_word_counts = unknown_word_counts(train_word_counts, test_word_counts)
+
     if similar:
         if len(val_word_counts) > 0:
             val_similar_words = find_similar_words(train_word_counts, unk_val_word_counts, distance)
