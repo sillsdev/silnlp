@@ -24,7 +24,7 @@ description = ""
 authors = ["SIL International"]
 
 [tool.poetry.dependencies]
-python = ">=3.7"
+python = ">=3.7,<3.9"
 pandas = "^1.0.4"
 sentencepiece = "^0.1.95"
 nltk = "^3.5"
@@ -51,3 +51,4 @@ mypy = "^0.812"
 black = "^20.8b1"
 flake8 = "^3.9.0"
 ipykernel = "^5.5.3"
+pylint = "^2.8.3"
