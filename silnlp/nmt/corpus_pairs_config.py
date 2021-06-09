@@ -1,10 +1,9 @@
-import random
 from pathlib import Path
 from typing import IO, Iterable, List, Optional, Set, Type, Union
 
 import sentencepiece as sp
 
-from ..common.corpus import get_scripture_parallel_corpus
+from ..common.corpus import get_scripture_parallel_corpus, split_corpus
 from ..common.environment import MT_CORPORA_DIR, MT_SCRIPTURE_DIR
 from ..common.utils import DeleteRandomToken, NoiseMethod, RandomTokenPermutation, ReplaceRandomToken, is_set
 from .config import Config, DataFileType
@@ -133,18 +132,6 @@ def get_parallel_corpus_size(src_file_path: Path, trg_file_path: Path) -> int:
             if len(src_line) > 0 and len(trg_line) > 0:
                 count += 1
     return count
-
-
-def split_corpus(corpus_size: int, split_size: Union[float, int], used_indices: Set[int] = set()) -> Optional[Set[int]]:
-    if isinstance(split_size, float):
-        split_size = int(split_size if split_size > 1 else corpus_size * split_size)
-    population = (
-        range(corpus_size) if len(used_indices) == 0 else [i for i in range(corpus_size) if i not in used_indices]
-    )
-    if split_size >= len(population):
-        return None
-
-    return set(random.sample(population, split_size))
 
 
 class CorpusPairsConfig(Config):
@@ -303,11 +290,11 @@ class CorpusPairsConfig(Config):
                 if len(src_line) == 0 or len(trg_line) == 0:
                     continue
 
-#                src_sentence = self._insert_trg_tag(pair.trg_iso, src_line)
+                #                src_sentence = self._insert_trg_tag(pair.trg_iso, src_line)
                 src_sentence = src_prefix + src_line
                 trg_sentence = trg_line
 
-#                mirror_src_sentence = self._insert_trg_tag(pair.src_iso, trg_line)
+                #                mirror_src_sentence = self._insert_trg_tag(pair.src_iso, trg_line)
                 mirror_src_sentence = mirror_prefix + trg_line
                 mirror_trg_sentence = src_line
                 mirror_src_spp = trg_spp
@@ -349,7 +336,7 @@ class CorpusPairsConfig(Config):
         if self.write_trg_tag:
             tags = f"<2{trg_iso}> "
         if len(src_tags) > 0:
-            tags = ' '.join(map(lambda x: '<2' + str(x) + '>', src_tags)) + ' ' + tags
+            tags = " ".join(map(lambda x: "<2" + str(x) + ">", src_tags)) + " " + tags
         return tags
 
     def _noise(self, src_noise: List[NoiseMethod], src_sentence: str) -> str:

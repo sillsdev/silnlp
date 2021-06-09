@@ -1,7 +1,8 @@
+import random
 import itertools
 import subprocess
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple
+from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple, Union
 
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -120,6 +121,18 @@ def filter_parallel_corpus(corpus: pd.DataFrame, score_threshold: float) -> pd.D
         return corpus.sort_values("score").iloc[int(score_threshold) :]
 
     return corpus
+
+
+def split_corpus(corpus_size: int, split_size: Union[float, int], used_indices: Set[int] = set()) -> Optional[Set[int]]:
+    if isinstance(split_size, float):
+        split_size = int(split_size if split_size > 1 else corpus_size * split_size)
+    population = (
+        range(corpus_size) if len(used_indices) == 0 else [i for i in range(corpus_size) if i not in used_indices]
+    )
+    if split_size >= len(population):
+        return None
+
+    return set(random.sample(population, split_size))
 
 
 def get_scripture_path(iso: str, project: str) -> Path:

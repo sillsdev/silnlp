@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union, cast
 
 
+import numpy as np
 import sentencepiece as sp
 import tensorflow as tf
 import yaml
@@ -17,7 +18,7 @@ from opennmt.data import Noise, Vocab, WordDropout, WordNoiser, tokens_to_words
 from opennmt.models import Model, get_model_from_catalog
 
 from ..alignment.machine_aligner import FastAlignMachineAligner
-from ..common.corpus import load_corpus
+from ..common.corpus import load_corpus, split_corpus
 from ..common.utils import get_git_revision_hash, get_mt_exp_dir, merge_dict, set_seed
 from .runner import SILRunner
 from .transformer import SILTransformer
@@ -178,6 +179,7 @@ class Config(ABC):
                     "seed": 111,
                     "tokenize": True,
                     "guided_alignment": False,
+                    "guided_alignment_train_corpus_max_size": 1000000,
                 },
                 "train": {
                     "average_last_checkpoints": 0,
@@ -494,7 +496,19 @@ class Config(ABC):
         with tempfile.TemporaryDirectory() as td:
             temp_dir = Path(td)
             aligner = FastAlignMachineAligner(temp_dir)
-            aligner.train(self.exp_dir / "train.src.txt", self.exp_dir / "train.trg.txt")
+
+            # reduce size of alignment training data
+            train_src_arr = np.array((self.exp_dir / "train.src.txt").open(encoding="utf-8").readlines())
+            train_trg_arr = np.array((self.exp_dir / "train.trg.txt").open(encoding="utf-8").readlines())
+            align_inds = list(
+                split_corpus(
+                    corpus_size=len(train_src_arr), split_size=self.data.get("guided_alignment_train_corpus_max_size")
+                )
+            )
+            (self.exp_dir / "train.src.align.txt").open("w+", encoding="utf-8").writelines(train_src_arr[align_inds])
+            (self.exp_dir / "train.trg.align.txt").open("w+", encoding="utf-8").writelines(train_trg_arr[align_inds])
+
+            aligner.train(self.exp_dir / "train.src.align.txt", self.exp_dir / "train.trg.align.txt")
             aligner.align(self.exp_dir / "train.alignments.txt")
 
 
