@@ -1,15 +1,16 @@
+import logging
 import re
 import subprocess
-import logging
 from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, List, Optional
-from lxml import etree
 from xml.sax.saxutils import escape
+
+from lxml import etree
 
 from .canon import book_id_to_number
 from .corpus import get_terms_glosses_path, get_terms_metadata_path, load_corpus
-from .environment import MT_SCRIPTURE_DIR, MT_TERMS_DIR, PT_TERMS_DIR, PT_PROJECTS_DIR
+from .environment import MT_SCRIPTURE_DIR, MT_TERMS_DIR, PT_PROJECTS_DIR, PT_TERMS_DIR
 from .utils import get_repo_dir
 
 _TERMS_LISTS = {
@@ -50,9 +51,10 @@ def extract_project(project: str, include_texts: str, exclude_texts: str, includ
         "-sf",
         "pt",
         "-tf",
-        "pt-m" if include_markers else "pt",
+        "pt_m" if include_markers else "pt",
         "-as",
         "-ie",
+        "-md",
     ]
     output_basename = f"{iso}-{project}"
     if len(include_texts) > 0 or len(exclude_texts) > 0:
@@ -77,16 +79,13 @@ def extract_project(project: str, include_texts: str, exclude_texts: str, includ
     output_filename = MT_SCRIPTURE_DIR / f"{output_basename}.txt"
     args.append(str(output_filename))
 
-    subprocess.run(args, cwd=get_repo_dir())
+    subprocess.run(args, cwd=get_repo_dir(), stdout=subprocess.DEVNULL)
 
     # check if the number of lines in the file is correct (the same as vref.txt - 31104 ending at REV 22:21)
-    number_of_lines_written = len(output_filename.open(encoding="utf-8").readlines())
-    if number_of_lines_written != 31104:
-        LOGGER.error(
-            "The number of terms written is "
-            + str(number_of_lines_written)
-            + " but should be 31104 (number of verses in the Bible)."
-        )
+    segment_count = sum(1 for _ in load_corpus(output_filename))
+    LOGGER.info(f"# of Segments: {segment_count}")
+    if segment_count != 31104:
+        LOGGER.error(f"The number of segments is {segment_count}, but should be 31104 (number of verses in the Bible).")
 
 
 def escape_id(id: str) -> str:
@@ -227,7 +226,7 @@ def extract_term_renderings(project_folder: str) -> None:
             terms_glosses_path = get_terms_glosses_path(list_name)
             if terms_glosses_path.is_file():
                 terms_glosses_path.unlink()
-    LOGGER.info(f"# of Terms written: {count}")
+    LOGGER.info(f"# of Terms: {count}")
 
 
 def book_file_name_digits(book_num: int) -> str:

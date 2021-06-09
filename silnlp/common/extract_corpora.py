@@ -33,10 +33,11 @@ def main() -> None:
     projects: Set[str] = set(args.projects)
 
     if args.clearml:
-        from clearml import Task
         import datetime
 
-        task = Task.init(
+        from clearml import Task
+
+        Task.init(
             project_name="LangTech_ExtractCorpora", task_name=str(args.projects) + "_" + str(datetime.datetime.now())
         )
 
