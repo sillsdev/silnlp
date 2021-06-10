@@ -1,6 +1,7 @@
 import argparse
 import logging
 import os
+import sys
 import shutil
 import tempfile
 from abc import ABC, abstractmethod
@@ -252,8 +253,16 @@ class Config(ABC):
         self.root = config
         self.src_isos = src_isos
         self.trg_isos = trg_isos
-        self.src_file_paths = src_file_paths
-        self.trg_file_paths = trg_file_paths
+
+        self.src_file_paths = set(src_file_paths)
+        self.trg_file_paths = set(trg_file_paths)
+
+        # confirm that input file paths exist
+        for file in self.src_file_paths | self.trg_file_paths:
+            if not file.is_file():
+                LOGGER.error("The source file " + str(file) + " does not exist.  Exiting.")
+                sys.exit(1)
+
         self.src_tags = src_tags
 
         parent: Optional[str] = self.data.get("parent")
