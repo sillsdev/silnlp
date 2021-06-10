@@ -31,50 +31,13 @@ __Download and install__ the following before creating any projects or starting 
 
 1. [Git](https://git-scm.com/downloads)
 2. [Python 3.7](https://www.python.org/downloads/) (latest minor version, ie 3.7.9)
-   1. Will also work with Python 3.8, but not Python 3.9 because of a [llvmlite incompatability](https://stackoverflow.com/questions/65798319/llvmlite-failed-to-install-error-building-llvmlite)
+   * Will also work with Python 3.8, but not Python 3.9 because of a [llvmlite incompatability](https://stackoverflow.com/questions/65798319/llvmlite-failed-to-install-error-building-llvmlite)
 3. Poetry via Powershell using the following command:
 ```
 (Invoke-WebRequest -Uri https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py -UseBasicParsing).Content | python
 ```
-4. [.NET Core SDK](https://dotnet.microsoft.com/download)
-5. SIL.Machine.Tool
----
-### SIL.Machine.Tool
-
-Many of the scripts in this repo require [SIL.Machine.Tool](https://github.com/sillsdev/machine). SIL.Machine.Tool is a dotnet program and it requires the __.NET core sdk__.
-#### To install SIL.Machine.Tool
-1. You'll need to choose the correct .NET core SDK according to your Operating system. 
-1. Download and install the __.NET core sdk__ from [Microsoft](https://dotnet.microsoft.com/download)
-1. To Install SIL.Machine.Tool:
-   __Open the repo directory `silnlp`__ and execute the following command from that folder:
-   ```
-   dotnet tool restore
-   ```
-   When dotnet can't find the manifest file: `dotnet-tools.json` which is in the .config subdirectory of the silnlp repo it will report an error message:
-
-   ```
-   C:\Users\username>dotnet tool restore
-   Cannot find a manifest file.
-   For a list of locations searched, specify the "-d" option before the tool name.
-   No tools were restored.
-   ```
-   Change the current working directory to the the repo and then dotnet should restore the sil Machine tool.
-
-   The -d option is useful to show where dotnet is looking for the manifest file:
-   ```
-   D:\GitHub>dotnet -d tool restore
-   Telemetry is: Enabled
-   The list of searched paths:
-           D:\GitHub\.config\dotnet-tools.json
-           D:\GitHub\dotnet-tools.json
-           D:\.config\dotnet-tools.json
-           D:\dotnet-tools.json
-   Cannot find a manifest file.
-   For a list of locations searched, specify the "-d" option before the tool name.
-   No tools were restored.
-
-   D:\GitHub>
-   ```
+4. Install [.NET Core SDK](https://dotnet.microsoft.com/download)
+   * Note - the .NET SDK is needed for [SIL.Machine.Tool](https://github.com/sillsdev/machine).  Many of the scripts in this repo require this .Net package.  The .Net package will be installed and updated when the silnlp is initialized in `__init__.py`.
 ---
 ## Development Environment setup
 ### Option 1: PyCharm Setup
