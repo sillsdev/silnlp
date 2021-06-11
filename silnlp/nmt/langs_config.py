@@ -59,7 +59,7 @@ class LangsDataFile:
         return (self.type & DataFileType.VAL) == DataFileType.VAL
 
 
-def train_count(data_files: List[LangsDataFile]) -> int:
+def get_train_count(data_files: List[LangsDataFile]) -> int:
     return len([df for df in data_files if df.is_train])
 
 
@@ -212,14 +212,14 @@ class LangsConfig(Config):
 
     def _build_corpora(
         self, src_spp: Optional[sp.SentencePieceProcessor], trg_spp: Optional[sp.SentencePieceProcessor], stats: bool
-    ) -> None:
+    ) -> int:
         LOGGER.info("Collecting data sets...")
         test_size: int = self.data["test_size"]
         val_size: int = self.data["val_size"]
         disjoint_test: bool = self.data["disjoint_test"]
         disjoint_val: bool = self.data["disjoint_val"]
         score_threshold: float = self.data["score_threshold"]
-        mixed_src: bool = self.data["mixed_src"] and train_count(self.src_files) > 1
+        mixed_src: bool = self.data["mixed_src"] and get_train_count(self.src_files) > 1
 
         test_indices: Optional[Set[int]] = None
         val_indices: Optional[Set[int]] = None
@@ -245,7 +245,7 @@ class LangsConfig(Config):
             for src_file in self.src_files:
                 for trg_file in self.trg_files:
                     if (
-                        train_count(self.src_files) > 1 or train_count(self.trg_files) > 1
+                        get_train_count(self.src_files) > 1 or get_train_count(self.trg_files) > 1
                     ) and src_file.iso == trg_file.iso:
                         continue
 
@@ -391,7 +391,7 @@ class LangsConfig(Config):
                             terms = self._add_to_terms_dataset("en", trg_terms_file.iso, terms, cur_terms)
 
         if train is None:
-            return
+            return 0
 
         LOGGER.info("Writing train data set...")
         if mixed_src:
@@ -408,9 +408,10 @@ class LangsConfig(Config):
         write_corpus(self.exp_dir / "train.src.txt", encode_sp_lines(src_spp, train["source"]))
         write_corpus(self.exp_dir / "train.trg.txt", encode_sp_lines(trg_spp, train["target"]))
         write_corpus(self.exp_dir / "train.vref.txt", (str(vr) for vr in train["vref"]))
+        train_count = len(train)
 
         if terms is not None:
-            self._write_terms(src_spp, trg_spp, terms)
+            train_count += self._write_terms(src_spp, trg_spp, terms)
 
         LOGGER.info("Writing validation data set...")
         if len(val) > 0:
@@ -442,6 +443,7 @@ class LangsConfig(Config):
                         self.exp_dir / f"{prefix}.trg.detok{trg_suffix}.txt",
                         decode_sp_lines(encode_sp_lines(trg_spp, pair_test[column])),
                     )
+        return train_count
 
     def _add_to_train_dataset(
         self,
@@ -573,13 +575,14 @@ class LangsConfig(Config):
         src_spp: Optional[sp.SentencePieceProcessor],
         trg_spp: Optional[sp.SentencePieceProcessor],
         terms: pd.DataFrame,
-    ) -> None:
+    ) -> int:
         train_src_file: Optional[IO] = None
         train_trg_file: Optional[IO] = None
         train_vref_file: Optional[IO] = None
 
         dict_src_file: Optional[IO] = None
         dict_trg_file: Optional[IO] = None
+        train_count = 0
         try:
             terms_config = self.data["terms"]
             if terms_config["train"]:
@@ -609,6 +612,7 @@ class LangsConfig(Config):
                             train_src_file.write(stv + "\n")
                             train_trg_file.write(ttv + "\n")
                             train_vref_file.write("\n")
+                            train_count += 1
 
                 if dict_src_file is not None and dict_trg_file is not None:
                     dict_src_file.write("\t".join(src_term_variants) + "\n")
@@ -625,3 +629,4 @@ class LangsConfig(Config):
                 dict_src_file.close()
             if dict_trg_file is not None:
                 dict_trg_file.close()
+        return train_count

@@ -28,10 +28,19 @@ class MachineAligner(Aligner):
         self._threshold = threshold
         self._direct_model_prefix = direct_model_prefix
         self._params = params
+        self._lowercase = False
 
     @property
     def has_inverse_model(self) -> bool:
         return self._has_inverse_model
+
+    @property
+    def lowercase(self) -> bool:
+        return self._lowercase
+
+    @lowercase.setter
+    def lowercase(self, value: bool) -> None:
+        self._lowercase = value
 
     def train(self, src_file_path: Path, trg_file_path: Path) -> None:
         direct_lex_path = self.model_dir / "lexicon.direct.txt"
@@ -46,7 +55,14 @@ class MachineAligner(Aligner):
         self._train_alignment_model()
 
     def align(self, out_file_path: Path, sym_heuristic: str = "grow-diag-final-and") -> None:
-        self._align_parallel_corpus(out_file_path, sym_heuristic)
+        self._align_parallel_corpus(
+            self.model_dir / "src.txt", self.model_dir / "trg.txt", out_file_path, sym_heuristic
+        )
+
+    def force_align(
+        self, src_file_path: Path, trg_file_path: Path, out_file_path: Path, sym_heuristic: str = "grow-diag-final-and"
+    ) -> None:
+        self._align_parallel_corpus(src_file_path, trg_file_path, out_file_path, sym_heuristic)
 
     def extract_lexicon(self, out_file_path: Path) -> None:
         lexicon = self.get_direct_lexicon()
@@ -81,6 +97,8 @@ class MachineAligner(Aligner):
             "-mt",
             self.model_type,
         ]
+        if self._lowercase:
+            args.append("-l")
         if self._plugin_file_path is not None:
             args.append("-mp")
             args.append(str(self._plugin_file_path))
@@ -90,20 +108,24 @@ class MachineAligner(Aligner):
                 args.append(f"{key}={value}")
         subprocess.run(args, cwd=get_repo_dir())
 
-    def _align_parallel_corpus(self, output_file_path: Path, sym_heuristic: str) -> None:
+    def _align_parallel_corpus(
+        self, src_file_path: Path, trg_file_path: Path, output_file_path: Path, sym_heuristic: str
+    ) -> None:
         args: List[str] = [
             "dotnet",
             "machine",
             "align",
-            str(self.model_dir),
-            str(self.model_dir / "src.txt"),
-            str(self.model_dir / "trg.txt"),
+            str(self.model_dir) + os.sep,
+            str(src_file_path),
+            str(trg_file_path),
             str(output_file_path),
             "-mt",
             self.model_type,
             "-sh",
             sym_heuristic,
         ]
+        if self._lowercase:
+            args.append("-l")
         if self._plugin_file_path is not None:
             args.append("-mp")
             args.append(str(self._plugin_file_path))

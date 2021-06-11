@@ -179,7 +179,7 @@ class Config(ABC):
                     "seed": 111,
                     "tokenize": True,
                     "guided_alignment": False,
-                    "guided_alignment_train_corpus_max_size": 1000000,
+                    "guided_alignment_train_size": 1000000,
                 },
                 "train": {
                     "average_last_checkpoints": 0,
@@ -315,10 +315,10 @@ class Config(ABC):
     def preprocess(self, stats: bool) -> None:
         self._build_vocabs()
         src_spp, trg_spp = self.create_sp_processors()
-        self._build_corpora(src_spp, trg_spp, stats)
+        train_count = self._build_corpora(src_spp, trg_spp, stats)
         if self.data["guided_alignment"]:
             LOGGER.info("Generating train alignments...")
-            self._create_train_alignments()
+            self._create_train_alignments(train_count)
         LOGGER.info("Preprocessing completed")
 
     def create_sp_processors(self) -> Tuple[Optional[sp.SentencePieceProcessor], Optional[sp.SentencePieceProcessor]]:
@@ -348,7 +348,7 @@ class Config(ABC):
     @abstractmethod
     def _build_corpora(
         self, src_spp: Optional[sp.SentencePieceProcessor], trg_spp: Optional[sp.SentencePieceProcessor], stats: bool
-    ) -> None:
+    ) -> int:
         pass
 
     def _build_vocabs(self) -> None:
@@ -492,24 +492,38 @@ class Config(ABC):
         character_coverage: float = self.data.get(f"{prefix}_character_coverage", self.data.get("character_coverage"))
         build_vocab(vocab_file_paths, vocab_size, casing, character_coverage, model_prefix, vocab_path, tag_langs)
 
-    def _create_train_alignments(self) -> None:
+    def _create_train_alignments(self, train_count: int) -> None:
         with tempfile.TemporaryDirectory() as td:
             temp_dir = Path(td)
             aligner = FastAlignMachineAligner(temp_dir)
+            aligner.lowercase = True
 
-            # reduce size of alignment training data
-            train_src_arr = np.array((self.exp_dir / "train.src.txt").open(encoding="utf-8").readlines())
-            train_trg_arr = np.array((self.exp_dir / "train.trg.txt").open(encoding="utf-8").readlines())
-            align_inds = list(
-                split_corpus(
-                    corpus_size=len(train_src_arr), split_size=self.data.get("guided_alignment_train_corpus_max_size")
-                )
-            )
-            (self.exp_dir / "train.src.align.txt").open("w+", encoding="utf-8").writelines(train_src_arr[align_inds])
-            (self.exp_dir / "train.trg.align.txt").open("w+", encoding="utf-8").writelines(train_trg_arr[align_inds])
+            src_align_path = self.exp_dir / "train.src.txt"
+            trg_align_path = self.exp_dir / "train.trg.txt"
+            train_size: Union[int, float] = self.data["guided_alignment_train_size"]
+            split_indices = split_corpus(train_count, train_size)
+            if split_indices is not None:
+                # reduce size of alignment training data
+                src_train_path = temp_dir / "train.src.align.txt"
+                trg_train_path = temp_dir / "train.trg.align.txt"
 
-            aligner.train(self.exp_dir / "train.src.align.txt", self.exp_dir / "train.trg.align.txt")
-            aligner.align(self.exp_dir / "train.alignments.txt")
+                with open(src_align_path, "r", encoding="utf-8-sig") as src_in_file, open(
+                    trg_align_path, "r", encoding="utf-8-sig"
+                ) as trg_in_file, open(src_train_path, "w", encoding="utf-8", newline="\n") as src_out_file, open(
+                    trg_train_path, "w", encoding="utf-8", newline="\n"
+                ) as trg_out_file:
+                    i = 0
+                    for src_sentence, trg_sentence in zip(src_in_file, trg_in_file):
+                        if i in split_indices:
+                            src_out_file.write(src_sentence)
+                            trg_out_file.write(trg_sentence)
+                        i += 1
+            else:
+                src_train_path = src_align_path
+                trg_train_path = trg_align_path
+
+            aligner.train(src_train_path, trg_train_path)
+            aligner.force_align(src_align_path, trg_align_path, self.exp_dir / "train.alignments.txt")
 
 
 def set_transformer_dropout(
