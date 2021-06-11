@@ -153,7 +153,7 @@ class CorpusPairsConfig(Config):
 
     def _build_corpora(
         self, src_spp: Optional[sp.SentencePieceProcessor], trg_spp: Optional[sp.SentencePieceProcessor], stats: bool
-    ) -> None:
+    ) -> int:
         test_iso_pairs_count = len(set((p.src_iso, p.trg_iso) for p in self.corpus_pairs if p.is_test))
         for old_file_path in self.exp_dir.glob("test.*.txt"):
             old_file_path.unlink()
@@ -164,9 +164,10 @@ class CorpusPairsConfig(Config):
         ) as val_src_file, open(
             self.exp_dir / "val.trg.txt", "w", encoding="utf-8", newline="\n"
         ) as val_trg_file:
+            train_count = 0
             for pair in self.corpus_pairs:
                 if pair.is_scripture:
-                    self._write_scripture_data_sets(
+                    train_count += self._write_scripture_data_sets(
                         src_spp,
                         trg_spp,
                         train_src_file,
@@ -177,7 +178,7 @@ class CorpusPairsConfig(Config):
                         pair,
                     )
                 else:
-                    self._write_standard_data_sets(
+                    train_count += self._write_standard_data_sets(
                         src_spp,
                         trg_spp,
                         train_src_file,
@@ -187,6 +188,7 @@ class CorpusPairsConfig(Config):
                         test_iso_pairs_count,
                         pair,
                     )
+            return train_count
 
     def _write_scripture_data_sets(
         self,
@@ -198,9 +200,9 @@ class CorpusPairsConfig(Config):
         val_trg_file: IO,
         test_iso_pairs_count: int,
         pair: CorpusPair,
-    ) -> None:
+    ) -> int:
         corpus = get_scripture_parallel_corpus(pair.src_file_path, pair.trg_file_path)
-        self._write_data_sets(
+        return self._write_data_sets(
             src_spp,
             trg_spp,
             train_src_file,
@@ -224,12 +226,12 @@ class CorpusPairsConfig(Config):
         val_trg_file: IO,
         test_iso_pairs_count: int,
         pair: CorpusPair,
-    ) -> None:
+    ) -> int:
         corpus_size = get_parallel_corpus_size(pair.src_file_path, pair.trg_file_path)
         with open(pair.src_file_path, "r", encoding="utf-8") as input_src_file, open(
             pair.trg_file_path, "r", encoding="utf-8"
         ) as input_trg_file:
-            self._write_data_sets(
+            return self._write_data_sets(
                 src_spp,
                 trg_spp,
                 train_src_file,
@@ -256,7 +258,7 @@ class CorpusPairsConfig(Config):
         corpus_size: int,
         src_corpus: Iterable[str],
         trg_corpus: Iterable[str],
-    ):
+    ) -> int:
         print(f"Writing {pair.src_file_path.stem} -> {pair.trg_file_path.stem}...")
         test_indices: Optional[Set[int]] = set()
         if pair.is_test:
@@ -325,6 +327,7 @@ class CorpusPairsConfig(Config):
         print(f"- train size: {train_count}")
         print(f"- val size: {val_count}")
         print(f"- test size: {test_count}")
+        return train_count
 
     def _insert_trg_tag(self, trg_iso: str, src_sentence: str) -> str:
         if self.write_trg_tag:
