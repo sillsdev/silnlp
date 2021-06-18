@@ -1,0 +1,71 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<CommentList>
+  <Comment Thread="BT_מַשָּׂא-1" User="Damien Daspit" VerseRef="2KI 9:25" Language="en" Date="2020-03-19T17:54:01.5596734+07:00">
+    <SelectedText />
+    <StartPosition>0</StartPosition>
+    <ContextBefore>\v 25 </ContextBefore>
+    <ContextAfter />
+    <Status>todo</Status>
+    <Type></Type>
+    <ConflictType />
+    <Verse>\v 25 </Verse>
+    <ExtraHeadingInfo>מַשָּׂא-1￼hebrew￼maśśāʾ-1￼utterance, oracle</ExtraHeadingInfo>
+    <HideInTextWindow>true</HideInTextWindow>
+    <Contents>
+      <p>Paratext has identified a single term which should be two different terms. Please review the renderings that Paratext copied to both מַשָּׂא-1 and מַשָּׂא-2. These are now separate terms.</p>
+    </Contents>
+    <BiblicalTermId>מַשָּׂא-1</BiblicalTermId>
+    <TagAdded>-3</TagAdded>
+  </Comment>
+  <Comment Thread="BT_מַשָּׂא-2" User="Damien Daspit" VerseRef="GEN 25:14" Language="en" Date="2020-03-19T17:54:01.6065482+07:00">
+    <SelectedText />
+    <StartPosition>0</StartPosition>
+    <ContextBefore>\v 14 </ContextBefore>
+    <ContextAfter />
+    <Status>todo</Status>
+    <Type></Type>
+    <ConflictType />
+    <Verse>\v 14 </Verse>
+    <ExtraHeadingInfo>מַשָּׂא-2￼hebrew￼maśśāʾ-2￼Massa</ExtraHeadingInfo>
+    <HideInTextWindow>true</HideInTextWindow>
+    <Contents>
+      <p>Paratext has identified a single term which should be two different terms. Please review the renderings that Paratext copied to both מַשָּׂא-2 and מַשָּׂא-1. These are now separate terms.</p>
+    </Contents>
+    <BiblicalTermId>מַשָּׂא-2</BiblicalTermId>
+    <TagAdded>-3</TagAdded>
+  </Comment>
+  <Comment Thread="BT_מַשָּׂא" User="Damien Daspit" VerseRef="GEN 1:1" Language="en" Date="2020-03-19T17:54:01.6075454+07:00">
+    <SelectedText />
+    <StartPosition>0</StartPosition>
+    <ContextBefore>\v 1 </ContextBefore>
+    <ContextAfter />
+    <Status>todo</Status>
+    <Type></Type>
+    <ConflictType />
+    <Verse>\v 1 </Verse>
+    <ExtraHeadingInfo>מַשָּׂא￼hebrew￼￼</ExtraHeadingInfo>
+    <HideInTextWindow>true</HideInTextWindow>
+    <Contents>
+      <p>Please do not edit this term. Any edits you make will be lost because a newer version of Paratext has replaced this term with another term. Upgrade to the latest version of Paratext to use the new term: מַשָּׂא-1</p>
+    </Contents>
+    <BiblicalTermId>מַשָּׂא</BiblicalTermId>
+    <TagAdded>-3</TagAdded>
+  </Comment>
+  <Comment Thread="BT_מַשָּׂא" User="Damien Daspit" VerseRef="GEN 1:1" Language="en" Date="2020-03-19T17:54:01.6085427+07:00">
+    <SelectedText />
+    <StartPosition>0</StartPosition>
+    <ContextBefore>\v 1 </ContextBefore>
+    <ContextAfter />
+    <Status>todo</Status>
+    <Type></Type>
+    <ConflictType />
+    <Verse>\v 1 </Verse>
+    <ExtraHeadingInfo>מַשָּׂא￼hebrew￼￼</ExtraHeadingInfo>
+    <HideInTextWindow>true</HideInTextWindow>
+    <Contents>
+      <p>Please do not edit this term. Any edits you make will be lost because a newer version of Paratext has replaced this term with another term. Upgrade to the latest version of Paratext to use the new term: מַשָּׂא-2</p>
+    </Contents>
+    <BiblicalTermId>מַשָּׂא</BiblicalTermId>
+    <TagAdded>-3</TagAdded>
+  </Comment>
+</CommentList>
