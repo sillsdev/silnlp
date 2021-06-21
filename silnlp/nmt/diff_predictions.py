@@ -145,36 +145,43 @@ def split_words(s: str) -> List[str]:
     return s.split(' ')
 
 
-def apply_unknown_formatting(df: pd.DataFrame, workbook, sheet, histogram_offset: int, src_words: List[str]):
+def apply_unknown_formatting(df: pd.DataFrame, workbook, sheet, histogram_offset: int, corpus: str,
+                             corpus_words: List[str]):
     sheet.write_rich_string('E6', unknown_format, 'Orange (underline)', normal_format, ': Unknown source word')
+    if corpus is 'src':
+        column = 'B'
+        column_name = 'Source_Sentence'
+    else:
+        column = 'C'
+        column_name = 'Target_Sentence'
     for index, row in df.iterrows():
-        src = row['Source_Sentence']
+        text = row[column_name]
         segments = []
         last_state = ""
         s = ""
-        for src_word in split_words(src):
-            if strip_punct(src_word.lower()) in src_words:
+        for word in split_words(text):
+            if strip_punct(word.lower()) in corpus_words:
                 if last_state is not 'known':
                     last_state = 'known'
                     if s is not '':
                         segments.append(s)
                     segments.append(normal_format)
-                    s = src_word + ' '
+                    s = word + ' '
                 else:
-                    s = s + src_word + ' '
+                    s = s + word + ' '
             else:
                 if last_state is not 'unknown':
                     last_state = 'unknown'
                     if s is not '':
                         segments.append(s)
                     segments.append(unknown_format)
-                    s = src_word + ' '
+                    s = word + ' '
                 else:
-                    s = s + src_word + ' '
+                    s = s + word + ' '
         segments.append(s)
         if len(segments) > 2:
             segments.append(wrap_format)
-            sheet.write_rich_string(f'B{histogram_offset+index+2}', *segments)
+            sheet.write_rich_string(f'{column}{histogram_offset+index+2}', *segments)
 
 
 def apply_diff_formatting(df: pd.DataFrame, workbook, sheet, histogram_offset: int):
@@ -198,19 +205,23 @@ def apply_diff_formatting(df: pd.DataFrame, workbook, sheet, histogram_offset: i
                 sheet.write_comment(f'E{histogram_offset+index+2}', p2)
 
 
-def add_training_corpora(writer, exp1_dir: Path, col_width: int):
+def add_training_corpora(writer, exp1_dir: Path, exp2_dir: Path, col_width: int):
     sheet_name = 'Training Data'
 
-    vref_file = os.path.join(exp1_dir, 'train.vref.txt')
-    if not os.path.exists(vref_file):
-        print(f'No verse reference file {vref_file}; training corpora is not included in spreadsheet')
-        return
-
-    vrefs = load_corpus(Path(vref_file))
     srcs = decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, 'train.src.txt'))))
     trgs = decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, 'train.trg.txt'))))
 
-    df = pd.DataFrame(list(zip(vrefs, srcs, trgs)), columns=['Verse_Ref', 'Source', 'Target'])
+    if os.path.exists(os.path.join(exp1_dir, 'train.vref.txt')):
+        vrefs = load_corpus(Path(os.path.join(exp1_dir, 'train.vref.txt')))
+        df = pd.DataFrame(list(zip(vrefs, srcs, trgs)), columns=['Verse_Ref', 'Source', 'Target'])
+    elif os.path.exists(os.path.join(exp2_dir, 'train.vref.txt')):
+        vrefs = load_corpus(Path(os.path.join(exp2_dir, 'train.vref.txt')))
+        df = pd.DataFrame(list(zip(vrefs, srcs, trgs)), columns=['Verse_Ref', 'Source', 'Target'])
+    else:
+        df = pd.DataFrame(list(zip(srcs,trgs)), columns=['Source', 'Target'])
+        df['Verse_Ref'] = ''                        # Add an empty verse reference column
+        df = df[['Verse_Ref', 'Source', 'Target']]  # Reorder the columns for consistency
+
     df.to_excel(writer, index=False, sheet_name=sheet_name)
 
     sheet = writer.sheets[sheet_name]
@@ -252,9 +263,15 @@ def main() -> None:
     exp2_name = args.exp2
     exp2_dir = get_mt_exp_dir(exp2_name)
 
-    if not filecmp.cmp(os.path.join(exp1_dir, "test.vref.txt"), os.path.join(exp2_dir, "test.vref.txt")):
-        print(f'{exp1_name} and {exp2_name} have different test set verse references; exiting')
-        return
+    vref_file = None
+    if os.path.exists(os.path.join(exp1_dir, "test.vref.txt")):
+        vref_file = os.path.join(exp1_dir, "test.vref.txt")
+        if os.path.exists(os.path.join(exp2_dir, "test.vref.txt")) and \
+           not filecmp.cmp(os.path.join(exp1_dir, "test.vref.txt"), os.path.join(exp2_dir, "test.vref.txt")):
+            print(f'{exp1_name} and {exp2_name} have different test set verse references; exiting')
+            return
+    elif os.path.exists(os.path.join(exp2_dir, "test.vref.txt")):
+        vref_file = os.path.join(exp2_dir, "test.vref.text")
 
     if not filecmp.cmp(os.path.join(exp1_dir, "test.src.txt"), os.path.join(exp2_dir, "test.src.txt")):
         print(f'{exp1_name} and {exp2_name} have different test set source verse text; exiting')
@@ -277,6 +294,7 @@ def main() -> None:
 
     if args.show_unknown:
         src_words = load_words(os.path.join(exp1_dir, "train.src.txt"), True)
+        trg_words = load_words(os.path.join(exp1_dir, "train.trg.txt"), True)
 
     for exp1_file_name in sorted(glob.glob(os.path.join(exp1_dir, f'test.trg-predictions.detok.txt.*'))):
         for exp2_file_name in sorted(glob.glob(os.path.join(exp2_dir, f'test.trg-predictions.detok.txt.*'))):
@@ -286,16 +304,25 @@ def main() -> None:
             exp2_checkpoint = os.path.splitext(exp2_file_name)[1]
             print(f'Comparing results for {args.exp1}({exp1_checkpoint}) and {args.exp2}({exp2_checkpoint})')
             sheet_name = f'{exp1_checkpoint} vs {exp2_checkpoint}'
-            exp1_vrefs = load_corpus(Path(os.path.join(exp1_dir, "test.vref.txt")))
+            exp1_vrefs = load_corpus(vref_file) if vref_file is not None else None
             exp1_srcs = decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, "test.src.txt"))))
             exp1_refs = load_corpus(Path(os.path.join(exp1_dir, "test.trg.detok.txt")))
             exp1_preds = load_corpus(Path(exp1_file_name))
             exp2_preds = load_corpus(Path(exp2_file_name))
 
             # Create the initial data frame
-            df = pd.DataFrame(list(zip(exp1_vrefs, exp1_srcs, exp1_refs, exp1_preds, exp2_preds)),
-                              columns=['Verse_Ref', 'Source_Sentence', 'Target_Sentence',
-                                       'Exp1_Prediction', 'Exp2_Prediction'])
+            if exp1_vrefs is not None:
+                df = pd.DataFrame(list(zip(exp1_vrefs, exp1_srcs, exp1_refs, exp1_preds, exp2_preds)),
+                                  columns=['Verse_Ref', 'Source_Sentence', 'Target_Sentence',
+                                           'Exp1_Prediction', 'Exp2_Prediction'])
+            else:
+                df = pd.DataFrame(list(zip(exp1_srcs, exp1_refs, exp1_preds, exp2_preds)),
+                                  columns=['Source_Sentence', 'Target_Sentence',
+                                           'Exp1_Prediction', 'Exp2_Prediction'])
+                df['Verse_Ref'] = ''  # Add an empty verse reference column
+                df = df[['Verse_Ref', 'Source_Sentence', 'Target_Sentence',
+                        'Exp1_Prediction', 'Exp2_Prediction']]  # Reorder the columns for consistency
+
             # Calculate the sentence BLEU scores for each prediction
             for index, row in df.iterrows():
                 bleu = sentence_bleu(row['Exp1_Prediction'], [row['Target_Sentence']],
@@ -314,7 +341,8 @@ def main() -> None:
             sheet.autofilter(histogram_offset, 0, histogram_offset+df.shape[0]-1, df.shape[1]-1)
 
             if args.show_unknown:
-                apply_unknown_formatting(df, workbook, sheet, histogram_offset, src_words)
+                apply_unknown_formatting(df, workbook, sheet, histogram_offset, "src", src_words)
+                apply_unknown_formatting(df, workbook, sheet, histogram_offset, "trg", trg_words)
             if args.show_diffs:
                 apply_diff_formatting(df, workbook, sheet, histogram_offset)
 
@@ -322,7 +350,7 @@ def main() -> None:
             add_histogram(df, sheet, f'{args.exp1}{exp1_checkpoint}', f'{args.exp2}{exp2_checkpoint}')
 
     if args.include_train:
-        add_training_corpora(writer, exp1_dir, text_wrap_column_width+20)
+        add_training_corpora(writer, exp1_dir, exp2_dir, text_wrap_column_width+20)
 
     writer.save()
 #    os.remove(exp1_graph)
