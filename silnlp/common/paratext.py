@@ -10,7 +10,7 @@ from lxml import etree
 
 from .canon import book_id_to_number
 from .corpus import get_terms_glosses_path, get_terms_metadata_path, load_corpus
-from .environment import MT_SCRIPTURE_DIR, MT_TERMS_DIR, PT_PROJECTS_DIR, PT_TERMS_DIR
+from .environment import MT_SCRIPTURE_DIR, MT_TERMS_DIR, PT_PROJECTS_DIR, PT_TERMS_DIR, ASSETS_DIR
 from .utils import get_repo_dir
 
 _TERMS_LISTS = {
@@ -41,7 +41,7 @@ def extract_project(project: str, include_texts: str, exclude_texts: str, includ
     settings_tree = etree.parse(str(project_dir / "Settings.xml"), parser=parser_utf8)
     iso = get_iso(settings_tree)
 
-    ref_dir = PT_PROJECTS_DIR / "Ref"
+    ref_dir = ASSETS_DIR / "Ref"
     args: List[str] = [
         "dotnet",
         "machine",
@@ -79,7 +79,10 @@ def extract_project(project: str, include_texts: str, exclude_texts: str, includ
     output_filename = MT_SCRIPTURE_DIR / f"{output_basename}.txt"
     args.append(str(output_filename))
 
-    subprocess.run(args, cwd=get_repo_dir(), stdout=subprocess.DEVNULL)
+    result = subprocess.run(args, cwd=get_repo_dir(), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+
+    if len(result.stderr) > 0:
+        raise RuntimeError(result.stderr.decode("utf-8"))
 
     # check if the number of lines in the file is correct (the same as vref.txt - 31104 ending at REV 22:21)
     segment_count = sum(1 for _ in load_corpus(output_filename))

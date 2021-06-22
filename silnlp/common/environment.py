@@ -7,6 +7,8 @@ load_dotenv()
 
 ROOT_DIR = Path.home() / ".silnlp"
 
+ASSETS_DIR = Path(__file__).parent.parent / "assets"
+
 
 def get_data_dir() -> Path:
     sil_nlp_data_path = os.getenv("SIL_NLP_DATA_PATH")

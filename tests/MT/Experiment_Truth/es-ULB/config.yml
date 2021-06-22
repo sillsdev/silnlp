@@ -1,0 +1,16 @@
+data:
+  seed: 111
+  src_langs:
+  - es-es_ulb
+  trg_langs:
+  - en-en_ulb
+  test_size: 250
+  val_size: 250
+  src_casing: preserve
+  trg_casing: preserve
+  vocab_size: 8000
+  term_cats:
+  include_term_glosses: false
+  tokenize: false
+  guided_alignment: True
+  guided_alignment_train_corpus_max_size: 1000

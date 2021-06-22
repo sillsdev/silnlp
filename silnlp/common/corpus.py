@@ -8,7 +8,7 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 
 from ..common.utils import get_repo_dir
-from .environment import MT_SCRIPTURE_DIR, MT_TERMS_DIR
+from .environment import MT_SCRIPTURE_DIR, MT_TERMS_DIR, ASSETS_DIR
 from .verse_ref import VerseRef
 
 
@@ -46,7 +46,7 @@ def get_scripture_parallel_corpus(src_file_path: Path, trg_file_path: Path) -> p
     src_sentences: List[str] = []
     trg_sentences: List[str] = []
     indices: List[int] = []
-    with open(MT_SCRIPTURE_DIR / "vref.txt", "r", encoding="utf-8") as vref_file, open(
+    with open(ASSETS_DIR / "vref.txt", "r", encoding="utf-8") as vref_file, open(
         src_file_path, "r", encoding="utf-8"
     ) as src_file, open(trg_file_path, "r", encoding="utf-8") as trg_file:
         index = 0

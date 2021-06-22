@@ -15,7 +15,7 @@ def compare_folders(truth_folder: str, computed_folder: str):
     for tf in truth_files:
         tfp = os.path.join(truth_folder, tf)
         cfp = os.path.join(computed_folder, tf)
-        assert cfp.is_file(), "The file " + tf + " should have been but was not created."
+        assert os.path.isfile(cfp), "The file " + tf + " should have been but was not created."
         if tf == "log.txt":
             tf_content = tfp.open("r", encoding="utf-8").readlines()
             cf_content = cfp.open("r", encoding="utf-8").readlines()
