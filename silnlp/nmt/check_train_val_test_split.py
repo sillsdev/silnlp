@@ -105,13 +105,13 @@ def writeWordList(writer: pd.ExcelWriter, word_list: Dict, sheet: str):
 
 corpusStats = pd.DataFrame(columns=['Corpus',
                                     'Set',
-                                    'Total Words',
-                                    'Unique',
-                                    'Unknown (Total)',
-                                    'Unknown (Unique)',
-                                    'Unknown (% Total)',
-                                    'Unknown (% Unique)',
-                                    'Unknown (Misspellings)',
+                                    'Words (Total)',
+                                    'Words (Unique)',
+                                    'Words (Unknown)',
+                                    'Words (Unknown) %',
+                                    'Words (Unique Unknown)',
+                                    'Words (Unique Unknown) %',
+                                    'Possible Misspellings',
                                     ])
 
 
@@ -121,43 +121,27 @@ def writeStats(writer: pd.ExcelWriter):
 
 
 def collectStats(corpus: str,
-                 train_word_counts: Counter,
-                 val_word_counts: Counter,
-                 unk_val_word_counts: Counter,
-                 val_similar_words: Dict[str, List[str]],
-                 test_word_counts: Counter,
-                 unk_test_word_counts: Counter,
-                 test_similar_words: Dict[str, List[str]]):
+                 corpus_set: str,
+                 word_counts: Counter,
+                 unk_word_counts: Counter,
+                 similar_words: Dict[str, List[str]]):
     global corpusStats
 
-    corpusStats = corpusStats.append({
+    stats = {
         'Corpus': corpus,
-        'Set': "train",
-        'Total Words': sum(train_word_counts.values()),
-        'Unique': len(train_word_counts)
-    }, ignore_index=True)
-    corpusStats = corpusStats.append({
-        'Corpus': corpus,
-        'Set': "val",
-        'Total Words': sum(val_word_counts.values()),
-        'Unique': len(val_word_counts),
-        'Unknown (Total)': sum(unk_val_word_counts.values()),
-        'Unknown (Unique)': len(unk_val_word_counts),
-        'Unknown (% Total)': sum(unk_val_word_counts.values()) / sum(val_word_counts.values()) * 100,
-        'Unknown (% Unique)': len(unk_val_word_counts) / len(val_word_counts) * 100,
-        'Unknown (Misspellings)': len(val_similar_words)
-    }, ignore_index=True)
-    corpusStats = corpusStats.append({
-        'Corpus': corpus,
-        'Set': "test",
-        'Total Words': sum(test_word_counts.values()),
-        'Unique': len(test_word_counts),
-        'Unknown (Total)': sum(unk_test_word_counts.values()),
-        'Unknown (Unique)': len(unk_test_word_counts),
-        'Unknown (% Total)': sum(unk_test_word_counts.values()) / sum(test_word_counts.values()) * 100,
-        'Unknown (% Unique)': len(unk_test_word_counts) / len(test_word_counts) * 100,
-        'Unknown (Misspellings)': len(test_similar_words)
-    }, ignore_index=True)
+        'Set': corpus_set,
+        'Words (Total)': sum(word_counts.values()),
+        'Words (Unique)': len(word_counts),
+    }
+    if unk_word_counts is not None:
+        stats['Words (Unknown)'] = sum(unk_word_counts.values())
+        stats['Words (Unknown) %'] = sum(unk_word_counts.values()) / sum(word_counts.values()) * 100
+        stats['Words (Unique Unknown)'] = len(unk_word_counts)
+        stats['Words (Unique Unknown) %'] = len(unk_word_counts) / len(word_counts) * 100
+    if similar_words is not None:
+        stats['Possible Misspellings'] = len(similar_words)
+
+    corpusStats = corpusStats.append(stats, ignore_index=True)
 
 
 def wordChecks(folder: str, writer: pd.ExcelWriter, corpus: str,
@@ -188,6 +172,7 @@ def wordChecks(folder: str, writer: pd.ExcelWriter, corpus: str,
         print(f'No test data for corpus {corpus}')
         return
     unk_test_word_counts = unknown_word_counts(train_word_counts, test_word_counts)
+    unk_test_val_word_counts = unknown_word_counts(train_word_counts + val_word_counts, test_word_counts)
 
     if similar:
         if len(val_word_counts) > 0:
@@ -195,9 +180,10 @@ def wordChecks(folder: str, writer: pd.ExcelWriter, corpus: str,
         if len(test_word_counts) > 0:
             test_similar_words = find_similar_words(train_word_counts, unk_test_word_counts, distance)
 
-    collectStats(corpus, train_word_counts,
-                 val_word_counts, unk_val_word_counts, val_similar_words,
-                 test_word_counts, unk_test_word_counts, test_similar_words)
+    collectStats(corpus, "Train", train_word_counts, None, None)
+    collectStats(corpus, "Val (vs Train)", val_word_counts, unk_val_word_counts, val_similar_words)
+    collectStats(corpus, "Test (vs Train)", test_word_counts, unk_test_word_counts, test_similar_words)
+    collectStats(corpus, "Test (vs Train+Val)", test_word_counts, unk_test_val_word_counts, None)
 
     if details:
         # Source corpora word counts/lists

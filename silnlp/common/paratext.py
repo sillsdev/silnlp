@@ -1,5 +1,6 @@
 import logging
 import re
+import os
 import subprocess
 from collections import OrderedDict
 from pathlib import Path
@@ -248,7 +249,8 @@ def book_file_name_digits(book_num: int) -> str:
 
 def get_book_path(project: str, book: str) -> Path:
     project_dir = get_project_dir(project)
-    settings_tree = etree.parse(str(project_dir / "Settings.xml"), parser=parser_utf8)
+#    settings_tree = etree.parse(str(project_dir / "Settings.xml"), parser=parser_utf8)
+    settings_tree = etree.parse(os.path.join(project_dir, "Settings.xml"))
     naming_elem = settings_tree.find("Naming")
     assert naming_elem is not None
 
