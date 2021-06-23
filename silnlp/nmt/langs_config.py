@@ -412,23 +412,28 @@ class LangsConfig(Config):
 
         if terms is not None:
             train_count += self._write_terms(src_spp, trg_spp, terms)
+        LOGGER.info(f"train size: {train_count}, terms size: {0 if terms is None else len(terms)}")
 
-        LOGGER.info("Writing validation data set...")
         if len(val) > 0:
+            LOGGER.info("Writing validation data set...")
             val_src = itertools.chain.from_iterable(map(lambda pair_val: pair_val["source"], val.values()))
             write_corpus(self.exp_dir / "val.src.txt", encode_sp_lines(src_spp, val_src))
+            val_count = sum(len(pair_val) for pair_val in val.values())
             self._write_val_corpora(trg_spp, val)
             val_vref = itertools.chain.from_iterable(map(lambda pair_val: pair_val["vref"], val.values()))
             write_corpus(self.exp_dir / "val.vref.txt", map(lambda vr: str(vr), val_vref))
+            LOGGER.info(f"val size: {val_count}")
 
         LOGGER.info("Writing test data set...")
         for old_file_path in self.exp_dir.glob("test.*.txt"):
             old_file_path.unlink()
 
+        test_count = 0
         for (src_iso, trg_iso), pair_test in test.items():
             prefix = "test" if len(test) == 1 else f"test.{src_iso}.{trg_iso}"
-            write_corpus(self.exp_dir / f"{prefix}.vref.txt", map(lambda vr: str(vr), pair_test["vref"]))
+            write_corpus(self.exp_dir / f"{prefix}.vref.txt", (str(vr) for vr in pair_test["vref"]))
             write_corpus(self.exp_dir / f"{prefix}.src.txt", encode_sp_lines(src_spp, pair_test["source"]))
+            test_count += len(pair_test)
 
             columns: List[str] = [c for c in pair_test.columns if c.startswith("target")]
             for column in columns:
@@ -443,6 +448,7 @@ class LangsConfig(Config):
                         self.exp_dir / f"{prefix}.trg.detok{trg_suffix}.txt",
                         decode_sp_lines(encode_sp_lines(trg_spp, pair_test[column])),
                     )
+        LOGGER.info(f"test size: {test_count}")
         return train_count
 
     def _add_to_train_dataset(
