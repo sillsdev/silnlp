@@ -33,3 +33,4 @@ nlp/checkdata/Recent/iso with at least one missing folder.txt
 nlp/checkdata/Recent/iso-to-folder.txt
 tests/MT/scripture/
 tests/MT/Experiments/
+tests/MT/terms/

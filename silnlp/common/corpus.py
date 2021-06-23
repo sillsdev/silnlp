@@ -148,11 +148,17 @@ def exclude_books(corpus: pd.DataFrame, books: Set[int]) -> pd.DataFrame:
 
 
 def get_terms_metadata_path(list_name: str) -> Path:
-    return MT_TERMS_DIR / f"{list_name}-metadata.txt"
+    md_path = MT_TERMS_DIR / f"{list_name}-metadata.txt"
+    if md_path.is_file():
+        return md_path
+    return ASSETS_DIR / f"{list_name}-metadata.txt"
 
 
 def get_terms_glosses_path(list_name: str) -> Path:
-    return MT_TERMS_DIR / f"en-{list_name}-glosses.txt"
+    gl_path = MT_TERMS_DIR / f"en-{list_name}-glosses.txt"
+    if gl_path.is_file():
+        return gl_path
+    return ASSETS_DIR / f"en-{list_name}-glosses.txt"
 
 
 def get_terms_renderings_path(iso: str, project: str) -> Optional[Path]:
