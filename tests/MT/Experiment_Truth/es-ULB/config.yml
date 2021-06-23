@@ -4,8 +4,8 @@ data:
   - es-es_ulb
   trg_langs:
   - en-en_ulb
-  test_size: 250
-  val_size: 250
+  test_size: 25
+  val_size: 25
   src_casing: preserve
   trg_casing: preserve
   vocab_size: 8000
