@@ -14,10 +14,10 @@ LOGGER.addHandler(ch)
 # Update or add dotnet machine environment
 try:
     result = subprocess.run(
-        "dotnet tool restore", cwd=Path(__file__).parent.parent, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        ["dotnet", "tool", "restore"], cwd=Path(__file__).parent.parent, stdout=subprocess.PIPE, stderr=subprocess.PIPE
     )
     LOGGER.debug(result.stdout)
 except:
     LOGGER.error(
-        "The .Net Core SDK needs to be installed (https://dotnet.microsoft.com/download) to be able to use the functionality in sil.machine.tool (most of silnlp)."
+        "The .NET Core SDK needs to be installed (https://dotnet.microsoft.com/download) to be able to use the functionality in SIL.Machine.Tool (most of silnlp)."
     )
