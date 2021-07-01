@@ -22,7 +22,6 @@ _TERMS_LISTS = {
     "Project": "ProjectBiblicalTerms.xml",
 }
 
-parser_utf8 = etree.XMLParser(encoding="UTF-8")
 LOGGER = logging.getLogger(__name__)
 
 
@@ -39,7 +38,7 @@ def get_iso(settings_tree: etree.ElementTree) -> str:
 
 def extract_project(project: str, include_texts: str, exclude_texts: str, include_markers: bool) -> None:
     project_dir = get_project_dir(project)
-    settings_tree = etree.parse(str(project_dir / "Settings.xml"), parser=parser_utf8)
+    settings_tree = etree.parse(str(project_dir / "Settings.xml"))
     iso = get_iso(settings_tree)
 
     ref_dir = ASSETS_DIR / "Ref"
@@ -137,7 +136,7 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> None:
     with open(terms_metadata_path, "w", encoding="utf-8", newline="\n") as terms_metadata_file, open(
         terms_glosses_path, "w", encoding="utf-8", newline="\n"
     ) as terms_glosses_file:
-        terms_tree = etree.parse(str(terms_xml_path), parser=parser_utf8)
+        terms_tree = etree.parse(str(terms_xml_path))
         for term_elem in terms_tree.getroot().findall("Term"):
             id = term_elem.get("Id")
             if id is None:
@@ -182,7 +181,7 @@ def extract_term_renderings(project_folder: str) -> None:
     if not renderings_path.is_file():
         return
 
-    renderings_tree = etree.parse(str(renderings_path), parser=parser_utf8)
+    renderings_tree = etree.parse(str(renderings_path))
     rendering_elems: Dict[str, etree.Element] = {}
     for elem in renderings_tree.getroot().findall("TermRendering"):
         id = elem.get("Id")
@@ -191,7 +190,7 @@ def extract_term_renderings(project_folder: str) -> None:
         id = escape_id(id)
         rendering_elems[id] = elem
 
-    settings_tree = etree.parse(str(project_dir / "Settings.xml"), parser=parser_utf8)
+    settings_tree = etree.parse(str(project_dir / "Settings.xml"))
     iso = get_iso(settings_tree)
     project_name = settings_tree.getroot().findtext("Name", project_folder)
     terms_setting = settings_tree.getroot().findtext("BiblicalTermsListSetting", "Major::BiblicalTerms.xml")
@@ -249,7 +248,6 @@ def book_file_name_digits(book_num: int) -> str:
 
 def get_book_path(project: str, book: str) -> Path:
     project_dir = get_project_dir(project)
-#    settings_tree = etree.parse(str(project_dir / "Settings.xml"), parser=parser_utf8)
     settings_tree = etree.parse(os.path.join(project_dir, "Settings.xml"))
     naming_elem = settings_tree.find("Naming")
     assert naming_elem is not None

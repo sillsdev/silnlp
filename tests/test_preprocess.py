@@ -19,8 +19,9 @@ def test_preprocess(exp_folder):
     assert os.path.isfile(config_file), "The configuraiton file config.yml does not exist for " + exp_folder.name
     experiment_path = exp_dir / exp_folder.name
     shutil.rmtree(experiment_path, ignore_errors=True)
-    os.mkdir(experiment_path)
+    os.makedirs(experiment_path, exist_ok=True)
     shutil.copyfile(src=config_file, dst=os.path.join(experiment_path, "config.yml"))
+    helper.init_file_logger(str(experiment_path))
 
     config = load_config(experiment_path)
     config.set_seed()

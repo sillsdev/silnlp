@@ -1,6 +1,20 @@
 import os
 from pathlib import Path
 import gc
+import logging
+
+
+def init_file_logger(exp_folder: str):
+    LOGGER = logging.getLogger()
+    LOGGER.setLevel(logging.INFO)
+    LOGGER.handlers = []  # removes all handlers
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    ch = logging.StreamHandler()
+    ch.setFormatter(formatter)
+    LOGGER.addHandler(ch)
+    fh = logging.FileHandler(os.path.join(exp_folder, "log.txt"))
+    fh.setFormatter(formatter)
+    LOGGER.addHandler(fh)
 
 
 def remove_previously_created_files(folder: str, extensions_to_delete=("txt", "json")):
@@ -17,11 +31,14 @@ def compare_folders(truth_folder: str, computed_folder: str):
         cfp = os.path.join(computed_folder, tf)
         assert os.path.isfile(cfp), "The file " + tf + " should have been but was not created."
         if tf == "log.txt":
-            tf_content = tfp.open("r", encoding="utf-8").readlines()
-            cf_content = cfp.open("r", encoding="utf-8").readlines()
+            tf_content = open(tfp, "r", encoding="utf-8").readlines()
+            cf_content = open(cfp, "r", encoding="utf-8").readlines()
             # remove the timestamp from the logfile
             tf_content = [l[26:] for l in tf_content]
             cf_content = [l[26:] for l in cf_content]
+            assert len(cf_content) == len(
+                tf_content
+            ), f"Log entry has only {len(cf_content)} lines but should have {len(tf_content)} lines"
             for i in range(len(tf_content)):
                 assert tf_content[i] == cf_content[i], (
                     "Log entry line " + str(i) + " should be:\n  " + tf_content[i] + "\nbut is:\n  " + cf_content[i]
