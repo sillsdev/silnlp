@@ -43,12 +43,12 @@ def compare_folders(truth_folder: str, computed_folder: str):
                     "Log entry line " + str(i) + " should be:\n  " + tf_content[i] + "\nbut is:\n  " + cf_content[i]
                 )
         elif tf.endswith((".src.txt", ".trg.txt")):
-            tf_content = open(tfp, "r", encoding="utf-8").readlines()
-            cf_content = open(cfp, "r", encoding="utf-8").readlines()
+            tf_content = ["".join(l.split()) for l in open(tfp, "r", encoding="utf-8").readlines()]
+            cf_content = ["".join(l.split()) for l in open(cfp, "r", encoding="utf-8").readlines()]
             for i in range(len(tf_content)):
                 # remove all whitespace, as it changes as per sentencepiece and is hard to control.
-                assert "".join(tf_content[i].split()) == "".join(
-                    cf_content[i].split()
+                assert (
+                    tf_content[i] == cf_content[i]
                 ), f"line {i} in {tf} should be:\n  {tf_content[i]}\nbut is:\n  {cf_content[i]}"
         elif tf.endswith((".xml", ".txt", ".csv", ".json")):
             tf_content = open(tfp, "r", encoding="utf-8").readlines()
