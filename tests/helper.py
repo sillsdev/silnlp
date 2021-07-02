@@ -37,7 +37,7 @@ def compare_folders(truth_folder: str, computed_folder: str):
             cf_content = [l[26:] for l in cf_content]
             assert len(cf_content) == len(
                 tf_content
-            ), f"Log entry has only {len(cf_content)} lines but should have {len(tf_content)} lines"
+            ), f"Log entry has {len(cf_content)} lines but should have {len(tf_content)} lines"
             for i in range(len(tf_content)):
                 assert tf_content[i] == cf_content[i], (
                     "Log entry line " + str(i) + " should be:\n  " + tf_content[i] + "\nbut is:\n  " + cf_content[i]

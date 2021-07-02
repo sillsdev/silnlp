@@ -58,12 +58,12 @@ def main() -> None:
             extract_term_renderings(project)
             LOGGER.info("Done.")
     else:
-        LOGGER.warning("Couldn't find any data to process for any project.")
+        LOGGER.warning(f"Couldn't find any data to process for any project in {PT_PROJECTS_DIR}.")
 
     # Tell the user which projects couldn't be found.
     for project in projects:
         if project not in projects_found:
-            LOGGER.warning(f"Couldn't find project {project}")
+            LOGGER.warning(f"Couldn't find project {project} in {PT_PROJECTS_DIR}.")
 
 
 if __name__ == "__main__":

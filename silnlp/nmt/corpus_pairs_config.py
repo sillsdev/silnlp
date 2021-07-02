@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import IO, Iterable, List, Optional, Set, Type, Union
 
@@ -8,6 +9,8 @@ from ..common.environment import MT_CORPORA_DIR, MT_SCRIPTURE_DIR
 from ..common.utils import DeleteRandomToken, NoiseMethod, RandomTokenPermutation, ReplaceRandomToken, is_set
 from .config import Config, DataFileType
 from .utils import decode_sp, encode_sp
+
+LOGGER = logging.getLogger(__name__)
 
 
 def parse_iso(file_path: Path) -> str:
@@ -259,7 +262,7 @@ class CorpusPairsConfig(Config):
         src_corpus: Iterable[str],
         trg_corpus: Iterable[str],
     ) -> int:
-        print(f"Writing {pair.src_file_path.stem} -> {pair.trg_file_path.stem}...")
+        LOGGER.info(f"Writing {pair.src_file_path.stem} -> {pair.trg_file_path.stem}...")
         test_indices: Optional[Set[int]] = set()
         if pair.is_test:
             test_size = pair.size if pair.test_size is None else pair.test_size
@@ -324,9 +327,7 @@ class CorpusPairsConfig(Config):
                         train_count += 1
 
                 index += 1
-        print(f"- train size: {train_count}")
-        print(f"- val size: {val_count}")
-        print(f"- test size: {test_count}")
+        LOGGER.info(f"train size: {train_count}, val size: {val_count}, test size: {test_count}")
         return train_count
 
     def _insert_trg_tag(self, trg_iso: str, src_sentence: str) -> str:
