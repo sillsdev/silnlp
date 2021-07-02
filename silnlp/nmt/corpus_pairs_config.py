@@ -85,7 +85,10 @@ def get_corpus_path(corpus: str) -> Path:
     corpus_path = MT_CORPORA_DIR / f"{corpus}.txt"
     if corpus_path.is_file():
         return corpus_path
-    return MT_SCRIPTURE_DIR / f"{corpus}.txt"
+    corpus_path = MT_SCRIPTURE_DIR / f"{corpus}.txt"
+    if not corpus_path.is_file():
+        LOGGER.info(f"Could not find file '{corpus}' in either {MT_CORPORA_DIR} or {MT_SCRIPTURE_DIR}")
+    return corpus_path
 
 
 def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
