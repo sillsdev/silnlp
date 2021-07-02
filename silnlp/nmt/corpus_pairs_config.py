@@ -87,7 +87,7 @@ def get_corpus_path(corpus: str) -> Path:
         return corpus_path
     corpus_path = MT_SCRIPTURE_DIR / f"{corpus}.txt"
     if not corpus_path.is_file():
-        LOGGER.info(f"Could not find file '{corpus}' in either {MT_CORPORA_DIR} or {MT_SCRIPTURE_DIR}")
+        LOGGER.warning(f"Could not find file '{corpus}' in either {MT_CORPORA_DIR} or {MT_SCRIPTURE_DIR}")
     return corpus_path
 
 
