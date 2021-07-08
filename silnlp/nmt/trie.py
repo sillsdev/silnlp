@@ -19,6 +19,10 @@ class Trie:
         self.indptr: Optional[tf.Tensor] = None
         self.states: Optional[tf.RaggedTensor] = None
 
+    @property
+    def empty(self) -> bool:
+        return self.num_states == 0
+
     def add(self, ids: tf.Tensor, values: List[tf.Tensor]) -> None:
         if self.build_matrix is None or self.build_states is None:
             raise RuntimeError("The trie is immutable.")

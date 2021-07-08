@@ -533,8 +533,9 @@ class SILTransformer(Transformer):
                     trg_ids = [self.labels_inputter.make_features(tf.constant(te.strip()))["ids"] for te in trg_entry]
                     for src_variant_ids in src_ids:
                         dictionary.add(src_variant_ids, trg_ids)
-            dictionary.compile()
-            self._dictionary = dictionary
+            if not dictionary.empty:
+                dictionary.compile()
+                self._dictionary = dictionary
             self.labels_inputter.set_decoder_mode(mark_start=True, mark_end=True)
 
     def analyze(self, features):
