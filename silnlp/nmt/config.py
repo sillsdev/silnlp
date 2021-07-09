@@ -678,7 +678,7 @@ def main() -> None:
     config_path = exp_dir / "config.yml"
     if config_path.is_file() and not args.force:
         LOGGER.warning(
-            'The experiment config file already exists. Use "--force" if you want to overwrite the existing config.'
+            f'The experiment config file {config_path} already exists. Use "--force" if you want to overwrite the existing config.'
         )
         return
 
@@ -740,7 +740,7 @@ def main() -> None:
         data_config["mirror"] = True
     with open(config_path, "w", encoding="utf-8") as file:
         yaml.dump(config, file)
-    LOGGER.info("Config file created")
+    LOGGER.info(f"Config file created: {config_path}")
 
 
 if __name__ == "__main__":
