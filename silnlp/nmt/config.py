@@ -75,6 +75,7 @@ class DataFileType(Flag):
     TRAIN = auto()
     TEST = auto()
     VAL = auto()
+    DICT = auto()
 
 
 def convert_vocab(sp_vocab_path: Path, onmt_vocab_path: Path, tag_langs: Set[str] = None) -> None:

@@ -1,6 +1,6 @@
 import itertools
-import random
 import logging
+import random
 from pathlib import Path
 from statistics import mean
 from typing import IO, Any, Dict, Iterable, List, Optional, Set, Tuple, Union
@@ -11,17 +11,19 @@ import sentencepiece as sp
 from ..alignment.utils import add_alignment_scores
 from ..common.canon import get_books
 from ..common.corpus import (
-    Term,
     exclude_books,
     filter_parallel_corpus,
     get_scripture_parallel_corpus,
     get_scripture_path,
     get_terms,
+    get_terms_corpus,
+    get_terms_data_frame,
     get_terms_glosses_path,
     get_terms_list,
     get_terms_renderings_path,
     include_books,
     load_corpus,
+    parse_scripture_path,
     split_parallel_corpus,
     write_corpus,
 )
@@ -34,17 +36,11 @@ from .utils import decode_sp_lines, encode_sp, encode_sp_lines
 LOGGER = logging.getLogger(__name__)
 
 
-def parse_data_file_path(data_file_path: Path) -> Tuple[str, str]:
-    file_name = data_file_path.stem
-    parts = file_name.split("-")
-    return (parts[0], parts[1])
-
-
 class LangsDataFile:
     def __init__(self, path: Path, type: DataFileType):
         self.path = path
         self.type = type
-        self.iso, self.project = parse_data_file_path(path)
+        self.iso, self.project = parse_scripture_path(path)
 
     @property
     def is_train(self):
@@ -61,33 +57,6 @@ class LangsDataFile:
 
 def get_train_count(data_files: List[LangsDataFile]) -> int:
     return len([df for df in data_files if df.is_train])
-
-
-def get_terms_corpus(src_terms: Dict[str, Term], trg_terms: Dict[str, Term], cats: Optional[Set[str]]) -> pd.DataFrame:
-    data: Set[Tuple[str, str]] = set()
-    for src_term in src_terms.values():
-        if cats is not None and src_term.cat not in cats:
-            continue
-
-        trg_term = trg_terms.get(src_term.id)
-        if trg_term is None:
-            continue
-
-        for src_rendering in src_term.renderings:
-            for trg_rendering in trg_term.renderings:
-                data.add((src_rendering, trg_rendering))
-    return pd.DataFrame(data, columns=["source", "target"])
-
-
-def get_terms_data_frame(terms: Dict[str, Term], cats: Optional[Set[str]]) -> pd.DataFrame:
-    data: Set[Tuple[str, str]] = set()
-    for term in terms.values():
-        if cats is not None and term.cat not in cats:
-            continue
-        for rendering in term.renderings:
-            for gloss in term.glosses:
-                data.add((rendering, gloss))
-    return pd.DataFrame(data, columns=["rendering", "gloss"])
 
 
 def parse_projects(projects_value: Optional[Union[str, List[str]]], default: Set[str] = set()) -> Set[str]:
@@ -613,12 +582,11 @@ class LangsConfig(Config):
                     ]
 
                     if train_src_file is not None and train_trg_file is not None and train_vref_file is not None:
-                        for stv in src_term_variants:
-                            for ttv in trg_term_variants:
-                                train_src_file.write(stv + "\n")
-                                train_trg_file.write(ttv + "\n")
-                                train_vref_file.write("\n")
-                                train_count += 1
+                        for stv, ttv in zip(src_term_variants, trg_term_variants):
+                            train_src_file.write(stv + "\n")
+                            train_trg_file.write(ttv + "\n")
+                            train_vref_file.write("\n")
+                            train_count += 1
 
                     if dict_src_file is not None and dict_trg_file is not None:
                         dict_src_file.write("\t".join(src_term_variants) + "\n")
