@@ -25,7 +25,7 @@ from ..common.corpus import (
     split_parallel_corpus,
     write_corpus,
 )
-from ..common.environment import ASSETS_DIR
+from ..common.environment import SNE
 from ..common.utils import get_mt_exp_dir, merge_dict
 from ..common.verse_ref import VerseRef
 from .config import Config, DataFileType
@@ -557,7 +557,7 @@ class LangsConfig(Config):
             return
 
         vrefs: Dict[str, int] = {}
-        for i, vref_str in enumerate(load_corpus(ASSETS_DIR / "vref.txt")):
+        for i, vref_str in enumerate(load_corpus(SNE._ASSETS_DIR / "vref.txt")):
             vrefs[vref_str] = i
 
         exp_dir = get_mt_exp_dir(exp_name)

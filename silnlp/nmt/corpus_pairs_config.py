@@ -5,7 +5,7 @@ from typing import IO, Iterable, List, Optional, Set, Type, Union
 import sentencepiece as sp
 
 from ..common.corpus import get_scripture_parallel_corpus, split_corpus
-from ..common.environment import MT_CORPORA_DIR, MT_SCRIPTURE_DIR
+from ..common.environment import SNE
 from ..common.utils import DeleteRandomToken, NoiseMethod, RandomTokenPermutation, ReplaceRandomToken, is_set
 from .config import Config, DataFileType
 from .utils import decode_sp, encode_sp
@@ -56,7 +56,7 @@ class CorpusPair:
 
     @property
     def is_scripture(self):
-        return self.src_file_path.parent == MT_SCRIPTURE_DIR
+        return self.src_file_path.parent == SNE._MT_SCRIPTURE_DIR
 
 
 def create_noise_methods(params: List[dict]) -> List[NoiseMethod]:
@@ -82,12 +82,12 @@ def create_noise_methods(params: List[dict]) -> List[NoiseMethod]:
 
 
 def get_corpus_path(corpus: str) -> Path:
-    corpus_path = MT_CORPORA_DIR / f"{corpus}.txt"
+    corpus_path = SNE._MT_CORPORA_DIR / f"{corpus}.txt"
     if corpus_path.is_file():
         return corpus_path
-    corpus_path = MT_SCRIPTURE_DIR / f"{corpus}.txt"
+    corpus_path = SNE._MT_SCRIPTURE_DIR / f"{corpus}.txt"
     if not corpus_path.is_file():
-        LOGGER.warning(f"Could not find file '{corpus}' in either {MT_CORPORA_DIR} or {MT_SCRIPTURE_DIR}")
+        LOGGER.warning(f"Could not find file '{corpus}' in either {SNE._MT_CORPORA_DIR} or {SNE._MT_SCRIPTURE_DIR}")
     return corpus_path
 
 

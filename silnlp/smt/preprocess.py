@@ -13,7 +13,7 @@ from ..common.corpus import (
     split_parallel_corpus,
     write_corpus,
 )
-from ..common.environment import ASSETS_DIR
+from ..common.environment import SNE
 from ..common.utils import get_git_revision_hash, get_mt_exp_dir, set_seed
 from .config import load_config
 from ..common.verse_ref import VerseRef
@@ -35,7 +35,7 @@ def get_test_indices(config: dict) -> Optional[Set[int]]:
         return None
 
     vrefs: Dict[str, int] = {}
-    for i, vref_str in enumerate(load_corpus(ASSETS_DIR / "vref.txt")):
+    for i, vref_str in enumerate(load_corpus(SNE._ASSETS_DIR / "vref.txt")):
         vrefs[vref_str] = i
 
     test_indices: Set[int] = set()

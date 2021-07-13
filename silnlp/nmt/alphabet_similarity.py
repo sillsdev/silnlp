@@ -6,13 +6,13 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
-from ..common.environment import MT_SCRIPTURE_DIR
+from ..common.environment import SNE
 from .config import load_config
 from .langs_config import LangsConfig
 
 
 def get_corpus_path(project: str) -> Path:
-    return MT_SCRIPTURE_DIR / f"{project}.txt"
+    return SNE._MT_SCRIPTURE_DIR / f"{project}.txt"
 
 
 def computeSimilarity(projects: List[str]) -> None:
