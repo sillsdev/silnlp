@@ -92,7 +92,7 @@ def get_scripture_parallel_corpus(src_file_path: Path, trg_file_path: Path) -> p
 
 
 def split_parallel_corpus(
-    corpus: pd.DataFrame, split_size: int, split_indices: Set[int] = None
+    corpus: pd.DataFrame, split_size: Union[float, int], split_indices: Set[int] = None
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     split: pd.DataFrame
     if split_indices is None:

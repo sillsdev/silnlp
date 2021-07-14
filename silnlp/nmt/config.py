@@ -1,16 +1,18 @@
 import argparse
+import itertools
 import logging
 import os
-import sys
+import random
 import shutil
+import sys
 import tempfile
-from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from enum import Enum, Flag, auto
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union, cast
+from statistics import mean
+from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, Type, Union, cast
 
-
-import numpy as np
+import pandas as pd
 import sentencepiece as sp
 import tensorflow as tf
 import yaml
@@ -19,11 +21,40 @@ from opennmt.data import Noise, Vocab, WordDropout, WordNoiser, tokens_to_words
 from opennmt.models import Model, get_model_from_catalog
 
 from ..alignment.machine_aligner import FastAlignMachineAligner
-from ..common.corpus import load_corpus, split_corpus
-from ..common.utils import get_git_revision_hash, get_mt_exp_dir, merge_dict, set_seed
+from ..alignment.utils import add_alignment_scores
+from ..common.canon import get_books
+from ..common.corpus import (
+    exclude_books,
+    filter_parallel_corpus,
+    get_scripture_parallel_corpus,
+    get_terms,
+    get_terms_corpus,
+    get_terms_data_frame,
+    get_terms_glosses_path,
+    get_terms_list,
+    get_terms_renderings_path,
+    include_books,
+    load_corpus,
+    split_corpus,
+    split_parallel_corpus,
+    write_corpus,
+)
+from ..common.environment import MT_CORPORA_DIR, MT_SCRIPTURE_DIR
+from ..common.utils import (
+    DeleteRandomToken,
+    NoiseMethod,
+    RandomTokenPermutation,
+    ReplaceRandomToken,
+    get_git_revision_hash,
+    get_mt_exp_dir,
+    is_set,
+    merge_dict,
+    set_seed,
+)
+from ..common.verse_ref import VerseRef
 from .runner import SILRunner
 from .transformer import SILTransformer
-from .utils import encode_sp_lines, get_best_model_dir, get_last_checkpoint
+from .utils import decode_sp, decode_sp_lines, encode_sp, encode_sp_lines, get_best_model_dir, get_last_checkpoint
 
 _PYTHON_TO_TENSORFLOW_LOGGING_LEVEL: Dict[int, int] = {
     logging.CRITICAL: 3,
@@ -44,11 +75,6 @@ _DEFAULT_NEW_CONFIG: dict = {
         "mirror": False,
         "mixed_src": False,
         "seed": 111,
-        "test_size": 1,
-        "val_size": 1,
-        "disjoint_test": False,
-        "disjoint_val": False,
-        "score_threshold": 0,
     },
     "train": {"maximum_features_length": 150, "maximum_labels_length": 150},
     "eval": {"multi_ref_eval": False},
@@ -61,6 +87,8 @@ _DEFAULT_NEW_CONFIG: dict = {
         "word_dropout": 0.1,
     },
 }
+
+BASIC_DATA_PROJECT = "BASIC"
 
 
 # Different types of parent model checkpoints (last, best, average)
@@ -78,10 +106,269 @@ class DataFileType(Flag):
     DICT = auto()
 
 
-def convert_vocab(sp_vocab_path: Path, onmt_vocab_path: Path, tag_langs: Set[str] = None) -> None:
+@dataclass
+class DataFile:
+    path: Path
+    iso: str = field(init=False)
+    project: str = field(init=False)
+
+    def __post_init__(self):
+        file_name = self.path.stem
+        parts = file_name.split("-")
+        self.iso = parts[0]
+        self.project = parts[1] if self.path.parent == MT_SCRIPTURE_DIR else BASIC_DATA_PROJECT
+
+    @property
+    def is_scripture(self) -> bool:
+        return self.project != BASIC_DATA_PROJECT
+
+
+@dataclass
+class CorpusPair:
+    src_files: List[DataFile]
+    trg_files: List[DataFile]
+    type: DataFileType
+    src_noise: List[NoiseMethod]
+    tags: List[str]
+    size: Union[float, int]
+    test_size: Optional[Union[float, int]]
+    val_size: Optional[Union[float, int]]
+    disjoint_test: bool
+    disjoint_val: bool
+    score_threshold: float
+    mixed_src: bool
+    corpus_books: Set[int]
+    test_books: Set[int]
+    use_test_set_from: str
+    src_terms_files: List[DataFile]
+    trg_terms_files: List[DataFile]
+    is_lexical: bool
+
+    @property
+    def src_file_path(self) -> Path:
+        return self.src_files[0].path
+
+    @property
+    def trg_file_path(self) -> Path:
+        return self.trg_files[0].path
+
+    @property
+    def src_iso(self) -> str:
+        return self.src_files[0].iso
+
+    @property
+    def trg_iso(self) -> str:
+        return self.trg_files[0].iso
+
+    @property
+    def is_train(self) -> bool:
+        return is_set(self.type, DataFileType.TRAIN)
+
+    @property
+    def is_test(self) -> bool:
+        return is_set(self.type, DataFileType.TEST)
+
+    @property
+    def is_val(self) -> bool:
+        return is_set(self.type, DataFileType.VAL)
+
+    @property
+    def is_dictionary(self) -> bool:
+        return is_set(self.type, DataFileType.DICT)
+
+    @property
+    def is_scripture(self) -> bool:
+        return self.src_files[0].is_scripture
+
+
+@dataclass
+class IsoPairInfo:
+    test_projects: Set[str] = field(default_factory=set)
+    val_projects: Set[str] = field(default_factory=set)
+    has_basic_test_data: bool = False
+
+    @property
+    def has_multiple_test_projects(self) -> bool:
+        return len(self.test_projects) > 1
+
+    @property
+    def has_test_data(self) -> bool:
+        return len(self.test_projects) > 0 or self.has_basic_test_data
+
+
+def create_noise_methods(params: List[dict]) -> List[NoiseMethod]:
+    if params is None:
+        return None
+    methods: List[NoiseMethod] = []
+    for module in params:
+        noise_type, args = next(iter(module.items()))
+        if not isinstance(args, list):
+            args = [args]
+        noise_type = noise_type.lower()
+        noise_method_class: Type[NoiseMethod]
+        if noise_type == "dropout":
+            noise_method_class = DeleteRandomToken
+        elif noise_type == "replacement":
+            noise_method_class = ReplaceRandomToken
+        elif noise_type == "permutation":
+            noise_method_class = RandomTokenPermutation
+        else:
+            raise ValueError("Invalid noise type: %s" % noise_type)
+        methods.append(noise_method_class(*args))
+    return methods
+
+
+def get_corpus_path(corpus: str) -> Path:
+    corpus_path = MT_CORPORA_DIR / f"{corpus}.txt"
+    if corpus_path.is_file():
+        return corpus_path
+    return MT_SCRIPTURE_DIR / f"{corpus}.txt"
+
+
+def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
+    pairs: List[CorpusPair] = []
+    for pair in corpus_pairs:
+        type_strs: Optional[Union[str, List[str]]] = pair.get("type")
+        if type_strs is None:
+            type_strs = ["train", "test", "val"]
+        elif isinstance(type_strs, str):
+            type_strs = type_strs.split(",")
+        type = DataFileType.NONE
+        for type_str in type_strs:
+            type_str = type_str.strip().lower()
+            if type_str == "train":
+                type |= DataFileType.TRAIN
+            elif type_str == "test":
+                type |= DataFileType.TEST
+            elif type_str == "val" or type_str == "validation":
+                type |= DataFileType.VAL
+            elif type_str == "dict" or type_str == "dictionary":
+                type |= DataFileType.DICT
+
+        src: Union[str, List[str]] = pair["src"]
+        if isinstance(src, str):
+            src = src.split(",")
+        src_files = [DataFile(get_corpus_path(sp.strip())) for sp in src]
+        trg: Union[str, List[str]] = pair["trg"]
+        if isinstance(trg, str):
+            trg = trg.split(",")
+        trg_files = [DataFile(get_corpus_path(tp.strip())) for tp in trg]
+        is_scripture = src_files[0].is_scripture
+        if not all(df.is_scripture == is_scripture for df in (src_files + trg_files)):
+            raise RuntimeError("All corpora in a corpus pair must contain the same type of data.")
+        if not is_scripture and len(src_files) != len(trg_files):
+            raise RuntimeError("A basic corpus pair must contain the same number of source and target corpora.")
+
+        tags: Union[str, List[str]] = pair.get("tags", [])
+        if isinstance(tags, str):
+            tags = [tag.strip() for tag in tags.split(",")]
+
+        src_noise = create_noise_methods(pair.get("src_noise", []))
+
+        size: Union[float, int] = pair.get("size", 1.0)
+        test_size: Optional[Union[float, int]] = pair.get("test_size")
+        if test_size is None and is_set(type, DataFileType.TRAIN | DataFileType.TEST):
+            test_size = 0 if "test_books" in pair else 250
+        val_size: Optional[Union[float, int]] = pair.get("val_size")
+        if val_size is None and is_set(type, DataFileType.TRAIN | DataFileType.VAL):
+            val_size = 250
+
+        disjoint_test: bool = pair.get("disjoint_test", False)
+        disjoint_val: bool = pair.get("disjoint_val", False)
+        score_threshold: float = pair.get("score_threshold", 0.0)
+        mixed_src: bool = pair.get("mixed_src", False) and len(src_files) > 1 and is_set(type, DataFileType.TRAIN)
+        corpus_books = get_books(pair.get("corpus_books", []))
+        test_books = get_books(pair.get("test_books", []))
+        use_test_set_from: str = pair.get("use_test_set_from", "")
+
+        src_terms_files = get_terms_files(src_files) if is_set(type, DataFileType.TRAIN) else []
+        trg_terms_files = get_terms_files(trg_files) if is_set(type, DataFileType.TRAIN) else []
+
+        is_lexical: bool = pair.get("lexical", is_set(type, DataFileType.DICT))
+
+        if is_scripture:
+            pairs.append(
+                CorpusPair(
+                    src_files,
+                    trg_files,
+                    type,
+                    src_noise,
+                    tags,
+                    size,
+                    test_size,
+                    val_size,
+                    disjoint_test,
+                    disjoint_val,
+                    score_threshold,
+                    mixed_src,
+                    corpus_books,
+                    test_books,
+                    use_test_set_from,
+                    src_terms_files,
+                    trg_terms_files,
+                    is_lexical,
+                )
+            )
+        else:
+            for src_file, trg_file in zip(src_files, trg_files):
+                pairs.append(
+                    CorpusPair(
+                        [src_file],
+                        [trg_file],
+                        type,
+                        src_noise,
+                        tags,
+                        size,
+                        test_size,
+                        val_size,
+                        disjoint_test,
+                        disjoint_val,
+                        score_threshold,
+                        mixed_src,
+                        corpus_books,
+                        test_books,
+                        use_test_set_from,
+                        src_terms_files,
+                        trg_terms_files,
+                        is_lexical,
+                    )
+                )
+    return pairs
+
+
+def get_terms_files(files: List[DataFile]) -> List[DataFile]:
+    terms_files: List[DataFile] = []
+    for file in files:
+        terms_path = get_terms_renderings_path(file.iso, file.project)
+        if terms_path is None:
+            continue
+        terms_files.append(DataFile(terms_path))
+    return terms_files
+
+
+def get_terms_glosses_file_paths(terms_files: List[DataFile]) -> Set[Path]:
+    glosses_file_paths: Set[Path] = set()
+    for terms_file in terms_files:
+        list_name = get_terms_list(terms_file.path)
+        glosses_path = get_terms_glosses_path(list_name)
+        if glosses_path.is_file():
+            glosses_file_paths.add(glosses_path)
+    return glosses_file_paths
+
+
+def get_parallel_corpus_size(src_file_path: Path, trg_file_path: Path) -> int:
+    count = 0
+    with open(src_file_path, "r", encoding="utf-8") as src_file, open(trg_file_path, "r", encoding="utf-8") as trg_file:
+        for src_line, trg_line in zip(src_file, trg_file):
+            src_line = src_line.strip()
+            trg_line = trg_line.strip()
+            if len(src_line) > 0 and len(trg_line) > 0:
+                count += 1
+    return count
+
+
+def convert_vocab(sp_vocab_path: Path, onmt_vocab_path: Path) -> None:
     special_tokens = [PADDING_TOKEN, START_OF_SENTENCE_TOKEN, END_OF_SENTENCE_TOKEN]
-    #    if tag_langs is not None:
-    #        special_tokens.extend(map(lambda l: f"<2{l}>", tag_langs))
 
     vocab = Vocab(special_tokens)
     with open(sp_vocab_path, "r", encoding="utf-8") as vocab_file:
@@ -103,12 +390,11 @@ def build_vocab(
     character_coverage: float,
     model_prefix: Path,
     vocab_path: Path,
-    tag_langs: Optional[Set[str]] = None,
+    tags: Set[str],
 ) -> None:
     user_defined_symbols = "<blank>"
-    if tag_langs is not None:
-        for tag in tag_langs:
-            user_defined_symbols += "," + f"<2{tag}>"
+    for tag in tags:
+        user_defined_symbols += f",{tag}"
 
     casing = casing.lower()
     normalization: str
@@ -135,7 +421,7 @@ def build_vocab(
         control_symbols="<range>",
     )
 
-    convert_vocab(model_prefix.with_suffix(".vocab"), vocab_path, tag_langs)
+    convert_vocab(model_prefix.with_suffix(".vocab"), vocab_path)
 
 
 def get_checkpoint_path(model_dir: Path, checkpoint_type: CheckpointType) -> Tuple[Optional[Path], Optional[int]]:
@@ -152,17 +438,8 @@ def get_checkpoint_path(model_dir: Path, checkpoint_type: CheckpointType) -> Tup
         raise RuntimeError(f"Unsupported checkpoint type: {checkpoint_type}")
 
 
-class Config(ABC):
-    def __init__(
-        self,
-        exp_dir: Path,
-        config: dict,
-        src_isos: Set[str],
-        trg_isos: Set[str],
-        src_file_paths: Set[Path],
-        trg_file_paths: Set[Path],
-        src_tags: Set[str],
-    ) -> None:
+class Config:
+    def __init__(self, exp_dir: Path, config: dict) -> None:
         config = merge_dict(
             {
                 "model": "SILTransformerBase",
@@ -182,6 +459,12 @@ class Config(ABC):
                     "tokenize": True,
                     "guided_alignment": False,
                     "guided_alignment_train_size": 1000000,
+                    "terms": {
+                        "train": True,
+                        "dictionary": False,
+                        "categories": "PN",
+                        "include_glosses": True,
+                    },
                 },
                 "train": {
                     "average_last_checkpoints": 0,
@@ -252,19 +535,61 @@ class Config(ABC):
 
         self.exp_dir = exp_dir
         self.root = config
-        self.src_isos = src_isos
-        self.trg_isos = trg_isos
 
-        self.src_file_paths = set(src_file_paths)
-        self.trg_file_paths = set(trg_file_paths)
+        self.corpus_pairs = parse_corpus_pairs(data_config["corpus_pairs"])
+
+        if any(p.is_dictionary for p in self.corpus_pairs):
+            data_config["source_dictionary"] = str(exp_dir / self._dict_src_filename())
+            data_config["target_dictionary"] = str(exp_dir / self._dict_trg_filename())
+
+        terms_config: dict = data_config["terms"]
+        self.src_isos: Set[str] = set()
+        self.trg_isos: Set[str] = set()
+        self.src_file_paths: Set[Path] = set()
+        self.trg_file_paths: Set[Path] = set()
+        self._tags: Set[str] = set()
+        self._has_scripture_data = False
+        self._iso_pairs: Dict[Tuple[str, str], IsoPairInfo] = {}
+        for corpus_pair in self.corpus_pairs:
+            pair_src_isos = {sf.iso for sf in corpus_pair.src_files}
+            pair_trg_isos = {tf.iso for tf in corpus_pair.trg_files}
+            self.src_isos.update(pair_src_isos)
+            self.trg_isos.update(pair_trg_isos)
+            self.src_file_paths.update(sf.path for sf in corpus_pair.src_files)
+            self.trg_file_paths.update(tf.path for tf in corpus_pair.trg_files)
+            self.src_file_paths.update(sf.path for sf in corpus_pair.src_terms_files)
+            self.trg_file_paths.update(tf.path for tf in corpus_pair.trg_terms_files)
+            if terms_config["include_glosses"]:
+                if "en" in pair_src_isos:
+                    self.src_file_paths.update(get_terms_glosses_file_paths(corpus_pair.src_terms_files))
+                if "en" in pair_trg_isos:
+                    self.trg_file_paths.update(get_terms_glosses_file_paths(corpus_pair.trg_terms_files))
+            self._tags.update(f"<{tag}>" for tag in corpus_pair.tags)
+
+            if corpus_pair.is_scripture:
+                self._has_scripture_data = True
+
+            for src_file in corpus_pair.src_files:
+                for trg_file in corpus_pair.trg_files:
+                    iso_pair = self._iso_pairs.get((src_file.iso, trg_file.iso))
+                    if iso_pair is None:
+                        iso_pair = IsoPairInfo()
+                        self._iso_pairs[(src_file.iso, trg_file.iso)] = iso_pair
+                    if corpus_pair.is_scripture:
+                        if corpus_pair.is_test:
+                            iso_pair.test_projects.add(trg_file.project)
+                        if corpus_pair.is_val:
+                            iso_pair.val_projects.add(trg_file.project)
+                    elif corpus_pair.is_test:
+                        iso_pair.has_basic_test_data = True
+
+        self._multiple_test_iso_pairs = sum(1 for iso_pair in self._iso_pairs.values() if iso_pair.has_test_data) > 1
 
         # confirm that input file paths exist
         for file in self.src_file_paths | self.trg_file_paths:
             if not file.is_file():
                 LOGGER.error("The source file " + str(file) + " does not exist.  Exiting.")
                 sys.exit(1)
-
-        self.src_tags = src_tags
 
         parent: Optional[str] = self.data.get("parent")
         self.parent_config: Optional[Config] = None
@@ -280,6 +605,11 @@ class Config(ABC):
             or self.mirror
             or (self.parent_config is not None and self.parent_config.write_trg_tag)
         )
+
+        if self.write_trg_tag:
+            self._tags.update(f"<2{trg_iso}>" for trg_iso in self.trg_isos)
+            if self.mirror:
+                self._tags.update(f"<2{src_iso}>" for src_iso in self.src_isos)
 
     @property
     def default_src_iso(self) -> str:
@@ -355,22 +685,749 @@ class Config(ABC):
         src_spp.Load(str(self.exp_dir / "sp.model" if self.share_vocab else self.exp_dir / "src-sp.model"))
         return src_spp
 
-    @abstractmethod
     def _build_corpora(
         self, src_spp: Optional[sp.SentencePieceProcessor], trg_spp: Optional[sp.SentencePieceProcessor], stats: bool
     ) -> int:
-        pass
+        self._delete_files("train.*.txt")
+        self._delete_files("val.*.txt")
+        self._delete_files("test.*.txt")
+        self._delete_files("dict.*.txt")
+
+        train_count = 0
+        for pair in self.corpus_pairs:
+            if pair.is_scripture:
+                train_count += self._write_scripture_data_sets(src_spp, trg_spp, pair, stats)
+            else:
+                train_count += self._write_basic_data_sets(src_spp, trg_spp, pair)
+        return train_count
+
+    def _delete_files(self, pattern: str) -> None:
+        for old_file_path in self.exp_dir.glob(pattern):
+            old_file_path.unlink()
+
+    def _write_scripture_data_sets(
+        self,
+        src_spp: Optional[sp.SentencePieceProcessor],
+        trg_spp: Optional[sp.SentencePieceProcessor],
+        pair: CorpusPair,
+        stats: bool,
+    ) -> int:
+        src_corpora_str = ", ".join(sf.path.stem for sf in pair.src_files)
+        if len(pair.src_files) > 1:
+            src_corpora_str = f"[{src_corpora_str}]"
+        trg_corpora_str = ", ".join(tf.path.stem for tf in pair.trg_files)
+        if len(pair.trg_files) > 1:
+            trg_corpora_str = f"[{trg_corpora_str}]"
+        LOGGER.info(f"Preprocessing {src_corpora_str} -> {trg_corpora_str}")
+        test_size = pair.size if pair.test_size is None else pair.test_size
+        val_size = pair.size if pair.val_size is None else pair.val_size
+
+        test_indices: Optional[Set[int]] = None
+        val_indices: Optional[Set[int]] = None
+
+        train: Optional[pd.DataFrame] = None
+        val: Dict[Tuple[str, str], pd.DataFrame] = {}
+        test: Dict[Tuple[str, str], pd.DataFrame] = {}
+        pair_val_indices: Dict[Tuple[str, str], Set[int]] = {}
+        pair_test_indices: Dict[Tuple[str, str], Set[int]] = {}
+        terms: Optional[pd.DataFrame] = None
+
+        if pair.use_test_set_from != "":
+            self._populate_pair_test_indices(pair.use_test_set_from, pair_test_indices)
+
+        stats_file: Optional[TextIO] = None
+        try:
+            if stats:
+                stats_file = open(self.exp_dir / "corpus-stats.csv", "w", encoding="utf-8")
+                stats_file.write("src_project,trg_project,count,align_score,filtered_count,filtered_align_score\n")
+
+            for src_file in pair.src_files:
+                for trg_file in pair.trg_files:
+                    if src_file.iso == trg_file.iso:
+                        continue
+
+                    corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path)
+                    if len(pair.corpus_books) > 0:
+                        cur_train = include_books(corpus, pair.corpus_books)
+                        if len(pair.corpus_books.intersection(pair.test_books)) > 0:
+                            cur_train = exclude_books(cur_train, pair.test_books)
+                    elif len(pair.test_books) > 0:
+                        cur_train = exclude_books(corpus, pair.test_books)
+                    else:
+                        cur_train = corpus
+
+                    corpus_count = len(cur_train)
+                    if pair.is_train and (stats_file is not None or pair.score_threshold > 0):
+                        add_alignment_scores(cur_train)
+                        if stats_file is not None:
+                            cur_train.to_csv(self.exp_dir / f"{src_file.project}_{trg_file.project}.csv", index=False)
+
+                    tags_str = self._get_tags_str(pair.tags, trg_file.iso)
+                    mirror_tags_str = self._get_tags_str(pair.tags, src_file.iso)
+
+                    if pair.is_test:
+                        if pair.disjoint_test and test_indices is None:
+                            indices: Set[int] = set(cur_train.index)
+                            if pair.disjoint_val and val_indices is not None:
+                                indices.difference_update(val_indices)
+                            split_size = test_size
+                            if isinstance(test_size, float):
+                                split_size = int(split_size if split_size > 1 else corpus_count * split_size)
+                            test_indices = set(random.sample(indices, min(split_size, len(indices))))
+
+                        if len(pair.test_books) > 0:
+                            cur_test = include_books(corpus, pair.test_books)
+                            if test_size > 0:
+                                _, cur_test = split_parallel_corpus(
+                                    cur_test,
+                                    test_size,
+                                    pair_test_indices.get((src_file.iso, trg_file.iso), test_indices),
+                                )
+                        else:
+                            cur_train, cur_test = split_parallel_corpus(
+                                cur_train, test_size, pair_test_indices.get((src_file.iso, trg_file.iso), test_indices)
+                            )
+
+                        cur_test.drop("score", axis=1, inplace=True, errors="ignore")
+                        self._add_to_eval_dataset(
+                            src_file.iso,
+                            trg_file.iso,
+                            trg_file.project,
+                            tags_str,
+                            test,
+                            pair_test_indices,
+                            cur_test,
+                        )
+
+                    if pair.is_train:
+                        alignment_score = mean(cur_train["score"]) if stats_file is not None else 0
+
+                        filtered_count = 0
+                        filtered_alignment_score = alignment_score
+                        if pair.score_threshold > 0:
+                            unfiltered_len = len(cur_train)
+                            cur_train = filter_parallel_corpus(cur_train, pair.score_threshold)
+                            filtered_count = unfiltered_len - len(cur_train)
+                            filtered_alignment_score = mean(cur_train["score"]) if stats_file is not None else 0
+
+                        if stats_file is not None:
+                            LOGGER.info(
+                                f"{src_file.project} -> {trg_file.project} stats -"
+                                f" count: {corpus_count},"
+                                f" alignment: {alignment_score:.4f},"
+                                f" filtered count: {filtered_count},"
+                                f" alignment (filtered): {filtered_alignment_score:.4f}"
+                            )
+                            stats_file.write(
+                                f"{src_file.project},{trg_file.project},{corpus_count},{alignment_score:.4f},"
+                                f"{filtered_count},{filtered_alignment_score:.4f}\n"
+                            )
+                        cur_train.drop("score", axis=1, inplace=True, errors="ignore")
+
+                    if pair.is_val:
+                        if pair.disjoint_val and val_indices is None:
+                            indices = set(cur_train.index)
+                            if pair.disjoint_test and test_indices is not None:
+                                indices.difference_update(test_indices)
+                            split_size = val_size
+                            if isinstance(split_size, float):
+                                split_size = int(split_size if split_size > 1 else corpus_count * split_size)
+                            val_indices = set(random.sample(indices, min(split_size, len(indices))))
+
+                        cur_train, cur_val = split_parallel_corpus(
+                            cur_train, val_size, pair_val_indices.get((src_file.iso, trg_file.iso), val_indices)
+                        )
+
+                        self._add_to_eval_dataset(
+                            src_file.iso, trg_file.iso, trg_file.project, tags_str, val, pair_val_indices, cur_val
+                        )
+
+                    if pair.is_train:
+                        if self.mirror:
+                            mirror_cur_train = cur_train.rename(columns={"source": "target", "target": "source"})
+                            train = self._add_to_train_dataset(
+                                trg_file.project,
+                                src_file.project,
+                                pair.mixed_src,
+                                mirror_tags_str,
+                                train,
+                                mirror_cur_train,
+                            )
+
+                        train = self._add_to_train_dataset(
+                            src_file.project, trg_file.project, pair.mixed_src, tags_str, train, cur_train
+                        )
+
+        finally:
+            if stats_file is not None:
+                stats_file.close()
+
+        terms_config = self.data["terms"]
+        if terms_config["train"] or terms_config["dictionary"]:
+            term_cats: Optional[Union[str, List[str]]] = terms_config["categories"]
+            if isinstance(term_cats, str):
+                term_cats = [cat.strip() for cat in term_cats.split(",")]
+            if term_cats is None or len(term_cats) > 0:
+                term_cats_set: Optional[Set[str]] = None if term_cats is None else set(term_cats)
+                all_src_terms = [
+                    (src_terms_file, get_terms(src_terms_file.path)) for src_terms_file in pair.src_terms_files
+                ]
+                all_trg_terms = [
+                    (trg_terms_file, get_terms(trg_terms_file.path)) for trg_terms_file in pair.trg_terms_files
+                ]
+                for src_terms_file, src_terms in all_src_terms:
+                    for trg_terms_file, trg_terms in all_trg_terms:
+                        if src_terms_file.iso == trg_terms_file.iso:
+                            continue
+                        tags_str = self._get_tags_str(pair.tags, trg_terms_file.iso)
+                        mirror_tags_str = self._get_tags_str(pair.tags, src_terms_file.iso)
+                        cur_terms = get_terms_corpus(src_terms, trg_terms, term_cats_set)
+                        terms = self._add_to_terms_dataset(tags_str, mirror_tags_str, terms, cur_terms)
+                if terms_config["include_glosses"]:
+                    if "en" in self.trg_isos:
+                        for src_terms_file, src_terms in all_src_terms:
+                            cur_terms = get_terms_data_frame(src_terms, term_cats_set)
+                            cur_terms = cur_terms.rename(columns={"rendering": "source", "gloss": "target"})
+                            tags_str = self._get_tags_str(pair.tags, "en")
+                            mirror_tags_str = self._get_tags_str(pair.tags, src_terms_file.iso)
+                            terms = self._add_to_terms_dataset(tags_str, mirror_tags_str, terms, cur_terms)
+                    if "en" in self.src_isos:
+                        for trg_terms_file, trg_terms in all_trg_terms:
+                            cur_terms = get_terms_data_frame(trg_terms, term_cats_set)
+                            cur_terms = cur_terms.rename(columns={"rendering": "target", "gloss": "source"})
+                            tags_str = self._get_tags_str(pair.tags, trg_terms_file.iso)
+                            mirror_tags_str = self._get_tags_str(pair.tags, "en")
+                            terms = self._add_to_terms_dataset(tags_str, mirror_tags_str, terms, cur_terms)
+
+        if train is None:
+            return 0
+
+        if pair.mixed_src:
+            train.fillna("", inplace=True)
+            src_columns: List[str] = [c for c in train.columns if c.startswith("source")]
+
+            def select_random_column(row: Any) -> pd.Series:
+                nonempty_src_columns: List[str] = [c for c in src_columns if row[c] != ""]
+                return row[random.choice(nonempty_src_columns)]
+
+            train["source"] = train[src_columns].apply(select_random_column, axis=1)
+            train.drop(src_columns, axis=1, inplace=True, errors="ignore")
+
+        self._append_corpus(self._train_src_filename(), encode_sp_lines(src_spp, train["source"]))
+        self._append_corpus(self._train_trg_filename(), encode_sp_lines(trg_spp, train["target"]))
+        self._append_corpus(self._train_vref_filename(), (str(vr) for vr in train["vref"]))
+        train_count = len(train)
+
+        terms_train_count, dict_count = self._write_terms(src_spp, trg_spp, terms)
+        train_count += terms_train_count
+
+        val_count = 0
+        if len(val) > 0:
+            val_src = itertools.chain.from_iterable(pair_val["source"] for pair_val in val.values())
+            self._append_corpus(self._val_src_filename(), encode_sp_lines(src_spp, val_src))
+            val_count = sum(len(pair_val) for pair_val in val.values())
+            self._write_val_corpora(trg_spp, val)
+            val_vref = itertools.chain.from_iterable(pair_val["vref"] for pair_val in val.values())
+            self._append_corpus(self._val_vref_filename(), (str(vr) for vr in val_vref))
+
+        test_count = 0
+        for (src_iso, trg_iso), pair_test in test.items():
+            self._append_corpus(self._test_vref_filename(src_iso, trg_iso), (str(vr) for vr in pair_test["vref"]))
+            self._append_corpus(
+                self._test_src_filename(src_iso, trg_iso), encode_sp_lines(src_spp, pair_test["source"])
+            )
+            test_count += len(pair_test)
+
+            columns: List[str] = [c for c in pair_test.columns if c.startswith("target")]
+            test_projects = self._get_test_projects(src_iso, trg_iso)
+            for column in columns:
+                project = column[len("target_") :]
+                self._append_corpus(
+                    self._test_trg_filename(src_iso, trg_iso, project),
+                    decode_sp_lines(encode_sp_lines(trg_spp, pair_test[column])),
+                )
+                test_projects.remove(project)
+            for project in test_projects:
+                self._fill_corpus(self._test_trg_filename(src_iso, trg_iso, project), len(pair_test))
+        LOGGER.info(
+            f"train size: {train_count},"
+            f" val size: {val_count},"
+            f" test size: {test_count},"
+            f" dict size: {dict_count},"
+            f" terms size: {0 if terms is None else len(terms)}"
+        )
+        return train_count
+
+    def _populate_pair_test_indices(self, exp_name: str, pair_test_indices: Dict[Tuple[str, str], Set[int]]) -> None:
+        vrefs: Dict[str, int] = {}
+        for i, vref_str in enumerate(load_corpus(MT_SCRIPTURE_DIR / "vref.txt")):
+            if vref_str != "":
+                vrefs[vref_str] = i
+
+        exp_dir = get_mt_exp_dir(exp_name)
+        for vref_path in exp_dir.glob("test*.vref.txt"):
+            stem = vref_path.stem
+            test_indices: Set[int] = set()
+            if stem == "test.vref":
+                pair_test_indices[(self.default_src_iso, self.default_trg_iso)] = test_indices
+            else:
+                _, src_iso, trg_iso, _ = stem.split(".", maxsplit=4)
+                pair_test_indices[(src_iso, trg_iso)] = test_indices
+
+            for vref_str in load_corpus(vref_path):
+                vref = VerseRef.from_string(vref_str)
+                if vref.has_multiple:
+                    vref = vref.simplify()
+                test_indices.add(vrefs[str(vref)])
+
+    def _add_to_eval_dataset(
+        self,
+        src_iso: str,
+        trg_iso: str,
+        trg_project: str,
+        tags_str: str,
+        dataset: Dict[Tuple[str, str], pd.DataFrame],
+        pair_indices: Dict[Tuple[str, str], Set[int]],
+        new_data: pd.DataFrame,
+    ) -> None:
+        if len(new_data) == 0:
+            return
+
+        self._insert_tags(tags_str, new_data)
+
+        pair_data = dataset.get((src_iso, trg_iso))
+
+        if (src_iso, trg_iso) not in pair_indices:
+            pair_indices[(src_iso, trg_iso)] = set(new_data.index)
+
+        new_data.rename(columns={"target": f"target_{trg_project}"}, inplace=True)
+        if pair_data is None:
+            pair_data = new_data
+        else:
+            pair_data = pair_data.combine_first(new_data)
+            pair_data.fillna("", inplace=True)
+
+        dataset[(src_iso, trg_iso)] = pair_data
+
+    def _add_to_train_dataset(
+        self,
+        src_project: str,
+        trg_project: str,
+        mixed_src: bool,
+        tags_str: str,
+        train: pd.DataFrame,
+        cur_train: pd.DataFrame,
+    ) -> pd.DataFrame:
+        self._insert_tags(tags_str, cur_train)
+        if mixed_src:
+            cur_train.rename(columns={"source": f"source_{src_project}"}, inplace=True)
+            cur_train.set_index(
+                pd.MultiIndex.from_tuples(
+                    map(lambda i: (trg_project, i), cur_train.index), names=["trg_project", "index"]
+                ),
+                inplace=True,
+            )
+            train = cur_train if train is None else train.combine_first(cur_train)
+        else:
+            train = pd.concat([train, cur_train], ignore_index=True)
+        return train
+
+    def _insert_tags(self, tags_str: str, sentences: pd.DataFrame) -> None:
+        if tags_str != "":
+            sentences.loc[:, "source"] = tags_str + sentences.loc[:, "source"]
+
+    def _add_to_terms_dataset(
+        self, tags_str: str, mirror_tags_str: str, terms: Optional[pd.DataFrame], cur_terms: pd.DataFrame
+    ) -> pd.DataFrame:
+        if self.mirror:
+            mirror_cur_terms = cur_terms.rename(columns={"source": "target", "target": "source"})
+            self._insert_tags(mirror_tags_str, mirror_cur_terms)
+            terms = pd.concat([terms, mirror_cur_terms], ignore_index=True)
+
+        self._insert_tags(tags_str, cur_terms)
+
+        return pd.concat([terms, cur_terms], ignore_index=True)
+
+    def _write_terms(
+        self,
+        src_spp: Optional[sp.SentencePieceProcessor],
+        trg_spp: Optional[sp.SentencePieceProcessor],
+        terms: Optional[pd.DataFrame],
+    ) -> Tuple[int, int]:
+        train_src_file: Optional[TextIO] = None
+        train_trg_file: Optional[TextIO] = None
+        train_vref_file: Optional[TextIO] = None
+
+        dict_src_file: Optional[TextIO] = None
+        dict_trg_file: Optional[TextIO] = None
+        train_count = 0
+        dict_count = 0
+        try:
+            terms_config = self.data["terms"]
+            if terms_config["train"] and terms is not None:
+                train_src_file = open(self.exp_dir / self._train_src_filename(), "a", encoding="utf-8", newline="\n")
+                train_trg_file = open(self.exp_dir / self._train_trg_filename(), "a", encoding="utf-8", newline="\n")
+                train_vref_file = open(self.exp_dir / self._train_vref_filename(), "a", encoding="utf-8", newline="\n")
+
+            if terms_config["dictionary"]:
+                dict_src_file = open(self.exp_dir / self._dict_src_filename(), "a", encoding="utf-8", newline="\n")
+                dict_trg_file = open(self.exp_dir / self._dict_trg_filename(), "a", encoding="utf-8", newline="\n")
+
+            if terms is not None:
+                for _, term in terms.iterrows():
+                    src_term: str = term["source"]
+                    trg_term: str = term["target"]
+                    src_term_variants = [
+                        encode_sp(src_spp, src_term, add_dummy_prefix=True),
+                        encode_sp(src_spp, src_term, add_dummy_prefix=False),
+                    ]
+                    trg_term_variants = [
+                        encode_sp(trg_spp, trg_term, add_dummy_prefix=True),
+                        encode_sp(trg_spp, trg_term, add_dummy_prefix=False),
+                    ]
+
+                    if train_src_file is not None and train_trg_file is not None and train_vref_file is not None:
+                        for stv, ttv in zip(src_term_variants, trg_term_variants):
+                            train_src_file.write(stv + "\n")
+                            train_trg_file.write(ttv + "\n")
+                            train_vref_file.write("\n")
+                            train_count += 1
+
+                    if dict_src_file is not None and dict_trg_file is not None:
+                        dict_src_file.write("\t".join(src_term_variants) + "\n")
+                        dict_trg_file.write("\t".join(trg_term_variants) + "\n")
+                        dict_count += 1
+        finally:
+            if train_src_file is not None:
+                train_src_file.close()
+            if train_trg_file is not None:
+                train_trg_file.close()
+            if train_vref_file is not None:
+                train_vref_file.close()
+
+            if dict_src_file is not None:
+                dict_src_file.close()
+            if dict_trg_file is not None:
+                dict_trg_file.close()
+        return train_count, dict_count
+
+    def _write_val_corpora(
+        self, trg_spp: Optional[sp.SentencePieceProcessor], val: Dict[Tuple[str, str], pd.DataFrame]
+    ) -> None:
+        ref_files: List[TextIO] = []
+        try:
+            for (src_iso, trg_iso), pair_val in val.items():
+                columns: List[str] = [c for c in pair_val.columns if c.startswith("target")]
+                if self.root["eval"]["multi_ref_eval"]:
+                    val_project_count = self._get_val_ref_count(src_iso, trg_iso)
+                    for index in pair_val.index:
+                        for ci in range(val_project_count):
+                            if len(ref_files) == ci:
+                                ref_files.append(open(self.exp_dir / self._val_trg_filename(ci), "a", encoding="utf-8"))
+                            if ci < len(columns):
+                                col = columns[ci]
+                                ref_files[ci].write(encode_sp(trg_spp, pair_val.loc[index, col].strip()) + "\n")
+                            else:
+                                ref_files[ci].write("\n")
+                else:
+                    for index in pair_val.index:
+                        if len(ref_files) == 0:
+                            ref_files.append(open(self.exp_dir / self._val_trg_filename(), "a", encoding="utf-8"))
+                        columns_with_data: List[str] = list(
+                            filter(lambda c: pair_val.loc[index, c].strip() != "", columns)
+                        )
+                        col = random.choice(columns_with_data)
+                        ref_files[0].write(encode_sp(trg_spp, pair_val.loc[index, col].strip()) + "\n")
+
+        finally:
+            for ref_file in ref_files:
+                ref_file.close()
+
+    def _append_corpus(self, filename: str, sentences: Iterable[str]) -> None:
+        write_corpus(self.exp_dir / filename, sentences, append=True)
+
+    def _fill_corpus(self, filename: str, size: int) -> None:
+        write_corpus(self.exp_dir / filename, ("" for _ in range(size)), append=True)
+
+    def _write_basic_data_sets(
+        self,
+        src_spp: Optional[sp.SentencePieceProcessor],
+        trg_spp: Optional[sp.SentencePieceProcessor],
+        pair: CorpusPair,
+    ) -> int:
+        LOGGER.info(f"Preprocessing {pair.src_file_path.stem} -> {pair.trg_file_path.stem}")
+        corpus_size = get_parallel_corpus_size(pair.src_file_path, pair.trg_file_path)
+        with open(pair.src_file_path, "r", encoding="utf-8") as input_src_file, open(
+            pair.trg_file_path, "r", encoding="utf-8"
+        ) as input_trg_file:
+            test_indices: Optional[Set[int]] = set()
+            if pair.is_test:
+                test_size = pair.size if pair.test_size is None else pair.test_size
+                test_indices = split_corpus(corpus_size, test_size)
+
+            val_indices: Optional[Set[int]] = set()
+            if pair.is_val and test_indices is not None:
+                val_size = pair.size if pair.val_size is None else pair.val_size
+                val_indices = split_corpus(corpus_size, val_size, test_indices)
+
+            train_indices: Optional[Set[int]] = set()
+            if pair.is_train and test_indices is not None and val_indices is not None:
+                train_size = pair.size
+                train_indices = split_corpus(corpus_size, train_size, test_indices | val_indices)
+
+            train_count = 0
+            val_count = 0
+            test_count = 0
+            dict_count = 0
+            tags_str = self._get_tags_str(pair.tags, pair.trg_iso)
+            mirror_tags_str = self._get_tags_str(pair.tags, pair.src_iso)
+
+            with open(
+                self.exp_dir / self._train_src_filename(), "a", encoding="utf-8", newline="\n"
+            ) as train_src_file, open(
+                self.exp_dir / self._train_trg_filename(), "a", encoding="utf-8", newline="\n"
+            ) as train_trg_file, open(
+                self.exp_dir / self._val_src_filename(), "a", encoding="utf-8", newline="\n"
+            ) as val_src_file, open(
+                self.exp_dir / self._val_trg_filename(), "a", encoding="utf-8", newline="\n"
+            ) as val_trg_file, open(
+                self.exp_dir / self._test_src_filename(pair.src_iso, pair.trg_iso), "a", encoding="utf-8", newline="\n"
+            ) as test_src_file, open(
+                self.exp_dir / self._test_trg_filename(pair.src_iso, pair.trg_iso), "a", encoding="utf-8", newline="\n"
+            ) as test_trg_file:
+                train_vref_file: Optional[TextIO] = None
+                val_vref_file: Optional[TextIO] = None
+                test_vref_file: Optional[TextIO] = None
+                test_trg_project_files: List[TextIO] = []
+                val_trg_ref_files: List[TextIO] = []
+                dict_src_file: Optional[TextIO] = None
+                dict_trg_file: Optional[TextIO] = None
+                try:
+                    if self._has_scripture_data:
+                        train_vref_file = open(
+                            self.exp_dir / self._train_vref_filename(), "a", encoding="utf-8", newline="\n"
+                        )
+                        val_vref_file = open(
+                            self.exp_dir / self._val_vref_filename(), "a", encoding="utf-8", newline="\n"
+                        )
+                        test_vref_file = open(
+                            self.exp_dir / self._test_vref_filename(pair.src_iso, pair.trg_iso),
+                            "a",
+                            encoding="utf-8",
+                            newline="\n",
+                        )
+                        test_projects = self._get_test_projects(pair.src_iso, pair.trg_iso)
+                        test_trg_project_files = [
+                            open(
+                                self.exp_dir / self._test_trg_filename(pair.src_iso, pair.trg_iso, project),
+                                "a",
+                                encoding="utf-8",
+                                newline="\n",
+                            )
+                            for project in test_projects
+                            if project != BASIC_DATA_PROJECT
+                        ]
+                        val_ref_count = self._get_val_ref_count(pair.src_iso, pair.trg_iso)
+                        val_trg_ref_files = [
+                            open(
+                                self.exp_dir / self._val_trg_filename(index),
+                                "a",
+                                encoding="utf-8",
+                                newline="\n",
+                            )
+                            for index in range(1, val_ref_count)
+                        ]
+                    if pair.is_dictionary:
+                        dict_src_file = open(
+                            self.exp_dir / self._dict_src_filename(), "a", encoding="utf-8", newline="\n"
+                        )
+                        dict_trg_file = open(
+                            self.exp_dir / self._dict_trg_filename(), "a", encoding="utf-8", newline="\n"
+                        )
+
+                    index = 0
+                    for src_line, trg_line in zip(input_src_file, input_trg_file):
+                        src_line = src_line.strip()
+                        trg_line = trg_line.strip()
+                        if len(src_line) == 0 or len(trg_line) == 0:
+                            continue
+
+                        src_sentence = tags_str + src_line
+                        trg_sentence = trg_line
+
+                        if pair.is_test and (test_indices is None or index in test_indices):
+                            test_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
+                            test_trg_file.write(decode_sp(encode_sp(trg_spp, trg_sentence)) + "\n")
+                            if test_vref_file is not None:
+                                test_vref_file.write("\n")
+                            for test_trg_project_file in test_trg_project_files:
+                                test_trg_project_file.write("\n")
+                            test_count += 1
+                        elif pair.is_val and (val_indices is None or index in val_indices):
+                            val_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
+                            val_trg_file.write(encode_sp(trg_spp, trg_sentence) + "\n")
+                            if val_vref_file is not None:
+                                val_vref_file.write("\n")
+                            for val_trg_ref_file in val_trg_ref_files:
+                                val_trg_ref_file.write("\n")
+                            val_count += 1
+                        elif pair.is_train and (train_indices is None or index in train_indices):
+                            noised_src_sentence = self._noise(pair.src_noise, src_sentence)
+                            train_count += self._write_train_sentence_pair(
+                                train_src_file,
+                                train_trg_file,
+                                train_vref_file,
+                                src_spp,
+                                trg_spp,
+                                noised_src_sentence,
+                                trg_sentence,
+                                pair.is_lexical,
+                            )
+                            if self.mirror:
+                                mirror_src_sentence = mirror_tags_str + trg_line
+                                mirror_trg_sentence = src_line
+                                mirror_src_spp = trg_spp
+                                mirror_trg_spp = src_spp
+                                train_count += self._write_train_sentence_pair(
+                                    train_src_file,
+                                    train_trg_file,
+                                    train_vref_file,
+                                    mirror_src_spp,
+                                    mirror_trg_spp,
+                                    mirror_src_sentence,
+                                    mirror_trg_sentence,
+                                    pair.is_lexical,
+                                )
+                        if pair.is_dictionary and dict_src_file is not None and dict_trg_file is not None:
+                            src_variants = [
+                                encode_sp(src_spp, src_sentence, add_dummy_prefix=True),
+                                encode_sp(src_spp, src_sentence, add_dummy_prefix=False),
+                            ]
+                            trg_variants = [
+                                encode_sp(trg_spp, trg_sentence, add_dummy_prefix=True),
+                                encode_sp(trg_spp, trg_sentence, add_dummy_prefix=False),
+                            ]
+                            dict_src_file.write("\t".join(src_variants) + "\n")
+                            dict_trg_file.write("\t".join(trg_variants) + "\n")
+                            dict_count += 1
+
+                        index += 1
+                finally:
+                    if train_vref_file is not None:
+                        train_vref_file.close()
+                    if val_vref_file is not None:
+                        val_vref_file.close()
+                    if test_vref_file is not None:
+                        test_vref_file.close()
+                    for val_trg_ref_file in val_trg_ref_files:
+                        val_trg_ref_file.close()
+                    for test_trg_project_file in test_trg_project_files:
+                        test_trg_project_file.close()
+                    if dict_src_file is not None:
+                        dict_src_file.close()
+                    if dict_trg_file is not None:
+                        dict_trg_file.close()
+            LOGGER.info(
+                f"train size: {train_count}, val size: {val_count}, test size: {test_count}, dict size: {dict_count}"
+            )
+            return train_count
+
+    def _write_train_sentence_pair(
+        self,
+        src_file: TextIO,
+        trg_file: TextIO,
+        vref_file: Optional[TextIO],
+        src_spp: Optional[sp.SentencePieceProcessor],
+        trg_spp: Optional[sp.SentencePieceProcessor],
+        src_sentence: str,
+        trg_sentence: str,
+        is_lexical: bool,
+    ) -> int:
+        src_variants = [encode_sp(src_spp, src_sentence, add_dummy_prefix=True)]
+        trg_variants = [encode_sp(trg_spp, trg_sentence, add_dummy_prefix=True)]
+        if is_lexical:
+            src_variants.append(encode_sp(src_spp, src_sentence, add_dummy_prefix=False))
+            trg_variants.append(encode_sp(trg_spp, trg_sentence, add_dummy_prefix=False))
+        for src_variant, trg_variant in zip(src_variants, trg_variants):
+            src_file.write(src_variant + "\n")
+            trg_file.write(trg_variant + "\n")
+            if vref_file is not None:
+                vref_file.write("\n")
+        return len(src_variants)
+
+    def _get_tags_str(self, tags: List[str], trg_iso: str) -> str:
+        tags_str = ""
+        if len(tags) > 0:
+            tags_str += " ".join(f"<{t}>" for t in tags) + " "
+        if self.write_trg_tag:
+            tags_str += f"<2{trg_iso}> "
+        return tags_str
+
+    def _noise(self, src_noise: List[NoiseMethod], src_sentence: str) -> str:
+        if len(src_noise) == 0:
+            return src_sentence
+        tokens = src_sentence.split()
+        tag: List[str] = []
+        if self.write_trg_tag:
+            tag = tokens[:1]
+            tokens = tokens[1:]
+        for noise_method in src_noise:
+            tokens = noise_method(tokens)
+        if self.write_trg_tag:
+            tokens = tag + tokens
+        return " ".join(tokens)
+
+    def _get_val_ref_count(self, src_iso: str, trg_iso: str) -> int:
+        if self.root["eval"]["multi_ref_eval"]:
+            return len(self._iso_pairs[(src_iso, trg_iso)].val_projects)
+        return 1
+
+    def _get_test_projects(self, src_iso: str, trg_iso: str) -> Set[str]:
+        iso_pair = self._iso_pairs[(src_iso, trg_iso)]
+        test_projects = iso_pair.test_projects.copy()
+        if iso_pair.has_basic_test_data:
+            test_projects.add(BASIC_DATA_PROJECT)
+        return test_projects
+
+    def _train_src_filename(self) -> str:
+        return "train.src.txt"
+
+    def _train_trg_filename(self) -> str:
+        return "train.trg.txt"
+
+    def _train_vref_filename(self) -> str:
+        return "train.vref.txt"
+
+    def _val_src_filename(self) -> str:
+        return "val.src.txt"
+
+    def _val_vref_filename(self) -> str:
+        return "val.vref.txt"
+
+    def _val_trg_filename(self, index: int = 0) -> str:
+        return f"val.trg.txt.{index}" if self.root["eval"]["multi_ref_eval"] else "val.trg.txt"
+
+    def _test_src_filename(self, src_iso: str, trg_iso: str) -> str:
+        return f"test.{src_iso}.{trg_iso}.src.txt" if self._multiple_test_iso_pairs else "test.src.txt"
+
+    def _test_vref_filename(self, src_iso: str, trg_iso: str) -> str:
+        return f"test.{src_iso}.{trg_iso}.vref.txt" if self._multiple_test_iso_pairs else "test.vref.txt"
+
+    def _test_trg_filename(self, src_iso: str, trg_iso: str, project: str = BASIC_DATA_PROJECT) -> str:
+        prefix = f"test.{src_iso}.{trg_iso}" if self._multiple_test_iso_pairs else "test"
+        has_multiple_test_projects = self._iso_pairs[(src_iso, trg_iso)].has_multiple_test_projects
+        suffix = f".{project}" if has_multiple_test_projects else ""
+        return f"{prefix}.trg.detok{suffix}.txt"
+
+    def _dict_src_filename(self) -> str:
+        return "dict.src.txt"
+
+    def _dict_trg_filename(self) -> str:
+        return "dict.trg.txt"
 
     def _build_vocabs(self) -> None:
         if not self.data["tokenize"]:
             return
-
-        tag_isos: Set[str] = set()
-        if self.write_trg_tag:
-            tag_isos = self.trg_isos | self.src_isos if self.mirror else set(self.trg_isos)
-        if self.src_tags is not None:
-            for tag in self.src_tags:
-                tag_isos.add(tag)
 
         if self.share_vocab:
             LOGGER.info("Building shared vocabulary...")
@@ -397,7 +1454,7 @@ class Config(ABC):
             share_vocab_file_paths: Set[Path] = self.src_file_paths | self.trg_file_paths
             character_coverage = self.data.get("character_coverage", 1.0)
             build_vocab(
-                share_vocab_file_paths, vocab_size, casing, character_coverage, model_prefix, vocab_path, tag_isos
+                share_vocab_file_paths, vocab_size, casing, character_coverage, model_prefix, vocab_path, self._tags
             )
 
             self._update_vocab(vocab_path, vocab_path)
@@ -405,21 +1462,12 @@ class Config(ABC):
             src_vocab_file_paths: Set[Path] = set(self.src_file_paths)
             if self.mirror:
                 src_vocab_file_paths.update(self.trg_file_paths)
-            self._create_unshared_vocab(
-                self.src_isos,
-                src_vocab_file_paths,
-                "source",
-                tag_langs=tag_isos,
-            )
+            self._create_unshared_vocab(self.src_isos, src_vocab_file_paths, "source")
 
             trg_vocab_file_paths: Set[Path] = set(self.trg_file_paths)
             if self.mirror:
                 trg_vocab_file_paths.update(self.src_file_paths)
-            self._create_unshared_vocab(
-                self.trg_isos,
-                trg_vocab_file_paths,
-                "target",
-            )
+            self._create_unshared_vocab(self.trg_isos, trg_vocab_file_paths, "target")
 
             self._update_vocab(self.exp_dir / "src-onmt.vocab", self.exp_dir / "trg-onmt.vocab")
 
@@ -445,13 +1493,7 @@ class Config(ABC):
             step,
         )
 
-    def _create_unshared_vocab(
-        self,
-        isos: Set[str],
-        vocab_file_paths: Set[Path],
-        side: str,
-        tag_langs: Optional[Set[str]] = None,
-    ) -> None:
+    def _create_unshared_vocab(self, isos: Set[str], vocab_file_paths: Set[Path], side: str) -> None:
         prefix = "src" if side == "source" else "trg"
         model_prefix = self.exp_dir / f"{prefix}-sp"
         vocab_path = self.exp_dir / f"{prefix}-onmt.vocab"
@@ -488,7 +1530,7 @@ class Config(ABC):
                     onmt_vocab_path = self.exp_dir / f"{prefix}-onmt.vocab"
                     shutil.copy2(parent_sp_prefix_path.with_suffix(".model"), self.exp_dir / f"{prefix}-sp.model")
                     shutil.copy2(parent_sp_prefix_path.with_suffix(".vocab"), sp_vocab_path)
-                    convert_vocab(sp_vocab_path, onmt_vocab_path, tag_langs)
+                    convert_vocab(sp_vocab_path, onmt_vocab_path)
                     return
                 elif child_tokens is not None and parent_vocab is not None:
                     onmt_delta_vocab_path = self.exp_dir / f"{prefix}-onmt-delta.vocab"
@@ -500,7 +1542,8 @@ class Config(ABC):
         vocab_size: int = self.data.get(f"{prefix}_vocab_size", self.data.get("vocab_size"))
         casing: str = self.data.get(f"{prefix}_casing", self.data.get("casing"))
         character_coverage: float = self.data.get(f"{prefix}_character_coverage", self.data.get("character_coverage"))
-        build_vocab(vocab_file_paths, vocab_size, casing, character_coverage, model_prefix, vocab_path, tag_langs)
+        tags = self._tags if side == "source" else set()
+        build_vocab(vocab_file_paths, vocab_size, casing, character_coverage, model_prefix, vocab_path, tags)
 
     def _create_train_alignments(self, train_count: int) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -534,26 +1577,6 @@ class Config(ABC):
 
             aligner.train(src_train_path, trg_train_path)
             aligner.force_align(src_align_path, trg_align_path, self.exp_dir / "train.alignments.txt")
-
-
-def set_transformer_dropout(
-    root_layer: SILTransformer,
-    dropout: float = 0.1,
-    attention_dropout: float = 0.1,
-    ffn_dropout: float = 0.1,
-):
-    for layer in (root_layer,) + root_layer.submodules:
-        name: str = layer.name
-        if name == "self_attention_encoder":
-            layer.dropout = dropout
-        elif name == "self_attention_decoder":
-            layer.dropout = dropout
-        elif name.startswith("transformer_layer_wrapper"):
-            layer.output_dropout = dropout
-        elif name.startswith("multi_head_attention"):
-            layer.dropout = attention_dropout
-        elif name.startswith("feed_forward_network"):
-            layer.dropout = ffn_dropout
 
 
 class SILWordNoiser(WordNoiser):
@@ -605,9 +1628,7 @@ def create_model(config: Config) -> Model:
         attention_dropout = config.params["transformer_attention_dropout"]
         ffn_dropout = config.params["transformer_ffn_dropout"]
         if dropout != 0.1 or attention_dropout != 0.1 or ffn_dropout != 0.1:
-            set_transformer_dropout(
-                model, dropout=dropout, attention_dropout=attention_dropout, ffn_dropout=ffn_dropout
-            )
+            model.set_dropout(dropout=dropout, attention_dropout=attention_dropout, ffn_dropout=ffn_dropout)
 
     word_dropout: float = config.params["word_dropout"]
     if word_dropout > 0:
@@ -646,11 +1667,7 @@ def load_config(exp_name: str) -> Config:
     with open(config_path, "r", encoding="utf-8") as file:
         config = yaml.safe_load(file)
 
-    from .corpus_pairs_config import CorpusPairsConfig
-    from .langs_config import LangsConfig
-
-    config_class: Any = CorpusPairsConfig if "corpus_pairs" in config["data"] else LangsConfig
-    return config_class(exp_dir, config)
+    return Config(exp_dir, config)
 
 
 def copy_config_value(src: dict, trg: dict, key: str) -> None:
@@ -661,8 +1678,8 @@ def copy_config_value(src: dict, trg: dict, key: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Creates a NMT experiment config file")
     parser.add_argument("experiment", help="Experiment name")
-    parser.add_argument("--src-langs", nargs="*", metavar="lang", default=[], help="Source language")
-    parser.add_argument("--trg-langs", nargs="*", metavar="lang", default=[], help="Target language")
+    parser.add_argument("--src", nargs="*", metavar="corpus", default=[], help="Source corpora")
+    parser.add_argument("--trg", nargs="*", metavar="corpus", default=[], help="Target corpora")
     parser.add_argument("--vocab-size", type=int, help="Shared vocabulary size")
     parser.add_argument("--src-vocab-size", type=int, help="Source vocabulary size")
     parser.add_argument("--trg-vocab-size", type=int, help="Target vocabulary size")
@@ -674,6 +1691,9 @@ def main() -> None:
     args = parser.parse_args()
 
     get_git_revision_hash()
+
+    if len(args.src) != len(args.trg):
+        raise RuntimeError("The number of source and target corpora must be the same.")
 
     exp_dir = get_mt_exp_dir(args.experiment)
     config_path = exp_dir / "config.yml"
@@ -689,8 +1709,10 @@ def main() -> None:
     if args.model is not None:
         config["model"] = args.model
     data_config: dict = config["data"]
-    data_config["src_langs"] = args.src_langs
-    data_config["trg_langs"] = args.trg_langs
+    corpus_pairs: List[dict] = []
+    for src_corpus, trg_corpus in zip(args.src, args.trg):
+        corpus_pairs.append({"src": src_corpus, "trg": trg_corpus})
+    data_config["corpus_pairs"] = corpus_pairs
     if args.parent is not None:
         data_config["parent"] = args.parent
         parent_config = load_config(args.parent)
