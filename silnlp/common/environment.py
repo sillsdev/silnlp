@@ -15,9 +15,12 @@ class SilNlpEnv:
         self._ASSETS_DIR = Path(__file__).parent.parent / "assets"
 
         # Root data directory
-        self.set_data_dir(self.resolve_data_dir())
+        self.set_data_dir()
 
-    def set_data_dir(self, DATA_DIR: Path):
+    def set_data_dir(self, DATA_DIR: Path = None):
+        if DATA_DIR is None:
+            DATA_DIR = self.resolve_data_dir()
+
         self._DATA_DIR = Path(DATA_DIR)
 
         # Paratext directories

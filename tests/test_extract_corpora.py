@@ -5,11 +5,11 @@ from silnlp.common.paratext import extract_project, extract_term_renderings
 from silnlp.common.environment import SNE
 
 
-scr_truth_dir = SNE._MT_DIR / "scripture"
-
 # set scripture directory to temp
+SNE.set_data_dir()
 SNE._MT_SCRIPTURE_DIR = SNE._MT_DIR / "temp_scripture"
 SNE._MT_SCRIPTURE_DIR.mkdir(exist_ok=True)
+scr_truth_dir = SNE._MT_DIR / "scripture"
 
 
 def test_extract_corpora():

@@ -6,12 +6,12 @@ from silnlp.nmt.config import load_config
 from silnlp.common.environment import SNE
 
 
-exp_truth_dir = SNE._MT_DIR / "Experiments"
-exp_subdirs = [folder for folder in exp_truth_dir.glob("*/")]
-
 # set experiment directory to temp
+SNE.set_data_dir()
 SNE._MT_EXPERIMENTS_DIR = SNE._MT_DIR / "temp_experiments"
 SNE._MT_EXPERIMENTS_DIR.mkdir(exist_ok=True)
+exp_truth_dir = SNE._MT_DIR / "Experiments"
+exp_subdirs = [folder for folder in exp_truth_dir.glob("*/")]
 
 
 @pytest.mark.parametrize("exp_folder", exp_subdirs)
