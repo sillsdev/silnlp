@@ -1,0 +1,741 @@
+dublin_core:
+  type: bundle
+  conformsto: rc0.2
+  creator: 'Door43 World Missions Community'
+  contributor:
+    - "Ada Gonzalez"
+    - "Addy Duarte"
+    - "Al Tejada"
+    - "Aldo Lopez"
+    - "Alicea Eliezer Adorno López"
+    - "Amara Enid Lebrón Navarro"
+    - "Ana Molina"
+    - "Andrea Gonzalez"
+    - "Andrea Lopez"
+    - "Anellys Ledesma Leon"
+    - "Anette Otero"
+    - "Aquile Sanchez"
+    - "Argie Rubio"
+    - "Aryam"
+    - "Ashley Rivera Alicea"
+    - "Audrey Ordonez"
+    - "Blanca Del Valle"
+    - "Blanca Machado Andujar"
+    - "Camila Z. Camareno"
+    - "Camill J. Ortiz Navarro"
+    - "Camille Velez"
+    - "Carlos Colon Santiago"
+    - "Carlos Rodriguez"
+    - "Carmelo Arbona"
+    - "Carmen Gragirene"
+    - "Carolina de Burgos"
+    - "Cassy Pabon"
+    - "Celma Barros"
+    - "Charlene TC"
+    - "Chuck"
+    - "Coral J. Canales Diaz"
+    - "Cristian Santiago"
+    - "Damaris Saavedra Herrera"
+    - "Damaso Jose Reyna"
+    - "David Bachmann"
+    - "David Markham"
+    - "David Muñoz"
+    - "David Sanchez"
+    - "Deborah Armoa"
+    - "Dennise Gemelka"
+    - "Diego Arboleda Dorielis"
+    - "Diego Carreira"
+    - "Doris Marie Soto Alicea"
+    - "Edixa Collazo"
+    - "Eliezer Adorno López"
+    - "Elisa Abigail Medina"
+    - "Eric Fortunado"
+    - "Esteban Velez"
+    - "Euclides Rodriguez"
+    - "Eustaquio Colón"
+    - "Eva Lopez Valles"
+    - "Evelyn Cedeño"
+    - "Evelyn Teran"
+    - "Fidelita Lozada"
+    - "Fidelita Sánchez"
+    - "Flores Dorielis Parrilla Rivera"
+    - "Francisco Corichi"
+    - "Gabriel Neufeld"
+    - "Gabriela Castro"
+    - "Génesis Cruz Maurás"
+    - "Genesis Mercado Morales"
+    - "Genesis Mercado"
+    - "Geronimo Gilberto Llorens"
+    - "Gretchen M. Rivera Alicea"
+    - "Guadalberto Camacho"
+    - "Guillermo Ortiz Acevedo"
+    - "Gustavo Barrero"
+    - "Heidie Diaz"
+    - "Hermes J. Sánchez Guzmán"
+    - "Irene"
+    - "Irvin Carrillo"
+    - "Isabel Rodriguez Malabet"
+    - "Ivana Nicole Sanchez"
+    - "Ivette Rivera Castro"
+    - "Ivonne M. Rosa Fernandez"
+    - "Jamin Carrasquillo"
+    - "Janice"
+    - "Javier A. Sanchez Navarro"
+    - "Javier Rascon"
+    - "Jazmin Sorto Lopez"
+    - "Jeanmark N. Rodriguez"
+    - "Jeffrey Feliciano Soto"
+    - "Jeffrey Perez"
+    - "Jeremy Mikkelsen"
+    - "Jessica Cuadrado"
+    - "JoAnne Studna"
+    - "Jody"
+    - "Joe L. Ocasio Diaz"
+    - "John De Micheli Vega"
+    - "Johny Herbert Padua"
+    - "Jonathan Ramirez"
+    - "Jorge Hang"
+    - "Jose A. Torres"
+    - "Jose D.Soto Aleman"
+    - "Jose Luis Ramirez"
+    - "Josema Oviedo"
+    - "Joseph Fithian"
+    - "Josue Medina"
+    - "Judith Cano"
+    - "Julio Turell Sánchez"
+    - "Jusvelyn Vizcarrondo"
+    - "Kailena A. Marquez"
+    - "Karen Cierra"
+    - "Karina Bogarin"
+    - "Keillyn Vazquez Del Valle"
+    - "Kenneth Rosa Rosales"
+    - "Laura Feijo Slone"
+    - "Laura Negron"
+    - "Laura Noemí Rosario Negrón"
+    - "Laura Rosario"
+    - "Leticia Santos"
+    - "Lucia Martinez"
+    - "Lucy Maldonado"
+    - "Lucy Rios"
+    - "Luis Amarilla"
+    - "Luis Enrique Morales"
+    - "Luis Matias"
+    - "Luisa Arboleda"
+    - "Luz E. Fuentes Nieves"
+    - "Lysmar Santiago Páez"
+    - "Magdalena Cotto"
+    - "Marcela Pizarro"
+    - "Marcos Rivera Cabrera"
+    - "Margarita Benitez"
+    - "Margarita Gonzalez"
+    - "Margie Oyola"
+    - "Maria Collazo"
+    - "Maria Julia Navarro"
+    - "María Lugoviñas"
+    - "Maria M. Toro"
+    - "Maria Silvia Eizmendi"
+    - "Marilu Reyes Marzan"
+    - "Marilyn Garcia"
+    - "Marilyn Rodríguez"
+    - "Melisa Milagros Moroni"
+    - "Merari C. Díaz Lugoviñas"
+    - "Merari Diaz"
+    - "Michael A Rodriguez"
+    - "Miguel Contreras"
+    - "Miguel Torres Cancel"
+    - "Milady Ada Priscilla"
+    - "Mileidy Z. Díaz Cabello"
+    - "Milka Ayala"
+    - "Mireilys E. Ramirez"
+    - "Miriam Otero Myrna"
+    - "Mirriam Sanchez"
+    - "Nadia Meza Gonzalez"
+    - "Nadia Salguedolce"
+    - "Nadia Valiente"
+    - "Nancy Oyola Cintron"
+    - "Nashael Rodriguez"
+    - "Nayeli Lebron Navarro"
+    - "Nelida Matos"
+    - "Nelson J. Martinez"
+    - "Nereida Mateo"
+    - "Nichole Y. Colon"
+    - "Noemi Gonzalez"
+    - "Nora Duarte"
+    - "Norma I Navarro"
+    - "Norma Nury Aguila"
+    - "Nyilonka"
+    - "Olga Perez"
+    - "Olga Serrano"
+    - "Olivia De Serrano"
+    - "Orlando Bravo"
+    - "Pablo Torres"
+    - "Parrilla Rivera"
+    - "Priscila Torres"
+    - "Rafael Amil Acosta"
+    - "Ramon Alvarado"
+    - "Raquel Bruno"
+    - "Raul De la Rosa"
+    - "Reinaldo Santana"
+    - "Ricardo Rodriguez"
+    - "Rivera Esther Cedeño"
+    - "Roberto Delgado"
+    - "Rocio Ortiz"
+    - "Rosa Navarro"
+    - "Rosa Torres"
+    - "Rosalia Muñoz"
+    - "Rose Lugoviñas"
+    - "Roselyn Latorre"
+    - "Rosin Navarro"
+    - "Ruth Esperanza Calo Castro"
+    - "Ruth Jimenez Rodriguez"
+    - "Sally Rolón"
+    - "Sandra"
+    - "Sarai Melendez Burgos"
+    - "Sharon M. Quiñones"
+    - "Soravel Llanos"
+    - "Tania Alicea Vázquez"
+    - "Tanya M.Valentín Quiñones"
+    - "Trina E. Calderón"
+    - "Victor Vázquez Colón"
+    - "Virginia Ortiz Quiñones"
+    - "Wanda I Quiñones Santiago"
+    - "Wanda Mercado"
+    - "Wanda Molina"
+    - "Wanda Quiñones"
+    - "Wendy Colón"
+    - "Wilmer Rodriguez"
+    - "Yanielys Hernandez"
+    - "Yarimar Ruíz Rivera"
+    - "Yessica Cuadrado"
+    - "Yolanda Davila"
+    - "Yonahira Kercadó Negrón"
+    - "Yuri Torres"
+    - "Zahir"
+  format: text/usfm
+  identifier: ulb
+  title: 'Español Latino Americano ULB'
+  subject: 'Bible'
+  description: "An open-licensed update of the ASV, intended to provide a 'form-centric' understanding of the Bible. It increases the translator's understanding of the lexical and grammatical composition of the underlying text by adhering closely to the word order and structure of the originals."
+  language:
+    identifier: 'es-419'
+    title: 'Español Latinoamericano'
+    direction: ltr
+  source:
+    -
+      identifier: 'English ASV'
+      language: 'en'
+      version: '1'
+  rights: 'CC BY-SA 4.0'
+  relation:
+    - 'es-419/obs'
+    - 'es-419/tn'
+    - 'es-419/tq'
+    - 'es-419/tw'
+  publisher: Door43
+  issued: '2019-10-09'
+  modified: '2019-10-09'
+  version: '1.4'
+checking:
+  checking_entity:
+    - "Ana Gloria Molina Escuté- Iglesia Catacumba 3-Seminary graduated student"
+    - "Chaplain Tania Alicea- Primera Iglesia Cristiana Discípulos de Cristo, Vega Alta-Biblical Institute Graduated"
+    - "Edixa Collazo-Iglesia Senda de Amor, Dorado - MIP Church of God Min. to the Military"
+    - "Juana Diaz-Seminary Graduated Student AIC"
+    - "Laura Negrón Nieves-Seminary teacher- Iglesia Fuente de Luzñ Del Poblado"
+    - "Margarita Benitez Rivera-La Iglesia de Dios, Seminary graduated (Insituto Biblico Hispano) and translators studies from Traducción Bíblica México"
+    - "María Leticia Caro, Iglesia Bautista Dios de Paz, Chihuahua, pastor wife, church leader"
+    - "Pastor Carlos Eduardo Rodriguez, Iglesia Jesucristo Vino en Carne, Chihuahua"
+    - "Pastor David Bachmanm-Iglesia Bautista Antioquia, Brasil- Insituto Bíblico Palabra de Vida"
+    - "Pastor David Sánchez- Iglesia Discípulos de Cristo Juan Domingo, Puerto Rico"
+    - "Pastor Fidelita Lozada- Iglesia Senda de Amor, Dorado"
+    - "Pastor Francisco Javier Rascón, Iglesia Nazareth, Chihuahua"
+    - "Pastor Gerónimo Hernández, Iglesia Centro Familiar Poder y Gozo, Chihuahua"
+    - "Pastor Heriberto González Mireles-Pastor Centro Cristiano Vida Nueva, Chihuahua, M.D"
+    - "Pastor Jesús M. Vizcaino – Iglesia Enmanuel, Chihuahua"
+    - "Pastor José A. Torres Rodríguez-Wesleyan Church in Rio Grande"
+    - "Pastor Jose Gabriel Villanueva -Iglesia Comunidad Carisma, Chihuahua, also chaplain M.D"
+    - "Pastor José Luis Ramírez-Iglesia Bautista Dios de Paz, Chihuahua"
+    - "Pastor Laura A. Cervantes Hernández- Iglesia Centro Cristiano Vid Nueva, Chihuahua, Degree in Counseling"
+    - "Pastor Marilyn Rodriguez- Iglesia Ciudad del Reino, Gurabo-M.D. Theology"
+    - "Pastor Myrna E. Morales Moreno- Iglesia Comunidad Carisma, Chihuahua"
+    - "Pastor Norma A. Anaya, Iglesia Jesucristo Vino en Carne, Chihuahua"
+    - "Pastor Pablo Salatiel Torres de la Garza- UPC Lake Nona"
+    - "Pastor Pablo Salatiel Torres de la Garza- UPC Lake Nona"
+    - "Pastor Pablo Torres Porragas-UPC Lake Nona"
+    - "Pastor Reinaldo Santana Rabell- Primera Iglesia Cristiana Discípulos de Cristo, Vega Alta"
+    - "Pastor Samuel Hernández- Iglesia Dios de Paz, Chihuahua"
+    - "Pastor Víctor M. Vázquez Colón-Iglesia Bautista de Palmer, Rio Grande"
+    - "Rafael Amill- Primera Iglesia Cristiana Discípulos de Cristo, Vega Alta"
+    - "Rev. Carmelo Arbona- Iglesia Roble de Justicia-Seminary Professor- Seminario Teologico del Caribe"
+    - "Rosalía Muñoz- Iglesia Jesus de Nazareth, Chihuahua, pastor wife, Doctor in medicine."
+    - "Rosario, Asambleas de Dios"
+    - "Roselyn Latorre- Calvary Chapel of Puerto Rico"
+    - "San Lorenzo-MD Translation- Biblical Institute Bethelem-Chaplain"
+    - "Sandra Flores-Pastor, Iglesia Dios de Paz, Mexico"
+    - "Yolanda Padua Orozco- Templo Enmanuel Church, Lawyer, Biblical Institute"
+
+  checking_level: '3'
+
+projects:
+  -
+    title: '1 Crónicas '
+    versification: ufw
+    identifier: '1ch'
+    sort: 13
+    path: ./13-1CH.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: '1 Reyes '
+    versification: ufw
+    identifier: '1ki'
+    sort: 11
+    path: ./11-1KI.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: '1 Samuel '
+    versification: ufw
+    identifier: '1sa'
+    sort: 9
+    path: ./09-1SA.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: '2 Crónicas '
+    versification: ufw
+    identifier: '2ch'
+    sort: 14
+    path: ./14-2CH.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: '2 Reyes '
+    versification: ufw
+    identifier: '2ki'
+    sort: 12
+    path: ./12-2KI.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: '2 Samuel '
+    versification: ufw
+    identifier: '2sa'
+    sort: 10
+    path: ./10-2SA.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Amós '
+    versification: ufw
+    identifier: 'amo'
+    sort: 30
+    path: ./30-AMO.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Daniel '
+    versification: ufw
+    identifier: 'dan'
+    sort: 27
+    path: ./27-DAN.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Deuteronomio '
+    versification: ufw
+    identifier: 'deu'
+    sort: 5
+    path: ./05-DEU.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Eclesiastés '
+    versification: ufw
+    identifier: 'ecc'
+    sort: 21
+    path: ./21-ECC.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Ester '
+    versification: ufw
+    identifier: 'est'
+    sort: 17
+    path: ./17-EST.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Éxodo '
+    versification: ufw
+    identifier: 'exo'
+    sort: 2
+    path: ./02-EXO.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Ezequiel '
+    versification: ufw
+    identifier: 'ezk'
+    sort: 26
+    path: ./26-EZK.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Esdras '
+    versification: ufw
+    identifier: 'ezr'
+    sort: 15
+    path: ./15-EZR.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Génesis '
+    versification: ufw
+    identifier: 'gen'
+    sort: 1
+    path: ./01-GEN.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Habacuc '
+    versification: ufw
+    identifier: 'hab'
+    sort: 35
+    path: ./35-HAB.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Hageo '
+    versification: ufw
+    identifier: 'hag'
+    sort: 37
+    path: ./37-HAG.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Oseas '
+    versification: ufw
+    identifier: 'hos'
+    sort: 28
+    path: ./28-HOS.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Isaías '
+    versification: ufw
+    identifier: 'isa'
+    sort: 23
+    path: ./23-ISA.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Jueces '
+    versification: ufw
+    identifier: 'jdg'
+    sort: 7
+    path: ./07-JDG.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Jeremías '
+    versification: ufw
+    identifier: 'jer'
+    sort: 24
+    path: ./24-JER.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Job '
+    versification: ufw
+    identifier: 'job'
+    sort: 18
+    path: ./18-JOB.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Joel '
+    versification: ufw
+    identifier: 'jol'
+    sort: 29
+    path: ./29-JOL.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Jonás '
+    versification: ufw
+    identifier: 'jon'
+    sort: 32
+    path: ./32-JON.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Josué '
+    versification: ufw
+    identifier: 'jos'
+    sort: 6
+    path: ./06-JOS.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Lamentaciones '
+    versification: ufw
+    identifier: 'lam'
+    sort: 25
+    path: ./25-LAM.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Levítico '
+    versification: ufw
+    identifier: 'lev'
+    sort: 3
+    path: ./03-LEV.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Malaquías '
+    versification: ufw
+    identifier: 'mal'
+    sort: 39
+    path: ./39-MAL.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Miqueas '
+    versification: ufw
+    identifier: 'mic'
+    sort: 33
+    path: ./33-MIC.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Nahúm '
+    versification: ufw
+    identifier: 'nam'
+    sort: 34
+    path: ./34-NAM.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Nehemias '
+    versification: ufw
+    identifier: 'neh'
+    sort: 16
+    path: ./16-NEH.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Números '
+    versification: ufw
+    identifier: 'num'
+    sort: 4
+    path: ./04-NUM.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Abdias '
+    versification: ufw
+    identifier: 'oba'
+    sort: 31
+    path: ./31-OBA.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Proverbios '
+    versification: ufw
+    identifier: 'pro'
+    sort: 20
+    path: ./20-PRO.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Salmos '
+    versification: ufw
+    identifier: 'psa'
+    sort: 19
+    path: ./19-PSA.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Ruth '
+    versification: ufw
+    identifier: 'rut'
+    sort: 8
+    path: ./08-RUT.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Cántico de Salomón '
+    versification: ufw
+    identifier: 'sng'
+    sort: 22
+    path: ./22-SNG.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'ZACARÍAS '
+    versification: ufw
+    identifier: 'zec'
+    sort: 38
+    path: ./38-ZEC.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: 'Sofonías '
+    versification: ufw
+    identifier: 'zep'
+    sort: 36
+    path: ./36-ZEP.usfm
+    categories: [ 'bible-ot' ]
+  -
+    title: '1 Corintios '
+    versification: ufw
+    identifier: '1co'
+    sort: 46
+    path: ./47-1CO.usfm
+    categories: [ 'bible-nt' ]
+  -
+    title: 'I Juan '
+    versification: ufw
+    identifier: '1jn'
+    sort: 62
+    path: ./63-1JN.usfm
+    categories: [ 'bible-nt' ]
+  -
+    title: '1 Pedro '
+    versification: ufw
+    identifier: '1pe'
+    sort: 60
+    path: ./61-1PE.usfm
+    categories: [ 'bible-nt' ]
+  -
+    title: '1 Tesalonicenses '
+    versification: ufw
+    identifier: '1th'
+    sort: 52
+    path: ./53-1TH.usfm
+    categories: [ 'bible-nt' ]
+  -
+    title: '1 Timoteo '
+    versification: ufw
+    identifier: '1ti'
+    sort: 54
+    path: ./55-1TI.usfm
+    categories: [ 'bible-nt' ]
+  -
+    title: '2 Corintios '
+    versification: ufw
+    identifier: '2co'
+    sort: 47
+    path: ./48-2CO.usfm
+    categories: [ 'bible-nt' ]
+  -
+    title: '2 Juan '
+    versification: ufw
+    identifier: '2jn'
+    sort: 63
+    path: ./64-2JN.usfm
+    categories: [ 'bible-nt' ]
+  -
+    title: '2 Pedro '
+    versification: ufw
+    identifier: '2pe'
+    sort: 61
+    path: ./62-2PE.usfm
+    categories: [ 'bible-nt' ]
+  -
+    title: '2 Tesalonicenses '
+    versification: ufw
+    identifier: '2th'
+    sort: 53
+    path: ./54-2TH.usfm
+    categories: [ 'bible-nt' ]
+  -
+    title: '2 Timoteo '
+    versification: ufw
+    identifier: '2ti'
+    sort: 55
+    path: ./56-2TI.usfm
+    categories: [ 'bible-nt' ]
+  -
+    title: '3 Juan '
+    versification: ufw
+    identifier: '3jn'
+    sort: 64
+    path: ./65-3JN.usfm
+    categories: [ 'bible-nt' ]
+  -
+    title: 'Hechos '
+    versification: ufw
+    identifier: 'act'
+    sort: 44
+    path: ./45-ACT.usfm
+    categories: [ 'bible-nt' ]
+  -
+    title: 'Colosenses '
+    versification: ufw
+    identifier: 'col'
+    sort: 51
+    path: ./52-COL.usfm
+    categories: [ 'bible-nt' ]
+  -
+    title: 'Efesios '
+    versification: ufw
+    identifier: 'eph'
+    sort: 49
+    path: ./50-EPH.usfm
+    categories: [ 'bible-nt' ]
+  -
+    title: 'Gálatas '
+    versification: ufw
+    identifier: 'gal'
+    sort: 48
+    path: ./49-GAL.usfm
+    categories: [ 'bible-nt' ]
+  -
+    title: 'Hebreos '
+    versification: ufw
+    identifier: 'heb'
+    sort: 58
+    path: ./59-HEB.usfm
+    categories: [ 'bible-nt' ]
+  -
+    title: 'Santiago '
+    versification: ufw
+    identifier: 'jas'
+    sort: 59
+    path: ./60-JAS.usfm
+    categories: [ 'bible-nt' ]
+  -
+    title: 'Juan '
+    versification: ufw
+    identifier: 'jhn'
+    sort: 43
+    path: ./44-JHN.usfm
+    categories: [ 'bible-nt' ]
+  -
+    title: 'Judas '
+    versification: ufw
+    identifier: 'jud'
+    sort: 65
+    path: ./66-JUD.usfm
+    categories: [ 'bible-nt' ]
+  -
+    title: 'Lucas '
+    versification: ufw
+    identifier: 'luk'
+    sort: 42
+    path: ./43-LUK.usfm
+    categories: [ 'bible-nt' ]
+  -
+    title: 'Mateo '
+    versification: ufw
+    identifier: 'mat'
+    sort: 40
+    path: ./41-MAT.usfm
+    categories: [ 'bible-nt' ]
+  -
+    title: 'Marcos '
+    versification: ufw
+    identifier: 'mrk'
+    sort: 41
+    path: ./42-MRK.usfm
+    categories: [ 'bible-nt' ]
+  -
+    title: 'Filemón '
+    versification: ufw
+    identifier: 'phm'
+    sort: 57
+    path: ./58-PHM.usfm
+    categories: [ 'bible-nt' ]
+  -
+    title: 'Filipenses '
+    versification: ufw
+    identifier: 'php'
+    sort: 50
+    path: ./51-PHP.usfm
+    categories: [ 'bible-nt' ]
+  -
+    title: 'Apocalipsis '
+    versification: ufw
+    identifier: 'rev'
+    sort: 66
+    path: ./67-REV.usfm
+    categories: [ 'bible-nt' ]
+  -
+    title: 'Romanos '
+    versification: ufw
+    identifier: 'rom'
+    sort: 45
+    path: ./46-ROM.usfm
+    categories: [ 'bible-nt' ]
+  -
+    title: 'Tito '
+    versification: ufw
+    identifier: 'tit'
+    sort: 56
+    path: ./57-TIT.usfm
+    categories: [ 'bible-nt' ]

@@ -38,6 +38,10 @@ __Download and install__ the following before creating any projects or starting 
 ```
 4. Install [.NET Core SDK](https://dotnet.microsoft.com/download)
    * Note - the .NET SDK is needed for [SIL.Machine.Tool](https://github.com/sillsdev/machine).  Many of the scripts in this repo require this .Net package.  The .Net package will be installed and updated when the silnlp is initialized in `__init__.py`.
+5. Install C++ Redistributable
+   * Note - this may already be installed.  If it is not installed you may get cryptic errors such as "System.DllNotFoundException: Unable to load DLL 'thot' or one of its dependencies"
+   * Download from https://support.microsoft.com/en-us/topic/the-latest-supported-visual-c-downloads-2647da03-1eea-4433-9aff-95f26a218cc0 and install
+
 ---
 ## Development Environment setup
 ### Option 1: PyCharm Setup

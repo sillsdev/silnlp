@@ -1,0 +1,33 @@
+﻿<ScriptureText>
+  <StyleSheet>usfm.sty</StyleSheet>
+  <BooksPresent>111111111111111111111111111111111111111111111111111111111111111111000000000000000000000000000000000000000000000000000000000</BooksPresent>
+  <Versification>4</Versification>
+  <LanguageIsoCode>qaa:::</LanguageIsoCode>
+  <Language>Unlisted Language</Language>
+  <MinParatextVersion>8.0.100.76</MinParatextVersion>
+  <FullName>Reference</FullName>
+  <Encoding>65001</Encoding>
+  <Editable>T</Editable>
+  <Copyright />
+  <NormalizationForm>NFC</NormalizationForm>
+  <Name>Ref</Name>
+  <Guid>c3376e51ed7fc506fce228fa331c165d049bc3af</Guid>
+  <DefaultFont>Charis SIL</DefaultFont>
+  <DefaultFontSize>12</DefaultFontSize>
+  <FontFeatures />
+  <HtmlLanguage />
+  <AssociatedLexicalProject />
+  <FileNameBookNameForm>41MAT</FileNameBookNameForm>
+  <FileNamePrePart />
+  <FileNamePostPart>Ref.SFM</FileNamePostPart>
+  <BiblicalTermsListSetting>Major::BiblicalTerms.xml</BiblicalTermsListSetting>
+  <MatchBasedOnStems>F</MatchBasedOnStems>
+  <AllowReadAccess>F</AllowReadAccess>
+  <AllowSharingWithSLDR>F</AllowSharingWithSLDR>
+  <Visibility>Public</Visibility>
+  <TranslationInfo>Standard::</TranslationInfo>
+  <EncodingConverter />
+  <UsfmVersion>3</UsfmVersion>
+  <ParallelPassagesBooks>000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000</ParallelPassagesBooks>
+  <Naming PrePart="" PostPart="Ref.SFM" BookNameForm="41MAT" />
+</ScriptureText>

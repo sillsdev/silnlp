@@ -6,14 +6,14 @@ from typing import List, Set
 import pandas as pd
 
 from ..common.corpus import tokenize_corpus, write_corpus
-from ..common.environment import ALIGN_EXPERIMENTS_DIR
+from ..common.environment import SNE
 from .lexicon import Lexicon
 from .machine_aligner import FastAlignMachineAligner
 
 
 def get_experiment_dirs(exp_pattern: str) -> List[Path]:
     exp_dirs: List[Path] = []
-    for path in ALIGN_EXPERIMENTS_DIR.glob(str(PurePath(exp_pattern) / "**" / "config.yml")):
+    for path in SNE._ALIGN_EXPERIMENTS_DIR.glob(str(PurePath(exp_pattern) / "**" / "config.yml")):
         dir = path.parent
         if len(list(dir.rglob("config.yml"))) == 1:
             exp_dirs.append(dir)
@@ -21,7 +21,7 @@ def get_experiment_dirs(exp_pattern: str) -> List[Path]:
 
 
 def get_experiment_name(exp_dir: Path) -> str:
-    return exp_dir.as_posix()[len(ALIGN_EXPERIMENTS_DIR.as_posix()) + 1 :]
+    return exp_dir.as_posix()[len(SNE._ALIGN_EXPERIMENTS_DIR.as_posix()) + 1 :]
 
 
 def compute_alignment_score(

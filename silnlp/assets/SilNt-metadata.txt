@@ -1,0 +1,1597 @@
+Αἰγύπτιος	?	9.7.2.1 - Names of countries
+Αἰθίοψ	?	9.7.2.1 - Names of countries
+Αἰνέας	?	9.7.1.1 - Personal names
+Αἰνών	?	9.7.2.2 - Names of regions
+Αἴγυπτος	?	9.7.2.1 - Names of countries
+Αὐγοῦστος	?	9.7.1.1 - Personal names
+Βάαλ	?	9.7.1.1 - Personal names
+Βέροια	?	9.7.2.3 - Names of cities
+Βαβυλών	?	9.7.2.3 - Names of cities
+Βαλάκ	?	9.7.1.1 - Personal names
+Βαλαάμ	?	9.7.1.1 - Personal names
+Βαράκ	?	9.7.1.1 - Personal names
+Βαραββᾶς	?	9.7.1.1 - Personal names
+Βαραχίας	?	9.7.1.1 - Personal names
+Βαρθολομαῖος	?	9.7.1.1 - Personal names
+Βαριησοῦς	?	9.7.1.1 - Personal names
+Βαριωνᾶ	?	9.7.1.1 - Personal names
+Βαρναβᾶς	?	9.7.1.1 - Personal names
+Βαρσαββᾶς	?	9.7.1.1 - Personal names
+Βαρτιμαῖος	?	9.7.1.1 - Personal names
+Βεελζεβούλ	?	9.7.1.1 - Personal names
+Βελιάρ	?	9.7.1.1 - Personal names
+Βενιαμίν	?	9.7.1.1 - Personal names
+Βερνίκη	?	9.7.1.1 - Personal names
+Βεροιαῖος	?	9.7.2.3 - Names of cities
+Βηθανία	?	9.7.2.3 - Names of cities
+Βηθζαθά	?	9.7.2 - Name of a place
+Βηθλέεμ	?	9.7.2.3 - Names of cities
+Βηθσαϊδά	?	9.7.2.3 - Names of cities
+Βηθφαγή	?	9.7.2.3 - Names of cities
+Βιθυνία	?	9.7.2.2 - Names of regions
+Βλάστος	?	9.7.1.1 - Personal names
+Βοανηργές	?	9.7.1.1 - Personal names
+Βοσόρ	?	9.7.1.1 - Personal names
+Βόες	?	9.7.1.1 - Personal names
+Γάδ	?	9.7.1.1 - Personal names
+Γάζα	?	9.7.2.3 - Names of cities
+Γάϊος	?	9.7.1.1 - Personal names
+Γαββαθά	?	9.7.2 - Name of a place
+Γαβριήλ	?	9.7.1.1 - Personal names
+Γαδαρηνός	?	9.7.2.3 - Names of cities
+Γαλάτης	?	9.7.2.2 - Names of regions
+Γαλατία	?	9.7.2.2 - Names of regions
+Γαλατικός	?	9.7.2.2 - Names of regions
+Γαλιλαία	?	9.7.2.2 - Names of regions
+Γαλιλαῖος	?	9.7.2.2 - Names of regions
+Γαλλίων	?	9.7.1.1 - Personal names
+Γαμαλιήλ	?	9.7.1.1 - Personal names
+Γεδεών	?	9.7.1.1 - Personal names
+Γεθσημανί	?	9.7.2 - Name of a place
+Γεννησαρέτ	?	9.7.2.2 - Names of regions
+Γερασηνός	?	9.7.2.3 - Names of cities
+Γολγοθᾶ	?	9.7.2.7 - Names of mountains
+Γόμορρα	?	9.7.2.3 - Names of cities
+Γώγ	?	9.7.1.1 - Personal names
+Δάμαρις	?	9.7.1.1 - Personal names
+Δέρβη	?	9.7.2.3 - Names of cities
+Δίδυμος	?	9.7.1.6 - Nickname
+Δαλμανουθά	?	9.7.2.3 - Names of cities
+Δαλματία	?	9.7.2.2 - Names of regions
+Δαμασκηνός	?	9.7.2.3 - Names of cities
+Δαμασκός	?	9.7.2.3 - Names of cities
+Δανιήλ	?	9.7.1.1 - Personal names
+Δαυίδ	?	9.7.1.1 - Personal names
+Δεκάπολις	?	9.7.2.2 - Names of regions
+Δερβαῖος	?	9.7.2.3 - Names of cities
+Δημήτριος	?	9.7.1.1 - Personal names
+Δημᾶς	?	9.7.1.1 - Personal names
+Διονύσιος	?	9.7.1.1 - Personal names
+Διοτρέφης	?	9.7.1.1 - Personal names
+Διόσκουροι	?	9.7.1.1 - Personal names; 9.7.2.5 - Names of heavenly bodies
+Δορκάς	?	9.7.1.1 - Personal names
+Δρούσιλλα	?	9.7.1.1 - Personal names
+Εὐνίκη	?	9.7.1.1 - Personal names
+Εὐοδία	?	9.7.1.1 - Personal names
+Εὐφράτης	?	9.7.2.9 - Names of rivers
+Εὔβουλος	?	9.7.1.1 - Personal names
+Εὔτυχος	?	9.7.1.1 - Personal names
+Εὕα	?	9.7.1.1 - Personal names
+Ζάρα	?	9.7.1.1 - Personal names
+Ζαβουλών	?	9.7.1.1 - Personal names; 9.7.2.2 - Names of regions
+Ζακχαῖος	?	9.7.1.1 - Personal names
+Ζαχαρίας	?	9.7.1.1 - Personal names
+Ζεβεδαῖος	?	9.7.1.1 - Personal names
+Ζεύς	?	4.9.2 - Supernatural being
+Ζηνᾶς	?	9.7.1.1 - Personal names
+Ζοροβαβέλ	?	9.7.1.1 - Personal names
+Θάρα	?	9.7.1.1 - Personal names
+Θαδδαῖος	?	9.7.1.1 - Personal names
+Θαμάρ	?	9.7.1.1 - Personal names
+Θεσσαλονίκη	?	9.7.2.3 - Names of cities
+Θεσσαλονικεύς	?	9.7.2.3 - Names of cities
+Θευδᾶς	?	9.7.1.1 - Personal names
+Θεόφιλος	?	9.7.1.1 - Personal names
+Θυάτειρα	?	9.7.2.3 - Names of cities
+Θωμᾶς	?	9.7.1.1 - Personal names
+Κάρπος	?	9.7.1.1 - Personal names
+Κάϊν	?	9.7.1.1 - Personal names
+Κίς	?	9.7.1.1 - Personal names
+Καισάρεια	?	9.7.2.3 - Names of cities
+Καλοὶ Λιμένες	?	9.7.2.8 - Names of oceans and lakes
+Κανά	?	9.7.2.3 - Names of cities
+Καναναῖος	?	4.6.6.5 - Politics
+Κανδάκη	?	4.6.4 - Rule
+Καππαδοκία	?	9.7.2.2 - Names of regions
+Καφαρναούμ	?	9.7.2.3 - Names of cities
+Καϊάφας	?	9.7.1.1 - Personal names
+Καϊνάμ	?	9.7.1.1 - Personal names
+Καῖσαρ	?	4.6.1 - Ruler; 9.7.1.1 - Personal names
+Καῦδα	?	9.7.2.2 - Names of regions
+Κεγχρεαί	?	9.7.2.3 - Names of cities
+Κεδρών	?	9.7.2.9 - Names of rivers
+Κηφᾶς	?	9.7.1.1 - Personal names
+Κιλικία	?	9.7.2.2 - Names of regions
+Κλήμης	?	9.7.1.1 - Personal names
+Κλαυδία	?	9.7.1.1 - Personal names
+Κλαύδιος	?	9.7.1.1 - Personal names
+Κλεοπᾶς	?	9.7.1.1 - Personal names
+Κλωπᾶς	?	9.7.1.1 - Personal names
+Κνίδος	?	9.7.2.2 - Names of regions
+Κολοσσαί	?	9.7.2.3 - Names of cities
+Κορίνθιος	?	9.7.2.3 - Names of cities
+Κορνήλιος	?	9.7.1.1 - Personal names
+Κούαρτος	?	9.7.1.1 - Personal names
+Κρής	?	9.7.2.2 - Names of regions
+Κρήσκης	?	9.7.1.1 - Personal names
+Κρήτη	?	9.7.2.2 - Names of regions
+Κρίσπος	?	9.7.1.1 - Personal names
+Κυρήνη	?	9.7.2.3 - Names of cities
+Κυρήνιος	?	9.7.1.1 - Personal names
+Κυρηναῖος	?	9.7.2.2 - Names of regions
+Κωσάμ	?	9.7.1.1 - Personal names
+Κόρε	?	9.7.1.1 - Personal names
+Κόρινθος	?	9.7.2.3 - Names of cities
+Κύπριος	?	9.7.2.2 - Names of regions
+Κύπρος	?	9.7.2.2 - Names of regions
+Κώς	?	9.7.2.2 - Names of regions
+Λάζαρος	?	9.7.1.1 - Personal names
+Λάμεχ	?	9.7.1.1 - Personal names
+Λίνος	?	9.7.1.1 - Personal names
+Λαοδίκεια	?	9.7.2.3 - Names of cities
+Λαοδικεύς	?	9.7.2.3 - Names of cities
+Λασαία	?	9.7.2.3 - Names of cities
+Λεγιών	?	9.7.1.1 - Personal names
+Λευί	?	9.7.1.1 - Personal names
+Λευίτης	?	4.9.7.1 - Religious person
+Λευιτικός	?	4.9.7.1 - Religious person
+Λιβερτῖνος	?	4.5.4.4 - Slave
+Λιβύη	?	9.7.2.2 - Names of regions
+Λουκᾶς	?	9.7.1.1 - Personal names
+Λούκιος	?	9.7.1.1 - Personal names
+Λυδία	?	9.7.1.1 - Personal names
+Λυκία	?	9.7.2.2 - Names of regions
+Λυκαονία	?	9.7.2.2 - Names of regions
+Λυκαονιστί	?	9.7.1.5 - Names of languages
+Λυσίας	?	9.7.1.1 - Personal names
+Λυσανίας	?	9.7.1.1 - Personal names
+Λωΐς	?	9.7.1.1 - Personal names
+Λύδδα	?	9.7.2.3 - Names of cities
+Λύστρα	?	9.7.2.3 - Names of cities
+Λώτ	?	9.7.1.1 - Personal names
+Μάαθ	?	9.7.1.1 - Personal names
+Μάλχος	?	9.7.1.1 - Personal names
+Μάρθα	?	9.7.1.1 - Personal names
+Μίλητος	?	9.7.2.3 - Names of cities
+Μαγαδάν	?	9.7.2.3 - Names of cities
+Μαγδαληνή	?	9.7.1.1 - Personal names
+Μαγώγ	?	9.7.1.1 - Personal names
+Μαδιάμ	?	9.7.2.2 - Names of regions
+Μαθθάτ	?	9.7.1.1 - Personal names
+Μαθθίας	?	9.7.1.1 - Personal names
+Μαθθαῖος	?	9.7.1.1 - Personal names
+Μαθουσαλά	?	9.7.1.1 - Personal names
+Μακεδονία	?	9.7.2.2 - Names of regions
+Μακεδών	?	9.7.2.2 - Names of regions
+Μαλελεήλ	?	9.7.1.1 - Personal names
+Μαναήν	?	9.7.1.1 - Personal names
+Μανασσῆς	?	9.7.1.1 - Personal names
+Μαρία	?	9.7.1.1 - Personal names
+Ματθάν	?	9.7.1.1 - Personal names
+Ματταθά	?	9.7.1.1 - Personal names
+Ματταθίας	?	9.7.1.1 - Personal names
+Μελίτη	?	9.7.2.2 - Names of regions
+Μελεά	?	9.7.1.1 - Personal names
+Μελχί	?	9.7.1.1 - Personal names
+Μελχισέδεκ	?	9.7.1.1 - Personal names
+Μεννά	?	9.7.1.1 - Personal names
+Μεσοποταμία	?	9.7.2.1 - Names of countries
+Μεσσίας	?	4.9.7.1 - Religious person
+Μιτυλήνη	?	9.7.2.3 - Names of cities
+Μιχαήλ	?	9.7.1.1 - Personal names
+Μνάσων	?	9.7.1.1 - Personal names
+Μυσία	?	9.7.2.2 - Names of regions
+Μωϋσῆς	?	3.5.7.1 - Write; 6.7 - Tool; 9.7.1.1 - Personal names
+Μόλοχ	?	9.7.1.1 - Personal names
+Μύρα	?	9.7.2.3 - Names of cities
+Μᾶρκος	?	9.7.1.1 - Personal names
+Μῆδος	?	9.7.2.1 - Names of countries
+Νάρκισσος	?	9.7.1.1 - Personal names
+Νέα Πόλις	?	9.7.2.3 - Names of cities
+Νίγερ	?	9.7.1.1 - Personal names
+Ναΐν	?	9.7.2.3 - Names of cities
+Ναασσών	?	9.7.1.1 - Personal names
+Ναγγαί	?	9.7.1.1 - Personal names
+Ναζαρά	?	9.7.2.3 - Names of cities
+Ναζαρηνός	?	9.7.2.3 - Names of cities
+Ναζωραῖος	?	9.7.2.3 - Names of cities
+Ναθάμ	?	9.7.1.1 - Personal names
+Ναθαναήλ	?	9.7.1.1 - Personal names
+Ναιμάν	?	9.7.1.1 - Personal names
+Ναούμ	?	9.7.1.1 - Personal names
+Ναχώρ	?	9.7.1.1 - Personal names
+Νεφθαλίμ	?	9.7.1.1 - Personal names; 9.7.2.2 - Names of regions
+Νηρί	?	9.7.1.1 - Personal names
+Νηρεύς	?	9.7.1.1 - Personal names
+Νικάνωρ	?	9.7.1.1 - Personal names
+Νικολαΐτης	?	3.2.5.5 - Philosophy
+Νικόδημος	?	9.7.1.1 - Personal names
+Νικόλαος	?	9.7.1.1 - Personal names
+Νικόπολις	?	9.7.2.3 - Names of cities
+Νινευίτης	?	9.7.2.3 - Names of cities
+Νύμφα	?	9.7.1.1 - Personal names
+Νῶε	?	9.7.1.1 - Personal names
+Οὐρίας	?	9.7.1.1 - Personal names
+Οὐρβανός	?	9.7.1.1 - Personal names
+Πάταρα	?	9.7.2.3 - Names of cities
+Πάτμος	?	9.7.2.2 - Names of regions
+Πάφος	?	9.7.2.3 - Names of cities
+Πέργαμος	?	9.7.2.3 - Names of cities
+Πέργη	?	9.7.2.3 - Names of cities
+Πέτρος	?	9.7.1.1 - Personal names
+Παμφυλία	?	9.7.2.2 - Names of regions
+Παρμενᾶς	?	9.7.1.1 - Personal names
+Πατροβᾶς	?	9.7.1.1 - Personal names
+Παῦλος	?	9.7.1.1 - Personal names
+Περσίς	?	9.7.1.1 - Personal names
+Πιλᾶτος	?	9.7.1.1 - Personal names
+Πισίδιος	?	9.7.2.2 - Names of regions
+Πισιδία	?	9.7.2.2 - Names of regions
+Ποντικός	?	9.7.2.2 - Names of regions
+Ποτίολοι	?	9.7.2.3 - Names of cities
+Πούδης	?	9.7.1.1 - Personal names
+Πρίσκα	?	9.7.1.1 - Personal names
+Πρόχορος	?	9.7.1.1 - Personal names
+Πτολεμαΐς	?	9.7.2.3 - Names of cities
+Πόντιος	?	9.7.1.1 - Personal names
+Πόντος	?	9.7.2.2 - Names of regions
+Πόπλιος	?	9.7.1.1 - Personal names
+Πόρκιος	?	9.7.1.1 - Personal names
+Πύρρος	?	9.7.1.1 - Personal names
+Σάμος	?	9.7.2.2 - Names of regions
+Σάπφιρα	?	9.7.1.1 - Personal names
+Σάρδεις	?	9.7.2.3 - Names of cities
+Σάρεπτα	?	9.7.2.3 - Names of cities
+Σάρρα	?	9.7.1.1 - Personal names
+Σέργιος	?	9.7.1.1 - Personal names
+Σήθ	?	9.7.1.1 - Personal names
+Σήμ	?	9.7.1.1 - Personal names
+Σίμων	?	9.7.1.1 - Personal names
+Σαβαώθ	?	4.9.1 - God
+Σαδδουκαῖος	?	4.9.7 - Religious organization
+Σαδώκ	?	9.7.1.1 - Personal names
+Σαλά	?	9.7.1.1 - Personal names
+Σαλήμ	?	9.7.1.1 - Personal names; 9.7.2.3 - Names of cities
+Σαλαθιήλ	?	9.7.1.1 - Personal names
+Σαλαμίς	?	9.7.2.3 - Names of cities
+Σαλείμ	?	9.7.2.3 - Names of cities
+Σαλμών	?	9.7.1.1 - Personal names
+Σαλμώνη	?	9.7.2.2 - Names of regions
+Σαλώμη	?	9.7.1.1 - Personal names
+Σαμάρεια	?	9.7.2.2 - Names of regions
+Σαμαρίτης	?	9.7.2.2 - Names of regions
+Σαμαρῖτις	?	9.7.2.2 - Names of regions
+Σαμοθρᾴκη	?	9.7.2.2 - Names of regions
+Σαμουήλ	?	9.7.1.1 - Personal names
+Σαμψών	?	9.7.1.1 - Personal names
+Σαούλ, Σαῦλος	?	9.7.1.1 - Personal names
+Σαρών	?	9.7.2.2 - Names of regions
+Σατανᾶς	?	4.9.2 - Supernatural being
+Σεκοῦνδος	?	9.7.1.1 - Personal names
+Σελεύκεια	?	9.7.2.3 - Names of cities
+Σεμεΐν	?	9.7.1.1 - Personal names
+Σερούχ	?	9.7.1.1 - Personal names
+Σιδών	?	9.7.2.3 - Names of cities
+Σιδώνιος	?	9.7.2.3 - Names of cities
+Σιλουανός	?	9.7.1.1 - Personal names
+Σιλωάμ	?	9.7.2 - Name of a place
+Σιλᾶς	?	9.7.1.1 - Personal names
+Σινᾶ	?	9.7.2.7 - Names of mountains
+Σιών	?	9.7.2.3 - Names of cities; 9.7.2.7 - Names of mountains
+Σκευᾶς	?	9.7.1.1 - Personal names
+Σκύθης	?	9.7.2.1 - Names of countries
+Σμύρνα	?	9.7.2.3 - Names of cities
+Σολομών	?	9.7.1.1 - Personal names
+Σουσάννα	?	9.7.1.1 - Personal names
+Σπανία	?	9.7.2.2 - Names of regions
+Στάχυς	?	9.7.1.1 - Personal names
+Στέφανος	?	9.7.1.1 - Personal names
+Στεφανᾶς	?	9.7.1.1 - Personal names
+Στοϊκός	?	3.2.5.5 - Philosophy
+Συμεών	?	9.7.1.1 - Personal names
+Συντύχη	?	9.7.1.1 - Personal names
+Συράκουσαι	?	9.7.2.3 - Names of cities
+Συρία	?	9.7.2.2 - Names of regions
+Συροφοινίκισσα	?	9.7.2.2 - Names of regions
+Συχάρ	?	9.7.2.3 - Names of cities
+Συχέμ	?	9.7.1.1 - Personal names; 9.7.2.3 - Names of cities
+Σωσίπατρος	?	9.7.1.1 - Personal names
+Σωσθένης	?	9.7.1.1 - Personal names
+Σόδομα	?	9.7.2.3 - Names of cities
+Σύρος	?	9.7.2.2 - Names of regions
+Σύρτις	?	9.7.2.8 - Names of oceans and lakes
+Σώπατρος	?	9.7.1.1 - Personal names
+Τέρτιος	?	9.7.1.1 - Personal names
+Τέρτυλλος	?	9.7.1.1 - Personal names
+Τίμων	?	9.7.1.1 - Personal names
+Τίτιος	?	9.7.1.1 - Personal names
+Τίτος	?	9.7.1.1 - Personal names
+Ταβιθά	?	9.7.1.1 - Personal names
+Ταρσεύς	?	9.7.2.3 - Names of cities
+Ταρσός	?	9.7.2.3 - Names of cities
+Τιβέριος	?	9.7.1.1 - Personal names
+Τιβεριάς	?	9.7.2.3 - Names of cities
+Τιμαῖος	?	9.7.1.1 - Personal names
+Τιμόθεος	?	9.7.1.1 - Personal names
+Τραχωνῖτις	?	9.7.2.2 - Names of regions
+Τρυφῶσα	?	9.7.1.1 - Personal names
+Τρόφιμος	?	9.7.1.1 - Personal names
+Τρύφαινα	?	9.7.1.1 - Personal names
+Τρῳάς	?	9.7.2.3 - Names of cities
+Τυχικός	?	9.7.1.1 - Personal names
+Τύραννος	?	9.7.1.1 - Personal names
+Τύριος	?	9.7.2.3 - Names of cities
+Τύρος	?	9.7.2.3 - Names of cities
+Φάλεκ	?	9.7.1.1 - Personal names
+Φάρες	?	9.7.1.1 - Personal names
+Φίλητος	?	9.7.1.1 - Personal names
+Φίλιπποι	?	9.7.2.3 - Names of cities
+Φίλιππος	?	9.7.1.1 - Personal names
+Φανουήλ	?	9.7.1.1 - Personal names
+Φαραώ	?	4.6.1 - Ruler
+Φαρισαῖος	?	4.9.7 - Religious organization
+Φιλήμων	?	9.7.1.1 - Personal names
+Φιλαδέλφεια	?	9.7.2.3 - Names of cities
+Φιλιππήσιος	?	9.7.2.3 - Names of cities
+Φιλόλογος	?	9.7.1.1 - Personal names
+Φλέγων	?	9.7.1.1 - Personal names
+Φοίβη	?	9.7.1.1 - Personal names
+Φοινίκη	?	9.7.2.2 - Names of regions
+Φορτουνᾶτος	?	9.7.1.1 - Personal names
+Φοῖνιξ	?	9.7.2.3 - Names of cities
+Φρυγία	?	9.7.2.2 - Names of regions
+Φύγελος	?	9.7.1.1 - Personal names
+Φῆλιξ	?	9.7.1.1 - Personal names
+Φῆστος	?	9.7.1.1 - Personal names
+Χίος	?	9.7.2.3 - Names of cities
+Χαλδαῖος	?	9.7.2.1 - Names of countries
+Χανάαν	?	9.7.2.2 - Names of regions
+Χαναναῖος	?	9.7.2.2 - Names of regions
+Χαρράν	?	9.7.2.3 - Names of cities
+Χλόη	?	9.7.1.1 - Personal names
+Χοραζίν	?	9.7.2.3 - Names of cities
+Χουζᾶς	?	9.7.1.1 - Personal names
+Χριστιανός	?	4.9.7 - Religious organization
+Χριστός	?	4.5.3.4 - Appoint, delegate; 5.4.5 - Anoint the body
+αἰών	?	1 - Universe, creation; 4.3.1.1 - Bad, immoral; 8.4.1.7 - Era
+αἰώνιος	?	8.4.2.3 - Forever
+αἱματεκχυσία	?	4.9.5.5 - Offering, sacrifice
+αἴγειος	?	1.6.1.1.3 - Hoofed animals; 6.3.1.3 - Goat
+αἷμα	?	2.2.5 - Bleed, blood; 2.6.6.1 - Kill; 8.3.3.3.4 - Colors of the spectrum
+αὐθεντέω	?	4.5.2 - Have authority
+αὐλέω	?	4.2.3.5 - Musical instrument
+αὐλή	?	6.3.1.2 - Sheep; 6.5.1.4 - Yard
+αὐλητής	?	4.2.3.5 - Musical instrument
+αὐλός	?	4.2.3.5 - Musical instrument
+αὐτοκατάκριτος	?	4.7.6.2 - Condemn, find guilty
+βάπτισμα	?	4.9.5.6 - Religious purification
+βάρβαρος	?	4.6.2.1 - Foreigner
+βάτος	?	1.5.2 - Bush, shrub
+βάτραχος	?	1.6.1.4 - Amphibian
+βάϊον	?	1.5.5 - Parts of a plant
+βέβηλος	?	4.9.5.8 - Dedicate to religious use; 4.9.9 - Irreligion; 8.3.7.1 - Bad
+βέλος	?	4.8.3.7 - Weapon, shoot
+βίβλος	?	3.5.7.2 - Written material
+βίος	?	2.6 - Life; 4.3 - Behavior; 6.8.1.5 - Possession, property
+βίωσις	?	2.6 - Life; 4.3 - Behavior
+βαλλάντιον	?	5.3.1 - Men's clothing; 5.3.2 - Women's clothing; 6.7.7.1 - Bag; 6.8.1.4 - Store wealth
+βαπτίζω	?	4.9.5.6 - Religious purification; 4.9.5.8 - Dedicate to religious use; 5.6 - Cleaning; 5.6.2 - Bathe; 7.3.2.6 - Put in; 9.1.2.1 - Happen
+βαπτισμός	?	4.9.5.6 - Religious purification; 5.6 - Cleaning; 5.6.2 - Bathe
+βαπτιστής	?	4.9.5.6 - Religious purification
+βασίλειον	?	6.5.1 - Building; 6.5.1.2 - Types of houses
+βασίλισσα	?	4.6.1.1 - King's family
+βασιλεία	?	4.6.4 - Rule; 4.6.7.1 - Country
+βασιλεύς	?	4.6.1 - Ruler
+βδέλυγμα	?	3.4.2.1.2 - Hate, detest
+βδέλυγμα τῆς ἐρημώσεως	?	3.4.2.1.2 - Hate, detest; 7.9.3 - Destroy
+βεβηλόω	?	4.9.5.6 - Religious purification
+βελόνη	?	6.6.1 - Working with cloth
+βιβλίον	?	3.5.7.2 - Written material
+βιβλαρίδιον	?	3.5.7.2 - Written material
+βιωτικός	?	2.6 - Life; 4.3 - Behavior
+βιόω	?	2.6 - Life; 4.3 - Behavior
+βλάσφημος	?	3.5.1.8.2 - Insult
+βλασφημέω	?	3.5.1.8.2 - Insult
+βλασφημία	?	3.5.1.8.2 - Insult
+βοτάνη	?	1.5.3 - Grass, herb, vine
+βοῦς	?	1.6.1.1.3 - Hoofed animals; 6.3.1.1 - Cattle
+βυρσεύς	?	6.6.4.3 - Working with leather
+βωμός	?	4.9.8 - Religious things
+βότρυς	?	1.5.5 - Parts of a plant; 6.2.1.4.1 - Growing grapes
+βύσσινος	?	6.6.1.1 - Cloth
+βύσσος	?	6.6.1.1 - Cloth
+βῆμα	?	6.5.2 - Parts of a building; 7.2.1.1 - Walk
+γάμος	?	2.6.1 - Marriage; 2.6.1.2 - Wedding
+γέεννα	?	4.9.6 - Heaven, hell
+γαζοφυλάκιον	?	6.5.2 - Parts of a building; 6.7.7 - Container; 6.8.1.4 - Store wealth
+γαστέρες ἀργαί	?	4.3.6.1 - Lack self-control; 5.2.2.4 - Manner of eating
+γλεῦκος	?	5.2.3.7 - Alcoholic beverage
+γλωσσόκομον	?	6.7.7 - Container; 6.8.1.4 - Store wealth
+γνησίως	?	3.5.1.3.5 - Real
+γράμμα	?	3.5.7.1 - Write; 3.5.7.7 - Letter; 6.8.7 - Accounting
+γράφω	?	3.5.7.1 - Write
+γραμματεύς	?	3.2.2 - Learn; 4.5.1 - Person in authority; 4.6.1.2 - Government official; 4.9.7.1 - Religious person
+γραφή	?	3.5.3.1 - Word; 3.5.7.2 - Written material; 4.9.3.1 - Sacred writings
+γῆ	?	1.2.1 - Land; 1.2.2.1 - Soil, dirt; 1.3.1.5 - Island, shore; 2 - Person; 4.6.7 - Region
+δάμαλις	?	1.6.1.1.3 - Hoofed animals; 6.3.1.1 - Cattle
+δέησις	?	3.3.2 - Request
+δένδρον	?	1.5.1 - Tree
+δέομαι	?	3.3.2 - Request
+δέρμα	?	5.3 - Clothing; 6.6.4.3 - Working with leather
+δίδραχμον	?	6.8.8 - Tax
+δίκαιος	?	4.3.1 - Good, moral; 4.7.8.1 - Covenant; 4.7.9 - Justice; 8.3.7.7 - Right, proper
+δίκη	?	4.7.7 - Punish; 4.9.2 - Supernatural being
+δίκτυον	?	6.4.5.3 - Fishing equipment
+δίλογος	?	3.5.1.3.2 - Tell a lie; 4.3.5.6 - Hypocrite
+δαίμων	?	4.9.2 - Supernatural being; 4.9.4.2 - Demon possession
+δαιμονίζομαι	?	4.9.4.2 - Demon possession
+δαιμονιώδης	?	4.9.2 - Supernatural being; 4.9.4.2 - Demon possession
+δαιμόνιον	?	4.9.2 - Supernatural being; 4.9.4.2 - Demon possession
+δακτύλιος	?	5.4.1 - Jewelry
+δερμάτινος	?	6.6.4.3 - Working with leather
+δεσμωτήριον	?	4.7.7.3 - Imprison; 6.5.1 - Building
+δεσμός	?	2.5.2 - Disease; 2.5.4 - Disabled; 4.7.7.3 - Imprison; 6.7.5 - Fastening tool
+δηνάριον	?	6.8.6.1 - Monetary units
+διάβολος	?	3.5.1.8 - Criticize; 3.5.1.8.2 - Insult; 3.5.1.8.4 - Gossip; 4.9.2 - Supernatural being
+διάγνωσις	?	4.7.6 - Judge, render a verdict
+διάδημα	?	5.4.1 - Jewelry
+διάκρισις	?	3.2.2.3 - Evaluate, test; 3.5.1.8 - Criticize
+διάνοια	?	3.1 - Soul, spirit; 3.2 - Think
+διαγινώσκω	?	3.2.2 - Learn; 4.7.6 - Judge, render a verdict
+διαθήκη	?	2.6.6.7 - Inherit; 4.7.8.1 - Covenant
+διακαθαίρω	?	5.6 - Cleaning
+διακαθαρίζω	?	5.6 - Cleaning
+διακονέω	?	2.5.7 - Treat disease; 4.3.4.5.2 - Care for; 4.5.4.3 - Serve; 4.9.7.1 - Religious person; 5 - Daily life; 5.2.1.1 - Cooking methods
+διακρίνω	?	3.2.2.3 - Evaluate, test; 3.2.5.1 - Believe; 3.3.1.2 - Choose; 3.5.1.6 - Debate; 3.5.1.8 - Criticize
+διαλλάσσω	?	4.8.4.9 - Reconcile
+διαμαρτύρομαι	?	3.3.3.4 - Insist; 3.3.3.7 - Warn; 3.5.1 - Say
+διασῴζω	?	2.5.7 - Treat disease; 4.4.4.4 - Save from trouble
+διαφυλάσσω	?	4.4.4.5 - Protect
+δικαίωμα	?	4.3.1 - Good, moral; 4.7.1 - Laws; 4.7.6.1 - Acquit
+δικαίως	?	4.3.1 - Good, moral
+δικαίωσις	?	4.7.6.1 - Acquit
+δικαιοκρισία	?	4.7.6 - Judge, render a verdict
+δικαιοσύνη	?	4.3.1 - Good, moral; 4.7.8.1 - Covenant; 4.9.5 - Practice religion; 6.8.3.1 - Give, donate
+δικαιόω	?	4.3.1 - Good, moral; 4.5.4.1 - Obey; 4.7.6 - Judge, render a verdict; 4.7.8.1 - Covenant; 7.2.6.4 - Set free
+δικαστής	?	4.7.4.1 - Legal personnel
+δοκίμιον	?	3.2.2.3 - Evaluate, test; 3.5.1.3.5 - Real
+δοκιμάζω	?	3.2.2.3 - Evaluate, test; 3.2.5.9 - Approve of something; 3.3.1.2 - Choose
+δοκός	?	6.5.3 - Building materials; 6.6.3.2 - Wood
+δοξάζω	?	4.5.5 - Honor; 8.3.3.1 - Shine; 8.3.3.1.2 - Bright; 8.3.7.6 - Improve; 8.3.8.2 - Glory
+δουλαγωγέω	?	4.5.4.4 - Slave
+δουλεία	?	4.5.4.4 - Slave
+δουλεύω	?	3.3.3.6 - Control; 4.5.4.3 - Serve; 4.5.4.4 - Slave
+δουλόω	?	3.3.3.6 - Control; 4.5 - Authority; 4.5.4.4 - Slave; 9.4.2.3 - Necessary 
+δούλη	?	4.5.4.4 - Slave
+δοῦλος	?	3.3.3.6 - Control; 4.5.4.4 - Slave
+δράκων	?	4.9.2 - Supernatural being
+δρέπανον	?	6.2.8 - Agricultural tool; 6.7.1 - Cutting tool
+δραχμή	?	6.8.6.1 - Monetary units
+δυνάστης	?	4.5.1 - Person in authority
+δυνατός	?	6.1.1.1 - Expert; 9.4.2.1 - Can; 9.4.4.4 - Possible
+δυσφημέω	?	3.5.1.8 - Criticize; 3.5.1.8.2 - Insult
+δόκιμος	?	3.2.2.3 - Evaluate, test; 3.5.1.3.5 - Real; 4.5.5 - Honor
+δόξα	?	1.1 - Sky; 2.3.1.8.1 - Beautiful; 3.5.1.7 - Praise; 3.5.8.4 - Show, indicate; 4.5.5 - Honor; 4.9.2 - Supernatural being; 4.9.4 - Miracle, supernatural power; 8.3.3.1.2 - Bright; 8.3.8.2 - Glory
+δύναμις	?	3.5.8.1 - Meaning; 4.5.1 - Person in authority; 4.6.1 - Ruler; 4.9.2 - Supernatural being; 4.9.4 - Miracle, supernatural power; 9.4.2.1 - Can
+δῶμα	?	6.5.2.2 - Roof
+δῶρον	?	4.9.8 - Religious things; 6.7.7 - Container; 6.8.3.1 - Give, donate
+εἰδωλεῖον	?	4.9.8.2 - Place of worship; 6.5.1 - Building
+εἰδωλολάτρης	?	4.9.8.1 - Idol
+εἰδωλολατρία	?	4.9.8.1 - Idol
+εἰδωλόθυτον	?	4.9.5.5 - Offering, sacrifice; 5.2.3.2.1 - Meat
+εἰκών	?	4.9.8.1 - Idol; 6.6.5.3 - Sculpture; 8.3.5.2.2 - Like, similar; 8.3.5.4 - Pattern, model
+εἰλικρινής	?	3.5.1.3.1 - Tell the truth
+εἰρήνη	?	4.8.4 - Peace
+εἰρηνεύω	?	4.8.4 - Peace
+εἰρηνικός	?	4.8.4 - Peace
+εἰρηνοποιέω	?	4.8.4.8 - Make peace
+εἰρηνοποιός	?	4.8.4.8 - Make peace
+εἰς κενὸν	?	9.6.2.6.1 - Without result 
+εἰς τοὺς αἰῶνας τῶν αἰώνων, εἰς τὸν αἰῶνα τοῦ αἰῶνος, εἰς τὸν αἰῶνα, εἰς τοὺς αἰῶνας, εἰς ἡμέραν αἰῶνος, εἰς παντὰς τοὺς αἰῶνας	?	8.4.2.3 - Forever
+εἰσφέρω	?	7.3.1 - Carry; 7.3.3 - Take somewhere
+εἰσφέρω εἰς τὰς ἀκοάς	?	3.5.1 - Say
+εἴδωλον	?	4.9.8.1 - Idol
+εὐαγγέλιον	?	3.5.1.2.1 - Announce; 3.5.2.2 - News, message
+εὐαγγελίζω	?	3.5.1.2.1 - Announce; 3.5.2.1 - Report
+εὐθυμέω	?	3.4.1 - Feel good
+εὐθύς	?	4.3.1 - Good, moral; 8.3.1.3 - Straight; 8.4.6.4.4 - Immediately
+εὐθύτης	?	4.3.1 - Good, moral
+εὐλογέω	?	3.5.1.7 - Praise; 4.3.4 - Do good to; 4.9.4.3 - Bless
+εὐλογία	?	3.5.1.7 - Praise; 3.5.1.7.2 - Flatter; 4.3.4 - Do good to; 4.9.4.3 - Bless; 6.8.3.1 - Give, donate
+εὐλογητός	?	3.5.1.7 - Praise
+εὐσεβέω	?	4.5.5 - Honor; 4.9.5.3 - Worship; 9.4.3.2 - Hortative
+εὐχή	?	4.7.5.7 - Take oath; 4.9.5.2 - Pray
+εὔσπλαγχνος	?	4.3.3 - Love; 4.4.4.1 - Mercy; 4.4.4.2 - Show sympathy, support
+εὔχομαι	?	3.3 - Want; 4.9.5.2 - Pray
+ζάω	?	2.6 - Life; 4.3 - Behavior; 4.9.6.1 - Resurrection
+ζευκτηρία	?	6.7.5 - Fastening tool; 7.2.4.2.1 - Boat
+ζηλωτής	?	3.2.5.7 - Extreme belief; 3.4.1.4.2 - Enthusiastic; 4.6.6.5 - Politics
+ζιζάνιον	?	1.5.3 - Grass, herb, vine
+ζυγός	?	4.5.4.4 - Slave; 6.3.1.7 - Beast of burden; 8.2.9 - Weigh
+ζωή	?	2.6 - Life
+ζώνη	?	5.3 - Clothing
+ζῆλος	?	3.2.5.7 - Extreme belief; 3.4.1.4.2 - Enthusiastic; 3.4.2.1.8 - Jealous; 5.5.4 - Burn; 9.3.1.1 - To a large degree
+ζῳογονέω	?	2.6 - Life; 4.9.6.1 - Resurrection
+ζῳοποιέω	?	2.6 - Life; 4.9.6.1 - Resurrection
+ζῷον	?	1.6 - Animal; 4.9.2 - Supernatural being
+θέατρον	?	4.2.2.2 - Festival, show; 6.5.1 - Building
+θήκη	?	6.7.7 - Container; 6.7.7.2 - Sheath
+θήρα	?	4.8.2.5 - Revenge; 6.4.2 - Trap
+θαρσέω	?	4.4.3.1 - Brave
+θεά	?	4.9.2 - Supernatural being
+θειότης	?	4.9.1 - God; 4.9.2 - Supernatural being
+θεμέλιον	?	6.5.2.6 - Foundation; 9.6.2.4 - Basis
+θεμέλιος	?	6.5.2.6 - Foundation
+θεμελιόω	?	6.5.2.6 - Foundation; 9.6.2.4 - Basis
+θεοδίδακτος	?	3.6 - Teach
+θεομάχος	?	4.8.2 - Fight
+θεοσέβεια	?	4.9.5.1 - Devout
+θεοσεβής	?	4.9.5.1 - Devout
+θεοστυγής	?	4.3.3.1 - Hate, ill will; 4.9.9 - Irreligion
+θεράπων	?	4.5.4.3 - Serve
+θεραπεία	?	2.5.7 - Treat disease; 4.5.4.3 - Serve; 6.1.1 - Worker
+θεραπεύω	?	2.5.7 - Treat disease; 4.5.4.3 - Serve
+θεόπνευστος	?	3.2.1.1 - Think about
+θεός	?	4.9.1 - God; 4.9.2 - Supernatural being
+θεότης	?	4.9.1 - God; 4.9.2 - Supernatural being
+θεῖος	?	4.9.1 - God; 4.9.2 - Supernatural being
+θηρίον	?	1.6 - Animal; 1.6.1 - Types of animals; 4.3.1.1 - Bad, immoral; 4.9.2 - Supernatural being
+θησαυρός	?	6.5.2 - Parts of a building; 6.7.7 - Container; 6.8.1.4 - Store wealth; 6.8.1.5 - Possession, property; 8.3.7.9 - Value
+θρέμμα	?	1.6.1 - Types of animals; 1.6.1.1.3 - Hoofed animals; 6.3.1 - Domesticated animal
+θρησκεία	?	4.9 - Religion; 4.9.5.1 - Devout
+θρόνος	?	4.6.1 - Ruler; 4.6.4 - Rule; 4.9.2 - Supernatural being; 4.9.4 - Miracle, supernatural power; 5.1.1.2 - Chair
+θυμίαμα	?	2.3.4 - Smell; 4.9.5.5 - Offering, sacrifice; 5.4.5 - Anoint the body
+θυμιατήριον	?	4.9.5.5 - Offering, sacrifice; 4.9.8 - Religious things
+θυρίς	?	6.5.2.5 - Window
+θυρεός	?	4.8.3.7 - Weapon, shoot
+θυρωρός	?	5.8 - Manage a house; 6.5.2.4 - Door
+θυσία	?	4.9.5.5 - Offering, sacrifice
+θυσιαστήριον	?	4.9.5.5 - Offering, sacrifice; 4.9.8 - Religious things
+θύρα	?	6.5.1.5 - Fence, wall; 6.5.2.4 - Door
+θύω	?	2.6.6.1 - Kill; 4.9.5.5 - Offering, sacrifice
+θύϊνος	?	6.6.3.2 - Wood
+κάλαμος	?	1.5.3 - Grass, herb, vine; 1.5.5 - Parts of a plant; 3.5.7.1 - Write; 8.2.8 - Measure
+κάλυμμα	?	5.3 - Clothing
+κάμηλος	?	1.6.1.1.3 - Hoofed animals
+κάμινος	?	6.5.1 - Building; 6.6.2.3 - Working with metal; 6.6.2.4 - Working with clay
+κάρφος	?	1.5.5 - Parts of a plant; 6.6.3.2 - Wood; 8.1.6.2 - Piece
+κέραμος	?	6.5.2.2 - Roof; 6.5.3 - Building materials
+κέρμα	?	6.8.6 - Money
+κήρυγμα	?	3.5.2 - Make speech
+καθέδρα	?	5.1.1.2 - Chair
+καθαρίζω	?	2.5.7 - Treat disease; 4.8.4.7 - Forgive; 4.9.5.6 - Religious purification; 5.6 - Cleaning
+καθαρισμός	?	4.8.4.7 - Forgive; 4.9.5.6 - Religious purification
+καθαρός	?	4.8.4.7 - Forgive; 4.9.5.6 - Religious purification; 5.6.1 - Clean, dirty; 7.5.3.1 - Pure, unmixed
+καθαρότης	?	4.9.5.6 - Religious purification
+καλάμη	?	1.5.5 - Parts of a plant
+καλλιέλαιος	?	1.5.1 - Tree; 6.2.1.7 - Growing trees
+καλός	?	2.3.1.8.1 - Beautiful; 4.3.1 - Good, moral; 4.5.6.1 - High status; 8.3.7 - Good; 8.3.7.2 - Better
+καρδία	?	3.1 - Soul, spirit; 8.5.1.4 - Inside
+καρδιογνώστης	?	3.2.3 - Know
+κατάκριμα	?	4.7.6.2 - Condemn, find guilty
+κατάκρισις	?	4.7.6.2 - Condemn, find guilty
+κατάλυμα	?	6.5.1 - Building; 6.5.2.7 - Room; 7.2.4 - Travel
+κατήγωρ	?	4.7.5.3 - Accuse, confront
+καταγινώσκω	?	4.7.5.3 - Accuse, confront; 4.7.6.2 - Condemn, find guilty
+καταδίκη	?	4.7.6.2 - Condemn, find guilty
+καταδικάζω	?	4.7.6.2 - Condemn, find guilty
+καταδουλόω	?	3.3.3.6 - Control; 4.5.4.4 - Slave
+κατακρίνω	?	4.7.6.2 - Condemn, find guilty
+καταλλάσσω	?	4.8.4.9 - Reconcile
+καταλλαγή	?	4.8.4.9 - Reconcile
+καταπέτασμα	?	5.1.2 - Household decoration; 6.5.2.5 - Window
+κατασκήνωσις	?	1.6.5 - Animal home; 5.9 - Live, stay
+κατασκηνόω	?	1.6.5 - Animal home; 5.9 - Live, stay
+κατασφραγίζω	?	3.5.7.1 - Write; 7.3.6.1 - Shut, close
+κατείδωλος	?	4.9.8.1 - Idol
+κατεξουσιάζω	?	4.6.4 - Rule
+κατευλογέω	?	4.9.4.3 - Bless
+κειρία	?	2.6.6.5 - Bury; 5.3 - Clothing
+κενοδοξία	?	4.3.2.3 - Proud
+κενοφωνία	?	3.5.5 - Foolish talk
+κενόδοξος	?	4.3.2.3 - Proud
+κενός	?	3.2.1.4 - Stupid; 3.5.1.3 - True; 8.1.8.1 - Empty; 9.6.2.6.1 - Without result ; 9.6.2.7.1 - Without purpose 
+κενόω	?	4.5.6.2 - Low status; 9.6.2.6.1 - Without result ; 9.6.2.7.1 - Without purpose 
+κεράμιον	?	6.7.7 - Container
+κεράτιον	?	1.5.5 - Parts of a plant; 5.2.3.1.1 - Food from seeds
+κεραμεύς	?	6.6.2.4 - Working with clay
+κεφαλίς	?	3.5.7.1 - Write
+κηρύσσω	?	3.5.1.2.1 - Announce; 3.5.2 - Make speech
+κιβωτός	?	6.7.7 - Container; 7.2.4.2.1 - Boat
+κιθάρα	?	4.2.3.5 - Musical instrument
+κιθαρίζω	?	4.2.3.2 - Play music
+κιθαρῳδός	?	4.2.3.4 - Musician
+κλάδος	?	1.5.5 - Parts of a plant
+κλίβανος	?	5.2.1.3 - Cooking utensil; 5.5.7 - Fireplace
+κλίνη	?	5.1.1.3 - Bed
+κλείς	?	6.1.2 - Method; 6.5.2.4 - Door; 6.7 - Tool; 6.7.8 - Parts of tools; 9.5.1.3 - Means
+κλινάριον	?	2.5.4 - Disabled; 5.1.1.3 - Bed; 6.7.3 - Carrying tool
+κλινίδιον	?	2.5.4 - Disabled; 5.1.1.3 - Bed; 6.7.3 - Carrying tool
+κλῆμα	?	1.5.5 - Parts of a plant
+κοδράντης	?	6.8.6.1 - Monetary units
+κοιλία	?	2.1.8.2 - Stomach; 2.1.8.4 - Female organs; 3.1 - Soul, spirit; 3.3 - Want; 3.4 - Emotion
+κοινωνέω	?	4.3.4.3 - Cooperate with; 4.3.4.5 - Share with; 6.8.3 - Share wealth; 8.3.5.2.2 - Like, similar
+κοινωνία	?	4.1 - Relationships; 4.3.4.5 - Share with; 6.8.3 - Share wealth; 6.8.3.1 - Give, donate
+κοινωνικός	?	6.8.3.2 - Generous
+κοινωνός	?	4.1 - Relationships
+κοινός	?	4.3.4.5 - Share with; 4.9.5.6 - Religious purification; 6.8.3 - Share wealth; 8.1.5.3 - Both; 8.3.5.2.2 - Like, similar; 8.3.7.9 - Value
+κοινόω	?	4.9.5.6 - Religious purification
+κοιτών	?	6.5.2.7 - Room
+κολλούριον	?	2.5.7.2 - Medicine
+κολυμβήθρα	?	1.3.1.1 - Ocean, lake; 6.6.7 - Working with water
+κορβανᾶς	?	6.5.1 - Building; 6.8.1.4 - Store wealth
+κοσμικός	?	1.2 - World; 4.3.1.1 - Bad, immoral
+κοσμοκράτωρ	?	4.6.1 - Ruler; 4.9.2 - Supernatural being
+κράβαττος	?	2.5.4 - Disabled; 5.1.1.3 - Bed; 6.7.3 - Carrying tool
+κράσπεδον	?	5.3.6 - Parts of clothing; 5.4.1 - Jewelry
+κρίθινος	?	5.2.3.1.1 - Food from seeds
+κρίμα	?	4.5 - Authority; 4.7.5 - Trial; 4.7.6 - Judge, render a verdict; 4.7.6.2 - Condemn, find guilty
+κρίνον	?	1.5.3 - Grass, herb, vine
+κρίνω	?	3.2.2.3 - Evaluate, test; 3.2.5 - Opinion; 3.3.1 - Decide, plan; 3.4.1.1.3 - Prefer; 4.6.4 - Rule; 4.7.5 - Trial; 4.7.6 - Judge, render a verdict; 4.7.6.2 - Condemn, find guilty
+κρίσις	?	3.2.2.3 - Evaluate, test; 4.5 - Authority; 4.7.4 - Court of law; 4.7.5 - Trial; 4.7.6 - Judge, render a verdict; 4.7.6.2 - Condemn, find guilty; 4.7.9 - Justice; 9.6.2.4 - Basis
+κριθή	?	1.5.3 - Grass, herb, vine; 5.2.3.1.1 - Food from seeds
+κριτήριον	?	4.7.4 - Court of law; 4.7.5 - Trial
+κριτής	?	4.7.4.1 - Legal personnel
+κριτικός	?	4.7.6 - Judge, render a verdict
+κτῆνος	?	1.6.1.1.3 - Hoofed animals; 6.3.1 - Domesticated animal; 6.3.1.7 - Beast of burden
+κυνάριον	?	1.6.1.1.2 - Carnivore; 6.3.1.5 - Dog
+κυριότης	?	4.5 - Authority; 4.5.1 - Person in authority; 4.6.1 - Ruler
+κωλύω	?	3.3.2.2 - Refuse to do something; 3.3.4.2 - Refuse permission; 3.3.4.4 - Prevent; 7.4.5 - Keep something
+κόκκινος	?	8.3.3.3.4 - Colors of the spectrum
+κόκκος	?	1.5.5 - Parts of a plant
+κόραξ	?	1.6.1.2 - Bird
+κόσμος	?	1 - Universe, creation; 1.2 - World; 2 - Person; 4.3 - Behavior; 4.3.9 - Culture; 5.4 - Adornment
+κόφινος	?	6.6.4.2 - Weaving baskets and mats; 6.7.7 - Container
+κύμβαλον	?	4.2.3.5 - Musical instrument
+κύμινον	?	1.5.3 - Grass, herb, vine; 5.2.3.3.3 - Spice
+κύριος	?	4.5.1 - Person in authority; 4.5.4.4 - Slave; 4.5.5.1 - Title, name of honor; 4.9.1 - God
+κύων	?	1.6.1.1.2 - Carnivore; 2.6.2.3 - Sexual immorality; 6.3.1.5 - Dog; 8.3.7.1 - Bad
+κώνωψ	?	1.6.1.7 - Insect
+κῆνσος	?	4.6.2 - Citizen; 6.8.8 - Tax
+κῆρυξ	?	3.5.2 - Make speech
+κῆτος	?	1.6.1.5 - Fish
+λάχανον	?	1.5.3 - Grass, herb, vine
+λέντιον	?	5.6.2 - Bathe; 6.6.1.1 - Cloth
+λέπρα	?	2.5.1 - Sick
+λέων	?	1.6.1.1.2 - Carnivore
+λίβανος	?	2.3.4 - Smell; 5.4.5 - Anoint the body
+λίνον	?	5.5.7 - Fireplace; 6.6.1.1 - Cloth; 8.3.3.1.1 - Light source
+λαμπάς	?	8.3.3.1.1 - Light source
+λατρεία	?	4.5.4.3 - Serve; 4.9.5 - Practice religion
+λατρεύω	?	4.5.4.3 - Serve; 4.9.5 - Practice religion
+λαός	?	4.1.4.1 - Social class; 4.2.1.7 - Crowd, group; 4.5.6.2 - Low status; 4.6.2 - Citizen; 4.9.7 - Religious organization
+λειτουργέω	?	4.5.4.3 - Serve; 4.9.5 - Practice religion
+λειτουργία	?	4.5.4.3 - Serve; 4.9.5 - Practice religion
+λειτουργικός	?	4.5.4.3 - Serve
+λειτουργός	?	4.5.4.3 - Serve
+λεπρός	?	2.5.1 - Sick
+λεπτόν	?	6.8.6.1 - Monetary units
+ληνός	?	6.2.1.4.1 - Growing grapes
+λιβανωτός	?	4.9.8 - Religious things
+λιθόστρωτον	?	6.5.3 - Building materials; 6.5.4.1 - Road; 7.5.9.2 - Fill, cover
+λογικός	?	3.5.1.3.5 - Real; 9.1.3.1 - Physical, non-physical
+λυτρωτής	?	4.4.4.4 - Save from trouble; 6.8.4.1 - Buy; 7.2.6.4 - Set free
+λυτρόω	?	4.4.4.4 - Save from trouble; 6.8.4.1 - Buy; 7.2.6.4 - Set free
+λυχνία	?	8.3.3.1.1 - Light source
+λόγχη	?	4.8.3.7 - Weapon, shoot
+λύκος	?	1.6.1.1.2 - Carnivore; 4.3.1.1 - Bad, immoral
+λύτρον	?	4.4.4.4 - Save from trouble; 6.8.4.1 - Buy; 7.2.6.4 - Set free
+λύτρωσις	?	4.4.4.4 - Save from trouble; 6.8.4.1 - Buy; 7.2.6.4 - Set free
+λύχνος	?	8.3.3.1.1 - Light source
+μάρτυς	?	4.7.5.5 - Witness, testify
+μάταιος	?	6.1.2.2.2 - Useless; 9.6.2.6.1 - Without result 
+μέλαν	?	3.5.7.1 - Write
+μέτοχος	?	4.3.4.3 - Cooperate with; 4.3.4.5 - Share with; 8.3.5.2.2 - Like, similar
+μίασμα	?	4.3.1.1 - Bad, immoral; 5.6.1 - Clean, dirty; 8.3.3.3.6 - Change color
+μίσθιος	?	6.9.2 - Work for someone
+μαθήτρια	?	4.5.4.5 - Follow, be a disciple
+μαθητής	?	3.2.2 - Learn; 3.6 - Teach; 3.6.2 - School; 4.5.4.5 - Follow, be a disciple
+μαθητεύω	?	4.5.4.5 - Follow, be a disciple
+μακάριος	?	3.4.1.2 - Happy; 4.4.1 - Prosperity; 4.9.4.3 - Bless
+μακαρίζω	?	3.4.1.2 - Happy; 4.4.1 - Prosperity; 4.9.4.3 - Bless
+μακαρισμός	?	3.4.1.2 - Happy; 4.4.1 - Prosperity; 4.9.4.3 - Bless
+μαράνα θᾶ	?	?
+μαρτυρέω	?	4.7.5.5 - Witness, testify
+μαρτυρία	?	4.3.1.4 - Reputation; 4.7.5.5 - Witness, testify
+μαρτύριον	?	4.7.5.5 - Witness, testify
+μαρτύρομαι	?	3.3.3.4 - Insist; 3.5.1 - Say
+ματαιολογία	?	3.5.5 - Foolish talk
+ματαιολόγος	?	3.5.5 - Foolish talk
+ματαιότης	?	6.1.2.2.2 - Useless; 9.6.2.6.1 - Without result 
+ματαιόω	?	6.1.2.2.2 - Useless; 9.6.2.6.1 - Without result 
+μεγαλεῖον	?	4.5.6.1 - High status; 6.1.2.3.4 - Power, force; 8.3.7.5 - Important
+μεγαλωσύνη	?	4.5.6.1 - High status; 4.9.1 - God; 8.3.7.5 - Important
+μεμβράνα	?	3.5.7.1 - Write; 6.6.4.3 - Working with leather
+μεριστής	?	7.8 - Divide into pieces
+μεσίτης	?	3.3.2.1 - Agree to do something; 3.3.2.3 - Intercede; 4.8.4.9 - Reconcile
+μεσουράνημα	?	1.1 - Sky; 1.1.1 - Sun
+μεσότοιχον	?	6.5.1.5 - Fence, wall
+μετάνοια	?	4.3.8 - Change behavior; 4.8.4.6 - Repent
+μετέχω	?	4.2.1.8.3 - Belong to an organization; 4.3.4.3 - Cooperate with; 4.3.4.5 - Share with; 5.2.2 - Eat; 8.3.5.2.2 - Like, similar
+μεταμέλομαι	?	3.2.5.8 - Change your mind; 3.4.2.2 - Sorry; 4.8.4.6 - Repent
+μετανοέω	?	4.3.8 - Change behavior; 4.8.4.6 - Repent
+μετοχή	?	4.3.4.3 - Cooperate with; 4.3.4.5 - Share with; 8.3.5.2.2 - Like, similar
+μετριοπαθέω	?	3.4 - Emotion; 4.4.4.3 - Gentle
+μηλωτή	?	5.3 - Clothing; 6.6.4.3 - Working with leather
+μιαίνω	?	4.3.1.1 - Bad, immoral; 4.9.5.6 - Religious purification; 5.6.1 - Clean, dirty; 8.3.3.3.6 - Change color
+μιασμός	?	4.3.1.1 - Bad, immoral
+μισθωτός	?	6.9.2 - Work for someone
+μνημεῖον	?	2.6.6.6 - Grave; 3.2.6.4 - Remind; 6.5.1 - Building
+μνηστεύω	?	2.6.1.1 - Arrange a marriage
+μνᾶ	?	6.8.6.1 - Monetary units
+μνῆμα	?	2.6.6.6 - Grave
+μοιχάω	?	2.6.2.3 - Sexual immorality
+μοιχαλίς	?	2.6.2.3 - Sexual immorality
+μοιχεία	?	2.6.2.3 - Sexual immorality
+μοιχεύω	?	2.6.2.3 - Sexual immorality
+μοιχός	?	2.6.2.3 - Sexual immorality
+μολυσμός	?	4.3.1.1 - Bad, immoral; 4.9.5.6 - Religious purification
+μολύνω	?	4.3.1.1 - Bad, immoral; 4.9.5.6 - Religious purification; 5.6.1 - Clean, dirty
+μοσχοποιέω	?	4.9.8.1 - Idol
+μυλικός	?	5.2.1.2.3 - Grind flour; 6.2.6.2 - Mill grain
+μυρίζω	?	2.6.6.5 - Bury; 5.4.5 - Anoint the body
+μόδιος	?	6.7.7 - Container; 8.2.5.1 - Big container, volume
+μόσχος	?	1.6.1.1.3 - Hoofed animals; 6.3.1.1 - Cattle
+μύλινος	?	5.2.1.2.3 - Grind flour; 6.2.6.2 - Mill grain
+μύλος	?	5.2.1.2.3 - Grind flour; 6.2.6.2 - Mill grain
+μύρον	?	2.6.6.5 - Bury; 5.4.5 - Anoint the body
+νάρδος	?	5.4.5 - Anoint the body
+ναός	?	4.9.8.1 - Idol; 4.9.8.2 - Place of worship
+ναῦς	?	7.2.4.2.1 - Boat
+νεωκόρος	?	4.9.7.1 - Religious person
+νηστεία	?	4.2.2.2 - Festival, show; 4.9.5.9 - Fasting; 5.2.2.5 - Hungry, thirsty; 5.2.2.9 - Fast, not eat
+νηστεύω	?	4.9.5.9 - Fasting; 5.2.2.9 - Fast, not eat
+νιπτήρ	?	5.6 - Cleaning; 5.6.2 - Bathe; 6.7.7 - Container
+νομίμως	?	4.7 - Law; 8.3.7.7 - Right, proper
+νομικός	?	4.7 - Law; 4.7.4.1 - Legal personnel
+νομοδιδάσκαλος	?	3.6 - Teach; 4.7.4.1 - Legal personnel
+νομοθέτης	?	4.7.2 - Pass laws
+νομοθεσία	?	4.7.2 - Pass laws
+νομοθετέω	?	4.7.2 - Pass laws
+νοσσίον	?	1.6.1.2 - Bird
+νοσσιά	?	1.6.1.2 - Bird
+νυμφών	?	2.6.1.2 - Wedding; 6.5.2 - Parts of a building
+νόμισμα	?	6.8.6 - Money
+νόμος	?	4.7.1 - Laws; 4.9.3.1 - Sacred writings
+ξέστης	?	5.2.2.8 - Eating utensil; 6.7.7 - Container
+ξενία	?	4.2.1.4.2 - Show hospitality; 6.5.2.7 - Room
+ξύλινος	?	6.6.3.2 - Wood
+ξύλον	?	1.5.1 - Tree; 4.7.7.3 - Imprison; 4.7.7.4 - Execute; 4.8.3.7 - Weapon, shoot; 5.5.6 - Fuel; 6.6.3.2 - Wood
+οἰκέτης	?	5.8 - Manage a house
+οἰκία	?	5.9 - Live, stay; 6.5.1.1 - House; 6.8.1.5 - Possession, property
+οἰκεῖος	?	4.1.9.8 - Family, clan; 5.9 - Live, stay
+οἰκοδομή	?	2.1 - Body; 4.3.1.3 - Mature in behavior; 4.9.7 - Religious organization; 6.5 - Working with buildings; 6.5.1 - Building; 9.1.2.5 - Make
+οἰκονομία	?	4.5.3.4 - Appoint, delegate; 5.8 - Manage a house; 9.1.2 - Do
+οἰκονόμος	?	4.5.1 - Person in authority; 5.8 - Manage a house
+οἰκουμένη	?	1.2 - World; 2 - Person; 4.6.7.1 - Country
+οἰκτίρμων	?	4.4.4.1 - Mercy
+οἰκτίρω	?	4.4.4.1 - Mercy
+οἰκτιρμός	?	4.4.4.1 - Mercy
+οἴκημα	?	6.5.2.7 - Room
+οἶκος τοῦ θεοῦ	?	4.9.7 - Religious organization
+οἶνος	?	5.2.3.7 - Alcoholic beverage
+οὐράνιος	?	1.1 - Sky; 4.9.6 - Heaven, hell
+οὐρανόθεν	?	1.1 - Sky; 4.9.6 - Heaven, hell
+οὐρανός	?	1.1 - Sky; 4.9.1 - God; 4.9.6 - Heaven, hell
+πάρδαλις	?	1.6.1.1.2 - Carnivore
+πάρεσις	?	3.1.2.4 - Ignore
+πάσχα	?	1.6.1.1.3 - Hoofed animals; 4.2.2.1 - Ceremony; 4.9.5.4 - Religious ceremony; 4.9.5.5 - Offering, sacrifice; 6.3.1.2 - Sheep
+πέδη	?	4.7.7.3 - Imprison; 6.7.5 - Fastening tool
+πήγανον	?	1.5.3 - Grass, herb, vine; 5.2.3.3.3 - Spice
+πήρα	?	6.7.3 - Carrying tool
+πίναξ	?	5.2.2.8 - Eating utensil
+πίστις	?	3.2.5.1 - Believe; 3.2.5.1.1 - Trust; 3.5.1.9 - Promise; 4.9 - Religion; 4.9.7.1 - Religious person
+παγίς	?	4.3.1.1 - Bad, immoral; 6.4.2 - Trap
+παιδίσκη	?	4.5.4.4 - Slave
+παλιγγενεσία	?	2.6.3 - Birth; 4.9.5.7 - Salvation; 8.4.6.5.3 - New; 8.4.7.2 - Start again; 9.1.2.6 - Change something
+πανδοχεύς	?	6.5.1 - Building; 7.2.4 - Travel
+πανδοχεῖον	?	6.5.1 - Building; 7.2.4 - Travel
+πανοπλία	?	4.8.3.7 - Weapon, shoot
+παντοκράτωρ	?	4.9.1 - God
+παράδεισος	?	4.9.6 - Heaven, hell
+παράδοσις	?	3.6 - Teach
+παράκλησις	?	3.4.1.5 - Confident; 3.5.1.5 - Ask; 4.4.4.2 - Show sympathy, support
+παράκλητος	?	4.3.4.2 - Help; 4.9.1 - God
+παράπτωμα	?	4.3.1.1 - Bad, immoral
+παράσημον	?	3.5.6 - Sign, symbol; 7.2.4.2.1 - Boat
+παραβολή	?	3.5.4.1 - Fable, myth; 8.3.5.4 - Pattern, model
+παρακαλέω	?	3.4.1.5 - Confident; 3.5.1.5 - Ask; 4.2.1.1 - Invite; 4.4.4.2 - Show sympathy, support; 7.5.1 - Gather
+παρανομέω	?	4.5.4.2 - Disobey
+παρατήρησις	?	2.3.1.2 - Watch; 3.1.2.1 - Alert; 4.4.4.5 - Protect
+παρεμβολή	?	4.8.3.6.6 - Fort; 5.9 - Live, stay; 6.5.1 - Building
+παρθένος	?	2.6.1.3 - Unmarried; 2.6.2.1 - Virginity; 2.6.4.3 - Youth; 2.6.5.1 - Man; 2.6.5.2 - Woman
+παροψίς	?	5.2.2.8 - Eating utensil
+παῖς	?	2.6.4.2 - Child; 4.1.9.1 - Related by birth; 4.5.4.4 - Slave
+πείθω	?	3.2.5.1 - Believe; 3.2.5.1.1 - Trust; 3.3.3.3 - Persuade; 4.5.4.1 - Obey
+πειράζω	?	3.2.2.3 - Evaluate, test; 4.3.1.1 - Bad, immoral; 4.7.5.1 - Investigate a crime; 6.1.2.1 - Try, attempt
+πειρασμός	?	3.2.2.3 - Evaluate, test; 4.3.1.1 - Bad, immoral; 4.7.5.1 - Investigate a crime
+πεισμονή	?	3.3.3.3 - Persuade
+περίεργος	?	4.3.4.6 - Meddle; 4.9.4.1 - Sorcery
+περιβόλαιον	?	5.3 - Clothing
+περιεργάζομαι	?	4.3.4.6 - Meddle
+περικεφαλαία	?	4.8.3.7 - Weapon, shoot
+περιπατέω	?	4.3 - Behavior; 7.2.1.1 - Walk
+περιστερά	?	1.6.1.2 - Bird
+περιτέμνω	?	4.9.5.4 - Religious ceremony; 5.4.6.1 - Circumcision
+περιτομή	?	4.9.5.4 - Religious ceremony; 5.4.6.1 - Circumcision
+πετεινόν	?	1.6.1.2 - Bird
+πηδάλιον	?	7.2.4.2.1 - Boat
+πινακίδιον	?	3.5.7.1 - Write
+πιστεύω	?	3.2.5.1 - Believe; 3.2.5.1.1 - Trust; 4.3.4.5.3 - Entrust to the care of; 4.9.7.1 - Religious person
+πιστικός	?	7.5.3.1 - Pure, unmixed
+πιστός	?	3.2.5.1.1 - Trust; 3.5.1.3 - True; 4.5.4.1 - Obey
+πιστόω	?	3.2.5.1 - Believe; 3.3.3.3 - Persuade
+πλάξ	?	3.5.7.1 - Write
+πληροφορέω	?	3.2.5.1 - Believe; 3.3.3.3 - Persuade; 6.1.2.3.5 - Complete, finish; 9.4.4.2 - Sure
+πληροφορία	?	3.2.5.1 - Believe; 3.3.3.3 - Persuade; 9.4.4.2 - Sure
+πληρόω	?	3.3.3.1 - Suggest; 3.3.3.3 - Persuade; 3.4 - Emotion; 3.6 - Teach; 4.3.4.5.1 - Provide for, support; 4.5.4.1 - Obey; 4.9.4.6 - Prophecy; 6.1.2.3.5 - Complete, finish; 8.1.8 - Full; 8.4.6.1.3 - End
+πλοιάριον	?	7.2.4.2.1 - Boat
+πλοῖον	?	7.2.4.2.1 - Boat
+πνευματικός	?	3.1 - Soul, spirit; 3.5.2.3 - Figurative; 4.3.1 - Good, moral; 4.3.1.3 - Mature in behavior; 4.9.1 - God; 4.9.5.1 - Devout; 9.1.3.1 - Physical, non-physical
+πνευματικῶς	?	3.1 - Soul, spirit; 3.5.2.3 - Figurative; 4.9.1 - God; 4.9.2 - Supernatural being
+πνεῦμα	?	1.1.3.1 - Wind; 3.1 - Soul, spirit; 3.2 - Think; 3.2.5.6 - Attitude; 3.4.2.3 - Angry; 4.9.1 - God; 4.9.2 - Supernatural being
+πνεῦμα πονηρόν	?	4.9.2 - Supernatural being
+πνεῦμα ἀκάθαρτον	?	4.9.2 - Supernatural being
+πνεῦμα ἅγιον	?	4.9.1 - God
+ποίμνη	?	1.6.6 - Animal group; 4.9.7 - Religious organization; 6.3.1.2 - Sheep; 6.3.2 - Tend herds in fields
+ποίμνιον	?	4.9.7 - Religious organization
+ποδήρης	?	5.3 - Clothing
+πολιτεύομαι	?	4.3 - Behavior
+πολύσπλαγχνος	?	4.3.3 - Love; 4.4.4.2 - Show sympathy, support
+πονηρός	?	2.5.1 - Sick; 3.4.2.2 - Sorry; 4.3.1.1 - Bad, immoral; 4.7.6.2 - Condemn, find guilty; 8.3.7.1 - Bad
+πορνεία	?	2.6.2.3 - Sexual immorality
+πορφύρα	?	5.3 - Clothing; 6.6.1.1 - Cloth
+πραιτώριον	?	4.8.3.6.1 - Army; 4.8.3.6.6 - Fort; 6.5.1 - Building
+πρεσβυτέριον	?	4.5.1 - Person in authority; 4.6.3.1 - Governing body; 4.9.7.1 - Religious person
+πρεσβύτερος	?	2.6.4.5 - Old person; 4.5.1 - Person in authority; 4.9.7.1 - Religious person; 8.4.2 - Take time; 8.4.5 - Relative time
+προαμαρτάνω	?	4.3.1.1 - Bad, immoral
+προαύλιον	?	6.5.1.4 - Yard
+προελπίζω	?	3.2.7.1 - Hope
+προεπαγγέλλω	?	3.5.1.9 - Promise
+προευαγγελίζομαι	?	3.2.7.3 - Predict; 3.5.1.2.1 - Announce
+προσάββατον	?	8.4.1.3.1 - Days of the week
+προσήλυτος	?	4.9.7.1 - Religious person
+προσευχή	?	4.9.5.2 - Pray; 4.9.8.2 - Place of worship
+προσεύχομαι	?	4.9.5.2 - Pray
+προσκεφάλαιον	?	5.1.1.3 - Bed
+προσκοπή	?	3.4.2.3 - Angry; 4.3.1.1 - Bad, immoral; 4.4 - Prosperity, trouble
+προσκυνέω	?	4.5.4 - Submit to authority; 7.1.5 - Bow
+προσκυνητής	?	4.5.4 - Submit to authority; 7.1.5 - Bow
+προσκόπτω	?	3.4.2.3 - Angry; 7.2.1.5 - Walk with difficulty; 7.7.1 - Hit
+προσφάγιον	?	5.2 - Food
+προσφέρω	?	4.3 - Behavior; 4.9.5.5 - Offering, sacrifice; 6.8.3.1 - Give, donate; 7.3.1 - Carry; 7.3.3 - Take somewhere
+προσφιλής	?	3.4.1.1 - Like, love
+προσφορά	?	4.9.5.5 - Offering, sacrifice
+προσωπολήμπτης	?	4.7.9.4 - Discriminate, be unfair
+προσωπολημπτέω	?	4.7.9.4 - Discriminate, be unfair
+προσωπολημψία	?	4.7.9.4 - Discriminate, be unfair
+προφήτης	?	4.9.3.1 - Sacred writings; 4.9.4.6 - Prophecy; 4.9.7.1 - Religious person
+προφητεύω	?	4.9.4.6 - Prophecy
+προφητικός	?	4.9.4.6 - Prophecy
+προφῆτις	?	4.9.4.6 - Prophecy; 4.9.7.1 - Religious person
+πρόβατον	?	1.6.1.1.3 - Hoofed animals; 4.9.7.1 - Religious person
+πρόκριμα	?	4.7.9.4 - Discriminate, be unfair
+πρόσκομμα	?	3.4.2.3 - Angry; 4.3.1.1 - Bad, immoral; 7.2.1.5 - Walk with difficulty
+πρύμνα	?	7.2.4.2.1 - Boat
+πρῷρα	?	7.2.4.2.1 - Boat
+πταίω	?	4.3.1.1 - Bad, immoral; 4.7.3 - Break the law; 7.2.1.5 - Walk with difficulty; 7.2.2.5.1 - Fall
+πτερύγιον	?	6.5.2 - Parts of a building
+πτηνόν	?	1.6.1.2 - Bird
+πτύον	?	6.2.6.1 - Winnow grain; 6.2.8 - Agricultural tool
+πυλών	?	6.5.1.5 - Fence, wall
+πυρὸς αἰωνίου δίκη	?	4.9.6 - Heaven, hell
+πύθων	?	4.9.4.6 - Prophecy; 4.9.4.7 - Omen, divination
+πύργος	?	6.5.1 - Building
+πᾶσα σάρξ	?	2 - Person
+πῦρ ζῆλος	?	5.5.4 - Burn
+πῦρ τὸ αἰώνιον	?	4.9.6 - Heaven, hell
+πῶλος	?	1.6.1.1.3 - Hoofed animals; 6.3.1.7 - Beast of burden
+σάββατον	?	8.4.1.3 - Week; 8.4.1.3.1 - Days of the week
+σάκκος	?	5.3 - Clothing; 6.6.1.1 - Cloth
+σάλπιγξ	?	4.2.3.5 - Musical instrument
+σάρκινος	?	2 - Person; 2.1.7 - Flesh; 4.3.1.1 - Bad, immoral
+σάρξ	?	2 - Person; 2.1 - Body; 2.1.7 - Flesh; 2.6 - Life; 4.1.9.1 - Related by birth
+σέβασμα	?	4.9.8 - Religious things; 4.9.8.2 - Place of worship
+σέβω	?	4.5.5 - Honor; 4.9.5.3 - Worship
+σής	?	1.6.1.7 - Insect
+σίκερα	?	5.2.3.7 - Alcoholic beverage
+σίναπι	?	1.5.2 - Bush, shrub
+σαβαχθάνι	?	4.3.3.3 - Abandon
+σαββάτου ὁδός	?	8.2.2 - Long
+σαββατισμός	?	8.4.1.3.1 - Days of the week
+σαγήνη	?	6.4.5.3 - Fishing equipment
+σαλπίζω	?	4.2.3.5 - Musical instrument
+σαλπιστής	?	4.2.3.5 - Musical instrument
+σανίς	?	6.5.3 - Building materials; 6.6.3.2 - Wood
+σανδάλιον	?	5.3 - Clothing
+σαργάνη	?	6.6.4.2 - Weaving baskets and mats; 6.7.7 - Container
+σαρκικός	?	2 - Person; 2.1 - Body; 4.3.1.1 - Bad, immoral; 9.1.3.1 - Physical, non-physical
+σεβάζομαι	?	4.5.5 - Honor; 4.9.5.3 - Worship
+σειρὰ ζόφου	?	4.9.6 - Heaven, hell; 6.7.5 - Fastening tool
+σημεῖον	?	3.5.1.6.1 - Demonstrate; 3.5.6 - Sign, symbol; 3.5.8.4 - Show, indicate
+σιμικίνθιον	?	5.3.1 - Men's clothing; 5.3.4 - Clothes for special occasions
+σινδών	?	5.3 - Clothing; 6.6.1.1 - Cloth
+σιρικόν	?	5.3 - Clothing; 6.6.1.1 - Cloth
+σιτίον	?	1.5.5 - Parts of a plant; 5.2 - Food; 5.2.3.1.1 - Food from seeds
+σιτιστός	?	6.3 - Animal husbandry
+σιωπάω	?	3.5.1.1.5 - Say nothing
+σκάνδαλον	?	3.4.2.3 - Angry; 4.3.1.1 - Bad, immoral; 6.4.2 - Trap
+σκάφη	?	7.2.4.2.1 - Boat
+σκέπασμα	?	4.4.4.5 - Protect; 5.3 - Clothing; 6.5.1.2 - Types of houses; 7.3.7 - Cover
+σκήνωμα	?	2.1 - Body; 5.9 - Live, stay; 6.5.1.2 - Types of houses
+σκανδαλίζω	?	3.2.5.1 - Believe; 3.4.2.3 - Angry; 4.3.1.1 - Bad, immoral; 6.4.2 - Trap
+σκευή	?	6.7 - Tool; 7.2.4.2.1 - Boat
+σκηνή	?	6.5.1.2 - Types of houses; 9.7.3.2 - Names of buildings
+σκηνοπηγία	?	4.2.2.1 - Ceremony; 4.9.5.4 - Religious ceremony
+σκηνοποιός	?	6.5.1 - Building
+σκηνόω	?	5.9 - Live, stay
+σκληροκαρδία	?	3.3.1.7 - Stubborn
+σκορπίος	?	1.6.1.8 - Spider
+σκωληκόβρωτος	?	2.5.2.2 - Skin disease; 2.5.2.3 - Stomach illness
+σκότος τὸ ἐξώτερον	?	4.9.6 - Heaven, hell
+σκύβαλον	?	8.3.7.8.3 - Garbage
+σκώληξ	?	1.6.1.7 - Insect; 1.6.1.9 - Small animals
+σκῆνος	?	2.1 - Body; 6.5.1.2 - Types of houses
+σμύρνα	?	2.6.6.5 - Bury; 5.4.5 - Anoint the body
+σορός	?	2.6.6.5 - Bury; 5.1.1.3 - Bed
+σουδάριον	?	2.6.6.5 - Bury; 5.3 - Clothing; 5.3.1 - Men's clothing
+σπένδω	?	4.9.5.5 - Offering, sacrifice
+σπέρμα	?	1.5.5 - Parts of a plant; 4.1.9.1.5 - Grandson, granddaughter; 6.2.3 - Plant a field; 8.4.6.1 - Start something
+σπλάγχνον	?	2.1.8 - Internal organs; 3.1 - Soul, spirit; 3.4 - Emotion; 4.3.3 - Love; 4.4.4.2 - Show sympathy, support
+σπλαγχνίζομαι	?	4.3.3 - Love; 4.4.4.1 - Mercy; 4.4.4.2 - Show sympathy, support
+σπουδή	?	3.4.1.4.2 - Enthusiastic; 6.1.2.3.2 - Work hard; 8.4.8 - Speed; 9.3.4 - Do intensely
+σπυρίς	?	6.6.4.2 - Weaving baskets and mats; 6.7.7 - Container
+σπόγγος	?	1.6.1.9 - Small animals; 5.6 - Cleaning
+σπόρος	?	1.5.5 - Parts of a plant; 6.2.3 - Plant a field
+στάδιον	?	6.5.1 - Building
+στάμνος	?	6.7.7 - Container
+στάχυς	?	1.5.5 - Parts of a plant; 6.2.1.1.2 - Growing wheat
+στέγη	?	6.5.2.2 - Roof
+στέμμα	?	8.3.8 - Decorated
+στέφανος	?	4.2.6.2 - Sports; 4.7.7.1 - Reward; 5.4.1 - Jewelry
+στίγμα	?	2.1.4 - Skin; 2.5.3 - Injure; 3.5.6.1 - Gesture
+στατήρ	?	6.8.6.1 - Monetary units
+σταυρός	?	4.7.7.4 - Execute
+σταυρόω	?	4.7.7.4 - Execute
+σταφυλή	?	1.5.5 - Parts of a plant; 6.2.1.4.1 - Growing grapes
+στιβάς	?	1.5.5 - Parts of a plant
+στοά	?	6.5.2 - Parts of a building
+στοιχεῖον	?	1.2.2 - Substance, matter; 8.1.6.1 - Part; 8.3.7.5.1 - Basic; 8.4.5.1 - Order, sequence
+στολή	?	5.3 - Clothing
+στρουθίον	?	1.6.1.2 - Bird
+στῦλος	?	6.5.2 - Parts of a building; 7.2.5.3 - Guide
+συγκοινωνέω	?	4.1 - Relationships; 4.3.4.3 - Cooperate with
+συγκοινωνός	?	4.1 - Relationships; 4.3.4.3 - Cooperate with; 4.3.4.5 - Share with; 8.3.5.2.2 - Like, similar
+συζάω	?	2.6 - Life
+συκάμινος	?	1.5.1 - Tree
+συκομορέα	?	1.5.1 - Tree
+συκῆ	?	1.5.1 - Tree
+συμπαθέω	?	2.5.6.1 - Pain; 4.3.3 - Love; 4.4.4.2 - Show sympathy, support
+συμπαθής	?	4.3.3 - Love; 4.4.4.2 - Show sympathy, support
+συναγωγή	?	4.9.7 - Religious organization; 6.5.1 - Building
+συναλλάσσω	?	4.8.4.9 - Reconcile
+συνδοξάζω	?	4.5.5 - Honor
+συνείδησις	?	3.1 - Soul, spirit; 3.2.3 - Know; 3.4.2.2 - Sorry; 4.3 - Behavior
+συνεργός	?	4.1.2.1 - Working relationship; 6.1.1 - Worker
+συντελεία αἰῶνος	?	8.4.1.7 - Era
+συσταυρόω	?	4.7.7.4 - Execute
+σφραγίζω	?	3.2.5.9 - Approve of something; 3.5.6 - Sign, symbol; 3.5.7.1 - Write; 3.5.8.4 - Show, indicate; 4.7.8 - Legal contract; 7.3.6.1 - Shut, close; 7.7.7 - Mark
+σφραγίς	?	3.5.1.3.5 - Real; 3.5.6 - Sign, symbol; 3.5.7.1 - Write; 4.7.8 - Legal contract; 6.7 - Tool; 7.3.6.1 - Shut, close; 7.7.7 - Mark
+σχοινίον	?	7.5.4.1 - Rope, string
+σχολή	?	3.6.2 - School; 6.5.1 - Building
+σωματικός	?	2.1 - Body
+σωματικῶς	?	2.1 - Body; 9.1.3.1 - Physical, non-physical
+σωτήρ	?	4.4.4.4 - Save from trouble; 4.9.5.7 - Salvation
+σωτήριον	?	4.9.5.7 - Salvation
+σωτήριος	?	4.9.5.7 - Salvation
+σωτηρία	?	4.4.4.4 - Save from trouble; 4.9.5.7 - Salvation
+σύζυγος	?	4.1.2.1 - Working relationship; 6.1.1 - Worker
+σύμψυχος	?	4.1.5 - Unity
+σύνδουλος	?	4.5.4.4 - Slave
+σύσσωμος	?	4.2.1.8.3 - Belong to an organization
+σῖτος	?	1.5.3 - Grass, herb, vine; 1.5.5 - Parts of a plant; 5.2.3.1.1 - Food from seeds; 6.2.1.1.2 - Growing wheat
+σῦκον	?	1.5.1 - Tree; 5.2.3.1.2 - Food from fruit
+σῴζω	?	2.5.7 - Treat disease; 4.4.4.4 - Save from trouble; 4.9.5.7 - Salvation
+σῶμα	?	2 - Person; 2.1 - Body; 4.5.4.4 - Slave; 4.9.7 - Religious organization; 8.3.5.4 - Pattern, model
+τάλαντον	?	6.8.6.1 - Monetary units
+τάφος	?	2.6.6.6 - Grave
+τέλος	?	6.8.8 - Tax
+τέρας	?	3.4.1.3 - Surprise; 3.5.8.4 - Show, indicate; 4.9.4.7 - Omen, divination
+ταβέρνη	?	6.5.1 - Building; 7.2.4 - Travel
+ταμεῖον	?	6.5.2.7 - Room
+ταρταρόω	?	4.9.6 - Heaven, hell
+ταῦρος	?	1.6.1.1.3 - Hoofed animals; 6.3.1.1 - Cattle
+τελώνης	?	6.8.8 - Tax
+τελώνιον	?	6.8.8 - Tax
+τεῖχος	?	6.5.1.5 - Fence, wall
+τράγος	?	1.6.1.1.3 - Hoofed animals; 6.3.1.3 - Goat
+τρίβολος	?	1.5.3 - Grass, herb, vine
+τρίστεγον	?	6.5.2 - Parts of a building; 6.5.2.8 - Floor, story
+τρυγών	?	1.6.1.2 - Bird
+τρυμαλιά	?	6.6.1 - Working with cloth; 7.8.5 - Make hole, opening
+τρόπος	?	4.3 - Behavior; 9.5.1.4 - Way, manner
+τρύβλιον	?	5.2.2.8 - Eating utensil; 6.7.7 - Container
+τρύπημα	?	6.6.1 - Working with cloth; 7.8.5 - Make hole, opening
+τρῆμα	?	6.6.1 - Working with cloth; 7.8.5 - Make hole, opening
+τόξον	?	4.8.3.7 - Weapon, shoot
+τύπος	?	2.1.4 - Skin; 2.5.3 - Injure; 4.9.8.1 - Idol; 8.3.5.2.2 - Like, similar; 8.3.5.4 - Pattern, model; 8.3.5.5 - Imitate
+τὰ περίεργα	?	4.9.4.1 - Sorcery
+υἱὸς τοῦ ἀνθρώπου	?	2 - Person; 4.1.9.1.4 - Son, daughter
+φάντασμα	?	4.9.2 - Supernatural being
+φάτνη	?	6.3 - Animal husbandry; 6.5.2 - Parts of a building; 6.7.7 - Container
+φίλανδρος	?	4.3.3 - Love
+φίλαυτος	?	4.3.3 - Love; 4.3.4.4.1 - Selfish
+φίλος	?	3.4.1.1 - Like, love; 4.1.1 - Friend
+φαιλόνης	?	5.3 - Clothing
+φανός	?	8.3.3.1.1 - Light source
+φιάλη	?	4.9.8 - Religious things; 5.2.1.3 - Cooking utensil; 5.2.2.8 - Eating utensil; 6.7.7 - Container
+φιλάγαθος	?	3.4.1.1 - Like, love; 3.4.1.1.1 - Enjoy doing something; 4.3.1 - Good, moral
+φιλάδελφος	?	4.3.3 - Love
+φιλάργυρος	?	6.8.2.5 - Greedy
+φιλέω	?	3.4.1.1 - Like, love; 3.4.1.1.1 - Enjoy doing something; 3.5.1.4.3 - Greet; 4.1.8 - Show affection
+φιλήδονος	?	3.4.1.1.1 - Enjoy doing something
+φιλία	?	3.4.1.1 - Like, love; 4.1.1 - Friend
+φιλαδελφία	?	4.3.3 - Love
+φιλανθρωπία	?	4.3.4 - Do good to
+φιλαργυρία	?	6.8.2.5 - Greedy
+φιλοφρόνως	?	4.3.4 - Do good to
+φιλόθεος	?	4.3.3 - Love; 4.9.5.1 - Devout
+φιλόστοργος	?	4.3.3 - Love
+φοβέω	?	3.4.2.4 - Afraid; 4.5.5 - Honor; 4.9.5.3 - Worship
+φοβερός	?	3.4.2.4 - Afraid
+φοῖνιξ	?	1.5.1 - Tree; 1.5.5 - Parts of a plant
+φραγέλλιον	?	4.7.7 - Punish
+φραγμός	?	4.1.6 - Disunity; 6.5.1.5 - Fence, wall; 6.5.4.1 - Road
+φρονέω	?	3.2.5 - Opinion
+φρόνημα	?	3.2.5 - Opinion
+φρύγανον	?	1.5.5 - Parts of a plant; 5.5.6 - Fuel; 6.6.3.2 - Wood
+φυλή	?	4.1.9.8 - Family, clan; 4.6.7.1 - Country
+φυλακτήριον	?	4.9.8 - Religious things; 5.4.1 - Jewelry
+φυτεία	?	1.5 - Plant
+φόβητρον	?	3.4.2.4 - Afraid
+φόβος	?	3.4.2.4 - Afraid; 4.9.5.3 - Worship
+φόρος	?	6.8.8 - Tax
+φύλλον	?	1.5.5 - Parts of a plant
+χάραγμα	?	3.5.6 - Sign, symbol; 4.9.8.1 - Idol; 6.6.5.3 - Sculpture; 7.7.7 - Mark; 8.3.5.4 - Pattern, model
+χάραξ	?	6.5.1.5 - Fence, wall
+χάρις	?	3.4.1.1.8 - Pleased with; 3.5.1.7.1 - Thank; 4.3.4 - Do good to; 4.4.4.1 - Mercy; 6.8.3.1 - Give, donate
+χάρισμα	?	6.8.3.1 - Give, donate
+χάρτης	?	3.5.7.1 - Write; 6.6.3.3 - Working with paper
+χαλινός	?	6.3.1.7 - Beast of burden
+χαλκίον	?	6.6.2.3 - Working with metal; 6.7.7 - Container
+χαρίζομαι	?	4.8.2.7 - Betray; 4.8.4.7 - Forgive; 6.8.3.1 - Give, donate; 6.8.5.4 - Repay debt
+χαριτόω	?	4.3.4 - Do good to
+χειροτονέω	?	3.3.1.2 - Choose; 4.5.3.4 - Appoint, delegate
+χερούβ	?	4.9.2 - Supernatural being
+χιτών	?	5.3 - Clothing
+χλαμύς	?	5.3 - Clothing
+χλωρόν	?	1.5 - Plant
+χοῖρος	?	1.6.1.1.3 - Hoofed animals; 6.3.1.4 - Pig
+χρίω	?	4.5.3.4 - Appoint, delegate; 5.4.5 - Anoint the body
+χρηματισμός	?	4.9.4.6 - Prophecy; 4.9.4.7 - Omen, divination
+χρηστεύομαι	?	4.3.4 - Do good to
+χρηστός	?	4.3.4 - Do good to; 6.1.2.2.1 - Useful; 6.1.3.1 - Easy, possible; 8.3.7.2 - Better
+χρηστότης	?	4.3.3 - Love; 4.3.4 - Do good to
+χρυσίον	?	1.2.2.3 - Metal; 5.4.1 - Jewelry
+χρυσοδακτύλιος	?	5.4.1 - Jewelry
+χρυσός	?	1.2.2.3 - Metal; 6.8.6 - Money
+χρῆμα	?	6.8.1.5 - Possession, property; 6.8.6 - Money
+χρῖσμα	?	4.5.3.4 - Appoint, delegate; 5.4.5 - Anoint the body
+χόρτος	?	1.5.3 - Grass, herb, vine; 1.5.5 - Parts of a plant
+ψευδαπόστολος	?	4.3.5.6 - Hypocrite; 4.9.9 - Irreligion
+ψευδοπροφήτης	?	4.3.5.6 - Hypocrite; 4.9.4.6 - Prophecy; 4.9.9 - Irreligion
+ψευδόχριστος	?	4.3.5.6 - Hypocrite; 4.9.9 - Irreligion
+ψυχή	?	2 - Person; 2.6 - Life; 3.1 - Soul, spirit
+ψυχικός	?	2.6 - Life; 4.3.1.1 - Bad, immoral; 9.1.3.1 - Physical, non-physical
+ἀΐδιος	?	8.4.2.3 - Forever
+ἀββά	?	4.1.9.1.2 - Father, mother
+ἀγάπη	?	3.4.1.1 - Like, love; 4.3.3 - Love; 5.2.2.3 - Feast
+ἀγαθοεργέω	?	4.3.4 - Do good to
+ἀγαθοποιΐα	?	4.3.4 - Do good to
+ἀγαθοποιέω	?	4.3.4 - Do good to
+ἀγαθοποιός	?	4.3.4 - Do good to
+ἀγαθωσύνη	?	4.3.1 - Good, moral
+ἀγαθός	?	4.3.1 - Good, moral; 8.3.7 - Good
+ἀγαπάω	?	3.4.1.1 - Like, love; 4.3.3 - Love
+ἀγαπητός	?	4.3.3 - Love; 9.7.1.7 - Terms of endearment
+ἀγγεῖον	?	6.7.7 - Container
+ἀγοράζω	?	6.8.4.1 - Buy; 7.4.3 - Get
+ἀγοραῖος	?	4.7.4 - Court of law; 6.1.2.4.2 - Lazy; 6.8.4.8 - Store, marketplace
+ἀγριέλαιος	?	1.5.1 - Tree
+ἀγωγή	?	4.3 - Behavior
+ἀδίκημα	?	4.3.4.1 - Do evil to
+ἀδίκως	?	4.3.1.1 - Bad, immoral; 4.3.4.1 - Do evil to; 4.7.9.2 - Unfair
+ἀδελφή	?	4.1.2 - Types of people; 4.1.9.1.3 - Brother, sister; 4.9.7.1 - Religious person
+ἀδελφός	?	4.1.2 - Types of people; 4.1.9.1 - Related by birth; 4.1.9.1.3 - Brother, sister; 4.9.7.1 - Religious person
+ἀδελφότης	?	4.1.2 - Types of people; 4.2.1.9 - Social group; 4.9.7.1 - Religious person
+ἀδικέω	?	2.5.3 - Injure; 4.3.4.1 - Do evil to; 7.9.1 - Damage
+ἀδικία	?	4.3.4.1 - Do evil to
+ἀετός	?	1.6.1.2 - Bird
+ἀθέμιτος	?	4.3.1.1 - Bad, immoral; 4.3.9.1 - Custom; 4.7.3 - Break the law
+ἀκάθαρτος	?	4.3.1.1 - Bad, immoral; 4.9.5.6 - Religious purification; 4.9.5.6.1 - Taboo; 5.6.1 - Clean, dirty
+ἀκάνθινος	?	1.5.5 - Parts of a plant
+ἀκέραιος	?	4.3.1 - Good, moral; 7.5.3.1 - Pure, unmixed
+ἀκαθαρσία	?	2.6.2.3 - Sexual immorality; 4.3.1.1 - Bad, immoral; 5.6.1 - Clean, dirty
+ἀκατάγνωστος	?	4.3.1.4 - Reputation
+ἀκρίς	?	1.6.1.7 - Insect
+ἀκροατήριον	?	6.5.2.7 - Room
+ἀκροβυστία	?	4.6.2.1 - Foreigner; 5.4.6.1 - Circumcision
+ἀκρογωνιαῖος	?	6.5.2 - Parts of a building
+ἀλάβαστρος	?	6.7.7 - Container
+ἀλέκτωρ	?	1.6.1.2 - Bird; 6.3.6.1 - Chicken
+ἀλήθεια	?	3.5.1.3 - True; 4.3.1 - Good, moral
+ἀλίσγημα	?	4.3.1.1 - Bad, immoral; 4.9.5.6 - Religious purification
+ἀλείφω	?	5.4.5 - Anoint the body; 7.3.7.3 - Spread, smear
+ἀληθής	?	3.5.1.3 - True; 3.5.1.3.5 - Real; 4.3.1 - Good, moral
+ἀληθεύω	?	3.5.1.3.1 - Tell the truth; 4.3.1 - Good, moral
+ἀληθινός	?	3.5.1.3 - True; 3.5.1.3.5 - Real; 4.3.1 - Good, moral
+ἀληθῶς	?	3.5.1.3 - True; 9.4.4.1 - Certainly, definitely
+ἀλλόφυλος	?	4.6.2.1 - Foreigner
+ἀλόη	?	2.6.6.5 - Bury; 5.4.5 - Anoint the body
+ἀλώπηξ	?	1.6.1.1.2 - Carnivore; 8.3.7.1 - Bad
+ἀμέμπτως	?	4.3.1 - Good, moral; 4.7.6.1 - Acquit
+ἀμήν	?	3.2.5.4 - Agree with someone; 3.5.1.3 - True; 9.4.4.1 - Certainly, definitely; 9.4.6 - Yes
+ἀμίαντος	?	4.3.1 - Good, moral; 5.6.1 - Clean, dirty; 8.3.3.3.6 - Change color
+ἀμεταμέλητος	?	3.4.2.2 - Sorry
+ἀμνός	?	1.6.1.1.3 - Hoofed animals; 6.3.1.2 - Sheep
+ἀμπελών	?	1.5.3 - Grass, herb, vine; 6.2.1.4.1 - Growing grapes
+ἀμφίβληστρον	?	6.4.5.3 - Fishing equipment
+ἀμώμητος	?	4.3.1 - Good, moral; 8.3.7.8.2 - Blemish
+ἀνάγαιον	?	6.5.2.8 - Floor, story
+ἀνάκρισις	?	3.5.1.5 - Ask; 4.7.5 - Trial
+ἀνάστασις	?	4.5.6.1 - High status; 4.9.6.1 - Resurrection; 9.1.1.2 - Become, change state
+ἀνέγκλητος	?	4.3.1.4 - Reputation; 4.7.5.3 - Accuse, confront
+ἀνέλεος	?	4.4.4.1 - Mercy
+ἀναβαθμός	?	6.5.2.8 - Floor, story
+ἀνακρίνω	?	3.2.2.1 - Study; 3.2.2.3 - Evaluate, test; 3.5.1.5 - Ask; 4.7.5.1 - Investigate a crime
+ἀναμάρτητος	?	4.3.1 - Good, moral
+ἀναστρέφω	?	4.3 - Behavior; 7.2.3.6 - Return
+ἀναστροφή	?	4.3 - Behavior
+ἀνδραποδιστής	?	4.3.4.8 - Kidnap; 4.5.4.4 - Slave
+ἀνελεήμων	?	4.4.4.1 - Mercy
+ἀνεπίλημπτος	?	4.3.1.4 - Reputation; 4.7.5.1 - Investigate a crime
+ἀνομία	?	4.7.3 - Break the law
+ἀντίδικος	?	4.7.5.3 - Accuse, confront; 4.8.1.1 - Oppose; 4.8.2.9 - Enemy
+ἀντίλυτρον	?	4.3.4.8 - Kidnap; 7.2.6.4 - Set free
+ἀντίχριστος	?	4.8.1.1 - Oppose; 4.8.2.9 - Enemy; 4.9.7.1 - Religious person
+ἀνυπόκριτος	?	3.5.1.3.5 - Real
+ἀνόμως	?	3.3.4.3 - Exempt; 4.7 - Law
+ἀξίνη	?	6.7.1 - Cutting tool
+ἀπαλλάσσω	?	2.5.7 - Treat disease; 4.8.4.8 - Make peace; 4.8.4.9 - Reconcile; 7.2.6.4 - Set free; 7.3.3.1 - Take something from somewhere
+ἀπείραστος	?	4.3.1.1 - Bad, immoral
+ἀπιστέω	?	3.2.5.1.1 - Trust; 3.2.5.2 - Disbelief; 4.9.9 - Irreligion
+ἀπιστία	?	3.2.5.1.1 - Trust; 3.2.5.2 - Disbelief; 4.9.9 - Irreligion
+ἀπογράφω	?	3.5.7.1 - Write; 4.6.6 - Government functions
+ἀπογραφή	?	3.5.7.6 - List; 4.6.2 - Citizen; 4.6.6 - Government functions
+ἀποδιορίζω	?	4.1.6 - Disunity; 8.3.5.2.3 - Different
+ἀποδοκιμάζω	?	4.3.2.1 - Despise someone; 4.7.7.5 - Ostracize; 7.4.5.2 - Throw away
+ἀποθήκη	?	6.5.1 - Building
+ἀποκαταλλάσσω	?	4.8.4.9 - Reconcile
+ἀπολύτρωσις	?	7.2.6.4 - Set free
+ἀπολύω	?	2.6.1.4 - Divorce; 3.3.4.1 - Give permission; 4.8.4.7 - Forgive; 7.2.3.3 - Leave; 7.2.6.4 - Set free; 7.2.8 - Send someone
+ἀποστολή	?	3.5.2.2 - News, message; 4.6.6.3 - Represent; 4.9.7.1 - Religious person
+ἀποσυνάγωγος	?	4.2.1.8.2 - Leave an organization; 4.7.7.5 - Ostracize
+ἀπόκριμα	?	4.7.6 - Judge, render a verdict
+ἀπόστολος	?	3.5.2.2 - News, message; 4.6.6.3 - Represent; 4.9.7.1 - Religious person
+ἀπώλεια	?	6.1.2.2.6 - Waste; 7.9.3 - Destroy
+ἀπ᾽ αἰῶνος	?	8.4.6.2 - Past
+ἀρήν	?	1.6.1.1.3 - Hoofed animals
+ἀργός	?	6.1.2.2.2 - Useless; 6.1.2.4.1 - Careless, irresponsible; 6.1.2.4.2 - Lazy; 6.1.5 - Unemployed, not working
+ἀρνίον	?	1.6.1.1.3 - Hoofed animals; 4.9.7.1 - Religious person; 6.3.1.2 - Sheep
+ἀρτέμων	?	7.2.4.2.1 - Boat
+ἀρχή	?	4.5 - Authority; 4.6.1 - Ruler; 4.9.2 - Supernatural being; 8.3.7.5.1 - Basic; 8.4.6.1 - Start something; 8.4.6.1.1 - Beginning; 8.6.6 - Edge; 9.6.2.5 - Cause
+ἀρχιερεύς	?	4.9.7.1 - Religious person
+ἀρχισυνάγωγος	?	4.9.7.1 - Religious person
+ἀρχιτελώνης	?	6.8.8 - Tax
+ἀρχιτρίκλινος	?	5.2.2.3 - Feast
+ἀσκός	?	5.2.2.8 - Eating utensil; 6.7.7 - Container
+ἀσπίς	?	1.6.1.3.1 - Snake
+ἀσσάριον	?	6.8.6.1 - Monetary units
+ἀσφάλεια	?	4.4.4.4 - Save from trouble; 9.4.4.2 - Sure
+ἀσφαλής	?	4.4.4.4 - Save from trouble; 9.4.4.1 - Certainly, definitely
+ἀσφαλῶς	?	4.4.4.4 - Save from trouble; 9.4.4.2 - Sure
+ἀφίημι	?	2.6.1.4 - Divorce; 3.2.5.9 - Approve of something; 3.3.4.1 - Give permission; 3.3.5.2 - Reject; 4.8.4.7 - Forgive; 6.8.5.4 - Repay debt; 7.2.3.3 - Leave; 7.2.8 - Send someone; 7.4.5.1 - Leave something; 8.4.6.1.2 - Stop something; 9.1.2 - Do
+ἀφεδρών	?	6.5.1 - Building
+ἀφιλάργυρος	?	6.8.2.5 - Greedy
+ἁγιάζω	?	4.3.1 - Good, moral; 4.3.2 - Admire someone; 4.5.5 - Honor; 4.9.5.3 - Worship; 4.9.5.6 - Religious purification; 4.9.5.8 - Dedicate to religious use
+ἁγιασμός	?	4.3.1 - Good, moral; 4.9.5.8 - Dedicate to religious use
+ἁγιωσύνη	?	4.3.1 - Good, moral; 4.9.5.8 - Dedicate to religious use
+ἁγιότης	?	4.3.1 - Good, moral; 4.9.5.8 - Dedicate to religious use
+ἁγνίζω	?	4.3.1 - Good, moral; 4.3.8 - Change behavior; 4.9.5.6 - Religious purification; 5.6 - Cleaning
+ἁγνεία	?	4.3.1 - Good, moral
+ἁγνισμός	?	4.9.5.6 - Religious purification
+ἁγνός	?	4.3.1 - Good, moral
+ἁγνότης	?	4.3.1 - Good, moral
+ἁμάρτημα	?	4.3.1.1 - Bad, immoral; 4.7.3 - Break the law
+ἁμαρτάνω	?	4.3.1.1 - Bad, immoral; 4.7.3 - Break the law
+ἁμαρτία	?	4.3.1.1 - Bad, immoral; 4.7.3 - Break the law
+ἁμαρτωλός	?	4.3.1.1 - Bad, immoral; 4.7.3 - Break the law
+ἁρμόζω	?	2.6.1.1 - Arrange a marriage
+ἄβυσσος	?	1.2.1.5 - Underground; 4.9.6 - Heaven, hell; 7.8.6 - Dig; 8.2.6.5 - Deep, shallow
+ἄγγελος	?	3.5.2.2 - News, message; 4.9.2 - Supernatural being
+ἄγγος	?	6.7.7 - Container
+ἄγκιστρον	?	6.4.5.3 - Fishing equipment
+ἄγκυρα	?	7.2.4.2.1 - Boat
+ἄδικος	?	4.3.1.1 - Bad, immoral; 4.3.4.1 - Do evil to; 4.7.9.2 - Unfair
+ἄδολος	?	3.5.1.3 - True; 4.3.5.5 - Deceive; 7.5.3.1 - Pure, unmixed
+ἄθεος	?	4.9.9 - Irreligion
+ἄθεσμος	?	4.7.3 - Break the law
+ἄκανθα	?	1.5.3 - Grass, herb, vine
+ἄμεμπτος	?	4.3.1 - Good, moral; 4.7.6.1 - Acquit
+ἄμπελος	?	1.5.3 - Grass, herb, vine; 6.2.1.4.1 - Growing grapes
+ἄμωμος	?	4.3.1 - Good, moral; 8.3.7.8.2 - Blemish
+ἄνηθον	?	1.5.3 - Grass, herb, vine; 5.2.3.3.3 - Spice
+ἄνθος	?	1.5.5 - Parts of a plant
+ἄνθραξ	?	5.5.6 - Fuel
+ἄνομος	?	3.3.4.3 - Exempt; 4.7 - Law; 4.7.3 - Break the law
+ἄντλημα	?	6.7.7 - Container
+ἄπιστος	?	3.2.5.2 - Disbelief; 4.9.9 - Irreligion
+ἄρκος	?	1.6.1.1.2 - Carnivore
+ἄροτρον	?	6.2.8 - Agricultural tool
+ἄρχων	?	4.6.1 - Ruler
+ἄρωμα	?	2.6.6.5 - Bury; 5.2.3.3.3 - Spice; 5.4.5 - Anoint the body
+ἄσπιλος	?	4.3.1 - Good, moral; 5.6.1 - Clean, dirty
+ἄσπονδος	?	4.8.4.9 - Reconcile
+ἄφεσις	?	4.8.4.7 - Forgive; 7.2.6.4 - Set free
+ἄφθαρτος	?	1.5.6 - Growth of plants; 2.6.6 - Die; 8.3.7.8 - Decay
+ἄχυρον	?	1.5.5 - Parts of a plant; 6.2.6.1 - Winnow grain; 6.2.6.3 - Thresh
+ἄψινθος	?	1.5.3 - Grass, herb, vine; 2.3.3 - Taste; 2.5.7.3 - Medicinal plants
+ἅγιος	?	4.3.1 - Good, moral; 4.9.5.6 - Religious purification; 4.9.5.8 - Dedicate to religious use; 4.9.8.2 - Place of worship; 6.5.2.7 - Room
+ἅλυσις	?	4.7.7.3 - Imprison; 7.5.4.1 - Rope, string
+ἅλων	?	1.5.5 - Parts of a plant; 6.2.6.3 - Thresh
+ἅρμα	?	7.2.4.1.1 - Vehicle
+Ἀαρών	?	9.7.1.1 - Personal names
+Ἀβαδδών	?	4.9.2 - Supernatural being; 9.7.1.1 - Personal names
+Ἀβιά	?	9.7.1.1 - Personal names
+Ἀβιαθάρ	?	9.7.1.1 - Personal names
+Ἀβιληνή	?	9.7.2.2 - Names of regions
+Ἀβιούδ	?	9.7.1.1 - Personal names
+Ἀβραάμ	?	9.7.1.1 - Personal names
+Ἀγρίππας	?	9.7.1.1 - Personal names
+Ἀδάμ	?	9.7.1.1 - Personal names
+Ἀδδί	?	9.7.1.1 - Personal names
+Ἀδμίν	?	9.7.1.1 - Personal names
+Ἀδρίας	?	9.7.2.9 - Names of rivers
+Ἀδραμυττηνός	?	9.7.2.3 - Names of cities
+Ἀζώρ	?	9.7.1.1 - Personal names
+Ἀθηναῖος	?	9.7.2.3 - Names of cities
+Ἀθῆναι	?	9.7.2.3 - Names of cities
+Ἀκύλας	?	9.7.1.1 - Personal names
+Ἀλέξανδρος	?	9.7.1.1 - Personal names
+Ἀλεξανδρεύς	?	9.7.2.3 - Names of cities
+Ἀλεξανδρῖνος	?	9.7.2.3 - Names of cities
+Ἀμιναδάβ	?	9.7.1.1 - Personal names
+Ἀμπλιᾶτος	?	9.7.1.1 - Personal names
+Ἀμφίπολις	?	9.7.2.3 - Names of cities
+Ἀμώς-1	?	9.7.1.1 - Personal names
+Ἀμώς-2	?	9.7.1.1 - Personal names
+Ἀνδρέας	?	9.7.1.1 - Personal names
+Ἀνδρόνικος	?	9.7.1.1 - Personal names
+Ἀντιοχεύς	?	9.7.2.3 - Names of cities
+Ἀντιπατρίς	?	9.7.2.3 - Names of cities
+Ἀντιπᾶς	?	9.7.1.1 - Personal names
+Ἀντιόχεια	?	9.7.2.3 - Names of cities
+Ἀπελλῆς	?	9.7.1.1 - Personal names
+Ἀπολλωνία	?	9.7.2.3 - Names of cities
+Ἀπολλύων	?	4.9.2 - Supernatural being; 9.7.1.1 - Personal names
+Ἀπολλῶς	?	9.7.1.1 - Personal names
+Ἀππίου Φόρον	?	9.7.2.3 - Names of cities
+Ἀπφία	?	9.7.1.1 - Personal names
+Ἀράμ	?	9.7.1.1 - Personal names
+Ἀρίσταρχος	?	9.7.1.1 - Personal names
+Ἀραβία	?	9.7.2.2 - Names of regions
+Ἀριστόβουλος	?	9.7.1.1 - Personal names
+Ἀρνί	?	9.7.1.1 - Personal names
+Ἀρτεμᾶς	?	9.7.1.1 - Personal names
+Ἀρφαξάδ	?	9.7.1.1 - Personal names
+Ἀρχέλαος	?	9.7.1.1 - Personal names
+Ἀσάφ	?	9.7.1.1 - Personal names
+Ἀσήρ	?	9.7.1.1 - Personal names
+Ἀσία	?	9.7.2.2 - Names of regions
+Ἀσιανός	?	9.7.2.2 - Names of regions
+Ἀσύγκριτος	?	9.7.1.1 - Personal names
+Ἀττάλεια	?	9.7.2.3 - Names of cities
+Ἀχάζ	?	9.7.1.1 - Personal names
+Ἀχίμ	?	9.7.1.1 - Personal names
+Ἀχαΐα	?	9.7.2.2 - Names of regions
+Ἀχαϊκός	?	9.7.1.1 - Personal names
+Ἁγάρ	?	9.7.1.1 - Personal names
+Ἁκελδαμάχ	?	9.7.2 - Name of a place
+Ἁλφαῖος	?	9.7.1.1 - Personal names
+Ἁνανίας	?	9.7.1.1 - Personal names
+Ἁρέτας	?	9.7.1.1 - Personal names
+Ἁριμαθαία	?	9.7.2.3 - Names of cities
+Ἁρμαγεδών	?	9.7.2.2 - Names of regions
+Ἄζωτος	?	9.7.2.3 - Names of cities
+Ἄραψ	?	9.7.2.1 - Names of countries
+Ἄρειος Πάγος	?	4.6.3.1 - Governing body; 9.7.2 - Name of a place
+Ἄρτεμις	?	9.7.1.1 - Personal names
+Ἄρχιππος	?	9.7.1.1 - Personal names
+Ἅβελ	?	9.7.1.1 - Personal names
+Ἅγαβος	?	9.7.1.1 - Personal names
+Ἅγια Ἁγίων	?	4.9.8.2 - Place of worship; 6.5.2.7 - Room
+Ἅννα	?	9.7.1.1 - Personal names
+Ἅννας	?	9.7.1.1 - Personal names
+Ἆσσος	?	9.7.2.3 - Names of cities
+ἐγχρίω	?	5.4.5 - Anoint the body
+ἐθελοθρησκία	?	4.9.5 - Practice religion
+ἐθνικός	?	4.9.9 - Irreligion
+ἐκδίκησις	?	4.7.6 - Judge, render a verdict; 4.7.7 - Punish; 4.8.2.5 - Revenge
+ἐκδικέω	?	4.7.6 - Judge, render a verdict; 4.7.7 - Punish; 4.8.2.5 - Revenge
+ἐκκαθαίρω	?	5.6 - Cleaning
+ἐκκλησία	?	4.2.1.5 - Meeting, assembly; 4.9.7 - Religious organization
+ἐκλέγω	?	3.3.1.2 - Choose
+ἐκλεκτός	?	3.3.1.2 - Choose
+ἐκλογή	?	3.3.1.2 - Choose
+ἐκπειράζω	?	3.2.2.3 - Evaluate, test; 4.3.1.1 - Bad, immoral
+ἐλαία	?	1.5.1 - Tree; 1.5.5 - Parts of a plant; 5.2.3.1.2 - Food from fruit
+ἐλαιών	?	1.5.1 - Tree; 6.2.1.7 - Growing trees
+ἐλεέω, ἐλεάω	?	4.4.4.1 - Mercy
+ἐλεήμων	?	4.4.4.1 - Mercy
+ἐλεεινός	?	4.4.4.1 - Mercy
+ἐλπίζω	?	3.2.7 - Expect; 3.2.7.1 - Hope
+ἐλπίς	?	3.2.7.1 - Hope
+ἐλωΐ	?	4.9.1 - God; 4.9.2 - Supernatural being
+ἐν Χριστῷ	?	4.1 - Relationships; 4.9.1 - God
+ἐν ὀνόματι	?	9.6.2.5.1 - Reason
+ἐνάλιον	?	1.6.1.5 - Fish
+ἐνδοξάζομαι	?	4.5.5 - Honor
+ἐνδώμησις	?	6.5.2 - Parts of a building; 6.5.3 - Building materials
+ἐντέλλομαι	?	4.5.3.2 - Command
+ἐντολή	?	4.5.3.2 - Command
+ἐξαγοράζω	?	4.5.4.4 - Slave; 6.8.4.1 - Buy; 7.2.6.4 - Set free
+ἐξαιρέω	?	4.4.4.4 - Save from trouble; 7.5.2.4 - Remove, take apart
+ἐξουσία	?	3.3.3.6 - Control; 3.3.4.1 - Give permission; 4.5 - Authority; 4.5.1 - Person in authority; 4.9.2 - Supernatural being
+ἐξουσιάζω	?	4.5 - Authority; 4.6.4 - Rule
+ἐπάγγελμα	?	3.5.1.9 - Promise
+ἐπίβλημα	?	5.3.6 - Parts of clothing
+ἐπίσκοπος	?	2.5.7 - Treat disease; 4.3.4.5.2 - Care for; 4.5.1 - Person in authority; 4.9.7.1 - Religious person
+ἐπαγγέλλομαι	?	3.5.1 - Say; 3.5.1.9 - Promise
+ἐπαγγελία	?	3.5.1.9 - Promise
+ἐπενδύτης	?	5.3 - Clothing
+ἐπιείκεια	?	4.4.4.3 - Gentle
+ἐπιεικής	?	4.4.4.3 - Gentle
+ἐπικαλέω	?	3.3.2 - Request; 3.5.1.5 - Ask; 4.7.5 - Trial; 9.7 - Name
+ἐπικαλύπτω	?	4.8.4.7 - Forgive
+ἐπικρίνω	?	3.3.1 - Decide, plan
+ἐπιποθέω	?	3.3 - Want; 3.4.1.1 - Like, love; 3.4.2.1.5 - Lonely; 4.3.3 - Love
+ἐπισκοπή	?	2.5.7 - Treat disease; 4.2.1.4 - Visit; 4.3.4.5.2 - Care for; 4.5.1 - Person in authority; 4.9.7.1 - Religious person
+ἐπιταγή	?	4.5 - Authority; 4.5.3.2 - Command
+ἐπιτιμάω	?	4.5.3.2 - Command; 4.8.4.1 - Rebuke
+ἐπιχρίω	?	5.4.5 - Anoint the body
+ἐπουράνιος	?	1.1 - Sky; 4.9.1 - God; 4.9.6 - Heaven, hell
+ἐρίφιον	?	1.6.1.1.3 - Hoofed animals; 6.3.1.3 - Goat
+ἐρωτάω	?	3.3.2 - Request; 3.5.1.5 - Ask
+ἐσθής	?	5.3 - Clothing
+ἐσμυρνισμένος οἶνος	?	2.5.7.2 - Medicine
+ἐχθρός	?	4.8.2.9 - Enemy
+ἑρπετόν	?	1.6.1 - Types of animals
+ἑτεροζυγέω	?	4.1 - Relationships; 6.3.1.7 - Beast of burden
+ἔγερσις	?	4.9.6.1 - Resurrection
+ἔθνος	?	4.6.7.1 - Country; 4.9.9 - Irreligion
+ἔλαιον	?	1.2.3.2 - Oil; 5.2.3.3.5 - Cooking oil
+ἔλεος	?	4.4.4.1 - Mercy
+ἔνδικος	?	4.7.9 - Justice
+ἔνδοξος	?	4.5.5 - Honor; 8.3.8.2 - Glory
+ἔνδυμα	?	5.3 - Clothing
+ἔννομος	?	4.7 - Law
+ἔντευξις	?	3.3.2.3 - Intercede
+ἔξεστι	?	3.3.4.1 - Give permission; 4.7 - Law
+ἔπαυλις	?	6.5.1.1 - House
+ἔριφος	?	1.6.1.1.3 - Hoofed animals; 6.3.1.3 - Goat
+ἔσοπτρον	?	2.3.1.7 - Reflect, mirror
+ἔχιδνα	?	1.6.1.3.1 - Snake; 8.3.7.1 - Bad
+Ἐλαμίτης	?	9.7.2.1 - Names of countries
+Ἐλεάζαρ	?	9.7.1.1 - Personal names
+Ἐλιέζερ	?	9.7.1.1 - Personal names
+Ἐλιακίμ	?	9.7.1.1 - Personal names
+Ἐλιούδ	?	9.7.1.1 - Personal names
+Ἐλισάβετ	?	9.7.1.1 - Personal names
+Ἐλισαῖος	?	9.7.1.1 - Personal names
+Ἐλμαδάμ	?	9.7.1.1 - Personal names
+Ἐλύμας	?	9.7.1.1 - Personal names
+Ἐμμανουήλ	?	9.7.1.1 - Personal names
+Ἐμμαοῦς	?	9.7.2.3 - Names of cities
+Ἐνώς	?	9.7.1.1 - Personal names
+Ἐπαίνετος	?	9.7.1.1 - Personal names
+Ἐπαφρόδιτος	?	9.7.1.1 - Personal names
+Ἐπαφρᾶς	?	9.7.1.1 - Personal names
+Ἐφέσιος	?	9.7.2.3 - Names of cities
+Ἐφραίμ	?	9.7.2.3 - Names of cities
+Ἑβραΐς	?	9.7.1.5 - Names of languages
+Ἑβραϊστί	?	9.7.1.5 - Names of languages
+Ἑβραῖος	?	9.7.1.4 - Tribal names
+Ἑζεκίας	?	9.7.1.1 - Personal names
+Ἑλλάς	?	9.7.2.1 - Names of countries
+Ἑλληνίς	?	4.9.9 - Irreligion; 9.7.2.1 - Names of countries
+Ἑλληνιστής	?	9.7.1.5 - Names of languages
+Ἑλληνιστί	?	9.7.1.5 - Names of languages
+Ἑμμώρ	?	9.7.1.1 - Personal names
+Ἑνώχ	?	9.7.1.1 - Personal names
+Ἑρμογένης	?	9.7.1.1 - Personal names
+Ἑρμᾶς	?	9.7.1.1 - Personal names
+Ἑρμῆς	?	9.7.1.1 - Personal names
+Ἑσλί	?	9.7.1.1 - Personal names
+Ἑσρώμ	?	9.7.1.1 - Personal names
+Ἔβερ	?	9.7.1.1 - Personal names
+Ἔραστος	?	9.7.1.1 - Personal names
+Ἔφεσος	?	9.7.2.3 - Names of cities
+Ἕλλην	?	4.9.9 - Irreligion; 9.7.2.1 - Names of countries
+ἡδύοσμον	?	1.5.3 - Grass, herb, vine
+ἤρεμος	?	2.3.2.5 - Quiet; 3.4.1.2.2 - Calm
+ἦθος	?	4.3.9.1 - Custom
+ἧλος	?	6.7.5 - Fastening tool
+Ἠλί	?	9.7.1.1 - Personal names
+Ἠλίας	?	9.7.1.1 - Personal names
+Ἠσαΐας	?	9.7.1.1 - Personal names
+Ἠσαῦ	?	9.7.1.1 - Personal names
+Ἡρῳδίων	?	9.7.1.1 - Personal names
+Ἡρῳδιάς	?	9.7.1.1 - Personal names
+Ἡρῳδιανοί	?	4.6.6.5 - Politics
+Ἡρῴδης	?	9.7.1.1 - Personal names
+Ἤρ	?	9.7.1.1 - Personal names
+ἰσχύω	?	2.5 - Healthy; 9.4.2.1 - Can
+ἰσόψυχος	?	3.2.5.4 - Agree with someone; 4.1.5 - Unity
+ἰχθύδιον	?	1.6.1.5 - Fish
+ἰχθύς	?	1.6.1.5 - Fish
+ἱεράτευμα	?	4.9.7.1 - Religious person
+ἱερατεία	?	4.9.7.1 - Religious person
+ἱερατεύω	?	4.9.7.1 - Religious person
+ἱερεύς	?	4.9.7.1 - Religious person
+ἱερουργέω	?	4.9.7.1 - Religious person
+ἱερωσύνη	?	4.9.7.1 - Religious person
+ἱερόν	?	4.9.8.2 - Place of worship; 6.5.1 - Building
+ἱλάσκομαι	?	4.8.4.3 - Appease
+ἱλασμός	?	4.8.4.3 - Appease
+ἱλαστήριον	?	4.8.4.3 - Appease
+ἱμάς	?	4.7.7 - Punish; 6.7.5 - Fastening tool; 7.7.1 - Hit
+ἱμάτιον	?	5.3 - Clothing
+ἱματισμός	?	5.3 - Clothing
+ἵλεως	?	4.8.4.3 - Appease
+ἵππος	?	1.6.1.1.3 - Hoofed animals; 6.3.1.7 - Beast of burden
+Ἰάκωβος	?	9.7.1.1 - Personal names
+Ἰάννης	?	9.7.1.1 - Personal names
+Ἰάρετ	?	9.7.1.1 - Personal names
+Ἰάσων	?	9.7.1.1 - Personal names
+Ἰάϊρος	?	9.7.1.1 - Personal names
+Ἰακώβ	?	9.7.1.1 - Personal names
+Ἰαμβρῆς	?	9.7.1.1 - Personal names
+Ἰανναί	?	9.7.1.1 - Personal names
+Ἰδουμαία	?	9.7.2.2 - Names of regions
+Ἰεζάβελ	?	9.7.1.1 - Personal names
+Ἰερεμίας	?	9.7.1.1 - Personal names
+Ἰεριχώ	?	9.7.2.3 - Names of cities
+Ἰεσσαί	?	9.7.1.1 - Personal names
+Ἰεφθάε	?	9.7.1.1 - Personal names
+Ἰεχονίας	?	9.7.1.1 - Personal names
+Ἰησοῦς	?	9.7.1.1 - Personal names
+Ἰκόνιον	?	9.7.2.3 - Names of cities
+Ἰλλυρικόν	?	9.7.2.2 - Names of regions
+Ἰορδάνης	?	9.7.2.9 - Names of rivers
+Ἰουδαία	?	9.7.1.4 - Tribal names; 9.7.2.2 - Names of regions
+Ἰουδαϊκός	?	9.7.1.4 - Tribal names
+Ἰουδαϊκῶς	?	9.7.1.4 - Tribal names
+Ἰουδαῖος	?	9.7.1.4 - Tribal names; 9.7.2.2 - Names of regions
+Ἰουλία	?	9.7.1.1 - Personal names
+Ἰουνιᾶς	?	9.7.1.1 - Personal names
+Ἰούδας	?	9.7.1.1 - Personal names; 9.7.1.4 - Tribal names; 9.7.2.2 - Names of regions
+Ἰούλιος	?	9.7.1.1 - Personal names
+Ἰοῦστος	?	9.7.1.1 - Personal names
+Ἰσαάκ	?	9.7.1.1 - Personal names
+Ἰσκαριώθ	?	9.7.1.1 - Personal names
+Ἰσραήλ	?	9.7.1.1 - Personal names; 9.7.2.1 - Names of countries
+Ἰσραηλίτης	?	9.7.1.4 - Tribal names
+Ἰσσαχάρ	?	9.7.1.1 - Personal names
+Ἰταλία	?	9.7.2.2 - Names of regions
+Ἰταλικός	?	9.7.2.2 - Names of regions
+Ἰτουραῖος	?	9.7.2.2 - Names of regions
+Ἰωάννα	?	9.7.1.1 - Personal names
+Ἰωάννης	?	9.7.1.1 - Personal names
+Ἰωήλ	?	9.7.1.1 - Personal names
+Ἰωαθάμ	?	9.7.1.1 - Personal names
+Ἰωανάν	?	9.7.1.1 - Personal names
+Ἰωβήδ	?	9.7.1.1 - Personal names
+Ἰωδά	?	9.7.1.1 - Personal names
+Ἰωνάμ	?	9.7.1.1 - Personal names
+Ἰωνᾶς	?	9.7.1.1 - Personal names
+Ἰωράμ	?	9.7.1.1 - Personal names
+Ἰωρίμ	?	9.7.1.1 - Personal names
+Ἰωσήφ	?	9.7.1.1 - Personal names
+Ἰωσήχ	?	9.7.1.1 - Personal names
+Ἰωσίας	?	9.7.1.1 - Personal names
+Ἰωσαφάτ	?	9.7.1.1 - Personal names
+Ἰωσῆς	?	9.7.1.1 - Personal names
+Ἰόππη	?	9.7.2.3 - Names of cities
+Ἰώβ	?	9.7.1.1 - Personal names
+Ἱεράπολις	?	9.7.2.3 - Names of cities
+Ἱεροσολυμίτης	?	9.7.2.3 - Names of cities
+Ἱεροσόλυμα	?	9.7.2.3 - Names of cities
+ὀθόνη	?	6.6.1.1 - Cloth
+ὀθόνιον	?	6.6.1.1 - Cloth
+ὀλιγόπιστος	?	3.2.5.3 - Doubt
+ὀλιγόψυχος	?	3.4.2.1 - Sad
+ὀνάριον	?	1.6.1.1.3 - Hoofed animals
+ὀπώρα	?	1.5.5 - Parts of a plant; 5.2.3.1.2 - Food from fruit
+ὀφείλημα	?	4.3.1.1 - Bad, immoral; 6.8.5.3 - Owe; 9.4.3.2 - Hortative
+ὀφείλω	?	4.3.1.1 - Bad, immoral; 6.8.5.3 - Owe; 9.4.3.2 - Hortative
+ὀφειλέτης	?	4.3.1.1 - Bad, immoral; 6.8.5 - Borrow; 6.8.5.3 - Owe; 9.4.3.2 - Hortative
+ὀφειλή	?	6.8.5.3 - Owe; 9.4.3.2 - Hortative
+ὀφθαλμοδουλία	?	4.5.4.3 - Serve
+ὀχύρωμα	?	4.8.3.6.6 - Fort; 6.5.1 - Building
+ὀψάριον	?	1.6.1.5 - Fish; 5.2.3.2.1 - Meat
+ὁλοκαύτωμα	?	4.9.5.5 - Offering, sacrifice
+ὁρκωμοσία	?	4.7.5.7 - Take oath
+ὁσίως	?	4.3.1 - Good, moral
+ὁσιότης	?	4.3.1 - Good, moral; 4.9.5.8 - Dedicate to religious use
+ὄλυνθος	?	1.5.5 - Parts of a plant; 5.2.3.1.2 - Food from fruit
+ὄνομα	?	2 - Person; 4.3.1.4 - Reputation; 9.7 - Name
+ὄνος	?	1.6.1.1.3 - Hoofed animals; 6.3.1.7 - Beast of burden
+ὄξος	?	5.2.3.7 - Alcoholic beverage
+ὄρνεον	?	1.6.1.2 - Bird
+ὄρνις	?	1.6.1.2 - Bird
+ὄφις	?	1.6.1.3.1 - Snake; 8.3.7.1 - Bad
+ὅπλον	?	4.8.3.7 - Weapon, shoot; 6.7 - Tool
+ὅρκος	?	4.7.5.7 - Take oath
+ὅσιος	?	4.3.1 - Good, moral; 4.9.5.8 - Dedicate to religious use
+Ὀζίας	?	9.7.1.1 - Personal names
+Ὀλυμπᾶς	?	9.7.1.1 - Personal names
+Ὀνήσιμος	?	9.7.1.1 - Personal names
+Ὀνησίφορος	?	9.7.1.1 - Personal names
+ὑάλινος	?	6.6.2.5 - Working with glass
+ὑδρία	?	6.6.7.2 - Conveying water; 6.7.7 - Container
+ὑπερῷον	?	6.5.2.7 - Room; 6.5.2.8 - Floor, story
+ὑπηρέτης	?	4.5.4.3 - Serve
+ὑπηρετέω	?	4.3.4.5.1 - Provide for, support; 4.5.4.3 - Serve
+ὑποζύγιον	?	1.6.1.1.3 - Hoofed animals; 6.3.1.7 - Beast of burden
+ὑποκρίνομαι	?	4.3.5.6 - Hypocrite
+ὑποκριτής	?	4.3.5.6 - Hypocrite
+ὑπολήνιον	?	6.2.1.4.1 - Growing grapes; 6.5.1 - Building
+ὑποπόδιον	?	5.1.1.2 - Chair
+ὑπόδημα	?	5.3 - Clothing
+ὑπόκρισις	?	4.3.5.6 - Hypocrite
+ὑπόστασις	?	3.2.5.1.1 - Trust; 8.3.5.1 - Nature, character
+ὑψηλός	?	4.9.6 - Heaven, hell; 8.2.6.3 - High; 8.3.7.9 - Value
+ὕαλος	?	6.6.2.5 - Working with glass
+ὕλη	?	1.2.1.6 - Forest, grassland, desert; 6.6.3.2 - Wood
+ὕσσωπος	?	1.5.2 - Bush, shrub
+ὕψιστος	?	4.9.1 - God; 4.9.6 - Heaven, hell
+ὕψος	?	4.5.6.1 - High status; 4.9.6 - Heaven, hell; 8.2.6.3 - High
+ὗς	?	1.6.1.1.3 - Hoofed animals; 6.3.1.4 - Pig
+Ὑμέναιος	?	9.7.1.1 - Personal names
+ὡσαννά	?	3.5.1.7 - Praise
+Ὡσηέ	?	9.7.1.1 - Personal names
+ᾅδης	?	4.9.6 - Heaven, hell
+ῥάβδος	?	2.5.4 - Disabled; 4.6.1 - Ruler; 4.7.7 - Punish; 6.3.1.2 - Sheep; 6.6.3.2 - Wood; 7.2.1.1 - Walk; 7.2.1.5 - Walk with difficulty
+ῥάκος	?	5.3.6 - Parts of clothing; 6.6.1 - Working with cloth
+ῥέδη	?	7.2.4.1.1 - Vehicle
+ῥίζα	?	1.5.5 - Parts of a plant; 4.1.9.1 - Related by birth; 4.1.9.1.5 - Grandson, granddaughter; 9.6.2.5 - Cause
+ῥαββί	?	3.6 - Teach
+ῥαφίς	?	6.6.1 - Working with cloth
+ῥύομαι	?	4.4.4.4 - Save from trouble
+ῥῆμα	?	3.5.1 - Say; 9.1.2.1 - Happen
+Ῥήγιον	?	9.7.2.3 - Names of cities
+Ῥαγαύ	?	9.7.1.1 - Personal names
+Ῥαιφάν	?	9.7.1.1 - Personal names
+Ῥαμά	?	9.7.2.3 - Names of cities
+Ῥαχάβ	?	9.7.1.1 - Personal names
+Ῥαχήλ	?	9.7.1.1 - Personal names
+Ῥεβέκκα	?	9.7.1.1 - Personal names
+Ῥησά	?	9.7.1.1 - Personal names
+Ῥοβοάμ	?	9.7.1.1 - Personal names
+Ῥουβήν	?	9.7.1.1 - Personal names
+Ῥούθ	?	9.7.1.1 - Personal names
+Ῥοῦφος	?	9.7.1.1 - Personal names
+Ῥωμαῖος	?	9.7.2.3 - Names of cities
+Ῥόδη	?	9.7.1.1 - Personal names
+Ῥόδος	?	9.7.2.2 - Names of regions
+Ῥώμη	?	9.7.2.3 - Names of cities

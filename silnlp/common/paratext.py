@@ -11,7 +11,7 @@ from lxml import etree
 
 from .canon import book_id_to_number
 from .corpus import get_terms_glosses_path, get_terms_metadata_path, load_corpus
-from .environment import MT_SCRIPTURE_DIR, MT_TERMS_DIR, PT_PROJECTS_DIR, PT_TERMS_DIR
+from .environment import SNE
 from .utils import get_repo_dir
 
 _TERMS_LISTS = {
@@ -22,12 +22,11 @@ _TERMS_LISTS = {
     "Project": "ProjectBiblicalTerms.xml",
 }
 
-parser_utf8 = etree.XMLParser(encoding="UTF-8")
 LOGGER = logging.getLogger(__name__)
 
 
 def get_project_dir(project: str) -> Path:
-    return PT_PROJECTS_DIR / project
+    return SNE._PT_PROJECTS_DIR / project
 
 
 def get_iso(settings_tree: etree.ElementTree) -> str:
@@ -39,10 +38,10 @@ def get_iso(settings_tree: etree.ElementTree) -> str:
 
 def extract_project(project: str, include_texts: str, exclude_texts: str, include_markers: bool) -> None:
     project_dir = get_project_dir(project)
-    settings_tree = etree.parse(str(project_dir / "Settings.xml"), parser=parser_utf8)
+    settings_tree = etree.parse(str(project_dir / "Settings.xml"))
     iso = get_iso(settings_tree)
 
-    ref_dir = PT_PROJECTS_DIR / "Ref"
+    ref_dir = SNE._ASSETS_DIR / "Ref"
     args: List[str] = [
         "dotnet",
         "machine",
@@ -77,10 +76,13 @@ def extract_project(project: str, include_texts: str, exclude_texts: str, includ
         output_basename += "-m"
 
     args.append("-to")
-    output_filename = MT_SCRIPTURE_DIR / f"{output_basename}.txt"
+    output_filename = SNE._MT_SCRIPTURE_DIR / f"{output_basename}.txt"
     args.append(str(output_filename))
 
-    subprocess.run(args, cwd=get_repo_dir(), stdout=subprocess.DEVNULL)
+    result = subprocess.run(args, cwd=get_repo_dir(), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+
+    if len(result.stderr) > 0:
+        raise RuntimeError(result.stderr.decode("utf-8"))
 
     # check if the number of lines in the file is correct (the same as vref.txt - 31104 ending at REV 22:21)
     segment_count = sum(1 for _ in load_corpus(output_filename))
@@ -125,7 +127,7 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> None:
     if project is not None:
         list_name = project
 
-    dir = PT_TERMS_DIR if project is None else PT_PROJECTS_DIR / project
+    dir = SNE._PT_TERMS_DIR if project is None else SNE._PT_PROJECTS_DIR / project
     terms_xml_path = dir / list_file_name
 
     terms_metadata_path = get_terms_metadata_path(list_name)
@@ -134,7 +136,7 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> None:
     with open(terms_metadata_path, "w", encoding="utf-8", newline="\n") as terms_metadata_file, open(
         terms_glosses_path, "w", encoding="utf-8", newline="\n"
     ) as terms_glosses_file:
-        terms_tree = etree.parse(str(terms_xml_path), parser=parser_utf8)
+        terms_tree = etree.parse(str(terms_xml_path))
         for term_elem in terms_tree.getroot().findall("Term"):
             id = term_elem.get("Id")
             if id is None:
@@ -179,7 +181,7 @@ def extract_term_renderings(project_folder: str) -> None:
     if not renderings_path.is_file():
         return
 
-    renderings_tree = etree.parse(str(renderings_path), parser=parser_utf8)
+    renderings_tree = etree.parse(str(renderings_path))
     rendering_elems: Dict[str, etree.Element] = {}
     for elem in renderings_tree.getroot().findall("TermRendering"):
         id = elem.get("Id")
@@ -188,7 +190,7 @@ def extract_term_renderings(project_folder: str) -> None:
         id = escape_id(id)
         rendering_elems[id] = elem
 
-    settings_tree = etree.parse(str(project_dir / "Settings.xml"), parser=parser_utf8)
+    settings_tree = etree.parse(str(project_dir / "Settings.xml"))
     iso = get_iso(settings_tree)
     project_name = settings_tree.getroot().findtext("Name", project_folder)
     terms_setting = settings_tree.getroot().findtext("BiblicalTermsListSetting", "Major::BiblicalTerms.xml")
@@ -203,7 +205,7 @@ def extract_term_renderings(project_folder: str) -> None:
         list_name = project_folder
 
     terms_metadata_path = get_terms_metadata_path(list_name)
-    terms_renderings_path = MT_TERMS_DIR / f"{iso}-{project_folder}-{list_type}-renderings.txt"
+    terms_renderings_path = SNE._MT_TERMS_DIR / f"{iso}-{project_folder}-{list_type}-renderings.txt"
     count = 0
     with open(terms_renderings_path, "w", encoding="utf-8", newline="\n") as terms_renderings_file:
         for line in load_corpus(terms_metadata_path):
@@ -246,7 +248,6 @@ def book_file_name_digits(book_num: int) -> str:
 
 def get_book_path(project: str, book: str) -> Path:
     project_dir = get_project_dir(project)
-#    settings_tree = etree.parse(str(project_dir / "Settings.xml"), parser=parser_utf8)
     settings_tree = etree.parse(os.path.join(project_dir, "Settings.xml"))
     naming_elem = settings_tree.find("Naming")
     assert naming_elem is not None
@@ -266,4 +267,4 @@ def get_book_path(project: str, book: str) -> Path:
 
     book_file_name = f"{pre_part}{book_name}{post_part}"
 
-    return PT_PROJECTS_DIR / project / book_file_name
+    return SNE._PT_PROJECTS_DIR / project / book_file_name

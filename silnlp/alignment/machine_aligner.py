@@ -1,12 +1,15 @@
 import os
 import shutil
 import subprocess
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..common.utils import get_repo_dir
 from .aligner import Aligner
 from .lexicon import Lexicon
+
+LOGGER = logging.getLogger(__name__)
 
 
 class MachineAligner(Aligner):
@@ -106,7 +109,12 @@ class MachineAligner(Aligner):
             args.append("-tp")
             for key, value in self._params.items():
                 args.append(f"{key}={value}")
-        subprocess.run(args, cwd=get_repo_dir())
+        result = subprocess.run(
+            args, cwd=get_repo_dir(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8"
+        )
+        LOGGER.debug(f"Executed: {' '.join(args)}\nResult: {result.stdout}")
+        if len(result.stderr) > 0:
+            raise RuntimeError(f"Error in executing: {' '.join(args)}\nError returned: {result.stderr}")
 
     def _align_parallel_corpus(
         self, src_file_path: Path, trg_file_path: Path, output_file_path: Path, sym_heuristic: str

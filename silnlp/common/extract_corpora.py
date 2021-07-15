@@ -9,7 +9,7 @@ import argparse
 import logging
 from typing import Set
 
-from ..common.environment import MT_SCRIPTURE_DIR, MT_TERMS_DIR, PT_PROJECTS_DIR
+from ..common.environment import SNE
 from .paratext import extract_project, extract_term_renderings
 
 LOGGER = logging.getLogger(__package__ + ".extract_corpora")
@@ -44,26 +44,26 @@ def main() -> None:
     # Which projects have data we can find?
     projects_found: Set[str] = set()
     for project in projects:
-        project_path = PT_PROJECTS_DIR / project
+        project_path = SNE._PT_PROJECTS_DIR / project
         if project_path.is_dir():
             projects_found.add(project)
 
     # Process the projects that have data and tell the user.
     if len(projects_found) > 0:
-        MT_SCRIPTURE_DIR.mkdir(exist_ok=True, parents=True)
-        MT_TERMS_DIR.mkdir(exist_ok=True, parents=True)
+        SNE._MT_SCRIPTURE_DIR.mkdir(exist_ok=True, parents=True)
+        SNE._MT_TERMS_DIR.mkdir(exist_ok=True, parents=True)
         for project in projects_found:
             LOGGER.info(f"Extracting {project}...")
             extract_project(project, args.include, args.exclude, args.markers)
             extract_term_renderings(project)
             LOGGER.info("Done.")
     else:
-        LOGGER.warning(f"Couldn't find any data to process for any project in {PT_PROJECTS_DIR}.")
+        LOGGER.warning(f"Couldn't find any data to process for any project in {SNE._PT_PROJECTS_DIR}.")
 
     # Tell the user which projects couldn't be found.
     for project in projects:
         if project not in projects_found:
-            LOGGER.warning(f"Couldn't find project {project} in {PT_PROJECTS_DIR}.")
+            LOGGER.warning(f"Couldn't find project {project} in {SNE._PT_PROJECTS_DIR}.")
 
 
 if __name__ == "__main__":

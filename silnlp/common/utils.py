@@ -9,7 +9,7 @@ from typing import Any, List
 
 import numpy as np
 
-from ..common.environment import MT_EXPERIMENTS_DIR
+from ..common.environment import SNE
 
 LOGGER = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ def get_git_revision_hash() -> str:
 
 
 def get_mt_exp_dir(exp_name: str) -> Path:
-    return MT_EXPERIMENTS_DIR / exp_name
+    return SNE._MT_EXPERIMENTS_DIR / exp_name
 
 
 def set_seed(seed: Any) -> None:
