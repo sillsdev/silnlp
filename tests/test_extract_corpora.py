@@ -1,7 +1,5 @@
 import shutil
-import tempfile
 import os
-from pathlib import Path
 from . import helper
 from silnlp.common.paratext import extract_project, extract_term_renderings
 from silnlp.common.environment import SNE
@@ -10,8 +8,8 @@ from silnlp.common.environment import SNE
 scr_truth_dir = SNE._MT_DIR / "scripture"
 
 # set scripture directory to temp
-with tempfile.TemporaryDirectory() as src_dir:
-    SNE._MT_SCRIPTURE_DIR = Path(src_dir)
+SNE._MT_SCRIPTURE_DIR = SNE._MT_DIR / "temp_scripture"
+SNE._MT_SCRIPTURE_DIR.mkdir(exist_ok=True)
 
 
 def test_extract_corpora():

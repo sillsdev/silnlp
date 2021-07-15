@@ -1,7 +1,5 @@
 import pytest
-from pathlib import Path
 import shutil
-import tempfile
 import os
 from . import helper
 from silnlp.nmt.config import load_config
@@ -12,8 +10,8 @@ exp_truth_dir = SNE._MT_DIR / "Experiments"
 exp_subdirs = [folder for folder in exp_truth_dir.glob("*/")]
 
 # set experiment directory to temp
-with tempfile.TemporaryDirectory() as src_dir:
-    SNE._MT_EXPERIMENTS_DIR = Path(src_dir)
+SNE._MT_EXPERIMENTS_DIR = SNE._MT_DIR / "temp_experiments"
+SNE._MT_EXPERIMENTS_DIR.mkdir(exist_ok=True)
 
 
 @pytest.mark.parametrize("exp_folder", exp_subdirs)
