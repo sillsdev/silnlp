@@ -43,7 +43,7 @@ def main() -> None:
     exp_dir = get_mt_exp_dir(args.experiment)
     config_path = exp_dir / "config.yml"
     if config_path.is_file() and not args.force:
-        print('The experiment config file already exists. Use "--force" if you want to overwrite the existing config.')
+        print(f'The experiment config file {config_path} already exists. Use "--force" if you want to overwrite the existing config.')
         return
 
     exp_dir.mkdir(exist_ok=True, parents=True)
@@ -61,7 +61,7 @@ def main() -> None:
         config["seed"] = args.seed
     with open(config_path, "w", encoding="utf-8") as file:
         yaml.dump(config, file)
-    print("Config file created")
+    print(f"Config file created: {config_path}")
 
 
 if __name__ == "__main__":

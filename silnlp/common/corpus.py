@@ -139,6 +139,12 @@ def get_scripture_path(iso: str, project: str) -> Path:
     return SNE._MT_SCRIPTURE_DIR / f"{iso}-{project}.txt"
 
 
+def parse_scripture_path(data_file_path: Path) -> Tuple[str, str]:
+    file_name = data_file_path.stem
+    parts = file_name.split("-")
+    return (parts[0], parts[1])
+
+
 def include_books(corpus: pd.DataFrame, books: Set[int]) -> pd.DataFrame:
     return corpus[corpus.apply(lambda r: r["vref"].book_num in books, axis=1)].copy()
 
@@ -205,3 +211,30 @@ def get_terms(terms_renderings_path: Path) -> Dict[str, Term]:
         renderings = [] if len(renderings_line) == 0 else renderings_line.split("\t")
         terms[id] = Term(id, cat, domain, glosses, renderings)
     return terms
+
+
+def get_terms_corpus(src_terms: Dict[str, Term], trg_terms: Dict[str, Term], cats: Optional[Set[str]]) -> pd.DataFrame:
+    data: Set[Tuple[str, str]] = set()
+    for src_term in src_terms.values():
+        if cats is not None and src_term.cat not in cats:
+            continue
+
+        trg_term = trg_terms.get(src_term.id)
+        if trg_term is None:
+            continue
+
+        for src_rendering in src_term.renderings:
+            for trg_rendering in trg_term.renderings:
+                data.add((src_rendering, trg_rendering))
+    return pd.DataFrame(data, columns=["source", "target"])
+
+
+def get_terms_data_frame(terms: Dict[str, Term], cats: Optional[Set[str]]) -> pd.DataFrame:
+    data: Set[Tuple[str, str]] = set()
+    for term in terms.values():
+        if cats is not None and term.cat not in cats:
+            continue
+        for rendering in term.renderings:
+            for gloss in term.glosses:
+                data.add((rendering, gloss))
+    return pd.DataFrame(data, columns=["rendering", "gloss"])

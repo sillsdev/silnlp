@@ -1,6 +1,6 @@
 import itertools
-import random
 import logging
+import random
 from pathlib import Path
 from statistics import mean
 from typing import IO, Any, Dict, Iterable, List, Optional, Set, Tuple, Union
@@ -11,17 +11,19 @@ import sentencepiece as sp
 from ..alignment.utils import add_alignment_scores
 from ..common.canon import get_books
 from ..common.corpus import (
-    Term,
     exclude_books,
     filter_parallel_corpus,
     get_scripture_parallel_corpus,
     get_scripture_path,
     get_terms,
+    get_terms_corpus,
+    get_terms_data_frame,
     get_terms_glosses_path,
     get_terms_list,
     get_terms_renderings_path,
     include_books,
     load_corpus,
+    parse_scripture_path,
     split_parallel_corpus,
     write_corpus,
 )
@@ -34,17 +36,11 @@ from .utils import decode_sp_lines, encode_sp, encode_sp_lines
 LOGGER = logging.getLogger(__name__)
 
 
-def parse_data_file_path(data_file_path: Path) -> Tuple[str, str]:
-    file_name = data_file_path.stem
-    parts = file_name.split("-")
-    return (parts[0], parts[1])
-
-
 class LangsDataFile:
     def __init__(self, path: Path, type: DataFileType):
         self.path = path
         self.type = type
-        self.iso, self.project = parse_data_file_path(path)
+        self.iso, self.project = parse_scripture_path(path)
 
     @property
     def is_train(self):
@@ -61,33 +57,6 @@ class LangsDataFile:
 
 def get_train_count(data_files: List[LangsDataFile]) -> int:
     return len([df for df in data_files if df.is_train])
-
-
-def get_terms_corpus(src_terms: Dict[str, Term], trg_terms: Dict[str, Term], cats: Optional[Set[str]]) -> pd.DataFrame:
-    data: Set[Tuple[str, str]] = set()
-    for src_term in src_terms.values():
-        if cats is not None and src_term.cat not in cats:
-            continue
-
-        trg_term = trg_terms.get(src_term.id)
-        if trg_term is None:
-            continue
-
-        for src_rendering in src_term.renderings:
-            for trg_rendering in trg_term.renderings:
-                data.add((src_rendering, trg_rendering))
-    return pd.DataFrame(data, columns=["source", "target"])
-
-
-def get_terms_data_frame(terms: Dict[str, Term], cats: Optional[Set[str]]) -> pd.DataFrame:
-    data: Set[Tuple[str, str]] = set()
-    for term in terms.values():
-        if cats is not None and term.cat not in cats:
-            continue
-        for rendering in term.renderings:
-            for gloss in term.glosses:
-                data.add((rendering, gloss))
-    return pd.DataFrame(data, columns=["rendering", "gloss"])
 
 
 def parse_projects(projects_value: Optional[Union[str, List[str]]], default: Set[str] = set()) -> Set[str]:
@@ -410,8 +379,7 @@ class LangsConfig(Config):
         write_corpus(self.exp_dir / "train.vref.txt", (str(vr) for vr in train["vref"]))
         train_count = len(train)
 
-        if terms is not None:
-            train_count += self._write_terms(src_spp, trg_spp, terms)
+        train_count += self._write_terms(src_spp, trg_spp, terms)
         LOGGER.info(f"train size: {train_count}, terms size: {0 if terms is None else len(terms)}")
 
         if len(val) > 0:
@@ -503,7 +471,7 @@ class LangsConfig(Config):
         dataset[(src_iso, trg_iso)] = pair_data
 
     def _add_to_terms_dataset(
-        self, src_iso: str, trg_iso: str, terms: pd.DataFrame, cur_terms: pd.DataFrame
+        self, src_iso: str, trg_iso: str, terms: Optional[pd.DataFrame], cur_terms: pd.DataFrame
     ) -> pd.DataFrame:
         if self.mirror:
             mirror_cur_terms = cur_terms.rename(columns={"source": "target", "target": "source"})
@@ -580,7 +548,7 @@ class LangsConfig(Config):
         self,
         src_spp: Optional[sp.SentencePieceProcessor],
         trg_spp: Optional[sp.SentencePieceProcessor],
-        terms: pd.DataFrame,
+        terms: Optional[pd.DataFrame],
     ) -> int:
         train_src_file: Optional[IO] = None
         train_trg_file: Optional[IO] = None
@@ -591,7 +559,7 @@ class LangsConfig(Config):
         train_count = 0
         try:
             terms_config = self.data["terms"]
-            if terms_config["train"]:
+            if terms_config["train"] and terms is not None:
                 train_src_file = open(self.exp_dir / "train.src.txt", "a", encoding="utf-8", newline="\n")
                 train_trg_file = open(self.exp_dir / "train.trg.txt", "a", encoding="utf-8", newline="\n")
                 train_vref_file = open(self.exp_dir / "train.vref.txt", "a", encoding="utf-8", newline="\n")
@@ -600,29 +568,29 @@ class LangsConfig(Config):
                 dict_src_file = open(self.exp_dir / "dict.src.txt", "w", encoding="utf-8", newline="\n")
                 dict_trg_file = open(self.exp_dir / "dict.trg.txt", "w", encoding="utf-8", newline="\n")
 
-            for _, term in terms.iterrows():
-                src_term: str = term["source"]
-                trg_term: str = term["target"]
-                src_term_variants = [
-                    encode_sp(src_spp, src_term, add_dummy_prefix=True),
-                    encode_sp(src_spp, src_term, add_dummy_prefix=False),
-                ]
-                trg_term_variants = [
-                    encode_sp(trg_spp, trg_term, add_dummy_prefix=True),
-                    encode_sp(trg_spp, trg_term, add_dummy_prefix=False),
-                ]
+            if terms is not None:
+                for _, term in terms.iterrows():
+                    src_term: str = term["source"]
+                    trg_term: str = term["target"]
+                    src_term_variants = [
+                        encode_sp(src_spp, src_term, add_dummy_prefix=True),
+                        encode_sp(src_spp, src_term, add_dummy_prefix=False),
+                    ]
+                    trg_term_variants = [
+                        encode_sp(trg_spp, trg_term, add_dummy_prefix=True),
+                        encode_sp(trg_spp, trg_term, add_dummy_prefix=False),
+                    ]
 
-                if train_src_file is not None and train_trg_file is not None and train_vref_file is not None:
-                    for stv in src_term_variants:
-                        for ttv in trg_term_variants:
+                    if train_src_file is not None and train_trg_file is not None and train_vref_file is not None:
+                        for stv, ttv in zip(src_term_variants, trg_term_variants):
                             train_src_file.write(stv + "\n")
                             train_trg_file.write(ttv + "\n")
                             train_vref_file.write("\n")
                             train_count += 1
 
-                if dict_src_file is not None and dict_trg_file is not None:
-                    dict_src_file.write("\t".join(src_term_variants) + "\n")
-                    dict_trg_file.write("\t".join(trg_term_variants) + "\n")
+                    if dict_src_file is not None and dict_trg_file is not None:
+                        dict_src_file.write("\t".join(src_term_variants) + "\n")
+                        dict_trg_file.write("\t".join(trg_term_variants) + "\n")
         finally:
             if train_src_file is not None:
                 train_src_file.close()
