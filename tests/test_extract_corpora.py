@@ -1,29 +1,32 @@
 import shutil
+import tempfile
 import os
 from pathlib import Path
 from . import helper
 from silnlp.common.paratext import extract_project, extract_term_renderings
+from silnlp.common.environment import SNE
 
 
-pp_dir = Path(__file__).parent / "Paratext/projects"
+scr_truth_dir = SNE._MT_DIR / "scripture"
 
-scr_dir = Path(__file__).parent / "MT/scripture"
-scr_truth_dir = Path(__file__).parent / "MT/scripture_truth"
+# set scripture directory to temp
+with tempfile.TemporaryDirectory() as src_dir:
+    SNE._MT_SCRIPTURE_DIR = Path(src_dir)
 
 
 def test_extract_corpora():
-    shutil.rmtree(scr_dir, ignore_errors=True)
-    os.mkdir(scr_dir)
-    pp_subdirs = [folder for folder in pp_dir.glob("*/")]
+    shutil.rmtree(SNE._MT_SCRIPTURE_DIR, ignore_errors=True)
+    os.mkdir(SNE._MT_SCRIPTURE_DIR)
+    pp_subdirs = [folder for folder in SNE._PT_PROJECTS_DIR.glob("*/")]
     for project in pp_subdirs:
         extract_project(project.parts[-1], include_texts="", exclude_texts="", include_markers=False)
         extract_term_renderings(project.parts[-1])
 
-    helper.compare_folders(truth_folder=scr_truth_dir, computed_folder=scr_dir)
+    helper.compare_folders(truth_folder=scr_truth_dir, computed_folder=SNE._MT_SCRIPTURE_DIR)
 
 
 def test_extract_corpora_error():
-    project = pp_dir / "not_a_project"
+    project = SNE._PT_PROJECTS_DIR / "not_a_project"
     error = "no error"
     try:
         extract_project(project.parts[-1], include_texts="", exclude_texts="", include_markers=False)
