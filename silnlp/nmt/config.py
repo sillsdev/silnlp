@@ -550,6 +550,7 @@ class Config:
         self._tags: Set[str] = set()
         self._has_scripture_data = False
         self._iso_pairs: Dict[Tuple[str, str], IsoPairInfo] = {}
+        self.src_projects: Set[str] = set()
         for corpus_pair in self.corpus_pairs:
             pair_src_isos = {sf.iso for sf in corpus_pair.src_files}
             pair_trg_isos = {tf.iso for tf in corpus_pair.trg_files}
@@ -557,17 +558,17 @@ class Config:
             self.trg_isos.update(pair_trg_isos)
             self.src_file_paths.update(sf.path for sf in corpus_pair.src_files)
             self.trg_file_paths.update(tf.path for tf in corpus_pair.trg_files)
-            self.src_file_paths.update(sf.path for sf in corpus_pair.src_terms_files)
-            self.trg_file_paths.update(tf.path for tf in corpus_pair.trg_terms_files)
-            if terms_config["include_glosses"]:
-                if "en" in pair_src_isos:
-                    self.src_file_paths.update(get_terms_glosses_file_paths(corpus_pair.src_terms_files))
-                if "en" in pair_trg_isos:
-                    self.trg_file_paths.update(get_terms_glosses_file_paths(corpus_pair.trg_terms_files))
-            self._tags.update(f"<{tag}>" for tag in corpus_pair.tags)
-
             if corpus_pair.is_scripture:
                 self._has_scripture_data = True
+                self.src_file_paths.update(sf.path for sf in corpus_pair.src_terms_files)
+                self.trg_file_paths.update(tf.path for tf in corpus_pair.trg_terms_files)
+                self.src_projects.update(sf.project for sf in corpus_pair.src_files)
+                if terms_config["include_glosses"]:
+                    if "en" in pair_src_isos:
+                        self.src_file_paths.update(get_terms_glosses_file_paths(corpus_pair.src_terms_files))
+                    if "en" in pair_trg_isos:
+                        self.trg_file_paths.update(get_terms_glosses_file_paths(corpus_pair.trg_terms_files))
+            self._tags.update(f"<{tag}>" for tag in corpus_pair.tags)
 
             for src_file in corpus_pair.src_files:
                 for trg_file in corpus_pair.trg_files:
@@ -684,6 +685,26 @@ class Config:
         src_spp = sp.SentencePieceProcessor()
         src_spp.Load(str(self.exp_dir / "sp.model" if self.share_vocab else self.exp_dir / "src-sp.model"))
         return src_spp
+
+    def is_train_project(self, ref_file_path: Path) -> bool:
+        trg_iso, trg_project = self._parse_ref_file_path(ref_file_path)
+        for pair in self.corpus_pairs:
+            if not pair.is_train:
+                continue
+            for df in pair.src_files + pair.trg_files:
+                if df.iso == trg_iso and df.project == trg_project:
+                    return True
+        return False
+
+    def is_ref_project(self, ref_projects: Set[str], ref_file_path: Path) -> bool:
+        _, trg_project = self._parse_ref_file_path(ref_file_path)
+        return trg_project in ref_projects
+
+    def _parse_ref_file_path(self, ref_file_path: Path) -> Tuple[str, str]:
+        parts = ref_file_path.name.split(".")
+        if len(parts) == 5:
+            return self.default_trg_iso, parts[3]
+        return parts[2], parts[5]
 
     def _build_corpora(
         self, src_spp: Optional[sp.SentencePieceProcessor], trg_spp: Optional[sp.SentencePieceProcessor], stats: bool

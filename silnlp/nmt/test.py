@@ -1,10 +1,8 @@
 import argparse
-import logging
 import random
 import sys
 from pathlib import Path
 from typing import IO, Dict, Iterable, List, Optional, Set, Tuple, cast
-
 
 import numpy as np
 import sacrebleu
@@ -15,7 +13,6 @@ from ..common.metrics import compute_meteor_score, compute_ter_score, compute_we
 from ..common.utils import get_git_revision_hash
 from ..common.verse_ref import VerseRef
 from .config import Config, create_runner, load_config
-from .langs_config import LangsConfig
 from .utils import decode_sp, get_best_model_dir, get_last_checkpoint
 
 _SUPPORTED_SCORERS = {"bleu", "sentencebleu", "chrf3", "meteor", "wer", "ter"}
@@ -206,7 +203,7 @@ def load_test_data(
     ) as pred_file, open(config.exp_dir / output_file_name, "w", encoding="utf-8") as out_file:
         ref_file_paths = list(config.exp_dir.glob(ref_pattern))
         select_rand_ref_line = False
-        if isinstance(config, LangsConfig) and len(ref_file_paths) > 1:
+        if len(ref_file_paths) > 1:
             if len(ref_projects) == 0:
                 # no refs specified, so randomly select verses from all available train refs to build one ref
                 select_rand_ref_line = True
