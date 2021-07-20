@@ -10,7 +10,6 @@ from opennmt.layers import (
     Dense,
     FeedForwardNetwork,
     LayerNorm,
-    LayerWrapper,
     MultiHeadAttention,
     MultiHeadAttentionReduction,
     SelfAttentionEncoderLayer,
@@ -574,6 +573,21 @@ class SILTransformer(Transformer):
             "logits": outputs["logits"],
             "index": features["index"],
         }
+
+    def set_dropout(self, dropout: float = 0.1, attention_dropout: float = 0.1, ffn_dropout: float = 0.1) -> None:
+        root_layer = self
+        for layer in (root_layer,) + root_layer.submodules:
+            name: str = layer.name
+            if name == "self_attention_encoder":
+                layer.dropout = dropout
+            elif name == "self_attention_decoder":
+                layer.dropout = dropout
+            elif name.startswith("transformer_layer_wrapper"):
+                layer.output_dropout = dropout
+            elif name.startswith("multi_head_attention"):
+                layer.dropout = attention_dropout
+            elif name.startswith("feed_forward_network"):
+                layer.dropout = ffn_dropout
 
     def _dynamic_decode(self, features, encoder_outputs, encoder_state, encoder_sequence_length):
         params = self.params

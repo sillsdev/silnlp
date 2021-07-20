@@ -1,9 +1,7 @@
 import argparse
-import logging
 import time
 from pathlib import Path
 from typing import Iterable, Optional
-
 
 import tensorflow as tf
 
@@ -12,7 +10,6 @@ from ..common.paratext import book_file_name_digits
 from ..common.translator import Translator
 from ..common.utils import get_git_revision_hash
 from .config import Config, create_runner, load_config
-from .langs_config import LangsConfig
 from .utils import decode_sp_lines, encode_sp, get_best_model_dir, get_last_checkpoint
 
 
@@ -94,7 +91,7 @@ def main() -> None:
     if book is not None:
         src_project: Optional[str] = args.src_project
         if src_project is None:
-            if not isinstance(config, LangsConfig) or len(config.src_projects) > 1:
+            if len(config.src_projects) != 1:
                 raise RuntimeError("A source project must be specified.")
             src_project = next(iter(config.src_projects))
 

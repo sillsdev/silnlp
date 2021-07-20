@@ -8,7 +8,6 @@ import seaborn as sns
 
 from ..common.environment import SNE
 from .config import load_config
-from .langs_config import LangsConfig
 
 
 def get_corpus_path(project: str) -> Path:
@@ -95,14 +94,13 @@ def main() -> None:
     exp_name = args.experiment
     config = load_config(exp_name)
 
-    if not isinstance(config, LangsConfig):
-        raise RuntimeError("The specified experiment has an unsupported configuration.")
-
     projects: Set[str] = set()
-    for src_file in config.src_files:
-        projects.add(f"{src_file.iso}-{src_file.project}")
-    for trg_file in config.trg_files:
-        projects.add(f"{trg_file.iso}-{trg_file.project}")
+    for pair in config.corpus_pairs:
+        if pair.is_scripture:
+            for src_file in pair.src_files:
+                projects.add(f"{src_file.iso}-{src_file.project}")
+            for trg_file in pair.trg_files:
+                projects.add(f"{trg_file.iso}-{trg_file.project}")
 
     computeSimilarity(list(projects))
 
