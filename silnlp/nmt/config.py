@@ -106,6 +106,12 @@ class DataFileType(Flag):
     DICT = auto()
 
 
+class DataFileMapping(Enum):
+    ONE_TO_ONE = auto()
+    MIXED_SRC = auto()
+    MANY_TO_MANY = auto()
+
+
 @dataclass
 class DataFile:
     path: Path
@@ -136,29 +142,13 @@ class CorpusPair:
     disjoint_test: bool
     disjoint_val: bool
     score_threshold: float
-    mixed_src: bool
     corpus_books: Set[int]
     test_books: Set[int]
     use_test_set_from: str
     src_terms_files: List[DataFile]
     trg_terms_files: List[DataFile]
-    is_lexical: bool
-
-    @property
-    def src_file_path(self) -> Path:
-        return self.src_files[0].path
-
-    @property
-    def trg_file_path(self) -> Path:
-        return self.trg_files[0].path
-
-    @property
-    def src_iso(self) -> str:
-        return self.src_files[0].iso
-
-    @property
-    def trg_iso(self) -> str:
-        return self.trg_files[0].iso
+    is_lexical_data: bool
+    mapping: DataFileMapping
 
     @property
     def is_train(self) -> bool:
@@ -228,10 +218,10 @@ def get_corpus_path(corpus: str) -> Path:
 def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
     pairs: List[CorpusPair] = []
     for pair in corpus_pairs:
-        type_strs: Optional[Union[str, List[str]]] = pair.get("type")
-        if type_strs is None:
-            type_strs = ["train", "test", "val"]
-        elif isinstance(type_strs, str):
+        if "type" not in pair:
+            pair["type"] = ["train", "test", "val"]
+        type_strs: Union[str, List[str]] = pair["type"]
+        if isinstance(type_strs, str):
             type_strs = type_strs.split(",")
         type = DataFileType.NONE
         for type_str in type_strs:
@@ -256,8 +246,6 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
         is_scripture = src_files[0].is_scripture
         if not all(df.is_scripture == is_scripture for df in (src_files + trg_files)):
             raise RuntimeError("All corpora in a corpus pair must contain the same type of data.")
-        if not is_scripture and len(src_files) != len(trg_files):
-            raise RuntimeError("A basic corpus pair must contain the same number of source and target corpora.")
 
         tags: Union[str, List[str]] = pair.get("tags", [])
         if isinstance(tags, str):
@@ -265,18 +253,23 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
 
         src_noise = create_noise_methods(pair.get("src_noise", []))
 
-        size: Union[float, int] = pair.get("size", 1.0)
+        if "size" not in pair:
+            pair["size"] = 1.0
+        size: Union[float, int] = pair["size"]
+        if "test_size" not in pair and is_set(type, DataFileType.TRAIN | DataFileType.TEST):
+            pair["test_size"] = 0 if "test_books" in pair else 250
         test_size: Optional[Union[float, int]] = pair.get("test_size")
-        if test_size is None and is_set(type, DataFileType.TRAIN | DataFileType.TEST):
-            test_size = 0 if "test_books" in pair else 250
+        if "val_size" not in pair and is_set(type, DataFileType.TRAIN | DataFileType.VAL):
+            pair["val_size"] = 250
         val_size: Optional[Union[float, int]] = pair.get("val_size")
-        if val_size is None and is_set(type, DataFileType.TRAIN | DataFileType.VAL):
-            val_size = 250
 
-        disjoint_test: bool = pair.get("disjoint_test", False)
-        disjoint_val: bool = pair.get("disjoint_val", False)
+        if "disjoint_test" not in pair:
+            pair["disjoint_test"] = False
+        disjoint_test: bool = pair["disjoint_test"]
+        if "disjoint_val" not in pair:
+            pair["disjoint_val"] = False
+        disjoint_val: bool = pair["disjoint_val"]
         score_threshold: float = pair.get("score_threshold", 0.0)
-        mixed_src: bool = pair.get("mixed_src", False) and len(src_files) > 1 and is_set(type, DataFileType.TRAIN)
         corpus_books = get_books(pair.get("corpus_books", []))
         test_books = get_books(pair.get("test_books", []))
         use_test_set_from: str = pair.get("use_test_set_from", "")
@@ -284,55 +277,42 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
         src_terms_files = get_terms_files(src_files) if is_set(type, DataFileType.TRAIN) else []
         trg_terms_files = get_terms_files(trg_files) if is_set(type, DataFileType.TRAIN) else []
 
-        is_lexical: bool = pair.get("lexical", is_set(type, DataFileType.DICT))
+        if "lexical" not in pair:
+            pair["lexical"] = is_set(type, DataFileType.DICT)
+        is_lexical_data: bool = pair["lexical"]
 
-        if is_scripture:
-            pairs.append(
-                CorpusPair(
-                    src_files,
-                    trg_files,
-                    type,
-                    src_noise,
-                    tags,
-                    size,
-                    test_size,
-                    val_size,
-                    disjoint_test,
-                    disjoint_val,
-                    score_threshold,
-                    mixed_src,
-                    corpus_books,
-                    test_books,
-                    use_test_set_from,
-                    src_terms_files,
-                    trg_terms_files,
-                    is_lexical,
-                )
+        if "mapping" not in pair:
+            pair["mapping"] = DataFileMapping.ONE_TO_ONE.name.lower()
+        mapping = DataFileMapping[pair["mapping"].upper()]
+        if not is_scripture and mapping != DataFileMapping.ONE_TO_ONE:
+            raise RuntimeError("Basic corpus pairs only support one-to-one mapping.")
+        if mapping == DataFileMapping.ONE_TO_ONE and len(src_files) != len(trg_files):
+            raise RuntimeError(
+                "A corpus pair with one-to-one mapping must contain the same number of source and target corpora."
             )
-        else:
-            for src_file, trg_file in zip(src_files, trg_files):
-                pairs.append(
-                    CorpusPair(
-                        [src_file],
-                        [trg_file],
-                        type,
-                        src_noise,
-                        tags,
-                        size,
-                        test_size,
-                        val_size,
-                        disjoint_test,
-                        disjoint_val,
-                        score_threshold,
-                        mixed_src,
-                        corpus_books,
-                        test_books,
-                        use_test_set_from,
-                        src_terms_files,
-                        trg_terms_files,
-                        is_lexical,
-                    )
-                )
+
+        pairs.append(
+            CorpusPair(
+                src_files,
+                trg_files,
+                type,
+                src_noise,
+                tags,
+                size,
+                test_size,
+                val_size,
+                disjoint_test,
+                disjoint_val,
+                score_threshold,
+                corpus_books,
+                test_books,
+                use_test_set_from,
+                src_terms_files,
+                trg_terms_files,
+                is_lexical_data,
+                mapping,
+            )
+        )
     return pairs
 
 
@@ -436,6 +416,17 @@ def get_checkpoint_path(model_dir: Path, checkpoint_type: CheckpointType) -> Tup
         return (None, None)
     else:
         raise RuntimeError(f"Unsupported checkpoint type: {checkpoint_type}")
+
+def get_data_file_pairs(corpus_pair: CorpusPair) -> Iterable[Tuple[DataFile, DataFile]]:
+    if corpus_pair.mapping == DataFileMapping.ONE_TO_ONE:
+        for file_pair in zip(corpus_pair.src_files, corpus_pair.trg_files):
+            yield file_pair
+    else:
+        for src_file in corpus_pair.src_files:
+            for trg_file in corpus_pair.trg_files:
+                if src_file.iso == trg_file.iso:
+                    continue
+                yield (src_file, trg_file)
 
 
 class Config:
@@ -759,125 +750,127 @@ class Config:
         stats_file: Optional[TextIO] = None
         try:
             if stats:
-                stats_file = open(self.exp_dir / "corpus-stats.csv", "w", encoding="utf-8")
-                stats_file.write("src_project,trg_project,count,align_score,filtered_count,filtered_align_score\n")
+                stats_file = self._open_append("corpus-stats.csv")
+                if stats_file.tell() == 0:
+                    stats_file.write("src_project,trg_project,count,align_score,filtered_count,filtered_align_score\n")
 
-            for src_file in pair.src_files:
-                for trg_file in pair.trg_files:
-                    if src_file.iso == trg_file.iso:
-                        continue
+            for src_file, trg_file in get_data_file_pairs(pair):
+                corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path)
+                if len(pair.corpus_books) > 0:
+                    cur_train = include_books(corpus, pair.corpus_books)
+                    if len(pair.corpus_books.intersection(pair.test_books)) > 0:
+                        cur_train = exclude_books(cur_train, pair.test_books)
+                elif len(pair.test_books) > 0:
+                    cur_train = exclude_books(corpus, pair.test_books)
+                else:
+                    cur_train = corpus
 
-                    corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path)
-                    if len(pair.corpus_books) > 0:
-                        cur_train = include_books(corpus, pair.corpus_books)
-                        if len(pair.corpus_books.intersection(pair.test_books)) > 0:
-                            cur_train = exclude_books(cur_train, pair.test_books)
-                    elif len(pair.test_books) > 0:
-                        cur_train = exclude_books(corpus, pair.test_books)
+                corpus_count = len(cur_train)
+                if pair.is_train and (stats_file is not None or pair.score_threshold > 0):
+                    add_alignment_scores(cur_train)
+                    if stats_file is not None:
+                        cur_train.to_csv(self.exp_dir / f"{src_file.project}_{trg_file.project}.csv", index=False)
+
+                tags_str = self._get_tags_str(pair.tags, trg_file.iso)
+                mirror_tags_str = self._get_tags_str(pair.tags, src_file.iso)
+
+                if pair.is_test:
+                    if pair.disjoint_test and test_indices is None:
+                        indices: Set[int] = set(cur_train.index)
+                        if pair.disjoint_val and val_indices is not None:
+                            indices.difference_update(val_indices)
+                        split_size = test_size
+                        if isinstance(test_size, float):
+                            split_size = int(split_size if split_size > 1 else corpus_count * split_size)
+                        test_indices = set(random.sample(indices, min(split_size, len(indices))))
+
+                    if len(pair.test_books) > 0:
+                        cur_test = include_books(corpus, pair.test_books)
+                        if test_size > 0:
+                            _, cur_test = split_parallel_corpus(
+                                cur_test,
+                                test_size,
+                                pair_test_indices.get((src_file.iso, trg_file.iso), test_indices),
+                            )
                     else:
-                        cur_train = corpus
-
-                    corpus_count = len(cur_train)
-                    if pair.is_train and (stats_file is not None or pair.score_threshold > 0):
-                        add_alignment_scores(cur_train)
-                        if stats_file is not None:
-                            cur_train.to_csv(self.exp_dir / f"{src_file.project}_{trg_file.project}.csv", index=False)
-
-                    tags_str = self._get_tags_str(pair.tags, trg_file.iso)
-                    mirror_tags_str = self._get_tags_str(pair.tags, src_file.iso)
-
-                    if pair.is_test:
-                        if pair.disjoint_test and test_indices is None:
-                            indices: Set[int] = set(cur_train.index)
-                            if pair.disjoint_val and val_indices is not None:
-                                indices.difference_update(val_indices)
-                            split_size = test_size
-                            if isinstance(test_size, float):
-                                split_size = int(split_size if split_size > 1 else corpus_count * split_size)
-                            test_indices = set(random.sample(indices, min(split_size, len(indices))))
-
-                        if len(pair.test_books) > 0:
-                            cur_test = include_books(corpus, pair.test_books)
-                            if test_size > 0:
-                                _, cur_test = split_parallel_corpus(
-                                    cur_test,
-                                    test_size,
-                                    pair_test_indices.get((src_file.iso, trg_file.iso), test_indices),
-                                )
-                        else:
-                            cur_train, cur_test = split_parallel_corpus(
-                                cur_train, test_size, pair_test_indices.get((src_file.iso, trg_file.iso), test_indices)
-                            )
-
-                        cur_test.drop("score", axis=1, inplace=True, errors="ignore")
-                        self._add_to_eval_dataset(
-                            src_file.iso,
-                            trg_file.iso,
-                            trg_file.project,
-                            tags_str,
-                            test,
-                            pair_test_indices,
-                            cur_test,
+                        cur_train, cur_test = split_parallel_corpus(
+                            cur_train, test_size, pair_test_indices.get((src_file.iso, trg_file.iso), test_indices)
                         )
 
-                    if pair.is_train:
-                        alignment_score = mean(cur_train["score"]) if stats_file is not None else 0
+                    cur_test.drop("score", axis=1, inplace=True, errors="ignore")
+                    self._add_to_eval_dataset(
+                        src_file.iso,
+                        trg_file.iso,
+                        trg_file.project,
+                        tags_str,
+                        test,
+                        pair_test_indices,
+                        cur_test,
+                    )
 
-                        filtered_count = 0
-                        filtered_alignment_score = alignment_score
-                        if pair.score_threshold > 0:
-                            unfiltered_len = len(cur_train)
-                            cur_train = filter_parallel_corpus(cur_train, pair.score_threshold)
-                            filtered_count = unfiltered_len - len(cur_train)
-                            filtered_alignment_score = mean(cur_train["score"]) if stats_file is not None else 0
+                if pair.is_train:
+                    alignment_score = mean(cur_train["score"]) if stats_file is not None else 0
 
-                        if stats_file is not None:
-                            LOGGER.info(
-                                f"{src_file.project} -> {trg_file.project} stats -"
-                                f" count: {corpus_count},"
-                                f" alignment: {alignment_score:.4f},"
-                                f" filtered count: {filtered_count},"
-                                f" alignment (filtered): {filtered_alignment_score:.4f}"
-                            )
-                            stats_file.write(
-                                f"{src_file.project},{trg_file.project},{corpus_count},{alignment_score:.4f},"
-                                f"{filtered_count},{filtered_alignment_score:.4f}\n"
-                            )
-                        cur_train.drop("score", axis=1, inplace=True, errors="ignore")
+                    filtered_count = 0
+                    filtered_alignment_score = alignment_score
+                    if pair.score_threshold > 0:
+                        unfiltered_len = len(cur_train)
+                        cur_train = filter_parallel_corpus(cur_train, pair.score_threshold)
+                        filtered_count = unfiltered_len - len(cur_train)
+                        filtered_alignment_score = mean(cur_train["score"]) if stats_file is not None else 0
 
-                    if pair.is_val:
-                        if pair.disjoint_val and val_indices is None:
-                            indices = set(cur_train.index)
-                            if pair.disjoint_test and test_indices is not None:
-                                indices.difference_update(test_indices)
-                            split_size = val_size
-                            if isinstance(split_size, float):
-                                split_size = int(split_size if split_size > 1 else corpus_count * split_size)
-                            val_indices = set(random.sample(indices, min(split_size, len(indices))))
-
-                        cur_train, cur_val = split_parallel_corpus(
-                            cur_train, val_size, pair_val_indices.get((src_file.iso, trg_file.iso), val_indices)
+                    if stats_file is not None:
+                        LOGGER.info(
+                            f"{src_file.project} -> {trg_file.project} stats -"
+                            f" count: {corpus_count},"
+                            f" alignment: {alignment_score:.4f},"
+                            f" filtered count: {filtered_count},"
+                            f" alignment (filtered): {filtered_alignment_score:.4f}"
                         )
-
-                        self._add_to_eval_dataset(
-                            src_file.iso, trg_file.iso, trg_file.project, tags_str, val, pair_val_indices, cur_val
+                        stats_file.write(
+                            f"{src_file.project},{trg_file.project},{corpus_count},{alignment_score:.4f},"
+                            f"{filtered_count},{filtered_alignment_score:.4f}\n"
                         )
+                    cur_train.drop("score", axis=1, inplace=True, errors="ignore")
 
-                    if pair.is_train:
-                        if self.mirror:
-                            mirror_cur_train = cur_train.rename(columns={"source": "target", "target": "source"})
-                            train = self._add_to_train_dataset(
-                                trg_file.project,
-                                src_file.project,
-                                pair.mixed_src,
-                                mirror_tags_str,
-                                train,
-                                mirror_cur_train,
-                            )
+                if pair.is_val:
+                    if pair.disjoint_val and val_indices is None:
+                        indices = set(cur_train.index)
+                        if pair.disjoint_test and test_indices is not None:
+                            indices.difference_update(test_indices)
+                        split_size = val_size
+                        if isinstance(split_size, float):
+                            split_size = int(split_size if split_size > 1 else corpus_count * split_size)
+                        val_indices = set(random.sample(indices, min(split_size, len(indices))))
 
+                    cur_train, cur_val = split_parallel_corpus(
+                        cur_train, val_size, pair_val_indices.get((src_file.iso, trg_file.iso), val_indices)
+                    )
+
+                    self._add_to_eval_dataset(
+                        src_file.iso, trg_file.iso, trg_file.project, tags_str, val, pair_val_indices, cur_val
+                    )
+
+                if pair.is_train:
+                    if self.mirror:
+                        mirror_cur_train = cur_train.rename(columns={"source": "target", "target": "source"})
                         train = self._add_to_train_dataset(
-                            src_file.project, trg_file.project, pair.mixed_src, tags_str, train, cur_train
+                            trg_file.project,
+                            src_file.project,
+                            pair.mapping == DataFileMapping.MIXED_SRC,
+                            mirror_tags_str,
+                            train,
+                            mirror_cur_train,
                         )
+
+                    train = self._add_to_train_dataset(
+                        src_file.project,
+                        trg_file.project,
+                        pair.mapping == DataFileMapping.MIXED_SRC,
+                        tags_str,
+                        train,
+                        cur_train,
+                    )
 
         finally:
             if stats_file is not None:
@@ -923,7 +916,7 @@ class Config:
         if train is None:
             return 0
 
-        if pair.mixed_src:
+        if pair.mapping == DataFileMapping.MIXED_SRC:
             train.fillna("", inplace=True)
             src_columns: List[str] = [c for c in train.columns if c.startswith("source")]
 
@@ -1086,13 +1079,13 @@ class Config:
         try:
             terms_config = self.data["terms"]
             if terms_config["train"] and terms is not None:
-                train_src_file = open(self.exp_dir / self._train_src_filename(), "a", encoding="utf-8", newline="\n")
-                train_trg_file = open(self.exp_dir / self._train_trg_filename(), "a", encoding="utf-8", newline="\n")
-                train_vref_file = open(self.exp_dir / self._train_vref_filename(), "a", encoding="utf-8", newline="\n")
+                train_src_file = self._open_append(self._train_src_filename())
+                train_trg_file = self._open_append(self._train_trg_filename())
+                train_vref_file = self._open_append(self._train_vref_filename())
 
             if terms_config["dictionary"]:
-                dict_src_file = open(self.exp_dir / self._dict_src_filename(), "a", encoding="utf-8", newline="\n")
-                dict_trg_file = open(self.exp_dir / self._dict_trg_filename(), "a", encoding="utf-8", newline="\n")
+                dict_src_file = self._open_append(self._dict_src_filename())
+                dict_trg_file = self._open_append(self._dict_trg_filename())
 
             if terms is not None:
                 for _, term in terms.iterrows():
@@ -1144,7 +1137,7 @@ class Config:
                     for index in pair_val.index:
                         for ci in range(val_project_count):
                             if len(ref_files) == ci:
-                                ref_files.append(open(self.exp_dir / self._val_trg_filename(ci), "a", encoding="utf-8"))
+                                ref_files.append(self._open_append(self._val_trg_filename(ci)))
                             if ci < len(columns):
                                 col = columns[ci]
                                 ref_files[ci].write(encode_sp(trg_spp, pair_val.loc[index, col].strip()) + "\n")
@@ -1153,7 +1146,7 @@ class Config:
                 else:
                     for index in pair_val.index:
                         if len(ref_files) == 0:
-                            ref_files.append(open(self.exp_dir / self._val_trg_filename(), "a", encoding="utf-8"))
+                            ref_files.append(self._open_append(self._val_trg_filename()))
                         columns_with_data: List[str] = list(
                             filter(lambda c: pair_val.loc[index, c].strip() != "", columns)
                         )
@@ -1170,188 +1163,166 @@ class Config:
     def _fill_corpus(self, filename: str, size: int) -> None:
         write_corpus(self.exp_dir / filename, ("" for _ in range(size)), append=True)
 
+    def _open_append(self, filename: str) -> TextIO:
+        return open(self.exp_dir / filename, "a", encoding="utf-8", newline="\n")
+
     def _write_basic_data_sets(
         self,
         src_spp: Optional[sp.SentencePieceProcessor],
         trg_spp: Optional[sp.SentencePieceProcessor],
         pair: CorpusPair,
     ) -> int:
-        LOGGER.info(f"Preprocessing {pair.src_file_path.stem} -> {pair.trg_file_path.stem}")
-        corpus_size = get_parallel_corpus_size(pair.src_file_path, pair.trg_file_path)
-        with open(pair.src_file_path, "r", encoding="utf-8") as input_src_file, open(
-            pair.trg_file_path, "r", encoding="utf-8"
-        ) as input_trg_file:
-            test_indices: Optional[Set[int]] = set()
-            if pair.is_test:
-                test_size = pair.size if pair.test_size is None else pair.test_size
-                test_indices = split_corpus(corpus_size, test_size)
+        total_train_count = 0
+        for src_file, trg_file in zip(pair.src_files, pair.trg_files):
+            LOGGER.info(f"Preprocessing {src_file.path.stem} -> {trg_file.path.stem}")
+            corpus_size = get_parallel_corpus_size(src_file.path, trg_file.path)
+            with open(src_file.path, "r", encoding="utf-8") as input_src_file, open(
+                trg_file.path, "r", encoding="utf-8"
+            ) as input_trg_file:
+                test_indices: Optional[Set[int]] = set()
+                if pair.is_test:
+                    test_size = pair.size if pair.test_size is None else pair.test_size
+                    test_indices = split_corpus(corpus_size, test_size)
 
-            val_indices: Optional[Set[int]] = set()
-            if pair.is_val and test_indices is not None:
-                val_size = pair.size if pair.val_size is None else pair.val_size
-                val_indices = split_corpus(corpus_size, val_size, test_indices)
+                val_indices: Optional[Set[int]] = set()
+                if pair.is_val and test_indices is not None:
+                    val_size = pair.size if pair.val_size is None else pair.val_size
+                    val_indices = split_corpus(corpus_size, val_size, test_indices)
 
-            train_indices: Optional[Set[int]] = set()
-            if pair.is_train and test_indices is not None and val_indices is not None:
-                train_size = pair.size
-                train_indices = split_corpus(corpus_size, train_size, test_indices | val_indices)
+                train_indices: Optional[Set[int]] = set()
+                if pair.is_train and test_indices is not None and val_indices is not None:
+                    train_size = pair.size
+                    train_indices = split_corpus(corpus_size, train_size, test_indices | val_indices)
 
-            train_count = 0
-            val_count = 0
-            test_count = 0
-            dict_count = 0
-            tags_str = self._get_tags_str(pair.tags, pair.trg_iso)
-            mirror_tags_str = self._get_tags_str(pair.tags, pair.src_iso)
+                train_count = 0
+                val_count = 0
+                test_count = 0
+                dict_count = 0
+                tags_str = self._get_tags_str(pair.tags, trg_file.iso)
+                mirror_tags_str = self._get_tags_str(pair.tags, src_file.iso)
 
-            with open(
-                self.exp_dir / self._train_src_filename(), "a", encoding="utf-8", newline="\n"
-            ) as train_src_file, open(
-                self.exp_dir / self._train_trg_filename(), "a", encoding="utf-8", newline="\n"
-            ) as train_trg_file, open(
-                self.exp_dir / self._val_src_filename(), "a", encoding="utf-8", newline="\n"
-            ) as val_src_file, open(
-                self.exp_dir / self._val_trg_filename(), "a", encoding="utf-8", newline="\n"
-            ) as val_trg_file, open(
-                self.exp_dir / self._test_src_filename(pair.src_iso, pair.trg_iso), "a", encoding="utf-8", newline="\n"
-            ) as test_src_file, open(
-                self.exp_dir / self._test_trg_filename(pair.src_iso, pair.trg_iso), "a", encoding="utf-8", newline="\n"
-            ) as test_trg_file:
-                train_vref_file: Optional[TextIO] = None
-                val_vref_file: Optional[TextIO] = None
-                test_vref_file: Optional[TextIO] = None
-                test_trg_project_files: List[TextIO] = []
-                val_trg_ref_files: List[TextIO] = []
-                dict_src_file: Optional[TextIO] = None
-                dict_trg_file: Optional[TextIO] = None
-                try:
-                    if self._has_scripture_data:
-                        train_vref_file = open(
-                            self.exp_dir / self._train_vref_filename(), "a", encoding="utf-8", newline="\n"
-                        )
-                        val_vref_file = open(
-                            self.exp_dir / self._val_vref_filename(), "a", encoding="utf-8", newline="\n"
-                        )
-                        test_vref_file = open(
-                            self.exp_dir / self._test_vref_filename(pair.src_iso, pair.trg_iso),
-                            "a",
-                            encoding="utf-8",
-                            newline="\n",
-                        )
-                        test_projects = self._get_test_projects(pair.src_iso, pair.trg_iso)
-                        test_trg_project_files = [
-                            open(
-                                self.exp_dir / self._test_trg_filename(pair.src_iso, pair.trg_iso, project),
-                                "a",
-                                encoding="utf-8",
-                                newline="\n",
-                            )
-                            for project in test_projects
-                            if project != BASIC_DATA_PROJECT
-                        ]
-                        val_ref_count = self._get_val_ref_count(pair.src_iso, pair.trg_iso)
-                        val_trg_ref_files = [
-                            open(
-                                self.exp_dir / self._val_trg_filename(index),
-                                "a",
-                                encoding="utf-8",
-                                newline="\n",
-                            )
-                            for index in range(1, val_ref_count)
-                        ]
-                    if pair.is_dictionary:
-                        dict_src_file = open(
-                            self.exp_dir / self._dict_src_filename(), "a", encoding="utf-8", newline="\n"
-                        )
-                        dict_trg_file = open(
-                            self.exp_dir / self._dict_trg_filename(), "a", encoding="utf-8", newline="\n"
-                        )
+                with self._open_append(self._train_src_filename()) as train_src_file, self._open_append(
+                    self._train_trg_filename()
+                ) as train_trg_file, self._open_append(self._val_src_filename()) as val_src_file, self._open_append(
+                    self._val_trg_filename()
+                ) as val_trg_file, self._open_append(
+                    self._test_src_filename(src_file.iso, trg_file.iso)
+                ) as test_src_file, self._open_append(
+                    self._test_trg_filename(src_file.iso, trg_file.iso)
+                ) as test_trg_file:
+                    train_vref_file: Optional[TextIO] = None
+                    val_vref_file: Optional[TextIO] = None
+                    test_vref_file: Optional[TextIO] = None
+                    test_trg_project_files: List[TextIO] = []
+                    val_trg_ref_files: List[TextIO] = []
+                    dict_src_file: Optional[TextIO] = None
+                    dict_trg_file: Optional[TextIO] = None
+                    try:
+                        if self._has_scripture_data:
+                            train_vref_file = self._open_append(self._train_vref_filename())
+                            val_vref_file = self._open_append(self._val_vref_filename())
+                            test_vref_file = self._open_append(self._test_vref_filename(src_file.iso, trg_file.iso))
+                            test_projects = self._get_test_projects(src_file.iso, trg_file.iso)
+                            test_trg_project_files = [
+                                self._open_append(self._test_trg_filename(src_file.iso, trg_file.iso, project))
+                                for project in test_projects
+                                if project != BASIC_DATA_PROJECT
+                            ]
+                            val_ref_count = self._get_val_ref_count(src_file.iso, trg_file.iso)
+                            val_trg_ref_files = [
+                                self._open_append(self._val_trg_filename(index)) for index in range(1, val_ref_count)
+                            ]
+                        if pair.is_dictionary:
+                            dict_src_file = self._open_append(self._dict_src_filename())
+                            dict_trg_file = self._open_append(self._dict_trg_filename())
 
-                    index = 0
-                    for src_line, trg_line in zip(input_src_file, input_trg_file):
-                        src_line = src_line.strip()
-                        trg_line = trg_line.strip()
-                        if len(src_line) == 0 or len(trg_line) == 0:
-                            continue
+                        index = 0
+                        for src_line, trg_line in zip(input_src_file, input_trg_file):
+                            src_line = src_line.strip()
+                            trg_line = trg_line.strip()
+                            if len(src_line) == 0 or len(trg_line) == 0:
+                                continue
 
-                        src_sentence = tags_str + src_line
-                        trg_sentence = trg_line
+                            src_sentence = tags_str + src_line
+                            trg_sentence = trg_line
 
-                        if pair.is_test and (test_indices is None or index in test_indices):
-                            test_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
-                            test_trg_file.write(decode_sp(encode_sp(trg_spp, trg_sentence)) + "\n")
-                            if test_vref_file is not None:
-                                test_vref_file.write("\n")
-                            for test_trg_project_file in test_trg_project_files:
-                                test_trg_project_file.write("\n")
-                            test_count += 1
-                        elif pair.is_val and (val_indices is None or index in val_indices):
-                            val_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
-                            val_trg_file.write(encode_sp(trg_spp, trg_sentence) + "\n")
-                            if val_vref_file is not None:
-                                val_vref_file.write("\n")
-                            for val_trg_ref_file in val_trg_ref_files:
-                                val_trg_ref_file.write("\n")
-                            val_count += 1
-                        elif pair.is_train and (train_indices is None or index in train_indices):
-                            noised_src_sentence = self._noise(pair.src_noise, src_sentence)
-                            train_count += self._write_train_sentence_pair(
-                                train_src_file,
-                                train_trg_file,
-                                train_vref_file,
-                                src_spp,
-                                trg_spp,
-                                noised_src_sentence,
-                                trg_sentence,
-                                pair.is_lexical,
-                            )
-                            if self.mirror:
-                                mirror_src_sentence = mirror_tags_str + trg_line
-                                mirror_trg_sentence = src_line
-                                mirror_src_spp = trg_spp
-                                mirror_trg_spp = src_spp
+                            if pair.is_test and (test_indices is None or index in test_indices):
+                                test_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
+                                test_trg_file.write(decode_sp(encode_sp(trg_spp, trg_sentence)) + "\n")
+                                if test_vref_file is not None:
+                                    test_vref_file.write("\n")
+                                for test_trg_project_file in test_trg_project_files:
+                                    test_trg_project_file.write("\n")
+                                test_count += 1
+                            elif pair.is_val and (val_indices is None or index in val_indices):
+                                val_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
+                                val_trg_file.write(encode_sp(trg_spp, trg_sentence) + "\n")
+                                if val_vref_file is not None:
+                                    val_vref_file.write("\n")
+                                for val_trg_ref_file in val_trg_ref_files:
+                                    val_trg_ref_file.write("\n")
+                                val_count += 1
+                            elif pair.is_train and (train_indices is None or index in train_indices):
+                                noised_src_sentence = self._noise(pair.src_noise, src_sentence)
                                 train_count += self._write_train_sentence_pair(
                                     train_src_file,
                                     train_trg_file,
                                     train_vref_file,
-                                    mirror_src_spp,
-                                    mirror_trg_spp,
-                                    mirror_src_sentence,
-                                    mirror_trg_sentence,
-                                    pair.is_lexical,
+                                    src_spp,
+                                    trg_spp,
+                                    noised_src_sentence,
+                                    trg_sentence,
+                                    pair.is_lexical_data,
                                 )
-                        if pair.is_dictionary and dict_src_file is not None and dict_trg_file is not None:
-                            src_variants = [
-                                encode_sp(src_spp, src_sentence, add_dummy_prefix=True),
-                                encode_sp(src_spp, src_sentence, add_dummy_prefix=False),
-                            ]
-                            trg_variants = [
-                                encode_sp(trg_spp, trg_sentence, add_dummy_prefix=True),
-                                encode_sp(trg_spp, trg_sentence, add_dummy_prefix=False),
-                            ]
-                            dict_src_file.write("\t".join(src_variants) + "\n")
-                            dict_trg_file.write("\t".join(trg_variants) + "\n")
-                            dict_count += 1
+                                if self.mirror:
+                                    mirror_src_sentence = mirror_tags_str + trg_line
+                                    mirror_trg_sentence = src_line
+                                    mirror_src_spp = trg_spp
+                                    mirror_trg_spp = src_spp
+                                    train_count += self._write_train_sentence_pair(
+                                        train_src_file,
+                                        train_trg_file,
+                                        train_vref_file,
+                                        mirror_src_spp,
+                                        mirror_trg_spp,
+                                        mirror_src_sentence,
+                                        mirror_trg_sentence,
+                                        pair.is_lexical_data,
+                                    )
+                            if pair.is_dictionary and dict_src_file is not None and dict_trg_file is not None:
+                                src_variants = [
+                                    encode_sp(src_spp, src_sentence, add_dummy_prefix=True),
+                                    encode_sp(src_spp, src_sentence, add_dummy_prefix=False),
+                                ]
+                                trg_variants = [
+                                    encode_sp(trg_spp, trg_sentence, add_dummy_prefix=True),
+                                    encode_sp(trg_spp, trg_sentence, add_dummy_prefix=False),
+                                ]
+                                dict_src_file.write("\t".join(src_variants) + "\n")
+                                dict_trg_file.write("\t".join(trg_variants) + "\n")
+                                dict_count += 1
 
-                        index += 1
-                finally:
-                    if train_vref_file is not None:
-                        train_vref_file.close()
-                    if val_vref_file is not None:
-                        val_vref_file.close()
-                    if test_vref_file is not None:
-                        test_vref_file.close()
-                    for val_trg_ref_file in val_trg_ref_files:
-                        val_trg_ref_file.close()
-                    for test_trg_project_file in test_trg_project_files:
-                        test_trg_project_file.close()
-                    if dict_src_file is not None:
-                        dict_src_file.close()
-                    if dict_trg_file is not None:
-                        dict_trg_file.close()
+                            index += 1
+                    finally:
+                        if train_vref_file is not None:
+                            train_vref_file.close()
+                        if val_vref_file is not None:
+                            val_vref_file.close()
+                        if test_vref_file is not None:
+                            test_vref_file.close()
+                        for val_trg_ref_file in val_trg_ref_files:
+                            val_trg_ref_file.close()
+                        for test_trg_project_file in test_trg_project_files:
+                            test_trg_project_file.close()
+                        if dict_src_file is not None:
+                            dict_src_file.close()
+                        if dict_trg_file is not None:
+                            dict_trg_file.close()
             LOGGER.info(
                 f"train size: {train_count}, val size: {val_count}, test size: {test_count}, dict size: {dict_count}"
             )
-            return train_count
+            total_train_count += train_count
+        return total_train_count
 
     def _write_train_sentence_pair(
         self,
@@ -1556,7 +1527,7 @@ class Config:
                 elif child_tokens is not None and parent_vocab is not None:
                     onmt_delta_vocab_path = self.exp_dir / f"{prefix}-onmt-delta.vocab"
                     vocab_delta = child_tokens.difference(parent_vocab.words)
-                    with open(onmt_delta_vocab_path, "w", encoding="utf-8") as f:
+                    with open(onmt_delta_vocab_path, "w", encoding="utf-8", newline="\n") as f:
                         [f.write(f"{token}\n") for token in vocab_delta]
 
         LOGGER.info(f"Building {side} vocabulary...")
