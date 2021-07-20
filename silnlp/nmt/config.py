@@ -122,10 +122,12 @@ def build_vocab(
     # use custom normalization that does not convert ZWJ and ZWNJ to spaces
     # allows properly handling of scripts like Devanagari
     normalization_path = Path(__file__).parent / f"{normalization}.tsv"
+    file_paths = [fp for fp in file_paths]
+    file_paths.sort()
 
     sp.SentencePieceTrainer.Train(
         normalization_rule_tsv=normalization_path,
-        input=[fp for fp in file_paths],
+        input=file_paths,
         model_prefix=model_prefix,
         vocab_size=vocab_size,
         user_defined_symbols=user_defined_symbols,
@@ -320,6 +322,7 @@ class Config(ABC):
     def set_seed(self) -> None:
         seed = self.data["seed"]
         set_seed(seed)
+        sp.set_random_generator_seed(seed)
         tf.random.set_seed(seed)
 
     def preprocess(self, stats: bool) -> None:
