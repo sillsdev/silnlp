@@ -18,7 +18,7 @@ exp_subdirs = [folder for folder in exp_truth_dir.glob("*/")]
 def test_preprocess(exp_folder):
     exp_truth_path = os.path.join(exp_truth_dir, exp_folder)
     config_file = os.path.join(exp_truth_path, "config.yml")
-    assert os.path.isfile(config_file), "The configuraiton file config.yml does not exist for " + exp_folder.name
+    assert os.path.isfile(config_file), "The configuration file config.yml does not exist for " + exp_folder.name
     experiment_path = SNE._MT_EXPERIMENTS_DIR / exp_folder.name
     shutil.rmtree(experiment_path, ignore_errors=True)
     os.makedirs(experiment_path, exist_ok=True)
