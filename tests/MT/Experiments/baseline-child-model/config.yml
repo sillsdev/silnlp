@@ -2,18 +2,16 @@ data:
   mirror: false
   score_threshold: 0.0
   seed: 111
-  share_vocab: false
+  corpus_pairs:
+  - src: en-en_ulb
+    trg: es-es_ulb
+    test_size: 25
+    val_size: 25
   src_casing: lower
-  src_langs:
-  - en-en_ulb
-  src_vocab_size: 1000
-  test_size: 25
   trg_casing: preserve
-  trg_langs:
-  - es-es_ulb
+  share_vocab: false
+  src_vocab_size: 1000
   trg_vocab_size: 1000
-  val_size: 25
-  test_size: 25
 eval:
   multi_ref_eval: false
 params:

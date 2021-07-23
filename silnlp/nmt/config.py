@@ -645,7 +645,6 @@ class Config:
     def set_seed(self) -> None:
         seed = self.data["seed"]
         set_seed(seed)
-        sp.set_random_generator_seed(seed)
         tf.random.set_seed(seed)
 
     def preprocess(self, stats: bool) -> None:

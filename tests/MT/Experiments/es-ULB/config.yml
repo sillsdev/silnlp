@@ -1,11 +1,10 @@
 data:
   seed: 111
-  src_langs:
-  - es-es_ulb
-  trg_langs:
-  - en-en_ulb
-  test_size: 25
-  val_size: 25
+  corpus_pairs:
+  - src: es-es_ulb
+    trg: en-en_ulb
+    test_size: 25
+    val_size: 25
   src_casing: preserve
   trg_casing: preserve
   vocab_size: 8000

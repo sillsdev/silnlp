@@ -1,6 +1,7 @@
 import pytest
 import shutil
 import os
+import sentencepiece as sp
 from . import helper
 from silnlp.nmt.config import load_config
 from silnlp.common.environment import SNE
@@ -25,6 +26,7 @@ def test_preprocess(exp_folder):
     shutil.copyfile(src=config_file, dst=os.path.join(experiment_path, "config.yml"))
     helper.init_file_logger(str(experiment_path))
 
+    sp.set_random_generator_seed(111)  # this is to make the vocab generation consistent
     config = load_config(experiment_path)
     config.set_seed()
     config.preprocess(stats=False)
