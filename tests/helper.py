@@ -20,8 +20,10 @@ def compare_folders(truth_folder: str, computed_folder: str):
         cfp = os.path.join(computed_folder, tf)
         assert os.path.isfile(cfp), "The file " + tf + " should have been but was not created."
         if tf == "log.txt":
-            tf_content = open(tfp, "r", encoding="utf-8").readlines()
-            cf_content = open(cfp, "r", encoding="utf-8").readlines()
+            with open(tfp, "r", encoding="utf-8") as f:
+                tf_content = f.readlines()
+            with open(cfp, "r", encoding="utf-8") as f:
+                cf_content = f.readlines()
             # remove the timestamp from the logfile
             tf_content = [l[26:] for l in tf_content]
             cf_content = [l[26:] for l in cf_content]
@@ -33,14 +35,18 @@ def compare_folders(truth_folder: str, computed_folder: str):
                     "Log entry line " + str(i) + " should be:\n  " + tf_content[i] + "\nbut is:\n  " + cf_content[i]
                 )
         elif tf.endswith((".xml", ".txt", ".csv", ".json", ".vocab")):
-            tf_content = open(tfp, "r", encoding="utf-8").readlines()
-            cf_content = open(cfp, "r", encoding="utf-8").readlines()
+            with open(tfp, "r", encoding="utf-8") as f:
+                tf_content = f.readlines()
+            with open(cfp, "r", encoding="utf-8") as f:
+                cf_content = f.readlines()
             for i in range(len(tf_content)):
                 # normalize unix and PC endings
                 assert (
                     tf_content[i].strip() == cf_content[i].strip()
                 ), f"line {i} in {tf} should be:\n  {tf_content[i]}\nbut is:\n  {cf_content[i]}"
         else:
-            tf_content = open(tfp, "rb").read()
-            cf_content = open(cfp, "rb").read()
+            with open(tfp, "rb") as f:
+                tf_content = f.readlines()
+            with open(cfp, "rb") as f:
+                cf_content = f.readlines()
             assert tf_content == cf_content, f"The file {tf} was created differently."
