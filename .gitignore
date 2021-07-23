@@ -26,6 +26,7 @@ credentials.py
 
 # omit egg-info
 *.egg-info/
+*.model
 nlp/checkdata/Recent/alphabet.py
 nlp/checkdata/Recent/alphabet_nltk.py
 nlp/checkdata/Recent/alphabetSimilarity.py
