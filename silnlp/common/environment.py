@@ -11,8 +11,8 @@ LOGGER = logging.getLogger(__name__)
 
 class SilNlpEnv:
     def __init__(self):
-        self._ROOT_DIR = Path.home() / ".silnlp"
-        self._ASSETS_DIR = Path(__file__).parent.parent / "assets"
+        self.root_dir = Path.home() / ".silnlp"
+        self.assets_dir = Path(__file__).parent.parent / "assets"
 
         # Root data directory
         self.set_data_dir()
@@ -21,7 +21,7 @@ class SilNlpEnv:
         if DATA_DIR is None:
             DATA_DIR = self.resolve_data_dir()
 
-        self._DATA_DIR = Path(DATA_DIR)
+        self.data_dir = Path(DATA_DIR)
 
         # Paratext directories
         self.set_paratext_dir()
@@ -30,38 +30,38 @@ class SilNlpEnv:
 
     def set_paratext_dir(self, PT_DIR: Path = None):
         if PT_DIR is not None:
-            self._PT_DIR = Path(PT_DIR)
-        elif hasattr(self, "_PT_DIR"):
+            self.pt_dir = Path(PT_DIR)
+        elif hasattr(self, "pt_dir"):
             # it is already initialized
             return
         else:
-            self._PT_DIR = self._DATA_DIR / "Paratext"
-        self._PT_PROJECTS_DIR = self._PT_DIR / "projects"
-        self._PT_TERMS_DIR = self._PT_DIR / "terms"
+            self.pt_dir = self.data_dir / "Paratext"
+        self.pt_projects_dir = self.pt_dir / "projects"
+        self.pt_terms_dir = self.pt_dir / "terms"
 
     def set_machine_translation_dir(self, MT_DIR: Path = None):
         if MT_DIR is not None:
-            self._MT_DIR = Path(MT_DIR)
-        elif hasattr(self, "_MT_DIR"):
+            self.mt_dir = Path(MT_DIR)
+        elif hasattr(self, "mt_dir"):
             # it is already initialized
             return
         else:
-            self._MT_DIR = self._DATA_DIR / "MT"
-        self._MT_CORPORA_DIR = self._MT_DIR / "corpora"
-        self._MT_TERMS_DIR = self._MT_DIR / "terms"
-        self._MT_SCRIPTURE_DIR = self._MT_DIR / "scripture"
-        self._MT_EXPERIMENTS_DIR = self._MT_DIR / "experiments"
+            self.mt_dir = self.data_dir / "MT"
+        self.mt_corpora_dir = self.mt_dir / "corpora"
+        self.mt_terms_dir = self.mt_dir / "terms"
+        self.mt_scripture_dir = self.mt_dir / "scripture"
+        self.mt_experiments_dir = self.mt_dir / "experiments"
 
     def set_alignment_dir(self, ALIGN_DIR: Path = None):
         if ALIGN_DIR is not None:
-            self._ALIGN_DIR = Path(ALIGN_DIR)
-        elif hasattr(self, "_ALIGN_DIR"):
+            self.align_dir = Path(ALIGN_DIR)
+        elif hasattr(self, "align_dir"):
             # it is already initialized
             return
         else:
-            self._ALIGN_DIR = self._DATA_DIR / "Alignment"
-        self._ALIGN_GOLD_DIR = self._ALIGN_DIR / "gold"
-        self._ALIGN_EXPERIMENTS_DIR = self._ALIGN_DIR / "experiments"
+            self.align_dir = self.data_dir / "Alignment"
+        self.align_gold_dir = self.align_dir / "gold"
+        self.align_experiments_dir = self.align_dir / "experiments"
 
     def resolve_data_dir(self) -> Path:
         sil_nlp_data_path = os.getenv("SIL_NLP_DATA_PATH")
@@ -89,11 +89,11 @@ class SilNlpEnv:
             )
             return gutenberg_path
 
-        data_root = self._ROOT_DIR / "data"
+        data_root = self.root_dir / "data"
         LOGGER.info(
             f"Using workspace: {data_root}.  To change the workspace, set the environment variable SIL_NLP_DATA_PATH."
         )
         return data_root
 
 
-SNE = SilNlpEnv()
+SIL_NLP_ENV = SilNlpEnv()

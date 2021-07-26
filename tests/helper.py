@@ -44,6 +44,9 @@ def compare_folders(truth_folder: str, computed_folder: str):
                 assert (
                     tf_content[i].strip() == cf_content[i].strip()
                 ), f"line {i} in {tf} should be:\n  {tf_content[i]}\nbut is:\n  {cf_content[i]}"
+        elif tf.endswith(".model"):
+            # don't compare models - just keep going.
+            pass
         else:
             with open(tfp, "rb") as f:
                 tf_content = f.readlines()

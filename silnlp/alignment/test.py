@@ -6,7 +6,7 @@ import pandas as pd
 from nltk.translate.api import Alignment
 
 from ..common.canon import ALL_BOOK_IDS, book_id_to_number, get_books, is_ot_nt
-from ..common.environment import SNE
+from ..common.environment import SIL_NLP_ENV
 from ..common.utils import set_seed
 from ..common.verse_ref import VerseRef
 from .config import get_all_book_paths, load_config
@@ -136,7 +136,7 @@ def main() -> None:
             test([exp_dir], args.by_book, books, test_size, exp_dir)
         if (
             args.experiments != exp_name
-            and exp_dir.parent != SNE._ALIGN_EXPERIMENTS_DIR
+            and exp_dir.parent != SIL_NLP_ENV.align_experiments_dir
             and exp_dir.match(combine_pattern)
         ):
             combination = combinations.get(exp_dir.parent)

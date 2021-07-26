@@ -17,7 +17,7 @@ from ..common.corpus import (
     parse_scripture_path,
     split_corpus,
 )
-from ..common.environment import SNE
+from ..common.environment import SIL_NLP_ENV
 from ..common.utils import (
     DeleteRandomToken,
     NoiseMethod,
@@ -79,11 +79,11 @@ class CorpusPair:
 
     @property
     def is_scripture(self):
-        return self.src_file_path.parent == SNE._MT_SCRIPTURE_DIR
+        return self.src_file_path.parent == SIL_NLP_ENV.mt_scripture_dir
 
     @property
     def is_terms(self):
-        return self.src_file_path.parent == SNE._MT_TERMS_DIR
+        return self.src_file_path.parent == SIL_NLP_ENV.mt_terms_dir
 
 
 def create_noise_methods(params: List[dict]) -> List[NoiseMethod]:
@@ -109,12 +109,14 @@ def create_noise_methods(params: List[dict]) -> List[NoiseMethod]:
 
 
 def get_corpus_path(corpus: str) -> Path:
-    corpus_path = SNE._MT_CORPORA_DIR / f"{corpus}.txt"
+    corpus_path = SIL_NLP_ENV.mt_corpora_dir / f"{corpus}.txt"
     if corpus_path.is_file():
         return corpus_path
-    corpus_path = SNE._MT_SCRIPTURE_DIR / f"{corpus}.txt"
+    corpus_path = SIL_NLP_ENV.mt_scripture_dir / f"{corpus}.txt"
     if not corpus_path.is_file():
-        LOGGER.warning(f"Could not find file '{corpus}' in either {SNE._MT_CORPORA_DIR} or {SNE._MT_SCRIPTURE_DIR}")
+        LOGGER.warning(
+            f"Could not find file '{corpus}' in either {SIL_NLP_ENV.mt_corpora_dir} or {SIL_NLP_ENV.mt_scripture_dir}"
+        )
     return corpus_path
 
 

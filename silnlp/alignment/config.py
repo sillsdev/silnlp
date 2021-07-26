@@ -5,7 +5,7 @@ from typing import Dict, Iterable, Tuple, Type, Union
 import yaml
 
 from ..common.canon import ALL_BOOK_IDS, book_id_to_number, is_ot_nt
-from ..common.environment import SNE
+from ..common.environment import SIL_NLP_ENV
 from ..common.flatcat_stemmer import FlatCatStemmer
 from ..common.null_stemmer import NullStemmer
 from ..common.snowball_stemmer import SnowballStemmer
@@ -86,7 +86,7 @@ def get_stemmer(stemmer_config: Union[dict, str]) -> Stemmer:
 
 def load_config(exp_dir: Path) -> dict:
     config: dict = {}
-    while exp_dir != SNE._ALIGN_EXPERIMENTS_DIR:
+    while exp_dir != SIL_NLP_ENV.align_experiments_dir:
         config_path = exp_dir / "config.yml"
         if config_path.is_file():
             with open(config_path, "r", encoding="utf-8") as file:

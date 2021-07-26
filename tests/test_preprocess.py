@@ -4,14 +4,14 @@ import os
 import sentencepiece as sp
 from . import helper
 from silnlp.nmt.config import load_config
-from silnlp.common.environment import SNE
+from silnlp.common.environment import SIL_NLP_ENV
 
 
 # set experiment directory to temp
-SNE.set_data_dir()
-SNE._MT_EXPERIMENTS_DIR = SNE._MT_DIR / "temp_experiments"
-SNE._MT_EXPERIMENTS_DIR.mkdir(exist_ok=True)
-exp_truth_dir = SNE._MT_DIR / "Experiments"
+SIL_NLP_ENV.set_data_dir()
+SIL_NLP_ENV.mt_experiments_dir = SIL_NLP_ENV.mt_dir / "temp_experiments"
+SIL_NLP_ENV.mt_experiments_dir.mkdir(exist_ok=True)
+exp_truth_dir = SIL_NLP_ENV.mt_dir / "Experiments"
 exp_subdirs = [folder for folder in exp_truth_dir.glob("*/")]
 
 
@@ -20,7 +20,7 @@ def test_preprocess(exp_folder):
     exp_truth_path = os.path.join(exp_truth_dir, exp_folder)
     config_file = os.path.join(exp_truth_path, "config.yml")
     assert os.path.isfile(config_file), "The configuration file config.yml does not exist for " + exp_folder.name
-    experiment_path = SNE._MT_EXPERIMENTS_DIR / exp_folder.name
+    experiment_path = SIL_NLP_ENV.mt_experiments_dir / exp_folder.name
     shutil.rmtree(experiment_path, ignore_errors=True)
     os.makedirs(experiment_path, exist_ok=True)
     shutil.copyfile(src=config_file, dst=os.path.join(experiment_path, "config.yml"))

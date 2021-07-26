@@ -10,7 +10,7 @@ logging.basicConfig(level=logging.INFO)
 from nltk.translate import Alignment
 
 from ..common.corpus import write_corpus
-from ..common.environment import SNE
+from ..common.environment import SIL_NLP_ENV
 from ..common.stemmer import Stemmer
 from ..common.utils import set_seed
 from ..common.verse_ref import VerseRef
@@ -104,7 +104,7 @@ def main() -> None:
 
         corpus_name: str = config["corpus"]
 
-        corpus_path = SNE._ALIGN_GOLD_DIR / (corpus_name + ".alignment.json")
+        corpus_path = SIL_NLP_ENV.align_gold_dir / (corpus_name + ".alignment.json")
         verses: List[dict]
         with open(corpus_path, "r", encoding="utf-8") as f:
             verses = json.load(f)
