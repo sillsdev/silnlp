@@ -26,8 +26,10 @@ credentials.py
 
 # omit egg-info
 *.egg-info/
+*.model
 nlp/checkdata/Recent/alphabet.py
 nlp/checkdata/Recent/alphabet_nltk.py
 nlp/checkdata/Recent/alphabetSimilarity.py
 nlp/checkdata/Recent/iso with at least one missing folder.txt
 nlp/checkdata/Recent/iso-to-folder.txt
+tests/**/temp*

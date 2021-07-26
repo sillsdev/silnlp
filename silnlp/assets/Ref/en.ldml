@@ -1,0 +1,26 @@
+﻿<ldml><identity><version number="" /><generation date="2015-09-04T19:42:39Z" /><language type="en" /><special xmlns:sil="urn://www.sil.org/ldml/0.1"><sil:identity windowsLCID="1033" /></special></identity><characters><exemplarCharacters>[A-Za-z]</exemplarCharacters><exemplarCharacters type="punctuation">[!'\-.?\u00B4\u200C\u200D\u2014]</exemplarCharacters><special xmlns:sil="urn://www.sil.org/ldml/0.1"><sil:exemplarCharacters type="footnotes">[]</sil:exemplarCharacters></special></characters><delimiters><special xmlns:sil="urn://www.sil.org/ldml/0.1"><sil:matched-pairs><sil:matched-pair open="(" close=")" paraClose="false" /><sil:matched-pair open="{" close="}" paraClose="false" /><sil:matched-pair open="[" close="]" paraClose="false" /></sil:matched-pairs><sil:punctuation-patterns><sil:punctuation-pattern pattern="._" context="final" /><sil:punctuation-pattern pattern="!_" context="final" /><sil:punctuation-pattern pattern="?_" context="final" /><sil:punctuation-pattern pattern="-" context="medial" /><sil:punctuation-pattern pattern="'" context="medial" /><sil:punctuation-pattern pattern="´" context="medial" /><sil:punctuation-pattern pattern="—" context="medial" /><sil:punctuation-pattern pattern="‌" context="medial" /><sil:punctuation-pattern pattern="‍" context="medial" /></sil:punctuation-patterns></special></delimiters><layout><orientation><characterOrder>left-to-right</characterOrder></orientation></layout><collations><defaultCollation>standard</defaultCollation><collation type="standard"><cr><![CDATA[&[before 1] [first regular] < a\/A < b\/B < c\/C < d\/D < e\/E < f\/F < g\/G < h\/H < i\/I < j\/J < k\/K < l\/L < m\/M < n\/N < o\/O < p\/P < q\/Q < r\/R < s\/S < t\/T < u\/U < v\/V < w\/W < x\/X < y\/Y < z\/Z]]></cr><special xmlns:sil="urn://www.sil.org/ldml/0.1"><sil:simple><![CDATA[a/A
+b/B
+c/C
+d/D
+e/E
+f/F
+g/G
+h/H
+i/I
+j/J
+k/K
+l/L
+m/M
+n/N
+o/O
+p/P
+q/Q
+r/R
+s/S
+t/T
+u/U
+v/V
+w/W
+x/X
+y/Y
+z/Z]]></sil:simple></special></collation></collations><special xmlns:sil="urn://www.sil.org/ldml/0.1"><sil:external-resources><sil:font name="Times New Roman" types="default" /><sil:font name="Cambria" types="default" /><sil:font name="Charis SIL" types="default" size="1.2" /></sil:external-resources></special></ldml>

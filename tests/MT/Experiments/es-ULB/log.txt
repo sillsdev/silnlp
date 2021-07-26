@@ -1,0 +1,4 @@
+2021-07-23 15:24:12,924 - silnlp.nmt.config - INFO - Preprocessing es-es_ulb -> en-en_ulb
+2021-07-23 15:24:13,137 - silnlp.nmt.config - INFO - train size: 303, val size: 25, test size: 25, dict size: 0, terms size: 0
+2021-07-23 15:24:13,138 - silnlp.nmt.config - INFO - Generating train alignments...
+2021-07-23 15:24:14,600 - silnlp.nmt.config - INFO - Preprocessing completed

@@ -1,0 +1,12 @@
+2021-07-20 16:47:10,046 - silnlp.nmt.config - INFO - Building source vocabulary...
+2021-07-20 16:47:12,321 - silnlp.nmt.config - INFO - Building target vocabulary...
+2021-07-20 16:47:14,315 - silnlp.nmt.config - INFO - Preprocessing de-Books -> en-Books
+2021-07-20 16:47:14,331 - silnlp.nmt.config - INFO - train size: 100, val size: 0, test size: 0, dict size: 0
+2021-07-20 16:47:14,331 - silnlp.nmt.config - INFO - Preprocessing de-GlobalVoices -> en-GlobalVoices
+2021-07-20 16:47:14,346 - silnlp.nmt.config - INFO - train size: 100, val size: 0, test size: 0, dict size: 0
+2021-07-20 16:47:14,346 - silnlp.nmt.config - INFO - Preprocessing de-newstest2014_ende -> en-newstest2014_ende
+2021-07-20 16:47:14,362 - silnlp.nmt.config - INFO - train size: 0, val size: 100, test size: 0, dict size: 0
+2021-07-20 16:47:14,362 - silnlp.nmt.config - INFO - Preprocessing de-newstest2017_ende -> en-newstest2017_ende
+2021-07-20 16:47:14,378 - silnlp.nmt.config - INFO - train size: 0, val size: 0, test size: 100, dict size: 0
+2021-07-20 16:47:14,378 - silnlp.nmt.config - INFO - Generating train alignments...
+2021-07-20 16:47:16,921 - silnlp.nmt.config - INFO - Preprocessing completed

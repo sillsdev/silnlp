@@ -1,0 +1,26 @@
+data:
+  mirror: false
+  score_threshold: 0.0
+  seed: 111
+  corpus_pairs:
+  - src: en-en_ulb
+    trg: es-es_ulb
+    test_size: 25
+    val_size: 25
+  src_casing: lower
+  trg_casing: preserve
+  share_vocab: false
+  src_vocab_size: 1000
+  trg_vocab_size: 1000
+eval:
+  multi_ref_eval: false
+params:
+  dropout: 0.2
+  length_penalty: 0.2
+  transformer_attention_dropout: 0.1
+  transformer_dropout: 0.1
+  transformer_ffn_dropout: 0.1
+  word_dropout: 0.1
+train:
+  maximum_features_length: 150
+  maximum_labels_length: 150

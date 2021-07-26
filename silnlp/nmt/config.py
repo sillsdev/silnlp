@@ -39,7 +39,7 @@ from ..common.corpus import (
     split_parallel_corpus,
     write_corpus,
 )
-from ..common.environment import MT_CORPORA_DIR, MT_SCRIPTURE_DIR
+from ..common.environment import SIL_NLP_ENV
 from ..common.utils import (
     DeleteRandomToken,
     NoiseMethod,
@@ -122,7 +122,7 @@ class DataFile:
         file_name = self.path.stem
         parts = file_name.split("-")
         self.iso = parts[0]
-        self.project = parts[1] if self.path.parent == MT_SCRIPTURE_DIR else BASIC_DATA_PROJECT
+        self.project = parts[1] if self.path.parent == SIL_NLP_ENV.mt_scripture_dir else BASIC_DATA_PROJECT
 
     @property
     def is_scripture(self) -> bool:
@@ -209,10 +209,10 @@ def create_noise_methods(params: List[dict]) -> List[NoiseMethod]:
 
 
 def get_corpus_path(corpus: str) -> Path:
-    corpus_path = MT_CORPORA_DIR / f"{corpus}.txt"
+    corpus_path = SIL_NLP_ENV.mt_corpora_dir / f"{corpus}.txt"
     if corpus_path.is_file():
         return corpus_path
-    return MT_SCRIPTURE_DIR / f"{corpus}.txt"
+    return SIL_NLP_ENV.mt_scripture_dir / f"{corpus}.txt"
 
 
 def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
@@ -388,10 +388,12 @@ def build_vocab(
     # use custom normalization that does not convert ZWJ and ZWNJ to spaces
     # allows properly handling of scripts like Devanagari
     normalization_path = Path(__file__).parent / f"{normalization}.tsv"
+    file_paths = [fp for fp in file_paths]
+    file_paths.sort()
 
     sp.SentencePieceTrainer.Train(
         normalization_rule_tsv=normalization_path,
-        input=[fp for fp in file_paths],
+        input=file_paths,
         model_prefix=model_prefix,
         vocab_size=vocab_size,
         user_defined_symbols=user_defined_symbols,
@@ -416,6 +418,7 @@ def get_checkpoint_path(model_dir: Path, checkpoint_type: CheckpointType) -> Tup
         return (None, None)
     else:
         raise RuntimeError(f"Unsupported checkpoint type: {checkpoint_type}")
+
 
 def get_data_file_pairs(corpus_pair: CorpusPair) -> Iterable[Tuple[DataFile, DataFile]]:
     if corpus_pair.mapping == DataFileMapping.ONE_TO_ONE:
@@ -974,7 +977,7 @@ class Config:
 
     def _populate_pair_test_indices(self, exp_name: str, pair_test_indices: Dict[Tuple[str, str], Set[int]]) -> None:
         vrefs: Dict[str, int] = {}
-        for i, vref_str in enumerate(load_corpus(MT_SCRIPTURE_DIR / "vref.txt")):
+        for i, vref_str in enumerate(load_corpus(SIL_NLP_ENV.mt_scripture_dir / "vref.txt")):
             if vref_str != "":
                 vrefs[vref_str] = i
 

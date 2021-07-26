@@ -1,0 +1,36 @@
+data:
+  corpus_pairs:
+  - type: train
+    src: de-Books
+    trg: en-Books
+  - type: train
+    src: de-GlobalVoices
+    trg: en-GlobalVoices
+    src_noise:
+    - dropout: 0.1
+    - replacement: 0.1
+    - permutation: 3
+  - type: val
+    src: de-newstest2014_ende
+    trg: en-newstest2014_ende
+  - type: test
+    src: de-newstest2017_ende
+    trg: en-newstest2017_ende
+  seed: 111
+  test_size: 25
+  val_size: 25
+  share_vocab: false
+  src_casing: lower
+  src_vocab_size: 2000
+  trg_casing: preserve
+  trg_vocab_size: 2000
+train:
+  keep_checkpoint_max: 1
+  max_step: 500000
+  sample_buffer_size: 10000000
+eval:
+  steps: 5000
+  early_stopping:
+    metric: bleu
+    min_improvement: 0.01
+    steps: 4

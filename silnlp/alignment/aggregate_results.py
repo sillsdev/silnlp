@@ -3,7 +3,7 @@ from typing import Dict, Set
 import pandas as pd
 
 from ..common.canon import ALL_BOOK_IDS, book_id_to_number
-from ..common.environment import ALIGN_EXPERIMENTS_DIR
+from ..common.environment import SIL_NLP_ENV
 from .config import get_all_book_paths
 
 ALIGNERS = [
@@ -50,7 +50,7 @@ TRANSLATIONS = [
     "nrt",
 ]
 TESTAMENTS = ["nt", "ot", "nt+ot"]
-ROOT_DIR = ALIGN_EXPERIMENTS_DIR / "pab-nlp"
+EXP_DIR = SIL_NLP_ENV.align_experiments_dir / "pab-nlp"
 
 
 def aggregate_testament_results() -> None:
@@ -59,7 +59,7 @@ def aggregate_testament_results() -> None:
         available_books: Set[str] = set()
         available_aligners: Set[str] = set()
         for translation in TRANSLATIONS:
-            translation_dir = ROOT_DIR / translation
+            translation_dir = EXP_DIR / translation
             exp_dir = translation_dir if testament == "nt+ot" else translation_dir / testament
             scores_path = exp_dir / "scores.csv"
             if scores_path.is_file():
@@ -70,7 +70,7 @@ def aggregate_testament_results() -> None:
         available_books.remove("ALL")
 
         for metric in METRICS:
-            output_path = ROOT_DIR / f"{testament}.all.{metric}.csv"
+            output_path = EXP_DIR / f"{testament}.all.{metric}.csv"
             with open(output_path, "w") as output_file:
                 output_file.write("Model," + ",".join(filter(lambda t: t in data, TRANSLATIONS)) + "\n")
                 for aligner in ALIGNERS:
@@ -86,7 +86,7 @@ def aggregate_testament_results() -> None:
 
             if len(available_books) > 0:
                 for aligner in available_aligners:
-                    output_path = ROOT_DIR / f"{testament}.all.{aligner}.{metric}.csv"
+                    output_path = EXP_DIR / f"{testament}.all.{aligner}.{metric}.csv"
                     with open(output_path, "w") as output_file:
                         output_file.write("Book," + ",".join(filter(lambda t: t in data, TRANSLATIONS)) + "\n")
                         for book_id in sorted(available_books, key=lambda b: book_id_to_number(b)):
@@ -109,7 +109,7 @@ def aggregate_book_results() -> None:
         available_translations: Set[str] = set()
         available_aligners: Set[str] = set()
         for translation in TRANSLATIONS:
-            exp_dir = ROOT_DIR / f"{translation}-by-book" / testament
+            exp_dir = EXP_DIR / f"{translation}-by-book" / testament
             if not exp_dir.is_dir():
                 continue
             available_translations.add(translation)
@@ -124,7 +124,7 @@ def aggregate_book_results() -> None:
 
         for metric in METRICS:
             for aligner in available_aligners:
-                output_path = ROOT_DIR / f"{testament}.single.{aligner}.{metric}.csv"
+                output_path = EXP_DIR / f"{testament}.single.{aligner}.{metric}.csv"
                 with open(output_path, "w") as output_file:
                     output_file.write(
                         "Book," + ",".join(filter(lambda t: t in available_translations, TRANSLATIONS)) + "\n"

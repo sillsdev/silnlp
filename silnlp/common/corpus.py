@@ -8,7 +8,7 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 
 from ..common.utils import get_repo_dir
-from .environment import MT_SCRIPTURE_DIR, MT_TERMS_DIR
+from .environment import SIL_NLP_ENV
 from .verse_ref import VerseRef
 
 
@@ -46,7 +46,7 @@ def get_scripture_parallel_corpus(src_file_path: Path, trg_file_path: Path) -> p
     src_sentences: List[str] = []
     trg_sentences: List[str] = []
     indices: List[int] = []
-    with open(MT_SCRIPTURE_DIR / "vref.txt", "r", encoding="utf-8") as vref_file, open(
+    with open(SIL_NLP_ENV.assets_dir / "vref.txt", "r", encoding="utf-8") as vref_file, open(
         src_file_path, "r", encoding="utf-8"
     ) as src_file, open(trg_file_path, "r", encoding="utf-8") as trg_file:
         index = 0
@@ -136,7 +136,7 @@ def split_corpus(corpus_size: int, split_size: Union[float, int], used_indices: 
 
 
 def get_scripture_path(iso: str, project: str) -> Path:
-    return MT_SCRIPTURE_DIR / f"{iso}-{project}.txt"
+    return SIL_NLP_ENV.mt_scripture_dir / f"{iso}-{project}.txt"
 
 
 def parse_scripture_path(data_file_path: Path) -> Tuple[str, str]:
@@ -154,15 +154,21 @@ def exclude_books(corpus: pd.DataFrame, books: Set[int]) -> pd.DataFrame:
 
 
 def get_terms_metadata_path(list_name: str) -> Path:
-    return MT_TERMS_DIR / f"{list_name}-metadata.txt"
+    md_path = SIL_NLP_ENV.mt_terms_dir / f"{list_name}-metadata.txt"
+    if md_path.is_file():
+        return md_path
+    return SIL_NLP_ENV.assets_dir / f"{list_name}-metadata.txt"
 
 
 def get_terms_glosses_path(list_name: str) -> Path:
-    return MT_TERMS_DIR / f"en-{list_name}-glosses.txt"
+    gl_path = SIL_NLP_ENV.mt_terms_dir / f"en-{list_name}-glosses.txt"
+    if gl_path.is_file():
+        return gl_path
+    return SIL_NLP_ENV.assets_dir / f"en-{list_name}-glosses.txt"
 
 
 def get_terms_renderings_path(iso: str, project: str) -> Optional[Path]:
-    matches = list(MT_TERMS_DIR.glob(f"{iso}-{project}-*-renderings.txt"))
+    matches = list(SIL_NLP_ENV.mt_terms_dir.glob(f"{iso}-{project}-*-renderings.txt"))
     if len(matches) == 0:
         return None
     assert len(matches) == 1
