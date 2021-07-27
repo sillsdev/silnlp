@@ -453,6 +453,7 @@ class Config:
                     "tokenize": True,
                     "guided_alignment": False,
                     "guided_alignment_train_size": 1000000,
+                    "stats_max_size": 100000,  # a little over the size of the bible
                     "terms": {
                         "train": True,
                         "dictionary": False,
@@ -639,6 +640,10 @@ class Config:
         return self.data["share_vocab"]
 
     @property
+    def stats_max_size(self) -> int:
+        return self.data["stats_max_size"]
+
+    @property
     def has_parent(self) -> bool:
         return "parent" in self.data
 
@@ -752,7 +757,7 @@ class Config:
 
         stats_file: Optional[TextIO] = None
         try:
-            if stats:
+            if stats and pair.size < self.stats_max_size:
                 stats_file = self._open_append("corpus-stats.csv")
                 if stats_file.tell() == 0:
                     stats_file.write("src_project,trg_project,count,align_score,filtered_count,filtered_align_score\n")
