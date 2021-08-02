@@ -532,7 +532,10 @@ class Config:
 
         self.corpus_pairs = parse_corpus_pairs(data_config["corpus_pairs"])
 
-        if any(p.is_dictionary for p in self.corpus_pairs):
+        if any(
+            p.is_dictionary or (len(p.src_terms_files) > 0 and data_config["terms"]["dictionary"])
+            for p in self.corpus_pairs
+        ):
             data_config["source_dictionary"] = str(exp_dir / self._dict_src_filename())
             data_config["target_dictionary"] = str(exp_dir / self._dict_trg_filename())
 
@@ -579,12 +582,6 @@ class Config:
                         iso_pair.has_basic_test_data = True
 
         self._multiple_test_iso_pairs = sum(1 for iso_pair in self._iso_pairs.values() if iso_pair.has_test_data) > 1
-
-        # confirm that input file paths exist
-        for file in self.src_file_paths | self.trg_file_paths:
-            if not file.is_file():
-                LOGGER.error("The source file " + str(file) + " does not exist.  Exiting.")
-                sys.exit(1)
 
         parent: Optional[str] = self.data.get("parent")
         self.parent_config: Optional[Config] = None
@@ -648,6 +645,12 @@ class Config:
         tf.random.set_seed(seed)
 
     def preprocess(self, stats: bool) -> None:
+        # confirm that input file paths exist
+        for file in self.src_file_paths | self.trg_file_paths:
+            if not file.is_file():
+                LOGGER.error("The source file " + str(file) + " does not exist.")
+                return
+
         self._build_vocabs()
         src_spp, trg_spp = self.create_sp_processors()
         train_count = self._build_corpora(src_spp, trg_spp, stats)

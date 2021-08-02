@@ -18,7 +18,6 @@ def main() -> None:
     config = load_config(exp_name)
 
     config.set_seed()
-
     config.preprocess(args.stats)
 
 

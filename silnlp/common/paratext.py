@@ -1,10 +1,11 @@
+import itertools
 import logging
-import re
 import os
+import re
 import subprocess
 from collections import OrderedDict
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 from xml.sax.saxutils import escape
 
 from lxml import etree
@@ -13,6 +14,7 @@ from .canon import book_id_to_number
 from .corpus import get_terms_glosses_path, get_terms_metadata_path, load_corpus
 from .environment import SIL_NLP_ENV
 from .utils import get_repo_dir
+from .verse_ref import VerseRef
 
 _TERMS_LISTS = {
     "Major": "BiblicalTerms.xml",
@@ -36,7 +38,7 @@ def get_iso(settings_tree: etree.ElementTree) -> str:
     return iso[:index]
 
 
-def extract_project(project: str, include_texts: str, exclude_texts: str, include_markers: bool) -> None:
+def extract_project(project: str, include_texts: str, exclude_texts: str, include_markers: bool) -> Path:
     project_dir = get_project_dir(project)
     settings_tree = etree.parse(str(project_dir / "Settings.xml"))
     iso = get_iso(settings_tree)
@@ -89,6 +91,7 @@ def extract_project(project: str, include_texts: str, exclude_texts: str, includ
     LOGGER.info(f"# of Segments: {segment_count}")
     if segment_count != 31104:
         LOGGER.error(f"The number of segments is {segment_count}, but should be 31104 (number of verses in the Bible).")
+    return output_filename
 
 
 def escape_id(id: str) -> str:
@@ -118,10 +121,10 @@ def clean_term(term_str: str) -> str:
     return " ".join(term_str.split())
 
 
-def extract_terms_list(list_type: str, project: Optional[str] = None) -> None:
+def extract_terms_list(list_type: str, project: Optional[str] = None) -> Dict[str, List[VerseRef]]:
     list_file_name = _TERMS_LISTS.get(list_type)
     if list_file_name is None:
-        return
+        return {}
 
     list_name = list_type
     if project is not None:
@@ -133,6 +136,7 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> None:
     terms_metadata_path = get_terms_metadata_path(list_name)
     terms_glosses_path = get_terms_glosses_path(list_name)
 
+    references: Dict[str, List[VerseRef]] = {}
     with open(terms_metadata_path, "w", encoding="utf-8", newline="\n") as terms_metadata_file, open(
         terms_glosses_path, "w", encoding="utf-8", newline="\n"
     ) as terms_glosses_file:
@@ -152,6 +156,14 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> None:
             match = re.match(r"\[(.+?)\]", gloss_str)
             if match is not None:
                 gloss_str = match.group(1)
+
+            refs_elem = term_elem.find("References")
+            if refs_elem is not None:
+                refs_list: List[VerseRef] = []
+                for verse_elem in refs_elem.findall("Verse"):
+                    bbbcccvvv = int(verse_elem.text[:9])
+                    refs_list.append(VerseRef.from_bbbcccvvv(bbbcccvvv))
+                references[id] = refs_list
             gloss_str = gloss_str.replace("?", "")
             gloss_str = clean_term(gloss_str)
             gloss_str = re.sub(r"\s+\d+(\.\d+)*$", "", gloss_str)
@@ -159,6 +171,7 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> None:
             glosses = [gloss.strip() for gloss in glosses if gloss.strip() != ""]
             terms_metadata_file.write(f"{id}\t{cat}\t{domain}\n")
             terms_glosses_file.write("\t".join(OrderedDict.fromkeys(glosses)) + "\n")
+    return references
 
 
 def extract_terms_list_from_renderings(project: str, renderings_tree: etree.ElementTree) -> None:
@@ -175,7 +188,7 @@ def extract_terms_list_from_renderings(project: str, renderings_tree: etree.Elem
             terms_metadata_file.write(f"{id}\t?\t?\n")
 
 
-def extract_term_renderings(project_folder: str) -> None:
+def extract_term_renderings(project_folder: str, corpus_filename: Path) -> None:
     project_dir = get_project_dir(project_folder)
     renderings_path = project_dir / "TermRenderings.xml"
     if not renderings_path.is_file():
@@ -197,12 +210,22 @@ def extract_term_renderings(project_folder: str) -> None:
 
     list_type, terms_project, _ = terms_setting.split(":", maxsplit=3)
     list_name = list_type
+    references: Dict[str, List[VerseRef]] = {}
     if list_type == "Project":
         if terms_project == project_name:
-            extract_terms_list(list_type, project_folder)
+            references = extract_terms_list(list_type, project_folder)
         else:
             extract_terms_list_from_renderings(project_folder, renderings_tree)
         list_name = project_folder
+
+    corpus: Dict[VerseRef, str] = {}
+    if len(references) > 0:
+        prev_verse_str = ""
+        for ref_str, verse_str in zip(load_corpus(SIL_NLP_ENV.assets_dir / "vref.txt"), load_corpus(corpus_filename)):
+            if verse_str == "<range>":
+                verse_str = prev_verse_str
+            corpus[VerseRef.from_string(ref_str)] = verse_str
+            prev_verse_str = verse_str
 
     terms_metadata_path = get_terms_metadata_path(list_name)
     terms_renderings_path = SIL_NLP_ENV.mt_terms_dir / f"{iso}-{project_folder}-{list_type}-renderings.txt"
@@ -211,15 +234,29 @@ def extract_term_renderings(project_folder: str) -> None:
         for line in load_corpus(terms_metadata_path):
             id, _, _ = line.split("\t", maxsplit=3)
             rendering_elem = rendering_elems.get(id)
-            renderings: List[str] = []
+            refs_list = references.get(id, [])
+
+            renderings: Set[str] = set()
             if rendering_elem is not None and rendering_elem.get("Guess", "false") == "false":
                 renderings_str = rendering_elem.findtext("Renderings", "")
                 if renderings_str != "":
-                    renderings_str = renderings_str.replace("*", "")
-                    renderings_str = clean_term(renderings_str)
-                    renderings = renderings_str.strip().split("||")
-                    renderings = [rendering.strip() for rendering in renderings if rendering.strip() != ""]
-            terms_renderings_file.write("\t".join(OrderedDict.fromkeys(renderings)) + "\n")
+                    for rendering in renderings_str.strip().split("||"):
+                        rendering = clean_term(rendering).strip()
+                        if len(refs_list) > 0 and "*" in rendering:
+                            regex = (
+                                re.escape(rendering).replace("\\ \\*\\*\\ ", "(?:\\ \\w+)*\\ ").replace("\\*", "\\w*")
+                            )
+                            for ref in refs_list:
+                                verse_str = corpus.get(ref, "")
+                                for match in re.finditer(regex, verse_str):
+                                    surface_form = match.group()
+                                    renderings.add(surface_form)
+
+                        else:
+                            rendering = rendering.replace("*", "").strip()
+                            if rendering != "":
+                                renderings.add(rendering)
+            terms_renderings_file.write("\t".join(renderings) + "\n")
             if len(renderings) > 0:
                 count += 1
     if count == 0:
