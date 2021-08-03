@@ -3,11 +3,12 @@ import logging
 import os
 from typing import Optional
 
-
 import tensorflow as tf
 
 from ..common.utils import get_git_revision_hash
 from .config import create_runner, load_config
+
+LOGGER = logging.getLogger(__package__ + ".train")
 
 os.environ["TF_DETERMINISTIC_OPS"] = "1"
 
@@ -42,7 +43,10 @@ def main() -> None:
             checkpoint_path = str(config.exp_dir / "parent")
 
         print(f"=== Training ({exp_name}) ===")
-        runner.train(num_devices=args.num_devices, with_eval=True, checkpoint_path=checkpoint_path)
+        try:
+            runner.train(num_devices=args.num_devices, with_eval=True, checkpoint_path=checkpoint_path)
+        except RuntimeError as e:
+            LOGGER.warning(str(e))
         print("Training completed")
 
 

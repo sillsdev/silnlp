@@ -11,7 +11,7 @@ from xml.sax.saxutils import escape
 from lxml import etree
 
 from .canon import book_id_to_number
-from .corpus import get_terms_glosses_path, get_terms_metadata_path, load_corpus
+from .corpus import get_terms_glosses_path, get_terms_metadata_path, get_terms_vrefs_path, load_corpus
 from .environment import SIL_NLP_ENV
 from .utils import get_repo_dir
 from .verse_ref import VerseRef
@@ -135,11 +135,12 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> Dict[st
 
     terms_metadata_path = get_terms_metadata_path(list_name)
     terms_glosses_path = get_terms_glosses_path(list_name)
+    terms_vrefs_path = get_terms_vrefs_path(list_name)
 
     references: Dict[str, List[VerseRef]] = {}
     with open(terms_metadata_path, "w", encoding="utf-8", newline="\n") as terms_metadata_file, open(
         terms_glosses_path, "w", encoding="utf-8", newline="\n"
-    ) as terms_glosses_file:
+    ) as terms_glosses_file, open(terms_vrefs_path, "w", encoding="utf-8", newline="\n") as terms_vrefs_file:
         terms_tree = etree.parse(str(terms_xml_path))
         for term_elem in terms_tree.getroot().findall("Term"):
             id = term_elem.get("Id")
@@ -158,8 +159,8 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> Dict[st
                 gloss_str = match.group(1)
 
             refs_elem = term_elem.find("References")
+            refs_list: List[VerseRef] = []
             if refs_elem is not None:
-                refs_list: List[VerseRef] = []
                 for verse_elem in refs_elem.findall("Verse"):
                     bbbcccvvv = int(verse_elem.text[:9])
                     refs_list.append(VerseRef.from_bbbcccvvv(bbbcccvvv))
@@ -167,10 +168,11 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> Dict[st
             gloss_str = gloss_str.replace("?", "")
             gloss_str = clean_term(gloss_str)
             gloss_str = re.sub(r"\s+\d+(\.\d+)*$", "", gloss_str)
-            glosses = re.split("[;,/]", gloss_str)
+            glosses: List[str] = re.split("[;,/]", gloss_str)
             glosses = [gloss.strip() for gloss in glosses if gloss.strip() != ""]
             terms_metadata_file.write(f"{id}\t{cat}\t{domain}\n")
-            terms_glosses_file.write("\t".join(OrderedDict.fromkeys(glosses)) + "\n")
+            terms_glosses_file.write("\t".join(glosses) + "\n")
+            terms_vrefs_file.write("\t".join(str(vref) for vref in refs_list) + "\n")
     return references
 
 
