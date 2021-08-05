@@ -220,7 +220,7 @@ def get_terms(terms_renderings_path: Path) -> Dict[str, Term]:
         id, cat, domain = metadata_line.split("\t", maxsplit=3)
         glosses = [] if glosses_line is None or len(glosses_line) == 0 else glosses_line.split("\t")
         renderings = [] if len(renderings_line) == 0 else renderings_line.split("\t")
-        vrefs = set() if len(vrefs_line) == 0 else set(VerseRef.from_string(vref) for vref in vrefs_line.split("\t"))
+        vrefs = set() if vrefs_line is None or len(vrefs_line) == 0 else set(VerseRef.from_string(vref) for vref in vrefs_line.split("\t"))
         terms[id] = Term(id, cat, domain, glosses, renderings, vrefs)
     return terms
 
