@@ -6,12 +6,11 @@ from typing import IO, Dict, Iterable, List, Optional, Set, Tuple, cast
 
 import numpy as np
 import sacrebleu
+from machine.scripture import VerseRef, book_number_to_id, get_books
 from sacrebleu.metrics import BLEU, BLEUScore
 
-from ..common.canon import book_number_to_id, get_books
 from ..common.metrics import compute_meteor_score, compute_ter_score, compute_wer_score
 from ..common.utils import get_git_revision_hash
-from ..common.verse_ref import VerseRef
 from .config import Config, create_runner, load_config
 from .utils import decode_sp, get_best_model_dir, get_last_checkpoint
 

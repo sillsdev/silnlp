@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from ..common.corpus import load_corpus, write_corpus
-from ..common.utils import get_repo_dir
+from ..common.utils import check_dotnet, get_repo_dir
 from .aligner import Aligner
 from .lexicon import Lexicon
 
@@ -219,6 +219,7 @@ class GizaAligner(Aligner):
     def _symmetrize(
         self, direct_align_path: Path, inverse_align_path: Path, output_path: Path, sym_heuristic: str
     ) -> None:
+        check_dotnet()
         args: List[str] = [
             "dotnet",
             "machine",

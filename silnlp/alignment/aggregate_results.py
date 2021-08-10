@@ -1,8 +1,8 @@
 from typing import Dict, Set
 
 import pandas as pd
+from machine.scripture import ALL_BOOK_IDS, book_id_to_number
 
-from ..common.canon import ALL_BOOK_IDS, book_id_to_number
 from ..common.environment import SIL_NLP_ENV
 from .config import get_all_book_paths
 

@@ -3,12 +3,11 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 import pandas as pd
+from machine.scripture import ALL_BOOK_IDS, VerseRef, book_id_to_number, get_books, is_ot_nt
 from nltk.translate.api import Alignment
 
-from ..common.canon import ALL_BOOK_IDS, book_id_to_number, get_books, is_ot_nt
 from ..common.environment import SIL_NLP_ENV
 from ..common.utils import set_seed
-from ..common.verse_ref import VerseRef
 from .config import get_all_book_paths, load_config
 from .lexicon import Lexicon
 from .metrics import (

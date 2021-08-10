@@ -3,8 +3,8 @@ from pathlib import Path
 from typing import Dict, Iterable, Tuple, Type, Union
 
 import yaml
+from machine.scripture import ALL_BOOK_IDS, book_id_to_number, is_ot_nt
 
-from ..common.canon import ALL_BOOK_IDS, book_id_to_number, is_ot_nt
 from ..common.environment import SIL_NLP_ENV
 from ..common.flatcat_stemmer import FlatCatStemmer
 from ..common.null_stemmer import NullStemmer

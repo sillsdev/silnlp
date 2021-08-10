@@ -1,16 +1,16 @@
 import itertools
 import random
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple, Union, cast
+from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple, Union
 
 import pandas as pd
+from machine.corpora import ESCAPE_SPACES, LOWERCASE, NFC_NORMALIZE, TextFileTextCorpus, pipeline
+from machine.scripture import VerseRef
+from machine.tokenization import LatinWordTokenizer
 from sklearn.model_selection import train_test_split
 
-from ..common.utils import get_repo_dir
 from .environment import SIL_NLP_ENV
-from .verse_ref import VerseRef
 
 
 def write_corpus(corpus_path: Path, sentences: Iterable[str], append: bool = False) -> None:
@@ -27,19 +27,12 @@ def load_corpus(corpus_path: Path) -> Iterator[str]:
 
 
 def tokenize_corpus(input_path: Path, output_path: Path) -> None:
-    args: List[str] = [
-        "dotnet",
-        "machine",
-        "tokenize",
-        str(input_path),
-        str(output_path),
-        "-t",
-        "latin",
-        "-l",
-        "-nf",
-        "nfc",
-    ]
-    subprocess.run(args, stdout=subprocess.DEVNULL, cwd=get_repo_dir())
+    tokenizer = LatinWordTokenizer()
+    corpus = TextFileTextCorpus(tokenizer, input_path)
+    processor = pipeline(ESCAPE_SPACES, NFC_NORMALIZE, LOWERCASE)
+    with open(output_path, "w", encoding="utf-8", newline="\n") as output_stream, corpus.get_segments() as segments:
+        for segment in segments:
+            output_stream.write(" ".join(processor.process(segment.segment)) + "\n")
 
 
 def get_scripture_parallel_corpus(src_file_path: Path, trg_file_path: Path) -> pd.DataFrame:
@@ -58,17 +51,20 @@ def get_scripture_parallel_corpus(src_file_path: Path, trg_file_path: Path) -> p
             vref = VerseRef.from_string(vref_line)
             if src_line == "<range>" and trg_line == "<range>":
                 if vref.chapter_num == vrefs[-1].chapter_num:
-                    vrefs[-1] = VerseRef.from_range(vrefs[-1].simplify(), vref)
+                    vrefs[-1].simplify()
+                    vrefs[-1] = VerseRef.from_range(vrefs[-1], vref)
             elif src_line == "<range>":
                 if vref.chapter_num == vrefs[-1].chapter_num:
-                    vrefs[-1] = VerseRef.from_range(vrefs[-1].simplify(), vref)
+                    vrefs[-1].simplify()
+                    vrefs[-1] = VerseRef.from_range(vrefs[-1], vref)
                 if len(trg_line) > 0:
                     if len(trg_sentences[-1]) > 0:
                         trg_sentences[-1] += " "
                     trg_sentences[-1] += trg_line
             elif trg_line == "<range>":
                 if vref.chapter_num == vrefs[-1].chapter_num:
-                    vrefs[-1] = VerseRef.from_range(vrefs[-1].simplify(), vref)
+                    vrefs[-1].simplify()
+                    vrefs[-1] = VerseRef.from_range(vrefs[-1], vref)
                 if len(src_line) > 0:
                     if len(src_sentences[-1]) > 0:
                         src_sentences[-1] += " "
@@ -220,7 +216,11 @@ def get_terms(terms_renderings_path: Path) -> Dict[str, Term]:
         id, cat, domain = metadata_line.split("\t", maxsplit=3)
         glosses = [] if glosses_line is None or len(glosses_line) == 0 else glosses_line.split("\t")
         renderings = [] if len(renderings_line) == 0 else renderings_line.split("\t")
-        vrefs = set() if vrefs_line is None or len(vrefs_line) == 0 else set(VerseRef.from_string(vref) for vref in vrefs_line.split("\t"))
+        vrefs = (
+            set()
+            if vrefs_line is None or len(vrefs_line) == 0
+            else set(VerseRef.from_string(vref) for vref in vrefs_line.split("\t"))
+        )
         terms[id] = Term(id, cat, domain, glosses, renderings, vrefs)
     return terms
 
@@ -248,7 +248,9 @@ def get_terms_corpus(
     return pd.DataFrame(data, columns=["source", "target", "dictionary"])
 
 
-def get_terms_data_frame(terms: Dict[str, Term], cats: Optional[Set[str]], dictionary_books: Optional[Set[int]]) -> pd.DataFrame:
+def get_terms_data_frame(
+    terms: Dict[str, Term], cats: Optional[Set[str]], dictionary_books: Optional[Set[int]]
+) -> pd.DataFrame:
     data: Set[Tuple[str, str, bool]] = set()
     for term in terms.values():
         if cats is not None and term.cat not in cats:

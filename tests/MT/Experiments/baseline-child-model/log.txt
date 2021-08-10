@@ -1,5 +1,5 @@
 2021-07-23 15:16:25,943 - silnlp.nmt.config - INFO - Building source vocabulary...
 2021-07-23 15:16:27,511 - silnlp.nmt.config - INFO - Building target vocabulary...
 2021-07-23 15:16:29,154 - silnlp.nmt.config - INFO - Preprocessing en-en_ulb -> es-es_ulb
-2021-07-23 15:16:29,421 - silnlp.nmt.config - INFO - train size: 303, val size: 25, test size: 25, dict size: 0, terms size: 0
+2021-07-23 15:16:29,421 - silnlp.nmt.config - INFO - train size: 303, val size: 25, test size: 25, dict size: 0, terms train size: 0
 2021-07-23 15:16:29,421 - silnlp.nmt.config - INFO - Preprocessing completed

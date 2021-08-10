@@ -5,25 +5,25 @@ import os
 import random
 import shutil
 import tempfile
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from enum import Enum, Flag, auto
 from pathlib import Path
 from statistics import mean
 from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, Type, Union, cast
-from contextlib import ExitStack
 
 import pandas as pd
 import sentencepiece as sp
 import tensorflow as tf
 import yaml
+from machine.scripture import VerseRef, get_books
 from opennmt import END_OF_SENTENCE_TOKEN, PADDING_TOKEN, START_OF_SENTENCE_TOKEN
 from opennmt.data import Noise, Vocab, WordDropout, WordNoiser, tokens_to_words
-from opennmt.models import Model, get_model_from_catalog
 from opennmt.inputters import TextInputter
+from opennmt.models import Model, get_model_from_catalog
 
 from ..alignment.machine_aligner import FastAlignMachineAligner
 from ..alignment.utils import add_alignment_scores
-from ..common.canon import get_books
 from ..common.corpus import (
     exclude_books,
     filter_parallel_corpus,
@@ -52,7 +52,6 @@ from ..common.utils import (
     merge_dict,
     set_seed,
 )
-from ..common.verse_ref import VerseRef
 from .runner import SILRunner
 from .transformer import SILTransformer
 from .utils import decode_sp, decode_sp_lines, encode_sp, encode_sp_lines, get_best_model_dir, get_last_checkpoint
@@ -773,6 +772,7 @@ class Config:
 
                 corpus_count = len(cur_train)
                 if pair.is_train and (stats_file is not None or pair.score_threshold > 0):
+                    LOGGER.info("Computing alignment scores")
                     add_alignment_scores(cur_train)
                     if stats_file is not None:
                         cur_train.to_csv(self.exp_dir / f"{src_file.project}_{trg_file.project}.csv", index=False)
@@ -994,7 +994,7 @@ class Config:
             for vref_str in load_corpus(vref_path):
                 vref = VerseRef.from_string(vref_str)
                 if vref.has_multiple:
-                    vref = vref.simplify()
+                    vref.simplify()
                 test_indices.add(vrefs[str(vref)])
 
     def _add_to_eval_dataset(

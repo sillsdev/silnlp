@@ -2,8 +2,9 @@ import argparse
 from statistics import mean
 from typing import Dict, Optional, Set, Tuple
 
+from machine.scripture import VerseRef, get_books
+
 from ..alignment.utils import add_alignment_scores
-from ..common.canon import get_books
 from ..common.corpus import (
     exclude_books,
     get_scripture_parallel_corpus,
@@ -16,7 +17,6 @@ from ..common.corpus import (
 from ..common.environment import SIL_NLP_ENV
 from ..common.utils import get_git_revision_hash, get_mt_exp_dir, set_seed
 from .config import load_config
-from ..common.verse_ref import VerseRef
 
 
 def parse_lang(lang: str) -> Tuple[str, str]:
@@ -42,7 +42,7 @@ def get_test_indices(config: dict) -> Optional[Set[int]]:
     for vref_str in load_corpus(vref_path):
         vref = VerseRef.from_string(vref_str)
         if vref.has_multiple:
-            vref = vref.simplify()
+            vref.simplify()
         test_indices.add(vrefs[str(vref)])
     return test_indices
 

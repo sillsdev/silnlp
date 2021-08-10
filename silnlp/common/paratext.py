@@ -1,20 +1,17 @@
-import itertools
 import logging
 import os
 import re
-import subprocess
-from collections import OrderedDict
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 from xml.sax.saxutils import escape
 
 from lxml import etree
+from machine.corpora import FilteredTextCorpus, ParallelTextCorpus, ParatextTextCorpus, Text
+from machine.scripture import VerseRef, book_id_to_number
+from machine.tokenization import NullTokenizer
 
-from .canon import book_id_to_number
 from .corpus import get_terms_glosses_path, get_terms_metadata_path, get_terms_vrefs_path, load_corpus
 from .environment import SIL_NLP_ENV
-from .utils import get_repo_dir
-from .verse_ref import VerseRef
 
 _TERMS_LISTS = {
     "Major": "BiblicalTerms.xml",
@@ -44,50 +41,71 @@ def extract_project(project: str, include_texts: str, exclude_texts: str, includ
     iso = get_iso(settings_tree)
 
     ref_dir = SIL_NLP_ENV.assets_dir / "Ref"
-    args: List[str] = [
-        "dotnet",
-        "machine",
-        "build-corpus",
-        str(ref_dir),
-        str(project_dir),
-        "-sf",
-        "pt",
-        "-tf",
-        "pt_m" if include_markers else "pt",
-        "-as",
-        "-ie",
-        "-md",
-    ]
+
+    tokenizer = NullTokenizer()
+    ref_corpus = ParatextTextCorpus(tokenizer, ref_dir)
+    project_corpus = ParatextTextCorpus(tokenizer, project_dir, include_markers=include_markers)
+
     output_basename = f"{iso}-{project}"
     if len(include_texts) > 0 or len(exclude_texts) > 0:
         output_basename += "_"
-    if len(include_texts) > 0:
-        args.append("-i")
-        args.append(include_texts)
-        for text in include_texts.split(","):
-            text = text.strip("*")
-            output_basename += f"+{text}"
-    if len(exclude_texts) > 0:
-        args.append("-e")
-        args.append(exclude_texts)
-        for text in exclude_texts.split(","):
-            text = text.strip("*")
-            output_basename += f"-{text}"
+        include_texts_set: Optional[Set[str]] = None
+        if len(include_texts) > 0:
+            include_texts_set = set()
+            for text in include_texts.split(","):
+                include_texts_set.add(text)
+                text = text.strip("*")
+                output_basename += f"+{text}"
+        exclude_texts_set: Optional[Set[str]] = None
+        if len(exclude_texts) > 0:
+            exclude_texts_set = set()
+            for text in exclude_texts.split(","):
+                exclude_texts_set.add(text)
+                text = text.strip("*")
+                output_basename += f"-{text}"
+
+        def filter_corpus(text: Text) -> bool:
+            if exclude_texts_set is not None and text.id in exclude_texts_set:
+                return False
+
+            if include_texts_set is not None and text.id in include_texts_set:
+                return True
+
+            return include_texts_set is None
+
+        ref_corpus = FilteredTextCorpus(ref_corpus, filter_corpus)
+        project_corpus = FilteredTextCorpus(project_corpus, filter_corpus)
 
     if include_markers:
         output_basename += "-m"
-
-    args.append("-to")
     output_filename = SIL_NLP_ENV.mt_scripture_dir / f"{output_basename}.txt"
-    args.append(str(output_filename))
 
-    result = subprocess.run(args, cwd=get_repo_dir(), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    parallel_corpus = ParallelTextCorpus(ref_corpus, project_corpus)
+    segment_count = 0
+    with open(output_filename, "w", encoding="utf-8", newline="\n") as output_stream, parallel_corpus.get_segments(
+        all_source_segments=True
+    ) as segments:
+        cur_ref: Optional[Any] = None
+        cur_target_line = ""
+        cur_target_line_range = True
+        for segment in segments:
+            if cur_ref is not None and segment.segment_ref != cur_ref:
+                output_stream.write(("<range>" if cur_target_line_range else cur_target_line) + "\n")
+                segment_count += 1
+                cur_target_line = ""
+                cur_target_line_range = True
 
-    if len(result.stderr) > 0:
-        raise RuntimeError(result.stderr.decode("utf-8"))
+            cur_ref = segment.segment_ref
+            if not segment.is_target_in_range or segment.is_target_range_start or len(segment.target_segment) > 0:
+                if len(segment.target_segment) > 0:
+                    if len(cur_target_line) > 0:
+                        cur_target_line += " "
+                    cur_target_line += segment.target_segment[0]
+                cur_target_line_range = False
+        output_stream.write(("<range>" if cur_target_line_range else cur_target_line) + "\n")
+        segment_count += 1
 
     # check if the number of lines in the file is correct (the same as vref.txt - 31104 ending at REV 22:21)
-    segment_count = sum(1 for _ in load_corpus(output_filename))
     LOGGER.info(f"# of Segments: {segment_count}")
     if segment_count != 31104:
         LOGGER.error(f"The number of segments is {segment_count}, but should be 31104 (number of verses in the Bible).")

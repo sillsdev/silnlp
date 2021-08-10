@@ -1,9 +1,10 @@
-import shutil
 import os
-from . import helper
-from silnlp.common.paratext import extract_project, extract_term_renderings
-from silnlp.common.environment import SIL_NLP_ENV
+import shutil
 
+from silnlp.common.environment import SIL_NLP_ENV
+from silnlp.common.paratext import extract_project, extract_term_renderings
+
+from . import helper
 
 # set scripture directory to temp
 SIL_NLP_ENV.set_data_dir()
@@ -17,8 +18,8 @@ def test_extract_corpora():
     os.mkdir(SIL_NLP_ENV.mt_scripture_dir)
     pp_subdirs = [folder for folder in SIL_NLP_ENV.pt_projects_dir.glob("*/")]
     for project in pp_subdirs:
-        extract_project(project.parts[-1], include_texts="", exclude_texts="", include_markers=False)
-        extract_term_renderings(project.parts[-1])
+        corpus_filename = extract_project(project.parts[-1], include_texts="", exclude_texts="", include_markers=False)
+        extract_term_renderings(project.parts[-1], corpus_filename)
 
     helper.compare_folders(truth_folder=scr_truth_dir, computed_folder=SIL_NLP_ENV.mt_scripture_dir)
 
