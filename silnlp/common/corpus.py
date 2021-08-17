@@ -201,10 +201,10 @@ class Term:
     vrefs: Set[VerseRef]
 
 
-def get_terms(terms_renderings_path: Path) -> Dict[str, Term]:
+def get_terms(terms_renderings_path: Path, iso: str = "en") -> Dict[str, Term]:
     list_name = get_terms_list(terms_renderings_path)
     terms_metadata_path = get_terms_metadata_path(list_name)
-    terms_glosses_path = get_terms_glosses_path(list_name)
+    terms_glosses_path = get_terms_glosses_path(list_name, iso=iso)
     terms_vrefs_path = get_terms_vrefs_path(list_name)
     terms: Dict[str, Term] = {}
     terms_metadata = load_corpus(terms_metadata_path)
