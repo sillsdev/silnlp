@@ -157,11 +157,12 @@ def get_terms_metadata_path(list_name: str) -> Path:
     return SIL_NLP_ENV.mt_terms_dir / f"{list_name}-metadata.txt"
 
 
-def get_terms_glosses_path(list_name: str) -> Path:
-    gl_path = SIL_NLP_ENV.assets_dir / f"en-{list_name}-glosses.txt"
+def get_terms_glosses_path(list_name: str, iso: str = "en") -> Path:
+    iso = iso.lower()
+    gl_path = SIL_NLP_ENV.assets_dir / f"{iso}-{list_name}-glosses.txt"
     if gl_path.is_file():
         return gl_path
-    return SIL_NLP_ENV.mt_terms_dir / f"en-{list_name}-glosses.txt"
+    return SIL_NLP_ENV.mt_terms_dir / f"{iso}-{list_name}-glosses.txt"
 
 
 def get_terms_vrefs_path(list_name: str) -> Path:

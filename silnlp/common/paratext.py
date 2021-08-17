@@ -10,8 +10,9 @@ from machine.corpora import FilteredTextCorpus, ParallelTextCorpus, ParatextText
 from machine.scripture import VerseRef, book_id_to_number
 from machine.tokenization import NullTokenizer
 
-from .corpus import get_terms_glosses_path, get_terms_metadata_path, get_terms_vrefs_path, load_corpus
-from .environment import SIL_NLP_ENV
+from silnlp.common.corpus import get_terms_glosses_path, get_terms_metadata_path, get_terms_vrefs_path, load_corpus
+from silnlp.common.environment import SIL_NLP_ENV
+from silnlp.common.utils import ulist
 
 _TERMS_LISTS = {
     "Major": "BiblicalTerms.xml",
@@ -116,16 +117,16 @@ def escape_id(id: str) -> str:
     return escape(id).replace("\n", "&#xA;")
 
 
-def strip_parens(term_str: str) -> str:
+def strip_parens(term_str: str, left="(", right=")") -> str:
     parens: int = 0
     end: int = -1
     for i in reversed(range(len(term_str))):
         c = term_str[i]
-        if c == ")":
+        if c == right:
             if parens == 0:
                 end = i + 1
             parens += 1
-        elif c == "(":
+        elif c == left:
             parens -= 1
             if parens == 0:
                 term_str = term_str[:i] + term_str[end:]
@@ -172,10 +173,6 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> Dict[st
             if domain == "":
                 domain = "?"
             gloss_str = term_elem.findtext("Gloss", "")
-            match = re.match(r"\[(.+?)\]", gloss_str)
-            if match is not None:
-                gloss_str = match.group(1)
-
             refs_elem = term_elem.find("References")
             refs_list: List[VerseRef] = []
             if refs_elem is not None:
@@ -183,15 +180,53 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> Dict[st
                     bbbcccvvv = int(verse_elem.text[:9])
                     refs_list.append(VerseRef.from_bbbcccvvv(bbbcccvvv))
                 references[id] = refs_list
-            gloss_str = gloss_str.replace("?", "")
-            gloss_str = clean_term(gloss_str)
-            gloss_str = re.sub(r"\s+\d+(\.\d+)*$", "", gloss_str)
-            glosses: List[str] = re.split("[;,/]", gloss_str)
-            glosses = [gloss.strip() for gloss in glosses if gloss.strip() != ""]
+            glosses = _process_gloss_string(gloss_str)
             terms_metadata_file.write(f"{id}\t{cat}\t{domain}\n")
             terms_glosses_file.write("\t".join(glosses) + "\n")
             terms_vrefs_file.write("\t".join(str(vref) for vref in refs_list) + "\n")
     return references
+
+
+def extract_major_terms_per_langauge(iso: str) -> None:
+
+    # extract Biblical Terms for the langauage
+    terms_xml_path = SIL_NLP_ENV.pt_terms_dir / f"BiblicalTerms{iso.capitalize()}.xml"
+    terms_tree = etree.parse(str(terms_xml_path))
+
+    # build glosses dict
+    terms_dict = {}
+    for term_elem in terms_tree.getroot().findall("Terms")[0].findall("Localization"):
+        id = term_elem.get("Id")
+        if id is None:
+            continue
+        terms_dict[escape_id(id)] = _process_gloss_string(term_elem.get("Gloss", ""))
+
+    terms_glosses_path = get_terms_glosses_path(list_name="Major", iso=iso)
+
+    with open(terms_glosses_path, "w", encoding="utf-8", newline="\n") as terms_glosses_file:
+        # import major metadata to line up terms to it
+        major_metadata = open(
+            SIL_NLP_ENV.assets_dir / "Major-metadata.txt", "r", encoding="utf-8", newline="\n"
+        ).readlines()
+        for line in major_metadata:
+            id = line.split("\t")[0]
+            if id in terms_dict:
+                terms_glosses_file.write("\t".join(terms_dict[id]) + "\n")
+            else:
+                terms_glosses_file.write("\n")
+
+
+def _process_gloss_string(gloss_str: str) -> str:
+    match = re.match(r"\[(.+?)\]", gloss_str)
+    if match is not None:
+        gloss_str = match.group(1)
+    gloss_str = gloss_str.replace("?", "")
+    gloss_str = clean_term(gloss_str)
+    gloss_str = strip_parens(gloss_str, left="[", right="]")
+    gloss_str = re.sub(r"\s+\d+(\.\d+)*$", "", gloss_str)
+    glosses = re.split("[;,/]", gloss_str)
+    glosses = ulist([gloss.strip() for gloss in glosses if gloss.strip() != ""])
+    return glosses
 
 
 def extract_terms_list_from_renderings(project: str, renderings_tree: etree.ElementTree) -> None:
