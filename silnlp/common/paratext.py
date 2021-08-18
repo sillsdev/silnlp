@@ -10,9 +10,9 @@ from machine.corpora import FilteredTextCorpus, ParallelTextCorpus, ParatextText
 from machine.scripture import VerseRef, book_id_to_number
 from machine.tokenization import NullTokenizer
 
-from silnlp.common.corpus import get_terms_glosses_path, get_terms_metadata_path, get_terms_vrefs_path, load_corpus
-from silnlp.common.environment import SIL_NLP_ENV
-from silnlp.common.utils import ulist
+from .corpus import get_terms_glosses_path, get_terms_metadata_path, get_terms_vrefs_path, load_corpus
+from .environment import SIL_NLP_ENV
+from .utils import unique_list
 
 _TERMS_LISTS = {
     "Major": "BiblicalTerms.xml",
@@ -187,7 +187,7 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> Dict[st
     return references
 
 
-def extract_major_terms_per_langauge(iso: str) -> None:
+def extract_major_terms_per_language(iso: str) -> None:
 
     # extract Biblical Terms for the langauage
     terms_xml_path = SIL_NLP_ENV.pt_terms_dir / f"BiblicalTerms{iso.capitalize()}.xml"
@@ -225,7 +225,7 @@ def _process_gloss_string(gloss_str: str) -> str:
     gloss_str = strip_parens(gloss_str, left="[", right="]")
     gloss_str = re.sub(r"\s+\d+(\.\d+)*$", "", gloss_str)
     glosses = re.split("[;,/]", gloss_str)
-    glosses = ulist([gloss.strip() for gloss in glosses if gloss.strip() != ""])
+    glosses = unique_list([gloss.strip() for gloss in glosses if gloss.strip() != ""])
     return glosses
 
 

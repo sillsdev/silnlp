@@ -50,10 +50,13 @@ def merge_dict(dict1: dict, dict2: dict) -> dict:
             dict1[key] = value
     return dict1
 
-def ulist(seq: list):
+
+def unique_list(seq: list) -> list:
+    # make the lists unique, keeping only the first element found
     seen = set()
     seen_add = seen.add
     return [x for x in seq if not (x in seen or seen_add(x))]
+
 
 def is_set(value: Flag, flag: Flag) -> bool:
     return (value & flag) == flag
