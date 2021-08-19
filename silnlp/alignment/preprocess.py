@@ -7,13 +7,13 @@ from typing import Iterable, List, Tuple
 
 logging.basicConfig(level=logging.INFO)
 
+from machine.scripture import VerseRef
 from nltk.translate import Alignment
 
 from ..common.corpus import write_corpus
 from ..common.environment import SIL_NLP_ENV
 from ..common.stemmer import Stemmer
 from ..common.utils import set_seed
-from ..common.verse_ref import VerseRef
 from .config import get_all_book_paths, get_stemmer, load_config
 from .lexicon import Lexicon
 from .utils import get_experiment_dirs, get_experiment_name

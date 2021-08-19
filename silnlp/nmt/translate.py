@@ -4,8 +4,8 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 import tensorflow as tf
+from machine.scripture import book_id_to_number
 
-from ..common.canon import book_id_to_number
 from ..common.paratext import book_file_name_digits
 from ..common.translator import Translator
 from ..common.utils import get_git_revision_hash

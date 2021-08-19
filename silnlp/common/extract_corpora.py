@@ -54,8 +54,8 @@ def main() -> None:
         SIL_NLP_ENV.mt_terms_dir.mkdir(exist_ok=True, parents=True)
         for project in projects_found:
             LOGGER.info(f"Extracting {project}...")
-            extract_project(project, args.include, args.exclude, args.markers)
-            extract_term_renderings(project)
+            corpus_filename = extract_project(project, args.include, args.exclude, args.markers)
+            extract_term_renderings(project, corpus_filename)
             LOGGER.info("Done.")
     else:
         LOGGER.warning(f"Couldn't find any data to process for any project in {SIL_NLP_ENV.pt_projects_dir}.")

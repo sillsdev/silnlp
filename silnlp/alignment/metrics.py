@@ -3,10 +3,10 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import pandas as pd
+from machine.scripture import VerseRef
 from nltk.translate import Alignment
 
 from ..common.corpus import load_corpus
-from ..common.verse_ref import VerseRef
 from .config import get_aligner_name
 from .lexicon import Lexicon
 from .rbo import average_overlap, rbo_ext

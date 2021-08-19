@@ -1,15 +1,16 @@
-import random
 import itertools
-import subprocess
+import random
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple, Union
 
 import pandas as pd
+from machine.corpora import ESCAPE_SPACES, LOWERCASE, NFC_NORMALIZE, TextFileTextCorpus, pipeline
+from machine.scripture import VerseRef
+from machine.tokenization import LatinWordTokenizer
 from sklearn.model_selection import train_test_split
 
-from ..common.utils import get_repo_dir
 from .environment import SIL_NLP_ENV
-from .verse_ref import VerseRef
 
 
 def write_corpus(corpus_path: Path, sentences: Iterable[str], append: bool = False) -> None:
@@ -26,19 +27,12 @@ def load_corpus(corpus_path: Path) -> Iterator[str]:
 
 
 def tokenize_corpus(input_path: Path, output_path: Path) -> None:
-    args: List[str] = [
-        "dotnet",
-        "machine",
-        "tokenize",
-        str(input_path),
-        str(output_path),
-        "-t",
-        "latin",
-        "-l",
-        "-nf",
-        "nfc",
-    ]
-    subprocess.run(args, stdout=subprocess.DEVNULL, cwd=get_repo_dir())
+    tokenizer = LatinWordTokenizer()
+    corpus = TextFileTextCorpus(tokenizer, input_path)
+    processor = pipeline(ESCAPE_SPACES, NFC_NORMALIZE, LOWERCASE)
+    with open(output_path, "w", encoding="utf-8", newline="\n") as output_stream, corpus.get_segments() as segments:
+        for segment in segments:
+            output_stream.write(" ".join(processor.process(segment.segment)) + "\n")
 
 
 def get_scripture_parallel_corpus(src_file_path: Path, trg_file_path: Path) -> pd.DataFrame:
@@ -57,17 +51,20 @@ def get_scripture_parallel_corpus(src_file_path: Path, trg_file_path: Path) -> p
             vref = VerseRef.from_string(vref_line)
             if src_line == "<range>" and trg_line == "<range>":
                 if vref.chapter_num == vrefs[-1].chapter_num:
-                    vrefs[-1] = VerseRef.from_range(vrefs[-1].simplify(), vref)
+                    vrefs[-1].simplify()
+                    vrefs[-1] = VerseRef.from_range(vrefs[-1], vref)
             elif src_line == "<range>":
                 if vref.chapter_num == vrefs[-1].chapter_num:
-                    vrefs[-1] = VerseRef.from_range(vrefs[-1].simplify(), vref)
+                    vrefs[-1].simplify()
+                    vrefs[-1] = VerseRef.from_range(vrefs[-1], vref)
                 if len(trg_line) > 0:
                     if len(trg_sentences[-1]) > 0:
                         trg_sentences[-1] += " "
                     trg_sentences[-1] += trg_line
             elif trg_line == "<range>":
                 if vref.chapter_num == vrefs[-1].chapter_num:
-                    vrefs[-1] = VerseRef.from_range(vrefs[-1].simplify(), vref)
+                    vrefs[-1].simplify()
+                    vrefs[-1] = VerseRef.from_range(vrefs[-1], vref)
                 if len(src_line) > 0:
                     if len(src_sentences[-1]) > 0:
                         src_sentences[-1] += " "
@@ -154,17 +151,24 @@ def exclude_books(corpus: pd.DataFrame, books: Set[int]) -> pd.DataFrame:
 
 
 def get_terms_metadata_path(list_name: str) -> Path:
-    md_path = SIL_NLP_ENV.mt_terms_dir / f"{list_name}-metadata.txt"
+    md_path = SIL_NLP_ENV.assets_dir / f"{list_name}-metadata.txt"
     if md_path.is_file():
         return md_path
-    return SIL_NLP_ENV.assets_dir / f"{list_name}-metadata.txt"
+    return SIL_NLP_ENV.mt_terms_dir / f"{list_name}-metadata.txt"
 
 
 def get_terms_glosses_path(list_name: str) -> Path:
-    gl_path = SIL_NLP_ENV.mt_terms_dir / f"en-{list_name}-glosses.txt"
+    gl_path = SIL_NLP_ENV.assets_dir / f"en-{list_name}-glosses.txt"
     if gl_path.is_file():
         return gl_path
-    return SIL_NLP_ENV.assets_dir / f"en-{list_name}-glosses.txt"
+    return SIL_NLP_ENV.mt_terms_dir / f"en-{list_name}-glosses.txt"
+
+
+def get_terms_vrefs_path(list_name: str) -> Path:
+    md_path = SIL_NLP_ENV.assets_dir / f"{list_name}-vrefs.txt"
+    if md_path.is_file():
+        return md_path
+    return SIL_NLP_ENV.mt_terms_dir / f"{list_name}-vrefs.txt"
 
 
 def get_terms_renderings_path(iso: str, project: str) -> Optional[Path]:
@@ -186,35 +190,48 @@ def get_terms_list(terms_renderings_path: Path) -> str:
     return list_name
 
 
+@dataclass(frozen=True)
 class Term:
-    def __init__(self, id: str, cat: str, domain: str, glosses: List[str], renderings: List[str]) -> None:
-        self.id = id
-        self.cat = cat
-        self.domain = domain
-        self.glosses = glosses
-        self.renderings = renderings
+    id: str
+    cat: str
+    domain: str
+    glosses: List[str]
+    renderings: List[str]
+    vrefs: Set[VerseRef]
 
 
 def get_terms(terms_renderings_path: Path) -> Dict[str, Term]:
     list_name = get_terms_list(terms_renderings_path)
     terms_metadata_path = get_terms_metadata_path(list_name)
     terms_glosses_path = get_terms_glosses_path(list_name)
+    terms_vrefs_path = get_terms_vrefs_path(list_name)
     terms: Dict[str, Term] = {}
     terms_metadata = load_corpus(terms_metadata_path)
     terms_glosses = load_corpus(terms_glosses_path) if terms_glosses_path.is_file() else iter([])
     terms_renderings = load_corpus(terms_renderings_path)
-    for metadata_line, glosses_line, renderings_line in itertools.zip_longest(
-        terms_metadata, terms_glosses, terms_renderings
+    terms_vrefs = load_corpus(terms_vrefs_path) if terms_vrefs_path.is_file() else iter([])
+    for metadata_line, glosses_line, renderings_line, vrefs_line in itertools.zip_longest(
+        terms_metadata, terms_glosses, terms_renderings, terms_vrefs
     ):
         id, cat, domain = metadata_line.split("\t", maxsplit=3)
         glosses = [] if glosses_line is None or len(glosses_line) == 0 else glosses_line.split("\t")
         renderings = [] if len(renderings_line) == 0 else renderings_line.split("\t")
-        terms[id] = Term(id, cat, domain, glosses, renderings)
+        vrefs = (
+            set()
+            if vrefs_line is None or len(vrefs_line) == 0
+            else set(VerseRef.from_string(vref) for vref in vrefs_line.split("\t"))
+        )
+        terms[id] = Term(id, cat, domain, glosses, renderings, vrefs)
     return terms
 
 
-def get_terms_corpus(src_terms: Dict[str, Term], trg_terms: Dict[str, Term], cats: Optional[Set[str]]) -> pd.DataFrame:
-    data: Set[Tuple[str, str]] = set()
+def get_terms_corpus(
+    src_terms: Dict[str, Term],
+    trg_terms: Dict[str, Term],
+    cats: Optional[Set[str]],
+    dictionary_books: Optional[Set[int]],
+) -> pd.DataFrame:
+    data: Set[Tuple[str, str, bool]] = set()
     for src_term in src_terms.values():
         if cats is not None and src_term.cat not in cats:
             continue
@@ -223,18 +240,25 @@ def get_terms_corpus(src_terms: Dict[str, Term], trg_terms: Dict[str, Term], cat
         if trg_term is None:
             continue
 
+        dictionary = dictionary_books is None or any(vref.book_num in dictionary_books for vref in src_term.vrefs)
+
         for src_rendering in src_term.renderings:
             for trg_rendering in trg_term.renderings:
-                data.add((src_rendering, trg_rendering))
-    return pd.DataFrame(data, columns=["source", "target"])
+                data.add((src_rendering, trg_rendering, dictionary))
+    return pd.DataFrame(data, columns=["source", "target", "dictionary"])
 
 
-def get_terms_data_frame(terms: Dict[str, Term], cats: Optional[Set[str]]) -> pd.DataFrame:
-    data: Set[Tuple[str, str]] = set()
+def get_terms_data_frame(
+    terms: Dict[str, Term], cats: Optional[Set[str]], dictionary_books: Optional[Set[int]]
+) -> pd.DataFrame:
+    data: Set[Tuple[str, str, bool]] = set()
     for term in terms.values():
         if cats is not None and term.cat not in cats:
             continue
+
+        dictionary = dictionary_books is None or any(vref.book_num in dictionary_books for vref in term.vrefs)
+
         for rendering in term.renderings:
             for gloss in term.glosses:
-                data.add((rendering, gloss))
-    return pd.DataFrame(data, columns=["rendering", "gloss"])
+                data.add((rendering, gloss, dictionary))
+    return pd.DataFrame(data, columns=["rendering", "gloss", "dictionary"])

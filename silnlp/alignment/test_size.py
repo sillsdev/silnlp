@@ -4,8 +4,8 @@ from pathlib import Path
 from typing import List, Optional, Set, Tuple
 
 import numpy as np
+from machine.scripture import get_books
 
-from ..common.canon import get_books
 from ..common.utils import set_seed
 from .config import ALIGNERS, load_config
 from .metrics import compute_alignment_metrics, load_all_alignments, load_vrefs

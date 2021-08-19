@@ -166,6 +166,16 @@ def make_inference_dataset(
 
 
 class SILRunner(Runner):
+    def _finalize_config(self, training=False, num_replicas=1, num_devices=1):
+        config = super()._finalize_config(training, num_replicas, num_devices)
+        if training and not config["eval"].get("use_dictionary", True):
+            data_config = config["data"]
+            if "source_dictionary" in data_config:
+                del data_config["source_dictionary"]
+            if "target_dictionary" in data_config:
+                del data_config["target_dictionary"]
+        return config
+
     def export_embeddings(self, side: str, output_path: str) -> None:
         config = self._finalize_config()
         model = self._init_model(config)

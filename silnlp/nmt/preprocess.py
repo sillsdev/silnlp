@@ -1,9 +1,9 @@
 import argparse
 import logging
 
-LOGGER = logging.getLogger(__package__ + ".preprocess")
-
 from .config import get_git_revision_hash, load_config
+
+LOGGER = logging.getLogger(__package__ + ".preprocess")
 
 
 def main() -> None:
@@ -18,7 +18,6 @@ def main() -> None:
     config = load_config(exp_name)
 
     config.set_seed()
-
     config.preprocess(args.stats)
 
 

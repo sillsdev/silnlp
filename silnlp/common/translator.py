@@ -1,9 +1,10 @@
+import os
 import string
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Iterable, List, Optional, Union
+
 from lxml import etree
-import os
 
 from .. import sfm
 from ..sfm import usfm

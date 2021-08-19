@@ -340,13 +340,15 @@ class SILSelfAttentionDecoder(SelfAttentionDecoder):
         if memory is not None:
             if not isinstance(memory, (list, tuple)):
                 memory = (memory,)
-        if memory_sequence_length is not None:
-            if not isinstance(memory_sequence_length, (list, tuple)):
-                memory_sequence_length = (memory_sequence_length,)
-            memory_mask = [
-                tf.sequence_mask(mem_length, maxlen=tf.shape(mem)[1])
-                for mem, mem_length in zip(memory, memory_sequence_length)
-            ]
+            if memory_sequence_length is not None:
+                if not isinstance(memory_sequence_length, (list, tuple)):
+                    memory_sequence_length = (memory_sequence_length,)
+                memory_mask = [
+                    tf.sequence_mask(mem_length, maxlen=tf.shape(mem)[1])
+                    for mem, mem_length in zip(memory, memory_sequence_length)
+                ]
+            else:
+                memory_mask = tuple(None for _ in memory)
 
         # Run each layer.
         new_cache = []

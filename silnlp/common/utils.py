@@ -1,11 +1,11 @@
+import logging
 import os
 import random
 import subprocess
-import logging
 from abc import ABC, abstractmethod
 from enum import Flag
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Optional
 
 import numpy as np
 
@@ -53,6 +53,28 @@ def merge_dict(dict1: dict, dict2: dict) -> dict:
 
 def is_set(value: Flag, flag: Flag) -> bool:
     return (value & flag) == flag
+
+
+_is_dotnet_installed: Optional[bool] = None
+
+
+def check_dotnet() -> None:
+    global _is_dotnet_installed
+    if _is_dotnet_installed is None:
+        # Update or add dotnet machine environment
+        try:
+            subprocess.run(
+                ["dotnet", "tool", "restore"],
+                cwd=Path(__file__).parent.parent.parent,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            _is_dotnet_installed = True
+        except:
+            _is_dotnet_installed = False
+
+    if not _is_dotnet_installed:
+        raise RuntimeError("The .NET Core SDK needs to be installed (https://dotnet.microsoft.com/download).")
 
 
 class NoiseMethod(ABC):

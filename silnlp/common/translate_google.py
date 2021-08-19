@@ -1,11 +1,9 @@
 import argparse
-import logging
 from typing import Iterable, Optional
 
-
 from google.cloud import translate_v2 as translate
+from machine.scripture import book_id_to_number
 
-from .canon import book_id_to_number
 from .paratext import book_file_name_digits
 from .translator import Translator
 from .utils import get_git_revision_hash, get_mt_exp_dir

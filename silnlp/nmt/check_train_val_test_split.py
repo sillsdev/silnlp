@@ -145,7 +145,7 @@ def collectStats(corpus: str,
 
 
 def wordChecks(folder: str, writer: pd.ExcelWriter, corpus: str,
-               similar: bool = False, distance: int = 1, details: bool = False):
+               similar: bool = False, distance: int = 1, details: bool = False, detok_val: bool = True):
     if corpus is not "src" and corpus is not "trg":
         return
 
@@ -158,7 +158,10 @@ def wordChecks(folder: str, writer: pd.ExcelWriter, corpus: str,
 
     # Load the validation data
     val_file = os.path.join(folder, f"val.{corpus}.txt")
-    val_word_counts = load_word_counts(val_file)
+    if detok_val:
+        val_word_counts = load_word_counts(val_file)
+    else:
+        val_word_counts = load_word_counts(val_file, False)
     unk_val_word_counts = unknown_word_counts(train_word_counts, val_word_counts)
 
     # Load the test data
@@ -187,17 +190,19 @@ def wordChecks(folder: str, writer: pd.ExcelWriter, corpus: str,
 
     if details:
         # Source corpora word counts/lists
-        writeWordCounts(writer, train_word_counts, f'train.{corpus} word counts')
+        writeWordCounts(writer, train_word_counts + val_word_counts + test_word_counts, f'words-all.{corpus}')
+        writeWordCounts(writer, train_word_counts, f'words-train.{corpus}')
         if len(val_word_counts) > 0:
-            writeWordCounts(writer, val_word_counts, f'val.{corpus} word counts')
-            writeWordCounts(writer, unk_val_word_counts, f'val.{corpus} unknown word counts')
+            writeWordCounts(writer, val_word_counts, f'words-val.{corpus}')
+            writeWordCounts(writer, unk_val_word_counts, f'unknown-val.{corpus} vs train')
             if similar:
-                writeWordList(writer, val_similar_words, f'val.{corpus} misspellings')
+                writeWordList(writer, val_similar_words, f'misspelling-val.{corpus}')
         if len(test_word_counts) > 0:
-            writeWordCounts(writer, test_word_counts, f'test.{corpus} word counts')
-            writeWordCounts(writer, unk_test_word_counts, f'test.{corpus} unknown word counts')
+            writeWordCounts(writer, test_word_counts, f'words-test.{corpus}')
+            writeWordCounts(writer, unk_test_word_counts, f'unknown-test.{corpus} vs train')
+            writeWordCounts(writer, unk_test_val_word_counts, f'unknown-test.{corpus} vs train+val')
             if similar:
-                writeWordList(writer, test_similar_words, f'test.{corpus} misspellings')
+                writeWordList(writer, test_similar_words, f'misspelling-test.{corpus}')
 
 
 def main() -> None:
@@ -208,6 +213,7 @@ def main() -> None:
     parser.add_argument("--details", default=False, action="store_true", help="Show detailed word lists")
     parser.add_argument("--similar-words", default=False, action="store_true", help="Find similar words")
     parser.add_argument("--distance", default=1, help="Max. Levenshtein distance for word similarity")
+    parser.add_argument("--detok-val", default=True, action="store_false", help="Detokenize the target validation set")
     args = parser.parse_args()
 
     print("Git commit:", get_git_revision_hash())
@@ -222,7 +228,7 @@ def main() -> None:
     print("Analyzing source ...")
     wordChecks(exp_dir, writer, "src", args.similar_words, args.distance, args.details)
     print("Analyzing target ...")
-    wordChecks(exp_dir, writer, "trg", args.similar_words, args.distance, args.details)
+    wordChecks(exp_dir, writer, "trg", args.similar_words, args.distance, args.details, args.detok_val)
     writeStats(writer)
     writer.save()
 

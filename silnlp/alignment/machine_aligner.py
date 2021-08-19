@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ..common.utils import get_repo_dir
+from ..common.utils import check_dotnet, get_repo_dir
 from .aligner import Aligner
 from .lexicon import Lexicon
 
@@ -89,6 +89,7 @@ class MachineAligner(Aligner):
         return Lexicon.load(inverse_lex_path, include_special_tokens)
 
     def _train_alignment_model(self) -> None:
+        check_dotnet()
         args: List[str] = [
             "dotnet",
             "machine",
@@ -119,6 +120,7 @@ class MachineAligner(Aligner):
     def _align_parallel_corpus(
         self, src_file_path: Path, trg_file_path: Path, output_file_path: Path, sym_heuristic: str
     ) -> None:
+        check_dotnet()
         args: List[str] = [
             "dotnet",
             "machine",
@@ -140,6 +142,7 @@ class MachineAligner(Aligner):
         subprocess.run(args, cwd=get_repo_dir())
 
     def _extract_lexicon(self, direction: str, out_file_path: Path) -> None:
+        check_dotnet()
         args: List[str] = [
             "dotnet",
             "machine",

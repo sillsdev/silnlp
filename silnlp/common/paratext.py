@@ -1,18 +1,17 @@
 import logging
-import re
 import os
-import subprocess
-from collections import OrderedDict
+import re
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 from xml.sax.saxutils import escape
 
 from lxml import etree
+from machine.corpora import FilteredTextCorpus, ParallelTextCorpus, ParatextTextCorpus, Text
+from machine.scripture import VerseRef, book_id_to_number
+from machine.tokenization import NullTokenizer
 
-from .canon import book_id_to_number
-from .corpus import get_terms_glosses_path, get_terms_metadata_path, load_corpus
+from .corpus import get_terms_glosses_path, get_terms_metadata_path, get_terms_vrefs_path, load_corpus
 from .environment import SIL_NLP_ENV
-from .utils import get_repo_dir
 
 _TERMS_LISTS = {
     "Major": "BiblicalTerms.xml",
@@ -36,59 +35,81 @@ def get_iso(settings_tree: etree.ElementTree) -> str:
     return iso[:index]
 
 
-def extract_project(project: str, include_texts: str, exclude_texts: str, include_markers: bool) -> None:
+def extract_project(project: str, include_texts: str, exclude_texts: str, include_markers: bool) -> Path:
     project_dir = get_project_dir(project)
     settings_tree = etree.parse(str(project_dir / "Settings.xml"))
     iso = get_iso(settings_tree)
 
     ref_dir = SIL_NLP_ENV.assets_dir / "Ref"
-    args: List[str] = [
-        "dotnet",
-        "machine",
-        "build-corpus",
-        str(ref_dir),
-        str(project_dir),
-        "-sf",
-        "pt",
-        "-tf",
-        "pt_m" if include_markers else "pt",
-        "-as",
-        "-ie",
-        "-md",
-    ]
+
+    tokenizer = NullTokenizer()
+    ref_corpus = ParatextTextCorpus(tokenizer, ref_dir)
+    project_corpus = ParatextTextCorpus(tokenizer, project_dir, include_markers=include_markers)
+
     output_basename = f"{iso}-{project}"
     if len(include_texts) > 0 or len(exclude_texts) > 0:
         output_basename += "_"
-    if len(include_texts) > 0:
-        args.append("-i")
-        args.append(include_texts)
-        for text in include_texts.split(","):
-            text = text.strip("*")
-            output_basename += f"+{text}"
-    if len(exclude_texts) > 0:
-        args.append("-e")
-        args.append(exclude_texts)
-        for text in exclude_texts.split(","):
-            text = text.strip("*")
-            output_basename += f"-{text}"
+        include_texts_set: Optional[Set[str]] = None
+        if len(include_texts) > 0:
+            include_texts_set = set()
+            for text in include_texts.split(","):
+                include_texts_set.add(text)
+                text = text.strip("*")
+                output_basename += f"+{text}"
+        exclude_texts_set: Optional[Set[str]] = None
+        if len(exclude_texts) > 0:
+            exclude_texts_set = set()
+            for text in exclude_texts.split(","):
+                exclude_texts_set.add(text)
+                text = text.strip("*")
+                output_basename += f"-{text}"
+
+        def filter_corpus(text: Text) -> bool:
+            if exclude_texts_set is not None and text.id in exclude_texts_set:
+                return False
+
+            if include_texts_set is not None and text.id in include_texts_set:
+                return True
+
+            return include_texts_set is None
+
+        ref_corpus = FilteredTextCorpus(ref_corpus, filter_corpus)
+        project_corpus = FilteredTextCorpus(project_corpus, filter_corpus)
 
     if include_markers:
         output_basename += "-m"
-
-    args.append("-to")
     output_filename = SIL_NLP_ENV.mt_scripture_dir / f"{output_basename}.txt"
-    args.append(str(output_filename))
 
-    result = subprocess.run(args, cwd=get_repo_dir(), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    parallel_corpus = ParallelTextCorpus(ref_corpus, project_corpus)
+    segment_count = 0
+    with open(output_filename, "w", encoding="utf-8", newline="\n") as output_stream, parallel_corpus.get_segments(
+        all_source_segments=True
+    ) as segments:
+        cur_ref: Optional[Any] = None
+        cur_target_line = ""
+        cur_target_line_range = True
+        for segment in segments:
+            if cur_ref is not None and segment.segment_ref != cur_ref:
+                output_stream.write(("<range>" if cur_target_line_range else cur_target_line) + "\n")
+                segment_count += 1
+                cur_target_line = ""
+                cur_target_line_range = True
 
-    if len(result.stderr) > 0:
-        raise RuntimeError(result.stderr.decode("utf-8"))
+            cur_ref = segment.segment_ref
+            if not segment.is_target_in_range or segment.is_target_range_start or len(segment.target_segment) > 0:
+                if len(segment.target_segment) > 0:
+                    if len(cur_target_line) > 0:
+                        cur_target_line += " "
+                    cur_target_line += segment.target_segment[0]
+                cur_target_line_range = False
+        output_stream.write(("<range>" if cur_target_line_range else cur_target_line) + "\n")
+        segment_count += 1
 
     # check if the number of lines in the file is correct (the same as vref.txt - 31104 ending at REV 22:21)
-    segment_count = sum(1 for _ in load_corpus(output_filename))
     LOGGER.info(f"# of Segments: {segment_count}")
     if segment_count != 31104:
         LOGGER.error(f"The number of segments is {segment_count}, but should be 31104 (number of verses in the Bible).")
+    return output_filename
 
 
 def escape_id(id: str) -> str:
@@ -118,10 +139,10 @@ def clean_term(term_str: str) -> str:
     return " ".join(term_str.split())
 
 
-def extract_terms_list(list_type: str, project: Optional[str] = None) -> None:
+def extract_terms_list(list_type: str, project: Optional[str] = None) -> Dict[str, List[VerseRef]]:
     list_file_name = _TERMS_LISTS.get(list_type)
     if list_file_name is None:
-        return
+        return {}
 
     list_name = list_type
     if project is not None:
@@ -132,10 +153,12 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> None:
 
     terms_metadata_path = get_terms_metadata_path(list_name)
     terms_glosses_path = get_terms_glosses_path(list_name)
+    terms_vrefs_path = get_terms_vrefs_path(list_name)
 
+    references: Dict[str, List[VerseRef]] = {}
     with open(terms_metadata_path, "w", encoding="utf-8", newline="\n") as terms_metadata_file, open(
         terms_glosses_path, "w", encoding="utf-8", newline="\n"
-    ) as terms_glosses_file:
+    ) as terms_glosses_file, open(terms_vrefs_path, "w", encoding="utf-8", newline="\n") as terms_vrefs_file:
         terms_tree = etree.parse(str(terms_xml_path))
         for term_elem in terms_tree.getroot().findall("Term"):
             id = term_elem.get("Id")
@@ -152,13 +175,23 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> None:
             match = re.match(r"\[(.+?)\]", gloss_str)
             if match is not None:
                 gloss_str = match.group(1)
+
+            refs_elem = term_elem.find("References")
+            refs_list: List[VerseRef] = []
+            if refs_elem is not None:
+                for verse_elem in refs_elem.findall("Verse"):
+                    bbbcccvvv = int(verse_elem.text[:9])
+                    refs_list.append(VerseRef.from_bbbcccvvv(bbbcccvvv))
+                references[id] = refs_list
             gloss_str = gloss_str.replace("?", "")
             gloss_str = clean_term(gloss_str)
             gloss_str = re.sub(r"\s+\d+(\.\d+)*$", "", gloss_str)
-            glosses = re.split("[;,/]", gloss_str)
+            glosses: List[str] = re.split("[;,/]", gloss_str)
             glosses = [gloss.strip() for gloss in glosses if gloss.strip() != ""]
             terms_metadata_file.write(f"{id}\t{cat}\t{domain}\n")
-            terms_glosses_file.write("\t".join(OrderedDict.fromkeys(glosses)) + "\n")
+            terms_glosses_file.write("\t".join(glosses) + "\n")
+            terms_vrefs_file.write("\t".join(str(vref) for vref in refs_list) + "\n")
+    return references
 
 
 def extract_terms_list_from_renderings(project: str, renderings_tree: etree.ElementTree) -> None:
@@ -175,7 +208,7 @@ def extract_terms_list_from_renderings(project: str, renderings_tree: etree.Elem
             terms_metadata_file.write(f"{id}\t?\t?\n")
 
 
-def extract_term_renderings(project_folder: str) -> None:
+def extract_term_renderings(project_folder: str, corpus_filename: Path) -> None:
     project_dir = get_project_dir(project_folder)
     renderings_path = project_dir / "TermRenderings.xml"
     if not renderings_path.is_file():
@@ -197,12 +230,22 @@ def extract_term_renderings(project_folder: str) -> None:
 
     list_type, terms_project, _ = terms_setting.split(":", maxsplit=3)
     list_name = list_type
+    references: Dict[str, List[VerseRef]] = {}
     if list_type == "Project":
         if terms_project == project_name:
-            extract_terms_list(list_type, project_folder)
+            references = extract_terms_list(list_type, project_folder)
         else:
             extract_terms_list_from_renderings(project_folder, renderings_tree)
         list_name = project_folder
+
+    corpus: Dict[VerseRef, str] = {}
+    if len(references) > 0:
+        prev_verse_str = ""
+        for ref_str, verse_str in zip(load_corpus(SIL_NLP_ENV.assets_dir / "vref.txt"), load_corpus(corpus_filename)):
+            if verse_str == "<range>":
+                verse_str = prev_verse_str
+            corpus[VerseRef.from_string(ref_str)] = verse_str
+            prev_verse_str = verse_str
 
     terms_metadata_path = get_terms_metadata_path(list_name)
     terms_renderings_path = SIL_NLP_ENV.mt_terms_dir / f"{iso}-{project_folder}-{list_type}-renderings.txt"
@@ -211,15 +254,29 @@ def extract_term_renderings(project_folder: str) -> None:
         for line in load_corpus(terms_metadata_path):
             id, _, _ = line.split("\t", maxsplit=3)
             rendering_elem = rendering_elems.get(id)
-            renderings: List[str] = []
+            refs_list = references.get(id, [])
+
+            renderings: Set[str] = set()
             if rendering_elem is not None and rendering_elem.get("Guess", "false") == "false":
                 renderings_str = rendering_elem.findtext("Renderings", "")
                 if renderings_str != "":
-                    renderings_str = renderings_str.replace("*", "")
-                    renderings_str = clean_term(renderings_str)
-                    renderings = renderings_str.strip().split("||")
-                    renderings = [rendering.strip() for rendering in renderings if rendering.strip() != ""]
-            terms_renderings_file.write("\t".join(OrderedDict.fromkeys(renderings)) + "\n")
+                    for rendering in renderings_str.strip().split("||"):
+                        rendering = clean_term(rendering).strip()
+                        if len(refs_list) > 0 and "*" in rendering:
+                            regex = (
+                                re.escape(rendering).replace("\\ \\*\\*\\ ", "(?:\\ \\w+)*\\ ").replace("\\*", "\\w*")
+                            )
+                            for ref in refs_list:
+                                verse_str = corpus.get(ref, "")
+                                for match in re.finditer(regex, verse_str):
+                                    surface_form = match.group()
+                                    renderings.add(surface_form)
+
+                        else:
+                            rendering = rendering.replace("*", "").strip()
+                            if rendering != "":
+                                renderings.add(rendering)
+            terms_renderings_file.write("\t".join(renderings) + "\n")
             if len(renderings) > 0:
                 count += 1
     if count == 0:

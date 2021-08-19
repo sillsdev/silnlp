@@ -17,6 +17,11 @@ exclude = '''
 )/
 '''
 
+[tool.isort]
+# make it compatible with black
+profile = "black"
+line_length = 120
+
 [tool.poetry]
 name = "silnlp"
 version = "1.0.0"
@@ -45,6 +50,7 @@ clearml = ">=1.0.3"
 XlsxWriter = "^1.4.3"
 python-Levenshtein = "^0.12.2"
 lxml = "^4.6.3"
+sil-machine = "^0.1.2"
 
 [tool.poetry.dev-dependencies]
 mypy = "^0.812"
