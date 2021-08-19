@@ -1,7 +1,7 @@
 import logging
 
 # Initialize logger
-LOGGER = logging.getLogger(__name__)
+LOGGER = logging.getLogger("silnlp")
 LOGGER.setLevel(logging.INFO)
 ch = logging.StreamHandler()
 formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")

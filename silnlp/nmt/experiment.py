@@ -49,19 +49,6 @@ class SILExperiment:
         pass
 
 
-@dataclass
-class SILExperimentCML(SILExperiment):
-    def __post_init__(self):
-        from clearml import Task
-        import datetime
-
-        self.task = Task.init(
-            project_name="LangTech_Experiment",
-            task_name=self.name + "_" + str(datetime.datetime.now().strftime("%m/%d/%Y, %H:%M:%S")),
-        )
-        return super().__post_init__()
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run experiment - preprocesses, train and test")
     parser.add_argument("experiment", help="Experiment name")
@@ -69,15 +56,9 @@ def main() -> None:
     parser.add_argument("--mixed-precision", default=False, action="store_true", help="Enable mixed precision")
     parser.add_argument("--memory-growth", default=False, action="store_true", help="Enable memory growth")
     parser.add_argument("--num-devices", type=int, default=1, help="Number of devices to train on")
-    parser.add_argument("--clearml", default=False, action="store_true", help="Record experiment in ClearML")
     args = parser.parse_args()
 
-    if args.clearml:
-        ExpClass = SILExperimentCML
-    else:
-        ExpClass = SILExperiment
-
-    exp = ExpClass(
+    exp = SILExperiment(
         name=args.experiment,
         make_stats=args.stats,
         mixed_precision=args.mixed_precision,
