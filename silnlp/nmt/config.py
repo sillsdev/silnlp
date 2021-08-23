@@ -892,10 +892,12 @@ class Config:
                 categories_set: Optional[Set[str]] = None if categories is None else set(categories)
                 dict_books = get_books(terms_config["dictionary_books"]) if "dictionary_books" in terms_config else None
                 all_src_terms = [
-                    (src_terms_file, get_terms(src_terms_file.path)) for src_terms_file in pair.src_terms_files
+                    (src_terms_file, get_terms(src_terms_file.path, iso=src_terms_file.iso))
+                    for src_terms_file in pair.src_terms_files
                 ]
                 all_trg_terms = [
-                    (trg_terms_file, get_terms(trg_terms_file.path)) for trg_terms_file in pair.trg_terms_files
+                    (trg_terms_file, get_terms(trg_terms_file.path, iso=trg_terms_file.iso))
+                    for trg_terms_file in pair.trg_terms_files
                 ]
                 for src_terms_file, src_terms in all_src_terms:
                     for trg_terms_file, trg_terms in all_trg_terms:
