@@ -66,12 +66,12 @@ def get_style(elem: sfm.Element) -> str:
 
 def collect_segments_from_paragraph(segments: List[Segment], cur_elem: sfm.Element, cur_segment: Segment) -> None:
     style = get_style(cur_elem)
-    if style != "q":
+    if style != "q" and style != "b":
         if not cur_segment.is_empty:
             segments.append(cur_segment.copy())
         cur_segment.reset()
 
-    cur_segment.paras.append(Paragraph(cur_elem))
+    cur_segment.paras.append(Paragraph(cur_elem, text="\n" if style == "b" else ""))
     for i, child in enumerate(cur_elem):
         if isinstance(child, sfm.Element):
             if child.name == "v":
@@ -111,6 +111,8 @@ def update_segments(segments: List[Segment], translations: List[str]) -> None:
         lines = translation.splitlines()
         if len(lines) == len(segment.paras):
             for para, line in zip(reversed(segment.paras), reversed(lines)):
+                if len(para.child_indices) == 0:
+                    continue
                 for child_index in reversed(para.child_indices):
                     para.elem.pop(child_index)
                 if para.text.endswith("\n"):
@@ -121,7 +123,7 @@ def update_segments(segments: List[Segment], translations: List[str]) -> None:
                     para.elem.insert(insert_nl_index, sfm.Text("\n", parent=para.elem))
                 para.elem.insert(para.child_indices[0], sfm.Text(line, parent=para.elem))
         else:
-            first_para = segment.paras[0]
+            first_para = next(p for p in segment.paras if len(p.child_indices) > 0)
             for child_index in reversed(first_para.child_indices):
                 first_para.elem.pop(child_index)
 
