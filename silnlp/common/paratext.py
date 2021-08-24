@@ -249,7 +249,7 @@ def extract_term_renderings(project_folder: str, corpus_filename: Path) -> None:
     if not renderings_path.is_file():
         return
 
-    renderings_tree = etree.parse(str(renderings_path))
+    renderings_tree = etree.parse(str(renderings_path), parser=etree.XMLParser(encoding="utf-8"))
     rendering_elems: Dict[str, etree.Element] = {}
     for elem in renderings_tree.getroot().findall("TermRendering"):
         id = elem.get("Id")
