@@ -1,6 +1,9 @@
 import os
 import logging
 from pathlib import Path
+from s3path import S3Path
+import tempfile
+import boto3
 
 from dotenv import load_dotenv
 
@@ -13,6 +16,7 @@ class SilNlpEnv:
     def __init__(self):
         self.root_dir = Path.home() / ".silnlp"
         self.assets_dir = Path(__file__).parent.parent / "assets"
+        self.is_bucket = False
 
         # Root data directory
         self.set_data_dir()
@@ -48,9 +52,15 @@ class SilNlpEnv:
         else:
             self.mt_dir = self.data_dir / "MT"
         self.mt_corpora_dir = self.mt_dir / "corpora"
+
         self.mt_terms_dir = self.mt_dir / "terms"
         self.mt_scripture_dir = self.mt_dir / "scripture"
-        self.mt_experiments_dir = self.mt_dir / "experiments"
+        if self.is_bucket:
+            self.mt_experiments_dir = Path(tempfile.TemporaryDirectory().name)
+            self.mt_experiments_dir.mkdir()
+            self.final_experiment_dir: S3Path = self.mt_dir / "experiments"
+        else:
+            self.mt_experiments_dir = self.mt_dir / "experiments"
 
     def set_alignment_dir(self, ALIGN_DIR: Path = None):
         if ALIGN_DIR is not None:
@@ -64,6 +74,7 @@ class SilNlpEnv:
         self.align_experiments_dir = self.align_dir / "experiments"
 
     def resolve_data_dir(self) -> Path:
+        self.is_bucket = False
         sil_nlp_data_path = os.getenv("SIL_NLP_DATA_PATH")
         if sil_nlp_data_path is not None:
             temp_path = Path(sil_nlp_data_path)
@@ -71,16 +82,17 @@ class SilNlpEnv:
                 LOGGER.info(f"Using workspace: {sil_nlp_data_path} as per environment variable SIL_NLP_DATA_PATH.")
                 return Path(sil_nlp_data_path)
             else:
-                raise Exception(
-                    f"The path defined by environment variable SIL_NLP_DATA_PATH ({sil_nlp_data_path}) is not a directory."
-                )
-
-        aqua_path = Path("G:/Shared drives/AQUA")
-        if aqua_path.is_dir():
-            LOGGER.info(
-                f"Using workspace: {aqua_path}.  To change the workspace, set the environment variable SIL_NLP_DATA_PATH."
-            )
-            return aqua_path
+                temp_s3_path = S3Path(sil_nlp_data_path)
+                if temp_s3_path.is_dir():
+                    LOGGER.info(
+                        f"Using s3 workspace: {sil_nlp_data_path} as per environment variable SIL_NLP_DATA_PATH."
+                    )
+                    self.is_bucket = True
+                    return S3Path(sil_nlp_data_path)
+                else:
+                    raise Exception(
+                        f"The path defined by environment variable SIL_NLP_DATA_PATH ({sil_nlp_data_path}) is not a real or s3 directory."
+                    )
 
         gutenberg_path = Path("G:/Shared drives/Gutenberg")
         if gutenberg_path.is_dir():
@@ -89,11 +101,43 @@ class SilNlpEnv:
             )
             return gutenberg_path
 
-        data_root = self.root_dir / "data"
-        LOGGER.info(
-            f"Using workspace: {data_root}.  To change the workspace, set the environment variable SIL_NLP_DATA_PATH."
-        )
-        return data_root
+        s3root = S3Path("/aqua-ml-data")
+        if s3root.is_dir():
+            LOGGER.info(
+                f"Using s3 workspace workspace: {s3root}.  To change the workspace, set the environment variable SIL_NLP_DATA_PATH."
+            )
+            self.is_bucket = True
+            return s3root
+
+        raise FileExistsError("No valid path exists")
+
+    def copy_experiment_to_bucket(self, name: str):
+        if not self.is_bucket:
+            return
+        name = str(name)
+        if len(name) == 0:
+            raise Exception(
+                f"No experiment name is given.  Data still in the temp directory of {self.mt_experiments_dir}"
+            )
+        s3 = boto3.resource("s3")
+        data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
+        temp_folder = str(self.mt_experiments_dir / name)
+        # we don't need to delete all existing files - it will just overwrite them
+        len_exp_dir = len(str(self.mt_experiments_dir))
+        files_already_in_s3 = set()
+        for obj in data_bucket.object_versions.filter(Prefix="MT/experiments/" + name):
+            files_already_in_s3.add(str(obj.object_key))
+
+        for root, dirs, files in os.walk(temp_folder, topdown=False):
+            s3_dest_path = str("MT/experiments/" + root[len_exp_dir + 1 :].replace("\\", "/"))
+            for f in files:
+                source_file = os.path.join(root, f)
+                dest_file = s3_dest_path + "/" + f
+                if dest_file not in files_already_in_s3:
+                    LOGGER.debug(f"adding{dest_file} to s3 bucket")
+                    data_bucket.upload_file(source_file, dest_file)
+                else:
+                    LOGGER.debug(f"{dest_file} already in s3 bucket")
 
 
 SIL_NLP_ENV = SilNlpEnv()

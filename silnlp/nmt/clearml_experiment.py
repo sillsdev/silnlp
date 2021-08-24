@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 from .experiment import SILExperiment
 from .config import Config, get_git_revision_hash, get_mt_exp_dir
+from ..common.environment import SIL_NLP_ENV
 from clearml import Task
 import yaml
 

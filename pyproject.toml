@@ -51,6 +51,7 @@ XlsxWriter = "^1.4.3"
 python-Levenshtein = "^0.12.2"
 lxml = "^4.6.3"
 sil-machine = "^0.1.2"
+s3path = "^0.3.2"
 
 [tool.poetry.dev-dependencies]
 mypy = "^0.812"

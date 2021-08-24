@@ -2,6 +2,7 @@ import argparse
 import logging
 import os
 from dataclasses import dataclass
+from silnlp.common.environment import SIL_NLP_ENV
 from typing import Optional
 
 logging.basicConfig()
@@ -30,6 +31,7 @@ class SILExperiment:
     def preprocess(self):
         self.config.set_seed()
         self.config.preprocess(self.make_stats)
+        SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
 
     def train(self):
         os.environ["TF_DETERMINISTIC_OPS"] = "1"
@@ -43,9 +45,11 @@ class SILExperiment:
 
         print(f"=== Training ({self.name}) ===")
         runner.train(num_devices=self.num_devices, with_eval=True, checkpoint_path=checkpoint_path)
+        SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
         print("Training completed")
 
     def test(self):
+        SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
         pass
 
 
