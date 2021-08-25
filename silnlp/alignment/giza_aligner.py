@@ -2,10 +2,11 @@ import os
 import platform
 import subprocess
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Iterable, List, Optional, Set, TextIO, Tuple
+
+from machine.translation import SymmetrizationHeuristic, WordAlignmentMatrix
 
 from ..common.corpus import load_corpus, write_corpus
-from ..common.utils import check_dotnet, get_repo_dir
 from .aligner import Aligner
 from .lexicon import Lexicon
 
@@ -219,18 +220,21 @@ class GizaAligner(Aligner):
     def _symmetrize(
         self, direct_align_path: Path, inverse_align_path: Path, output_path: Path, sym_heuristic: str
     ) -> None:
-        check_dotnet()
-        args: List[str] = [
-            "dotnet",
-            "machine",
-            "symmetrize",
-            str(direct_align_path),
-            str(inverse_align_path),
-            str(output_path),
-            "-sh",
-            sym_heuristic,
-        ]
-        subprocess.run(args, cwd=get_repo_dir())
+        heuristic = SymmetrizationHeuristic[sym_heuristic.upper().replace("-", "_")]
+        with open(direct_align_path, "r", encoding="utf-8-sig") as direct_file, open(
+            inverse_align_path, "r", encoding="utf-8-sig"
+        ) as inverse_file, open(output_path, "w", encoding="utf-8", newline="\n") as out_file:
+            for matrix, inv_matrix in zip(_parse_giza_alignments(direct_file), _parse_giza_alignments(inverse_file)):
+                src_len = max(matrix.row_count, inv_matrix.column_count)
+                trg_len = max(matrix.column_count, inv_matrix.row_count)
+
+                matrix.resize(src_len, trg_len)
+                inv_matrix.resize(trg_len, src_len)
+
+                inv_matrix.transpose()
+                matrix.symmetrize_with(inv_matrix, heuristic)
+
+                out_file.write(str(matrix) + "\n")
 
     def _load_vocab(self, side: str) -> List[str]:
         vocab_path = self.model_dir / f"{side}.vcb"
@@ -257,6 +261,37 @@ class GizaAligner(Aligner):
                 if prob > self.threshold:
                     lexicon[src_word, trg_word] = prob
         return lexicon
+
+
+def _parse_giza_alignments(stream: TextIO) -> Iterable[WordAlignmentMatrix]:
+    line_index = 0
+    target: List[str] = []
+    for line in stream:
+        line = line.strip()
+        if line.startswith("#"):
+            line_index = 0
+        elif line_index == 1:
+            target = line.split()
+        elif line_index == 2:
+            start = line.find("({")
+            end = line.find("})")
+            src_index = -1
+            source: List[str] = []
+            pairs: Set[Tuple[int, int]] = set()
+            while start != -1 and end != -1:
+                if src_index > -1:
+                    trg_indices_str = line[start + 2 : end].strip()
+                    trg_indices = trg_indices_str.split(" ")
+                    for trg_index in trg_indices:
+                        pairs.add((src_index, int(trg_index) - 1))
+                start = line.find("({", start + 2)
+                if start >= 0:
+                    src_word = line[end + 3 : start]
+                    source.append(src_word)
+                    end = line.find("})", end + 2)
+                    src_index += 1
+            yield WordAlignmentMatrix(len(source), len(target), pairs)
+        line_index += 1
 
 
 class Ibm1GizaAligner(GizaAligner):

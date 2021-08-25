@@ -1437,14 +1437,31 @@ python-versions = "*"
 
 [[package]]
 name = "sil-machine"
-version = "0.1.2"
+version = "0.3.0"
 description = "A natural language processing library that is focused on providing tools for resource-poor languages."
 category = "main"
 optional = false
-python-versions = ">=3.7,<4.0"
+python-versions = ">=3.7,<3.11"
 
 [package.dependencies]
+numpy = ">=1.19.0,<2.0.0"
 regex = ">=2021.7.6,<2022.0.0"
+sil-thot = {version = ">=3.3.4,<4.0.0", optional = true, markers = "extra == \"thot\""}
+sortedcontainers = ">=2.4.0,<3.0.0"
+
+[package.extras]
+thot = ["sil-thot (>=3.3.4,<4.0.0)"]
+
+[[package]]
+name = "sil-thot"
+version = "3.3.4"
+description = "A toolkit for statistical word alignment and machine translation"
+category = "main"
+optional = false
+python-versions = ">=3.6, <4.0"
+
+[package.extras]
+test = ["pytest", "numpy"]
 
 [[package]]
 name = "six"
@@ -1453,6 +1470,14 @@ description = "Python 2 and 3 compatibility utilities"
 category = "main"
 optional = false
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*"
+
+[[package]]
+name = "sortedcontainers"
+version = "2.4.0"
+description = "Sorted Containers -- Sorted List, Sorted Dict, Sorted Set"
+category = "main"
+optional = false
+python-versions = "*"
 
 [[package]]
 name = "tensorboard"
@@ -1568,11 +1593,14 @@ python-versions = ">= 3.5"
 
 [[package]]
 name = "tqdm"
-version = "4.61.1"
+version = "4.62.2"
 description = "Fast, Extensible Progress Meter"
 category = "main"
 optional = false
 python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,>=2.7"
+
+[package.dependencies]
+colorama = {version = "*", markers = "platform_system == \"Windows\""}
 
 [package.extras]
 dev = ["py-make (>=0.1.0)", "twine", "wheel"]
@@ -1703,7 +1731,7 @@ testing = ["pytest (>=4.6)", "pytest-checkdocs (>=1.2.3)", "pytest-flake8", "pyt
 [metadata]
 lock-version = "1.1"
 python-versions = ">=3.7,<3.9"
-content-hash = "c512dac71239dbd3d7dfe4c0e59f677a388297be7bc75a2f4170d65832909287"
+content-hash = "5d6fbaa32fd90fa386e2a619a51dbcc96801a0223b0a374c8c7db55c41b83650"
 
 [metadata.files]
 absl-py = [
@@ -2109,6 +2137,8 @@ lxml = [
     {file = "lxml-4.6.3-cp27-cp27m-win_amd64.whl", hash = "sha256:8157dadbb09a34a6bd95a50690595e1fa0af1a99445e2744110e3dca7831c4ee"},
     {file = "lxml-4.6.3-cp27-cp27mu-manylinux1_i686.whl", hash = "sha256:7728e05c35412ba36d3e9795ae8995e3c86958179c9770e65558ec3fdfd3724f"},
     {file = "lxml-4.6.3-cp27-cp27mu-manylinux1_x86_64.whl", hash = "sha256:4bff24dfeea62f2e56f5bab929b4428ae6caba2d1eea0c2d6eb618e30a71e6d4"},
+    {file = "lxml-4.6.3-cp310-cp310-manylinux_2_12_i686.manylinux2010_i686.manylinux_2_24_i686.whl", hash = "sha256:64812391546a18896adaa86c77c59a4998f33c24788cadc35789e55b727a37f4"},
+    {file = "lxml-4.6.3-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.manylinux_2_24_x86_64.whl", hash = "sha256:c1a40c06fd5ba37ad39caa0b3144eb3772e813b5fb5b084198a985431c2f1e8d"},
     {file = "lxml-4.6.3-cp35-cp35m-manylinux1_i686.whl", hash = "sha256:74f7d8d439b18fa4c385f3f5dfd11144bb87c1da034a466c5b5577d23a1d9b51"},
     {file = "lxml-4.6.3-cp35-cp35m-manylinux1_x86_64.whl", hash = "sha256:f90ba11136bfdd25cae3951af8da2e95121c9b9b93727b1b896e3fa105b2f586"},
     {file = "lxml-4.6.3-cp35-cp35m-manylinux2010_i686.whl", hash = "sha256:4c61b3a0db43a1607d6264166b230438f85bfed02e8cff20c22e564d0faff354"},
@@ -2826,12 +2856,35 @@ sentencepiece = [
     {file = "sentencepiece-0.1.96.tar.gz", hash = "sha256:9bdf097d5bd1d8ce42dfee51f6ff05f5578b96e48c6f6006aa4eff69edfa3639"},
 ]
 sil-machine = [
-    {file = "sil-machine-0.1.2.tar.gz", hash = "sha256:60d331c7effc0f35a15949c027517b5cb87b2b28a0b2cd36535a191a6a9e8b67"},
-    {file = "sil_machine-0.1.2-py3-none-any.whl", hash = "sha256:3b10f3bb3a53364dc65808595be87e3bc8b6f5eebf7c9c70edf5fa105d64e557"},
+    {file = "sil-machine-0.3.0.tar.gz", hash = "sha256:9ffcfda9cc19330756a97676017d11c30e19e5a3cf0cec1fc8f09981d23de2bc"},
+    {file = "sil_machine-0.3.0-py3-none-any.whl", hash = "sha256:bff45f2f611e6f956bb3704d1a228fb596df11a0b959ead97c9860fd2b611431"},
+]
+sil-thot = [
+    {file = "sil-thot-3.3.4.tar.gz", hash = "sha256:40e3218df86d1e2c61f53ed2cb0b9e3b5a447cec7b6031c2642cca7ba39b1b0f"},
+    {file = "sil_thot-3.3.4-cp36-cp36m-macosx_10_13_x86_64.whl", hash = "sha256:320c536af3d0dc9b9209fb97d8c02e7f6be784d09dc846410bb2d608e2ca8205"},
+    {file = "sil_thot-3.3.4-cp36-cp36m-manylinux_2_12_x86_64.manylinux2010_x86_64.whl", hash = "sha256:5b7a9f2116c2f3b9e4fc36b27a1b8de1d87520d8dff777f00394bd6d0afb69c8"},
+    {file = "sil_thot-3.3.4-cp36-cp36m-win32.whl", hash = "sha256:d04c3771bb564d8e79bb4555ced6bffbe1c9cef849d97731c48ede54f66e6a0a"},
+    {file = "sil_thot-3.3.4-cp36-cp36m-win_amd64.whl", hash = "sha256:e193bc49958874192c62281a6707b08ba79f0a107bf780485074bfed779b7f02"},
+    {file = "sil_thot-3.3.4-cp37-cp37m-macosx_10_13_x86_64.whl", hash = "sha256:e442559fd9ef65530dec258c4620ee4fb998bd3db69767c63e7c10f5a0a49f2d"},
+    {file = "sil_thot-3.3.4-cp37-cp37m-manylinux_2_12_x86_64.manylinux2010_x86_64.whl", hash = "sha256:829e0b02a854e6d9d4dc9a534a9b100bc7329bc079a390046bca4a1d51847649"},
+    {file = "sil_thot-3.3.4-cp37-cp37m-win32.whl", hash = "sha256:678166672517fcea3a36dbfc02bcc656ddf38de068e4ce36c9428aac7fa0aff0"},
+    {file = "sil_thot-3.3.4-cp37-cp37m-win_amd64.whl", hash = "sha256:1702cc97c39e59b74e2d43797c8bed5657bcd16859a62bef5c04b9b271acfc2c"},
+    {file = "sil_thot-3.3.4-cp38-cp38-macosx_10_13_x86_64.whl", hash = "sha256:a4b60a92c35fcd371f9fd3e5ed96267b0f8a4b9acbcbd02fd40b549a5547f42a"},
+    {file = "sil_thot-3.3.4-cp38-cp38-manylinux_2_12_x86_64.manylinux2010_x86_64.whl", hash = "sha256:0ec5852956ae81d8c4fc2e2ce4fffea9577d89c536275248238bc2bf33891491"},
+    {file = "sil_thot-3.3.4-cp38-cp38-win32.whl", hash = "sha256:eec051972b9938c3940036860be5c5a0e7b92f11fb7fd8bc88886dcaaa31f46c"},
+    {file = "sil_thot-3.3.4-cp38-cp38-win_amd64.whl", hash = "sha256:7b9bf750cb69ba001c3261e8e976820f156b0c7a1569a504485f8b793f5288e8"},
+    {file = "sil_thot-3.3.4-cp39-cp39-macosx_10_13_x86_64.whl", hash = "sha256:03e299f946f7f5156702b00862db39e5793f185ca9bdc753b21b15e6fd3c991c"},
+    {file = "sil_thot-3.3.4-cp39-cp39-manylinux_2_12_x86_64.manylinux2010_x86_64.whl", hash = "sha256:4b6c9c12223fbad4bc5359dfc58de577706c828e4c96bb79f33889a7ec6cd727"},
+    {file = "sil_thot-3.3.4-cp39-cp39-win32.whl", hash = "sha256:44bd10c9891a81198abb401e1c5ef4b5726be7c624a344b3ccb6bc13f0f84642"},
+    {file = "sil_thot-3.3.4-cp39-cp39-win_amd64.whl", hash = "sha256:7ee411f53b2a167cf161011282932e702c67baaa5c45df840e359bbed1f82492"},
 ]
 six = [
     {file = "six-1.15.0-py2.py3-none-any.whl", hash = "sha256:8b74bedcbbbaca38ff6d7491d76f2b06b3592611af620f8426e82dddb04a5ced"},
     {file = "six-1.15.0.tar.gz", hash = "sha256:30639c035cdb23534cd4aa2dd52c3bf48f06e5f4a941509c8bafd8ce11080259"},
+]
+sortedcontainers = [
+    {file = "sortedcontainers-2.4.0-py2.py3-none-any.whl", hash = "sha256:a163dcaede0f1c021485e957a39245190e74249897e2ae4b2aa38595db237ee0"},
+    {file = "sortedcontainers-2.4.0.tar.gz", hash = "sha256:25caa5a06cc30b6b83d11423433f65d1f9d76c4c6a0c90e3379eaa43b9bfdb88"},
 ]
 tensorboard = [
     {file = "tensorboard-2.5.0-py3-none-any.whl", hash = "sha256:e167460085b6528956b33bab1c970c989cdce47a6616273880733f5e7bde452e"},
@@ -2923,8 +2976,8 @@ tornado = [
     {file = "tornado-6.1.tar.gz", hash = "sha256:33c6e81d7bd55b468d2e793517c909b139960b6c790a60b7991b9b6b76fb9791"},
 ]
 tqdm = [
-    {file = "tqdm-4.61.1-py2.py3-none-any.whl", hash = "sha256:aa0c29f03f298951ac6318f7c8ce584e48fa22ec26396e6411e43d038243bdb2"},
-    {file = "tqdm-4.61.1.tar.gz", hash = "sha256:24be966933e942be5f074c29755a95b315c69a91f839a29139bf26ffffe2d3fd"},
+    {file = "tqdm-4.62.2-py2.py3-none-any.whl", hash = "sha256:80aead664e6c1672c4ae20dc50e1cdc5e20eeff9b14aa23ecd426375b28be588"},
+    {file = "tqdm-4.62.2.tar.gz", hash = "sha256:a4d6d112e507ef98513ac119ead1159d286deab17dffedd96921412c2d236ff5"},
 ]
 traitlets = [
     {file = "traitlets-5.0.5-py3-none-any.whl", hash = "sha256:69ff3f9d5351f31a7ad80443c2674b7099df13cc41fc5fa6e2f6d3b0330b0426"},

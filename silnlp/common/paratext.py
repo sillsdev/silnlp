@@ -188,7 +188,6 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> Dict[st
 
 
 def extract_major_terms_per_language(iso: str) -> None:
-
     # extract Biblical Terms for the langauage
     terms_xml_path = SIL_NLP_ENV.pt_terms_dir / f"BiblicalTerms{iso.capitalize()}.xml"
     terms_tree = etree.parse(str(terms_xml_path))
@@ -216,7 +215,7 @@ def extract_major_terms_per_language(iso: str) -> None:
                 terms_glosses_file.write("\n")
 
 
-def _process_gloss_string(gloss_str: str) -> str:
+def _process_gloss_string(gloss_str: str) -> List[str]:
     match = re.match(r"\[(.+?)\]", gloss_str)
     if match is not None:
         gloss_str = match.group(1)

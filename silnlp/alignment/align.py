@@ -1,4 +1,5 @@
 import argparse
+import logging
 import shutil
 import time
 from datetime import timedelta
@@ -7,6 +8,8 @@ from typing import Dict, List, Optional
 
 from .config import ALIGNERS, get_aligner, get_aligner_name, get_all_book_paths, load_config
 from .utils import get_experiment_dirs, get_experiment_name
+
+LOGGER = logging.getLogger(__package__ + ".align")
 
 
 def align(aligner_ids: List[str], exp_dir: Path, book: Optional[str] = None) -> None:
@@ -33,9 +36,9 @@ def align(aligner_ids: List[str], exp_dir: Path, book: Optional[str] = None) -> 
             shutil.rmtree(aligner.model_dir)
         aligner_name = get_aligner_name(aligner_id)
         if book is None:
-            print(f"--- {aligner_name} ---")
+            LOGGER.info(f"Aligning using {aligner_name}")
         else:
-            print(f"--- {aligner_name} ({book}) ---")
+            LOGGER.info(f"Aligning {book} using {aligner_name}")
         method_alignments_file_path = exp_dir / f"alignments.{aligner_id}.txt"
 
         start = time.perf_counter()
@@ -44,7 +47,7 @@ def align(aligner_ids: List[str], exp_dir: Path, book: Optional[str] = None) -> 
         end = time.perf_counter()
         delta = timedelta(seconds=end - start)
         times[aligner_name] = str(delta)
-        print(f"Duration: {delta}")
+        LOGGER.info(f"{aligner_name} duration: {delta}")
 
     with open(durations_path, "w", encoding="utf-8") as out_file:
         out_file.write("Model,Duration\n")
@@ -74,7 +77,7 @@ def main() -> None:
     for exp_dir in get_experiment_dirs(args.experiments):
         exp_name = get_experiment_name(exp_dir)
         if not args.skip_align:
-            print(f"=== Aligning ({exp_name}) ===")
+            LOGGER.info(f"Aligning {exp_name}")
             config = load_config(exp_dir)
 
             if config["by_book"]:
@@ -85,7 +88,7 @@ def main() -> None:
                 align(aligner_ids, exp_dir)
 
         if not args.skip_extract_lexicon:
-            print(f"=== Extracting lexicons ({exp_name}) ===")
+            LOGGER.info(f"Extracting lexicons {exp_name}")
             extract_lexicons(aligner_ids, exp_dir)
 
 

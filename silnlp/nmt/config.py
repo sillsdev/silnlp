@@ -659,7 +659,7 @@ class Config:
         src_spp, trg_spp = self.create_sp_processors()
         train_count = self._build_corpora(src_spp, trg_spp, stats)
         if self.data["guided_alignment"]:
-            LOGGER.info("Generating train alignments...")
+            LOGGER.info("Generating train alignments")
             self._create_train_alignments(train_count)
         LOGGER.info("Preprocessing completed")
 

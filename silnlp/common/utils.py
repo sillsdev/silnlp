@@ -5,7 +5,7 @@ import subprocess
 from abc import ABC, abstractmethod
 from enum import Flag
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Set
 
 import numpy as np
 
@@ -51,9 +51,9 @@ def merge_dict(dict1: dict, dict2: dict) -> dict:
     return dict1
 
 
-def unique_list(seq: list) -> list:
+def unique_list(seq: List[str]) -> List[str]:
     # make the lists unique, keeping only the first element found
-    seen = set()
+    seen: Set[str] = set()
     seen_add = seen.add
     return [x for x in seq if not (x in seen or seen_add(x))]
 

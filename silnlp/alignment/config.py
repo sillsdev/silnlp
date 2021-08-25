@@ -14,22 +14,27 @@ from ..common.utils import merge_dict
 from ..common.wordnet_stemmer import WordNetStemmer
 from .aligner import Aligner
 from .clear_aligner import ClearAligner
+from .dotnet_machine_aligner import (
+    FastAlignDotnetMachineAligner,
+    HmmDotnetMachineAligner,
+    Ibm1DotnetMachineAligner,
+    Ibm2DotnetMachineAligner,
+    ParatextDotnetMachineAligner,
+)
 from .fast_align import FastAlign
 from .giza_aligner import HmmGizaAligner, Ibm1GizaAligner, Ibm2GizaAligner, Ibm3GizaAligner, Ibm4GizaAligner
-from .machine_aligner import (
-    FastAlignMachineAligner,
-    HmmMachineAligner,
-    Ibm1MachineAligner,
-    Ibm2MachineAligner,
-    ParatextMachineAligner,
-)
+from .machine_aligner import FastAlignMachineAligner, HmmMachineAligner, Ibm1MachineAligner, Ibm2MachineAligner
 
 ALIGNERS: Dict[str, Tuple[Type[Aligner], str]] = {
     "fast_align": (FastAlignMachineAligner, "FastAlign"),
     "ibm1": (Ibm1MachineAligner, "IBM-1"),
     "ibm2": (Ibm2MachineAligner, "IBM-2"),
     "hmm": (HmmMachineAligner, "HMM"),
-    "pt": (ParatextMachineAligner, "PT"),
+    "dotnet_fast_align": (FastAlignDotnetMachineAligner, ".NET-FastAlign"),
+    "dotnet_ibm1": (Ibm1DotnetMachineAligner, ".NET-IBM-1"),
+    "dotnet_ibm2": (Ibm2DotnetMachineAligner, ".NET-IBM-2"),
+    "dotnet_hmm": (HmmDotnetMachineAligner, ".NET-HMM"),
+    "dotnet_pt": (ParatextDotnetMachineAligner, ".NET-PT"),
     "giza_ibm1": (Ibm1GizaAligner, "Giza-IBM-1"),
     "giza_ibm2": (Ibm2GizaAligner, "Giza-IBM-2"),
     "giza_hmm": (HmmGizaAligner, "Giza-HMM"),
