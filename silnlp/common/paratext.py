@@ -83,7 +83,7 @@ def extract_project(project: str, include_texts: str, exclude_texts: str, includ
 
     parallel_corpus = ParallelTextCorpus(ref_corpus, project_corpus)
     segment_count = 0
-    with open(output_filename, "w", encoding="utf-8", newline="\n") as output_stream, parallel_corpus.get_segments(
+    with output_filename.open("w", encoding="utf-8", newline="\n") as output_stream, parallel_corpus.get_segments(
         all_source_segments=True
     ) as segments:
         cur_ref: Optional[Any] = None
@@ -157,9 +157,9 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> Dict[st
     terms_vrefs_path = get_terms_vrefs_path(list_name)
 
     references: Dict[str, List[VerseRef]] = {}
-    with open(terms_metadata_path, "w", encoding="utf-8", newline="\n") as terms_metadata_file, open(
-        terms_glosses_path, "w", encoding="utf-8", newline="\n"
-    ) as terms_glosses_file, open(terms_vrefs_path, "w", encoding="utf-8", newline="\n") as terms_vrefs_file:
+    with terms_metadata_path.open("w", encoding="utf-8", newline="\n") as terms_metadata_file, terms_glosses_path.open(
+        "w", encoding="utf-8", newline="\n"
+    ) as terms_glosses_file, terms_vrefs_path.open("w", encoding="utf-8", newline="\n") as terms_vrefs_file:
         terms_tree = etree.parse(str(terms_xml_path))
         for term_elem in terms_tree.getroot().findall("Term"):
             id = term_elem.get("Id")
@@ -203,11 +203,11 @@ def extract_major_terms_per_language(iso: str) -> None:
 
     terms_glosses_path = get_terms_glosses_path(list_name="Major", iso=iso)
 
-    with open(terms_glosses_path, "w", encoding="utf-8", newline="\n") as terms_glosses_file:
+    with terms_glosses_path.open("w", encoding="utf-8", newline="\n") as terms_glosses_file:
         # import major metadata to line up terms to it
-        major_metadata = open(
-            SIL_NLP_ENV.assets_dir / "Major-metadata.txt", "r", encoding="utf-8", newline="\n"
-        ).readlines()
+        major_metadata = (
+            (SIL_NLP_ENV.assets_dir / "Major-metadata.txt").open("r", encoding="utf-8", newline="\n").readlines()
+        )
         for line in major_metadata:
             id = line.split("\t")[0]
             if id in terms_dict:
@@ -231,7 +231,7 @@ def _process_gloss_string(gloss_str: str) -> str:
 
 def extract_terms_list_from_renderings(project: str, renderings_tree: etree.ElementTree) -> None:
     terms_metadata_path = get_terms_metadata_path(project)
-    with open(terms_metadata_path, "w", encoding="utf-8", newline="\n") as terms_metadata_file:
+    with terms_metadata_path.open("w", encoding="utf-8", newline="\n") as terms_metadata_file:
         for rendering_elem in renderings_tree.getroot().findall("TermRendering"):
             id = rendering_elem.get("Id")
             if id is None:
@@ -285,7 +285,7 @@ def extract_term_renderings(project_folder: str, corpus_filename: Path) -> None:
     terms_metadata_path = get_terms_metadata_path(list_name)
     terms_renderings_path = SIL_NLP_ENV.mt_terms_dir / f"{iso}-{project_folder}-{list_type}-renderings.txt"
     count = 0
-    with open(terms_renderings_path, "w", encoding="utf-8", newline="\n") as terms_renderings_file:
+    with terms_renderings_path.open("w", encoding="utf-8", newline="\n") as terms_renderings_file:
         for line in load_corpus(terms_metadata_path):
             id, _, _ = line.split("\t", maxsplit=3)
             rendering_elem = rendering_elems.get(id)

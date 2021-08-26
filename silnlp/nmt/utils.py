@@ -60,7 +60,7 @@ def get_best_model_dir(model_dir: Path) -> Tuple[Path, int]:
 
 
 def get_last_checkpoint(model_dir: Path) -> Tuple[Path, int]:
-    with open(model_dir / "checkpoint", "r", encoding="utf-8") as file:
+    with (model_dir / "checkpoint").open("r", encoding="utf-8") as file:
         checkpoint_config = yaml.safe_load(file)
         checkpoint_prefix = Path(checkpoint_config["model_checkpoint_path"])
         parts = checkpoint_prefix.name.split("-")

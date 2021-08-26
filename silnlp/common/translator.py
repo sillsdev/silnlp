@@ -168,7 +168,7 @@ class Translator(ABC):
         settings_tree = etree.parse(settings_path)
         src_iso = get_iso(settings_tree)
         book_path = get_book_path(src_project, book)
-        with open(book_path, mode="r", encoding="utf-8") as book_file:
+        with book_path.open(mode="r", encoding="utf-8") as book_file:
             doc = list(usfm.parser(book_file, stylesheet=usfm.relaxed_stylesheet, canonicalise_footnotes=False))
 
         segments = collect_segments(doc)
@@ -177,5 +177,5 @@ class Translator(ABC):
 
         update_segments(segments, translations)
 
-        with open(output_path, mode="w", encoding="utf-8", newline="\n") as output_file:
+        with output_path.open(mode="w", encoding="utf-8", newline="\n") as output_file:
             output_file.write(sfm.generate(doc))

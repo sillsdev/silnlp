@@ -1,11 +1,10 @@
-from silnlp.common.environment import SIL_NLP_ENV
-import logging
+from silnlp.nmt.clearml_experiment import SILExperimentCML
 
-LOGGER = logging.getLogger("silnlp")
-LOGGER.setLevel(logging.DEBUG)
-
-(SIL_NLP_ENV.mt_experiments_dir / "hello").mkdir()
-(SIL_NLP_ENV.mt_experiments_dir / "hello" / "exp").mkdir()
-(SIL_NLP_ENV.mt_experiments_dir / "hello" / "exp" / "world.txt").open("w+").write("hello world!")
-
-SIL_NLP_ENV.copy_experiment_to_bucket("hello")
+exp = SILExperimentCML(
+    name="parent-alignment",
+    make_stats=True,  # limited by stats_max_size to process only Bibles
+    mixed_precision=True,  # clearML GPU's can handle mixed precision
+    memory_growth=False,  # we can allocate all memory all the time
+    num_devices=-1,  # get all devices
+)
+exp.run()

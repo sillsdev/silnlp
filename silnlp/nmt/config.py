@@ -336,7 +336,7 @@ def get_terms_glosses_file_paths(terms_files: List[DataFile]) -> Set[Path]:
 
 def get_parallel_corpus_size(src_file_path: Path, trg_file_path: Path) -> int:
     count = 0
-    with open(src_file_path, "r", encoding="utf-8") as src_file, open(trg_file_path, "r", encoding="utf-8") as trg_file:
+    with src_file_path.open("r", encoding="utf-8") as src_file, trg_file_path.open("r", encoding="utf-8") as trg_file:
         for src_line, trg_line in zip(src_file, trg_file):
             src_line = src_line.strip()
             trg_line = trg_line.strip()
@@ -349,7 +349,7 @@ def convert_vocab(sp_vocab_path: Path, onmt_vocab_path: Path) -> None:
     special_tokens = [PADDING_TOKEN, START_OF_SENTENCE_TOKEN, END_OF_SENTENCE_TOKEN]
 
     vocab = Vocab(special_tokens)
-    with open(sp_vocab_path, "r", encoding="utf-8") as vocab_file:
+    with sp_vocab_path.open("r", encoding="utf-8") as vocab_file:
         for line in vocab_file:
             token = line.rstrip("\r\n")
             index = token.rindex("\t")
@@ -1158,7 +1158,7 @@ class Config:
         write_corpus(self.exp_dir / filename, ("" for _ in range(size)), append=True)
 
     def _open_append(self, filename: str) -> TextIO:
-        return open(self.exp_dir / filename, "a", encoding="utf-8", newline="\n")
+        return (self.exp_dir / filename).open("a", encoding="utf-8", newline="\n")
 
     def _write_basic_data_sets(
         self,
@@ -1520,7 +1520,7 @@ class Config:
                 elif child_tokens is not None and parent_vocab is not None:
                     onmt_delta_vocab_path = self.exp_dir / f"{prefix}-onmt-delta.vocab"
                     vocab_delta = child_tokens.difference(parent_vocab.words)
-                    with open(onmt_delta_vocab_path, "w", encoding="utf-8", newline="\n") as f:
+                    with onmt_delta_vocab_path.open("w", encoding="utf-8", newline="\n") as f:
                         [f.write(f"{token}\n") for token in vocab_delta]
 
         LOGGER.info(f"Building {side} vocabulary...")
@@ -1545,10 +1545,9 @@ class Config:
                 src_train_path = temp_dir / "train.src.align.txt"
                 trg_train_path = temp_dir / "train.trg.align.txt"
 
-                with open(src_align_path, "r", encoding="utf-8-sig") as src_in_file, open(
-                    trg_align_path, "r", encoding="utf-8-sig"
-                ) as trg_in_file, open(src_train_path, "w", encoding="utf-8", newline="\n") as src_out_file, open(
-                    trg_train_path, "w", encoding="utf-8", newline="\n"
+                with src_align_path.open("r", encoding="utf-8-sig") as src_in_file, trg_align_path.open(
+                    "r", encoding="utf-8-sig"
+                ) as trg_in_file, src_train_path.open("w", encoding="utf-8", newline="\n") as src_out_file, trg_train_path.open( "w", encoding="utf-8", newline="\n"
                 ) as trg_out_file:
                     i = 0
                     for src_sentence, trg_sentence in zip(src_in_file, trg_in_file):
@@ -1650,7 +1649,7 @@ def load_config(exp_name: str) -> Config:
     exp_dir = get_mt_exp_dir(exp_name)
     config_path = exp_dir / "config.yml"
 
-    with open(config_path, "r", encoding="utf-8") as file:
+    with config_path.open("r", encoding="utf-8") as file:
         config = yaml.safe_load(file)
 
     return Config(exp_dir, config)
@@ -1747,7 +1746,7 @@ def main() -> None:
         data_config["seed"] = args.seed
     if args.mirror:
         data_config["mirror"] = True
-    with open(config_path, "w", encoding="utf-8") as file:
+    with config_path.open("w", encoding="utf-8") as file:
         yaml.dump(config, file)
     LOGGER.info(f"Config file created: {config_path}")
 

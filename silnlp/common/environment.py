@@ -25,7 +25,7 @@ class SilNlpEnv:
         if DATA_DIR is None:
             DATA_DIR = self.resolve_data_dir()
 
-        self.data_dir = Path(DATA_DIR)
+        self.data_dir = pathify(DATA_DIR)
 
         # Paratext directories
         self.set_paratext_dir()
@@ -34,7 +34,7 @@ class SilNlpEnv:
 
     def set_paratext_dir(self, PT_DIR: Path = None):
         if PT_DIR is not None:
-            self.pt_dir = Path(PT_DIR)
+            self.pt_dir = pathify(PT_DIR)
         elif hasattr(self, "pt_dir"):
             # it is already initialized
             return
@@ -45,7 +45,7 @@ class SilNlpEnv:
 
     def set_machine_translation_dir(self, MT_DIR: Path = None):
         if MT_DIR is not None:
-            self.mt_dir = Path(MT_DIR)
+            self.mt_dir = pathify(MT_DIR)
         elif hasattr(self, "mt_dir"):
             # it is already initialized
             return
@@ -58,13 +58,12 @@ class SilNlpEnv:
         if self.is_bucket:
             self.mt_experiments_dir = Path(tempfile.TemporaryDirectory().name)
             self.mt_experiments_dir.mkdir()
-            self.final_experiment_dir: S3Path = self.mt_dir / "experiments"
         else:
             self.mt_experiments_dir = self.mt_dir / "experiments"
 
     def set_alignment_dir(self, ALIGN_DIR: Path = None):
         if ALIGN_DIR is not None:
-            self.align_dir = Path(ALIGN_DIR)
+            self.align_dir = pathify(ALIGN_DIR)
         elif hasattr(self, "align_dir"):
             # it is already initialized
             return
@@ -111,6 +110,27 @@ class SilNlpEnv:
 
         raise FileExistsError("No valid path exists")
 
+    def copy_experiment_from_bucket(self, name: str):
+        if not self.is_bucket:
+            return
+        name = str(name)
+        if len(name) == 0:
+            raise Exception(
+                f"No experiment name is given.  Data still in the temp directory of {self.mt_experiments_dir}"
+            )
+        s3 = boto3.resource("s3")
+        data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
+        len_aqua_path = len("MT/experiments/")
+        proj_name = name.split("/")[0]
+        for obj in data_bucket.object_versions.filter(Prefix="MT/experiments/" + proj_name):
+            rel_path = str(obj.object_key)[len_aqua_path:]
+            rel_folder = "/".join(rel_path.split("/")[:-1])
+            if (rel_folder == proj_name) or rel_folder.startswith(name):
+                # copy over project files and experiment files
+                temp_dest_path = self.mt_experiments_dir / rel_path
+                temp_dest_path.parent.mkdir(parents=True, exist_ok=True)
+                data_bucket.download_file(obj.object_key, str(temp_dest_path))
+
     def copy_experiment_to_bucket(self, name: str):
         if not self.is_bucket:
             return
@@ -138,6 +158,14 @@ class SilNlpEnv:
                     data_bucket.upload_file(source_file, dest_file)
                 else:
                     LOGGER.debug(f"{dest_file} already in s3 bucket")
+
+
+def pathify(path: Path) -> Path:
+    # If it does not act like a path, make it a path
+    if type(path) in [Path, S3Path]:
+        return path
+    else:
+        return Path(path)
 
 
 SIL_NLP_ENV = SilNlpEnv()

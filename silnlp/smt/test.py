@@ -80,7 +80,7 @@ def main() -> None:
 
     sent_len = len(sys)
     print("Test results")
-    with open(exp_dir / "scores.csv", "w", encoding="utf-8") as scores_file:
+    with (exp_dir / "scores.csv").open("w", encoding="utf-8") as scores_file:
         scores_file.write("src_iso,trg_iso,sent_len,scorer,score\n")
         for scorer in scorers:
             if scorer == "bleu":
