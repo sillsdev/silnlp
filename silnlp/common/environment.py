@@ -4,6 +4,7 @@ from pathlib import Path
 from s3path import S3Path
 import tempfile
 import boto3
+from typing import Iterable, List
 
 from dotenv import load_dotenv
 
@@ -158,6 +159,26 @@ class SilNlpEnv:
                     data_bucket.upload_file(source_file, dest_file)
                 else:
                     LOGGER.debug(f"{dest_file} already in s3 bucket")
+
+
+def download_if_s3_paths(paths: Iterable[S3Path]) -> List[Path]:
+    return_paths = []
+    s3_setup = False
+
+    for path in paths:
+        if type(path) is not S3Path:
+            return_paths.append(path)
+        else:
+            if not s3_setup:
+                temp_root = Path(tempfile.TemporaryDirectory().name)
+                temp_root.mkdir()
+                s3 = boto3.resource("s3")
+                data_bucket = s3.Bucket(str(SIL_NLP_ENV.data_dir).strip("\\/"))
+                s3_setup = True
+            temp_path = temp_root / path.name
+            data_bucket.download_file(path.key, str(temp_path))
+            return_paths.append(temp_path)
+    return return_paths
 
 
 def pathify(path: Path) -> Path:

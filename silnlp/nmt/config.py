@@ -40,7 +40,7 @@ from ..common.corpus import (
     split_parallel_corpus,
     write_corpus,
 )
-from ..common.environment import SIL_NLP_ENV
+from ..common.environment import SIL_NLP_ENV, download_if_s3_paths
 from ..common.utils import (
     DeleteRandomToken,
     NoiseMethod,
@@ -388,6 +388,8 @@ def build_vocab(
     normalization_path = Path(__file__).parent / f"{normalization}.tsv"
     file_paths = [fp for fp in file_paths]
     file_paths.sort()
+
+    file_paths = download_if_s3_paths(file_paths)
 
     sp.SentencePieceTrainer.Train(
         normalization_rule_tsv=normalization_path,
@@ -1182,8 +1184,8 @@ class Config:
         LOGGER.info(f"Preprocessing {src_file.path.stem} -> {trg_file.path.stem}")
         corpus_size = get_parallel_corpus_size(src_file.path, trg_file.path)
         with ExitStack() as stack:
-            input_src_file = stack.enter_context(open(src_file.path, "r", encoding="utf-8"))
-            input_trg_file = stack.enter_context(open(trg_file.path, "r", encoding="utf-8"))
+            input_src_file = stack.enter_context(src_file.path.open("r", encoding="utf-8"))
+            input_trg_file = stack.enter_context(trg_file.path.open("r", encoding="utf-8"))
             test_indices: Optional[Set[int]] = set()
             if pair.is_test:
                 test_size = pair.size if pair.test_size is None else pair.test_size
@@ -1547,7 +1549,10 @@ class Config:
 
                 with src_align_path.open("r", encoding="utf-8-sig") as src_in_file, trg_align_path.open(
                     "r", encoding="utf-8-sig"
-                ) as trg_in_file, src_train_path.open("w", encoding="utf-8", newline="\n") as src_out_file, trg_train_path.open( "w", encoding="utf-8", newline="\n"
+                ) as trg_in_file, src_train_path.open(
+                    "w", encoding="utf-8", newline="\n"
+                ) as src_out_file, trg_train_path.open(
+                    "w", encoding="utf-8", newline="\n"
                 ) as trg_out_file:
                     i = 0
                     for src_sentence, trg_sentence in zip(src_in_file, trg_in_file):
