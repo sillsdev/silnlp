@@ -1,4 +1,7 @@
-2021-07-23 15:24:12,924 - silnlp.nmt.config - INFO - Preprocessing es-es_ulb -> en-en_ulb
-2021-07-23 15:24:13,137 - silnlp.nmt.config - INFO - train size: 303, val size: 25, test size: 25, dict size: 0, terms train size: 0
-2021-07-23 15:24:13,138 - silnlp.nmt.config - INFO - Generating train alignments...
-2021-07-23 15:24:14,600 - silnlp.nmt.config - INFO - Preprocessing completed
+2021-09-02 17:21:33,861 - silnlp.nmt.config - INFO - Preprocessing es-es_ulb -> en-en_ulb
+2021-09-02 17:21:34,102 - silnlp.nmt.config - INFO - train size: 303, val size: 25, test size: 25, dict size: 0, terms train size: 0
+2021-09-02 17:21:34,103 - silnlp.nmt.config - INFO - Generating train alignments
+2021-09-02 17:21:34,103 - silnlp.alignment.machine_aligner - INFO - Training model
+2021-09-02 17:21:34,416 - silnlp.alignment.machine_aligner - INFO - Loading model
+2021-09-02 17:21:34,487 - silnlp.alignment.machine_aligner - INFO - Aligning corpus
+2021-09-02 17:21:34,588 - silnlp.nmt.config - INFO - Preprocessing completed
