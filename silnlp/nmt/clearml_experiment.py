@@ -23,7 +23,7 @@ class SILExperimentCML(SILExperiment):
         self.task = Task.init(project_name="LangTech_" + project, task_name=exp_name)
 
         self.task.set_base_docker(
-            docker_image="silintlai/machine-silnlp:master-latest",
+            docker_cmd="silintlai/machine-silnlp:master-latest",
         )
         self.task.execute_remotely(queue_name="langtech_40gb")
 
