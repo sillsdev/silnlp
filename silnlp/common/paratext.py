@@ -160,30 +160,31 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> Dict[st
     with open(terms_metadata_path, "w", encoding="utf-8", newline="\n") as terms_metadata_file, open(
         terms_glosses_path, "w", encoding="utf-8", newline="\n"
     ) as terms_glosses_file, open(terms_vrefs_path, "w", encoding="utf-8", newline="\n") as terms_vrefs_file:
-        terms_tree = etree.parse(str(terms_xml_path))
-        for term_elem in terms_tree.getroot().findall("Term"):
-            id = term_elem.get("Id")
-            if id is None:
-                continue
-            id = escape_id(id)
-            cat = term_elem.findtext("Category", "?")
-            if cat == "":
-                cat = "?"
-            domain = term_elem.findtext("Domain", "?")
-            if domain == "":
-                domain = "?"
-            gloss_str = term_elem.findtext("Gloss", "")
-            refs_elem = term_elem.find("References")
-            refs_list: List[VerseRef] = []
-            if refs_elem is not None:
-                for verse_elem in refs_elem.findall("Verse"):
-                    bbbcccvvv = int(verse_elem.text[:9])
-                    refs_list.append(VerseRef.from_bbbcccvvv(bbbcccvvv))
-                references[id] = refs_list
-            glosses = _process_gloss_string(gloss_str)
-            terms_metadata_file.write(f"{id}\t{cat}\t{domain}\n")
-            terms_glosses_file.write("\t".join(glosses) + "\n")
-            terms_vrefs_file.write("\t".join(str(vref) for vref in refs_list) + "\n")
+        if os.path.exists(terms_xml_path):
+            terms_tree = etree.parse(str(terms_xml_path))
+            for term_elem in terms_tree.getroot().findall("Term"):
+                id = term_elem.get("Id")
+                if id is None:
+                    continue
+                id = escape_id(id)
+                cat = term_elem.findtext("Category", "?")
+                if cat == "":
+                    cat = "?"
+                domain = term_elem.findtext("Domain", "?")
+                if domain == "":
+                    domain = "?"
+                gloss_str = term_elem.findtext("Gloss", "")
+                refs_elem = term_elem.find("References")
+                refs_list: List[VerseRef] = []
+                if refs_elem is not None:
+                    for verse_elem in refs_elem.findall("Verse"):
+                        bbbcccvvv = int(verse_elem.text[:9])
+                        refs_list.append(VerseRef.from_bbbcccvvv(bbbcccvvv))
+                    references[id] = refs_list
+                glosses = _process_gloss_string(gloss_str)
+                terms_metadata_file.write(f"{id}\t{cat}\t{domain}\n")
+                terms_glosses_file.write("\t".join(glosses) + "\n")
+                terms_vrefs_file.write("\t".join(str(vref) for vref in refs_list) + "\n")
     return references
 
 
