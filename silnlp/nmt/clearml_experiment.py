@@ -78,7 +78,6 @@ def main() -> None:
         make_stats=True,  # limited by stats_max_size to process only Bibles
         mixed_precision=True,  # clearML GPU's can handle mixed precision
         memory_growth=False,  # We will be sharing GPU's - let's not get greedy
-        num_devices=-1,  # get all devices
     )
     exp.run()
 

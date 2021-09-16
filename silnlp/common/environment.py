@@ -128,6 +128,7 @@ class SilNlpEnv:
             rel_folder = "/".join(rel_path.split("/")[:-1])
             if (rel_folder == proj_name) or rel_folder.startswith(name):
                 # copy over project files and experiment files
+                LOGGER.info("Copying from bucket to temp drive: " + rel_path)
                 temp_dest_path = self.mt_experiments_dir / rel_path
                 temp_dest_path.parent.mkdir(parents=True, exist_ok=True)
                 data_bucket.download_file(obj.object_key, str(temp_dest_path))
