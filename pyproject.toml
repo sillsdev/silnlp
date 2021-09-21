@@ -51,6 +51,7 @@ XlsxWriter = "^1.4.3"
 python-Levenshtein = "^0.12.2"
 lxml = "^4.6.3"
 tqdm = "^4.62.2"
+s3path = "^0.3.2"
 sil-machine = {extras = ["thot"], version = "^0.3.0"}
 
 [tool.poetry.dev-dependencies]

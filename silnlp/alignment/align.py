@@ -19,7 +19,7 @@ def align(aligner_ids: List[str], exp_dir: Path, book: Optional[str] = None) -> 
     durations_path = exp_dir / "duration.csv"
     times: Dict[str, str] = {}
     if durations_path.is_file():
-        with open(durations_path, "r", encoding="utf-8") as in_file:
+        with durations_path.open("r", encoding="utf-8") as in_file:
             first_line = True
             for line in in_file:
                 if first_line:
@@ -49,7 +49,7 @@ def align(aligner_ids: List[str], exp_dir: Path, book: Optional[str] = None) -> 
         times[aligner_name] = str(delta)
         LOGGER.info(f"{aligner_name} duration: {delta}")
 
-    with open(durations_path, "w", encoding="utf-8") as out_file:
+    with durations_path.open("w", encoding="utf-8") as out_file:
         out_file.write("Model,Duration\n")
         for aligner_name, delta_str in times.items():
             out_file.write(f"{aligner_name},{delta_str}\n")

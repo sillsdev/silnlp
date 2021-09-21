@@ -54,9 +54,9 @@ def check_sent_pair(src_sent: str, trg_sent: str) -> bool:
 
 
 def split_and_filter_tsv(input_path: Path, src_path: Path, trg_path: Path):
-    with open(input_path, "r", encoding="utf-8") as input_file, open(
-        src_path, "w", encoding="utf-8"
-    ) as src_output_file, open(trg_path, "w", encoding="utf-8") as trg_output_file:
+    with input_path.open("r", encoding="utf-8") as input_file, src_path.open(
+        "w", encoding="utf-8"
+    ) as src_output_file, trg_path.open("w", encoding="utf-8") as trg_output_file:
         for sentences in input_file:
             src_sent, trg_sent = sentences.strip().split("\t")
             if check_sent_pair(src_sent, trg_sent):
@@ -65,10 +65,10 @@ def split_and_filter_tsv(input_path: Path, src_path: Path, trg_path: Path):
 
 
 def filter_src_trg_files(src_in_path: Path, trg_in_path: Path, src_out_path: Path, trg_out_path: Path):
-    with open(src_in_path, "r", encoding="utf-8") as src_file, open(
-        trg_in_path, "r", encoding="utf-8"
-    ) as trg_file, open(src_out_path, "w", encoding="utf-8") as tmp_src_file, open(
-        trg_out_path, "w", encoding="utf-8"
+    with src_in_path.open("r", encoding="utf-8") as src_file, trg_in_path.open(
+        "r", encoding="utf-8"
+    ) as trg_file, src_out_path.open("w", encoding="utf-8") as tmp_src_file, trg_out_path.open(
+        "w", encoding="utf-8"
     ) as tmp_trg_file:
         for src_sent, trg_sent in zip(src_file, trg_file):
             if check_sent_pair(src_sent, trg_sent):
@@ -77,9 +77,9 @@ def filter_src_trg_files(src_in_path: Path, trg_in_path: Path, src_out_path: Pat
 
 
 def write_scores_file(scores_out_path: Path, scores: List[float], src_path: Path, trg_path: Path):
-    with open(src_path, "r", encoding="utf-8") as src_in, open(trg_path, "r", encoding="utf-8") as trg_in, open(
-        scores_out_path, "w", encoding="utf-8"
-    ) as scores_out:
+    with src_path.open("r", encoding="utf-8") as src_in, trg_path.open(
+        "r", encoding="utf-8"
+    ) as trg_in, scores_out_path.open("w", encoding="utf-8") as scores_out:
         for src_sent, trg_sent, score in zip(src_in, trg_in, scores):
             scores_out.write(f"{src_sent.strip()}\t{trg_sent.strip()}\t{score:.3f}\n")
 
@@ -139,7 +139,7 @@ def main() -> None:
 
         # Write the filtered results
         count: int = 0
-        with open(src_path, "r", encoding="utf-8") as src_in, open(trg_path, "r", encoding="utf-8") as trg_in, open(
+        with src_path.open("r", encoding="utf-8") as src_in, trg_path.open("r", encoding="utf-8") as trg_in, open(
             args.src_output, "w", encoding="utf-8"
         ) as src_out, open(args.trg_output, "w", encoding="utf-8") as trg_out:
             for src_sent, trg_sent, score in zip(src_in, trg_in, scores):

@@ -199,7 +199,7 @@ class GizaAligner(Aligner):
     def _merge_alignment_parts(self, model_prefix: Path, output_file_path: Path) -> None:
         alignments: List[Tuple[int, str]] = []
         for input_file_path in model_prefix.parent.glob(model_prefix.name + f".A{self.file_suffix}.part*"):
-            with open(input_file_path, "r", encoding="utf-8") as in_file:
+            with input_file_path.open("r", encoding="utf-8") as in_file:
                 line_index = 0
                 segment_index = 0
                 cur_alignment: str = ""
