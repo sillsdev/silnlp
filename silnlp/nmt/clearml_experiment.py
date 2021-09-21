@@ -1,12 +1,13 @@
 import argparse
-from dataclasses import dataclass
 import shutil
-from clearml import Task
-import yaml
+from dataclasses import dataclass
 
-from .experiment import SILExperiment
-from .config import Config, get_git_revision_hash, get_mt_exp_dir
+import yaml
+from clearml import Task
+
 from ..common.environment import SIL_NLP_ENV
+from .config import Config, get_git_revision_hash, get_mt_exp_dir
+from .experiment import SILExperiment
 
 
 @dataclass

@@ -34,6 +34,7 @@ class SILExperiment:
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
 
     def train(self):
+        os.system("nvidia-smi")
         os.environ["TF_DETERMINISTIC_OPS"] = "1"
 
         runner = create_runner(self.config, mixed_precision=self.mixed_precision, memory_growth=self.memory_growth)

@@ -205,9 +205,8 @@ def extract_major_terms_per_language(iso: str) -> None:
 
     with terms_glosses_path.open("w", encoding="utf-8", newline="\n") as terms_glosses_file:
         # import major metadata to line up terms to it
-        major_metadata = (
-            (SIL_NLP_ENV.assets_dir / "Major-metadata.txt").open("r", encoding="utf-8", newline="\n").readlines()
-        )
+        with (SIL_NLP_ENV.assets_dir / "Major-metadata.txt").open("r", encoding="utf-8", newline="\n") as mm_file:
+            major_metadata = mm_file.readlines()
         for line in major_metadata:
             id = line.split("\t")[0]
             if id in terms_dict:

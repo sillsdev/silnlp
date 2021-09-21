@@ -85,7 +85,8 @@ class FastAlign(Aligner):
         self.model_dir.mkdir(exist_ok=True)
         align_input_path = self.model_dir / "align-input.txt"
 
-        with src_file_path.open("r", encoding="utf-8") as src_tok_output_file, trg_file_path."r".open( encoding="utf-8"
+        with src_file_path.open("r", encoding="utf-8") as src_tok_output_file, trg_file_path.open(
+            "r", encoding="utf-8"
         ) as trg_tok_output_file, align_input_path.open("w", encoding="utf-8", newline="\n") as align_input_file:
             for src_sentence, trg_sentence in zip(src_tok_output_file, trg_tok_output_file):
                 align_input_file.write(f"{src_sentence.strip()} ||| {trg_sentence.strip()}\n")

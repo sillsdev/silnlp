@@ -1,12 +1,12 @@
-import os
 import logging
-from pathlib import Path
-from s3path import S3Path
+import os
 import tempfile
-import boto3
+from pathlib import Path
 from typing import Iterable, List
 
+import boto3
 from dotenv import load_dotenv
+from s3path import S3Path
 
 load_dotenv()
 
