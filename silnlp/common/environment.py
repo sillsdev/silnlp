@@ -111,7 +111,7 @@ class SilNlpEnv:
 
         raise FileExistsError("No valid path exists")
 
-    def copy_experiment_from_bucket(self, name: str):
+    def copy_experiment_from_bucket(self, name: str, extensions: Tuple[str] = ("")):
         if not self.is_bucket:
             return
         name = str(name)
@@ -123,17 +123,22 @@ class SilNlpEnv:
         data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
         len_aqua_path = len("MT/experiments/")
         proj_name = name.split("/")[0]
-        for obj in data_bucket.object_versions.filter(Prefix="MT/experiments/" + proj_name):
+        objs = list(data_bucket.object_versions.filter(Prefix="MT/experiments/" + proj_name))
+        if len(objs) == 0:
+            LOGGER.info("No files found in the bucket under: MT/experiments/" + proj_name)
+            return
+        for obj in objs:
             rel_path = str(obj.object_key)[len_aqua_path:]
-            rel_folder = "/".join(rel_path.split("/")[:-1])
-            if (rel_folder == proj_name) or rel_folder.startswith(name):
-                # copy over project files and experiment files
-                LOGGER.info("Copying from bucket to temp drive: " + rel_path)
-                temp_dest_path = self.mt_experiments_dir / rel_path
-                temp_dest_path.parent.mkdir(parents=True, exist_ok=True)
-                data_bucket.download_file(obj.object_key, str(temp_dest_path))
+            if rel_path.endswith(extensions):
+                rel_folder = "/".join(rel_path.split("/")[:-1])
+                if (rel_folder == proj_name) or rel_folder.startswith(name):
+                    # copy over project files and experiment files
+                    LOGGER.info("Copying from bucket to temp drive: " + rel_path)
+                    temp_dest_path = self.mt_experiments_dir / rel_path
+                    temp_dest_path.parent.mkdir(parents=True, exist_ok=True)
+                    data_bucket.download_file(obj.object_key, str(temp_dest_path))
 
-    def copy_experiment_to_bucket(self, name: str, extensions: Tuple[str] = ("")):
+    def copy_experiment_to_bucket(self, name: str):
         if not self.is_bucket:
             return
         name = str(name)
@@ -155,9 +160,7 @@ class SilNlpEnv:
             for f in files:
                 source_file = os.path.join(root, f)
                 dest_file = s3_dest_path + "/" + f
-                if not dest_file.endswith(extensions):
-                    LOGGER.debug(f"{dest_file} does not end with {extensions}")
-                elif dest_file in files_already_in_s3:
+                if dest_file in files_already_in_s3:
                     LOGGER.debug(f"{dest_file} already in s3 bucket")
                 else:
                     LOGGER.debug(f"adding{dest_file} to s3 bucket")

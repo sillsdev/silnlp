@@ -588,7 +588,7 @@ class Config:
         parent: Optional[str] = self.data.get("parent")
         self.parent_config: Optional[Config] = None
         if parent is not None:
-            SIL_NLP_ENV.copy_experiment_to_bucket(parent, extensions=("config.yml", ".model", ".vocab"))
+            SIL_NLP_ENV.copy_experiment_from_bucket(parent, extensions=("config.yml", ".model", ".vocab"))
             self.parent_config = load_config(parent)
             freeze_layers: Optional[List[str]] = self.parent_config.params.get("freeze_layers")
             # do not freeze any word embeddings layer, because we will update them when we create the parent model
@@ -1707,7 +1707,7 @@ def main() -> None:
     data_config["corpus_pairs"] = corpus_pairs
     if args.parent is not None:
         data_config["parent"] = args.parent
-        SIL_NLP_ENV.copy_experiment_to_bucket(args.parent, extensions=("config.yml"))
+        SIL_NLP_ENV.copy_experiment_from_bucket(args.parent, extensions=("config.yml"))
         parent_config = load_config(args.parent)
         for key in [
             "share_vocab",
