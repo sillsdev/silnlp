@@ -58,6 +58,6 @@ sil-machine = {extras = ["thot"], version = "^0.3.0"}
 mypy = "^0.812"
 black = "^20.8b1"
 flake8 = "^3.9.0"
-ipykernel = "^5.5.3"
+ipykernel = "^6.4.1"
 pylint = "^2.8.3"
 pytest = "^6.2.4"

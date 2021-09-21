@@ -2,7 +2,7 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import Iterable, List
+from typing import Iterable, List, Tuple
 
 import boto3
 from dotenv import load_dotenv
@@ -133,7 +133,7 @@ class SilNlpEnv:
                 temp_dest_path.parent.mkdir(parents=True, exist_ok=True)
                 data_bucket.download_file(obj.object_key, str(temp_dest_path))
 
-    def copy_experiment_to_bucket(self, name: str):
+    def copy_experiment_to_bucket(self, name: str, extensions: Tuple[str] = ("")):
         if not self.is_bucket:
             return
         name = str(name)
@@ -155,11 +155,13 @@ class SilNlpEnv:
             for f in files:
                 source_file = os.path.join(root, f)
                 dest_file = s3_dest_path + "/" + f
-                if dest_file not in files_already_in_s3:
+                if not dest_file.endswith(extensions):
+                    LOGGER.debug(f"{dest_file} does not end with {extensions}")
+                elif dest_file in files_already_in_s3:
+                    LOGGER.debug(f"{dest_file} already in s3 bucket")
+                else:
                     LOGGER.debug(f"adding{dest_file} to s3 bucket")
                     data_bucket.upload_file(source_file, dest_file)
-                else:
-                    LOGGER.debug(f"{dest_file} already in s3 bucket")
 
 
 def download_if_s3_paths(paths: Iterable[S3Path]) -> List[Path]:
@@ -180,6 +182,19 @@ def download_if_s3_paths(paths: Iterable[S3Path]) -> List[Path]:
             data_bucket.download_file(path.key, str(temp_path))
             return_paths.append(temp_path)
     return return_paths
+
+
+def download_if_s3_path(path: S3Path) -> Path:
+    if type(path) is not S3Path:
+        return path
+    else:
+        temp_root = Path(tempfile.TemporaryDirectory().name)
+        temp_root.mkdir()
+        s3 = boto3.resource("s3")
+        data_bucket = s3.Bucket(str(SIL_NLP_ENV.data_dir).strip("\\/"))
+        temp_path = temp_root / path.name
+        data_bucket.download_file(path.key, str(temp_path))
+        return temp_path
 
 
 def pathify(path: Path) -> Path:
