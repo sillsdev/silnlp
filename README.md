@@ -86,3 +86,24 @@ Lastly, setup PyCharm to use the Black code formatter by following the instructi
     "python.linting.pylintEnabled": true,
     "editor.formatOnSave": true,
 ```
+
+## S3 bucket setup
+We use the /aqua-ml-data bucket for storing our experiment data.  Here is some workspace setup to enable a decent workflow.
+
+### install and setup aws
+The following will allow the boto3 and S3Path libraries in Python correctly talk to the S3 bucket.
+* Install the aws-cli from: https://aws.amazon.com/cli/
+* In cmd, type: `aws configure` and enter in the secret and keys for /aqua-ml-data
+* This will store the data in `~\.aws`
+
+### install and setup rclone
+The following will mount /aqua-ml-data on your S drive and allow you to explore, read and write.
+* Download rclone from: https://rclone.org/downloads/
+* Unzip to your desktop (or some convient location)
+* Take the `scripts/rclone/rclone.conf` file in this repo and copy it to `~\AppData\Roaming\rclone` (creating folders if necessary) 
+* Take the `scripts/rclone/mount_to_s.bat` file in this repo and copy it to the folder that contains the unzipped rclone.
+* Double-click the bat file
+
+### setup environment variable
+The following will auto-select the bucket for local silnlp operations
+* Set the environment variable SIL_NLP_DATA_PATH to /aqua-ml-data

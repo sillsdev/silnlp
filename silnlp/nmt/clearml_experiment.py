@@ -12,6 +12,9 @@ from .experiment import SILExperiment
 
 @dataclass
 class SILExperimentCML(SILExperiment):
+    queue_name: str = "langtech_40gb"
+    remote_execution: bool = True
+
     def __post_init__(self):
 
         name_parts = self.name.split("/")
@@ -26,7 +29,8 @@ class SILExperimentCML(SILExperiment):
         self.task.set_base_docker(
             docker_cmd="silintlai/machine-silnlp:master-latest",
         )
-        self.task.execute_remotely(queue_name="langtech_40gb")
+        if self.remote_execution:
+            self.task.execute_remotely(queue_name=self.queue_name)
 
         # after init, "project name" and "task name" could be different. Read them again and update.
         self.clearml_project_folder: str = self.task.get_project_name()

@@ -40,7 +40,7 @@ from ..common.corpus import (
     split_parallel_corpus,
     write_corpus,
 )
-from ..common.environment import SIL_NLP_ENV, download_if_s3_paths
+from ..common.environment import SIL_NLP_ENV, download_if_s3_paths, download_if_s3_path
 from ..common.utils import (
     DeleteRandomToken,
     NoiseMethod,
@@ -588,6 +588,7 @@ class Config:
         parent: Optional[str] = self.data.get("parent")
         self.parent_config: Optional[Config] = None
         if parent is not None:
+            SIL_NLP_ENV.copy_experiment_from_bucket(parent, extensions=("config.yml", ".model", ".vocab"))
             self.parent_config = load_config(parent)
             freeze_layers: Optional[List[str]] = self.parent_config.params.get("freeze_layers")
             # do not freeze any word embeddings layer, because we will update them when we create the parent model
@@ -1471,6 +1472,7 @@ class Config:
             else CheckpointType.LAST
         )
         checkpoint_path, step = get_checkpoint_path(model_dir, parent_model_to_use)
+        checkpoint_path = download_if_s3_path(checkpoint_path)
         parent_runner = create_runner(self.parent_config)
         parent_runner.update_vocab(
             str(self.exp_dir / "parent"),
@@ -1705,6 +1707,7 @@ def main() -> None:
     data_config["corpus_pairs"] = corpus_pairs
     if args.parent is not None:
         data_config["parent"] = args.parent
+        SIL_NLP_ENV.copy_experiment_from_bucket(args.parent, extensions=("config.yml"))
         parent_config = load_config(args.parent)
         for key in [
             "share_vocab",
