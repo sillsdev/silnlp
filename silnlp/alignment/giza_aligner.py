@@ -59,13 +59,21 @@ class GizaAligner(Aligner):
         src_trg_prefix = src_trg_snt_file_path.with_suffix("")
         src_trg_output_prefix = src_trg_prefix.parent / (src_trg_prefix.name + "_invswm")
         self._execute_mgiza(src_trg_snt_file_path, src_trg_output_prefix)
-        src_trg_alignments_file_path = src_trg_output_prefix.with_suffix(f".A{self.file_suffix}.all")
-        self._merge_alignment_parts(src_trg_output_prefix, src_trg_alignments_file_path)
+
+        src_trg_alignments_file_path = src_trg_output_prefix.with_suffix(f".A{self.file_suffix}")
+        if src_trg_alignments_file_path.is_file():
+            src_trg_alignments_file_path.rename(src_trg_output_prefix.with_suffix(f".A{self.file_suffix}.all"))
+        else:
+            self._merge_alignment_parts(src_trg_output_prefix, src_trg_alignments_file_path)
 
         trg_src_output_prefix = src_trg_prefix.parent / (src_trg_prefix.name + "_swm")
         self._execute_mgiza(trg_src_snt_file_path, trg_src_output_prefix)
-        trg_src_alignments_file_path = trg_src_output_prefix.with_suffix(f".A{self.file_suffix}.all")
-        self._merge_alignment_parts(trg_src_output_prefix, trg_src_alignments_file_path)
+
+        trg_src_alignments_file_path = trg_src_output_prefix.with_suffix(f".A{self.file_suffix}")
+        if trg_src_alignments_file_path.is_file():
+            trg_src_alignments_file_path.rename(trg_src_output_prefix.with_suffix(f".A{self.file_suffix}.all"))
+        else:
+            self._merge_alignment_parts(trg_src_output_prefix, trg_src_alignments_file_path)
 
     def align(self, out_file_path: Path, sym_heuristic: str = "grow-diag-final-and") -> None:
         src_trg_alignments_file_path = self.model_dir / f"src_trg_invswm.A{self.file_suffix}.all"
@@ -281,7 +289,7 @@ def _parse_giza_alignments(stream: TextIO) -> Iterable[WordAlignmentMatrix]:
             while start != -1 and end != -1:
                 if src_index > -1:
                     trg_indices_str = line[start + 2 : end].strip()
-                    trg_indices = trg_indices_str.split(" ")
+                    trg_indices = trg_indices_str.split()
                     for trg_index in trg_indices:
                         pairs.add((src_index, int(trg_index) - 1))
                 start = line.find("({", start + 2)
@@ -290,7 +298,7 @@ def _parse_giza_alignments(stream: TextIO) -> Iterable[WordAlignmentMatrix]:
                     source.append(src_word)
                     end = line.find("})", end + 2)
                     src_index += 1
-            yield WordAlignmentMatrix(len(source), len(target), pairs)
+            yield WordAlignmentMatrix.from_word_pairs(len(source), len(target), pairs)
         line_index += 1
 
 
