@@ -1,5 +1,6 @@
 import os
 import tempfile
+import matplotlib.pyplot as plt
 from pathlib import Path
 
 from silnlp.alignment.machine_aligner import FastAlignMachineAligner
@@ -16,11 +17,15 @@ def align_set(src_input_path: Path, trg_input_path: Path, output_dir: Path):
     output_dir.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory() as td:
         temp_dir = Path(td)
+        src_ranged_path = output_dir / src_input_path.name
+        trg_ranged_path = output_dir / trg_input_path.name
+        account_for_ranges(src_input_path, trg_input_path, src_ranged_path, trg_ranged_path)
+
         src_tok_output_path = temp_dir / "tokenize-src-output.txt"
         trg_tok_output_path = temp_dir / "tokenize-trg-output.txt"
 
-        tokenize_corpus(src_input_path, src_tok_output_path)
-        tokenize_corpus(trg_input_path, trg_tok_output_path)
+        tokenize_corpus(src_ranged_path, src_tok_output_path)
+        tokenize_corpus(trg_ranged_path, trg_tok_output_path)
 
         fast_align = FastAlignMachineAligner(temp_dir)
 
@@ -31,20 +36,23 @@ def align_set(src_input_path: Path, trg_input_path: Path, output_dir: Path):
         direct_lexicon = fast_align.get_direct_lexicon(include_special_tokens=True)
         inverse_lexicon = fast_align.get_inverse_lexicon(include_special_tokens=True)
 
-    scores = []
-    with src_tok_output_path.open("r", encoding="utf-8") as src_tok_output_file, trg_tok_output_path.open(
-        "r", encoding="utf-8"
-    ) as trg_tok_output_file, sym_align_path.open("r", encoding="utf-8") as sym_align_file:
-        for src_sentence, trg_sentence, alignment in zip(src_tok_output_file, trg_tok_output_file, sym_align_file):
-            if src_sentence.strip() == "" or trg_sentence.strip() == "":
-                scores.append("N/A\n")
-            else:
-                scores.append(
-                    "%0.2f\n"
-                    % compute_alignment_score(direct_lexicon, inverse_lexicon, src_sentence, trg_sentence, alignment)
-                )
-    with (output_dir / "alignment.scores.txt").open("w+", encoding="utf-8") as as_file:
-        as_file.writelines(scores)
+        scores = []
+        with src_tok_output_path.open("r", encoding="utf-8") as src_tok_output_file, trg_tok_output_path.open(
+            "r", encoding="utf-8"
+        ) as trg_tok_output_file, sym_align_path.open("r", encoding="utf-8") as sym_align_file:
+            for src_sentence, trg_sentence, alignment in zip(src_tok_output_file, trg_tok_output_file, sym_align_file):
+                if src_sentence.strip() == "" or trg_sentence.strip() == "":
+                    scores.append(-1)
+                else:
+                    scores.append(
+                        compute_alignment_score(direct_lexicon, inverse_lexicon, src_sentence, trg_sentence, alignment)
+                    )
+        with (output_dir / "alignment.scores.txt").open("w+", encoding="utf-8") as as_file:
+            as_file.writelines(["%0.2f\n" % s for s in scores])
+        plt.plot(scores, "k.", markersize=2)
+        plt.xlabel("Verses")
+        plt.ylabel("Alignment Score")
+        plt.savefig(output_dir / "alignment.png")
 
 
 def full_bibles(scripture_dir: Path, threshold_present=0.95):
@@ -58,6 +66,37 @@ def full_bibles(scripture_dir: Path, threshold_present=0.95):
         if populated_len >= reference_len * threshold_present:
             complete_files.append(f)
     return complete_files
+
+
+def account_for_ranges(src_input_path: Path, trg_input_path: Path, src_output_path: Path, trg_output_path: Path):
+    src_lines = src_input_path.open(encoding="utf-8").readlines()
+    trg_lines = trg_input_path.open(encoding="utf-8").readlines()
+    src_concat = ""
+    trg_concat = ""
+    src_ranged = []
+    trg_ranged = []
+    for i in range(min(len(src_lines), len(trg_lines)) - 1, -1, -1):
+        if src_lines[i] == "<range>\n":
+            if trg_lines[i] != "<range>\n":
+                trg_concat = trg_lines[i].strip() + " " + trg_concat
+                src_concat = ""
+            src_lines[i] = "\n"
+            trg_lines[i] = "\n"
+        else:
+            if trg_lines[i] == "<range>\n":
+                src_concat = src_lines[i].strip() + " " + src_concat
+                trg_concat = ""
+                src_lines[i] = "\n"
+                trg_lines[i] = "\n"
+            else:
+                if src_concat != "":
+                    src_ranged.insert(0,src_lines[i].strip() + " " + src_concat.strip() + "\n")
+                    src_concat = ""
+                if trg_concat != "":
+                    src_ranged.insert(0,trg_lines[i].strip() + " " + trg_concat.strip() + "\n")
+                    trg_concat = ""
+    src_output_path.open("w+", encoding="utf-8").writelines(src_lines)
+    trg_output_path.open("w+", encoding="utf-8").writelines(trg_lines)
 
 
 scripture_dir = Path("C:\\Users\\johnm\\Documents\\repos\\bible-parallel-corpus-internal\\corpus\\scripture")
