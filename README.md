@@ -107,3 +107,12 @@ The following will mount /aqua-ml-data on your S drive and allow you to explore,
 ### setup environment variable
 The following will auto-select the bucket for local silnlp operations
 * Set the environment variable SIL_NLP_DATA_PATH to /aqua-ml-data
+
+## Setup ClearML on local PC
+Install the clearml python package:
+
+`pip install clearml`
+
+Connect your computer to the server by creating credentials, then run the below and follow the setup instructions:
+
+`clearml-init`

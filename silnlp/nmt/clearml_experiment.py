@@ -57,18 +57,15 @@ class SILExperimentCML(SILExperiment):
             # read in the project/experiment yaml file
             with (exp_dir / "config.yml").open("r", encoding="utf-8") as file:
                 config = yaml.safe_load(file)
-            # connect it with ClearML - if it is run remotely, it will update the params with the remote values
-            self.task.connect(mutable=config, name="config")
         else:
-            # else, read in the project only yaml file
-            with (get_mt_exp_dir(self.clearml_project_folder) / "config.yml").open("r", encoding="utf-8") as file:
-                config = yaml.safe_load(file)
-            self.task.connect(mutable=config, name="config")
+            config = {}
 
-            # then, after connection (and a possible remote update) write it to the experiment folder
-            exp_dir.mkdir(parents=True, exist_ok=True)
-            with (exp_dir / "config.yml").open("w+", encoding="utf-8") as file:
-                yaml.safe_dump(data=config, stream=file)
+        # connect it with ClearML - if it is run remotely, it will update the params with the remote values
+        self.task.connect(mutable=config, name="config")
+        # then, after connection (and a possible remote update) write it to the experiment folder
+        exp_dir.mkdir(parents=True, exist_ok=True)
+        with (exp_dir / "config.yml").open("w+", encoding="utf-8") as file:
+            yaml.safe_dump(data=config, stream=file)
 
         return Config(exp_dir, config)
 
@@ -83,6 +80,8 @@ def main() -> None:
         make_stats=True,  # limited by stats_max_size to process only Bibles
         mixed_precision=True,  # clearML GPU's can handle mixed precision
         memory_growth=False,  # We will be sharing GPU's - let's not get greedy
+        queue_name="langtech_40gb",
+        remote_execution=True,
     )
     exp.run()
 
