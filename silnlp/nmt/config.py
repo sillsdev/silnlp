@@ -1463,7 +1463,7 @@ class Config:
         if self.parent_config is None:
             return
 
-        model_dir = self.parent_config.model_dir
+        model_dir = SIL_NLP_ENV.get_source_experiment_path(self.parent_config.model_dir)
         parent_model_to_use = (
             CheckpointType.BEST
             if self.data["parent_use_best"]
@@ -1472,7 +1472,9 @@ class Config:
             else CheckpointType.LAST
         )
         checkpoint_path, step = get_checkpoint_path(model_dir, parent_model_to_use)
-        checkpoint_path = download_if_s3_path(checkpoint_path)
+        if checkpoint_path is not None:
+            SIL_NLP_ENV.copy_experiment_from_bucket(checkpoint_path.parent)
+            checkpoint_path = SIL_NLP_ENV.get_temp_experiment_path(checkpoint_path)
         parent_runner = create_runner(self.parent_config)
         parent_runner.update_vocab(
             str(self.exp_dir / "parent"),
