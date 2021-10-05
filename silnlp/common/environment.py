@@ -115,6 +115,7 @@ class SilNlpEnv:
         if not self.is_bucket:
             return
         name = str(name)
+        name = name.split("MT/experiments/")[-1]
         if len(name) == 0:
             raise Exception(
                 f"No experiment name is given.  Data still in the temp directory of {self.mt_experiments_dir}"
@@ -165,6 +166,24 @@ class SilNlpEnv:
                 else:
                     LOGGER.debug(f"adding{dest_file} to s3 bucket")
                     data_bucket.upload_file(source_file, dest_file)
+
+    def get_source_experiment_path(self, tmp_path):
+        if not self.is_bucket:
+            return tmp_path
+        if tmp_path is None:
+            return tmp_path
+        end_of_path = str(tmp_path)[len(str(self.mt_experiments_dir)) :]
+        source_path = self.data_dir / ("MT/experiments" + end_of_path.replace("\\", "/"))
+        return source_path
+
+    def get_temp_experiment_path(self, source_path):
+        if not self.is_bucket:
+            return source_path
+        if source_path is None:
+            return source_path
+        end_of_path = str(source_path)[len(str(self.data_dir / "MT/experiments")) + 1 :]
+        tmp_path = self.mt_experiments_dir / end_of_path
+        return tmp_path
 
 
 def download_if_s3_paths(paths: Iterable[S3Path]) -> List[Path]:
