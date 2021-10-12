@@ -3,6 +3,7 @@ import logging
 import os
 from dataclasses import dataclass
 from silnlp.common.environment import SIL_NLP_ENV
+from silnlp.nmt.test import test
 from typing import Optional
 
 logging.basicConfig()
@@ -50,6 +51,13 @@ class SILExperiment:
         print("Training completed")
 
     def test(self):
+        test(
+            experiment=self.name,
+            last=True,
+            ave=True,
+            best=True,
+            scorers=["bleu", "sentencebleu", "chrf3", "wer", "ter"],
+        )
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
         pass
 
