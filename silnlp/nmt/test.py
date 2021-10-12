@@ -1,6 +1,7 @@
 import argparse
 import random
 import sys
+import logging
 from pathlib import Path
 from typing import IO, Dict, Iterable, List, Optional, Set, Tuple, cast
 
@@ -13,6 +14,8 @@ from ..common.metrics import compute_meteor_score, compute_ter_score, compute_we
 from ..common.utils import get_git_revision_hash
 from .config import Config, create_runner, load_config
 from .utils import decode_sp, get_best_model_dir, get_last_checkpoint
+
+LOGGER = logging.getLogger(__name__)
 
 _SUPPORTED_SCORERS = {"bleu", "sentencebleu", "chrf3", "meteor", "wer", "ter"}
 
@@ -527,19 +530,22 @@ def test(
         )
 
     if avg:
-        checkpoint_path, _ = get_last_checkpoint(config.model_dir / "avg")
-        step = -1
-        results[step] = test_checkpoint(
-            config,
-            force_infer,
-            by_book,
-            memory_growth,
-            ref_projects,
-            checkpoint_path,
-            step,
-            scorers,
-            books,
-        )
+        try:
+            checkpoint_path, _ = get_last_checkpoint(config.model_dir / "avg")
+            step = -1
+            results[step] = test_checkpoint(
+                config,
+                force_infer,
+                by_book,
+                memory_growth,
+                ref_projects,
+                checkpoint_path,
+                step,
+                scorers,
+                books,
+            )
+        except:
+            LOGGER.info("No average checkpoint available.")
 
     if best:
         step = best_step

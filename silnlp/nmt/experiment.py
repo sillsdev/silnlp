@@ -54,7 +54,7 @@ class SILExperiment:
         test(
             experiment=self.name,
             last=True,
-            ave=True,
+            avg=True,
             best=True,
             scorers=["bleu", "sentencebleu", "chrf3", "wer", "ter"],
         )
