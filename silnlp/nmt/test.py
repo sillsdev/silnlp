@@ -16,7 +16,6 @@ from .utils import decode_sp, get_best_model_dir, get_last_checkpoint
 
 _SUPPORTED_SCORERS = {"bleu", "sentencebleu", "chrf3", "meteor", "wer", "ter"}
 
-TOKENIZER_DEFAULT = BLEU.TOKENIZER_DEFAULT
 
 class PairScore:
     def __init__(
@@ -278,7 +277,7 @@ def sentence_bleu(
     smooth_method: str = "exp",
     smooth_value: float = None,
     lowercase: bool = False,
-    tokenize=TOKENIZER_DEFAULT,
+    tokenize=sacrebleu.DEFAULT_TOKENIZER,
     use_effective_order: bool = False,
 ) -> BLEUScore:
     """
@@ -303,7 +302,7 @@ def write_sentence_bleu(
     preds: List[str],
     refs: List[List[str]],
     lowercase: bool = False,
-    tokenize=TOKENIZER_DEFAULT,
+    tokenize=sacrebleu.DEFAULT_TOKENIZER,
 ):
     scores_path = predictions_detok_path + ".scores.csv"
     with open(scores_path, "w", encoding="utf-8-sig") as scores_file:
@@ -486,7 +485,7 @@ def test(
     memory_growth=False,
     checkpoint: str = None,
     last=False,
-    ave=False,
+    avg=False,
     best=False,
     force_infer=False,
     scorers=None,
