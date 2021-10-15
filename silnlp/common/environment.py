@@ -2,7 +2,7 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import Iterable, List, Tuple
+from typing import Iterable, List, Tuple, Union
 
 import boto3
 from dotenv import load_dotenv
@@ -111,7 +111,7 @@ class SilNlpEnv:
 
         raise FileExistsError("No valid path exists")
 
-    def copy_experiment_from_bucket(self, name: str, extensions: Tuple[str] = ("")):
+    def copy_experiment_from_bucket(self, name: Union[str, Path], extensions: Union[str, Tuple[str, ...]] = ""):
         if not self.is_bucket:
             return
         name = str(name)

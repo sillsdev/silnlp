@@ -1,6 +1,6 @@
 import logging
 import os
-import shutil
+import platform
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -53,6 +53,9 @@ class DotnetMachineAligner(Aligner):
         if inverse_lex_path.is_file():
             inverse_lex_path.unlink()
         self.model_dir.mkdir(exist_ok=True)
+        if self.model_type == "ibm4":
+            self._execute_mkcls(src_file_path, "src")
+            self._execute_mkcls(trg_file_path, "trg")
         self._train_alignment_model(src_file_path, trg_file_path)
 
     def align(self, out_file_path: Path, sym_heuristic: str = "grow-diag-final-and") -> None:
@@ -88,6 +91,7 @@ class DotnetMachineAligner(Aligner):
 
     def _train_alignment_model(self, src_file_path: Path, trg_file_path: Path) -> None:
         check_dotnet()
+        ibm2_iter_count = 5 if self.model_type == "ibm2" else 0
         args: List[str] = [
             "dotnet",
             "machine",
@@ -98,7 +102,22 @@ class DotnetMachineAligner(Aligner):
             str(trg_file_path),
             "-mt",
             self.model_type,
+            "-tp",
+            "ibm1-iters=5",
+            "-tp",
+            f"ibm2-iters={ibm2_iter_count}",
+            "-tp",
+            "hmm-iters=5",
+            "-tp",
+            "ibm3-iters=5",
+            "-tp",
+            "ibm4-iters=5",
         ]
+        if self.model_type == "ibm4":
+            src_classes_path = self.model_dir / f"src_trg.src.classes"
+            args.extend(["-tp", f"src-classes={src_classes_path}"])
+            trg_classes_path = self.model_dir / f"src_trg.trg.classes"
+            args.extend(["-tp", f"trg-classes={trg_classes_path}"])
         if self._lowercase:
             args.append("-l")
         if self._plugin_file_path is not None:
@@ -122,8 +141,6 @@ class DotnetMachineAligner(Aligner):
             str(src_file_path),
             str(trg_file_path),
             str(output_file_path),
-            "-mt",
-            self.model_type,
             "-sh",
             sym_heuristic,
         ]
@@ -156,6 +173,18 @@ class DotnetMachineAligner(Aligner):
             args.append(str(self._plugin_file_path))
         subprocess.run(args, cwd=get_repo_dir())
 
+    def _execute_mkcls(self, input_file_path: Path, side: str) -> None:
+        mkcls_path = Path(os.getenv("MGIZA_PATH", "."), "mkcls")
+        if platform.system() == "Windows":
+            mkcls_path = mkcls_path.with_suffix(".exe")
+        if not mkcls_path.is_file():
+            raise RuntimeError("mkcls is not installed.")
+
+        output_file_path = self.model_dir / f"src_trg.{side}.classes"
+
+        args: List[str] = [str(mkcls_path), "-n10", f"-p{input_file_path}", f"-V{output_file_path}"]
+        subprocess.run(args)
+
 
 class Ibm1DotnetMachineAligner(DotnetMachineAligner):
     def __init__(self, model_dir: Path) -> None:
@@ -170,6 +199,16 @@ class Ibm2DotnetMachineAligner(DotnetMachineAligner):
 class HmmDotnetMachineAligner(DotnetMachineAligner):
     def __init__(self, model_dir: Path) -> None:
         super().__init__("hmm", "hmm", model_dir)
+
+
+class Ibm3DotnetMachineAligner(DotnetMachineAligner):
+    def __init__(self, model_dir: Path) -> None:
+        super().__init__("ibm3", "ibm3", model_dir)
+
+
+class Ibm4DotnetMachineAligner(DotnetMachineAligner):
+    def __init__(self, model_dir: Path) -> None:
+        super().__init__("ibm4", "ibm4", model_dir)
 
 
 class FastAlignDotnetMachineAligner(DotnetMachineAligner):
