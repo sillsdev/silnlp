@@ -121,6 +121,8 @@ class DataFile:
     def __post_init__(self):
         file_name = self.path.stem
         parts = file_name.split("-")
+        if len(parts) < 2:
+            raise RuntimeError(f"The filename {file_name} needs to be of the format <iso>-<project>")
         self.iso = parts[0]
         self.project = parts[1] if self.path.parent == SIL_NLP_ENV.mt_scripture_dir else BASIC_DATA_PROJECT
 
