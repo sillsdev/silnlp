@@ -40,7 +40,7 @@ from ..common.corpus import (
     split_parallel_corpus,
     write_corpus,
 )
-from ..common.environment import SIL_NLP_ENV, download_if_s3_paths, download_if_s3_path
+from ..common.environment import SIL_NLP_ENV, download_if_s3_path, download_if_s3_paths
 from ..common.utils import (
     DeleteRandomToken,
     NoiseMethod,
@@ -1708,7 +1708,7 @@ def main() -> None:
     data_config["corpus_pairs"] = corpus_pairs
     if args.parent is not None:
         data_config["parent"] = args.parent
-        SIL_NLP_ENV.copy_experiment_from_bucket(args.parent, extensions=("config.yml"))
+        SIL_NLP_ENV.copy_experiment_from_bucket(args.parent, extensions="config.yml")
         parent_config = load_config(args.parent)
         for key in [
             "share_vocab",
