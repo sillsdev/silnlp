@@ -40,7 +40,7 @@ from ..common.corpus import (
     split_parallel_corpus,
     write_corpus,
 )
-from ..common.environment import SIL_NLP_ENV, download_if_s3_paths, download_if_s3_path
+from ..common.environment import SIL_NLP_ENV, download_if_s3_path, download_if_s3_paths
 from ..common.utils import (
     DeleteRandomToken,
     NoiseMethod,
@@ -1463,7 +1463,7 @@ class Config:
         if self.parent_config is None:
             return
 
-        model_dir = self.parent_config.model_dir
+        model_dir = SIL_NLP_ENV.get_source_experiment_path(self.parent_config.model_dir)
         parent_model_to_use = (
             CheckpointType.BEST
             if self.data["parent_use_best"]
@@ -1472,7 +1472,9 @@ class Config:
             else CheckpointType.LAST
         )
         checkpoint_path, step = get_checkpoint_path(model_dir, parent_model_to_use)
-        checkpoint_path = download_if_s3_path(checkpoint_path)
+        if checkpoint_path is not None:
+            SIL_NLP_ENV.copy_experiment_from_bucket(checkpoint_path.parent)
+            checkpoint_path = SIL_NLP_ENV.get_temp_experiment_path(checkpoint_path)
         parent_runner = create_runner(self.parent_config)
         parent_runner.update_vocab(
             str(self.exp_dir / "parent"),
@@ -1707,7 +1709,7 @@ def main() -> None:
     data_config["corpus_pairs"] = corpus_pairs
     if args.parent is not None:
         data_config["parent"] = args.parent
-        SIL_NLP_ENV.copy_experiment_from_bucket(args.parent, extensions=("config.yml"))
+        SIL_NLP_ENV.copy_experiment_from_bucket(args.parent, extensions="config.yml")
         parent_config = load_config(args.parent)
         for key in [
             "share_vocab",

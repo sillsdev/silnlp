@@ -1,6 +1,9 @@
 import logging
+import os
+import platform
+import subprocess
 from pathlib import Path
-from typing import Iterable, List, Sequence, Tuple
+from typing import Dict, Iterable, List, Sequence, Tuple
 
 from machine.corpora import (
     LOWERCASE,
@@ -21,10 +24,13 @@ from machine.translation.thot import (
     ThotHmmWordAlignmentModel,
     ThotIbm1WordAlignmentModel,
     ThotIbm2WordAlignmentModel,
+    ThotIbm3WordAlignmentModel,
+    ThotIbm4WordAlignmentModel,
     ThotSymmetrizedWordAlignmentModel,
     ThotWordAlignmentModel,
     ThotWordAlignmentModelTrainer,
     ThotWordAlignmentModelType,
+    ThotWordAlignmentParameters,
 )
 from machine.utils import Phase, PhasedProgressReporter, ProgressStatus
 from tqdm import tqdm
@@ -58,6 +64,9 @@ class MachineAligner(Aligner):
         if inverse_lex_path.is_file():
             inverse_lex_path.unlink()
         self.model_dir.mkdir(exist_ok=True)
+        if self.model_type is ThotWordAlignmentModelType.IBM4:
+            self._execute_mkcls(src_file_path, "src")
+            self._execute_mkcls(trg_file_path, "trg")
         self._train_alignment_model(src_file_path, trg_file_path)
 
     def align(self, out_file_path: Path, sym_heuristic: str = "grow-diag-final-and") -> None:
@@ -95,12 +104,41 @@ class MachineAligner(Aligner):
         if self.lowercase:
             preprocessor = LOWERCASE
 
+        direct_params = ThotWordAlignmentParameters()
+        direct_params.ibm1_iteration_count = 5
+        direct_params.ibm2_iteration_count = 5 if self.model_type is ThotWordAlignmentModelType.IBM2 else 0
+        direct_params.hmm_iteration_count = 5
+        direct_params.ibm3_iteration_count = 5
+        direct_params.ibm4_iteration_count = 5
+
+        inverse_params = ThotWordAlignmentParameters()
+        inverse_params.ibm1_iteration_count = 5
+        inverse_params.ibm2_iteration_count = 5 if self.model_type is ThotWordAlignmentModelType.IBM2 else 0
+        inverse_params.hmm_iteration_count = 5
+        inverse_params.ibm3_iteration_count = 5
+        inverse_params.ibm4_iteration_count = 5
+        if self.model_type is ThotWordAlignmentModelType.IBM4:
+            direct_params.source_word_classes = self._load_word_classes("src")
+            direct_params.target_word_classes = self._load_word_classes("trg")
+            inverse_params.source_word_classes = direct_params.target_word_classes
+            inverse_params.target_word_classes = direct_params.source_word_classes
+
         direct_trainer = ThotWordAlignmentModelTrainer(
-            self.model_type, self.model_dir / "src_trg_invswm", preprocessor, preprocessor, parallel_corpus
+            self.model_type,
+            parallel_corpus,
+            self.model_dir / "src_trg_invswm",
+            parameters=direct_params,
+            source_preprocessor=preprocessor,
+            target_preprocessor=preprocessor,
         )
 
         inverse_trainer = ThotWordAlignmentModelTrainer(
-            self.model_type, self.model_dir / "src_trg_swm", preprocessor, preprocessor, parallel_corpus.invert()
+            self.model_type,
+            parallel_corpus.invert(),
+            self.model_dir / "src_trg_swm",
+            parameters=inverse_params,
+            source_preprocessor=preprocessor,
+            target_preprocessor=preprocessor,
         )
 
         trainer = SymmetrizedWordAlignmentModelTrainer(direct_trainer, inverse_trainer)
@@ -171,10 +209,35 @@ class MachineAligner(Aligner):
             return ThotIbm2WordAlignmentModel(model_path)
         elif self.model_type is ThotWordAlignmentModelType.HMM:
             return ThotHmmWordAlignmentModel(model_path)
+        elif self.model_type is ThotWordAlignmentModelType.IBM3:
+            return ThotIbm3WordAlignmentModel(model_path)
+        elif self.model_type is ThotWordAlignmentModelType.IBM4:
+            return ThotIbm4WordAlignmentModel(model_path)
         elif self.model_type is ThotWordAlignmentModelType.FAST_ALIGN:
             return ThotFastAlignWordAlignmentModel(model_path)
         else:
             raise ValueError("An invalid model type was specified.")
+
+    def _execute_mkcls(self, input_file_path: Path, side: str) -> None:
+        mkcls_path = Path(os.getenv("MGIZA_PATH", "."), "mkcls")
+        if platform.system() == "Windows":
+            mkcls_path = mkcls_path.with_suffix(".exe")
+        if not mkcls_path.is_file():
+            raise RuntimeError("mkcls is not installed.")
+
+        output_file_path = self.model_dir / f"src_trg.{side}.classes"
+
+        args: List[str] = [str(mkcls_path), "-n10", f"-p{input_file_path}", f"-V{output_file_path}"]
+        subprocess.run(args)
+
+    def _load_word_classes(self, side: str) -> Dict[str, str]:
+        word_classes: Dict[str, str] = {}
+        with open(self.model_dir / f"src_trg.{side}.classes", "r", encoding="utf-8-sig") as file:
+            for line in file:
+                line = line.strip()
+                word, word_class = line.split("\t", maxsplit=2)
+                word_classes[word] = word_class
+        return word_classes
 
 
 def _batch(
@@ -211,3 +274,13 @@ class HmmMachineAligner(MachineAligner):
 class FastAlignMachineAligner(MachineAligner):
     def __init__(self, model_dir: Path) -> None:
         super().__init__("fast_align", ThotWordAlignmentModelType.FAST_ALIGN, model_dir)
+
+
+class Ibm3MachineAligner(MachineAligner):
+    def __init__(self, model_dir: Path) -> None:
+        super().__init__("ibm3", ThotWordAlignmentModelType.IBM3, model_dir)
+
+
+class Ibm4MachineAligner(MachineAligner):
+    def __init__(self, model_dir: Path) -> None:
+        super().__init__("ibm4", ThotWordAlignmentModelType.IBM4, model_dir)

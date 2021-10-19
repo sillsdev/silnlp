@@ -19,20 +19,33 @@ from .dotnet_machine_aligner import (
     HmmDotnetMachineAligner,
     Ibm1DotnetMachineAligner,
     Ibm2DotnetMachineAligner,
+    Ibm3DotnetMachineAligner,
+    Ibm4DotnetMachineAligner,
     ParatextDotnetMachineAligner,
 )
 from .fast_align import FastAlign
 from .giza_aligner import HmmGizaAligner, Ibm1GizaAligner, Ibm2GizaAligner, Ibm3GizaAligner, Ibm4GizaAligner
-from .machine_aligner import FastAlignMachineAligner, HmmMachineAligner, Ibm1MachineAligner, Ibm2MachineAligner
+from .machine_aligner import (
+    FastAlignMachineAligner,
+    HmmMachineAligner,
+    Ibm1MachineAligner,
+    Ibm2MachineAligner,
+    Ibm3MachineAligner,
+    Ibm4MachineAligner,
+)
 
 ALIGNERS: Dict[str, Tuple[Type[Aligner], str]] = {
     "fast_align": (FastAlignMachineAligner, "FastAlign"),
     "ibm1": (Ibm1MachineAligner, "IBM-1"),
     "ibm2": (Ibm2MachineAligner, "IBM-2"),
     "hmm": (HmmMachineAligner, "HMM"),
+    "ibm3": (Ibm3MachineAligner, "IBM-3"),
+    "ibm4": (Ibm4MachineAligner, "IBM-4"),
     "dotnet_fast_align": (FastAlignDotnetMachineAligner, ".NET-FastAlign"),
     "dotnet_ibm1": (Ibm1DotnetMachineAligner, ".NET-IBM-1"),
     "dotnet_ibm2": (Ibm2DotnetMachineAligner, ".NET-IBM-2"),
+    "dotnet_ibm3": (Ibm3DotnetMachineAligner, ".NET-IBM-3"),
+    "dotnet_ibm4": (Ibm4DotnetMachineAligner, ".NET-IBM-4"),
     "dotnet_hmm": (HmmDotnetMachineAligner, ".NET-HMM"),
     "dotnet_pt": (ParatextDotnetMachineAligner, ".NET-PT"),
     "giza_ibm1": (Ibm1GizaAligner, "Giza-IBM-1"),
