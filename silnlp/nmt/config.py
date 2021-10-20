@@ -409,17 +409,22 @@ def build_vocab(
 
 
 def get_checkpoint_path(model_dir: Path, checkpoint_type: CheckpointType) -> Tuple[Optional[Path], Optional[int]]:
+    model_dir = SIL_NLP_ENV.get_source_experiment_path(model_dir)
+    ckpt = None
+    step = None
     if checkpoint_type == CheckpointType.AVERAGE:
         # Get the checkpoint path and step count for the averaged checkpoint
-        return get_last_checkpoint(model_dir / "avg")
+        ckpt, step = get_last_checkpoint(model_dir / "avg")
     elif checkpoint_type == CheckpointType.BEST:
         # Get the checkpoint path and step count for the best checkpoint
         best_model_dir, step = get_best_model_dir(model_dir)
-        return (best_model_dir / "ckpt", step)
-    elif checkpoint_type == CheckpointType.LAST:
-        return (None, None)
-    else:
+        ckpt, step = (best_model_dir / "ckpt", step)
+    elif checkpoint_type != CheckpointType.LAST:
         raise RuntimeError(f"Unsupported checkpoint type: {checkpoint_type}")
+    if ckpt is not None:
+        SIL_NLP_ENV.copy_experiment_from_bucket(ckpt.parent)
+        ckpt, step = (SIL_NLP_ENV.get_temp_experiment_path(ckpt), step)
+    return ckpt, step
 
 
 def get_data_file_pairs(corpus_pair: CorpusPair) -> Iterable[Tuple[DataFile, DataFile]]:
@@ -1465,7 +1470,6 @@ class Config:
         if self.parent_config is None:
             return
 
-        model_dir = SIL_NLP_ENV.get_source_experiment_path(self.parent_config.model_dir)
         parent_model_to_use = (
             CheckpointType.BEST
             if self.data["parent_use_best"]
@@ -1473,10 +1477,7 @@ class Config:
             if self.data["parent_use_average"]
             else CheckpointType.LAST
         )
-        checkpoint_path, step = get_checkpoint_path(model_dir, parent_model_to_use)
-        if checkpoint_path is not None:
-            SIL_NLP_ENV.copy_experiment_from_bucket(checkpoint_path.parent)
-            checkpoint_path = SIL_NLP_ENV.get_temp_experiment_path(checkpoint_path)
+        checkpoint_path, step = get_checkpoint_path(self.parent_config.model_dir, parent_model_to_use)
         parent_runner = create_runner(self.parent_config)
         parent_runner.update_vocab(
             str(self.exp_dir / "parent"),

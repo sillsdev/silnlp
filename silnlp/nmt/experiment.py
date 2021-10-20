@@ -2,13 +2,14 @@ import argparse
 import logging
 import os
 from dataclasses import dataclass
-from silnlp.common.environment import SIL_NLP_ENV
 from typing import Optional
 
 logging.basicConfig()
 
+from ..common.environment import SIL_NLP_ENV
 from ..common.utils import get_git_revision_hash
 from .config import create_runner, load_config, Config
+from .test import test
 
 
 @dataclass
@@ -50,8 +51,14 @@ class SILExperiment:
         print("Training completed")
 
     def test(self):
+        test(
+            experiment=self.name,
+            last=True,
+            avg=True,
+            best=True,
+            scorers=["bleu", "sentencebleu", "chrf3", "wer", "ter"],
+        )
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
-        pass
 
 
 def main() -> None:

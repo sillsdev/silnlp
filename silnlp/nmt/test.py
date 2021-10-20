@@ -1,6 +1,7 @@
 import argparse
 import random
 import sys
+import logging
 from pathlib import Path
 from typing import IO, Dict, Iterable, List, Optional, Set, Tuple, cast
 
@@ -13,6 +14,8 @@ from ..common.metrics import compute_meteor_score, compute_ter_score, compute_we
 from ..common.utils import get_git_revision_hash
 from .config import Config, create_runner, load_config
 from .utils import decode_sp, get_best_model_dir, get_last_checkpoint
+
+LOGGER = logging.getLogger(__name__)
 
 _SUPPORTED_SCORERS = {"bleu", "sentencebleu", "chrf3", "meteor", "wer", "ter"}
 
@@ -480,6 +483,119 @@ def test_checkpoint(
     return scores
 
 
+def test(
+    experiment: str,
+    memory_growth=False,
+    checkpoint: str = None,
+    last=False,
+    avg=False,
+    best=False,
+    force_infer=False,
+    scorers=None,
+    ref_projects=[],
+    books=[],
+    by_book=False,
+):
+    exp_name = experiment
+    config = load_config(exp_name)
+    ref_projects: Set[str] = set(ref_projects)
+    books = get_books(books)
+
+    temp_scorers: Set[str] = set()
+    if scorers is None:
+        temp_scorers.add("bleu")
+    else:
+        for scorer in set(scorers):
+            scorer = scorer.lower()
+            if scorer in _SUPPORTED_SCORERS:
+                temp_scorers.add(scorer)
+    scorers = temp_scorers
+
+    best_model_path, best_step = get_best_model_dir(config.model_dir)
+    results: Dict[int, List[PairScore]] = {}
+    step: int
+    if checkpoint is not None:
+        checkpoint_path = config.model_dir / f"ckpt-{checkpoint}"
+        step = int(checkpoint)
+        results[step] = test_checkpoint(
+            config,
+            force_infer,
+            by_book,
+            memory_growth,
+            ref_projects,
+            checkpoint_path,
+            step,
+            scorers,
+            books,
+        )
+
+    if avg:
+        try:
+            checkpoint_path, _ = get_last_checkpoint(config.model_dir / "avg")
+            step = -1
+            results[step] = test_checkpoint(
+                config,
+                force_infer,
+                by_book,
+                memory_growth,
+                ref_projects,
+                checkpoint_path,
+                step,
+                scorers,
+                books,
+            )
+        except:
+            LOGGER.info("No average checkpoint available.")
+
+    if best:
+        step = best_step
+        if step not in results:
+            checkpoint_path = best_model_path / "ckpt"
+            results[step] = test_checkpoint(
+                config,
+                force_infer,
+                by_book,
+                memory_growth,
+                ref_projects,
+                checkpoint_path,
+                step,
+                scorers,
+                books,
+            )
+
+    if last or (not best and checkpoint is None and not avg):
+        checkpoint_path, step = get_last_checkpoint(config.model_dir)
+
+        if step not in results:
+            results[step] = test_checkpoint(
+                config,
+                force_infer,
+                by_book,
+                memory_growth,
+                ref_projects,
+                checkpoint_path,
+                step,
+                scorers,
+                books,
+            )
+
+    for step in sorted(results.keys()):
+        num_refs = results[step][0].num_refs
+        if num_refs == 0:
+            num_refs = 1
+        checkpoint_name: str
+        if step == -1:
+            checkpoint_name = "averaged checkpoint"
+        elif step == best_step:
+            checkpoint_name = f"best checkpoint {step}"
+        else:
+            checkpoint_name = f"checkpoint {step}"
+        books_str = "ALL" if len(books) == 0 else ", ".join(map(lambda n: book_number_to_id(n), sorted(books)))
+        print(f"Test results for {checkpoint_name} ({num_refs} reference(s), books: {books_str})")
+        for score in results[step]:
+            score.write(sys.stdout)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Tests an NMT model")
     parser.add_argument("experiment", help="Experiment name")
@@ -504,100 +620,7 @@ def main() -> None:
 
     get_git_revision_hash()
 
-    exp_name = args.experiment
-    config = load_config(exp_name)
-    ref_projects: Set[str] = set(args.ref_projects)
-    books = get_books(args.books)
-
-    scorers: Set[str] = set()
-    if args.scorers is None:
-        scorers.add("bleu")
-    else:
-        for scorer in set(args.scorers):
-            scorer = scorer.lower()
-            if scorer in _SUPPORTED_SCORERS:
-                scorers.add(scorer)
-
-    best_model_path, best_step = get_best_model_dir(config.model_dir)
-    results: Dict[int, List[PairScore]] = {}
-    step: int
-    if args.checkpoint is not None:
-        checkpoint_path = config.model_dir / f"ckpt-{args.checkpoint}"
-        step = int(args.checkpoint)
-        results[step] = test_checkpoint(
-            config,
-            args.force_infer,
-            args.by_book,
-            args.memory_growth,
-            ref_projects,
-            checkpoint_path,
-            step,
-            scorers,
-            books,
-        )
-
-    if args.avg:
-        checkpoint_path, _ = get_last_checkpoint(config.model_dir / "avg")
-        step = -1
-        results[step] = test_checkpoint(
-            config,
-            args.force_infer,
-            args.by_book,
-            args.memory_growth,
-            ref_projects,
-            checkpoint_path,
-            step,
-            scorers,
-            books,
-        )
-
-    if args.best:
-        step = best_step
-        if step not in results:
-            checkpoint_path = best_model_path / "ckpt"
-            results[step] = test_checkpoint(
-                config,
-                args.force_infer,
-                args.by_book,
-                args.memory_growth,
-                ref_projects,
-                checkpoint_path,
-                step,
-                scorers,
-                books,
-            )
-
-    if args.last or (not args.best and args.checkpoint is None and not args.avg):
-        checkpoint_path, step = get_last_checkpoint(config.model_dir)
-
-        if step not in results:
-            results[step] = test_checkpoint(
-                config,
-                args.force_infer,
-                args.by_book,
-                args.memory_growth,
-                ref_projects,
-                checkpoint_path,
-                step,
-                scorers,
-                books,
-            )
-
-    for step in sorted(results.keys()):
-        num_refs = results[step][0].num_refs
-        if num_refs == 0:
-            num_refs = 1
-        checkpoint_name: str
-        if step == -1:
-            checkpoint_name = "averaged checkpoint"
-        elif step == best_step:
-            checkpoint_name = f"best checkpoint {step}"
-        else:
-            checkpoint_name = f"checkpoint {step}"
-        books_str = "ALL" if len(books) == 0 else ", ".join(map(lambda n: book_number_to_id(n), sorted(books)))
-        print(f"Test results for {checkpoint_name} ({num_refs} reference(s), books: {books_str})")
-        for score in results[step]:
-            score.write(sys.stdout)
+    test(**args)
 
 
 if __name__ == "__main__":
