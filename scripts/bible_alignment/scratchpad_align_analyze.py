@@ -2,6 +2,7 @@ import logging
 import pandas as pd
 import numpy as np
 from pathlib import Path
+import matplotlib.pyplot as plt
 
 LOGGER = logging.getLogger("silnlp")
 
@@ -18,6 +19,19 @@ for i, name in enumerate(alignment_names):
 
 al_df = pd.DataFrame(index=verses, data=data)
 al_df[al_df == -1] = np.nan
+al_df_norm = al_df.copy()
+al_df["book"] = al_df.index.str.extract(r"(^\w+)")[0].to_numpy()
+books = list(al_df["book"].unique())
+al_df_norm = al_df - al_df.mean(axis=0)
+al_df_norm["book"] = al_df["book"]
 
-al_df.iloc[:50000:1000, :10].plot()
-al_df.min(axis=0)
+al_means = al_df_norm.groupby(by="book").agg(np.nanmean)
+al_means = al_means.loc[books, :]
+al_means = al_means[~al_means.mean(axis=1).isna()]
+fig = plt.figure(figsize=(20, 8))
+ax = fig.gca()
+al_means = al_means.iloc[:, ::10]
+ax.pcolor(al_means)
+plt.yticks(np.arange(0.5, len(al_means.index), 1), al_means.index)
+plt.xticks(np.arange(0.5, len(al_means.columns), 1), al_means.columns)
+plt.show()
