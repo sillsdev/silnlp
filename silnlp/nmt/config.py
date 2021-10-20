@@ -410,19 +410,21 @@ def build_vocab(
 
 def get_checkpoint_path(model_dir: Path, checkpoint_type: CheckpointType) -> Tuple[Optional[Path], Optional[int]]:
     model_dir = SIL_NLP_ENV.get_source_experiment_path(model_dir)
-    ckpt_and_step = (None, None)
+    ckpt = None
+    step = None
     if checkpoint_type == CheckpointType.AVERAGE:
         # Get the checkpoint path and step count for the averaged checkpoint
-        ckpt_and_step = get_last_checkpoint(model_dir / "avg")
+        ckpt, step = get_last_checkpoint(model_dir / "avg")
     elif checkpoint_type == CheckpointType.BEST:
         # Get the checkpoint path and step count for the best checkpoint
         best_model_dir, step = get_best_model_dir(model_dir)
-        ckpt_and_step = (best_model_dir / "ckpt", step)
+        ckpt, step = (best_model_dir / "ckpt", step)
     elif checkpoint_type != CheckpointType.LAST:
         raise RuntimeError(f"Unsupported checkpoint type: {checkpoint_type}")
-    if ckpt_and_step[0] is not None:
-        SIL_NLP_ENV.copy_experiment_from_bucket(ckpt_and_step[0].parent)
-        ckpt_and_step = (SIL_NLP_ENV.get_temp_experiment_path(ckpt_and_step[0]), ckpt_and_step[1])
+    if ckpt is not None:
+        SIL_NLP_ENV.copy_experiment_from_bucket(ckpt.parent)
+        ckpt, step = (SIL_NLP_ENV.get_temp_experiment_path(ckpt), step)
+    return ckpt, step
 
 
 def get_data_file_pairs(corpus_pair: CorpusPair) -> Iterable[Tuple[DataFile, DataFile]]:
