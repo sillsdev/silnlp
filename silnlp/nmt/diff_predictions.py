@@ -11,7 +11,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import difflib as dl
 from ..common.corpus import load_corpus
-from .utils import decode_sp, decode_sp_lines
+from .utils import decode_sp, decode_sp_lines, get_best_model_dir, get_last_checkpoint
 from .config import get_git_revision_hash, get_mt_exp_dir
 import sacrebleu
 from sacrebleu.metrics import BLEU, BLEUScore
@@ -145,9 +145,9 @@ def split_words(s: str) -> List[str]:
     return s.split(' ')
 
 
-def apply_unknown_formatting(df: pd.DataFrame, workbook, sheet, histogram_offset: int, corpus: str,
+def apply_unknown_formatting(df: pd.DataFrame, sheet, histogram_offset: int, corpus: str,
                              corpus_words: List[str]):
-    sheet.write_rich_string('E6', unknown_format, 'Orange (underline)', normal_format, ': Unknown source word')
+    sheet.write_rich_string('I6', unknown_format, 'Orange (underline)', normal_format, ': Unknown source word')
     if corpus is 'src':
         column = 'B'
         column_name = 'Source_Sentence'
@@ -184,11 +184,11 @@ def apply_unknown_formatting(df: pd.DataFrame, workbook, sheet, histogram_offset
             sheet.write_rich_string(f'{column}{histogram_offset+index+2}', *segments)
 
 
-def apply_diff_formatting(df: pd.DataFrame, workbook, sheet, histogram_offset: int):
-    sheet.write_rich_string('E2', equal_format, 'Green', normal_format, ': matching text')
-    sheet.write_rich_string('E3', insert_format, 'Blue (italics)', normal_format, ': text inserted in prediction')
-    sheet.write_rich_string('E4', delete_format, 'Red', normal_format, ': text missing from prediction')
-    sheet.write_rich_string('E5', replace_format, 'Purple (bold)', normal_format, ': text replaced in prediction')
+def apply_diff_formatting(df: pd.DataFrame, sheet, histogram_offset: int):
+    sheet.write_rich_string('I2', equal_format, 'Green', normal_format, ': matching text')
+    sheet.write_rich_string('I3', insert_format, 'Blue (italics)', normal_format, ': text inserted in prediction')
+    sheet.write_rich_string('I4', delete_format, 'Red', normal_format, ': text missing from prediction')
+    sheet.write_rich_string('I5', replace_format, 'Purple (bold)', normal_format, ': text replaced in prediction')
 
     for index, row in df.iterrows():
         ref = row['Target_Sentence']
@@ -208,25 +208,54 @@ def apply_diff_formatting(df: pd.DataFrame, workbook, sheet, histogram_offset: i
 def add_training_corpora(writer, exp1_dir: Path, exp2_dir: Path, col_width: int):
     sheet_name = 'Training Data'
 
-    srcs = decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, 'train.src.txt'))))
-    trgs = decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, 'train.trg.txt'))))
+    df = pd.DataFrame(columns=['Verse_Ref', 'Source', 'Target'])
 
     if os.path.exists(os.path.join(exp1_dir, 'train.vref.txt')):
-        vrefs = load_corpus(Path(os.path.join(exp1_dir, 'train.vref.txt')))
-        df = pd.DataFrame(list(zip(vrefs, srcs, trgs)), columns=['Verse_Ref', 'Source', 'Target'])
-    elif os.path.exists(os.path.join(exp2_dir, 'train.vref.txt')):
-        vrefs = load_corpus(Path(os.path.join(exp2_dir, 'train.vref.txt')))
-        df = pd.DataFrame(list(zip(vrefs, srcs, trgs)), columns=['Verse_Ref', 'Source', 'Target'])
-    else:
-        df = pd.DataFrame(list(zip(srcs,trgs)), columns=['Source', 'Target'])
-        df['Verse_Ref'] = ''                        # Add an empty verse reference column
-        df = df[['Verse_Ref', 'Source', 'Target']]  # Reorder the columns for consistency
+        df['Verse_Ref'] = list(load_corpus(Path(os.path.join(exp1_dir, 'train.vref.txt'))))
+    elif exp2_dir is not None and os.path.exists(os.path.join(exp2_dir, 'train.vref.txt')):
+        df['Verse_Ref'] = list(load_corpus(Path(os.path.join(exp2_dir, 'train.vref.txt'))))
+
+    df['Source'] = list(decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, 'train.src.txt')))))
+    df['Target'] = list(decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, 'train.trg.txt')))))
 
     df.to_excel(writer, index=False, sheet_name=sheet_name)
 
     sheet = writer.sheets[sheet_name]
     sheet.set_column(1, 2, col_width, wrap_format)
-    sheet.autofilter(0, 0, df.shape[0] - 1, df.shape[1] - 1)
+    sheet.autofilter(0, 0, df.shape[0], df.shape[1] - 1)
+
+
+def get_digit_list(s: str) -> List[str]:
+    return re.findall(r'\d+(?:,*\d+)*', s)
+
+
+def add_digits_analysis(writer, df: pd.DataFrame, col_width: int):
+    sheet_name = 'Digits'
+
+    digit_rows: List[List[str], List[str], List[str], List[str]] = []
+    for index, row in df.iterrows():
+        vref = row['Verse_Ref']
+        trg = row['Target_Sentence']
+        if trg != "":
+            trg_digits = get_digit_list(trg)
+            if len(trg_digits) > 0:
+                src_digits = get_digit_list(row['Source_Sentence'])
+                p1_digits = get_digit_list(row['Exp1_Prediction'])
+                p2_digits = get_digit_list(row['Exp2_Prediction'])
+                all_digits = list(set(src_digits) | set(trg_digits) | set(p1_digits) | set(p2_digits))
+                for digit_str in all_digits:
+                    digit_rows.append([vref, digit_str,
+                                       digit_str in src_digits,
+                                       digit_str in trg_digits,
+                                       digit_str in p1_digits,
+                                       digit_str in p2_digits])
+
+    digits_df = pd.DataFrame(digit_rows, columns=['Verse_Ref', 'Digits',
+                                                  'Source', 'Reference', 'Experiment1', 'Experiment2'])
+
+    digits_df.to_excel(writer, index=False, sheet_name=sheet_name)
+    sheet = writer.sheets[sheet_name]
+    sheet.autofilter(0, 0, digits_df.shape[0], digits_df.shape[1] - 1)
 
 
 def main() -> None:
@@ -237,18 +266,19 @@ def main() -> None:
     global insert_format
     global delete_format
     global unknown_format
-    histogram_offset = 15
     text_wrap_column_width = 45
 
     parser = argparse.ArgumentParser(description="Compare the predictions across 2 experiments")
     parser.add_argument("exp1", type=str, help="Experiment 1 folder")
-    parser.add_argument("exp2", type=str, help="Experiment 2 folder")
+    parser.add_argument("--exp2", type=str, default=None, help="Experiment 2 folder")
+    parser.add_argument("--last", default=False, action="store_true", help="Compare predictions from last checkpoints")
     parser.add_argument("--show-diffs", default=False, action="store_true",
                         help="Show difference (prediction vs reference")
     parser.add_argument("--show-unknown", default=False, action="store_true",
                         help="Show unknown words in source verse")
     parser.add_argument("--include-train", default=False, action="store_true",
                         help="Include the src/trg training corpora in the spreadsheet")
+    parser.add_argument("--analyze-digits", default=False, action="store_true",help="Perform digits analysis")
     parser.add_argument("--preserve-case", default=False, action="store_true",
                         help="Score predictions with case preserved")
     parser.add_argument("--tokenize", type=str, default="13a",
@@ -260,26 +290,14 @@ def main() -> None:
     exp1_name = args.exp1
     exp1_dir = get_mt_exp_dir(exp1_name)
     exp1_xls = os.path.join(exp1_dir, 'diff_predictions.xlsx')
-    exp2_name = args.exp2
-    exp2_dir = get_mt_exp_dir(exp2_name)
-
-    vref_file = None
-    if os.path.exists(os.path.join(exp1_dir, "test.vref.txt")):
-        vref_file = os.path.join(exp1_dir, "test.vref.txt")
-        if os.path.exists(os.path.join(exp2_dir, "test.vref.txt")) and \
-           not filecmp.cmp(os.path.join(exp1_dir, "test.vref.txt"), os.path.join(exp2_dir, "test.vref.txt")):
-            print(f'{exp1_name} and {exp2_name} have different test set verse references; exiting')
-            return
-    elif os.path.exists(os.path.join(exp2_dir, "test.vref.txt")):
-        vref_file = os.path.join(exp2_dir, "test.vref.text")
-
-    if not filecmp.cmp(os.path.join(exp1_dir, "test.src.txt"), os.path.join(exp2_dir, "test.src.txt")):
-        print(f'{exp1_name} and {exp2_name} have different test set source verse text; exiting')
-        return
-
-    if not filecmp.cmp(os.path.join(exp1_dir, "test.trg.detok.txt"), os.path.join(exp2_dir, "test.trg.detok.txt")):
-        print(f'{exp1_name} and {exp2_name} have different test set target verse text; exiting')
-        return
+    if args.exp2 is None:
+        histogram_offset = 0
+        exp2_name = None
+        exp2_dir = None
+    else:
+        histogram_offset = 15
+        exp2_name = args.exp2
+        exp2_dir = get_mt_exp_dir(exp2_name)
 
     # Set up to generate the Excel output
     writer: pd.ExcelWriter = pd.ExcelWriter(exp1_xls, engine='xlsxwriter')
@@ -292,62 +310,127 @@ def main() -> None:
     replace_format = workbook.add_format({'color': 'purple', 'bold': True})
     unknown_format = workbook.add_format({'color': 'orange', 'underline': True})
 
+    exp1_type = ''
+    model_dir = exp1_dir / 'run'
+    if os.path.exists(model_dir):   # NMT experiment
+        exp1_type = 'NMT'
+        exp1_test_trg_filename = os.path.join(exp1_dir, 'test.trg.detok.txt')
+    else:
+        model_dir = exp1_dir / 'engine'
+        if os.path.exists(model_dir):   # SMT experiment
+            exp1_type = 'SMT'
+            exp1_test_trg_filename = os.path.join(exp1_dir, 'test.trg.txt')
+        else:
+            print('Unable to determine experiment 1 type (NMT, SMT)')
+            return
+    exp2_type = ''
+    model_dir = exp2_dir / 'run'
+    if os.path.exists(model_dir):   # NMT experiment
+        exp2_type = 'NMT'
+        exp2_test_trg_filename = os.path.join(exp2_dir, 'test.trg.detok.txt')
+    else:
+        model_dir = exp2_dir / 'engine'
+        if os.path.exists(model_dir):   # SMT experiment
+            exp2_type = 'SMT'
+            exp2_test_trg_filename = os.path.join(exp2_dir, 'test.trg.txt')
+        else:
+            print('Unable to determine experiment 2 type (NMT, SMT)')
+            return
+
+    vref_file = None        # Are VREF's available, and do they match?
+    if os.path.exists(os.path.join(exp1_dir, 'test.vref.txt')):
+        vref_file = os.path.join(exp1_dir, 'test.vref.txt')
+        if exp2_dir is not None and os.path.exists(os.path.join(exp2_dir, 'test.vref.txt')) and \
+           not filecmp.cmp(os.path.join(exp1_dir, 'test.vref.txt'), os.path.join(exp2_dir, 'test.vref.txt')):
+            print(f'{exp1_name} and {exp2_name} have different test set verse references; exiting')
+            return
+    elif exp2_dir is not None and os.path.exists(os.path.join(exp2_dir, 'test.vref.txt')):
+        vref_file = os.path.join(exp2_dir, "test.vref.text")
+
     if args.show_unknown:
-        src_words = load_words(os.path.join(exp1_dir, "train.src.txt"), True)
-        trg_words = load_words(os.path.join(exp1_dir, "train.trg.txt"), True)
+        src_words = load_words(Path(os.path.join(exp1_dir, "train.src.txt")), True)
+        trg_words = load_words(Path(os.path.join(exp1_dir, "train.trg.txt")), True)
 
-    for exp1_file_name in sorted(glob.glob(os.path.join(exp1_dir, f'test.trg-predictions.detok.txt.*'))):
-        for exp2_file_name in sorted(glob.glob(os.path.join(exp2_dir, f'test.trg-predictions.detok.txt.*'))):
-            exp1_scores: List[float] = []
-            exp2_scores: List[float] = []
-            exp1_checkpoint = os.path.splitext(exp1_file_name)[1]
-            exp2_checkpoint = os.path.splitext(exp2_file_name)[1]
-            print(f'Comparing results for {args.exp1}({exp1_checkpoint}) and {args.exp2}({exp2_checkpoint})')
-            sheet_name = f'{exp1_checkpoint} vs {exp2_checkpoint}'
-            exp1_vrefs = load_corpus(vref_file) if vref_file is not None else None
-            exp1_srcs = decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, "test.src.txt"))))
-            exp1_refs = load_corpus(Path(os.path.join(exp1_dir, "test.trg.detok.txt")))
-            exp1_preds = load_corpus(Path(exp1_file_name))
-            exp2_preds = load_corpus(Path(exp2_file_name))
+    if exp1_type is 'NMT':              # NMT experiment
+        model_dir = exp1_dir / 'run'
+        _, exp1_step = get_last_checkpoint(model_dir) if args.last else get_best_model_dir(model_dir)
+        exp1_file_name = glob.glob(os.path.join(exp1_dir, f'test.trg-predictions.detok.txt.*{exp1_step}'))[0]
+    else:                               # SMT experiment
+        exp1_step = 0
+        exp1_file_name = os.path.join(exp1_dir, 'test.trg-predictions.txt')
+    if not os.path.exists(exp1_file_name):
+        print(f'Predictions file not found: {exp1_file_name}')
+        return
+    print(f'Experiment 1: {exp1_file_name}')
+    sheet_name = f'{exp1_step}'
 
-            # Create the initial data frame
-            if exp1_vrefs is not None:
-                df = pd.DataFrame(list(zip(exp1_vrefs, exp1_srcs, exp1_refs, exp1_preds, exp2_preds)),
-                                  columns=['Verse_Ref', 'Source_Sentence', 'Target_Sentence',
-                                           'Exp1_Prediction', 'Exp2_Prediction'])
-            else:
-                df = pd.DataFrame(list(zip(exp1_srcs, exp1_refs, exp1_preds, exp2_preds)),
-                                  columns=['Source_Sentence', 'Target_Sentence',
-                                           'Exp1_Prediction', 'Exp2_Prediction'])
-                df['Verse_Ref'] = ''  # Add an empty verse reference column
-                df = df[['Verse_Ref', 'Source_Sentence', 'Target_Sentence',
-                        'Exp1_Prediction', 'Exp2_Prediction']]  # Reorder the columns for consistency
+    if exp2_dir is not None:
+        if exp2_type is 'NMT':          # NMT experiment
+            model_dir = exp2_dir / 'run'
+            _, exp2_step = get_last_checkpoint(model_dir) if args.last else get_best_model_dir(model_dir)
+            exp2_file_name = glob.glob(os.path.join(exp2_dir, f'test.trg-predictions.detok.txt.*{exp2_step}'))[0]
+        else:                           # SMT experiment
+            exp1_step = 0
+            exp2_file_name = os.path.join(exp2_dir, 'test.trg-predictions.txt')
+        if not os.path.exists(exp2_file_name):
+            print(f'Predictions file (best) not found: {exp2_file_name}')
+            return
+        print(f'-- vs Experiment 2: {exp2_file_name}')
+        sheet_name += f' vs {exp2_step}'
 
-            # Calculate the sentence BLEU scores for each prediction
-            for index, row in df.iterrows():
-                bleu = sentence_bleu(row['Exp1_Prediction'], [row['Target_Sentence']],
-                                     lowercase=not args.preserve_case, tokenize=args.tokenize)
-                exp1_scores.append(bleu.score)
-                bleu = sentence_bleu(row['Exp2_Prediction'], [row['Target_Sentence']],
-                                     lowercase=not args.preserve_case, tokenize=args.tokenize)
-                exp2_scores.append(bleu.score)
-            # Update the DF with the scores and score differences
-            df['Exp1_Score'] = exp1_scores
-            df['Exp2_Score'] = exp2_scores
-            df['Score_Delta'] = df['Exp2_Score'] - df['Exp1_Score']
+    # Create the initial data frame
+    df = pd.DataFrame(columns=['Verse_Ref', 'Source_Sentence', 'Target_Sentence', 'Exp1_Prediction',
+                               'Exp2_Prediction', 'Exp1_Score', 'Exp2_Score', 'Score_Delta'])
+    # Load the datasets
+    df['Source_Sentence'] = list(decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, 'test.src.txt')))))
+    df['Target_Sentence'] = list(load_corpus(Path(exp1_test_trg_filename)))
+    df['Exp1_Prediction'] = list(load_corpus(Path(exp1_file_name)))
+    if exp2_dir is not None:
+        df['Exp2_Prediction'] = list(load_corpus(Path(exp2_file_name)))
+    else:
+        df['Exp2_Prediction'] = ""
+    if vref_file is not None:
+        df['Verse_Ref'] = list(load_corpus(Path(vref_file)))
+    else:
+        df['Verse_Ref'] = ""
 
-            df.to_excel(writer, index=False, float_format="%.2f", sheet_name=sheet_name, startrow=histogram_offset)
-            sheet = writer.sheets[sheet_name]
-            sheet.autofilter(histogram_offset, 0, histogram_offset+df.shape[0]-1, df.shape[1]-1)
+    # Calculate the sentence BLEU scores for each prediction
+    exp1_scores: List[float] = []
+    exp2_scores: List[float] = []
+    for index, row in df.iterrows():
+        bleu = sentence_bleu(row['Exp1_Prediction'], [row['Target_Sentence']],
+                             lowercase=not args.preserve_case, tokenize=args.tokenize)
+        exp1_scores.append(bleu.score)
+        if exp2_dir is not None:
+            bleu = sentence_bleu(row['Exp2_Prediction'], [row['Target_Sentence']],
+                                 lowercase=not args.preserve_case, tokenize=args.tokenize)
+            exp2_scores.append(bleu.score)
 
-            if args.show_unknown:
-                apply_unknown_formatting(df, workbook, sheet, histogram_offset, "src", src_words)
-                apply_unknown_formatting(df, workbook, sheet, histogram_offset, "trg", trg_words)
-            if args.show_diffs:
-                apply_diff_formatting(df, workbook, sheet, histogram_offset)
+    # Update the DF with the scores and score differences
+    df['Exp1_Score'] = exp1_scores
+    if exp2_dir is None:
+        df['Exp2_Score'] = ""
+        df['Score_Delta'] = ""
+    else:
+        df['Exp2_Score'] = exp2_scores
+        df['Score_Delta'] = df['Exp2_Score'] - df['Exp1_Score']
 
-            adjust_column_widths(df, sheet, text_wrap_column_width)
-            add_histogram(df, sheet, f'{args.exp1}{exp1_checkpoint}', f'{args.exp2}{exp2_checkpoint}')
+    df.to_excel(writer, index=False, float_format="%.2f", sheet_name=sheet_name, startrow=histogram_offset)
+    sheet = writer.sheets[sheet_name]
+    sheet.autofilter(histogram_offset, 0, histogram_offset+df.shape[0], df.shape[1]-1)
+
+    if args.show_unknown:
+        apply_unknown_formatting(df, sheet, histogram_offset, "src", src_words)
+        apply_unknown_formatting(df, sheet, histogram_offset, "trg", trg_words)
+    if args.show_diffs:
+        apply_diff_formatting(df, sheet, histogram_offset)
+
+    adjust_column_widths(df, sheet, text_wrap_column_width)
+    if exp2_dir is not None:
+        add_histogram(df, sheet, f'{args.exp1}({exp1_step})', f'{args.exp2}({exp2_step})')
+
+    if args.analyze_digits:
+        add_digits_analysis(writer, df, text_wrap_column_width+20)
 
     if args.include_train:
         add_training_corpora(writer, exp1_dir, exp2_dir, text_wrap_column_width+20)
