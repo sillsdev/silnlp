@@ -981,8 +981,9 @@ class Config:
                     decode_sp_lines(encode_sp_lines(trg_spp, pair_test[column])),
                 )
                 test_projects.remove(project)
-            for project in test_projects:
-                self._fill_corpus(self._test_trg_filename(src_iso, trg_iso, project), len(pair_test))
+            if self._has_multiple_test_projects(src_iso, trg_iso):
+                for project in test_projects:
+                    self._fill_corpus(self._test_trg_filename(src_iso, trg_iso, project), len(pair_test))
         LOGGER.info(
             f"train size: {train_count},"
             f" val size: {val_count},"
@@ -1237,11 +1238,12 @@ class Config:
                     self._open_append(self._test_vref_filename(src_file.iso, trg_file.iso))
                 )
                 test_projects = self._get_test_projects(src_file.iso, trg_file.iso)
-                test_trg_project_files = [
-                    stack.enter_context(self._open_append(self._test_trg_filename(src_file.iso, trg_file.iso, project)))
-                    for project in test_projects
-                    if project != BASIC_DATA_PROJECT
-                ]
+                if self._has_multiple_test_projects(src_file.iso, trg_file.iso):
+                    test_trg_project_files = [
+                        stack.enter_context(self._open_append(self._test_trg_filename(src_file.iso, trg_file.iso, project)))
+                        for project in test_projects
+                        if project != BASIC_DATA_PROJECT
+                    ]
                 val_ref_count = self._get_val_ref_count(src_file.iso, trg_file.iso)
                 val_trg_ref_files = [
                     stack.enter_context(self._open_append(self._val_trg_filename(index)))
@@ -1411,6 +1413,9 @@ class Config:
         has_multiple_test_projects = self._iso_pairs[(src_iso, trg_iso)].has_multiple_test_projects
         suffix = f".{project}" if has_multiple_test_projects else ""
         return f"{prefix}.trg.detok{suffix}.txt"
+
+    def _has_multiple_test_projects(self, src_iso: str, trg_iso: str) -> bool:
+        return self._iso_pairs[(src_iso, trg_iso)].has_multiple_test_projects
 
     def _dict_src_filename(self) -> str:
         return "dict.src.txt"
