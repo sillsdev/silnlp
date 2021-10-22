@@ -8,7 +8,7 @@ logging.basicConfig()
 
 from ..common.environment import SIL_NLP_ENV
 from ..common.utils import get_git_revision_hash
-from .config import create_runner, load_config, Config
+from .config import Config, create_runner, load_config
 from .test import test
 
 
@@ -56,7 +56,7 @@ class SILExperiment:
             last=True,
             avg=True,
             best=True,
-            scorers=["bleu", "sentencebleu", "chrf3", "wer", "ter"],
+            scorers={"bleu", "sentencebleu", "chrf3", "wer", "ter"},
         )
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
 
