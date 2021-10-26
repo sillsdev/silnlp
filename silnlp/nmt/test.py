@@ -7,6 +7,7 @@ from typing import IO, Dict, Iterable, List, Optional, Set, Tuple, cast
 
 import numpy as np
 import sacrebleu
+import tensorflow as tf
 from machine.scripture import VerseRef, book_number_to_id, get_books
 from sacrebleu.metrics import BLEU, BLEUScore
 
@@ -51,9 +52,11 @@ class PairScore:
                 f"{self.bleu.precisions[2]:.2f}/{self.bleu.precisions[3]:.2f}/{self.bleu.bp:.3f}/"
                 f"{self.bleu.sys_len:d}/{self.bleu.ref_len:d}\n"
             )
+            tf.summary.scalar(f"{self.book}/BLEU", self.bleu.score)
         for key, val in self.other_scores.items():
             file.write(f"{self.book},{self.src_iso},{self.trg_iso},{self.num_refs},{self.refs},{self.sent_len:d},")
             file.write(f"{key},{val:.2f}\n")
+            tf.summary.scalar(f"{self.book}/{key}", val)
 
 
 def score_individual_books(
