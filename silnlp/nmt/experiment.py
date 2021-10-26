@@ -1,6 +1,7 @@
 import argparse
 import logging
 import os
+import tensorflow as tf
 from dataclasses import dataclass
 from typing import Optional
 
@@ -23,6 +24,7 @@ class SILExperiment:
     def __post_init__(self):
         self.config: Config = load_config(self.name)
         self.rev_hash = get_git_revision_hash()
+        self.tensorboard_init()
 
     def run(self):
         self.preprocess()
@@ -59,6 +61,9 @@ class SILExperiment:
             scorers=["bleu", "sentencebleu", "chrf3", "wer", "ter"],
         )
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
+
+    def tensorboard_init(self):
+        tf.summary.create_file_writer(str(SIL_NLP_ENV.mt_experiments_dir / self.name / "logs"))
 
 
 def main() -> None:

@@ -40,6 +40,7 @@ class SILExperimentCML(SILExperiment):
 
         self.config: Config = self.load_clearml_config()
         self.rev_hash = get_git_revision_hash()
+        self.tensorboard_init()
 
     def load_clearml_config(self):
 
