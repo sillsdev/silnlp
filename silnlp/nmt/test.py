@@ -1,7 +1,7 @@
 import argparse
+import logging
 import random
 import sys
-import logging
 from pathlib import Path
 from typing import IO, Dict, Iterable, List, Optional, Set, Tuple, cast
 
@@ -379,14 +379,17 @@ def test_checkpoint(
 
     checkpoint_name = "averaged checkpoint" if step == -1 else f"checkpoint {step}"
 
-    if force_infer or any(not (config.exp_dir / f).is_file() for f in predictions_detok_file_names):
+    features_paths: List[str] = []
+    predictions_paths: List[str] = []
+    for i in range(len(predictions_file_names)):
+        predictions_path = config.exp_dir / predictions_file_names[i]
+        if force_infer or not predictions_path.is_file():
+            features_paths.append(str(config.exp_dir / features_file_names[i]))
+            predictions_paths.append(str(predictions_path))
+    if len(predictions_paths) > 0:
         runner = create_runner(config, memory_growth=memory_growth)
         print(f"Inferencing {checkpoint_name}...")
-        runner.infer_multiple(
-            [str(config.exp_dir / f) for f in features_file_names],
-            [str(config.exp_dir / f) for f in predictions_file_names],
-            checkpoint_path=str(checkpoint_path),
-        )
+        runner.infer_multiple(features_paths, predictions_paths, checkpoint_path=str(checkpoint_path))
 
     print(f"Scoring {checkpoint_name}...")
     default_src_iso = config.default_src_iso
@@ -489,30 +492,23 @@ def test_checkpoint(
 def test(
     experiment: str,
     memory_growth=False,
-    checkpoint: str = None,
-    last=False,
-    avg=False,
-    best=False,
-    force_infer=False,
-    scorers=None,
-    ref_projects=[],
-    books=[],
-    by_book=False,
+    checkpoint: Optional[str] = None,
+    last: bool = False,
+    avg: bool = False,
+    best: bool = False,
+    force_infer: bool = False,
+    scorers: Set[str] = set(),
+    ref_projects: Set[str] = set(),
+    books: Set[str] = set(),
+    by_book: bool = False,
 ):
     exp_name = experiment
     config = load_config(exp_name)
-    ref_projects: Set[str] = set(ref_projects)
-    books = get_books(books)
+    books_nums = get_books(books)
 
-    temp_scorers: Set[str] = set()
-    if scorers is None:
-        temp_scorers.add("bleu")
-    else:
-        for scorer in set(scorers):
-            scorer = scorer.lower()
-            if scorer in _SUPPORTED_SCORERS:
-                temp_scorers.add(scorer)
-    scorers = temp_scorers
+    if len(scorers) == 0:
+        scorers.add("bleu")
+    scorers.intersection_update(_SUPPORTED_SCORERS)
 
     best_model_path, best_step = get_best_model_dir(config.model_dir)
     results: Dict[int, List[PairScore]] = {}
@@ -529,7 +525,7 @@ def test(
             checkpoint_path,
             step,
             scorers,
-            books,
+            books_nums,
         )
 
     if avg:
@@ -545,7 +541,7 @@ def test(
                 checkpoint_path,
                 step,
                 scorers,
-                books,
+                books_nums,
             )
         except:
             LOGGER.info("No average checkpoint available.")
@@ -563,7 +559,7 @@ def test(
                 checkpoint_path,
                 step,
                 scorers,
-                books,
+                books_nums,
             )
 
     if last or (not best and checkpoint is None and not avg):
@@ -579,7 +575,7 @@ def test(
                 checkpoint_path,
                 step,
                 scorers,
-                books,
+                books_nums,
             )
 
     for step in sorted(results.keys()):
@@ -614,6 +610,7 @@ def main() -> None:
         nargs="*",
         metavar="scorer",
         choices=_SUPPORTED_SCORERS,
+        default=[],
         help=f"List of scorers - {_SUPPORTED_SCORERS}",
     )
     parser.add_argument("--books", nargs="*", metavar="book", default=[], help="Books")
@@ -623,7 +620,19 @@ def main() -> None:
 
     get_git_revision_hash()
 
-    test(**args)
+    test(
+        args.experiment,
+        memory_growth=args.memory_growth,
+        checkpoint=args.checkpoint,
+        last=args.last,
+        best=args.best,
+        avg=args.avg,
+        ref_projects=set(args.ref_projects),
+        force_infer=args.force_infer,
+        scorers=set(s.lower() for s in args.scorers),
+        books=set(args.books),
+        by_book=args.by_book,
+    )
 
 
 if __name__ == "__main__":

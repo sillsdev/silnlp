@@ -1,7 +1,6 @@
 ﻿<ScriptureText>
   <StyleSheet>usfm.sty</StyleSheet>
-  <BooksPresent>111111111111111111111111111111111111111111111111111111111111111111000000000000000000000000000000000000000000000000000000000</BooksPresent>
-  <Versification>4</Versification>
+  <Versification>1</Versification>
   <LanguageIsoCode>qaa:::</LanguageIsoCode>
   <Language>Unlisted Language</Language>
   <MinParatextVersion>8.0.100.76</MinParatextVersion>
@@ -11,11 +10,7 @@
   <Copyright />
   <NormalizationForm>NFC</NormalizationForm>
   <Name>Ref</Name>
-  <Guid>c3376e51ed7fc506fce228fa331c165d049bc3af</Guid>
-  <DefaultFont>Charis SIL</DefaultFont>
-  <DefaultFontSize>12</DefaultFontSize>
-  <FontFeatures />
-  <HtmlLanguage />
+  <Guid>9d76675a159bbbfc465bfff5689642f089c5a4eb</Guid>
   <AssociatedLexicalProject />
   <FileNameBookNameForm>41MAT</FileNameBookNameForm>
   <FileNamePrePart />
@@ -29,5 +24,6 @@
   <EncodingConverter />
   <UsfmVersion>3</UsfmVersion>
   <ParallelPassagesBooks>000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000</ParallelPassagesBooks>
+  <BooksPresent>111111111111111111111111111111111111111111111111111111111111111111111111111111111111110000000000000000010000000000011000000</BooksPresent>
   <Naming PrePart="" PostPart="Ref.SFM" BookNameForm="41MAT" />
 </ScriptureText>

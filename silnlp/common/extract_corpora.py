@@ -1,16 +1,10 @@
-# Extracts parallel corpora from Paratext projects.
-# This script is dependent on the Machine tool being installed.
-# To install:
-# 1. Install .NET Core SDK (https://dotnet.microsoft.com/download)
-# 2. Run "dotnet tool restore"
-
-
 import argparse
 import logging
 from typing import Set
 
+from ..common.corpus import count_lines
 from ..common.environment import SIL_NLP_ENV
-from .paratext import extract_project, extract_term_renderings
+from .paratext import extract_project, extract_term_renderings, get_project_dir
 
 LOGGER = logging.getLogger(__package__ + ".extract_corpora")
 
@@ -50,12 +44,21 @@ def main() -> None:
 
     # Process the projects that have data and tell the user.
     if len(projects_found) > 0:
+        expected_verse_count = count_lines(SIL_NLP_ENV.assets_dir / "vref.txt")
         SIL_NLP_ENV.mt_scripture_dir.mkdir(exist_ok=True, parents=True)
         SIL_NLP_ENV.mt_terms_dir.mkdir(exist_ok=True, parents=True)
         for project in projects_found:
             LOGGER.info(f"Extracting {project}...")
-            corpus_filename = extract_project(project, args.include, args.exclude, args.markers)
-            extract_term_renderings(project, corpus_filename)
+            project_dir = get_project_dir(project)
+            corpus_filename, verse_count = extract_project(
+                project_dir, SIL_NLP_ENV.mt_scripture_dir, args.include, args.exclude, args.markers
+            )
+            # check if the number of lines in the file is correct (the same as vref.txt)
+            LOGGER.info(f"# of Verses: {verse_count}")
+            if verse_count != expected_verse_count:
+                LOGGER.error(f"The number of verses is {verse_count}, but should be {expected_verse_count}.")
+            terms_count = extract_term_renderings(project_dir, corpus_filename)
+            LOGGER.info(f"# of Terms: {terms_count}")
             LOGGER.info("Done.")
     else:
         LOGGER.warning(f"Couldn't find any data to process for any project in {SIL_NLP_ENV.pt_projects_dir}.")

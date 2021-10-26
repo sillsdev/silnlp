@@ -263,3 +263,8 @@ def get_terms_data_frame(
             for gloss in term.glosses:
                 data.add((rendering, gloss, dictionary))
     return pd.DataFrame(data, columns=["rendering", "gloss", "dictionary"])
+
+
+def count_lines(file_path: Path) -> int:
+    with file_path.open("r", encoding="utf-8-sig") as file:
+        return sum(1 for _ in file)
