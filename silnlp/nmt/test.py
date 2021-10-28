@@ -243,8 +243,9 @@ def load_test_data(
                 sys, refs = dataset[iso]
                 sys.append(detok_pred_line)
                 if select_rand_ref_line:
-                    ref_index = random.randint(0, len(ref_files) - 1)
-                    ref_line = lines[ref_index + 2].strip()
+                    ref_lines: List[str] = [l for l in map(lambda l: l.strip(), lines[2:]) if len(l) > 0]
+                    ref_index = random.randint(0, len(ref_lines) - 1)
+                    ref_line = ref_lines[ref_index]
                     if len(refs) == 0:
                         refs.append([])
                     refs[0].append(ref_line)
