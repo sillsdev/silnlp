@@ -16,7 +16,7 @@ import pandas as pd
 import sentencepiece as sp
 import tensorflow as tf
 import yaml
-from machine.scripture import VerseRef, get_books
+from machine.scripture import VerseRef, get_books, ORIGINAL_VERSIFICATION
 from opennmt import END_OF_SENTENCE_TOKEN, PADDING_TOKEN, START_OF_SENTENCE_TOKEN
 from opennmt.data import Noise, Vocab, WordDropout, WordNoiser, tokens_to_words
 from opennmt.inputters import TextInputter
@@ -1012,7 +1012,7 @@ class Config:
                 pair_test_indices[(src_iso, trg_iso)] = test_indices
 
             for vref_str in load_corpus(vref_path):
-                vref = VerseRef.from_string(vref_str)
+                vref = VerseRef.from_string(vref_str, ORIGINAL_VERSIFICATION)
                 if vref.has_multiple:
                     vref.simplify()
                 test_indices.add(vrefs[str(vref)])

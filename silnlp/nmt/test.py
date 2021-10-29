@@ -7,7 +7,7 @@ from typing import IO, Dict, Iterable, List, Optional, Set, Tuple, cast
 
 import numpy as np
 import sacrebleu
-from machine.scripture import VerseRef, book_number_to_id, get_books
+from machine.scripture import VerseRef, book_number_to_id, get_books, ORIGINAL_VERSIFICATION
 from sacrebleu.metrics import BLEU, BLEUScore
 
 from ..common.metrics import compute_meteor_score, compute_ter_score, compute_wer_score
@@ -145,7 +145,7 @@ def process_individual_books(
                 src_line = lines[2].strip()
                 # Get book
                 if vref != "":
-                    vref = VerseRef.from_string(vref.strip())
+                    vref = VerseRef.from_string(vref.strip(), ORIGINAL_VERSIFICATION)
                     # Check if book in books
                     if vref.book_num in books:
                         # Get iso
@@ -226,7 +226,7 @@ def load_test_data(
                 if vref_file is not None:
                     vref_line = vref_file.readline().strip()
                     if vref_line != "":
-                        vref = VerseRef.from_string(vref_line)
+                        vref = VerseRef.from_string(vref_line, ORIGINAL_VERSIFICATION)
                         if vref.book_num not in books:
                             continue
                 src_line = lines[0].strip()
