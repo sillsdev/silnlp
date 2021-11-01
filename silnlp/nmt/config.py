@@ -16,7 +16,7 @@ import pandas as pd
 import sentencepiece as sp
 import tensorflow as tf
 import yaml
-from machine.scripture import VerseRef, get_books
+from machine.scripture import VerseRef, get_books, ORIGINAL_VERSIFICATION
 from opennmt import END_OF_SENTENCE_TOKEN, PADDING_TOKEN, START_OF_SENTENCE_TOKEN
 from opennmt.data import Noise, Vocab, WordDropout, WordNoiser, tokens_to_words
 from opennmt.inputters import TextInputter
@@ -371,6 +371,7 @@ def build_vocab(
     model_prefix: Path,
     vocab_path: Path,
     tags: Set[str],
+    max_train_size: int,
 ) -> None:
     user_defined_symbols = "<blank>"
     for tag in tags:
@@ -400,7 +401,7 @@ def build_vocab(
         vocab_size=vocab_size,
         user_defined_symbols=user_defined_symbols,
         character_coverage="%.4f" % character_coverage,
-        input_sentence_size=1000000,
+        input_sentence_size=max_train_size,
         shuffle_input_sentence=True,
         control_symbols="<range>",
     )
@@ -452,6 +453,7 @@ class Config:
                     "eval_labels_file": str(exp_dir / "val.trg.txt"),
                     "share_vocab": True,
                     "character_coverage": 1.0,
+                    "sp_max_train_size": 1000000,
                     "mirror": False,
                     "parent_use_best": False,
                     "parent_use_average": False,
@@ -1010,7 +1012,7 @@ class Config:
                 pair_test_indices[(src_iso, trg_iso)] = test_indices
 
             for vref_str in load_corpus(vref_path):
-                vref = VerseRef.from_string(vref_str)
+                vref = VerseRef.from_string(vref_str, ORIGINAL_VERSIFICATION)
                 if vref.has_multiple:
                     vref.simplify()
                 test_indices.add(vrefs[str(vref)])
@@ -1240,7 +1242,9 @@ class Config:
                 test_projects = self._get_test_projects(src_file.iso, trg_file.iso)
                 if self._has_multiple_test_projects(src_file.iso, trg_file.iso):
                     test_trg_project_files = [
-                        stack.enter_context(self._open_append(self._test_trg_filename(src_file.iso, trg_file.iso, project)))
+                        stack.enter_context(
+                            self._open_append(self._test_trg_filename(src_file.iso, trg_file.iso, project))
+                        )
                         for project in test_projects
                         if project != BASIC_DATA_PROJECT
                     ]
@@ -1452,9 +1456,17 @@ class Config:
             model_prefix = self.exp_dir / "sp"
             vocab_path = self.exp_dir / "onmt.vocab"
             share_vocab_file_paths: Set[Path] = self.src_file_paths | self.trg_file_paths
-            character_coverage = self.data.get("character_coverage", 1.0)
+            character_coverage: float = self.data["character_coverage"]
+            max_train_size: int = self.data["sp_max_train_size"]
             build_vocab(
-                share_vocab_file_paths, vocab_size, casing, character_coverage, model_prefix, vocab_path, self._tags
+                share_vocab_file_paths,
+                vocab_size,
+                casing,
+                character_coverage,
+                model_prefix,
+                vocab_path,
+                self._tags,
+                max_train_size,
             )
 
             self._update_vocab(vocab_path, vocab_path)
@@ -1542,7 +1554,10 @@ class Config:
         casing: str = self.data.get(f"{prefix}_casing", self.data.get("casing"))
         character_coverage: float = self.data.get(f"{prefix}_character_coverage", self.data.get("character_coverage"))
         tags = self._tags if side == "source" else set()
-        build_vocab(vocab_file_paths, vocab_size, casing, character_coverage, model_prefix, vocab_path, tags)
+        max_train_size: int = self.data["sp_max_train_size"]
+        build_vocab(
+            vocab_file_paths, vocab_size, casing, character_coverage, model_prefix, vocab_path, tags, max_train_size
+        )
 
     def _create_train_alignments(self, train_count: int) -> None:
         with tempfile.TemporaryDirectory() as td:

@@ -7,7 +7,7 @@ from xml.sax.saxutils import escape
 
 from lxml import etree
 from machine.corpora import FilteredTextCorpus, ParallelTextCorpus, ParatextTextCorpus, Text
-from machine.scripture import VerseRef, book_id_to_number
+from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_id_to_number, get_books
 from machine.tokenization import NullTokenizer
 
 from .corpus import get_terms_glosses_path, get_terms_metadata_path, get_terms_vrefs_path, load_corpus
@@ -37,7 +37,11 @@ def get_iso(settings_tree: etree.ElementTree) -> str:
 
 
 def extract_project(
-    project_dir: Path, output_dir: Path, include_texts: str = "", exclude_texts: str = "", include_markers: bool = False
+    project_dir: Path,
+    output_dir: Path,
+    include_books: List[str] = [],
+    exclude_books: List[str] = [],
+    include_markers: bool = False,
 ) -> Tuple[Path, int]:
     settings_tree = parse_project_settings(project_dir)
     iso = get_iso(settings_tree)
@@ -49,31 +53,28 @@ def extract_project(
     project_corpus = ParatextTextCorpus(tokenizer, project_dir, include_markers=include_markers)
 
     output_basename = f"{iso}-{project_dir.name}"
-    if len(include_texts) > 0 or len(exclude_texts) > 0:
+    if len(include_books) > 0 or len(exclude_books) > 0:
         output_basename += "_"
-        include_texts_set: Optional[Set[str]] = None
-        if len(include_texts) > 0:
-            include_texts_set = set()
-            for text in include_texts.split(","):
-                include_texts_set.add(text)
-                text = text.strip("*")
+        include_books_set: Optional[Set[int]] = None
+        if len(include_books) > 0:
+            include_books_set = get_books(include_books)
+            for text in include_books:
                 output_basename += f"+{text}"
-        exclude_texts_set: Optional[Set[str]] = None
-        if len(exclude_texts) > 0:
-            exclude_texts_set = set()
-            for text in exclude_texts.split(","):
-                exclude_texts_set.add(text)
-                text = text.strip("*")
+        exclude_books_set: Optional[Set[int]] = None
+        if len(exclude_books) > 0:
+            exclude_books_set = get_books(exclude_books)
+            for text in exclude_books:
                 output_basename += f"-{text}"
 
         def filter_corpus(text: Text) -> bool:
-            if exclude_texts_set is not None and text.id in exclude_texts_set:
+            book_num = book_id_to_number(text.id)
+            if exclude_books_set is not None and book_num in exclude_books_set:
                 return False
 
-            if include_texts_set is not None and text.id in include_texts_set:
+            if include_books_set is not None and book_num in include_books_set:
                 return True
 
-            return include_texts_set is None
+            return include_books_set is None
 
         ref_corpus = FilteredTextCorpus(ref_corpus, filter_corpus)
         project_corpus = FilteredTextCorpus(project_corpus, filter_corpus)
@@ -181,7 +182,9 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> Dict[st
                 if refs_elem is not None:
                     for verse_elem in refs_elem.findall("Verse"):
                         bbbcccvvv = int(verse_elem.text[:9])
-                        refs_list.append(VerseRef.from_bbbcccvvv(bbbcccvvv))
+                        vref = VerseRef.from_bbbcccvvv(bbbcccvvv)
+                        vref.change_versification(ORIGINAL_VERSIFICATION)
+                        refs_list.append(vref)
                     references[id] = refs_list
                 glosses = _process_gloss_string(gloss_str)
                 terms_metadata_file.write(f"{id}\t{cat}\t{domain}\n")
@@ -249,7 +252,7 @@ def extract_term_renderings(project_dir: Path, corpus_filename: Path) -> int:
     if not renderings_path.is_file():
         return 0
 
-    renderings_tree = etree.parse(str(renderings_path), parser=etree.XMLParser(encoding="utf-8"))
+    renderings_tree = etree.parse(str(renderings_path))
     rendering_elems: Dict[str, etree.Element] = {}
     for elem in renderings_tree.getroot().findall("TermRendering"):
         id = elem.get("Id")
@@ -279,7 +282,7 @@ def extract_term_renderings(project_dir: Path, corpus_filename: Path) -> int:
         for ref_str, verse_str in zip(load_corpus(SIL_NLP_ENV.assets_dir / "vref.txt"), load_corpus(corpus_filename)):
             if verse_str == "<range>":
                 verse_str = prev_verse_str
-            corpus[VerseRef.from_string(ref_str)] = verse_str
+            corpus[VerseRef.from_string(ref_str, ORIGINAL_VERSIFICATION)] = verse_str
             prev_verse_str = verse_str
 
     terms_metadata_path = get_terms_metadata_path(list_name)
