@@ -3,14 +3,15 @@ import logging
 import os
 import tensorflow as tf
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, List
 
 logging.basicConfig()
 
 from ..common.environment import SIL_NLP_ENV
 from ..common.utils import get_git_revision_hash
-from .config import Config, create_runner, load_config
+from .config import Config, create_runner, get_checkpoint_path, load_config
 from .test import test
+from .translate import NMTTranslator
 
 
 @dataclass
@@ -25,6 +26,7 @@ class SILExperiment:
         self.config: Config = load_config(self.name)
         self.rev_hash = get_git_revision_hash()
         self.tensorboard_init()
+        self.config.set_seed()
 
     def run(self):
         self.preprocess()
@@ -33,7 +35,6 @@ class SILExperiment:
 
     def preprocess(self):
         SIL_NLP_ENV.copy_experiment_from_bucket(self.name, extensions=(".yml"))
-        self.config.set_seed()
         self.config.preprocess(self.make_stats)
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
 
@@ -63,6 +64,15 @@ class SILExperiment:
             best=True,
             scorers={"bleu", "sentencebleu", "chrf3", "wer", "ter"},
         )
+        SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
+
+    def translate(self, book: str = "all", checkpoint="last"):
+
+        checkpoint_path, step = get_checkpoint_path(self.config.model_dir, checkpoint)
+
+        translator = NMTTranslator(self.config, checkpoint_path, step, self.memory_growth)
+
+        translator.translate_book_by_step(book)
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
 
     def tensorboard_init(self):
