@@ -32,6 +32,7 @@ class SILExperiment:
         self.test()
 
     def preprocess(self):
+        SIL_NLP_ENV.copy_experiment_from_bucket(self.name, extensions=(".yml"))
         self.config.set_seed()
         self.config.preprocess(self.make_stats)
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
@@ -39,6 +40,7 @@ class SILExperiment:
     def train(self):
         os.system("nvidia-smi")
         os.environ["TF_DETERMINISTIC_OPS"] = "1"
+        SIL_NLP_ENV.copy_experiment_from_bucket(self.name, extensions=(".txt", ".vocab", ".model", ".yml", ".csv"))
 
         runner = create_runner(self.config, mixed_precision=self.mixed_precision, memory_growth=self.memory_growth)
         runner.save_effective_config(str(self.config.exp_dir / f"effective-config-{self.rev_hash}.yml"), training=True)
@@ -53,6 +55,7 @@ class SILExperiment:
         print("Training completed")
 
     def test(self):
+        SIL_NLP_ENV.copy_experiment_from_bucket(self.name, extensions=(".txt", ".vocab", ".model", ".yml", ".csv"))
         test(
             experiment=self.name,
             last=True,

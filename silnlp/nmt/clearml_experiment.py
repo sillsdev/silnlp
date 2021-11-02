@@ -45,7 +45,7 @@ class SILExperimentCML(SILExperiment):
     def load_clearml_config(self):
 
         # copy from S3 bucket to temp first
-        SIL_NLP_ENV.copy_experiment_from_bucket(self.name)
+        SIL_NLP_ENV.copy_experiment_from_bucket(self.name, extensions=("config.yml"))
         # if the project/experiment yaml file already exists, use it to re-read the config.  If not, write it.
         exp_dir = get_mt_exp_dir(self.name)
         proj_dir = get_mt_exp_dir(self.clearml_project_folder)

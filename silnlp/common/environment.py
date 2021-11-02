@@ -2,6 +2,7 @@ import logging
 import os
 import tempfile
 from pathlib import Path
+from datetime import datetime, timezone
 from typing import Iterable, List, Tuple, Union
 
 import boto3
@@ -57,8 +58,22 @@ class SilNlpEnv:
         self.mt_terms_dir = self.mt_dir / "terms"
         self.mt_scripture_dir = self.mt_dir / "scripture"
         if self.is_bucket:
-            self.mt_experiments_dir = Path(tempfile.TemporaryDirectory().name)
-            self.mt_experiments_dir.mkdir()
+            sil_nlp_cache_dir = os.getenv("SIL_NLP_CACHE_EXPERIMENT_DIR")
+            if sil_nlp_cache_dir is not None:
+                temp_path = Path(sil_nlp_cache_dir)
+                if temp_path.is_dir():
+                    LOGGER.info(
+                        f"Using cache dir: {sil_nlp_cache_dir} as per environment variable SIL_NLP_CACHE_EXPERIMENT_DIR."
+                    )
+                    self.mt_experiments_dir = temp_path
+                else:
+                    raise Exception(
+                        "The path in SIL_NLP_CACHE_EXPERIMENT_DIR does not exist.  Create it first: "
+                        + sil_nlp_cache_dir
+                    )
+            else:
+                self.mt_experiments_dir = Path(tempfile.TemporaryDirectory().name)
+                self.mt_experiments_dir.mkdir()
         else:
             self.mt_experiments_dir = self.mt_dir / "experiments"
 
@@ -118,7 +133,7 @@ class SilNlpEnv:
         name = name.split("MT/experiments/")[-1]
         if len(name) == 0:
             raise Exception(
-                f"No experiment name is given.  Data still in the temp directory of {self.mt_experiments_dir}"
+                f"No experiment name is given.  Data still in the cache directory of {self.mt_experiments_dir}"
             )
         s3 = boto3.resource("s3")
         data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
@@ -134,9 +149,14 @@ class SilNlpEnv:
                 rel_folder = "/".join(rel_path.split("/")[:-1])
                 if (rel_folder == proj_name) or rel_folder.startswith(name):
                     # copy over project files and experiment files
-                    LOGGER.info("Copying from bucket to temp drive: " + rel_path)
+                    LOGGER.info("Copying from bucket to local cache: " + rel_path)
                     temp_dest_path = self.mt_experiments_dir / rel_path
                     temp_dest_path.parent.mkdir(parents=True, exist_ok=True)
+                    if temp_dest_path.exists():
+                        curr_mod_time = datetime.fromtimestamp(os.path.getmtime(temp_dest_path), tz=timezone.utc)
+                        new_mod_time = obj.last_modified
+                        if curr_mod_time >= new_mod_time:
+                            continue
                     data_bucket.download_file(obj.object_key, str(temp_dest_path))
 
     def copy_experiment_to_bucket(self, name: str):
