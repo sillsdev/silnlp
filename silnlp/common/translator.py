@@ -164,8 +164,8 @@ class Translator(ABC):
 
     def translate_book(self, src_project: str, book: str, output_path: Path, trg_iso: Optional[str] = None) -> None:
         src_project_dir = get_project_dir(src_project)
-        settings_path = os.path.join(src_project_dir, "Settings.xml")
-        settings_tree = etree.parse(settings_path)
+        with (src_project_dir / "Settings.xml").open('rb') as settingsf:
+            settings_tree = etree.parse(settingsf)
         src_iso = get_iso(settings_tree)
         book_path = get_book_path(src_project, book)
         with book_path.open(mode="r", encoding="utf-8") as book_file:
