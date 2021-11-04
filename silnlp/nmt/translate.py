@@ -1,4 +1,5 @@
 import argparse
+import os
 import time
 from pathlib import Path
 from typing import Iterable, Optional, Dict
@@ -22,13 +23,17 @@ class NMTTranslator(Translator):
     checkpoint: str = "last"
     memory_growth: bool = False
     clearml_queue: str = None
-    experiment_suffix: str = ""
 
-    def __post_init__(self):
+    def init_translation_task(self, experiment_suffix: str):
         self.clearml = SILClearML(
-            self.name, self.clearml_queue, project_suffix="_infer", experiment_suffix=self.experiment_suffix
+            self.name, self.clearml_queue, project_suffix="_infer", experiment_suffix=experiment_suffix
         )
         self.name = self.clearml.get_remote_name()
+
+        SIL_NLP_ENV.copy_experiment_from_bucket(
+            self.name, extensions=(".vocab", ".model", ".yml", "dict.src.txt", "dict.trg.txt")
+        )
+
         self.config: Config = self.clearml.load_config()
         self.config.set_seed()
 
@@ -58,6 +63,7 @@ class NMTTranslator(Translator):
         return text
 
     def translate_book_by_step(self, book, src_project=None, output_usfm=None, trg_lang=None):
+        self.init_translation_task(experiment_suffix=f"_{self.checkpoint}_{book}")
         if src_project is None:
             if len(self.config.src_projects) != 1:
                 raise RuntimeError("A source project must be specified.")
@@ -76,6 +82,7 @@ class NMTTranslator(Translator):
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
 
     def translate_parts(self, src_prefix, trg_prefix, start_seq, end_seq, trg_lang=None):
+        self.init_translation_task(experiment_suffix=f"_{self.checkpoint}_{src_prefix}")
         if trg_prefix is None:
             raise RuntimeError("A target file prefix must be specified.")
         if start_seq is None or end_seq is None:
@@ -93,6 +100,7 @@ class NMTTranslator(Translator):
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
 
     def translate_src(self, src_file_path, trg_lang=None, trg_file_path=None):
+        self.init_translation_task(experiment_suffix=f"_{self.checkpoint}_{os.path.basename(src_file_path)}")
         src_file_path = Path(src_file_path)
         default_output_dir = self.config.exp_dir / "infer" / self._step_str
         trg_file_path = default_output_dir / src_file_path.name if trg_file_path is None else Path(trg_file_path)

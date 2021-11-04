@@ -149,14 +149,15 @@ class SilNlpEnv:
                 rel_folder = "/".join(rel_path.split("/")[:-1])
                 if (rel_folder == proj_name) or rel_folder.startswith(name):
                     # copy over project files and experiment files
-                    LOGGER.info("Copying from bucket to local cache: " + rel_path)
                     temp_dest_path = self.mt_experiments_dir / rel_path
                     temp_dest_path.parent.mkdir(parents=True, exist_ok=True)
                     if temp_dest_path.exists():
                         curr_mod_time = datetime.fromtimestamp(os.path.getmtime(temp_dest_path), tz=timezone.utc)
                         new_mod_time = obj.last_modified
                         if curr_mod_time >= new_mod_time:
+                            LOGGER.info("File already exists in the cache: " + rel_path)
                             continue
+                    LOGGER.info("Copying from bucket to local cache: " + rel_path)
                     data_bucket.download_file(obj.object_key, str(temp_dest_path))
 
     def copy_experiment_to_bucket(self, name: str):
