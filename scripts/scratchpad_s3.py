@@ -1,11 +1,10 @@
-from silnlp.nmt.clearml_experiment import SILExperimentCML
+from silnlp.nmt.experiment import SILExperiment
+from silnlp.nmt.translate import NMTTranslator
 
-exp = SILExperimentCML(
+tlr = NMTTranslator(
     name="de-to-en-WMT2020+Bibles_AE/bch-en",
-    make_stats=True,  # limited by stats_max_size to process only Bibles
-    mixed_precision=True,  # clearML GPU's can handle mixed precision
     memory_growth=False,
-    queue_name="langtech_40gb",
-    remote_execution=True,
+    clearml_queue=None,
+    experiment_suffix="_2PE_2nd",
 )
-exp.run()
+tlr.translate_book_by_step("2PE")

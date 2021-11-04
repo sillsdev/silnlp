@@ -415,7 +415,7 @@ def get_checkpoint_path(model_dir: Path, checkpoint_type: CheckpointType) -> Tup
     step = None
     if type(checkpoint_type) is str:
         checkpoint_type = checkpoint_type.lower()
-        if "ave" in checkpoint_type:
+        if "avg" in checkpoint_type:
             checkpoint_type = CheckpointType.AVERAGE
         elif "best" in checkpoint_type:
             checkpoint_type = CheckpointType.BEST
