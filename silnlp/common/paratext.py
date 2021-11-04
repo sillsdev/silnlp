@@ -2,12 +2,12 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 from xml.sax.saxutils import escape
 
 from lxml import etree
 from machine.corpora import FilteredTextCorpus, ParallelTextCorpus, ParatextTextCorpus, Text
-from machine.scripture import VerseRef, book_id_to_number
+from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_id_to_number, get_books
 from machine.tokenization import NullTokenizer
 
 from .corpus import get_terms_glosses_path, get_terms_metadata_path, get_terms_vrefs_path, load_corpus
@@ -36,9 +36,14 @@ def get_iso(settings_tree: etree.ElementTree) -> str:
     return iso[:index]
 
 
-def extract_project(project: str, include_texts: str, exclude_texts: str, include_markers: bool) -> Path:
-    project_dir = get_project_dir(project)
-    settings_tree = etree.parse(str(project_dir / "Settings.xml"))
+def extract_project(
+    project_dir: Path,
+    output_dir: Path,
+    include_books: List[str] = [],
+    exclude_books: List[str] = [],
+    include_markers: bool = False,
+) -> Tuple[Path, int]:
+    settings_tree = parse_project_settings(project_dir)
     iso = get_iso(settings_tree)
 
     ref_dir = SIL_NLP_ENV.assets_dir / "Ref"
@@ -47,70 +52,68 @@ def extract_project(project: str, include_texts: str, exclude_texts: str, includ
     ref_corpus = ParatextTextCorpus(tokenizer, ref_dir)
     project_corpus = ParatextTextCorpus(tokenizer, project_dir, include_markers=include_markers)
 
-    output_basename = f"{iso}-{project}"
-    if len(include_texts) > 0 or len(exclude_texts) > 0:
+    output_basename = f"{iso}-{project_dir.name}"
+    if len(include_books) > 0 or len(exclude_books) > 0:
         output_basename += "_"
-        include_texts_set: Optional[Set[str]] = None
-        if len(include_texts) > 0:
-            include_texts_set = set()
-            for text in include_texts.split(","):
-                include_texts_set.add(text)
-                text = text.strip("*")
+        include_books_set: Optional[Set[int]] = None
+        if len(include_books) > 0:
+            include_books_set = get_books(include_books)
+            for text in include_books:
                 output_basename += f"+{text}"
-        exclude_texts_set: Optional[Set[str]] = None
-        if len(exclude_texts) > 0:
-            exclude_texts_set = set()
-            for text in exclude_texts.split(","):
-                exclude_texts_set.add(text)
-                text = text.strip("*")
+        exclude_books_set: Optional[Set[int]] = None
+        if len(exclude_books) > 0:
+            exclude_books_set = get_books(exclude_books)
+            for text in exclude_books:
                 output_basename += f"-{text}"
 
         def filter_corpus(text: Text) -> bool:
-            if exclude_texts_set is not None and text.id in exclude_texts_set:
+            book_num = book_id_to_number(text.id)
+            if exclude_books_set is not None and book_num in exclude_books_set:
                 return False
 
-            if include_texts_set is not None and text.id in include_texts_set:
+            if include_books_set is not None and book_num in include_books_set:
                 return True
 
-            return include_texts_set is None
+            return include_books_set is None
 
         ref_corpus = FilteredTextCorpus(ref_corpus, filter_corpus)
         project_corpus = FilteredTextCorpus(project_corpus, filter_corpus)
 
     if include_markers:
         output_basename += "-m"
-    output_filename = SIL_NLP_ENV.mt_scripture_dir / f"{output_basename}.txt"
+    output_filename = output_dir / f"{output_basename}.txt"
 
-    parallel_corpus = ParallelTextCorpus(ref_corpus, project_corpus)
-    segment_count = 0
-    with output_filename.open("w", encoding="utf-8", newline="\n") as output_stream, parallel_corpus.get_segments(
-        all_source_segments=True
-    ) as segments:
-        cur_ref: Optional[Any] = None
-        cur_target_line = ""
-        cur_target_line_range = True
-        for segment in segments:
-            if cur_ref is not None and segment.segment_ref != cur_ref:
-                output_stream.write(("<range>" if cur_target_line_range else cur_target_line) + "\n")
-                segment_count += 1
-                cur_target_line = ""
-                cur_target_line_range = True
+    try:
+        parallel_corpus = ParallelTextCorpus(ref_corpus, project_corpus)
+        segment_count = 0
+        with output_filename.open("w", encoding="utf-8", newline="\n") as output_stream, parallel_corpus.get_segments(
+            all_source_segments=True
+        ) as segments:
+            cur_ref: Optional[VerseRef] = None
+            cur_target_line = ""
+            cur_target_line_range = True
+            for segment in segments:
+                ref: VerseRef = segment.segment_ref
+                if cur_ref is not None and ref.compare_to(cur_ref, compare_segments=False) != 0:
+                    output_stream.write(("<range>" if cur_target_line_range else cur_target_line) + "\n")
+                    segment_count += 1
+                    cur_target_line = ""
+                    cur_target_line_range = True
 
-            cur_ref = segment.segment_ref
-            if not segment.is_target_in_range or segment.is_target_range_start or len(segment.target_segment) > 0:
-                if len(segment.target_segment) > 0:
-                    if len(cur_target_line) > 0:
-                        cur_target_line += " "
-                    cur_target_line += segment.target_segment[0]
-                cur_target_line_range = False
-        output_stream.write(("<range>" if cur_target_line_range else cur_target_line) + "\n")
-        segment_count += 1
-
-    # check if the number of lines in the file is correct (the same as vref.txt - 31104 ending at REV 22:21)
-    LOGGER.info(f"# of Segments: {segment_count}")
-    if segment_count != 31104:
-        LOGGER.error(f"The number of segments is {segment_count}, but should be 31104 (number of verses in the Bible).")
-    return output_filename
+                cur_ref = ref
+                if not segment.is_target_in_range or segment.is_target_range_start or len(segment.target_segment) > 0:
+                    if len(segment.target_segment) > 0:
+                        if len(cur_target_line) > 0:
+                            cur_target_line += " "
+                        cur_target_line += segment.target_segment[0]
+                    cur_target_line_range = False
+            output_stream.write(("<range>" if cur_target_line_range else cur_target_line) + "\n")
+            segment_count += 1
+        return output_filename, segment_count
+    except:
+        if output_filename.is_file():
+            output_filename.unlink()
+        raise
 
 
 def escape_id(id: str) -> str:
@@ -179,7 +182,9 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> Dict[st
                 if refs_elem is not None:
                     for verse_elem in refs_elem.findall("Verse"):
                         bbbcccvvv = int(verse_elem.text[:9])
-                        refs_list.append(VerseRef.from_bbbcccvvv(bbbcccvvv))
+                        vref = VerseRef.from_bbbcccvvv(bbbcccvvv)
+                        vref.change_versification(ORIGINAL_VERSIFICATION)
+                        refs_list.append(vref)
                     references[id] = refs_list
                 glosses = _process_gloss_string(gloss_str)
                 terms_metadata_file.write(f"{id}\t{cat}\t{domain}\n")
@@ -242,13 +247,16 @@ def extract_terms_list_from_renderings(project: str, renderings_tree: etree.Elem
             terms_metadata_file.write(f"{id}\t?\t?\n")
 
 
-def extract_term_renderings(project_folder: str, corpus_filename: Path) -> None:
-    project_dir = get_project_dir(project_folder)
+def extract_term_renderings(project_dir: Path, corpus_filename: Path) -> int:
     renderings_path = project_dir / "TermRenderings.xml"
     if not renderings_path.is_file():
-        return
+        return 0
 
-    renderings_tree = etree.parse(str(renderings_path), parser=etree.XMLParser(encoding="utf-8"))
+    try:
+        renderings_tree = etree.parse(str(renderings_path))
+    except etree.XMLSyntaxError:
+        # Try forcing the encoding to UTF-8 during parsing
+        renderings_tree = etree.parse(str(renderings_path), parser=etree.XMLParser(encoding="utf-8"))
     rendering_elems: Dict[str, etree.Element] = {}
     for elem in renderings_tree.getroot().findall("TermRendering"):
         id = elem.get("Id")
@@ -257,9 +265,9 @@ def extract_term_renderings(project_folder: str, corpus_filename: Path) -> None:
         id = escape_id(id)
         rendering_elems[id] = elem
 
-    settings_tree = etree.parse(str(project_dir / "Settings.xml"))
+    settings_tree = parse_project_settings(project_dir)
     iso = get_iso(settings_tree)
-    project_name = settings_tree.getroot().findtext("Name", project_folder)
+    project_name = settings_tree.getroot().findtext("Name", project_dir.name)
     terms_setting = settings_tree.getroot().findtext("BiblicalTermsListSetting", "Major::BiblicalTerms.xml")
 
     list_type, terms_project, _ = terms_setting.split(":", maxsplit=3)
@@ -267,10 +275,10 @@ def extract_term_renderings(project_folder: str, corpus_filename: Path) -> None:
     references: Dict[str, List[VerseRef]] = {}
     if list_type == "Project":
         if terms_project == project_name:
-            references = extract_terms_list(list_type, project_folder)
+            references = extract_terms_list(list_type, project_dir.name)
         else:
-            extract_terms_list_from_renderings(project_folder, renderings_tree)
-        list_name = project_folder
+            extract_terms_list_from_renderings(project_dir.name, renderings_tree)
+        list_name = project_dir.name
 
     corpus: Dict[VerseRef, str] = {}
     if len(references) > 0:
@@ -278,11 +286,11 @@ def extract_term_renderings(project_folder: str, corpus_filename: Path) -> None:
         for ref_str, verse_str in zip(load_corpus(SIL_NLP_ENV.assets_dir / "vref.txt"), load_corpus(corpus_filename)):
             if verse_str == "<range>":
                 verse_str = prev_verse_str
-            corpus[VerseRef.from_string(ref_str)] = verse_str
+            corpus[VerseRef.from_string(ref_str, ORIGINAL_VERSIFICATION)] = verse_str
             prev_verse_str = verse_str
 
     terms_metadata_path = get_terms_metadata_path(list_name)
-    terms_renderings_path = SIL_NLP_ENV.mt_terms_dir / f"{iso}-{project_folder}-{list_type}-renderings.txt"
+    terms_renderings_path = SIL_NLP_ENV.mt_terms_dir / f"{iso}-{project_dir.name}-{list_type}-renderings.txt"
     count = 0
     with terms_renderings_path.open("w", encoding="utf-8", newline="\n") as terms_renderings_file:
         for line in load_corpus(terms_metadata_path):
@@ -320,7 +328,7 @@ def extract_term_renderings(project_folder: str, corpus_filename: Path) -> None:
             terms_glosses_path = get_terms_glosses_path(list_name)
             if terms_glosses_path.is_file():
                 terms_glosses_path.unlink()
-    LOGGER.info(f"# of Terms: {count}")
+    return count
 
 
 def book_file_name_digits(book_num: int) -> str:
@@ -339,7 +347,7 @@ def book_file_name_digits(book_num: int) -> str:
 
 def get_book_path(project: str, book: str) -> Path:
     project_dir = get_project_dir(project)
-    settings_tree = etree.parse(os.path.join(project_dir, "Settings.xml"))
+    settings_tree = parse_project_settings(project_dir)
     naming_elem = settings_tree.find("Naming")
     assert naming_elem is not None
 
@@ -359,3 +367,13 @@ def get_book_path(project: str, book: str) -> Path:
     book_file_name = f"{pre_part}{book_name}{post_part}"
 
     return SIL_NLP_ENV.pt_projects_dir / project / book_file_name
+
+
+def parse_project_settings(project_dir: Path) -> Any:
+    settings_filename = project_dir / "Settings.xml"
+    if not settings_filename.is_file():
+        settings_filename = next(project_dir.glob("*.ssf"), Path())
+    if not settings_filename.is_file():
+        raise RuntimeError("The project directory does not contain a settings file.")
+
+    return etree.parse(str(settings_filename))

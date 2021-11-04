@@ -1,4 +1,5 @@
 import argparse
+import logging
 import random
 import sys
 from pathlib import Path
@@ -6,13 +7,15 @@ from typing import IO, Dict, Iterable, List, Optional, Set, Tuple, cast
 
 import numpy as np
 import sacrebleu
-from machine.scripture import VerseRef, book_number_to_id, get_books
+from machine.scripture import VerseRef, book_number_to_id, get_books, ORIGINAL_VERSIFICATION
 from sacrebleu.metrics import BLEU, BLEUScore
 
 from ..common.metrics import compute_meteor_score, compute_ter_score, compute_wer_score
 from ..common.utils import get_git_revision_hash
 from .config import Config, create_runner, load_config
 from .utils import decode_sp, get_best_model_dir, get_last_checkpoint
+
+LOGGER = logging.getLogger(__name__)
 
 _SUPPORTED_SCORERS = {"bleu", "sentencebleu", "chrf3", "meteor", "wer", "ter"}
 
@@ -142,7 +145,7 @@ def process_individual_books(
                 src_line = lines[2].strip()
                 # Get book
                 if vref != "":
-                    vref = VerseRef.from_string(vref.strip())
+                    vref = VerseRef.from_string(vref.strip(), ORIGINAL_VERSIFICATION)
                     # Check if book in books
                     if vref.book_num in books:
                         # Get iso
@@ -223,7 +226,7 @@ def load_test_data(
                 if vref_file is not None:
                     vref_line = vref_file.readline().strip()
                     if vref_line != "":
-                        vref = VerseRef.from_string(vref_line)
+                        vref = VerseRef.from_string(vref_line, ORIGINAL_VERSIFICATION)
                         if vref.book_num not in books:
                             continue
                 src_line = lines[0].strip()
@@ -240,8 +243,9 @@ def load_test_data(
                 sys, refs = dataset[iso]
                 sys.append(detok_pred_line)
                 if select_rand_ref_line:
-                    ref_index = random.randint(0, len(ref_files) - 1)
-                    ref_line = lines[ref_index + 2].strip()
+                    ref_lines: List[str] = [l for l in map(lambda l: l.strip(), lines[2:]) if len(l) > 0]
+                    ref_index = random.randint(0, len(ref_lines) - 1)
+                    ref_line = ref_lines[ref_index]
                     if len(refs) == 0:
                         refs.append([])
                     refs[0].append(ref_line)
@@ -373,14 +377,17 @@ def test_checkpoint(
 
     checkpoint_name = "averaged checkpoint" if step == -1 else f"checkpoint {step}"
 
-    if force_infer or any(not (config.exp_dir / f).is_file() for f in predictions_detok_file_names):
+    features_paths: List[str] = []
+    predictions_paths: List[str] = []
+    for i in range(len(predictions_file_names)):
+        predictions_path = config.exp_dir / predictions_file_names[i]
+        if force_infer or not predictions_path.is_file():
+            features_paths.append(str(config.exp_dir / features_file_names[i]))
+            predictions_paths.append(str(predictions_path))
+    if len(predictions_paths) > 0:
         runner = create_runner(config, memory_growth=memory_growth)
         print(f"Inferencing {checkpoint_name}...")
-        runner.infer_multiple(
-            [str(config.exp_dir / f) for f in features_file_names],
-            [str(config.exp_dir / f) for f in predictions_file_names],
-            checkpoint_path=str(checkpoint_path),
-        )
+        runner.infer_multiple(features_paths, predictions_paths, checkpoint_path=str(checkpoint_path))
 
     print(f"Scoring {checkpoint_name}...")
     default_src_iso = config.default_src_iso
@@ -480,107 +487,93 @@ def test_checkpoint(
     return scores
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Tests an NMT model")
-    parser.add_argument("experiment", help="Experiment name")
-    parser.add_argument("--memory-growth", default=False, action="store_true", help="Enable memory growth")
-    parser.add_argument("--checkpoint", type=str, help="Test checkpoint")
-    parser.add_argument("--last", default=False, action="store_true", help="Test last checkpoint")
-    parser.add_argument("--best", default=False, action="store_true", help="Test best evaluated checkpoint")
-    parser.add_argument("--avg", default=False, action="store_true", help="Test averaged checkpoint")
-    parser.add_argument("--ref-projects", nargs="*", metavar="project", default=[], help="Reference projects")
-    parser.add_argument("--force-infer", default=False, action="store_true", help="Force inferencing")
-    parser.add_argument(
-        "--scorers",
-        nargs="*",
-        metavar="scorer",
-        choices=_SUPPORTED_SCORERS,
-        help=f"List of scorers - {_SUPPORTED_SCORERS}",
-    )
-    parser.add_argument("--books", nargs="*", metavar="book", default=[], help="Books")
-    parser.add_argument("--by-book", default=False, action="store_true", help="Score individual books")
-
-    args = parser.parse_args()
-
-    get_git_revision_hash()
-
-    exp_name = args.experiment
+def test(
+    experiment: str,
+    memory_growth=False,
+    checkpoint: Optional[str] = None,
+    last: bool = False,
+    avg: bool = False,
+    best: bool = False,
+    force_infer: bool = False,
+    scorers: Set[str] = set(),
+    ref_projects: Set[str] = set(),
+    books: Set[str] = set(),
+    by_book: bool = False,
+):
+    exp_name = experiment
     config = load_config(exp_name)
-    ref_projects: Set[str] = set(args.ref_projects)
-    books = get_books(args.books)
+    books_nums = get_books(books)
 
-    scorers: Set[str] = set()
-    if args.scorers is None:
+    if len(scorers) == 0:
         scorers.add("bleu")
-    else:
-        for scorer in set(args.scorers):
-            scorer = scorer.lower()
-            if scorer in _SUPPORTED_SCORERS:
-                scorers.add(scorer)
+    scorers.intersection_update(_SUPPORTED_SCORERS)
 
     best_model_path, best_step = get_best_model_dir(config.model_dir)
     results: Dict[int, List[PairScore]] = {}
     step: int
-    if args.checkpoint is not None:
-        checkpoint_path = config.model_dir / f"ckpt-{args.checkpoint}"
-        step = int(args.checkpoint)
+    if checkpoint is not None:
+        checkpoint_path = config.model_dir / f"ckpt-{checkpoint}"
+        step = int(checkpoint)
         results[step] = test_checkpoint(
             config,
-            args.force_infer,
-            args.by_book,
-            args.memory_growth,
+            force_infer,
+            by_book,
+            memory_growth,
             ref_projects,
             checkpoint_path,
             step,
             scorers,
-            books,
+            books_nums,
         )
 
-    if args.avg:
-        checkpoint_path, _ = get_last_checkpoint(config.model_dir / "avg")
-        step = -1
-        results[step] = test_checkpoint(
-            config,
-            args.force_infer,
-            args.by_book,
-            args.memory_growth,
-            ref_projects,
-            checkpoint_path,
-            step,
-            scorers,
-            books,
-        )
+    if avg:
+        try:
+            checkpoint_path, _ = get_last_checkpoint(config.model_dir / "avg")
+            step = -1
+            results[step] = test_checkpoint(
+                config,
+                force_infer,
+                by_book,
+                memory_growth,
+                ref_projects,
+                checkpoint_path,
+                step,
+                scorers,
+                books_nums,
+            )
+        except:
+            LOGGER.info("No average checkpoint available.")
 
-    if args.best:
+    if best:
         step = best_step
         if step not in results:
             checkpoint_path = best_model_path / "ckpt"
             results[step] = test_checkpoint(
                 config,
-                args.force_infer,
-                args.by_book,
-                args.memory_growth,
+                force_infer,
+                by_book,
+                memory_growth,
                 ref_projects,
                 checkpoint_path,
                 step,
                 scorers,
-                books,
+                books_nums,
             )
 
-    if args.last or (not args.best and args.checkpoint is None and not args.avg):
+    if last or (not best and checkpoint is None and not avg):
         checkpoint_path, step = get_last_checkpoint(config.model_dir)
 
         if step not in results:
             results[step] = test_checkpoint(
                 config,
-                args.force_infer,
-                args.by_book,
-                args.memory_growth,
+                force_infer,
+                by_book,
+                memory_growth,
                 ref_projects,
                 checkpoint_path,
                 step,
                 scorers,
-                books,
+                books_nums,
             )
 
     for step in sorted(results.keys()):
@@ -598,6 +591,46 @@ def main() -> None:
         print(f"Test results for {checkpoint_name} ({num_refs} reference(s), books: {books_str})")
         for score in results[step]:
             score.write(sys.stdout)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Tests an NMT model")
+    parser.add_argument("experiment", help="Experiment name")
+    parser.add_argument("--memory-growth", default=False, action="store_true", help="Enable memory growth")
+    parser.add_argument("--checkpoint", type=str, help="Test checkpoint")
+    parser.add_argument("--last", default=False, action="store_true", help="Test last checkpoint")
+    parser.add_argument("--best", default=False, action="store_true", help="Test best evaluated checkpoint")
+    parser.add_argument("--avg", default=False, action="store_true", help="Test averaged checkpoint")
+    parser.add_argument("--ref-projects", nargs="*", metavar="project", default=[], help="Reference projects")
+    parser.add_argument("--force-infer", default=False, action="store_true", help="Force inferencing")
+    parser.add_argument(
+        "--scorers",
+        nargs="*",
+        metavar="scorer",
+        choices=_SUPPORTED_SCORERS,
+        default=[],
+        help=f"List of scorers - {_SUPPORTED_SCORERS}",
+    )
+    parser.add_argument("--books", nargs="*", metavar="book", default=[], help="Books")
+    parser.add_argument("--by-book", default=False, action="store_true", help="Score individual books")
+
+    args = parser.parse_args()
+
+    get_git_revision_hash()
+
+    test(
+        args.experiment,
+        memory_growth=args.memory_growth,
+        checkpoint=args.checkpoint,
+        last=args.last,
+        best=args.best,
+        avg=args.avg,
+        ref_projects=set(args.ref_projects),
+        force_infer=args.force_infer,
+        scorers=set(s.lower() for s in args.scorers),
+        books=set(args.books),
+        by_book=args.by_book,
+    )
 
 
 if __name__ == "__main__":

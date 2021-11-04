@@ -2,7 +2,7 @@ import argparse
 from statistics import mean
 from typing import Dict, Optional, Set, Tuple
 
-from machine.scripture import VerseRef, get_books
+from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books
 
 from ..alignment.utils import add_alignment_scores
 from ..common.corpus import (
@@ -40,7 +40,7 @@ def get_test_indices(config: dict) -> Optional[Set[int]]:
 
     test_indices: Set[int] = set()
     for vref_str in load_corpus(vref_path):
-        vref = VerseRef.from_string(vref_str)
+        vref = VerseRef.from_string(vref_str, ORIGINAL_VERSIFICATION)
         if vref.has_multiple:
             vref.simplify()
         test_indices.add(vrefs[str(vref)])

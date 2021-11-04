@@ -2,11 +2,11 @@ import itertools
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple, Union
+from typing import Callable, Dict, Iterable, Iterator, List, Optional, Set, Tuple, Union
 
 import pandas as pd
 from machine.corpora import ESCAPE_SPACES, LOWERCASE, NFC_NORMALIZE, TextFileTextCorpus, pipeline
-from machine.scripture import VerseRef
+from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
 from machine.tokenization import LatinWordTokenizer
 from sklearn.model_selection import train_test_split
 
@@ -48,7 +48,7 @@ def get_scripture_parallel_corpus(src_file_path: Path, trg_file_path: Path) -> p
             vref_line = vref_line.strip()
             src_line = src_line.strip()
             trg_line = trg_line.strip()
-            vref = VerseRef.from_string(vref_line)
+            vref = VerseRef.from_string(vref_line, ORIGINAL_VERSIFICATION)
             if src_line == "<range>" and trg_line == "<range>":
                 if vref.chapter_num == vrefs[-1].chapter_num:
                     vrefs[-1].simplify()
@@ -220,7 +220,7 @@ def get_terms(terms_renderings_path: Path, iso: str = "en") -> Dict[str, Term]:
         vrefs = (
             set()
             if vrefs_line is None or len(vrefs_line) == 0
-            else set(VerseRef.from_string(vref) for vref in vrefs_line.split("\t"))
+            else set(VerseRef.from_string(vref, ORIGINAL_VERSIFICATION) for vref in vrefs_line.split("\t"))
         )
         terms[id] = Term(id, cat, domain, glosses, renderings, vrefs)
     return terms
@@ -263,3 +263,8 @@ def get_terms_data_frame(
             for gloss in term.glosses:
                 data.add((rendering, gloss, dictionary))
     return pd.DataFrame(data, columns=["rendering", "gloss", "dictionary"])
+
+
+def count_lines(file_path: Path, filter: Callable[[str], bool] = lambda l: True) -> int:
+    with file_path.open("r", encoding="utf-8-sig") as file:
+        return sum(1 for l in file if filter(l))

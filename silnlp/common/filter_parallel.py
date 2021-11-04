@@ -95,7 +95,6 @@ def src_trg_same_check(src: str, trg: str) -> bool:
 
 # Sentence words number remove
 def sentence_word_num_check(src: str, trg: str, min_tok: int, max_tok: int) -> bool:
-
     def check_word_num(sent):
         segs = sent.strip().split()
         if len(segs) < min_tok or len(segs) > max_tok:
@@ -115,7 +114,6 @@ def sentence_words_ratio_check(src: str, trg: str, src_trg_words_ratio: float) -
 
 # Specific punctuation number exceeded sentence remove
 def specific_punct_check(src: str, trg: str, specific_punct_limit: int) -> bool:
-
     def hot_fix_filter(sent):
         if sent.count("/") > specific_punct_limit:
             return True
@@ -132,7 +130,6 @@ def specific_punct_check(src: str, trg: str, specific_punct_limit: int) -> bool:
 
 # Characters condition remove
 def characs_check(src: str, trg: str, max_words_per_sent: int, avg_word_len_lb: float, avg_word_len_ub: float) -> bool:
-
     def filter_by_len(sent):
         segs = sent.split()
         for x in segs:
@@ -158,7 +155,7 @@ def punctuation_check(src: str,
                       punct_max_num: int,
                       src_trg_punct_ratio: float,
                       punct_text_ratio: float) -> bool:
-    count_func = lambda l1,l2: sum([1 for x in l1 if x in l2])
+    count_func = lambda l1, l2: sum([1 for x in l1 if x in l2])
 
     m_punct_src = count_func(src, set(punctuation_set))
     m_punct_trg = count_func(trg, set(punctuation_set))
@@ -169,10 +166,10 @@ def punctuation_check(src: str,
     if m_punct_src > punct_max_num or m_punct_trg > punct_max_num:
         return True
     if m_punct_src / (len(src) + 1e-9) > punct_text_ratio or \
-       m_punct_trg / (len(trg) + 1e-9) > punct_text_ratio:
+            m_punct_trg / (len(trg) + 1e-9) > punct_text_ratio:
         return True
     if m_punct_src / (m_punct_trg + 1e-9) > src_trg_punct_ratio or \
-       m_punct_trg / (m_punct_src + 1e-9) > src_trg_punct_ratio:
+            m_punct_trg / (m_punct_src + 1e-9) > src_trg_punct_ratio:
         return True
 
     return False
@@ -208,7 +205,6 @@ def characs_sum_check(src: str, trg: str, src_trg_char_ratio: float) -> bool:
 
 # Optional: Remove sentences with too many non-Latin characters
 def latin_check(src: str, trg: str, latin_ratio: float) -> bool:
-  
     def count_latin(sent):
         if len(re.findall("[^a-zA-Z]", sent)) / len(sent) > latin_ratio:
             return False
@@ -239,9 +235,9 @@ def add_range(start_hex_str: str, end_hex_str: str, script_name: str):
     start_code_val = int(start_hex_str, 16)
     end_code_val = int(end_hex_str, 16)
     if s in script_dict.keys():
-        script_dict[s].update(set(range(start_code_val, end_code_val+1)))
+        script_dict[s].update(set(range(start_code_val, end_code_val + 1)))
     else:
-        script_dict[s] = set(range(start_code_val, end_code_val+1))
+        script_dict[s] = set(range(start_code_val, end_code_val + 1))
 
 
 def load_script_dict():
@@ -265,13 +261,15 @@ def load_script_dict():
                 add_range(parts.group(1), parts.group(3), parts.group(4))
     r.release_conn()
     end_time = time.time()
-    print(f'Loaded in {(end_time-start_time):.4f} seconds')
+    print(f'Loaded in {(end_time - start_time):.4f} seconds')
+
+
 #    print("\n".join(f"{k}\t{v}" for k, v in script_dict.items()))
 
 
-def script_check(src: str, trg: str, valid_scripts: List[str], threshold: int) -> bool:
-
-    def check_line(line: str, scripts: List[str]) -> bool:
+def script_check(src: str, trg: str, valid_src_scripts: List[str], valid_trg_scripts: List[str],
+                 threshold: int) -> bool:
+    def check_line(line: str, scripts: List[str], limit: int) -> bool:
         error_count = 0
         for c in line:
             char_code = ord(c)
@@ -285,24 +283,24 @@ def script_check(src: str, trg: str, valid_scripts: List[str], threshold: int) -
             # Character c wasn't part of one of the valid scripts
             if not match:
                 error_count += 1
-                if error_count >= threshold:
+                if error_count >= limit:
                     return False
 
         # Successfully checked all the characters in the line
         return True
 
-    return not check_line(src, valid_scripts) or not check_line(trg, valid_scripts)
+    return not check_line(src, valid_src_scripts, threshold) or \
+           not check_line(trg, valid_trg_scripts, threshold)
 
 
-def log_error(log_flag: bool, logfile, label: str, src: str, trg:str):
+def log_error(log_flag: bool, logfile, label: str, src: str, trg: str):
     if log_flag:
         logfile.write(f"{label}\t{src}\t{trg}\n")
 
 
 def main() -> None:
-
     def ratio_string(count: int, total: int) -> str:
-        return f'{count: >10} ({(100*count/total):6.2f}%)'
+        return f'{count: >10} ({(100 * count / total):6.2f}%)'
 
     def print_counters(out_file):
         out_file.write(f'  {original_line_count:>10}\tOriginal sentences\n')
@@ -326,7 +324,8 @@ def main() -> None:
                        f'src/trg character ratio ({src_trg_char_ratio})\n')
         out_file.write(f'- {ratio_string(count_latin, original_line_count)}\tLatin ratio ({latin_ratio})\n')
         out_file.write(f'- {ratio_string(count_script, original_line_count)}\t'
-                       f'>={script_error_threshold} chars not in valid script list ({valid_scripts})\n')
+                       f'>={script_error_threshold} chars not in valid script list '
+                       f'(src: {valid_src_scripts}; trg: {valid_trg_scripts})\n')
         out_file.write(f'= {ratio_string(final_line_count, original_line_count)}\tRemaining sentences\n')
 
     parser = argparse.ArgumentParser(description="Filtering for noisy parallel corpora")
@@ -378,7 +377,12 @@ def main() -> None:
     punct_text_ratio = filter_config.get('punct_text_ratio')
     src_trg_char_ratio = filter_config.get('src_trg_char_ratio')
     latin_ratio = filter_config.get('latin_ratio', 0.25)
-    valid_scripts = [s.lower() for s in filter_config.get('valid_scripts').split()]
+    if filter_config.get('valid_src_scripts') and filter_config.get('valid_trg_scripts'):
+        valid_src_scripts = [s.lower() for s in filter_config.get('valid_src_scripts').split()]
+        valid_trg_scripts = [s.lower() for s in filter_config.get('valid_trg_scripts').split()]
+    else:
+        valid_src_scripts = [s.lower() for s in filter_config.get('valid_scripts').split()]
+        valid_trg_scripts = valid_src_scripts
     script_error_threshold = filter_config.get('script_error_threshold')
 
     # Initial setup (if needed)
@@ -389,10 +393,10 @@ def main() -> None:
     src_err_file_name = f"{os.path.splitext(args.src)[0]}_errors{os.path.splitext(args.src)[1]}"
     trg_out_file_name = f"{os.path.splitext(args.trg)[0]}_clean{os.path.splitext(args.trg)[1]}"
     with open(args.src, "r", encoding="utf-8") as src_in, \
-         open(args.trg, "r", encoding="utf-8") as trg_in, \
-         open(src_out_file_name, "w", encoding="utf-8") as src_out, \
-         open(trg_out_file_name, "w", encoding="utf-8") as trg_out, \
-         open(src_err_file_name, "w", encoding="utf-8") as error_log:
+            open(args.trg, "r", encoding="utf-8") as trg_in, \
+            open(src_out_file_name, "w", encoding="utf-8") as src_out, \
+            open(trg_out_file_name, "w", encoding="utf-8") as trg_out, \
+            open(src_err_file_name, "w", encoding="utf-8") as error_log:
         for src_line, trg_line in tqdm(zip(src_in, trg_in)):
             src_line = src_line.strip()
             trg_line = trg_line.strip()
@@ -413,7 +417,8 @@ def main() -> None:
             elif specific_punct_toggle and specific_punct_check(src_line, trg_line, specific_punct_limit):
                 count_specific_punc += 1
                 log_error(args.errors, error_log, "specific_punct_check", src_line, trg_line)
-            elif characs_toggle and characs_check(src_line, trg_line, max_words_per_sent, avg_word_len_lb, avg_word_len_ub):
+            elif characs_toggle and characs_check(src_line, trg_line, max_words_per_sent, avg_word_len_lb,
+                                                  avg_word_len_ub):
                 count_characs += 1
                 log_error(args.errors, error_log, "characs_check", src_line, trg_line)
             elif special_char_toggle and special_char_check(src_line, trg_line):
@@ -432,7 +437,9 @@ def main() -> None:
             elif latin_toggle and latin_check(src_line, trg_line, latin_ratio):
                 count_latin += 1
                 log_error(args.errors, error_log, "latin_check", src_line, trg_line)
-            elif scripts_toggle and script_check(src_line, trg_line, valid_scripts, script_error_threshold):
+            elif scripts_toggle and script_check(src_line, trg_line,
+                                                 valid_src_scripts, valid_trg_scripts,
+                                                 script_error_threshold):
                 count_script += 1
                 log_error(args.errors, error_log, "script_check", src_line, trg_line)
             else:

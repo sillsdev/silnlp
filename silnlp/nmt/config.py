@@ -16,7 +16,7 @@ import pandas as pd
 import sentencepiece as sp
 import tensorflow as tf
 import yaml
-from machine.scripture import VerseRef, get_books
+from machine.scripture import VerseRef, get_books, ORIGINAL_VERSIFICATION
 from opennmt import END_OF_SENTENCE_TOKEN, PADDING_TOKEN, START_OF_SENTENCE_TOKEN
 from opennmt.data import Noise, Vocab, WordDropout, WordNoiser, tokens_to_words
 from opennmt.inputters import TextInputter
@@ -121,6 +121,8 @@ class DataFile:
     def __post_init__(self):
         file_name = self.path.stem
         parts = file_name.split("-")
+        if len(parts) < 2:
+            raise RuntimeError(f"The filename {file_name} needs to be of the format <iso>-<project>")
         self.iso = parts[0]
         self.project = parts[1] if self.path.parent == SIL_NLP_ENV.mt_scripture_dir else BASIC_DATA_PROJECT
 
@@ -369,6 +371,7 @@ def build_vocab(
     model_prefix: Path,
     vocab_path: Path,
     tags: Set[str],
+    max_train_size: int,
 ) -> None:
     user_defined_symbols = "<blank>"
     for tag in tags:
@@ -398,7 +401,7 @@ def build_vocab(
         vocab_size=vocab_size,
         user_defined_symbols=user_defined_symbols,
         character_coverage="%.4f" % character_coverage,
-        input_sentence_size=1000000,
+        input_sentence_size=max_train_size,
         shuffle_input_sentence=True,
         control_symbols="<range>",
     )
@@ -407,17 +410,22 @@ def build_vocab(
 
 
 def get_checkpoint_path(model_dir: Path, checkpoint_type: CheckpointType) -> Tuple[Optional[Path], Optional[int]]:
+    model_dir = SIL_NLP_ENV.get_source_experiment_path(model_dir)
+    ckpt = None
+    step = None
     if checkpoint_type == CheckpointType.AVERAGE:
         # Get the checkpoint path and step count for the averaged checkpoint
-        return get_last_checkpoint(model_dir / "avg")
+        ckpt, step = get_last_checkpoint(model_dir / "avg")
     elif checkpoint_type == CheckpointType.BEST:
         # Get the checkpoint path and step count for the best checkpoint
         best_model_dir, step = get_best_model_dir(model_dir)
-        return (best_model_dir / "ckpt", step)
-    elif checkpoint_type == CheckpointType.LAST:
-        return (None, None)
-    else:
+        ckpt, step = (best_model_dir / "ckpt", step)
+    elif checkpoint_type != CheckpointType.LAST:
         raise RuntimeError(f"Unsupported checkpoint type: {checkpoint_type}")
+    if ckpt is not None:
+        SIL_NLP_ENV.copy_experiment_from_bucket(ckpt.parent)
+        ckpt, step = (SIL_NLP_ENV.get_temp_experiment_path(ckpt), step)
+    return ckpt, step
 
 
 def get_data_file_pairs(corpus_pair: CorpusPair) -> Iterable[Tuple[DataFile, DataFile]]:
@@ -445,6 +453,7 @@ class Config:
                     "eval_labels_file": str(exp_dir / "val.trg.txt"),
                     "share_vocab": True,
                     "character_coverage": 1.0,
+                    "sp_max_train_size": 1000000,
                     "mirror": False,
                     "parent_use_best": False,
                     "parent_use_average": False,
@@ -974,8 +983,9 @@ class Config:
                     decode_sp_lines(encode_sp_lines(trg_spp, pair_test[column])),
                 )
                 test_projects.remove(project)
-            for project in test_projects:
-                self._fill_corpus(self._test_trg_filename(src_iso, trg_iso, project), len(pair_test))
+            if self._has_multiple_test_projects(src_iso, trg_iso):
+                for project in test_projects:
+                    self._fill_corpus(self._test_trg_filename(src_iso, trg_iso, project), len(pair_test))
         LOGGER.info(
             f"train size: {train_count},"
             f" val size: {val_count},"
@@ -1002,7 +1012,7 @@ class Config:
                 pair_test_indices[(src_iso, trg_iso)] = test_indices
 
             for vref_str in load_corpus(vref_path):
-                vref = VerseRef.from_string(vref_str)
+                vref = VerseRef.from_string(vref_str, ORIGINAL_VERSIFICATION)
                 if vref.has_multiple:
                     vref.simplify()
                 test_indices.add(vrefs[str(vref)])
@@ -1230,11 +1240,14 @@ class Config:
                     self._open_append(self._test_vref_filename(src_file.iso, trg_file.iso))
                 )
                 test_projects = self._get_test_projects(src_file.iso, trg_file.iso)
-                test_trg_project_files = [
-                    stack.enter_context(self._open_append(self._test_trg_filename(src_file.iso, trg_file.iso, project)))
-                    for project in test_projects
-                    if project != BASIC_DATA_PROJECT
-                ]
+                if self._has_multiple_test_projects(src_file.iso, trg_file.iso):
+                    test_trg_project_files = [
+                        stack.enter_context(
+                            self._open_append(self._test_trg_filename(src_file.iso, trg_file.iso, project))
+                        )
+                        for project in test_projects
+                        if project != BASIC_DATA_PROJECT
+                    ]
                 val_ref_count = self._get_val_ref_count(src_file.iso, trg_file.iso)
                 val_trg_ref_files = [
                     stack.enter_context(self._open_append(self._val_trg_filename(index)))
@@ -1405,6 +1418,9 @@ class Config:
         suffix = f".{project}" if has_multiple_test_projects else ""
         return f"{prefix}.trg.detok{suffix}.txt"
 
+    def _has_multiple_test_projects(self, src_iso: str, trg_iso: str) -> bool:
+        return self._iso_pairs[(src_iso, trg_iso)].has_multiple_test_projects
+
     def _dict_src_filename(self) -> str:
         return "dict.src.txt"
 
@@ -1440,9 +1456,17 @@ class Config:
             model_prefix = self.exp_dir / "sp"
             vocab_path = self.exp_dir / "onmt.vocab"
             share_vocab_file_paths: Set[Path] = self.src_file_paths | self.trg_file_paths
-            character_coverage = self.data.get("character_coverage", 1.0)
+            character_coverage: float = self.data["character_coverage"]
+            max_train_size: int = self.data["sp_max_train_size"]
             build_vocab(
-                share_vocab_file_paths, vocab_size, casing, character_coverage, model_prefix, vocab_path, self._tags
+                share_vocab_file_paths,
+                vocab_size,
+                casing,
+                character_coverage,
+                model_prefix,
+                vocab_path,
+                self._tags,
+                max_train_size,
             )
 
             self._update_vocab(vocab_path, vocab_path)
@@ -1463,7 +1487,6 @@ class Config:
         if self.parent_config is None:
             return
 
-        model_dir = SIL_NLP_ENV.get_source_experiment_path(self.parent_config.model_dir)
         parent_model_to_use = (
             CheckpointType.BEST
             if self.data["parent_use_best"]
@@ -1471,10 +1494,7 @@ class Config:
             if self.data["parent_use_average"]
             else CheckpointType.LAST
         )
-        checkpoint_path, step = get_checkpoint_path(model_dir, parent_model_to_use)
-        if checkpoint_path is not None:
-            SIL_NLP_ENV.copy_experiment_from_bucket(checkpoint_path.parent)
-            checkpoint_path = SIL_NLP_ENV.get_temp_experiment_path(checkpoint_path)
+        checkpoint_path, step = get_checkpoint_path(self.parent_config.model_dir, parent_model_to_use)
         parent_runner = create_runner(self.parent_config)
         parent_runner.update_vocab(
             str(self.exp_dir / "parent"),
@@ -1534,7 +1554,10 @@ class Config:
         casing: str = self.data.get(f"{prefix}_casing", self.data.get("casing"))
         character_coverage: float = self.data.get(f"{prefix}_character_coverage", self.data.get("character_coverage"))
         tags = self._tags if side == "source" else set()
-        build_vocab(vocab_file_paths, vocab_size, casing, character_coverage, model_prefix, vocab_path, tags)
+        max_train_size: int = self.data["sp_max_train_size"]
+        build_vocab(
+            vocab_file_paths, vocab_size, casing, character_coverage, model_prefix, vocab_path, tags, max_train_size
+        )
 
     def _create_train_alignments(self, train_count: int) -> None:
         with tempfile.TemporaryDirectory() as td:
