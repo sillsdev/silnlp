@@ -265,6 +265,6 @@ def get_terms_data_frame(
     return pd.DataFrame(data, columns=["rendering", "gloss", "dictionary"])
 
 
-def count_lines(file_path: Path, filter: Callable[[str], bool]) -> int:
+def count_lines(file_path: Path, filter: Callable[[str], bool] = lambda l: True) -> int:
     with file_path.open("r", encoding="utf-8-sig") as file:
         return sum(1 for l in file if filter(l))

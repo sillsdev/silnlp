@@ -254,8 +254,13 @@ def extract_term_renderings(project_dir: Path, corpus_filename: Path) -> int:
     if not renderings_path.is_file():
         return 0
 
-    with renderings_path.open("rb") as renderings_file:
-        renderings_tree = etree.parse(renderings_file)
+    try:
+        with renderings_path.open("rb") as renderings_file:
+            renderings_tree = etree.parse(renderings_file)
+    except etree.XMLSyntaxError:
+        # Try forcing the encoding to UTF-8 during parsing
+        with renderings_path.open("rb") as renderings_file:
+            renderings_tree = etree.parse(renderings_file, parser=etree.XMLParser(encoding="utf-8"))
     rendering_elems: Dict[str, etree.Element] = {}
     for elem in renderings_tree.getroot().findall("TermRendering"):
         id = elem.get("Id")

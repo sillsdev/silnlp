@@ -409,7 +409,7 @@ def build_vocab(
     convert_vocab(model_prefix.with_suffix(".vocab"), vocab_path)
 
 
-def get_checkpoint_path(model_dir: Path, checkpoint_type: CheckpointType) -> Tuple[Optional[Path], Optional[int]]:
+def get_checkpoint_path(model_dir: Path, checkpoint_type: Union[CheckpointType, str]) -> Tuple[Optional[Path], Optional[int]]:
     model_dir = SIL_NLP_ENV.get_source_experiment_path(model_dir)
     ckpt = None
     step = None

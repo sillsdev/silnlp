@@ -1539,7 +1539,7 @@ python-versions = "*"
 
 [[package]]
 name = "sil-machine"
-version = "0.3.5"
+version = "0.3.6"
 description = "A natural language processing library that is focused on providing tools for resource-poor languages."
 category = "main"
 optional = false
@@ -1848,7 +1848,7 @@ testing = ["pytest (>=4.6)", "pytest-checkdocs (>=2.4)", "pytest-flake8", "pytes
 [metadata]
 lock-version = "1.1"
 python-versions = ">=3.7,<3.9"
-content-hash = "7c5766a5b9cef9e24e0f06517d42463d414c66d69c5e00d00c359b010372b75b"
+content-hash = "19f7b040b0674a6d811bdfc97251abcdb939d6451aa7d15d53823d7c83486b6d"
 
 [metadata.files]
 absl-py = [
@@ -2300,6 +2300,8 @@ lxml = [
     {file = "lxml-4.6.3-cp27-cp27m-win_amd64.whl", hash = "sha256:8157dadbb09a34a6bd95a50690595e1fa0af1a99445e2744110e3dca7831c4ee"},
     {file = "lxml-4.6.3-cp27-cp27mu-manylinux1_i686.whl", hash = "sha256:7728e05c35412ba36d3e9795ae8995e3c86958179c9770e65558ec3fdfd3724f"},
     {file = "lxml-4.6.3-cp27-cp27mu-manylinux1_x86_64.whl", hash = "sha256:4bff24dfeea62f2e56f5bab929b4428ae6caba2d1eea0c2d6eb618e30a71e6d4"},
+    {file = "lxml-4.6.3-cp310-cp310-manylinux_2_12_i686.manylinux2010_i686.manylinux_2_24_i686.whl", hash = "sha256:64812391546a18896adaa86c77c59a4998f33c24788cadc35789e55b727a37f4"},
+    {file = "lxml-4.6.3-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.manylinux_2_24_x86_64.whl", hash = "sha256:c1a40c06fd5ba37ad39caa0b3144eb3772e813b5fb5b084198a985431c2f1e8d"},
     {file = "lxml-4.6.3-cp35-cp35m-manylinux1_i686.whl", hash = "sha256:74f7d8d439b18fa4c385f3f5dfd11144bb87c1da034a466c5b5577d23a1d9b51"},
     {file = "lxml-4.6.3-cp35-cp35m-manylinux1_x86_64.whl", hash = "sha256:f90ba11136bfdd25cae3951af8da2e95121c9b9b93727b1b896e3fa105b2f586"},
     {file = "lxml-4.6.3-cp35-cp35m-manylinux2010_i686.whl", hash = "sha256:4c61b3a0db43a1607d6264166b230438f85bfed02e8cff20c22e564d0faff354"},
@@ -2424,6 +2426,9 @@ nltk = [
     {file = "nltk-3.6.3.zip", hash = "sha256:5db64a976e88cef0db9200c7f25aeceba8a86efbe09cc824f01a6d3163f7e937"},
 ]
 numba = [
+    {file = "numba-0.54.0-2-cp37-cp37m-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:10f4e76dbf0a8f01a6fe9dd7d20e8f9c842c8a86c5ea9046fbf4c44c76c7451a"},
+    {file = "numba-0.54.0-2-cp37-cp37m-manylinux2014_i686.manylinux_2_17_i686.whl", hash = "sha256:95718e256d2551e62d329a7d76193327c1974e9439cdba5929d383d86e664bb9"},
+    {file = "numba-0.54.0-2-cp37-cp37m-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:ddf031ba9ddf0f1aeab0850efd7783121763600ca9f85dd3ee11ae97684c9ed6"},
     {file = "numba-0.54.0-cp37-cp37m-macosx_10_14_x86_64.whl", hash = "sha256:253f0989c1e1a0f4e6409eefeea59cddb11f181b44d75ac5a3a287cccff8c9f0"},
     {file = "numba-0.54.0-cp37-cp37m-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:0801755ac3e05f7ba30c5404556cedc437f58baa3b1b4886c40c16f33c5d684c"},
     {file = "numba-0.54.0-cp37-cp37m-manylinux2014_i686.manylinux_2_17_i686.whl", hash = "sha256:27fdb46ea27c891b70f476f643af86d0af8c08a4d9d19a0ae28f80ce68efc550"},
@@ -3065,8 +3070,8 @@ sentencepiece = [
     {file = "sentencepiece-0.1.96.tar.gz", hash = "sha256:9bdf097d5bd1d8ce42dfee51f6ff05f5578b96e48c6f6006aa4eff69edfa3639"},
 ]
 sil-machine = [
-    {file = "sil-machine-0.3.5.tar.gz", hash = "sha256:a87103ee5a63a1c556591bc61056446638c5b1239cb6b845845ad1123d27776f"},
-    {file = "sil_machine-0.3.5-py3-none-any.whl", hash = "sha256:e59d8ab8dbcc3c06370dac796912e1552161b2f33067b7f2c5509ad62e622890"},
+    {file = "sil-machine-0.3.6.tar.gz", hash = "sha256:c43726640d136177ecd2ae0b14e62e629b8807fb0a2b8125176d5c9a22d5b66b"},
+    {file = "sil_machine-0.3.6-py3-none-any.whl", hash = "sha256:8eb137eac89e3c50600a374bd467d01c32dd04a94dde1b4522502bfd89495915"},
 ]
 sil-thot = [
     {file = "sil-thot-3.3.5.tar.gz", hash = "sha256:4694edb0469c2fe6b4655d41e8cfdde69c2ddf8022bd90916d7ca4b1593197f2"},
