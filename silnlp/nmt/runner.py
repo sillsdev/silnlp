@@ -4,10 +4,9 @@ from typing import Any, List, Optional, Tuple
 import numpy as np
 import tensorflow as tf
 import yaml
-from opennmt import Runner, evaluation
+from opennmt import Runner
 from opennmt.data import Vocab, inference_pipeline
 from opennmt.models import Model, SequenceToSequence
-from opennmt.utils import checkpoint as checkpoint_util
 from opennmt.utils.checkpoint import Checkpoint
 from opennmt.utils.misc import OrderRestorer, extract_batches, item_or_tuple
 
@@ -365,32 +364,3 @@ class SILRunner(Runner):
         tf.get_logger().setLevel(level)
         with open(path, "w") as file:
             yaml.dump(config, file)
-
-    def evaluate(self, features_file=None, labels_file=None, checkpoint_path=None):
-        """Runs evaluation.
-
-        Args:
-          features_file: The input features file to evaluate. If not set, will load
-            ``eval_features_file`` from the data configuration.
-          labels_file: The output labels file to evaluate. If not set, will load
-            ``eval_labels_file`` from the data configuration.
-          checkpoint_path: The checkpoint path to load the model weights from.
-
-        Returns:
-          A dict of evaluation metrics.
-        """
-        config = self._finalize_config()
-        model = self._init_model(config)
-        checkpoint = checkpoint_util.Checkpoint.from_config(config, model)
-        checkpoint_path = checkpoint.restore(checkpoint_path=checkpoint_path, weights_only=True)
-        step = checkpoint_util.get_step_from_checkpoint_prefix(checkpoint_path)
-        evaluator = evaluation.Evaluator.from_config(
-            model, config, features_file=features_file, labels_file=labels_file
-        )
-
-        results = evaluator(step)
-
-        for key, value in results.items():
-            tf.summary.scalar(key, value, step=step)
-
-        return results

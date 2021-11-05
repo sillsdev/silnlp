@@ -164,8 +164,8 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> Dict[st
         "w", encoding="utf-8", newline="\n"
     ) as terms_glosses_file, terms_vrefs_path.open("w", encoding="utf-8", newline="\n") as terms_vrefs_file:
         if os.path.exists(terms_xml_path):
-            with terms_xml_path.open("rb") as termsf:
-                terms_tree = etree.parse(termsf)
+            with terms_xml_path.open("rb") as terms_file:
+                terms_tree = etree.parse(terms_file)
             for term_elem in terms_tree.getroot().findall("Term"):
                 id = term_elem.get("Id")
                 if id is None:
@@ -197,8 +197,8 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> Dict[st
 def extract_major_terms_per_language(iso: str) -> None:
     # extract Biblical Terms for the langauage
     terms_xml_path = SIL_NLP_ENV.pt_terms_dir / f"BiblicalTerms{iso.capitalize()}.xml"
-    with terms_xml_path.open("rb") as termsf:
-        terms_tree = etree.parse(termsf)
+    with terms_xml_path.open("rb") as terms_file:
+        terms_tree = etree.parse(terms_file)
 
     # build glosses dict
     terms_dict = {}
@@ -254,8 +254,8 @@ def extract_term_renderings(project_dir: Path, corpus_filename: Path) -> int:
     if not renderings_path.is_file():
         return 0
 
-    with renderings_path.open("rb") as rendf:
-        renderings_tree = etree.parse(rendf)
+    with renderings_path.open("rb") as renderings_file:
+        renderings_tree = etree.parse(renderings_file)
     rendering_elems: Dict[str, etree.Element] = {}
     for elem in renderings_tree.getroot().findall("TermRendering"):
         id = elem.get("Id")
@@ -375,6 +375,6 @@ def parse_project_settings(project_dir: Path) -> Any:
     if not settings_filename.is_file():
         raise RuntimeError("The project directory does not contain a settings file.")
 
-    with settings_filename.open("rb") as settingsf:
-        settings_tree = etree.parse(settingsf)
+    with settings_filename.open("rb") as settings_file:
+        settings_tree = etree.parse(settings_file)
     return settings_tree
