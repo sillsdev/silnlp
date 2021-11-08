@@ -97,7 +97,7 @@ class TranslationTask:
         self.translator.translate_book(src_project, book, output_path, trg_iso=trg_iso)
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
 
-    def translate_parts(
+    def translate_text_files(
         self, src_prefix: str, trg_prefix: str, start_seq: str, end_seq: str, trg_iso: Optional[str] = None
     ):
         self.init_translation_task(experiment_suffix=f"_{self.checkpoint}_{src_prefix}")
@@ -170,9 +170,9 @@ def main() -> None:
             args.book, src_project=args.src_project, output_usfm=args.output_usfm, trg_iso=args.trg_iso
         )
     elif args.src_prefix is not None:
-        translator.translate_parts(args.src_prefix, args.trg_prefix, args.start_seq, args.end_seq, args.trg_iso)
+        translator.translate_text_files(args.src_prefix, args.trg_prefix, args.start_seq, args.end_seq, args.trg_iso)
     elif args.src is not None:
-        translator.translate_src(args.src, args.trg_iso, args.trg)
+        translator.translate_text_file(args.src, args.trg_iso, args.trg)
     else:
         raise RuntimeError("A Scripture book, file, or file prefix must be specified.")
 
