@@ -409,10 +409,18 @@ def build_vocab(
     convert_vocab(model_prefix.with_suffix(".vocab"), vocab_path)
 
 
-def get_checkpoint_path(model_dir: Path, checkpoint_type: CheckpointType) -> Tuple[Optional[Path], Optional[int]]:
+def get_checkpoint_path(model_dir: Path, checkpoint_type: Union[CheckpointType, str]) -> Tuple[Optional[Path], Optional[int]]:
     model_dir = SIL_NLP_ENV.get_source_experiment_path(model_dir)
     ckpt = None
     step = None
+    if type(checkpoint_type) is str:
+        checkpoint_type = checkpoint_type.lower()
+        if "avg" in checkpoint_type:
+            checkpoint_type = CheckpointType.AVERAGE
+        elif "best" in checkpoint_type:
+            checkpoint_type = CheckpointType.BEST
+        elif "last" in checkpoint_type:
+            checkpoint_type = CheckpointType.LAST
     if checkpoint_type == CheckpointType.AVERAGE:
         # Get the checkpoint path and step count for the averaged checkpoint
         ckpt, step = get_last_checkpoint(model_dir / "avg")
@@ -420,7 +428,9 @@ def get_checkpoint_path(model_dir: Path, checkpoint_type: CheckpointType) -> Tup
         # Get the checkpoint path and step count for the best checkpoint
         best_model_dir, step = get_best_model_dir(model_dir)
         ckpt, step = (best_model_dir / "ckpt", step)
-    elif checkpoint_type != CheckpointType.LAST:
+    elif checkpoint_type == CheckpointType.LAST:
+        ckpt, step = get_last_checkpoint(model_dir)
+    else:
         raise RuntimeError(f"Unsupported checkpoint type: {checkpoint_type}")
     if ckpt is not None:
         SIL_NLP_ENV.copy_experiment_from_bucket(ckpt.parent)
