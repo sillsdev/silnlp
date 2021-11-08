@@ -1539,7 +1539,7 @@ python-versions = "*"
 
 [[package]]
 name = "sil-machine"
-version = "0.3.6"
+version = "0.3.7"
 description = "A natural language processing library that is focused on providing tools for resource-poor languages."
 category = "main"
 optional = false
@@ -1848,7 +1848,7 @@ testing = ["pytest (>=4.6)", "pytest-checkdocs (>=2.4)", "pytest-flake8", "pytes
 [metadata]
 lock-version = "1.1"
 python-versions = ">=3.7,<3.9"
-content-hash = "19f7b040b0674a6d811bdfc97251abcdb939d6451aa7d15d53823d7c83486b6d"
+content-hash = "9e71f1c70d97b3eec9fffb25a84058cf0419ecc94ef365c502290c07e3986e6c"
 
 [metadata.files]
 absl-py = [
@@ -3060,8 +3060,8 @@ sentencepiece = [
     {file = "sentencepiece-0.1.96.tar.gz", hash = "sha256:9bdf097d5bd1d8ce42dfee51f6ff05f5578b96e48c6f6006aa4eff69edfa3639"},
 ]
 sil-machine = [
-    {file = "sil-machine-0.3.6.tar.gz", hash = "sha256:c43726640d136177ecd2ae0b14e62e629b8807fb0a2b8125176d5c9a22d5b66b"},
-    {file = "sil_machine-0.3.6-py3-none-any.whl", hash = "sha256:8eb137eac89e3c50600a374bd467d01c32dd04a94dde1b4522502bfd89495915"},
+    {file = "sil-machine-0.3.7.tar.gz", hash = "sha256:531b73463350343b03d89211b404a8b3c4592b36d74527cbc6c0da22242be85e"},
+    {file = "sil_machine-0.3.7-py3-none-any.whl", hash = "sha256:086f6a9d774af25df9b5c8fd196d55fb3753fadbf63f24c0e081ba6e7f4bb4bb"},
 ]
 sil-thot = [
     {file = "sil-thot-3.3.5.tar.gz", hash = "sha256:4694edb0469c2fe6b4655d41e8cfdde69c2ddf8022bd90916d7ca4b1593197f2"},
