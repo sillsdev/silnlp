@@ -164,7 +164,8 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> Dict[st
         "w", encoding="utf-8", newline="\n"
     ) as terms_glosses_file, terms_vrefs_path.open("w", encoding="utf-8", newline="\n") as terms_vrefs_file:
         if os.path.exists(terms_xml_path):
-            terms_tree = etree.parse(str(terms_xml_path))
+            with terms_xml_path.open("rb") as terms_file:
+                terms_tree = etree.parse(terms_file)
             for term_elem in terms_tree.getroot().findall("Term"):
                 id = term_elem.get("Id")
                 if id is None:
@@ -196,7 +197,8 @@ def extract_terms_list(list_type: str, project: Optional[str] = None) -> Dict[st
 def extract_major_terms_per_language(iso: str) -> None:
     # extract Biblical Terms for the langauage
     terms_xml_path = SIL_NLP_ENV.pt_terms_dir / f"BiblicalTerms{iso.capitalize()}.xml"
-    terms_tree = etree.parse(str(terms_xml_path))
+    with terms_xml_path.open("rb") as terms_file:
+        terms_tree = etree.parse(terms_file)
 
     # build glosses dict
     terms_dict = {}
@@ -253,10 +255,12 @@ def extract_term_renderings(project_dir: Path, corpus_filename: Path) -> int:
         return 0
 
     try:
-        renderings_tree = etree.parse(str(renderings_path))
+        with renderings_path.open("rb") as renderings_file:
+            renderings_tree = etree.parse(renderings_file)
     except etree.XMLSyntaxError:
         # Try forcing the encoding to UTF-8 during parsing
-        renderings_tree = etree.parse(str(renderings_path), parser=etree.XMLParser(encoding="utf-8"))
+        with renderings_path.open("rb") as renderings_file:
+            renderings_tree = etree.parse(renderings_file, parser=etree.XMLParser(encoding="utf-8"))
     rendering_elems: Dict[str, etree.Element] = {}
     for elem in renderings_tree.getroot().findall("TermRendering"):
         id = elem.get("Id")
@@ -376,4 +380,6 @@ def parse_project_settings(project_dir: Path) -> Any:
     if not settings_filename.is_file():
         raise RuntimeError("The project directory does not contain a settings file.")
 
-    return etree.parse(str(settings_filename))
+    with settings_filename.open("rb") as settings_file:
+        settings_tree = etree.parse(settings_file)
+    return settings_tree

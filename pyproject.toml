@@ -46,14 +46,14 @@ lit-nlp = "^0.3"
 tensorflow = "2.4.1"
 google-cloud-translate = "^3.0.2"
 scipy = "1.4.1"
-clearml = ">=1.1.2"
+clearml = ">=1.1.3"
 XlsxWriter = "^1.4.3"
 python-Levenshtein = "^0.12.2"
 lxml = "^4.6.3"
 tqdm = "^4.62.2"
 s3path = "^0.3.2"
 sacrebleu = "^1.5.1"
-sil-machine = {extras = ["thot"], version = "^0.3.4"}
+sil-machine = {extras = ["thot"], version = "^0.3.7"}
 
 [tool.poetry.dev-dependencies]
 mypy = "^0.812"

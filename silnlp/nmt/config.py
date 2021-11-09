@@ -16,13 +16,14 @@ import pandas as pd
 import sentencepiece as sp
 import tensorflow as tf
 import yaml
-from machine.scripture import VerseRef, get_books, ORIGINAL_VERSIFICATION
+from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books
 from opennmt import END_OF_SENTENCE_TOKEN, PADDING_TOKEN, START_OF_SENTENCE_TOKEN
 from opennmt.data import Noise, Vocab, WordDropout, WordNoiser, tokens_to_words
 from opennmt.inputters import TextInputter
 from opennmt.models import Model, get_model_from_catalog
 
-from ..alignment.machine_aligner import FastAlignMachineAligner
+from ..alignment.config import get_aligner, get_aligner_name
+from ..alignment.machine_aligner import MachineAligner
 from ..alignment.utils import add_alignment_scores
 from ..common.corpus import (
     exclude_books,
@@ -40,7 +41,7 @@ from ..common.corpus import (
     split_parallel_corpus,
     write_corpus,
 )
-from ..common.environment import SIL_NLP_ENV, download_if_s3_path, download_if_s3_paths
+from ..common.environment import SIL_NLP_ENV, download_if_s3_paths
 from ..common.utils import (
     DeleteRandomToken,
     NoiseMethod,
@@ -409,10 +410,20 @@ def build_vocab(
     convert_vocab(model_prefix.with_suffix(".vocab"), vocab_path)
 
 
-def get_checkpoint_path(model_dir: Path, checkpoint_type: CheckpointType) -> Tuple[Optional[Path], Optional[int]]:
+def get_checkpoint_path(
+    model_dir: Path, checkpoint_type: Union[CheckpointType, str]
+) -> Tuple[Optional[Path], Optional[int]]:
     model_dir = SIL_NLP_ENV.get_source_experiment_path(model_dir)
     ckpt = None
     step = None
+    if isinstance(checkpoint_type, str):
+        checkpoint_type = checkpoint_type.lower()
+        if "avg" in checkpoint_type:
+            checkpoint_type = CheckpointType.AVERAGE
+        elif "best" in checkpoint_type:
+            checkpoint_type = CheckpointType.BEST
+        elif "last" in checkpoint_type:
+            checkpoint_type = CheckpointType.LAST
     if checkpoint_type == CheckpointType.AVERAGE:
         # Get the checkpoint path and step count for the averaged checkpoint
         ckpt, step = get_last_checkpoint(model_dir / "avg")
@@ -420,7 +431,9 @@ def get_checkpoint_path(model_dir: Path, checkpoint_type: CheckpointType) -> Tup
         # Get the checkpoint path and step count for the best checkpoint
         best_model_dir, step = get_best_model_dir(model_dir)
         ckpt, step = (best_model_dir / "ckpt", step)
-    elif checkpoint_type != CheckpointType.LAST:
+    elif checkpoint_type == CheckpointType.LAST:
+        ckpt, step = get_last_checkpoint(model_dir)
+    else:
         raise RuntimeError(f"Unsupported checkpoint type: {checkpoint_type}")
     if ckpt is not None:
         SIL_NLP_ENV.copy_experiment_from_bucket(ckpt.parent)
@@ -460,6 +473,7 @@ class Config:
                     "parent_use_vocab": False,
                     "seed": 111,
                     "tokenize": True,
+                    "aligner": "fast_align",
                     "guided_alignment": False,
                     "guided_alignment_train_size": 1000000,
                     "stats_max_size": 100000,  # a little over the size of the bible
@@ -671,7 +685,6 @@ class Config:
         src_spp, trg_spp = self.create_sp_processors()
         train_count = self._build_corpora(src_spp, trg_spp, stats)
         if self.data["guided_alignment"]:
-            LOGGER.info("Generating train alignments")
             self._create_train_alignments(train_count)
         LOGGER.info("Preprocessing completed")
 
@@ -789,8 +802,9 @@ class Config:
 
                 corpus_count = len(cur_train)
                 if pair.is_train and (stats_file is not None or pair.score_threshold > 0):
-                    LOGGER.info("Computing alignment scores")
-                    add_alignment_scores(cur_train)
+                    aligner_id = self.data["aligner"]
+                    LOGGER.info(f"Computing alignment scores using {get_aligner_name(aligner_id)}")
+                    add_alignment_scores(cur_train, aligner_id)
                     if stats_file is not None:
                         cur_train.to_csv(self.exp_dir / f"{src_file.project}_{trg_file.project}.csv", index=False)
 
@@ -1562,9 +1576,13 @@ class Config:
     def _create_train_alignments(self, train_count: int) -> None:
         with tempfile.TemporaryDirectory() as td:
             temp_dir = Path(td)
-            aligner = FastAlignMachineAligner(temp_dir)
+            aligner = get_aligner(self.data["aligner"], temp_dir)
+            aligner_name = get_aligner_name(aligner.id)
+            if not isinstance(aligner, MachineAligner):
+                raise RuntimeError(f"{aligner_name} is not supported for generating train alignments.")
             aligner.lowercase = True
 
+            LOGGER.info(f"Generating train alignments using {aligner_name}")
             src_align_path = self.exp_dir / "train.src.txt"
             trg_align_path = self.exp_dir / "train.trg.txt"
             train_size: Union[int, float] = self.data["guided_alignment_train_size"]

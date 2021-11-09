@@ -7,8 +7,8 @@ import pandas as pd
 
 from ..common.corpus import tokenize_corpus, write_corpus
 from ..common.environment import SIL_NLP_ENV
+from .config import get_aligner
 from .lexicon import Lexicon
-from .machine_aligner import FastAlignMachineAligner
 
 
 def get_experiment_dirs(exp_pattern: str) -> List[Path]:
@@ -60,17 +60,17 @@ def compute_alignment_score(
     return mean(probs)
 
 
-def add_alignment_scores(corpus: pd.DataFrame) -> None:
+def add_alignment_scores(corpus: pd.DataFrame, aligner_id: str = "fast_align") -> None:
     with tempfile.TemporaryDirectory() as td:
         src_path = Path(td) / "src-input.txt"
         trg_path = Path(td) / "trg-input.txt"
         write_corpus(src_path, corpus["source"])
         write_corpus(trg_path, corpus["target"])
-        scores = compute_alignment_scores(src_path, trg_path)
+        scores = compute_alignment_scores(src_path, trg_path, aligner_id)
         corpus["score"] = scores
 
 
-def compute_alignment_scores(src_input_path: Path, trg_input_path: Path) -> List[float]:
+def compute_alignment_scores(src_input_path: Path, trg_input_path: Path, aligner_id: str = "fast_align") -> List[float]:
     with tempfile.TemporaryDirectory() as td:
         temp_dir = Path(td)
         src_tok_output_path = temp_dir / "tokenize-src-output.txt"
@@ -79,14 +79,14 @@ def compute_alignment_scores(src_input_path: Path, trg_input_path: Path) -> List
         tokenize_corpus(src_input_path, src_tok_output_path)
         tokenize_corpus(trg_input_path, trg_tok_output_path)
 
-        fast_align = FastAlignMachineAligner(temp_dir)
+        aligner = get_aligner(aligner_id, temp_dir)
 
         sym_align_path = temp_dir / "sym-align.txt"
-        fast_align.train(src_tok_output_path, trg_tok_output_path)
-        fast_align.align(sym_align_path)
+        aligner.train(src_tok_output_path, trg_tok_output_path)
+        aligner.align(sym_align_path)
 
-        direct_lexicon = fast_align.get_direct_lexicon(include_special_tokens=True)
-        inverse_lexicon = fast_align.get_inverse_lexicon(include_special_tokens=True)
+        direct_lexicon = aligner.get_direct_lexicon(include_special_tokens=True)
+        inverse_lexicon = aligner.get_inverse_lexicon(include_special_tokens=True)
 
         scores: List[float] = []
         with src_tok_output_path.open("r", encoding="utf-8") as src_tok_output_file, trg_tok_output_path.open(

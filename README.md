@@ -98,6 +98,7 @@ The following will allow the boto3 and S3Path libraries in Python correctly talk
 
 ### install and setup rclone
 The following will mount /aqua-ml-data on your S drive and allow you to explore, read and write.
+* Install WinFsp: http://www.secfs.net/winfsp/rel/
 * Download rclone from: https://rclone.org/downloads/
 * Unzip to your desktop (or some convient location)
 * Take the `scripts/rclone/rclone.conf` file in this repo and copy it to `~\AppData\Roaming\rclone` (creating folders if necessary) 
