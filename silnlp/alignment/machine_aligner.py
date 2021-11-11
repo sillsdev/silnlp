@@ -178,8 +178,9 @@ class MachineAligner(Aligner):
             total=count, bar_format="{l_bar}{bar:40}{r_bar}", leave=False
         ) as pbar:
             for src_segments, trg_segments in _batch(segments, preprocessor):
-                for alignment in model.get_best_alignments(src_segments, trg_segments):
-                    out_file.write(str(alignment) + "\n")
+                for i, alignment in enumerate(model.get_best_alignments(src_segments, trg_segments)):
+                    alignened_word_pairs = model.get_aligned_word_pairs(src_segments[i], trg_segments[i], alignment)
+                    out_file.write(" ".join(str(wp) for wp in alignened_word_pairs) + "\n")
                 pbar.update(len(src_segments))
 
     def _extract_lexicon(self, out_file_path: Path, direct: bool) -> None:
