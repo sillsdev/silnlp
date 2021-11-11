@@ -65,16 +65,17 @@ class SILClearML:
             # read in the project/experiment yaml file
             with (exp_dir / "config.yml").open("r", encoding="utf-8") as file:
                 config = yaml.safe_load(file)
+            # connect it with ClearML - if it is run remotely, it will update the params with the remote values
+            self.task.connect(mutable=config, name="config")
         else:
-            config = {}
+            # else, read in the project only yaml file
+            with (get_mt_exp_dir(self.clearml_project_folder) / "config.yml").open("r", encoding="utf-8") as file:
+                config = yaml.safe_load(file)
+            self.task.connect(mutable=config, name="config")
 
-        # connect it with ClearML - if it is run remotely, it will update the params with the remote values
-        self.task.connect(mutable=config, name="config")
-        # then, after connection (and a possible remote update) write it to the experiment folder
-        exp_dir.mkdir(parents=True, exist_ok=True)
-        with (exp_dir / "config.yml").open("w+", encoding="utf-8") as file:
-            yaml.safe_dump(data=config, stream=file)
+            # then, after connection (and a possible remote update) write it to the experiment folder
+            exp_dir.mkdir(parents=True, exist_ok=True)
+            with (exp_dir / "config.yml").open("w+", encoding="utf-8") as file:
+                yaml.safe_dump(data=config, stream=file)
 
         return Config(exp_dir, config)
-        queue_name="langtech_40gb",
-        remote_execution=True,
