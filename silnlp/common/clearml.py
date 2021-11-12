@@ -44,11 +44,14 @@ class SILClearML:
         if (self.clearml_project_folder.startswith(self.project_prefix)) and (
             self.clearml_project_folder.endswith(self.project_suffix)
         ):
-            self.clearml_project_folder = self.clearml_project_folder[
-                len(self.project_prefix) : -len(self.project_suffix)
-            ]
+            if len(self.project_suffix) > 0:
+                self.clearml_project_folder = self.clearml_project_folder[
+                    len(self.project_prefix) : -len(self.project_suffix)
+                ]
+            else:
+                self.clearml_project_folder = self.clearml_project_folder[len(self.project_prefix) :]
         self.name = self.clearml_project_folder + "/" + self.task.name
-        if self.name.endswith(self.experiment_suffix):
+        if len(self.experiment_suffix) > 0 and self.name.endswith(self.experiment_suffix):
             self.name = self.name[: -len(self.experiment_suffix)]
         return self.name
 
