@@ -25,8 +25,8 @@ class SILExperiment:
 
     def __post_init__(self):
         self.clearml = SILClearML(self.name, self.clearml_queue)
-        self.name = self.clearml.get_remote_name()
-        self.config: Config = self.clearml.load_config()
+        self.name: str = self.clearml.name
+        self.config: Config = self.clearml.config
         self.rev_hash = get_git_revision_hash()
         self.tensorboard_init()
         self.config.set_seed()

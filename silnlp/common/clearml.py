@@ -29,13 +29,16 @@ class SILClearML:
             task_name=exp_name + self.experiment_suffix,
         )
 
+        self._determine_clearml_project_name()
+        self._load_config()
+
         self.task.set_base_docker(
             docker_cmd="silintlai/machine-silnlp:master-latest",
         )
         if self.queue_name is not None:
             self.task.execute_remotely(queue_name=self.queue_name)
 
-    def get_remote_name(self):
+    def _determine_clearml_project_name(self):
         # after init, "project name" and "task name" could be different. Read them again and update.
         self.clearml_project_folder: str = self.task.get_project_name()
         if (self.clearml_project_folder.startswith(self.project_prefix)) and (
@@ -49,7 +52,7 @@ class SILClearML:
             self.name = self.name[: -len(self.experiment_suffix)]
         return self.name
 
-    def load_config(self):
+    def _load_config(self):
 
         # copy from S3 bucket to temp first
         SIL_NLP_ENV.copy_experiment_from_bucket(self.name, extensions=("config.yml"))
@@ -68,11 +71,16 @@ class SILClearML:
         else:
             config = {}
 
-        # connect it with ClearML - if it is run remotely, it will update the params with the remote values
+        # connect it with ClearML
+        # - if it is run locally, it will set the config parameters in the clearml server
+        # - if it is run remotely, it will update the params with the remote values
         self.task.connect(mutable=config, name="config")
         # then, after connection (and a possible remote update) write it to the experiment folder
         exp_dir.mkdir(parents=True, exist_ok=True)
         with (exp_dir / "config.yml").open("w+", encoding="utf-8") as file:
             yaml.safe_dump(data=config, stream=file)
 
-        return Config(exp_dir, config)
+        self.config = Config(exp_dir, config)
+
+    def get_config(self):
+        return self.config

@@ -57,13 +57,13 @@ class TranslationTask:
         self.clearml = SILClearML(
             self.name, self.clearml_queue, project_suffix="_infer", experiment_suffix=experiment_suffix
         )
-        self.name = self.clearml.get_remote_name()
+        self.name: str = self.clearml.name
+        self.config: Config = self.clearml.config
 
         SIL_NLP_ENV.copy_experiment_from_bucket(
             self.name, extensions=(".vocab", ".model", ".yml", "dict.src.txt", "dict.trg.txt")
         )
 
-        self.config: Config = self.clearml.load_config()
         self.config.set_seed()
 
         checkpoint_path, step = get_checkpoint_path(self.config.model_dir, self.checkpoint)
