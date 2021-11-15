@@ -391,9 +391,8 @@ def build_vocab(
     # allows properly handling of scripts like Devanagari
     normalization_path = Path(__file__).parent / f"{normalization}.tsv"
     file_paths = [fp for fp in file_paths]
-    file_paths.sort()
-
     file_paths = download_if_s3_paths(file_paths)
+    file_paths.sort()
 
     sp.SentencePieceTrainer.Train(
         normalization_rule_tsv=normalization_path,
