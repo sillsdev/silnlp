@@ -160,7 +160,7 @@ class SilNlpEnv:
                     LOGGER.info("Copying from bucket to local cache: " + rel_path)
                     data_bucket.download_file(obj.object_key, str(temp_dest_path))
 
-    def copy_experiment_to_bucket(self, name: str):
+    def copy_experiment_to_bucket(self, name: str, extensions: Union[str, Tuple[str, ...]] = ""):
         if not self.is_bucket:
             return
         name = str(name)
@@ -179,14 +179,15 @@ class SilNlpEnv:
 
         for root, dirs, files in os.walk(temp_folder, topdown=False):
             s3_dest_path = str("MT/experiments/" + root[len_exp_dir + 1 :].replace("\\", "/"))
-            for f in files:
-                source_file = os.path.join(root, f)
-                dest_file = s3_dest_path + "/" + f
-                if dest_file in files_already_in_s3:
-                    LOGGER.debug(f"{dest_file} already in s3 bucket")
-                else:
-                    LOGGER.debug(f"adding{dest_file} to s3 bucket")
-                    data_bucket.upload_file(source_file, dest_file)
+            for file in files:
+                if file.endswith(extensions):
+                    source_file = os.path.join(root, file)
+                    dest_file = s3_dest_path + "/" + file
+                    if dest_file in files_already_in_s3:
+                        LOGGER.debug(f"{dest_file} already in s3 bucket")
+                    else:
+                        LOGGER.debug(f"adding{dest_file} to s3 bucket")
+                        data_bucket.upload_file(source_file, dest_file)
 
     def get_source_experiment_path(self, tmp_path):
         if not self.is_bucket:
