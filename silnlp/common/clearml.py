@@ -17,6 +17,7 @@ class SILClearML:
     experiment_suffix: str = ""
 
     def __post_init__(self):
+        self.name = self.name.replace("\\", "/")
         name_parts = self.name.split("/")
         project = name_parts[0]
         if len(name_parts) == 1:

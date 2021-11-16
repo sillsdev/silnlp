@@ -59,6 +59,10 @@ def align_set(src_input_path: Path, trg_input_path: Path, output_dir: Path):
         plt.savefig(output_dir / "alignment.png")
 
 
+def align_worker(kwargs):
+    return align_set(**kwargs)
+
+
 def full_bibles(scripture_dir: Path, threshold_present=0.95):
     reference_len = len((scripture_dir / "vref.txt").open(encoding="utf-8").readlines())
     complete_files = []
@@ -103,19 +107,24 @@ def account_for_ranges(src_input_path: Path, trg_input_path: Path, src_output_pa
     trg_output_path.open("w+", encoding="utf-8").writelines(trg_lines)
 
 
-def process_alignments(scripture_dir: Path, alignment_dir: Path, src_path: Path, complete_files: list):
+def process_alignments(
+    scripture_dir: Path, alignment_dir: Path, src_path: Path, complete_files: list, suffix: str = ""
+):
     cpu_num = multiprocessing.cpu_count() // 2
     all_kwargs = []
     for f in complete_files:
         filename = os.path.split(f.strip())[1]
         name = os.path.splitext(filename)[0]
-        f_dir = alignment_dir / name
+        f_dir = alignment_dir / (name + suffix)
         f_dir.mkdir(exist_ok=True)
         if (f_dir / "alignment.scores.txt").exists():
-            LOGGER.info("Already aligned: " + name)
+            LOGGER.info("Already aligned: " + (name + suffix))
         else:
             all_kwargs.append(
                 {"src_input_path": src_path, "trg_input_path": scripture_dir / filename, "output_dir": f_dir}
             )
-    for kwargs in all_kwargs:
-        align_set(**kwargs)
+    pool = multiprocessing.Pool(cpu_num)
+    result = pool.map_async(align_worker, all_kwargs)
+    result.get()
+    pool.close()
+    pool.join()

@@ -31,25 +31,31 @@ def compute_alignment_score(
     trg_sentence: str,
     alignment: str,
 ) -> float:
-    pairs = alignment.split(" ")
-    src_words = src_sentence.split(" ")
-    trg_words = trg_sentence.split(" ")
+    pairs = alignment.strip().split(" ")
+    src_words = src_sentence.strip().split(" ")
+    trg_words = trg_sentence.strip().split(" ")
     probs: List[float] = []
     unaligned_trg_indices: Set[int] = set(range(len(trg_words)))
     unaligned_src_indices: Set[int] = set(range(len(src_words)))
     for pair in pairs:
         if pair != "":
-            parts = pair.split("-")
+            prop_parts = pair.split(":")
+            parts = prop_parts[0].split("-")
             i = int(parts[0])
             j = int(parts[1])
             unaligned_src_indices.discard(i)
             unaligned_trg_indices.discard(j)
-            src_word = src_words[i]
-            trg_word = trg_words[j]
-            direct_prob = max(direct_lexicon[src_word, trg_word], 1e-9)
-            inverse_prob = max(inverse_lexicon[trg_word, src_word], 1e-9)
-            prob = max(direct_prob, inverse_prob)
-            probs.append(prob)
+            if len(prop_parts) > 1:
+                # the probability is in the alignment itself
+                probs.append(float(prop_parts[1]))
+            else:
+                # grab the probability from the lexicons
+                src_word = src_words[i]
+                trg_word = trg_words[j]
+                direct_prob = max(direct_lexicon[src_word, trg_word], 1e-9)
+                inverse_prob = max(inverse_lexicon[trg_word, src_word], 1e-9)
+                prob = max(direct_prob, inverse_prob)
+                probs.append(prob)
 
     for j in unaligned_trg_indices:
         probs.append(max(direct_lexicon["NULL", trg_words[j]], 1e-9))
