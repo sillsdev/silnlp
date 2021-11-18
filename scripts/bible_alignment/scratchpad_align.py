@@ -1,33 +1,25 @@
+import os
 import logging
 import multiprocessing
 from pathlib import Path
 
-from align_helper import process_alignments
+from silnlp.alignment.bulk_align import process_alignments
 
 LOGGER = logging.getLogger("silnlp")
 
+# python -m silnlp.alignment.bulk_align "C:\Users\johnm\Documents\repos\bible-parallel-corpus-internal\corpus\scripture\hbo-HEB.txt" "C:\Users\johnm\Documents\repos\bible-parallel-corpus-internal\alignments\targets" "C:\Users\johnm\Documents\repos\bible-parallel-corpus-internal\alignments"
 
 if __name__ == "__main__":
-    scripture_dir = Path("C:\\Users\\johnm\\Documents\\repos\\bible-parallel-corpus-internal\\corpus\\scripture")
-    alignment_dir = scripture_dir / "..\\..\\alignments"
-    # complete_files = full_bibles(scripture_dir)
-    # (alignment_dir / "alignment_sources.txt").open('w+').writelines([f'{p.name}\n' for p in complete_files])
-    complete_files = (alignment_dir / "alignment_sources.txt").open().readlines()
+    alignment_dir = Path("C:\\Users\\johnm\\Documents\\repos\\bible-parallel-corpus-internal\\alignments")
+    target_dir = alignment_dir / "targets"
+    output_dir = alignment_dir
+    aligner = "hmm"
+    src_filename = "hbo-HEB.txt"
+    src_path = alignment_dir / src_filename
+    src_basename = os.path.splitext("hbo-HEB.txt")[0]
 
-    src_path = alignment_dir / "hbo-HEB.txt"
     process_alignments(
-        scripture_dir=scripture_dir,
-        alignment_dir=alignment_dir,
         src_path=src_path,
-        complete_files=complete_files,
-        suffix="_HEB",
-    )
-
-    src_path = alignment_dir / "grc-GRK.txt"
-    process_alignments(
-        scripture_dir=scripture_dir,
-        alignment_dir=alignment_dir,
-        src_path=src_path,
-        complete_files=complete_files,
-        suffix="_GRK",
+        trg_paths=list(target_dir.iterdir()),
+        output_dir=output_dir / (aligner + "_" + src_basename),
     )
