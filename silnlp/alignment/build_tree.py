@@ -44,9 +44,13 @@ def compute_similarity_score(corpus: pd.DataFrame, aligner_id: str) -> float:
             "r", encoding="utf-8"
         ) as trg_tok_output_file, sym_align_path.open("r", encoding="utf-8") as sym_align_file:
             for src_sentence, trg_sentence, alignment in zip(src_tok_output_file, trg_tok_output_file, sym_align_file):
-                scores.append(
-                    compute_alignment_score(direct_lexicon, inverse_lexicon, src_sentence, trg_sentence, alignment)
-                )
+                src_sentence = src_sentence.strip()
+                trg_sentence = trg_sentence.strip()
+                alignment = alignment.strip()
+                if len(alignment) > 0:
+                    scores.append(
+                        compute_alignment_score(direct_lexicon, inverse_lexicon, src_sentence, trg_sentence, alignment)
+                    )
         return mean(scores)
 
 
