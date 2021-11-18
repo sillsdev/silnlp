@@ -119,7 +119,8 @@ def main() -> None:
 
     project_list = list(projects)
     isos: Set[str] = set()
-    pair_count = 0
+    remaining_pair_count = 0
+    total_pair_count = 0
     for i in range(len(project_list)):
         for j in range(i + 1, len(project_list)):
             project1 = project_list[i]
@@ -130,14 +131,15 @@ def main() -> None:
                 isos.add(iso1)
                 isos.add(iso2)
                 if recompute or frozenset([project1, project2]) not in trans_scores:
-                    pair_count += 1
+                    remaining_pair_count += 1
+                total_pair_count += 1
 
-    if pair_count > 0:
-        LOGGER.info(f"Computing similarity scores for {pair_count} translation pairs")
+    if remaining_pair_count > 0:
+        LOGGER.info(f"Computing similarity scores for {remaining_pair_count} translation pairs")
     iso_list = list(isos)
     iso_indices = {iso: i for i, iso in enumerate(iso_list)}
     iso_scores: List[List[float]] = [[0.0] * len(iso_list) for _ in iso_list]
-    pair_num = 1
+    pair_num = total_pair_count - remaining_pair_count + 1
     with scores_path.open("a", encoding="utf-8", newline="\n") as out_file:
         for i in range(len(project_list)):
             for j in range(i + 1, len(project_list)):
@@ -148,7 +150,7 @@ def main() -> None:
                 if iso1 != iso2:
                     score = trans_scores.get(frozenset([project1, project2]))
                     if recompute or score is None:
-                        LOGGER.info(f"Processing {project1} <-> {project2} ({pair_num}/{pair_count})")
+                        LOGGER.info(f"Processing {project1} <-> {project2} ({pair_num}/{total_pair_count})")
                         corpus = get_scripture_parallel_corpus(
                             corpus_path / (project1 + ".txt"), corpus_path / (project2 + ".txt")
                         )
