@@ -75,10 +75,12 @@ def main() -> None:
     parser.add_argument("--image", type=str, help="The image file")
     parser.add_argument("--country", type=str, help="The country to include")
     parser.add_argument("--family", type=str, help="The language family to include")
-    parser.add_argument("--aligner", type=str, default="fast_align", help="The aligner")
+    parser.add_argument("--aligner", type=str, default="fast_align", help="The alignment model")
     parser.add_argument("--recompute", default=False, action="store_true", help="Recompute similarity scores")
-    parser.add_argument("--graph-type", type=str, default="tree", help="Type of graph")
-    parser.add_argument("--data-type", type=str, default="language", help="Type of data")
+    parser.add_argument("--graph-type", type=str, default="tree", choices=["tree", "network"], help="Type of graph")
+    parser.add_argument(
+        "--data-type", type=str, default="language", choices=["language", "project"], help="Type of data"
+    )
     parser.add_argument("--threshold", type=float, default=1.0, help="Similarity threshold")
     args = parser.parse_args()
 
@@ -227,7 +229,7 @@ def main() -> None:
         draw_graph(threshold)
         if image is None:
             axes_slider = plt.axes([0.2, 0.03, 0.65, 0.03])
-            slider = Slider(axes_slider, "Similarity", 0.0, 1.0, 1.0, valstep=0.01)
+            slider = Slider(axes_slider, "Similarity", 0.0, 1.0, threshold, valstep=0.01)
             slider.on_changed(lambda x: draw_graph(x))
     else:
         sim_matrix = sim_matrix / min(1.0, float(np.max(sim_matrix)) + 0.01)
