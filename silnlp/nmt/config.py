@@ -482,6 +482,7 @@ class Config:
                         "categories": "PN",
                         "include_glosses": True,
                     },
+                    "transfer_alignment_heads": True,
                 },
                 "train": {
                     "average_last_checkpoints": 0,
@@ -1515,6 +1516,7 @@ class Config:
             str(trg_vocab_path),
             None if checkpoint_path is None else str(checkpoint_path),
             step,
+            transfer_alignment_heads=self.data["transfer_alignment_heads"],
         )
 
     def _create_unshared_vocab(self, isos: Set[str], vocab_file_paths: Set[Path], side: str) -> None:
