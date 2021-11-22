@@ -1,11 +1,15 @@
 from dataclasses import dataclass
 import shutil
+import logging
 
 import yaml
 from clearml import Task
+from clearml.backend_api.session.session import LoginError
 
 from .environment import SIL_NLP_ENV
 from ..nmt.config import Config, get_mt_exp_dir
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -24,18 +28,33 @@ class SILClearML:
         else:
             exp_name = name_parts[1]
 
-        self.task = Task.init(
-            project_name=self.project_prefix + project + self.project_suffix,
-            task_name=exp_name + self.experiment_suffix,
-        )
+        try:
+            self.task = Task.init(
+                project_name=self.project_prefix + project + self.project_suffix,
+                task_name=exp_name + self.experiment_suffix,
+            )
 
-        self.task.set_base_docker(
-            docker_cmd="silintlai/machine-silnlp:master-latest",
-        )
-        if self.queue_name is not None:
-            self.task.execute_remotely(queue_name=self.queue_name)
+            self.task.set_base_docker(
+                docker_cmd="silintlai/machine-silnlp:master-latest",
+            )
+            if self.queue_name is not None:
+                self.task.execute_remotely(queue_name=self.queue_name)
+        except LoginError as e:
+            if self.queue_name is None:
+                LOGGER.info(
+                    f"Was not able to connect to a ClearML task.  Proceeding only locally.  Error code: {e.args[0]}"
+                )
+            else:
+                LOGGER.error(
+                    f"Was not able to connect to ClearML to execute on queue {self.queue_name}).  Stopping execution."
+                )
+                exit()
+            self.task = None
 
     def get_remote_name(self):
+        if self.task is None:
+            self.clearml_project_folder = ""
+            return self.name
         # after init, "project name" and "task name" could be different. Read them again and update.
         self.clearml_project_folder: str = self.task.get_project_name()
         if (self.clearml_project_folder.startswith(self.project_prefix)) and (
@@ -58,6 +77,11 @@ class SILClearML:
         SIL_NLP_ENV.copy_experiment_from_bucket(self.name, extensions=("config.yml"))
         # if the project/experiment yaml file already exists, use it to re-read the config.  If not, write it.
         exp_dir = get_mt_exp_dir(self.name)
+        if self.task is None:
+            with (exp_dir / "config.yml").open("r", encoding="utf-8") as file:
+                config = yaml.safe_load(file)
+            return Config(exp_dir, config)
+        # There is a ClearML task - lets' do more complex importing.
         proj_dir = get_mt_exp_dir(self.clearml_project_folder)
         if (proj_dir / "config.yml").exists():
             # if there is no experiment yaml, copy the project one to it.
