@@ -1,9 +1,9 @@
 import argparse
 import os
 import time
-from pathlib import Path
-from typing import Iterable, Optional, Dict
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, Iterable, Optional
 
 import tensorflow as tf
 from machine.scripture import book_id_to_number
@@ -13,12 +13,12 @@ from ..common.environment import SIL_NLP_ENV
 from ..common.paratext import book_file_name_digits
 from ..common.translator import Translator
 from ..common.utils import get_git_revision_hash
-from .config import Config, create_runner, load_config, get_checkpoint_path
+from .config import Config, create_runner, get_checkpoint_path, load_config
 from .utils import decode_sp_lines, encode_sp, get_best_model_dir, get_last_checkpoint
 
 
 class NMTTranslator(Translator):
-    def __init__(self, config: Config, checkpoint_path: str, memory_growth: bool):
+    def __init__(self, config: Config, checkpoint_path: Optional[Path], memory_growth: bool):
         self._multiple_trg_isos = len(config.trg_isos) > 1
         self._default_trg_iso = config.default_trg_iso
         self.checkpoint_path = checkpoint_path
@@ -29,7 +29,9 @@ class NMTTranslator(Translator):
         self, sentences: Iterable[str], src_iso: Optional[str] = None, trg_iso: Optional[str] = None
     ) -> Iterable[str]:
         features_list = [encode_sp(self._src_spp, self._insert_lang_tag(s, trg_iso)) for s in sentences]
-        translations = self._runner.infer_list(features_list, checkpoint_path=str(self.checkpoint_path))
+        translations = self._runner.infer_list(
+            features_list, checkpoint_path=str(self.checkpoint_path) if self.checkpoint_path is not None else None
+        )
         return decode_sp_lines(t[0] for t in translations)
 
     def _insert_lang_tag(self, text: str, trg_iso: Optional[str]) -> str:
@@ -45,7 +47,7 @@ class TranslationTask:
     name: str
     checkpoint: str = "last"
     memory_growth: bool = False
-    clearml_queue: str = None
+    clearml_queue: Optional[str] = None
 
     def __post_init__(self):
         if self.checkpoint is None:
@@ -53,7 +55,6 @@ class TranslationTask:
         self.translator = None
 
     def init_translation_task(self, experiment_suffix: str):
-
         self.clearml = SILClearML(
             self.name, self.clearml_queue, project_suffix="_infer", experiment_suffix=experiment_suffix
         )
@@ -98,7 +99,7 @@ class TranslationTask:
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
 
     def translate_text_files(
-        self, src_prefix: str, trg_prefix: str, start_seq: str, end_seq: str, trg_iso: Optional[str] = None
+        self, src_prefix: str, trg_prefix: str, start_seq: int, end_seq: int, trg_iso: Optional[str] = None
     ):
         self.init_translation_task(experiment_suffix=f"_{self.checkpoint}_{src_prefix}")
         if trg_prefix is None:

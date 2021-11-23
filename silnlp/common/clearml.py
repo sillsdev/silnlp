@@ -1,13 +1,14 @@
-from dataclasses import dataclass
-import shutil
 import logging
+import shutil
+from dataclasses import dataclass
+from typing import Optional
 
 import yaml
 from clearml import Task
 from clearml.backend_api.session.session import LoginError
 
-from .environment import SIL_NLP_ENV
 from ..nmt.config import Config, get_mt_exp_dir
+from .environment import SIL_NLP_ENV
 
 LOGGER = logging.getLogger(__name__)
 
@@ -15,12 +16,13 @@ LOGGER = logging.getLogger(__name__)
 @dataclass
 class SILClearML:
     name: str
-    queue_name: str = None
+    queue_name: Optional[str] = None
     project_prefix: str = "LangTech_"
     project_suffix: str = ""
     experiment_suffix: str = ""
+    clearml_project_folder: str = ""
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         name_parts = self.name.split("/")
         project = name_parts[0]
         if len(name_parts) == 1:
@@ -51,12 +53,13 @@ class SILClearML:
                 exit()
             self.task = None
 
-    def get_remote_name(self):
+    def get_remote_name(self) -> str:
         if self.task is None:
             self.clearml_project_folder = ""
             return self.name
         # after init, "project name" and "task name" could be different. Read them again and update.
-        self.clearml_project_folder: str = self.task.get_project_name()
+        self.clearml_project_folder = self.task.get_project_name()
+        assert self.clearml_project_folder is not None
         if (self.clearml_project_folder.startswith(self.project_prefix)) and (
             self.clearml_project_folder.endswith(self.project_suffix)
         ):
@@ -71,8 +74,7 @@ class SILClearML:
             self.name = self.name[: -len(self.experiment_suffix)]
         return self.name
 
-    def load_config(self):
-
+    def load_config(self) -> Config:
         # copy from S3 bucket to temp first
         SIL_NLP_ENV.copy_experiment_from_bucket(self.name, extensions=("config.yml"))
         # if the project/experiment yaml file already exists, use it to re-read the config.  If not, write it.
