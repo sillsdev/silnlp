@@ -103,7 +103,7 @@ def main() -> None:
     recompute: bool = args.recompute
     country_lower = None if country is None else country.lower()
     family_lower = None if family is None else family.lower()
-    projects: Set[str] = set()
+    projects = SortedSet()
     with metadata_path.open("r", encoding="utf-8-sig") as metadata_file:
         reader = csv.reader(metadata_file)
         for r in reader:
@@ -203,16 +203,23 @@ def main() -> None:
 
         graph = nx.to_networkx_graph(sim_matrix)
 
-        figure = plt.figure(f"{title} Network", figsize=(12, 8))
-        plt.title(f"{title} Network")
-        ax = plt.axes()
+        figure, axes = plt.subplots(1, 2 if image is None else 1, num=f"{title} Network", figsize=(12, 8))
+        ax_main: plt.Axes
+        ax_slider: Optional[plt.Axes] = None
+        if isinstance(axes, plt.Axes):
+            ax_main = axes
+            ax_main.set_position([0, 0, 1, 1])
+        else:
+            ax_main, ax_slider = axes
+            ax_main.set_position([0.04, 0.08, 0.92, 0.88])
+            ax_slider.set_position([0.2, 0.03, 0.65, 0.03])
 
         def draw_graph(sim: float) -> None:
-            ax.clear()
-            pos = nx.spring_layout(graph, seed=123, k=1.5 / sqrt(len(items)))
+            ax_main.clear()
+            pos = nx.spring_layout(graph, seed=111, k=1.5 / sqrt(len(items)))
             nx.draw_networkx(
                 graph,
-                ax=ax,
+                ax=ax_main,
                 pos=pos,
                 labels={i: item for i, item in enumerate(items)},
                 font_size=8,
@@ -227,18 +234,17 @@ def main() -> None:
 
         threshold: float = args.threshold
         draw_graph(threshold)
-        if image is None:
-            axes_slider = plt.axes([0.2, 0.03, 0.65, 0.03])
-            slider = Slider(axes_slider, "Similarity", 0.0, 1.0, threshold, valstep=0.01)
+        if ax_slider is not None:
+            slider = Slider(ax_slider, "Similarity", 0.0, 1.0, threshold, valstep=0.01)
             slider.on_changed(lambda x: draw_graph(x))
     else:
         sim_matrix = sim_matrix / min(1.0, float(np.max(sim_matrix)) + 0.01)
 
         dist_matrix = 1.0 - squareform(sim_matrix)
         linkage_matrix = linkage(dist_matrix, method="ward", optimal_ordering=True)
-        plt.figure(f"{title} Tree", figsize=(12, 8))
-        plt.title(f"{title} Tree")
-        dendrogram(linkage_matrix, labels=items, leaf_rotation=90, leaf_font_size=6 if len(items) >= 40 else 8)
+        figure, ax = plt.subplots(num=f"{title} Network", figsize=(12, 8))
+        ax.set_position([0.06, 0.125, 0.9, 0.8])
+        dendrogram(linkage_matrix, labels=items, leaf_rotation=90, leaf_font_size=6 if len(items) >= 40 else 8, ax=ax)
 
     if image is None:
         plt.show()
