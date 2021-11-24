@@ -7,6 +7,7 @@ import pandas as pd
 
 from ..common.corpus import tokenize_corpus, write_corpus
 from ..common.environment import SIL_NLP_ENV
+from .machine_aligner import MachineAligner
 from .config import get_aligner
 from .lexicon import Lexicon
 
@@ -87,11 +88,11 @@ def compute_alignment_scores(
         tokenize_corpus(src_input_path, src_tok_output_path)
         tokenize_corpus(trg_input_path, trg_tok_output_path)
 
-        aligner = get_aligner(aligner_id, temp_dir)
+        aligner: MachineAligner = get_aligner(aligner_id, temp_dir)
         if sym_align_path is None:
             sym_align_path = temp_dir / "sym-align.txt"
         aligner.train(src_tok_output_path, trg_tok_output_path)
-        aligner.align(sym_align_path)
+        aligner.align(sym_align_path, export_probabilies=True)
 
         direct_lexicon = aligner.get_direct_lexicon(include_special_tokens=True)
         inverse_lexicon = aligner.get_inverse_lexicon(include_special_tokens=True)
