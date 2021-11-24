@@ -882,6 +882,21 @@ optional = false
 python-versions = ">=3.5"
 
 [[package]]
+name = "networkx"
+version = "2.6.3"
+description = "Python package for creating and manipulating graphs and networks"
+category = "main"
+optional = false
+python-versions = ">=3.7"
+
+[package.extras]
+default = ["numpy (>=1.19)", "scipy (>=1.5,!=1.6.1)", "matplotlib (>=3.3)", "pandas (>=1.1)"]
+developer = ["black (==21.5b1)", "pre-commit (>=2.12)"]
+doc = ["sphinx (>=4.0,<5.0)", "pydata-sphinx-theme (>=0.6,<1.0)", "sphinx-gallery (>=0.9,<1.0)", "numpydoc (>=1.1)", "pillow (>=8.2)", "nb2plots (>=0.6)", "texext (>=0.6.6)"]
+extra = ["lxml (>=4.5)", "pygraphviz (>=1.7)", "pydot (>=1.4.1)"]
+test = ["pytest (>=6.2)", "pytest-cov (>=2.12)", "codecov (>=2.1)"]
+
+[[package]]
 name = "nltk"
 version = "3.6.3"
 description = "Natural Language Toolkit"
@@ -1539,7 +1554,7 @@ python-versions = "*"
 
 [[package]]
 name = "sil-machine"
-version = "0.3.8"
+version = "0.4.0"
 description = "A natural language processing library that is focused on providing tools for resource-poor languages."
 category = "main"
 optional = false
@@ -1547,6 +1562,7 @@ python-versions = ">=3.7,<3.11"
 
 [package.dependencies]
 chardet = ">=4.0.0,<5.0.0"
+networkx = ">=2.6.3,<3.0.0"
 numpy = ">=1.19.0,<2.0.0"
 regex = ">=2021.7.6,<2022.0.0"
 sil-thot = {version = ">=3.3.5,<4.0.0", optional = true, markers = "extra == \"thot\""}
@@ -1848,7 +1864,7 @@ testing = ["pytest (>=4.6)", "pytest-checkdocs (>=2.4)", "pytest-flake8", "pytes
 [metadata]
 lock-version = "1.1"
 python-versions = ">=3.7,<3.9"
-content-hash = "a45a54b910a3af349c8d7341ab6ec1da0e863ef59925517804b84478d2137d5d"
+content-hash = "5f3a7277c3caee10bba79a392b707836be826cd5b696f99738083f5361dc6278"
 
 [metadata.files]
 absl-py = [
@@ -2420,6 +2436,10 @@ mypy-extensions = [
 nest-asyncio = [
     {file = "nest_asyncio-1.5.1-py3-none-any.whl", hash = "sha256:76d6e972265063fe92a90b9cc4fb82616e07d586b346ed9d2c89a4187acea39c"},
     {file = "nest_asyncio-1.5.1.tar.gz", hash = "sha256:afc5a1c515210a23c461932765691ad39e8eba6551c055ac8d5546e69250d0aa"},
+]
+networkx = [
+    {file = "networkx-2.6.3-py3-none-any.whl", hash = "sha256:80b6b89c77d1dfb64a4c7854981b60aeea6360ac02c6d4e4913319e0a313abef"},
+    {file = "networkx-2.6.3.tar.gz", hash = "sha256:c0946ed31d71f1b732b5aaa6da5a0388a345019af232ce2f49c766e2d6795c51"},
 ]
 nltk = [
     {file = "nltk-3.6.3-py3-none-any.whl", hash = "sha256:665225d585367f64a73ff1cb436964b425304dc772406653412e19dfe0157688"},
@@ -3060,8 +3080,8 @@ sentencepiece = [
     {file = "sentencepiece-0.1.96.tar.gz", hash = "sha256:9bdf097d5bd1d8ce42dfee51f6ff05f5578b96e48c6f6006aa4eff69edfa3639"},
 ]
 sil-machine = [
-    {file = "sil-machine-0.3.8.tar.gz", hash = "sha256:dbfa66807ee1bfab078115cf22b2813a083ce768de76c99f9dbec78add94abda"},
-    {file = "sil_machine-0.3.8-py3-none-any.whl", hash = "sha256:beab6b59e998bf63fb8e7134343b3e47aa758138cfde3f152012045297500177"},
+    {file = "sil-machine-0.4.0.tar.gz", hash = "sha256:f0ed1cca1be8b61715df001619fa2ef4bf00f5d1eb20197f59a8c48b18a04274"},
+    {file = "sil_machine-0.4.0-py3-none-any.whl", hash = "sha256:8a6fe121ed0580b781a21a7d1bee5e907e1cabeaa00d70a2bf0f8c780e35bc30"},
 ]
 sil-thot = [
     {file = "sil-thot-3.3.5.tar.gz", hash = "sha256:4694edb0469c2fe6b4655d41e8cfdde69c2ddf8022bd90916d7ca4b1593197f2"},

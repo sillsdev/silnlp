@@ -1,14 +1,24 @@
 import logging
 import os
-import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 from xml.sax.saxutils import escape
 
+import regex
 from lxml import etree
-from machine.corpora import FilteredTextCorpus, ParallelTextCorpus, ParatextTextCorpus, Text
+from machine.corpora import (
+    DictionaryTextCorpus,
+    FilteredTextCorpus,
+    MemoryText,
+    ParallelTextCorpus,
+    ParatextTextCorpus,
+    Text,
+    TextCorpus,
+    TextSegment,
+    UsfmFileTextCorpus,
+)
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_id_to_number, get_books
-from machine.tokenization import NullTokenizer
+from machine.tokenization import NullTokenizer, WhitespaceTokenizer
 
 from .corpus import get_terms_glosses_path, get_terms_metadata_path, get_terms_vrefs_path, load_corpus
 from .environment import SIL_NLP_ENV
@@ -21,6 +31,10 @@ _TERMS_LISTS = {
     "Pt6": "BiblicalTermsP6NT.xml",
     "Project": "ProjectBiblicalTerms.xml",
 }
+
+_MORPH_INFO_PATTERN = regex.compile(r"<[^>]+>")
+
+_NON_LETTER_PATTERN = regex.compile(r"([^\p{L}\p{M}]*)[\p{L}\p{M}]+([^\p{L}\p{M}]*)")
 
 LOGGER = logging.getLogger(__name__)
 
@@ -42,6 +56,7 @@ def extract_project(
     include_books: List[str] = [],
     exclude_books: List[str] = [],
     include_markers: bool = False,
+    extract_lemmas: bool = False,
 ) -> Tuple[Path, int]:
     settings_tree = parse_project_settings(project_dir)
     iso = get_iso(settings_tree)
@@ -50,7 +65,12 @@ def extract_project(
 
     tokenizer = NullTokenizer()
     ref_corpus = ParatextTextCorpus(tokenizer, ref_dir)
-    project_corpus = ParatextTextCorpus(tokenizer, project_dir, include_markers=include_markers)
+
+    ltg_dir = project_dir / "LTG"
+    if extract_lemmas and ltg_dir.is_dir():
+        project_corpus = get_lemma_text_corpus(project_dir)
+    else:
+        project_corpus = ParatextTextCorpus(tokenizer, project_dir, include_markers=include_markers)
 
     output_basename = f"{iso}-{project_dir.name}"
     if len(include_books) > 0 or len(exclude_books) > 0:
@@ -81,6 +101,8 @@ def extract_project(
 
     if include_markers:
         output_basename += "-m"
+    elif extract_lemmas and ltg_dir.is_dir():
+        output_basename += "-lemmas"
     output_filename = output_dir / f"{output_basename}.txt"
 
     try:
@@ -114,6 +136,51 @@ def extract_project(
         if output_filename.is_file():
             output_filename.unlink()
         raise
+
+
+def get_lemma_text_corpus(project_dir: Path) -> TextCorpus:
+    tokenizer = WhitespaceTokenizer()
+    surface_corpus = ParatextTextCorpus(tokenizer, project_dir)
+    lemma_corpus = UsfmFileTextCorpus(
+        tokenizer, "usfm.sty", "utf-8-sig", project_dir / "LTG", surface_corpus.versification, glob_pattern="*.LTG"
+    )
+    parallel_corpus = ParallelTextCorpus(surface_corpus, lemma_corpus)
+    new_texts: List[Text] = []
+    for text in parallel_corpus.texts:
+        new_segments: List[TextSegment] = []
+        with text.segments as segments:
+            for segment in segments:
+                if len(segment.source_segment) != len(segment.target_segment):
+                    raise RuntimeError("The lemma file is invalid.")
+                lemmas: List[str] = []
+                for surface, lemma in zip(segment.source_segment, segment.target_segment):
+                    lemma = lemma.split("|")[0]
+                    lemma = strip_morph_info(lemma)
+                    match = _NON_LETTER_PATTERN.fullmatch(surface)
+                    if match is not None:
+                        lemma = match.group(1) + lemma + match.group(2)
+                    lemmas.append(lemma)
+                lemmas_text = " ".join(lemmas)
+                new_segments.append(
+                    TextSegment(
+                        text.id,
+                        segment.segment_ref,
+                        [] if len(lemmas_text) == 0 else [lemmas_text],
+                        segment.is_source_sentence_start,
+                        segment.is_source_in_range,
+                        segment.is_source_range_start,
+                        len(lemmas_text) == 0,
+                    )
+                )
+        new_texts.append(MemoryText(text.id, new_segments))
+    return DictionaryTextCorpus(new_texts)
+
+
+def strip_morph_info(lemma: str) -> str:
+    lemma = lemma[1:]
+    lemma = lemma.replace("+", "")
+    lemma = _MORPH_INFO_PATTERN.sub("", lemma)
+    return lemma
 
 
 def escape_id(id: str) -> str:
@@ -223,14 +290,14 @@ def extract_major_terms_per_language(iso: str) -> None:
 
 
 def _process_gloss_string(gloss_str: str) -> List[str]:
-    match = re.match(r"\[(.+?)\]", gloss_str)
+    match = regex.match(r"\[(.+?)\]", gloss_str)
     if match is not None:
         gloss_str = match.group(1)
     gloss_str = gloss_str.replace("?", "")
     gloss_str = clean_term(gloss_str)
     gloss_str = strip_parens(gloss_str, left="[", right="]")
-    gloss_str = re.sub(r"\s+\d+(\.\d+)*$", "", gloss_str)
-    glosses = re.split("[;,/]", gloss_str)
+    gloss_str = regex.sub(r"\s+\d+(\.\d+)*$", "", gloss_str)
+    glosses = regex.split("[;,/]", gloss_str)
     glosses = unique_list([gloss.strip() for gloss in glosses if gloss.strip() != ""])
     return glosses
 
@@ -310,11 +377,13 @@ def extract_term_renderings(project_dir: Path, corpus_filename: Path) -> int:
                         rendering = clean_term(rendering).strip()
                         if len(refs_list) > 0 and "*" in rendering:
                             regex = (
-                                re.escape(rendering).replace("\\ \\*\\*\\ ", "(?:\\ \\w+)*\\ ").replace("\\*", "\\w*")
+                                regex.escape(rendering)
+                                .replace("\\ \\*\\*\\ ", "(?:\\ \\w+)*\\ ")
+                                .replace("\\*", "\\w*")
                             )
                             for ref in refs_list:
                                 verse_str = corpus.get(ref, "")
-                                for match in re.finditer(regex, verse_str):
+                                for match in regex.finditer(regex, verse_str):
                                     surface_form = match.group()
                                     renderings.add(surface_form)
 
