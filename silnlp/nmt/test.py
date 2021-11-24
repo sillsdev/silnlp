@@ -388,7 +388,7 @@ def test_checkpoint(
             features_paths.append(str(config.exp_dir / features_file_names[i]))
             predictions_paths.append(str(predictions_path))
     if len(predictions_paths) > 0:
-        runner = create_runner(config, memory_growth=memory_growth)
+        runner = create_runner(config)
         print(f"Inferencing {checkpoint_name}...")
         runner.infer_multiple(features_paths, predictions_paths, checkpoint_path=str(checkpoint_path))
 

@@ -15,6 +15,7 @@ class SILClearML:
     project_prefix: str = "LangTech_"
     project_suffix: str = ""
     experiment_suffix: str = ""
+    memory_growth: bool = False
 
     def __post_init__(self):
         self.name = self.name.replace("\\", "/")
@@ -83,7 +84,7 @@ class SILClearML:
         with (exp_dir / "config.yml").open("w+", encoding="utf-8") as file:
             yaml.safe_dump(data=config, stream=file)
 
-        self.config = Config(exp_dir, config)
+        self.config = Config(exp_dir=exp_dir, config=config, memory_growth=self.memory_growth)
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name, extensions="config.yml")
 
     def get_config(self):

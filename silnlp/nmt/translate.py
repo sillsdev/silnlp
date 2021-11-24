@@ -22,7 +22,7 @@ class NMTTranslator(Translator):
         self._multiple_trg_isos = len(config.trg_isos) > 1
         self._default_trg_iso = config.default_trg_iso
         self.checkpoint_path = checkpoint_path
-        self._runner = create_runner(config, memory_growth=memory_growth)
+        self._runner = create_runner(config)
         self._src_spp = config.create_src_sp_processor()
 
     def translate(
@@ -55,7 +55,11 @@ class TranslationTask:
     def init_translation_task(self, experiment_suffix: str):
 
         self.clearml = SILClearML(
-            self.name, self.clearml_queue, project_suffix="_infer", experiment_suffix=experiment_suffix
+            self.name,
+            self.clearml_queue,
+            project_suffix="_infer",
+            experiment_suffix=experiment_suffix,
+            memory_growth=self.memory_growth,
         )
         self.name: str = self.clearml.name
         self.config: Config = self.clearml.config
