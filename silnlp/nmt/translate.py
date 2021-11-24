@@ -83,7 +83,7 @@ class TranslationTask:
         trg_iso: Optional[str] = None,
     ):
         self.init_translation_task(experiment_suffix=f"_{self.checkpoint}_{books}")
-        book_nums = get_books([book.strip("*") for book in books])
+        book_nums = get_books([book.strip("*") for book in books.split(",")])
 
         if src_project is None:
             if len(self.config.src_projects) != 1:
@@ -98,6 +98,7 @@ class TranslationTask:
             book = book_number_to_id(book_num)
             output_path = output_dir / f"{book_file_name_digits(book_num)}{book}.SFM"
             try:
+                LOGGER.info(f"Translating {book} ...")
                 self.translator.translate_book(src_project, book, output_path, trg_iso=trg_iso)
             except Exception as e:
                 if not displayed_error_already:
