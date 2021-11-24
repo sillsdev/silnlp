@@ -10,6 +10,8 @@ from opennmt.models import Model, SequenceToSequence
 from opennmt.utils.checkpoint import Checkpoint
 from opennmt.utils.misc import OrderRestorer, extract_batches, item_or_tuple
 
+from .transformer import SILSelfAttentionDecoder, SILTransformer
+
 
 class VariableUpdate:
     def __init__(
@@ -255,6 +257,7 @@ class SILRunner(Runner):
         tgt_vocab: Optional[str] = None,
         checkpoint_path: Optional[str] = None,
         step: int = None,
+        transfer_alignment_heads: bool = True,
     ) -> str:
         if not isinstance(self._model, SequenceToSequence):
             raise ValueError("Updating vocabularies is only supported for sequence to sequence models")
@@ -279,7 +282,17 @@ class SILRunner(Runner):
         new_checkpoint = Checkpoint.from_config(new_config, new_model, optimizer=new_optimizer)
         new_model.create_variables(optimizer=new_optimizer)
 
-        model.transfer_weights(new_model, new_optimizer=new_optimizer, optimizer=optimizer)
+        ignore_weights: Optional[List[tf.Variable]] = None
+        if isinstance(new_model, SILTransformer) and not transfer_alignment_heads:
+            ignore_weights = []
+            new_decoder: SILSelfAttentionDecoder = new_model.decoder
+            for new_decoder_layer in new_decoder.layers:
+                if new_decoder_layer.alignment_head is not None:
+                    ignore_weights.extend(new_decoder_layer.alignment_head.weights)
+
+        model.transfer_weights(
+            new_model, new_optimizer=new_optimizer, optimizer=optimizer, ignore_weights=ignore_weights
+        )
         new_optimizer.iterations.assign(optimizer.iterations)
         new_checkpoint.save(step=step)
         return output_dir

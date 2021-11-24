@@ -21,6 +21,7 @@ def main() -> None:
         "--exclude", metavar="books", nargs="+", default=[], help="The books to exclude; e.g., 'NT', 'OT', 'GEN'"
     )
     parser.add_argument("--markers", default=False, action="store_true", help="Include USFM markers")
+    parser.add_argument("--lemmas", default=False, action="store_true", help="Extract lemmas if available")
 
     parser.add_argument("--clearml", default=False, action="store_true", help="Register Extraction in ClearML")
 
@@ -71,13 +72,13 @@ def main() -> None:
             LOGGER.info(f"Extracting {project}...")
             project_dir = get_project_dir(project)
             corpus_filename, verse_count = extract_project(
-                project_dir, SIL_NLP_ENV.mt_scripture_dir, include_books, exclude_books, args.markers
+                project_dir, SIL_NLP_ENV.mt_scripture_dir, include_books, exclude_books, args.markers, args.lemmas
             )
             # check if the number of lines in the file is correct (the same as vref.txt)
             LOGGER.info(f"# of Verses: {verse_count}")
             if verse_count != expected_verse_count:
                 LOGGER.error(f"The number of verses is {verse_count}, but should be {expected_verse_count}.")
-            terms_count = extract_term_renderings(project_dir, corpus_filename)
+            terms_count = extract_term_renderings(project_dir, corpus_filename, SIL_NLP_ENV.mt_terms_dir)
             LOGGER.info(f"# of Terms: {terms_count}")
             LOGGER.info("Done.")
     else:

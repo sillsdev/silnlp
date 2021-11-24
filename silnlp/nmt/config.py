@@ -453,8 +453,7 @@ def get_data_file_pairs(corpus_pair: CorpusPair) -> Iterable[Tuple[DataFile, Dat
 
 
 class Config:
-    def __init__(self, exp_dir: Path, config: dict, memory_growth: bool = False) -> None:
-        self.memory_growth = memory_growth
+    def __init__(self, exp_dir: Path, config: dict) -> None:
         config = merge_dict(
             {
                 "model": "SILTransformerBase",
@@ -483,6 +482,7 @@ class Config:
                         "categories": "PN",
                         "include_glosses": True,
                     },
+                    "transfer_alignment_heads": True,
                 },
                 "train": {
                     "average_last_checkpoints": 0,
@@ -1516,6 +1516,7 @@ class Config:
             str(trg_vocab_path),
             None if checkpoint_path is None else str(checkpoint_path),
             step,
+            transfer_alignment_heads=self.data["transfer_alignment_heads"],
         )
 
     def _create_unshared_vocab(self, isos: Set[str], vocab_file_paths: Set[Path], side: str) -> None:
@@ -1684,11 +1685,6 @@ def set_tf_log_level(log_level: int = logging.INFO) -> None:
 
 def create_runner(config: Config, mixed_precision: bool = False) -> SILRunner:
     set_tf_log_level()
-
-    if config.memory_growth:
-        gpus = tf.config.list_physical_devices(device_type="GPU")
-        for device in gpus:
-            tf.config.experimental.set_memory_growth(device, enable=True)
 
     model = create_model(config)
 

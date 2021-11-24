@@ -124,3 +124,9 @@ class BLEUMultiRefScorer(Scorer):
         sys_stream = load_sys_stream(hyp_path)
         bleu = sacrebleu.corpus_bleu(sys_stream, cast(List[Iterable[str]], ref_streams), force=True)
         return bleu.score
+
+
+def enable_memory_growth():
+    gpus = tf.config.list_physical_devices(device_type="GPU")
+    for device in gpus:
+        tf.config.experimental.set_memory_growth(device, enable=True)

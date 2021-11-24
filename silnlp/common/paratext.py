@@ -1,14 +1,24 @@
 import logging
 import os
-import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 from xml.sax.saxutils import escape
 
+import regex as re
 from lxml import etree
-from machine.corpora import FilteredTextCorpus, ParallelTextCorpus, ParatextTextCorpus, Text
+from machine.corpora import (
+    DictionaryTextCorpus,
+    FilteredTextCorpus,
+    MemoryText,
+    ParallelTextCorpus,
+    ParatextTextCorpus,
+    Text,
+    TextCorpus,
+    TextSegment,
+    UsfmFileTextCorpus,
+)
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_id_to_number, get_books
-from machine.tokenization import NullTokenizer
+from machine.tokenization import NullTokenizer, WhitespaceTokenizer
 
 from .corpus import get_terms_glosses_path, get_terms_metadata_path, get_terms_vrefs_path, load_corpus
 from .environment import SIL_NLP_ENV
@@ -21,6 +31,10 @@ _TERMS_LISTS = {
     "Pt6": "BiblicalTermsP6NT.xml",
     "Project": "ProjectBiblicalTerms.xml",
 }
+
+_MORPH_INFO_PATTERN = re.compile(r"<[^>]+>")
+
+_NON_LETTER_PATTERN = re.compile(r"([^\p{L}\p{M}]*)[\p{L}\p{M}]+([^\p{L}\p{M}]*)")
 
 LOGGER = logging.getLogger(__name__)
 
@@ -42,6 +56,7 @@ def extract_project(
     include_books: List[str] = [],
     exclude_books: List[str] = [],
     include_markers: bool = False,
+    extract_lemmas: bool = False,
 ) -> Tuple[Path, int]:
     settings_tree = parse_project_settings(project_dir)
     iso = get_iso(settings_tree)
@@ -50,7 +65,12 @@ def extract_project(
 
     tokenizer = NullTokenizer()
     ref_corpus = ParatextTextCorpus(tokenizer, ref_dir)
-    project_corpus = ParatextTextCorpus(tokenizer, project_dir, include_markers=include_markers)
+
+    ltg_dir = project_dir / "LTG"
+    if extract_lemmas and ltg_dir.is_dir():
+        project_corpus = get_lemma_text_corpus(project_dir)
+    else:
+        project_corpus = ParatextTextCorpus(tokenizer, project_dir, include_markers=include_markers)
 
     output_basename = f"{iso}-{project_dir.name}"
     if len(include_books) > 0 or len(exclude_books) > 0:
@@ -81,6 +101,8 @@ def extract_project(
 
     if include_markers:
         output_basename += "-m"
+    elif extract_lemmas and ltg_dir.is_dir():
+        output_basename += "-lemmas"
     output_filename = output_dir / f"{output_basename}.txt"
 
     try:
@@ -116,6 +138,51 @@ def extract_project(
         raise
 
 
+def get_lemma_text_corpus(project_dir: Path) -> TextCorpus:
+    tokenizer = WhitespaceTokenizer()
+    surface_corpus = ParatextTextCorpus(tokenizer, project_dir)
+    lemma_corpus = UsfmFileTextCorpus(
+        tokenizer, "usfm.sty", "utf-8-sig", project_dir / "LTG", surface_corpus.versification, glob_pattern="*.LTG"
+    )
+    parallel_corpus = ParallelTextCorpus(surface_corpus, lemma_corpus)
+    new_texts: List[Text] = []
+    for text in parallel_corpus.texts:
+        new_segments: List[TextSegment] = []
+        with text.segments as segments:
+            for segment in segments:
+                if len(segment.source_segment) != len(segment.target_segment):
+                    raise RuntimeError("The lemma file is invalid.")
+                lemmas: List[str] = []
+                for surface, lemma in zip(segment.source_segment, segment.target_segment):
+                    lemma = lemma.split("|")[0]
+                    lemma = strip_morph_info(lemma)
+                    match = _NON_LETTER_PATTERN.fullmatch(surface)
+                    if match is not None:
+                        lemma = match.group(1) + lemma + match.group(2)
+                    lemmas.append(lemma)
+                lemmas_text = " ".join(lemmas)
+                new_segments.append(
+                    TextSegment(
+                        text.id,
+                        segment.segment_ref,
+                        [] if len(lemmas_text) == 0 else [lemmas_text],
+                        segment.is_source_sentence_start,
+                        segment.is_source_in_range,
+                        segment.is_source_range_start,
+                        len(lemmas_text) == 0,
+                    )
+                )
+        new_texts.append(MemoryText(text.id, new_segments))
+    return DictionaryTextCorpus(new_texts)
+
+
+def strip_morph_info(lemma: str) -> str:
+    lemma = lemma[1:]
+    lemma = lemma.replace("+", "")
+    lemma = _MORPH_INFO_PATTERN.sub("", lemma)
+    return lemma
+
+
 def escape_id(id: str) -> str:
     return escape(id).replace("\n", "&#xA;")
 
@@ -143,21 +210,23 @@ def clean_term(term_str: str) -> str:
     return " ".join(term_str.split())
 
 
-def extract_terms_list(list_type: str, project: Optional[str] = None) -> Dict[str, List[VerseRef]]:
+def extract_terms_list(
+    list_type: str, output_dir: Path, project_dir: Optional[Path] = None
+) -> Dict[str, List[VerseRef]]:
     list_file_name = _TERMS_LISTS.get(list_type)
     if list_file_name is None:
         return {}
 
     list_name = list_type
-    if project is not None:
-        list_name = project
+    if project_dir is not None:
+        list_name = project_dir.name
 
-    dir = SIL_NLP_ENV.pt_terms_dir if project is None else SIL_NLP_ENV.pt_projects_dir / project
+    dir = SIL_NLP_ENV.pt_terms_dir if project_dir is None else project_dir
     terms_xml_path = dir / list_file_name
 
-    terms_metadata_path = get_terms_metadata_path(list_name)
-    terms_glosses_path = get_terms_glosses_path(list_name)
-    terms_vrefs_path = get_terms_vrefs_path(list_name)
+    terms_metadata_path = get_terms_metadata_path(list_name, mt_terms_dir=output_dir)
+    terms_glosses_path = get_terms_glosses_path(list_name, mt_terms_dir=output_dir)
+    terms_vrefs_path = get_terms_vrefs_path(list_name, mt_terms_dir=output_dir)
 
     references: Dict[str, List[VerseRef]] = {}
     with terms_metadata_path.open("w", encoding="utf-8", newline="\n") as terms_metadata_file, terms_glosses_path.open(
@@ -235,8 +304,8 @@ def _process_gloss_string(gloss_str: str) -> List[str]:
     return glosses
 
 
-def extract_terms_list_from_renderings(project: str, renderings_tree: etree.ElementTree) -> None:
-    terms_metadata_path = get_terms_metadata_path(project)
+def extract_terms_list_from_renderings(project: str, renderings_tree: etree.ElementTree, output_dir: Path) -> None:
+    terms_metadata_path = get_terms_metadata_path(project, mt_terms_dir=output_dir)
     with terms_metadata_path.open("w", encoding="utf-8", newline="\n") as terms_metadata_file:
         for rendering_elem in renderings_tree.getroot().findall("TermRendering"):
             id = rendering_elem.get("Id")
@@ -249,7 +318,7 @@ def extract_terms_list_from_renderings(project: str, renderings_tree: etree.Elem
             terms_metadata_file.write(f"{id}\t?\t?\n")
 
 
-def extract_term_renderings(project_dir: Path, corpus_filename: Path) -> int:
+def extract_term_renderings(project_dir: Path, corpus_filename: Path, output_dir: Path) -> int:
     renderings_path = project_dir / "TermRenderings.xml"
     if not renderings_path.is_file():
         return 0
@@ -279,9 +348,9 @@ def extract_term_renderings(project_dir: Path, corpus_filename: Path) -> int:
     references: Dict[str, List[VerseRef]] = {}
     if list_type == "Project":
         if terms_project == project_name:
-            references = extract_terms_list(list_type, project_dir.name)
+            references = extract_terms_list(list_type, output_dir, project_dir)
         else:
-            extract_terms_list_from_renderings(project_dir.name, renderings_tree)
+            extract_terms_list_from_renderings(project_dir.name, renderings_tree, output_dir)
         list_name = project_dir.name
 
     corpus: Dict[VerseRef, str] = {}
@@ -293,8 +362,8 @@ def extract_term_renderings(project_dir: Path, corpus_filename: Path) -> int:
             corpus[VerseRef.from_string(ref_str, ORIGINAL_VERSIFICATION)] = verse_str
             prev_verse_str = verse_str
 
-    terms_metadata_path = get_terms_metadata_path(list_name)
-    terms_renderings_path = SIL_NLP_ENV.mt_terms_dir / f"{iso}-{project_dir.name}-{list_type}-renderings.txt"
+    terms_metadata_path = get_terms_metadata_path(list_name, mt_terms_dir=output_dir)
+    terms_renderings_path = output_dir / f"{iso}-{project_dir.name}-{list_type}-renderings.txt"
     count = 0
     with terms_renderings_path.open("w", encoding="utf-8", newline="\n") as terms_renderings_file:
         for line in load_corpus(terms_metadata_path):
@@ -329,7 +398,7 @@ def extract_term_renderings(project_dir: Path, corpus_filename: Path) -> int:
         terms_renderings_path.unlink()
         if list_type == "Project":
             terms_metadata_path.unlink()
-            terms_glosses_path = get_terms_glosses_path(list_name)
+            terms_glosses_path = get_terms_glosses_path(list_name, mt_terms_dir=output_dir)
             if terms_glosses_path.is_file():
                 terms_glosses_path.unlink()
     return count

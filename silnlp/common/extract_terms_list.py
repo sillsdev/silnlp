@@ -11,7 +11,7 @@ def main() -> None:
 
     SIL_NLP_ENV.mt_terms_dir.mkdir(exist_ok=True, parents=True)
 
-    extract_terms_list(args.list)
+    extract_terms_list(args.list, SIL_NLP_ENV.mt_terms_dir)
 
 
 if __name__ == "__main__":

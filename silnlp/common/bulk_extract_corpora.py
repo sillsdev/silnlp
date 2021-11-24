@@ -12,11 +12,11 @@ from tqdm.contrib.concurrent import process_map
 logging.disable(logging.CRITICAL)
 from ..common.corpus import count_lines, write_corpus
 from ..common.environment import SIL_NLP_ENV
-from .paratext import extract_project
+from .paratext import extract_project, extract_term_renderings
 
 
-def extract_directory_or_bundle(args: Tuple[Path, Path, bytes, int]) -> Tuple[str, Optional[str]]:
-    input_path, output_path, password, expected_verse_count = args
+def extract_directory_or_bundle(args: Tuple[Path, Path, Optional[Path], bytes, int]) -> Tuple[str, Optional[str]]:
+    input_path, corpus_output_path, terms_output_path, password, expected_verse_count = args
     project = input_path.stem
     try:
         if input_path.suffix == ".p8z":
@@ -25,9 +25,13 @@ def extract_directory_or_bundle(args: Tuple[Path, Path, bytes, int]) -> Tuple[st
                 with ZipFile(input_path, "r") as bundle_file:
                     bundle_file.extractall(project_dir, pwd=password)
 
-                corpus_path, verse_count = extract_project(project_dir, output_path)
+                corpus_path, verse_count = extract_project(project_dir, corpus_output_path)
+                if terms_output_path is not None:
+                    extract_term_renderings(project_dir, corpus_path, terms_output_path)
         else:
-            corpus_path, verse_count = extract_project(input_path, output_path)
+            corpus_path, verse_count = extract_project(input_path, corpus_output_path)
+            if terms_output_path is not None:
+                extract_term_renderings(input_path, corpus_path, terms_output_path)
 
         if verse_count != expected_verse_count:
             corpus_path.unlink()
@@ -41,16 +45,21 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Extracts text corpora from a folder of Paratext projects")
     parser.add_argument("--input", type=str, required=True, help="The input folder.")
     parser.add_argument("--output", type=str, required=True, help="The output corpus folder.")
+    parser.add_argument("--terms-output", type=str, help="The output corpus folder.")
     parser.add_argument("--password", type=str, default="", help="The bundle password.")
     parser.add_argument("--error-log", type=str, help="The error log file.")
     args = parser.parse_args()
 
     input = Path(args.input)
-    output = Path(args.output)
+    corpus_output = Path(args.output)
+    terms_output = Path(args.terms_output) if args.terms_output is not None else None
     password = bytes(args.password, "utf-8")
 
     expected_verse_count = count_lines(SIL_NLP_ENV.assets_dir / "vref.txt")
-    work = [(p, output, password, expected_verse_count) for p in chain(input.glob("*.p8z"), input.iterdir())]
+    work = [
+        (p, corpus_output, terms_output, password, expected_verse_count)
+        for p in chain(input.glob("*.p8z"), (p for p in input.iterdir() if p.is_dir()))
+    ]
     print(f"Extracting {len(work)} projects...")
     errors: List[Tuple[str, str]] = []
     for project, msg in process_map(

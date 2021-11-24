@@ -1,8 +1,9 @@
-from typing import Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import tensorflow as tf
 import tensorflow_addons as tfa
 from opennmt import END_OF_SENTENCE_ID, START_OF_SENTENCE_ID
+from opennmt.data.vocab import get_mapping, update_variable, update_variable_and_slots
 from opennmt.decoders import SelfAttentionDecoder
 from opennmt.encoders import ParallelEncoder, SelfAttentionEncoder
 from opennmt.inputters import WordEmbedder, add_sequence_controls
@@ -20,7 +21,7 @@ from opennmt.layers import (
     split_heads,
 )
 from opennmt.layers.reducer import align_in_time
-from opennmt.models import EmbeddingsSharingLevel, Transformer, register_model_in_catalog
+from opennmt.models import EmbeddingsSharingLevel, SequenceToSequence, Transformer, register_model_in_catalog
 from opennmt.models.sequence_to_sequence import _add_noise, replace_unknown_target
 from opennmt.utils.decoding import BeamSearch, DecodingStrategy, Sampler
 from opennmt.utils.misc import shape_list
@@ -741,6 +742,70 @@ class SILTransformer(Transformer):
             trg_variants = trg_variants.write(0, tf.constant([], dtype=tf.int32))
         return src_entry_indices.stack(), tf.RaggedTensor.from_nested_row_lengths(
             trg_variants.concat(), [trg_entry_lengths.stack(), trg_variant_lengths.stack()]
+        )
+
+    def transfer_weights(
+        self,
+        new_model: "SILTransformer",
+        new_optimizer: Any = None,
+        optimizer: Any = None,
+        ignore_weights: Optional[List[tf.Variable]] = None,
+    ):
+        updated_variables = []
+
+        def _map_variable(mapping, var_a, var_b, axis=0):
+            if new_optimizer is not None and optimizer is not None:
+                variables = update_variable_and_slots(
+                    var_a,
+                    var_b,
+                    optimizer,
+                    new_optimizer,
+                    mapping,
+                    vocab_axis=axis,
+                )
+            else:
+                variables = [update_variable(var_a, var_b, mapping, vocab_axis=axis)]
+            updated_variables.extend(variables)
+
+        source_mapping, _ = get_mapping(
+            self.features_inputter.vocabulary_file,
+            new_model.features_inputter.vocabulary_file,
+        )
+        target_mapping, _ = get_mapping(
+            self.labels_inputter.vocabulary_file,
+            new_model.labels_inputter.vocabulary_file,
+        )
+
+        _map_variable(
+            source_mapping,
+            self.features_inputter.embedding,
+            new_model.features_inputter.embedding,
+        )
+        _map_variable(
+            target_mapping,
+            self.decoder.output_layer.bias,
+            new_model.decoder.output_layer.bias,
+        )
+
+        if not EmbeddingsSharingLevel.share_input_embeddings(self.share_embeddings):
+            _map_variable(
+                target_mapping,
+                self.labels_inputter.embedding,
+                new_model.labels_inputter.embedding,
+            )
+        if not EmbeddingsSharingLevel.share_target_embeddings(self.share_embeddings):
+            _map_variable(
+                target_mapping,
+                self.decoder.output_layer.kernel,
+                new_model.decoder.output_layer.kernel,
+                axis=1,
+            )
+
+        return super(SequenceToSequence, self).transfer_weights(
+            new_model,
+            new_optimizer=new_optimizer,
+            optimizer=optimizer,
+            ignore_weights=updated_variables + (ignore_weights if ignore_weights is not None else []),
         )
 
 

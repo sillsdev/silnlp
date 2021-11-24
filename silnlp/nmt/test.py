@@ -14,7 +14,7 @@ from sacrebleu.metrics import BLEU, BLEUScore
 from ..common.metrics import compute_meteor_score, compute_ter_score, compute_wer_score
 from ..common.utils import get_git_revision_hash
 from .config import Config, create_runner, load_config
-from .utils import decode_sp, get_best_model_dir, get_last_checkpoint
+from .utils import decode_sp, get_best_model_dir, get_last_checkpoint, enable_memory_growth
 
 LOGGER = logging.getLogger(__name__)
 
@@ -337,7 +337,6 @@ def test_checkpoint(
     config: Config,
     force_infer: bool,
     by_book: bool,
-    memory_growth: bool,
     ref_projects: Set[str],
     checkpoint_path: Path,
     step: int,
@@ -492,7 +491,6 @@ def test_checkpoint(
 
 def test(
     experiment: str,
-    memory_growth=False,
     checkpoint: Optional[str] = None,
     last: bool = False,
     avg: bool = False,
@@ -521,7 +519,6 @@ def test(
             config,
             force_infer,
             by_book,
-            memory_growth,
             ref_projects,
             checkpoint_path,
             step,
@@ -537,7 +534,6 @@ def test(
                 config,
                 force_infer,
                 by_book,
-                memory_growth,
                 ref_projects,
                 checkpoint_path,
                 step,
@@ -555,7 +551,6 @@ def test(
                 config,
                 force_infer,
                 by_book,
-                memory_growth,
                 ref_projects,
                 checkpoint_path,
                 step,
@@ -571,7 +566,6 @@ def test(
                 config,
                 force_infer,
                 by_book,
-                memory_growth,
                 ref_projects,
                 checkpoint_path,
                 step,
@@ -619,11 +613,13 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    if args.memory_growth:
+        enable_memory_growth()
+
     get_git_revision_hash()
 
     test(
         args.experiment,
-        memory_growth=args.memory_growth,
         checkpoint=args.checkpoint,
         last=args.last,
         best=args.best,
