@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 from xml.sax.saxutils import escape
 
-import regex
+import regex as re
 from lxml import etree
 from machine.corpora import (
     DictionaryTextCorpus,
@@ -32,9 +32,9 @@ _TERMS_LISTS = {
     "Project": "ProjectBiblicalTerms.xml",
 }
 
-_MORPH_INFO_PATTERN = regex.compile(r"<[^>]+>")
+_MORPH_INFO_PATTERN = re.compile(r"<[^>]+>")
 
-_NON_LETTER_PATTERN = regex.compile(r"([^\p{L}\p{M}]*)[\p{L}\p{M}]+([^\p{L}\p{M}]*)")
+_NON_LETTER_PATTERN = re.compile(r"([^\p{L}\p{M}]*)[\p{L}\p{M}]+([^\p{L}\p{M}]*)")
 
 LOGGER = logging.getLogger(__name__)
 
@@ -210,21 +210,23 @@ def clean_term(term_str: str) -> str:
     return " ".join(term_str.split())
 
 
-def extract_terms_list(list_type: str, project: Optional[str] = None) -> Dict[str, List[VerseRef]]:
+def extract_terms_list(
+    list_type: str, output_dir: Path, project_dir: Optional[Path] = None
+) -> Dict[str, List[VerseRef]]:
     list_file_name = _TERMS_LISTS.get(list_type)
     if list_file_name is None:
         return {}
 
     list_name = list_type
-    if project is not None:
-        list_name = project
+    if project_dir is not None:
+        list_name = project_dir.name
 
-    dir = SIL_NLP_ENV.pt_terms_dir if project is None else SIL_NLP_ENV.pt_projects_dir / project
+    dir = SIL_NLP_ENV.pt_terms_dir if project_dir is None else project_dir
     terms_xml_path = dir / list_file_name
 
-    terms_metadata_path = get_terms_metadata_path(list_name)
-    terms_glosses_path = get_terms_glosses_path(list_name)
-    terms_vrefs_path = get_terms_vrefs_path(list_name)
+    terms_metadata_path = get_terms_metadata_path(list_name, mt_terms_dir=output_dir)
+    terms_glosses_path = get_terms_glosses_path(list_name, mt_terms_dir=output_dir)
+    terms_vrefs_path = get_terms_vrefs_path(list_name, mt_terms_dir=output_dir)
 
     references: Dict[str, List[VerseRef]] = {}
     with terms_metadata_path.open("w", encoding="utf-8", newline="\n") as terms_metadata_file, terms_glosses_path.open(
@@ -290,20 +292,20 @@ def extract_major_terms_per_language(iso: str) -> None:
 
 
 def _process_gloss_string(gloss_str: str) -> List[str]:
-    match = regex.match(r"\[(.+?)\]", gloss_str)
+    match = re.match(r"\[(.+?)\]", gloss_str)
     if match is not None:
         gloss_str = match.group(1)
     gloss_str = gloss_str.replace("?", "")
     gloss_str = clean_term(gloss_str)
     gloss_str = strip_parens(gloss_str, left="[", right="]")
-    gloss_str = regex.sub(r"\s+\d+(\.\d+)*$", "", gloss_str)
-    glosses = regex.split("[;,/]", gloss_str)
+    gloss_str = re.sub(r"\s+\d+(\.\d+)*$", "", gloss_str)
+    glosses = re.split("[;,/]", gloss_str)
     glosses = unique_list([gloss.strip() for gloss in glosses if gloss.strip() != ""])
     return glosses
 
 
-def extract_terms_list_from_renderings(project: str, renderings_tree: etree.ElementTree) -> None:
-    terms_metadata_path = get_terms_metadata_path(project)
+def extract_terms_list_from_renderings(project: str, renderings_tree: etree.ElementTree, output_dir: Path) -> None:
+    terms_metadata_path = get_terms_metadata_path(project, mt_terms_dir=output_dir)
     with terms_metadata_path.open("w", encoding="utf-8", newline="\n") as terms_metadata_file:
         for rendering_elem in renderings_tree.getroot().findall("TermRendering"):
             id = rendering_elem.get("Id")
@@ -316,7 +318,7 @@ def extract_terms_list_from_renderings(project: str, renderings_tree: etree.Elem
             terms_metadata_file.write(f"{id}\t?\t?\n")
 
 
-def extract_term_renderings(project_dir: Path, corpus_filename: Path) -> int:
+def extract_term_renderings(project_dir: Path, corpus_filename: Path, output_dir: Path) -> int:
     renderings_path = project_dir / "TermRenderings.xml"
     if not renderings_path.is_file():
         return 0
@@ -346,9 +348,9 @@ def extract_term_renderings(project_dir: Path, corpus_filename: Path) -> int:
     references: Dict[str, List[VerseRef]] = {}
     if list_type == "Project":
         if terms_project == project_name:
-            references = extract_terms_list(list_type, project_dir.name)
+            references = extract_terms_list(list_type, output_dir, project_dir)
         else:
-            extract_terms_list_from_renderings(project_dir.name, renderings_tree)
+            extract_terms_list_from_renderings(project_dir.name, renderings_tree, output_dir)
         list_name = project_dir.name
 
     corpus: Dict[VerseRef, str] = {}
@@ -360,8 +362,8 @@ def extract_term_renderings(project_dir: Path, corpus_filename: Path) -> int:
             corpus[VerseRef.from_string(ref_str, ORIGINAL_VERSIFICATION)] = verse_str
             prev_verse_str = verse_str
 
-    terms_metadata_path = get_terms_metadata_path(list_name)
-    terms_renderings_path = SIL_NLP_ENV.mt_terms_dir / f"{iso}-{project_dir.name}-{list_type}-renderings.txt"
+    terms_metadata_path = get_terms_metadata_path(list_name, mt_terms_dir=output_dir)
+    terms_renderings_path = output_dir / f"{iso}-{project_dir.name}-{list_type}-renderings.txt"
     count = 0
     with terms_renderings_path.open("w", encoding="utf-8", newline="\n") as terms_renderings_file:
         for line in load_corpus(terms_metadata_path):
@@ -377,13 +379,11 @@ def extract_term_renderings(project_dir: Path, corpus_filename: Path) -> int:
                         rendering = clean_term(rendering).strip()
                         if len(refs_list) > 0 and "*" in rendering:
                             regex = (
-                                regex.escape(rendering)
-                                .replace("\\ \\*\\*\\ ", "(?:\\ \\w+)*\\ ")
-                                .replace("\\*", "\\w*")
+                                re.escape(rendering).replace("\\ \\*\\*\\ ", "(?:\\ \\w+)*\\ ").replace("\\*", "\\w*")
                             )
                             for ref in refs_list:
                                 verse_str = corpus.get(ref, "")
-                                for match in regex.finditer(regex, verse_str):
+                                for match in re.finditer(regex, verse_str):
                                     surface_form = match.group()
                                     renderings.add(surface_form)
 
@@ -398,7 +398,7 @@ def extract_term_renderings(project_dir: Path, corpus_filename: Path) -> int:
         terms_renderings_path.unlink()
         if list_type == "Project":
             terms_metadata_path.unlink()
-            terms_glosses_path = get_terms_glosses_path(list_name)
+            terms_glosses_path = get_terms_glosses_path(list_name, mt_terms_dir=output_dir)
             if terms_glosses_path.is_file():
                 terms_glosses_path.unlink()
     return count

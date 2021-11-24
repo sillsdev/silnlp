@@ -78,7 +78,7 @@ def main() -> None:
             LOGGER.info(f"# of Verses: {verse_count}")
             if verse_count != expected_verse_count:
                 LOGGER.error(f"The number of verses is {verse_count}, but should be {expected_verse_count}.")
-            terms_count = extract_term_renderings(project_dir, corpus_filename)
+            terms_count = extract_term_renderings(project_dir, corpus_filename, SIL_NLP_ENV.mt_terms_dir)
             LOGGER.info(f"# of Terms: {terms_count}")
             LOGGER.info("Done.")
     else:
