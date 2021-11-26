@@ -57,10 +57,10 @@ class SILClearML:
                 exit()
             self.task = None
 
-    def _determine_clearml_project_name(self):
+    def _determine_clearml_project_name(self) -> None:
         if self.task is None:
             self.clearml_project_folder = ""
-            return self.name
+            return
         # after init, "project name" and "task name" could be different. Read them again and update.
         self.clearml_project_folder = self.task.get_project_name()
         assert self.clearml_project_folder is not None
@@ -77,7 +77,7 @@ class SILClearML:
         if len(self.experiment_suffix) > 0 and self.name.endswith(self.experiment_suffix):
             self.name = self.name[: -len(self.experiment_suffix)]
 
-    def _load_config(self):
+    def _load_config(self) -> None:
         # copy from S3 bucket to temp first
         SIL_NLP_ENV.copy_experiment_from_bucket(self.name, extensions="config.yml")
         # if the project/experiment yaml file already exists, use it to re-read the config.  If not, write it.
@@ -111,6 +111,3 @@ class SILClearML:
 
         self.config = Config(exp_dir=exp_dir, config=config)
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name, extensions="config.yml")
-
-    def get_config(self):
-        return self.config

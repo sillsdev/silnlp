@@ -1,6 +1,5 @@
 import os
 import logging
-import multiprocessing
 from pathlib import Path
 
 from silnlp.alignment.bulk_align import process_alignments
@@ -20,6 +19,6 @@ if __name__ == "__main__":
 
     process_alignments(
         src_path=src_path,
-        trg_paths=list(target_dir.iterdir()),
+        trg_paths=list(target_dir.glob("*.txt")),
         output_dir=output_dir / (aligner + "_" + src_basename),
     )

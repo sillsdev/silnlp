@@ -40,46 +40,42 @@ def align_set(src_input_path: Path, trg_input_path: Path, output_dir: Path, alig
         sym_align_path=output_dir / "sym-align.txt",
     )
     with (output_dir / "alignment.scores.txt").open("w+", encoding="utf-8") as as_file:
-        as_file.writelines(["%0.2f\n" % s for s in scores])
+        as_file.writelines(["%0.4f\n" % s for s in scores])
     plt.plot(scores, "k.", markersize=2)
     plt.xlabel("Verses")
     plt.ylabel("Alignment Score")
     plt.savefig(output_dir / "alignment.png")
 
 
-def full_bibles(scripture_dir: Path, threshold_present=0.95):
-    reference_len = len((scripture_dir / "vref.txt").open(encoding="utf-8").readlines())
-    complete_files = []
-
-    for f in scripture_dir.iterdir():
-        if str(f).endswith("vref.txt"):
-            continue
-        populated_len = sum([len(l) > 1 for l in f.open(encoding="utf-8").readlines()])
-        if populated_len >= reference_len * threshold_present:
-            complete_files.append(f)
-    return complete_files
-
-
-def process_alignments(src_path: Path, trg_paths: List[Path], output_dir: Path, aligner: str = "fast_align"):
+def process_alignments(
+    src_path: Path, trg_paths: List[Path], output_dir: Path, aligner: str = "fast_align", multiprocess: bool = False
+):
     output_dir.mkdir(exist_ok=True)
-    cpu_num = multiprocessing.cpu_count() // 2
-    all_kwargs = []
-    for trg_path in trg_paths:
-        filename = trg_path.name
-        name = os.path.splitext(filename)[0]
-        f_dir = output_dir / name
-        f_dir.mkdir(exist_ok=True)
-        if (f_dir / "alignment.scores.txt").exists():
-            LOGGER.info("Already aligned: " + name)
-        else:
-            all_kwargs.append(
-                {"src_input_path": src_path, "trg_input_path": trg_path, "output_dir": f_dir, "aligner": aligner}
-            )
-    pool = multiprocessing.Pool(cpu_num)
-    result = pool.map_async(align_worker, all_kwargs)
-    result.get()
-    pool.close()
-    pool.join()
+    if multiprocess:
+        all_kwargs = []
+        for trg_path in trg_paths:
+            f_dir = output_dir / trg_path.stem
+            f_dir.mkdir(exist_ok=True)
+            if (f_dir / "alignment.scores.txt").exists():
+                LOGGER.info("Already aligned: " + trg_path.stem)
+            else:
+                all_kwargs.append(
+                    {"src_input_path": src_path, "trg_input_path": trg_path, "output_dir": f_dir, "aligner": aligner}
+                )
+        cpu_num = multiprocessing.cpu_count() // 2
+        pool = multiprocessing.Pool(cpu_num)
+        result = pool.map_async(align_worker, all_kwargs)
+        result.get()
+        pool.close()
+        pool.join()
+    else:
+        for trg_path in trg_paths:
+            f_dir = output_dir / trg_path.stem
+            f_dir.mkdir(exist_ok=True)
+            if (f_dir / "alignment.scores.txt").exists():
+                LOGGER.info("Already aligned: " + trg_path.stem)
+            else:
+                align_set(src_input_path=src_path, trg_input_path=trg_path, output_dir=f_dir, aligner=aligner)
 
 
 def main() -> None:
@@ -88,6 +84,12 @@ def main() -> None:
     parser.add_argument("trg_dir", type=str, help="folder of bibles to align to")
     parser.add_argument("output_dir", type=str, help="folder to contain bible alignments")
     parser.add_argument("--aligner", type=str, default="fast_align", help="Aligner to use for extraction")
+    parser.add_argument(
+        "--multiprocess",
+        default=False,
+        action="store_true",
+        help="Use multiple processes, that is if the chosen alignement algorithm does not do so already.",
+    )
     args = parser.parse_args()
 
     if args.aligner not in ALIGNERS.keys():
@@ -103,9 +105,10 @@ def main() -> None:
 
     process_alignments(
         src_path=Path(args.src_path),
-        trg_paths=list(Path(args.trg_dir).iterdir()),
+        trg_paths=list(Path(args.trg_dir).glob("*.txt")),
         output_dir=Path(args.output_dir) / (args.aligner + "_" + src_basename),
         aligner=args.aligner,
+        multiprocess=args.multiprocess,
     )
 
 

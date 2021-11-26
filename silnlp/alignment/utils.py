@@ -92,7 +92,7 @@ def compute_alignment_scores(
         if sym_align_path is None:
             sym_align_path = temp_dir / "sym-align.txt"
         aligner.train(src_tok_output_path, trg_tok_output_path)
-        aligner.align(sym_align_path, export_probabilies=True)
+        aligner.align(sym_align_path, export_probabilities=True)
 
         direct_lexicon = aligner.get_direct_lexicon(include_special_tokens=True)
         inverse_lexicon = aligner.get_inverse_lexicon(include_special_tokens=True)

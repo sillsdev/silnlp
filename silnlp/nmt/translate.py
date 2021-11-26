@@ -83,7 +83,7 @@ class TranslationTask:
         trg_iso: Optional[str] = None,
     ):
         self.init_translation_task(experiment_suffix=f"_{self.checkpoint}_{books}")
-        book_nums = get_books([book.strip("*") for book in books.split(",")])
+        book_nums = get_books(books)
 
         if src_project is None:
             if len(self.config.src_projects) != 1:

@@ -70,14 +70,14 @@ class MachineAligner(Aligner):
         self._train_alignment_model(src_file_path, trg_file_path)
 
     def align(
-        self, out_file_path: Path, sym_heuristic: str = "grow-diag-final-and", export_probabilies: bool = False
+        self, out_file_path: Path, sym_heuristic: str = "grow-diag-final-and", export_probabilities: bool = False
     ) -> None:
         self._align_parallel_corpus(
             self.model_dir / "src_trg_invswm.src",
             self.model_dir / "src_trg_invswm.trg",
             out_file_path,
             sym_heuristic,
-            export_probabilies=export_probabilies,
+            export_probabilities=export_probabilities,
         )
 
     def force_align(
@@ -168,7 +168,7 @@ class MachineAligner(Aligner):
         trg_file_path: Path,
         output_file_path: Path,
         sym_heuristic: str,
-        export_probabilies: bool = False,
+        export_probabilities: bool = False,
     ) -> None:
         tokenizer = WhitespaceTokenizer()
         src_corpus = TextFileTextCorpus(tokenizer, src_file_path)
@@ -190,7 +190,7 @@ class MachineAligner(Aligner):
         ) as pbar:
             for src_segments, trg_segments in _batch(segments, preprocessor):
                 for i, alignment in enumerate(model.get_best_alignments(src_segments, trg_segments)):
-                    if export_probabilies:
+                    if export_probabilities:
                         alignened_word_pairs = model.get_aligned_word_pairs(src_segments[i], trg_segments[i], alignment)
                         out_file.write(" ".join(str(wp) for wp in alignened_word_pairs) + "\n")
                     else:
