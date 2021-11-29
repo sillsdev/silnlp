@@ -262,11 +262,11 @@ python-versions = ">=3.6"
 
 [[package]]
 name = "ctranslate2"
-version = "2.4.0"
+version = "2.8.1"
 description = "Fast inference engine for Transformer models"
 category = "main"
 optional = false
-python-versions = ">=3.6,<3.10"
+python-versions = ">=3.6,<3.11"
 
 [package.dependencies]
 numpy = "*"
@@ -953,22 +953,22 @@ signedtoken = ["cryptography (>=3.0.0,<4)", "pyjwt (>=2.0.0,<3)"]
 
 [[package]]
 name = "opennmt-tf"
-version = "2.21.0"
+version = "2.23.0"
 description = "Neural machine translation and sequence learning using TensorFlow"
 category = "main"
 optional = false
-python-versions = ">=3.5"
+python-versions = ">=3.6"
 
 [package.dependencies]
-ctranslate2 = {version = ">=2.0.0,<3", markers = "platform_system == \"Linux\" or platform_system == \"Darwin\""}
-pyonmttok = {version = ">=1.26.4,<2", markers = "platform_system == \"Linux\" or platform_system == \"Darwin\""}
-pyyaml = ">=5.3,<5.5"
+ctranslate2 = ">=2.3.2,<3"
+pyonmttok = ">=1.29.0,<2"
+pyyaml = ">=5.3,<7"
 rouge = ">=1.0,<2"
 sacrebleu = ">=1.5.0,<2.1"
-tensorflow-addons = ">=0.14,<0.15"
+tensorflow-addons = ">=0.14,<0.16"
 
 [package.extras]
-tensorflow = ["tensorflow (>=2.3.0,<2.7.0)", "tensorflow-text (>=2.3.0,<2.7.0)"]
+tensorflow = ["tensorflow (>=2.4.0,<2.8.0)", "tensorflow-text (>=2.4.0,<2.8.0)"]
 tests = ["black (==21.7b0)", "flake8 (>=3.9.0,<3.10.0)", "isort (>=5.9,<6)", "parameterized (==0.8.1)", "pytest-cov"]
 
 [[package]]
@@ -1290,11 +1290,11 @@ scipy = ">=1.0"
 
 [[package]]
 name = "pyonmttok"
-version = "1.28.0"
+version = "1.29.0"
 description = "Fast and customizable text tokenization library with BPE and SentencePiece support"
 category = "main"
 optional = false
-python-versions = ">=3.5,<3.10"
+python-versions = ">=3.6,<3.11"
 
 [[package]]
 name = "pyparsing"
@@ -1864,7 +1864,7 @@ testing = ["pytest (>=4.6)", "pytest-checkdocs (>=2.4)", "pytest-flake8", "pytes
 [metadata]
 lock-version = "1.1"
 python-versions = ">=3.7,<3.9"
-content-hash = "5f3a7277c3caee10bba79a392b707836be826cd5b696f99738083f5361dc6278"
+content-hash = "809fc63385277f1513d1a52cc62fa0d64141af1ef0e7ce3cd664281059cd71cc"
 
 [metadata.files]
 absl-py = [
@@ -1997,14 +1997,21 @@ contextlib2 = [
     {file = "contextlib2-21.6.0.tar.gz", hash = "sha256:ab1e2bfe1d01d968e1b7e8d9023bc51ef3509bba217bb730cee3827e1ee82869"},
 ]
 ctranslate2 = [
-    {file = "ctranslate2-2.4.0-cp36-cp36m-macosx_10_9_x86_64.whl", hash = "sha256:842bae286a132c0e20f9da717e7eb4f2ec363aed5f608ce7202269ca7a24cd98"},
-    {file = "ctranslate2-2.4.0-cp36-cp36m-manylinux2014_x86_64.whl", hash = "sha256:b89dd1a4daf0da921a441fcca8b2331e80ba783bd2e507324e72a4e7988db119"},
-    {file = "ctranslate2-2.4.0-cp37-cp37m-macosx_10_9_x86_64.whl", hash = "sha256:5d069d73cc7125bdd82079d8a4f3e02d75c147d0b220d7e1bd6d3c8f5c64ea50"},
-    {file = "ctranslate2-2.4.0-cp37-cp37m-manylinux2014_x86_64.whl", hash = "sha256:caea52220a0146dd897e91c858645c5171a6dca2c10c1b7fe1dc1d3b367d6dad"},
-    {file = "ctranslate2-2.4.0-cp38-cp38-macosx_10_9_x86_64.whl", hash = "sha256:10018cf424b2268279333fc0edfdd7d07ba5ecb6bfe36dc846aa5af06f7d83cb"},
-    {file = "ctranslate2-2.4.0-cp38-cp38-manylinux2014_x86_64.whl", hash = "sha256:f3339b74163acc1935d624ea21b4f6f6ddc5913be899b54cf25a14ee20087322"},
-    {file = "ctranslate2-2.4.0-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:26b31c76bf8159331b52b50424c8df736587b779ed63bacfcb5459d69da2e772"},
-    {file = "ctranslate2-2.4.0-cp39-cp39-manylinux2014_x86_64.whl", hash = "sha256:d335e64d0a254d2f0790acbf9da70ef534d1e0bd840f66688fec985b862091ef"},
+    {file = "ctranslate2-2.8.1-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:7e54eea96590f730a0921708e0a1cc3e0145bebc8447775e872cdfb9385d90f2"},
+    {file = "ctranslate2-2.8.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:c2195c5c2c5439adde492c49698cdd7532cc3a76a223f19a6b3e31a509838d08"},
+    {file = "ctranslate2-2.8.1-cp310-cp310-win_amd64.whl", hash = "sha256:5747f62d04c319ac1087d3c040dfdc062b21604af63b8b58e8233c401f49c505"},
+    {file = "ctranslate2-2.8.1-cp36-cp36m-macosx_10_9_x86_64.whl", hash = "sha256:b62700f4c449464e0f1f8c4391867718a9d682f644d6b6dbcd8cf947666378f7"},
+    {file = "ctranslate2-2.8.1-cp36-cp36m-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:faf23cf47ac823248bee1c185ab5e8f3b073ed03f4cfc5af37f17e43bed49c4a"},
+    {file = "ctranslate2-2.8.1-cp36-cp36m-win_amd64.whl", hash = "sha256:299faabbf86e8ee476e678dd9ef4dcc1150bfaf5de0f9dfb707cdbdd9317362c"},
+    {file = "ctranslate2-2.8.1-cp37-cp37m-macosx_10_9_x86_64.whl", hash = "sha256:8cf3a740b5291380481aae9f5c2e65c01d9fa000b51928078267596a1053f526"},
+    {file = "ctranslate2-2.8.1-cp37-cp37m-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:a7ad54a9a58d205b4b115097d99e9bb9a1f4a70ddf1bff3a7195d48f6afe8735"},
+    {file = "ctranslate2-2.8.1-cp37-cp37m-win_amd64.whl", hash = "sha256:a7934f4bac745ad3afce6752a0394081b83320fbcc09c94895e8378a14d1a442"},
+    {file = "ctranslate2-2.8.1-cp38-cp38-macosx_10_9_x86_64.whl", hash = "sha256:27636029aaa755845b470ed8ff290513b2ec4f23751da2561160dc77d43c1468"},
+    {file = "ctranslate2-2.8.1-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:6cdc1c290ddcf5d255440d6a3f7da2bfaa61d6003ed3c7685cc33f4f4077ed2b"},
+    {file = "ctranslate2-2.8.1-cp38-cp38-win_amd64.whl", hash = "sha256:09afe80b02d36e9fbb229d67374605bf6a9545053c0b3cbb2042c9206c9bf7e5"},
+    {file = "ctranslate2-2.8.1-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:c28575ac00a80e9cad5860f9de41e1d6d1d204c62ea2d691826b3e70d0dd63e8"},
+    {file = "ctranslate2-2.8.1-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:fe6b4442dbfdea1264da372f1ef49a306dc6f0d2c79917de6d805d3ef2d05d4e"},
+    {file = "ctranslate2-2.8.1-cp39-cp39-win_amd64.whl", hash = "sha256:ac0aaa84fc394fa3f1b7c7d54631bae7e086b96a2c71bc13ee2dd4d0830310d3"},
 ]
 cycler = [
     {file = "cycler-0.10.0-py2.py3-none-any.whl", hash = "sha256:1d8a5ae1ff6c5cf9b93e8811e581232ad8920aeec647c37316ceac982b08cb2d"},
@@ -2510,8 +2517,8 @@ oauthlib = [
     {file = "oauthlib-3.1.1.tar.gz", hash = "sha256:8f0215fcc533dd8dd1bee6f4c412d4f0cd7297307d43ac61666389e3bc3198a3"},
 ]
 opennmt-tf = [
-    {file = "OpenNMT-tf-2.21.0.tar.gz", hash = "sha256:0f2fcd40c95799b3560b127fbb455767aaa96a6fb7be1b10b225e66a76f9fc97"},
-    {file = "OpenNMT_tf-2.21.0-py3-none-any.whl", hash = "sha256:94bf10f7321a5acbab1fe77bc7764882afb4f6133688dfdcf3b1aec7a05f6129"},
+    {file = "OpenNMT-tf-2.23.0.tar.gz", hash = "sha256:c9e28fe0c26bd7b7d5cc323443f43901f0dc8304e31440ad8fdca25ce6603626"},
+    {file = "OpenNMT_tf-2.23.0-py3-none-any.whl", hash = "sha256:3f0cc1a876e05df66384f02d0743f505516ec77ee9c190a70ad873c89e119f15"},
 ]
 opt-einsum = [
     {file = "opt_einsum-3.3.0-py3-none-any.whl", hash = "sha256:2455e59e3947d3c275477df7f5205b30635e266fe6dc300e3d9f9646bfcea147"},
@@ -2769,21 +2776,21 @@ pynndescent = [
     {file = "pynndescent-0.5.4.tar.gz", hash = "sha256:221124cbad8e3cf3ed421a4089d80ac5a29d3215e76cb49effc1df887533d2a8"},
 ]
 pyonmttok = [
-    {file = "pyonmttok-1.28.0-cp35-cp35m-macosx_10_9_x86_64.whl", hash = "sha256:bf3f0c26e2f202302145c0a89a589a00c3d3c3c5551b1cff76a529d2d12c70dd"},
-    {file = "pyonmttok-1.28.0-cp35-cp35m-manylinux2010_x86_64.whl", hash = "sha256:d3b2cc700156f8a8960866c366af4cffc68f11c7341fd511c26cc956f5c16823"},
-    {file = "pyonmttok-1.28.0-cp35-cp35m-win_amd64.whl", hash = "sha256:2c6c72888e1a8659b43daa6e1d8af99535a8a90f33e75b68d28d7c96baaffd8a"},
-    {file = "pyonmttok-1.28.0-cp36-cp36m-macosx_10_9_x86_64.whl", hash = "sha256:41d42e44b27658c28651b03e1a7abfa711547837bcc974f42cb901f0ce056d8a"},
-    {file = "pyonmttok-1.28.0-cp36-cp36m-manylinux2010_x86_64.whl", hash = "sha256:9f2108447dbaba8cd051825ec484bff6cd9bb48bf0500548430845dc496cf562"},
-    {file = "pyonmttok-1.28.0-cp36-cp36m-win_amd64.whl", hash = "sha256:01b8df2815ed0ce6220dd6e03d23881b9cae7f6119caa69d470817c3322d3730"},
-    {file = "pyonmttok-1.28.0-cp37-cp37m-macosx_10_9_x86_64.whl", hash = "sha256:ed6e74501f8d1a10ae976bba9572982d2690e2dbb9aeb94856a99db67bcaa6e2"},
-    {file = "pyonmttok-1.28.0-cp37-cp37m-manylinux2010_x86_64.whl", hash = "sha256:03ebb89fbf2491c53b0208b9be65d5e22d8b465249d67fbd0ac6c7ea5d7667c2"},
-    {file = "pyonmttok-1.28.0-cp37-cp37m-win_amd64.whl", hash = "sha256:a0ec3da777c00035c18ae12d90fc14a7a699fd55be93ca931836e08cb03cdedb"},
-    {file = "pyonmttok-1.28.0-cp38-cp38-macosx_10_9_x86_64.whl", hash = "sha256:bccb5d400191088dfe04e8a261ee21ac25ca0482109992272bc1e72a3203717e"},
-    {file = "pyonmttok-1.28.0-cp38-cp38-manylinux2010_x86_64.whl", hash = "sha256:85327f6b97c0e6534e90ccc29e487287ffc20a2ffed5b8403340a38838651ed1"},
-    {file = "pyonmttok-1.28.0-cp38-cp38-win_amd64.whl", hash = "sha256:3e3455495fd6280363b17a9f3d4fb202349b10f10c466814bf404611997d667a"},
-    {file = "pyonmttok-1.28.0-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:af73bd0f4d7c8f7a370f50e12b8be8b057590942cfe3c7016c6bef967c7f8a19"},
-    {file = "pyonmttok-1.28.0-cp39-cp39-manylinux2010_x86_64.whl", hash = "sha256:30729fac6dc0181fac38273ee91f98014a7c57df2d06db4bf4b03d66d53ca5c4"},
-    {file = "pyonmttok-1.28.0-cp39-cp39-win_amd64.whl", hash = "sha256:47f3bb5c887aee05b332098472dd11b5d53078ee78a48d5f18943a092243d140"},
+    {file = "pyonmttok-1.29.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:51f73cc485e080b987e5bcb27081c1cd0561b55601bcc991ab7f12a48067db88"},
+    {file = "pyonmttok-1.29.0-cp310-cp310-manylinux_2_12_x86_64.manylinux2010_x86_64.whl", hash = "sha256:e5240bb03aa2144fe7b94eea56d9da79fdcc83bfac1f99732b67d9f5f58fff7f"},
+    {file = "pyonmttok-1.29.0-cp310-cp310-win_amd64.whl", hash = "sha256:34e9dc60c9b1865a604d14af9103b3be660c463a24057273d6b3e8fa5a59fdbb"},
+    {file = "pyonmttok-1.29.0-cp36-cp36m-macosx_10_9_x86_64.whl", hash = "sha256:5daac54bdb2772fa18bd76156c33fef991d1f52f8f912c775819a734c2cf516a"},
+    {file = "pyonmttok-1.29.0-cp36-cp36m-manylinux_2_12_x86_64.manylinux2010_x86_64.whl", hash = "sha256:17cdcda73a6d75ce7dd2c9699a2790048dcfefa6a45f2a21ed8fe92144aec89d"},
+    {file = "pyonmttok-1.29.0-cp36-cp36m-win_amd64.whl", hash = "sha256:cc9eb18e6ad14b3c8b12ebef432abbce43edfc79dc99e6e8d37e6a0d58f5a878"},
+    {file = "pyonmttok-1.29.0-cp37-cp37m-macosx_10_9_x86_64.whl", hash = "sha256:02ea4b146beca6abf7f9f847dfc297d0a19a9f994dcfb0119007676bab3be30e"},
+    {file = "pyonmttok-1.29.0-cp37-cp37m-manylinux_2_12_x86_64.manylinux2010_x86_64.whl", hash = "sha256:20aad32bbb0d8d5cc9565b81e14c49abea9916d901c53211c47de0a1ab877177"},
+    {file = "pyonmttok-1.29.0-cp37-cp37m-win_amd64.whl", hash = "sha256:27b524226d7b3549613ddd609fc7b7fa0f3b91bb65cf0cd622ba854aa9acc9e0"},
+    {file = "pyonmttok-1.29.0-cp38-cp38-macosx_10_9_x86_64.whl", hash = "sha256:2dfc153aab56bc5b487522b99836cc489b35e20a77b6e217612e2d933f311795"},
+    {file = "pyonmttok-1.29.0-cp38-cp38-manylinux_2_12_x86_64.manylinux2010_x86_64.whl", hash = "sha256:394bfeb427fa2d916e8125aeebc589cfaf14029121d15c8624c51f9afabfb030"},
+    {file = "pyonmttok-1.29.0-cp38-cp38-win_amd64.whl", hash = "sha256:6ae21eba00133719d04e27968f8226830b89340baaf827cbb24aeabd06be60b3"},
+    {file = "pyonmttok-1.29.0-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:838b292a0af41514c627dfa7e385e2a06678019a01fcdd24b18f8df24a2e782a"},
+    {file = "pyonmttok-1.29.0-cp39-cp39-manylinux_2_12_x86_64.manylinux2010_x86_64.whl", hash = "sha256:9c1c0a64b2d2d04b5d5fe48b8f6ea0ff579f1e3386e0bd308991b8d76a6f559f"},
+    {file = "pyonmttok-1.29.0-cp39-cp39-win_amd64.whl", hash = "sha256:6d289cd12a86217f00ec5909b8e4319743a0c78e4d071197e509a6c896f62f81"},
 ]
 pyparsing = [
     {file = "pyparsing-2.4.7-py2.py3-none-any.whl", hash = "sha256:ef9d7589ef3c200abe66653d3f1ab1033c3c419ae9b9bdb1240a85b024efc88b"},

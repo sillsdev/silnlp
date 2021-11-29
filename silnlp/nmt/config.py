@@ -1625,33 +1625,19 @@ class SILWordNoiser(WordNoiser):
         super().__init__(noises=noises, subword_token=subword_token, is_spacer=is_spacer)
         self.has_lang_tag = has_lang_tag
 
-    def _call(
-        self, tokens: tf.Tensor, sequence_length: Optional[Union[int, tf.Tensor]], keep_shape: bool
-    ) -> Tuple[tf.Tensor, Union[int, tf.Tensor]]:
-        rank = tokens.shape.rank
-        if rank == 1:
-            input_length = tf.shape(tokens)[0]
-            if sequence_length is not None:
-                tokens = tokens[:sequence_length]
-            else:
-                tokens = tokens[: tf.math.count_nonzero(tokens)]
-            words = tokens_to_words(tokens, subword_token=self.subword_token, is_spacer=self.is_spacer)
-            words = cast(tf.Tensor, words.to_tensor())
-            tag: Optional[str] = None
-            if self.has_lang_tag:
-                tag = words[:1]
-                words = words[1:]
-            for noise in self.noises:
-                words = noise(words)
-            if tag is not None:
-                words = tf.concat([tag, words], axis=0)
-            outputs = tf.RaggedTensor.from_tensor(words, padding="").flat_values
-            output_length = tf.shape(outputs)[0]
-            if keep_shape:
-                outputs = tf.pad(outputs, [[0, input_length - output_length]])
-            return outputs, output_length
-        else:
-            return super()._call(tokens, sequence_length=sequence_length, keep_shape=keep_shape)
+    def _apply_noise(self, tokens):
+        words = tokens_to_words(tokens, subword_token=self.subword_token, is_spacer=self.is_spacer)
+        words = cast(tf.Tensor, words.to_tensor())
+        tag: Optional[str] = None
+        if self.has_lang_tag:
+            tag = words[:1]
+            words = words[1:]
+        for noise in self.noises:
+            words = noise(words)
+        if tag is not None:
+            words = tf.concat([tag, words], axis=0)
+        tokens = tf.RaggedTensor.from_tensor(words, padding="").flat_values
+        return tokens
 
 
 def create_model(config: Config) -> Model:

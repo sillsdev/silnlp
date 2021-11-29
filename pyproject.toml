@@ -40,7 +40,7 @@ Morfessor-FlatCat = "^1.0.8"
 psutil = "^5.7.3"
 scikit-learn = "0.22.2.post1"
 numpy = "1.19.5"
-OpenNMT-tf = "^2.18.1"
+OpenNMT-tf = "^2.23.0"
 annoy = "^1.17.0"
 lit-nlp = "^0.3"
 tensorflow = "2.4.1"
@@ -54,6 +54,7 @@ tqdm = "^4.62.2"
 s3path = "^0.3.2"
 sacrebleu = "^1.5.1"
 sil-machine = {extras = ["thot"], version = "^0.4.0"}
+ctranslate2 = "^2.8.1"
 
 [tool.poetry.dev-dependencies]
 mypy = "^0.812"
