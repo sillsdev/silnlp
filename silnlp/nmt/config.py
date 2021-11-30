@@ -1666,7 +1666,9 @@ def create_model(config: Config) -> Model:
 
 def set_tf_log_level(log_level: int = logging.INFO) -> None:
     tf.get_logger().setLevel(log_level)
-    os.environ["TF_CPP_MIN_LOG_LEVEL"] = str(_PYTHON_TO_TENSORFLOW_LOGGING_LEVEL[log_level])
+    # Do not display warnings from TensorFlow C++, because of spurious "PredictCost()" errors.
+    # See https://github.com/tensorflow/tensorflow/issues/50575.
+    os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 
 def create_runner(config: Config, mixed_precision: bool = False, memory_growth: bool = False) -> SILRunner:
