@@ -546,6 +546,8 @@ class Config:
         model: str = config["model"]
         if model.endswith("AlignmentEnhanced"):
             data_config["guided_alignment"] = True
+            data_config["train_features_file"] = [str(exp_dir / "train.src.txt"), str(exp_dir / "train.vref.txt")]
+            data_config["eval_features_file"] = [str(exp_dir / "val.src.txt"), str(exp_dir / "val.vref.txt")]
 
         if data_config["guided_alignment"]:
             if config["params"]["word_dropout"] > 0:
