@@ -32,6 +32,7 @@ def main() -> None:
 
     if args.eager_execution:
         tf.config.run_functions_eagerly(True)
+        tf.data.experimental.enable_debug_mode()
 
     for exp_name in args.experiments:
         config = load_config(exp_name)

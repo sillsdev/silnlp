@@ -2,436 +2,28 @@ from typing import Any, List, Optional, Tuple
 
 import tensorflow as tf
 import tensorflow_addons as tfa
-from opennmt import END_OF_SENTENCE_ID, START_OF_SENTENCE_ID
+from opennmt import END_OF_SENTENCE_ID, START_OF_SENTENCE_ID, UNKNOWN_TOKEN
 from opennmt.data.vocab import get_mapping, update_variable, update_variable_and_slots
-from opennmt.decoders import SelfAttentionDecoder
 from opennmt.encoders import ParallelEncoder, SelfAttentionEncoder
-from opennmt.inputters import WordEmbedder, add_sequence_controls
-from opennmt.layers import (
-    Dense,
-    FeedForwardNetwork,
-    LayerNorm,
-    MultiHeadAttention,
-    MultiHeadAttentionReduction,
-    SelfAttentionEncoderLayer,
-    SinusoidalPositionEncoder,
-    TransformerLayerWrapper,
-    dropout,
-    future_mask,
-    split_heads,
-)
+from opennmt.inputters import ParallelInputter, WordEmbedder, add_sequence_controls
+from opennmt.layers import MultiHeadAttentionReduction, SinusoidalPositionEncoder
 from opennmt.layers.reducer import align_in_time
-from opennmt.models import EmbeddingsSharingLevel, SequenceToSequence, Transformer, register_model_in_catalog
+from opennmt.models import (
+    EmbeddingsSharingLevel,
+    SequenceToSequence,
+    SequenceToSequenceInputter,
+    Transformer,
+    register_model_in_catalog,
+)
 from opennmt.models.sequence_to_sequence import _add_noise, replace_unknown_target
-from opennmt.utils.decoding import BeamSearch, DecodingStrategy, Sampler
+from opennmt.utils import BeamSearch, DecodingStrategy, Sampler
 from opennmt.utils.misc import shape_list
 
-from .decoding import DictionaryGuidedBeamSearch, dynamic_decode
+from .decoding import DictionaryGuidedBeamSearch
+from .sil_self_attention_decoder import SILSelfAttentionDecoder
+from .sil_self_attention_encoder import SILSelfAttentionEncoder
+from .sil_source_word_embedder import SILSourceWordEmbedder
 from .trie import Trie
-
-EPSILON: float = 1e-07
-
-
-def clip_attention_probs(attention: tf.Tensor, mask: tf.Tensor) -> tf.Tensor:
-    attention = tf.clip_by_value(attention, EPSILON, 1.0 - EPSILON)
-    mask = tf.cast(mask, attention.dtype)
-    if mask.shape.rank == 2:
-        mask = tf.expand_dims(mask, 1)  # Broadcast on time dimension.
-    mask = tf.expand_dims(mask, 1)  # Broadcast on head dimension.
-    attention = tf.multiply(attention, mask)
-    return attention
-
-
-class SILTransformerLayerWrapper(TransformerLayerWrapper):
-    def __init__(self, layer, output_dropout, pre_norm=True, residual_connection=True, **kwargs):
-        super(TransformerLayerWrapper, self).__init__(
-            layer,
-            normalize_input=pre_norm,
-            normalize_output=not pre_norm,
-            output_dropout=output_dropout,
-            residual_connection=residual_connection,
-            **kwargs,
-        )
-
-
-class SILSelfAttentionEncoderLayer(SelfAttentionEncoderLayer):
-    def __init__(
-        self,
-        num_units,
-        num_heads,
-        ffn_inner_dim,
-        dropout=0.1,
-        attention_dropout=0.1,
-        ffn_dropout=0.1,
-        ffn_activation=tf.nn.relu,
-        maximum_relative_position=None,
-        pre_norm=True,
-        self_attention_residual_connection=True,
-        **kwargs,
-    ):
-        super(SelfAttentionEncoderLayer, self).__init__(**kwargs)
-        self.self_attention = MultiHeadAttention(
-            num_heads,
-            num_units,
-            dropout=attention_dropout,
-            maximum_relative_position=maximum_relative_position,
-        )
-        self.self_attention = SILTransformerLayerWrapper(
-            self.self_attention, dropout, pre_norm=pre_norm, residual_connection=self_attention_residual_connection
-        )
-        self.ffn = FeedForwardNetwork(ffn_inner_dim, num_units, dropout=ffn_dropout, activation=ffn_activation)
-        self.ffn = SILTransformerLayerWrapper(self.ffn, dropout, pre_norm=pre_norm)
-
-
-class SILSelfAttentionEncoder(SelfAttentionEncoder):
-    def __init__(
-        self,
-        num_layers,
-        num_units=512,
-        num_heads=8,
-        ffn_inner_dim=2048,
-        dropout=0.1,
-        attention_dropout=0.1,
-        ffn_dropout=0.1,
-        ffn_activation=tf.nn.relu,
-        position_encoder_class=SinusoidalPositionEncoder,
-        maximum_relative_position=None,
-        pre_norm=True,
-        drop_self_attention_residual_connections=set(),
-        **kwargs,
-    ):
-        super(SelfAttentionEncoder, self).__init__(**kwargs)
-        self.num_units = num_units
-        self.dropout = dropout
-        self.position_encoder = None
-        if position_encoder_class is not None:
-            self.position_encoder = position_encoder_class()
-        self.layer_norm = LayerNorm() if pre_norm else None
-        self.layers = [
-            SILSelfAttentionEncoderLayer(
-                num_units,
-                num_heads,
-                ffn_inner_dim,
-                dropout=dropout,
-                attention_dropout=attention_dropout,
-                ffn_dropout=ffn_dropout,
-                ffn_activation=ffn_activation,
-                maximum_relative_position=maximum_relative_position,
-                pre_norm=pre_norm,
-                self_attention_residual_connection=i not in drop_self_attention_residual_connections,
-            )
-            for i in range(num_layers)
-        ]
-
-
-class AlignmentHead(tf.keras.layers.Layer):
-    def __init__(self, num_units, **kwargs):
-        super().__init__(**kwargs)
-        self.num_units = num_units
-        self.linear_queries = Dense(self.num_units)
-        self.linear_keys = Dense(self.num_units)
-
-    def call(self, inputs, memory=None, mask=None, cache=None):
-        def _compute_k(x):
-            keys = self.linear_keys(x)
-            keys = split_heads(keys, 1)
-            return keys
-
-        # Compute queries.
-        queries = self.linear_queries(inputs)
-        queries = split_heads(queries, 1)
-        queries *= self.num_units ** -0.5
-
-        # Compute keys.
-        if cache is not None:
-            keys = tf.cond(
-                tf.equal(tf.shape(cache)[2], 0),
-                true_fn=lambda: _compute_k(memory),
-                false_fn=lambda: cache,
-            )
-        else:
-            keys = _compute_k(memory)
-
-        cache = keys
-
-        # Dot product attention.
-        dot = tf.matmul(queries, keys, transpose_b=True)
-        if mask is not None:
-            mask = tf.cast(mask, tf.float32)
-            if mask.shape.rank == 2:
-                mask = tf.expand_dims(mask, 1)  # Broadcast on time dimension.
-            mask = tf.expand_dims(mask, 1)  # Broadcast on head dimension.
-            dot = tf.cast(
-                tf.cast(dot, tf.float32) * mask + ((1.0 - mask) * tf.float32.min),
-                dot.dtype,
-            )
-        attn = tf.cast(tf.nn.softmax(tf.cast(dot, tf.float32)), dot.dtype)
-        return attn, cache
-
-
-class SILSelfAttentionDecoderLayer(tf.keras.layers.Layer):
-    def __init__(
-        self,
-        num_units,
-        num_heads,
-        ffn_inner_dim,
-        num_sources=1,
-        dropout=0.1,
-        attention_dropout=0.1,
-        ffn_dropout=0.1,
-        ffn_activation=tf.nn.relu,
-        maximum_relative_position=None,
-        pre_norm=True,
-        alignment_head_num_units=None,
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
-        self.self_attention = MultiHeadAttention(
-            num_heads,
-            num_units,
-            dropout=attention_dropout,
-            maximum_relative_position=maximum_relative_position,
-        )
-        self.self_attention = TransformerLayerWrapper(self.self_attention, dropout, pre_norm=pre_norm)
-        self.attention = []
-        for _ in range(num_sources):
-            attention = MultiHeadAttention(
-                num_heads,
-                num_units,
-                dropout=attention_dropout,
-                return_attention=alignment_head_num_units is None,
-            )
-            attention = TransformerLayerWrapper(attention, dropout, pre_norm=pre_norm)
-            self.attention.append(attention)
-        if alignment_head_num_units is None:
-            self.alignment_head = None
-        else:
-            self.alignment_head = AlignmentHead(alignment_head_num_units)
-            self.alignment_head = SILTransformerLayerWrapper(
-                self.alignment_head, 0, pre_norm=pre_norm, residual_connection=False
-            )
-        self.ffn = FeedForwardNetwork(ffn_inner_dim, num_units, dropout=ffn_dropout, activation=ffn_activation)
-        self.ffn = TransformerLayerWrapper(self.ffn, dropout, pre_norm=pre_norm)
-
-    def call(
-        self,
-        inputs,
-        mask=None,
-        memory=None,
-        memory_mask=None,
-        cache=None,
-        training=None,
-    ):
-        """Runs the decoder layer."""
-        if cache is None:
-            cache = {}
-
-        outputs, self_kv = self.self_attention(inputs, mask=mask, cache=cache.get("self_kv"), training=training)
-
-        attention = []
-        memory_kv = []
-        alignment_memory_k = None
-        if memory is not None:
-            memory_kv_cache = cache.get("memory_kv")
-            if memory_kv_cache is None:
-                memory_kv_cache = [None] * len(self.attention)
-            for layer, mem, mem_mask, mem_cache in zip(self.attention, memory, memory_mask, memory_kv_cache):
-                result = layer(
-                    outputs,
-                    memory=mem,
-                    mask=mem_mask,
-                    cache=mem_cache,
-                    training=training,
-                )
-                if len(result) == 3:
-                    outputs, memory_kv_i, attention_i = result
-                    attention.append(attention_i)
-                else:
-                    outputs, memory_kv_i = result
-                memory_kv.append(memory_kv_i)
-
-            if self.alignment_head is not None:
-                attention_0, alignment_memory_k = self.alignment_head(
-                    outputs, memory=memory[0], mask=memory_mask[0], cache=cache.get("alignment_memory_k")
-                )
-                # clip the probs to ensure that model does not diverge with loss = NaN
-                attention_0 = clip_attention_probs(attention_0, memory_mask[0])
-                attention.append(attention_0)
-
-        outputs = self.ffn(outputs, training=training)
-        cache = dict(self_kv=self_kv, memory_kv=memory_kv)
-        if self.alignment_head is not None:
-            cache["alignment_memory_k"] = alignment_memory_k
-        return outputs, cache, attention
-
-
-class SILSelfAttentionDecoder(SelfAttentionDecoder):
-    def __init__(
-        self,
-        num_layers,
-        num_units=512,
-        num_heads=8,
-        ffn_inner_dim=2048,
-        dropout=0.1,
-        attention_dropout=0.1,
-        ffn_dropout=0.1,
-        ffn_activation=tf.nn.relu,
-        position_encoder_class=SinusoidalPositionEncoder,
-        num_sources=1,
-        maximum_relative_position=None,
-        attention_reduction=MultiHeadAttentionReduction.FIRST_HEAD_LAST_LAYER,
-        pre_norm=True,
-        alignment_head_num_units=None,
-        **kwargs,
-    ):
-        super(SelfAttentionDecoder, self).__init__(num_sources=num_sources, **kwargs)
-        self.num_units = num_units
-        self.num_heads = num_heads
-        self.dropout = dropout
-        self.attention_reduction = attention_reduction
-        self.position_encoder = None
-        if position_encoder_class is not None:
-            self.position_encoder = position_encoder_class()
-        self.alignment_head_num_units = alignment_head_num_units
-        self.layer_norm = LayerNorm() if pre_norm else None
-        self.layers = [
-            SILSelfAttentionDecoderLayer(
-                self.num_units,
-                self.num_heads,
-                ffn_inner_dim,
-                num_sources=num_sources,
-                dropout=dropout,
-                attention_dropout=attention_dropout,
-                ffn_dropout=ffn_dropout,
-                ffn_activation=ffn_activation,
-                maximum_relative_position=maximum_relative_position,
-                pre_norm=pre_norm,
-                alignment_head_num_units=alignment_head_num_units,
-            )
-            for _ in range(num_layers)
-        ]
-
-    def _run(
-        self,
-        inputs,
-        sequence_length=None,
-        cache=None,
-        memory=None,
-        memory_sequence_length=None,
-        step=None,
-        training=None,
-    ):
-        # Process inputs.
-        inputs *= self.num_units ** 0.5
-        if self.position_encoder is not None:
-            inputs = self.position_encoder(inputs, position=step + 1 if step is not None else None)
-        inputs = dropout(inputs, self.dropout, training=training)
-
-        # Prepare query mask.
-        mask = None
-        if step is None:
-            maximum_length = tf.shape(inputs)[1]
-            if sequence_length is None:
-                batch_size = tf.shape(inputs)[0]
-                sequence_length = tf.fill([batch_size], maximum_length)
-            mask = future_mask(sequence_length, maximum_length=maximum_length)
-
-        # Prepare memory mask.
-        memory_mask = None
-        if memory is not None:
-            if not isinstance(memory, (list, tuple)):
-                memory = (memory,)
-            if memory_sequence_length is not None:
-                if not isinstance(memory_sequence_length, (list, tuple)):
-                    memory_sequence_length = (memory_sequence_length,)
-                memory_mask = [
-                    tf.sequence_mask(mem_length, maxlen=tf.shape(mem)[1])
-                    for mem, mem_length in zip(memory, memory_sequence_length)
-                ]
-            else:
-                memory_mask = tuple(None for _ in memory)
-
-        # Run each layer.
-        new_cache = []
-        attention = []
-        for i, layer in enumerate(self.layers):
-            inputs, layer_cache, layer_attention = layer(
-                inputs,
-                mask=mask,
-                memory=memory,
-                memory_mask=memory_mask,
-                cache=cache[i] if cache is not None else None,
-                training=training,
-            )
-            attention.append(layer_attention)
-            new_cache.append(layer_cache)
-        outputs = self.layer_norm(inputs) if self.layer_norm is not None else inputs
-
-        # Convert list of shape num_layers x num_sources to num_sources x num_layers
-        attention = list(map(list, zip(*attention)))
-        if attention:
-            attention = MultiHeadAttentionReduction.reduce(
-                attention[0],  # Get attention to the first source.
-                self.attention_reduction,
-            )
-        else:
-            attention = None
-
-        return outputs, new_cache, attention
-
-    def dynamic_decode(
-        self,
-        embeddings,
-        start_ids,
-        end_id=END_OF_SENTENCE_ID,
-        initial_state=None,
-        decoding_strategy=None,
-        sampler=None,
-        maximum_iterations=None,
-        minimum_iterations=0,
-        tflite_output_size=None,
-    ):
-        if tflite_output_size is not None:
-            input_fn = lambda ids: embeddings.tflite_call(ids)
-        elif isinstance(embeddings, WordEmbedder):
-            input_fn = lambda ids: embeddings({"ids": ids})
-        else:
-            input_fn = lambda ids: tf.nn.embedding_lookup(embeddings, ids)
-
-        # TODO: find a better way to pass the state reorder flags.
-        if hasattr(decoding_strategy, "_set_state_reorder_flags"):
-            state_reorder_flags = self._get_state_reorder_flags()
-            decoding_strategy._set_state_reorder_flags(state_reorder_flags)
-
-        return dynamic_decode(
-            lambda ids, step, state: self(input_fn(ids), step, state),
-            start_ids,
-            end_id=end_id,
-            initial_state=initial_state,
-            decoding_strategy=decoding_strategy,
-            sampler=sampler,
-            maximum_iterations=maximum_iterations,
-            minimum_iterations=minimum_iterations,
-            attention_history=self.support_alignment_history,
-            attention_size=tf.shape(self.memory)[1] if self.support_alignment_history else None,
-            tflite_output_size=tflite_output_size,
-        )
-
-    def _get_initial_state(self, batch_size, dtype, initial_state=None):
-        cache = super()._get_initial_state(batch_size, dtype, initial_state)
-        if self.alignment_head_num_units is not None:
-            for layer_cache in cache:
-                layer_cache["alignment_memory_k"] = tf.zeros(
-                    [batch_size, 1, 0, self.alignment_head_num_units], dtype=dtype
-                )
-        return cache
-
-    def _get_state_reorder_flags(self):
-        reorder_flags = super()._get_state_reorder_flags()
-        if self.alignment_head_num_units is not None:
-            for flag in reorder_flags:
-                flag["alignment_memory_k"] = False
-        return reorder_flags
 
 
 class SILTransformer(Transformer):
@@ -457,7 +49,7 @@ class SILTransformer(Transformer):
         alignment_head_num_units=None,
     ):
         if source_inputter is None:
-            source_inputter = WordEmbedder(embedding_size=num_units)
+            source_inputter = SILSourceWordEmbedder(embedding_size=num_units)
         if target_inputter is None:
             target_inputter = WordEmbedder(embedding_size=num_units)
 
@@ -522,29 +114,47 @@ class SILTransformer(Transformer):
             )
         )
         self._dictionary: Optional[Trie] = None
-        super(Transformer, self).__init__(
+
+        if not isinstance(target_inputter, WordEmbedder):
+            raise TypeError("Target inputter must be a WordEmbedder")
+        if EmbeddingsSharingLevel.share_input_embeddings(share_embeddings):
+            if isinstance(source_inputter, ParallelInputter):
+                source_inputters = source_inputter.inputters
+            else:
+                source_inputters = [source_inputter]
+            for inputter in source_inputters:
+                if not isinstance(inputter, WordEmbedder):
+                    raise TypeError("Sharing embeddings requires all inputters to be a " "WordEmbedder")
+
+        examples_inputter = SILSequenceToSequenceInputter(
             source_inputter,
             target_inputter,
-            encoder,
-            decoder,
-            share_embeddings=share_embeddings,
+            share_parameters=EmbeddingsSharingLevel.share_input_embeddings(share_embeddings),
         )
+        super(SequenceToSequence, self).__init__(examples_inputter)
+        self.encoder = encoder
+        self.decoder = decoder
+        self.share_embeddings = share_embeddings
 
     def initialize(self, data_config, params=None):
         super().initialize(data_config, params=params)
         src_dict_path: Optional[str] = data_config.get("source_dictionary")
         trg_dict_path: Optional[str] = data_config.get("target_dictionary")
-        if src_dict_path is not None and trg_dict_path is not None:
+        ref_dict_path: Optional[str] = data_config.get("ref_dictionary")
+        if src_dict_path is not None and trg_dict_path is not None and ref_dict_path is not None:
             self.labels_inputter.set_decoder_mode(enable=False, mark_start=False, mark_end=False)
             dictionary = Trie(self.features_inputter.vocabulary_size)
-            with tf.io.gfile.GFile(src_dict_path) as src_dict, tf.io.gfile.GFile(trg_dict_path) as trg_dict:
-                for src_entry_str, trg_entry_str in zip(src_dict, trg_dict):
+            with tf.io.gfile.GFile(src_dict_path) as src_dict, tf.io.gfile.GFile(
+                trg_dict_path
+            ) as trg_dict, tf.io.gfile.GFile(ref_dict_path) as ref_dict:
+                for src_entry_str, trg_entry_str, ref_entry_str in zip(src_dict, trg_dict, ref_dict):
                     src_entry = src_entry_str.strip().split("\t")
                     src_ids = [self.features_inputter.make_features(tf.constant(se.strip()))["ids"] for se in src_entry]
                     trg_entry = trg_entry_str.strip().split("\t")
                     trg_ids = [self.labels_inputter.make_features(tf.constant(te.strip()))["ids"] for te in trg_entry]
+                    refs = ref_entry_str.strip().split("\t")
                     for src_variant_ids in src_ids:
-                        dictionary.add(src_variant_ids, trg_ids)
+                        dictionary.add(src_variant_ids, trg_ids, refs)
             if not dictionary.empty:
                 dictionary.compile()
                 self._dictionary = dictionary
@@ -591,11 +201,11 @@ class SILTransformer(Transformer):
         root_layer = self
         for layer in (root_layer,) + root_layer.submodules:
             name: str = layer.name
-            if name == "self_attention_encoder":
+            if "self_attention_encoder" in name:
                 layer.dropout = dropout
-            elif name == "self_attention_decoder":
+            elif "self_attention_decoder" in name:
                 layer.dropout = dropout
-            elif name.startswith("transformer_layer_wrapper"):
+            elif "transformer_layer_wrapper" in name:
                 layer.output_dropout = dropout
             elif name.startswith("multi_head_attention"):
                 layer.dropout = attention_dropout
@@ -627,7 +237,8 @@ class SILTransformer(Transformer):
         decoding_strategy = DecodingStrategy.from_params(params, tflite_mode=tflite_run)
         if self._dictionary is not None and isinstance(decoding_strategy, BeamSearch):
             src_ids: tf.Tensor = features["ids"]
-            src_entry_indices, trg_entries = self.batch_find_trg_entries(src_ids)
+            ref = tf.RaggedTensor.from_tensor(features["ref"], lengths=features["ref_length"])
+            src_entry_indices, trg_entries = self.batch_find_trg_entries(src_ids, ref)
             decoding_strategy = DictionaryGuidedBeamSearch(
                 src_entry_indices,
                 trg_entries,
@@ -735,10 +346,13 @@ class SILTransformer(Transformer):
                 predictions[key] = value[:, :num_hypotheses]
         return predictions
 
-    def batch_find_trg_entries(self, src_ids: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+    def batch_find_trg_entries(self, src_ids: tf.Tensor, ref: tf.RaggedTensor) -> Tuple[tf.Tensor, tf.Tensor]:
+        if self._dictionary is None:
+            raise ValueError("The dictionary must be initialized.")
+        ref_id = self._dictionary.get_ref_id(ref)
         src_entry_indices, trg_entries = tf.map_fn(
-            lambda src_ids: self.find_trg_entries(src_ids),
-            src_ids,
+            lambda args: self.find_trg_entries(args[0], args[1]),
+            (src_ids, ref_id),
             fn_output_signature=(
                 tf.TensorSpec((None), dtype=tf.int32),
                 tf.RaggedTensorSpec(shape=(None, None, None), dtype=tf.int32, row_splits_dtype=tf.int32),
@@ -747,42 +361,51 @@ class SILTransformer(Transformer):
         return src_entry_indices, trg_entries.to_tensor()
 
     @tf.function
-    def find_trg_entries(self, src_ids: tf.Tensor) -> Tuple[tf.Tensor, tf.RaggedTensor]:
+    def find_trg_entries(self, src_ids: tf.Tensor, ref_id: tf.Tensor) -> Tuple[tf.Tensor, tf.RaggedTensor]:
         if self._dictionary is None:
             raise ValueError("The dictionary must be initialized.")
-        length = tf.shape(src_ids)[0]
-        src_entry_indices = tf.TensorArray(tf.int32, size=length)
-        trg_entry_lengths = tf.TensorArray(tf.int32, size=0, dynamic_size=True)
-        trg_variants = tf.TensorArray(tf.int32, size=0, dynamic_size=True, infer_shape=False)
-        trg_variant_lengths = tf.TensorArray(tf.int32, size=0, dynamic_size=True)
 
-        trg_entry_lengths = trg_entry_lengths.write(0, 0)
-        i = 0
-        j = 1
-        k = 0
-        while i < length:
-            trg_entry, prefix_len = self._dictionary.longest_prefix(src_ids[i:])
-            if prefix_len == 0:
-                src_entry_indices = src_entry_indices.write(i, 0)
-                i += 1
-            else:
-                num_variants = trg_entry.nrows()
-                trg_entry_lengths = trg_entry_lengths.write(j, num_variants)
-                end = i + prefix_len
-                while i < end:
-                    src_entry_indices = src_entry_indices.write(i, j)
+        if tf.size(ref_id) == 0:
+            src_entry_indices = tf.zeros_like(src_ids, dtype=tf.int32)
+            trg_entries = tf.ragged.constant(
+                [[]], ragged_rank=2, inner_shape=(None), dtype=tf.int32, row_splits_dtype=tf.int32
+            )
+        else:
+            length = tf.shape(src_ids)[0]
+            src_entry_indices_array = tf.TensorArray(tf.int32, size=length)
+            trg_entry_lengths_array = tf.TensorArray(tf.int32, size=0, dynamic_size=True)
+            trg_variants_array = tf.TensorArray(tf.int32, size=0, dynamic_size=True, infer_shape=False)
+            trg_variant_lengths_array = tf.TensorArray(tf.int32, size=0, dynamic_size=True)
+
+            trg_entry_lengths_array = trg_entry_lengths_array.write(0, 0)
+            i = 0
+            j = 1
+            k = 0
+            while i < length:
+                trg_entry, prefix_len = self._dictionary.longest_prefix(src_ids[i:], ref_id)
+                if prefix_len == 0:
+                    src_entry_indices_array = src_entry_indices_array.write(i, 0)
                     i += 1
-                j += 1
-                for vi in tf.range(num_variants):
-                    trg_variant = trg_entry[vi]
-                    trg_variants = trg_variants.write(k, trg_variant)
-                    trg_variant_lengths = trg_variant_lengths.write(k, tf.shape(trg_variant)[0])
-                    k += 1
-        if k == 0:
-            trg_variants = trg_variants.write(0, tf.constant([], dtype=tf.int32))
-        return src_entry_indices.stack(), tf.RaggedTensor.from_nested_row_lengths(
-            trg_variants.concat(), [trg_entry_lengths.stack(), trg_variant_lengths.stack()]
-        )
+                else:
+                    num_variants = trg_entry.nrows()
+                    trg_entry_lengths_array = trg_entry_lengths_array.write(j, num_variants)
+                    end = i + prefix_len
+                    while i < end:
+                        src_entry_indices_array = src_entry_indices_array.write(i, j)
+                        i += 1
+                    j += 1
+                    for vi in tf.range(num_variants):
+                        trg_variant = trg_entry[vi]
+                        trg_variants_array = trg_variants_array.write(k, trg_variant)
+                        trg_variant_lengths_array = trg_variant_lengths_array.write(k, tf.shape(trg_variant)[0])
+                        k += 1
+            if k == 0:
+                trg_variants_array = trg_variants_array.write(0, tf.constant([], dtype=tf.int32))
+            src_entry_indices = src_entry_indices_array.stack()
+            trg_entries = tf.RaggedTensor.from_nested_row_lengths(
+                trg_variants_array.concat(), [trg_entry_lengths_array.stack(), trg_variant_lengths_array.stack()]
+            )
+        return src_entry_indices, trg_entries
 
     def transfer_weights(
         self,
@@ -847,6 +470,19 @@ class SILTransformer(Transformer):
             optimizer=optimizer,
             ignore_weights=updated_variables + (ignore_weights if ignore_weights is not None else []),
         )
+
+
+class SILSequenceToSequenceInputter(SequenceToSequenceInputter):
+    def _structure(self):
+        structure = []
+        if isinstance(self.features_inputter, SILSourceWordEmbedder):
+            structure.append([None, None])
+        elif isinstance(self.features_inputter, ParallelInputter):
+            structure.append(self.features_inputter._structure())
+        else:
+            structure.append(None)
+        structure.append(None)
+        return structure
 
 
 @register_model_in_catalog

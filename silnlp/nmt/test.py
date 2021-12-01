@@ -8,13 +8,13 @@ from typing import IO, Dict, Iterable, List, Optional, Set, Tuple, cast
 import numpy as np
 import sacrebleu
 import tensorflow as tf
-from machine.scripture import VerseRef, book_number_to_id, get_books, ORIGINAL_VERSIFICATION
+from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_number_to_id, get_books
 from sacrebleu.metrics import BLEU, BLEUScore
 
 from ..common.metrics import compute_meteor_score, compute_ter_score, compute_wer_score
 from ..common.utils import get_git_revision_hash
 from .config import Config, create_runner, load_config
-from .utils import decode_sp, get_best_model_dir, get_last_checkpoint, enable_memory_growth
+from .utils import decode_sp, enable_memory_growth, get_best_model_dir, get_last_checkpoint
 
 LOGGER = logging.getLogger(__name__)
 
@@ -379,12 +379,12 @@ def test_checkpoint(
 
     checkpoint_name = "averaged checkpoint" if step == -1 else f"checkpoint {step}"
 
-    features_paths: List[str] = []
+    features_paths: List[List[str]] = []
     predictions_paths: List[str] = []
     for i in range(len(predictions_file_names)):
         predictions_path = config.exp_dir / predictions_file_names[i]
         if force_infer or not predictions_path.is_file():
-            features_paths.append(str(config.exp_dir / features_file_names[i]))
+            features_paths.append([str(config.exp_dir / features_file_names[i]), str(config.exp_dir / vref_paths[i])])
             predictions_paths.append(str(predictions_path))
     if len(predictions_paths) > 0:
         runner = create_runner(config)
@@ -610,13 +610,22 @@ def main() -> None:
     )
     parser.add_argument("--books", nargs="*", metavar="book", default=[], help="Books")
     parser.add_argument("--by-book", default=False, action="store_true", help="Score individual books")
-
+    parser.add_argument(
+        "--eager-execution",
+        default=False,
+        action="store_true",
+        help="Enable TensorFlow eager execution.",
+    )
     args = parser.parse_args()
+
+    get_git_revision_hash()
+
+    if args.eager_execution:
+        tf.config.run_functions_eagerly(True)
+        tf.data.experimental.enable_debug_mode()
 
     if args.memory_growth:
         enable_memory_growth()
-
-    get_git_revision_hash()
 
     test(
         args.experiment,

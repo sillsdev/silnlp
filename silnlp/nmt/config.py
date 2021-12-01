@@ -53,8 +53,8 @@ from ..common.utils import (
     merge_dict,
     set_seed,
 )
+from .models.sil_transformer import SILTransformer
 from .runner import SILRunner
-from .transformer import SILTransformer
 from .utils import decode_sp, decode_sp_lines, encode_sp, encode_sp_lines, get_best_model_dir, get_last_checkpoint
 
 _PYTHON_TO_TENSORFLOW_LOGGING_LEVEL: Dict[int, int] = {
@@ -461,7 +461,7 @@ class Config:
                 "data": {
                     "train_features_file": str(exp_dir / "train.src.txt"),
                     "train_labels_file": str(exp_dir / "train.trg.txt"),
-                    "eval_features_file": str(exp_dir / "val.src.txt"),
+                    "eval_features_file": [str(exp_dir / "val.src.txt"), str(exp_dir / "val.vref.txt")],
                     "eval_labels_file": str(exp_dir / "val.trg.txt"),
                     "share_vocab": True,
                     "character_coverage": 1.0,
@@ -563,6 +563,7 @@ class Config:
         ):
             data_config["source_dictionary"] = str(exp_dir / self._dict_src_filename())
             data_config["target_dictionary"] = str(exp_dir / self._dict_trg_filename())
+            data_config["ref_dictionary"] = str(exp_dir / self._dict_vref_filename())
 
         terms_config: dict = data_config["terms"]
         self.src_isos: Set[str] = set()
@@ -918,12 +919,10 @@ class Config:
                 categories_set: Optional[Set[str]] = None if categories is None else set(categories)
                 dict_books = get_books(terms_config["dictionary_books"]) if "dictionary_books" in terms_config else None
                 all_src_terms = [
-                    (src_terms_file, get_terms(src_terms_file.path, iso=src_terms_file.iso))
-                    for src_terms_file in pair.src_terms_files
+                    (src_terms_file, get_terms(src_terms_file.path)) for src_terms_file in pair.src_terms_files
                 ]
                 all_trg_terms = [
-                    (trg_terms_file, get_terms(trg_terms_file.path, iso=trg_terms_file.iso))
-                    for trg_terms_file in pair.trg_terms_files
+                    (trg_terms_file, get_terms(trg_terms_file.path)) for trg_terms_file in pair.trg_terms_files
                 ]
                 for src_terms_file, src_terms in all_src_terms:
                     for trg_terms_file, trg_terms in all_trg_terms:
@@ -1119,15 +1118,18 @@ class Config:
 
             dict_src_file: Optional[TextIO] = None
             dict_trg_file: Optional[TextIO] = None
+            dict_vref_file: Optional[TextIO] = None
             if terms_config["dictionary"]:
                 dict_src_file = stack.enter_context(self._open_append(self._dict_src_filename()))
                 dict_trg_file = stack.enter_context(self._open_append(self._dict_trg_filename()))
+                dict_vref_file = stack.enter_context(self._open_append(self._dict_vref_filename()))
 
             if terms is not None:
                 for _, term in terms.iterrows():
                     src_term = cast(str, term["source"])
                     trg_term = cast(str, term["target"])
                     dictionary = cast(bool, term["dictionary"])
+                    vrefs = cast(str, term["vrefs"])
                     src_term_variants = [
                         encode_sp(src_spp, src_term, add_dummy_prefix=True),
                         encode_sp(src_spp, src_term, add_dummy_prefix=False),
@@ -1144,9 +1146,15 @@ class Config:
                             train_vref_file.write("\n")
                             train_count += 1
 
-                    if dictionary and dict_src_file is not None and dict_trg_file is not None:
+                    if (
+                        dictionary
+                        and dict_src_file is not None
+                        and dict_trg_file is not None
+                        and dict_vref_file is not None
+                    ):
                         dict_src_file.write("\t".join(src_term_variants) + "\n")
                         dict_trg_file.write("\t".join(trg_term_variants) + "\n")
+                        dict_vref_file.write(vrefs + "\n")
                         dict_count += 1
         return train_count, dict_count
 
@@ -1440,6 +1448,9 @@ class Config:
 
     def _dict_trg_filename(self) -> str:
         return "dict.trg.txt"
+
+    def _dict_vref_filename(self) -> str:
+        return "dict.vref.txt"
 
     def _build_vocabs(self) -> None:
         if not self.data["tokenize"]:

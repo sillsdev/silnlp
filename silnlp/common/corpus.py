@@ -239,7 +239,7 @@ def get_terms_corpus(
     cats: Optional[Set[str]],
     dictionary_books: Optional[Set[int]],
 ) -> pd.DataFrame:
-    data: Set[Tuple[str, str, bool]] = set()
+    data: Set[Tuple[str, str, bool, str]] = set()
     for src_term in src_terms.values():
         if cats is not None and src_term.cat not in cats:
             continue
@@ -252,14 +252,14 @@ def get_terms_corpus(
 
         for src_rendering in src_term.renderings:
             for trg_rendering in trg_term.renderings:
-                data.add((src_rendering, trg_rendering, dictionary))
-    return pd.DataFrame(data, columns=["source", "target", "dictionary"])
+                data.add((src_rendering, trg_rendering, dictionary, "\t".join(str(vref) for vref in src_term.vrefs)))
+    return pd.DataFrame(data, columns=["source", "target", "dictionary", "vrefs"])
 
 
 def get_terms_data_frame(
     terms: Dict[str, Term], cats: Optional[Set[str]], dictionary_books: Optional[Set[int]]
 ) -> pd.DataFrame:
-    data: Set[Tuple[str, str, bool]] = set()
+    data: Set[Tuple[str, str, bool, str]] = set()
     for term in terms.values():
         if cats is not None and term.cat not in cats:
             continue
@@ -268,8 +268,8 @@ def get_terms_data_frame(
 
         for rendering in term.renderings:
             for gloss in term.glosses:
-                data.add((rendering, gloss, dictionary))
-    return pd.DataFrame(data, columns=["rendering", "gloss", "dictionary"])
+                data.add((rendering, gloss, dictionary, "\t".join(str(vref) for vref in term.vrefs)))
+    return pd.DataFrame(data, columns=["rendering", "gloss", "dictionary", "vrefs"])
 
 
 def count_lines(file_path: Path, filter: Callable[[str], bool] = lambda l: True) -> int:

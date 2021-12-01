@@ -1,5 +1,5 @@
 import logging
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple, Union
 
 import numpy as np
 import tensorflow as tf
@@ -10,7 +10,8 @@ from opennmt.models import Model, SequenceToSequence
 from opennmt.utils.checkpoint import Checkpoint
 from opennmt.utils.misc import OrderRestorer, extract_batches, item_or_tuple
 
-from .transformer import SILSelfAttentionDecoder, SILTransformer
+from .models.sil_self_attention_decoder import SILSelfAttentionDecoder
+from .models.sil_transformer import SILTransformer
 
 
 class VariableUpdate:
@@ -336,7 +337,10 @@ class SILRunner(Runner):
         return results
 
     def infer_multiple(
-        self, features_paths: List[str], predictions_paths: List[str], checkpoint_path: Optional[str] = None
+        self,
+        features_paths: Union[List[str], List[List[str]]],
+        predictions_paths: List[str],
+        checkpoint_path: Optional[str] = None,
     ) -> None:
         config = self._finalize_config()
         model: Model = self._init_model(config)
