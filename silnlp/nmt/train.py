@@ -1,6 +1,5 @@
 import argparse
 import logging
-import os
 from typing import Optional
 
 import tensorflow as tf
@@ -10,7 +9,9 @@ from .config import create_runner, load_config
 
 LOGGER = logging.getLogger(__package__ + ".train")
 
-os.environ["TF_DETERMINISTIC_OPS"] = "1"
+# As of TF 2.7, deterministic mode is slower, so we will disable it for now.
+# os.environ["TF_DETERMINISTIC_OPS"] = "True"
+# os.environ["TF_DISABLE_SEGMENT_REDUCTION_OP_DETERMINISM_EXCEPTIONS"] = "True"
 
 
 def main() -> None:
@@ -31,6 +32,7 @@ def main() -> None:
 
     if args.eager_execution:
         tf.config.run_functions_eagerly(True)
+        tf.data.experimental.enable_debug_mode()
 
     for exp_name in args.experiments:
         config = load_config(exp_name)

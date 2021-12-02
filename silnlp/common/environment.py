@@ -1,8 +1,11 @@
 import logging
 import os
+import re
+import subprocess
 import tempfile
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
+from platform import system, uname
 from typing import Iterable, List, Tuple, Union
 
 import boto3
@@ -90,8 +93,9 @@ class SilNlpEnv:
 
     def resolve_data_dir(self) -> Path:
         self.is_bucket = False
-        sil_nlp_data_path = os.getenv("SIL_NLP_DATA_PATH")
-        if sil_nlp_data_path is not None:
+        sil_nlp_data_path = get_env_path("SIL_NLP_DATA_PATH", default="")
+        print(sil_nlp_data_path)
+        if sil_nlp_data_path != "":
             temp_path = Path(sil_nlp_data_path)
             if temp_path.is_dir():
                 LOGGER.info(f"Using workspace: {sil_nlp_data_path} as per environment variable SIL_NLP_DATA_PATH.")
@@ -247,6 +251,27 @@ def pathify(path: Path) -> Path:
         return path
     else:
         return Path(path)
+
+
+def wsl_path(win_path: Union[str, Path]) -> str:
+    win_path_str = os.path.normpath(win_path).replace("\\", "\\\\")
+    args: List[str] = []
+    if system() == "Windows":
+        args.append("wsl")
+    args.extend(["wslpath", "-a", win_path_str])
+    result = subprocess.run(args, capture_output=True, encoding="utf-8")
+    return result.stdout.strip()
+
+
+def is_wsl() -> bool:
+    return "microsoft-standard" in uname().release
+
+
+def get_env_path(name: str, default: str = ".") -> str:
+    path = os.getenv(name, default)
+    if is_wsl() and (re.match(r"^[a-zA-Z]:", path) is not None or "\\" in path):
+        return wsl_path(path)
+    return path
 
 
 SIL_NLP_ENV = SilNlpEnv()

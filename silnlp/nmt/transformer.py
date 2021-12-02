@@ -6,7 +6,7 @@ from opennmt import END_OF_SENTENCE_ID, START_OF_SENTENCE_ID
 from opennmt.data.vocab import get_mapping, update_variable, update_variable_and_slots
 from opennmt.decoders import SelfAttentionDecoder
 from opennmt.encoders import ParallelEncoder, SelfAttentionEncoder
-from opennmt.inputters import WordEmbedder, add_sequence_controls
+from opennmt.inputters import ParallelInputter, WordEmbedder, add_sequence_controls
 from opennmt.layers import (
     Dense,
     FeedForwardNetwork,
@@ -27,6 +27,8 @@ from opennmt.utils.decoding import BeamSearch, DecodingStrategy, Sampler
 from opennmt.utils.misc import shape_list
 
 from .decoding import DictionaryGuidedBeamSearch, dynamic_decode
+from .ref_inputter import RefInputter
+from .take_first_reducer import TakeFirstReducer
 from .trie import Trie
 
 EPSILON: float = 1e-07
@@ -389,8 +391,11 @@ class SILSelfAttentionDecoder(SelfAttentionDecoder):
         sampler=None,
         maximum_iterations=None,
         minimum_iterations=0,
+        tflite_output_size=None,
     ):
-        if isinstance(embeddings, WordEmbedder):
+        if tflite_output_size is not None:
+            input_fn = lambda ids: embeddings.tflite_call(ids)
+        elif isinstance(embeddings, WordEmbedder):
             input_fn = lambda ids: embeddings({"ids": ids})
         else:
             input_fn = lambda ids: tf.nn.embedding_lookup(embeddings, ids)
@@ -411,6 +416,7 @@ class SILSelfAttentionDecoder(SelfAttentionDecoder):
             minimum_iterations=minimum_iterations,
             attention_history=self.support_alignment_history,
             attention_size=tf.shape(self.memory)[1] if self.support_alignment_history else None,
+            tflite_output_size=tflite_output_size,
         )
 
     def _get_initial_state(self, batch_size, dtype, initial_state=None):
@@ -433,12 +439,12 @@ class SILSelfAttentionDecoder(SelfAttentionDecoder):
 class SILTransformer(Transformer):
     def __init__(
         self,
-        source_inputter,
-        target_inputter,
-        num_layers,
-        num_units,
-        num_heads,
-        ffn_inner_dim,
+        source_inputter=None,
+        target_inputter=None,
+        num_layers=6,
+        num_units=512,
+        num_heads=8,
+        ffn_inner_dim=2048,
         dropout=0.1,
         attention_dropout=0.1,
         ffn_dropout=0.1,
@@ -452,6 +458,11 @@ class SILTransformer(Transformer):
         drop_encoder_self_attention_residual_connections=set(),
         alignment_head_num_units=None,
     ):
+        if source_inputter is None:
+            source_inputter = WordEmbedder(embedding_size=num_units)
+        if target_inputter is None:
+            target_inputter = WordEmbedder(embedding_size=num_units)
+
         if isinstance(num_layers, (list, tuple)):
             num_encoder_layers, num_decoder_layers = num_layers
         else:
@@ -498,6 +509,7 @@ class SILTransformer(Transformer):
             alignment_head_num_units=alignment_head_num_units,
         )
 
+        self._pre_norm = pre_norm
         self._num_units = num_units
         self._num_encoder_layers = num_encoder_layers
         self._num_decoder_layers = num_decoder_layers
@@ -524,17 +536,24 @@ class SILTransformer(Transformer):
         super().initialize(data_config, params=params)
         src_dict_path: Optional[str] = data_config.get("source_dictionary")
         trg_dict_path: Optional[str] = data_config.get("target_dictionary")
+        ref_dict_path: Optional[str] = data_config.get("ref_dictionary")
         if src_dict_path is not None and trg_dict_path is not None:
             self.labels_inputter.set_decoder_mode(enable=False, mark_start=False, mark_end=False)
             dictionary = Trie(self.features_inputter.vocabulary_size)
-            with tf.io.gfile.GFile(src_dict_path) as src_dict, tf.io.gfile.GFile(trg_dict_path) as trg_dict:
-                for src_entry_str, trg_entry_str in zip(src_dict, trg_dict):
+            with tf.io.gfile.GFile(src_dict_path) as src_dict, tf.io.gfile.GFile(
+                trg_dict_path
+            ) as trg_dict, tf.io.gfile.GFile(ref_dict_path) as ref_dict:
+                for src_entry_str, trg_entry_str, ref_entry_str in zip(src_dict, trg_dict, ref_dict):
                     src_entry = src_entry_str.strip().split("\t")
-                    src_ids = [self.features_inputter.make_features(tf.constant(se.strip()))["ids"] for se in src_entry]
+                    src_ids = [
+                        self.features_inputter.make_features(tf.constant(se.strip()))["inputter_0_ids"]
+                        for se in src_entry
+                    ]
                     trg_entry = trg_entry_str.strip().split("\t")
                     trg_ids = [self.labels_inputter.make_features(tf.constant(te.strip()))["ids"] for te in trg_entry]
+                    refs = tf.convert_to_tensor(ref_entry_str.strip().split("\t"))
                     for src_variant_ids in src_ids:
-                        dictionary.add(src_variant_ids, trg_ids)
+                        dictionary.add(src_variant_ids, trg_ids, refs)
             if not dictionary.empty:
                 dictionary.compile()
                 self._dictionary = dictionary
@@ -592,7 +611,14 @@ class SILTransformer(Transformer):
             elif name.startswith("feed_forward_network"):
                 layer.dropout = ffn_dropout
 
-    def _dynamic_decode(self, features, encoder_outputs, encoder_state, encoder_sequence_length):
+    def _dynamic_decode(
+        self,
+        features,
+        encoder_outputs,
+        encoder_state,
+        encoder_sequence_length,
+        tflite_run=False,
+    ):
         params = self.params
         batch_size = tf.shape(tf.nest.flatten(encoder_outputs)[0])[0]
         start_ids = tf.fill([batch_size], START_OF_SENTENCE_ID)
@@ -607,16 +633,18 @@ class SILTransformer(Transformer):
                 encoder_state,
             )
 
-        decoding_strategy = DecodingStrategy.from_params(params)
+        decoding_strategy = DecodingStrategy.from_params(params, tflite_mode=tflite_run)
         if self._dictionary is not None and isinstance(decoding_strategy, BeamSearch):
-            src_ids: tf.Tensor = features["ids"]
-            src_entry_indices, trg_entries = self.batch_find_trg_entries(src_ids)
+            src_ids: tf.Tensor = features["inputter_0_ids"]
+            ref: tf.Tensor = features["inputter_1_ref"]
+            src_entry_indices, trg_entries = self.batch_find_trg_entries(src_ids, ref)
             decoding_strategy = DictionaryGuidedBeamSearch(
                 src_entry_indices,
                 trg_entries,
                 decoding_strategy.beam_size,
                 decoding_strategy.length_penalty,
                 decoding_strategy.coverage_penalty,
+                decoding_strategy.tflite_output_size,
             )
 
         # Dynamically decodes from the encoder outputs.
@@ -633,9 +661,13 @@ class SILTransformer(Transformer):
             sampler=Sampler.from_params(params),
             maximum_iterations=params.get("maximum_decoding_length", 250),
             minimum_iterations=params.get("minimum_decoding_length", 0),
+            tflite_output_size=params.get("tflite_output_size", 250) if tflite_run else None,
         )
-        target_tokens = self.labels_inputter.ids_to_tokens.lookup(tf.cast(sampled_ids, tf.int64))
 
+        if tflite_run:
+            target_tokens = sampled_ids
+        else:
+            target_tokens = self.labels_inputter.ids_to_tokens.lookup(tf.cast(sampled_ids, tf.int64))
         # Maybe replace unknown targets by the source tokens with the highest attention weight.
         if params.get("replace_unknown_target", False):
             if alignment is None:
@@ -644,23 +676,41 @@ class SILTransformer(Transformer):
                 )
             if not isinstance(self.features_inputter, WordEmbedder):
                 raise TypeError("replace_unknown_target is only defined when the source " "inputter is a WordEmbedder")
-            source_tokens = features["tokens"]
+
+            source_tokens = features if tflite_run else features["inputter_0_tokens"]
             if beam_size > 1:
                 source_tokens = tfa.seq2seq.tile_batch(source_tokens, beam_size)
-            # Merge batch and beam dimensions.
             original_shape = tf.shape(target_tokens)
-            target_tokens = tf.reshape(target_tokens, [-1, original_shape[-1]])
+            if tflite_run:
+                target_tokens = tf.squeeze(target_tokens, axis=0)
+                output_size = original_shape[-1]
+                unknown_token = self.labels_inputter.vocabulary_size - 1
+            else:
+                target_tokens = tf.reshape(target_tokens, [-1, original_shape[-1]])
+                output_size = tf.shape(target_tokens)[1]
+                unknown_token = UNKNOWN_TOKEN
+
             align_shape = shape_list(alignment)
             attention = tf.reshape(
                 alignment,
                 [align_shape[0] * align_shape[1], align_shape[2], align_shape[3]],
             )
-            # We don't have attention for </s> but ensure that the attention time dimension matches
-            # the tokens time dimension.
-            attention = align_in_time(attention, tf.shape(target_tokens)[1])
-            replaced_target_tokens = replace_unknown_target(target_tokens, source_tokens, attention)
-            target_tokens = tf.reshape(replaced_target_tokens, original_shape)
+            attention = align_in_time(attention, output_size)
+            replaced_target_tokens = replace_unknown_target(
+                target_tokens, source_tokens, attention, unknown_token=unknown_token
+            )
+            if tflite_run:
+                target_tokens = replaced_target_tokens
+            else:
+                target_tokens = tf.reshape(replaced_target_tokens, original_shape)
 
+        if tflite_run:
+            if beam_size > 1:
+                target_tokens = tf.transpose(target_tokens)
+                target_tokens = target_tokens[:, :1]
+            target_tokens = tf.squeeze(target_tokens)
+
+            return target_tokens
         # Maybe add noise to the predictions.
         decoding_noise = params.get("decoding_noise")
         if decoding_noise:
@@ -695,10 +745,11 @@ class SILTransformer(Transformer):
                 predictions[key] = value[:, :num_hypotheses]
         return predictions
 
-    def batch_find_trg_entries(self, src_ids: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+    def batch_find_trg_entries(self, src_ids: tf.Tensor, ref: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
         src_entry_indices, trg_entries = tf.map_fn(
-            lambda src_ids: self.find_trg_entries(src_ids),
+            lambda i, r: self.find_trg_entries(i, r),
             src_ids,
+            ref,
             fn_output_signature=(
                 tf.TensorSpec((None), dtype=tf.int32),
                 tf.RaggedTensorSpec(shape=(None, None, None), dtype=tf.int32, row_splits_dtype=tf.int32),
@@ -707,7 +758,7 @@ class SILTransformer(Transformer):
         return src_entry_indices, trg_entries.to_tensor()
 
     @tf.function
-    def find_trg_entries(self, src_ids: tf.Tensor) -> Tuple[tf.Tensor, tf.RaggedTensor]:
+    def find_trg_entries(self, src_ids: tf.Tensor, ref: tf.Tensor) -> Tuple[tf.Tensor, tf.RaggedTensor]:
         if self._dictionary is None:
             raise ValueError("The dictionary must be initialized.")
         length = tf.shape(src_ids)[0]
@@ -721,23 +772,29 @@ class SILTransformer(Transformer):
         j = 1
         k = 0
         while i < length:
-            trg_entry, prefix_len = self._dictionary.longest_prefix(src_ids[i:])
+            trg_entry, prefix_len, entry_refs = self._dictionary.longest_prefix(src_ids[i:])
             if prefix_len == 0:
                 src_entry_indices = src_entry_indices.write(i, 0)
                 i += 1
             else:
-                num_variants = trg_entry.nrows()
-                trg_entry_lengths = trg_entry_lengths.write(j, num_variants)
                 end = i + prefix_len
-                while i < end:
-                    src_entry_indices = src_entry_indices.write(i, j)
-                    i += 1
-                j += 1
-                for vi in tf.range(num_variants):
-                    trg_variant = trg_entry[vi]
-                    trg_variants = trg_variants.write(k, trg_variant)
-                    trg_variant_lengths = trg_variant_lengths.write(k, tf.shape(trg_variant)[0])
-                    k += 1
+                matched = tf.sets.intersection(entry_refs, ref)
+                if tf.size(matched) == 0:
+                    while i < end:
+                        src_entry_indices = src_entry_indices.write(i, 0)
+                        i += 1
+                else:
+                    num_variants = trg_entry.nrows()
+                    trg_entry_lengths = trg_entry_lengths.write(j, num_variants)
+                    while i < end:
+                        src_entry_indices = src_entry_indices.write(i, j)
+                        i += 1
+                    j += 1
+                    for vi in tf.range(num_variants):
+                        trg_variant = trg_entry[vi]
+                        trg_variants = trg_variants.write(k, trg_variant)
+                        trg_variant_lengths = trg_variant_lengths.write(k, tf.shape(trg_variant)[0])
+                        k += 1
         if k == 0:
             trg_variants = trg_variants.write(0, tf.constant([], dtype=tf.int32))
         return src_entry_indices.stack(), tf.RaggedTensor.from_nested_row_lengths(
@@ -812,29 +869,12 @@ class SILTransformer(Transformer):
 @register_model_in_catalog
 class SILTransformerMedium(SILTransformer):
     def __init__(self):
-        super().__init__(
-            source_inputter=WordEmbedder(embedding_size=512),
-            target_inputter=WordEmbedder(embedding_size=512),
-            num_layers=3,
-            num_units=512,
-            num_heads=8,
-            ffn_inner_dim=2048,
-        )
+        super().__init__(num_layers=3)
 
 
 @register_model_in_catalog(alias="SILTransformer")
 class SILTransformerBase(SILTransformer):
     """Defines a Transformer model as decribed in https://arxiv.org/abs/1706.03762."""
-
-    def __init__(self):
-        super().__init__(
-            source_inputter=WordEmbedder(embedding_size=512),
-            target_inputter=WordEmbedder(embedding_size=512),
-            num_layers=6,
-            num_units=512,
-            num_heads=8,
-            ffn_inner_dim=2048,
-        )
 
 
 @register_model_in_catalog
@@ -843,12 +883,9 @@ class SILTransformerBaseAlignmentEnhanced(SILTransformer):
 
     def __init__(self):
         super().__init__(
-            source_inputter=WordEmbedder(embedding_size=512),
-            target_inputter=WordEmbedder(embedding_size=512),
-            num_layers=6,
-            num_units=512,
-            num_heads=8,
-            ffn_inner_dim=2048,
+            source_inputter=ParallelInputter(
+                [WordEmbedder(embedding_size=512), RefInputter()], reducer=TakeFirstReducer()
+            ),
             attention_reduction=MultiHeadAttentionReduction.AVERAGE_ALL_LAYERS,
             alignment_head_num_units=64,
         )
@@ -862,16 +899,7 @@ class SILTransformerBaseRelative(SILTransformer):
     """
 
     def __init__(self):
-        super().__init__(
-            source_inputter=WordEmbedder(embedding_size=512),
-            target_inputter=WordEmbedder(embedding_size=512),
-            num_layers=6,
-            num_units=512,
-            num_heads=8,
-            ffn_inner_dim=2048,
-            position_encoder_class=None,
-            maximum_relative_position=20,
-        )
+        super().__init__(position_encoder_class=None, maximum_relative_position=20)
 
 
 @register_model_in_catalog
@@ -882,15 +910,7 @@ class SILTransformerBaseNoResidual(SILTransformer):
     """
 
     def __init__(self):
-        super().__init__(
-            source_inputter=WordEmbedder(embedding_size=512),
-            target_inputter=WordEmbedder(embedding_size=512),
-            num_layers=6,
-            num_units=512,
-            num_heads=8,
-            ffn_inner_dim=2048,
-            drop_encoder_self_attention_residual_connections={3},
-        )
+        super().__init__(drop_encoder_self_attention_residual_connections={3})
 
 
 @register_model_in_catalog
@@ -898,14 +918,7 @@ class SILTransformerBig(SILTransformer):
     """Defines a large Transformer model as decribed in https://arxiv.org/abs/1706.03762."""
 
     def __init__(self):
-        super().__init__(
-            source_inputter=WordEmbedder(embedding_size=1024),
-            target_inputter=WordEmbedder(embedding_size=1024),
-            num_layers=6,
-            num_units=1024,
-            num_heads=16,
-            ffn_inner_dim=4096,
-        )
+        super().__init__(num_units=1024, num_heads=16, ffn_inner_dim=4096)
 
 
 @register_model_in_catalog
@@ -917,12 +930,13 @@ class SILTransformerBigRelative(SILTransformer):
 
     def __init__(self):
         super().__init__(
-            source_inputter=WordEmbedder(embedding_size=1024),
-            target_inputter=WordEmbedder(embedding_size=1024),
-            num_layers=6,
-            num_units=1024,
-            num_heads=16,
-            ffn_inner_dim=4096,
-            position_encoder_class=None,
-            maximum_relative_position=20,
+            num_units=1024, num_heads=16, ffn_inner_dim=4096, position_encoder_class=None, maximum_relative_position=20
         )
+
+
+@register_model_in_catalog
+class SILTransformerTiny(SILTransformer):
+    """Defines a tiny Transformer model."""
+
+    def __init__(self):
+        super().__init__(num_layers=2, num_units=64, num_heads=2, ffn_inner_dim=64)
