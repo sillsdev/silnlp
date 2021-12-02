@@ -23,6 +23,7 @@ class SILClearML:
     clearml_project_folder: str = ""
 
     def __post_init__(self) -> None:
+        self.name = self.name.replace("\\", "/")
         name_parts = self.name.split("/")
         project = name_parts[0]
         if len(name_parts) == 1:
@@ -35,6 +36,9 @@ class SILClearML:
                 project_name=self.project_prefix + project + self.project_suffix,
                 task_name=exp_name + self.experiment_suffix,
             )
+
+            self._determine_clearml_project_name()
+            self._load_config()
 
             self.task.set_base_docker(
                 docker_cmd="silintlai/machine-silnlp:master-latest",
@@ -53,10 +57,10 @@ class SILClearML:
                 exit()
             self.task = None
 
-    def get_remote_name(self) -> str:
+    def _determine_clearml_project_name(self) -> None:
         if self.task is None:
             self.clearml_project_folder = ""
-            return self.name
+            return
         # after init, "project name" and "task name" could be different. Read them again and update.
         self.clearml_project_folder = self.task.get_project_name()
         assert self.clearml_project_folder is not None
@@ -72,11 +76,10 @@ class SILClearML:
         self.name = self.clearml_project_folder + "/" + self.task.name
         if len(self.experiment_suffix) > 0 and self.name.endswith(self.experiment_suffix):
             self.name = self.name[: -len(self.experiment_suffix)]
-        return self.name
 
-    def load_config(self) -> Config:
+    def _load_config(self) -> None:
         # copy from S3 bucket to temp first
-        SIL_NLP_ENV.copy_experiment_from_bucket(self.name, extensions=("config.yml"))
+        SIL_NLP_ENV.copy_experiment_from_bucket(self.name, extensions="config.yml")
         # if the project/experiment yaml file already exists, use it to re-read the config.  If not, write it.
         exp_dir = get_mt_exp_dir(self.name)
         if self.task is None:
@@ -94,17 +97,17 @@ class SILClearML:
             # read in the project/experiment yaml file
             with (exp_dir / "config.yml").open("r", encoding="utf-8") as file:
                 config = yaml.safe_load(file)
-            # connect it with ClearML - if it is run remotely, it will update the params with the remote values
-            self.task.connect(mutable=config, name="config")
         else:
-            # else, read in the project only yaml file
-            with (get_mt_exp_dir(self.clearml_project_folder) / "config.yml").open("r", encoding="utf-8") as file:
-                config = yaml.safe_load(file)
-            self.task.connect(mutable=config, name="config")
+            config = {}
 
-            # then, after connection (and a possible remote update) write it to the experiment folder
-            exp_dir.mkdir(parents=True, exist_ok=True)
-            with (exp_dir / "config.yml").open("w+", encoding="utf-8") as file:
-                yaml.safe_dump(data=config, stream=file)
+        # connect it with ClearML
+        # - if it is run locally, it will set the config parameters in the clearml server
+        # - if it is run remotely, it will update the params with the remote values
+        self.task.connect(mutable=config, name="config")
+        # then, after connection (and a possible remote update) write it to the experiment folder
+        exp_dir.mkdir(parents=True, exist_ok=True)
+        with (exp_dir / "config.yml").open("w+", encoding="utf-8") as file:
+            yaml.safe_dump(data=config, stream=file)
 
-        return Config(exp_dir, config)
+        self.config = Config(exp_dir=exp_dir, config=config)
+        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, extensions="config.yml")

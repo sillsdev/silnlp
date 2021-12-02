@@ -71,9 +71,15 @@ class MachineAligner(Aligner):
             self._execute_mkcls(trg_file_path, "trg")
         self._train_alignment_model(src_file_path, trg_file_path)
 
-    def align(self, out_file_path: Path, sym_heuristic: str = "grow-diag-final-and") -> None:
+    def align(
+        self, out_file_path: Path, sym_heuristic: str = "grow-diag-final-and", export_probabilities: bool = False
+    ) -> None:
         self._align_parallel_corpus(
-            self.model_dir / "src_trg_invswm.src", self.model_dir / "src_trg_invswm.trg", out_file_path, sym_heuristic
+            self.model_dir / "src_trg_invswm.src",
+            self.model_dir / "src_trg_invswm.trg",
+            out_file_path,
+            sym_heuristic,
+            export_probabilities=export_probabilities,
         )
 
     def force_align(
@@ -159,7 +165,12 @@ class MachineAligner(Aligner):
                 trainer.save()
 
     def _align_parallel_corpus(
-        self, src_file_path: Path, trg_file_path: Path, output_file_path: Path, sym_heuristic: str
+        self,
+        src_file_path: Path,
+        trg_file_path: Path,
+        output_file_path: Path,
+        sym_heuristic: str,
+        export_probabilities: bool = False,
     ) -> None:
         tokenizer = WhitespaceTokenizer()
         src_corpus = TextFileTextCorpus(tokenizer, src_file_path)
@@ -180,8 +191,12 @@ class MachineAligner(Aligner):
             total=count, bar_format="{l_bar}{bar:40}{r_bar}", leave=False
         ) as pbar:
             for src_segments, trg_segments in _batch(segments, preprocessor):
-                for alignment in model.get_best_alignments(src_segments, trg_segments):
-                    out_file.write(str(alignment) + "\n")
+                for i, alignment in enumerate(model.get_best_alignments(src_segments, trg_segments)):
+                    if export_probabilities:
+                        alignened_word_pairs = model.get_aligned_word_pairs(src_segments[i], trg_segments[i], alignment)
+                        out_file.write(" ".join(str(wp) for wp in alignened_word_pairs) + "\n")
+                    else:
+                        out_file.write(str(alignment) + "\n")
                 pbar.update(len(src_segments))
 
     def _extract_lexicon(self, out_file_path: Path, direct: bool) -> None:

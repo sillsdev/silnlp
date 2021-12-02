@@ -546,6 +546,8 @@ class Config:
         model: str = config["model"]
         if model.endswith("AlignmentEnhanced"):
             data_config["guided_alignment"] = True
+            data_config["train_features_file"] = [str(exp_dir / "train.src.txt"), str(exp_dir / "train.vref.txt")]
+            data_config["eval_features_file"] = [str(exp_dir / "val.src.txt"), str(exp_dir / "val.vref.txt")]
 
         if data_config["guided_alignment"]:
             if config["params"]["word_dropout"] > 0:
@@ -1671,13 +1673,8 @@ def set_tf_log_level(log_level: int = logging.INFO) -> None:
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 
-def create_runner(config: Config, mixed_precision: bool = False, memory_growth: bool = False) -> SILRunner:
+def create_runner(config: Config, mixed_precision: bool = False) -> SILRunner:
     set_tf_log_level()
-
-    if memory_growth:
-        gpus = tf.config.list_physical_devices(device_type="GPU")
-        for device in gpus:
-            tf.config.experimental.set_memory_growth(device, enable=True)
 
     model = create_model(config)
 
