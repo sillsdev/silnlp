@@ -41,10 +41,6 @@ def align_set(src_input_path: Path, trg_input_path: Path, output_dir: Path, alig
     )
     with (output_dir / "alignment.scores.txt").open("w+", encoding="utf-8") as as_file:
         as_file.writelines(["%0.4f\n" % s for s in scores])
-    plt.plot(scores, "k.", markersize=2)
-    plt.xlabel("Verses")
-    plt.ylabel("Alignment Score")
-    plt.savefig(output_dir / "alignment.png")
 
 
 def process_alignments(
@@ -79,10 +75,10 @@ def process_alignments(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Aligns source bible to defined set of bibles")
-    parser.add_argument("src_path", type=str, help="Path to source bible text")
-    parser.add_argument("trg_dir", type=str, help="folder of bibles to align to")
-    parser.add_argument("output_dir", type=str, help="folder to contain bible alignments")
+    parser = argparse.ArgumentParser(description="Aligns source Bible to defined set of Bibles")
+    parser.add_argument("src_path", type=str, help="Path to source Bible text")
+    parser.add_argument("trg_dir", type=str, help="folder of Bibles to align to")
+    parser.add_argument("output_dir", type=str, help="folder to contain Bible alignments")
     parser.add_argument("--aligner", type=str, default="fast_align", help="Aligner to use for extraction")
     parser.add_argument(
         "--multiprocess",
