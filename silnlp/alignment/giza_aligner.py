@@ -7,6 +7,7 @@ from typing import Iterable, List, Optional, Set, TextIO, Tuple
 from machine.translation import SymmetrizationHeuristic, WordAlignmentMatrix
 
 from ..common.corpus import load_corpus, write_corpus
+from ..common.environment import get_env_path
 from .aligner import Aligner
 from .lexicon import Lexicon
 
@@ -93,7 +94,7 @@ class GizaAligner(Aligner):
         lexicon.write(out_file_path)
 
     def _execute_mkcls(self, input_file_path: Path) -> None:
-        mkcls_path = Path(os.getenv("MGIZA_PATH", "."), "mkcls")
+        mkcls_path = Path(get_env_path("MGIZA_PATH"), "mkcls")
         if platform.system() == "Windows":
             mkcls_path = mkcls_path.with_suffix(".exe")
         if not mkcls_path.is_file():
@@ -106,7 +107,7 @@ class GizaAligner(Aligner):
         subprocess.run(args)
 
     def _execute_plain2snt(self, src_file_path: Path, trg_file_path: Path) -> Tuple[Path, Path]:
-        plain2snt_path = Path(os.getenv("MGIZA_PATH", "."), "plain2snt")
+        plain2snt_path = Path(get_env_path("MGIZA_PATH"), "plain2snt")
         if platform.system() == "Windows":
             plain2snt_path = plain2snt_path.with_suffix(".exe")
         if not plain2snt_path.is_file():
@@ -135,7 +136,7 @@ class GizaAligner(Aligner):
         return src_trg_snt_file_path, trg_src_snt_file_path
 
     def _execute_snt2cooc(self, snt_file_path: Path) -> None:
-        snt2cooc_path = Path(os.getenv("MGIZA_PATH", "."), "snt2cooc")
+        snt2cooc_path = Path(get_env_path("MGIZA_PATH"), "snt2cooc")
         if platform.system() == "Windows":
             snt2cooc_path = snt2cooc_path.with_suffix(".exe")
         if not snt2cooc_path.is_file():
@@ -155,7 +156,7 @@ class GizaAligner(Aligner):
         subprocess.run(args)
 
     def _execute_mgiza(self, snt_file_path: Path, output_path: Path) -> None:
-        mgiza_path = Path(os.getenv("MGIZA_PATH", "."), "mgiza")
+        mgiza_path = Path(get_env_path("MGIZA_PATH"), "mgiza")
         if platform.system() == "Windows":
             mgiza_path = mgiza_path.with_suffix(".exe")
         if not mgiza_path.is_file():

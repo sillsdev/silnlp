@@ -1,22 +1,16 @@
 import math
-import os
 import platform
 import subprocess
 from pathlib import Path
 from typing import List
 
+from ..common.environment import get_env_path, wsl_path
 from .aligner import Aligner
 from .lexicon import Lexicon
 
 
-def wsl_path(win_path: Path) -> str:
-    win_path_str = os.path.normpath(win_path).replace("\\", "\\\\")
-    result = subprocess.run(["wsl", "wslpath", "-a", win_path_str], capture_output=True, encoding="utf-8")
-    return result.stdout.strip()
-
-
 def execute_fast_align(input_path: Path, output_path: Path, prob_table_path: Path, reverse: bool) -> None:
-    fast_align_path = Path(os.getenv("FAST_ALIGN_PATH", "."), "fast_align")
+    fast_align_path = Path(get_env_path("FAST_ALIGN_PATH"), "fast_align")
     if not fast_align_path.is_file():
         raise RuntimeError("fast_align is not installed.")
 
@@ -34,7 +28,7 @@ def execute_fast_align(input_path: Path, output_path: Path, prob_table_path: Pat
 
 
 def execute_atools(forward_align_path: Path, reverse_align_path: Path, output_path: Path, sym_heuristic: str) -> None:
-    atools_path = Path(os.getenv("FAST_ALIGN_PATH", "."), "atools")
+    atools_path = Path(get_env_path("FAST_ALIGN_PATH"), "atools")
     if not atools_path.is_file():
         raise RuntimeError("atools is not installed.")
 

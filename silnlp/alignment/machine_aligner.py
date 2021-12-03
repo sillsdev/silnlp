@@ -35,6 +35,8 @@ from machine.translation.thot import (
 from machine.utils import Phase, PhasedProgressReporter, ProgressStatus
 from tqdm import tqdm
 
+from ..common.environment import get_env_path
+
 from .aligner import Aligner
 from .lexicon import Lexicon
 
@@ -234,7 +236,7 @@ class MachineAligner(Aligner):
             raise ValueError("An invalid model type was specified.")
 
     def _execute_mkcls(self, input_file_path: Path, side: str) -> None:
-        mkcls_path = Path(os.getenv("MGIZA_PATH", "."), "mkcls")
+        mkcls_path = Path(get_env_path("MGIZA_PATH"), "mkcls")
         if platform.system() == "Windows":
             mkcls_path = mkcls_path.with_suffix(".exe")
         if not mkcls_path.is_file():

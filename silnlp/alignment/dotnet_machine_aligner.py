@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..common.utils import check_dotnet, get_repo_dir
+from ..common.environment import get_env_path
 from .aligner import Aligner
 from .lexicon import Lexicon
 
@@ -174,7 +175,7 @@ class DotnetMachineAligner(Aligner):
         subprocess.run(args, cwd=get_repo_dir())
 
     def _execute_mkcls(self, input_file_path: Path, side: str) -> None:
-        mkcls_path = Path(os.getenv("MGIZA_PATH", "."), "mkcls")
+        mkcls_path = Path(get_env_path("MGIZA_PATH"), "mkcls")
         if platform.system() == "Windows":
             mkcls_path = mkcls_path.with_suffix(".exe")
         if not mkcls_path.is_file():
@@ -222,7 +223,7 @@ class ParatextDotnetMachineAligner(DotnetMachineAligner):
             "pt",
             "betainv",
             model_dir,
-            plugin_file_path=Path(os.getenv("BETA_INV_PLUGIN_PATH", ".")),
+            plugin_file_path=Path(get_env_path("BETA_INV_PLUGIN_PATH")),
             has_inverse_model=False,
             threshold=0,
             direct_model_prefix="src_trg",
