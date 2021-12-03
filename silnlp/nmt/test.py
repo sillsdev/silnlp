@@ -14,7 +14,7 @@ from sacrebleu.metrics import BLEU, BLEUScore
 from ..common.metrics import compute_meteor_score, compute_ter_score, compute_wer_score
 from ..common.utils import get_git_revision_hash
 from .config import Config, create_runner, load_config
-from .utils import decode_sp, get_best_model_dir, get_last_checkpoint, enable_memory_growth
+from .utils import decode_sp, get_best_model_dir, get_last_checkpoint
 
 LOGGER = logging.getLogger(__name__)
 
@@ -337,6 +337,7 @@ def test_checkpoint(
     config: Config,
     force_infer: bool,
     by_book: bool,
+    memory_growth: bool,
     ref_projects: Set[str],
     checkpoint_path: Path,
     step: int,
@@ -387,7 +388,7 @@ def test_checkpoint(
             features_paths.append(str(config.exp_dir / features_file_names[i]))
             predictions_paths.append(str(predictions_path))
     if len(predictions_paths) > 0:
-        runner = create_runner(config)
+        runner = create_runner(config, memory_growth=memory_growth)
         print(f"Inferencing {checkpoint_name}...")
         runner.infer_multiple(features_paths, predictions_paths, checkpoint_path=str(checkpoint_path))
 
@@ -491,6 +492,7 @@ def test_checkpoint(
 
 def test(
     experiment: str,
+    memory_growth=False,
     checkpoint: Optional[str] = None,
     last: bool = False,
     avg: bool = False,
@@ -519,6 +521,7 @@ def test(
             config,
             force_infer,
             by_book,
+            memory_growth,
             ref_projects,
             checkpoint_path,
             step,
@@ -534,6 +537,7 @@ def test(
                 config,
                 force_infer,
                 by_book,
+                memory_growth,
                 ref_projects,
                 checkpoint_path,
                 step,
@@ -551,6 +555,7 @@ def test(
                 config,
                 force_infer,
                 by_book,
+                memory_growth,
                 ref_projects,
                 checkpoint_path,
                 step,
@@ -566,6 +571,7 @@ def test(
                 config,
                 force_infer,
                 by_book,
+                memory_growth,
                 ref_projects,
                 checkpoint_path,
                 step,
@@ -613,13 +619,11 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if args.memory_growth:
-        enable_memory_growth()
-
     get_git_revision_hash()
 
     test(
         args.experiment,
+        memory_growth=args.memory_growth,
         checkpoint=args.checkpoint,
         last=args.last,
         best=args.best,

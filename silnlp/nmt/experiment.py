@@ -10,9 +10,8 @@ logging.basicConfig()
 from ..common.environment import SIL_NLP_ENV
 from ..common.utils import get_git_revision_hash
 from ..common.clearml import SILClearML
-from .config import Config, create_runner
+from .config import Config, create_runner, get_checkpoint_path
 from .test import test
-from .utils import enable_memory_growth
 
 
 @dataclass
@@ -20,13 +19,14 @@ class SILExperiment:
     name: str
     make_stats: bool = False
     mixed_precision: bool = False
+    memory_growth: bool = False
     num_devices: int = 1
     clearml_queue: str = None
 
     def __post_init__(self):
         self.clearml = SILClearML(self.name, self.clearml_queue)
-        self.name: str = self.clearml.name
-        self.config: Config = self.clearml.config
+        self.name = self.clearml.get_remote_name()
+        self.config: Config = self.clearml.load_config()
         self.rev_hash = get_git_revision_hash()
         self.tensorboard_init()
         self.config.set_seed()
@@ -46,7 +46,7 @@ class SILExperiment:
         os.environ["TF_DETERMINISTIC_OPS"] = "1"
         SIL_NLP_ENV.copy_experiment_from_bucket(self.name, extensions=(".txt", ".vocab", ".model", ".yml", ".csv"))
 
-        runner = create_runner(self.config, mixed_precision=self.mixed_precision)
+        runner = create_runner(self.config, mixed_precision=self.mixed_precision, memory_growth=self.memory_growth)
         runner.save_effective_config(str(self.config.exp_dir / f"effective-config-{self.rev_hash}.yml"), training=True)
 
         checkpoint_path: Optional[str] = None
@@ -85,13 +85,11 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.memory_growth:
-        enable_memory_growth()
-
     exp = SILExperiment(
         name=args.experiment,
         make_stats=args.stats,
         mixed_precision=args.mixed_precision,
+        memory_growth=args.memory_growth,
         num_devices=args.num_devices,
         clearml_queue=args.clearml_queue,
     )

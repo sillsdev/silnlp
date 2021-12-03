@@ -35,9 +35,7 @@ def tokenize_corpus(input_path: Path, output_path: Path) -> None:
             output_stream.write(" ".join(processor.process(segment.segment)) + "\n")
 
 
-def get_scripture_parallel_corpus(
-    src_file_path: Path, trg_file_path: Path, remove_empty_sentences: bool = True
-) -> pd.DataFrame:
+def get_scripture_parallel_corpus(src_file_path: Path, trg_file_path: Path) -> pd.DataFrame:
     vrefs: List[VerseRef] = []
     src_sentences: List[str] = []
     trg_sentences: List[str] = []
@@ -78,18 +76,13 @@ def get_scripture_parallel_corpus(
                 indices.append(index)
             index += 1
 
-    if remove_empty_sentences:
-        for i in range(len(vrefs) - 1, -1, -1):
-            if len(src_sentences[i]) == 0 or len(trg_sentences[i]) == 0:
-                vrefs.pop(i)
-                src_sentences.pop(i)
-                trg_sentences.pop(i)
-                indices.pop(i)
-    else:
-        for i in range(len(vrefs) - 1, -1, -1):
-            if len(src_sentences[i]) == 0 or len(trg_sentences[i]) == 0:
-                src_sentences[i] = ""
-                trg_sentences[i] = ""
+    # remove empty sentences
+    for i in range(len(vrefs) - 1, -1, -1):
+        if len(src_sentences[i]) == 0 or len(trg_sentences[i]) == 0:
+            vrefs.pop(i)
+            src_sentences.pop(i)
+            trg_sentences.pop(i)
+            indices.pop(i)
 
     data = {"vref": vrefs, "source": src_sentences, "target": trg_sentences}
     return pd.DataFrame(data, index=indices)

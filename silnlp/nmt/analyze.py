@@ -25,7 +25,7 @@ from ..common.utils import get_git_revision_hash
 from .config import Config, create_model, load_config, set_tf_log_level
 from .runner import make_inference_dataset
 from .transformer import SILTransformer
-from .utils import decode_sp, encode_sp, get_best_model_dir, get_last_checkpoint, enable_memory_growth
+from .utils import decode_sp, encode_sp, get_best_model_dir, get_last_checkpoint
 
 
 def create_test_dataset(config: Config) -> lit_dataset.Dataset:
@@ -422,7 +422,9 @@ def main() -> None:
         tf.config.run_functions_eagerly(True)
 
     if args.memory_growth:
-        enable_memory_growth()
+        gpus = tf.config.list_physical_devices(device_type="GPU")
+        for device in gpus:
+            tf.config.experimental.set_memory_growth(device, enable=True)
 
     checkpoints: Set[str] = set()
     if args.avg:

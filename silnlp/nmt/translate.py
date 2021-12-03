@@ -1,31 +1,28 @@
 import argparse
 import os
 import time
-import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, Optional
 
 import tensorflow as tf
-from machine.scripture import book_number_to_id, get_books
+from machine.scripture import book_id_to_number
 
 from ..common.clearml import SILClearML
 from ..common.environment import SIL_NLP_ENV
 from ..common.paratext import book_file_name_digits
 from ..common.translator import Translator
 from ..common.utils import get_git_revision_hash
-from .config import Config, create_runner, get_checkpoint_path
-from .utils import decode_sp_lines, enable_memory_growth, encode_sp
-
-LOGGER = logging.getLogger(__name__)
+from .config import Config, create_runner, get_checkpoint_path, load_config
+from .utils import decode_sp_lines, encode_sp, get_best_model_dir, get_last_checkpoint
 
 
 class NMTTranslator(Translator):
-    def __init__(self, config: Config, checkpoint_path: Optional[Path]):
+    def __init__(self, config: Config, checkpoint_path: Optional[Path], memory_growth: bool):
         self._multiple_trg_isos = len(config.trg_isos) > 1
         self._default_trg_iso = config.default_trg_iso
         self.checkpoint_path = checkpoint_path
-        self._runner = create_runner(config)
+        self._runner = create_runner(config, memory_growth=memory_growth)
         self._src_spp = config.create_src_sp_processor()
 
     def translate(
@@ -49,6 +46,7 @@ class NMTTranslator(Translator):
 class TranslationTask:
     name: str
     checkpoint: str = "last"
+    memory_growth: bool = False
     clearml_queue: Optional[str] = None
 
     def __post_init__(self):
@@ -58,54 +56,46 @@ class TranslationTask:
 
     def init_translation_task(self, experiment_suffix: str):
         self.clearml = SILClearML(
-            self.name,
-            self.clearml_queue,
-            project_suffix="_infer",
-            experiment_suffix=experiment_suffix,
+            self.name, self.clearml_queue, project_suffix="_infer", experiment_suffix=experiment_suffix
         )
-        self.name: str = self.clearml.name
-        self.config: Config = self.clearml.config
+        self.name = self.clearml.get_remote_name()
 
         SIL_NLP_ENV.copy_experiment_from_bucket(
             self.name, extensions=(".vocab", ".model", ".yml", "dict.src.txt", "dict.trg.txt")
         )
 
+        self.config: Config = self.clearml.load_config()
         self.config.set_seed()
 
         checkpoint_path, step = get_checkpoint_path(self.config.model_dir, self.checkpoint)
-        self.translator = NMTTranslator(config=self.config, checkpoint_path=checkpoint_path)
+        self.translator = NMTTranslator(
+            config=self.config, checkpoint_path=checkpoint_path, memory_growth=self.memory_growth
+        )
         self._step_str = "avg" if step == -1 else str(step)
 
-    def translate_books(
+    def translate_book(
         self,
-        books: str,
+        book: str,
         src_project: Optional[str] = None,
+        output_usfm: Optional[str] = None,
         trg_iso: Optional[str] = None,
     ):
-        self.init_translation_task(experiment_suffix=f"_{self.checkpoint}_{books}")
-        book_nums = get_books(books)
-
+        self.init_translation_task(experiment_suffix=f"_{self.checkpoint}_{book}")
         if src_project is None:
             if len(self.config.src_projects) != 1:
                 raise RuntimeError("A source project must be specified.")
             src_project = next(iter(self.config.src_projects))
 
-        output_dir = self.config.exp_dir / "infer" / self._step_str
-        output_dir.mkdir(exist_ok=True, parents=True)
+        default_output_dir = self.config.exp_dir / "infer" / self._step_str
+        output_path: Optional[Path] = None if output_usfm is None else Path(output_usfm)
+        if output_path is None:
+            book_num = book_id_to_number(book)
+            output_path = default_output_dir / f"{book_file_name_digits(book_num)}{book}.SFM"
+        elif output_path.name == output_path:
+            output_path = default_output_dir / output_path
 
-        displayed_error_already = False
-        for book_num in book_nums:
-            book = book_number_to_id(book_num)
-            output_path = output_dir / f"{book_file_name_digits(book_num)}{book}.SFM"
-            try:
-                LOGGER.info(f"Translating {book} ...")
-                self.translator.translate_book(src_project, book, output_path, trg_iso=trg_iso)
-            except Exception as e:
-                if not displayed_error_already:
-                    LOGGER.error(f"Was not able to translate {book}.  Error: {e.args[0]}")
-                    displayed_error_already = True
-                else:
-                    LOGGER.error(f"Was not able to translate {book}.")
+        output_path.parent.mkdir(exist_ok=True, parents=True)
+        self.translator.translate_book(src_project, book, output_path, trg_iso=trg_iso)
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
 
     def translate_text_files(
@@ -150,9 +140,7 @@ def main() -> None:
     parser.add_argument("--start-seq", default=None, type=int, help="Starting file sequence #")
     parser.add_argument("--end-seq", default=None, type=int, help="Ending file sequence #")
     parser.add_argument("--src-project", default=None, type=str, help="The source project to translate")
-    parser.add_argument(
-        "--books", metavar="books", nargs="+", default=[], help="The books to translate; e.g., 'NT', 'OT', 'GEN,EXO'"
-    )
+    parser.add_argument("--book", default=None, type=str, help="The book to translate")
     parser.add_argument("--trg-iso", default=None, type=str, help="The target language (iso code) to translate into")
     parser.add_argument("--output-usfm", default=None, type=str, help="The output USFM file path")
     parser.add_argument(
@@ -171,17 +159,17 @@ def main() -> None:
     if args.eager_execution:
         tf.config.run_functions_eagerly(True)
 
-    if args.memory_growth:
-        enable_memory_growth()
-
     translator = TranslationTask(
         name=args.experiment,
         checkpoint=args.checkpoint,
+        memory_growth=args.memory_growth,
         clearml_queue=args.clearml_queue,
     )
 
-    if args.books is not None:
-        translator.translate_books(args.books, src_project=args.src_project, trg_iso=args.trg_iso)
+    if args.book is not None:
+        translator.translate_book(
+            args.book, src_project=args.src_project, output_usfm=args.output_usfm, trg_iso=args.trg_iso
+        )
     elif args.src_prefix is not None:
         translator.translate_text_files(args.src_prefix, args.trg_prefix, args.start_seq, args.end_seq, args.trg_iso)
     elif args.src is not None:
