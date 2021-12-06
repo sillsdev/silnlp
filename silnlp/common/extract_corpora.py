@@ -47,10 +47,8 @@ def main() -> None:
 
     # Process the projects that have data and tell the user.
     if len(projects_found) > 0:
-        include_books: List[str] = [book.strip("*") for book in args.include]
-        exclude_books: List[str] = [book.strip("*") for book in args.exclude]
-        include_books_set = get_books(include_books) if len(include_books) > 0 else None
-        exclude_books_set = get_books(exclude_books) if len(exclude_books) > 0 else None
+        include_books_set = get_books(args.include) if len(args.include) > 0 else None
+        exclude_books_set = get_books(args.exclude) if len(args.exclude) > 0 else None
 
         def filter_lines(verse_ref_str: str) -> bool:
             if include_books_set is None and exclude_books_set is None:

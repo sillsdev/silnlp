@@ -36,7 +36,7 @@ def main() -> None:
     for exp_name in args.experiments:
         config = load_config(exp_name)
         config.set_seed()
-        runner = create_runner(config, mixed_precision=args.mixed_precision, memory_growth=args.memory_growth)
+        runner = create_runner(config, mixed_precision=args.mixed_precision)
         runner.save_effective_config(str(config.exp_dir / f"effective-config-{rev_hash}.yml"), training=True)
 
         checkpoint_path: Optional[str] = None

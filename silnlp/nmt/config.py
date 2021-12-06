@@ -1671,13 +1671,8 @@ def set_tf_log_level(log_level: int = logging.INFO) -> None:
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 
-def create_runner(config: Config, mixed_precision: bool = False, memory_growth: bool = False) -> SILRunner:
+def create_runner(config: Config, mixed_precision: bool = False) -> SILRunner:
     set_tf_log_level()
-
-    if memory_growth:
-        gpus = tf.config.list_physical_devices(device_type="GPU")
-        for device in gpus:
-            tf.config.experimental.set_memory_growth(device, enable=True)
 
     model = create_model(config)
 
