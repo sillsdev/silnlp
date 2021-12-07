@@ -1,15 +1,16 @@
 import argparse
 import logging
 import os
-import tensorflow as tf
 from dataclasses import dataclass
-from typing import Optional, List
+from typing import Optional
+
+import tensorflow as tf
 
 logging.basicConfig()
 
+from ..common.clearml import SILClearML
 from ..common.environment import SIL_NLP_ENV
 from ..common.utils import get_git_revision_hash
-from ..common.clearml import SILClearML
 from .config import Config, create_runner
 from .test import test
 from .utils import enable_memory_growth
@@ -21,7 +22,7 @@ class SILExperiment:
     make_stats: bool = False
     mixed_precision: bool = False
     num_devices: int = 1
-    clearml_queue: str = None
+    clearml_queue: Optional[str] = None
 
     def __post_init__(self):
         self.clearml = SILClearML(self.name, self.clearml_queue)
@@ -43,7 +44,7 @@ class SILExperiment:
 
     def train(self):
         os.system("nvidia-smi")
-        os.environ["TF_DETERMINISTIC_OPS"] = "1"
+        # os.environ["TF_DETERMINISTIC_OPS"] = "1"
         SIL_NLP_ENV.copy_experiment_from_bucket(self.name, extensions=(".txt", ".vocab", ".model", ".yml", ".csv"))
 
         runner = create_runner(self.config, mixed_precision=self.mixed_precision)
