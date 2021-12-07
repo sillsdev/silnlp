@@ -41,7 +41,7 @@ class SILClearML:
             self._load_config()
 
             self.task.set_base_docker(
-                docker_cmd="silintlai/machine-silnlp:master-latest",
+                docker_image="silintlai/machine-silnlp:master-latest", docker_arguments="--pull always"
             )
             if self.queue_name is not None:
                 self.task.execute_remotely(queue_name=self.queue_name)
