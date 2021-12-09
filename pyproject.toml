@@ -56,6 +56,7 @@ sacrebleu = "^1.5.1"
 sil-machine = {extras = ["thot"], version = "^0.4.1"}
 ctranslate2 = "^2.8.1"
 tensorflow-addons = "0.15"
+langcodes = "^3.3.0"
 
 [tool.poetry.dev-dependencies]
 mypy = "^0.812"

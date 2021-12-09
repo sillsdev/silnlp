@@ -24,6 +24,8 @@ from .corpus import get_terms_glosses_path, get_terms_metadata_path, get_terms_v
 from .environment import SIL_NLP_ENV
 from .utils import unique_list
 
+from langcodes import *
+
 _TERMS_LISTS = {
     "Major": "BiblicalTerms.xml",
     "All": "AllBiblicalTerms.xml",
@@ -43,11 +45,17 @@ def get_project_dir(project: str) -> Path:
     return SIL_NLP_ENV.pt_projects_dir / project
 
 
+def normalize_iso(iso: str):
+    if tag_is_valid(iso):
+        return Language.get(iso).to_alpha3()
+    return iso
+
+
 def get_iso(settings_tree: etree.ElementTree) -> str:
     iso = settings_tree.getroot().findtext("LanguageIsoCode")
     assert iso is not None
     index = iso.index(":")
-    return iso[:index]
+    return normalize_iso(iso[:index])
 
 
 def extract_project(
