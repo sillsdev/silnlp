@@ -57,6 +57,7 @@ def extract_project(
     exclude_books: List[str] = [],
     include_markers: bool = False,
     extract_lemmas: bool = False,
+    record_dropped_verses: bool = False,
 ) -> Tuple[Path, int]:
     settings_tree = parse_project_settings(project_dir)
     iso = get_iso(settings_tree)
@@ -106,16 +107,29 @@ def extract_project(
     output_filename = output_dir / f"{output_basename}.txt"
 
     try:
+        if record_dropped_verses:
+            versification_issues_filename = output_dir / f"{output_basename}_versification.txt"
+            ref_corpus_ids = set(t.id for t in ref_corpus.texts)
+            versification_issues_fh = versification_issues_filename.open("w", encoding="utf-8", newline="\n")
+            versification_issues_fh.write(f"{project_corpus._versification._name}\n")
+
         parallel_corpus = ParallelTextCorpus(ref_corpus, project_corpus)
         segment_count = 0
         with output_filename.open("w", encoding="utf-8", newline="\n") as output_stream, parallel_corpus.get_segments(
-            all_source_segments=True
+            all_source_segments=True, all_target_segments=record_dropped_verses
         ) as segments:
             cur_ref: Optional[VerseRef] = None
             cur_target_line = ""
             cur_target_line_range = True
             for segment in segments:
                 ref: VerseRef = segment.segment_ref
+                if record_dropped_verses:
+                    if segment.source_segment != ["placeholder"]:
+                        if segment.source_segment == []:
+                            versification_issues_fh.write(f"{ref}; {segment.target_segment}")
+                            continue
+                        else:
+                            a = 1
                 if cur_ref is not None and ref.compare_to(cur_ref, compare_segments=False) != 0:
                     output_stream.write(("<range>" if cur_target_line_range else cur_target_line) + "\n")
                     segment_count += 1
