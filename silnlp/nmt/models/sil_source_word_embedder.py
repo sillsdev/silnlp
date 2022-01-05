@@ -28,8 +28,12 @@ class SILSourceWordEmbedder(WordEmbedder):
         else:
             features = super().make_features(element=element[0], features=features, training=training)
             if not training and "ref" not in features:
-                features["ref"] = get_all_verse_refs(element[1])
-                features["ref_length"] = tf.shape(features["ref"])[0]
+                if tf.strings.length(element[1]) == 0:
+                    ref = tf.constant([""], dtype=tf.string)
+                else:
+                    ref = get_all_verse_refs(element[1])
+                features["ref"] = ref
+                features["ref_length"] = tf.shape(ref)[0]
         return features
 
     def input_signature(self):
