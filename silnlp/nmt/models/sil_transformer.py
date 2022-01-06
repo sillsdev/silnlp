@@ -23,7 +23,7 @@ from .decoding import DictionaryGuidedBeamSearch
 from .sil_self_attention_decoder import SILSelfAttentionDecoder
 from .sil_self_attention_encoder import SILSelfAttentionEncoder
 from .sil_source_word_embedder import SILSourceWordEmbedder
-from .trie import Trie
+from .trie import Trie, TrieCompiler
 
 
 class SILTransformer(Transformer):
@@ -143,7 +143,7 @@ class SILTransformer(Transformer):
         ref_dict_path: Optional[str] = data_config.get("ref_dictionary")
         if src_dict_path is not None and trg_dict_path is not None and ref_dict_path is not None:
             self.labels_inputter.set_decoder_mode(enable=False, mark_start=False, mark_end=False)
-            dictionary = Trie(self.features_inputter.vocabulary_size)
+            dictionary_compiler = TrieCompiler(self.features_inputter.vocabulary_size)
             with tf.io.gfile.GFile(src_dict_path) as src_dict, tf.io.gfile.GFile(
                 trg_dict_path
             ) as trg_dict, tf.io.gfile.GFile(ref_dict_path) as ref_dict:
@@ -154,10 +154,9 @@ class SILTransformer(Transformer):
                     trg_ids = [self.labels_inputter.make_features(tf.constant(te.strip()))["ids"] for te in trg_entry]
                     refs = ref_entry_str.strip().split("\t")
                     for src_variant_ids in src_ids:
-                        dictionary.add(src_variant_ids, trg_ids, refs)
-            if not dictionary.empty:
-                dictionary.compile()
-                self._dictionary = dictionary
+                        dictionary_compiler.add(src_variant_ids, trg_ids, refs)
+            if not dictionary_compiler.empty:
+                self._dictionary = dictionary_compiler.compile()
             self.labels_inputter.set_decoder_mode(mark_start=True, mark_end=True)
 
     def analyze(self, features):

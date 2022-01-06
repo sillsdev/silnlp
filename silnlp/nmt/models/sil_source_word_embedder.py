@@ -38,8 +38,8 @@ class SILSourceWordEmbedder(WordEmbedder):
 
     def input_signature(self):
         signature = super().input_signature()
-        signature["ref"] = tf.TensorSpec([None], tf.string)
-        signature["ref_length"] = tf.TensorSpec([], tf.int32)
+        signature["ref"] = tf.TensorSpec([None, None], tf.string)
+        signature["ref_length"] = tf.TensorSpec([None], tf.int32)
         return signature
 
 
