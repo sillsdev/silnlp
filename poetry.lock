@@ -739,8 +739,8 @@ python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*, !=3.5.*"
 
 [[package]]
 name = "libclang"
-version = "12.0.0"
-description = "Clang Python Bindings, mirrored from the official LLVM repo: https://github.com/llvm/llvm-project/tree/main/clang/bindings/python, to make the installation process easier."
+version = "11.1.0"
+description = "Clang Python Bindings, mirrored from the official LLVM repo: https://github.com/llvm/llvm-project/tree/master/clang/bindings/python, to make the installation process easier."
 category = "main"
 optional = false
 python-versions = "*"
@@ -1902,7 +1902,7 @@ testing = ["pytest (>=4.6)", "pytest-checkdocs (>=2.4)", "pytest-flake8", "pytes
 [metadata]
 lock-version = "1.1"
 python-versions = ">=3.7,<3.9"
-content-hash = "8489ebeaa00ef18f1b75b0baf268a79216100db0ce9f305c646ee23a87506ce4"
+content-hash = "ad45adcc716ee57779cb91c6f7def857a58a560e20dac232ee4241a5d5e57fe2"
 
 [metadata.files]
 absl-py = [
@@ -2326,11 +2326,10 @@ lazy-object-proxy = [
     {file = "lazy_object_proxy-1.6.0-cp39-cp39-win_amd64.whl", hash = "sha256:f5144c75445ae3ca2057faac03fda5a902eff196702b0a24daf1d6ce0650514b"},
 ]
 libclang = [
-    {file = "libclang-12.0.0-py2.py3-none-macosx_10_9_x86_64.whl", hash = "sha256:3b0585dbdc3f3b372340f1efe7c28bf4a5b658d2fb8dc0544a7ef0d2bef40618"},
-    {file = "libclang-12.0.0-py2.py3-none-macosx_11_0_arm64.whl", hash = "sha256:6df2f8a2cb75181e3c1e99e5dfca2fd44bb7f84ed12d5112541e03c10384f306"},
-    {file = "libclang-12.0.0-py2.py3-none-manylinux1_x86_64.whl", hash = "sha256:b828cb52cf3f02fb0e0a8fddb9dece7e2ed006f8b4d54ee811cef0471d414367"},
-    {file = "libclang-12.0.0-py2.py3-none-manylinux2014_aarch64.whl", hash = "sha256:275126823c60ab5c9fae6a433cbb6a47e4d1b5f668a985fbd6065553dbc7efcc"},
-    {file = "libclang-12.0.0-py2.py3-none-win_amd64.whl", hash = "sha256:fadad3bf5fbab50c996eb151adc58c3a7cbee45a9135060c416be7b640372112"},
+    {file = "libclang-11.1.0-py2.py3-none-macosx_10_9_x86_64.whl", hash = "sha256:c9680adc86aaa15f3bd8271218415cae9356b7c4341313dba812991a56e1b7cb"},
+    {file = "libclang-11.1.0-py2.py3-none-manylinux1_x86_64.whl", hash = "sha256:d8ec7b750c4bf9433340570852ffd0816ccd4ce81548705724aa2d89f37f7329"},
+    {file = "libclang-11.1.0-py2.py3-none-manylinux2014_aarch64.whl", hash = "sha256:39d07c8965a3c963fb2686496339b6dbacf42acbd32e4bc7361373a45e98cebe"},
+    {file = "libclang-11.1.0-py2.py3-none-win_amd64.whl", hash = "sha256:8cb0082a30b9e1e615d7f4211b0c428b607a9bd1e43ddc6c0cabdd9ea5b244bf"},
 ]
 lit-nlp = [
     {file = "lit_nlp-0.3-py3-none-any.whl", hash = "sha256:e099975a639267a89e1a22dd90c4c1a459bb22ad4ec385d0b4d02bcf5a301250"},
