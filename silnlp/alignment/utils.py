@@ -39,7 +39,7 @@ def compute_alignment_score(
     unaligned_trg_indices: Set[int] = set(range(len(trg_words)))
     unaligned_src_indices: Set[int] = set(range(len(src_words)))
     for pair in pairs:
-        if pair != "":
+        if pair != "" and pair != "\n":
             prop_parts = pair.split(":")
             parts = prop_parts[0].split("-")
             i = int(parts[0])
