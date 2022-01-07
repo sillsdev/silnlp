@@ -3,7 +3,7 @@ import logging
 import os
 import glob
 import filecmp
-from typing import List
+from typing import List, Iterable
 from pathlib import Path
 import re
 import string
@@ -20,6 +20,7 @@ logging.basicConfig()
 
 first_time_diff: bool = True
 wrap_format = None
+text_align_format = None
 normal_format = None
 equal_format = None
 insert_format = None
@@ -27,6 +28,16 @@ replace_format = None
 delete_format = None
 unknown_format = None
 
+VREF = 'VREF'
+SRC_SENTENCE = 'Source Sentence'
+TRG_SENTENCE = 'Target Sentence'
+EXP1_SRC_TOKENS = "Exp1 Source Tokens"
+EXP2_SRC_TOKENS = "Exp2 Source Tokens"
+EXP1_PREDICTION = "Exp1 Prediction"
+EXP2_PREDICTION = "Exp2 Prediction"
+EXP1_SCORE = "Exp1 Score"
+EXP2_SCORE = "Exp2 Score"
+SCORE_DELTA = "Score Delta"
 
 def sentence_bleu(
     hypothesis: str,
@@ -57,7 +68,7 @@ def sentence_bleu(
 def add_histogram(df: pd.DataFrame, sheet, exp1: str, exp2: str):
     graph = f"{sheet.name}.jpg"
     # Create the histogram
-    ax = df['Score_Delta'].plot.hist(bins=20,
+    ax = df[SCORE_DELTA].plot.hist(bins=20,
                                      figsize=(8, 3),
                                      grid=True,
                                      title=f'{exp1} vs {exp2}',
@@ -65,9 +76,9 @@ def add_histogram(df: pd.DataFrame, sheet, exp1: str, exp2: str):
                                      ylabel='Number of Verses'
                                      )
     # Calculate the mean, median, and STD
-    score_delta_mean = df['Score_Delta'].mean()
-    score_delta_median = df['Score_Delta'].median()
-    score_delta_std = df['Score_Delta'].std()
+    score_delta_mean = df[SCORE_DELTA].mean()
+    score_delta_median = df[SCORE_DELTA].median()
+    score_delta_std = df[SCORE_DELTA].std()
     # Display the mean, median, and STD
     props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
     text_str = f'Mean: {score_delta_mean:.2f}\nMedian: {score_delta_median:.2f}\nSTD: {score_delta_std:.2f}'
@@ -80,8 +91,8 @@ def add_histogram(df: pd.DataFrame, sheet, exp1: str, exp2: str):
 
 
 def adjust_column_widths(df: pd.DataFrame, sheet, col_width: int):
-    # Iterate through each column and set the width == the max length in that column.  If the max length is > 45,
-    # set the column width to 45 and enable word wrapping
+    # Iterate through each column and set the width == the max length in that column.  If the max length is too high,
+    # set the column width to the max and enable word wrapping
     for i, col in enumerate(df.columns):
         # find length of column i
         column_len = df[col].astype(str).str.len().max()
@@ -126,16 +137,12 @@ def split_punct(s: str):
     return re.findall(all_punctuation, s)
 
 
-def load_words(word_file: Path, decode: bool = True) -> List[str]:
+def load_words(lines: Iterable[str]) -> List[str]:
     unique_words: List[str] = []
-    for train_str in load_corpus(word_file):
-        if decode:
-            line_words = decode_sp(train_str).split(' ')
-        else:
-            line_words = train_str.split(' ')
-        for line_word in line_words:
+    for train_str in lines:
+        for line_word in train_str.split(' '):
             stripped_word = strip_punct(line_word.lower())
-            if stripped_word is not "" and stripped_word not in unique_words:
+            if stripped_word != "" and stripped_word not in unique_words:
                 unique_words.append(stripped_word)
     unique_words.sort()
     return unique_words
@@ -147,13 +154,13 @@ def split_words(s: str) -> List[str]:
 
 def apply_unknown_formatting(df: pd.DataFrame, sheet, histogram_offset: int, corpus: str,
                              corpus_words: List[str]):
-    sheet.write_rich_string('I6', unknown_format, 'Orange (underline)', normal_format, ': Unknown source word')
-    if corpus is 'src':
+    sheet.write_rich_string('F6', unknown_format, 'Orange (underline)', normal_format, ': Unknown source word')
+    if corpus == 'src':
         column = 'B'
-        column_name = 'Source_Sentence'
+        column_name = SRC_SENTENCE
     else:
         column = 'C'
-        column_name = 'Target_Sentence'
+        column_name = TRG_SENTENCE
     for index, row in df.iterrows():
         text = row[column_name]
         segments = []
@@ -161,18 +168,18 @@ def apply_unknown_formatting(df: pd.DataFrame, sheet, histogram_offset: int, cor
         s = ""
         for word in split_words(text):
             if strip_punct(word.lower()) in corpus_words:
-                if last_state is not 'known':
+                if last_state != 'known':
                     last_state = 'known'
-                    if s is not '':
+                    if s != '':
                         segments.append(s)
                     segments.append(normal_format)
                     s = word + ' '
                 else:
                     s = s + word + ' '
             else:
-                if last_state is not 'unknown':
+                if last_state != 'unknown':
                     last_state = 'unknown'
-                    if s is not '':
+                    if s != '':
                         segments.append(s)
                     segments.append(unknown_format)
                     s = word + ' '
@@ -185,35 +192,35 @@ def apply_unknown_formatting(df: pd.DataFrame, sheet, histogram_offset: int, cor
 
 
 def apply_diff_formatting(df: pd.DataFrame, sheet, histogram_offset: int):
-    sheet.write_rich_string('I2', equal_format, 'Green', normal_format, ': matching text')
-    sheet.write_rich_string('I3', insert_format, 'Blue (italics)', normal_format, ': text inserted in prediction')
-    sheet.write_rich_string('I4', delete_format, 'Red', normal_format, ': text missing from prediction')
-    sheet.write_rich_string('I5', replace_format, 'Purple (bold)', normal_format, ': text replaced in prediction')
+    sheet.write_rich_string('F2', equal_format, 'Green', normal_format, ': matching text')
+    sheet.write_rich_string('F3', insert_format, 'Blue (italics)', normal_format, ': text inserted in prediction')
+    sheet.write_rich_string('F4', delete_format, 'Red', normal_format, ': text missing from prediction')
+    sheet.write_rich_string('F5', replace_format, 'Purple (bold)', normal_format, ': text replaced in prediction')
 
     for index, row in df.iterrows():
-        ref = row['Target_Sentence']
-        p1 = row['Exp1_Prediction']
-        p2 = row['Exp2_Prediction']
+        ref = row[TRG_SENTENCE]
+        p1 = row[EXP1_PREDICTION]
+        p2 = row[EXP2_PREDICTION]
         if ref != "":
             if p1 != "" and p1 != ref:
                 segments = get_diff_segments(ref, p1)
-                sheet.write_rich_string(f'D{histogram_offset+index+2}', *segments)
-                sheet.write_comment(f'D{histogram_offset+index+2}', p1)
+                sheet.write_rich_string(f'E{histogram_offset+index+2}', *segments)
+                sheet.write_comment(f'E{histogram_offset+index+2}', p1)
             if p2 != "" and p2 != ref:
                 segments = get_diff_segments(ref, p2)
-                sheet.write_rich_string(f'E{histogram_offset+index+2}', *segments)
-                sheet.write_comment(f'E{histogram_offset+index+2}', p2)
+                sheet.write_rich_string(f'G{histogram_offset+index+2}', *segments)
+                sheet.write_comment(f'G{histogram_offset+index+2}', p2)
 
 
 def add_training_corpora(writer, exp1_dir: Path, exp2_dir: Path, col_width: int):
     sheet_name = 'Training Data'
 
-    df = pd.DataFrame(columns=['Verse_Ref', 'Source', 'Target'])
+    df = pd.DataFrame(columns=[VREF, SRC_SENTENCE, TRG_SENTENCE])
 
     if os.path.exists(os.path.join(exp1_dir, 'train.vref.txt')):
-        df['Verse_Ref'] = list(load_corpus(Path(os.path.join(exp1_dir, 'train.vref.txt'))))
+        df[VREF] = list(load_corpus(Path(os.path.join(exp1_dir, 'train.vref.txt'))))
     elif exp2_dir is not None and os.path.exists(os.path.join(exp2_dir, 'train.vref.txt')):
-        df['Verse_Ref'] = list(load_corpus(Path(os.path.join(exp2_dir, 'train.vref.txt'))))
+        df[VREF] = list(load_corpus(Path(os.path.join(exp2_dir, 'train.vref.txt'))))
 
     df['Source'] = list(decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, 'train.src.txt')))))
     df['Target'] = list(decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, 'train.trg.txt')))))
@@ -234,14 +241,14 @@ def add_digits_analysis(writer, df: pd.DataFrame, col_width: int):
 
     digit_rows: List[List[str], List[str], List[str], List[str]] = []
     for index, row in df.iterrows():
-        vref = row['Verse_Ref']
-        trg = row['Target_Sentence']
+        vref = row[VREF]
+        trg = row[TRG_SENTENCE]
         if trg != "":
             trg_digits = get_digit_list(trg)
             if len(trg_digits) > 0:
-                src_digits = get_digit_list(row['Source_Sentence'])
-                p1_digits = get_digit_list(row['Exp1_Prediction'])
-                p2_digits = get_digit_list(row['Exp2_Prediction'])
+                src_digits = get_digit_list(row[SRC_SENTENCE])
+                p1_digits = get_digit_list(row[EXP1_PREDICTION])
+                p2_digits = get_digit_list(row[EXP2_PREDICTION])
                 all_digits = list(set(src_digits) | set(trg_digits) | set(p1_digits) | set(p2_digits))
                 for digit_str in all_digits:
                     digit_rows.append([vref, digit_str,
@@ -250,7 +257,7 @@ def add_digits_analysis(writer, df: pd.DataFrame, col_width: int):
                                        digit_str in p1_digits,
                                        digit_str in p2_digits])
 
-    digits_df = pd.DataFrame(digit_rows, columns=['Verse_Ref', 'Digits',
+    digits_df = pd.DataFrame(digit_rows, columns=[VREF, 'Digits',
                                                   'Source', 'Reference', 'Experiment1', 'Experiment2'])
 
     digits_df.to_excel(writer, index=False, sheet_name=sheet_name)
@@ -260,17 +267,18 @@ def add_digits_analysis(writer, df: pd.DataFrame, col_width: int):
 
 def main() -> None:
     global wrap_format
+    global text_align_format
     global normal_format
     global equal_format
     global replace_format
     global insert_format
     global delete_format
     global unknown_format
-    text_wrap_column_width = 45
+    text_wrap_column_width = 35
 
     parser = argparse.ArgumentParser(description="Compare the predictions across 2 experiments")
     parser.add_argument("exp1", type=str, help="Experiment 1 folder")
-    parser.add_argument("--exp2", type=str, default=None, help="Experiment 2 folder")
+    parser.add_argument("exp2", type=str, help="Experiment 2 folder")
     parser.add_argument("--last", default=False, action="store_true", help="Compare predictions from last checkpoints")
     parser.add_argument("--show-diffs", default=False, action="store_true",
                         help="Show difference (prediction vs reference")
@@ -287,22 +295,19 @@ def main() -> None:
 
     print("Git commit:", get_git_revision_hash())
 
+    histogram_offset = 15
+
     exp1_name = args.exp1
     exp1_dir = get_mt_exp_dir(exp1_name)
-    exp1_xls = os.path.join(exp1_dir, 'diff_predictions.xlsx')
-    if args.exp2 is None:
-        histogram_offset = 0
-        exp2_name = None
-        exp2_dir = None
-    else:
-        histogram_offset = 15
-        exp2_name = args.exp2
-        exp2_dir = get_mt_exp_dir(exp2_name)
+    exp2_name = args.exp2
+    exp2_dir = get_mt_exp_dir(exp2_name)
+    output_path = os.path.join(exp1_dir, 'diff_predictions.xlsx')
 
     # Set up to generate the Excel output
-    writer: pd.ExcelWriter = pd.ExcelWriter(exp1_xls, engine='xlsxwriter')
+    writer: pd.ExcelWriter = pd.ExcelWriter(output_path, engine='xlsxwriter')
     workbook = writer.book
     wrap_format = workbook.add_format({'text_wrap': True})
+    text_align_format = workbook.add_format({'align': 'left', 'valign': 'left'})
     normal_format = workbook.add_format({'color': 'black'})
     equal_format = workbook.add_format({'color': 'green'})
     insert_format = workbook.add_format({'color': 'blue', 'italic': True})
@@ -340,18 +345,18 @@ def main() -> None:
     vref_file = None        # Are VREF's available, and do they match?
     if os.path.exists(os.path.join(exp1_dir, 'test.vref.txt')):
         vref_file = os.path.join(exp1_dir, 'test.vref.txt')
-        if exp2_dir is not None and os.path.exists(os.path.join(exp2_dir, 'test.vref.txt')) and \
+        if os.path.exists(os.path.join(exp2_dir, 'test.vref.txt')) and \
            not filecmp.cmp(os.path.join(exp1_dir, 'test.vref.txt'), os.path.join(exp2_dir, 'test.vref.txt')):
             print(f'{exp1_name} and {exp2_name} have different test set verse references; exiting')
             return
-    elif exp2_dir is not None and os.path.exists(os.path.join(exp2_dir, 'test.vref.txt')):
+    elif os.path.exists(os.path.join(exp2_dir, 'test.vref.txt')):
         vref_file = os.path.join(exp2_dir, "test.vref.text")
 
     if args.show_unknown:
-        src_words = load_words(Path(os.path.join(exp1_dir, "train.src.txt")), True)
-        trg_words = load_words(Path(os.path.join(exp1_dir, "train.trg.txt")), True)
+        src_words = load_words(decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, "train.src.txt")))))
+        trg_words = load_words(decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, "train.trg.txt")))))
 
-    if exp1_type is 'NMT':              # NMT experiment
+    if exp1_type == 'NMT':              # NMT experiment
         model_dir = exp1_dir / 'run'
         _, exp1_step = get_last_checkpoint(model_dir) if args.last else get_best_model_dir(model_dir)
         exp1_file_name = glob.glob(os.path.join(exp1_dir, f'test.trg-predictions.detok.txt.*{exp1_step}'))[0]
@@ -364,56 +369,46 @@ def main() -> None:
     print(f'Experiment 1: {exp1_file_name}')
     sheet_name = f'{exp1_step}'
 
-    if exp2_dir is not None:
-        if exp2_type is 'NMT':          # NMT experiment
-            model_dir = exp2_dir / 'run'
-            _, exp2_step = get_last_checkpoint(model_dir) if args.last else get_best_model_dir(model_dir)
-            exp2_file_name = glob.glob(os.path.join(exp2_dir, f'test.trg-predictions.detok.txt.*{exp2_step}'))[0]
-        else:                           # SMT experiment
-            exp1_step = 0
-            exp2_file_name = os.path.join(exp2_dir, 'test.trg-predictions.txt')
-        if not os.path.exists(exp2_file_name):
-            print(f'Predictions file (best) not found: {exp2_file_name}')
-            return
-        print(f'-- vs Experiment 2: {exp2_file_name}')
-        sheet_name += f' vs {exp2_step}'
+    if exp2_type == 'NMT':          # NMT experiment
+        model_dir = exp2_dir / 'run'
+        _, exp2_step = get_last_checkpoint(model_dir) if args.last else get_best_model_dir(model_dir)
+        exp2_file_name = glob.glob(os.path.join(exp2_dir, f'test.trg-predictions.detok.txt.*{exp2_step}'))[0]
+    else:                           # SMT experiment
+        exp1_step = 0
+        exp2_file_name = os.path.join(exp2_dir, 'test.trg-predictions.txt')
+    if not os.path.exists(exp2_file_name):
+        print(f'Predictions file (best) not found: {exp2_file_name}')
+        return
+    print(f'-- vs Experiment 2: {exp2_file_name}')
+    sheet_name += f' vs {exp2_step}'
 
     # Create the initial data frame
-    df = pd.DataFrame(columns=['Verse_Ref', 'Source_Sentence', 'Target_Sentence', 'Exp1_Prediction',
-                               'Exp2_Prediction', 'Exp1_Score', 'Exp2_Score', 'Score_Delta'])
+    df = pd.DataFrame(columns=[VREF, SRC_SENTENCE, TRG_SENTENCE, EXP1_SRC_TOKENS, EXP1_PREDICTION,
+                               EXP2_SRC_TOKENS, EXP2_PREDICTION, EXP1_SCORE, EXP2_SCORE, SCORE_DELTA])
     # Load the datasets
-    df['Source_Sentence'] = list(decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, 'test.src.txt')))))
-    df['Target_Sentence'] = list(load_corpus(Path(exp1_test_trg_filename)))
-    df['Exp1_Prediction'] = list(load_corpus(Path(exp1_file_name)))
-    if exp2_dir is not None:
-        df['Exp2_Prediction'] = list(load_corpus(Path(exp2_file_name)))
-    else:
-        df['Exp2_Prediction'] = ""
-    if vref_file is not None:
-        df['Verse_Ref'] = list(load_corpus(Path(vref_file)))
-    else:
-        df['Verse_Ref'] = ""
+    df[VREF] = list(load_corpus(Path(vref_file))) if vref_file is not None else ""
+    df[SRC_SENTENCE] = list(decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, 'test.src.txt')))))
+    df[TRG_SENTENCE] = list(load_corpus(Path(exp1_test_trg_filename)))
+    df[EXP1_SRC_TOKENS] = list(load_corpus(Path(os.path.join(exp1_dir, 'test.src.txt'))))
+    df[EXP1_PREDICTION] = list(load_corpus(Path(exp1_file_name)))
+    df[EXP2_SRC_TOKENS] = list(load_corpus(Path(os.path.join(exp2_dir, 'test.src.txt'))))
+    df[EXP2_PREDICTION] = list(load_corpus(Path(exp2_file_name)))
 
     # Calculate the sentence BLEU scores for each prediction
     exp1_scores: List[float] = []
     exp2_scores: List[float] = []
     for index, row in df.iterrows():
-        bleu = sentence_bleu(row['Exp1_Prediction'], [row['Target_Sentence']],
+        bleu = sentence_bleu(row[EXP1_PREDICTION], [row[TRG_SENTENCE]],
                              lowercase=not args.preserve_case, tokenize=args.tokenize)
         exp1_scores.append(bleu.score)
-        if exp2_dir is not None:
-            bleu = sentence_bleu(row['Exp2_Prediction'], [row['Target_Sentence']],
-                                 lowercase=not args.preserve_case, tokenize=args.tokenize)
-            exp2_scores.append(bleu.score)
+        bleu = sentence_bleu(row[EXP2_PREDICTION], [row[TRG_SENTENCE]],
+                             lowercase=not args.preserve_case, tokenize=args.tokenize)
+        exp2_scores.append(bleu.score)
 
     # Update the DF with the scores and score differences
-    df['Exp1_Score'] = exp1_scores
-    if exp2_dir is None:
-        df['Exp2_Score'] = ""
-        df['Score_Delta'] = ""
-    else:
-        df['Exp2_Score'] = exp2_scores
-        df['Score_Delta'] = df['Exp2_Score'] - df['Exp1_Score']
+    df[EXP1_SCORE] = exp1_scores
+    df[EXP2_SCORE] = exp2_scores
+    df[SCORE_DELTA] = df[EXP2_SCORE] - df[EXP1_SCORE]
 
     df.to_excel(writer, index=False, float_format="%.2f", sheet_name=sheet_name, startrow=histogram_offset)
     sheet = writer.sheets[sheet_name]
@@ -426,8 +421,7 @@ def main() -> None:
         apply_diff_formatting(df, sheet, histogram_offset)
 
     adjust_column_widths(df, sheet, text_wrap_column_width)
-    if exp2_dir is not None:
-        add_histogram(df, sheet, f'{args.exp1}({exp1_step})', f'{args.exp2}({exp2_step})')
+    add_histogram(df, sheet, f'{args.exp1}({exp1_step})', f'{args.exp2}({exp2_step})')
 
     if args.analyze_digits:
         add_digits_analysis(writer, df, text_wrap_column_width+20)
@@ -437,7 +431,7 @@ def main() -> None:
 
     writer.save()
 #    os.remove(exp1_graph)
-    print(f'Output is in {exp1_xls}')
+    print(f'Output is in {output_path}')
 
 
 if __name__ == "__main__":
