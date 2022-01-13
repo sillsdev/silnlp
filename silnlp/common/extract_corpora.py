@@ -42,6 +42,7 @@ def main() -> None:
     )
     parser.add_argument("--markers", default=False, action="store_true", help="Include USFM markers")
     parser.add_argument("--lemmas", default=False, action="store_true", help="Extract lemmas if available")
+    parser.add_argument("--project-vrefs", default=False, action="store_true", help="Extract project verse refs")
 
     parser.add_argument("--clearml", default=False, action="store_true", help="Register Extraction in ClearML")
 
@@ -74,7 +75,13 @@ def main() -> None:
             LOGGER.info(f"Extracting {project}...")
             project_dir = get_project_dir(project)
             corpus_filename, verse_count = extract_project(
-                project_dir, SIL_NLP_ENV.mt_scripture_dir, args.include, args.exclude, args.markers, args.lemmas
+                project_dir,
+                SIL_NLP_ENV.mt_scripture_dir,
+                args.include,
+                args.exclude,
+                args.markers,
+                args.lemmas,
+                args.project_vrefs,
             )
             # check if the number of lines in the file is correct (the same as vref.txt)
             LOGGER.info(f"# of Verses: {verse_count}")

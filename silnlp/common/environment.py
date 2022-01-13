@@ -94,7 +94,6 @@ class SilNlpEnv:
     def resolve_data_dir(self) -> Path:
         self.is_bucket = False
         sil_nlp_data_path = get_env_path("SIL_NLP_DATA_PATH", default="")
-        print(sil_nlp_data_path)
         if sil_nlp_data_path != "":
             temp_path = Path(sil_nlp_data_path)
             if temp_path.is_dir():

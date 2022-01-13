@@ -1,7 +1,8 @@
 import logging
 import os
+from contextlib import ExitStack
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, TextIO, Tuple
 from xml.sax.saxutils import escape
 
 import regex as re
@@ -57,6 +58,7 @@ def extract_project(
     exclude_books: List[str] = [],
     include_markers: bool = False,
     extract_lemmas: bool = False,
+    output_project_vrefs: bool = False,
 ) -> Tuple[Path, int]:
     settings_tree = parse_project_settings(project_dir)
     iso = get_iso(settings_tree)
@@ -104,25 +106,45 @@ def extract_project(
     elif extract_lemmas and ltg_dir.is_dir():
         output_basename += "-lemmas"
     output_filename = output_dir / f"{output_basename}.txt"
+    output_vref_filename = output_dir / f"{output_basename}.vref.txt"
 
     try:
         parallel_corpus = ParallelTextCorpus(ref_corpus, project_corpus)
         segment_count = 0
-        with output_filename.open("w", encoding="utf-8", newline="\n") as output_stream, parallel_corpus.get_segments(
-            all_source_segments=True
-        ) as segments:
+        with ExitStack() as stack:
+            output_stream = stack.enter_context(output_filename.open("w", encoding="utf-8", newline="\n"))
+            segments = stack.enter_context(parallel_corpus.get_segments(all_source_segments=True))
+            output_vref_stream: Optional[TextIO] = None
+            if output_project_vrefs:
+                output_vref_stream = stack.enter_context(output_vref_filename.open("w", encoding="utf-8", newline="\n"))
+
             cur_ref: Optional[VerseRef] = None
+            cur_trg_ref: Optional[VerseRef] = None
             cur_target_line = ""
             cur_target_line_range = True
             for segment in segments:
                 ref: VerseRef = segment.segment_ref
                 if cur_ref is not None and ref.compare_to(cur_ref, compare_segments=False) != 0:
                     output_stream.write(("<range>" if cur_target_line_range else cur_target_line) + "\n")
+                    if output_vref_stream is not None:
+                        output_vref_stream.write(("" if cur_trg_ref is None else str(cur_trg_ref)) + "\n")
                     segment_count += 1
                     cur_target_line = ""
                     cur_target_line_range = True
+                    cur_trg_ref = None
 
                 cur_ref = ref
+                if cur_trg_ref is None:
+                    cur_trg_ref = segment.target_segment_ref
+                elif segment.target_segment_ref is not None and cur_trg_ref != segment.target_segment_ref:
+                    cur_trg_ref.simplify()
+                    if cur_trg_ref < segment.target_segment_ref:
+                        start_ref = cur_trg_ref
+                        end_ref = segment.target_segment_ref
+                    else:
+                        start_ref = segment.target_segment_ref
+                        end_ref = cur_trg_ref
+                    cur_trg_ref = VerseRef.from_range(start_ref, end_ref)
                 if not segment.is_target_in_range or segment.is_target_range_start or len(segment.target_segment) > 0:
                     if len(segment.target_segment) > 0:
                         if len(cur_target_line) > 0:
@@ -130,11 +152,15 @@ def extract_project(
                         cur_target_line += segment.target_segment[0]
                     cur_target_line_range = False
             output_stream.write(("<range>" if cur_target_line_range else cur_target_line) + "\n")
+            if output_vref_stream is not None:
+                output_vref_stream.write(("" if cur_trg_ref is None else str(cur_trg_ref)) + "\n")
             segment_count += 1
         return output_filename, segment_count
     except:
         if output_filename.is_file():
             output_filename.unlink()
+        if output_vref_filename.is_file():
+            output_vref_filename.unlink()
         raise
 
 
