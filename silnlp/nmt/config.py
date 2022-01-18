@@ -610,9 +610,10 @@ class Config:
         self._multiple_test_iso_pairs = sum(1 for iso_pair in self._iso_pairs.values() if iso_pair.has_test_data) > 1
 
         if self._has_scripture_data:
-            data_config["eval_features_file"] = (
-                [str(exp_dir / self._val_src_filename()), str(exp_dir / self._val_vref_filename())],
-            )
+            data_config["eval_features_file"] = [
+                str(exp_dir / self._val_src_filename()),
+                str(exp_dir / self._val_vref_filename()),
+            ]
 
         parent: Optional[str] = self.data.get("parent")
         self.parent_config: Optional[Config] = None

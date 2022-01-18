@@ -1,4 +1,4 @@
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple, cast
 
 import tensorflow as tf
 import tensorflow_addons as tfa
@@ -158,6 +158,10 @@ class SILTransformer(Transformer):
             if not dictionary_compiler.empty:
                 self._dictionary = dictionary_compiler.compile()
             self.labels_inputter.set_decoder_mode(mark_start=True, mark_end=True)
+
+        cast(SILSequenceToSequenceInputter, self.examples_inputter).features_has_ref = isinstance(
+            data_config["eval_features_file"], list
+        )
 
     def analyze(self, features):
         # Encode the source.
@@ -472,10 +476,14 @@ class SILTransformer(Transformer):
 
 
 class SILSequenceToSequenceInputter(SequenceToSequenceInputter):
+    def __init__(self, features_inputter, labels_inputter, share_parameters=False):
+        super().__init__(features_inputter, labels_inputter, share_parameters)
+        self.features_has_ref = False
+
     def _structure(self):
         structure = []
         if isinstance(self.features_inputter, SILSourceWordEmbedder):
-            structure.append([None, None])
+            structure.append([None, None] if self.features_has_ref else None)
         elif isinstance(self.features_inputter, ParallelInputter):
             structure.append(self.features_inputter._structure())
         else:
