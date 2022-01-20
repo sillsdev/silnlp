@@ -338,7 +338,7 @@ class SILRunner(Runner):
 
     def infer_multiple(
         self,
-        features_paths: Union[List[str], List[List[str]]],
+        features_paths: List[Union[str, List[str]]],
         predictions_paths: List[str],
         checkpoint_path: Optional[str] = None,
     ) -> None:

@@ -3,7 +3,7 @@ import logging
 import random
 import sys
 from pathlib import Path
-from typing import IO, Dict, Iterable, List, Optional, Set, Tuple, cast
+from typing import IO, Dict, Iterable, List, Optional, Set, Tuple, Union, cast
 
 import numpy as np
 import sacrebleu
@@ -379,12 +379,17 @@ def test_checkpoint(
 
     checkpoint_name = "averaged checkpoint" if step == -1 else f"checkpoint {step}"
 
-    features_paths: List[List[str]] = []
+    features_paths: List[Union[str, List[str]]] = []
     predictions_paths: List[str] = []
     for i in range(len(predictions_file_names)):
         predictions_path = config.exp_dir / predictions_file_names[i]
         if force_infer or not predictions_path.is_file():
-            features_paths.append([str(config.exp_dir / features_file_names[i]), str(config.exp_dir / vref_paths[i])])
+            features_path = config.exp_dir / features_file_names[i]
+            vref_path = config.exp_dir / vref_paths[i]
+            if vref_path.is_file():
+                features_paths.append([str(features_path), str(vref_path)])
+            else:
+                features_paths.append(str(features_path))
             predictions_paths.append(str(predictions_path))
     if len(predictions_paths) > 0:
         runner = create_runner(config)
