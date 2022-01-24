@@ -1,10 +1,10 @@
 import argparse
+import logging
 import os
 import time
-import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, Optional
+from typing import Dict, Iterable, List, Optional, Union
 
 import tensorflow as tf
 from machine.scripture import book_number_to_id, get_books
@@ -29,9 +29,21 @@ class NMTTranslator(Translator):
         self._src_spp = config.create_src_sp_processor()
 
     def translate(
-        self, sentences: Iterable[str], src_iso: Optional[str] = None, trg_iso: Optional[str] = None
+        self,
+        sentences: Iterable[Union[str, List[str]]],
+        src_iso: Optional[str] = None,
+        trg_iso: Optional[str] = None,
     ) -> Iterable[str]:
-        features_list = [encode_sp(self._src_spp, self._insert_lang_tag(s, trg_iso)) for s in sentences]
+        features_list: List[List[str]] = [[]]
+        for sentence in sentences:
+            if isinstance(sentence, str):
+                features_list[0].append(encode_sp(self._src_spp, self._insert_lang_tag(sentence, trg_iso)))
+            else:
+                features_list[0].append(encode_sp(self._src_spp, self._insert_lang_tag(sentence[0], trg_iso)))
+                for i in range(1, len(sentence)):
+                    if i == len(features_list):
+                        features_list.append([])
+                    features_list[i].append(sentence[i])
         translations = self._runner.infer_list(
             features_list, checkpoint_path=str(self.checkpoint_path) if self.checkpoint_path is not None else None
         )
@@ -170,6 +182,7 @@ def main() -> None:
 
     if args.eager_execution:
         tf.config.run_functions_eagerly(True)
+        tf.data.experimental.enable_debug_mode()
 
     if args.memory_growth:
         enable_memory_growth()

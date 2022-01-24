@@ -136,7 +136,7 @@ def transfer_weights(
 
 def make_inference_dataset(
     model: Model,
-    features_list: List[str],
+    features_list: List[List[str]],
     batch_size: int,
     batch_type: str = "examples",
     length_bucket_width: int = None,
@@ -153,7 +153,11 @@ def make_inference_dataset(
 
     transform_fns = [lambda dataset: dataset.map(_map_fn, num_parallel_calls=num_threads or 1)]
 
-    dataset = tf.data.Dataset.from_tensor_slices(features_list)
+    if len(features_list) == 1:
+        dataset = tf.data.Dataset.from_tensor_slices(features_list[0])
+    else:
+        datasets = tuple(tf.data.Dataset.from_tensor_slices(f) for f in features_list)
+        dataset = tf.data.Dataset.zip(datasets)
     dataset = dataset.apply(
         inference_pipeline(
             batch_size,
@@ -298,7 +302,7 @@ class SILRunner(Runner):
         new_checkpoint.save(step=step)
         return output_dir
 
-    def infer_list(self, features_list: List[str], checkpoint_path: Optional[str] = None) -> List[List[str]]:
+    def infer_list(self, features_list: List[List[str]], checkpoint_path: Optional[str] = None) -> List[List[str]]:
         config = self._finalize_config()
         model: Model = self._init_model(config)
         checkpoint = Checkpoint.from_config(config, model)
@@ -317,7 +321,7 @@ class SILRunner(Runner):
             tf.get_logger().info("Tracing and optimizing the inference graph...")
             infer_fn.get_concrete_function()  # Trace the function now.
 
-        results: List[List[str]] = [[""]] * len(features_list)
+        results: List[List[str]] = [[""]] * len(features_list[0])
         for source in dataset:
             predictions = infer_fn(source)
             predictions = tf.nest.map_structure(lambda t: t.numpy(), predictions)

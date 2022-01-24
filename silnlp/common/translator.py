@@ -1,10 +1,10 @@
-import os
 import string
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Iterable, List, Optional, Union
+from typing import Iterable, List, Optional, Tuple, Union
 
 from lxml import etree
+from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
 
 from .. import sfm
 from ..sfm import usfm
@@ -27,7 +27,8 @@ class Paragraph:
 
 
 class Segment:
-    def __init__(self, paras: Iterable[Paragraph] = []):
+    def __init__(self, ref: VerseRef, paras: Iterable[Paragraph] = []):
+        self.ref = ref
         self.paras = list(paras)
 
     @property
@@ -47,7 +48,7 @@ class Segment:
         self.paras.clear()
 
     def copy(self) -> "Segment":
-        return Segment(p.copy() for p in self.paras if len(p.child_indices) > 0)
+        return Segment(self.ref.copy(), (p.copy() for p in self.paras if len(p.child_indices) > 0))
 
 
 def get_char_style_text(elem: sfm.Element) -> str:
@@ -78,6 +79,7 @@ def collect_segments_from_paragraph(segments: List[Segment], cur_elem: sfm.Eleme
                 if not cur_segment.is_empty:
                     segments.append(cur_segment.copy())
                 cur_segment.reset()
+                cur_segment.ref.verse = child.args[0]
                 cur_segment.paras.append(Paragraph(cur_elem))
             elif child.meta["StyleType"] == "Character" and child.name != "fig":
                 cur_segment.add_text(i, get_char_style_text(child))
@@ -85,18 +87,21 @@ def collect_segments_from_paragraph(segments: List[Segment], cur_elem: sfm.Eleme
             if i > 0 or child != "\n":
                 cur_segment.add_text(i, str(child))
 
-    cur_child_segment = Segment()
+    cur_child_segment = Segment(cur_segment.ref.copy())
+    cur_child_segment.ref.verse_num = 0
     for child in cur_elem:
         if isinstance(child, sfm.Element) and child.meta["StyleType"] == "Paragraph":
+            if child.name == "c":
+                cur_child_segment.ref.chapter = child.args[0]
             collect_segments_from_paragraph(segments, child, cur_child_segment)
     if not cur_child_segment.is_empty:
         segments.append(cur_child_segment)
 
 
-def collect_segments(doc: List[sfm.Element]) -> List[Segment]:
+def collect_segments(book: str, doc: List[sfm.Element]) -> List[Segment]:
     segments: List[Segment] = []
     for root in doc:
-        cur_segment = Segment()
+        cur_segment = Segment(VerseRef(book, 0, 0, ORIGINAL_VERSIFICATION))
         collect_segments_from_paragraph(segments, root, cur_segment)
         if not cur_segment.is_empty:
             segments.append(cur_segment)
@@ -153,7 +158,10 @@ def update_segments(segments: List[Segment], translations: List[str]) -> None:
 class Translator(ABC):
     @abstractmethod
     def translate(
-        self, sentences: Iterable[str], src_iso: Optional[str] = None, trg_iso: Optional[str] = None
+        self,
+        sentences: Iterable[Union[str, List[str]]],
+        src_iso: Optional[str] = None,
+        trg_iso: Optional[str] = None,
     ) -> Iterable[str]:
         pass
 
@@ -171,9 +179,15 @@ class Translator(ABC):
         with book_path.open(mode="r", encoding="utf-8") as book_file:
             doc = list(usfm.parser(book_file, stylesheet=usfm.relaxed_stylesheet, canonicalise_footnotes=False))
 
-        segments = collect_segments(doc)
+        segments = collect_segments(book, doc)
 
-        translations = list(self.translate((s.text.strip() for s in segments), src_iso=src_iso, trg_iso=trg_iso))
+        translations = list(
+            self.translate(
+                ([s.text.strip(), str(s.ref) if s.ref.verse_num != 0 else ""] for s in segments),
+                src_iso=src_iso,
+                trg_iso=trg_iso,
+            )
+        )
 
         update_segments(segments, translations)
 
