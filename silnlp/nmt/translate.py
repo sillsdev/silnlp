@@ -9,7 +9,7 @@ from typing import Dict, Iterable, List, Optional, Union
 import tensorflow as tf
 from machine.scripture import book_number_to_id, get_books
 
-from ..common.clearml import SILClearML
+from ..common.clearml_connection import SILClearML
 from ..common.environment import SIL_NLP_ENV
 from ..common.paratext import book_file_name_digits
 from ..common.translator import Translator

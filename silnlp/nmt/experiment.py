@@ -8,7 +8,7 @@ import tensorflow as tf
 
 logging.basicConfig()
 
-from ..common.clearml import SILClearML
+from ..common.clearml_connection import SILClearML
 from ..common.environment import SIL_NLP_ENV
 from ..common.utils import get_git_revision_hash
 from .config import Config, create_runner
