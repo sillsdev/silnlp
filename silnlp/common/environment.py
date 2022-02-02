@@ -150,7 +150,7 @@ class SilNlpEnv:
             rel_path = str(obj.object_key)[len_aqua_path:]
             if rel_path.endswith(extensions):
                 rel_folder = "/".join(rel_path.split("/")[:-1])
-                if (rel_folder == proj_name) or rel_folder.startswith(name):
+                if rel_path.startswith(name + "/"):
                     # copy over project files and experiment files
                     temp_dest_path = self.mt_experiments_dir / rel_path
                     temp_dest_path.parent.mkdir(parents=True, exist_ok=True)
