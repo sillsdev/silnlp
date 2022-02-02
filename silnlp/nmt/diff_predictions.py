@@ -27,6 +27,7 @@ insert_format = None
 replace_format = None
 delete_format = None
 unknown_format = None
+dictionary_format = None
 
 VREF = 'VREF'
 SRC_SENTENCE = 'Source Sentence'
@@ -38,6 +39,9 @@ EXP2_PREDICTION = "Exp2 Prediction"
 EXP1_SCORE = "Exp1 Score"
 EXP2_SCORE = "Exp2 Score"
 SCORE_DELTA = "Score Delta"
+DICT_SRC = "Source"
+DICT_TRG = "Target"
+
 
 def sentence_bleu(
     hypothesis: str,
@@ -212,6 +216,36 @@ def apply_diff_formatting(df: pd.DataFrame, sheet, histogram_offset: int):
                 sheet.write_comment(f'G{histogram_offset+index+2}', p2)
 
 
+def apply_dict_formatting(df: pd.DataFrame, sheet, histogram_offset: int, dictDf: pd.DataFrame):
+    sheet.write_rich_string('F7', dictionary_format, 'Green (underline)', normal_format, ': Source dictionary word')
+    column = 'B'
+    for index, row in df.iterrows():
+        text = row[SRC_SENTENCE]
+        segments = []
+        last_state = 'notdict'
+        s = ''
+        for word in split_words(text):
+            if (len(dictDf[dictDf[DICT_SRC] == strip_punct(word.lower())])):
+                if last_state != 'dict':
+                    last_state = 'dict'
+                    if s != '':
+                        segments.append(s)
+                        s = ''
+                    segments.append(dictionary_format)
+            else:
+                if last_state == 'dict':
+                    last_state = 'notdict'
+                    if s != '':
+                        segments.append(s)
+                        s = ''
+                    segments.append(normal_format)
+            s = s + word + ' '
+        segments.append(s)
+        if len(segments) > 2:
+            segments.append(wrap_format)
+            sheet.write_rich_string(f'{column}{histogram_offset+index+2}', *segments)
+
+
 def add_training_corpora(writer, exp1_dir: Path, exp2_dir: Path, col_width: int):
     sheet_name = 'Training Data'
 
@@ -230,6 +264,31 @@ def add_training_corpora(writer, exp1_dir: Path, exp2_dir: Path, col_width: int)
     sheet = writer.sheets[sheet_name]
     sheet.set_column(1, 2, col_width, wrap_format)
     sheet.autofilter(0, 0, df.shape[0], df.shape[1] - 1)
+
+
+def load_dictionary(exp1_dir: Path, exp2_dir: Path):
+    dictDf = pd.DataFrame(columns=[DICT_SRC, DICT_TRG])
+
+    src_file_name = os.path.join(exp1_dir, 'dict.src.txt')
+    trg_file_name = os.path.join(exp1_dir, 'dict.trg.txt')
+    if not os.path.exists(src_file_name) or not os.path.exists(trg_file_name):
+        src_file_name = os.path.join(exp2_dir, 'dict.src.txt')
+        trg_file_name = os.path.join(exp2_dir, 'dict.trg.txt')
+        if not os.path.exists(src_file_name) or not os.path.exists(trg_file_name):
+            print('Warning: no dictionary files available')
+            return None
+
+    dictDf[DICT_SRC] = [decode_sp(line.split('\t')[0]).lower() for line in load_corpus(Path(src_file_name))]
+    dictDf[DICT_TRG] = [decode_sp(line.split('\t')[0]).lower() for line in load_corpus(Path(trg_file_name))]
+    return dictDf
+
+
+def add_dictionary(writer, dictDf: pd.DataFrame, col_width: int):
+    sheet_name = 'Dictionary'
+    dictDf.to_excel(writer, index=False, sheet_name=sheet_name)
+    sheet = writer.sheets[sheet_name]
+    sheet.set_column(1, 2, col_width, wrap_format)
+    sheet.autofilter(0, 0, dictDf.shape[0], dictDf.shape[1] - 1)
 
 
 def get_digit_list(s: str) -> List[str]:
@@ -274,18 +333,24 @@ def main() -> None:
     global insert_format
     global delete_format
     global unknown_format
+    global dictionary_format
     text_wrap_column_width = 35
 
     parser = argparse.ArgumentParser(description="Compare the predictions across 2 experiments")
     parser.add_argument("exp1", type=str, help="Experiment 1 folder")
+    parser.add_argument("step1", type=int, help="Experiment 1 step")
     parser.add_argument("exp2", type=str, help="Experiment 2 folder")
-    parser.add_argument("--last", default=False, action="store_true", help="Compare predictions from last checkpoints")
+    parser.add_argument("step2", type=int, help="Experiment 2 step")
     parser.add_argument("--show-diffs", default=False, action="store_true",
                         help="Show difference (prediction vs reference")
     parser.add_argument("--show-unknown", default=False, action="store_true",
                         help="Show unknown words in source verse")
+    parser.add_argument("--show-dict", default=False, action="store_true",
+                        help="Show dictionary words in source verse")
     parser.add_argument("--include-train", default=False, action="store_true",
                         help="Include the src/trg training corpora in the spreadsheet")
+    parser.add_argument("--include-dict", default=False, action="store_true",
+                        help="Include the src/trg dictionary in the spreadsheet")
     parser.add_argument("--analyze-digits", default=False, action="store_true",help="Perform digits analysis")
     parser.add_argument("--preserve-case", default=False, action="store_true",
                         help="Score predictions with case preserved")
@@ -314,33 +379,10 @@ def main() -> None:
     delete_format = workbook.add_format({'color': 'red', 'font_strikeout': 1})
     replace_format = workbook.add_format({'color': 'purple', 'bold': True})
     unknown_format = workbook.add_format({'color': 'orange', 'underline': True})
+    dictionary_format = workbook.add_format({'color': 'green', 'underline': True})
 
-    exp1_type = ''
-    model_dir = exp1_dir / 'run'
-    if os.path.exists(model_dir):   # NMT experiment
-        exp1_type = 'NMT'
-        exp1_test_trg_filename = os.path.join(exp1_dir, 'test.trg.detok.txt')
-    else:
-        model_dir = exp1_dir / 'engine'
-        if os.path.exists(model_dir):   # SMT experiment
-            exp1_type = 'SMT'
-            exp1_test_trg_filename = os.path.join(exp1_dir, 'test.trg.txt')
-        else:
-            print('Unable to determine experiment 1 type (NMT, SMT)')
-            return
-    exp2_type = ''
-    model_dir = exp2_dir / 'run'
-    if os.path.exists(model_dir):   # NMT experiment
-        exp2_type = 'NMT'
-        exp2_test_trg_filename = os.path.join(exp2_dir, 'test.trg.detok.txt')
-    else:
-        model_dir = exp2_dir / 'engine'
-        if os.path.exists(model_dir):   # SMT experiment
-            exp2_type = 'SMT'
-            exp2_test_trg_filename = os.path.join(exp2_dir, 'test.trg.txt')
-        else:
-            print('Unable to determine experiment 2 type (NMT, SMT)')
-            return
+    exp1_test_trg_filename = os.path.join(exp1_dir, 'test.trg.detok.txt')
+    exp2_test_trg_filename = os.path.join(exp2_dir, 'test.trg.detok.txt')
 
     vref_file = None        # Are VREF's available, and do they match?
     if os.path.exists(os.path.join(exp1_dir, 'test.vref.txt')):
@@ -356,31 +398,21 @@ def main() -> None:
         src_words = load_words(decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, "train.src.txt")))))
         trg_words = load_words(decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, "train.trg.txt")))))
 
-    if exp1_type == 'NMT':              # NMT experiment
-        model_dir = exp1_dir / 'run'
-        _, exp1_step = get_last_checkpoint(model_dir) if args.last else get_best_model_dir(model_dir)
-        exp1_file_name = glob.glob(os.path.join(exp1_dir, f'test.trg-predictions.detok.txt.*{exp1_step}'))[0]
-    else:                               # SMT experiment
-        exp1_step = 0
-        exp1_file_name = os.path.join(exp1_dir, 'test.trg-predictions.txt')
+    exp1_file_name = os.path.join(exp1_dir, f'test.trg-predictions.detok.txt.{args.step1}')
     if not os.path.exists(exp1_file_name):
         print(f'Predictions file not found: {exp1_file_name}')
         return
     print(f'Experiment 1: {exp1_file_name}')
-    sheet_name = f'{exp1_step}'
+    sheet_name = f'{args.step1}'
 
-    if exp2_type == 'NMT':          # NMT experiment
-        model_dir = exp2_dir / 'run'
-        _, exp2_step = get_last_checkpoint(model_dir) if args.last else get_best_model_dir(model_dir)
-        exp2_file_name = glob.glob(os.path.join(exp2_dir, f'test.trg-predictions.detok.txt.*{exp2_step}'))[0]
-    else:                           # SMT experiment
-        exp1_step = 0
-        exp2_file_name = os.path.join(exp2_dir, 'test.trg-predictions.txt')
+    exp2_file_name = os.path.join(exp2_dir, f'test.trg-predictions.detok.txt.{args.step2}')
     if not os.path.exists(exp2_file_name):
         print(f'Predictions file (best) not found: {exp2_file_name}')
         return
     print(f'-- vs Experiment 2: {exp2_file_name}')
-    sheet_name += f' vs {exp2_step}'
+    sheet_name += f' vs {args.step2}'
+
+    dictDf = load_dictionary(exp1_dir, exp2_dir) if args.include_dict or args.show_dict else None
 
     # Create the initial data frame
     df = pd.DataFrame(columns=[VREF, SRC_SENTENCE, TRG_SENTENCE, EXP1_SRC_TOKENS, EXP1_PREDICTION,
@@ -419,15 +451,20 @@ def main() -> None:
         apply_unknown_formatting(df, sheet, histogram_offset, "trg", trg_words)
     if args.show_diffs:
         apply_diff_formatting(df, sheet, histogram_offset)
+    if args.show_dict and dictDf is not None:
+        apply_dict_formatting(df, sheet, histogram_offset, dictDf)
 
     adjust_column_widths(df, sheet, text_wrap_column_width)
-    add_histogram(df, sheet, f'{args.exp1}({exp1_step})', f'{args.exp2}({exp2_step})')
+    add_histogram(df, sheet, f'{args.exp1}({args.step1})', f'{args.exp2}({args.step2})')
 
     if args.analyze_digits:
         add_digits_analysis(writer, df, text_wrap_column_width+20)
 
     if args.include_train:
         add_training_corpora(writer, exp1_dir, exp2_dir, text_wrap_column_width+20)
+
+    if args.include_dict and dictDf is not None:
+        add_dictionary(writer, dictDf, text_wrap_column_width+20)
 
     writer.save()
 #    os.remove(exp1_graph)
