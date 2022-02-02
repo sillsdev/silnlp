@@ -367,6 +367,7 @@ def convert_vocab(sp_vocab_path: Path, onmt_vocab_path: Path) -> None:
 def build_vocab(
     file_paths: Iterable[Path],
     vocab_size: int,
+    vocab_type: str,
     casing: str,
     character_coverage: float,
     model_prefix: Path,
@@ -398,6 +399,7 @@ def build_vocab(
         normalization_rule_tsv=normalization_path,
         input=file_paths,
         model_prefix=model_prefix,
+        model_type=vocab_type,
         vocab_size=vocab_size,
         user_defined_symbols=user_defined_symbols,
         character_coverage="%.4f" % character_coverage,
@@ -527,6 +529,12 @@ class Config:
                 and "vocab_size" not in data_config
             ):
                 data_config["vocab_size"] = 24000
+            if (
+                "src_vocab_type" not in data_config
+                and "trg_vocab_type" not in data_config
+                and "vocab_type" not in data_config
+            ):
+                data_config["vocab_type"] = "unigram"
             if "src_casing" not in data_config and "trg_casing" not in data_config and "casing" not in data_config:
                 data_config["casing"] = "lower"
         else:
@@ -537,6 +545,11 @@ class Config:
                     data_config["src_vocab_size"] = 8000
                 if "trg_vocab_size" not in data_config:
                     data_config["trg_vocab_size"] = 8000
+            if "vocab_type" not in data_config:
+                if "src_vocab_type" not in data_config:
+                    data_config["src_vocab_type"] = "unigram"
+                if "trg_vocab_type" not in data_config:
+                    data_config["trg_vocab_type"] = "unigram"
             if "casing" not in data_config:
                 if "src_casing" not in data_config:
                     data_config["src_casing"] = "lower"
@@ -1475,6 +1488,17 @@ class Config:
                     )
             assert vocab_size is not None
 
+            vocab_type: Optional[int] = self.data.get("vocab_type")
+            if vocab_type is None:
+                vocab_type = self.data.get("src_vocab_type")
+                if vocab_type is None:
+                    vocab_type = self.data["trg_vocab_type"]
+                elif self.data.get("trg_vocab_type", vocab_type) != vocab_type:
+                    raise RuntimeError(
+                        "The source and target vocab types cannot be different when creating a shared vocab."
+                    )
+            assert vocab_type is not None
+
             casing: Optional[str] = self.data.get("casing")
             if casing is None:
                 casing = self.data.get("src_casing")
@@ -1492,6 +1516,7 @@ class Config:
             build_vocab(
                 share_vocab_file_paths,
                 vocab_size,
+                vocab_type,
                 casing,
                 character_coverage,
                 model_prefix,
@@ -1583,12 +1608,13 @@ class Config:
 
         LOGGER.info(f"Building {side} vocabulary...")
         vocab_size: int = self.data.get(f"{prefix}_vocab_size", self.data.get("vocab_size"))
+        vocab_type: str = self.data.get(f"{prefix}_vocab_type", self.data.get("vocab_type"))
         casing: str = self.data.get(f"{prefix}_casing", self.data.get("casing"))
         character_coverage: float = self.data.get(f"{prefix}_character_coverage", self.data.get("character_coverage"))
         tags = self._tags if side == "source" else set()
         max_train_size: int = self.data["sp_max_train_size"]
         build_vocab(
-            vocab_file_paths, vocab_size, casing, character_coverage, model_prefix, vocab_path, tags, max_train_size
+            vocab_file_paths, vocab_size, vocab_type, casing, character_coverage, model_prefix, vocab_path, tags, max_train_size
         )
 
     def _create_train_alignments(self, train_count: int) -> None:
