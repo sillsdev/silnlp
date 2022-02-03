@@ -129,7 +129,9 @@ class SilNlpEnv:
 
         raise FileExistsError("No valid path exists")
 
-    def copy_experiment_from_bucket(self, name: Union[str, Path], extensions: Union[str, Tuple[str, ...]] = ""):
+    def copy_experiment_from_bucket(
+        self, name: Union[str, Path], extensions: Union[str, Tuple[str, ...]] = "", copy_run: bool = False
+    ):
         if not self.is_bucket:
             return
         name = str(name)
@@ -148,20 +150,20 @@ class SilNlpEnv:
             return
         for obj in objs:
             rel_path = str(obj.object_key)[len_aqua_path:]
-            if rel_path.endswith(extensions):
-                rel_folder = "/".join(rel_path.split("/")[:-1])
-                if rel_path.startswith(name + "/"):
-                    # copy over project files and experiment files
-                    temp_dest_path = self.mt_experiments_dir / rel_path
-                    temp_dest_path.parent.mkdir(parents=True, exist_ok=True)
-                    if temp_dest_path.exists():
-                        curr_mod_time = datetime.fromtimestamp(os.path.getmtime(temp_dest_path), tz=timezone.utc)
-                        new_mod_time = obj.last_modified
-                        if curr_mod_time >= new_mod_time:
-                            LOGGER.info("File already exists in the cache: " + rel_path)
-                            continue
-                    LOGGER.info("Copying from bucket to local cache: " + rel_path)
-                    data_bucket.download_file(obj.object_key, str(temp_dest_path))
+            if (rel_path.endswith(extensions) and rel_path.startswith(name + "/")) or (
+                copy_run and rel_path.startswith(name + "/run/")
+            ):
+                # copy over project files and experiment files
+                temp_dest_path = self.mt_experiments_dir / rel_path
+                temp_dest_path.parent.mkdir(parents=True, exist_ok=True)
+                if temp_dest_path.exists():
+                    curr_mod_time = datetime.fromtimestamp(os.path.getmtime(temp_dest_path), tz=timezone.utc)
+                    new_mod_time = obj.last_modified
+                    if curr_mod_time >= new_mod_time:
+                        LOGGER.info("File already exists in the cache: " + rel_path)
+                        continue
+                LOGGER.info("Copying from bucket to local cache: " + rel_path)
+                data_bucket.download_file(obj.object_key, str(temp_dest_path))
 
     def copy_experiment_to_bucket(self, name: str, extensions: Union[str, Tuple[str, ...]] = ""):
         if not self.is_bucket:
