@@ -368,6 +368,7 @@ def build_vocab(
     file_paths: Iterable[Path],
     vocab_size: int,
     vocab_type: str,
+    vocab_seed: int,
     casing: str,
     character_coverage: float,
     model_prefix: Path,
@@ -395,6 +396,8 @@ def build_vocab(
     file_paths = download_if_s3_paths(file_paths)
     file_paths.sort()
 
+    if vocab_seed is not None:
+        sp.set_random_generator_seed(vocab_seed)
     sp.SentencePieceTrainer.Train(
         normalization_rule_tsv=normalization_path,
         input=file_paths,
@@ -1499,6 +1502,12 @@ class Config:
                     )
             assert vocab_type is not None
 
+            vocab_seed: Optional[int] = self.data.get("vocab_seed")
+            if vocab_seed is None:
+                vocab_seed = self.data.get("src_vocab_seed")
+                if vocab_seed is None:
+                    vocab_seed = self.data["trg_vocab_seed"]
+
             casing: Optional[str] = self.data.get("casing")
             if casing is None:
                 casing = self.data.get("src_casing")
@@ -1517,6 +1526,7 @@ class Config:
                 share_vocab_file_paths,
                 vocab_size,
                 vocab_type,
+                vocab_seed,
                 casing,
                 character_coverage,
                 model_prefix,
@@ -1609,13 +1619,13 @@ class Config:
         LOGGER.info(f"Building {side} vocabulary...")
         vocab_size: int = self.data.get(f"{prefix}_vocab_size", self.data.get("vocab_size"))
         vocab_type: str = self.data.get(f"{prefix}_vocab_type", self.data.get("vocab_type"))
+        vocab_seed: int = self.data.get(f"{prefix}_vocab_seed", self.data.get("vocab_seed"))
         casing: str = self.data.get(f"{prefix}_casing", self.data.get("casing"))
         character_coverage: float = self.data.get(f"{prefix}_character_coverage", self.data.get("character_coverage"))
         tags = self._tags if side == "source" else set()
         max_train_size: int = self.data["sp_max_train_size"]
-        build_vocab(
-            vocab_file_paths, vocab_size, vocab_type, casing, character_coverage, model_prefix, vocab_path, tags, max_train_size
-        )
+        build_vocab(vocab_file_paths, vocab_size, vocab_type, vocab_seed, casing,
+                    character_coverage, model_prefix, vocab_path, tags, max_train_size)
 
     def _create_train_alignments(self, train_count: int) -> None:
         with tempfile.TemporaryDirectory() as td:
