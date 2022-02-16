@@ -348,8 +348,8 @@ def get_parallel_corpus_size(src_file_path: Path, trg_file_path: Path) -> int:
     return count
 
 
-def convert_vocab(sp_vocab_path: Path, onmt_vocab_path: Path) -> None:
-    special_tokens = [PADDING_TOKEN, START_OF_SENTENCE_TOKEN, END_OF_SENTENCE_TOKEN]
+def convert_vocab(sp_vocab_path: Path, onmt_vocab_path: Path, tags: Set[str]) -> None:
+    special_tokens = [START_OF_SENTENCE_TOKEN, END_OF_SENTENCE_TOKEN, PADDING_TOKEN] + list(tags)
 
     vocab = Vocab(special_tokens)
     with sp_vocab_path.open("r", encoding="utf-8") as vocab_file:
@@ -357,7 +357,7 @@ def convert_vocab(sp_vocab_path: Path, onmt_vocab_path: Path) -> None:
             token = line.rstrip("\r\n")
             index = token.rindex("\t")
             token = token[:index]
-            if token in ("<unk>", "<s>", "</s>", "<range>"):  # Ignore special tokens
+            if token in ("<unk>", "<s>", "</s>", "<blank>"):  # Ignore special tokens
                 continue
             vocab.add(token)
     vocab.pad_to_multiple(8)
@@ -376,10 +376,6 @@ def build_vocab(
     tags: Set[str],
     max_train_size: int,
 ) -> None:
-    user_defined_symbols = "<blank>"
-    for tag in tags:
-        user_defined_symbols += f",{tag}"
-
     casing = casing.lower()
     normalization: str
     if casing == "lower":
@@ -404,14 +400,13 @@ def build_vocab(
         model_prefix=model_prefix,
         model_type=vocab_type,
         vocab_size=vocab_size,
-        user_defined_symbols=user_defined_symbols,
+        user_defined_symbols="<blank>",
         character_coverage="%.4f" % character_coverage,
         input_sentence_size=max_train_size,
         shuffle_input_sentence=True,
-        control_symbols="<range>",
     )
 
-    convert_vocab(model_prefix.with_suffix(".vocab"), vocab_path)
+    convert_vocab(model_prefix.with_suffix(".vocab"), vocab_path, tags)
 
 
 def get_checkpoint_path(
@@ -1575,6 +1570,7 @@ class Config:
         prefix = "src" if side == "source" else "trg"
         model_prefix = self.exp_dir / f"{prefix}-sp"
         vocab_path = self.exp_dir / f"{prefix}-onmt.vocab"
+        tags = self._tags if side == "source" else set()
         if self.parent_config is not None:
             parent_isos = self.parent_config.src_isos if side == "source" else self.parent_config.trg_isos
             if isos == parent_isos:
@@ -1608,7 +1604,7 @@ class Config:
                     onmt_vocab_path = self.exp_dir / f"{prefix}-onmt.vocab"
                     shutil.copy2(parent_sp_prefix_path.with_suffix(".model"), self.exp_dir / f"{prefix}-sp.model")
                     shutil.copy2(parent_sp_prefix_path.with_suffix(".vocab"), sp_vocab_path)
-                    convert_vocab(sp_vocab_path, onmt_vocab_path)
+                    convert_vocab(sp_vocab_path, onmt_vocab_path, tags)
                     return
                 elif child_tokens is not None and parent_vocab is not None:
                     onmt_delta_vocab_path = self.exp_dir / f"{prefix}-onmt-delta.vocab"
@@ -1622,7 +1618,6 @@ class Config:
         vocab_seed: int = self.data.get(f"{prefix}_vocab_seed", self.data.get("vocab_seed"))
         casing: str = self.data.get(f"{prefix}_casing", self.data.get("casing"))
         character_coverage: float = self.data.get(f"{prefix}_character_coverage", self.data.get("character_coverage"))
-        tags = self._tags if side == "source" else set()
         max_train_size: int = self.data["sp_max_train_size"]
         build_vocab(vocab_file_paths, vocab_size, vocab_type, vocab_seed, casing,
                     character_coverage, model_prefix, vocab_path, tags, max_train_size)
