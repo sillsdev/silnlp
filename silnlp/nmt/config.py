@@ -370,6 +370,7 @@ def build_vocab(
     vocab_type: str,
     vocab_seed: int,
     casing: str,
+    vocab_split_by_unicode_script: bool,
     character_coverage: float,
     model_prefix: Path,
     vocab_path: Path,
@@ -404,6 +405,7 @@ def build_vocab(
         character_coverage="%.4f" % character_coverage,
         input_sentence_size=max_train_size,
         shuffle_input_sentence=True,
+        split_by_unicode_script=vocab_split_by_unicode_script,
     )
 
     convert_vocab(model_prefix.with_suffix(".vocab"), vocab_path, tags)
@@ -535,6 +537,12 @@ class Config:
                 data_config["vocab_type"] = "unigram"
             if "src_casing" not in data_config and "trg_casing" not in data_config and "casing" not in data_config:
                 data_config["casing"] = "lower"
+            if (
+                "src_vocab_split_by_unicode_script" not in data_config
+                and "trg_vocab_split_by_unicode_script" not in data_config
+                and "vocab_split_by_unicode_script" not in data_config
+            ):
+                data_config["vocab_split_by_unicode_script"] = True
         else:
             data_config["source_vocabulary"] = str(exp_dir / "src-onmt.vocab")
             data_config["target_vocabulary"] = str(exp_dir / "trg-onmt.vocab")
@@ -553,6 +561,11 @@ class Config:
                     data_config["src_casing"] = "lower"
                 if "trg_casing" not in data_config:
                     data_config["trg_casing"] = "lower"
+            if "vocab_split_by_unicode_script" not in data_config:
+                if "src_vocab_split_by_unicode_script" not in data_config:
+                    data_config["src_vocab_split_by_unicode_script"] = True
+                if "trg_vocab_split_by_unicode_script" not in data_config:
+                    data_config["trg_vocab_split_by_unicode_script"] = True
 
         model: str = config["model"]
         if model.endswith("AlignmentEnhanced"):
@@ -1486,7 +1499,7 @@ class Config:
                     )
             assert vocab_size is not None
 
-            vocab_type: Optional[int] = self.data.get("vocab_type")
+            vocab_type: Optional[str] = self.data.get("vocab_type")
             if vocab_type is None:
                 vocab_type = self.data.get("src_vocab_type")
                 if vocab_type is None:
@@ -1512,6 +1525,20 @@ class Config:
                     raise RuntimeError("The source and target casing cannot be different when creating a shared vocab.")
             assert casing is not None
 
+            vocab_split_by_unicode_script: Optional[bool] = self.data.get("vocab_split_by_unicode_script")
+            if vocab_split_by_unicode_script is None:
+                vocab_split_by_unicode_script = self.data.get("src_vocab_split_by_unicode_script")
+                if vocab_split_by_unicode_script is None:
+                    vocab_split_by_unicode_script = self.data["trg_vocab_split_by_unicode_script"]
+                elif (
+                    self.data.get("trg_vocab_split_by_unicode_script", vocab_split_by_unicode_script)
+                    != vocab_split_by_unicode_script
+                ):
+                    raise RuntimeError(
+                        "The source and target cannot split tokens differently when creating a shared vocab."
+                    )
+            assert vocab_split_by_unicode_script is not None
+
             model_prefix = self.exp_dir / "sp"
             vocab_path = self.exp_dir / "onmt.vocab"
             share_vocab_file_paths: Set[Path] = self.src_file_paths | self.trg_file_paths
@@ -1523,6 +1550,7 @@ class Config:
                 vocab_type,
                 vocab_seed,
                 casing,
+                vocab_split_by_unicode_script,
                 character_coverage,
                 model_prefix,
                 vocab_path,
@@ -1617,10 +1645,24 @@ class Config:
         vocab_type: str = self.data.get(f"{prefix}_vocab_type", self.data.get("vocab_type"))
         vocab_seed: int = self.data.get(f"{prefix}_vocab_seed", self.data.get("vocab_seed"))
         casing: str = self.data.get(f"{prefix}_casing", self.data.get("casing"))
+        vocab_split_by_unicode_script: bool = self.data.get(
+            f"{prefix}_vocab_split_by_unicode_script", self.data.get("vocab_split_by_unicode_script")
+        )
         character_coverage: float = self.data.get(f"{prefix}_character_coverage", self.data.get("character_coverage"))
         max_train_size: int = self.data["sp_max_train_size"]
-        build_vocab(vocab_file_paths, vocab_size, vocab_type, vocab_seed, casing,
-                    character_coverage, model_prefix, vocab_path, tags, max_train_size)
+        build_vocab(
+            vocab_file_paths,
+            vocab_size,
+            vocab_type,
+            vocab_seed,
+            casing,
+            vocab_split_by_unicode_script,
+            character_coverage,
+            model_prefix,
+            vocab_path,
+            tags,
+            max_train_size,
+        )
 
     def _create_train_alignments(self, train_count: int) -> None:
         with tempfile.TemporaryDirectory() as td:
