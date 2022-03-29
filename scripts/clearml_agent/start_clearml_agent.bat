@@ -1,7 +1,7 @@
 rem move clearml.conf to C:/Users/Username/clearml.conf
 rem
 rem ClearML credentials
-rem Create new clearml credentials in https://app.pro.clear.ml/profile
+rem Create new clearml credentials in https://app.sil.hosted.allegro.ai/profile
 rem in clearml.conf, replace the credentials with the access and private keys that you created. 
 rem 
 rem SSH key management
