@@ -57,6 +57,8 @@ def compute_alignment_score(
                 inverse_prob = max(inverse_lexicon[trg_word, src_word], 1e-9)
                 prob = max(direct_prob, inverse_prob)
                 probs.append(prob)
+        else:
+            print(f"No pairs in alignment! src >>{src_sentence}<< trg >>{trg_sentence}<< alignment >>{alignment}<<")
 
     for j in unaligned_trg_indices:
         probs.append(max(direct_lexicon["NULL", trg_words[j]], 1e-9))
@@ -64,7 +66,7 @@ def compute_alignment_score(
     for i in unaligned_src_indices:
         probs.append(max(inverse_lexicon["NULL", src_words[i]], 1e-9))
 
-    return mean(probs)
+    return mean(probs) if len(probs) > 0 else 0
 
 
 def add_alignment_scores(corpus: pd.DataFrame, aligner_id: str = "fast_align") -> None:

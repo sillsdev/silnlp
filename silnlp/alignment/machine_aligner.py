@@ -210,8 +210,12 @@ class MachineAligner(Aligner):
                 for trg_word_index, prob in sorted(trg_word_probs, key=lambda wp: wp[1], reverse=True):
                     prob = round(prob, 8)
                     if prob > 0:
-                        trg_word = trg_words[trg_word_index]
-                        out_file.write(f"{src_word}\t{trg_word}\t{prob}\n")
+                        try:
+                            trg_word = trg_words[trg_word_index]
+                            out_file.write(f"{src_word}\t{trg_word}\t{prob}\n")
+                        except IndexError:
+                            print(f'Index error! Source Word/Index: {src_word}/{src_word_index},'
+                                  f'Target Index: {trg_word_index}, Probability: {prob}')
 
     def _create_symmetrized_model(self, sym_heuristic: str) -> SymmetrizedWordAlignmentModel:
         model = ThotSymmetrizedWordAlignmentModel(self._create_model(direct=True), self._create_model(direct=False))
