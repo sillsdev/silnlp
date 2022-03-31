@@ -7,6 +7,7 @@ import sacrebleu
 import sentencepiece as sp
 import tensorflow as tf
 import yaml
+import numpy as np
 from opennmt.utils import Scorer, register_scorer
 
 _TAG_PATTERN = re.compile(r"(<\w+> )+")
@@ -82,7 +83,7 @@ class BLEUSentencepieceScorer(Scorer):
             return bleu.score
 
 
-def load_ref_streams(ref_path: str) -> List[List[str]]:
+def load_ref_streams(ref_path: str, detok: bool = False) -> List[List[str]]:
     ref_streams: List[IO] = []
     try:
         if ref_path.endswith(".0"):
@@ -96,7 +97,10 @@ def load_ref_streams(ref_path: str) -> List[List[str]]:
         refs: List[List[str]] = []
         for lines in zip(*ref_streams):
             for ref_index in range(len(ref_streams)):
-                ref_line = lines[ref_index].strip()
+                if not detok:
+                    ref_line = lines[ref_index].strip()
+                else:
+                    ref_line = decode_sp(lines[ref_index].strip())
                 if len(refs) == ref_index:
                     refs.append([])
                 refs[ref_index].append(ref_line)
@@ -106,11 +110,14 @@ def load_ref_streams(ref_path: str) -> List[List[str]]:
             ref_stream.close()
 
 
-def load_sys_stream(hyp_path: str) -> List[str]:
+def load_sys_stream(hyp_path: str, detok: bool = False) -> List[str]:
     sys_stream = []
     with tf.io.gfile.GFile(hyp_path) as f:
         for line in f:
-            sys_stream.append(line.rstrip())
+            if not detok:
+                sys_stream.append(line.rstrip())
+            else:
+                sys_stream.append(decode_sp(line.rstrip()))
     return sys_stream
 
 
@@ -124,6 +131,42 @@ class BLEUMultiRefScorer(Scorer):
         sys_stream = load_sys_stream(hyp_path)
         bleu = sacrebleu.corpus_bleu(sys_stream, cast(List[Iterable[str]], ref_streams), force=True)
         return bleu.score
+
+
+@register_scorer(name="bleu_multi_ref_detok")
+class BLEUMultiRefScorer(Scorer):
+    def __init__(self):
+        super().__init__("bleu_multi_ref_detok")
+
+    def __call__(self, ref_path: str, hyp_path: str) -> float:
+        ref_streams = load_ref_streams(ref_path, detok=True)
+        sys_stream = load_sys_stream(hyp_path, detok=True)
+        bleu = sacrebleu.corpus_bleu(sys_stream, cast(List[Iterable[str]], ref_streams), force=True)
+        return bleu.score
+
+
+@register_scorer(name="chrf3")
+class chrF3Scorer(Scorer):
+    def __init__(self):
+        super().__init__("chrf3")
+
+    def __call__(self, ref_path: str, hyp_path: str) -> float:
+        ref_streams = load_ref_streams(ref_path)
+        sys_stream = load_sys_stream(hyp_path)
+        chrf3_score = sacrebleu.corpus_chrf(sys_stream, ref_streams, order=6, beta=3, remove_whitespace=True)
+        return np.round(float(chrf3_score.score * 100), 2)
+
+
+@register_scorer(name="chrf3_detok")
+class chrF3DetokScorer(Scorer):
+    def __init__(self):
+        super().__init__("chrf3_detok")
+
+    def __call__(self, ref_path: str, hyp_path: str) -> float:
+        ref_streams = load_ref_streams(ref_path, detok=True)
+        sys_stream = load_sys_stream(hyp_path, detok=True)
+        chrf3_score = sacrebleu.corpus_chrf(sys_stream, ref_streams, order=6, beta=3, remove_whitespace=True)
+        return np.round(float(chrf3_score.score * 100), 2)
 
 
 def enable_memory_growth():
