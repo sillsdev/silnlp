@@ -151,7 +151,8 @@ class SilNlpEnv:
         for obj in objs:
             rel_path = str(obj.object_key)[len_aqua_path:]
             if (rel_path.endswith(extensions) and rel_path.startswith(name + "/")) or (
-                copy_run and rel_path.startswith(name + "/run/")
+                copy_run and rel_path.startswith(name + "/run/")) or (
+                copy_run and rel_path.startswith(name + "/parent/")
             ):
                 # copy over project files and experiment files
                 temp_dest_path = self.mt_experiments_dir / rel_path
