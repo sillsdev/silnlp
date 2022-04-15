@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import pandas as pd
-from machine.corpora import ESCAPE_SPACES, LOWERCASE, NFC_NORMALIZE, pipeline
+from machine.corpora import escape_spaces, nfc_normalize, lowercase
 from machine.tokenization import LatinWordTokenizer
 from matplotlib.widgets import Slider
 from scipy.cluster.hierarchy import dendrogram, linkage
@@ -60,10 +60,9 @@ def compute_similarity_score(corpus: pd.DataFrame, aligner_id: str) -> float:
 
 def tokenize_verses(verses: Iterable[str], output_path: Path) -> None:
     tokenizer = LatinWordTokenizer()
-    processor = pipeline(ESCAPE_SPACES, NFC_NORMALIZE, LOWERCASE)
     with output_path.open("w", encoding="utf-8", newline="\n") as output_stream:
         for verse in verses:
-            tokens = processor.process(tokenizer.tokenize(verse))
+            tokens = lowercase(nfc_normalize(escape_spaces(tokenizer.tokenize(verse))))
             output_stream.write(" ".join(tokens) + "\n")
 
 

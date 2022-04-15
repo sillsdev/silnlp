@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, Iterator, List, Optional, Set, Tuple, Union
 
 import pandas as pd
-from machine.corpora import ESCAPE_SPACES, LOWERCASE, NFC_NORMALIZE, TextFileTextCorpus, pipeline
+from machine.corpora import TextFileTextCorpus
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
 from machine.tokenization import LatinWordTokenizer
 from sklearn.model_selection import train_test_split
@@ -27,12 +27,10 @@ def load_corpus(corpus_path: Path) -> Iterator[str]:
 
 
 def tokenize_corpus(input_path: Path, output_path: Path) -> None:
-    tokenizer = LatinWordTokenizer()
-    corpus = TextFileTextCorpus(tokenizer, input_path)
-    processor = pipeline(ESCAPE_SPACES, NFC_NORMALIZE, LOWERCASE)
-    with output_path.open("w", encoding="utf-8", newline="\n") as output_stream, corpus.get_segments() as segments:
-        for segment in segments:
-            output_stream.write(" ".join(processor.process(segment.segment)) + "\n")
+    corpus = TextFileTextCorpus(input_path).tokenize(LatinWordTokenizer()).escape_spaces().nfc_normalize().lowercase()
+    with output_path.open("w", encoding="utf-8", newline="\n") as output_stream, corpus.get_rows() as rows:
+        for row in rows:
+            output_stream.write(row.text + "\n")
 
 
 def get_scripture_parallel_corpus(

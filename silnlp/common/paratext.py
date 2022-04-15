@@ -9,17 +9,15 @@ import regex as re
 from lxml import etree
 from machine.corpora import (
     DictionaryTextCorpus,
-    FilteredTextCorpus,
     MemoryText,
-    ParallelTextCorpus,
     ParatextTextCorpus,
     Text,
     TextCorpus,
-    TextSegment,
+    TextRow,
     UsfmFileTextCorpus,
 )
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_id_to_number, get_books
-from machine.tokenization import NullTokenizer, WhitespaceTokenizer
+from machine.tokenization import WhitespaceTokenizer
 
 from .corpus import get_terms_glosses_path, get_terms_metadata_path, get_terms_vrefs_path, load_corpus
 from .environment import SIL_NLP_ENV
@@ -65,14 +63,13 @@ def extract_project(
 
     ref_dir = SIL_NLP_ENV.assets_dir / "Ref"
 
-    tokenizer = NullTokenizer()
-    ref_corpus = ParatextTextCorpus(tokenizer, ref_dir)
+    ref_corpus = ParatextTextCorpus(ref_dir)
 
     ltg_dir = project_dir / "LTG"
     if extract_lemmas and ltg_dir.is_dir():
         project_corpus = get_lemma_text_corpus(project_dir)
     else:
-        project_corpus = ParatextTextCorpus(tokenizer, project_dir, include_markers=include_markers)
+        project_corpus = ParatextTextCorpus(project_dir, include_markers=include_markers)
 
     output_basename = f"{iso}-{project_dir.name}"
     if len(include_books) > 0 or len(exclude_books) > 0:
@@ -98,8 +95,8 @@ def extract_project(
 
             return include_books_set is None
 
-        ref_corpus = FilteredTextCorpus(ref_corpus, filter_corpus)
-        project_corpus = FilteredTextCorpus(project_corpus, filter_corpus)
+        ref_corpus = ref_corpus.filter_texts(filter_corpus)
+        project_corpus = project_corpus.filter_texts(filter_corpus)
 
     if include_markers:
         output_basename += "-m"
@@ -109,11 +106,11 @@ def extract_project(
     output_vref_filename = output_dir / f"{output_basename}.vref.txt"
 
     try:
-        parallel_corpus = ParallelTextCorpus(ref_corpus, project_corpus)
+        parallel_corpus = ref_corpus.align_rows(project_corpus, all_source_rows=True)
         segment_count = 0
         with ExitStack() as stack:
             output_stream = stack.enter_context(output_filename.open("w", encoding="utf-8", newline="\n"))
-            segments = stack.enter_context(parallel_corpus.get_segments(all_source_segments=True))
+            rows = stack.enter_context(parallel_corpus.get_rows())
             output_vref_stream: Optional[TextIO] = None
             if output_project_vrefs:
                 output_vref_stream = stack.enter_context(output_vref_filename.open("w", encoding="utf-8", newline="\n"))
@@ -122,8 +119,8 @@ def extract_project(
             cur_trg_ref: Optional[VerseRef] = None
             cur_target_line = ""
             cur_target_line_range = True
-            for segment in segments:
-                ref: VerseRef = segment.segment_ref
+            for row in rows:
+                ref: VerseRef = row.ref
                 if cur_ref is not None and ref.compare_to(cur_ref, compare_segments=False) != 0:
                     output_stream.write(("<range>" if cur_target_line_range else cur_target_line) + "\n")
                     if output_vref_stream is not None:
@@ -134,22 +131,22 @@ def extract_project(
                     cur_trg_ref = None
 
                 cur_ref = ref
-                if cur_trg_ref is None:
-                    cur_trg_ref = segment.target_segment_ref
-                elif segment.target_segment_ref is not None and cur_trg_ref != segment.target_segment_ref:
+                if cur_trg_ref is None and len(row.target_refs) > 0:
+                    cur_trg_ref = row.target_refs[0]
+                elif cur_trg_ref is not None and len(row.target_refs) > 0 and cur_trg_ref != row.target_refs[0]:
                     cur_trg_ref.simplify()
-                    if cur_trg_ref < segment.target_segment_ref:
+                    if cur_trg_ref < row.target_refs[0]:
                         start_ref = cur_trg_ref
-                        end_ref = segment.target_segment_ref
+                        end_ref = row.target_refs[0]
                     else:
-                        start_ref = segment.target_segment_ref
+                        start_ref = row.target_refs[0]
                         end_ref = cur_trg_ref
                     cur_trg_ref = VerseRef.from_range(start_ref, end_ref)
-                if not segment.is_target_in_range or segment.is_target_range_start or len(segment.target_segment) > 0:
-                    if len(segment.target_segment) > 0:
+                if not row.is_target_in_range or row.is_target_range_start or len(row.target_text) > 0:
+                    if len(row.target_text) > 0:
                         if len(cur_target_line) > 0:
                             cur_target_line += " "
-                        cur_target_line += segment.target_segment[0]
+                        cur_target_line += row.target_text
                     cur_target_line_range = False
             output_stream.write(("<range>" if cur_target_line_range else cur_target_line) + "\n")
             if output_vref_stream is not None:
@@ -166,20 +163,21 @@ def extract_project(
 
 def get_lemma_text_corpus(project_dir: Path) -> TextCorpus:
     tokenizer = WhitespaceTokenizer()
-    surface_corpus = ParatextTextCorpus(tokenizer, project_dir)
+    surface_corpus = ParatextTextCorpus(project_dir)
     lemma_corpus = UsfmFileTextCorpus(
-        tokenizer, "usfm.sty", "utf-8-sig", project_dir / "LTG", surface_corpus.versification, glob_pattern="*.LTG"
+        "usfm.sty", "utf-8-sig", project_dir / "LTG", surface_corpus.versification, glob_pattern="*.LTG"
     )
-    parallel_corpus = ParallelTextCorpus(surface_corpus, lemma_corpus)
+    surface_corpus = surface_corpus.tokenize(tokenizer)
+    lemma_corpus = lemma_corpus.tokenize(tokenizer)
     new_texts: List[Text] = []
-    for text in parallel_corpus.texts:
-        new_segments: List[TextSegment] = []
-        with text.segments as segments:
-            for segment in segments:
-                if len(segment.source_segment) != len(segment.target_segment):
+    for surface_text, lemma_text in zip(surface_corpus.texts, lemma_corpus.texts):
+        new_rows: List[TextRow] = []
+        with surface_text.get_rows() as surface_rows, lemma_text.get_rows() as lemma_rows:
+            for surface_row, lemma_row in zip(surface_rows, lemma_rows):
+                if len(surface_row.segment) != len(lemma_row.segment) or surface_row.ref != lemma_row.ref:
                     raise RuntimeError("The lemma file is invalid.")
                 lemmas: List[str] = []
-                for surface, lemma in zip(segment.source_segment, segment.target_segment):
+                for surface, lemma in zip(surface_row.segment, lemma_row.segment):
                     lemma = lemma.split("|")[0]
                     lemma = strip_morph_info(lemma)
                     match = _NON_LETTER_PATTERN.fullmatch(surface)
@@ -187,18 +185,18 @@ def get_lemma_text_corpus(project_dir: Path) -> TextCorpus:
                         lemma = match.group(1) + lemma + match.group(2)
                     lemmas.append(lemma)
                 lemmas_text = " ".join(lemmas)
-                new_segments.append(
-                    TextSegment(
-                        text.id,
-                        segment.segment_ref,
+                new_rows.append(
+                    TextRow(
+                        surface_text.id,
+                        surface_row.ref,
                         [] if len(lemmas_text) == 0 else [lemmas_text],
-                        segment.is_source_sentence_start,
-                        segment.is_source_in_range,
-                        segment.is_source_range_start,
+                        surface_row.is_sentence_start,
+                        surface_row.is_in_range,
+                        surface_row.is_range_start,
                         len(lemmas_text) == 0,
                     )
                 )
-        new_texts.append(MemoryText(text.id, new_segments))
+        new_texts.append(MemoryText(surface_text.id, new_rows))
     return DictionaryTextCorpus(new_texts)
 
 

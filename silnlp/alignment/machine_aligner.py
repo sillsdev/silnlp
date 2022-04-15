@@ -1,18 +1,10 @@
 import logging
-import os
 import platform
 import subprocess
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence, Tuple
 
-from machine.corpora import (
-    LOWERCASE,
-    NO_OP,
-    ParallelTextCorpus,
-    ParallelTextSegment,
-    TextFileTextCorpus,
-    TokenProcessor,
-)
+from machine.corpora import ParallelTextRow, TextFileTextCorpus
 from machine.tokenization import WhitespaceTokenizer
 from machine.translation import (
     SymmetrizationHeuristic,
@@ -36,7 +28,6 @@ from machine.utils import Phase, PhasedProgressReporter, ProgressStatus
 from tqdm import tqdm
 
 from ..common.environment import get_env_path
-
 from .aligner import Aligner
 from .lexicon import Lexicon
 
@@ -104,13 +95,11 @@ class MachineAligner(Aligner):
         return Lexicon.load(inverse_lex_path, include_special_tokens)
 
     def _train_alignment_model(self, src_file_path: Path, trg_file_path: Path) -> None:
-        tokenizer = WhitespaceTokenizer()
-        src_corpus = TextFileTextCorpus(tokenizer, src_file_path)
-        trg_corpus = TextFileTextCorpus(tokenizer, trg_file_path)
-        parallel_corpus = ParallelTextCorpus(src_corpus, trg_corpus)
-        preprocessor = NO_OP
+        src_corpus = TextFileTextCorpus(src_file_path)
+        trg_corpus = TextFileTextCorpus(trg_file_path)
+        parallel_corpus = src_corpus.align_rows(trg_corpus).tokenize(WhitespaceTokenizer())
         if self.lowercase:
-            preprocessor = LOWERCASE
+            parallel_corpus = parallel_corpus.lowercase()
 
         direct_params = ThotWordAlignmentParameters()
         direct_params.ibm1_iteration_count = 5
@@ -132,21 +121,11 @@ class MachineAligner(Aligner):
             inverse_params.target_word_classes = direct_params.source_word_classes
 
         direct_trainer = ThotWordAlignmentModelTrainer(
-            self.model_type,
-            parallel_corpus,
-            self.model_dir / "src_trg_invswm",
-            parameters=direct_params,
-            source_preprocessor=preprocessor,
-            target_preprocessor=preprocessor,
+            self.model_type, parallel_corpus, self.model_dir / "src_trg_invswm", parameters=direct_params
         )
 
         inverse_trainer = ThotWordAlignmentModelTrainer(
-            self.model_type,
-            parallel_corpus.invert(),
-            self.model_dir / "src_trg_swm",
-            parameters=inverse_params,
-            source_preprocessor=preprocessor,
-            target_preprocessor=preprocessor,
+            self.model_type, parallel_corpus.invert(), self.model_dir / "src_trg_swm", parameters=inverse_params
         )
 
         trainer = SymmetrizedWordAlignmentModelTrainer(direct_trainer, inverse_trainer)
@@ -172,25 +151,23 @@ class MachineAligner(Aligner):
         sym_heuristic: str,
         export_probabilities: bool = False,
     ) -> None:
-        tokenizer = WhitespaceTokenizer()
-        src_corpus = TextFileTextCorpus(tokenizer, src_file_path)
-        trg_corpus = TextFileTextCorpus(tokenizer, trg_file_path)
-        parallel_corpus = ParallelTextCorpus(src_corpus, trg_corpus)
+        src_corpus = TextFileTextCorpus(src_file_path)
+        trg_corpus = TextFileTextCorpus(trg_file_path)
+        parallel_corpus = src_corpus.align_rows(trg_corpus).tokenize(WhitespaceTokenizer())
         LOGGER.info("Loading model")
         model = self._create_symmetrized_model(sym_heuristic)
-        preprocessor = NO_OP
         if self.lowercase:
-            preprocessor = LOWERCASE
+            parallel_corpus = parallel_corpus.lowercase()
 
-        count = parallel_corpus.get_count()
+        count = parallel_corpus.count()
 
         LOGGER.info("Aligning corpus")
         with open(
             output_file_path, "w", encoding="utf-8", newline="\n"
-        ) as out_file, parallel_corpus.segments as segments, tqdm(
+        ) as out_file, parallel_corpus.get_rows() as rows, tqdm(
             total=count, bar_format="{l_bar}{bar:40}{r_bar}", leave=False
         ) as pbar:
-            for src_segments, trg_segments in _batch(segments, preprocessor):
+            for src_segments, trg_segments in _batch(rows):
                 for i, alignment in enumerate(model.get_best_alignments(src_segments, trg_segments)):
                     if export_probabilities:
                         alignened_word_pairs = model.get_aligned_word_pairs(src_segments[i], trg_segments[i], alignment)
@@ -214,8 +191,10 @@ class MachineAligner(Aligner):
                             trg_word = trg_words[trg_word_index]
                             out_file.write(f"{src_word}\t{trg_word}\t{prob}\n")
                         except IndexError:
-                            print(f'Index error! Source Word/Index: {src_word}/{src_word_index},'
-                                  f'Target Index: {trg_word_index}, Probability: {prob}')
+                            print(
+                                f"Index error! Source Word/Index: {src_word}/{src_word_index},"
+                                f"Target Index: {trg_word_index}, Probability: {prob}"
+                            )
 
     def _create_symmetrized_model(self, sym_heuristic: str) -> SymmetrizedWordAlignmentModel:
         model = ThotSymmetrizedWordAlignmentModel(self._create_model(direct=True), self._create_model(direct=False))
@@ -261,14 +240,12 @@ class MachineAligner(Aligner):
         return word_classes
 
 
-def _batch(
-    segments: Iterable[ParallelTextSegment], preprocessor: TokenProcessor
-) -> Iterable[Tuple[List[Sequence[str]], List[Sequence[str]]]]:
+def _batch(rows: Iterable[ParallelTextRow]) -> Iterable[Tuple[List[Sequence[str]], List[Sequence[str]]]]:
     src_segments: List[Sequence[str]] = []
     trg_segments: List[Sequence[str]] = []
-    for segment in segments:
-        src_segments.append(preprocessor.process(segment.source_segment))
-        trg_segments.append(preprocessor.process(segment.target_segment))
+    for row in rows:
+        src_segments.append(row.source_segment)
+        trg_segments.append(row.target_segment)
         if len(src_segments) == _BATCH_SIZE:
             yield src_segments, trg_segments
             src_segments.clear()
