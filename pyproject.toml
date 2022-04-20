@@ -1,0 +1,67 @@
+[tool.black]
+line-length = 120
+target-version = ['py37']
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+# make it compatible with black
+profile = "black"
+line_length = 120
+
+[tool.poetry]
+name = "silnlp"
+version = "1.0.0"
+description = ""
+authors = ["SIL International"]
+
+[tool.poetry.dependencies]
+python = ">=3.7,<3.9"
+pandas = "^1.0.4"
+sentencepiece = "^0.1.95"
+nltk = "^3.5"
+python-dotenv = "^0.13.0"
+seaborn = "^0.10.1"
+morfessor = "^2.0.6"
+Morfessor-FlatCat = "^1.0.8"
+psutil = "^5.7.3"
+scikit-learn = "0.22.2.post1"
+numpy = "1.19.5"
+OpenNMT-tf = "^2.23.0"
+annoy = "^1.17.0"
+lit-nlp = "^0.3"
+tensorflow = "2.7"
+google-cloud-translate = "^3.0.2"
+scipy = "1.4.1"
+clearml = ">=1.1.6"
+XlsxWriter = "^1.4.3"
+python-Levenshtein = "^0.12.2"
+lxml = "^4.6.3"
+tqdm = "^4.62.2"
+s3path = "^0.3.2"
+sacrebleu = "^1.5.1"
+sil-machine = {extras = ["thot"], version = "^0.5.0"}
+ctranslate2 = "^2.8.1"
+tensorflow-addons = "0.15"
+libclang = "^11.1.0"
+
+[tool.poetry.dev-dependencies]
+mypy = "^0.812"
+black = "^20.8b1"
+flake8 = "^3.9.0"
+ipykernel = "^6.4.1"
+pylint = "^2.8.3"
+pytest = "^6.2.4"
