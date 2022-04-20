@@ -44,8 +44,9 @@ _DEFAULT_FILTER_CONFIG: dict = {
         "punct_text_ratio": 0.5,
         "src_trg_char_ratio": 3,
         "latin_ratio": 0.25,
-        "valid_scripts": "latin common",
+        "valid_scripts": "latin inherited common",
         "script_error_threshold": 1,
+        "exclude_symbols": "So",
     },
 }
 
@@ -221,27 +222,24 @@ script_dict: Dict = {}
 scripts_url = "http://www.unicode.org/Public/UNIDATA/Scripts.txt"
 
 
-def add_single(hex_str: str, script_name: str):
+def add_single(hex_str: str, script_name: str, gen_cat: str):
     s = script_name.lower()
+    g = gen_cat.lower()
     code_val = int(hex_str, 16)
-    if s in script_dict.keys():
-        script_dict[s].add(code_val)
-    else:
-        script_dict[s] = {code_val}
+    script_dict[code_val] = [s, g]
 
 
-def add_range(start_hex_str: str, end_hex_str: str, script_name: str):
+def add_range(start_hex_str: str, end_hex_str: str, script_name: str, gen_cat: str):
     s = script_name.lower()
+    g = gen_cat.lower()
     start_code_val = int(start_hex_str, 16)
     end_code_val = int(end_hex_str, 16)
-    if s in script_dict.keys():
-        script_dict[s].update(set(range(start_code_val, end_code_val + 1)))
-    else:
-        script_dict[s] = set(range(start_code_val, end_code_val + 1))
+    for i in range(start_code_val, end_code_val+1):
+        script_dict[i] = [s, g]
 
 
-def load_script_dict():
-    unicode_re = re.compile(r"^([0-9A-F]{4,5})(..([0-9A-F]{4,5})){0,1}\s+;\s+([\w]+)\s+#")
+def load_script_dict(valid_scripts: List[str]):
+    unicode_re = re.compile(r"^([0-9A-F]{4,5})(..([0-9A-F]{4,5})){0,1}\s+;\s+([\w]+)\s+#\s+([\S]{2,2})\s+")
     http = urllib3.PoolManager()
 
     start_time = time.time()
@@ -255,10 +253,11 @@ def load_script_dict():
         line = data.decode('utf-8').strip()
         if line != "" and not line.startswith('#'):
             parts = unicode_re.match(line)
-            if parts.group(3) is None:
-                add_single(parts.group(1), parts.group(4))
-            else:
-                add_range(parts.group(1), parts.group(3), parts.group(4))
+            if parts.group(4).lower() in valid_scripts:
+                if parts.group(3) is None:
+                    add_single(parts.group(1), parts.group(4), parts.group(5))
+                else:
+                    add_range(parts.group(1), parts.group(3), parts.group(4), parts.group(5))
     r.release_conn()
     end_time = time.time()
     print(f'Loaded in {(end_time - start_time):.4f} seconds')
@@ -266,31 +265,34 @@ def load_script_dict():
 
 #    print("\n".join(f"{k}\t{v}" for k, v in script_dict.items()))
 
+symbol_cats = {'so'}
+
 
 def script_check(src: str, trg: str, valid_src_scripts: List[str], valid_trg_scripts: List[str],
-                 threshold: int) -> bool:
-    def check_line(line: str, scripts: List[str], limit: int) -> bool:
+                 exclude_symbols: List[str], threshold: int) -> bool:
+
+    def check_line(line: str, scripts: List[str], exc_symbols: List[str], limit: int) -> bool:
         error_count = 0
+
         for c in line:
             char_code = ord(c)
-
-            match = False
-            for s in scripts:
-                if char_code in script_dict[s]:
-                    match = True
-                    break
-
-            # Character c wasn't part of one of the valid scripts
-            if not match:
+            if char_code not in script_dict:
                 error_count += 1
-                if error_count >= limit:
-                    return False
+            else:
+                script = script_dict[char_code][0]
+                genl_cat = script_dict[char_code][1]
 
-        # Successfully checked all the characters in the line
+                if script not in scripts:
+                    error_count += 1
+                elif genl_cat in exc_symbols:
+                    error_count += 1
+
+        if error_count >= limit:
+            return False
         return True
 
-    return not check_line(src, valid_src_scripts, threshold) or \
-           not check_line(trg, valid_trg_scripts, threshold)
+    return not check_line(src, valid_src_scripts, exclude_symbols, threshold) or \
+           not check_line(trg, valid_trg_scripts, exclude_symbols, threshold)
 
 
 def log_error(log_flag: bool, logfile, label: str, src: str, trg: str):
@@ -384,10 +386,11 @@ def main() -> None:
         valid_src_scripts = [s.lower() for s in filter_config.get('valid_scripts').split()]
         valid_trg_scripts = valid_src_scripts
     script_error_threshold = filter_config.get('script_error_threshold')
+    exclude_symbols = [s.lower() for s in filter_config.get('exclude_symbols').split()]
 
     # Initial setup (if needed)
     if scripts_toggle:
-        load_script_dict()
+        load_script_dict(list(set(valid_src_scripts) | set(valid_trg_scripts)))
 
     src_out_file_name = f"{os.path.splitext(args.src)[0]}_clean{os.path.splitext(args.src)[1]}"
     src_err_file_name = f"{os.path.splitext(args.src)[0]}_errors{os.path.splitext(args.src)[1]}"
@@ -438,7 +441,7 @@ def main() -> None:
                 count_latin += 1
                 log_error(args.errors, error_log, "latin_check", src_line, trg_line)
             elif scripts_toggle and script_check(src_line, trg_line,
-                                                 valid_src_scripts, valid_trg_scripts,
+                                                 valid_src_scripts, valid_trg_scripts, exclude_symbols,
                                                  script_error_threshold):
                 count_script += 1
                 log_error(args.errors, error_log, "script_check", src_line, trg_line)
