@@ -877,7 +877,7 @@ class Config:
                     )
 
                 if pair.is_train:
-                    alignment_score = mean(cur_train["score"]) if stats_file is not None else 0
+                    alignment_score = cur_train["score"].mean() if stats_file is not None else 0
 
                     filtered_count = 0
                     filtered_alignment_score = alignment_score
@@ -1766,7 +1766,8 @@ def create_runner(config: Config, mixed_precision: bool = False) -> SILRunner:
 
     model = create_model(config)
 
-    return SILRunner(model, config.root, auto_config=True, mixed_precision=mixed_precision)
+    return SILRunner(model, config.root, auto_config=True, mixed_precision=mixed_precision, seed=config.data['seed'])
+#    return SILRunner(model, config.root, auto_config=True, mixed_precision=mixed_precision)
 
 
 def load_config(exp_name: str) -> Config:
