@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import pandas as pd
-from machine.corpora import escape_spaces, nfc_normalize, lowercase
+from machine.corpora import escape_spaces, lowercase, nfc_normalize
 from machine.tokenization import LatinWordTokenizer
 from matplotlib.widgets import Slider
 from scipy.cluster.hierarchy import dendrogram, linkage
@@ -55,7 +55,7 @@ def compute_similarity_score(corpus: pd.DataFrame, aligner_id: str) -> float:
                     scores.append(
                         compute_alignment_score(direct_lexicon, inverse_lexicon, src_sentence, trg_sentence, alignment)
                     )
-        return mean(scores)
+        return 0 if len(scores) == 0 else mean(scores)
 
 
 def tokenize_verses(verses: Iterable[str], output_path: Path) -> None:
