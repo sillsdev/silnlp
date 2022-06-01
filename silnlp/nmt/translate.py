@@ -62,6 +62,9 @@ class TranslationTask:
     name: str
     checkpoint: str = "last"
     clearml_queue: Optional[str] = None
+    clearml: Optional[SILClearML] = None
+    name: Optional[str] = None
+    config: Optional[Config] = None
 
     def __post_init__(self):
         if self.checkpoint is None:
@@ -193,7 +196,7 @@ def main() -> None:
         clearml_queue=args.clearml_queue,
     )
 
-    if args.books is not None:
+    if len(args.books) > 0:
         translator.translate_books(args.books, src_project=args.src_project, trg_iso=args.trg_iso)
     elif args.src_prefix is not None:
         translator.translate_text_files(args.src_prefix, args.trg_prefix, args.start_seq, args.end_seq, args.trg_iso)
