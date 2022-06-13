@@ -145,7 +145,13 @@ class TranslationTask:
 
     def translate_text_file(self, src_file_path, trg_iso=None, trg_file_path=None):
         self.init_translation_task(experiment_suffix=f"_{self.checkpoint}_{os.path.basename(src_file_path)}")
-        src_file_path = Path(src_file_path)
+        if(Path(src_file_path).exists()):
+            src_file_path = Path(src_file_path)
+        elif (SIL_NLP_ENV.data_dir / src_file_path).exists():
+            src_file_path = SIL_NLP_ENV.data_dir / src_file_path
+        else:
+            raise FileNotFoundError("Cannot find: " + src_file_path)
+
         default_output_dir = self.config.exp_dir / "infer" / self._step_str
         trg_file_path = default_output_dir / src_file_path.name if trg_file_path is None else Path(trg_file_path)
         trg_file_path.parent.mkdir(exist_ok=True, parents=True)
