@@ -191,7 +191,10 @@ def main() -> None:
         help="Enable TensorFlow eager execution.",
     )
     parser.add_argument(
-        "--clearml-queue", default=None, type=str, help="Process the infer on ClearML on the specified queue."
+        "--clearml-queue",
+        default=None,
+        type=str,
+        help="Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run it locally and register it with ClearML.",
     )
     args = parser.parse_args()
 

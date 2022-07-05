@@ -20,5 +20,6 @@ if __name__ == "__main__":
     process_alignments(
         src_path=src_path,
         trg_paths=list(target_dir.glob("*.txt")),
+        aligner=aligner,
         output_dir=output_dir / (aligner + "_" + src_basename),
     )

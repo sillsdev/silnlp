@@ -4,8 +4,6 @@ from dataclasses import dataclass
 from typing import Optional
 
 import yaml
-from clearml import Task
-from clearml.backend_api.session.session import LoginError
 
 from ..nmt.config import Config, get_mt_exp_dir
 from .environment import SIL_NLP_ENV
@@ -30,6 +28,14 @@ class SILClearML:
             exp_name = name_parts[0]
         else:
             exp_name = name_parts[1]
+        if self.queue_name is None:
+            self.task = None
+            self._load_config()
+            LOGGER.info(f"No ClearML task initiated.")
+            return
+
+        from clearml import Task
+        from clearml.backend_api.session.session import LoginError
 
         try:
             self.task = Task.init(
@@ -43,7 +49,7 @@ class SILClearML:
             self.task.set_base_docker(
                 docker_image="silintlai/machine-silnlp:master-latest", docker_arguments="--pull always"
             )
-            if self.queue_name is not None:
+            if self.queue_name.lower() not in ("local", "locally"):
                 self.task.execute_remotely(queue_name=self.queue_name)
         except LoginError as e:
             if self.queue_name is None:
@@ -85,7 +91,8 @@ class SILClearML:
         if self.task is None:
             with (exp_dir / "config.yml").open("r", encoding="utf-8") as file:
                 config = yaml.safe_load(file)
-            return Config(exp_dir, config)
+            self.config = Config(exp_dir, config)
+            return
         # There is a ClearML task - lets' do more complex importing.
         proj_dir = get_mt_exp_dir(self.clearml_project_folder)
         if (proj_dir / "config.yml").exists():
