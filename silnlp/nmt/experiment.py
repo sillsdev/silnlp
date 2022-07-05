@@ -84,7 +84,10 @@ def main() -> None:
     parser.add_argument("--memory-growth", default=False, action="store_true", help="Enable memory growth")
     parser.add_argument("--num-devices", type=int, default=1, help="Number of devices to train on")
     parser.add_argument(
-        "--clearml_queue", default=None, type=str, help="Run remotely on ClearML queue.  Default: None (run locally)"
+        "--clearml_queue",
+        default=None,
+        type=str,
+        help="Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run it locally and register it with ClearML.",
     )
     args = parser.parse_args()
 
