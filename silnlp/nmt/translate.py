@@ -4,7 +4,7 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Union
+from typing import Iterable, List, Optional, Union
 
 import tensorflow as tf
 from machine.scripture import book_number_to_id, get_books
@@ -66,6 +66,10 @@ class TranslationTask:
     name: Optional[str] = None
     config: Optional[Config] = None
 
+    def __init__(self, name: str, checkpoint: str = "last", clearml_queue: Optional[str] = None):
+        self._step_str = None
+        self.translator = None
+
     def __post_init__(self):
         if self.checkpoint is None:
             self.checkpoint = "last"
@@ -82,7 +86,7 @@ class TranslationTask:
         self.config: Config = self.clearml.config
 
         SIL_NLP_ENV.copy_experiment_from_bucket(
-            self.name, extensions=(".vocab", ".model", ".yml", "dict.src.txt", "dict.trg.txt")
+            self.name, extensions=(".vocab", ".model", ".yml", "dict.src.txt", "dict.trg.txt", "dict.vref.txt")
         )
 
         self.config.set_seed()
