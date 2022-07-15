@@ -41,6 +41,16 @@ def show_config(config: dict):
     print(json.dumps(config, indent=2))
 
 
+def keep_lines(src,trg):
+    src = src.strip()
+    trg =trg.strip()
+
+    if src == '' or trg == '' or src == trg:
+        return False
+    else:
+        return True
+        
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Splitting a parallel corpus")
     parser.add_argument("experiment", help="Experiment name")
@@ -60,8 +70,23 @@ def main() -> None:
     # Create the initial data frame
     corpus = pd.DataFrame(columns=['SRC', 'TRG'])
     print(f'Loading corpus - src: {split_config.get("src")}, trg: {split_config.get("trg")}')
-    corpus['SRC'] = list(load_corpus(Path(os.path.join(exp_dir, split_config.get('src')))))
-    corpus['TRG'] = list(load_corpus(Path(os.path.join(exp_dir, split_config.get('trg')))))
+    trg_lines = list(load_corpus(Path(os.path.join(exp_dir, split_config.get('src')))))
+    src_lines = list(load_corpus(Path(os.path.join(exp_dir, split_config.get('trg')))))
+    
+    # Remove lines where one or other of the lines are blank, or both lines are identical.
+    filtered_src = list()
+    filtered_trg = list()
+    
+    for src,trg in zip(src_lines,trg_lines):
+        if keep_lines(src,trg):
+            filtered_src.append(src)
+            filtered_trg.append(src)
+                   
+    corpus['SRC'] = filtered_src
+    corpus['TRG'] = filtered_trg
+    
+    
+    
     remainder = None
 
     splits = split_config.get('splits')
