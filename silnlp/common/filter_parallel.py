@@ -19,6 +19,7 @@ from ..common.utils import get_git_revision_hash, merge_dict
 
 _DEFAULT_FILTER_CONFIG: dict = {
     "filter": {
+        "blank_same_toggle": True,
         "dup_toggle": True,
         "src_trg_same_toggle": True,
         "sentence_word_num_toggle": True,
@@ -306,6 +307,7 @@ def main() -> None:
 
     def print_counters(out_file):
         out_file.write(f'  {original_line_count:>10}\tOriginal sentences\n')
+        out_file.write(f'- {ratio_string(count_blanks_same, original_line_count)}\tblank/same src/trg sentence pairs\n')
         out_file.write(f'- {ratio_string(count_duplicates, original_line_count)}\tduplicate src/trg sentence pairs\n')
         out_file.write(f'- {ratio_string(count_src_trg_same, original_line_count)}\tsame src/trg sentence\n')
         out_file.write(f'- {ratio_string(count_word_num, original_line_count)}\t'
@@ -347,11 +349,12 @@ def main() -> None:
 
     # Initialize counters
     original_line_count = final_line_count = 0
-    count_duplicates = count_src_trg_same = count_word_num = count_words_ratio = count_specific_punc = 0
-    count_characs = count_special_char = count_punctuation = count_html = count_characs_sum = count_latin = 0
-    count_script = 0
+    count_blanks_same = count_duplicates = count_src_trg_same = count_word_num = count_words_ratio = 0
+    count_specific_punc = count_characs = count_special_char = count_punctuation = count_html = count_characs_sum = 0
+    count_latin = count_script = 0
 
     # Initialize toggles
+    blank_same_toggle = filter_config.get("blank_same_toggle")
     dup_toggle = filter_config.get("dup_toggle")
     src_trg_same_toggle = filter_config.get("src_trg_same_toggle")
     sentence_word_num_toggle = filter_config.get("sentence_word_num_toggle")
@@ -405,6 +408,9 @@ def main() -> None:
             trg_line = trg_line.strip()
             original_line_count += 1
 
+            if blank_same_toggle and (src_line == '' or trg_line == '' or src_line == trg_line):
+                count_blanks_same += 1
+                log_error(args.errors, error_log, "blank_same_check", src_line, trg_line)
             if dup_toggle and dup_check(src_line, trg_line):
                 count_duplicates += 1
                 log_error(args.errors, error_log, "dup_check", src_line, trg_line)
