@@ -31,10 +31,7 @@ authors = ["SIL International"]
 [tool.poetry.dependencies]
 python = ">=3.7,<3.9"
 pandas = "^1.0.4"
-sentencepiece = [
-    {path = ".\\wheels\\sentencepiece-0.1.97-cp38-cp38-win_amd64.whl", platform = "win32"},
-    {path = ".\\wheels\\sentencepiece-0.1.97-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", platform = "linux"}
-]
+sentencepiece = "^0.1.97"
 nltk = "^3.5"
 python-dotenv = "^0.13.0"
 seaborn = "^0.10.1"

@@ -1581,7 +1581,7 @@ python-versions = "*"
 
 [package.source]
 type = "file"
-url = "wheels/sentencepiece-0.1.97-cp38-cp38-win_amd64.whl"
+url = "wheels/sentencepiece-0.1.97-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
 
 [[package]]
 name = "sil-machine"
