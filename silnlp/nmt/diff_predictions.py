@@ -7,6 +7,7 @@ from typing import List, Iterable
 from pathlib import Path
 import re
 import string
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import difflib as dl
@@ -15,6 +16,7 @@ from .utils import decode_sp, decode_sp_lines, get_best_model_dir, get_last_chec
 from .config import get_git_revision_hash, get_mt_exp_dir
 import sacrebleu
 from sacrebleu.metrics import BLEU, BLEUScore
+import xlsxwriter
 
 logging.basicConfig()
 
@@ -28,6 +30,7 @@ replace_format = None
 delete_format = None
 unknown_format = None
 dictionary_format = None
+bleu_format = None
 
 VREF = 'VREF'
 SRC_SENTENCE = 'Source Sentence'
@@ -69,29 +72,46 @@ def sentence_bleu(
     return metric.sentence_score(hypothesis, references, use_effective_order=use_effective_order)
 
 
-def add_histogram(df: pd.DataFrame, sheet, exp1: str, exp2: str):
-    graph = f"{sheet.name}.jpg"
-    # Create the histogram
-    ax = df[SCORE_DELTA].plot.hist(bins=20,
-                                     figsize=(8, 3),
-                                     grid=True,
-                                     title=f'{exp1} vs {exp2}',
-                                     xlabel='BLEU Score Delta',
-                                     ylabel='Number of Verses'
-                                     )
-    # Calculate the mean, median, and STD
-    score_delta_mean = df[SCORE_DELTA].mean()
-    score_delta_median = df[SCORE_DELTA].median()
-    score_delta_std = df[SCORE_DELTA].std()
-    # Display the mean, median, and STD
-    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-    text_str = f'Mean: {score_delta_mean:.2f}\nMedian: {score_delta_median:.2f}\nSTD: {score_delta_std:.2f}'
-    ax.text(0.05, 0.95, text_str, transform=ax.transAxes, fontsize=10, verticalalignment='top', bbox=props)
-    # Add the histogram to the sheet
-    plt.plot()
-    plt.savefig(graph, dpi=80)
-    plt.clf()
-    sheet.insert_image('B1', graph)
+histogram_offset = 0
+
+def add_histogram(writer: pd.ExcelWriter, sheet_name: str, data: pd.Series, bin_size: int, title: str, x_axis: str):
+    global histogram_offset
+
+    counts, b, bars = plt.hist(data, bins=range(int(min(data.values)-bin_size), int(max(data.values)+bin_size), bin_size))
+    df = pd.DataFrame({'bin': b[:-1], 'count': counts})
+    df.to_excel(writer, index=False, sheet_name=sheet_name, startrow=histogram_offset, startcol=0)
+    sheet = writer.book.get_worksheet_by_name(sheet_name)
+    chart = writer.book.add_chart({'type': 'column'})
+    chart.set_title({'name': title})
+    chart.add_series({'categories': [sheet_name, histogram_offset+1, 0, histogram_offset+1+df.shape[0], 0],
+                      'values': [sheet_name, histogram_offset+1, 1, histogram_offset+1+df.shape[0], 1],
+                      'data_labels': {'value': True, 'num_format': '0'}})
+    chart.set_legend({'none': True})
+    chart.set_x_axis({'name': x_axis})
+    chart.set_y_axis({'name': 'Number of Verses'})
+    sheet.insert_chart(f'D{histogram_offset+2}', chart)
+    histogram_offset += df.shape[0] + 2
+
+
+def add_stats(df: pd.DataFrame, sheet, exp1: str, exp2: str):
+    global bleu_format
+
+    sheet.write_string('A1', 'BLEU Scores')
+    sheet.write_string('B1', exp1)
+    sheet.write_string('C1', exp2)
+    sheet.write_string('D1', 'Delta Scores')
+    sheet.write_string('A2', 'Mean')
+    sheet.write_string('A3', 'Median')
+    sheet.write_string('A4', 'STD')
+    sheet.write_number('B2', df[EXP1_SCORE].mean(), bleu_format)
+    sheet.write_number('B3', df[EXP1_SCORE].median(), bleu_format)
+    sheet.write_number('B4', df[EXP1_SCORE].std(), bleu_format)
+    sheet.write_number('C2', df[EXP2_SCORE].mean(), bleu_format)
+    sheet.write_number('C3', df[EXP2_SCORE].median(), bleu_format)
+    sheet.write_number('C4', df[EXP2_SCORE].std(), bleu_format)
+    sheet.write_number('D2', df[SCORE_DELTA].mean(), bleu_format)
+    sheet.write_number('D3', df[SCORE_DELTA].median(), bleu_format)
+    sheet.write_number('D4', df[SCORE_DELTA].std(), bleu_format)
 
 
 def adjust_column_widths(df: pd.DataFrame, sheet, col_width: int):
@@ -156,9 +176,8 @@ def split_words(s: str) -> List[str]:
     return s.split(' ')
 
 
-def apply_unknown_formatting(df: pd.DataFrame, sheet, histogram_offset: int, corpus: str,
+def apply_unknown_formatting(df: pd.DataFrame, sheet, stats_offset: int, corpus: str,
                              corpus_words: List[str]):
-    sheet.write_rich_string('F6', unknown_format, 'Orange (underline)', normal_format, ': Unknown source word')
     if corpus == 'src':
         column = 'B'
         column_name = SRC_SENTENCE
@@ -192,15 +211,10 @@ def apply_unknown_formatting(df: pd.DataFrame, sheet, histogram_offset: int, cor
         segments.append(s)
         if len(segments) > 2:
             segments.append(wrap_format)
-            sheet.write_rich_string(f'{column}{histogram_offset+index+2}', *segments)
+            sheet.write_rich_string(f'{column}{stats_offset+index+2}', *segments)
 
 
-def apply_diff_formatting(df: pd.DataFrame, sheet, histogram_offset: int):
-    sheet.write_rich_string('F2', equal_format, 'Green', normal_format, ': matching text')
-    sheet.write_rich_string('F3', insert_format, 'Blue (italics)', normal_format, ': text inserted in prediction')
-    sheet.write_rich_string('F4', delete_format, 'Red', normal_format, ': text missing from prediction')
-    sheet.write_rich_string('F5', replace_format, 'Purple (bold)', normal_format, ': text replaced in prediction')
-
+def apply_diff_formatting(df: pd.DataFrame, sheet, stats_offset: int):
     for index, row in df.iterrows():
         ref = row[TRG_SENTENCE]
         p1 = row[EXP1_PREDICTION]
@@ -208,16 +222,15 @@ def apply_diff_formatting(df: pd.DataFrame, sheet, histogram_offset: int):
         if ref != "":
             if p1 != "" and p1 != ref:
                 segments = get_diff_segments(ref, p1)
-                sheet.write_rich_string(f'E{histogram_offset+index+2}', *segments)
-                sheet.write_comment(f'E{histogram_offset+index+2}', p1)
+                sheet.write_rich_string(f'E{stats_offset+index+2}', *segments)
+                sheet.write_comment(f'E{stats_offset+index+2}', p1)
             if p2 != "" and p2 != ref:
                 segments = get_diff_segments(ref, p2)
-                sheet.write_rich_string(f'G{histogram_offset+index+2}', *segments)
-                sheet.write_comment(f'G{histogram_offset+index+2}', p2)
+                sheet.write_rich_string(f'G{stats_offset+index+2}', *segments)
+                sheet.write_comment(f'G{stats_offset+index+2}', p2)
 
 
-def apply_dict_formatting(df: pd.DataFrame, sheet, histogram_offset: int, dictDf: pd.DataFrame):
-    sheet.write_rich_string('F7', dictionary_format, 'Green (underline)', normal_format, ': Source dictionary word')
+def apply_dict_formatting(df: pd.DataFrame, sheet, stats_offset: int, dictDf: pd.DataFrame):
     column = 'B'
     for index, row in df.iterrows():
         text = row[SRC_SENTENCE]
@@ -243,7 +256,7 @@ def apply_dict_formatting(df: pd.DataFrame, sheet, histogram_offset: int, dictDf
         segments.append(s)
         if len(segments) > 2:
             segments.append(wrap_format)
-            sheet.write_rich_string(f'{column}{histogram_offset+index+2}', *segments)
+            sheet.write_rich_string(f'{column}{stats_offset+index+2}', *segments)
 
 
 def add_training_corpora(writer, exp1_dir: Path, exp2_dir: Path, col_width: int):
@@ -256,14 +269,25 @@ def add_training_corpora(writer, exp1_dir: Path, exp2_dir: Path, col_width: int)
     elif exp2_dir is not None and os.path.exists(os.path.join(exp2_dir, 'train.vref.txt')):
         df[VREF] = list(load_corpus(Path(os.path.join(exp2_dir, 'train.vref.txt'))))
 
-    df['Source'] = list(decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, 'train.src.txt')))))
-    df['Target'] = list(decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, 'train.trg.txt')))))
+    df[SRC_SENTENCE] = list(decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, 'train.src.txt')))))
+    df[TRG_SENTENCE] = list(decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, 'train.trg.txt')))))
 
     df.to_excel(writer, index=False, sheet_name=sheet_name)
 
     sheet = writer.sheets[sheet_name]
     sheet.set_column(1, 2, col_width, wrap_format)
     sheet.autofilter(0, 0, df.shape[0], df.shape[1] - 1)
+
+
+def add_legend(writer: pd.ExcelWriter, sheet_name: str):
+    sheet = writer.book.add_worksheet(sheet_name)
+    sheet.write_string('A1', 'Legend')
+    sheet.write_rich_string('A2', equal_format, 'Green', normal_format, ': matching text')
+    sheet.write_rich_string('A3', insert_format, 'Blue (italics)', normal_format, ': text inserted in prediction')
+    sheet.write_rich_string('A4', delete_format, 'Red', normal_format, ': text missing from prediction')
+    sheet.write_rich_string('A5', replace_format, 'Purple (bold)', normal_format, ': text replaced in prediction')
+    sheet.write_rich_string('A6', unknown_format, 'Orange (underline)', normal_format, ': Unknown source word')
+    sheet.write_rich_string('A7', dictionary_format, 'Green (underline)', normal_format, ': Source dictionary word')
 
 
 def load_dictionary(exp1_dir: Path, exp2_dir: Path):
@@ -334,6 +358,7 @@ def main() -> None:
     global delete_format
     global unknown_format
     global dictionary_format
+    global bleu_format
     text_wrap_column_width = 35
 
     parser = argparse.ArgumentParser(description="Compare the predictions across 2 experiments")
@@ -360,7 +385,7 @@ def main() -> None:
 
     print("Git commit:", get_git_revision_hash())
 
-    histogram_offset = 15
+    stats_offset = 5
 
     exp1_name = args.exp1
     exp1_dir = get_mt_exp_dir(exp1_name)
@@ -372,7 +397,7 @@ def main() -> None:
     writer: pd.ExcelWriter = pd.ExcelWriter(output_path, engine='xlsxwriter')
     workbook = writer.book
     wrap_format = workbook.add_format({'text_wrap': True})
-    text_align_format = workbook.add_format({'align': 'left', 'valign': 'left'})
+    text_align_format = workbook.add_format({'align': 'left', 'valign': 'top'})
     normal_format = workbook.add_format({'color': 'black'})
     equal_format = workbook.add_format({'color': 'green'})
     insert_format = workbook.add_format({'color': 'blue', 'italic': True})
@@ -380,6 +405,7 @@ def main() -> None:
     replace_format = workbook.add_format({'color': 'purple', 'bold': True})
     unknown_format = workbook.add_format({'color': 'orange', 'underline': True})
     dictionary_format = workbook.add_format({'color': 'green', 'underline': True})
+    bleu_format = workbook.add_format({'num_format': '0.00'})
 
     exp1_test_trg_filename = os.path.join(exp1_dir, 'test.trg.detok.txt')
     exp2_test_trg_filename = os.path.join(exp2_dir, 'test.trg.detok.txt')
@@ -442,20 +468,28 @@ def main() -> None:
     df[EXP2_SCORE] = exp2_scores
     df[SCORE_DELTA] = df[EXP2_SCORE] - df[EXP1_SCORE]
 
-    df.to_excel(writer, index=False, float_format="%.2f", sheet_name=sheet_name, startrow=histogram_offset)
+    add_legend(writer, 'Legend')
+
+    df.to_excel(writer, index=False, float_format="%.2f", sheet_name=sheet_name, startrow=stats_offset)
     sheet = writer.sheets[sheet_name]
-    sheet.autofilter(histogram_offset, 0, histogram_offset+df.shape[0], df.shape[1]-1)
+    sheet.autofilter(stats_offset, 0, stats_offset+df.shape[0], df.shape[1]-1)
 
     if args.show_unknown:
-        apply_unknown_formatting(df, sheet, histogram_offset, "src", src_words)
-        apply_unknown_formatting(df, sheet, histogram_offset, "trg", trg_words)
+        apply_unknown_formatting(df, sheet, stats_offset, "src", src_words)
+        apply_unknown_formatting(df, sheet, stats_offset, "trg", trg_words)
     if args.show_diffs:
-        apply_diff_formatting(df, sheet, histogram_offset)
+        apply_diff_formatting(df, sheet, stats_offset)
     if args.show_dict and dictDf is not None:
-        apply_dict_formatting(df, sheet, histogram_offset, dictDf)
+        apply_dict_formatting(df, sheet, stats_offset, dictDf)
 
     adjust_column_widths(df, sheet, text_wrap_column_width)
-    add_histogram(df, sheet, f'{args.exp1}({args.step1})', f'{args.exp2}({args.step2})')
+    add_stats(df, sheet, f'{args.exp1}({args.step1})', f'{args.exp2}({args.step2})')
+
+    data_offset = stats_offset + 2
+
+    add_histogram(writer, 'Charts', df[SCORE_DELTA], 2, 'Delta BLEU Scores', 'Delta BLEU')
+    add_histogram(writer, 'Charts', df[EXP1_SCORE], 5, 'Experiment 1', 'BLEU')
+    add_histogram(writer, 'Charts', df[EXP2_SCORE], 5, 'Experiment 2', 'BLEU')
 
     if args.analyze_digits:
         add_digits_analysis(writer, df, text_wrap_column_width+20)
