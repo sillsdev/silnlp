@@ -14,14 +14,18 @@ _TAG_PATTERN = re.compile(r"(<\w+> )+")
 
 
 def decode_sp(line: str) -> str:
-    return line.replace(" ", "").replace("\u2581", " ").lstrip()
+    #    return line.replace(" ", "").replace("\u2581", " ").lstrip()
+    # Unicode 2581 (Lower One Eighth Block) used by SentencePiece for start-of-word indicator
+    # Unicode 2580 (Upper Half Block) used for morpheme segment indicator
+    return line.replace(" ", "").replace("\u2581\u2580", "").replace("\u2581", " ").lstrip()
 
 
 def decode_sp_lines(lines: Iterable[str]) -> Iterable[str]:
     return map(decode_sp, lines)
 
 
-def encode_sp(spp: Optional[sp.SentencePieceProcessor], line: str, add_dummy_prefix: Optional[bool] = True) -> str:
+def encode_sp(spp: Optional[sp.SentencePieceProcessor], line: str, add_dummy_prefix: Optional[bool] = True,
+              sample_subwords: Optional[bool] = False) -> str:
     if spp is None:
         return line
     prefix = ""
@@ -32,16 +36,20 @@ def encode_sp(spp: Optional[sp.SentencePieceProcessor], line: str, add_dummy_pre
         line = line[index:]
     if not add_dummy_prefix:
         line = "\ufffc" + line
-    pieces = spp.EncodeAsPieces(line)
+    if sample_subwords:
+        pieces = spp.Encode(line, out_type=str, enable_sampling=True, alpha=0.1, nbest_size=-1)
+    else:
+        pieces = spp.EncodeAsPieces(line)
     if not add_dummy_prefix:
         pieces = pieces[2:]
     return prefix + " ".join(pieces)
 
 
 def encode_sp_lines(
-    spp: Optional[sp.SentencePieceProcessor], lines: Iterable[str], add_dummy_prefix: Optional[bool] = True
+    spp: Optional[sp.SentencePieceProcessor], lines: Iterable[str], add_dummy_prefix: Optional[bool] = True,
+        sample_subwords: Optional[bool] = False
 ) -> Iterator[str]:
-    return (encode_sp(spp, l, add_dummy_prefix=add_dummy_prefix) for l in lines)
+    return (encode_sp(spp, l, add_dummy_prefix=add_dummy_prefix, sample_subwords=sample_subwords) for l in lines)
 
 
 def get_best_model_dir(model_dir: Path) -> Tuple[Path, int]:

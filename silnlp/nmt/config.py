@@ -11,6 +11,7 @@ from enum import Enum, Flag, auto
 from pathlib import Path
 from statistics import mean
 from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, Type, Union, cast
+from tqdm import tqdm
 
 import pandas as pd
 import sentencepiece as sp
@@ -56,6 +57,8 @@ from ..common.utils import (
 from .models.sil_transformer import SILTransformer
 from .runner import SILRunner
 from .utils import decode_sp, decode_sp_lines, encode_sp, encode_sp_lines, get_best_model_dir, get_last_checkpoint
+from abc import ABC, abstractmethod
+from .augment import AugmentMethod, create_augment_methods
 
 _PYTHON_TO_TENSORFLOW_LOGGING_LEVEL: Dict[int, int] = {
     logging.CRITICAL: 3,
@@ -138,6 +141,7 @@ class CorpusPair:
     trg_files: List[DataFile]
     type: DataFileType
     src_noise: List[NoiseMethod]
+    augmentations: List[AugmentMethod]
     tags: List[str]
     size: Union[float, int]
     test_size: Optional[Union[float, int]]
@@ -253,6 +257,7 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
             tags = [tag.strip() for tag in tags.split(",")]
 
         src_noise = create_noise_methods(pair.get("src_noise", []))
+        augmentations = create_augment_methods(pair.get("augment", []))
 
         if "size" not in pair:
             pair["size"] = 1.0
@@ -298,6 +303,7 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
                 trg_files,
                 type,
                 src_noise,
+                augmentations,
                 tags,
                 size,
                 test_size,
@@ -996,6 +1002,10 @@ class Config:
         self._append_corpus(self._train_trg_filename(), encode_sp_lines(trg_spp, train["target"]))
         self._append_corpus(self._train_vref_filename(), (str(vr) for vr in train["vref"]))
         train_count = len(train)
+        augment_count = self._augment_corpus(pair.augmentations,
+                                             train["source"], train["target"], train["vref"],
+                                             src_spp, trg_spp)
+        train_count += augment_count
 
         terms_train_count, dict_count = self._write_terms(src_spp, trg_spp, terms)
         train_count += terms_train_count
@@ -1310,7 +1320,7 @@ class Config:
                 dict_trg_file = stack.enter_context(self._open_append(self._dict_trg_filename()))
 
             index = 0
-            for src_line, trg_line in zip(input_src_file, input_trg_file):
+            for src_line, trg_line in tqdm(zip(input_src_file, input_trg_file)):
                 src_line = src_line.strip()
                 trg_line = trg_line.strip()
                 if len(src_line) == 0 or len(trg_line) == 0:
@@ -1346,6 +1356,7 @@ class Config:
                         noised_src_sentence,
                         trg_sentence,
                         pair.is_lexical_data,
+                        pair.augmentations,
                     )
                     if self.mirror:
                         mirror_src_sentence = mirror_tags_str + trg_line
@@ -1361,6 +1372,7 @@ class Config:
                             mirror_src_sentence,
                             mirror_trg_sentence,
                             pair.is_lexical_data,
+                            pair.augmentations,
                         )
 
                 if pair.is_dictionary and dict_src_file is not None and dict_trg_file is not None:
@@ -1393,12 +1405,21 @@ class Config:
         src_sentence: str,
         trg_sentence: str,
         is_lexical: bool,
+        augmentations: List[AugmentMethod],
     ) -> int:
         src_variants = [encode_sp(src_spp, src_sentence, add_dummy_prefix=True)]
         trg_variants = [encode_sp(trg_spp, trg_sentence, add_dummy_prefix=True)]
+
         if is_lexical:
             src_variants.append(encode_sp(src_spp, src_sentence, add_dummy_prefix=False))
             trg_variants.append(encode_sp(trg_spp, trg_sentence, add_dummy_prefix=False))
+
+        src_augments, trg_augments = self._augment_sentence(augmentations,
+                                                            src_sentence, trg_sentence, '',
+                                                            src_spp, trg_spp)
+        src_variants.extend(src_augments)
+        trg_variants.extend(trg_augments)
+
         for src_variant, trg_variant in zip(src_variants, trg_variants):
             src_file.write(src_variant + "\n")
             trg_file.write(trg_variant + "\n")
@@ -1427,6 +1448,32 @@ class Config:
         if self.write_trg_tag:
             tokens = tag + tokens
         return " ".join(tokens)
+
+    def _augment_sentence(self,
+                        methods: List[AugmentMethod],
+                        src: str, trg: str, vref: str,
+                        src_spp: Optional[sp.SentencePieceProcessor],
+                        trg_spp: Optional[sp.SentencePieceProcessor]) -> Tuple[List[str],List[str]]:
+        src_augments: List[str] = []
+        trg_augments: List[str] = []
+        for method in methods:
+            src_delta, trg_delta = method.__augment_sentence__(src, trg, src_spp, trg_spp)
+            src_augments.extend(src_delta)
+            trg_augments.extend(trg_delta)
+        return src_augments, trg_augments
+
+    def _augment_corpus(self,
+                        methods: List[AugmentMethod],
+                        src: List[str], trg: List[str], vref: List[str],
+                        src_spp: Optional[sp.SentencePieceProcessor],
+                        trg_spp: Optional[sp.SentencePieceProcessor]) -> int:
+        augment_count = 0
+        for method in methods:
+            augment_count += method.__augment_corpus__(self.exp_dir / self._train_src_filename(),
+                                                       self.exp_dir / self._train_trg_filename(),
+                                                       self.exp_dir / self._train_vref_filename(),
+                                                       src, trg, vref, src_spp, trg_spp)
+        return augment_count
 
     def _get_val_ref_count(self, src_iso: str, trg_iso: str) -> int:
         if self.root["eval"]["multi_ref_eval"]:
@@ -1601,7 +1648,7 @@ class Config:
         tags = self._tags if side == "source" else set()
         if self.parent_config is not None:
             parent_isos = self.parent_config.src_isos if side == "source" else self.parent_config.trg_isos
-            if isos == parent_isos:
+            if isos.issubset(parent_isos):
                 if self.parent_config.share_vocab:
                     parent_sp_prefix_path = self.parent_config.exp_dir / "sp"
                     parent_vocab_path = self.parent_config.exp_dir / "onmt.vocab"
