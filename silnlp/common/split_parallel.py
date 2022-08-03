@@ -70,17 +70,17 @@ def main() -> None:
     # Create the initial data frame
     corpus = pd.DataFrame(columns=['SRC', 'TRG'])
     print(f'Loading corpus - src: {split_config.get("src")}, trg: {split_config.get("trg")}')
-    trg_lines = list(load_corpus(Path(os.path.join(exp_dir, split_config.get('src')))))
-    src_lines = list(load_corpus(Path(os.path.join(exp_dir, split_config.get('trg')))))
+    src_lines = list(load_corpus(Path(os.path.join(exp_dir, split_config.get('src')))))
+    trg_lines = list(load_corpus(Path(os.path.join(exp_dir, split_config.get('trg')))))
     
     # Remove lines where one or other of the lines are blank, or both lines are identical.
     filtered_src = list()
     filtered_trg = list()
     
-    for src,trg in zip(src_lines,trg_lines):
-        if keep_lines(src,trg):
+    for src, trg in zip(src_lines, trg_lines):
+        if keep_lines(src, trg):
             filtered_src.append(src)
-            filtered_trg.append(src)
+            filtered_trg.append(trg)
                    
     corpus['SRC'] = filtered_src
     corpus['TRG'] = filtered_trg
