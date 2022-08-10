@@ -235,7 +235,7 @@ def add_range(start_hex_str: str, end_hex_str: str, script_name: str, gen_cat: s
     g = gen_cat.lower()
     start_code_val = int(start_hex_str, 16)
     end_code_val = int(end_hex_str, 16)
-    for i in range(start_code_val, end_code_val+1):
+    for i in range(start_code_val, end_code_val + 1):
         script_dict[i] = [s, g]
 
 
@@ -271,7 +271,6 @@ symbol_cats = {'so'}
 
 def script_check(src: str, trg: str, valid_src_scripts: List[str], valid_trg_scripts: List[str],
                  exclude_symbols: List[str], threshold: int) -> bool:
-
     def check_line(line: str, scripts: List[str], exc_symbols: List[str], limit: int) -> bool:
         error_count = 0
 
@@ -293,7 +292,7 @@ def script_check(src: str, trg: str, valid_src_scripts: List[str], valid_trg_scr
         return True
 
     return not check_line(src, valid_src_scripts, exclude_symbols, threshold) or \
-           not check_line(trg, valid_trg_scripts, exclude_symbols, threshold)
+        not check_line(trg, valid_trg_scripts, exclude_symbols, threshold)
 
 
 def log_error(log_flag: bool, logfile, label: str, src: str, trg: str):

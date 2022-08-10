@@ -174,5 +174,3 @@ def create_augment_methods(params: List[List]) -> List[AugmentMethod]:
             raise ValueError("Invalid augment type: %s" % augment_type)
         methods.append(augment_method_class(*args))
     return methods
-
-

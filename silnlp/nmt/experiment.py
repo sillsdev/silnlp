@@ -69,6 +69,7 @@ class SILExperiment:
             avg=True,
             best=True,
             scorers={"bleu", "sentencebleu", "chrf3", "wer", "ter"},
+            by_book=True,
         )
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
 

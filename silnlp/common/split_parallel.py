@@ -41,9 +41,9 @@ def show_config(config: dict):
     print(json.dumps(config, indent=2))
 
 
-def keep_lines(src,trg):
+def keep_lines(src, trg):
     src = src.strip()
-    trg =trg.strip()
+    trg = trg.strip()
 
     if src == '' or trg == '' or src == trg:
         return False
@@ -84,9 +84,7 @@ def main() -> None:
                    
     corpus['SRC'] = filtered_src
     corpus['TRG'] = filtered_trg
-    
-    
-    
+
     remainder = None
 
     splits = split_config.get('splits')

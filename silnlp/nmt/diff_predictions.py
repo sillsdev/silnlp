@@ -52,24 +52,21 @@ def sentence_bleu(
     smooth_method: str = "exp",
     smooth_value: float = None,
     lowercase: bool = False,
-    tokenize=sacrebleu.DEFAULT_TOKENIZER,
-    use_effective_order: bool = False,
+    tokenize='13a',
+    use_effective_order: bool = True,
 ) -> BLEUScore:
     """
     Substitute for the sacrebleu version of sentence_bleu, which uses settings that aren't consistent with
     the values we use for corpus_bleu, and isn't fully parameterized
     """
-    args = argparse.Namespace(
-        smooth_method=smooth_method,
-        smooth_value=smooth_value,
-        force=False,
-        short=False,
-        lc=lowercase,
-        tokenize=tokenize,
-    )
-
-    metric = BLEU(args)
-    return metric.sentence_score(hypothesis, references, use_effective_order=use_effective_order)
+    metric = BLEU(smooth_method=smooth_method,
+                  smooth_value=smooth_value,
+                  force=False,
+                  lowercase=lowercase,
+                  tokenize=tokenize,
+                  effective_order=use_effective_order
+                  )
+    return metric.sentence_score(hypothesis, references)
 
 
 histogram_offset = 0

@@ -90,8 +90,8 @@ def main() -> None:
                 score_str += f"/{bleu.precisions[2]:.2f}/{bleu.precisions[3]:.2f}/{bleu.bp:.3f}/{bleu.sys_len:d}"
                 score_str += f"/{bleu.ref_len:d}"
             elif scorer == "chrf3":
-                chrf3 = sacrebleu.corpus_chrf(sys, [ref], order=6, beta=3, remove_whitespace=True)
-                chrf3_score: float = chrf3.score * 100
+                chrf3 = sacrebleu.corpus_chrf(sys, [ref], char_order=6, beta=3, remove_whitespace=True)
+                chrf3_score: float = chrf3.score
                 scorer_name = "chrF3"
                 score_str = f"{chrf3_score:.2f}"
             elif scorer == "meteor":

@@ -1,7 +1,7 @@
 import os
 import re
 from pathlib import Path
-from typing import IO, Iterable, Iterator, List, Optional, Tuple, cast
+from typing import IO, Iterable, Iterator, List, Optional, Tuple, cast, Sequence
 
 import sacrebleu
 import sentencepiece as sp
@@ -49,7 +49,7 @@ def encode_sp_lines(
     spp: Optional[sp.SentencePieceProcessor], lines: Iterable[str], add_dummy_prefix: Optional[bool] = True,
         sample_subwords: Optional[bool] = False
 ) -> Iterator[str]:
-    return (encode_sp(spp, l, add_dummy_prefix=add_dummy_prefix, sample_subwords=sample_subwords) for l in lines)
+    return (encode_sp(spp, line, add_dummy_prefix=add_dummy_prefix, sample_subwords=sample_subwords) for line in lines)
 
 
 def get_best_model_dir(model_dir: Path) -> Tuple[Path, int]:
@@ -75,7 +75,7 @@ def get_last_checkpoint(model_dir: Path) -> Tuple[Path, int]:
         parts = checkpoint_prefix.name.split("-")
         checkpoint_path = model_dir / checkpoint_prefix
         step = int(parts[-1])
-        return (checkpoint_path, step)
+        return checkpoint_path, step
 
 
 @register_scorer(name="bleu_sp")
@@ -87,7 +87,7 @@ class BLEUSentencepieceScorer(Scorer):
         with tf.io.gfile.GFile(ref_path) as ref_stream, tf.io.gfile.GFile(hyp_path) as sys_stream:
             sys = decode_sp_lines(sys_stream)
             ref = decode_sp_lines(ref_stream)
-            bleu = sacrebleu.corpus_bleu(sys, [ref], lowercase=True)
+            bleu = sacrebleu.corpus_bleu(cast(Sequence[str], sys), cast(Sequence[Sequence[str]], [ref]), lowercase=True)
             return bleu.score
 
 
@@ -137,7 +137,7 @@ class BLEUMultiRefScorer(Scorer):
     def __call__(self, ref_path: str, hyp_path: str) -> float:
         ref_streams = load_ref_streams(ref_path)
         sys_stream = load_sys_stream(hyp_path)
-        bleu = sacrebleu.corpus_bleu(sys_stream, cast(List[Iterable[str]], ref_streams), force=True)
+        bleu = sacrebleu.corpus_bleu(sys_stream, cast(Sequence[Sequence[str]], ref_streams), force=True)
         return bleu.score
 
 
@@ -149,7 +149,7 @@ class BLEUMultiRefScorer(Scorer):
     def __call__(self, ref_path: str, hyp_path: str) -> float:
         ref_streams = load_ref_streams(ref_path, detok=True)
         sys_stream = load_sys_stream(hyp_path, detok=True)
-        bleu = sacrebleu.corpus_bleu(sys_stream, cast(List[Iterable[str]], ref_streams), force=True)
+        bleu = sacrebleu.corpus_bleu(sys_stream, cast(Sequence[Sequence[str]], ref_streams), force=True)
         return bleu.score
 
 
@@ -161,8 +161,8 @@ class chrF3Scorer(Scorer):
     def __call__(self, ref_path: str, hyp_path: str) -> float:
         ref_streams = load_ref_streams(ref_path)
         sys_stream = load_sys_stream(hyp_path)
-        chrf3_score = sacrebleu.corpus_chrf(sys_stream, ref_streams, order=6, beta=3, remove_whitespace=True)
-        return np.round(float(chrf3_score.score * 100), 2)
+        chrf3_score = sacrebleu.corpus_chrf(sys_stream, ref_streams, char_order=6, beta=3, remove_whitespace=True)
+        return np.round(float(chrf3_score.score), 2)
 
 
 @register_scorer(name="chrf3_detok")
@@ -173,8 +173,8 @@ class chrF3DetokScorer(Scorer):
     def __call__(self, ref_path: str, hyp_path: str) -> float:
         ref_streams = load_ref_streams(ref_path, detok=True)
         sys_stream = load_sys_stream(hyp_path, detok=True)
-        chrf3_score = sacrebleu.corpus_chrf(sys_stream, ref_streams, order=6, beta=3, remove_whitespace=True)
-        return np.round(float(chrf3_score.score * 100), 2)
+        chrf3_score = sacrebleu.corpus_chrf(sys_stream, ref_streams, char_order=6, beta=3, remove_whitespace=True)
+        return np.round(float(chrf3_score.score), 2)
 
 
 def enable_memory_growth():

@@ -1,7 +1,6 @@
 import os
 from pathlib import Path
 import argparse
-from typing import Dict, List
 import pandas as pd
 
 from .utils import get_git_revision_hash

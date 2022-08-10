@@ -1,8 +1,7 @@
 import argparse
 import logging
 import os
-from ..common.corpus import load_corpus, write_corpus
-from .config import get_git_revision_hash, get_mt_exp_dir
+from .config import get_mt_exp_dir
 
 logging.basicConfig()
 

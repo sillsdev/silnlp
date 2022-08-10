@@ -144,7 +144,7 @@ def get_scripture_path(iso: str, project: str) -> Path:
 def parse_scripture_path(data_file_path: Path) -> Tuple[str, str]:
     file_name = data_file_path.stem
     parts = file_name.split("-")
-    return (parts[0], parts[1])
+    return parts[0], parts[1]
 
 
 def include_books(corpus: pd.DataFrame, books: Set[int]) -> pd.DataFrame:
@@ -219,7 +219,7 @@ def get_terms(terms_renderings_path: Path, iso: str = "en") -> Dict[str, Term]:
     for metadata_line, glosses_line, renderings_line, vrefs_line in itertools.zip_longest(
         terms_metadata, terms_glosses, terms_renderings, terms_vrefs
     ):
-        id, cat, domain = metadata_line.split("\t", maxsplit=3)
+        term_id, cat, domain = metadata_line.split("\t", maxsplit=3)
         glosses = [] if glosses_line is None or len(glosses_line) == 0 else glosses_line.split("\t")
         renderings = [] if len(renderings_line) == 0 else renderings_line.split("\t")
         vrefs = (
@@ -227,7 +227,7 @@ def get_terms(terms_renderings_path: Path, iso: str = "en") -> Dict[str, Term]:
             if vrefs_line is None or len(vrefs_line) == 0
             else set(VerseRef.from_string(vref, ORIGINAL_VERSIFICATION) for vref in vrefs_line.split("\t"))
         )
-        terms[id] = Term(id, cat, domain, glosses, renderings, vrefs)
+        terms[term_id] = Term(term_id, cat, domain, glosses, renderings, vrefs)
     return terms
 
 
@@ -270,6 +270,6 @@ def get_terms_data_frame(
     return pd.DataFrame(data, columns=["rendering", "gloss", "dictionary", "vrefs"])
 
 
-def count_lines(file_path: Path, filter: Callable[[str], bool] = lambda l: True) -> int:
+def count_lines(file_path: Path, line_filter: Callable[[str], bool] = lambda l: True) -> int:
     with file_path.open("r", encoding="utf-8-sig") as file:
-        return sum(1 for l in file if filter(l))
+        return sum(1 for l in file if line_filter(l))

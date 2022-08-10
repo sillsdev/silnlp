@@ -2,7 +2,7 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Sequence, cast
 
 import numpy as np
 import psutil
@@ -15,8 +15,8 @@ METEOR_FULLY_SUPPORTED_LANGS = {"en", "cz", "de", "es", "fr", "ar"}
 
 
 def compute_ter_score(hyps: Iterable[str], refs: List[Iterable[str]]) -> float:
-    result = sacrebleu.corpus_ter(hyps, refs)
-    return float(np.round(float(result.score) * 100, 2))
+    result = sacrebleu.corpus_ter(cast(Sequence[str], hyps), cast(Sequence[Sequence[str]], refs))
+    return float(np.round(float(result.score), 2))
 
 
 def compute_wer_score(hyps: Iterable[str], refs: Iterable[str]) -> float:
@@ -37,7 +37,7 @@ def compute_wer_score(hyps: Iterable[str], refs: Iterable[str]) -> float:
             print("Cannot divide by zero. Check for empty lines.")
             result = -1
 
-        return float(np.round(float(result) * 100, 2))
+        return float(np.round(float(result), 2))
 
 
 def compute_meteor_score(lang: str, hyps: Iterable[str], refs: List[Iterable[str]]) -> Optional[float]:

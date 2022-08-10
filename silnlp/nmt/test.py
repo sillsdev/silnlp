@@ -3,7 +3,7 @@ import logging
 import random
 import sys
 from pathlib import Path
-from typing import IO, Dict, Iterable, List, Optional, Set, Tuple, Union, cast
+from typing import IO, Dict, Iterable, List, Optional, Set, Tuple, Union, cast, Sequence
 
 import numpy as np
 import sacrebleu
@@ -96,8 +96,8 @@ def score_individual_books(
 
             other_scores: Dict[str, float] = {}
             if "chrf3" in scorers:
-                chrf3_score = sacrebleu.corpus_chrf(pair_sys, pair_refs, order=6, beta=3, remove_whitespace=True)
-                other_scores["CHRF3"] = np.round(float(chrf3_score.score * 100), 2)
+                chrf3_score = sacrebleu.corpus_chrf(pair_sys, pair_refs, char_order=6, beta=3, remove_whitespace=True)
+                other_scores["CHRF3"] = np.round(float(chrf3_score.score), 2)
 
             if "meteor" in scorers:
                 meteor_score = compute_meteor_score(trg_iso, pair_sys, pair_refs)
@@ -284,24 +284,21 @@ def sentence_bleu(
     smooth_method: str = "exp",
     smooth_value: float = None,
     lowercase: bool = False,
-    tokenize=sacrebleu.DEFAULT_TOKENIZER,
-    use_effective_order: bool = False,
+    tokenize: str = '13a',
+    use_effective_order: bool = True,
 ) -> BLEUScore:
     """
     Substitute for the sacrebleu version of sentence_bleu, which uses settings that aren't consistent with
     the values we use for corpus_bleu, and isn't fully parameterized
     """
-    args = argparse.Namespace(
-        smooth_method=smooth_method,
-        smooth_value=smooth_value,
-        force=False,
-        short=False,
-        lc=lowercase,
-        tokenize=tokenize,
-    )
-
-    metric = BLEU(args)
-    return metric.sentence_score(hypothesis, references, use_effective_order=use_effective_order)
+    metric = BLEU(smooth_method=smooth_method,
+                  smooth_value=smooth_value,
+                  force=False,
+                  lowercase=lowercase,
+                  tokenize=tokenize,
+                  effective_order=use_effective_order
+                  )
+    return metric.sentence_score(hypothesis, references)
 
 
 def write_sentence_bleu(
@@ -309,7 +306,7 @@ def write_sentence_bleu(
     preds: List[str],
     refs: List[List[str]],
     lowercase: bool = False,
-    tokenize=sacrebleu.DEFAULT_TOKENIZER,
+    tokenize: str = '13a',
 ):
     scores_path = predictions_detok_path + ".scores.csv"
     with open(scores_path, "w", encoding="utf-8-sig") as scores_file:
@@ -433,7 +430,7 @@ def test_checkpoint(
             if "bleu" in scorers:
                 bleu_score = sacrebleu.corpus_bleu(
                     pair_sys,
-                    cast(List[Iterable[str]], pair_refs),
+                    cast(Sequence[Sequence[str]], pair_refs),
                     lowercase=True,
                     tokenize=config.data.get("sacrebleu_tokenize", "13a"),
                 )
@@ -450,9 +447,9 @@ def test_checkpoint(
             other_scores: Dict[str, float] = {}
             if "chrf3" in scorers:
                 chrf3_score = sacrebleu.corpus_chrf(
-                    pair_sys, cast(List[Iterable[str]], pair_refs), order=6, beta=3, remove_whitespace=True
+                    pair_sys, cast(Sequence[Sequence[str]], pair_refs), char_order=6, beta=3, remove_whitespace=True
                 )
-                other_scores["CHRF3"] = np.round(float(chrf3_score.score * 100), 2)
+                other_scores["CHRF3"] = np.round(float(chrf3_score.score), 2)
 
             if "meteor" in scorers:
                 meteor_score = compute_meteor_score(trg_iso, pair_sys, cast(List[Iterable[str]], pair_refs))
@@ -479,7 +476,7 @@ def test_checkpoint(
                 else:
                     print("Error: book_dict did not load correctly. Not scoring individual books.")
     if len(config.src_isos) > 1 or len(config.trg_isos) > 1:
-        bleu = sacrebleu.corpus_bleu(overall_sys, cast(List[Iterable[str]], overall_refs), lowercase=True)
+        bleu = sacrebleu.corpus_bleu(overall_sys, cast(Sequence[Sequence[str]], overall_refs), lowercase=True)
         scores.append(PairScore("ALL", "ALL", "ALL", bleu, len(overall_sys), ref_projects))
 
     scores_file_root = f"scores-{suffix_str}"
@@ -508,7 +505,7 @@ def test(
 ):
     exp_name = experiment
     config = load_config(exp_name)
-    books_nums = get_books(books)
+    books_nums = get_books(list(books))
 
     if len(scorers) == 0:
         scorers.add("bleu")

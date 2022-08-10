@@ -2,7 +2,7 @@ import argparse
 import logging
 from typing import List, Set
 
-from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_id_to_number, get_books
+from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books
 
 from ..common.corpus import count_lines
 from ..common.environment import SIL_NLP_ENV

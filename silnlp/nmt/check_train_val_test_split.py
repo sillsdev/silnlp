@@ -154,23 +154,23 @@ def wordChecks(folder: str, writer: pd.ExcelWriter, corpus: str,
 
     # Load the training data
     train_file = os.path.join(folder, f"train.{corpus}.txt")
-    train_word_counts = load_word_counts(train_file)
+    train_word_counts = load_word_counts(Path(train_file))
 
     # Load the validation data
     val_file = os.path.join(folder, f"val.{corpus}.txt")
     if detok_val:
-        val_word_counts = load_word_counts(val_file)
+        val_word_counts = load_word_counts(Path(val_file))
     else:
-        val_word_counts = load_word_counts(val_file, False)
+        val_word_counts = load_word_counts(Path(val_file), False)
     unk_val_word_counts = unknown_word_counts(train_word_counts, val_word_counts)
 
     # Load the test data
     test_file = os.path.join(folder, f"test.{corpus}.txt")
     if os.path.exists(test_file):
-        test_word_counts = load_word_counts(test_file)
+        test_word_counts = load_word_counts(Path(test_file))
     elif corpus == "trg":
         test_file = os.path.join(folder, f"test.{corpus}.detok.txt")
-        test_word_counts = load_word_counts(test_file, False)
+        test_word_counts = load_word_counts(Path(test_file), False)
     else:
         print(f'No test data for corpus {corpus}')
         return
@@ -224,11 +224,11 @@ def main() -> None:
 
     pd.set_option('max_columns', None)
     writer = pd.ExcelWriter(out_file, engine='xlsxwriter')
-    corpusStats.to_excel(writer,sheet_name='Stats') # Create empty sheet so that this data is first in the xlsx
+    corpusStats.to_excel(writer, sheet_name='Stats') # Create empty sheet so that this data is first in the xlsx
     print("Analyzing source ...")
-    wordChecks(exp_dir, writer, "src", args.similar_words, args.distance, args.details)
+    wordChecks(Path(exp_dir), writer, "src", args.similar_words, args.distance, args.details)
     print("Analyzing target ...")
-    wordChecks(exp_dir, writer, "trg", args.similar_words, args.distance, args.details, args.detok_val)
+    wordChecks(Path(exp_dir), writer, "trg", args.similar_words, args.distance, args.details, args.detok_val)
     writeStats(writer)
     writer.save()
 

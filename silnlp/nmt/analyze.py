@@ -24,7 +24,7 @@ from tensorflow.python.eager.def_function import Function
 from ..common.utils import get_git_revision_hash
 from .config import Config, create_model, load_config, set_tf_log_level
 from .runner import make_inference_dataset
-from .transformer import SILTransformer
+from .models.sil_transformer import SILTransformer
 from .utils import decode_sp, encode_sp, get_best_model_dir, get_last_checkpoint, enable_memory_growth
 
 
