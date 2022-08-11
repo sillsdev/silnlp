@@ -16,21 +16,27 @@ class AugmentMethod(ABC):
         pass
 
     @abstractmethod
-    def __augment_corpus__(self,
-                           train_src_filename: Path,
-                           train_trg_filename: Path,
-                           train_vref_filename: Path,
-                           src: List[str],
-                           trg: List[str],
-                           vref: List[str],
-                           src_spp: Optional[sp.SentencePieceProcessor],
-                           trg_spp: Optional[sp.SentencePieceProcessor]) -> int:
+    def __augment_corpus__(
+        self,
+        train_src_filename: Path,
+        train_trg_filename: Path,
+        train_vref_filename: Path,
+        src: List[str],
+        trg: List[str],
+        vref: List[str],
+        src_spp: Optional[sp.SentencePieceProcessor],
+        trg_spp: Optional[sp.SentencePieceProcessor],
+    ) -> int:
         pass
 
     @abstractmethod
-    def __augment_sentence__(self, src: str, trg: str,
-                             src_spp: Optional[sp.SentencePieceProcessor],
-                             trg_spp: Optional[sp.SentencePieceProcessor]) -> Tuple[List[str], List[str]]:
+    def __augment_sentence__(
+        self,
+        src: str,
+        trg: str,
+        src_spp: Optional[sp.SentencePieceProcessor],
+        trg_spp: Optional[sp.SentencePieceProcessor],
+    ) -> Tuple[List[str], List[str]]:
         pass
 
     @abstractmethod
@@ -63,16 +69,22 @@ class CipherAugment(AugmentMethod):
 # Creates additional tokenized copies of the src and trg text using alternate subword encodings.
 class SubwordAugment(AugmentMethod):
     def __init__(self, args):
-        self.encodings = int(args.get('encodings', 0))
+        self.encodings = int(args.get("encodings", 0))
 
     def __pre__(self, args):
         pass
 
-    def __augment_corpus__(self,
-                           train_src_filename: Path, train_trg_filename: Path, train_vref_filename: Path,
-                           src: List[str], trg: List[str], vref: List[str],
-                           src_spp: Optional[sp.SentencePieceProcessor],
-                           trg_spp: Optional[sp.SentencePieceProcessor]) -> int:
+    def __augment_corpus__(
+        self,
+        train_src_filename: Path,
+        train_trg_filename: Path,
+        train_vref_filename: Path,
+        src: List[str],
+        trg: List[str],
+        vref: List[str],
+        src_spp: Optional[sp.SentencePieceProcessor],
+        trg_spp: Optional[sp.SentencePieceProcessor],
+    ) -> int:
         augment_count = 0
         for encoding in range(self.encodings):
             write_corpus(train_src_filename, encode_sp_lines(src_spp, src, sample_subwords=True), append=True)
@@ -81,10 +93,13 @@ class SubwordAugment(AugmentMethod):
             augment_count += len(src)
         return augment_count
 
-    def __augment_sentence__(self,
-                             src: str, trg: str,
-                             src_spp: Optional[sp.SentencePieceProcessor],
-                             trg_spp: Optional[sp.SentencePieceProcessor]) -> Tuple[List[str], List[str]]:
+    def __augment_sentence__(
+        self,
+        src: str,
+        trg: str,
+        src_spp: Optional[sp.SentencePieceProcessor],
+        trg_spp: Optional[sp.SentencePieceProcessor],
+    ) -> Tuple[List[str], List[str]]:
         src_augments: List[str] = [encode_sp(src_spp, src, sample_subwords=True) for x in range(self.encodings)]
         trg_augments: List[str] = [encode_sp(trg_spp, trg, sample_subwords=True) for x in range(self.encodings)]
         return src_augments, trg_augments

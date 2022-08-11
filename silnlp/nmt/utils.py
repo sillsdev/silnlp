@@ -24,8 +24,12 @@ def decode_sp_lines(lines: Iterable[str]) -> Iterable[str]:
     return map(decode_sp, lines)
 
 
-def encode_sp(spp: Optional[sp.SentencePieceProcessor], line: str, add_dummy_prefix: Optional[bool] = True,
-              sample_subwords: Optional[bool] = False) -> str:
+def encode_sp(
+    spp: Optional[sp.SentencePieceProcessor],
+    line: str,
+    add_dummy_prefix: Optional[bool] = True,
+    sample_subwords: Optional[bool] = False,
+) -> str:
     if spp is None:
         return line
     prefix = ""
@@ -46,8 +50,10 @@ def encode_sp(spp: Optional[sp.SentencePieceProcessor], line: str, add_dummy_pre
 
 
 def encode_sp_lines(
-    spp: Optional[sp.SentencePieceProcessor], lines: Iterable[str], add_dummy_prefix: Optional[bool] = True,
-        sample_subwords: Optional[bool] = False
+    spp: Optional[sp.SentencePieceProcessor],
+    lines: Iterable[str],
+    add_dummy_prefix: Optional[bool] = True,
+    sample_subwords: Optional[bool] = False,
 ) -> Iterator[str]:
     return (encode_sp(spp, line, add_dummy_prefix=add_dummy_prefix, sample_subwords=sample_subwords) for line in lines)
 

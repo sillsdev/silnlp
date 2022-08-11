@@ -10,8 +10,7 @@ from ..common.utils import get_git_revision_hash, get_mt_exp_dir, merge_dict, se
 from ..common.corpus import load_corpus, write_corpus
 
 _DEFAULT_SPLIT_CONFIG: dict = {
-    "split": {
-    },
+    "split": {},
 }
 
 
@@ -45,16 +44,16 @@ def keep_lines(src, trg):
     src = src.strip()
     trg = trg.strip()
 
-    if src == '' or trg == '' or src == trg:
+    if src == "" or trg == "" or src == trg:
         return False
     else:
         return True
-        
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Splitting a parallel corpus")
     parser.add_argument("experiment", help="Experiment name")
-    parser.add_argument('--config', type=str, default='config.yml', help='config file')
+    parser.add_argument("--config", type=str, default="config.yml", help="config file")
     args = parser.parse_args()
 
     rev_hash = get_git_revision_hash()
@@ -62,61 +61,61 @@ def main() -> None:
     exp_name: str = args.experiment
     exp_dir = get_mt_exp_dir(exp_name)
     config = load_config(exp_dir, args.config)
-    split_config = config.get('split')
-    write_config(exp_dir, f'effective_config-{rev_hash}.split.yml', split_config)
+    split_config = config.get("split")
+    write_config(exp_dir, f"effective_config-{rev_hash}.split.yml", split_config)
 
     set_seed(split_config["seed"])
 
     # Create the initial data frame
-    corpus = pd.DataFrame(columns=['SRC', 'TRG'])
+    corpus = pd.DataFrame(columns=["SRC", "TRG"])
     print(f'Loading corpus - src: {split_config.get("src")}, trg: {split_config.get("trg")}')
-    src_lines = list(load_corpus(Path(os.path.join(exp_dir, split_config.get('src')))))
-    trg_lines = list(load_corpus(Path(os.path.join(exp_dir, split_config.get('trg')))))
-    
+    src_lines = list(load_corpus(Path(os.path.join(exp_dir, split_config.get("src")))))
+    trg_lines = list(load_corpus(Path(os.path.join(exp_dir, split_config.get("trg")))))
+
     # Remove lines where one or other of the lines are blank, or both lines are identical.
     filtered_src = list()
     filtered_trg = list()
-    
+
     for src, trg in zip(src_lines, trg_lines):
         if keep_lines(src, trg):
             filtered_src.append(src)
             filtered_trg.append(trg)
-                   
-    corpus['SRC'] = filtered_src
-    corpus['TRG'] = filtered_trg
+
+    corpus["SRC"] = filtered_src
+    corpus["TRG"] = filtered_trg
 
     remainder = None
 
-    splits = split_config.get('splits')
+    splits = split_config.get("splits")
     for split in splits:
-        if split.get('type') == 'test':
+        if split.get("type") == "test":
             print(f'Creating test set - src: {split.get("src")}, trg: {split.get("trg")}, size: {split.get("size")}')
-            remainder, test = train_test_split(corpus, test_size=split.get('size'))
-            write_corpus(Path(os.path.join(exp_dir, split.get('src'))), test['SRC'])
-            write_corpus(Path(os.path.join(exp_dir, split.get('trg'))), test['TRG'])
+            remainder, test = train_test_split(corpus, test_size=split.get("size"))
+            write_corpus(Path(os.path.join(exp_dir, split.get("src"))), test["SRC"])
+            write_corpus(Path(os.path.join(exp_dir, split.get("trg"))), test["TRG"])
             break
 
     for split in splits:
-        if split.get('type') == 'val':
+        if split.get("type") == "val":
             print(f'Creating val set - src: {split.get("src")}, trg: {split.get("trg")}, size: {split.get("size")}')
-            remainder, val = train_test_split(remainder, test_size=split.get('size'))
-            write_corpus(Path(os.path.join(exp_dir, split.get('src'))), val['SRC'])
-            write_corpus(Path(os.path.join(exp_dir, split.get('trg'))), val['TRG'])
+            remainder, val = train_test_split(remainder, test_size=split.get("size"))
+            write_corpus(Path(os.path.join(exp_dir, split.get("src"))), val["SRC"])
+            write_corpus(Path(os.path.join(exp_dir, split.get("trg"))), val["TRG"])
             break
 
     for split in splits:
-        if split.get('type') == 'train':
-            train_size = split.get('size')
+        if split.get("type") == "train":
+            train_size = split.get("size")
             print(f'Creating train set - src: {split.get("src")}, trg: {split.get("trg")}, size: {train_size}')
             if isinstance(train_size, int):
                 _, train = train_test_split(remainder if remainder is not None else corpus, test_size=train_size)
-            elif isinstance(train_size, str) and train_size == 'all':
+            elif isinstance(train_size, str) and train_size == "all":
                 train = remainder if remainder is not None else corpus
             else:
-                print(f'Invalid training split size: {train_size}')
+                print(f"Invalid training split size: {train_size}")
                 continue
-            write_corpus(Path(os.path.join(exp_dir, split.get('src'))), train['SRC'])
-            write_corpus(Path(os.path.join(exp_dir, split.get('trg'))), train['TRG'])
+            write_corpus(Path(os.path.join(exp_dir, split.get("src"))), train["SRC"])
+            write_corpus(Path(os.path.join(exp_dir, split.get("trg"))), train["TRG"])
 
 
 if __name__ == "__main__":

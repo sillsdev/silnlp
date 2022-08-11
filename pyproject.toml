@@ -60,7 +60,7 @@ libclang = "14.0.6"
 
 [tool.poetry.dev-dependencies]
 mypy = "^0.812"
-black = "^20.8b1"
+black = "^22.6.0"
 flake8 = "^3.9.0"
 ipykernel = "^6.4.1"
 pylint = "^2.8.3"

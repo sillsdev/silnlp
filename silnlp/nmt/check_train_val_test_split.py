@@ -16,11 +16,11 @@ from collections import Counter
 logging.basicConfig()
 
 # Add the em-dash
-all_punctuation = string.punctuation + u"\u2014"
+all_punctuation = string.punctuation + "\u2014"
 # Add smart quotes
-all_punctuation = all_punctuation + u"\u2018" + u"\u2019" + u"\u201C" + u"\u201D"
+all_punctuation = all_punctuation + "\u2018" + "\u2019" + "\u201C" + "\u201D"
 # Add Danda (0964) and Double Danda (0965) for Devanagari scripts
-all_punctuation = all_punctuation + u"\u0964" + u"\u0965"
+all_punctuation = all_punctuation + "\u0964" + "\u0965"
 
 
 def strip_punct(s: str):
@@ -35,9 +35,9 @@ def load_words(word_file: Path, decode: bool = True) -> List[str]:
     unique_words: List[str] = []
     for train_str in load_corpus(word_file):
         if decode:
-            line_words = decode_sp(train_str).split(' ')
+            line_words = decode_sp(train_str).split(" ")
         else:
-            line_words = train_str.split(' ')
+            line_words = train_str.split(" ")
         for line_word in line_words:
             stripped_word = strip_punct(line_word.lower())
             if stripped_word is not "" and stripped_word not in unique_words:
@@ -50,9 +50,9 @@ def load_word_counts(word_file: Path, decode: bool = True) -> Counter:
     all_words: List[str] = []
     for train_str in load_corpus(word_file):
         if decode:
-            word_list = decode_sp(train_str).split(' ')
+            word_list = decode_sp(train_str).split(" ")
         else:
-            word_list = train_str.split(' ')
+            word_list = train_str.split(" ")
         for w in word_list:
             stripped_word = strip_punct(w.lower())
             if stripped_word is not "":
@@ -81,8 +81,11 @@ def find_similar_words(master_word_counts: Counter, these_word_counts: Counter, 
     for unk_word in sorted(these_word_counts.keys()):
         similar_words: List[str] = []
         for master_word in sorted(master_word_counts.keys()):
-            if (Levenshtein.distance(unk_word, master_word) <= distance) and \
-                    unk_word not in master_word and master_word not in unk_word:
+            if (
+                (Levenshtein.distance(unk_word, master_word) <= distance)
+                and unk_word not in master_word
+                and master_word not in unk_word
+            ):
                 similar_words.append(master_word)
         if len(similar_words) > 0:
             similar_word_list[unk_word] = similar_words
@@ -90,62 +93,70 @@ def find_similar_words(master_word_counts: Counter, these_word_counts: Counter, 
 
 
 def writeWordCounts(writer: pd.ExcelWriter, word_counts: Counter, sheet: str):
-    words = pd.DataFrame.from_dict(word_counts, orient='index').reset_index()
-    words = words.rename(columns={'index': 'word', 0: 'count'})
+    words = pd.DataFrame.from_dict(word_counts, orient="index").reset_index()
+    words = words.rename(columns={"index": "word", 0: "count"})
     words.to_excel(writer, index=False, sheet_name=sheet)
     s = writer.sheets[sheet]
     s.autofilter(0, 0, words.shape[0], words.shape[1])
 
 
 def writeWordList(writer: pd.ExcelWriter, word_list: Dict, sheet: str):
-    words = pd.DataFrame.from_dict(word_list, orient='index').reset_index()
-    words = words.rename(columns={'index': 'word', 0: 'similar words'})
+    words = pd.DataFrame.from_dict(word_list, orient="index").reset_index()
+    words = words.rename(columns={"index": "word", 0: "similar words"})
     words.to_excel(writer, index=False, sheet_name=sheet)
 
 
-corpusStats = pd.DataFrame(columns=['Corpus',
-                                    'Set',
-                                    'Words (Total)',
-                                    'Words (Unique)',
-                                    'Words (Unknown)',
-                                    'Words (Unknown) %',
-                                    'Words (Unique Unknown)',
-                                    'Words (Unique Unknown) %',
-                                    'Possible Misspellings',
-                                    ])
+corpusStats = pd.DataFrame(
+    columns=[
+        "Corpus",
+        "Set",
+        "Words (Total)",
+        "Words (Unique)",
+        "Words (Unknown)",
+        "Words (Unknown) %",
+        "Words (Unique Unknown)",
+        "Words (Unique Unknown) %",
+        "Possible Misspellings",
+    ]
+)
 
 
 def writeStats(writer: pd.ExcelWriter):
     global corpusStats
-    corpusStats.to_excel(writer, index=False, sheet_name='Stats')
+    corpusStats.to_excel(writer, index=False, sheet_name="Stats")
 
 
-def collectStats(corpus: str,
-                 corpus_set: str,
-                 word_counts: Counter,
-                 unk_word_counts: Counter,
-                 similar_words: Dict[str, List[str]]):
+def collectStats(
+    corpus: str, corpus_set: str, word_counts: Counter, unk_word_counts: Counter, similar_words: Dict[str, List[str]]
+):
     global corpusStats
 
     stats = {
-        'Corpus': corpus,
-        'Set': corpus_set,
-        'Words (Total)': sum(word_counts.values()),
-        'Words (Unique)': len(word_counts),
+        "Corpus": corpus,
+        "Set": corpus_set,
+        "Words (Total)": sum(word_counts.values()),
+        "Words (Unique)": len(word_counts),
     }
     if unk_word_counts is not None:
-        stats['Words (Unknown)'] = sum(unk_word_counts.values())
-        stats['Words (Unknown) %'] = sum(unk_word_counts.values()) / sum(word_counts.values()) * 100
-        stats['Words (Unique Unknown)'] = len(unk_word_counts)
-        stats['Words (Unique Unknown) %'] = len(unk_word_counts) / len(word_counts) * 100
+        stats["Words (Unknown)"] = sum(unk_word_counts.values())
+        stats["Words (Unknown) %"] = sum(unk_word_counts.values()) / sum(word_counts.values()) * 100
+        stats["Words (Unique Unknown)"] = len(unk_word_counts)
+        stats["Words (Unique Unknown) %"] = len(unk_word_counts) / len(word_counts) * 100
     if similar_words is not None:
-        stats['Possible Misspellings'] = len(similar_words)
+        stats["Possible Misspellings"] = len(similar_words)
 
     corpusStats = corpusStats.append(stats, ignore_index=True)
 
 
-def wordChecks(folder: str, writer: pd.ExcelWriter, corpus: str,
-               similar: bool = False, distance: int = 1, details: bool = False, detok_val: bool = True):
+def wordChecks(
+    folder: str,
+    writer: pd.ExcelWriter,
+    corpus: str,
+    similar: bool = False,
+    distance: int = 1,
+    details: bool = False,
+    detok_val: bool = True,
+):
     if corpus is not "src" and corpus is not "trg":
         return
 
@@ -172,7 +183,7 @@ def wordChecks(folder: str, writer: pd.ExcelWriter, corpus: str,
         test_file = os.path.join(folder, f"test.{corpus}.detok.txt")
         test_word_counts = load_word_counts(Path(test_file), False)
     else:
-        print(f'No test data for corpus {corpus}')
+        print(f"No test data for corpus {corpus}")
         return
     unk_test_word_counts = unknown_word_counts(train_word_counts, test_word_counts)
     unk_test_val_word_counts = unknown_word_counts(train_word_counts + val_word_counts, test_word_counts)
@@ -190,19 +201,19 @@ def wordChecks(folder: str, writer: pd.ExcelWriter, corpus: str,
 
     if details:
         # Source corpora word counts/lists
-        writeWordCounts(writer, train_word_counts + val_word_counts + test_word_counts, f'words-all.{corpus}')
-        writeWordCounts(writer, train_word_counts, f'words-train.{corpus}')
+        writeWordCounts(writer, train_word_counts + val_word_counts + test_word_counts, f"words-all.{corpus}")
+        writeWordCounts(writer, train_word_counts, f"words-train.{corpus}")
         if len(val_word_counts) > 0:
-            writeWordCounts(writer, val_word_counts, f'words-val.{corpus}')
-            writeWordCounts(writer, unk_val_word_counts, f'unknown-val.{corpus} vs train')
+            writeWordCounts(writer, val_word_counts, f"words-val.{corpus}")
+            writeWordCounts(writer, unk_val_word_counts, f"unknown-val.{corpus} vs train")
             if similar:
-                writeWordList(writer, val_similar_words, f'misspelling-val.{corpus}')
+                writeWordList(writer, val_similar_words, f"misspelling-val.{corpus}")
         if len(test_word_counts) > 0:
-            writeWordCounts(writer, test_word_counts, f'words-test.{corpus}')
-            writeWordCounts(writer, unk_test_word_counts, f'unknown-test.{corpus} vs train')
-            writeWordCounts(writer, unk_test_val_word_counts, f'unknown-test.{corpus} vs train+val')
+            writeWordCounts(writer, test_word_counts, f"words-test.{corpus}")
+            writeWordCounts(writer, unk_test_word_counts, f"unknown-test.{corpus} vs train")
+            writeWordCounts(writer, unk_test_val_word_counts, f"unknown-test.{corpus} vs train+val")
             if similar:
-                writeWordList(writer, test_similar_words, f'misspelling-test.{corpus}')
+                writeWordList(writer, test_similar_words, f"misspelling-test.{corpus}")
 
 
 def main() -> None:
@@ -222,9 +233,9 @@ def main() -> None:
     exp_dir = get_mt_exp_dir(exp_name)
     out_file = os.path.join(exp_dir, "word_counts.xlsx")
 
-    pd.set_option('max_columns', None)
-    writer = pd.ExcelWriter(out_file, engine='xlsxwriter')
-    corpusStats.to_excel(writer, sheet_name='Stats') # Create empty sheet so that this data is first in the xlsx
+    pd.set_option("max_columns", None)
+    writer = pd.ExcelWriter(out_file, engine="xlsxwriter")
+    corpusStats.to_excel(writer, sheet_name="Stats")  # Create empty sheet so that this data is first in the xlsx
     print("Analyzing source ...")
     wordChecks(Path(exp_dir), writer, "src", args.similar_words, args.distance, args.details)
     print("Analyzing target ...")

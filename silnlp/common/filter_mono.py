@@ -22,11 +22,16 @@ import argparse
 from string import punctuation
 
 parser = argparse.ArgumentParser()
-parser.add_argument('src', help='source file')
-parser.add_argument('--soft_html', action='store_true', default=False,
-                    help='whether to use soft version only to remove html tag, not the sentence')
-parser.add_argument('--check_non_latin', action='store_true', default=False,
-                    help='Check for too many non-Latin characters')
+parser.add_argument("src", help="source file")
+parser.add_argument(
+    "--soft_html",
+    action="store_true",
+    default=False,
+    help="whether to use soft version only to remove html tag, not the sentence",
+)
+parser.add_argument(
+    "--check_non_latin", action="store_true", default=False, help="Check for too many non-Latin characters"
+)
 args = parser.parse_args()
 f1 = args.src
 
@@ -49,12 +54,11 @@ def dup_remove(x_in):
     all_lines = [c.strip() for c in x_in]
     x_out = set(all_lines)  # make as set
 
-    print('After removing duplicated sentences, %i pairs sentences' % len(x_out))
+    print("After removing duplicated sentences, %i pairs sentences" % len(x_out))
     return x_out
 
 
 def sentence_word_num_remove(x_in):
-
     def check_word_num(sent):
         segs = sent.strip().split()
         if len(segs) < min_tok or len(segs) > max_top:
@@ -67,13 +71,12 @@ def sentence_word_num_remove(x_in):
         if check_word_num(sent):
             x_out.append(sent.strip())
 
-    print('After removing sentences with too few or too many words, %i sentences remain' % len(x_out))
+    print("After removing sentences with too few or too many words, %i sentences remain" % len(x_out))
     return x_out
 
 
 # Specific punctuation number exceeded sentence remove
 def specific_punc_remove(x_in):
-
     def hot_fix_filter(sent):
         sent = sent.strip()
         if sent.count("/") > 5:
@@ -92,13 +95,12 @@ def specific_punc_remove(x_in):
         if hot_fix_filter(sent):
             x_out.append(sent.strip())
 
-    print('After removing sentences with too many specific punctuations, %i sentences remain' % len(x_out))
+    print("After removing sentences with too many specific punctuations, %i sentences remain" % len(x_out))
     return x_out
 
 
 # Characters condition remove
 def characs_remove(x_in):
-
     def filter_by_len(sent):
         segs = sent.strip().split()
         for seg in segs:
@@ -106,7 +108,7 @@ def characs_remove(x_in):
                 return False
         m_char = sum([len(seg) for seg in segs])
         m_word = len(segs)
-        ratio = m_char * 1. / (m_word + 1e-9)
+        ratio = m_char * 1.0 / (m_word + 1e-9)
         if ratio > avg_word_len_ub or ratio < avg_word_len_lb:
             return False
         return True
@@ -117,7 +119,7 @@ def characs_remove(x_in):
         if filter_by_len(sent):
             x_out.append(sent.strip())
 
-    print('After removing sentence with characters condition, %i sentences remain' % len(x_out))
+    print("After removing sentence with characters condition, %i sentences remain" % len(x_out))
     return x_out
 
 
@@ -125,7 +127,7 @@ def characs_remove(x_in):
 def punctuation_remove(x_in):
     x_out = []
 
-    count_func = lambda l1,l2: sum([1 for x in l1 if x in l2])
+    count_func = lambda l1, l2: sum([1 for x in l1 if x in l2])
 
     punctuation_set = set(punctuation)
     for sent in x_in:
@@ -134,7 +136,7 @@ def punctuation_remove(x_in):
             continue
         x_out.append(sent.strip())
 
-    print('After removing sentences with too much punctuations, %i sentences remain' % len(x_out))
+    print("After removing sentences with too much punctuations, %i sentences remain" % len(x_out))
     return x_out
 
 
@@ -144,17 +146,17 @@ def html_remove(x_in):
 
     def filter_by_html(sentence):
         sen = sentence.strip()
-        detector = re.compile('<.*?>')
+        detector = re.compile("<.*?>")
         html_tag = re.findall(detector, sen)
-        if html_tag or 'https://' in sen or 'http://' in sen:
+        if html_tag or "https://" in sen or "http://" in sen:
             return False
         return True
 
     def soft_filter_by_html(sent):
         sent = sent.strip()
-        detector = re.compile('<.*?>')
-        sent = re.sub(detector, '', sent)
-        sent = re.sub('https?:\/\/.*[ \r\n]', '', x, flags=re.MULTILINE)
+        detector = re.compile("<.*?>")
+        sent = re.sub(detector, "", sent)
+        sent = re.sub("https?:\/\/.*[ \r\n]", "", x, flags=re.MULTILINE)
         return sent
 
     for x in x_in:
@@ -164,7 +166,7 @@ def html_remove(x_in):
             if filter_by_html(x):
                 x_out.append(x.strip())
 
-    print('After removing sentences with html address or tags, %i sentences remain' % len(x_out))
+    print("After removing sentences with html address or tags, %i sentences remain" % len(x_out))
     return x_out
 
 
@@ -177,13 +179,12 @@ def special_char_remove(x_in):
             continue
         x_out.append(x.strip())
 
-    print('After removing sentences with special characters, %i sentences remain' % len(x_out))
+    print("After removing sentences with special characters, %i sentences remain" % len(x_out))
     return x_out
 
 
 # Optional: Latin letter contained sentence remove
 def latin_remove(x_in):
-  
     def count_latin(sent):
         if len(re.findall("[^a-zA-Z]", sent)) / len(sent) > latin_ratio:
             return False
@@ -194,7 +195,7 @@ def latin_remove(x_in):
         if count_latin(x.strip()):
             x_out.append(x.strip())
 
-    print('After removing sentences with too many non-Latin characters, %i sentences remain' % len(x_out))
+    print("After removing sentences with too many non-Latin characters, %i sentences remain" % len(x_out))
     return x_out
 
 
@@ -202,46 +203,46 @@ fr_1 = open(f1, "r", encoding="utf8")
 
 f1_all_lines = fr_1.readlines()
 
-print(f'Starting with {len(f1_all_lines)} sentences')
+print(f"Starting with {len(f1_all_lines)} sentences")
 start = time.time()
 filter_1: list = list(dup_remove(f1_all_lines))
 end = time.time()
-print(f'Elapsed time: {((end-start)/60):.2f} minutes')
+print(f"Elapsed time: {((end-start)/60):.2f} minutes")
 start = time.time()
 filter_1 = sentence_word_num_remove(filter_1)
 end = time.time()
-print(f'Elapsed time: {((end-start)/60):.2f} minutes')
+print(f"Elapsed time: {((end-start)/60):.2f} minutes")
 start = time.time()
 filter_1 = specific_punc_remove(filter_1)
 end = time.time()
-print(f'Elapsed time: {((end-start)/60):.2f} minutes')
+print(f"Elapsed time: {((end-start)/60):.2f} minutes")
 start = time.time()
 filter_1 = characs_remove(filter_1)
 end = time.time()
-print(f'Elapsed time: {((end-start)/60):.2f} minutes')
+print(f"Elapsed time: {((end-start)/60):.2f} minutes")
 start = time.time()
 filter_1 = special_char_remove(filter_1)
 end = time.time()
-print(f'Elapsed time: {((end-start)/60):.2f} minutes')
+print(f"Elapsed time: {((end-start)/60):.2f} minutes")
 start = time.time()
 filter_1 = punctuation_remove(filter_1)
 end = time.time()
-print(f'Elapsed time: {((end-start)/60):.2f} minutes')
+print(f"Elapsed time: {((end-start)/60):.2f} minutes")
 start = time.time()
 filter_1 = html_remove(filter_1)
 end = time.time()
-print(f'Elapsed time: {((end-start)/60):.2f} minutes')
+print(f"Elapsed time: {((end-start)/60):.2f} minutes")
 start = time.time()
 if check_non_latin:
     filter_1 = latin_remove(filter_1)
     end = time.time()
-    print(f'Elapsed time: {((end - start) / 60):.2f} minutes')
+    print(f"Elapsed time: {((end - start) / 60):.2f} minutes")
 
 fr_1.close()
 
 fw_1 = open(f1 + ".clean", "w", encoding="utf8")
 
-print('After all filtering rules, %i sentences remain' % len(filter_1))
+print("After all filtering rules, %i sentences remain" % len(filter_1))
 
 for x in filter_1:
     print(x, file=fw_1)

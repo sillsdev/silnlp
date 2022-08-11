@@ -197,7 +197,7 @@ def main() -> None:
 
     graph_type = args.graph_type
     if graph_type == "network":
-        sim_matrix = 3000 ** sim_matrix
+        sim_matrix = 3000**sim_matrix
         sim_matrix[sim_matrix == 1] = 0
 
         graph = nx.to_networkx_graph(sim_matrix)
@@ -225,7 +225,7 @@ def main() -> None:
                 verticalalignment="bottom",
                 node_size=10,
                 edge_color=[
-                    "lightgray" if data["weight"] >= (3000 ** sim) else (1, 1, 1, 0)
+                    "lightgray" if data["weight"] >= (3000**sim) else (1, 1, 1, 0)
                     for _, _, data in graph.edges(data=True)
                 ],
             )

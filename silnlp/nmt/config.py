@@ -1002,9 +1002,9 @@ class Config:
         self._append_corpus(self._train_trg_filename(), encode_sp_lines(trg_spp, train["target"]))
         self._append_corpus(self._train_vref_filename(), (str(vr) for vr in train["vref"]))
         train_count = len(train)
-        augment_count = self._augment_corpus(pair.augmentations,
-                                             train["source"], train["target"], train["vref"],
-                                             src_spp, trg_spp)
+        augment_count = self._augment_corpus(
+            pair.augmentations, train["source"], train["target"], train["vref"], src_spp, trg_spp
+        )
         train_count += augment_count
 
         terms_train_count, dict_count = self._write_terms(src_spp, trg_spp, terms)
@@ -1414,9 +1414,9 @@ class Config:
             src_variants.append(encode_sp(src_spp, src_sentence, add_dummy_prefix=False))
             trg_variants.append(encode_sp(trg_spp, trg_sentence, add_dummy_prefix=False))
 
-        src_augments, trg_augments = self._augment_sentence(augmentations,
-                                                            src_sentence, trg_sentence, '',
-                                                            src_spp, trg_spp)
+        src_augments, trg_augments = self._augment_sentence(
+            augmentations, src_sentence, trg_sentence, "", src_spp, trg_spp
+        )
         src_variants.extend(src_augments)
         trg_variants.extend(trg_augments)
 
@@ -1449,11 +1449,15 @@ class Config:
             tokens = tag + tokens
         return " ".join(tokens)
 
-    def _augment_sentence(self,
-                        methods: List[AugmentMethod],
-                        src: str, trg: str, vref: str,
-                        src_spp: Optional[sp.SentencePieceProcessor],
-                        trg_spp: Optional[sp.SentencePieceProcessor]) -> Tuple[List[str],List[str]]:
+    def _augment_sentence(
+        self,
+        methods: List[AugmentMethod],
+        src: str,
+        trg: str,
+        vref: str,
+        src_spp: Optional[sp.SentencePieceProcessor],
+        trg_spp: Optional[sp.SentencePieceProcessor],
+    ) -> Tuple[List[str], List[str]]:
         src_augments: List[str] = []
         trg_augments: List[str] = []
         for method in methods:
@@ -1462,17 +1466,27 @@ class Config:
             trg_augments.extend(trg_delta)
         return src_augments, trg_augments
 
-    def _augment_corpus(self,
-                        methods: List[AugmentMethod],
-                        src: List[str], trg: List[str], vref: List[str],
-                        src_spp: Optional[sp.SentencePieceProcessor],
-                        trg_spp: Optional[sp.SentencePieceProcessor]) -> int:
+    def _augment_corpus(
+        self,
+        methods: List[AugmentMethod],
+        src: List[str],
+        trg: List[str],
+        vref: List[str],
+        src_spp: Optional[sp.SentencePieceProcessor],
+        trg_spp: Optional[sp.SentencePieceProcessor],
+    ) -> int:
         augment_count = 0
         for method in methods:
-            augment_count += method.__augment_corpus__(self.exp_dir / self._train_src_filename(),
-                                                       self.exp_dir / self._train_trg_filename(),
-                                                       self.exp_dir / self._train_vref_filename(),
-                                                       src, trg, vref, src_spp, trg_spp)
+            augment_count += method.__augment_corpus__(
+                self.exp_dir / self._train_src_filename(),
+                self.exp_dir / self._train_trg_filename(),
+                self.exp_dir / self._train_vref_filename(),
+                src,
+                trg,
+                vref,
+                src_spp,
+                trg_spp,
+            )
         return augment_count
 
     def _get_val_ref_count(self, src_iso: str, trg_iso: str) -> int:
@@ -1813,7 +1827,9 @@ def create_runner(config: Config, mixed_precision: bool = False) -> SILRunner:
 
     model = create_model(config)
 
-    return SILRunner(model, config.root, auto_config=True, mixed_precision=mixed_precision, seed=config.data['seed'])
+    return SILRunner(model, config.root, auto_config=True, mixed_precision=mixed_precision, seed=config.data["seed"])
+
+
 #    return SILRunner(model, config.root, auto_config=True, mixed_precision=mixed_precision)
 
 

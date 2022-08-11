@@ -78,7 +78,7 @@ class SILSelfAttentionDecoder(SelfAttentionDecoder):
         training=None,
     ):
         # Process inputs.
-        inputs *= self.num_units ** 0.5
+        inputs *= self.num_units**0.5
         if self.position_encoder is not None:
             inputs = self.position_encoder(inputs, position=step + 1 if step is not None else None)
         inputs = dropout(inputs, self.dropout, training=training)
@@ -216,7 +216,7 @@ class AlignmentHead(tf.keras.layers.Layer):
         # Compute queries.
         queries = self.linear_queries(inputs)
         queries = split_heads(queries, 1)
-        queries *= self.num_units ** -0.5
+        queries *= self.num_units**-0.5
 
         # Compute keys.
         if cache is not None:

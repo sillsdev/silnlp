@@ -284,20 +284,21 @@ def sentence_bleu(
     smooth_method: str = "exp",
     smooth_value: float = None,
     lowercase: bool = False,
-    tokenize: str = '13a',
+    tokenize: str = "13a",
     use_effective_order: bool = True,
 ) -> BLEUScore:
     """
     Substitute for the sacrebleu version of sentence_bleu, which uses settings that aren't consistent with
     the values we use for corpus_bleu, and isn't fully parameterized
     """
-    metric = BLEU(smooth_method=smooth_method,
-                  smooth_value=smooth_value,
-                  force=False,
-                  lowercase=lowercase,
-                  tokenize=tokenize,
-                  effective_order=use_effective_order
-                  )
+    metric = BLEU(
+        smooth_method=smooth_method,
+        smooth_value=smooth_value,
+        force=False,
+        lowercase=lowercase,
+        tokenize=tokenize,
+        effective_order=use_effective_order,
+    )
     return metric.sentence_score(hypothesis, references)
 
 
@@ -306,7 +307,7 @@ def write_sentence_bleu(
     preds: List[str],
     refs: List[List[str]],
     lowercase: bool = False,
-    tokenize: str = '13a',
+    tokenize: str = "13a",
 ):
     scores_path = predictions_detok_path + ".scores.csv"
     with open(scores_path, "w", encoding="utf-8-sig") as scores_file:
