@@ -1,15 +1,15 @@
 import tempfile
 from pathlib import Path, PurePath
 from statistics import mean
-from typing import List, Set
+from typing import List, Set, cast
 
 import pandas as pd
 
 from ..common.corpus import tokenize_corpus, write_corpus
 from ..common.environment import SIL_NLP_ENV
-from .machine_aligner import MachineAligner
 from .config import get_aligner
 from .lexicon import Lexicon
+from .machine_aligner import MachineAligner
 
 
 def get_experiment_dirs(exp_pattern: str) -> List[Path]:
@@ -90,7 +90,7 @@ def compute_alignment_scores(
         tokenize_corpus(src_input_path, src_tok_output_path)
         tokenize_corpus(trg_input_path, trg_tok_output_path)
 
-        aligner: MachineAligner = get_aligner(aligner_id, temp_dir)
+        aligner = cast(MachineAligner, get_aligner(aligner_id, temp_dir))
         if sym_align_path is None:
             sym_align_path = temp_dir / "sym-align.txt"
         aligner.train(src_tok_output_path, trg_tok_output_path)

@@ -1693,7 +1693,7 @@ toml = ["setuptools (>=42)"]
 
 [[package]]
 name = "sil-machine"
-version = "0.5.0"
+version = "0.6.0"
 description = "A natural language processing library that is focused on providing tools for resource-poor languages."
 category = "main"
 optional = false
@@ -1704,12 +1704,12 @@ chardet = ">=4.0.0,<5.0.0"
 networkx = ">=2.6.3,<3.0.0"
 numpy = ">=1.19.0,<2.0.0"
 regex = ">=2021.7.6,<2022.0.0"
-sil-thot = {version = ">=3.3.5,<4.0.0", optional = true, markers = "extra == \"thot\" or extra == \"all\""}
+sil-thot = {version = ">=3.3.6,<4.0.0", optional = true, markers = "extra == \"thot\" or extra == \"all\""}
 sortedcontainers = ">=2.4.0,<3.0.0"
 
 [package.extras]
-thot = ["sil-thot (>=3.3.5,<4.0.0)"]
-all = ["sil-thot (>=3.3.5,<4.0.0)", "sentencepiece (>=0.1.95,<0.2.0)", "libclang (>=11.1.0,<12.0.0)", "tensorflow (>=2.7.0,<3.0.0)", "OpenNMT-tf (>=2.25.0,<3.0.0)"]
+thot = ["sil-thot (>=3.3.6,<4.0.0)"]
+all = ["sil-thot (>=3.3.6,<4.0.0)", "sentencepiece (>=0.1.95,<0.2.0)", "libclang (>=11.1.0,<12.0.0)", "tensorflow (>=2.7.0,<3.0.0)", "OpenNMT-tf (>=2.25.0,<3.0.0)"]
 sentencepiece = ["sentencepiece (>=0.1.95,<0.2.0)"]
 tensorflow = ["libclang (>=11.1.0,<12.0.0)", "tensorflow (>=2.7.0,<3.0.0)", "OpenNMT-tf (>=2.25.0,<3.0.0)"]
 
@@ -2081,7 +2081,7 @@ testing = ["pytest (>=6)", "pytest-checkdocs (>=2.4)", "pytest-flake8", "pytest-
 [metadata]
 lock-version = "1.1"
 python-versions = ">=3.8,<3.9"
-content-hash = "bc5dd59e09c03f25f5c78710b3cb253fe6006033538a9f2adf1252e58bb04d4c"
+content-hash = "27820ce3871068c63ce407c5854ef39a5ad39805756401411bb9aff241cd775b"
 
 [metadata.files]
 absl-py = []
@@ -2605,8 +2605,8 @@ seaborn = []
 sentencepiece = []
 setuptools-scm = []
 sil-machine = [
-    {file = "sil-machine-0.5.0.tar.gz", hash = "sha256:28e910ce07f1e6629c464b5f1b53f0f28d5294993cd8fae179204c7e7df96b14"},
-    {file = "sil_machine-0.5.0-py3-none-any.whl", hash = "sha256:9c226f885ab01dce21910b984fdc69e8ffa8a80d203b42b3204d12d3993826a0"},
+    {file = "sil-machine-0.6.0.tar.gz", hash = "sha256:5b2ce1a658e1dc9b03e20f9c2c35c98d436a51ddbc9b52893dc7c0fa999ca098"},
+    {file = "sil_machine-0.6.0-py3-none-any.whl", hash = "sha256:cbffe6d45ebbc2d2e45a41b2282438b7ba9321ba1f3f2ee52a33c700218c6abe"},
 ]
 sil-thot = [
     {file = "sil-thot-3.3.6.tar.gz", hash = "sha256:afe9767efb2d53633add9277e4746cd239cfe18be439acadf19c8011495e584e"},

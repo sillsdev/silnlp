@@ -33,7 +33,7 @@ from .lexicon import Lexicon
 
 LOGGER = logging.getLogger(__name__)
 
-_BATCH_SIZE = 1000
+_BATCH_SIZE = 1024
 
 
 class MachineAligner(Aligner):
@@ -162,19 +162,22 @@ class MachineAligner(Aligner):
         count = parallel_corpus.count()
 
         LOGGER.info("Aligning corpus")
-        with open(
-            output_file_path, "w", encoding="utf-8", newline="\n"
-        ) as out_file, parallel_corpus.get_rows() as rows, tqdm(
-            total=count, bar_format="{l_bar}{bar:40}{r_bar}", leave=False
-        ) as pbar:
-            for src_segments, trg_segments in _batch(rows):
-                for i, alignment in enumerate(model.get_best_alignments(src_segments, trg_segments)):
+        with open(output_file_path, "w", encoding="utf-8", newline="\n") as out_file, parallel_corpus.batch(
+            _BATCH_SIZE
+        ) as batches, tqdm(total=count, bar_format="{l_bar}{bar:40}{r_bar}", leave=False) as pbar:
+            for row_batch in batches:
+                for source_segment, target_segment, alignment in model.get_best_alignment_batch(
+                    (r.source_segment, r.target_segment) for r in row_batch
+                ):
                     if export_probabilities:
-                        alignened_word_pairs = model.get_aligned_word_pairs(src_segments[i], trg_segments[i], alignment)
+                        word_pairs = alignment.to_aligned_word_pairs()
+                        alignened_word_pairs = model.compute_aligned_word_pair_scores(
+                            source_segment, target_segment, word_pairs
+                        )
                         out_file.write(" ".join(str(wp) for wp in alignened_word_pairs) + "\n")
                     else:
                         out_file.write(str(alignment) + "\n")
-                pbar.update(len(src_segments))
+                pbar.update(len(row_batch))
 
     def _extract_lexicon(self, out_file_path: Path, direct: bool) -> None:
         model = self._create_model(direct)
