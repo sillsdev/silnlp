@@ -4,7 +4,7 @@ import tensorflow as tf
 import tensorflow_addons as tfa
 from opennmt import END_OF_SENTENCE_ID, START_OF_SENTENCE_ID, UNKNOWN_TOKEN
 from opennmt.data.vocab import get_mapping, update_variable, update_variable_and_slots
-from opennmt.encoders import ParallelEncoder, SelfAttentionEncoder
+from opennmt.encoders import ParallelEncoder
 from opennmt.inputters import ParallelInputter, WordEmbedder, add_sequence_controls
 from opennmt.layers import MultiHeadAttentionReduction, SinusoidalPositionEncoder
 from opennmt.layers.reducer import align_in_time
@@ -39,12 +39,14 @@ class SILTransformer(Transformer):
         attention_dropout=0.1,
         ffn_dropout=0.1,
         ffn_activation=tf.nn.relu,
+        mha_bias=True,
         position_encoder_class=SinusoidalPositionEncoder,
         share_embeddings=EmbeddingsSharingLevel.NONE,
         share_encoders=False,
         maximum_relative_position=None,
         attention_reduction=MultiHeadAttentionReduction.FIRST_HEAD_LAST_LAYER,
         pre_norm=True,
+        output_layer_bias=True,
         drop_encoder_self_attention_residual_connections=set(),
         alignment_head_num_units=None,
     ):
@@ -67,6 +69,7 @@ class SILTransformer(Transformer):
                 attention_dropout=attention_dropout,
                 ffn_dropout=ffn_dropout,
                 ffn_activation=ffn_activation,
+                mha_bias=mha_bias,
                 position_encoder_class=position_encoder_class,
                 maximum_relative_position=maximum_relative_position,
                 pre_norm=pre_norm,
@@ -91,11 +94,13 @@ class SILTransformer(Transformer):
             attention_dropout=attention_dropout,
             ffn_dropout=ffn_dropout,
             ffn_activation=ffn_activation,
+            mha_bias=mha_bias,
             position_encoder_class=position_encoder_class,
             num_sources=source_inputter.num_outputs,
             maximum_relative_position=maximum_relative_position,
             attention_reduction=attention_reduction,
             pre_norm=pre_norm,
+            output_layer_bias=output_layer_bias,
             alignment_head_num_units=alignment_head_num_units,
         )
 
@@ -105,14 +110,13 @@ class SILTransformer(Transformer):
         self._num_decoder_layers = num_decoder_layers
         self._num_heads = num_heads
         self._with_relative_position = maximum_relative_position is not None
-        self._is_ct2_compatible = (
-            isinstance(encoder, SelfAttentionEncoder)
-            and ffn_activation is tf.nn.relu
-            and (
-                (self._with_relative_position and position_encoder_class is None)
-                or (not self._with_relative_position and position_encoder_class == SinusoidalPositionEncoder)
-            )
-        )
+        self._position_encoder_class = position_encoder_class
+        self._ffn_activation = ffn_activation
+        self._alignment_layer = -1
+        self._alignment_heads = 1
+        if attention_reduction == MultiHeadAttentionReduction.AVERAGE_LAST_LAYER:
+            self._alignment_heads = 0
+
         self._dictionary: Optional[Trie] = None
 
         if not isinstance(target_inputter, WordEmbedder):

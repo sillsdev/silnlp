@@ -32,6 +32,7 @@ class SILSelfAttentionDecoder(SelfAttentionDecoder):
         attention_dropout=0.1,
         ffn_dropout=0.1,
         ffn_activation=tf.nn.relu,
+        mha_bias=True,
         position_encoder_class=SinusoidalPositionEncoder,
         num_sources=1,
         maximum_relative_position=None,
@@ -60,6 +61,7 @@ class SILSelfAttentionDecoder(SelfAttentionDecoder):
                 attention_dropout=attention_dropout,
                 ffn_dropout=ffn_dropout,
                 ffn_activation=ffn_activation,
+                mha_bias=mha_bias,
                 maximum_relative_position=maximum_relative_position,
                 pre_norm=pre_norm,
                 alignment_head_num_units=alignment_head_num_units,
@@ -256,6 +258,7 @@ class SILSelfAttentionDecoderLayer(tf.keras.layers.Layer):
         attention_dropout=0.1,
         ffn_dropout=0.1,
         ffn_activation=tf.nn.relu,
+        mha_bias=True,
         maximum_relative_position=None,
         pre_norm=True,
         alignment_head_num_units=None,
@@ -265,6 +268,7 @@ class SILSelfAttentionDecoderLayer(tf.keras.layers.Layer):
         self.self_attention = MultiHeadAttention(
             num_heads,
             num_units,
+            bias=mha_bias,
             dropout=attention_dropout,
             maximum_relative_position=maximum_relative_position,
         )
@@ -274,6 +278,7 @@ class SILSelfAttentionDecoderLayer(tf.keras.layers.Layer):
             attention = MultiHeadAttention(
                 num_heads,
                 num_units,
+                bias=mha_bias,
                 dropout=attention_dropout,
                 return_attention=alignment_head_num_units is None,
             )

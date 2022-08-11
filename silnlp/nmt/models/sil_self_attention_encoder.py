@@ -22,6 +22,7 @@ class SILSelfAttentionEncoder(SelfAttentionEncoder):
         attention_dropout=0.1,
         ffn_dropout=0.1,
         ffn_activation=tf.nn.relu,
+        mha_bias=True,
         position_encoder_class=SinusoidalPositionEncoder,
         maximum_relative_position=None,
         pre_norm=True,
@@ -44,6 +45,7 @@ class SILSelfAttentionEncoder(SelfAttentionEncoder):
                 attention_dropout=attention_dropout,
                 ffn_dropout=ffn_dropout,
                 ffn_activation=ffn_activation,
+                mha_bias=mha_bias,
                 maximum_relative_position=maximum_relative_position,
                 pre_norm=pre_norm,
                 self_attention_residual_connection=i not in drop_self_attention_residual_connections,
@@ -62,6 +64,7 @@ class SILSelfAttentionEncoderLayer(SelfAttentionEncoderLayer):
         attention_dropout=0.1,
         ffn_dropout=0.1,
         ffn_activation=tf.nn.relu,
+        mha_bias=True,
         maximum_relative_position=None,
         pre_norm=True,
         self_attention_residual_connection=True,
@@ -71,6 +74,7 @@ class SILSelfAttentionEncoderLayer(SelfAttentionEncoderLayer):
         self.self_attention = MultiHeadAttention(
             num_heads,
             num_units,
+            bias=mha_bias,
             dropout=attention_dropout,
             maximum_relative_position=maximum_relative_position,
         )
