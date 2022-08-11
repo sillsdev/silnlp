@@ -11,7 +11,6 @@ from enum import Enum, Flag, auto
 from pathlib import Path
 from statistics import mean
 from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, Type, Union, cast
-from tqdm import tqdm
 
 import pandas as pd
 import sentencepiece as sp
@@ -22,6 +21,7 @@ from opennmt import END_OF_SENTENCE_TOKEN, PADDING_TOKEN, START_OF_SENTENCE_TOKE
 from opennmt.data import Noise, Vocab, WordDropout, WordNoiser, tokens_to_words
 from opennmt.inputters import TextInputter
 from opennmt.models import Model, get_model_from_catalog
+from tqdm import tqdm
 
 from ..alignment.config import get_aligner, get_aligner_name
 from ..alignment.machine_aligner import MachineAligner
@@ -54,11 +54,10 @@ from ..common.utils import (
     merge_dict,
     set_seed,
 )
+from .augment import AugmentMethod, create_augment_methods
 from .models.sil_transformer import SILTransformer
 from .runner import SILRunner
 from .utils import decode_sp, decode_sp_lines, encode_sp, encode_sp_lines, get_best_model_dir, get_last_checkpoint
-from abc import ABC, abstractmethod
-from .augment import AugmentMethod, create_augment_methods
 
 _PYTHON_TO_TENSORFLOW_LOGGING_LEVEL: Dict[int, int] = {
     logging.CRITICAL: 3,
@@ -1318,6 +1317,7 @@ class Config:
             if pair.is_dictionary:
                 dict_src_file = stack.enter_context(self._open_append(self._dict_src_filename()))
                 dict_trg_file = stack.enter_context(self._open_append(self._dict_trg_filename()))
+                dict_vref_file = stack.enter_context(self._open_append(self._dict_vref_filename()))
 
             index = 0
             for src_line, trg_line in tqdm(zip(input_src_file, input_trg_file)):
@@ -1375,7 +1375,12 @@ class Config:
                             pair.augmentations,
                         )
 
-                if pair.is_dictionary and dict_src_file is not None and dict_trg_file is not None:
+                if (
+                    pair.is_dictionary
+                    and dict_src_file is not None
+                    and dict_trg_file is not None
+                    and dict_vref_file is not None
+                ):
                     src_variants = [
                         encode_sp(src_spp, src_sentence, add_dummy_prefix=True),
                         encode_sp(src_spp, src_sentence, add_dummy_prefix=False),
@@ -1386,6 +1391,7 @@ class Config:
                     ]
                     dict_src_file.write("\t".join(src_variants) + "\n")
                     dict_trg_file.write("\t".join(trg_variants) + "\n")
+                    dict_vref_file.write("\n")
                     dict_count += 1
 
                 index += 1
