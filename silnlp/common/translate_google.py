@@ -1,5 +1,5 @@
 import argparse
-from typing import Iterable, Optional
+from typing import Iterable, List, Optional, Union
 
 from google.cloud import translate_v2 as translate
 from machine.scripture import book_id_to_number
@@ -14,7 +14,7 @@ class GoogleTranslator(Translator):
         self._translate_client = translate.Client()
 
     def translate(
-        self, sentences: Iterable[str], src_iso: Optional[str] = None, trg_iso: Optional[str] = None
+        self, sentences: Iterable[Union[str, List[str]]], src_iso: Optional[str] = None, trg_iso: Optional[str] = None
     ) -> Iterable[str]:
         for sentence in sentences:
             if len(sentence) == 0:

@@ -141,7 +141,10 @@ def extract_project(
                     else:
                         start_ref = row.target_refs[0]
                         end_ref = cur_trg_ref
-                    cur_trg_ref = VerseRef.from_range(start_ref, end_ref)
+                    if start_ref.chapter == end_ref.chapter:
+                        cur_trg_ref = VerseRef.from_range(start_ref, end_ref)
+                    else:
+                        cur_trg_ref = end_ref
                 if not row.is_target_in_range or row.is_target_range_start or len(row.target_text) > 0:
                     if len(row.target_text) > 0:
                         if len(cur_target_line) > 0:
@@ -221,10 +224,11 @@ def strip_parens(term_str: str, left="(", right=")") -> str:
                 end = i + 1
             parens += 1
         elif c == left:
-            parens -= 1
-            if parens == 0:
-                term_str = term_str[:i] + term_str[end:]
-                end = -1
+            if parens > 0:
+                parens -= 1
+                if parens == 0:
+                    term_str = term_str[:i] + term_str[end:]
+                    end = -1
     return term_str
 
 

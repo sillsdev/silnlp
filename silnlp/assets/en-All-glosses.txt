@@ -552,7 +552,7 @@ Ozem
 bracelet
 store up	be stored up	appoint as treasurer
 Ezer
-beryl stone)
+beryl
 wild goat
 Ara
 altar hearth	Ariel
@@ -3503,7 +3503,7 @@ strokes	blows
 rain-pits
 overthrow
 stock
-be hurried	hasty	hasten	make haste in haste	quickly)	obtain
+be hurried	hasty	hasten	make haste	obtain
 marriage-money
 Maharai
 Maher-Shalal-Hash-Baz
@@ -3579,7 +3579,7 @@ ulcer	boil
 shipyard	girdle
 girdle
 recorder
-)
+
 fork
 purpose	device	discretion
 psalm
@@ -3587,7 +3587,7 @@ pruning-knife
 snuffer
 a little	a trifle	a few
 pitchfork
-)
+
 sunrise	east
 north-winds
 seed-land
@@ -11104,7 +11104,7 @@ Lucius: of Cyrene	mentioned by Paul
 wash	bathe
 oracles	words	messages
 eloquent	learned
-something said	account	settlement of an account	value	reason	grounds	charge	matter	thing	book
+something said	word	saying	message	teaching	talk	conversation	question after "to ask"	preaching	Word	account	settlement of an account	value	reason	grounds	charge	matter	thing	book
 spear
 Lydia
 in the Lycaonian language
@@ -12066,7 +12066,7 @@ much	many	adv. often	frequently	strictly	insistently	strongly	hard	heartily	etc.
 very compassionate
 expensive	costly	of great value	very precious
 wickedness	evil	evil intention
-evil	bad	wicked	sinful	unsound	worthless	malignant or painful
+evil	bad	wicked	sinful	evil person	Evil One	guilty	unsound	worthless	malignant or painful
 of Pontus
 journey	pursuit
 go	proceed	travel	journey	leave	live	conduct one's life	die
@@ -12897,7 +12897,7 @@ have children
 childbirth	bearing of children
 bring up children
 completeness	maturity
-make perfect	perfect	make complete	make mature	fulfill	make come true
+make perfect	perfect	make complete	complete	finish	accomplish	end	make mature	fulfill	make come true
 perfecter
 fully	completely
 fulfillment	coming true	perfection
