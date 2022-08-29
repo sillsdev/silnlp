@@ -1,5 +1,6 @@
 from typing import Dict, Iterable, Iterator, Set, Tuple
 from pathlib import Path
+from tqdm import tqdm
 
 from ..common.corpus import load_corpus
 
@@ -20,19 +21,23 @@ class Lexicon:
 
     @classmethod
     def symmetrize(cls, direct_lexicon: "Lexicon", inverse_lexicon: "Lexicon") -> "Lexicon":
-        src_words: Set[str] = set(direct_lexicon.source_words)
-        src_words.update(inverse_lexicon.target_words)
-
-        trg_words: Set[str] = set(inverse_lexicon.source_words)
-        trg_words.update(direct_lexicon.target_words)
-
         lexicon = Lexicon()
-        for src_word in src_words:
-            for trg_word in trg_words:
-                direct_prob = direct_lexicon[src_word, trg_word]
-                inverse_prob = inverse_lexicon[trg_word, src_word]
-                prob = direct_prob * inverse_prob
+        # Add src/trg word pairs from the direct lexicon as long as the inverse prob is non-0
+        for src_word, trg_word, direct_prob in tqdm(direct_lexicon):
+            inverse_prob = inverse_lexicon[trg_word, src_word]
+            prob = direct_prob * inverse_prob
+            if prob > 0.0:
                 lexicon[src_word, trg_word] = prob
+
+        # Add src/trg word pairs from the inverse lexicon if the src word is not already there
+        # This isn't really necessary; the direct probability will always be 0 in this case.
+        for trg_word, src_word, inverse_prob in tqdm(inverse_lexicon):
+            if lexicon[src_word, trg_word] == 0.0:
+                direct_prob = direct_lexicon[src_word, trg_word]
+                prob = direct_prob * inverse_prob
+                if prob > 0.0:
+                    lexicon[src_word, trg_word] = prob
+
         lexicon.normalize()
         return lexicon
 
