@@ -1,4 +1,4 @@
-from typing import Iterable, List
+from typing import Iterable, List, Sequence
 
 from nltk.stem import SnowballStemmer as NltkSnowballStemmer
 
@@ -30,8 +30,8 @@ class SnowballStemmer(Stemmer):
             raise RuntimeError("The specified language is not supported by the Snowball stemmer.")
         self.stemmer = NltkSnowballStemmer(language_name, ignore_stopwords=ignore_stopwords)
 
-    def train(self, corpus: Iterable[List[str]]) -> None:
+    def train(self, corpus: Iterable[Sequence[str]]) -> None:
         pass
 
-    def stem(self, words: List[str]) -> List[str]:
+    def stem(self, words: Sequence[str]) -> Sequence[str]:
         return list(map(lambda w: self.stemmer.stem(w), words))

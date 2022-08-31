@@ -1,5 +1,5 @@
 import abc
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Sequence
 
 
 class Stemmer(abc.ABC):
@@ -7,9 +7,9 @@ class Stemmer(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def train(self, corpus: Iterable[List[str]]) -> None:
+    def train(self, corpus: Iterable[Sequence[str]]) -> None:
         pass
 
     @abc.abstractmethod
-    def stem(self, words: List[str]) -> List[str]:
+    def stem(self, words: Sequence[str]) -> Sequence[str]:
         pass

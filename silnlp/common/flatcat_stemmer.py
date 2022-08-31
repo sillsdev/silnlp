@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Iterable, List, Tuple
+from typing import Any, Iterable, List, Sequence, Tuple
 
 import flatcat
 import morfessor
@@ -7,7 +7,7 @@ import morfessor
 from ..common.stemmer import Stemmer
 
 
-def convert_verses_to_morfessor_data(verses: Iterable[List[str]]) -> Iterable[Tuple[int, Any]]:
+def convert_verses_to_morfessor_data(verses: Iterable[Sequence[str]]) -> Iterable[Tuple[int, Any]]:
     for verse in verses:
         for word in verse:
             yield (1, word)
@@ -40,7 +40,7 @@ class FlatCatStemmer(Stemmer):
         )
         self.flatcat_model.postprocessing.append(flatcat.HeuristicPostprocessor())
 
-    def train(self, corpus: Iterable[List[str]]) -> None:
+    def train(self, corpus: Iterable[Sequence[str]]) -> None:
         print("Training Morfessor model...")
         print("Hyperparameters:")
         print(f"- corpusweight: {self.morfessor_model.get_corpus_coding_weight()}")
@@ -59,7 +59,7 @@ class FlatCatStemmer(Stemmer):
         self.flatcat_model.train_batch(max_epochs=4, min_epoch_cost_gain=None, max_resegment_iterations=2)
         print("Done.")
 
-    def stem(self, words: List[str]) -> List[str]:
+    def stem(self, words: Sequence[str]) -> Sequence[str]:
         stems: List[str] = []
         for word in words:
             constructions, _ = self.flatcat_model.viterbi_analyze(word)

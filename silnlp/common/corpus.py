@@ -93,6 +93,13 @@ def get_scripture_parallel_corpus(
     return pd.DataFrame(data, index=indices)
 
 
+def get_mt_corpus_path(corpus: str) -> Path:
+    corpus_path = SIL_NLP_ENV.mt_corpora_dir / f"{corpus}.txt"
+    if corpus_path.is_file():
+        return corpus_path
+    return SIL_NLP_ENV.mt_scripture_dir / f"{corpus}.txt"
+
+
 def split_parallel_corpus(
     corpus: pd.DataFrame, split_size: Union[float, int], split_indices: Set[int] = None
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:

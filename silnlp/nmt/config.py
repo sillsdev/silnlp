@@ -29,6 +29,7 @@ from ..alignment.utils import add_alignment_scores
 from ..common.corpus import (
     exclude_books,
     filter_parallel_corpus,
+    get_mt_corpus_path,
     get_scripture_parallel_corpus,
     get_terms,
     get_terms_corpus,
@@ -212,13 +213,6 @@ def create_noise_methods(params: List[dict]) -> List[NoiseMethod]:
     return methods
 
 
-def get_corpus_path(corpus: str) -> Path:
-    corpus_path = SIL_NLP_ENV.mt_corpora_dir / f"{corpus}.txt"
-    if corpus_path.is_file():
-        return corpus_path
-    return SIL_NLP_ENV.mt_scripture_dir / f"{corpus}.txt"
-
-
 def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
     pairs: List[CorpusPair] = []
     for pair in corpus_pairs:
@@ -242,11 +236,11 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
         src: Union[str, List[str]] = pair["src"]
         if isinstance(src, str):
             src = src.split(",")
-        src_files = [DataFile(get_corpus_path(sp.strip())) for sp in src]
+        src_files = [DataFile(get_mt_corpus_path(sp.strip())) for sp in src]
         trg: Union[str, List[str]] = pair["trg"]
         if isinstance(trg, str):
             trg = trg.split(",")
-        trg_files = [DataFile(get_corpus_path(tp.strip())) for tp in trg]
+        trg_files = [DataFile(get_mt_corpus_path(tp.strip())) for tp in trg]
         is_scripture = src_files[0].is_scripture
         if not all(df.is_scripture == is_scripture for df in (src_files + trg_files)):
             raise RuntimeError("All corpora in a corpus pair must contain the same type of data.")

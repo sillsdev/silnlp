@@ -1,16 +1,17 @@
 import argparse
 import json
 import logging
-import unicodedata
+from contextlib import ExitStack
 from pathlib import Path
-from typing import Iterable, List, Tuple
+from typing import Iterable, List, Optional, TextIO, Tuple
 
-logging.basicConfig(level=logging.INFO)
-
-from machine.scripture import VerseRef
+import pandas as pd
+from machine.corpora import ParallelTextCorpus, ParallelTextRow, TextFileTextCorpus
+from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
+from machine.tokenization import LatinWordTokenizer, WhitespaceTokenizer
 from nltk.translate import Alignment
 
-from ..common.corpus import write_corpus
+from ..common.corpus import get_mt_corpus_path, get_scripture_parallel_corpus, write_corpus
 from ..common.environment import SIL_NLP_ENV
 from ..common.stemmer import Stemmer
 from ..common.utils import set_seed
@@ -18,33 +19,17 @@ from .config import get_all_book_paths, get_stemmer, load_config
 from .lexicon import Lexicon
 from .utils import get_experiment_dirs, get_experiment_name
 
-
-class ParallelSegment:
-    def __init__(self, ref: str, source: List[str], target: List[str], alignment: Alignment) -> None:
-        self.ref = ref
-        self.source = source
-        self.target = target
-        self.alignment = alignment
+LOGGER = logging.getLogger(__package__ + ".preprocess")
 
 
-def get_ref(verse: dict) -> str:
+def get_vref(verse: dict) -> VerseRef:
     id = str(verse["manuscript"]["words"][0]["id"])
-    return id[:-4]
+    return VerseRef.from_bbbcccvvv(int(id[:-4]), ORIGINAL_VERSIFICATION)
 
 
-def get_segment(segInfo: dict, casing: str, normalize: bool, use_lemma: bool = False) -> List[str]:
+def get_segment(segInfo: dict, use_lemma: bool = False) -> List[str]:
     words: Iterable[str] = (w["lemma" if use_lemma else "text"] for w in segInfo["words"])
-    return [transform_token(w, casing, normalize) for w in words]
-
-
-def transform_token(token: str, casing: str, normalize: bool) -> str:
-    token = token.replace(" ", "~")
-    casing = casing.lower()
-    if casing == "lower":
-        token = token.lower()
-    if normalize:
-        token = unicodedata.normalize("NFC", token)
-    return token
+    return [w.replace(" ", "~") for w in words]
 
 
 def get_alignment(verse: dict, primary_links_only: bool = False) -> Alignment:
@@ -63,23 +48,41 @@ def get_alignment(verse: dict, primary_links_only: bool = False) -> Alignment:
     return Alignment(pairs)
 
 
-def write_datasets(exp_dir: Path, src_stemmer: Stemmer, trg_stemmer: Stemmer, corpus: List[ParallelSegment]) -> None:
-    train_refs_path = exp_dir / "refs.txt"
-    write_corpus(train_refs_path, map(lambda s: s.ref, corpus))
+def write_datasets(
+    exp_dir: Path,
+    src_stemmer: Stemmer,
+    trg_stemmer: Stemmer,
+    rows: Iterable[ParallelTextRow],
+    is_scripture: bool,
+    has_gold_alignments: bool,
+) -> None:
+    with ExitStack() as stack:
+        train_refs_file: Optional[TextIO] = None
+        if is_scripture:
+            train_refs_path = exp_dir / "refs.txt"
+            train_refs_file = stack.enter_context(train_refs_path.open("w", encoding="utf-8", newline="\n"))
+        train_src_path = exp_dir / "src.txt"
+        train_src_file = stack.enter_context(train_src_path.open("w", encoding="utf-8", newline="\n"))
+        train_trg_path = exp_dir / "trg.txt"
+        train_trg_file = stack.enter_context(train_trg_path.open("w", encoding="utf-8", newline="\n"))
+        gold_alignments_file: Optional[TextIO] = None
+        if has_gold_alignments:
+            gold_alignments_path = exp_dir / "alignments.gold.txt"
+            gold_alignments_file = stack.enter_context(gold_alignments_path.open("w", encoding="utf-8", newline="\n"))
 
-    train_src_path = exp_dir / "src.txt"
-    write_corpus(train_src_path, map(lambda s: " ".join(s.source), corpus))
+        for row in rows:
+            if train_refs_file is not None:
+                train_refs_file.write(str(row.ref) + "\n")
+            train_src_file.write(" ".join(src_stemmer.stem(row.source_segment)) + "\n")
+            train_trg_file.write(" ".join(trg_stemmer.stem(row.target_segment)) + "\n")
+            if gold_alignments_file is not None:
+                gold_alignments_file.write(
+                    " ".join(f"{wp.source_index}-{wp.target_index}" for wp in row.aligned_word_pairs) + "\n"
+                )
 
-    train_trg_path = exp_dir / "trg.txt"
-    write_corpus(train_trg_path, map(lambda s: " ".join(src_stemmer.stem(s.target)), corpus))
-    write_corpus(train_trg_path, map(lambda s: " ".join(trg_stemmer.stem(s.target)), corpus))
 
-    test_alignments_path = exp_dir / "alignments.gold.txt"
-    write_corpus(test_alignments_path, map(lambda s: str(s.alignment), corpus))
-
-
-def is_in_book(segment: ParallelSegment, book: str) -> bool:
-    ref = VerseRef.from_bbbcccvvv(int(segment.ref))
+def is_in_book(row: ParallelTextRow, book: str) -> bool:
+    ref: VerseRef = row.ref
     return ref.book == book
 
 
@@ -88,6 +91,35 @@ def add_alignment(lexicon: Lexicon, source: List[str], target: List[str], alignm
         src_word = source[src_index]
         trg_word = target[trg_index]
         lexicon.increment(src_word, trg_word)
+
+
+def load_gold_alignment(corpus_name: str, use_src_lemma: bool) -> Tuple[ParallelTextCorpus, Lexicon]:
+    corpus_path = SIL_NLP_ENV.align_gold_dir / (corpus_name + ".alignment.json")
+    verses: List[dict]
+    with corpus_path.open("r", encoding="utf-8") as f:
+        verses = json.load(f)
+
+    vrefs: List[VerseRef] = []
+    src_verses: List[str] = []
+    trg_verses: List[str] = []
+    alignments: List[str] = []
+    lexicon = Lexicon()
+    for verse in verses:
+        vref = get_vref(verse)
+        source = get_segment(verse["manuscript"], use_lemma=use_src_lemma)
+        target = get_segment(verse["translation"])
+        alignment = get_alignment(verse)
+        vrefs.append(vref)
+        src_verses.append(" ".join(source))
+        trg_verses.append(" ".join(target))
+        alignments.append(str(alignment))
+        add_alignment(lexicon, source, target, get_alignment(verse, primary_links_only=True))
+    lexicon.normalize()
+    df = pd.DataFrame({"ref": vrefs, "source": src_verses, "target": trg_verses, "alignment": alignments})
+    return (
+        ParallelTextCorpus.from_pandas(df).tokenize(WhitespaceTokenizer()),
+        lexicon,
+    )
 
 
 def main() -> None:
@@ -102,44 +134,79 @@ def main() -> None:
 
         set_seed(config["seed"])
 
-        corpus_name: str = config["corpus"]
+        corpus_name: Optional[str] = config.get("corpus", config.get("gold"))
+        lexicon: Optional[Lexicon]
+        has_gold_alignments = False
+        if corpus_name is not None:
+            corpus, lexicon = load_gold_alignment(corpus_name, config["use_src_lemma"])
+            is_scripture = True
+            has_gold_alignments = True
+        else:
+            src_file_path = get_mt_corpus_path(config["src"])
+            trg_file_path = get_mt_corpus_path(config["trg"])
+            if (
+                src_file_path.parent == SIL_NLP_ENV.mt_scripture_dir
+                or trg_file_path.parent == SIL_NLP_ENV.mt_scripture_dir
+            ):
+                corpus = ParallelTextCorpus.from_pandas(
+                    get_scripture_parallel_corpus(src_file_path, trg_file_path), ref_column="vref"
+                )
+                is_scripture = True
+            else:
+                src_corpus = TextFileTextCorpus(src_file_path)
+                trg_corpus = TextFileTextCorpus(trg_file_path)
+                corpus = src_corpus.align_rows(trg_corpus)
+                is_scripture = False
+            corpus = corpus.tokenize(LatinWordTokenizer())
+            lexicon = None
 
-        corpus_path = SIL_NLP_ENV.align_gold_dir / (corpus_name + ".alignment.json")
-        verses: List[dict]
-        with corpus_path.open("r", encoding="utf-8") as f:
-            verses = json.load(f)
-
-        use_src_lemma: bool = config["use_src_lemma"]
         src_casing: str = config["src_casing"]
-        src_normalize: bool = config["src_normalize"]
+        src_casing = src_casing.lower()
         trg_casing: str = config["trg_casing"]
+        trg_casing = trg_casing.lower()
+
+        if src_casing == "lower" and trg_casing == "lower":
+            corpus = corpus.lowercase()
+        elif src_casing == "lower":
+            corpus = corpus.lowercase_source()
+        elif trg_casing == "lower":
+            corpus = corpus.lowercase_target()
+
+        src_normalize: bool = config["src_normalize"]
         trg_normalize: bool = config["trg_normalize"]
-        corpus: List[ParallelSegment] = []
-        lexicon = Lexicon()
-        for verse in verses:
-            ref_str = get_ref(verse)
-            source = get_segment(verse["manuscript"], src_casing, src_normalize, use_lemma=use_src_lemma)
-            target = get_segment(verse["translation"], trg_casing, trg_normalize)
-            alignment = get_alignment(verse)
-            corpus.append(ParallelSegment(ref_str, source, target, alignment))
-            add_alignment(lexicon, source, target, get_alignment(verse, primary_links_only=True))
-        lexicon.normalize()
+
+        if src_normalize and trg_normalize:
+            corpus = corpus.nfc_normalize()
+        elif src_normalize:
+            corpus = corpus.nfc_normalize_source()
+        elif trg_normalize:
+            corpus = corpus.nfc_normalize_target()
 
         src_stemmer = get_stemmer(config["src_stemmer"])
-        src_stemmer.train(map(lambda s: s.source, corpus))
+        src_stemmer.train(row.source_segment for row in corpus)
 
         trg_stemmer = get_stemmer(config["trg_stemmer"])
-        trg_stemmer.train(map(lambda s: s.target, corpus))
+        trg_stemmer.train(row.target_segment for row in corpus)
 
-        if config["by_book"]:
+        if is_scripture and config["by_book"]:
             for book, book_exp_dir in get_all_book_paths(exp_dir):
-                book_corpus = list(filter(lambda s: is_in_book(s, book), corpus))
+                with corpus.get_rows() as rows:
+                    book_corpus = [row for row in rows if is_in_book(row, book)]
                 if len(book_corpus) > 0:
                     book_exp_dir.mkdir(exist_ok=True)
-                    write_datasets(book_exp_dir, src_stemmer, trg_stemmer, book_corpus)
+                    write_datasets(
+                        book_exp_dir,
+                        src_stemmer,
+                        trg_stemmer,
+                        book_corpus,
+                        is_scripture=True,
+                        has_gold_alignments=has_gold_alignments,
+                    )
         else:
-            write_datasets(exp_dir, src_stemmer, trg_stemmer, corpus)
-            lexicon.write(exp_dir / "lexicon.gold.txt")
+            with corpus.get_rows() as rows:
+                write_datasets(exp_dir, src_stemmer, trg_stemmer, rows, is_scripture, has_gold_alignments)
+            if lexicon is not None:
+                lexicon.write(exp_dir / "lexicon.gold.txt")
 
 
 if __name__ == "__main__":
