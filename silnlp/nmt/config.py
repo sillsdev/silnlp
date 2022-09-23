@@ -1026,7 +1026,7 @@ class Config:
                 project = column[len("target_") :]
                 self._append_corpus(
                     self._test_trg_filename(src_iso, trg_iso, project),
-                    decode_sp_lines(encode_sp_lines(trg_spp, pair_test[column])),
+                    decode_sp_lines(encode_sp_lines(trg_spp, pair_test[column])) if self.data["tokenize"] else pair_test[column],
                 )
                 test_projects.remove(project)
             if self._has_multiple_test_projects(src_iso, trg_iso):
