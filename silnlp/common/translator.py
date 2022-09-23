@@ -176,7 +176,7 @@ class Translator(ABC):
             settings_tree = etree.parse(settings_file)
         src_iso = get_iso(settings_tree)
         book_path = get_book_path(src_project, book)
-        with book_path.open(mode="r", encoding="utf-8") as book_file:
+        with book_path.open(mode="r", encoding="utf-8-sig") as book_file:
             doc = list(usfm.parser(book_file, stylesheet=usfm.relaxed_stylesheet, canonicalise_footnotes=False))
 
         segments = collect_segments(book, doc)
