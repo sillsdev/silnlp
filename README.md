@@ -124,5 +124,9 @@ The following will cause the SILNLP tools to select the S3 bucket for local siln
 Install the clearml python package:  
 `pip install clearml`
 
+### Create your Clear-ML credentials
+Login to [Clear-ML](https://app.clear.ml/login) use a Google account with your work email address.  
+Click the user icon in the top right corner and choose Settings from the menu.  
+
 Connect your computer to the server by creating credentials, then run the below and follow the setup instructions:
 `clearml-init`
