@@ -14,13 +14,13 @@ Open a command window and use pip to install Clear-ML.
    Add your aws key and secret and the region to the configuration vault using this format:
 ```
 sdk {
-    aws {
-        s3 {
+	aws {
+		s3 {
 			key: "xxxxxxxxxxxxxxxxxx"
-            secret: "xxxxxxxxxxxxxxxxxx"
-            region: "us-east-1"
-        }
-   }
+			secret: "xxxxxxxxxxxxxxxxxx"
+			region: "us-east-1"
+		}
+	}
 }
 ```
 
