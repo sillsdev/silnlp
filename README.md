@@ -94,20 +94,26 @@ We use Amazon S3 storage for storing our experiment data. Here is some workspace
 The following will allow the boto3 and S3Path libraries in Python correctly talk to the S3 bucket.
 * Install the aws-cli from: https://aws.amazon.com/cli/
 * In cmd, type: `aws configure` and enter your AWS access_key_id and secret_access_key and the region (we use region = us-east-1).
-* The aws configure command will create a folder in your home directory named ".aws" it should contain two plain text files named 'config' and 'credentials'. The config file should contain the region and the credentials file should contain your access_key_id and your secret_access_key.
-(Home directory on windows is usually C:\Users\<Username>\ and on linux it is /home/username
+* The aws configure command will create a folder in your home directory named '.aws' it should contain two plain text files named 'config' and 'credentials'. The config file should contain the region and the credentials file should contain your access_key_id and your secret_access_key.
+(Home directory on windows is usually C:\Users\<Username>\ and on linux it is /home/username)
 
 ### Windows: Install and configure rclone
 The following will mount /aqua-ml-data on your S drive and allow you to explore, read and write.
 * Install WinFsp: http://www.secfs.net/winfsp/rel/
 * Download rclone from: https://rclone.org/downloads/
-* Unzip to your desktop (or some convient location)
-* Take the `scripts/rclone/rclone.conf` file in this repo and copy it to `~\AppData\Roaming\rclone` (creating folders if necessary) 
-* Take the `scripts/rclone/mount_to_s.bat` file in this repo and copy it to the folder that contains the unzipped rclone.
-* Double-click the bat file
+* Unzip to your desktop (or some convient location). Add the folder that contains rclone.exe to your PATH environment variable.
+* Take the `scripts/rclone/rclone.conf` file from this SILNLP repo and copy it to `~\AppData\Roaming\rclone` (creating folders if necessary) 
+* Take the `scripts/rclone/mount_to_s.bat` file from this SILNLP repo and copy it to the folder that contains the unzipped rclone.
+* Double-click the bat file. A command window should open and remain open. You should see something like:
+```
+C:\Users\David\Software\rclone>call rclone mount --vfs-cache-mode full --use-server-modtime s3aqua:aqua-ml-data S:
+The service rclone has been started.
+```
 
-### setup environment variable
-The following will auto-select the bucket for local silnlp operations
+
+
+### Setup environment variable
+The following will cause the SILNLP tools to select the S3 bucket for local silnlp operations
 * Set the environment variable SIL_NLP_DATA_PATH to /aqua-ml-data
 
 ## Setup ClearML on local PC
