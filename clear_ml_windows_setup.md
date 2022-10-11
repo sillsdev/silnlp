@@ -43,5 +43,4 @@ api {
 3. Use the button to copy the new credentials to your clipboard. 
 4. Paste them into the command window.
 5. This will create a clearml.conf file in your home directory i.e.  C:\Users\<Username>\clearml.conf
-6. If this file already exists the `clearml-init` command will invite you to edit it.  You may find it easier to delete it and run through these instructions.  
-You can put the copied details into the existing file in the required format.
+6. If this file already exists the `clearml-init` command will invite you to edit it.  You may find it easier to delete it and run through these instructions, or you can put the copied details into the existing file in the required format.
