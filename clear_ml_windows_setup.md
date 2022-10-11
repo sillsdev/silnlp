@@ -14,13 +14,13 @@ Open a command window and use pip to install Clear-ML.
    Add your aws key and secret and the region to the configuration vault using this format:
 ```
 sdk {
-	aws {
-		s3 {
-			key: "xxxxxxxxxxxxxxxxxx"
-			secret: "xxxxxxxxxxxxxxxxxx"
-			region: "us-east-1"
-		}
-	}
+  aws {
+    s3 {
+      key: "xxxxxxxxxxxxxxxxxx"
+      secret: "xxxxxxxxxxxxxxxxxx"
+      region: "us-east-1"
+    }
+  }
 }
 ```
 
@@ -31,13 +31,13 @@ sdk {
 They'll look something like this:
 ```
 api { 
-    web_server: https://app.sil.hosted.allegro.ai
-    api_server: https://api.sil.hosted.allegro.ai
-    files_server: https://files.sil.hosted.allegro.ai
-    credentials {
-        "access_key" = "xxxxxxxxxxxxxxxxxx"
-        "secret_key"  = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-    }
+  web_server: https://app.sil.hosted.allegro.ai
+  api_server: https://api.sil.hosted.allegro.ai
+  files_server: https://files.sil.hosted.allegro.ai
+  credentials {
+    "access_key" = "xxxxxxxxxxxxxxxxxx"
+    "secret_key"  = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  }
 }
 ```
 3. Use the button to copy the new credentials to your clipboard. 
