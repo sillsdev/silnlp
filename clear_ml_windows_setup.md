@@ -10,7 +10,7 @@ Open a command window and use pip to install Clear-ML.
 ## Add your AWS storage vault credentials (If using AWS S3).
 1. Login to [Clear-ML](https://app.sil.hosted.allegro.ai) login with your work email address.
 2. Go to the [workspace settings](https://app.sil.hosted.allegro.ai/settings/workspace-configuration).
-3. At the top of the page you should see the configuration vault. If not then you are probably not logged in to the Enterprise version of Clear-ML.  
+3. At the top of the page you should see the configuration vault. If you don't see the configuration vault it is probably the case that you are not logged in to the Enterprise version of Clear-ML.  
    Add your aws key and secret and the region to the configuration vault using this format:
 ```
 sdk {
