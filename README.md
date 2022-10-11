@@ -109,18 +109,19 @@ The following will mount /aqua-ml-data on your S drive and allow you to explore,
 C:\Users\David\Software\rclone>call rclone mount --vfs-cache-mode full --use-server-modtime s3aqua:aqua-ml-data S:
 The service rclone has been started.
 ```
+### To start S: drive every time you open Windows put a shortcut to the mount_to_s.bat file in the Startup folder.
+* In Windows Explorer put `shell:startup` in the address bar or open `C:\Users\<Username>\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup`
+* Right click to add a new shortcut. Choose `mount_to_s.bat` as the target, you can leave the name as the default.  
 
-
+Now your AWS S3 bucket should be mounted as S: drive when you start Windows.
 
 ### Setup environment variable
 The following will cause the SILNLP tools to select the S3 bucket for local silnlp operations
 * Set the environment variable SIL_NLP_DATA_PATH to /aqua-ml-data
-
+---
 ## Setup ClearML on local PC
-Install the clearml python package:
-
+Install the clearml python package:  
 `pip install clearml`
 
 Connect your computer to the server by creating credentials, then run the below and follow the setup instructions:
-
 `clearml-init`
