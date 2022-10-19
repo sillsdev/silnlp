@@ -101,7 +101,7 @@ def get_mt_corpus_path(corpus: str) -> Path:
 
 
 def split_parallel_corpus(
-    corpus: pd.DataFrame, split_size: Union[float, int], split_indices: Set[int] = None
+    corpus: pd.DataFrame, split_size: Union[float, int], split_indices: Optional[Set[int]] = None
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     split: pd.DataFrame
     if split_indices is None:

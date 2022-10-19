@@ -1,8 +1,7 @@
 import argparse
 import shutil
 
-from silnlp.nmt.config import load_config
-from silnlp.nmt.utils import decode_sp
+from silnlp.nmt.config_utils import load_config
 
 _COMMON_TERMS = {"god", "lord", "yhwh", "yahweh", "jehovah", "jehovah god"}
 
@@ -14,6 +13,7 @@ def main() -> None:
     args = parser.parse_args()
 
     config = load_config(args.experiment)
+    tokenizer = config.create_tokenizer()
     src_file_path = config.exp_dir / "dict.src.txt"
     orig_src_file_path = config.exp_dir / "dict.src.txt.orig"
     trg_file_path = config.exp_dir / "dict.trg.txt"
@@ -42,7 +42,7 @@ def main() -> None:
             trg = trg.strip()
             vref = vref.strip()
 
-            trg_words = [decode_sp(t).lower() for t in trg.split("\t")]
+            trg_words = [tokenizer.detokenize(t).lower() for t in trg.split("\t")]
             if all(t not in _COMMON_TERMS for t in trg_words):
                 src_file.write(src + "\n")
                 trg_file.write(trg + "\n")

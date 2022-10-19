@@ -3,7 +3,7 @@ import os
 import random
 import subprocess
 from abc import ABC, abstractmethod
-from enum import Flag
+from enum import Enum, Flag, auto
 from pathlib import Path
 from typing import Any, List, Optional, Set
 
@@ -12,6 +12,11 @@ import numpy as np
 from ..common.environment import SIL_NLP_ENV
 
 LOGGER = logging.getLogger(__name__)
+
+
+class Side(Enum):
+    SOURCE = auto()
+    TARGET = auto()
 
 
 def get_repo_dir() -> Path:

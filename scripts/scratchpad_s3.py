@@ -1,6 +1,6 @@
+from silnlp.common.tf_utils import enable_memory_growth
 from silnlp.nmt.experiment import SILExperiment
 from silnlp.nmt.translate import TranslationTask
-from silnlp.nmt.utils import enable_memory_growth
 
 enable_memory_growth()
 

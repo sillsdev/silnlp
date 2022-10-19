@@ -6,27 +6,25 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple, Union
 
-import tensorflow as tf
 from machine.scripture import book_number_to_id, get_books
 
-from ..common.clearml_connection import SILClearML
 from ..common.environment import SIL_NLP_ENV
 from ..common.paratext import book_file_name_digits
+from ..common.tf_utils import enable_eager_execution, enable_memory_growth
 from ..common.translator import Translator
 from ..common.utils import get_git_revision_hash
-from .config import Config, create_runner, get_checkpoint_path
-from .utils import decode_sp_lines, enable_memory_growth, encode_sp
+from .clearml_connection import SILClearML
+from .config import CheckpointType, Config, NMTModel
+from .tokenizer import Tokenizer
 
 LOGGER = logging.getLogger(__name__)
 
 
 class NMTTranslator(Translator):
-    def __init__(self, config: Config, checkpoint_path: Optional[Path]):
-        self._multiple_trg_isos = len(config.trg_isos) > 1
-        self._default_trg_iso = config.default_trg_iso
-        self.checkpoint_path = checkpoint_path
-        self._runner = create_runner(config)
-        self._src_spp = config.create_src_sp_processor()
+    def __init__(self, tokenizer: Tokenizer, model: NMTModel, checkpoint: Union[CheckpointType, str, int]):
+        self._tokenizer = tokenizer
+        self._model = model
+        self._checkpoint = checkpoint
 
     def translate(
         self,
@@ -34,27 +32,7 @@ class NMTTranslator(Translator):
         src_iso: Optional[str] = None,
         trg_iso: Optional[str] = None,
     ) -> Iterable[str]:
-        features_list: List[List[str]] = [[]]
-        for sentence in sentences:
-            if isinstance(sentence, str):
-                features_list[0].append(encode_sp(self._src_spp, self._insert_lang_tag(sentence, trg_iso)))
-            else:
-                features_list[0].append(encode_sp(self._src_spp, self._insert_lang_tag(sentence[0], trg_iso)))
-                for i in range(1, len(sentence)):
-                    if i == len(features_list):
-                        features_list.append([])
-                    features_list[i].append(sentence[i])
-        translations = self._runner.infer_list(
-            features_list, checkpoint_path=str(self.checkpoint_path) if self.checkpoint_path is not None else None
-        )
-        return decode_sp_lines(t[0] for t in translations)
-
-    def _insert_lang_tag(self, text: str, trg_iso: Optional[str]) -> str:
-        if self._multiple_trg_isos:
-            if trg_iso is None:
-                trg_iso = self._default_trg_iso
-            return f"<2{trg_iso}> {text}"
-        return text
+        return self._tokenizer.detokenize_all(self._model.translate(sentences, src_iso, trg_iso, self._checkpoint))
 
 
 @dataclass
@@ -82,8 +60,10 @@ class TranslationTask:
 
         clearml.config.set_seed()
 
-        checkpoint_path, step = get_checkpoint_path(clearml.config.model_dir, self.checkpoint)
-        translator = NMTTranslator(config=clearml.config, checkpoint_path=checkpoint_path)
+        tokenizer = clearml.config.create_tokenizer()
+        model = clearml.config.create_model()
+        translator = NMTTranslator(tokenizer, model, self.checkpoint)
+        step = model.get_checkpoint_step(self.checkpoint)
         step_str = "avg" if step == -1 else str(step)
         return translator, clearml.config, step_str
 
@@ -200,8 +180,7 @@ def main() -> None:
     get_git_revision_hash()
 
     if args.eager_execution:
-        tf.config.run_functions_eagerly(True)
-        tf.data.experimental.enable_debug_mode()
+        enable_eager_execution()
 
     if args.memory_growth:
         enable_memory_growth()

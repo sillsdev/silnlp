@@ -1,7 +1,8 @@
 import argparse
 import logging
 import os
-from .config import get_mt_exp_dir
+
+from ..common.utils import get_mt_exp_dir
 
 logging.basicConfig()
 

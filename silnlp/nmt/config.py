@@ -1,26 +1,17 @@
-import argparse
 import itertools
 import logging
-import os
 import random
-import shutil
 import tempfile
+from abc import ABC, abstractmethod
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from enum import Enum, Flag, auto
 from pathlib import Path
 from statistics import mean
-from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, Type, Union, cast
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, TextIO, Tuple, Type, Union, cast
 
 import pandas as pd
-import sentencepiece as sp
-import tensorflow as tf
-import yaml
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books
-from opennmt import END_OF_SENTENCE_TOKEN, PADDING_TOKEN, START_OF_SENTENCE_TOKEN
-from opennmt.data import Noise, Vocab, WordDropout, WordNoiser, tokens_to_words
-from opennmt.inputters import TextInputter
-from opennmt.models import Model, get_model_from_catalog
 from tqdm import tqdm
 
 from ..alignment.config import get_aligner, get_aligner_name
@@ -43,63 +34,30 @@ from ..common.corpus import (
     split_parallel_corpus,
     write_corpus,
 )
-from ..common.environment import SIL_NLP_ENV, download_if_s3_paths
+from ..common.environment import SIL_NLP_ENV
 from ..common.utils import (
     DeleteRandomToken,
     NoiseMethod,
     RandomTokenPermutation,
     ReplaceRandomToken,
-    get_git_revision_hash,
+    Side,
     get_mt_exp_dir,
     is_set,
-    merge_dict,
     set_seed,
 )
 from .augment import AugmentMethod, create_augment_methods
-from .models.sil_transformer import SILTransformer
-from .runner import SILRunner
-from .utils import decode_sp, decode_sp_lines, encode_sp, encode_sp_lines, get_best_model_dir, get_last_checkpoint
-
-_PYTHON_TO_TENSORFLOW_LOGGING_LEVEL: Dict[int, int] = {
-    logging.CRITICAL: 3,
-    logging.ERROR: 2,
-    logging.WARNING: 1,
-    logging.INFO: 0,
-    logging.DEBUG: 0,
-    logging.NOTSET: 0,
-}
-
+from .tokenizer import Tokenizer
 
 LOGGER = logging.getLogger(__package__ + ".config")
-
-_DEFAULT_NEW_CONFIG: dict = {
-    "data": {
-        "share_vocab": False,
-        "character_coverage": 1.0,
-        "mirror": False,
-        "mixed_src": False,
-        "seed": 111,
-    },
-    "train": {"maximum_features_length": 150, "maximum_labels_length": 150},
-    "eval": {"multi_ref_eval": False},
-    "params": {
-        "length_penalty": 0.2,
-        "dropout": 0.2,
-        "transformer_dropout": 0.1,
-        "transformer_attention_dropout": 0.1,
-        "transformer_ffn_dropout": 0.1,
-        "word_dropout": 0.1,
-    },
-}
 
 BASIC_DATA_PROJECT = "BASIC"
 
 
-# Different types of parent model checkpoints (last, best, average)
 class CheckpointType(Enum):
-    LAST = 1
-    BEST = 2
-    AVERAGE = 3
+    LAST = auto()
+    BEST = auto()
+    AVERAGE = auto()
+    OTHER = auto()
 
 
 class DataFileType(Flag):
@@ -347,100 +305,6 @@ def get_parallel_corpus_size(src_file_path: Path, trg_file_path: Path) -> int:
     return count
 
 
-def convert_vocab(sp_vocab_path: Path, onmt_vocab_path: Path, tags: Set[str]) -> None:
-    special_tokens = [START_OF_SENTENCE_TOKEN, END_OF_SENTENCE_TOKEN, PADDING_TOKEN] + list(tags)
-
-    vocab = Vocab(special_tokens)
-    with sp_vocab_path.open("r", encoding="utf-8") as vocab_file:
-        for line in vocab_file:
-            token = line.rstrip("\r\n")
-            index = token.rindex("\t")
-            token = token[:index]
-            if token in ("<unk>", "<s>", "</s>", "<blank>"):  # Ignore special tokens
-                continue
-            vocab.add(token)
-    vocab.pad_to_multiple(8)
-    vocab.serialize(onmt_vocab_path)
-
-
-def build_vocab(
-    file_paths: Iterable[Path],
-    vocab_size: int,
-    vocab_type: str,
-    vocab_seed: int,
-    casing: str,
-    vocab_split_by_unicode_script: bool,
-    character_coverage: float,
-    model_prefix: Path,
-    vocab_path: Path,
-    tags: Set[str],
-    max_train_size: int,
-) -> None:
-    casing = casing.lower()
-    normalization: str
-    if casing == "lower":
-        normalization = "nmt_nfkc_cf"
-    elif casing == "preserve":
-        normalization = "nmt_nfkc"
-    else:
-        raise RuntimeError("Invalid casing was specified in the config.")
-
-    # use custom normalization that does not convert ZWJ and ZWNJ to spaces
-    # allows properly handling of scripts like Devanagari
-    normalization_path = Path(__file__).parent / f"{normalization}.tsv"
-    file_paths = [fp for fp in file_paths]
-    file_paths = download_if_s3_paths(file_paths)
-    file_paths.sort()
-
-    if vocab_seed is not None:
-        sp.set_random_generator_seed(vocab_seed)
-    sp.SentencePieceTrainer.Train(
-        normalization_rule_tsv=normalization_path,
-        input=file_paths,
-        model_prefix=model_prefix,
-        model_type=vocab_type,
-        vocab_size=vocab_size,
-        user_defined_symbols="<blank>",
-        character_coverage="%.4f" % character_coverage,
-        input_sentence_size=max_train_size,
-        shuffle_input_sentence=True,
-        split_by_unicode_script=vocab_split_by_unicode_script,
-    )
-
-    convert_vocab(model_prefix.with_suffix(".vocab"), vocab_path, tags)
-
-
-def get_checkpoint_path(
-    model_dir: Path, checkpoint_type: Union[CheckpointType, str]
-) -> Tuple[Optional[Path], Optional[int]]:
-    model_dir = SIL_NLP_ENV.get_source_experiment_path(model_dir)
-    ckpt = None
-    step = None
-    if isinstance(checkpoint_type, str):
-        checkpoint_type = checkpoint_type.lower()
-        if "avg" in checkpoint_type:
-            checkpoint_type = CheckpointType.AVERAGE
-        elif "best" in checkpoint_type:
-            checkpoint_type = CheckpointType.BEST
-        elif "last" in checkpoint_type:
-            checkpoint_type = CheckpointType.LAST
-    if checkpoint_type == CheckpointType.AVERAGE:
-        # Get the checkpoint path and step count for the averaged checkpoint
-        ckpt, step = get_last_checkpoint(model_dir / "avg")
-    elif checkpoint_type == CheckpointType.BEST:
-        # Get the checkpoint path and step count for the best checkpoint
-        best_model_dir, step = get_best_model_dir(model_dir)
-        ckpt, step = (best_model_dir / "ckpt", step)
-    elif checkpoint_type == CheckpointType.LAST:
-        ckpt, step = get_last_checkpoint(model_dir)
-    else:
-        raise RuntimeError(f"Unsupported checkpoint type: {checkpoint_type}")
-    if ckpt is not None:
-        SIL_NLP_ENV.copy_experiment_from_bucket(ckpt.parent)
-        ckpt, step = (SIL_NLP_ENV.get_temp_experiment_path(ckpt), step)
-    return ckpt, step
-
-
 def get_data_file_pairs(corpus_pair: CorpusPair) -> Iterable[Tuple[DataFile, DataFile]]:
     if corpus_pair.mapping == DataFileMapping.ONE_TO_ONE:
         for file_pair in zip(corpus_pair.src_files, corpus_pair.trg_files):
@@ -453,140 +317,46 @@ def get_data_file_pairs(corpus_pair: CorpusPair) -> Iterable[Tuple[DataFile, Dat
                 yield (src_file, trg_file)
 
 
-class Config:
+class NMTModel(ABC):
+    @abstractmethod
+    def train(self, num_devices: int = 1) -> None:
+        ...
+
+    @abstractmethod
+    def save_effective_config(self, path: Path) -> None:
+        ...
+
+    @abstractmethod
+    def translate_text_files(
+        self,
+        input_paths: List[Union[Path, Sequence[Path]]],
+        translation_paths: List[Path],
+        checkpoint: Union[CheckpointType, str, int] = CheckpointType.BEST,
+    ) -> None:
+        ...
+
+    @abstractmethod
+    def translate(
+        self,
+        sentences: Iterable[Union[str, Sequence[str]]],
+        src_iso: Optional[str] = None,
+        trg_iso: Optional[str] = None,
+        checkpoint: Union[CheckpointType, str, int] = CheckpointType.BEST,
+    ) -> Iterable[str]:
+        ...
+
+    @abstractmethod
+    def get_checkpoint_step(self, checkpoint: Union[CheckpointType, str, int]) -> int:
+        ...
+
+
+class Config(ABC):
     def __init__(self, exp_dir: Path, config: dict) -> None:
-        config = merge_dict(
-            {
-                "model": "SILTransformerBase",
-                "model_dir": str(exp_dir / "run"),
-                "data": {
-                    "train_features_file": str(exp_dir / "train.src.txt"),
-                    "train_labels_file": str(exp_dir / "train.trg.txt"),
-                    "eval_features_file": str(exp_dir / "val.src.txt"),
-                    "eval_labels_file": str(exp_dir / "val.trg.txt"),
-                    "share_vocab": True,
-                    "character_coverage": 1.0,
-                    "sp_max_train_size": 1000000,
-                    "mirror": False,
-                    "parent_use_best": False,
-                    "parent_use_average": False,
-                    "parent_use_vocab": False,
-                    "seed": 111,
-                    "tokenize": True,
-                    "aligner": "fast_align",
-                    "guided_alignment": False,
-                    "guided_alignment_train_size": 1000000,
-                    "stats_max_size": 100000,  # a little over the size of the bible
-                    "terms": {
-                        "train": True,
-                        "dictionary": False,
-                        "categories": "PN",
-                        "include_glosses": True,
-                    },
-                    "transfer_alignment_heads": True,
-                },
-                "train": {
-                    "average_last_checkpoints": 0,
-                    "maximum_features_length": 150,
-                    "maximum_labels_length": 150,
-                    "keep_checkpoint_max": 3,
-                    "save_checkpoints_steps": 1000,
-                },
-                "eval": {
-                    "external_evaluators": "bleu_multi_ref",
-                    "steps": 1000,
-                    "early_stopping": {"metric": "bleu", "min_improvement": 0.2, "steps": 4},
-                    "export_on_best": "bleu",
-                    "export_format": "checkpoint",
-                    "max_exports_to_keep": 1,
-                    "multi_ref_eval": False,
-                    "use_dictionary": True,
-                },
-                "params": {
-                    "length_penalty": 0.2,
-                    "transformer_dropout": 0.1,
-                    "transformer_attention_dropout": 0.1,
-                    "transformer_ffn_dropout": 0.1,
-                    "word_dropout": 0,
-                    "guided_alignment_type": "mse",
-                    "guided_alignment_weight": 0.3,
-                },
-            },
-            config,
-        )
-        data_config: dict = config["data"]
-        eval_config: dict = config["eval"]
-        multi_ref_eval: bool = eval_config["multi_ref_eval"]
-        if multi_ref_eval:
-            data_config["eval_labels_file"] = str(exp_dir / "val.trg.txt.0")
-        if data_config["share_vocab"]:
-            data_config["source_vocabulary"] = str(exp_dir / "onmt.vocab")
-            data_config["target_vocabulary"] = str(exp_dir / "onmt.vocab")
-            if (
-                "src_vocab_size" not in data_config
-                and "trg_vocab_size" not in data_config
-                and "vocab_size" not in data_config
-            ):
-                data_config["vocab_size"] = 24000
-            if (
-                "src_vocab_type" not in data_config
-                and "trg_vocab_type" not in data_config
-                and "vocab_type" not in data_config
-            ):
-                data_config["vocab_type"] = "unigram"
-            if "src_casing" not in data_config and "trg_casing" not in data_config and "casing" not in data_config:
-                data_config["casing"] = "lower"
-            if (
-                "src_vocab_split_by_unicode_script" not in data_config
-                and "trg_vocab_split_by_unicode_script" not in data_config
-                and "vocab_split_by_unicode_script" not in data_config
-            ):
-                data_config["vocab_split_by_unicode_script"] = True
-        else:
-            data_config["source_vocabulary"] = str(exp_dir / "src-onmt.vocab")
-            data_config["target_vocabulary"] = str(exp_dir / "trg-onmt.vocab")
-            if "vocab_size" not in data_config:
-                if "src_vocab_size" not in data_config:
-                    data_config["src_vocab_size"] = 8000
-                if "trg_vocab_size" not in data_config:
-                    data_config["trg_vocab_size"] = 8000
-            if "vocab_type" not in data_config:
-                if "src_vocab_type" not in data_config:
-                    data_config["src_vocab_type"] = "unigram"
-                if "trg_vocab_type" not in data_config:
-                    data_config["trg_vocab_type"] = "unigram"
-            if "casing" not in data_config:
-                if "src_casing" not in data_config:
-                    data_config["src_casing"] = "lower"
-                if "trg_casing" not in data_config:
-                    data_config["trg_casing"] = "lower"
-            if "vocab_split_by_unicode_script" not in data_config:
-                if "src_vocab_split_by_unicode_script" not in data_config:
-                    data_config["src_vocab_split_by_unicode_script"] = True
-                if "trg_vocab_split_by_unicode_script" not in data_config:
-                    data_config["trg_vocab_split_by_unicode_script"] = True
-
-        model: str = config["model"]
-        if model.endswith("AlignmentEnhanced"):
-            data_config["guided_alignment"] = True
-
-        if data_config["guided_alignment"]:
-            if config["params"]["word_dropout"] > 0:
-                raise RuntimeError("Guided alignment will not work with word dropout enabled.")
-            data_config["train_alignments"] = str(exp_dir / "train.alignments.txt")
-
         self.exp_dir = exp_dir
         self.root = config
 
+        data_config: dict = config["data"]
         self.corpus_pairs = parse_corpus_pairs(data_config["corpus_pairs"])
-
-        if any(
-            p.is_dictionary or (len(p.src_terms_files) > 0 and data_config["terms"]["dictionary"])
-            for p in self.corpus_pairs
-        ):
-            data_config["source_dictionary"] = str(exp_dir / self._dict_src_filename())
-            data_config["target_dictionary"] = str(exp_dir / self._dict_trg_filename())
-            data_config["ref_dictionary"] = str(exp_dir / self._dict_vref_filename())
 
         terms_config: dict = data_config["terms"]
         self.src_isos: Set[str] = set()
@@ -632,33 +402,6 @@ class Config:
 
         self._multiple_test_iso_pairs = sum(1 for iso_pair in self._iso_pairs.values() if iso_pair.has_test_data) > 1
 
-        if self._has_scripture_data:
-            data_config["eval_features_file"] = [
-                str(exp_dir / self._val_src_filename()),
-                str(exp_dir / self._val_vref_filename()),
-            ]
-
-        parent: Optional[str] = self.data.get("parent")
-        self.parent_config: Optional[Config] = None
-        if parent is not None:
-            SIL_NLP_ENV.copy_experiment_from_bucket(parent, extensions=("config.yml", ".model", ".vocab"))
-            self.parent_config = load_config(parent)
-            freeze_layers: Optional[List[str]] = self.parent_config.params.get("freeze_layers")
-            # do not freeze any word embeddings layer, because we will update them when we create the parent model
-            if freeze_layers is not None:
-                self.parent_config.params["freeze_layers"] = list()
-
-        self.write_trg_tag: bool = (
-            len(self.trg_isos) > 1
-            or self.mirror
-            or (self.parent_config is not None and self.parent_config.write_trg_tag)
-        )
-
-        if self.write_trg_tag:
-            self._tags.update(f"<2{trg_iso}>" for trg_iso in self.trg_isos)
-            if self.mirror:
-                self._tags.update(f"<2{src_iso}>" for src_iso in self.src_isos)
-
     @property
     def default_src_iso(self) -> str:
         return next(iter(self.src_isos))
@@ -702,7 +445,6 @@ class Config:
     def set_seed(self) -> None:
         seed = self.data["seed"]
         set_seed(seed)
-        tf.random.set_seed(seed)
 
     def preprocess(self, stats: bool) -> None:
         # confirm that input file paths exist
@@ -712,35 +454,19 @@ class Config:
                 return
 
         self._build_vocabs()
-        src_spp, trg_spp = self.create_sp_processors()
-        train_count = self._build_corpora(src_spp, trg_spp, stats)
+        tokenizer = self.create_tokenizer()
+        train_count = self._build_corpora(tokenizer, stats)
         if self.data["guided_alignment"]:
             self._create_train_alignments(train_count)
         LOGGER.info("Preprocessing completed")
 
-    def create_sp_processors(self) -> Tuple[Optional[sp.SentencePieceProcessor], Optional[sp.SentencePieceProcessor]]:
-        if not self.data["tokenize"]:
-            return (None, None)
-        if self.share_vocab:
-            model_prefix = self.exp_dir / "sp"
-            src_spp = sp.SentencePieceProcessor()
-            src_spp.Load(str(model_prefix.with_suffix(".model")))
+    @abstractmethod
+    def create_model(self, mixed_precision: bool = False) -> NMTModel:
+        ...
 
-            trg_spp = src_spp
-        else:
-            src_spp = sp.SentencePieceProcessor()
-            src_spp.Load(str(self.exp_dir / "src-sp.model"))
-
-            trg_spp = sp.SentencePieceProcessor()
-            trg_spp.Load(str(self.exp_dir / "trg-sp.model"))
-        return (src_spp, trg_spp)
-
-    def create_src_sp_processor(self) -> Optional[sp.SentencePieceProcessor]:
-        if not self.data["tokenize"]:
-            return None
-        src_spp = sp.SentencePieceProcessor()
-        src_spp.Load(str(self.exp_dir / "sp.model" if self.share_vocab else self.exp_dir / "src-sp.model"))
-        return src_spp
+    @abstractmethod
+    def create_tokenizer(self) -> Tokenizer:
+        ...
 
     def is_train_project(self, ref_file_path: Path) -> bool:
         trg_iso, trg_project = self._parse_ref_file_path(ref_file_path)
@@ -762,9 +488,7 @@ class Config:
             return self.default_trg_iso, parts[3]
         return parts[2], parts[5]
 
-    def _build_corpora(
-        self, src_spp: Optional[sp.SentencePieceProcessor], trg_spp: Optional[sp.SentencePieceProcessor], stats: bool
-    ) -> int:
+    def _build_corpora(self, tokenizer: Tokenizer, stats: bool) -> int:
         self._delete_files("train.*.txt")
         self._delete_files("val.*.txt")
         self._delete_files("test.*.txt")
@@ -773,9 +497,9 @@ class Config:
         train_count = 0
         for pair in self.corpus_pairs:
             if pair.is_scripture:
-                train_count += self._write_scripture_data_sets(src_spp, trg_spp, pair, stats)
+                train_count += self._write_scripture_data_sets(tokenizer, pair, stats)
             else:
-                train_count += self._write_basic_data_sets(src_spp, trg_spp, pair)
+                train_count += self._write_basic_data_sets(tokenizer, pair)
         return train_count
 
     def _delete_files(self, pattern: str) -> None:
@@ -784,8 +508,7 @@ class Config:
 
     def _write_scripture_data_sets(
         self,
-        src_spp: Optional[sp.SentencePieceProcessor],
-        trg_spp: Optional[sp.SentencePieceProcessor],
+        tokenizer: Tokenizer,
         pair: CorpusPair,
         stats: bool,
     ) -> int:
@@ -808,6 +531,9 @@ class Config:
         pair_val_indices: Dict[Tuple[str, str], Set[int]] = {}
         pair_test_indices: Dict[Tuple[str, str], Set[int]] = {}
         terms: Optional[pd.DataFrame] = None
+        project_isos: Dict[str, str] = {}
+
+        tags_str = self._get_tags_str(pair.tags)
 
         if pair.use_test_set_from != "":
             self._populate_pair_test_indices(pair.use_test_set_from, pair_test_indices)
@@ -820,6 +546,8 @@ class Config:
                     stats_file.write("src_project,trg_project,count,align_score,filtered_count,filtered_align_score\n")
 
             for src_file, trg_file in get_data_file_pairs(pair):
+                project_isos[src_file.project] = src_file.iso
+                project_isos[trg_file.project] = trg_file.iso
                 corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path)
                 if len(pair.corpus_books) > 0:
                     cur_train = include_books(corpus, pair.corpus_books)
@@ -837,9 +565,6 @@ class Config:
                     add_alignment_scores(cur_train, aligner_id)
                     if stats_file is not None:
                         cur_train.to_csv(self.exp_dir / f"{src_file.project}_{trg_file.project}.csv", index=False)
-
-                tags_str = self._get_tags_str(pair.tags, trg_file.iso)
-                mirror_tags_str = self._get_tags_str(pair.tags, src_file.iso)
 
                 if pair.is_test:
                     if pair.disjoint_test and test_indices is None:
@@ -865,7 +590,7 @@ class Config:
                         )
 
                     cur_test.drop("score", axis=1, inplace=True, errors="ignore")
-                    self._add_to_eval_dataset(
+                    self._add_to_eval_data_set(
                         src_file.iso,
                         trg_file.iso,
                         trg_file.project,
@@ -914,23 +639,32 @@ class Config:
                         cur_train, val_size, pair_val_indices.get((src_file.iso, trg_file.iso), val_indices)
                     )
 
-                    self._add_to_eval_dataset(
+                    self._add_to_eval_data_set(
                         src_file.iso, trg_file.iso, trg_file.project, tags_str, val, pair_val_indices, cur_val
                     )
 
                 if pair.is_train:
+                    cur_train["source_lang"] = src_file.iso
+                    cur_train["target_lang"] = trg_file.iso
                     if self.mirror:
-                        mirror_cur_train = cur_train.rename(columns={"source": "target", "target": "source"})
-                        train = self._add_to_train_dataset(
+                        mirror_cur_train = cur_train.rename(
+                            columns={
+                                "source": "target",
+                                "target": "source",
+                                "source_lang": "target_lang",
+                                "target_lang": "source_lang",
+                            }
+                        )
+                        train = self._add_to_train_data_set(
                             trg_file.project,
                             src_file.project,
                             pair.mapping == DataFileMapping.MIXED_SRC,
-                            mirror_tags_str,
+                            tags_str,
                             train,
                             mirror_cur_train,
                         )
 
-                    train = self._add_to_train_dataset(
+                    train = self._add_to_train_data_set(
                         src_file.project,
                         trg_file.project,
                         pair.mapping == DataFileMapping.MIXED_SRC,
@@ -957,66 +691,54 @@ class Config:
                     for trg_terms_file, trg_terms in all_trg_terms:
                         if src_terms_file.iso == trg_terms_file.iso:
                             continue
-                        tags_str = self._get_tags_str(pair.tags, trg_terms_file.iso)
-                        mirror_tags_str = self._get_tags_str(pair.tags, src_terms_file.iso)
                         cur_terms = get_terms_corpus(src_terms, trg_terms, categories_set, dict_books)
-                        terms = self._add_to_terms_dataset(tags_str, mirror_tags_str, terms, cur_terms)
+                        cur_terms["source_lang"] = src_terms_file.iso
+                        cur_terms["target_lang"] = trg_terms_file.iso
+                        terms = self._add_to_terms_data_set(tags_str, terms, cur_terms)
                 if terms_config["include_glosses"]:
                     if "en" in self.trg_isos:
                         for src_terms_file, src_terms in all_src_terms:
                             cur_terms = get_terms_data_frame(src_terms, categories_set, dict_books)
                             cur_terms = cur_terms.rename(columns={"rendering": "source", "gloss": "target"})
-                            tags_str = self._get_tags_str(pair.tags, "en")
-                            mirror_tags_str = self._get_tags_str(pair.tags, src_terms_file.iso)
-                            terms = self._add_to_terms_dataset(tags_str, mirror_tags_str, terms, cur_terms)
+                            cur_terms["source_lang"] = src_terms_file.iso
+                            cur_terms["target_lang"] = "en"
+                            terms = self._add_to_terms_data_set(tags_str, terms, cur_terms)
                     if "en" in self.src_isos:
                         for trg_terms_file, trg_terms in all_trg_terms:
                             cur_terms = get_terms_data_frame(trg_terms, categories_set, dict_books)
                             cur_terms = cur_terms.rename(columns={"rendering": "target", "gloss": "source"})
-                            tags_str = self._get_tags_str(pair.tags, trg_terms_file.iso)
-                            mirror_tags_str = self._get_tags_str(pair.tags, "en")
-                            terms = self._add_to_terms_dataset(tags_str, mirror_tags_str, terms, cur_terms)
+                            cur_terms["source_lang"] = "en"
+                            cur_terms["target_lang"] = trg_terms_file.iso
+                            terms = self._add_to_terms_data_set(tags_str, terms, cur_terms)
 
         if train is None:
             return 0
 
-        if pair.mapping == DataFileMapping.MIXED_SRC:
-            train.fillna("", inplace=True)
-            src_columns: List[str] = [c for c in train.columns if c.startswith("source")]
-
-            def select_random_column(row: Any) -> pd.Series:
-                nonempty_src_columns: List[str] = [c for c in src_columns if row[c] != ""]
-                return row[random.choice(nonempty_src_columns)]
-
-            train["source"] = train[src_columns].apply(select_random_column, axis=1)
-            train.drop(src_columns, axis=1, inplace=True, errors="ignore")
-
-        self._append_corpus(self._train_src_filename(), encode_sp_lines(src_spp, train["source"]))
-        self._append_corpus(self._train_trg_filename(), encode_sp_lines(trg_spp, train["target"]))
-        self._append_corpus(self._train_vref_filename(), (str(vr) for vr in train["vref"]))
-        train_count = len(train)
-        augment_count = self._augment_corpus(
-            pair.augmentations, train["source"], train["target"], train["vref"], src_spp, trg_spp
+        train_count = self._write_train(
+            tokenizer, train, pair.mapping == DataFileMapping.MIXED_SRC, project_isos, pair.augmentations
         )
-        train_count += augment_count
-
-        terms_train_count, dict_count = self._write_terms(src_spp, trg_spp, terms)
+        terms_train_count, dict_count = self._write_terms(tokenizer, terms)
         train_count += terms_train_count
 
         val_count = 0
         if len(val) > 0:
-            val_src = itertools.chain.from_iterable(pair_val["source"] for pair_val in val.values())
-            self._append_corpus(self._val_src_filename(), encode_sp_lines(src_spp, val_src))
+            for (src_iso, trg_iso), pair_val in val.items():
+                tokenizer.set_src_lang(src_iso)
+                tokenizer.set_trg_lang(trg_iso)
+                self._append_corpus(self._val_src_filename(), tokenizer.tokenize_all(Side.SOURCE, pair_val["source"]))
             val_count = sum(len(pair_val) for pair_val in val.values())
-            self._write_val_corpora(trg_spp, val)
+            self._write_val_trg(tokenizer, val)
             val_vref = itertools.chain.from_iterable(pair_val["vref"] for pair_val in val.values())
             self._append_corpus(self._val_vref_filename(), (str(vr) for vr in val_vref))
 
         test_count = 0
         for (src_iso, trg_iso), pair_test in test.items():
+            tokenizer.set_src_lang(src_iso)
+            tokenizer.set_trg_lang(trg_iso)
             self._append_corpus(self._test_vref_filename(src_iso, trg_iso), (str(vr) for vr in pair_test["vref"]))
             self._append_corpus(
-                self._test_src_filename(src_iso, trg_iso), encode_sp_lines(src_spp, pair_test["source"])
+                self._test_src_filename(src_iso, trg_iso),
+                tokenizer.tokenize_all(Side.SOURCE, pair_test["source"]),
             )
             test_count += len(pair_test)
 
@@ -1026,7 +748,7 @@ class Config:
                 project = column[len("target_") :]
                 self._append_corpus(
                     self._test_trg_filename(src_iso, trg_iso, project),
-                    decode_sp_lines(encode_sp_lines(trg_spp, pair_test[column])) if self.data["tokenize"] else pair_test[column],
+                    tokenizer.normalize_all(Side.TARGET, pair_test[column]),
                 )
                 test_projects.remove(project)
             if self._has_multiple_test_projects(src_iso, trg_iso):
@@ -1063,7 +785,7 @@ class Config:
                     vref.simplify()
                 test_indices.add(vrefs[str(vref)])
 
-    def _add_to_eval_dataset(
+    def _add_to_eval_data_set(
         self,
         src_iso: str,
         trg_iso: str,
@@ -1092,7 +814,7 @@ class Config:
 
         dataset[(src_iso, trg_iso)] = pair_data
 
-    def _add_to_train_dataset(
+    def _add_to_train_data_set(
         self,
         src_project: str,
         trg_project: str,
@@ -1103,6 +825,7 @@ class Config:
     ) -> pd.DataFrame:
         self._insert_tags(tags_str, cur_train)
         if mixed_src:
+            cur_train.drop("source_lang", axis=1, inplace=True, errors="ignore")
             cur_train.rename(columns={"source": f"source_{src_project}"}, inplace=True)
             cur_train.set_index(
                 pd.MultiIndex.from_tuples(
@@ -1112,29 +835,79 @@ class Config:
             )
             train = cur_train if train is None else train.combine_first(cur_train)
         else:
-            train = pd.concat([train, cur_train], ignore_index=True)
+            train = cur_train if train is None else pd.concat([train, cur_train], ignore_index=True)
         return train
 
     def _insert_tags(self, tags_str: str, sentences: pd.DataFrame) -> None:
         if tags_str != "":
             cast(Any, sentences).loc[:, "source"] = tags_str + sentences.loc[:, "source"]
 
-    def _add_to_terms_dataset(
-        self, tags_str: str, mirror_tags_str: str, terms: Optional[pd.DataFrame], cur_terms: pd.DataFrame
+    def _add_to_terms_data_set(
+        self, tags_str: str, terms: Optional[pd.DataFrame], cur_terms: pd.DataFrame
     ) -> pd.DataFrame:
         if self.mirror:
-            mirror_cur_terms = cur_terms.rename(columns={"source": "target", "target": "source"})
-            self._insert_tags(mirror_tags_str, mirror_cur_terms)
-            terms = pd.concat([terms, mirror_cur_terms], ignore_index=True)
+            mirror_cur_terms = cur_terms.rename(
+                columns={
+                    "source": "target",
+                    "target": "source",
+                    "source_lang": "target_lang",
+                    "target_lang": "source_lang",
+                }
+            )
+            self._insert_tags(tags_str, mirror_cur_terms)
+            terms = mirror_cur_terms if terms is None else pd.concat([terms, mirror_cur_terms], ignore_index=True)
 
         self._insert_tags(tags_str, cur_terms)
+        return cur_terms if terms is None else pd.concat([terms, cur_terms], ignore_index=True)
 
-        return pd.concat([terms, cur_terms], ignore_index=True)
+    def _write_train(
+        self,
+        tokenizer: Tokenizer,
+        train: pd.DataFrame,
+        mixed_src: bool,
+        project_isos: Dict[str, str],
+        augmentations: List[AugmentMethod],
+    ) -> int:
+        train_count = 0
+        train.fillna("", inplace=True)
+        src_columns: List[str] = [c for c in train.columns if c.startswith("source")]
+        with ExitStack() as stack:
+            train_src_file = stack.enter_context(self._open_append(self._train_src_filename()))
+            train_trg_file = stack.enter_context(self._open_append(self._train_trg_filename()))
+            train_vref_file = stack.enter_context(self._open_append(self._train_vref_filename()))
+
+            for _, row in train.iterrows():
+                if mixed_src:
+                    nonempty_src_columns: List[str] = [c for c in src_columns if row[c] != ""]
+                    source_column = random.choice(nonempty_src_columns)
+                    src_sentence = row[source_column]
+                    src_project = source_column[7:]
+                    tokenizer.set_src_lang(project_isos[src_project])
+                else:
+                    src_sentence = row["source"]
+                    tokenizer.set_src_lang(row["source_lang"])
+                trg_sentence = row["target"]
+                vref = row["vref"]
+                tokenizer.set_trg_lang(row["target_lang"])
+
+                train_src_file.write(tokenizer.tokenize(Side.SOURCE, src_sentence) + "\n")
+                train_trg_file.write(tokenizer.tokenize(Side.TARGET, trg_sentence) + "\n")
+                train_vref_file.write(str(vref) + "\n")
+                train_count += 1
+
+                src_augments, trg_augments = self._augment_sentence(
+                    augmentations, src_sentence, trg_sentence, tokenizer
+                )
+                for src_augment, trg_augment in zip(src_augments, trg_augments):
+                    train_src_file.write(src_augment + "\n")
+                    train_trg_file.write(trg_augment + "\n")
+                    train_vref_file.write(str(vref) + "\n")
+                    train_count += 1
+        return train_count
 
     def _write_terms(
         self,
-        src_spp: Optional[sp.SentencePieceProcessor],
-        trg_spp: Optional[sp.SentencePieceProcessor],
+        tokenizer: Tokenizer,
         terms: Optional[pd.DataFrame],
     ) -> Tuple[int, int]:
         train_count = 0
@@ -1159,20 +932,22 @@ class Config:
 
             if terms is not None:
                 for _, term in terms.iterrows():
-                    src_term = cast(str, term["source"])
-                    trg_term = cast(str, term["target"])
-                    dictionary = cast(bool, term["dictionary"])
-                    vrefs = cast(str, term["vrefs"])
-                    src_term_variants = [
-                        encode_sp(src_spp, src_term, add_dummy_prefix=True),
-                        encode_sp(src_spp, src_term, add_dummy_prefix=False),
-                    ]
-                    trg_term_variants = [
-                        encode_sp(trg_spp, trg_term, add_dummy_prefix=True),
-                        encode_sp(trg_spp, trg_term, add_dummy_prefix=False),
-                    ]
+                    src_term = term["source"]
+                    trg_term = term["target"]
+                    dictionary = term["dictionary"]
+                    vrefs = term["vrefs"]
+                    tokenizer.set_src_lang(term["source_lang"])
+                    tokenizer.set_trg_lang(term["target_lang"])
 
                     if train_src_file is not None and train_trg_file is not None and train_vref_file is not None:
+                        src_term_variants = [
+                            tokenizer.tokenize(Side.SOURCE, src_term, add_dummy_prefix=True),
+                            tokenizer.tokenize(Side.SOURCE, src_term, add_dummy_prefix=False),
+                        ]
+                        trg_term_variants = [
+                            tokenizer.tokenize(Side.TARGET, trg_term, add_dummy_prefix=True),
+                            tokenizer.tokenize(Side.TARGET, trg_term, add_dummy_prefix=False),
+                        ]
                         for stv, ttv in zip(src_term_variants, trg_term_variants):
                             train_src_file.write(stv + "\n")
                             train_trg_file.write(ttv + "\n")
@@ -1185,18 +960,34 @@ class Config:
                         and dict_trg_file is not None
                         and dict_vref_file is not None
                     ):
+                        src_term_variants = [
+                            tokenizer.tokenize(
+                                Side.SOURCE, src_term, add_dummy_prefix=True, include_special_tokens=False
+                            ),
+                            tokenizer.tokenize(
+                                Side.SOURCE, src_term, add_dummy_prefix=False, include_special_tokens=False
+                            ),
+                        ]
+                        trg_term_variants = [
+                            tokenizer.tokenize(
+                                Side.TARGET, trg_term, add_dummy_prefix=True, include_special_tokens=False
+                            ),
+                            tokenizer.tokenize(
+                                Side.TARGET, trg_term, add_dummy_prefix=False, include_special_tokens=False
+                            ),
+                        ]
                         dict_src_file.write("\t".join(src_term_variants) + "\n")
                         dict_trg_file.write("\t".join(trg_term_variants) + "\n")
                         dict_vref_file.write(vrefs + "\n")
                         dict_count += 1
         return train_count, dict_count
 
-    def _write_val_corpora(
-        self, trg_spp: Optional[sp.SentencePieceProcessor], val: Dict[Tuple[str, str], pd.DataFrame]
-    ) -> None:
+    def _write_val_trg(self, tokenizer: Tokenizer, val: Dict[Tuple[str, str], pd.DataFrame]) -> None:
         with ExitStack() as stack:
             ref_files: List[TextIO] = []
             for (src_iso, trg_iso), pair_val in val.items():
+                tokenizer.set_src_lang(src_iso)
+                tokenizer.set_trg_lang(trg_iso)
                 columns: List[str] = [c for c in pair_val.columns if c.startswith("target")]
                 if self.root["eval"]["multi_ref_eval"]:
                     val_project_count = self._get_val_ref_count(src_iso, trg_iso)
@@ -1207,7 +998,7 @@ class Config:
                             if ci < len(columns):
                                 col = columns[ci]
                                 ref_files[ci].write(
-                                    encode_sp(trg_spp, cast(str, pair_val.loc[index, col]).strip()) + "\n"
+                                    tokenizer.tokenize(Side.TARGET, cast(str, pair_val.loc[index, col]).strip()) + "\n"
                                 )
                             else:
                                 ref_files[ci].write("\n")
@@ -1217,7 +1008,9 @@ class Config:
                             ref_files.append(stack.enter_context(self._open_append(self._val_trg_filename())))
                         columns_with_data = [c for c in columns if cast(str, pair_val.loc[index, c]).strip() != ""]
                         col = random.choice(columns_with_data)
-                        ref_files[0].write(encode_sp(trg_spp, cast(str, pair_val.loc[index, col]).strip()) + "\n")
+                        ref_files[0].write(
+                            tokenizer.tokenize(Side.TARGET, cast(str, pair_val.loc[index, col]).strip()) + "\n"
+                        )
 
     def _append_corpus(self, filename: str, sentences: Iterable[str]) -> None:
         write_corpus(self.exp_dir / filename, sentences, append=True)
@@ -1228,27 +1021,27 @@ class Config:
     def _open_append(self, filename: str) -> TextIO:
         return (self.exp_dir / filename).open("a", encoding="utf-8", newline="\n")
 
-    def _write_basic_data_sets(
-        self,
-        src_spp: Optional[sp.SentencePieceProcessor],
-        trg_spp: Optional[sp.SentencePieceProcessor],
-        pair: CorpusPair,
-    ) -> int:
+    def _write_basic_data_sets(self, tokenizer: Tokenizer, pair: CorpusPair) -> int:
         total_train_count = 0
         for src_file, trg_file in zip(pair.src_files, pair.trg_files):
-            total_train_count += self._write_basic_data_file_pair(src_spp, trg_spp, pair, src_file, trg_file)
+            total_train_count += self._write_basic_data_file_pair(tokenizer, pair, src_file, trg_file)
         return total_train_count
 
     def _write_basic_data_file_pair(
         self,
-        src_spp: Optional[sp.SentencePieceProcessor],
-        trg_spp: Optional[sp.SentencePieceProcessor],
+        tokenizer: Tokenizer,
         pair: CorpusPair,
         src_file: DataFile,
         trg_file: DataFile,
     ) -> int:
         LOGGER.info(f"Preprocessing {src_file.path.stem} -> {trg_file.path.stem}")
+        tokenizer.set_src_lang(src_file.iso)
+        tokenizer.set_trg_lang(trg_file.iso)
         corpus_size = get_parallel_corpus_size(src_file.path, trg_file.path)
+        train_count = 0
+        val_count = 0
+        test_count = 0
+        dict_count = 0
         with ExitStack() as stack:
             input_src_file = stack.enter_context(src_file.path.open("r", encoding="utf-8"))
             input_trg_file = stack.enter_context(trg_file.path.open("r", encoding="utf-8"))
@@ -1267,12 +1060,7 @@ class Config:
                 train_size = pair.size
                 train_indices = split_corpus(corpus_size, train_size, test_indices | val_indices)
 
-            train_count = 0
-            val_count = 0
-            test_count = 0
-            dict_count = 0
-            tags_str = self._get_tags_str(pair.tags, trg_file.iso)
-            mirror_tags_str = self._get_tags_str(pair.tags, src_file.iso)
+            tags_str = self._get_tags_str(pair.tags)
 
             train_src_file = stack.enter_context(self._open_append(self._train_src_filename()))
             train_trg_file = stack.enter_context(self._open_append(self._train_trg_filename()))
@@ -1288,6 +1076,7 @@ class Config:
             val_trg_ref_files: List[TextIO] = []
             dict_src_file: Optional[TextIO] = None
             dict_trg_file: Optional[TextIO] = None
+            dict_vref_file: Optional[TextIO] = None
             if self._has_scripture_data:
                 train_vref_file = stack.enter_context(self._open_append(self._train_vref_filename()))
                 val_vref_file = stack.enter_context(self._open_append(self._val_vref_filename()))
@@ -1324,50 +1113,50 @@ class Config:
                 trg_sentence = trg_line
 
                 if pair.is_test and (test_indices is None or index in test_indices):
-                    test_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
-                    test_trg_file.write(decode_sp(encode_sp(trg_spp, trg_sentence)) + "\n")
+                    test_src_file.write(tokenizer.tokenize(Side.SOURCE, src_sentence) + "\n")
+                    test_trg_file.write(tokenizer.normalize(Side.TARGET, trg_sentence) + "\n")
                     if test_vref_file is not None:
                         test_vref_file.write("\n")
                     for test_trg_project_file in test_trg_project_files:
                         test_trg_project_file.write("\n")
                     test_count += 1
                 elif pair.is_val and (val_indices is None or index in val_indices):
-                    val_src_file.write(encode_sp(src_spp, src_sentence) + "\n")
-                    val_trg_file.write(encode_sp(trg_spp, trg_sentence) + "\n")
+                    val_src_file.write(tokenizer.tokenize(Side.SOURCE, src_sentence) + "\n")
+                    val_trg_file.write(tokenizer.tokenize(Side.TARGET, trg_sentence) + "\n")
                     if val_vref_file is not None:
                         val_vref_file.write("\n")
                     for val_trg_ref_file in val_trg_ref_files:
                         val_trg_ref_file.write("\n")
                     val_count += 1
                 elif pair.is_train and (train_indices is None or index in train_indices):
-                    noised_src_sentence = self._noise(pair.src_noise, src_sentence)
+                    noised_src_sentence = tags_str + self._noise(pair.src_noise, src_line)
                     train_count += self._write_train_sentence_pair(
                         train_src_file,
                         train_trg_file,
                         train_vref_file,
-                        src_spp,
-                        trg_spp,
+                        tokenizer,
                         noised_src_sentence,
                         trg_sentence,
                         pair.is_lexical_data,
                         pair.augmentations,
                     )
                     if self.mirror:
-                        mirror_src_sentence = mirror_tags_str + trg_line
+                        tokenizer.set_src_lang(trg_file.iso)
+                        tokenizer.set_trg_lang(src_file.iso)
+                        mirror_src_sentence = tags_str + self._noise(pair.src_noise, trg_line)
                         mirror_trg_sentence = src_line
-                        mirror_src_spp = trg_spp
-                        mirror_trg_spp = src_spp
                         train_count += self._write_train_sentence_pair(
                             train_src_file,
                             train_trg_file,
                             train_vref_file,
-                            mirror_src_spp,
-                            mirror_trg_spp,
+                            tokenizer,
                             mirror_src_sentence,
                             mirror_trg_sentence,
                             pair.is_lexical_data,
                             pair.augmentations,
                         )
+                        tokenizer.set_src_lang(src_file.iso)
+                        tokenizer.set_trg_lang(trg_file.iso)
 
                 if (
                     pair.is_dictionary
@@ -1376,12 +1165,20 @@ class Config:
                     and dict_vref_file is not None
                 ):
                     src_variants = [
-                        encode_sp(src_spp, src_sentence, add_dummy_prefix=True),
-                        encode_sp(src_spp, src_sentence, add_dummy_prefix=False),
+                        tokenizer.tokenize(
+                            Side.SOURCE, src_sentence, add_dummy_prefix=True, include_special_tokens=False
+                        ),
+                        tokenizer.tokenize(
+                            Side.SOURCE, src_sentence, add_dummy_prefix=False, include_special_tokens=False
+                        ),
                     ]
                     trg_variants = [
-                        encode_sp(trg_spp, trg_sentence, add_dummy_prefix=True),
-                        encode_sp(trg_spp, trg_sentence, add_dummy_prefix=False),
+                        tokenizer.tokenize(
+                            Side.TARGET, trg_sentence, add_dummy_prefix=True, include_special_tokens=False
+                        ),
+                        tokenizer.tokenize(
+                            Side.TARGET, trg_sentence, add_dummy_prefix=False, include_special_tokens=False
+                        ),
                     ]
                     dict_src_file.write("\t".join(src_variants) + "\n")
                     dict_trg_file.write("\t".join(trg_variants) + "\n")
@@ -1400,23 +1197,20 @@ class Config:
         src_file: TextIO,
         trg_file: TextIO,
         vref_file: Optional[TextIO],
-        src_spp: Optional[sp.SentencePieceProcessor],
-        trg_spp: Optional[sp.SentencePieceProcessor],
+        tokenizer: Tokenizer,
         src_sentence: str,
         trg_sentence: str,
         is_lexical: bool,
         augmentations: List[AugmentMethod],
     ) -> int:
-        src_variants = [encode_sp(src_spp, src_sentence, add_dummy_prefix=True)]
-        trg_variants = [encode_sp(trg_spp, trg_sentence, add_dummy_prefix=True)]
+        src_variants = [tokenizer.tokenize(Side.SOURCE, src_sentence, add_dummy_prefix=True)]
+        trg_variants = [tokenizer.tokenize(Side.TARGET, trg_sentence, add_dummy_prefix=True)]
 
         if is_lexical:
-            src_variants.append(encode_sp(src_spp, src_sentence, add_dummy_prefix=False))
-            trg_variants.append(encode_sp(trg_spp, trg_sentence, add_dummy_prefix=False))
+            src_variants.append(tokenizer.tokenize(Side.SOURCE, src_sentence, add_dummy_prefix=False))
+            trg_variants.append(tokenizer.tokenize(Side.TARGET, trg_sentence, add_dummy_prefix=False))
 
-        src_augments, trg_augments = self._augment_sentence(
-            augmentations, src_sentence, trg_sentence, "", src_spp, trg_spp
-        )
+        src_augments, trg_augments = self._augment_sentence(augmentations, src_sentence, trg_sentence, tokenizer)
         src_variants.extend(src_augments)
         trg_variants.extend(trg_augments)
 
@@ -1427,67 +1221,30 @@ class Config:
                 vref_file.write("\n")
         return len(src_variants)
 
-    def _get_tags_str(self, tags: List[str], trg_iso: str) -> str:
+    def _get_tags_str(self, tags: List[str]) -> str:
         tags_str = ""
         if len(tags) > 0:
             tags_str += " ".join(f"<{t}>" for t in tags) + " "
-        if self.write_trg_tag:
-            tags_str += f"<2{trg_iso}> "
         return tags_str
 
     def _noise(self, src_noise: List[NoiseMethod], src_sentence: str) -> str:
         if len(src_noise) == 0:
             return src_sentence
         tokens = src_sentence.split()
-        tag: List[str] = []
-        if self.write_trg_tag:
-            tag = tokens[:1]
-            tokens = tokens[1:]
         for noise_method in src_noise:
             tokens = noise_method(tokens)
-        if self.write_trg_tag:
-            tokens = tag + tokens
         return " ".join(tokens)
 
     def _augment_sentence(
-        self,
-        methods: List[AugmentMethod],
-        src: str,
-        trg: str,
-        vref: str,
-        src_spp: Optional[sp.SentencePieceProcessor],
-        trg_spp: Optional[sp.SentencePieceProcessor],
+        self, methods: List[AugmentMethod], src: str, trg: str, tokenizer: Tokenizer
     ) -> Tuple[List[str], List[str]]:
         src_augments: List[str] = []
         trg_augments: List[str] = []
         for method in methods:
-            src_delta, trg_delta = method.__augment_sentence__(src, trg, src_spp, trg_spp)
+            src_delta, trg_delta = method.augment_sentence(src, trg, tokenizer)
             src_augments.extend(src_delta)
             trg_augments.extend(trg_delta)
         return src_augments, trg_augments
-
-    def _augment_corpus(
-        self,
-        methods: List[AugmentMethod],
-        src: List[str],
-        trg: List[str],
-        vref: List[str],
-        src_spp: Optional[sp.SentencePieceProcessor],
-        trg_spp: Optional[sp.SentencePieceProcessor],
-    ) -> int:
-        augment_count = 0
-        for method in methods:
-            augment_count += method.__augment_corpus__(
-                self.exp_dir / self._train_src_filename(),
-                self.exp_dir / self._train_trg_filename(),
-                self.exp_dir / self._train_vref_filename(),
-                src,
-                trg,
-                vref,
-                src_spp,
-                trg_spp,
-            )
-        return augment_count
 
     def _get_val_ref_count(self, src_iso: str, trg_iso: str) -> int:
         if self.root["eval"]["multi_ref_eval"]:
@@ -1543,187 +1300,9 @@ class Config:
     def _dict_vref_filename(self) -> str:
         return "dict.vref.txt"
 
+    @abstractmethod
     def _build_vocabs(self) -> None:
-        if not self.data["tokenize"]:
-            return
-
-        if self.share_vocab:
-            LOGGER.info("Building shared vocabulary...")
-            vocab_size: Optional[int] = self.data.get("vocab_size")
-            if vocab_size is None:
-                vocab_size = self.data.get("src_vocab_size")
-                if vocab_size is None:
-                    vocab_size = self.data["trg_vocab_size"]
-                elif self.data.get("trg_vocab_size", vocab_size) != vocab_size:
-                    raise RuntimeError(
-                        "The source and target vocab sizes cannot be different when creating a shared vocab."
-                    )
-            assert vocab_size is not None
-
-            vocab_type: Optional[str] = self.data.get("vocab_type")
-            if vocab_type is None:
-                vocab_type = self.data.get("src_vocab_type")
-                if vocab_type is None:
-                    vocab_type = self.data["trg_vocab_type"]
-                elif self.data.get("trg_vocab_type", vocab_type) != vocab_type:
-                    raise RuntimeError(
-                        "The source and target vocab types cannot be different when creating a shared vocab."
-                    )
-            assert vocab_type is not None
-
-            vocab_seed: Optional[int] = self.data.get("vocab_seed")
-            if vocab_seed is None:
-                vocab_seed = self.data.get("src_vocab_seed")
-                if vocab_seed is None:
-                    vocab_seed = self.data["trg_vocab_seed"]
-
-            casing: Optional[str] = self.data.get("casing")
-            if casing is None:
-                casing = self.data.get("src_casing")
-                if casing is None:
-                    casing = self.data["trg_casing"]
-                elif self.data.get("trg_casing", casing) != casing:
-                    raise RuntimeError("The source and target casing cannot be different when creating a shared vocab.")
-            assert casing is not None
-
-            vocab_split_by_unicode_script: Optional[bool] = self.data.get("vocab_split_by_unicode_script")
-            if vocab_split_by_unicode_script is None:
-                vocab_split_by_unicode_script = self.data.get("src_vocab_split_by_unicode_script")
-                if vocab_split_by_unicode_script is None:
-                    vocab_split_by_unicode_script = self.data["trg_vocab_split_by_unicode_script"]
-                elif (
-                    self.data.get("trg_vocab_split_by_unicode_script", vocab_split_by_unicode_script)
-                    != vocab_split_by_unicode_script
-                ):
-                    raise RuntimeError(
-                        "The source and target cannot split tokens differently when creating a shared vocab."
-                    )
-            assert vocab_split_by_unicode_script is not None
-
-            model_prefix = self.exp_dir / "sp"
-            vocab_path = self.exp_dir / "onmt.vocab"
-            share_vocab_file_paths: Set[Path] = self.src_file_paths | self.trg_file_paths
-            character_coverage: float = self.data["character_coverage"]
-            max_train_size: int = self.data["sp_max_train_size"]
-            build_vocab(
-                share_vocab_file_paths,
-                vocab_size,
-                vocab_type,
-                vocab_seed,
-                casing,
-                vocab_split_by_unicode_script,
-                character_coverage,
-                model_prefix,
-                vocab_path,
-                self._tags,
-                max_train_size,
-            )
-
-            self._update_vocab(vocab_path, vocab_path)
-        else:
-            src_vocab_file_paths: Set[Path] = set(self.src_file_paths)
-            if self.mirror:
-                src_vocab_file_paths.update(self.trg_file_paths)
-            self._create_unshared_vocab(self.src_isos, src_vocab_file_paths, "source")
-
-            trg_vocab_file_paths: Set[Path] = set(self.trg_file_paths)
-            if self.mirror:
-                trg_vocab_file_paths.update(self.src_file_paths)
-            self._create_unshared_vocab(self.trg_isos, trg_vocab_file_paths, "target")
-
-            self._update_vocab(self.exp_dir / "src-onmt.vocab", self.exp_dir / "trg-onmt.vocab")
-
-    def _update_vocab(self, src_vocab_path: Path, trg_vocab_path: Path) -> None:
-        if self.parent_config is None:
-            return
-
-        parent_model_to_use = (
-            CheckpointType.BEST
-            if self.data["parent_use_best"]
-            else CheckpointType.AVERAGE
-            if self.data["parent_use_average"]
-            else CheckpointType.LAST
-        )
-        checkpoint_path, step = get_checkpoint_path(self.parent_config.model_dir, parent_model_to_use)
-        parent_runner = create_runner(self.parent_config)
-        parent_runner.update_vocab(
-            str(self.exp_dir / "parent"),
-            str(src_vocab_path),
-            str(trg_vocab_path),
-            None if checkpoint_path is None else str(checkpoint_path),
-            step,
-            transfer_alignment_heads=self.data["transfer_alignment_heads"],
-        )
-
-    def _create_unshared_vocab(self, isos: Set[str], vocab_file_paths: Set[Path], side: str) -> None:
-        prefix = "src" if side == "source" else "trg"
-        model_prefix = self.exp_dir / f"{prefix}-sp"
-        vocab_path = self.exp_dir / f"{prefix}-onmt.vocab"
-        tags = self._tags if side == "source" else set()
-        if self.parent_config is not None:
-            parent_isos = self.parent_config.src_isos if side == "source" else self.parent_config.trg_isos
-            if isos.issubset(parent_isos):
-                if self.parent_config.share_vocab:
-                    parent_sp_prefix_path = self.parent_config.exp_dir / "sp"
-                    parent_vocab_path = self.parent_config.exp_dir / "onmt.vocab"
-                else:
-                    parent_sp_prefix_path = self.parent_config.exp_dir / f"{prefix}-sp"
-                    parent_vocab_path = self.parent_config.exp_dir / f"{prefix}-onmt.vocab"
-
-                parent_vocab: Optional[Vocab] = None
-                child_tokens: Optional[Set[str]] = None
-                parent_use_vocab: bool = self.data["parent_use_vocab"]
-                if not parent_use_vocab:
-                    parent_spp = sp.SentencePieceProcessor()
-                    parent_spp.Load(str(parent_sp_prefix_path.with_suffix(".model")))
-
-                    parent_vocab = Vocab()
-                    parent_vocab.load(str(parent_vocab_path))
-
-                    child_tokens = set()
-                    for vocab_file_path in vocab_file_paths:
-                        for line in encode_sp_lines(parent_spp, load_corpus(vocab_file_path)):
-                            child_tokens.update(line.split())
-                    parent_use_vocab = child_tokens.issubset(parent_vocab.words)
-
-                # all tokens in the child corpora are in the parent vocab, so we can just use the parent vocab
-                # or, the user wants to reuse the parent vocab for this child experiment
-                if parent_use_vocab:
-                    sp_vocab_path = self.exp_dir / f"{prefix}-sp.vocab"
-                    onmt_vocab_path = self.exp_dir / f"{prefix}-onmt.vocab"
-                    shutil.copy2(parent_sp_prefix_path.with_suffix(".model"), self.exp_dir / f"{prefix}-sp.model")
-                    shutil.copy2(parent_sp_prefix_path.with_suffix(".vocab"), sp_vocab_path)
-                    convert_vocab(sp_vocab_path, onmt_vocab_path, tags)
-                    return
-                elif child_tokens is not None and parent_vocab is not None:
-                    onmt_delta_vocab_path = self.exp_dir / f"{prefix}-onmt-delta.vocab"
-                    vocab_delta = child_tokens.difference(parent_vocab.words)
-                    with onmt_delta_vocab_path.open("w", encoding="utf-8", newline="\n") as f:
-                        [f.write(f"{token}\n") for token in vocab_delta]
-
-        LOGGER.info(f"Building {side} vocabulary...")
-        vocab_size: int = self.data.get(f"{prefix}_vocab_size", self.data.get("vocab_size"))
-        vocab_type: str = self.data.get(f"{prefix}_vocab_type", self.data.get("vocab_type"))
-        vocab_seed: int = self.data.get(f"{prefix}_vocab_seed", self.data.get("vocab_seed"))
-        casing: str = self.data.get(f"{prefix}_casing", self.data.get("casing"))
-        vocab_split_by_unicode_script: bool = self.data.get(
-            f"{prefix}_vocab_split_by_unicode_script", self.data.get("vocab_split_by_unicode_script")
-        )
-        character_coverage: float = self.data.get(f"{prefix}_character_coverage", self.data.get("character_coverage"))
-        max_train_size: int = self.data["sp_max_train_size"]
-        build_vocab(
-            vocab_file_paths,
-            vocab_size,
-            vocab_type,
-            vocab_seed,
-            casing,
-            vocab_split_by_unicode_script,
-            character_coverage,
-            model_prefix,
-            vocab_path,
-            tags,
-            max_train_size,
-        )
+        ...
 
     def _create_train_alignments(self, train_count: int) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -1763,182 +1342,3 @@ class Config:
 
             aligner.train(src_train_path, trg_train_path)
             aligner.force_align(src_align_path, trg_align_path, self.exp_dir / "train.alignments.txt")
-
-
-class SILWordNoiser(WordNoiser):
-    def __init__(
-        self,
-        noises: Optional[List[Noise]] = None,
-        subword_token: str = "￭",
-        is_spacer: Optional[bool] = None,
-        has_lang_tag: bool = False,
-    ) -> None:
-        super().__init__(noises=noises, subword_token=subword_token, is_spacer=is_spacer)
-        self.has_lang_tag = has_lang_tag
-
-    def _apply_noise(self, tokens):
-        words = tokens_to_words(tokens, subword_token=self.subword_token, is_spacer=self.is_spacer)
-        words = cast(tf.Tensor, words.to_tensor())
-        tag: Optional[str] = None
-        if self.has_lang_tag:
-            tag = words[:1]
-            words = words[1:]
-        for noise in self.noises:
-            words = noise(words)
-        if tag is not None:
-            words = tf.concat([tag, words], axis=0)
-        tokens = tf.RaggedTensor.from_tensor(words, padding="").flat_values
-        return tokens
-
-
-def create_model(config: Config) -> Model:
-    model_name = config.model
-    if model_name.startswith("Transformer"):
-        model_name = "SIL" + model_name
-    model = get_model_from_catalog(model_name)
-    if isinstance(model, SILTransformer):
-        dropout = config.params["transformer_dropout"]
-        attention_dropout = config.params["transformer_attention_dropout"]
-        ffn_dropout = config.params["transformer_ffn_dropout"]
-        if dropout != 0.1 or attention_dropout != 0.1 or ffn_dropout != 0.1:
-            model.set_dropout(dropout=dropout, attention_dropout=attention_dropout, ffn_dropout=ffn_dropout)
-
-    word_dropout: float = config.params["word_dropout"]
-    if word_dropout > 0:
-        source_noiser = SILWordNoiser(subword_token="▁", has_lang_tag=config.write_trg_tag)
-        source_noiser.add(WordDropout(word_dropout))
-        cast(TextInputter, model.features_inputter).set_noise(source_noiser, probability=1.0)
-
-        target_noiser = SILWordNoiser(subword_token="▁")
-        target_noiser.add(WordDropout(word_dropout))
-        cast(TextInputter, model.labels_inputter).set_noise(target_noiser, probability=1.0)
-    return model
-
-
-def set_tf_log_level(log_level: int = logging.INFO) -> None:
-    tf.get_logger().setLevel(log_level)
-    # Do not display warnings from TensorFlow C++, because of spurious "PredictCost()" errors.
-    # See https://github.com/tensorflow/tensorflow/issues/50575.
-    os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
-
-
-def create_runner(config: Config, mixed_precision: bool = False) -> SILRunner:
-    set_tf_log_level()
-
-    model = create_model(config)
-
-    return SILRunner(model, config.root, auto_config=True, mixed_precision=mixed_precision, seed=config.data["seed"])
-
-
-#    return SILRunner(model, config.root, auto_config=True, mixed_precision=mixed_precision)
-
-
-def load_config(exp_name: str) -> Config:
-    exp_dir = get_mt_exp_dir(exp_name)
-    config_path = exp_dir / "config.yml"
-
-    with config_path.open("r", encoding="utf-8") as file:
-        config = yaml.safe_load(file)
-
-    return Config(exp_dir, config)
-
-
-def copy_config_value(src: dict, trg: dict, key: str) -> None:
-    if key in src:
-        trg[key] = src[key]
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Creates a NMT experiment config file")
-    parser.add_argument("experiment", help="Experiment name")
-    parser.add_argument("--src", nargs="*", metavar="corpus", default=[], help="Source corpora")
-    parser.add_argument("--trg", nargs="*", metavar="corpus", default=[], help="Target corpora")
-    parser.add_argument("--vocab-size", type=int, help="Shared vocabulary size")
-    parser.add_argument("--src-vocab-size", type=int, help="Source vocabulary size")
-    parser.add_argument("--trg-vocab-size", type=int, help="Target vocabulary size")
-    parser.add_argument("--parent", type=str, help="Parent experiment name")
-    parser.add_argument("--mirror", default=False, action="store_true", help="Mirror train and validation data sets")
-    parser.add_argument("--force", default=False, action="store_true", help="Overwrite existing config file")
-    parser.add_argument("--seed", type=int, help="Randomization seed")
-    parser.add_argument("--model", type=str, help="The neural network model")
-    args = parser.parse_args()
-
-    get_git_revision_hash()
-
-    if len(args.src) != len(args.trg):
-        raise RuntimeError("The number of source and target corpora must be the same.")
-
-    exp_dir = get_mt_exp_dir(args.experiment)
-    config_path = exp_dir / "config.yml"
-    if config_path.is_file() and not args.force:
-        LOGGER.warning(
-            f'The experiment config file {config_path} already exists. Use "--force" if you want to overwrite the existing config.'
-        )
-        return
-
-    exp_dir.mkdir(exist_ok=True, parents=True)
-
-    config = _DEFAULT_NEW_CONFIG.copy()
-    if args.model is not None:
-        config["model"] = args.model
-    data_config: dict = config["data"]
-    corpus_pairs: List[dict] = []
-    for src_corpus, trg_corpus in zip(args.src, args.trg):
-        corpus_pairs.append({"src": src_corpus, "trg": trg_corpus})
-    data_config["corpus_pairs"] = corpus_pairs
-    if args.parent is not None:
-        data_config["parent"] = args.parent
-        SIL_NLP_ENV.copy_experiment_from_bucket(args.parent, extensions="config.yml")
-        parent_config = load_config(args.parent)
-        for key in [
-            "share_vocab",
-            "vocab_size",
-            "src_vocab_size",
-            "trg_vocab_size",
-            "casing",
-            "src_casing",
-            "trg_casing",
-        ]:
-            if key in parent_config.data:
-                data_config[key] = parent_config.data[key]
-    if args.vocab_size is not None:
-        data_config["vocab_size"] = args.vocab_size
-    elif args.src_vocab_size is not None or args.trg_vocab_size is not None:
-        data_config["share_vocab"] = False
-        if args.src_vocab_size is not None:
-            data_config["src_vocab_size"] = args.src_vocab_size
-        elif "vocab_size" in data_config:
-            data_config["src_vocab_size"] = data_config["vocab_size"]
-            del data_config["vocab_size"]
-        if args.trg_vocab_size is not None:
-            data_config["trg_vocab_size"] = args.trg_vocab_size
-        elif "vocab_size" in data_config:
-            data_config["trg_vocab_size"] = data_config["vocab_size"]
-            del data_config["vocab_size"]
-    if data_config["share_vocab"]:
-        if "vocab_size" not in data_config:
-            data_config["vocab_size"] = 24000
-        if "casing" not in data_config:
-            data_config["casing"] = "lower"
-    else:
-        if "src_vocab_size" not in data_config:
-            data_config["src_vocab_size"] = 8000
-        if "trg_vocab_size" not in data_config:
-            data_config["trg_vocab_size"] = 8000
-        if "src_casing" not in data_config:
-            data_config["src_casing"] = data_config.get("casing", "lower")
-        if "trg_casing" not in data_config:
-            data_config["trg_casing"] = data_config.get("casing", "lower")
-        if "casing" in data_config:
-            del data_config["casing"]
-    if args.seed is not None:
-        data_config["seed"] = args.seed
-    if args.mirror:
-        data_config["mirror"] = True
-    with config_path.open("w", encoding="utf-8") as file:
-        yaml.dump(config, file)
-    LOGGER.info(f"Config file created: {config_path}")
-
-
-if __name__ == "__main__":
-    main()

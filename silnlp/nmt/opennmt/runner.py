@@ -1,22 +1,28 @@
 import logging
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, List, Optional, Sequence, Tuple, Union, cast
 
 import numpy as np
 import tensorflow as tf
 import yaml
 from opennmt import Runner
-from opennmt.data import Vocab, inference_pipeline
-from opennmt.models import Model, SequenceToSequence
+from opennmt.data import Vocab, WordDropout, inference_pipeline
+from opennmt.inputters import TextInputter
+from opennmt.models import Model, SequenceToSequence, get_model_from_catalog
 from opennmt.utils.checkpoint import Checkpoint
 from opennmt.utils.misc import OrderRestorer, extract_batches, item_or_tuple
 
-from .models.sil_self_attention_decoder import SILSelfAttentionDecoder
-from .models.sil_transformer import SILTransformer
+from .noiser import SILWordNoiser
+from .sil_self_attention_decoder import SILSelfAttentionDecoder
+from .sil_transformer import SILTransformer
 
 
 class VariableUpdate:
     def __init__(
-        self, ref_variable: tf.Variable, new_variable: tf.Variable, vocab_axis: int = 0, initial: np.ndarray = None
+        self,
+        ref_variable: tf.Variable,
+        new_variable: tf.Variable,
+        vocab_axis: int = 0,
+        initial: Optional[np.ndarray] = None,
     ) -> None:
         self.ref_variable = ref_variable
         self.new_variable = new_variable
@@ -114,7 +120,7 @@ def transfer_weights(
     new_model: Model,
     optimizer: tf.keras.optimizers.Optimizer,
     new_optimizer: tf.keras.optimizers.Optimizer,
-    ignore_weights: list = None,
+    ignore_weights: Optional[list] = None,
 ) -> None:
     if type(model) is not type(new_model):
         raise ValueError("Transferring weights to another model type is not supported")
@@ -139,9 +145,9 @@ def make_inference_dataset(
     features_list: List[List[str]],
     batch_size: int,
     batch_type: str = "examples",
-    length_bucket_width: int = None,
-    num_threads: int = 1,
-    prefetch_buffer_size: int = None,
+    length_bucket_width: Optional[int] = None,
+    num_threads: Optional[int] = 1,
+    prefetch_buffer_size: Optional[int] = None,
 ):
     def _map_fn(*arg):
         features = model.features_inputter.make_features(element=item_or_tuple(arg), training=False)
@@ -261,7 +267,7 @@ class SILRunner(Runner):
         src_vocab: Optional[str] = None,
         tgt_vocab: Optional[str] = None,
         checkpoint_path: Optional[str] = None,
-        step: int = None,
+        step: Optional[int] = None,
         transfer_alignment_heads: bool = True,
     ) -> str:
         if not isinstance(self._model, SequenceToSequence):
@@ -342,7 +348,7 @@ class SILRunner(Runner):
 
     def infer_multiple(
         self,
-        features_paths: List[Union[str, List[str]]],
+        features_paths: List[Union[str, Sequence[str]]],
         predictions_paths: List[str],
         checkpoint_path: Optional[str] = None,
     ) -> None:
@@ -385,3 +391,33 @@ class SILRunner(Runner):
         tf.get_logger().setLevel(level)
         with open(path, "w") as file:
             yaml.dump(config, file)
+
+
+def create_model(model_name: str, config: dict, write_trg_tag: bool) -> Model:
+    params: dict = config["params"]
+    if model_name.startswith("Transformer"):
+        model_name = "SIL" + model_name
+    model = get_model_from_catalog(model_name)
+    if isinstance(model, SILTransformer):
+        dropout = params["transformer_dropout"]
+        attention_dropout = params["transformer_attention_dropout"]
+        ffn_dropout = params["transformer_ffn_dropout"]
+        if dropout != 0.1 or attention_dropout != 0.1 or ffn_dropout != 0.1:
+            model.set_dropout(dropout=dropout, attention_dropout=attention_dropout, ffn_dropout=ffn_dropout)
+
+    word_dropout: float = params["word_dropout"]
+    if word_dropout > 0:
+        source_noiser = SILWordNoiser(subword_token="▁", has_lang_tag=write_trg_tag)
+        source_noiser.add(WordDropout(word_dropout))
+        cast(TextInputter, model.features_inputter).set_noise(source_noiser, probability=1.0)
+
+        target_noiser = SILWordNoiser(subword_token="▁")
+        target_noiser.add(WordDropout(word_dropout))
+        cast(TextInputter, model.labels_inputter).set_noise(target_noiser, probability=1.0)
+    return model
+
+
+def create_runner(model_name: str, config: dict, write_trg_tag: bool, mixed_precision: bool = False) -> SILRunner:
+    model = create_model(model_name, config, write_trg_tag)
+
+    return SILRunner(model, config, auto_config=True, mixed_precision=mixed_precision, seed=config["data"]["seed"])

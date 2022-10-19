@@ -2,7 +2,7 @@ import os
 import shutil
 
 from silnlp.common.environment import SIL_NLP_ENV
-from silnlp.common.paratext import extract_project, extract_term_renderings, get_project_dir
+from silnlp.common.paratext import extract_project, extract_term_renderings
 
 from . import helper
 
@@ -10,6 +10,8 @@ from . import helper
 SIL_NLP_ENV.set_data_dir()
 SIL_NLP_ENV.mt_scripture_dir = SIL_NLP_ENV.mt_dir / "temp_scripture"
 SIL_NLP_ENV.mt_scripture_dir.mkdir(exist_ok=True)
+SIL_NLP_ENV.mt_terms_dir = SIL_NLP_ENV.mt_dir / "temp_terms"
+SIL_NLP_ENV.mt_terms_dir.mkdir(exist_ok=True)
 scr_truth_dir = SIL_NLP_ENV.mt_dir / "scripture"
 
 
@@ -19,7 +21,7 @@ def test_extract_corpora():
     pp_subdirs = [folder for folder in SIL_NLP_ENV.pt_projects_dir.glob("*/")]
     for project in pp_subdirs:
         corpus_filename = extract_project(project, SIL_NLP_ENV.mt_scripture_dir)
-        extract_term_renderings(project, corpus_filename)
+        extract_term_renderings(project, corpus_filename, SIL_NLP_ENV.mt_terms_dir)
 
     helper.compare_folders(truth_folder=scr_truth_dir, computed_folder=SIL_NLP_ENV.mt_scripture_dir)
 

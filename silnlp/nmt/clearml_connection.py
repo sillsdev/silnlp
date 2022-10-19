@@ -5,8 +5,9 @@ from typing import Optional
 
 import yaml
 
-from ..nmt.config import Config, get_mt_exp_dir
-from .environment import SIL_NLP_ENV
+from ..common.environment import SIL_NLP_ENV
+from .config import get_mt_exp_dir
+from .config_utils import create_config
 
 LOGGER = logging.getLogger(__name__)
 
@@ -91,7 +92,7 @@ class SILClearML:
         if self.task is None:
             with (exp_dir / "config.yml").open("r", encoding="utf-8") as file:
                 config = yaml.safe_load(file)
-            self.config = Config(exp_dir, config)
+            self.config = create_config(exp_dir, config)
             return
         # There is a ClearML task - lets' do more complex importing.
         proj_dir = get_mt_exp_dir(self.clearml_project_folder)
@@ -116,5 +117,5 @@ class SILClearML:
         with (exp_dir / "config.yml").open("w+", encoding="utf-8") as file:
             yaml.safe_dump(data=config, stream=file)
 
-        self.config = Config(exp_dir=exp_dir, config=config)
+        self.config = create_config(exp_dir, config)
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name, extensions="config.yml")

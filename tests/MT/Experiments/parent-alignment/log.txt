@@ -1,15 +1,15 @@
-2021-09-02 17:28:13,670 - silnlp.nmt.config - INFO - Building source vocabulary...
-2021-09-02 17:28:14,781 - silnlp.nmt.config - INFO - Building target vocabulary...
-2021-09-02 17:28:15,844 - silnlp.nmt.config - INFO - Preprocessing de-Books -> en-Books
-2021-09-02 17:28:15,855 - silnlp.nmt.config - INFO - train size: 100, val size: 0, test size: 0, dict size: 0
-2021-09-02 17:28:15,855 - silnlp.nmt.config - INFO - Preprocessing de-GlobalVoices -> en-GlobalVoices
-2021-09-02 17:28:15,864 - silnlp.nmt.config - INFO - train size: 100, val size: 0, test size: 0, dict size: 0
-2021-09-02 17:28:15,864 - silnlp.nmt.config - INFO - Preprocessing de-newstest2014_ende -> en-newstest2014_ende
-2021-09-02 17:28:15,872 - silnlp.nmt.config - INFO - train size: 0, val size: 100, test size: 0, dict size: 0
-2021-09-02 17:28:15,872 - silnlp.nmt.config - INFO - Preprocessing de-newstest2017_ende -> en-newstest2017_ende
-2021-09-02 17:28:15,878 - silnlp.nmt.config - INFO - train size: 0, val size: 0, test size: 100, dict size: 0
-2021-09-02 17:28:15,879 - silnlp.nmt.config - INFO - Generating train alignments
-2021-09-02 17:28:15,879 - silnlp.alignment.machine_aligner - INFO - Training model
-2021-09-02 17:28:16,308 - silnlp.alignment.machine_aligner - INFO - Loading model
-2021-09-02 17:28:16,394 - silnlp.alignment.machine_aligner - INFO - Aligning corpus
-2021-09-02 17:28:16,531 - silnlp.nmt.config - INFO - Preprocessing completed
+2022-10-21 12:51:33,769 - silnlp.nmt.open_nmt_config - INFO - Building source vocabulary...
+2022-10-21 12:51:34,892 - silnlp.nmt.open_nmt_config - INFO - Building target vocabulary...
+2022-10-21 12:51:36,008 - silnlp.nmt.config - INFO - Preprocessing de-Books -> en-Books
+2022-10-21 12:51:36,020 - silnlp.nmt.config - INFO - train size: 100, val size: 0, test size: 0, dict size: 0
+2022-10-21 12:51:36,020 - silnlp.nmt.config - INFO - Preprocessing de-GlobalVoices -> en-GlobalVoices
+2022-10-21 12:51:36,030 - silnlp.nmt.config - INFO - train size: 100, val size: 0, test size: 0, dict size: 0
+2022-10-21 12:51:36,030 - silnlp.nmt.config - INFO - Preprocessing de-newstest2014_ende -> en-newstest2014_ende
+2022-10-21 12:51:36,038 - silnlp.nmt.config - INFO - train size: 0, val size: 100, test size: 0, dict size: 0
+2022-10-21 12:51:36,039 - silnlp.nmt.config - INFO - Preprocessing de-newstest2017_ende -> en-newstest2017_ende
+2022-10-21 12:51:36,046 - silnlp.nmt.config - INFO - train size: 0, val size: 0, test size: 100, dict size: 0
+2022-10-21 12:51:36,046 - silnlp.nmt.config - INFO - Generating train alignments using FastAlign
+2022-10-21 12:51:36,047 - silnlp.alignment.machine_aligner - INFO - Training model
+2022-10-21 12:51:36,404 - silnlp.alignment.machine_aligner - INFO - Loading model
+2022-10-21 12:51:36,490 - silnlp.alignment.machine_aligner - INFO - Aligning corpus
+2022-10-21 12:51:36,613 - silnlp.nmt.config - INFO - Preprocessing completed

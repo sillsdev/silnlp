@@ -1,46 +1,28 @@
-from typing import List, Optional, Type, Tuple
-from abc import ABC, abstractmethod
 import logging
-import sentencepiece as sp
+from abc import ABC, abstractmethod
 from pathlib import Path
+from typing import List, Tuple, Type
 
-from .utils import encode_sp_lines, encode_sp
+import sentencepiece as sp
+
 from ..common.corpus import write_corpus
+from ..common.utils import Side
+from .tokenizer import Tokenizer
 
 LOGGER = logging.getLogger(__package__ + ".augment")
 
 
 class AugmentMethod(ABC):
     @abstractmethod
-    def __pre__(self, args):
+    def pre(self, args):
         pass
 
     @abstractmethod
-    def __augment_corpus__(
-        self,
-        train_src_filename: Path,
-        train_trg_filename: Path,
-        train_vref_filename: Path,
-        src: List[str],
-        trg: List[str],
-        vref: List[str],
-        src_spp: Optional[sp.SentencePieceProcessor],
-        trg_spp: Optional[sp.SentencePieceProcessor],
-    ) -> int:
+    def augment_sentence(self, src: str, trg: str, tokenizer: Tokenizer) -> Tuple[List[str], List[str]]:
         pass
 
     @abstractmethod
-    def __augment_sentence__(
-        self,
-        src: str,
-        trg: str,
-        src_spp: Optional[sp.SentencePieceProcessor],
-        trg_spp: Optional[sp.SentencePieceProcessor],
-    ) -> Tuple[List[str], List[str]]:
-        pass
-
-    @abstractmethod
-    def __post__(self, args):
+    def post(self, args):
         pass
 
 
@@ -52,16 +34,13 @@ class CipherAugment(AugmentMethod):
         LOGGER.warning("Not fully implemented - CipherAugment class")
         self.keys = [int(k) for k in args.get('keys', '').split(',')]
 
-    def __pre__(self, args):
+    def pre(self, args):
         pass
 
-    def __augment_corpus__(self, args):
+    def augment_sentence(self, args) -> int:
         pass
 
-    def __augment_sentence__(self, args) -> int:
-        pass
-
-    def __post__(self, args):
+    def post(self, args):
         pass
 """
 
@@ -71,40 +50,19 @@ class SubwordAugment(AugmentMethod):
     def __init__(self, args):
         self.encodings = int(args.get("encodings", 0))
 
-    def __pre__(self, args):
+    def pre(self, args):
         pass
 
-    def __augment_corpus__(
-        self,
-        train_src_filename: Path,
-        train_trg_filename: Path,
-        train_vref_filename: Path,
-        src: List[str],
-        trg: List[str],
-        vref: List[str],
-        src_spp: Optional[sp.SentencePieceProcessor],
-        trg_spp: Optional[sp.SentencePieceProcessor],
-    ) -> int:
-        augment_count = 0
-        for encoding in range(self.encodings):
-            write_corpus(train_src_filename, encode_sp_lines(src_spp, src, sample_subwords=True), append=True)
-            write_corpus(train_trg_filename, encode_sp_lines(trg_spp, trg, sample_subwords=True), append=True)
-            write_corpus(train_vref_filename, (str(vr) for vr in vref), append=True)
-            augment_count += len(src)
-        return augment_count
-
-    def __augment_sentence__(
-        self,
-        src: str,
-        trg: str,
-        src_spp: Optional[sp.SentencePieceProcessor],
-        trg_spp: Optional[sp.SentencePieceProcessor],
-    ) -> Tuple[List[str], List[str]]:
-        src_augments: List[str] = [encode_sp(src_spp, src, sample_subwords=True) for x in range(self.encodings)]
-        trg_augments: List[str] = [encode_sp(trg_spp, trg, sample_subwords=True) for x in range(self.encodings)]
+    def augment_sentence(self, src: str, trg: str, tokenizer: Tokenizer) -> Tuple[List[str], List[str]]:
+        src_augments: List[str] = [
+            tokenizer.tokenize(Side.SOURCE, src, sample_subwords=True) for _ in range(self.encodings)
+        ]
+        trg_augments: List[str] = [
+            tokenizer.tokenize(Side.TARGET, trg, sample_subwords=True) for _ in range(self.encodings)
+        ]
         return src_augments, trg_augments
 
-    def __post__(self, args):
+    def post(self, args):
         pass
 
 
@@ -116,16 +74,13 @@ class TransliterateAugment(AugmentMethod):
         self.source = args.get('source', None)
         self.target = args.get('target', None)
 
-    def __pre__(self, args):
+    def pre(self, args):
         pass
 
-    def __augment_corpus__(self, args):
+    def augment_sentence(self, args) -> int:
         pass
 
-    def __augment_sentence__(self, args) -> int:
-        pass
-
-    def __post__(self, args):
+    def post(self, args):
         pass
 """
 
@@ -138,16 +93,13 @@ class BiTAugment(AugmentMethod):
     def __init__(self, args):
         LOGGER.warning("Not fully implemented - BiTAugment class")
 
-    def __pre__(self, args):
+    def pre(self, args):
         pass
 
-    def __augment_corpus__(self, args):
+    def augment_sentence(self, args) -> int:
         pass
 
-    def __augment_sentence__(self, args) -> int:
-        pass
-
-    def __post__(self, args):
+    def post(self, args):
         pass
 """
 
@@ -161,21 +113,18 @@ class TLMAugment(AugmentMethod):
         self.alpha = float(args.get('alpha', 0.1))
         self.shuffle = args.get('shuffle', False)
 
-    def __pre__(self, args):
+    def pre(self, args):
         pass
 
-    def __augment_corpus__(self, args):
+    def augment_sentence(self, args) -> int:
         pass
 
-    def __augment_sentence__(self, args) -> int:
-        pass
-
-    def __post__(self, args):
+    def post(self, args):
         pass
 """
 
 
-def create_augment_methods(params: List[List]) -> List[AugmentMethod]:
+def create_augment_methods(params: List[dict]) -> List[AugmentMethod]:
     methods: List[AugmentMethod] = []
     for module in params:
         augment_type, args = next(iter(module.items()))

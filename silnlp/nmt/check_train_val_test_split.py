@@ -3,15 +3,17 @@ import logging
 import os
 import re
 import string
+from collections import Counter
+from pathlib import Path
+from typing import Dict, List, Optional
 
 import Levenshtein
 import pandas as pd
+
 from ..common.corpus import load_corpus
-from .utils import decode_sp
-from typing import Dict, List
-from pathlib import Path
-from .config import get_git_revision_hash, get_mt_exp_dir
-from collections import Counter
+from ..common.utils import get_git_revision_hash
+from .config import get_mt_exp_dir
+from .sp_utils import decode_sp
 
 logging.basicConfig()
 
@@ -127,7 +129,11 @@ def writeStats(writer: pd.ExcelWriter):
 
 
 def collectStats(
-    corpus: str, corpus_set: str, word_counts: Counter, unk_word_counts: Counter, similar_words: Dict[str, List[str]]
+    corpus: str,
+    corpus_set: str,
+    word_counts: Counter,
+    unk_word_counts: Optional[Counter],
+    similar_words: Optional[Dict[str, List[str]]],
 ):
     global corpusStats
 
@@ -149,7 +155,7 @@ def collectStats(
 
 
 def wordChecks(
-    folder: str,
+    folder: Path,
     writer: pd.ExcelWriter,
     corpus: str,
     similar: bool = False,

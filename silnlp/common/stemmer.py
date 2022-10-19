@@ -1,5 +1,5 @@
 import abc
-from typing import Any, Dict, Iterable, List, Sequence
+from typing import Any, Dict, Iterable, Sequence
 
 
 class Stemmer(abc.ABC):

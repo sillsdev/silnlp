@@ -8,12 +8,12 @@ import tensorflow as tf
 
 logging.basicConfig()
 
-from ..common.clearml_connection import SILClearML
 from ..common.environment import SIL_NLP_ENV
+from ..common.tf_utils import enable_memory_growth
 from ..common.utils import get_git_revision_hash
-from .config import Config, create_runner
+from .clearml_connection import SILClearML
+from .config import Config
 from .test import test
-from .utils import enable_memory_growth
 
 
 @dataclass
@@ -49,15 +49,11 @@ class SILExperiment:
             self.name, extensions=(".txt", ".vocab", ".model", ".yml", ".csv"), copy_run=True
         )
 
-        runner = create_runner(self.config, mixed_precision=self.mixed_precision)
-        runner.save_effective_config(str(self.config.exp_dir / f"effective-config-{self.rev_hash}.yml"), training=True)
-
-        checkpoint_path: Optional[str] = None
-        if not (self.config.exp_dir / "run").is_dir() and self.config.has_parent:
-            checkpoint_path = str(self.config.exp_dir / "parent")
+        model = self.config.create_model(self.mixed_precision)
+        model.save_effective_config(self.config.exp_dir / f"effective-config-{self.rev_hash}.yml")
 
         print(f"=== Training ({self.name}) ===")
-        runner.train(num_devices=self.num_devices, with_eval=True, checkpoint_path=checkpoint_path)
+        model.train(self.num_devices)
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
         print("Training completed")
 

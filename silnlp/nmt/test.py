@@ -3,7 +3,7 @@ import logging
 import random
 import sys
 from pathlib import Path
-from typing import IO, Dict, Iterable, List, Optional, Set, Tuple, Union, cast, Sequence
+from typing import IO, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union, cast
 
 import numpy as np
 import sacrebleu
@@ -12,9 +12,11 @@ from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_number_to_i
 from sacrebleu.metrics import BLEU, BLEUScore
 
 from ..common.metrics import compute_meteor_score, compute_ter_score, compute_wer_score
+from ..common.tf_utils import enable_eager_execution, enable_memory_growth
 from ..common.utils import get_git_revision_hash
-from .config import Config, create_runner, load_config
-from .utils import decode_sp, enable_memory_growth, get_best_model_dir, get_last_checkpoint
+from .config import CheckpointType, Config, NMTModel
+from .config_utils import load_config
+from .tokenizer import Tokenizer
 
 LOGGER = logging.getLogger(__name__)
 
@@ -119,6 +121,7 @@ def score_individual_books(
 
 
 def process_individual_books(
+    tokenizer: Tokenizer,
     src_file_path: Path,
     pred_file_path: Path,
     ref_file_paths: List[Path],
@@ -143,7 +146,7 @@ def process_individual_books(
             for lines in zip(pred_file, vref_file, src_file, *ref_files):
                 # Get file lines
                 pred_line = lines[0].strip()
-                detok_pred = decode_sp(pred_line)
+                detok_pred = tokenizer.detokenize(pred_line)
                 vref = lines[1].strip()
                 src_line = lines[2].strip()
                 # Get book
@@ -190,6 +193,7 @@ def process_individual_books(
 
 
 def load_test_data(
+    tokenizer: Tokenizer,
     vref_file_name: str,
     src_file_name: str,
     pred_file_name: str,
@@ -234,7 +238,7 @@ def load_test_data(
                             continue
                 src_line = lines[0].strip()
                 pred_line = lines[1].strip()
-                detok_pred_line = decode_sp(pred_line)
+                detok_pred_line = tokenizer.detokenize(pred_line)
                 iso = default_trg_iso
                 if src_line.startswith("<2"):
                     index = src_line.index(">")
@@ -262,6 +266,7 @@ def load_test_data(
             book_dict: Dict[str, dict] = {}
             if by_book:
                 book_dict = process_individual_books(
+                    tokenizer,
                     src_file_path,
                     pred_file_path,
                     ref_file_paths,
@@ -333,20 +338,22 @@ def write_sentence_bleu(
 
 def test_checkpoint(
     config: Config,
+    model: NMTModel,
+    tokenizer: Tokenizer,
     force_infer: bool,
     by_book: bool,
     ref_projects: Set[str],
-    checkpoint_path: Path,
+    checkpoint_type: CheckpointType,
     step: int,
     scorers: Set[str],
     books: Set[int],
 ) -> List[PairScore]:
     config.set_seed()
     vref_paths: List[str] = []
-    features_file_names: List[str] = []
-    predictions_file_names: List[str] = []
+    source_file_names: List[str] = []
+    translation_file_names: List[str] = []
     refs_patterns: List[str] = []
-    predictions_detok_file_names: List[str] = []
+    translation_detok_file_names: List[str] = []
     suffix_str = "_".join(map(lambda n: book_number_to_id(n), sorted(books)))
     if len(suffix_str) > 0:
         suffix_str += "-"
@@ -356,10 +363,10 @@ def test_checkpoint(
     if (config.exp_dir / features_file_name).is_file():
         # all test data is stored in a single file
         vref_paths.append("test.vref.txt")
-        features_file_names.append(features_file_name)
-        predictions_file_names.append(f"test.trg-predictions.txt.{suffix_str}")
+        source_file_names.append(features_file_name)
+        translation_file_names.append(f"test.trg-predictions.txt.{suffix_str}")
         refs_patterns.append("test.trg.detok*.txt")
-        predictions_detok_file_names.append(f"test.trg-predictions.detok.txt.{suffix_str}")
+        translation_detok_file_names.append(f"test.trg-predictions.detok.txt.{suffix_str}")
     else:
         # test data is split into separate files
         for src_iso in sorted(config.src_isos):
@@ -370,29 +377,30 @@ def test_checkpoint(
                 features_file_name = f"{prefix}.src.txt"
                 if (config.exp_dir / features_file_name).is_file():
                     vref_paths.append(f"{prefix}.vref.txt")
-                    features_file_names.append(features_file_name)
-                    predictions_file_names.append(f"{prefix}.trg-predictions.txt.{suffix_str}")
+                    source_file_names.append(features_file_name)
+                    translation_file_names.append(f"{prefix}.trg-predictions.txt.{suffix_str}")
                     refs_patterns.append(f"{prefix}.trg.detok*.txt")
-                    predictions_detok_file_names.append(f"{prefix}.trg-predictions.detok.txt.{suffix_str}")
+                    translation_detok_file_names.append(f"{prefix}.trg-predictions.detok.txt.{suffix_str}")
 
     checkpoint_name = "averaged checkpoint" if step == -1 else f"checkpoint {step}"
 
-    features_paths: List[Union[str, List[str]]] = []
-    predictions_paths: List[str] = []
-    for i in range(len(predictions_file_names)):
-        predictions_path = config.exp_dir / predictions_file_names[i]
+    source_paths: List[Union[Path, Sequence[Path]]] = []
+    translation_paths: List[Path] = []
+    for i in range(len(translation_file_names)):
+        predictions_path = config.exp_dir / translation_file_names[i]
         if force_infer or not predictions_path.is_file():
-            features_path = config.exp_dir / features_file_names[i]
+            source_path = config.exp_dir / source_file_names[i]
             vref_path = config.exp_dir / vref_paths[i]
             if vref_path.is_file():
-                features_paths.append([str(features_path), str(vref_path)])
+                source_paths.append((source_path, vref_path))
             else:
-                features_paths.append(str(features_path))
-            predictions_paths.append(str(predictions_path))
-    if len(predictions_paths) > 0:
-        runner = create_runner(config)
+                source_paths.append(source_path)
+            translation_paths.append(predictions_path)
+    if len(translation_paths) > 0:
         print(f"Inferencing {checkpoint_name}...")
-        runner.infer_multiple(features_paths, predictions_paths, checkpoint_path=str(checkpoint_path))
+        model.translate_text_files(
+            source_paths, translation_paths, step if checkpoint_type is CheckpointType.OTHER else checkpoint_type
+        )
 
     print(f"Scoring {checkpoint_name}...")
     default_src_iso = config.default_src_iso
@@ -400,12 +408,13 @@ def test_checkpoint(
     overall_sys: List[str] = []
     overall_refs: List[List[str]] = []
     for vref_file_name, features_file_name, predictions_file_name, refs_pattern, predictions_detok_file_name in zip(
-        vref_paths, features_file_names, predictions_file_names, refs_patterns, predictions_detok_file_names
+        vref_paths, source_file_names, translation_file_names, refs_patterns, translation_detok_file_names
     ):
         src_iso = default_src_iso
         if features_file_name != "test.src.txt":
             src_iso = features_file_name.split(".")[1]
         dataset, book_dict = load_test_data(
+            tokenizer,
             vref_file_name,
             features_file_name,
             predictions_file_name,
@@ -512,18 +521,21 @@ def test(
         scorers.add("bleu")
     scorers.intersection_update(_SUPPORTED_SCORERS)
 
-    best_model_path, best_step = get_best_model_dir(config.model_dir)
+    tokenizer = config.create_tokenizer()
+    model = config.create_model()
+    best_step = model.get_checkpoint_step(CheckpointType.BEST)
     results: Dict[int, List[PairScore]] = {}
     step: int
     if checkpoint is not None:
-        checkpoint_path = config.model_dir / f"ckpt-{checkpoint}"
         step = int(checkpoint)
         results[step] = test_checkpoint(
             config,
+            model,
+            tokenizer,
             force_infer,
             by_book,
             ref_projects,
-            checkpoint_path,
+            CheckpointType.OTHER,
             step,
             scorers,
             books_nums,
@@ -531,14 +543,15 @@ def test(
 
     if avg:
         try:
-            checkpoint_path, _ = get_last_checkpoint(config.model_dir / "avg")
             step = -1
             results[step] = test_checkpoint(
                 config,
+                model,
+                tokenizer,
                 force_infer,
                 by_book,
                 ref_projects,
-                checkpoint_path,
+                CheckpointType.AVERAGE,
                 step,
                 scorers,
                 books_nums,
@@ -549,28 +562,30 @@ def test(
     if best:
         step = best_step
         if step not in results:
-            checkpoint_path = best_model_path / "ckpt"
             results[step] = test_checkpoint(
                 config,
+                model,
+                tokenizer,
                 force_infer,
                 by_book,
                 ref_projects,
-                checkpoint_path,
+                CheckpointType.BEST,
                 step,
                 scorers,
                 books_nums,
             )
 
     if last or (not best and checkpoint is None and not avg):
-        checkpoint_path, step = get_last_checkpoint(config.model_dir)
-
+        step = model.get_checkpoint_step(CheckpointType.LAST)
         if step not in results:
             results[step] = test_checkpoint(
                 config,
+                model,
+                tokenizer,
                 force_infer,
                 by_book,
                 ref_projects,
-                checkpoint_path,
+                CheckpointType.LAST,
                 step,
                 scorers,
                 books_nums,
@@ -624,8 +639,7 @@ def main() -> None:
     get_git_revision_hash()
 
     if args.eager_execution:
-        tf.config.run_functions_eagerly(True)
-        tf.data.experimental.enable_debug_mode()
+        enable_eager_execution()
 
     if args.memory_growth:
         enable_memory_growth()

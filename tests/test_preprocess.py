@@ -1,11 +1,13 @@
-import pytest
-import shutil
 import os
-import sentencepiece as sp
-from . import helper
-from silnlp.nmt.config import load_config
-from silnlp.common.environment import SIL_NLP_ENV
+import shutil
 
+import pytest
+import sentencepiece as sp
+
+from silnlp.common.environment import SIL_NLP_ENV
+from silnlp.nmt.config_utils import load_config
+
+from . import helper
 
 # set experiment directory to temp
 SIL_NLP_ENV.set_data_dir()

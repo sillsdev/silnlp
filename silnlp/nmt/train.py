@@ -1,11 +1,9 @@
 import argparse
 import logging
-from typing import Optional
 
-import tensorflow as tf
-
+from ..common.tf_utils import enable_eager_execution, enable_memory_growth
 from ..common.utils import get_git_revision_hash
-from .config import create_runner, load_config
+from .config_utils import load_config
 
 LOGGER = logging.getLogger(__package__ + ".train")
 
@@ -31,22 +29,20 @@ def main() -> None:
     rev_hash = get_git_revision_hash()
 
     if args.eager_execution:
-        tf.config.run_functions_eagerly(True)
-        tf.data.experimental.enable_debug_mode()
+        enable_eager_execution()
+
+    if args.memory_growth:
+        enable_memory_growth()
 
     for exp_name in args.experiments:
         config = load_config(exp_name)
         config.set_seed()
-        runner = create_runner(config, mixed_precision=args.mixed_precision)
-        runner.save_effective_config(str(config.exp_dir / f"effective-config-{rev_hash}.yml"), training=True)
-
-        checkpoint_path: Optional[str] = None
-        if not (config.exp_dir / "run").is_dir() and config.has_parent:
-            checkpoint_path = str(config.exp_dir / "parent")
+        model = config.create_model(args.mixed_precision)
+        model.save_effective_config(config.exp_dir / f"effective-config-{rev_hash}.yml")
 
         print(f"=== Training ({exp_name}) ===")
         try:
-            runner.train(num_devices=args.num_devices, with_eval=True, checkpoint_path=checkpoint_path)
+            model.train(args.num_devices)
         except RuntimeError as e:
             LOGGER.warning(str(e))
         print("Training completed")

@@ -157,7 +157,7 @@ class SILSelfAttentionDecoder(SelfAttentionDecoder):
             input_fn = lambda ids: tf.nn.embedding_lookup(embeddings, ids)
 
         # TODO: find a better way to pass the state reorder flags.
-        if hasattr(decoding_strategy, "_set_state_reorder_flags"):
+        if decoding_strategy is not None and hasattr(decoding_strategy, "_set_state_reorder_flags"):
             state_reorder_flags = self._get_state_reorder_flags()
             decoding_strategy._set_state_reorder_flags(state_reorder_flags)
 

@@ -1,11 +1,11 @@
-2021-07-20 16:47:16,953 - silnlp.nmt.config - INFO - Building source vocabulary...
-2021-07-20 16:47:19,082 - silnlp.nmt.config - INFO - Building target vocabulary...
-2021-07-20 16:47:21,085 - silnlp.nmt.config - INFO - Preprocessing de-Books -> en-Books
-2021-07-20 16:47:21,100 - silnlp.nmt.config - INFO - train size: 100, val size: 0, test size: 0, dict size: 0
-2021-07-20 16:47:21,100 - silnlp.nmt.config - INFO - Preprocessing de-GlobalVoices -> en-GlobalVoices
-2021-07-20 16:47:21,116 - silnlp.nmt.config - INFO - train size: 100, val size: 0, test size: 0, dict size: 0
-2021-07-20 16:47:21,116 - silnlp.nmt.config - INFO - Preprocessing de-newstest2014_ende -> en-newstest2014_ende
-2021-07-20 16:47:21,116 - silnlp.nmt.config - INFO - train size: 0, val size: 100, test size: 0, dict size: 0
-2021-07-20 16:47:21,131 - silnlp.nmt.config - INFO - Preprocessing de-newstest2017_ende -> en-newstest2017_ende
-2021-07-20 16:47:21,131 - silnlp.nmt.config - INFO - train size: 0, val size: 0, test size: 100, dict size: 0
-2021-07-20 16:47:21,147 - silnlp.nmt.config - INFO - Preprocessing completed
+2022-10-21 13:04:03,749 - silnlp.nmt.open_nmt_config - INFO - Building source vocabulary...
+2022-10-21 13:04:04,908 - silnlp.nmt.open_nmt_config - INFO - Building target vocabulary...
+2022-10-21 13:04:06,044 - silnlp.nmt.config - INFO - Preprocessing de-Books -> en-Books
+2022-10-21 13:04:06,055 - silnlp.nmt.config - INFO - train size: 100, val size: 0, test size: 0, dict size: 0
+2022-10-21 13:04:06,055 - silnlp.nmt.config - INFO - Preprocessing de-GlobalVoices -> en-GlobalVoices
+2022-10-21 13:04:06,064 - silnlp.nmt.config - INFO - train size: 100, val size: 0, test size: 0, dict size: 0
+2022-10-21 13:04:06,064 - silnlp.nmt.config - INFO - Preprocessing de-newstest2014_ende -> en-newstest2014_ende
+2022-10-21 13:04:06,072 - silnlp.nmt.config - INFO - train size: 0, val size: 100, test size: 0, dict size: 0
+2022-10-21 13:04:06,073 - silnlp.nmt.config - INFO - Preprocessing de-newstest2017_ende -> en-newstest2017_ende
+2022-10-21 13:04:06,079 - silnlp.nmt.config - INFO - train size: 0, val size: 0, test size: 100, dict size: 0
+2022-10-21 13:04:06,080 - silnlp.nmt.config - INFO - Preprocessing completed

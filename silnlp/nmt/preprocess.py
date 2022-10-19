@@ -1,7 +1,8 @@
 import argparse
 import logging
 
-from .config import get_git_revision_hash, load_config
+from ..common.utils import get_git_revision_hash
+from .config_utils import load_config
 
 LOGGER = logging.getLogger(__package__ + ".preprocess")
 

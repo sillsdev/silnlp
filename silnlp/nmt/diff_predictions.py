@@ -1,22 +1,21 @@
 import argparse
+import difflib as dl
+import filecmp
 import logging
 import os
-import glob
-import filecmp
-from typing import List, Iterable
-from pathlib import Path
 import re
 import string
-import numpy as np
-import pandas as pd
+from pathlib import Path
+from typing import Any, Iterable, List, Optional
+
 import matplotlib.pyplot as plt
-import difflib as dl
+import pandas as pd
+from sacrebleu.metrics.bleu import BLEU, BLEUScore
+
 from ..common.corpus import load_corpus
-from .utils import decode_sp, decode_sp_lines, get_best_model_dir, get_last_checkpoint
-from .config import get_git_revision_hash, get_mt_exp_dir
-import sacrebleu
-from sacrebleu.metrics import BLEU, BLEUScore
-import xlsxwriter
+from ..common.utils import get_git_revision_hash
+from .config import get_mt_exp_dir
+from .sp_utils import decode_sp, decode_sp_lines
 
 logging.basicConfig()
 
@@ -50,7 +49,7 @@ def sentence_bleu(
     hypothesis: str,
     references: List[str],
     smooth_method: str = "exp",
-    smooth_value: float = None,
+    smooth_value: Optional[float] = None,
     lowercase: bool = False,
     tokenize="13a",
     use_effective_order: bool = True,
@@ -132,7 +131,7 @@ def adjust_column_widths(df: pd.DataFrame, sheet, col_width: int):
 
 
 def get_diff_segments(ref: str, pred: str) -> List:
-    segments = []
+    segments: List[Optional[str]] = []
     seq_matcher = dl.SequenceMatcher(None, ref, pred)
     for tag, i1, i2, j1, j2 in seq_matcher.get_opcodes():
         if tag == "equal":
@@ -190,7 +189,7 @@ def apply_unknown_formatting(df: pd.DataFrame, sheet, stats_offset: int, corpus:
         column_name = TRG_SENTENCE
     for index, row in df.iterrows():
         text = row[column_name]
-        segments = []
+        segments: List[Optional[str]] = []
         last_state = ""
         s = ""
         for word in split_words(text):
@@ -238,7 +237,7 @@ def apply_dict_formatting(df: pd.DataFrame, sheet, stats_offset: int, dictDf: pd
     column = "B"
     for index, row in df.iterrows():
         text = row[SRC_SENTENCE]
-        segments = []
+        segments: List[Optional[str]] = []
         last_state = "notdict"
         s = ""
         for word in split_words(text):
@@ -326,7 +325,7 @@ def get_digit_list(s: str) -> List[str]:
 def add_digits_analysis(writer, df: pd.DataFrame, col_width: int):
     sheet_name = "Digits"
 
-    digit_rows: List[List[str], List[str], List[str], List[str]] = []
+    digit_rows: List[List[Any]] = []
     for index, row in df.iterrows():
         vref = row[VREF]
         trg = row[TRG_SENTENCE]

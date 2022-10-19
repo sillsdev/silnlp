@@ -7,7 +7,7 @@ import pandas as pd
 import seaborn as sns
 
 from ..common.environment import SIL_NLP_ENV
-from .config import load_config
+from .config_utils import load_config
 
 
 def get_corpus_path(project: str) -> Path:
