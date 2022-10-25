@@ -57,6 +57,11 @@ ctranslate2 = "2.21.1"
 tensorflow-addons = "0.17.1"
 libclang = "14.0.6"
 sil-machine = {extras = ["thot"], version = "^0.7.1"}
+transformers = "^4.23.1"
+datasets = "^2.6.1"
+torch = {version = "1.10.1", source = "torch"}
+sacremoses = "^0.0.53"
+evaluate = "^0.3.0"
 
 [tool.poetry.dev-dependencies]
 mypy = "^0.812"
@@ -65,3 +70,10 @@ flake8 = "^3.9.0"
 ipykernel = "^6.4.1"
 pylint = "^2.8.3"
 pytest = "^6.2.4"
+
+[[tool.poetry.source]]
+name = "torch"
+url = "https://download.pytorch.org/whl/cu111"
+default = false
+secondary = true
+

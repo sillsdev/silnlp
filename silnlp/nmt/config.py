@@ -1,7 +1,6 @@
 import itertools
 import logging
 import random
-import tempfile
 from abc import ABC, abstractmethod
 from contextlib import ExitStack
 from dataclasses import dataclass, field
@@ -14,8 +13,7 @@ import pandas as pd
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books
 from tqdm import tqdm
 
-from ..alignment.config import get_aligner, get_aligner_name
-from ..alignment.machine_aligner import MachineAligner
+from ..alignment.config import get_aligner_name
 from ..alignment.utils import add_alignment_scores
 from ..common.corpus import (
     exclude_books,
@@ -319,7 +317,7 @@ def get_data_file_pairs(corpus_pair: CorpusPair) -> Iterable[Tuple[DataFile, Dat
 
 class NMTModel(ABC):
     @abstractmethod
-    def train(self, num_devices: int = 1) -> None:
+    def train(self) -> None:
         ...
 
     @abstractmethod
@@ -331,7 +329,7 @@ class NMTModel(ABC):
         self,
         input_paths: List[Union[Path, Sequence[Path]]],
         translation_paths: List[Path],
-        checkpoint: Union[CheckpointType, str, int] = CheckpointType.BEST,
+        checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
         ...
 
@@ -339,9 +337,9 @@ class NMTModel(ABC):
     def translate(
         self,
         sentences: Iterable[Union[str, Sequence[str]]],
-        src_iso: Optional[str] = None,
-        trg_iso: Optional[str] = None,
-        checkpoint: Union[CheckpointType, str, int] = CheckpointType.BEST,
+        src_iso: str,
+        trg_iso: str,
+        checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Iterable[str]:
         ...
 
@@ -415,8 +413,9 @@ class Config(ABC):
         return self.root["model"]
 
     @property
+    @abstractmethod
     def model_dir(self) -> Path:
-        return Path(self.root["model_dir"])
+        ...
 
     @property
     def params(self) -> dict:
@@ -425,6 +424,18 @@ class Config(ABC):
     @property
     def data(self) -> dict:
         return self.root["data"]
+
+    @property
+    def train(self) -> dict:
+        return self.root["train"]
+
+    @property
+    def infer(self) -> dict:
+        return self.root["infer"]
+
+    @property
+    def eval(self) -> dict:
+        return self.root["eval"]
 
     @property
     def mirror(self) -> bool:
@@ -455,13 +466,11 @@ class Config(ABC):
 
         self._build_vocabs()
         tokenizer = self.create_tokenizer()
-        train_count = self._build_corpora(tokenizer, stats)
-        if self.data["guided_alignment"]:
-            self._create_train_alignments(train_count)
+        self._build_corpora(tokenizer, stats)
         LOGGER.info("Preprocessing completed")
 
     @abstractmethod
-    def create_model(self, mixed_precision: bool = False) -> NMTModel:
+    def create_model(self, mixed_precision: bool = False, num_devices: int = 1) -> NMTModel:
         ...
 
     @abstractmethod
@@ -725,19 +734,19 @@ class Config(ABC):
             for (src_iso, trg_iso), pair_val in val.items():
                 tokenizer.set_src_lang(src_iso)
                 tokenizer.set_trg_lang(trg_iso)
-                self._append_corpus(self._val_src_filename(), tokenizer.tokenize_all(Side.SOURCE, pair_val["source"]))
+                self._append_corpus(self.val_src_filename(), tokenizer.tokenize_all(Side.SOURCE, pair_val["source"]))
             val_count = sum(len(pair_val) for pair_val in val.values())
             self._write_val_trg(tokenizer, val)
             val_vref = itertools.chain.from_iterable(pair_val["vref"] for pair_val in val.values())
-            self._append_corpus(self._val_vref_filename(), (str(vr) for vr in val_vref))
+            self._append_corpus(self.val_vref_filename(), (str(vr) for vr in val_vref))
 
         test_count = 0
         for (src_iso, trg_iso), pair_test in test.items():
             tokenizer.set_src_lang(src_iso)
             tokenizer.set_trg_lang(trg_iso)
-            self._append_corpus(self._test_vref_filename(src_iso, trg_iso), (str(vr) for vr in pair_test["vref"]))
+            self._append_corpus(self.test_vref_filename(src_iso, trg_iso), (str(vr) for vr in pair_test["vref"]))
             self._append_corpus(
-                self._test_src_filename(src_iso, trg_iso),
+                self.test_src_filename(src_iso, trg_iso),
                 tokenizer.tokenize_all(Side.SOURCE, pair_test["source"]),
             )
             test_count += len(pair_test)
@@ -747,13 +756,13 @@ class Config(ABC):
             for column in columns:
                 project = column[len("target_") :]
                 self._append_corpus(
-                    self._test_trg_filename(src_iso, trg_iso, project),
+                    self.test_trg_filename(src_iso, trg_iso, project),
                     tokenizer.normalize_all(Side.TARGET, pair_test[column]),
                 )
                 test_projects.remove(project)
             if self._has_multiple_test_projects(src_iso, trg_iso):
                 for project in test_projects:
-                    self._fill_corpus(self._test_trg_filename(src_iso, trg_iso, project), len(pair_test))
+                    self._fill_corpus(self.test_trg_filename(src_iso, trg_iso, project), len(pair_test))
         LOGGER.info(
             f"train size: {train_count},"
             f" val size: {val_count},"
@@ -765,7 +774,7 @@ class Config(ABC):
 
     def _populate_pair_test_indices(self, exp_name: str, pair_test_indices: Dict[Tuple[str, str], Set[int]]) -> None:
         vrefs: Dict[str, int] = {}
-        for i, vref_str in enumerate(load_corpus(SIL_NLP_ENV.mt_scripture_dir / "vref.txt")):
+        for i, vref_str in enumerate(load_corpus(SIL_NLP_ENV.assets_dir / "vref.txt")):
             if vref_str != "":
                 vrefs[vref_str] = i
 
@@ -872,9 +881,9 @@ class Config(ABC):
         train.fillna("", inplace=True)
         src_columns: List[str] = [c for c in train.columns if c.startswith("source")]
         with ExitStack() as stack:
-            train_src_file = stack.enter_context(self._open_append(self._train_src_filename()))
-            train_trg_file = stack.enter_context(self._open_append(self._train_trg_filename()))
-            train_vref_file = stack.enter_context(self._open_append(self._train_vref_filename()))
+            train_src_file = stack.enter_context(self._open_append(self.train_src_filename()))
+            train_trg_file = stack.enter_context(self._open_append(self.train_trg_filename()))
+            train_vref_file = stack.enter_context(self._open_append(self.train_vref_filename()))
 
             for _, row in train.iterrows():
                 if mixed_src:
@@ -918,17 +927,17 @@ class Config(ABC):
             train_trg_file: Optional[TextIO] = None
             train_vref_file: Optional[TextIO] = None
             if terms_config["train"] and terms is not None:
-                train_src_file = stack.enter_context(self._open_append(self._train_src_filename()))
-                train_trg_file = stack.enter_context(self._open_append(self._train_trg_filename()))
-                train_vref_file = stack.enter_context(self._open_append(self._train_vref_filename()))
+                train_src_file = stack.enter_context(self._open_append(self.train_src_filename()))
+                train_trg_file = stack.enter_context(self._open_append(self.train_trg_filename()))
+                train_vref_file = stack.enter_context(self._open_append(self.train_vref_filename()))
 
             dict_src_file: Optional[TextIO] = None
             dict_trg_file: Optional[TextIO] = None
             dict_vref_file: Optional[TextIO] = None
             if terms_config["dictionary"]:
-                dict_src_file = stack.enter_context(self._open_append(self._dict_src_filename()))
-                dict_trg_file = stack.enter_context(self._open_append(self._dict_trg_filename()))
-                dict_vref_file = stack.enter_context(self._open_append(self._dict_vref_filename()))
+                dict_src_file = stack.enter_context(self._open_append(self.dict_src_filename()))
+                dict_trg_file = stack.enter_context(self._open_append(self.dict_trg_filename()))
+                dict_vref_file = stack.enter_context(self._open_append(self.dict_vref_filename()))
 
             if terms is not None:
                 for _, term in terms.iterrows():
@@ -961,20 +970,12 @@ class Config(ABC):
                         and dict_vref_file is not None
                     ):
                         src_term_variants = [
-                            tokenizer.tokenize(
-                                Side.SOURCE, src_term, add_dummy_prefix=True, include_special_tokens=False
-                            ),
-                            tokenizer.tokenize(
-                                Side.SOURCE, src_term, add_dummy_prefix=False, include_special_tokens=False
-                            ),
+                            tokenizer.tokenize(Side.SOURCE, src_term, add_dummy_prefix=True, add_special_tokens=False),
+                            tokenizer.tokenize(Side.SOURCE, src_term, add_dummy_prefix=False, add_special_tokens=False),
                         ]
                         trg_term_variants = [
-                            tokenizer.tokenize(
-                                Side.TARGET, trg_term, add_dummy_prefix=True, include_special_tokens=False
-                            ),
-                            tokenizer.tokenize(
-                                Side.TARGET, trg_term, add_dummy_prefix=False, include_special_tokens=False
-                            ),
+                            tokenizer.tokenize(Side.TARGET, trg_term, add_dummy_prefix=True, add_special_tokens=False),
+                            tokenizer.tokenize(Side.TARGET, trg_term, add_dummy_prefix=False, add_special_tokens=False),
                         ]
                         dict_src_file.write("\t".join(src_term_variants) + "\n")
                         dict_trg_file.write("\t".join(trg_term_variants) + "\n")
@@ -994,7 +995,7 @@ class Config(ABC):
                     for index in pair_val.index:
                         for ci in range(val_project_count):
                             if len(ref_files) == ci:
-                                ref_files.append(stack.enter_context(self._open_append(self._val_trg_filename(ci))))
+                                ref_files.append(stack.enter_context(self._open_append(self.val_trg_filename(ci))))
                             if ci < len(columns):
                                 col = columns[ci]
                                 ref_files[ci].write(
@@ -1005,7 +1006,7 @@ class Config(ABC):
                 else:
                     for index in pair_val.index:
                         if len(ref_files) == 0:
-                            ref_files.append(stack.enter_context(self._open_append(self._val_trg_filename())))
+                            ref_files.append(stack.enter_context(self._open_append(self.val_trg_filename())))
                         columns_with_data = [c for c in columns if cast(str, pair_val.loc[index, c]).strip() != ""]
                         col = random.choice(columns_with_data)
                         ref_files[0].write(
@@ -1062,12 +1063,12 @@ class Config(ABC):
 
             tags_str = self._get_tags_str(pair.tags)
 
-            train_src_file = stack.enter_context(self._open_append(self._train_src_filename()))
-            train_trg_file = stack.enter_context(self._open_append(self._train_trg_filename()))
-            val_src_file = stack.enter_context(self._open_append(self._val_src_filename()))
-            val_trg_file = stack.enter_context(self._open_append(self._val_trg_filename()))
-            test_src_file = stack.enter_context(self._open_append(self._test_src_filename(src_file.iso, trg_file.iso)))
-            test_trg_file = stack.enter_context(self._open_append(self._test_trg_filename(src_file.iso, trg_file.iso)))
+            train_src_file = stack.enter_context(self._open_append(self.train_src_filename()))
+            train_trg_file = stack.enter_context(self._open_append(self.train_trg_filename()))
+            val_src_file = stack.enter_context(self._open_append(self.val_src_filename()))
+            val_trg_file = stack.enter_context(self._open_append(self.val_trg_filename()))
+            test_src_file = stack.enter_context(self._open_append(self.test_src_filename(src_file.iso, trg_file.iso)))
+            test_trg_file = stack.enter_context(self._open_append(self.test_trg_filename(src_file.iso, trg_file.iso)))
 
             train_vref_file: Optional[TextIO] = None
             val_vref_file: Optional[TextIO] = None
@@ -1078,29 +1079,29 @@ class Config(ABC):
             dict_trg_file: Optional[TextIO] = None
             dict_vref_file: Optional[TextIO] = None
             if self._has_scripture_data:
-                train_vref_file = stack.enter_context(self._open_append(self._train_vref_filename()))
-                val_vref_file = stack.enter_context(self._open_append(self._val_vref_filename()))
+                train_vref_file = stack.enter_context(self._open_append(self.train_vref_filename()))
+                val_vref_file = stack.enter_context(self._open_append(self.val_vref_filename()))
                 test_vref_file = stack.enter_context(
-                    self._open_append(self._test_vref_filename(src_file.iso, trg_file.iso))
+                    self._open_append(self.test_vref_filename(src_file.iso, trg_file.iso))
                 )
                 test_projects = self._get_test_projects(src_file.iso, trg_file.iso)
                 if self._has_multiple_test_projects(src_file.iso, trg_file.iso):
                     test_trg_project_files = [
                         stack.enter_context(
-                            self._open_append(self._test_trg_filename(src_file.iso, trg_file.iso, project))
+                            self._open_append(self.test_trg_filename(src_file.iso, trg_file.iso, project))
                         )
                         for project in test_projects
                         if project != BASIC_DATA_PROJECT
                     ]
                 val_ref_count = self._get_val_ref_count(src_file.iso, trg_file.iso)
                 val_trg_ref_files = [
-                    stack.enter_context(self._open_append(self._val_trg_filename(index)))
+                    stack.enter_context(self._open_append(self.val_trg_filename(index)))
                     for index in range(1, val_ref_count)
                 ]
             if pair.is_dictionary:
-                dict_src_file = stack.enter_context(self._open_append(self._dict_src_filename()))
-                dict_trg_file = stack.enter_context(self._open_append(self._dict_trg_filename()))
-                dict_vref_file = stack.enter_context(self._open_append(self._dict_vref_filename()))
+                dict_src_file = stack.enter_context(self._open_append(self.dict_src_filename()))
+                dict_trg_file = stack.enter_context(self._open_append(self.dict_trg_filename()))
+                dict_vref_file = stack.enter_context(self._open_append(self.dict_vref_filename()))
 
             index = 0
             for src_line, trg_line in tqdm(zip(input_src_file, input_trg_file)):
@@ -1165,20 +1166,12 @@ class Config(ABC):
                     and dict_vref_file is not None
                 ):
                     src_variants = [
-                        tokenizer.tokenize(
-                            Side.SOURCE, src_sentence, add_dummy_prefix=True, include_special_tokens=False
-                        ),
-                        tokenizer.tokenize(
-                            Side.SOURCE, src_sentence, add_dummy_prefix=False, include_special_tokens=False
-                        ),
+                        tokenizer.tokenize(Side.SOURCE, src_sentence, add_dummy_prefix=True, add_special_tokens=False),
+                        tokenizer.tokenize(Side.SOURCE, src_sentence, add_dummy_prefix=False, add_special_tokens=False),
                     ]
                     trg_variants = [
-                        tokenizer.tokenize(
-                            Side.TARGET, trg_sentence, add_dummy_prefix=True, include_special_tokens=False
-                        ),
-                        tokenizer.tokenize(
-                            Side.TARGET, trg_sentence, add_dummy_prefix=False, include_special_tokens=False
-                        ),
+                        tokenizer.tokenize(Side.TARGET, trg_sentence, add_dummy_prefix=True, add_special_tokens=False),
+                        tokenizer.tokenize(Side.TARGET, trg_sentence, add_dummy_prefix=False, add_special_tokens=False),
                     ]
                     dict_src_file.write("\t".join(src_variants) + "\n")
                     dict_trg_file.write("\t".join(trg_variants) + "\n")
@@ -1258,87 +1251,48 @@ class Config(ABC):
             test_projects.add(BASIC_DATA_PROJECT)
         return test_projects
 
-    def _train_src_filename(self) -> str:
+    def train_src_filename(self) -> str:
         return "train.src.txt"
 
-    def _train_trg_filename(self) -> str:
+    def train_trg_filename(self) -> str:
         return "train.trg.txt"
 
-    def _train_vref_filename(self) -> str:
+    def train_vref_filename(self) -> str:
         return "train.vref.txt"
 
-    def _val_src_filename(self) -> str:
+    def val_src_filename(self) -> str:
         return "val.src.txt"
 
-    def _val_vref_filename(self) -> str:
+    def val_vref_filename(self) -> str:
         return "val.vref.txt"
 
-    def _val_trg_filename(self, index: int = 0) -> str:
+    def val_trg_filename(self, index: int = 0) -> str:
         return f"val.trg.txt.{index}" if self.root["eval"]["multi_ref_eval"] else "val.trg.txt"
 
-    def _test_src_filename(self, src_iso: str, trg_iso: str) -> str:
+    def test_src_filename(self, src_iso: str, trg_iso: str) -> str:
         return f"test.{src_iso}.{trg_iso}.src.txt" if self._multiple_test_iso_pairs else "test.src.txt"
 
-    def _test_vref_filename(self, src_iso: str, trg_iso: str) -> str:
+    def test_vref_filename(self, src_iso: str, trg_iso: str) -> str:
         return f"test.{src_iso}.{trg_iso}.vref.txt" if self._multiple_test_iso_pairs else "test.vref.txt"
 
-    def _test_trg_filename(self, src_iso: str, trg_iso: str, project: str = BASIC_DATA_PROJECT) -> str:
+    def test_trg_filename(self, src_iso: str, trg_iso: str, project: str = BASIC_DATA_PROJECT) -> str:
         prefix = f"test.{src_iso}.{trg_iso}" if self._multiple_test_iso_pairs else "test"
         has_multiple_test_projects = self._iso_pairs[(src_iso, trg_iso)].has_multiple_test_projects
         suffix = f".{project}" if has_multiple_test_projects else ""
         return f"{prefix}.trg.detok{suffix}.txt"
 
-    def _has_multiple_test_projects(self, src_iso: str, trg_iso: str) -> bool:
-        return self._iso_pairs[(src_iso, trg_iso)].has_multiple_test_projects
-
-    def _dict_src_filename(self) -> str:
+    def dict_src_filename(self) -> str:
         return "dict.src.txt"
 
-    def _dict_trg_filename(self) -> str:
+    def dict_trg_filename(self) -> str:
         return "dict.trg.txt"
 
-    def _dict_vref_filename(self) -> str:
+    def dict_vref_filename(self) -> str:
         return "dict.vref.txt"
+
+    def _has_multiple_test_projects(self, src_iso: str, trg_iso: str) -> bool:
+        return self._iso_pairs[(src_iso, trg_iso)].has_multiple_test_projects
 
     @abstractmethod
     def _build_vocabs(self) -> None:
         ...
-
-    def _create_train_alignments(self, train_count: int) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            temp_dir = Path(td)
-            aligner = get_aligner(self.data["aligner"], temp_dir)
-            aligner_name = get_aligner_name(aligner.id)
-            if not isinstance(aligner, MachineAligner):
-                raise RuntimeError(f"{aligner_name} is not supported for generating train alignments.")
-            aligner.lowercase = True
-
-            LOGGER.info(f"Generating train alignments using {aligner_name}")
-            src_align_path = self.exp_dir / "train.src.txt"
-            trg_align_path = self.exp_dir / "train.trg.txt"
-            train_size: Union[int, float] = self.data["guided_alignment_train_size"]
-            split_indices = split_corpus(train_count, train_size)
-            if split_indices is not None:
-                # reduce size of alignment training data
-                src_train_path = temp_dir / "train.src.align.txt"
-                trg_train_path = temp_dir / "train.trg.align.txt"
-
-                with src_align_path.open("r", encoding="utf-8-sig") as src_in_file, trg_align_path.open(
-                    "r", encoding="utf-8-sig"
-                ) as trg_in_file, src_train_path.open(
-                    "w", encoding="utf-8", newline="\n"
-                ) as src_out_file, trg_train_path.open(
-                    "w", encoding="utf-8", newline="\n"
-                ) as trg_out_file:
-                    i = 0
-                    for src_sentence, trg_sentence in zip(src_in_file, trg_in_file):
-                        if i in split_indices:
-                            src_out_file.write(src_sentence)
-                            trg_out_file.write(trg_sentence)
-                        i += 1
-            else:
-                src_train_path = src_align_path
-                trg_train_path = trg_align_path
-
-            aligner.train(src_train_path, trg_train_path)
-            aligner.force_align(src_align_path, trg_align_path, self.exp_dir / "train.alignments.txt")

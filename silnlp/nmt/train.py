@@ -37,12 +37,12 @@ def main() -> None:
     for exp_name in args.experiments:
         config = load_config(exp_name)
         config.set_seed()
-        model = config.create_model(args.mixed_precision)
+        model = config.create_model(args.mixed_precision, args.num_devices)
         model.save_effective_config(config.exp_dir / f"effective-config-{rev_hash}.yml")
 
         print(f"=== Training ({exp_name}) ===")
         try:
-            model.train(args.num_devices)
+            model.train()
         except RuntimeError as e:
             LOGGER.warning(str(e))
         print("Training completed")

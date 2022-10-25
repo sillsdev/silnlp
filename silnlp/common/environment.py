@@ -44,7 +44,7 @@ class SilNlpEnv:
             # it is already initialized
             return
         elif os.getenv("SIL_NLP_PT_DIR"):
-            self.pt_dir = self.data_dir / os.getenv("SIL_NLP_PT_DIR")
+            self.pt_dir = self.data_dir / os.getenv("SIL_NLP_PT_DIR", "")
         else:
             self.pt_dir = self.data_dir / "Paratext"
         self.pt_projects_dir = self.pt_dir / "projects"
@@ -57,7 +57,7 @@ class SilNlpEnv:
             # it is already initialized
             return
         elif os.getenv("SIL_NLP_MT_DIR"):
-            self.mt_dir = self.data_dir / os.getenv("SIL_NLP_MT_DIR")
+            self.mt_dir = self.data_dir / os.getenv("SIL_NLP_MT_DIR", "")
         else:
             self.mt_dir = self.data_dir / "MT"
         self.mt_corpora_dir = self.mt_dir / "corpora"
@@ -166,9 +166,9 @@ class SilNlpEnv:
                     curr_mod_time = datetime.fromtimestamp(os.path.getmtime(temp_dest_path), tz=timezone.utc)
                     new_mod_time = obj.last_modified
                     if curr_mod_time >= new_mod_time:
-                        LOGGER.info("File already exists in the cache: " + rel_path)
+                        LOGGER.debug("File already exists in local cache: " + rel_path)
                         continue
-                LOGGER.info("Copying from bucket to local cache: " + rel_path)
+                LOGGER.info("Downloading file to local cache: " + rel_path)
                 data_bucket.download_file(obj.object_key, str(temp_dest_path))
 
     def copy_experiment_to_bucket(self, name: str, extensions: Union[str, Tuple[str, ...]] = ""):
@@ -195,9 +195,9 @@ class SilNlpEnv:
                     source_file = os.path.join(root, file)
                     dest_file = s3_dest_path + "/" + file
                     if dest_file in files_already_in_s3:
-                        LOGGER.debug(f"{dest_file} already in s3 bucket")
+                        LOGGER.debug("File already exists in S3 bucket: " + dest_file)
                     else:
-                        LOGGER.debug(f"adding{dest_file} to s3 bucket")
+                        LOGGER.info("Uploading file to S3 bucket: " + dest_file)
                         data_bucket.upload_file(source_file, dest_file)
 
     def get_source_experiment_path(self, tmp_path):
@@ -237,19 +237,6 @@ def download_if_s3_paths(paths: Iterable[S3Path]) -> List[Path]:
             data_bucket.download_file(path.key, str(temp_path))
             return_paths.append(temp_path)
     return return_paths
-
-
-def download_if_s3_path(path: S3Path) -> Path:
-    if type(path) is not S3Path:
-        return path
-    else:
-        temp_root = Path(tempfile.TemporaryDirectory().name)
-        temp_root.mkdir()
-        s3 = boto3.resource("s3")
-        data_bucket = s3.Bucket(str(SIL_NLP_ENV.data_dir).strip("\\/"))
-        temp_path = temp_root / path.name
-        data_bucket.download_file(path.key, str(temp_path))
-        return temp_path
 
 
 def pathify(path: Path) -> Path:

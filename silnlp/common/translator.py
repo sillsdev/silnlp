@@ -160,17 +160,15 @@ class Translator(ABC):
     def translate(
         self,
         sentences: Iterable[Union[str, List[str]]],
-        src_iso: Optional[str] = None,
-        trg_iso: Optional[str] = None,
+        src_iso: str,
+        trg_iso: str,
     ) -> Iterable[str]:
         pass
 
-    def translate_text_file(
-        self, src_file_path: Path, trg_file_path: Path, src_iso: Optional[str] = None, trg_iso: Optional[str] = None
-    ):
-        write_corpus(trg_file_path, self.translate(load_corpus(src_file_path), src_iso=src_iso, trg_iso=trg_iso))
+    def translate_text_file(self, src_file_path: Path, trg_file_path: Path, src_iso: str, trg_iso: str):
+        write_corpus(trg_file_path, self.translate(load_corpus(src_file_path), src_iso, trg_iso))
 
-    def translate_book(self, src_project: str, book: str, output_path: Path, trg_iso: Optional[str] = None) -> None:
+    def translate_book(self, src_project: str, book: str, output_path: Path, trg_iso: str) -> None:
         src_project_dir = get_project_dir(src_project)
         with (src_project_dir / "Settings.xml").open("rb") as settings_file:
             settings_tree = etree.parse(settings_file)
@@ -183,9 +181,7 @@ class Translator(ABC):
 
         translations = list(
             self.translate(
-                ([s.text.strip(), str(s.ref) if s.ref.verse_num != 0 else ""] for s in segments),
-                src_iso=src_iso,
-                trg_iso=trg_iso,
+                ([s.text.strip(), str(s.ref) if s.ref.verse_num != 0 else ""] for s in segments), src_iso, trg_iso
             )
         )
 

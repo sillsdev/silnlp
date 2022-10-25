@@ -1,6 +1,7 @@
 import logging
 import os
 import shutil
+import tempfile
 from pathlib import Path
 from typing import IO, Iterable, List, Optional, Sequence, Set, Tuple, Union, cast
 
@@ -14,14 +15,16 @@ from opennmt.data import Vocab
 from opennmt.models.catalog import list_model_names_from_catalog
 from opennmt.utils import Scorer, register_scorer
 
-from ..common.corpus import load_corpus
+from ..alignment.config import get_aligner, get_aligner_name
+from ..alignment.machine_aligner import MachineAligner
+from ..common.corpus import load_corpus, split_corpus
 from ..common.environment import SIL_NLP_ENV, download_if_s3_paths
 from ..common.tf_utils import set_tf_log_level
 from ..common.utils import Side, get_mt_exp_dir, merge_dict
 from .config import CheckpointType, Config, NMTModel
 from .opennmt.runner import create_runner
 from .sp_utils import decode_sp, decode_sp_lines
-from .tokenizer import Tokenizer
+from .tokenizer import NullTokenizer, Tokenizer
 
 LOGGER = logging.getLogger(__package__ + ".open_nmt_config")
 
@@ -317,6 +320,7 @@ class OpenNMTConfig(Config):
                     "guided_alignment_type": "mse",
                     "guided_alignment_weight": 0.3,
                 },
+                "infer": {},
             },
             config,
         )
@@ -387,14 +391,14 @@ class OpenNMTConfig(Config):
             p.is_dictionary or (len(p.src_terms_files) > 0 and data_config["terms"]["dictionary"])
             for p in self.corpus_pairs
         ):
-            data_config["source_dictionary"] = str(exp_dir / self._dict_src_filename())
-            data_config["target_dictionary"] = str(exp_dir / self._dict_trg_filename())
-            data_config["ref_dictionary"] = str(exp_dir / self._dict_vref_filename())
+            data_config["source_dictionary"] = str(exp_dir / self.dict_src_filename())
+            data_config["target_dictionary"] = str(exp_dir / self.dict_trg_filename())
+            data_config["ref_dictionary"] = str(exp_dir / self.dict_vref_filename())
 
         if self._has_scripture_data:
             data_config["eval_features_file"] = [
-                str(exp_dir / self._val_src_filename()),
-                str(exp_dir / self._val_vref_filename()),
+                str(exp_dir / self.val_src_filename()),
+                str(exp_dir / self.val_vref_filename()),
             ]
 
         parent: Optional[str] = self.data.get("parent")
@@ -422,12 +426,16 @@ class OpenNMTConfig(Config):
             if self.mirror:
                 self._tags.update(f"<2{src_iso}>" for src_iso in self.src_isos)
 
-    def create_model(self, mixed_precision: bool = False) -> NMTModel:
-        return OpenNMTModel(self, mixed_precision)
+    @property
+    def model_dir(self) -> Path:
+        return Path(self.root["model_dir"])
+
+    def create_model(self, mixed_precision: bool = False, num_devices: int = 1) -> NMTModel:
+        return OpenNMTModel(self, mixed_precision, num_devices)
 
     def create_tokenizer(self) -> Tokenizer:
         if not self.data["tokenize"]:
-            return OpenNMTTokenizer(write_trg_tag=self.write_trg_tag)
+            return NullTokenizer()
 
         if self.share_vocab:
             model_prefix = self.exp_dir / "sp"
@@ -626,19 +634,65 @@ class OpenNMTConfig(Config):
             max_train_size,
         )
 
+    def _build_corpora(self, tokenizer: Tokenizer, stats: bool) -> int:
+        train_count = super()._build_corpora(tokenizer, stats)
+        if self.data["guided_alignment"]:
+            self._create_train_alignments(train_count)
+        return train_count
+
+    def _create_train_alignments(self, train_count: int) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            temp_dir = Path(td)
+            aligner = get_aligner(self.data["aligner"], temp_dir)
+            aligner_name = get_aligner_name(aligner.id)
+            if not isinstance(aligner, MachineAligner):
+                raise RuntimeError(f"{aligner_name} is not supported for generating train alignments.")
+            aligner.lowercase = True
+
+            LOGGER.info(f"Generating train alignments using {aligner_name}")
+            src_align_path = self.exp_dir / "train.src.txt"
+            trg_align_path = self.exp_dir / "train.trg.txt"
+            train_size: Union[int, float] = self.data["guided_alignment_train_size"]
+            split_indices = split_corpus(train_count, train_size)
+            if split_indices is not None:
+                # reduce size of alignment training data
+                src_train_path = temp_dir / "train.src.align.txt"
+                trg_train_path = temp_dir / "train.trg.align.txt"
+
+                with src_align_path.open("r", encoding="utf-8-sig") as src_in_file, trg_align_path.open(
+                    "r", encoding="utf-8-sig"
+                ) as trg_in_file, src_train_path.open(
+                    "w", encoding="utf-8", newline="\n"
+                ) as src_out_file, trg_train_path.open(
+                    "w", encoding="utf-8", newline="\n"
+                ) as trg_out_file:
+                    i = 0
+                    for src_sentence, trg_sentence in zip(src_in_file, trg_in_file):
+                        if i in split_indices:
+                            src_out_file.write(src_sentence)
+                            trg_out_file.write(trg_sentence)
+                        i += 1
+            else:
+                src_train_path = src_align_path
+                trg_train_path = trg_align_path
+
+            aligner.train(src_train_path, trg_train_path)
+            aligner.force_align(src_align_path, trg_align_path, self.exp_dir / "train.alignments.txt")
+
 
 class OpenNMTModel(NMTModel):
-    def __init__(self, config: OpenNMTConfig, mixed_precision: bool) -> None:
+    def __init__(self, config: OpenNMTConfig, mixed_precision: bool, num_devices: int) -> None:
         set_tf_log_level()
         self._config = config
         self._runner = create_runner(config.model, config.root, config.write_trg_tag, mixed_precision)
+        self._num_devices = num_devices
 
-    def train(self, num_devices: int = 1) -> None:
+    def train(self) -> None:
         checkpoint_path: Optional[str] = None
         if not (self._config.exp_dir / "run").is_dir() and self._config.has_parent:
             checkpoint_path = str(self._config.exp_dir / "parent")
 
-        self._runner.train(num_devices=num_devices, with_eval=True, checkpoint_path=checkpoint_path)
+        self._runner.train(num_devices=self._num_devices, with_eval=True, checkpoint_path=checkpoint_path)
 
     def save_effective_config(self, path: Path) -> None:
         self._runner.save_effective_config(str(path), training=True)
@@ -647,30 +701,22 @@ class OpenNMTModel(NMTModel):
         self,
         input_paths: List[Union[Path, Sequence[Path]]],
         translation_paths: List[Path],
-        checkpoint: Union[CheckpointType, str, int] = CheckpointType.BEST,
+        checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
         features_paths = [str(p) if isinstance(p, Path) else [str(cp) for cp in p] for p in input_paths]
         predictions_paths = [str(p) for p in translation_paths]
-        checkpoint_path: Optional[Path]
-        if isinstance(checkpoint, int):
-            checkpoint_path = self._config.model_dir / f"ckpt-{checkpoint}"
-        else:
-            checkpoint_path, _ = get_checkpoint_path(self._config.model_dir, checkpoint)
-
-        self._runner.infer_multiple(
-            features_paths, predictions_paths, str(checkpoint_path) if checkpoint_path is not None else None
-        )
+        checkpoint_path, _ = get_checkpoint_path(self._config.model_dir, checkpoint)
+        self._runner.infer_multiple(features_paths, predictions_paths, str(checkpoint_path))
 
     def translate(
         self,
         sentences: Iterable[Union[str, Sequence[str]]],
-        src_iso: Optional[str] = None,
-        trg_iso: Optional[str] = None,
-        checkpoint: Union[CheckpointType, str, int] = CheckpointType.BEST,
+        src_iso: str,
+        trg_iso: str,
+        checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Iterable[str]:
         tokenizer = self._config.create_tokenizer()
-        tokenizer.set_src_lang(self._config.default_src_iso if src_iso is None else src_iso)
-        tokenizer.set_trg_lang(self._config.default_trg_iso if trg_iso is None else trg_iso)
+        tokenizer.set_trg_lang(trg_iso)
         features_list: List[List[str]] = [[]]
         for sentence in sentences:
             if isinstance(sentence, str):
@@ -681,27 +727,19 @@ class OpenNMTModel(NMTModel):
                     if i == len(features_list):
                         features_list.append([])
                     features_list[i].append(sentence[i])
-        checkpoint_path: Optional[Path]
-        if isinstance(checkpoint, int):
-            checkpoint_path = self._config.model_dir / f"ckpt-{checkpoint}"
-        else:
-            checkpoint_path, _ = get_checkpoint_path(self._config.model_dir, checkpoint)
-        translations = self._runner.infer_list(
-            features_list, checkpoint_path=str(checkpoint_path) if checkpoint_path is not None else None
-        )
-        return (t[0] for t in translations)
+        checkpoint_path, _ = get_checkpoint_path(self._config.model_dir, checkpoint)
+        translations = self._runner.infer_list(features_list, str(checkpoint_path))
+        return (decode_sp(t[0]) for t in translations)
 
     def get_checkpoint_step(self, checkpoint: Union[CheckpointType, str, int]) -> int:
-        if isinstance(checkpoint, int):
-            return checkpoint
         return get_checkpoint_path(self._config.model_dir, checkpoint)[1]
 
 
 class OpenNMTTokenizer(Tokenizer):
     def __init__(
         self,
-        src_spp: Optional[sp.SentencePieceProcessor] = None,
-        trg_spp: Optional[sp.SentencePieceProcessor] = None,
+        src_spp: sp.SentencePieceProcessor,
+        trg_spp: sp.SentencePieceProcessor,
         write_trg_tag: bool = False,
     ) -> None:
         self._src_spp = src_spp
@@ -722,21 +760,20 @@ class OpenNMTTokenizer(Tokenizer):
         line: str,
         add_dummy_prefix: bool = True,
         sample_subwords: bool = False,
-        include_special_tokens: bool = True,
+        add_special_tokens: bool = True,
     ) -> str:
         spp = self._src_spp if side is Side.SOURCE else self._trg_spp
-        if spp is not None:
-            if not add_dummy_prefix:
-                line = "\ufffc" + line
-            if sample_subwords:
-                pieces = spp.Encode(line, out_type=str, enable_sampling=True, alpha=0.1, nbest_size=-1)
-            else:
-                pieces = spp.EncodeAsPieces(line)
-            if not add_dummy_prefix:
-                pieces = pieces[2:]
-            line = " ".join(pieces)
+        if not add_dummy_prefix:
+            line = "\ufffc" + line
+        if sample_subwords:
+            pieces = spp.Encode(line, out_type=str, enable_sampling=True, alpha=0.1, nbest_size=-1)
+        else:
+            pieces = spp.EncodeAsPieces(line)
+        if not add_dummy_prefix:
+            pieces = pieces[2:]
+        line = " ".join(pieces)
         prefix = ""
-        if include_special_tokens and side is Side.SOURCE and self._write_trg_tag and self._trg_lang is not None:
+        if add_special_tokens and side is Side.SOURCE and self._write_trg_tag and self._trg_lang is not None:
             prefix = f"<2{self._trg_lang}> "
         return prefix + line
 
@@ -744,6 +781,4 @@ class OpenNMTTokenizer(Tokenizer):
         return self.detokenize(self.tokenize(side, line))
 
     def detokenize(self, line: str) -> str:
-        if self._trg_spp is None:
-            return line
         return decode_sp(line)

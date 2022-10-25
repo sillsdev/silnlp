@@ -20,7 +20,7 @@ class Tokenizer(ABC):
         line: str,
         add_dummy_prefix: bool = True,
         sample_subwords: bool = False,
-        include_special_tokens: bool = True,
+        add_special_tokens: bool = True,
     ) -> str:
         ...
 
@@ -38,10 +38,10 @@ class Tokenizer(ABC):
         lines: Iterable[str],
         add_dummy_prefix: bool = True,
         sample_subwords: bool = False,
-        include_special_tokens: bool = True,
+        add_special_tokens: bool = True,
     ) -> Iterable[str]:
         for line in lines:
-            yield self.tokenize(side, line, add_dummy_prefix, sample_subwords, include_special_tokens)
+            yield self.tokenize(side, line, add_dummy_prefix, sample_subwords, add_special_tokens)
 
     def normalize_all(self, side: Side, lines: Iterable[str]) -> Iterable[str]:
         for line in lines:
@@ -65,7 +65,7 @@ class NullTokenizer(Tokenizer):
         line: str,
         add_dummy_prefix: bool = True,
         sample_subwords: bool = False,
-        include_special_tokens: bool = True,
+        add_special_tokens: bool = True,
     ) -> str:
         return line
 

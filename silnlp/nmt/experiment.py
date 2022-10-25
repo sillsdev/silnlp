@@ -1,12 +1,7 @@
 import argparse
-import logging
 import os
 from dataclasses import dataclass
 from typing import Optional
-
-import tensorflow as tf
-
-logging.basicConfig()
 
 from ..common.environment import SIL_NLP_ENV
 from ..common.tf_utils import enable_memory_growth
@@ -29,7 +24,6 @@ class SILExperiment:
         self.name: str = self.clearml.name
         self.config: Config = self.clearml.config
         self.rev_hash = get_git_revision_hash()
-        self.tensorboard_init()
         self.config.set_seed()
 
     def run(self):
@@ -44,33 +38,29 @@ class SILExperiment:
 
     def train(self):
         os.system("nvidia-smi")
-        # os.environ["TF_DETERMINISTIC_OPS"] = "1"
         SIL_NLP_ENV.copy_experiment_from_bucket(
             self.name, extensions=(".txt", ".vocab", ".model", ".yml", ".csv"), copy_run=True
         )
 
-        model = self.config.create_model(self.mixed_precision)
+        model = self.config.create_model(self.mixed_precision, self.num_devices)
         model.save_effective_config(self.config.exp_dir / f"effective-config-{self.rev_hash}.yml")
 
         print(f"=== Training ({self.name}) ===")
-        model.train(self.num_devices)
+        model.train()
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
         print("Training completed")
 
     def test(self):
-        SIL_NLP_ENV.copy_experiment_from_bucket(self.name, extensions=(".txt", ".vocab", ".model", ".yml", ".csv"))
+        SIL_NLP_ENV.copy_experiment_from_bucket(
+            self.name, extensions=(".txt", ".vocab", ".model", ".yml", ".csv", ".json")
+        )
         test(
             experiment=self.name,
             last=True,
-            avg=True,
             best=True,
             scorers={"bleu", "sentencebleu", "chrf3", "wer", "ter"},
-            by_book=True,
         )
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
-
-    def tensorboard_init(self):
-        tf.summary.create_file_writer(str(SIL_NLP_ENV.mt_experiments_dir / self.name / "logs"))
 
 
 def main() -> None:
@@ -81,7 +71,7 @@ def main() -> None:
     parser.add_argument("--memory-growth", default=False, action="store_true", help="Enable memory growth")
     parser.add_argument("--num-devices", type=int, default=1, help="Number of devices to train on")
     parser.add_argument(
-        "--clearml_queue",
+        "--clearml-queue",
         default=None,
         type=str,
         help="Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run it locally and register it with ClearML.",

@@ -21,18 +21,12 @@ LOGGER = logging.getLogger(__name__)
 
 
 class NMTTranslator(Translator):
-    def __init__(self, tokenizer: Tokenizer, model: NMTModel, checkpoint: Union[CheckpointType, str, int]):
-        self._tokenizer = tokenizer
+    def __init__(self, model: NMTModel, checkpoint: Union[CheckpointType, str, int]):
         self._model = model
         self._checkpoint = checkpoint
 
-    def translate(
-        self,
-        sentences: Iterable[Union[str, List[str]]],
-        src_iso: Optional[str] = None,
-        trg_iso: Optional[str] = None,
-    ) -> Iterable[str]:
-        return self._tokenizer.detokenize_all(self._model.translate(sentences, src_iso, trg_iso, self._checkpoint))
+    def translate(self, sentences: Iterable[Union[str, List[str]]], src_iso: str, trg_iso: str) -> Iterable[str]:
+        return self._model.translate(sentences, src_iso, trg_iso, self._checkpoint)
 
 
 @dataclass
@@ -45,41 +39,22 @@ class TranslationTask:
         if self.checkpoint is None:
             self.checkpoint = "last"
 
-    def init_translation_task(self, experiment_suffix: str) -> Tuple[Translator, Config, str]:
-        clearml = SILClearML(
-            self.name,
-            self.clearml_queue,
-            project_suffix="_infer",
-            experiment_suffix=experiment_suffix,
-        )
-        self.name = clearml.name
-
-        SIL_NLP_ENV.copy_experiment_from_bucket(
-            self.name, extensions=(".vocab", ".model", ".yml", "dict.src.txt", "dict.trg.txt", "dict.vref.txt")
-        )
-
-        clearml.config.set_seed()
-
-        tokenizer = clearml.config.create_tokenizer()
-        model = clearml.config.create_model()
-        translator = NMTTranslator(tokenizer, model, self.checkpoint)
-        step = model.get_checkpoint_step(self.checkpoint)
-        step_str = "avg" if step == -1 else str(step)
-        return translator, clearml.config, step_str
-
     def translate_books(
         self,
         books: str,
-        src_project: Optional[str] = None,
-        trg_iso: Optional[str] = None,
+        src_project: Optional[str],
+        trg_iso: Optional[str],
     ):
-        translator, config, step_str = self.init_translation_task(experiment_suffix=f"_{self.checkpoint}_{books}")
+        translator, config, step_str = self._init_translation_task(experiment_suffix=f"_{self.checkpoint}_{books}")
         book_nums = get_books(books)
 
         if src_project is None:
             if len(config.src_projects) != 1:
                 raise RuntimeError("A source project must be specified.")
             src_project = next(iter(config.src_projects))
+
+        if trg_iso is None:
+            trg_iso = config.default_trg_iso
 
         output_dir = config.exp_dir / "infer" / step_str
         output_dir.mkdir(exist_ok=True, parents=True)
@@ -90,7 +65,7 @@ class TranslationTask:
             output_path = output_dir / f"{book_file_name_digits(book_num)}{book}.SFM"
             try:
                 LOGGER.info(f"Translating {book} ...")
-                translator.translate_book(src_project, book, output_path, trg_iso=trg_iso)
+                translator.translate_book(src_project, book, output_path, trg_iso)
             except Exception as e:
                 if not displayed_error_already:
                     LOGGER.error(f"Was not able to translate {book}.  Error: {e.args[0]}")
@@ -100,13 +75,25 @@ class TranslationTask:
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
 
     def translate_text_files(
-        self, src_prefix: str, trg_prefix: str, start_seq: int, end_seq: int, trg_iso: Optional[str] = None
+        self,
+        src_prefix: str,
+        trg_prefix: str,
+        start_seq: int,
+        end_seq: int,
+        src_iso: Optional[str],
+        trg_iso: Optional[str],
     ):
-        translator, _, _ = self.init_translation_task(experiment_suffix=f"_{self.checkpoint}_{src_prefix}")
+        translator, config, _ = self._init_translation_task(experiment_suffix=f"_{self.checkpoint}_{src_prefix}")
         if trg_prefix is None:
             raise RuntimeError("A target file prefix must be specified.")
         if start_seq is None or end_seq is None:
             raise RuntimeError("Start and end sequence numbers must be specified.")
+
+        if src_iso is None:
+            src_iso = config.default_src_iso
+        if trg_iso is None:
+            trg_iso = config.default_trg_iso
+
         cwd = Path.cwd()
         for i in range(start_seq, end_seq + 1):
             file_num = f"{i:04d}"
@@ -114,15 +101,22 @@ class TranslationTask:
             trg_file_path = cwd / f"{trg_prefix}{file_num}.txt"
             if src_file_path.is_file() and not trg_file_path.is_file():
                 start = time.time()
-                translator.translate_text_file(src_file_path, trg_file_path, trg_iso=trg_iso)
+                translator.translate_text_file(src_file_path, trg_file_path, src_iso, trg_iso)
                 end = time.time()
                 print(f"Translated {src_file_path.name} to {trg_file_path.name} in {((end-start)/60):.2f} minutes")
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
 
-    def translate_text_file(self, src_filename: str, trg_iso: Optional[str] = None, trg_filename: Optional[str] = None):
-        translator, config, step_str = self.init_translation_task(
+    def translate_text_file(
+        self, src_filename: str, trg_filename: Optional[str], src_iso: Optional[str], trg_iso: Optional[str]
+    ):
+        translator, config, step_str = self._init_translation_task(
             experiment_suffix=f"_{self.checkpoint}_{os.path.basename(src_filename)}"
         )
+
+        if src_iso is None:
+            src_iso = config.default_src_iso
+        if trg_iso is None:
+            trg_iso = config.default_trg_iso
 
         if Path(src_filename).exists():
             src_file_path = Path(src_filename)
@@ -142,8 +136,30 @@ class TranslationTask:
             default_output_dir = config.exp_dir / "infer" / step_str
             trg_file_path = default_output_dir / src_file_path.name
             trg_file_path.parent.mkdir(exist_ok=True, parents=True)
-        translator.translate_text_file(src_file_path, trg_file_path, trg_iso=trg_iso)
+
+        translator.translate_text_file(src_file_path, trg_file_path, src_iso, trg_iso)
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
+
+    def _init_translation_task(self, experiment_suffix: str) -> Tuple[Translator, Config, str]:
+        clearml = SILClearML(
+            self.name,
+            self.clearml_queue,
+            project_suffix="_infer",
+            experiment_suffix=experiment_suffix,
+        )
+        self.name = clearml.name
+
+        SIL_NLP_ENV.copy_experiment_from_bucket(
+            self.name, extensions=(".vocab", ".model", ".yml", "dict.src.txt", "dict.trg.txt", "dict.vref.txt", ".json")
+        )
+
+        clearml.config.set_seed()
+
+        model = clearml.config.create_model()
+        translator = NMTTranslator(model, self.checkpoint)
+        step = model.get_checkpoint_step(self.checkpoint)
+        step_str = "avg" if step == -1 else str(step)
+        return translator, clearml.config, step_str
 
 
 def main() -> None:
@@ -161,7 +177,8 @@ def main() -> None:
     parser.add_argument(
         "--books", metavar="books", nargs="+", default=[], help="The books to translate; e.g., 'NT', 'OT', 'GEN,EXO'"
     )
-    parser.add_argument("--trg-iso", default=None, type=str, help="The target language (iso code) to translate into")
+    parser.add_argument("--src-iso", default=None, type=str, help="The source language (iso code) to translate from")
+    parser.add_argument("--trg-iso", default=None, type=str, help="The target language (iso code) to translate to")
     parser.add_argument("--output-usfm", default=None, type=str, help="The output USFM file path")
     parser.add_argument(
         "--eager-execution",
@@ -192,11 +209,13 @@ def main() -> None:
     )
 
     if len(args.books) > 0:
-        translator.translate_books(args.books, src_project=args.src_project, trg_iso=args.trg_iso)
+        translator.translate_books(args.books, args.src_project, args.trg_iso)
     elif args.src_prefix is not None:
-        translator.translate_text_files(args.src_prefix, args.trg_prefix, args.start_seq, args.end_seq, args.trg_iso)
+        translator.translate_text_files(
+            args.src_prefix, args.trg_prefix, args.start_seq, args.end_seq, args.src_iso, args.trg_iso
+        )
     elif args.src is not None:
-        translator.translate_text_file(args.src, args.trg_iso, args.trg)
+        translator.translate_text_file(args.src, args.trg, args.src_iso, args.trg_iso)
     else:
         raise RuntimeError("A Scripture book, file, or file prefix must be specified.")
 
