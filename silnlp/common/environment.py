@@ -43,8 +43,8 @@ class SilNlpEnv:
         elif hasattr(self, "pt_dir"):
             # it is already initialized
             return
-        elif os.getenv("PT_DIR"):
-            self.pt_dir = self.data_dir / os.getenv("PT_DIR")
+        elif os.getenv("SIL_NLP_PT_DIR"):
+            self.pt_dir = self.data_dir / os.getenv("SIL_NLP_PT_DIR")
         else:
             self.pt_dir = self.data_dir / "Paratext"
         self.pt_projects_dir = self.pt_dir / "projects"
@@ -56,8 +56,8 @@ class SilNlpEnv:
         elif hasattr(self, "mt_dir"):
             # it is already initialized
             return
-        elif os.getenv("MT_DIR"):
-            self.mt_dir = self.data_dir / os.getenv("MT_DIR")
+        elif os.getenv("SIL_NLP_MT_DIR"):
+            self.mt_dir = self.data_dir / os.getenv("SIL_NLP_MT_DIR")
         else:
             self.mt_dir = self.data_dir / "MT"
         self.mt_corpora_dir = self.mt_dir / "corpora"
