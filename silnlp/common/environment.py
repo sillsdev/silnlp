@@ -168,7 +168,7 @@ class SilNlpEnv:
                     if curr_mod_time >= new_mod_time:
                         LOGGER.debug("File already exists in local cache: " + rel_path)
                         continue
-                LOGGER.info("Downloading file to local cache: " + rel_path)
+                LOGGER.info("Downloading " + rel_path)
                 data_bucket.download_file(obj.object_key, str(temp_dest_path))
 
     def copy_experiment_to_bucket(self, name: str, extensions: Union[str, Tuple[str, ...]] = ""):
@@ -197,7 +197,7 @@ class SilNlpEnv:
                     if dest_file in files_already_in_s3:
                         LOGGER.debug("File already exists in S3 bucket: " + dest_file)
                     else:
-                        LOGGER.info("Uploading file to S3 bucket: " + dest_file)
+                        LOGGER.info("Uploading " + dest_file)
                         data_bucket.upload_file(source_file, dest_file)
 
     def get_source_experiment_path(self, tmp_path):
