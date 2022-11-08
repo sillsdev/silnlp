@@ -15,6 +15,8 @@ from machine.corpora import (
     TextCorpus,
     TextRow,
     UsfmFileTextCorpus,
+    create_versification_ref_corpus,
+    extract_scripture_corpus,
 )
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_id_to_number, get_books
 from machine.tokenization import WhitespaceTokenizer
@@ -61,9 +63,7 @@ def extract_project(
     settings_tree = parse_project_settings(project_dir)
     iso = get_iso(settings_tree)
 
-    ref_dir = SIL_NLP_ENV.assets_dir / "Ref"
-
-    ref_corpus = ParatextTextCorpus(ref_dir)
+    ref_corpus = create_versification_ref_corpus()
 
     ltg_dir = project_dir / "LTG"
     if extract_lemmas and ltg_dir.is_dir():
@@ -106,55 +106,19 @@ def extract_project(
     output_vref_filename = output_dir / f"{output_basename}.vref.txt"
 
     try:
-        parallel_corpus = ref_corpus.align_rows(project_corpus, all_source_rows=True)
         segment_count = 0
         with ExitStack() as stack:
             output_stream = stack.enter_context(output_filename.open("w", encoding="utf-8", newline="\n"))
-            rows = stack.enter_context(parallel_corpus.get_rows())
+            output = stack.enter_context(extract_scripture_corpus(project_corpus, ref_corpus))
             output_vref_stream: Optional[TextIO] = None
             if output_project_vrefs:
                 output_vref_stream = stack.enter_context(output_vref_filename.open("w", encoding="utf-8", newline="\n"))
 
-            cur_ref: Optional[VerseRef] = None
-            cur_trg_ref: Optional[VerseRef] = None
-            cur_target_line = ""
-            cur_target_line_range = True
-            for row in rows:
-                ref: VerseRef = row.ref
-                if cur_ref is not None and ref.compare_to(cur_ref, compare_segments=False) != 0:
-                    output_stream.write(("<range>" if cur_target_line_range else cur_target_line) + "\n")
-                    if output_vref_stream is not None:
-                        output_vref_stream.write(("" if cur_trg_ref is None else str(cur_trg_ref)) + "\n")
-                    segment_count += 1
-                    cur_target_line = ""
-                    cur_target_line_range = True
-                    cur_trg_ref = None
-
-                cur_ref = ref
-                if cur_trg_ref is None and len(row.target_refs) > 0:
-                    cur_trg_ref = row.target_refs[0]
-                elif cur_trg_ref is not None and len(row.target_refs) > 0 and cur_trg_ref != row.target_refs[0]:
-                    cur_trg_ref.simplify()
-                    if cur_trg_ref < row.target_refs[0]:
-                        start_ref = cur_trg_ref
-                        end_ref = row.target_refs[0]
-                    else:
-                        start_ref = row.target_refs[0]
-                        end_ref = cur_trg_ref
-                    if start_ref.chapter == end_ref.chapter:
-                        cur_trg_ref = VerseRef.from_range(start_ref, end_ref)
-                    else:
-                        cur_trg_ref = end_ref
-                if not row.is_target_in_range or row.is_target_range_start or len(row.target_text) > 0:
-                    if len(row.target_text) > 0:
-                        if len(cur_target_line) > 0:
-                            cur_target_line += " "
-                        cur_target_line += row.target_text
-                    cur_target_line_range = False
-            output_stream.write(("<range>" if cur_target_line_range else cur_target_line) + "\n")
-            if output_vref_stream is not None:
-                output_vref_stream.write(("" if cur_trg_ref is None else str(cur_trg_ref)) + "\n")
-            segment_count += 1
+            for line, _, project_vref in output:
+                output_stream.write(line + "\n")
+                if output_vref_stream is not None:
+                    output_vref_stream.write(("" if project_vref is None else str(project_vref)) + "\n")
+                segment_count += 1
         return output_filename, segment_count
     except:
         if output_filename.is_file():

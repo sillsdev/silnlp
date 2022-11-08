@@ -11,7 +11,7 @@ from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
 from machine.tokenization import LatinWordTokenizer, WhitespaceTokenizer
 from nltk.translate import Alignment
 
-from ..common.corpus import get_mt_corpus_path, get_scripture_parallel_corpus, write_corpus
+from ..common.corpus import get_mt_corpus_path, get_scripture_parallel_corpus
 from ..common.environment import SIL_NLP_ENV
 from ..common.stemmer import Stemmer
 from ..common.utils import set_seed

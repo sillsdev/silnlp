@@ -1,7 +1,7 @@
 import string
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Iterable, List, Optional, Union
+from typing import Iterable, List, Union
 
 from lxml import etree
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef

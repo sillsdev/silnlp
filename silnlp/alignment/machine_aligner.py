@@ -2,9 +2,9 @@ import logging
 import platform
 import subprocess
 from pathlib import Path
-from typing import Dict, Iterable, List, Sequence, Tuple
+from typing import Dict, List
 
-from machine.corpora import ParallelTextRow, TextFileTextCorpus
+from machine.corpora import TextFileTextCorpus
 from machine.tokenization import WhitespaceTokenizer
 from machine.translation import (
     SymmetrizationHeuristic,
@@ -166,9 +166,7 @@ class MachineAligner(Aligner):
             _BATCH_SIZE
         ) as batches, tqdm(total=count, bar_format="{l_bar}{bar:40}{r_bar}", leave=False) as pbar:
             for row_batch in batches:
-                for source_segment, target_segment, alignment in model.get_best_alignment_batch(
-                    (r.source_segment, r.target_segment) for r in row_batch
-                ):
+                for (source_segment, target_segment), alignment in zip(row_batch, model.align_batch(row_batch)):
                     if export_probabilities:
                         word_pairs = alignment.to_aligned_word_pairs()
                         alignened_word_pairs = model.compute_aligned_word_pair_scores(
@@ -241,20 +239,6 @@ class MachineAligner(Aligner):
                 word, word_class = line.split("\t", maxsplit=2)
                 word_classes[word] = word_class
         return word_classes
-
-
-def _batch(rows: Iterable[ParallelTextRow]) -> Iterable[Tuple[List[Sequence[str]], List[Sequence[str]]]]:
-    src_segments: List[Sequence[str]] = []
-    trg_segments: List[Sequence[str]] = []
-    for row in rows:
-        src_segments.append(row.source_segment)
-        trg_segments.append(row.target_segment)
-        if len(src_segments) == _BATCH_SIZE:
-            yield src_segments, trg_segments
-            src_segments.clear()
-            trg_segments.clear()
-    if len(src_segments) > 0:
-        yield src_segments, trg_segments
 
 
 class Ibm1MachineAligner(MachineAligner):

@@ -213,16 +213,8 @@ python-versions = "*"
 pycparser = "*"
 
 [[package]]
-name = "chardet"
-version = "4.0.0"
-description = "Universal encoding detector for Python 2 and 3"
-category = "main"
-optional = false
-python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
-
-[[package]]
 name = "charset-normalizer"
-version = "2.1.0"
+version = "2.1.1"
 description = "The Real First Universal Charset Detector. Open, modern and actively maintained alternative to Chardet."
 category = "main"
 optional = false
@@ -1965,14 +1957,14 @@ toml = ["setuptools (>=42)"]
 
 [[package]]
 name = "sil-machine"
-version = "0.7.1"
+version = "0.8.2"
 description = "A natural language processing library that is focused on providing tools for resource-poor languages."
 category = "main"
 optional = false
 python-versions = ">=3.7,<3.11"
 
 [package.dependencies]
-chardet = ">=4.0.0,<5.0.0"
+charset-normalizer = ">=2.1.1,<3.0.0"
 networkx = ">=2.6.3,<3.0.0"
 numpy = ">=1.19.0,<2.0.0"
 regex = ">=2021.7.6,<2022.0.0"
@@ -1980,11 +1972,11 @@ sil-thot = {version = ">=3.3.6,<4.0.0", optional = true, markers = "extra == \"t
 sortedcontainers = ">=2.4.0,<3.0.0"
 
 [package.extras]
-all = ["OpenNMT-tf (>=2.25.0,<3.0.0)", "clearml (>=1.4.1,<2.0.0)", "json-stream (>=1.3.0,<2.0.0)", "libclang (>=11.1.0,<12.0.0)", "sentencepiece (>=0.1.95,<0.2.0)", "sil-thot (>=3.3.6,<4.0.0)", "tensorflow (>=2.7.0,<3.0.0)"]
+all = ["OpenNMT-tf (>=2.25.0,<3.0.0)", "clearml[s3] (>=1.6.4,<2.0.0)", "dynaconf (>=3.1.9,<4.0.0)", "json-stream (>=1.3.0,<2.0.0)", "libclang (>=11.1.0,<12.0.0)", "sentencepiece (>=0.1.95,<0.2.0)", "sil-thot (>=3.3.6,<4.0.0)", "tensorflow (>=2.7.0,<3.0.0)", "typing-extensions (>=3.7.4)"]
 sentencepiece = ["sentencepiece (>=0.1.95,<0.2.0)"]
 tensorflow = ["OpenNMT-tf (>=2.25.0,<3.0.0)", "libclang (>=11.1.0,<12.0.0)", "tensorflow (>=2.7.0,<3.0.0)"]
 thot = ["sil-thot (>=3.3.6,<4.0.0)"]
-webapi = ["clearml (>=1.4.1,<2.0.0)", "json-stream (>=1.3.0,<2.0.0)"]
+webapi = ["OpenNMT-tf (>=2.25.0,<3.0.0)", "clearml[s3] (>=1.6.4,<2.0.0)", "dynaconf (>=3.1.9,<4.0.0)", "json-stream (>=1.3.0,<2.0.0)", "libclang (>=11.1.0,<12.0.0)", "sentencepiece (>=0.1.95,<0.2.0)", "tensorflow (>=2.7.0,<3.0.0)", "typing-extensions (>=3.7.4)"]
 
 [[package]]
 name = "sil-thot"
@@ -2478,7 +2470,7 @@ testing = ["func-timeout", "jaraco.itertools", "pytest (>=6)", "pytest-black (>=
 [metadata]
 lock-version = "1.1"
 python-versions = ">=3.8,<3.9"
-content-hash = "7ef9cbaf5d2d463783fee18f594d4e8ce9501e940404184b4ea1e299fa5ca4fe"
+content-hash = "f3f755eebc0b9d72e2854676f70f6cd7703407721bb115a2a1ea8050fbc13e4f"
 
 [metadata.files]
 absl-py = [
@@ -2720,13 +2712,9 @@ cffi = [
     {file = "cffi-1.15.1-cp39-cp39-win_amd64.whl", hash = "sha256:70df4e3b545a17496c9b3f41f5115e69a4f2e77e94e1d2a8e1070bc0c38c8a3c"},
     {file = "cffi-1.15.1.tar.gz", hash = "sha256:d400bfb9a37b1351253cb402671cea7e89bdecc294e8016a707f6d1d8ac934f9"},
 ]
-chardet = [
-    {file = "chardet-4.0.0-py2.py3-none-any.whl", hash = "sha256:f864054d66fd9118f2e67044ac8981a54775ec5b67aed0441892edb553d21da5"},
-    {file = "chardet-4.0.0.tar.gz", hash = "sha256:0d6f53a15db4120f2b08c94f11e7d93d2c911ee118b6b30a04ec3ee8310179fa"},
-]
 charset-normalizer = [
-    {file = "charset-normalizer-2.1.0.tar.gz", hash = "sha256:575e708016ff3a5e3681541cb9d79312c416835686d054a23accb873b254f413"},
-    {file = "charset_normalizer-2.1.0-py3-none-any.whl", hash = "sha256:5189b6f22b01957427f35b6a08d9a0bc45b46d3788ef5a92e978433c7a35f8a5"},
+    {file = "charset-normalizer-2.1.1.tar.gz", hash = "sha256:5a3d016c7c547f69d6f81fb0db9449ce888b418b5b9952cc5e6e66843e9dd845"},
+    {file = "charset_normalizer-2.1.1-py3-none-any.whl", hash = "sha256:83e9a75d1911279afd89352c68b45348559d1fc0506b054b346651b5e7fee29f"},
 ]
 clearml = [
     {file = "clearml-1.6.2-py2.py3-none-any.whl", hash = "sha256:5288a4036cb92db55f808b68274c1994ccd7ec57546798b73f321271703b5d6c"},
@@ -3967,6 +3955,13 @@ pyyaml = [
     {file = "PyYAML-6.0-cp310-cp310-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_12_x86_64.manylinux2010_x86_64.whl", hash = "sha256:f84fbc98b019fef2ee9a1cb3ce93e3187a6df0b2538a651bfb890254ba9f90b5"},
     {file = "PyYAML-6.0-cp310-cp310-win32.whl", hash = "sha256:2cd5df3de48857ed0544b34e2d40e9fac445930039f3cfe4bcc592a1f836d513"},
     {file = "PyYAML-6.0-cp310-cp310-win_amd64.whl", hash = "sha256:daf496c58a8c52083df09b80c860005194014c3698698d1a57cbcfa182142a3a"},
+    {file = "PyYAML-6.0-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:d4b0ba9512519522b118090257be113b9468d804b19d63c71dbcf4a48fa32358"},
+    {file = "PyYAML-6.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:81957921f441d50af23654aa6c5e5eaf9b06aba7f0a19c18a538dc7ef291c5a1"},
+    {file = "PyYAML-6.0-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:afa17f5bc4d1b10afd4466fd3a44dc0e245382deca5b3c353d8b757f9e3ecb8d"},
+    {file = "PyYAML-6.0-cp311-cp311-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:dbad0e9d368bb989f4515da330b88a057617d16b6a8245084f1b05400f24609f"},
+    {file = "PyYAML-6.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:432557aa2c09802be39460360ddffd48156e30721f5e8d917f01d31694216782"},
+    {file = "PyYAML-6.0-cp311-cp311-win32.whl", hash = "sha256:bfaef573a63ba8923503d27530362590ff4f576c626d86a9fed95822a8255fd7"},
+    {file = "PyYAML-6.0-cp311-cp311-win_amd64.whl", hash = "sha256:01b45c0191e6d66c470b6cf1b9531a771a83c1c4208272ead47a3ae4f2f603bf"},
     {file = "PyYAML-6.0-cp36-cp36m-macosx_10_9_x86_64.whl", hash = "sha256:897b80890765f037df3403d22bab41627ca8811ae55e9a722fd0392850ec4d86"},
     {file = "PyYAML-6.0-cp36-cp36m-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:50602afada6d6cbfad699b0c7bb50d5ccffa7e46a3d738092afddc1f9758427f"},
     {file = "PyYAML-6.0-cp36-cp36m-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:48c346915c114f5fdb3ead70312bd042a953a8ce5c7106d5bfb1a5254e47da92"},
@@ -4260,8 +4255,8 @@ setuptools-scm = [
     {file = "setuptools_scm-7.0.5.tar.gz", hash = "sha256:031e13af771d6f892b941adb6ea04545bbf91ebc5ce68c78aaf3fff6e1fb4844"},
 ]
 sil-machine = [
-    {file = "sil-machine-0.7.1.tar.gz", hash = "sha256:0652e923f0e1d29a283d05344cdc166bcbcaf627cedb1a73793745f8eae8a11b"},
-    {file = "sil_machine-0.7.1-py3-none-any.whl", hash = "sha256:b13a2fbd87f879155d36034bab61da5065dc8b58c80c28ed63305cd87e3785ae"},
+    {file = "sil_machine-0.8.2-py3-none-any.whl", hash = "sha256:364cc2ade77faf852bd78f3b10c7b551fa82dd5e127621bedb6538bcb70bb247"},
+    {file = "sil_machine-0.8.2.tar.gz", hash = "sha256:bff03c4a8875df71cac5cd4987e309cf5371e21602215bf12d812104748be90d"},
 ]
 sil-thot = [
     {file = "sil-thot-3.3.6.tar.gz", hash = "sha256:afe9767efb2d53633add9277e4746cd239cfe18be439acadf19c8011495e584e"},
