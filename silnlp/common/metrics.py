@@ -37,7 +37,7 @@ def compute_wer_score(hyps: Iterable[str], refs: Iterable[str]) -> float:
             print("Cannot divide by zero. Check for empty lines.")
             result = -1
 
-        return float(np.round(float(result), 2))
+        return float(np.round(float(result) * 100, 2))
 
 
 def compute_meteor_score(lang: str, hyps: Iterable[str], refs: List[Iterable[str]]) -> Optional[float]:
