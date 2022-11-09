@@ -13,6 +13,7 @@ from ..common.paratext import book_file_name_digits
 from ..common.tf_utils import enable_eager_execution, enable_memory_growth
 from ..common.translator import Translator
 from ..common.utils import get_git_revision_hash
+from ..common.paratext import get_project_dir
 from .clearml_connection import SILClearML
 from .config import CheckpointType, Config, NMTModel
 from .tokenizer import Tokenizer
@@ -52,6 +53,11 @@ class TranslationTask:
             if len(config.src_projects) != 1:
                 raise RuntimeError("A source project must be specified.")
             src_project = next(iter(config.src_projects))
+
+        src_project_dir = get_project_dir(src_project)
+        if not src_project_dir.is_dir():
+            LOGGER.error(f"Source project {src_project} not found in projects folder {src_project_dir}")
+            return
 
         if trg_iso is None:
             trg_iso = config.default_trg_iso
