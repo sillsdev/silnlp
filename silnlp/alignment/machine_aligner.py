@@ -169,10 +169,8 @@ class MachineAligner(Aligner):
                 for (source_segment, target_segment), alignment in zip(row_batch, model.align_batch(row_batch)):
                     if export_probabilities:
                         word_pairs = alignment.to_aligned_word_pairs()
-                        alignened_word_pairs = model.compute_aligned_word_pair_scores(
-                            source_segment, target_segment, word_pairs
-                        )
-                        out_file.write(" ".join(str(wp) for wp in alignened_word_pairs) + "\n")
+                        model.compute_aligned_word_pair_scores(source_segment, target_segment, word_pairs)
+                        out_file.write(" ".join(str(wp) for wp in word_pairs) + "\n")
                     else:
                         out_file.write(str(alignment) + "\n")
                 pbar.update(len(row_batch))
