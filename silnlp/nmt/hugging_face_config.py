@@ -21,8 +21,9 @@ from transformers import (
     DataCollatorForSeq2Seq,
     EarlyStoppingCallback,
     HfArgumentParser,
+    M2M100Tokenizer,
     PreTrainedModel,
-    PreTrainedTokenizerFast,
+    PreTrainedTokenizer,
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
     TranslationPipeline,
@@ -146,6 +147,15 @@ def delete_tokenizer(checkpoint_path: Path) -> None:
             path.unlink()
 
 
+def add_lang_code_to_tokenizer(tokenizer: PreTrainedTokenizer, lang_code: str) -> None:
+    tokenizer.add_special_tokens({"additional_special_tokens": tokenizer.additional_special_tokens + [lang_code]})
+    lang_id = tokenizer.convert_tokens_to_ids(lang_code)
+    tokenizer.lang_code_to_id[lang_code] = lang_id
+    if isinstance(tokenizer, M2M100Tokenizer):
+        tokenizer.lang_token_to_id[lang_code] = lang_id
+        tokenizer.id_to_lang_token[lang_id] = lang_code
+
+
 class HuggingFaceConfig(Config):
     def __init__(self, exp_dir: Path, config: dict) -> None:
         config = merge_dict(
@@ -158,6 +168,7 @@ class HuggingFaceConfig(Config):
                     "stats_max_size": 100000,  # a little over the size of the bible
                     "terms": {"train": True, "categories": "PN", "include_glosses": True, "dictionary": False},
                     "lang_codes": {},
+                    "add_new_lang_code": True,
                 },
                 "train": {
                     "max_source_length": 200,
@@ -189,7 +200,7 @@ class HuggingFaceConfig(Config):
             },
             config,
         )
-        self._tokenizer: Optional[PreTrainedTokenizerFast] = None
+        self._tokenizer: Optional[PreTrainedTokenizer] = None
 
         super().__init__(exp_dir, config)
 
@@ -224,17 +235,28 @@ class HuggingFaceConfig(Config):
         )
 
     def _build_vocabs(self) -> None:
-        ...
+        if self.data["add_new_lang_code"]:
+            tokenizer = AutoTokenizer.from_pretrained(self.model, use_fast=True)
+            lang_codes: Dict[str, str] = self.data["lang_codes"]
+            updated = False
+            for iso in self.src_isos | self.trg_isos:
+                lang_code = lang_codes.get(iso, iso)
+                if lang_code not in tokenizer.lang_code_to_id:
+                    add_lang_code_to_tokenizer(tokenizer, lang_code)
+                    updated = True
+            if updated:
+                tokenizer.save_pretrained(self.exp_dir)
 
-    def get_tokenizer(self) -> PreTrainedTokenizerFast:
+    def get_tokenizer(self) -> PreTrainedTokenizer:
         if self._tokenizer is None:
-            self._tokenizer = AutoTokenizer.from_pretrained(self.model, use_fast=True)
+            model_name_or_path = str(self.exp_dir) if (self.exp_dir / "tokenizer_config.json").is_file() else self.model
+            self._tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True)
             self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
         return self._tokenizer
 
 
 def batch_prepare_for_model(
-    tokenizer: PreTrainedTokenizerFast,
+    tokenizer: PreTrainedTokenizer,
     batch_tokens: List[List[str]],
     return_tensors: Optional[Union[str, TensorType]] = None,
 ) -> BatchEncoding:
@@ -487,7 +509,7 @@ class HuggingFaceNMTModel(NMTModel):
 class HuggingFaceTokenizer(Tokenizer):
     def __init__(
         self,
-        tokenizer: PreTrainedTokenizerFast,
+        tokenizer: PreTrainedTokenizer,
         lang_codes: Dict[str, str],
         max_source_length: int,
         max_target_length: int,
