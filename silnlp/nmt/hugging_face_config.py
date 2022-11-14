@@ -137,7 +137,13 @@ def delete_optimizer_state(checkpoint_path: Path) -> None:
             path.unlink()
 
 
-TOKENIZER_FILES = {"sentencepiece.bpe.model", "special_tokens_map.json", "tokenizer.json", "tokenizer_config.json"}
+TOKENIZER_FILES = {
+    "sentencepiece.bpe.model",
+    "special_tokens_map.json",
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "added_tokens.json",
+}
 
 
 def delete_tokenizer(checkpoint_path: Path) -> None:
@@ -301,7 +307,9 @@ class HuggingFaceNMTModel(NMTModel):
         model.config.decoder_start_token_id = trg_lang_id
         model.config.forced_bos_token_id = trg_lang_id
 
-        def load_text_dataset(src_path: Path, trg_path: Path) -> Dataset:
+        def load_text_dataset(src_path: Path, trg_path: Path) -> Optional[Dataset]:
+            if not src_path.is_file() or not trg_path.is_file():
+                return None
             data = []
             with open(src_path, "r", encoding="utf-8-sig") as src_file, open(
                 trg_path, "r", encoding="utf-8-sig"
@@ -314,6 +322,7 @@ class HuggingFaceNMTModel(NMTModel):
             self._config.exp_dir / self._config.train_src_filename(),
             self._config.exp_dir / self._config.train_trg_filename(),
         )
+
         eval_dataset = load_text_dataset(
             self._config.exp_dir / self._config.val_src_filename(),
             self._config.exp_dir / self._config.val_trg_filename(),
@@ -328,21 +337,23 @@ class HuggingFaceNMTModel(NMTModel):
             model_inputs["labels"] = labels["input_ids"]
             return model_inputs
 
-        with training_args.main_process_first(desc="train dataset map encoding"):
-            train_dataset = train_dataset.map(
-                encode,
-                batched=True,
-                remove_columns=train_dataset.column_names,
-                desc="Encoding train dataset",
-            )
+        if train_dataset is not None:
+            with training_args.main_process_first(desc="train dataset map encoding"):
+                train_dataset = train_dataset.map(
+                    encode,
+                    batched=True,
+                    remove_columns=train_dataset.column_names,
+                    desc="Encoding train dataset",
+                )
 
-        with training_args.main_process_first(desc="validation dataset map encoding"):
-            eval_dataset = eval_dataset.map(
-                encode,
-                batched=True,
-                remove_columns=eval_dataset.column_names,
-                desc="Encoding validation dataset",
-            )
+        if eval_dataset is not None:
+            with training_args.main_process_first(desc="validation dataset map encoding"):
+                eval_dataset = eval_dataset.map(
+                    encode,
+                    batched=True,
+                    remove_columns=eval_dataset.column_names,
+                    desc="Encoding validation dataset",
+                )
 
         data_collator = DataCollatorForSeq2Seq(
             tokenizer,
@@ -395,7 +406,7 @@ class HuggingFaceNMTModel(NMTModel):
         train_result = trainer.train(resume_from_checkpoint=last_checkpoint)
 
         metrics = train_result.metrics
-        metrics["train_samples"] = len(train_dataset)
+        metrics["train_samples"] = len(train_dataset) if train_dataset is not None else 0
 
         trainer.log_metrics("train", metrics)
         trainer.save_metrics("train", metrics)
