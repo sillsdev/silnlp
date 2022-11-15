@@ -12,7 +12,7 @@ import transformers.utils.logging as transformers_logging
 import yaml
 from datasets import Dataset
 from sacremoses import MosesPunctNormalizer
-from torch import TensorType
+from torch import Tensor, TensorType
 from torch.utils.checkpoint import checkpoint
 from transformers import (
     AutoConfig,
@@ -21,6 +21,7 @@ from transformers import (
     DataCollatorForSeq2Seq,
     EarlyStoppingCallback,
     HfArgumentParser,
+    M2M100ForConditionalGeneration,
     M2M100Tokenizer,
     PreTrainedModel,
     PreTrainedTokenizer,
@@ -29,6 +30,7 @@ from transformers import (
     TranslationPipeline,
     set_seed,
 )
+from transformers.models.m2m_100.modeling_m2m_100 import shift_tokens_right
 from transformers.tokenization_utils import BatchEncoding, TruncationStrategy
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import to_py_obj
@@ -39,6 +41,13 @@ from ..common.environment import SIL_NLP_ENV
 from ..common.utils import Side, merge_dict
 from .config import CheckpointType, Config, NMTModel
 from .tokenizer import NullTokenizer, Tokenizer
+
+
+def prepare_decoder_input_ids_from_labels(self: M2M100ForConditionalGeneration, labels: Tensor) -> Tensor:
+    return shift_tokens_right(labels, self.config.pad_token_id, self.config.decoder_start_token_id)
+
+
+M2M100ForConditionalGeneration.prepare_decoder_input_ids_from_labels = prepare_decoder_input_ids_from_labels
 
 TRAINING_ARGS_CONFIG_MAPPING = {
     "train": {
