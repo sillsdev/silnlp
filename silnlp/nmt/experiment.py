@@ -2,12 +2,13 @@ import argparse
 import os
 from dataclasses import dataclass
 from typing import Optional
+from pathlib import Path
 
 from ..common.environment import SIL_NLP_ENV
 from ..common.tf_utils import enable_memory_growth
 from ..common.utils import get_git_revision_hash
 from .clearml_connection import SILClearML
-from .config import Config
+from .config import Config, get_mt_exp_dir
 from .test import test
 
 
@@ -77,6 +78,16 @@ def main() -> None:
         help="Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run it locally and register it with ClearML.",
     )
     args = parser.parse_args()
+
+    # Do some basic checks before starting the experiment
+    exp_dir = Path(get_mt_exp_dir(args.experiment))
+    if not exp_dir.exists():
+        print(f'ERROR: Experiment folder {exp_dir} does not exist.')
+        return -1
+    config_file = Path(exp_dir, 'config.yml')
+    if not config_file.exists():
+        print(f'ERROR: Config file does not exist in experiment folder {exp_dir}.')
+        return -1
 
     if args.memory_growth:
         enable_memory_growth()
