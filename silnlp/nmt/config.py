@@ -778,6 +778,7 @@ class Config(ABC):
             if vref_str != "":
                 vrefs[vref_str] = i
 
+        SIL_NLP_ENV.copy_experiment_from_bucket(exp_name, extensions=(".vref.txt"))
         exp_dir = get_mt_exp_dir(exp_name)
         for vref_path in exp_dir.glob("test*.vref.txt"):
             stem = vref_path.stem
