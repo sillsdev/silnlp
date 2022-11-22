@@ -329,7 +329,7 @@ class NMTModel(ABC):
         self,
         input_paths: List[Path],
         translation_paths: List[Path],
-        ref_paths: Optional[List[Path]] = None,
+        vref_paths: Optional[List[Path]] = None,
         checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
         ...
@@ -340,7 +340,7 @@ class NMTModel(ABC):
         sentences: Iterable[str],
         src_iso: str,
         trg_iso: str,
-        refs: Optional[Iterable[str]] = None,
+        vrefs: Optional[Iterable[VerseRef]] = None,
         checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Iterable[str]:
         ...
@@ -541,7 +541,6 @@ class Config(ABC):
         test: Dict[Tuple[str, str], pd.DataFrame] = {}
         pair_val_indices: Dict[Tuple[str, str], Set[int]] = {}
         pair_test_indices: Dict[Tuple[str, str], Set[int]] = {}
-        terms: Optional[pd.DataFrame] = None
         project_isos: Dict[str, str] = {}
 
         tags_str = self._get_tags_str(pair.tags)
@@ -684,52 +683,22 @@ class Config(ABC):
                         cur_train,
                     )
 
-        terms_config = self.data["terms"]
-        if terms_config["train"] or terms_config["dictionary"]:
-            categories: Optional[Union[str, List[str]]] = terms_config["categories"]
-            if isinstance(categories, str):
-                categories = [cat.strip() for cat in categories.split(",")]
-            if categories is None or len(categories) > 0:
-                categories_set: Optional[Set[str]] = None if categories is None else set(categories)
-                dict_books = get_books(terms_config["dictionary_books"]) if "dictionary_books" in terms_config else None
-                all_src_terms = [
-                    (src_terms_file, get_terms(src_terms_file.path)) for src_terms_file in pair.src_terms_files
-                ]
-                all_trg_terms = [
-                    (trg_terms_file, get_terms(trg_terms_file.path)) for trg_terms_file in pair.trg_terms_files
-                ]
-                for src_terms_file, src_terms in all_src_terms:
-                    for trg_terms_file, trg_terms in all_trg_terms:
-                        if src_terms_file.iso == trg_terms_file.iso:
-                            continue
-                        cur_terms = get_terms_corpus(src_terms, trg_terms, categories_set, dict_books)
-                        cur_terms["source_lang"] = src_terms_file.iso
-                        cur_terms["target_lang"] = trg_terms_file.iso
-                        terms = self._add_to_terms_data_set(tags_str, terms, cur_terms)
-                if terms_config["include_glosses"]:
-                    if "en" in self.trg_isos:
-                        for src_terms_file, src_terms in all_src_terms:
-                            cur_terms = get_terms_data_frame(src_terms, categories_set, dict_books)
-                            cur_terms = cur_terms.rename(columns={"rendering": "source", "gloss": "target"})
-                            cur_terms["source_lang"] = src_terms_file.iso
-                            cur_terms["target_lang"] = "en"
-                            terms = self._add_to_terms_data_set(tags_str, terms, cur_terms)
-                    if "en" in self.src_isos:
-                        for trg_terms_file, trg_terms in all_trg_terms:
-                            cur_terms = get_terms_data_frame(trg_terms, categories_set, dict_books)
-                            cur_terms = cur_terms.rename(columns={"rendering": "target", "gloss": "source"})
-                            cur_terms["source_lang"] = "en"
-                            cur_terms["target_lang"] = trg_terms_file.iso
-                            terms = self._add_to_terms_data_set(tags_str, terms, cur_terms)
-
         if train is None:
             return 0
 
         train_count = self._write_train(
             tokenizer, train, pair.mapping == DataFileMapping.MIXED_SRC, project_isos, pair.augmentations
         )
-        terms_train_count, dict_count = self._write_terms(tokenizer, terms)
+
+        terms_config = self.data["terms"]
+        terms_train_count = 0
+        if terms_config["train"]:
+            terms_train_count = self._write_terms(tokenizer, pair, tags_str)
         train_count += terms_train_count
+
+        dict_count = 0
+        if terms_config["dictionary"]:
+            dict_count = self._write_dictionary(tokenizer, pair)
 
         val_count = 0
         if len(val) > 0:
@@ -855,7 +824,7 @@ class Config(ABC):
             cast(Any, sentences).loc[:, "source"] = tags_str + sentences.loc[:, "source"]
 
     def _add_to_terms_data_set(
-        self, tags_str: str, terms: Optional[pd.DataFrame], cur_terms: pd.DataFrame
+        self, terms: Optional[pd.DataFrame], cur_terms: pd.DataFrame, tags_str: str = ""
     ) -> pd.DataFrame:
         if self.mirror:
             mirror_cur_terms = cur_terms.rename(
@@ -917,74 +886,75 @@ class Config(ABC):
                     train_count += 1
         return train_count
 
-    def _write_terms(
-        self,
-        tokenizer: Tokenizer,
-        terms: Optional[pd.DataFrame],
-    ) -> Tuple[int, int]:
+    def _write_terms(self, tokenizer: Tokenizer, pair: CorpusPair, tags_str: str) -> int:
+        terms = self._collect_terms(pair, tags_str)
+        if terms is None:
+            return 0
+
         train_count = 0
-        dict_count = 0
         with ExitStack() as stack:
-            terms_config = self.data["terms"]
-            train_src_file: Optional[TextIO] = None
-            train_trg_file: Optional[TextIO] = None
-            train_vref_file: Optional[TextIO] = None
-            if terms_config["train"] and terms is not None:
-                train_src_file = stack.enter_context(self._open_append(self.train_src_filename()))
-                train_trg_file = stack.enter_context(self._open_append(self.train_trg_filename()))
-                train_vref_file = stack.enter_context(self._open_append(self.train_vref_filename()))
+            train_src_file = stack.enter_context(self._open_append(self.train_src_filename()))
+            train_trg_file = stack.enter_context(self._open_append(self.train_trg_filename()))
+            train_vref_file = stack.enter_context(self._open_append(self.train_vref_filename()))
 
-            dict_src_file: Optional[TextIO] = None
-            dict_trg_file: Optional[TextIO] = None
-            dict_vref_file: Optional[TextIO] = None
-            if terms_config["dictionary"]:
-                dict_src_file = stack.enter_context(self._open_append(self.dict_src_filename()))
-                dict_trg_file = stack.enter_context(self._open_append(self.dict_trg_filename()))
-                dict_vref_file = stack.enter_context(self._open_append(self.dict_vref_filename()))
+            for _, term in terms.iterrows():
+                src_term = term["source"]
+                trg_term = term["target"]
+                tokenizer.set_src_lang(term["source_lang"])
+                tokenizer.set_trg_lang(term["target_lang"])
 
-            if terms is not None:
-                for _, term in terms.iterrows():
-                    src_term = term["source"]
-                    trg_term = term["target"]
-                    dictionary = term["dictionary"]
-                    vrefs = term["vrefs"]
-                    tokenizer.set_src_lang(term["source_lang"])
-                    tokenizer.set_trg_lang(term["target_lang"])
+                src_term_variants = [
+                    tokenizer.tokenize(Side.SOURCE, src_term, add_dummy_prefix=True),
+                    tokenizer.tokenize(Side.SOURCE, src_term, add_dummy_prefix=False),
+                ]
+                trg_term_variants = [
+                    tokenizer.tokenize(Side.TARGET, trg_term, add_dummy_prefix=True),
+                    tokenizer.tokenize(Side.TARGET, trg_term, add_dummy_prefix=False),
+                ]
+                for stv, ttv in zip(src_term_variants, trg_term_variants):
+                    train_src_file.write(stv + "\n")
+                    train_trg_file.write(ttv + "\n")
+                    train_vref_file.write("\n")
+                    train_count += 1
+        return train_count
 
-                    if train_src_file is not None and train_trg_file is not None and train_vref_file is not None:
-                        src_term_variants = [
-                            tokenizer.tokenize(Side.SOURCE, src_term, add_dummy_prefix=True),
-                            tokenizer.tokenize(Side.SOURCE, src_term, add_dummy_prefix=False),
-                        ]
-                        trg_term_variants = [
-                            tokenizer.tokenize(Side.TARGET, trg_term, add_dummy_prefix=True),
-                            tokenizer.tokenize(Side.TARGET, trg_term, add_dummy_prefix=False),
-                        ]
-                        for stv, ttv in zip(src_term_variants, trg_term_variants):
-                            train_src_file.write(stv + "\n")
-                            train_trg_file.write(ttv + "\n")
-                            train_vref_file.write("\n")
-                            train_count += 1
-
-                    if (
-                        dictionary
-                        and dict_src_file is not None
-                        and dict_trg_file is not None
-                        and dict_vref_file is not None
-                    ):
-                        src_term_variants = [
-                            tokenizer.tokenize(Side.SOURCE, src_term, add_dummy_prefix=True, add_special_tokens=False),
-                            tokenizer.tokenize(Side.SOURCE, src_term, add_dummy_prefix=False, add_special_tokens=False),
-                        ]
-                        trg_term_variants = [
-                            tokenizer.tokenize(Side.TARGET, trg_term, add_dummy_prefix=True, add_special_tokens=False),
-                            tokenizer.tokenize(Side.TARGET, trg_term, add_dummy_prefix=False, add_special_tokens=False),
-                        ]
-                        dict_src_file.write("\t".join(src_term_variants) + "\n")
-                        dict_trg_file.write("\t".join(trg_term_variants) + "\n")
-                        dict_vref_file.write(vrefs + "\n")
-                        dict_count += 1
-        return train_count, dict_count
+    def _collect_terms(
+        self, pair: CorpusPair, tags_str: str = "", filter_books: Optional[Set[int]] = None
+    ) -> Optional[pd.DataFrame]:
+        terms_config = self.data["terms"]
+        terms: Optional[pd.DataFrame] = None
+        categories: Optional[Union[str, List[str]]] = terms_config["categories"]
+        if isinstance(categories, str):
+            categories = [cat.strip() for cat in categories.split(",")]
+        if categories is not None and len(categories) == 0:
+            return None
+        categories_set: Optional[Set[str]] = None if categories is None else set(categories)
+        all_src_terms = [(src_terms_file, get_terms(src_terms_file.path)) for src_terms_file in pair.src_terms_files]
+        all_trg_terms = [(trg_terms_file, get_terms(trg_terms_file.path)) for trg_terms_file in pair.trg_terms_files]
+        for src_terms_file, src_terms in all_src_terms:
+            for trg_terms_file, trg_terms in all_trg_terms:
+                if src_terms_file.iso == trg_terms_file.iso:
+                    continue
+                cur_terms = get_terms_corpus(src_terms, trg_terms, categories_set, filter_books)
+                cur_terms["source_lang"] = src_terms_file.iso
+                cur_terms["target_lang"] = trg_terms_file.iso
+                terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
+        if terms_config["include_glosses"]:
+            if "en" in self.trg_isos:
+                for src_terms_file, src_terms in all_src_terms:
+                    cur_terms = get_terms_data_frame(src_terms, categories_set, filter_books)
+                    cur_terms = cur_terms.rename(columns={"rendering": "source", "gloss": "target"})
+                    cur_terms["source_lang"] = src_terms_file.iso
+                    cur_terms["target_lang"] = "en"
+                    terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
+            if "en" in self.src_isos:
+                for trg_terms_file, trg_terms in all_trg_terms:
+                    cur_terms = get_terms_data_frame(trg_terms, categories_set, filter_books)
+                    cur_terms = cur_terms.rename(columns={"rendering": "target", "gloss": "source"})
+                    cur_terms["source_lang"] = "en"
+                    cur_terms["target_lang"] = trg_terms_file.iso
+                    terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
+        return terms
 
     def _write_val_trg(self, tokenizer: Tokenizer, val: Dict[Tuple[str, str], pd.DataFrame]) -> None:
         with ExitStack() as stack:
@@ -1298,4 +1268,8 @@ class Config(ABC):
 
     @abstractmethod
     def _build_vocabs(self) -> None:
+        ...
+
+    @abstractmethod
+    def _write_dictionary(self, tokenizer: Tokenizer, pair: CorpusPair) -> int:
         ...

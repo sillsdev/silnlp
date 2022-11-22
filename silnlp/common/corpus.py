@@ -242,9 +242,9 @@ def get_terms_corpus(
     src_terms: Dict[str, Term],
     trg_terms: Dict[str, Term],
     cats: Optional[Set[str]],
-    dictionary_books: Optional[Set[int]],
+    filter_books: Optional[Set[int]] = None,
 ) -> pd.DataFrame:
-    data: Set[Tuple[str, str, bool, str]] = set()
+    data: Set[Tuple[str, str, str]] = set()
     for src_term in src_terms.values():
         if cats is not None and src_term.cat not in cats:
             continue
@@ -253,28 +253,36 @@ def get_terms_corpus(
         if trg_term is None:
             continue
 
-        dictionary = dictionary_books is None or any(vref.book_num in dictionary_books for vref in src_term.vrefs)
+        vrefs = (
+            src_term.vrefs
+            if filter_books is None
+            else {vref for vref in src_term.vrefs if vref.book_num in filter_books}
+        )
+        if len(vrefs) == 0:
+            continue
 
         for src_rendering in src_term.renderings:
             for trg_rendering in trg_term.renderings:
-                data.add((src_rendering, trg_rendering, dictionary, "\t".join(str(vref) for vref in src_term.vrefs)))
-    return pd.DataFrame(data, columns=["source", "target", "dictionary", "vrefs"])
+                data.add((src_rendering, trg_rendering, "\t".join(str(vref) for vref in vrefs)))
+    return pd.DataFrame(data, columns=["source", "target", "vrefs"])
 
 
 def get_terms_data_frame(
-    terms: Dict[str, Term], cats: Optional[Set[str]], dictionary_books: Optional[Set[int]]
+    terms: Dict[str, Term], cats: Optional[Set[str]], filter_books: Optional[Set[int]] = None
 ) -> pd.DataFrame:
-    data: Set[Tuple[str, str, bool, str]] = set()
+    data: Set[Tuple[str, str, str]] = set()
     for term in terms.values():
         if cats is not None and term.cat not in cats:
             continue
 
-        dictionary = dictionary_books is None or any(vref.book_num in dictionary_books for vref in term.vrefs)
+        vrefs = term.vrefs if filter_books is None else {vref for vref in term.vrefs if vref.book_num in filter_books}
+        if len(vrefs) == 0:
+            continue
 
         for rendering in term.renderings:
             for gloss in term.glosses:
-                data.add((rendering, gloss, dictionary, "\t".join(str(vref) for vref in term.vrefs)))
-    return pd.DataFrame(data, columns=["rendering", "gloss", "dictionary", "vrefs"])
+                data.add((rendering, gloss, "\t".join(str(vref) for vref in vrefs)))
+    return pd.DataFrame(data, columns=["rendering", "gloss", "vrefs"])
 
 
 def count_lines(file_path: Path, line_filter: Callable[[str], bool] = lambda l: True) -> int:

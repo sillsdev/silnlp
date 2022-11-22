@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional, Tuple, Union
 
-from machine.scripture import book_number_to_id, get_books
+from machine.scripture import VerseRef, book_number_to_id, get_books
 
 from ..common.environment import SIL_NLP_ENV
 from ..common.paratext import book_file_name_digits, get_project_dir
@@ -25,9 +25,9 @@ class NMTTranslator(Translator):
         self._checkpoint = checkpoint
 
     def translate(
-        self, sentences: Iterable[str], src_iso: str, trg_iso: str, refs: Optional[Iterable[str]] = None
+        self, sentences: Iterable[str], src_iso: str, trg_iso: str, vrefs: Optional[Iterable[VerseRef]] = None
     ) -> Iterable[str]:
-        return self._model.translate(sentences, src_iso, trg_iso, refs, self._checkpoint)
+        return self._model.translate(sentences, src_iso, trg_iso, vrefs, self._checkpoint)
 
 
 @dataclass

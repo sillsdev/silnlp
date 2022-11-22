@@ -1,9 +1,11 @@
 import json
 import re
+from contextlib import ExitStack
 from copy import deepcopy
 from enum import Enum
+from itertools import repeat
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
 
 import datasets.utils.logging as datasets_logging
 import evaluate
@@ -11,6 +13,7 @@ import numpy as np
 import transformers.utils.logging as transformers_logging
 import yaml
 from datasets import Dataset
+from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
 from sacremoses import MosesPunctNormalizer
 from torch import Tensor, TensorType
 from torch.utils.checkpoint import checkpoint
@@ -36,10 +39,10 @@ from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import to_py_obj
 from transformers.utils.logging import tqdm
 
-from ..common.corpus import count_lines
+from ..common.corpus import count_lines, get_terms
 from ..common.environment import SIL_NLP_ENV
 from ..common.utils import Side, merge_dict
-from .config import CheckpointType, Config, NMTModel
+from .config import CheckpointType, Config, CorpusPair, NMTModel
 from .tokenizer import NullTokenizer, Tokenizer
 
 
@@ -171,6 +174,25 @@ def add_lang_code_to_tokenizer(tokenizer: PreTrainedTokenizer, lang_code: str) -
         tokenizer.id_to_lang_token[lang_id] = lang_code
 
 
+def is_sublist(sub: List[int], lst: List[int]) -> bool:
+    ln = len(sub)
+    if ln >= len(lst):
+        return False
+    return any(lst[i : i + ln] == sub for i in range(len(sub) - ln + 1))
+
+
+def prune_sublists(words_ids: List[List[List[int]]]) -> List[List[List[int]]]:
+    result: List[List[List[int]]] = []
+    for variants in words_ids:
+        temp_variants: List[List[int]] = []
+        for i in range(len(variants)):
+            if not any(is_sublist(variants[i], variants[j]) for j in range(len(variants)) if i != j):
+                temp_variants.append(variants[i])
+        if len(temp_variants) > 0:
+            result.append(temp_variants)
+    return result
+
+
 class HuggingFaceConfig(Config):
     def __init__(self, exp_dir: Path, config: dict) -> None:
         config = merge_dict(
@@ -269,6 +291,66 @@ class HuggingFaceConfig(Config):
             self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
         return self._tokenizer
 
+    def _write_dictionary(self, tokenizer: Tokenizer, pair: CorpusPair) -> int:
+        terms_config = self.data["terms"]
+        dict_count = 0
+        with ExitStack() as stack:
+            dict_trg_file = stack.enter_context(self._open_append(self.dict_trg_filename()))
+            dict_vref_file = stack.enter_context(self._open_append(self.dict_vref_filename()))
+
+            categories: Optional[Union[str, List[str]]] = terms_config["categories"]
+            if isinstance(categories, str):
+                categories = [cat.strip() for cat in categories.split(",")]
+            if categories is not None and len(categories) == 0:
+                return 0
+            categories_set: Optional[Set[str]] = None if categories is None else set(categories)
+
+            all_trg_terms = [
+                (trg_terms_file, get_terms(trg_terms_file.path)) for trg_terms_file in pair.trg_terms_files
+            ]
+            for trg_terms_file, trg_terms in all_trg_terms:
+                tokenizer.set_trg_lang(trg_terms_file.iso)
+                for trg_term in trg_terms.values():
+                    if categories_set is not None and trg_term.cat not in categories_set:
+                        continue
+
+                    renderings: List[str] = []
+                    for rendering in trg_term.renderings:
+                        renderings.append(
+                            tokenizer.tokenize(Side.TARGET, rendering, add_dummy_prefix=True, add_special_tokens=False)
+                        )
+                        renderings.append(
+                            tokenizer.tokenize(Side.TARGET, rendering, add_dummy_prefix=False, add_special_tokens=False)
+                        )
+                    if len(renderings) == 0:
+                        continue
+                    dict_trg_file.write("\t".join(renderings) + "\n")
+                    dict_vref_file.write("\t".join(str(vref) for vref in trg_term.vrefs) + "\n")
+                    dict_count += 1
+
+            if terms_config["include_glosses"] and "en" in self.trg_isos:
+                all_src_terms = [get_terms(src_terms_file.path) for src_terms_file in pair.src_terms_files]
+                tokenizer.set_trg_lang("en")
+                for src_terms in all_src_terms:
+                    for src_term in src_terms.values():
+                        if categories_set is not None and src_term.cat not in categories_set:
+                            continue
+
+                        glosses: List[str] = []
+                        for gloss in src_term.glosses:
+                            glosses.append(
+                                tokenizer.tokenize(Side.TARGET, gloss, add_dummy_prefix=True, add_special_tokens=False)
+                            )
+                            glosses.append(
+                                tokenizer.tokenize(Side.TARGET, gloss, add_dummy_prefix=False, add_special_tokens=False)
+                            )
+                        if len(glosses) == 0:
+                            continue
+                        dict_trg_file.write("\t".join(glosses) + "\n")
+                        dict_vref_file.write("\t".join(str(vref) for vref in src_term.vrefs) + "\n")
+                        dict_count += 1
+        return dict_count
+
 
 def batch_prepare_for_model(
     tokenizer: PreTrainedTokenizer,
@@ -287,11 +369,15 @@ def batch_prepare_for_model(
     return BatchEncoding(batch_outputs, tensor_type=return_tensors)
 
 
+TSent = TypeVar("TSent")
+
+
 class HuggingFaceNMTModel(NMTModel):
     def __init__(self, config: HuggingFaceConfig, mixed_precision: bool, num_devices: int) -> None:
         self._config = config
         self._mixed_precision = mixed_precision
         set_seed(self._config.data["seed"])
+        self._dictionary: Optional[Dict[VerseRef, Set[str]]] = None
 
     def train(self) -> None:
         training_args = self._create_training_arguments()
@@ -451,7 +537,7 @@ class HuggingFaceNMTModel(NMTModel):
         self,
         input_paths: List[Path],
         translation_paths: List[Path],
-        ref_paths: Optional[List[Path]] = None,
+        vref_paths: Optional[List[Path]] = None,
         checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
         checkpoint_path, _ = get_checkpoint_path(self._config.model_dir, checkpoint)
@@ -460,22 +546,23 @@ class HuggingFaceNMTModel(NMTModel):
         pipeline = PretokenizedTranslationPipeline(
             model=model, tokenizer=tokenizer, src_lang=self._config.src_lang, tgt_lang=self._config.trg_lang, device=0
         )
-        batch_size: int = self._config.infer["infer_batch_size"]
-        num_beams: Optional[int] = self._config.infer.get("num_beams")
-        if num_beams is None:
-            num_beams = self._config.params.get("generation_num_beams")
-        for input_path, translation_path in zip(input_paths, translation_paths):
-            if not isinstance(input_path, Path):
-                input_path = input_path[0]
+        for input_path, translation_path, vref_path in zip(
+            input_paths,
+            translation_paths,
+            cast(Iterable[Optional[Path]], repeat(None) if vref_paths is None else vref_paths),
+        ):
             length = count_lines(input_path)
-            with input_path.open("r", encoding="utf-8-sig") as src_file, translation_path.open(
-                "w", encoding="utf-8", newline="\n"
-            ) as out_file:
+            with ExitStack() as stack:
+                src_file = stack.enter_context(input_path.open("r", encoding="utf-8-sig"))
                 sentences = (line.strip().split() for line in src_file)
+                out_file = stack.enter_context(translation_path.open("w", encoding="utf-8", newline="\n"))
+                vrefs: Optional[Iterable[VerseRef]] = None
+                if vref_path is not None:
+                    vref_file = stack.enter_context(vref_path.open("r", encoding="utf-8-sig"))
+                    vrefs = (VerseRef.from_string(line.strip(), ORIGINAL_VERSIFICATION) for line in vref_file)
+
                 for prediction in tqdm(
-                    pipeline(
-                        sentences, return_text=False, return_tensors=True, batch_size=batch_size, num_beams=num_beams
-                    ),
+                    self._translate_sentences(tokenizer, pipeline, sentences, vrefs, return_tensors=True),
                     total=length,
                     unit="ex",
                 ):
@@ -489,7 +576,7 @@ class HuggingFaceNMTModel(NMTModel):
         sentences: Iterable[str],
         src_iso: str,
         trg_iso: str,
-        refs: Optional[Iterable[str]] = None,
+        vrefs: Optional[Iterable[VerseRef]] = None,
         checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Iterable[str]:
         checkpoint_path, _ = get_checkpoint_path(self._config.model_dir, checkpoint)
@@ -503,13 +590,9 @@ class HuggingFaceNMTModel(NMTModel):
             tgt_lang=lang_codes.get(trg_iso, trg_iso),
             device=0,
         )
-        batch_size: int = self._config.infer["infer_batch_size"]
-        num_beams: Optional[int] = self._config.infer.get("num_beams")
-        if num_beams is None:
-            num_beams = self._config.params.get("generation_num_beams")
-        sentences = [line if isinstance(line, str) else line[0] for line in sentences]
+        sentences = list(sentences)
         for prediction in tqdm(
-            pipeline(sentences, batch_size=batch_size, num_beams=num_beams), total=len(sentences), unit="ex"
+            self._translate_sentences(tokenizer, pipeline, sentences, vrefs), total=len(sentences), unit="ex"
         ):
             yield prediction["translation_text"]
 
@@ -526,6 +609,86 @@ class HuggingFaceNMTModel(NMTModel):
                     args[param] = section_config[param]
         merge_dict(args, {"fp16": self._mixed_precision})
         return parser.parse_dict(args)[0]
+
+    def _get_dictionary(self) -> Dict[VerseRef, Set[str]]:
+        if self._dictionary is not None:
+            return self._dictionary
+
+        self._dictionary = {}
+
+        dict_trg_path = self._config.exp_dir / self._config.dict_trg_filename()
+        dict_vref_path = self._config.exp_dir / self._config.dict_vref_filename()
+
+        if not dict_trg_path.is_file() or not dict_vref_path.is_file():
+            return self._dictionary
+
+        with dict_trg_path.open("r", encoding="utf-8-sig") as trg_file, dict_vref_path.open(
+            "r", encoding="utf-8-sig"
+        ) as dict_file:
+            for trg_line, vref_line in zip(trg_file, dict_file):
+                vref_strs = vref_line.strip().split("\t")
+                for vref_str in vref_strs:
+                    verse_ref = VerseRef.from_string(vref_str, ORIGINAL_VERSIFICATION)
+                    terms = self._dictionary.get(verse_ref)
+                    if terms is None:
+                        terms = set()
+                        self._dictionary[verse_ref] = terms
+                    terms.add(trg_line.strip())
+
+        return self._dictionary
+
+    def _batch_sentences(
+        self, sentences: Iterable[TSent], vrefs: Optional[Iterable[VerseRef]], batch_size: int
+    ) -> Iterable[Tuple[List[TSent], Optional[List[List[List[str]]]]]]:
+        batch: List[TSent] = []
+        dictionary = self._get_dictionary()
+        for sentence, vref in zip(sentences, repeat(None) if vrefs is None else vrefs):
+            terms: Set[str] = set()
+            if vref is not None:
+                for vr in vref.all_verses():
+                    terms.update(dictionary.get(vr, set()))
+            if len(terms) > 0:
+                if len(batch) > 0:
+                    yield batch, None
+                    batch = []
+                force_words = [[term.split() for term in term.split("\t")] for term in terms]
+                yield [sentence], force_words
+            else:
+                batch.append(sentence)
+                if len(batch) == batch_size:
+                    yield batch, None
+                    batch = []
+        if len(batch) > 0:
+            yield batch, None
+
+    def _translate_sentences(
+        self,
+        tokenizer: PreTrainedTokenizer,
+        pipeline: TranslationPipeline,
+        sentences: Iterable[TSent],
+        vrefs: Optional[Iterable[VerseRef]],
+        return_tensors: bool = False,
+    ) -> Iterable[dict]:
+        batch_size: int = self._config.infer["infer_batch_size"]
+        num_beams: Optional[int] = self._config.infer.get("num_beams")
+        if num_beams is None:
+            num_beams = self._config.params.get("generation_num_beams")
+
+        for batch, force_words in self._batch_sentences(sentences, vrefs, batch_size):
+            if force_words is None:
+                force_words_ids = None
+            else:
+                force_words_ids = [[tokenizer.convert_tokens_to_ids(v) for v in vs] for vs in force_words]
+                force_words_ids = prune_sublists(force_words_ids)
+
+            yield from pipeline(
+                batch,
+                num_beams=num_beams,
+                force_words_ids=force_words_ids,
+                batch_size=batch_size,
+                return_text=not return_tensors,
+                return_tensors=return_tensors,
+            )
 
 
 class HuggingFaceTokenizer(Tokenizer):

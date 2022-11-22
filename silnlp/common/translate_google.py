@@ -1,8 +1,8 @@
 import argparse
-from typing import Iterable, List, Optional, Union
+from typing import Iterable, Optional
 
 from google.cloud import translate_v2 as translate
-from machine.scripture import book_id_to_number
+from machine.scripture import VerseRef, book_id_to_number
 
 from .paratext import book_file_name_digits
 from .translator import Translator
@@ -14,7 +14,7 @@ class GoogleTranslator(Translator):
         self._translate_client = translate.Client()
 
     def translate(
-        self, sentences: Iterable[Union[str, List[str]]], src_iso: Optional[str] = None, trg_iso: Optional[str] = None
+        self, sentences: Iterable[str], src_iso: str, trg_iso: str, vrefs: Optional[Iterable[VerseRef]] = None
     ) -> Iterable[str]:
         for sentence in sentences:
             if len(sentence) == 0:
@@ -40,7 +40,7 @@ def main() -> None:
     root_dir = get_mt_exp_dir(args.experiment)
     src_project: str = args.src_project
     book: str = args.book
-    trg_iso: Optional[str] = args.trg_lang
+    trg_iso: str = "en" if args.trg_lang is None else args.trg_lang
 
     default_output_dir = root_dir / src_project
     book_num = book_id_to_number(book)
@@ -49,7 +49,7 @@ def main() -> None:
     output_dir.mkdir(exist_ok=True)
 
     translator = GoogleTranslator()
-    translator.translate_book(src_project, book, output_path, trg_iso=trg_iso)
+    translator.translate_book(src_project, book, output_path, trg_iso)
 
 
 if __name__ == "__main__":

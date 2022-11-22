@@ -2,14 +2,17 @@ import logging
 import os
 import shutil
 import tempfile
+from contextlib import ExitStack
 from pathlib import Path
 from typing import IO, Iterable, List, Optional, Sequence, Set, Tuple, Union, cast
 
 import numpy as np
+import pandas as pd
 import sacrebleu
 import sentencepiece as sp
 import tensorflow as tf
 import yaml
+from machine.scripture import VerseRef, get_books
 from opennmt import END_OF_SENTENCE_TOKEN, PADDING_TOKEN, START_OF_SENTENCE_TOKEN
 from opennmt.data import Vocab
 from opennmt.models.catalog import list_model_names_from_catalog
@@ -17,11 +20,11 @@ from opennmt.utils import Scorer, register_scorer
 
 from ..alignment.config import get_aligner, get_aligner_name
 from ..alignment.machine_aligner import MachineAligner
-from ..common.corpus import load_corpus, split_corpus
+from ..common.corpus import get_terms, get_terms_corpus, get_terms_data_frame, load_corpus, split_corpus
 from ..common.environment import SIL_NLP_ENV, download_if_s3_paths
 from ..common.tf_utils import set_tf_log_level
 from ..common.utils import Side, get_mt_exp_dir, merge_dict
-from .config import CheckpointType, Config, NMTModel
+from .config import CheckpointType, Config, CorpusPair, NMTModel
 from .opennmt.runner import create_runner
 from .sp_utils import decode_sp, decode_sp_lines
 from .tokenizer import NullTokenizer, Tokenizer
@@ -679,6 +682,39 @@ class OpenNMTConfig(Config):
             aligner.train(src_train_path, trg_train_path)
             aligner.force_align(src_align_path, trg_align_path, self.exp_dir / "train.alignments.txt")
 
+    def _write_dictionary(self, tokenizer: Tokenizer, pair: CorpusPair) -> int:
+        terms_config = self.data["terms"]
+        dict_books = get_books(terms_config["dictionary_books"]) if "dictionary_books" in terms_config else None
+        terms = self._collect_terms(pair, filter_books=dict_books)
+
+        dict_count = 0
+        with ExitStack() as stack:
+            dict_src_file = stack.enter_context(self._open_append(self.dict_src_filename()))
+            dict_trg_file = stack.enter_context(self._open_append(self.dict_trg_filename()))
+            dict_vref_file = stack.enter_context(self._open_append(self.dict_vref_filename()))
+
+            if terms is not None:
+                for _, term in terms.iterrows():
+                    src_term = term["source"]
+                    trg_term = term["target"]
+                    vrefs = term["vrefs"]
+                    tokenizer.set_src_lang(term["source_lang"])
+                    tokenizer.set_trg_lang(term["target_lang"])
+
+                    src_term_variants = [
+                        tokenizer.tokenize(Side.SOURCE, src_term, add_dummy_prefix=True, add_special_tokens=False),
+                        tokenizer.tokenize(Side.SOURCE, src_term, add_dummy_prefix=False, add_special_tokens=False),
+                    ]
+                    trg_term_variants = [
+                        tokenizer.tokenize(Side.TARGET, trg_term, add_dummy_prefix=True, add_special_tokens=False),
+                        tokenizer.tokenize(Side.TARGET, trg_term, add_dummy_prefix=False, add_special_tokens=False),
+                    ]
+                    dict_src_file.write("\t".join(src_term_variants) + "\n")
+                    dict_trg_file.write("\t".join(trg_term_variants) + "\n")
+                    dict_vref_file.write(vrefs + "\n")
+                    dict_count += 1
+        return dict_count
+
 
 class OpenNMTModel(NMTModel):
     def __init__(self, config: OpenNMTConfig, mixed_precision: bool, num_devices: int) -> None:
@@ -701,14 +737,14 @@ class OpenNMTModel(NMTModel):
         self,
         input_paths: List[Path],
         translation_paths: List[Path],
-        ref_paths: Optional[List[Path]] = None,
+        vref_paths: Optional[List[Path]] = None,
         checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
         features_paths: List[Union[str, Sequence[str]]]
-        if ref_paths is None:
+        if vref_paths is None:
             features_paths = [str(ip) for ip in input_paths]
         else:
-            features_paths = [(str(ip), str(vp)) for ip, vp in zip(input_paths, ref_paths)]
+            features_paths = [(str(ip), str(vp)) for ip, vp in zip(input_paths, vref_paths)]
         predictions_paths = [str(p) for p in translation_paths]
         checkpoint_path, _ = get_checkpoint_path(self._config.model_dir, checkpoint)
         self._runner.infer_multiple(features_paths, predictions_paths, str(checkpoint_path))
@@ -718,14 +754,14 @@ class OpenNMTModel(NMTModel):
         sentences: Iterable[str],
         src_iso: str,
         trg_iso: str,
-        refs: Optional[Iterable[str]] = None,
+        vrefs: Optional[Iterable[VerseRef]] = None,
         checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Iterable[str]:
         tokenizer = self._config.create_tokenizer()
         tokenizer.set_trg_lang(trg_iso)
         features_list: List[List[str]] = [[tokenizer.tokenize(Side.SOURCE, s) for s in sentences]]
-        if refs is not None:
-            features_list.append(list(refs))
+        if vrefs is not None:
+            features_list.append([str(vref) if vref.verse_num != 0 else "" for vref in vrefs])
         checkpoint_path, _ = get_checkpoint_path(self._config.model_dir, checkpoint)
         translations = self._runner.infer_list(features_list, str(checkpoint_path))
         return (decode_sp(t[0]) for t in translations)
