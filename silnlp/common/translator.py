@@ -1,7 +1,7 @@
 import string
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Iterable, List, Union
+from typing import Iterable, List, Optional, Union
 
 from lxml import etree
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
@@ -158,10 +158,7 @@ def update_segments(segments: List[Segment], translations: List[str]) -> None:
 class Translator(ABC):
     @abstractmethod
     def translate(
-        self,
-        sentences: Iterable[Union[str, List[str]]],
-        src_iso: str,
-        trg_iso: str,
+        self, sentences: Iterable[str], src_iso: str, trg_iso: str, refs: Optional[Iterable[str]] = None
     ) -> Iterable[str]:
         pass
 
@@ -179,11 +176,9 @@ class Translator(ABC):
 
         segments = collect_segments(book, doc)
 
-        translations = list(
-            self.translate(
-                ([s.text.strip(), str(s.ref) if s.ref.verse_num != 0 else ""] for s in segments), src_iso, trg_iso
-            )
-        )
+        sentences = (s.text.strip() for s in segments)
+        refs = (str(s.ref) if s.ref.verse_num != 0 else "" for s in segments)
+        translations = list(self.translate(sentences, src_iso, trg_iso, refs))
 
         update_segments(segments, translations)
 

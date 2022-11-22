@@ -449,8 +449,9 @@ class HuggingFaceNMTModel(NMTModel):
 
     def translate_text_files(
         self,
-        input_paths: List[Union[Path, Sequence[Path]]],
+        input_paths: List[Path],
         translation_paths: List[Path],
+        ref_paths: Optional[List[Path]] = None,
         checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
         checkpoint_path, _ = get_checkpoint_path(self._config.model_dir, checkpoint)
@@ -485,9 +486,10 @@ class HuggingFaceNMTModel(NMTModel):
 
     def translate(
         self,
-        sentences: Iterable[Union[str, Sequence[str]]],
+        sentences: Iterable[str],
         src_iso: str,
         trg_iso: str,
+        refs: Optional[Iterable[str]] = None,
         checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Iterable[str]:
         checkpoint_path, _ = get_checkpoint_path(self._config.model_dir, checkpoint)

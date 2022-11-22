@@ -395,7 +395,7 @@ class OpenNMTConfig(Config):
             data_config["target_dictionary"] = str(exp_dir / self.dict_trg_filename())
             data_config["ref_dictionary"] = str(exp_dir / self.dict_vref_filename())
 
-        if self._has_scripture_data:
+        if self.has_scripture_data:
             data_config["eval_features_file"] = [
                 str(exp_dir / self.val_src_filename()),
                 str(exp_dir / self.val_vref_filename()),
@@ -699,34 +699,33 @@ class OpenNMTModel(NMTModel):
 
     def translate_text_files(
         self,
-        input_paths: List[Union[Path, Sequence[Path]]],
+        input_paths: List[Path],
         translation_paths: List[Path],
+        ref_paths: Optional[List[Path]] = None,
         checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
-        features_paths = [str(p) if isinstance(p, Path) else [str(cp) for cp in p] for p in input_paths]
+        features_paths: List[Union[str, Sequence[str]]]
+        if ref_paths is None:
+            features_paths = [str(ip) for ip in input_paths]
+        else:
+            features_paths = [(str(ip), str(vp)) for ip, vp in zip(input_paths, ref_paths)]
         predictions_paths = [str(p) for p in translation_paths]
         checkpoint_path, _ = get_checkpoint_path(self._config.model_dir, checkpoint)
         self._runner.infer_multiple(features_paths, predictions_paths, str(checkpoint_path))
 
     def translate(
         self,
-        sentences: Iterable[Union[str, Sequence[str]]],
+        sentences: Iterable[str],
         src_iso: str,
         trg_iso: str,
+        refs: Optional[Iterable[str]] = None,
         checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Iterable[str]:
         tokenizer = self._config.create_tokenizer()
         tokenizer.set_trg_lang(trg_iso)
-        features_list: List[List[str]] = [[]]
-        for sentence in sentences:
-            if isinstance(sentence, str):
-                features_list[0].append(tokenizer.tokenize(Side.SOURCE, sentence))
-            else:
-                features_list[0].append(tokenizer.tokenize(Side.SOURCE, sentence[0]))
-                for i in range(1, len(sentence)):
-                    if i == len(features_list):
-                        features_list.append([])
-                    features_list[i].append(sentence[i])
+        features_list: List[List[str]] = [[tokenizer.tokenize(Side.SOURCE, s) for s in sentences]]
+        if refs is not None:
+            features_list.append(list(refs))
         checkpoint_path, _ = get_checkpoint_path(self._config.model_dir, checkpoint)
         translations = self._runner.infer_list(features_list, str(checkpoint_path))
         return (decode_sp(t[0]) for t in translations)

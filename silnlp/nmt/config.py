@@ -327,8 +327,9 @@ class NMTModel(ABC):
     @abstractmethod
     def translate_text_files(
         self,
-        input_paths: List[Union[Path, Sequence[Path]]],
+        input_paths: List[Path],
         translation_paths: List[Path],
+        ref_paths: Optional[List[Path]] = None,
         checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
         ...
@@ -336,9 +337,10 @@ class NMTModel(ABC):
     @abstractmethod
     def translate(
         self,
-        sentences: Iterable[Union[str, Sequence[str]]],
+        sentences: Iterable[str],
         src_iso: str,
         trg_iso: str,
+        refs: Optional[Iterable[str]] = None,
         checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Iterable[str]:
         ...
@@ -362,7 +364,7 @@ class Config(ABC):
         self.src_file_paths: Set[Path] = set()
         self.trg_file_paths: Set[Path] = set()
         self._tags: Set[str] = set()
-        self._has_scripture_data = False
+        self.has_scripture_data = False
         self._iso_pairs: Dict[Tuple[str, str], IsoPairInfo] = {}
         self.src_projects: Set[str] = set()
         for corpus_pair in self.corpus_pairs:
@@ -373,7 +375,7 @@ class Config(ABC):
             self.src_file_paths.update(sf.path for sf in corpus_pair.src_files)
             self.trg_file_paths.update(tf.path for tf in corpus_pair.trg_files)
             if corpus_pair.is_scripture:
-                self._has_scripture_data = True
+                self.has_scripture_data = True
                 self.src_file_paths.update(sf.path for sf in corpus_pair.src_terms_files)
                 self.trg_file_paths.update(tf.path for tf in corpus_pair.trg_terms_files)
                 self.src_projects.update(sf.project for sf in corpus_pair.src_files)
@@ -1079,7 +1081,7 @@ class Config(ABC):
             dict_src_file: Optional[TextIO] = None
             dict_trg_file: Optional[TextIO] = None
             dict_vref_file: Optional[TextIO] = None
-            if self._has_scripture_data:
+            if self.has_scripture_data:
                 train_vref_file = stack.enter_context(self._open_append(self.train_vref_filename()))
                 val_vref_file = stack.enter_context(self._open_append(self.val_vref_filename()))
                 test_vref_file = stack.enter_context(

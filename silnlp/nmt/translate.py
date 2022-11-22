@@ -4,19 +4,17 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple, Union
+from typing import Iterable, Optional, Tuple, Union
 
 from machine.scripture import book_number_to_id, get_books
 
 from ..common.environment import SIL_NLP_ENV
-from ..common.paratext import book_file_name_digits
+from ..common.paratext import book_file_name_digits, get_project_dir
 from ..common.tf_utils import enable_eager_execution, enable_memory_growth
 from ..common.translator import Translator
 from ..common.utils import get_git_revision_hash
-from ..common.paratext import get_project_dir
 from .clearml_connection import SILClearML
 from .config import CheckpointType, Config, NMTModel
-from .tokenizer import Tokenizer
 
 LOGGER = logging.getLogger(__name__)
 
@@ -26,8 +24,10 @@ class NMTTranslator(Translator):
         self._model = model
         self._checkpoint = checkpoint
 
-    def translate(self, sentences: Iterable[Union[str, List[str]]], src_iso: str, trg_iso: str) -> Iterable[str]:
-        return self._model.translate(sentences, src_iso, trg_iso, self._checkpoint)
+    def translate(
+        self, sentences: Iterable[str], src_iso: str, trg_iso: str, refs: Optional[Iterable[str]] = None
+    ) -> Iterable[str]:
+        return self._model.translate(sentences, src_iso, trg_iso, refs, self._checkpoint)
 
 
 @dataclass
