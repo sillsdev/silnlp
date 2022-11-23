@@ -1,8 +1,8 @@
 import argparse
 import os
 from dataclasses import dataclass
-from typing import Optional
 from pathlib import Path
+from typing import Optional
 
 from ..common.environment import SIL_NLP_ENV
 from ..common.tf_utils import enable_memory_growth
@@ -34,6 +34,13 @@ class SILExperiment:
 
     def preprocess(self):
         SIL_NLP_ENV.copy_experiment_from_bucket(self.name, extensions=(".yml"))
+        # Do some basic checks before starting the experiment
+        exp_dir = Path(get_mt_exp_dir(self.name))
+        if not exp_dir.exists():
+            raise RuntimeError(f"ERROR: Experiment folder {exp_dir} does not exist.")
+        config_file = Path(exp_dir, "config.yml")
+        if not config_file.exists():
+            raise RuntimeError(f"ERROR: Config file does not exist in experiment folder {exp_dir}.")
         self.config.preprocess(self.make_stats)
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
 
@@ -78,16 +85,6 @@ def main() -> None:
         help="Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run it locally and register it with ClearML.",
     )
     args = parser.parse_args()
-
-    # Do some basic checks before starting the experiment
-    exp_dir = Path(get_mt_exp_dir(args.experiment))
-    if not exp_dir.exists():
-        print(f'ERROR: Experiment folder {exp_dir} does not exist.')
-        return -1
-    config_file = Path(exp_dir, 'config.yml')
-    if not config_file.exists():
-        print(f'ERROR: Config file does not exist in experiment folder {exp_dir}.')
-        return -1
 
     if args.memory_growth:
         enable_memory_growth()
