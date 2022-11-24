@@ -111,34 +111,6 @@ def get_best_checkpoint(model_dir: Path) -> Path:
     return model_dir / Path(trainer_state["best_model_checkpoint"]).name
 
 
-def get_checkpoint_path(model_dir: Path, checkpoint: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
-    step: Optional[int] = None
-    if isinstance(checkpoint, str):
-        checkpoint = checkpoint.lower()
-        if "avg" in checkpoint:
-            checkpoint = CheckpointType.AVERAGE
-        elif "best" in checkpoint:
-            checkpoint = CheckpointType.BEST
-        elif "last" in checkpoint:
-            checkpoint = CheckpointType.LAST
-        else:
-            step = int(checkpoint)
-            checkpoint = CheckpointType.OTHER
-    if checkpoint is CheckpointType.BEST:
-        ckpt = get_best_checkpoint(model_dir)
-        step = int(ckpt.name[11:])
-    elif checkpoint is CheckpointType.LAST:
-        ckpt = Path(get_last_checkpoint(model_dir))
-        step = int(ckpt.name[11:])
-    elif checkpoint is CheckpointType.OTHER and step is not None:
-        ckpt = model_dir / f"checkpoint-{step}"
-    else:
-        raise ValueError(f"Unsupported checkpoint type: {checkpoint}.")
-    if ckpt is not None:
-        SIL_NLP_ENV.copy_experiment_from_bucket(SIL_NLP_ENV.get_source_experiment_path(ckpt))
-    return ckpt, step
-
-
 OPTIMIZER_STATE_FILES = {"optimizer.pt", "rng_state.pth", "scaler.pt", "scheduler.pt"}
 
 
@@ -372,6 +344,33 @@ def batch_prepare_for_model(
 TSent = TypeVar("TSent")
 
 
+def batch_sentences(
+    sentences: Iterable[TSent],
+    vrefs: Optional[Iterable[VerseRef]],
+    batch_size: int,
+    dictionary: Dict[VerseRef, Set[str]],
+) -> Iterable[Tuple[List[TSent], Optional[List[List[List[str]]]]]]:
+    batch: List[TSent] = []
+    for sentence, vref in zip(sentences, repeat(None) if vrefs is None else vrefs):
+        terms: Set[str] = set()
+        if vref is not None:
+            for vr in vref.all_verses():
+                terms.update(dictionary.get(vr, set()))
+        if len(terms) > 0:
+            if len(batch) > 0:
+                yield batch, None
+                batch = []
+            force_words = [[term.split() for term in term.split("\t")] for term in terms]
+            yield [sentence], force_words
+        else:
+            batch.append(sentence)
+            if len(batch) == batch_size:
+                yield batch, None
+                batch = []
+    if len(batch) > 0:
+        yield batch, None
+
+
 class HuggingFaceNMTModel(NMTModel):
     def __init__(self, config: HuggingFaceConfig, mixed_precision: bool, num_devices: int) -> None:
         self._config = config
@@ -540,7 +539,7 @@ class HuggingFaceNMTModel(NMTModel):
         vref_paths: Optional[List[Path]] = None,
         checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
-        checkpoint_path, _ = get_checkpoint_path(self._config.model_dir, checkpoint)
+        checkpoint_path, _ = self.get_checkpoint_path(checkpoint)
         model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(str(checkpoint_path))
         tokenizer = self._config.get_tokenizer()
         pipeline = PretokenizedTranslationPipeline(
@@ -579,7 +578,7 @@ class HuggingFaceNMTModel(NMTModel):
         vrefs: Optional[Iterable[VerseRef]] = None,
         checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Iterable[str]:
-        checkpoint_path, _ = get_checkpoint_path(self._config.model_dir, checkpoint)
+        checkpoint_path, _ = self.get_checkpoint_path(checkpoint)
         model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(str(checkpoint_path))
         tokenizer = self._config.get_tokenizer()
         lang_codes: Dict[str, str] = self._config.data["lang_codes"]
@@ -592,12 +591,36 @@ class HuggingFaceNMTModel(NMTModel):
         )
         sentences = list(sentences)
         for prediction in tqdm(
-            self._translate_sentences(tokenizer, pipeline, sentences, vrefs), total=len(sentences), unit="ex"
+            self._translate_sentences(tokenizer, pipeline, sentences, vrefs),
+            total=len(sentences),
+            unit="ex",
         ):
             yield prediction["translation_text"]
 
-    def get_checkpoint_step(self, checkpoint: Union[CheckpointType, str, int]) -> int:
-        return get_checkpoint_path(self._config.model_dir, checkpoint)[1]
+    def get_checkpoint_path(self, checkpoint: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
+        step: Optional[int] = None
+        if isinstance(checkpoint, str):
+            checkpoint = checkpoint.lower()
+            if "avg" in checkpoint:
+                checkpoint = CheckpointType.AVERAGE
+            elif "best" in checkpoint:
+                checkpoint = CheckpointType.BEST
+            elif "last" in checkpoint:
+                checkpoint = CheckpointType.LAST
+            else:
+                step = int(checkpoint)
+                checkpoint = CheckpointType.OTHER
+        if checkpoint is CheckpointType.BEST:
+            ckpt = get_best_checkpoint(self._config.model_dir)
+            step = int(ckpt.name[11:])
+        elif checkpoint is CheckpointType.LAST:
+            ckpt = Path(get_last_checkpoint(self._config.model_dir))
+            step = int(ckpt.name[11:])
+        elif checkpoint is CheckpointType.OTHER and step is not None:
+            ckpt = self._config.model_dir / f"checkpoint-{step}"
+        else:
+            raise ValueError(f"Unsupported checkpoint type: {checkpoint}.")
+        return ckpt, step
 
     def _create_training_arguments(self) -> Seq2SeqTrainingArguments:
         parser = HfArgumentParser(Seq2SeqTrainingArguments)
@@ -637,30 +660,6 @@ class HuggingFaceNMTModel(NMTModel):
 
         return self._dictionary
 
-    def _batch_sentences(
-        self, sentences: Iterable[TSent], vrefs: Optional[Iterable[VerseRef]], batch_size: int
-    ) -> Iterable[Tuple[List[TSent], Optional[List[List[List[str]]]]]]:
-        batch: List[TSent] = []
-        dictionary = self._get_dictionary()
-        for sentence, vref in zip(sentences, repeat(None) if vrefs is None else vrefs):
-            terms: Set[str] = set()
-            if vref is not None:
-                for vr in vref.all_verses():
-                    terms.update(dictionary.get(vr, set()))
-            if len(terms) > 0:
-                if len(batch) > 0:
-                    yield batch, None
-                    batch = []
-                force_words = [[term.split() for term in term.split("\t")] for term in terms]
-                yield [sentence], force_words
-            else:
-                batch.append(sentence)
-                if len(batch) == batch_size:
-                    yield batch, None
-                    batch = []
-        if len(batch) > 0:
-            yield batch, None
-
     def _translate_sentences(
         self,
         tokenizer: PreTrainedTokenizer,
@@ -674,21 +673,31 @@ class HuggingFaceNMTModel(NMTModel):
         if num_beams is None:
             num_beams = self._config.params.get("generation_num_beams")
 
-        for batch, force_words in self._batch_sentences(sentences, vrefs, batch_size):
-            if force_words is None:
-                force_words_ids = None
-            else:
-                force_words_ids = [[tokenizer.convert_tokens_to_ids(v) for v in vs] for vs in force_words]
-                force_words_ids = prune_sublists(force_words_ids)
-
+        dictionary = self._get_dictionary()
+        if vrefs is None or len(dictionary) == 0:
             yield from pipeline(
-                batch,
+                sentences,
                 num_beams=num_beams,
-                force_words_ids=force_words_ids,
                 batch_size=batch_size,
                 return_text=not return_tensors,
                 return_tensors=return_tensors,
             )
+        else:
+            for batch, force_words in batch_sentences(sentences, vrefs, batch_size, dictionary):
+                if force_words is None:
+                    force_words_ids = None
+                else:
+                    force_words_ids = [[tokenizer.convert_tokens_to_ids(v) for v in vs] for vs in force_words]
+                    force_words_ids = prune_sublists(force_words_ids)
+
+                yield from pipeline(
+                    batch,
+                    num_beams=num_beams,
+                    force_words_ids=force_words_ids,
+                    batch_size=batch_size,
+                    return_text=not return_tensors,
+                    return_tensors=return_tensors,
+                )
 
 
 class HuggingFaceTokenizer(Tokenizer):

@@ -3,10 +3,9 @@ import os
 import re
 import subprocess
 import tempfile
-from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePath
 from platform import system, uname
-from typing import Iterable, List, Tuple, Union
+from typing import Iterable, List, Optional, Sequence, Union
 
 import boto3
 from dotenv import load_dotenv
@@ -133,9 +132,7 @@ class SilNlpEnv:
 
         raise FileExistsError("No valid path exists")
 
-    def copy_experiment_from_bucket(
-        self, name: Union[str, Path], extensions: Union[str, Tuple[str, ...]] = "", copy_run: bool = False
-    ):
+    def copy_experiment_from_bucket(self, name: Union[str, Path], patterns: Union[str, Sequence[str]] = []):
         if not self.is_bucket:
             return
         name = str(name)
@@ -147,31 +144,26 @@ class SilNlpEnv:
         s3 = boto3.resource("s3")
         data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
         len_aqua_path = len("MT/experiments/")
-        proj_name = name.split("/")[0]
-        objs = list(data_bucket.object_versions.filter(Prefix="MT/experiments/" + proj_name))
+        objs = list(data_bucket.object_versions.filter(Prefix="MT/experiments/" + name))
         if len(objs) == 0:
-            LOGGER.info("No files found in the bucket under: MT/experiments/" + proj_name)
+            LOGGER.info("No files found in the bucket under: MT/experiments/" + name)
             return
+        if isinstance(patterns, str):
+            patterns = [patterns]
         for obj in objs:
             rel_path = str(obj.object_key)[len_aqua_path:]
-            if (
-                (rel_path.endswith(extensions) and rel_path.startswith(name + "/"))
-                or (copy_run and rel_path.startswith(name + "/run/"))
-                or (copy_run and rel_path.startswith(name + "/parent/"))
-            ):
+            pure_path = PurePath(rel_path)
+            if len(patterns) == 0 or any(pure_path.match(pattern) for pattern in patterns):
                 # copy over project files and experiment files
                 temp_dest_path = self.mt_experiments_dir / rel_path
                 temp_dest_path.parent.mkdir(parents=True, exist_ok=True)
                 if temp_dest_path.exists():
-                    curr_mod_time = datetime.fromtimestamp(os.path.getmtime(temp_dest_path), tz=timezone.utc)
-                    new_mod_time = obj.last_modified
-                    if curr_mod_time >= new_mod_time:
-                        LOGGER.debug("File already exists in local cache: " + rel_path)
-                        continue
-                LOGGER.info("Downloading " + rel_path)
-                data_bucket.download_file(obj.object_key, str(temp_dest_path))
+                    LOGGER.debug("File already exists in local cache: " + rel_path)
+                else:
+                    LOGGER.info("Downloading " + rel_path)
+                    data_bucket.download_file(obj.object_key, str(temp_dest_path))
 
-    def copy_experiment_to_bucket(self, name: str, extensions: Union[str, Tuple[str, ...]] = ""):
+    def copy_experiment_to_bucket(self, name: str, patterns: Union[str, Sequence[str]] = []):
         if not self.is_bucket:
             return
         name = str(name)
@@ -188,10 +180,13 @@ class SilNlpEnv:
         for obj in data_bucket.object_versions.filter(Prefix="MT/experiments/" + name):
             files_already_in_s3.add(str(obj.object_key))
 
-        for root, dirs, files in os.walk(temp_folder, topdown=False):
+        if isinstance(patterns, str):
+            patterns = [patterns]
+        for root, _, files in os.walk(temp_folder, topdown=False):
             s3_dest_path = str("MT/experiments/" + root[len_exp_dir + 1 :].replace("\\", "/"))
             for file in files:
-                if file.endswith(extensions):
+                pure_path = PurePath(file)
+                if len(patterns) == 0 or any(pure_path.match(pattern) for pattern in patterns):
                     source_file = os.path.join(root, file)
                     dest_file = s3_dest_path + "/" + file
                     if dest_file in files_already_in_s3:
@@ -200,23 +195,10 @@ class SilNlpEnv:
                         LOGGER.info("Uploading " + dest_file)
                         data_bucket.upload_file(source_file, dest_file)
 
-    def get_source_experiment_path(self, tmp_path):
-        if not self.is_bucket:
-            return tmp_path
-        if tmp_path is None:
-            return tmp_path
+    def get_source_experiment_path(self, tmp_path: Path) -> str:
         end_of_path = str(tmp_path)[len(str(self.mt_experiments_dir)) :]
-        source_path = self.data_dir / ("MT/experiments" + end_of_path.replace("\\", "/"))
+        source_path = end_of_path.replace("\\", "/")
         return source_path
-
-    def get_temp_experiment_path(self, source_path):
-        if not self.is_bucket:
-            return source_path
-        if source_path is None:
-            return source_path
-        end_of_path = str(source_path)[len(str(self.data_dir / "MT/experiments")) + 1 :]
-        tmp_path = self.mt_experiments_dir / end_of_path
-        return tmp_path
 
 
 def download_if_s3_paths(paths: Iterable[S3Path]) -> List[Path]:

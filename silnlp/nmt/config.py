@@ -346,7 +346,7 @@ class NMTModel(ABC):
         ...
 
     @abstractmethod
-    def get_checkpoint_step(self, checkpoint: Union[CheckpointType, str, int]) -> int:
+    def get_checkpoint_path(self, checkpoint: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
         ...
 
 
@@ -749,7 +749,7 @@ class Config(ABC):
             if vref_str != "":
                 vrefs[vref_str] = i
 
-        SIL_NLP_ENV.copy_experiment_from_bucket(exp_name, extensions=(".vref.txt"))
+        SIL_NLP_ENV.copy_experiment_from_bucket(exp_name, patterns="test*.vref.txt")
         exp_dir = get_mt_exp_dir(exp_name)
         for vref_path in exp_dir.glob("test*.vref.txt"):
             stem = vref_path.stem

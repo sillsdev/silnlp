@@ -106,8 +106,7 @@ def build_vocab(
     convert_vocab(model_prefix.with_suffix(".vocab"), vocab_path, tags)
 
 
-def get_checkpoint_path(model_dir: Path, checkpoint: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
-    model_dir = SIL_NLP_ENV.get_source_experiment_path(model_dir)
+def _get_checkpoint_path(model_dir: Path, checkpoint: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
     step: Optional[int] = None
     if isinstance(checkpoint, str):
         checkpoint = checkpoint.lower()
@@ -134,9 +133,6 @@ def get_checkpoint_path(model_dir: Path, checkpoint: Union[CheckpointType, str, 
         ckpt = model_dir / f"ckpt-{step}"
     else:
         raise RuntimeError(f"Unsupported checkpoint type: {checkpoint}")
-    if ckpt is not None:
-        SIL_NLP_ENV.copy_experiment_from_bucket(ckpt.parent)
-        ckpt, step = (SIL_NLP_ENV.get_temp_experiment_path(ckpt), step)
     return ckpt, step
 
 
@@ -407,7 +403,7 @@ class OpenNMTConfig(Config):
         parent: Optional[str] = self.data.get("parent")
         self.parent_config: Optional[Config] = None
         if parent is not None:
-            SIL_NLP_ENV.copy_experiment_from_bucket(parent, extensions=("config.yml", ".model", ".vocab"))
+            SIL_NLP_ENV.copy_experiment_from_bucket(parent, patterns=("config.yml", "*.model", "*.vocab"))
             parent_exp_dir = get_mt_exp_dir(parent)
             parent_config_path = parent_exp_dir / "config.yml"
             with parent_config_path.open("r", encoding="utf-8") as file:
@@ -556,7 +552,7 @@ class OpenNMTConfig(Config):
             if self.data["parent_use_average"]
             else CheckpointType.LAST
         )
-        checkpoint_path, step = get_checkpoint_path(self.parent_config.model_dir, parent_model_to_use)
+        checkpoint_path, step = _get_checkpoint_path(self.parent_config.model_dir, parent_model_to_use)
         parent_config = cast(OpenNMTConfig, self.parent_config)
         parent_runner = create_runner(parent_config.model, parent_config.root, parent_config.write_trg_tag)
         parent_runner.update_vocab(
@@ -746,7 +742,7 @@ class OpenNMTModel(NMTModel):
         else:
             features_paths = [(str(ip), str(vp)) for ip, vp in zip(input_paths, vref_paths)]
         predictions_paths = [str(p) for p in translation_paths]
-        checkpoint_path, _ = get_checkpoint_path(self._config.model_dir, checkpoint)
+        checkpoint_path, _ = self.get_checkpoint_path(checkpoint)
         self._runner.infer_multiple(features_paths, predictions_paths, str(checkpoint_path))
 
     def translate(
@@ -762,12 +758,12 @@ class OpenNMTModel(NMTModel):
         features_list: List[List[str]] = [[tokenizer.tokenize(Side.SOURCE, s) for s in sentences]]
         if vrefs is not None:
             features_list.append([str(vref) if vref.verse_num != 0 else "" for vref in vrefs])
-        checkpoint_path, _ = get_checkpoint_path(self._config.model_dir, checkpoint)
+        checkpoint_path, _ = self.get_checkpoint_path(checkpoint)
         translations = self._runner.infer_list(features_list, str(checkpoint_path))
         return (decode_sp(t[0]) for t in translations)
 
-    def get_checkpoint_step(self, checkpoint: Union[CheckpointType, str, int]) -> int:
-        return get_checkpoint_path(self._config.model_dir, checkpoint)[1]
+    def get_checkpoint_path(self, checkpoint: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
+        return _get_checkpoint_path(self._config.model_dir, checkpoint)
 
 
 class OpenNMTTokenizer(Tokenizer):

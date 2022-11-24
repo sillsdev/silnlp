@@ -156,14 +156,17 @@ class TranslationTask:
         self.name = clearml.name
 
         SIL_NLP_ENV.copy_experiment_from_bucket(
-            self.name, extensions=(".vocab", ".model", ".yml", "dict.src.txt", "dict.trg.txt", "dict.vref.txt", ".json")
+            self.name, patterns=("*.vocab", "*.model", "*.yml", "dict.*.txt", "*.json", "checkpoint", "ckpt*.index")
         )
 
         clearml.config.set_seed()
 
         model = clearml.config.create_model()
         translator = NMTTranslator(model, self.checkpoint)
-        step = model.get_checkpoint_step(self.checkpoint)
+        checkpoint_path, step = model.get_checkpoint_path(self.checkpoint)
+        SIL_NLP_ENV.copy_experiment_from_bucket(
+            self.name, patterns=SIL_NLP_ENV.get_source_experiment_path(checkpoint_path)
+        )
         step_str = "avg" if step == -1 else str(step)
         return translator, clearml.config, step_str
 

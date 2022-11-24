@@ -19,6 +19,7 @@ class SILExperiment:
     mixed_precision: bool = False
     num_devices: int = 1
     clearml_queue: Optional[str] = None
+    save_checkpoints: bool = False
 
     def __post_init__(self):
         self.clearml = SILClearML(self.name, self.clearml_queue)
@@ -33,7 +34,6 @@ class SILExperiment:
         self.test()
 
     def preprocess(self):
-        SIL_NLP_ENV.copy_experiment_from_bucket(self.name, extensions=(".yml"))
         # Do some basic checks before starting the experiment
         exp_dir = Path(get_mt_exp_dir(self.name))
         if not exp_dir.exists():
@@ -46,29 +46,26 @@ class SILExperiment:
 
     def train(self):
         os.system("nvidia-smi")
-        SIL_NLP_ENV.copy_experiment_from_bucket(
-            self.name, extensions=(".txt", ".vocab", ".model", ".yml", ".csv"), copy_run=True
-        )
+        SIL_NLP_ENV.copy_experiment_from_bucket(self.name)
 
         model = self.config.create_model(self.mixed_precision, self.num_devices)
         model.save_effective_config(self.config.exp_dir / f"effective-config-{self.rev_hash}.yml")
-
+        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=f"effective-config-{self.rev_hash}.yml")
         print(f"=== Training ({self.name}) ===")
         model.train()
-        SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
+        if self.save_checkpoints:
+            SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
         print("Training completed")
 
     def test(self):
-        SIL_NLP_ENV.copy_experiment_from_bucket(
-            self.name, extensions=(".txt", ".vocab", ".model", ".yml", ".csv", ".json")
-        )
+        SIL_NLP_ENV.copy_experiment_from_bucket(self.name)
         test(
             experiment=self.name,
             last=True,
             best=True,
             scorers={"bleu", "sentencebleu", "chrf3", "wer", "ter"},
         )
-        SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
+        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("scores-*.csv", "test.trg-predictions.*"))
 
 
 def main() -> None:
@@ -84,6 +81,7 @@ def main() -> None:
         type=str,
         help="Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run it locally and register it with ClearML.",
     )
+    parser.add_argument("--save-checkpoints", default=False, action="store_true", help="Save checkpoints to S3 bucket")
     args = parser.parse_args()
 
     if args.memory_growth:
@@ -95,6 +93,7 @@ def main() -> None:
         mixed_precision=args.mixed_precision,
         num_devices=args.num_devices,
         clearml_queue=args.clearml_queue,
+        save_checkpoints=args.save_checkpoints,
     )
     exp.run()
 
