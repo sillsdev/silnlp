@@ -203,6 +203,7 @@ class HuggingFaceConfig(Config):
                     "per_device_eval_batch_size": 16,
                     "multi_ref_eval": False,
                     "predict_with_generate": True,
+                    "detokenize": True,
                 },
                 "infer": {"infer_batch_size": 32},
                 "params": {"optim": "adamw_torch"},
@@ -457,19 +458,38 @@ class HuggingFaceNMTModel(NMTModel):
         )
 
         metric = evaluate.load("sacrebleu")
+        all_special_ids = set(tokenizer.all_special_ids)
 
         def compute_metrics(eval_preds):
             preds, labels = eval_preds
             if isinstance(preds, tuple):
                 preds = preds[0]
-            decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
+
             # Replace -100 in the labels as we can't decode them.
             labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
-            decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
+            if self._config.eval["detokenize"]:
+                decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
+                decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
 
-            # Some simple post-processing
-            decoded_preds = [pred.strip() for pred in decoded_preds]
-            decoded_labels = [[label.strip()] for label in decoded_labels]
+                # Some simple post-processing
+                decoded_preds = [pred.strip() for pred in decoded_preds]
+                decoded_labels = [[label.strip()] for label in decoded_labels]
+            else:
+                decoded_preds = [
+                    " ".join(
+                        tokenizer.convert_ids_to_tokens(int(id)) for id in pred if id not in all_special_ids
+                    ).strip()
+                    for pred in preds
+                ]
+
+                decoded_labels = [
+                    [
+                        " ".join(
+                            tokenizer.convert_ids_to_tokens(int(id)) for id in label if id not in all_special_ids
+                        ).strip()
+                    ]
+                    for label in labels
+                ]
 
             result = metric.compute(predictions=decoded_preds, references=decoded_labels, lowercase=True)
             result = {"bleu": result["score"]}
