@@ -1,9 +1,9 @@
 import argparse
 import logging
 import random
-import sys
+from io import StringIO
 from pathlib import Path
-from typing import IO, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union, cast
+from typing import IO, Dict, Iterable, List, Optional, Sequence, Set, Tuple, cast
 
 import numpy as np
 import sacrebleu
@@ -17,7 +17,7 @@ from .config import CheckpointType, Config, NMTModel
 from .config_utils import load_config
 from .tokenizer import Tokenizer
 
-LOGGER = logging.getLogger(__name__)
+LOGGER = logging.getLogger(__package__ + ".test")
 
 _SUPPORTED_SCORERS = {"bleu", "sentencebleu", "chrf3", "meteor", "wer", "ter"}
 
@@ -61,7 +61,7 @@ class PairScore:
 def score_individual_books(
     book_dict: dict,
     src_iso: str,
-    predictions_detok_path: str,
+    predictions_detok_file_name: str,
     scorers: Set[str],
     config: Config,
     ref_projects: Set[str],
@@ -86,7 +86,7 @@ def score_individual_books(
 
             if "sentencebleu" in scorers:
                 write_sentence_bleu(
-                    predictions_detok_path,
+                    config.exp_dir / (predictions_detok_file_name + ".scores.tsv"),
                     pair_sys,
                     pair_refs,
                     lowercase=True,
@@ -305,14 +305,13 @@ def sentence_bleu(
 
 
 def write_sentence_bleu(
-    predictions_detok_path: str,
+    scores_path: Path,
     preds: List[str],
     refs: List[List[str]],
     lowercase: bool = False,
     tokenize: str = "13a",
 ):
-    scores_path = predictions_detok_path + ".scores.csv"
-    with open(scores_path, "w", encoding="utf-8-sig") as scores_file:
+    with scores_path.open("w", encoding="utf-8", newline="\n") as scores_file:
         scores_file.write("Verse\tBLEU\t1-gram\t2-gram\t3-gram\t4-gram\tBP\tPrediction")
         for ref in refs:
             scores_file.write("\tReference")
@@ -392,7 +391,7 @@ def test_checkpoint(
             if vref_paths is not None:
                 vref_paths.append(config.exp_dir / vref_file_names[i])
     if len(translation_paths) > 0:
-        print(f"Inferencing {checkpoint_name}...")
+        LOGGER.info(f"Inferencing {checkpoint_name}...")
         model.translate_text_files(
             source_paths,
             translation_paths,
@@ -400,7 +399,7 @@ def test_checkpoint(
             step if checkpoint_type is CheckpointType.OTHER else checkpoint_type,
         )
 
-    print(f"Scoring {checkpoint_name}...")
+    LOGGER.info(f"Scoring {checkpoint_name}")
     default_src_iso = config.default_src_iso
     scores: List[PairScore] = []
     overall_sys: List[str] = []
@@ -445,7 +444,7 @@ def test_checkpoint(
 
             if "sentencebleu" in scorers:
                 write_sentence_bleu(
-                    predictions_detok_file_name,
+                    config.exp_dir / (predictions_detok_file_name + ".scores.tsv"),
                     pair_sys,
                     cast(List[List[str]], pair_refs),
                     lowercase=True,
@@ -482,7 +481,7 @@ def test_checkpoint(
                     )
                     scores.extend(book_scores)
                 else:
-                    print("Error: book_dict did not load correctly. Not scoring individual books.")
+                    LOGGER.error("Error: book_dict did not load correctly. Not scoring individual books.")
     if len(config.src_isos) > 1 or len(config.trg_isos) > 1:
         bleu = sacrebleu.corpus_bleu(overall_sys, cast(Sequence[Sequence[str]], overall_refs), lowercase=True)
         scores.append(PairScore("ALL", "ALL", "ALL", bleu, len(overall_sys), ref_projects))
@@ -513,6 +512,11 @@ def test(
 ):
     exp_name = experiment
     config = load_config(exp_name)
+
+    if not any(config.exp_dir.glob("test*.src.txt")):
+        LOGGER.info("No test dataset.")
+        return
+
     books_nums = get_books(list(books))
 
     if len(scorers) == 0:
@@ -601,9 +605,13 @@ def test(
         else:
             checkpoint_name = f"checkpoint {step}"
         books_str = "ALL" if len(books) == 0 else ", ".join(map(lambda n: book_number_to_id(n), sorted(books)))
-        print(f"Test results for {checkpoint_name} ({num_refs} reference(s), books: {books_str})")
+        LOGGER.info(f"Test results for {checkpoint_name} ({num_refs} reference(s), books: {books_str})")
         for score in results[step]:
-            score.write(sys.stdout)
+            output = StringIO()
+            score.write(output)
+            output.seek(0)
+            for line in output:
+                LOGGER.info(line.strip())
 
 
 def main() -> None:
