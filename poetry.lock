@@ -302,7 +302,7 @@ python-versions = ">=3.6"
 
 [[package]]
 name = "datasets"
-version = "2.6.1"
+version = "2.7.1"
 description = "HuggingFace community-driven open-source library of datasets"
 category = "main"
 optional = false
@@ -310,7 +310,7 @@ python-versions = ">=3.7.0"
 
 [package.dependencies]
 aiohttp = "*"
-dill = "<0.3.6"
+dill = "<0.3.7"
 fsspec = {version = ">=2021.11.1", extras = ["http"]}
 huggingface-hub = ">=0.2.0,<1.0.0"
 multiprocess = "*"
@@ -328,13 +328,13 @@ xxhash = "*"
 apache-beam = ["apache-beam (>=2.26.0)"]
 audio = ["librosa"]
 benchmarks = ["numpy (==1.18.5)", "tensorflow (==2.3.0)", "torch (==1.7.1)", "transformers (==3.0.2)"]
-dev = ["Pillow (>=6.2.1)", "Werkzeug (>=1.0.1)", "absl-py", "aiobotocore (>=2.0.1)", "apache-beam (>=2.26.0)", "bert-score (>=0.3.6)", "black (>=22.0,<23.0)", "boto3 (>=1.19.8)", "botocore (>=1.22.8)", "elasticsearch (<8.0.0)", "faiss-cpu (>=1.6.4)", "flake8 (>=3.8.3)", "fsspec[s3]", "isort (>=5.0.0)", "jiwer", "langdetect", "librosa", "lz4", "mauve-text", "moto[s3,server] (==2.0.4)", "nltk", "py7zr", "pytest", "pytest-datadir", "pytest-xdist", "pyyaml (>=5.3.1)", "rarfile (>=4.0)", "requests-file (>=1.5.1)", "rouge-score", "s3fs (>=2021.11.1)", "sacrebleu", "sacremoses", "scikit-learn", "scipy", "sentencepiece", "seqeval", "six (>=1.15.0,<1.16.0)", "soundfile", "sqlalchemy", "tensorflow (>=2.3,!=2.6.0,!=2.6.1)", "texttable (>=1.6.3)", "tldextract", "tldextract (>=3.1.0)", "toml (>=0.10.1)", "torch", "torchaudio (<0.12.0)", "transformers", "zstandard"]
+dev = ["Pillow (>=6.2.1)", "Werkzeug (>=1.0.1)", "absl-py", "aiobotocore (>=2.0.1)", "apache-beam (>=2.26.0)", "bert-score (>=0.3.6)", "black (>=22.0,<23.0)", "boto3 (>=1.19.8)", "botocore (>=1.22.8)", "elasticsearch (<8.0.0)", "faiss-cpu (>=1.6.4)", "flake8 (>=3.8.3)", "fsspec[s3]", "isort (>=5.0.0)", "jiwer", "langdetect", "librosa", "lz4", "mauve-text", "moto[s3,server] (==2.0.4)", "nltk", "py7zr", "pytest", "pytest-datadir", "pytest-xdist", "pyyaml (>=5.3.1)", "rarfile (>=4.0)", "requests-file (>=1.5.1)", "rouge-score", "s3fs (>=2021.11.1)", "sacrebleu", "sacremoses", "scikit-learn", "scipy", "sentencepiece", "seqeval", "six (>=1.15.0,<1.16.0)", "soundfile", "spacy (>=3.0.0)", "sqlalchemy", "tensorflow (>=2.3,!=2.6.0,!=2.6.1)", "tensorflow-macos", "texttable (>=1.6.3)", "tldextract", "tldextract (>=3.1.0)", "toml (>=0.10.1)", "torch", "torchaudio (<0.12.0)", "transformers", "typer (<0.5.0)", "zstandard"]
 docs = ["s3fs"]
 quality = ["black (>=22.0,<23.0)", "flake8 (>=3.8.3)", "isort (>=5.0.0)", "pyyaml (>=5.3.1)"]
 s3 = ["boto3", "botocore", "fsspec", "s3fs"]
-tensorflow = ["tensorflow (>=2.2.0,!=2.6.0,!=2.6.1)"]
+tensorflow = ["tensorflow (>=2.2.0,!=2.6.0,!=2.6.1)", "tensorflow-macos"]
 tensorflow_gpu = ["tensorflow-gpu (>=2.2.0,!=2.6.0,!=2.6.1)"]
-tests = ["Pillow (>=6.2.1)", "Werkzeug (>=1.0.1)", "absl-py", "aiobotocore (>=2.0.1)", "apache-beam (>=2.26.0)", "bert-score (>=0.3.6)", "boto3 (>=1.19.8)", "botocore (>=1.22.8)", "elasticsearch (<8.0.0)", "faiss-cpu (>=1.6.4)", "fsspec[s3]", "jiwer", "langdetect", "librosa", "lz4", "mauve-text", "moto[s3,server] (==2.0.4)", "nltk", "py7zr", "pytest", "pytest-datadir", "pytest-xdist", "rarfile (>=4.0)", "requests-file (>=1.5.1)", "rouge-score", "s3fs (>=2021.11.1)", "sacrebleu", "sacremoses", "scikit-learn", "scipy", "sentencepiece", "seqeval", "six (>=1.15.0,<1.16.0)", "soundfile", "sqlalchemy", "tensorflow (>=2.3,!=2.6.0,!=2.6.1)", "texttable (>=1.6.3)", "tldextract", "tldextract (>=3.1.0)", "toml (>=0.10.1)", "torch", "torchaudio (<0.12.0)", "transformers", "zstandard"]
+tests = ["Pillow (>=6.2.1)", "Werkzeug (>=1.0.1)", "absl-py", "aiobotocore (>=2.0.1)", "apache-beam (>=2.26.0)", "bert-score (>=0.3.6)", "boto3 (>=1.19.8)", "botocore (>=1.22.8)", "elasticsearch (<8.0.0)", "faiss-cpu (>=1.6.4)", "fsspec[s3]", "jiwer", "langdetect", "librosa", "lz4", "mauve-text", "moto[s3,server] (==2.0.4)", "nltk", "py7zr", "pytest", "pytest-datadir", "pytest-xdist", "rarfile (>=4.0)", "requests-file (>=1.5.1)", "rouge-score", "s3fs (>=2021.11.1)", "sacrebleu", "sacremoses", "scikit-learn", "scipy", "sentencepiece", "seqeval", "six (>=1.15.0,<1.16.0)", "soundfile", "spacy (>=3.0.0)", "sqlalchemy", "tensorflow (>=2.3,!=2.6.0,!=2.6.1)", "tensorflow-macos", "texttable (>=1.6.3)", "tldextract", "tldextract (>=3.1.0)", "toml (>=0.10.1)", "torch", "torchaudio (<0.12.0)", "transformers", "typer (<0.5.0)", "zstandard"]
 torch = ["torch"]
 vision = ["Pillow (>=6.2.1)"]
 
@@ -2470,7 +2470,7 @@ testing = ["func-timeout", "jaraco.itertools", "pytest (>=6)", "pytest-black (>=
 [metadata]
 lock-version = "1.1"
 python-versions = ">=3.8,<3.9"
-content-hash = "f3f755eebc0b9d72e2854676f70f6cd7703407721bb115a2a1ea8050fbc13e4f"
+content-hash = "97ffac092994c9003d4e5578b147a90d4fb2a748cbd1f0587b24bed4f5c4360d"
 
 [metadata.files]
 absl-py = [
@@ -2761,8 +2761,8 @@ cycler = [
     {file = "cycler-0.11.0.tar.gz", hash = "sha256:9c87405839a19696e837b3b818fed3f5f69f16f1eec1a1ad77e043dcea9c772f"},
 ]
 datasets = [
-    {file = "datasets-2.6.1-py3-none-any.whl", hash = "sha256:e20e1faa8ea5925515570b14ac36183c518d5e07fe49e515d9f0992d2d89df0d"},
-    {file = "datasets-2.6.1.tar.gz", hash = "sha256:05d27d5966f35c2d51f5dbe07b2156cc30adc1e5c744f89947d18bb8244388ea"},
+    {file = "datasets-2.7.1-py3-none-any.whl", hash = "sha256:3d0d2e860cec7c4e77c40de64533d46853f939b6e2311cba4f483f000afae868"},
+    {file = "datasets-2.7.1.tar.gz", hash = "sha256:1c79a982d9d9c75fbbaea5b177c2b4c56894289b647fa2845ae2ebd8ac638a0f"},
 ]
 debugpy = [
     {file = "debugpy-1.6.2-cp310-cp310-macosx_10_15_universal2.whl", hash = "sha256:77a47d596ce8c69673d5f0c9876a80cb5a6cbc964f3b31b2d44683c7c01b6634"},
