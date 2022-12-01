@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 from pathlib import Path, PurePath
 from platform import system, uname
-from typing import Iterable, List, Optional, Sequence, Union
+from typing import Iterable, List, Sequence, Union
 
 import boto3
 from dotenv import load_dotenv
@@ -198,6 +198,8 @@ class SilNlpEnv:
     def get_source_experiment_path(self, tmp_path: Path) -> str:
         end_of_path = str(tmp_path)[len(str(self.mt_experiments_dir)) :]
         source_path = end_of_path.replace("\\", "/")
+        if source_path.startswith("/"):
+            source_path = source_path[1:]
         return source_path
 
 

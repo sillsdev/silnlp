@@ -165,7 +165,7 @@ class TranslationTask:
         translator = NMTTranslator(model, self.checkpoint)
         checkpoint_path, step = model.get_checkpoint_path(self.checkpoint)
         SIL_NLP_ENV.copy_experiment_from_bucket(
-            self.name, patterns=SIL_NLP_ENV.get_source_experiment_path(checkpoint_path)
+            self.name, patterns=SIL_NLP_ENV.get_source_experiment_path(checkpoint_path) + "/*.*"
         )
         step_str = "avg" if step == -1 else str(step)
         return translator, clearml.config, step_str
