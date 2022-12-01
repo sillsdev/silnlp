@@ -669,7 +669,10 @@ class HuggingFaceNMTModel(NMTModel):
             "r", encoding="utf-8-sig"
         ) as dict_file:
             for trg_line, vref_line in zip(trg_file, dict_file):
-                vref_strs = vref_line.strip().split("\t")
+                vref_line = vref_line.strip()
+                if vref_line == "":
+                    continue
+                vref_strs = vref_line.split("\t")
                 for vref_str in vref_strs:
                     verse_ref = VerseRef.from_string(vref_str, ORIGINAL_VERSIFICATION)
                     terms = self._dictionary.get(verse_ref)
