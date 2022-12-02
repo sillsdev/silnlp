@@ -36,12 +36,11 @@ from transformers import (
 from transformers.models.m2m_100.modeling_m2m_100 import shift_tokens_right
 from transformers.tokenization_utils import BatchEncoding, TruncationStrategy
 from transformers.trainer_utils import get_last_checkpoint
-from transformers.utils import to_py_obj
+from transformers.utils import PaddingStrategy, to_py_obj
 from transformers.utils.logging import tqdm
 
 from ..common.corpus import count_lines, get_terms
-from ..common.environment import SIL_NLP_ENV
-from ..common.utils import Side, merge_dict
+from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
 from .config import CheckpointType, Config, CorpusPair, NMTModel
 from .tokenizer import NullTokenizer, Tokenizer
 
@@ -450,11 +449,17 @@ class HuggingFaceNMTModel(NMTModel):
                     desc="Encoding validation dataset",
                 )
 
-        data_collator = DataCollatorForSeq2Seq(
+        src_noise = create_noise_methods(self._config.train.get("src_noise", []))
+        for noise_method in src_noise:
+            if isinstance(noise_method, ReplaceRandomToken):
+                noise_method.filler_token = tokenizer.convert_tokens_to_ids(noise_method.filler_token)
+
+        data_collator = DataCollatorForSeq2SeqNoising(
             tokenizer,
             model,
             label_pad_token_id=-100,
             pad_to_multiple_of=8 if training_args.fp16 else None,
+            src_noise=src_noise,
         )
 
         metric = evaluate.load("sacrebleu")
@@ -798,3 +803,32 @@ class PretokenizedTranslationPipeline(TranslationPipeline):
         tgt_lang_id = self.tokenizer.convert_tokens_to_ids(tgt_lang)
         model_inputs["forced_bos_token_id"] = tgt_lang_id
         return model_inputs
+
+
+class DataCollatorForSeq2SeqNoising:
+    def __init__(
+        self,
+        tokenizer: PreTrainedTokenizer,
+        model: Optional[Any] = None,
+        padding: Union[bool, str, PaddingStrategy] = True,
+        max_length: Optional[int] = None,
+        pad_to_multiple_of: Optional[int] = None,
+        label_pad_token_id: int = -100,
+        src_noise: List[NoiseMethod] = [],
+        return_tensors: str = "pt",
+    ):
+        self._data_collator = DataCollatorForSeq2Seq(
+            tokenizer, model, padding, max_length, pad_to_multiple_of, label_pad_token_id, return_tensors
+        )
+        self._src_noise = src_noise
+
+    def __call__(self, features, return_tensors=None):
+        if len(self._src_noise) > 0:
+            for feature in features:
+                input_ids = feature["input_ids"][:-2]
+                for noise_method in self._src_noise:
+                    input_ids = noise_method(input_ids)
+                feature["input_ids"] = input_ids + feature["input_ids"][-2:]
+                feature["attention_mask"] = feature["attention_mask"][: len(feature["input_ids"])]
+
+        return self._data_collator(features, return_tensors)

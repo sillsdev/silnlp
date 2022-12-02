@@ -5,7 +5,7 @@ import subprocess
 from abc import ABC, abstractmethod
 from enum import Enum, Flag, auto
 from pathlib import Path
-from typing import Any, List, Optional, Set
+from typing import Any, List, Optional, Set, Type
 
 import numpy as np
 
@@ -91,7 +91,7 @@ def check_dotnet() -> None:
 
 class NoiseMethod(ABC):
     @abstractmethod
-    def __call__(self, tokens: List[str]) -> List[str]:
+    def __call__(self, tokens: list) -> list:
         pass
 
 
@@ -110,7 +110,7 @@ class DeleteRandomToken(NoiseMethod):
     def __init__(self, probability: float) -> None:
         self.probability = probability
 
-    def __call__(self, tokens: List[str]) -> List[str]:
+    def __call__(self, tokens: list) -> list:
         return [token for token in tokens if not random_bool(self.probability)]
 
 
@@ -119,7 +119,7 @@ class ReplaceRandomToken(NoiseMethod):
         self.probability = probability
         self.filler_token = filler_token
 
-    def __call__(self, tokens: List[str]) -> List[str]:
+    def __call__(self, tokens: list) -> list:
         new_tokens = tokens.copy()
         for i in range(len(new_tokens)):
             if random_bool(self.probability):
@@ -131,6 +131,26 @@ class RandomTokenPermutation(NoiseMethod):
     def __init__(self, distance: int) -> None:
         self.distance = distance
 
-    def __call__(self, tokens: List[str]) -> List[str]:
+    def __call__(self, tokens: list) -> list:
         new_indices = [i + random.uniform(0, self.distance + 1) for i in range(len(tokens))]
         return [x for _, x in sorted(zip(new_indices, tokens), key=lambda pair: pair[0])]
+
+
+def create_noise_methods(params: List[dict]) -> List[NoiseMethod]:
+    methods: List[NoiseMethod] = []
+    for module in params:
+        noise_type, args = next(iter(module.items()))
+        if not isinstance(args, list):
+            args = [args]
+        noise_type = noise_type.lower()
+        noise_method_class: Type[NoiseMethod]
+        if noise_type == "dropout":
+            noise_method_class = DeleteRandomToken
+        elif noise_type == "replacement":
+            noise_method_class = ReplaceRandomToken
+        elif noise_type == "permutation":
+            noise_method_class = RandomTokenPermutation
+        else:
+            raise ValueError("Invalid noise type: %s" % noise_type)
+        methods.append(noise_method_class(*args))
+    return methods

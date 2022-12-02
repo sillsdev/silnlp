@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from enum import Enum, Flag, auto
 from pathlib import Path
 from statistics import mean
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, TextIO, Tuple, Type, Union, cast
+from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, Type, Union, cast
 
 import pandas as pd
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books
@@ -33,16 +33,7 @@ from ..common.corpus import (
     write_corpus,
 )
 from ..common.environment import SIL_NLP_ENV
-from ..common.utils import (
-    DeleteRandomToken,
-    NoiseMethod,
-    RandomTokenPermutation,
-    ReplaceRandomToken,
-    Side,
-    get_mt_exp_dir,
-    is_set,
-    set_seed,
-)
+from ..common.utils import NoiseMethod, Side, create_noise_methods, get_mt_exp_dir, is_set, set_seed
 from .augment import AugmentMethod, create_augment_methods
 from .tokenizer import Tokenizer
 
@@ -147,26 +138,6 @@ class IsoPairInfo:
     @property
     def has_test_data(self) -> bool:
         return len(self.test_projects) > 0 or self.has_basic_test_data
-
-
-def create_noise_methods(params: List[dict]) -> List[NoiseMethod]:
-    methods: List[NoiseMethod] = []
-    for module in params:
-        noise_type, args = next(iter(module.items()))
-        if not isinstance(args, list):
-            args = [args]
-        noise_type = noise_type.lower()
-        noise_method_class: Type[NoiseMethod]
-        if noise_type == "dropout":
-            noise_method_class = DeleteRandomToken
-        elif noise_type == "replacement":
-            noise_method_class = ReplaceRandomToken
-        elif noise_type == "permutation":
-            noise_method_class = RandomTokenPermutation
-        else:
-            raise ValueError("Invalid noise type: %s" % noise_type)
-        methods.append(noise_method_class(*args))
-    return methods
 
 
 def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
