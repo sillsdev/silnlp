@@ -107,7 +107,7 @@ def split_parallel_corpus(
     if split_indices is None:
         if split_size == 0:
             split = pd.DataFrame(columns=corpus.columns)
-        elif split_size >= len(corpus):
+        elif split_size >= len(corpus) or (isinstance(split_size, float) and split_size == 1.0):
             split = corpus
             corpus = pd.DataFrame(columns=corpus.columns)
         else:

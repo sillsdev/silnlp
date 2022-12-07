@@ -683,12 +683,11 @@ class Config(ABC):
                         cur_train,
                     )
 
-        if train is None:
-            return 0
-
-        train_count = self._write_train(
-            tokenizer, train, pair.mapping == DataFileMapping.MIXED_SRC, project_isos, pair.augmentations
-        )
+        train_count = 0
+        if train is not None and len(train) > 0:
+            train_count = self._write_train(
+                tokenizer, train, pair.mapping == DataFileMapping.MIXED_SRC, project_isos, pair.augmentations
+            )
 
         terms_config = self.data["terms"]
         terms_train_count = 0
