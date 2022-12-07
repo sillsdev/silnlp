@@ -205,8 +205,8 @@ class HuggingFaceConfig(Config):
                     "predict_with_generate": True,
                     "detokenize": True,
                 },
-                "infer": {"infer_batch_size": 32},
-                "params": {"optim": "adamw_torch"},
+                "infer": {"infer_batch_size": 16, "num_beams": 2},
+                "params": {"optim": "adamw_torch", "label_smoothing_factor": 0.2, "warmup_steps": 4000},
             },
             config,
         )
@@ -491,7 +491,12 @@ class HuggingFaceNMTModel(NMTModel):
                     for label in labels
                 ]
 
-            result = metric.compute(predictions=decoded_preds, references=decoded_labels, lowercase=True)
+            result = metric.compute(
+                predictions=decoded_preds,
+                references=decoded_labels,
+                lowercase=True,
+                force=not self._config.eval["detokenize"],
+            )
             result = {"bleu": result["score"]}
 
             prediction_lens = [np.count_nonzero(pred != tokenizer.pad_token_id) for pred in preds]
