@@ -390,6 +390,15 @@ class HuggingFaceNMTModel(NMTModel):
         model_config = AutoConfig.from_pretrained(
             self._config.model, use_cache=not training_args.gradient_checkpointing
         )
+        dropout = self._config.params.get("dropout")
+        if dropout is not None:
+            model_config.dropout = dropout
+        attention_dropout = self._config.params.get("attention_dropout")
+        if attention_dropout is not None:
+            model_config.attention_dropout = attention_dropout
+        activation_dropout = self._config.params.get("activation_dropout")
+        if activation_dropout is not None:
+            model_config.activation_dropout = activation_dropout
         model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(self._config.model, config=model_config)
         tokenizer = self._config.get_tokenizer()
 
