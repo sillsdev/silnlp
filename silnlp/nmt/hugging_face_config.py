@@ -205,7 +205,14 @@ class HuggingFaceConfig(Config):
                     "detokenize": True,
                 },
                 "infer": {"infer_batch_size": 16, "num_beams": 2},
-                "params": {"optim": "adamw_torch", "label_smoothing_factor": 0.2, "warmup_steps": 4000},
+                "params": {
+                    "optim": "adamw_torch",
+                    "label_smoothing_factor": 0.2,
+                    "warmup_steps": 4000,
+                    "dropout": 0.1,
+                    "attention_dropout": 0.1,
+                    "activation_dropout": 0.0,
+                },
             },
             config,
         )
@@ -388,17 +395,12 @@ class HuggingFaceNMTModel(NMTModel):
         transformers_logging.enable_explicit_format()
 
         model_config = AutoConfig.from_pretrained(
-            self._config.model, use_cache=not training_args.gradient_checkpointing
+            self._config.model,
+            use_cache=not training_args.gradient_checkpointing,
+            dropout=self._config.params["dropout"],
+            attention_dropout=self._config.params["attention_dropout"],
+            activation_dropout=self._config.params["activation_dropout"],
         )
-        dropout = self._config.params.get("dropout")
-        if dropout is not None:
-            model_config.dropout = dropout
-        attention_dropout = self._config.params.get("attention_dropout")
-        if attention_dropout is not None:
-            model_config.attention_dropout = attention_dropout
-        activation_dropout = self._config.params.get("activation_dropout")
-        if activation_dropout is not None:
-            model_config.activation_dropout = activation_dropout
         model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(self._config.model, config=model_config)
         tokenizer = self._config.get_tokenizer()
 
