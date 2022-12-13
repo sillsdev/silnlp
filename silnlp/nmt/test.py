@@ -507,7 +507,7 @@ def test(
     force_infer: bool = False,
     scorers: Set[str] = set(),
     ref_projects: Set[str] = set(),
-    books: Set[str] = set(),
+    books: List[str] = [],
     by_book: bool = False,
 ):
     exp_name = experiment
@@ -517,7 +517,7 @@ def test(
         LOGGER.info("No test dataset.")
         return
 
-    books_nums = get_books(list(books))
+    books_nums = get_books(books)
 
     if len(scorers) == 0:
         scorers.add("bleu")
@@ -659,7 +659,7 @@ def main() -> None:
         ref_projects=set(args.ref_projects),
         force_infer=args.force_infer,
         scorers=set(s.lower() for s in args.scorers),
-        books=set(args.books),
+        books=args.books,
         by_book=args.by_book,
     )
 
