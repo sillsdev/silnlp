@@ -1,8 +1,10 @@
 import argparse
 import logging
 from concurrent.futures import ProcessPoolExecutor
+from datetime import timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from time import time
 from typing import List, Set, Tuple
 
 import numpy as np
@@ -11,11 +13,7 @@ from machine.corpora import ParallelTextCorpus, escape_spaces, lowercase, nfc_no
 from machine.scripture import book_id_to_number, book_number_to_id
 from machine.tokenization import LatinWordTokenizer, WhitespaceTokenizer
 from machine.translation import SymmetrizationHeuristic
-from machine.translation.thot import (
-    ThotSymmetrizedWordAlignmentModel,
-    ThotWordAlignmentModelType,
-    create_thot_symmetrized_word_alignment_model,
-)
+from machine.translation.thot import ThotSymmetrizedWordAlignmentModel, create_thot_symmetrized_word_alignment_model
 from tqdm import tqdm
 
 LOGGER = logging.getLogger(__package__ + ".golden_path")
@@ -66,8 +64,8 @@ def preprocess(src_path: Path, trg_paths: List[Path], book_nums: List[int], prep
     return corpora
 
 
-def compute_log_prob(args: Tuple[int, int, List[Path], Set[int], int]) -> Tuple[int, int, float, float]:
-    path_index, book_index, corpus_paths, prev_book_nums, next_book_num = args
+def compute_log_prob(args: Tuple[int, int, List[Path], Set[int], int, str]) -> Tuple[int, int, float, float]:
+    i, j, corpus_paths, prev_book_nums, next_book_num, aligner = args
     corpus_scores: List[float] = []
     corpus_lengths: List[float] = []
     for corpus_path in corpus_paths:
@@ -77,9 +75,7 @@ def compute_log_prob(args: Tuple[int, int, List[Path], Set[int], int]) -> Tuple[
             continue
 
         corpus = ParallelTextCorpus.from_pandas(corpus_df)
-        model: ThotSymmetrizedWordAlignmentModel = create_thot_symmetrized_word_alignment_model(
-            ThotWordAlignmentModelType.FAST_ALIGN
-        )
+        model: ThotSymmetrizedWordAlignmentModel = create_thot_symmetrized_word_alignment_model(aligner)
         model.heuristic = SymmetrizationHeuristic.GROW_DIAG_FINAL_AND
         filter_book_nums = prev_book_nums | {next_book_num}
         trainer = model.create_trainer(
@@ -105,20 +101,20 @@ def compute_log_prob(args: Tuple[int, int, List[Path], Set[int], int]) -> Tuple[
         corpus_lengths.append(book_length)
 
     if len(corpus_scores) == 0:
-        return path_index, book_index, -np.inf, 0.0
+        return i, j, -np.inf, 0.0
 
-    return path_index, book_index, np.log(np.mean(corpus_scores, axis=0)), np.mean(corpus_lengths, axis=0)
+    return i, j, np.log(np.mean(corpus_scores, axis=0)), np.mean(corpus_lengths, axis=0)
 
 
 def compute_log_probs(
-    paths: List[List[int]], corpus_paths: List[Path], book_nums: List[int], executor: ProcessPoolExecutor
+    paths: List[List[int]], corpus_paths: List[Path], book_nums: List[int], executor: ProcessPoolExecutor, aligner: str
 ) -> Tuple[np.ndarray, np.ndarray]:
-    work: List[Tuple[int, int, List[Path], Set[int], int]] = []
+    work: List[Tuple[int, int, List[Path], Set[int], int, str]] = []
     for i, path in enumerate(paths):
         prev_book_nums = {book_nums[book_id] for book_id in path}
         for j, next_book_num in enumerate(book_nums):
             if next_book_num not in prev_book_nums:
-                work.append((i, j, corpus_paths, prev_book_nums, next_book_num))
+                work.append((i, j, corpus_paths, prev_book_nums, next_book_num, aligner))
 
     log_probs = np.full([len(paths), len(book_nums)], -np.inf)
     lengths = np.zeros([len(paths), len(book_nums)])
@@ -137,8 +133,9 @@ def search_step(
     beam_width: int,
     length_penalty: float,
     executor: ProcessPoolExecutor,
+    aligner: str,
 ) -> Tuple[List[List[int]], np.ndarray, np.ndarray]:
-    log_probs, lengths = compute_log_probs(paths, corpus_paths, book_nums, executor)
+    log_probs, lengths = compute_log_probs(paths, corpus_paths, book_nums, executor, aligner)
     total_probs = log_probs + cum_log_probs.reshape([-1, 1])
     total_lengths = lengths + cum_lengths.reshape([-1, 1])
     scores = total_probs.copy()
@@ -168,6 +165,7 @@ def beam_search(
     start_book_nums: List[int],
     length_penalty: float,
     executor: ProcessPoolExecutor,
+    aligner: str,
 ) -> Tuple[List[List[int]], List[float]]:
     paths: List[List[int]] = [[]]
     cum_log_probs = np.zeros(1)
@@ -181,7 +179,15 @@ def beam_search(
             cur_beam_width = beam_width
             cur_book_nums = book_nums
         paths, cum_log_probs, cum_lengths = search_step(
-            paths, cum_log_probs, cum_lengths, corpus_paths, cur_book_nums, cur_beam_width, length_penalty, executor
+            paths,
+            cum_log_probs,
+            cum_lengths,
+            corpus_paths,
+            cur_book_nums,
+            cur_beam_width,
+            length_penalty,
+            executor,
+            aligner,
         )
 
         for i, (path, score) in enumerate(zip(paths, cum_log_probs.tolist())):
@@ -199,14 +205,16 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="Compute the golden path for a Bible translation")
     parser.add_argument("--corpora", nargs="+", metavar="corpus", help="Corpora")
+    parser.add_argument("--ref-corpus", type=str, default="grc-GRK", help="Reference corpus")
     parser.add_argument("--beam-width", type=int, default=5, help="Beam width")
     parser.add_argument("--books", nargs="*", metavar="book", default=["NT"], help="Books")
     parser.add_argument("--start-books", nargs="*", metavar="book", default=[], help="Starting books")
     parser.add_argument("--length-penalty", type=float, default=0, help="Length penalty")
     parser.add_argument("--max-workers", type=int, default=2, help="Maximum number of worker processes")
+    parser.add_argument("--aligner", type=str, default="fast_align", help="Aligner")
     args = parser.parse_args()
 
-    src_path = get_mt_corpus_path("grc-GRK")
+    src_path = get_mt_corpus_path(args.ref_corpus)
     trg_paths = [get_mt_corpus_path(c) for c in args.corpora]
     book_nums = get_books(args.books)
     start_book_nums = get_books(args.start_books)
@@ -216,15 +224,18 @@ def main() -> None:
         max_workers=args.max_workers, initializer=disable_logging
     ) as executor:
         preprocess_dir = Path(temp_dir)
+        start = time()
         corpus_paths = preprocess(src_path, trg_paths, book_nums, preprocess_dir)
         paths, scores = beam_search(
-            corpus_paths, args.beam_width, book_nums, start_book_nums, args.length_penalty, executor
+            corpus_paths, args.beam_width, book_nums, start_book_nums, args.length_penalty, executor, args.aligner
         )
+        end = time()
         LOGGER.info(
-            "Best: "
+            "Golden Path: "
             + " -> ".join(book_number_to_id(book_nums[book_id]) for book_id in paths[0])
             + f", {round(scores[0], 8)}"
         )
+        LOGGER.info(f"Elapsed time: {timedelta(seconds=end - start)}")
 
 
 if __name__ == "__main__":
