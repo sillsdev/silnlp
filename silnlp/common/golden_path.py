@@ -1,6 +1,8 @@
 import argparse
 import logging
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import List, Set, Tuple
 
 import numpy as np
@@ -14,10 +16,13 @@ from machine.translation.thot import (
     ThotWordAlignmentModelType,
     create_thot_symmetrized_word_alignment_model,
 )
-
-from .corpus import get_mt_corpus_path, get_scripture_parallel_corpus
+from tqdm import tqdm
 
 LOGGER = logging.getLogger(__package__ + ".golden_path")
+
+
+def disable_logging() -> None:
+    logging.disable(logging.CRITICAL)
 
 
 def get_books(books: List[str]) -> List[int]:
@@ -42,9 +47,11 @@ def preprocess_verse(tokenizer: LatinWordTokenizer, verse: str) -> str:
     return " ".join(lowercase(nfc_normalize(escape_spaces(tokenizer.tokenize(verse)))))
 
 
-def preprocess(src_path: Path, trg_paths: List[Path], book_nums: List[int]) -> List[pd.DataFrame]:
+def preprocess(src_path: Path, trg_paths: List[Path], book_nums: List[int], preprocess_dir: Path) -> List[Path]:
+    from .corpus import get_scripture_parallel_corpus
+
     tokenizer = LatinWordTokenizer()
-    corpora: List[pd.DataFrame] = []
+    corpora: List[Path] = []
     books = {book_number_to_id(book_num) for book_num in book_nums}
     for trg_path in trg_paths:
         df = get_scripture_parallel_corpus(src_path, trg_path)
@@ -53,81 +60,85 @@ def preprocess(src_path: Path, trg_paths: List[Path], book_nums: List[int]) -> L
         df = df[df["text"].isin(books)]
         df["source"] = df["source"].map(lambda verse: preprocess_verse(tokenizer, verse))
         df["target"] = df["target"].map(lambda verse: preprocess_verse(tokenizer, verse))
-        corpora.append(df)
+        corpus_path = preprocess_dir / (trg_path.stem + ".pkl")
+        df.to_pickle(corpus_path)
+        corpora.append(corpus_path)
     return corpora
 
 
-def compute_alignment_prob(
-    corpus_df: pd.DataFrame, prev_book_nums: Set[int], next_book_num: int
-) -> Tuple[float, float]:
-    if next_book_num in prev_book_nums or not corpus_df["text"].eq(book_number_to_id(next_book_num)).any():
-        return np.nan, np.nan
+def compute_log_prob(args: Tuple[int, int, List[Path], Set[int], int]) -> Tuple[int, int, float, float]:
+    path_index, book_index, corpus_paths, prev_book_nums, next_book_num = args
+    corpus_scores: List[float] = []
+    corpus_lengths: List[float] = []
+    for corpus_path in corpus_paths:
+        corpus_df: pd.DataFrame = pd.read_pickle(corpus_path)
 
-    corpus = ParallelTextCorpus.from_pandas(corpus_df)
-    model: ThotSymmetrizedWordAlignmentModel = create_thot_symmetrized_word_alignment_model(
-        ThotWordAlignmentModelType.FAST_ALIGN
-    )
-    model.heuristic = SymmetrizationHeuristic.GROW_DIAG_FINAL_AND
-    filter_book_nums = prev_book_nums | {next_book_num}
-    trainer = model.create_trainer(
-        corpus.filter(lambda row: book_id_to_number(row.text_id) in filter_book_nums).tokenize(WhitespaceTokenizer())
-    )
-    trainer.train()
-    trainer.save()
+        if not corpus_df["text"].eq(book_number_to_id(next_book_num)).any():
+            continue
 
-    scores: List[float] = []
-    length = 0
-    with corpus.filter(lambda row: book_id_to_number(row.text_id) == next_book_num).tokenize(
-        WhitespaceTokenizer()
-    ).batch(1024) as batches:
-        for batch in batches:
-            alignments = model.align_batch(batch)
-            for row, alignment in zip(batch, alignments):
-                score = model.get_avg_translation_score(row.source_segment, row.target_segment, alignment)
-                scores.append(score)
-                length += 1
-    return np.mean(scores).item(), length
+        corpus = ParallelTextCorpus.from_pandas(corpus_df)
+        model: ThotSymmetrizedWordAlignmentModel = create_thot_symmetrized_word_alignment_model(
+            ThotWordAlignmentModelType.FAST_ALIGN
+        )
+        model.heuristic = SymmetrizationHeuristic.GROW_DIAG_FINAL_AND
+        filter_book_nums = prev_book_nums | {next_book_num}
+        trainer = model.create_trainer(
+            corpus.filter(lambda row: book_id_to_number(row.text_id) in filter_book_nums).tokenize(
+                WhitespaceTokenizer()
+            )
+        )
+        trainer.train()
+        trainer.save()
+
+        verse_scores: List[float] = []
+        book_length = 0.0
+        with corpus.filter(lambda row: book_id_to_number(row.text_id) == next_book_num).tokenize(
+            WhitespaceTokenizer()
+        ).batch(1024) as batches:
+            for batch in batches:
+                alignments = model.align_batch(batch)
+                for row, alignment in zip(batch, alignments):
+                    verse_score = model.get_avg_translation_score(row.source_segment, row.target_segment, alignment)
+                    verse_scores.append(verse_score)
+                    book_length += 1
+        corpus_scores.append(np.mean(verse_scores).item())
+        corpus_lengths.append(book_length)
+
+    if len(corpus_scores) == 0:
+        return path_index, book_index, -np.inf, 0.0
+
+    return path_index, book_index, np.log(np.mean(corpus_scores, axis=0)), np.mean(corpus_lengths, axis=0)
 
 
 def compute_log_probs(
-    paths: List[List[int]], corpus_dfs: List[pd.DataFrame], book_nums: List[int]
+    paths: List[List[int]], corpus_paths: List[Path], book_nums: List[int], executor: ProcessPoolExecutor
 ) -> Tuple[np.ndarray, np.ndarray]:
-    log_probs: List[np.ndarray] = []
-    lengths: List[np.ndarray] = []
-    for path in paths:
+    work: List[Tuple[int, int, List[Path], Set[int], int]] = []
+    for i, path in enumerate(paths):
         prev_book_nums = {book_nums[book_id] for book_id in path}
-        path_scores: List[List[float]] = []
-        path_lengths: List[List[float]] = []
-        for corpus_df in corpus_dfs:
-            corpus_scores: List[float] = []
-            corpus_lengths: List[float] = []
-            for next_book_num in book_nums:
-                score, length = compute_alignment_prob(corpus_df, prev_book_nums, next_book_num)
-                corpus_scores.append(score)
-                corpus_lengths.append(length)
-            path_scores.append(corpus_scores)
-            path_lengths.append(corpus_lengths)
-        if len(path_scores) > 1:
-            mean_path_scores = np.nanmean(path_scores, axis=0)
-            mean_path_lengths = np.nanmean(path_lengths, axis=0)
-        else:
-            mean_path_scores = np.array(path_scores[0])
-            mean_path_lengths = np.array(path_lengths[0])
-        log_probs.append(np.nan_to_num(np.log(mean_path_scores), nan=-np.inf))
-        lengths.append(np.nan_to_num(mean_path_lengths))
-    return np.stack(log_probs), np.stack(lengths)
+        for j, next_book_num in enumerate(book_nums):
+            if next_book_num not in prev_book_nums:
+                work.append((i, j, corpus_paths, prev_book_nums, next_book_num))
+
+    log_probs = np.full([len(paths), len(book_nums)], -np.inf)
+    lengths = np.zeros([len(paths), len(book_nums)])
+    for i, j, score, length in tqdm(executor.map(compute_log_prob, work, chunksize=1), total=len(work)):
+        log_probs[i, j] = score
+        lengths[i, j] = length
+    return log_probs, lengths
 
 
 def search_step(
     paths: List[List[int]],
     cum_log_probs: np.ndarray,
     cum_lengths: np.ndarray,
-    corpus_dfs: List[pd.DataFrame],
+    corpus_paths: List[Path],
     book_nums: List[int],
     beam_width: int,
     length_penalty: float,
+    executor: ProcessPoolExecutor,
 ) -> Tuple[List[List[int]], np.ndarray, np.ndarray]:
-    log_probs, lengths = compute_log_probs(paths, corpus_dfs, book_nums)
+    log_probs, lengths = compute_log_probs(paths, corpus_paths, book_nums, executor)
     total_probs = log_probs + cum_log_probs.reshape([-1, 1])
     total_lengths = lengths + cum_lengths.reshape([-1, 1])
     scores = total_probs.copy()
@@ -136,12 +147,12 @@ def search_step(
     scores = scores.reshape([-1])
     total_probs = total_probs.reshape([-1])
     total_lengths = total_lengths.reshape([-1])
-    sample_ids = top_k(scores, beam_width)
+    sample_ids = top_k(scores, min(beam_width, len(scores)))
     cum_log_probs = total_probs.take(sample_ids)
     cum_lengths = total_lengths.take(sample_ids)
     book_ids = sample_ids % len(book_nums)
     path_ids = sample_ids // len(book_nums)
-    paths = [paths[path_ids[i]] + [book_ids[i]] for i in range(beam_width)]
+    paths = [paths[path_ids[i]] + [book_ids[i]] for i in range(min(beam_width, len(scores)))]
     return paths, cum_log_probs, cum_lengths
 
 
@@ -151,16 +162,18 @@ def top_k(array: np.ndarray, k: int) -> np.ndarray:
 
 
 def beam_search(
-    corpus_dfs: List[pd.DataFrame],
+    corpus_paths: List[Path],
     beam_width: int,
     book_nums: List[int],
     start_book_nums: List[int],
     length_penalty: float,
+    executor: ProcessPoolExecutor,
 ) -> Tuple[List[List[int]], List[float]]:
     paths: List[List[int]] = [[]]
     cum_log_probs = np.zeros(1)
     cum_lengths = np.zeros(1)
     for step in range(len(book_nums)):
+        LOGGER.info(f"Step {step + 1}")
         if step < len(start_book_nums):
             cur_beam_width = 1
             cur_book_nums = [start_book_nums[step]]
@@ -168,23 +181,29 @@ def beam_search(
             cur_beam_width = beam_width
             cur_book_nums = book_nums
         paths, cum_log_probs, cum_lengths = search_step(
-            paths, cum_log_probs, cum_lengths, corpus_dfs, cur_book_nums, cur_beam_width, length_penalty
+            paths, cum_log_probs, cum_lengths, corpus_paths, cur_book_nums, cur_beam_width, length_penalty, executor
         )
 
-        LOGGER.info(f"Step {step + 1}")
-        for path, score in zip(paths, cum_log_probs.tolist()):
-            LOGGER.info(" -> ".join(book_number_to_id(book_nums[book_id]) for book_id in path) + f", {round(score, 8)}")
+        for i, (path, score) in enumerate(zip(paths, cum_log_probs.tolist())):
+            LOGGER.info(
+                f"Path {i + 1}: "
+                + " -> ".join(book_number_to_id(book_nums[book_id]) for book_id in path)
+                + f", {round(score, 8)}"
+            )
 
     return paths, cum_log_probs.tolist()
 
 
 def main() -> None:
+    from .corpus import get_mt_corpus_path
+
     parser = argparse.ArgumentParser(description="Compute the golden path for a Bible translation")
     parser.add_argument("--corpora", nargs="+", metavar="corpus", help="Corpora")
     parser.add_argument("--beam-width", type=int, default=5, help="Beam width")
     parser.add_argument("--books", nargs="*", metavar="book", default=["NT"], help="Books")
     parser.add_argument("--start-books", nargs="*", metavar="book", default=[], help="Starting books")
     parser.add_argument("--length-penalty", type=float, default=0, help="Length penalty")
+    parser.add_argument("--max-workers", type=int, default=2, help="Maximum number of worker processes")
     args = parser.parse_args()
 
     src_path = get_mt_corpus_path("grc-GRK")
@@ -192,15 +211,20 @@ def main() -> None:
     book_nums = get_books(args.books)
     start_book_nums = get_books(args.start_books)
     book_nums.extend(book_num for book_num in start_book_nums if book_num not in book_nums)
-    beam_width = min(args.beam_width, len(book_nums))
 
-    corpus_dfs = preprocess(src_path, trg_paths, book_nums)
-    paths, scores = beam_search(corpus_dfs, beam_width, book_nums, start_book_nums, args.length_penalty)
-    LOGGER.info(
-        "Best: "
-        + " -> ".join(book_number_to_id(book_nums[book_id]) for book_id in paths[0])
-        + f", {round(scores[0], 8)}"
-    )
+    with TemporaryDirectory() as temp_dir, ProcessPoolExecutor(
+        max_workers=args.max_workers, initializer=disable_logging
+    ) as executor:
+        preprocess_dir = Path(temp_dir)
+        corpus_paths = preprocess(src_path, trg_paths, book_nums, preprocess_dir)
+        paths, scores = beam_search(
+            corpus_paths, args.beam_width, book_nums, start_book_nums, args.length_penalty, executor
+        )
+        LOGGER.info(
+            "Best: "
+            + " -> ".join(book_number_to_id(book_nums[book_id]) for book_id in paths[0])
+            + f", {round(scores[0], 8)}"
+        )
 
 
 if __name__ == "__main__":
