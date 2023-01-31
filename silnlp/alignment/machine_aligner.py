@@ -155,29 +155,28 @@ class MachineAligner(Aligner):
         trg_corpus = TextFileTextCorpus(trg_file_path)
         parallel_corpus = src_corpus.align_rows(trg_corpus).tokenize(WhitespaceTokenizer())
         LOGGER.info("Loading model")
-        model = self._create_symmetrized_model(sym_heuristic)
-        if self.lowercase:
-            parallel_corpus = parallel_corpus.lowercase()
+        with self._create_symmetrized_model(sym_heuristic) as model:
+            if self.lowercase:
+                parallel_corpus = parallel_corpus.lowercase()
 
-        count = parallel_corpus.count()
+            count = parallel_corpus.count()
 
-        LOGGER.info("Aligning corpus")
-        with open(output_file_path, "w", encoding="utf-8", newline="\n") as out_file, parallel_corpus.batch(
-            _BATCH_SIZE
-        ) as batches, tqdm(total=count, bar_format="{l_bar}{bar:40}{r_bar}", leave=False) as pbar:
-            for row_batch in batches:
-                for (source_segment, target_segment), alignment in zip(row_batch, model.align_batch(row_batch)):
-                    if export_probabilities:
-                        word_pairs = alignment.to_aligned_word_pairs()
-                        model.compute_aligned_word_pair_scores(source_segment, target_segment, word_pairs)
-                        out_file.write(" ".join(str(wp) for wp in word_pairs) + "\n")
-                    else:
-                        out_file.write(str(alignment) + "\n")
-                pbar.update(len(row_batch))
+            LOGGER.info("Aligning corpus")
+            with open(output_file_path, "w", encoding="utf-8", newline="\n") as out_file, parallel_corpus.batch(
+                _BATCH_SIZE
+            ) as batches, tqdm(total=count, bar_format="{l_bar}{bar:40}{r_bar}", leave=False) as pbar:
+                for row_batch in batches:
+                    for (source_segment, target_segment), alignment in zip(row_batch, model.align_batch(row_batch)):
+                        if export_probabilities:
+                            word_pairs = alignment.to_aligned_word_pairs()
+                            model.compute_aligned_word_pair_scores(source_segment, target_segment, word_pairs)
+                            out_file.write(" ".join(str(wp) for wp in word_pairs) + "\n")
+                        else:
+                            out_file.write(str(alignment) + "\n")
+                    pbar.update(len(row_batch))
 
     def _extract_lexicon(self, out_file_path: Path, direct: bool) -> None:
-        model = self._create_model(direct)
-        with open(out_file_path, "w", encoding="utf-8", newline="\n") as out_file:
+        with self._create_model(direct) as model, open(out_file_path, "w", encoding="utf-8", newline="\n") as out_file:
             src_words = list(model.source_words)
             trg_words = list(model.target_words)
             for src_word_index in range(len(src_words)):
