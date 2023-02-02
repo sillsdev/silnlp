@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import IO, Iterable, List, Optional, Sequence, Set, Tuple, Union, cast
 
 import numpy as np
-import pandas as pd
 import sacrebleu
 import sentencepiece as sp
 import tensorflow as tf
@@ -20,7 +19,7 @@ from opennmt.utils import Scorer, register_scorer
 
 from ..alignment.config import get_aligner, get_aligner_name
 from ..alignment.machine_aligner import MachineAligner
-from ..common.corpus import get_terms, get_terms_corpus, get_terms_data_frame, load_corpus, split_corpus
+from ..common.corpus import load_corpus, split_corpus
 from ..common.environment import SIL_NLP_ENV, download_if_s3_paths
 from ..common.tf_utils import set_tf_log_level
 from ..common.utils import Side, get_mt_exp_dir, merge_dict

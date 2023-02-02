@@ -1,8 +1,12 @@
 import string
 from abc import ABC, abstractmethod
+from itertools import groupby
 from pathlib import Path
 from typing import Iterable, List, Optional, Union
 
+import docx
+import nltk
+from iso639 import Lang
 from lxml import etree
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
 
@@ -10,6 +14,8 @@ from .. import sfm
 from ..sfm import usfm
 from .corpus import load_corpus, write_corpus
 from .paratext import get_book_path, get_iso, get_project_dir
+
+nltk.download("punkt")
 
 
 class Paragraph:
@@ -162,7 +168,7 @@ class Translator(ABC):
     ) -> Iterable[str]:
         pass
 
-    def translate_text_file(self, src_file_path: Path, trg_file_path: Path, src_iso: str, trg_iso: str):
+    def translate_text(self, src_file_path: Path, trg_file_path: Path, src_iso: str, trg_iso: str) -> None:
         write_corpus(trg_file_path, self.translate(load_corpus(src_file_path), src_iso, trg_iso))
 
     def translate_book(self, src_project: str, book: str, output_path: Path, trg_iso: str) -> None:
@@ -171,9 +177,21 @@ class Translator(ABC):
             settings_tree = etree.parse(settings_file)
         src_iso = get_iso(settings_tree)
         book_path = get_book_path(src_project, book)
-        with book_path.open(mode="r", encoding="utf-8-sig") as book_file:
-            doc = list(usfm.parser(book_file, stylesheet=usfm.relaxed_stylesheet, canonicalise_footnotes=False))
+        self.translate_usfm(book_path, output_path, src_iso, trg_iso)
 
+    def translate_usfm(self, src_file_path: Path, trg_file_path: Path, src_iso: str, trg_iso: str) -> None:
+        with src_file_path.open(mode="r", encoding="utf-8-sig") as book_file:
+            doc: List[sfm.Element] = list(
+                usfm.parser(book_file, stylesheet=usfm.relaxed_stylesheet, canonicalise_footnotes=False)
+            )
+
+        book = ""
+        for elem in doc:
+            if elem.name == "id":
+                book = str(elem[0]).strip()[:3]
+                break
+        if book == "":
+            raise RuntimeError("The USFM file doesn't contain an id marker.")
         segments = collect_segments(book, doc)
 
         sentences = (s.text.strip() for s in segments)
@@ -182,5 +200,31 @@ class Translator(ABC):
 
         update_segments(segments, translations)
 
-        with output_path.open(mode="w", encoding="utf-8", newline="\n") as output_file:
+        with trg_file_path.open(mode="w", encoding="utf-8", newline="\n") as output_file:
             output_file.write(sfm.generate(doc))
+
+    def translate_docx(self, src_file_path: Path, trg_file_path: Path, src_iso: str, trg_iso: str) -> None:
+        tokenizer: nltk.tokenize.PunktSentenceTokenizer
+        try:
+            src_lang = Lang(src_iso)
+            tokenizer = nltk.data.load(f"tokenizers/punkt/{src_lang.name.lower()}.pickle")
+        except:
+            tokenizer = nltk.data.load("tokenizers/punkt/english.pickle")
+
+        with src_file_path.open("rb") as file:
+            doc = docx.Document(file)
+
+        sentences: List[str] = []
+        paras: List[int] = []
+
+        for i in range(len(doc.paragraphs)):
+            for sentence in tokenizer.tokenize(doc.paragraphs[i].text, "test"):
+                sentences.append(sentence)
+                paras.append(i)
+
+        for para, group in groupby(zip(self.translate(sentences, src_iso, trg_iso), paras), key=lambda t: t[1]):
+            text = " ".join(s[0] for s in group)
+            doc.paragraphs[para].text = text
+
+        with trg_file_path.open("wb") as file:
+            doc.save(file)

@@ -62,6 +62,8 @@ datasets = "^2.7.1"
 torch = {version = "1.10.1", source = "torch"}
 sacremoses = "^0.0.53"
 evaluate = "^0.3.0"
+python-docx = "^0.8.11"
+iso639-lang = "^2.1.0"
 
 [tool.poetry.dev-dependencies]
 mypy = "^0.812"

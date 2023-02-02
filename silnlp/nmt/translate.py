@@ -16,11 +16,11 @@ from ..common.utils import get_git_revision_hash
 from .clearml_connection import SILClearML
 from .config import CheckpointType, Config, NMTModel
 
-LOGGER = logging.getLogger(__name__)
+LOGGER = logging.getLogger(__package__ + ".translate")
 
 
 class NMTTranslator(Translator):
-    def __init__(self, model: NMTModel, checkpoint: Union[CheckpointType, str, int]):
+    def __init__(self, model: NMTModel, checkpoint: Union[CheckpointType, str, int]) -> None:
         self._model = model
         self._checkpoint = checkpoint
 
@@ -36,7 +36,7 @@ class TranslationTask:
     checkpoint: str = "last"
     clearml_queue: Optional[str] = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.checkpoint is None:
             self.checkpoint = "last"
 
@@ -88,7 +88,7 @@ class TranslationTask:
         end_seq: int,
         src_iso: Optional[str],
         trg_iso: Optional[str],
-    ):
+    ) -> None:
         translator, config, _ = self._init_translation_task(experiment_suffix=f"_{self.checkpoint}_{src_prefix}")
         if trg_prefix is None:
             raise RuntimeError("A target file prefix must be specified.")
@@ -107,16 +107,14 @@ class TranslationTask:
             trg_file_path = cwd / f"{trg_prefix}{file_num}.txt"
             if src_file_path.is_file() and not trg_file_path.is_file():
                 start = time.time()
-                translator.translate_text_file(src_file_path, trg_file_path, src_iso, trg_iso)
+                translator.translate_text(src_file_path, trg_file_path, src_iso, trg_iso)
                 end = time.time()
                 print(f"Translated {src_file_path.name} to {trg_file_path.name} in {((end-start)/60):.2f} minutes")
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
 
-    def translate_text_file(
-        self, src_filename: str, trg_filename: Optional[str], src_iso: Optional[str], trg_iso: Optional[str]
-    ):
+    def translate_files(self, src: str, trg: Optional[str], src_iso: Optional[str], trg_iso: Optional[str]) -> None:
         translator, config, step_str = self._init_translation_task(
-            experiment_suffix=f"_{self.checkpoint}_{os.path.basename(src_filename)}"
+            experiment_suffix=f"_{self.checkpoint}_{os.path.basename(src)}"
         )
 
         if src_iso is None:
@@ -124,26 +122,50 @@ class TranslationTask:
         if trg_iso is None:
             trg_iso = config.default_trg_iso
 
-        if Path(src_filename).exists():
-            src_file_path = Path(src_filename)
-        elif (SIL_NLP_ENV.data_dir / src_filename).exists():
-            src_file_path = SIL_NLP_ENV.data_dir / src_filename
-        else:
-            raise FileNotFoundError("Cannot find: " + src_filename)
+        src_path = Path(src)
+        if not src_path.exists() and not src_path.is_absolute():
+            src_path = SIL_NLP_ENV.data_dir / src
+        if not src_path.exists():
+            raise FileNotFoundError("Cannot find source: " + src)
 
-        if trg_filename is not None:
-            if Path(trg_filename).parent.exists():
-                trg_file_path = Path(trg_filename)
-            elif (SIL_NLP_ENV.data_dir / trg_filename).parent.exists():
-                trg_file_path = SIL_NLP_ENV.data_dir / trg_filename
+        if trg is not None:
+            trg_path = Path(trg)
+            if not trg_path.exists() and not trg_path.is_absolute():
+                trg_path = SIL_NLP_ENV.data_dir / trg
+            if not trg_path.exists() and ((src_path.is_file() and not trg_path.parent.is_dir()) or src_path.is_dir()):
+                raise FileNotFoundError("Cannot find target: " + trg)
+
+        else:
+            trg_path = config.exp_dir / "infer" / step_str
+            trg_path.mkdir(exist_ok=True, parents=True)
+
+        if src_path.is_file():
+            src_file_paths = [src_path]
+        else:
+            src_file_paths = list(p for p in src_path.rglob("*.*") if p.is_file())
+
+        for src_file_path in src_file_paths:
+            if trg_path.is_dir():
+                if src_path.is_file():
+                    trg_file_path = trg_path / src_file_path.name
+                    src_name = src_file_path.name
+                else:
+                    relative_path = src_file_path.relative_to(src_path)
+                    trg_file_path = trg_path / relative_path
+                    trg_file_path.parent.mkdir(exist_ok=True, parents=True)
+                    src_name = str(relative_path)
             else:
-                raise FileNotFoundError("Cannot find parent folder of: " + trg_filename)
-        else:
-            default_output_dir = config.exp_dir / "infer" / step_str
-            trg_file_path = default_output_dir / src_file_path.name
-            trg_file_path.parent.mkdir(exist_ok=True, parents=True)
+                trg_file_path = trg_path
+                src_name = src_file_path.name
 
-        translator.translate_text_file(src_file_path, trg_file_path, src_iso, trg_iso)
+            ext = src_file_path.suffix.lower()
+            LOGGER.info(f"Translating {src_name}")
+            if ext == ".txt":
+                translator.translate_text(src_file_path, trg_file_path, src_iso, trg_iso)
+            elif ext == ".docx":
+                translator.translate_docx(src_file_path, trg_file_path, src_iso, trg_iso)
+            elif ext == ".usfm" or ext == ".sfm":
+                translator.translate_usfm(src_file_path, trg_file_path, src_iso, trg_iso)
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
 
     def _init_translation_task(self, experiment_suffix: str) -> Tuple[Translator, Config, str]:
@@ -163,18 +185,21 @@ class TranslationTask:
 
         model = clearml.config.create_model()
         translator = NMTTranslator(model, self.checkpoint)
-        checkpoint_path, step = model.get_checkpoint_path(self.checkpoint)
-        SIL_NLP_ENV.copy_experiment_from_bucket(
-            self.name, patterns=SIL_NLP_ENV.get_source_experiment_path(checkpoint_path) + "/*.*"
-        )
-        step_str = "avg" if step == -1 else str(step)
+        if clearml.config.model_dir.exists():
+            checkpoint_path, step = model.get_checkpoint_path(self.checkpoint)
+            SIL_NLP_ENV.copy_experiment_from_bucket(
+                self.name, patterns=SIL_NLP_ENV.get_source_experiment_path(checkpoint_path) + "/*.*"
+            )
+            step_str = "avg" if step == -1 else str(step)
+        else:
+            step_str = "last"
         return translator, clearml.config, step_str
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Translates text using an NMT model")
     parser.add_argument("experiment", help="Experiment name")
-    parser.add_argument("--memory-growth", default=False, action="store_true", help="Enable memory growth")
+    parser.add_argument("--memory-growth", default=False, action="store_true", help="Enable TensorFlow memory growth")
     parser.add_argument("--checkpoint", type=str, help="Checkpoint to use (last, best, avg, or checkpoint #)")
     parser.add_argument("--src", default=None, type=str, help="Source file")
     parser.add_argument("--trg", default=None, type=str, help="Target file")
@@ -188,7 +213,6 @@ def main() -> None:
     )
     parser.add_argument("--src-iso", default=None, type=str, help="The source language (iso code) to translate from")
     parser.add_argument("--trg-iso", default=None, type=str, help="The target language (iso code) to translate to")
-    parser.add_argument("--output-usfm", default=None, type=str, help="The output USFM file path")
     parser.add_argument(
         "--eager-execution",
         default=False,
@@ -224,7 +248,7 @@ def main() -> None:
             args.src_prefix, args.trg_prefix, args.start_seq, args.end_seq, args.src_iso, args.trg_iso
         )
     elif args.src is not None:
-        translator.translate_text_file(args.src, args.trg, args.src_iso, args.trg_iso)
+        translator.translate_files(args.src, args.trg, args.src_iso, args.trg_iso)
     else:
         raise RuntimeError("A Scripture book, file, or file prefix must be specified.")
 

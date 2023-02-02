@@ -327,7 +327,7 @@ class Config(ABC):
         self.root = config
 
         data_config: dict = config["data"]
-        self.corpus_pairs = parse_corpus_pairs(data_config["corpus_pairs"])
+        self.corpus_pairs = parse_corpus_pairs(data_config.get("corpus_pairs", []))
 
         terms_config: dict = data_config["terms"]
         self.src_isos: Set[str] = set()
@@ -375,10 +375,14 @@ class Config(ABC):
 
     @property
     def default_src_iso(self) -> str:
+        if len(self.src_isos) == 0:
+            return ""
         return next(iter(self.src_isos))
 
     @property
     def default_trg_iso(self) -> str:
+        if len(self.trg_isos) == 0:
+            return ""
         return next(iter(self.trg_isos))
 
     @property

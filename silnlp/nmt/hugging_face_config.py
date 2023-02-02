@@ -619,8 +619,12 @@ class HuggingFaceNMTModel(NMTModel):
         vrefs: Optional[Iterable[VerseRef]] = None,
         checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Iterable[str]:
-        checkpoint_path, _ = self.get_checkpoint_path(checkpoint)
-        model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(str(checkpoint_path))
+        if self._config.model_dir.exists():
+            checkpoint_path, _ = self.get_checkpoint_path(checkpoint)
+            model_name = str(checkpoint_path)
+        else:
+            model_name = self._config.model
+        model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name)
         tokenizer = self._config.get_tokenizer()
         lang_codes: Dict[str, str] = self._config.data["lang_codes"]
         pipeline = TranslationPipeline(
@@ -630,7 +634,8 @@ class HuggingFaceNMTModel(NMTModel):
             tgt_lang=lang_codes.get(trg_iso, trg_iso),
             device=0,
         )
-        sentences = list(sentences)
+        if not isinstance(sentences, list):
+            sentences = list(sentences)
         for prediction in tqdm(
             self._translate_sentences(tokenizer, pipeline, sentences, vrefs),
             total=len(sentences),
