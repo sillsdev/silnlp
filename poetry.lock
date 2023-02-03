@@ -1976,7 +1976,7 @@ toml = ["setuptools (>=42)"]
 
 [[package]]
 name = "sil-machine"
-version = "0.9.0"
+version = "0.9.1"
 description = "A natural language processing library that is focused on providing tools for resource-poor languages."
 category = "main"
 optional = false
@@ -2489,7 +2489,7 @@ testing = ["func-timeout", "jaraco.itertools", "pytest (>=6)", "pytest-black (>=
 [metadata]
 lock-version = "1.1"
 python-versions = ">=3.8,<3.9"
-content-hash = "9effd8c1c715e9f297369e81e926c350001fd90f7aceb23b8eb17c2dded736c6"
+content-hash = "1a1d6016251962f075a1fca99347c672e5410376f0c731fb1cc8957e6dab2cdd"
 
 [metadata.files]
 absl-py = [
@@ -4281,8 +4281,8 @@ setuptools-scm = [
     {file = "setuptools_scm-7.0.5.tar.gz", hash = "sha256:031e13af771d6f892b941adb6ea04545bbf91ebc5ce68c78aaf3fff6e1fb4844"},
 ]
 sil-machine = [
-    {file = "sil_machine-0.9.0-py3-none-any.whl", hash = "sha256:cc1c9915928186a404b87b2655f063d2a9ed0817b0fcce1953323e5c393ea667"},
-    {file = "sil_machine-0.9.0.tar.gz", hash = "sha256:b6bc2a89cb2c5621978e517a71fa870463bab335db89bef9381f9b76b600f44b"},
+    {file = "sil_machine-0.9.1-py3-none-any.whl", hash = "sha256:76acc8664a9676a08c4e60a0cb6a2a4817fc71c9a032fc3c1e28e6915af30c8f"},
+    {file = "sil_machine-0.9.1.tar.gz", hash = "sha256:5fa408a7fb0533e519657cc306d7acf3540d8a3603c4587322aa6b2f047ee06f"},
 ]
 sil-thot = [
     {file = "sil-thot-3.4.0.tar.gz", hash = "sha256:c96a81c2532c93e8cdb18231ec7b605fb755f8c53416d1dfc198e6d7459fc549"},
