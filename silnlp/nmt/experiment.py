@@ -20,6 +20,9 @@ class SILExperiment:
     num_devices: int = 1
     clearml_queue: Optional[str] = None
     save_checkpoints: bool = False
+    run_prep: bool = False
+    run_train: bool = False
+    run_test: bool = False
 
     def __post_init__(self):
         self.clearml = SILClearML(self.name, self.clearml_queue)
@@ -29,9 +32,15 @@ class SILExperiment:
         self.config.set_seed()
 
     def run(self):
-        self.preprocess()
-        self.train()
-        self.test()
+        if self.run_prep:
+            print("prep")
+            #self.preprocess()
+        if self.run_train:
+            print("train")
+#            self.train()
+        if self.run_test:
+            print("test")
+            #self.test()
 
     def preprocess(self):
         # Do some basic checks before starting the experiment
@@ -82,10 +91,18 @@ def main() -> None:
         help="Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run it locally and register it with ClearML.",
     )
     parser.add_argument("--save-checkpoints", default=False, action="store_true", help="Save checkpoints to S3 bucket")
+    parser.add_argument("--preprocess", default=False, action="store_true", help="Run the preprocess step.")
+    parser.add_argument("--train", default=False, action="store_true", help="Run the train step.")
+    parser.add_argument("--test", default=False, action="store_true", help="Run the test step.")
     args = parser.parse_args()
 
     if args.memory_growth:
         enable_memory_growth()
+
+    if not (args.preprocess or args.train or args.test):
+        args.preprocess = True
+        args.train = True
+        args.test = True
 
     exp = SILExperiment(
         name=args.experiment,
@@ -94,6 +111,9 @@ def main() -> None:
         num_devices=args.num_devices,
         clearml_queue=args.clearml_queue,
         save_checkpoints=args.save_checkpoints,
+        run_prep=args.preprocess,
+        run_train=args.train,
+        run_test=args.test,
     )
     exp.run()
 
