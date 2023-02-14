@@ -10,6 +10,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, TypeVar, Uni
 import datasets.utils.logging as datasets_logging
 import evaluate
 import numpy as np
+import torch
 import transformers.utils.logging as transformers_logging
 import yaml
 from datasets import Dataset
@@ -33,7 +34,6 @@ from transformers import (
     TranslationPipeline,
     set_seed,
 )
-from transformers.models.m2m_100.modeling_m2m_100 import shift_tokens_right
 from transformers.tokenization_utils import BatchEncoding, TruncationStrategy
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import PaddingStrategy, to_py_obj
@@ -46,7 +46,20 @@ from .tokenizer import NullTokenizer, Tokenizer
 
 
 def prepare_decoder_input_ids_from_labels(self: M2M100ForConditionalGeneration, labels: Tensor) -> Tensor:
-    return shift_tokens_right(labels, self.config.pad_token_id, self.config.decoder_start_token_id)
+    # shift ids to the right
+    shifted_input_ids = labels.new_zeros(labels.shape)
+    shifted_input_ids[:, 1:] = labels[:, :-1].clone()
+    # copy lang id from the end to the beginning
+    extended_labels = torch.cat((labels, labels.new_full((labels.shape[0], 1), -100)), dim=1)
+    lang_index = extended_labels.argmin(dim=1, keepdim=True) - 1
+    shifted_input_ids[:, 0] = labels.gather(dim=1, index=lang_index).squeeze()
+
+    if self.config.pad_token_id is None:
+        raise ValueError("self.model.config.pad_token_id has to be defined.")
+    # replace possible -100 values in labels by `pad_token_id`
+    shifted_input_ids.masked_fill_(shifted_input_ids == -100, self.config.pad_token_id)
+
+    return shifted_input_ids
 
 
 M2M100ForConditionalGeneration.prepare_decoder_input_ids_from_labels = prepare_decoder_input_ids_from_labels
