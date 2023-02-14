@@ -33,14 +33,11 @@ class SILExperiment:
 
     def run(self):
         if self.run_prep:
-            print("prep")
-            #self.preprocess()
+            self.preprocess()
         if self.run_train:
-            print("train")
-#            self.train()
+            self.train()
         if self.run_test:
-            print("test")
-            #self.test()
+            self.test()
 
     def preprocess(self):
         # Do some basic checks before starting the experiment
