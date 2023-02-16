@@ -67,16 +67,17 @@ class SilNlpEnv:
             sil_nlp_cache_dir = os.getenv("SIL_NLP_CACHE_EXPERIMENT_DIR")
             if sil_nlp_cache_dir is not None:
                 temp_path = Path(sil_nlp_cache_dir)
-                if temp_path.is_dir():
-                    LOGGER.info(
-                        f"Using cache dir: {sil_nlp_cache_dir} as per environment variable SIL_NLP_CACHE_EXPERIMENT_DIR."
-                    )
-                    self.mt_experiments_dir = temp_path
-                else:
-                    raise Exception(
-                        "The path in SIL_NLP_CACHE_EXPERIMENT_DIR does not exist.  Create it first: "
-                        + sil_nlp_cache_dir
-                    )
+                if not hasattr(self, "mt_experiments_dir"):
+                    if temp_path.is_dir():
+                        LOGGER.info(
+                            f"Using cache dir: {sil_nlp_cache_dir} as per environment variable SIL_NLP_CACHE_EXPERIMENT_DIR."
+                        )
+                        self.mt_experiments_dir = temp_path
+                    else:
+                        raise Exception(
+                            "The path in SIL_NLP_CACHE_EXPERIMENT_DIR does not exist.  Create it first: "
+                            + sil_nlp_cache_dir
+                        )
             else:
                 self.mt_experiments_dir = Path(tempfile.TemporaryDirectory().name)
                 self.mt_experiments_dir.mkdir()
@@ -136,17 +137,18 @@ class SilNlpEnv:
         if not self.is_bucket:
             return
         name = str(name)
-        name = name.split("MT/experiments/")[-1]
+        experiment_path = str(self.mt_dir.relative_to(self.data_dir) / "experiments") + "/"
+        name = name.split(experiment_path)[-1]
         if len(name) == 0:
             raise Exception(
                 f"No experiment name is given.  Data still in the cache directory of {self.mt_experiments_dir}"
             )
         s3 = boto3.resource("s3")
         data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
-        len_aqua_path = len("MT/experiments/")
-        objs = list(data_bucket.object_versions.filter(Prefix="MT/experiments/" + name))
+        len_aqua_path = len(experiment_path)
+        objs = list(data_bucket.object_versions.filter(Prefix=experiment_path + name))
         if len(objs) == 0:
-            LOGGER.info("No files found in the bucket under: MT/experiments/" + name)
+            LOGGER.info("No files found in the bucket under: " + experiment_path + name)
             return
         if isinstance(patterns, str):
             patterns = [patterns]
@@ -171,19 +173,20 @@ class SilNlpEnv:
             raise Exception(
                 f"No experiment name is given.  Data still in the temp directory of {self.mt_experiments_dir}"
             )
+        experiment_path = str(self.mt_dir.relative_to(self.data_dir) / "experiments") + "/"
         s3 = boto3.resource("s3")
         data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
         temp_folder = str(self.mt_experiments_dir / name)
         # we don't need to delete all existing files - it will just overwrite them
         len_exp_dir = len(str(self.mt_experiments_dir))
         files_already_in_s3 = set()
-        for obj in data_bucket.object_versions.filter(Prefix="MT/experiments/" + name):
+        for obj in data_bucket.object_versions.filter(Prefix=experiment_path + name):
             files_already_in_s3.add(str(obj.object_key))
 
         if isinstance(patterns, str):
             patterns = [patterns]
         for root, _, files in os.walk(temp_folder, topdown=False):
-            s3_dest_path = str("MT/experiments/" + root[len_exp_dir + 1 :].replace("\\", "/"))
+            s3_dest_path = str(experiment_path + root[len_exp_dir + 1 :].replace("\\", "/"))
             for file in files:
                 pure_path = PurePath(file)
                 if len(patterns) == 0 or any(pure_path.match(pattern) for pattern in patterns):

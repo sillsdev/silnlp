@@ -233,9 +233,6 @@ class HuggingFaceConfig(Config):
 
         super().__init__(exp_dir, config)
 
-        if len(self.src_isos) > 1 or len(self.trg_isos) > 1 or self.mirror:
-            raise RuntimeError("HuggingFace does not support training multilingual models.")
-
     @property
     def model_dir(self) -> Path:
         return Path(self.train["output_dir"])

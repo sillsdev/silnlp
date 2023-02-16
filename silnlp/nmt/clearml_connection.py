@@ -54,7 +54,7 @@ class SILClearML:
                     "apt install -y python3-venv",
                     "python3 -m pip install --user pipx",
                     "PATH=$PATH:/root/.local/bin",
-                    "pipx install poetry==1.3.2",
+                    "pipx install poetry==1.2.2",
                 ],
             )
             if self.queue_name.lower() not in ("local", "locally"):

@@ -96,8 +96,12 @@ def main() -> None:
     parser.add_argument("--train", default=False, action="store_true", help="Run the train step.")
     parser.add_argument("--test", default=False, action="store_true", help="Run the test step.")
     parser.add_argument("--score-by-book", default=False, action="store_true", help="Score individual books")
+    parser.add_argument("--mt-dir", default=None, type=str, help="The machine translation directory.")
 
     args = parser.parse_args()
+
+    if args.mt_dir is not None:
+        SIL_NLP_ENV.set_machine_translation_dir(SIL_NLP_ENV.data_dir / args.mt_dir)
 
     if args.memory_growth:
         enable_memory_growth()

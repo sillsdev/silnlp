@@ -6,7 +6,6 @@ from io import StringIO
 from pathlib import Path
 from typing import IO, Dict, List, Optional, Set, TextIO, Tuple
 
-import numpy as np
 import sacrebleu
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_number_to_id, get_books
 from sacrebleu.metrics import BLEU, BLEUScore
@@ -19,6 +18,8 @@ from .config_utils import load_config
 from .tokenizer import Tokenizer
 
 LOGGER = logging.getLogger(__package__ + ".test")
+
+logging.getLogger("sacrebleu").setLevel(logging.ERROR)
 
 _SUPPORTED_SCORERS = {"bleu", "sentencebleu", "chrf3", "meteor", "wer", "ter", "spbleu"}
 
