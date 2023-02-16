@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 from pathlib import Path, PurePath
 from platform import system, uname
-from typing import Iterable, List, Sequence, Union
+from typing import Iterable, List, Optional, Sequence, Union
 
 import boto3
 from dotenv import load_dotenv
@@ -25,20 +25,20 @@ class SilNlpEnv:
         # Root data directory
         self.set_data_dir()
 
-    def set_data_dir(self, DATA_DIR: Path = None):
-        if DATA_DIR is None:
-            DATA_DIR = self.resolve_data_dir()
+    def set_data_dir(self, data_dir: Optional[Path] = None):
+        if data_dir is None:
+            data_dir = self.resolve_data_dir()
 
-        self.data_dir = pathify(DATA_DIR)
+        self.data_dir = pathify(data_dir)
 
         # Paratext directories
         self.set_paratext_dir()
         self.set_machine_translation_dir()
         self.set_alignment_dir()
 
-    def set_paratext_dir(self, PT_DIR: Path = None):
-        if PT_DIR is not None:
-            self.pt_dir = pathify(PT_DIR)
+    def set_paratext_dir(self, pt_dir: Optional[Path] = None):
+        if pt_dir is not None:
+            self.pt_dir = pathify(pt_dir)
         elif hasattr(self, "pt_dir"):
             # it is already initialized
             return
@@ -49,9 +49,9 @@ class SilNlpEnv:
         self.pt_projects_dir = self.pt_dir / "projects"
         self.pt_terms_dir = self.pt_dir / "terms"
 
-    def set_machine_translation_dir(self, MT_DIR: Path = None):
-        if MT_DIR is not None:
-            self.mt_dir = pathify(MT_DIR)
+    def set_machine_translation_dir(self, mt_dir: Optional[Path] = None):
+        if mt_dir is not None:
+            self.mt_dir = pathify(mt_dir)
         elif hasattr(self, "mt_dir"):
             # it is already initialized
             return
@@ -83,9 +83,9 @@ class SilNlpEnv:
         else:
             self.mt_experiments_dir = self.mt_dir / "experiments"
 
-    def set_alignment_dir(self, ALIGN_DIR: Path = None):
-        if ALIGN_DIR is not None:
-            self.align_dir = pathify(ALIGN_DIR)
+    def set_alignment_dir(self, align_dir: Optional[Path] = None):
+        if align_dir is not None:
+            self.align_dir = pathify(align_dir)
         elif hasattr(self, "align_dir"):
             # it is already initialized
             return
@@ -163,7 +163,7 @@ class SilNlpEnv:
                     LOGGER.info("Downloading " + rel_path)
                     data_bucket.download_file(obj.object_key, str(temp_dest_path))
 
-    def copy_experiment_to_bucket(self, name: str, patterns: Union[str, Sequence[str]] = []):
+    def copy_experiment_to_bucket(self, name: str, patterns: Union[str, Sequence[str]] = [], overwrite: bool = False):
         if not self.is_bucket:
             return
         name = str(name)
@@ -189,7 +189,7 @@ class SilNlpEnv:
                 if len(patterns) == 0 or any(pure_path.match(pattern) for pattern in patterns):
                     source_file = os.path.join(root, file)
                     dest_file = s3_dest_path + "/" + file
-                    if dest_file in files_already_in_s3:
+                    if not overwrite and dest_file in files_already_in_s3:
                         LOGGER.debug("File already exists in S3 bucket: " + dest_file)
                     else:
                         LOGGER.info("Uploading " + dest_file)

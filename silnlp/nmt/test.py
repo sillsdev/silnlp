@@ -11,7 +11,7 @@ import sacrebleu
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_number_to_id, get_books
 from sacrebleu.metrics import BLEU, BLEUScore
 
-from ..common.metrics import compute_meteor_score, compute_ter_score, compute_wer_score
+from ..common.metrics import compute_meteor_score, compute_wer_score
 from ..common.tf_utils import enable_eager_execution, enable_memory_growth
 from ..common.utils import get_git_revision_hash
 from .config import CheckpointType, Config, NMTModel
@@ -20,7 +20,7 @@ from .tokenizer import Tokenizer
 
 LOGGER = logging.getLogger(__package__ + ".test")
 
-_SUPPORTED_SCORERS = {"bleu", "sentencebleu", "chrf3", "meteor", "wer", "ter"}
+_SUPPORTED_SCORERS = {"bleu", "sentencebleu", "chrf3", "meteor", "wer", "ter", "spbleu"}
 
 
 class PairScore:
@@ -59,6 +59,66 @@ class PairScore:
             file.write(f"{key},{val:.2f}\n")
 
 
+def score_pair(
+    pair_sys: List[str],
+    pair_refs: List[List[str]],
+    book: str,
+    src_iso: str,
+    trg_iso: str,
+    predictions_detok_file_name: str,
+    scorers: Set[str],
+    config: Config,
+    ref_projects: Set[str],
+) -> PairScore:
+    bleu_score = None
+    if "bleu" in scorers:
+        bleu_score = sacrebleu.corpus_bleu(
+            pair_sys,
+            pair_refs,
+            lowercase=True,
+            tokenize=config.data.get("sacrebleu_tokenize", "13a"),
+        )
+
+    if "sentencebleu" in scorers:
+        write_sentence_bleu(
+            config.exp_dir / (predictions_detok_file_name + ".scores.tsv"),
+            pair_sys,
+            pair_refs,
+            lowercase=True,
+            tokenize=config.data.get("sacrebleu_tokenize", "13a"),
+        )
+
+    other_scores: Dict[str, float] = {}
+    if "chrf3" in scorers:
+        chrf3_score = sacrebleu.corpus_chrf(pair_sys, pair_refs, char_order=6, beta=3, remove_whitespace=True)
+        other_scores["CHRF3"] = chrf3_score.score
+
+    if "meteor" in scorers:
+        meteor_score = compute_meteor_score(trg_iso, pair_sys, pair_refs)
+        if meteor_score is not None:
+            other_scores["METEOR"] = meteor_score
+
+    if "wer" in scorers:
+        wer_score = compute_wer_score(pair_sys, pair_refs)
+        if wer_score >= 0:
+            other_scores["WER"] = wer_score
+
+    if "ter" in scorers:
+        ter_score = sacrebleu.corpus_ter(pair_sys, pair_refs)
+        if ter_score.score >= 0:
+            other_scores["TER"] = ter_score.score * 100
+
+    if "spbleu" in scorers:
+        spbleu_score = sacrebleu.corpus_bleu(
+            pair_sys,
+            pair_refs,
+            lowercase=True,
+            tokenize="flores200",
+        )
+        other_scores["spBLEU"] = spbleu_score.score
+    return PairScore(book, src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores)
+
+
 def score_individual_books(
     book_dict: Dict[str, Tuple[List[str], List[List[str]]]],
     src_iso: str,
@@ -75,46 +135,11 @@ def score_individual_books(
         pair_sys = book_tuple[0]
         pair_refs = book_tuple[1]
         overall_sys.extend(pair_sys)
-
-        bleu_score = None
-        if "bleu" in scorers:
-            bleu_score = sacrebleu.corpus_bleu(
-                pair_sys,
-                pair_refs,
-                lowercase=True,
-                tokenize=config.data.get("sacrebleu_tokenize", "13a"),
+        book_scores.append(
+            score_pair(
+                pair_sys, pair_refs, book, src_iso, trg_iso, predictions_detok_file_name, scorers, config, ref_projects
             )
-
-        if "sentencebleu" in scorers:
-            write_sentence_bleu(
-                config.exp_dir / (predictions_detok_file_name + ".scores.tsv"),
-                pair_sys,
-                pair_refs,
-                lowercase=True,
-                tokenize=config.data.get("sacrebleu_tokenize", "13a"),
-            )
-
-        other_scores: Dict[str, float] = {}
-        if "chrf3" in scorers:
-            chrf3_score = sacrebleu.corpus_chrf(pair_sys, pair_refs, char_order=6, beta=3, remove_whitespace=True)
-            other_scores["CHRF3"] = np.round(float(chrf3_score.score), 2)
-
-        if "meteor" in scorers:
-            meteor_score = compute_meteor_score(trg_iso, pair_sys, pair_refs)
-            if meteor_score is not None:
-                other_scores["METEOR"] = meteor_score
-
-        if "wer" in scorers:
-            wer_score = compute_wer_score(pair_sys, pair_refs)
-            if wer_score >= 0:
-                other_scores["WER"] = wer_score
-
-        if "ter" in scorers:
-            ter_score = compute_ter_score(pair_sys, pair_refs)
-            if ter_score >= 0:
-                other_scores["TER"] = ter_score
-        score = PairScore(book, src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores)
-        book_scores.append(score)
+        )
     return book_scores
 
 
@@ -403,45 +428,13 @@ def test_checkpoint(
         # ensure that all refs are the same length as the sys
         for overall_ref in filter(lambda r: len(r) < len(overall_sys), overall_refs):
             overall_ref.extend([""] * (len(overall_sys) - len(overall_ref)))
-        bleu_score = None
-        if "bleu" in scorers:
-            bleu_score = sacrebleu.corpus_bleu(
-                pair_sys,
-                pair_refs,
-                lowercase=True,
-                tokenize=config.data.get("sacrebleu_tokenize", "13a"),
+
+        scores.append(
+            score_pair(
+                pair_sys, pair_refs, "ALL", src_iso, trg_iso, predictions_detok_file_name, scorers, config, ref_projects
             )
+        )
 
-        if "sentencebleu" in scorers:
-            write_sentence_bleu(
-                config.exp_dir / (predictions_detok_file_name + ".scores.tsv"),
-                pair_sys,
-                pair_refs,
-                lowercase=True,
-                tokenize=config.data.get("sacrebleu_tokenize", "13a"),
-            )
-
-        other_scores: Dict[str, float] = {}
-        if "chrf3" in scorers:
-            chrf3_score = sacrebleu.corpus_chrf(pair_sys, pair_refs, char_order=6, beta=3, remove_whitespace=True)
-            other_scores["CHRF3"] = np.round(float(chrf3_score.score), 2)
-
-        if "meteor" in scorers:
-            meteor_score = compute_meteor_score(trg_iso, pair_sys, pair_refs)
-            if meteor_score is not None:
-                other_scores["METEOR"] = meteor_score
-
-        if "wer" in scorers:
-            wer_score = compute_wer_score(pair_sys, pair_refs)
-            if wer_score >= 0:
-                other_scores["WER"] = wer_score
-
-        if "ter" in scorers:
-            ter_score = compute_ter_score(pair_sys, pair_refs)
-            if ter_score >= 0:
-                other_scores["TER"] = ter_score
-
-        scores.append(PairScore("ALL", src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores))
         if by_book:
             if len(book_dict) != 0:
                 book_scores = score_individual_books(

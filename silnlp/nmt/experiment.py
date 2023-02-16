@@ -71,13 +71,15 @@ class SILExperiment:
             last=True,
             best=True,
             by_book=self.score_by_book,
-            scorers={"bleu", "sentencebleu", "chrf3", "wer", "ter"},
+            scorers={"bleu", "sentencebleu", "chrf3", "wer", "ter", "spbleu"},
         )
-        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("scores-*.csv", "test.trg-predictions.*"))
+        SIL_NLP_ENV.copy_experiment_to_bucket(
+            self.name, patterns=("scores-*.csv", "test.*trg-predictions.*"), overwrite=True
+        )
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run experiment - preprocesses, train and test")
+    parser = argparse.ArgumentParser(description="Run experiment - preprocess, train, and test")
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument("--stats", default=False, action="store_true", help="Output corpus statistics")
     parser.add_argument("--mixed-precision", default=False, action="store_true", help="Enable mixed precision")

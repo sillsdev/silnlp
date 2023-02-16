@@ -4,40 +4,31 @@ import tempfile
 from pathlib import Path
 from typing import List, Optional
 
-import numpy as np
 import psutil
-import sacrebleu
-from opennmt.utils.wer import wer
+from opennmt.utils.wer import sentence_wer
 
 from ..common.corpus import write_corpus
 
 METEOR_FULLY_SUPPORTED_LANGS = {"en", "cz", "de", "es", "fr", "ar"}
 
 
-def compute_ter_score(hyps: List[str], refs: List[List[str]]) -> float:
-    result = sacrebleu.corpus_ter(hyps, refs)
-    return float(np.round(float(result.score), 2))
-
-
 def compute_wer_score(hyps: List[str], refs: List[List[str]]) -> float:
-    with tempfile.TemporaryDirectory() as td:
-        temp_dir = Path(td)
-        hyps_path = temp_dir / "hyps.txt"
-        refs_path = temp_dir / "refs.txt"
+    if len(hyps) == 0:
+        return 100.0
 
-        write_corpus(hyps_path, hyps)
-        write_corpus(refs_path, (line for r in zip(*refs) for line in r))
+    try:
+        wer_score = 0.0
+        for hyp, ref in zip(hyps, refs[0]):
+            wer_score += sentence_wer(ref.lower(), hyp.lower())
+        result = wer_score / len(hyps)
+    except UnicodeDecodeError:
+        print("Unable to compute WER score")
+        result = -1
+    except ZeroDivisionError:
+        print("Cannot divide by zero. Check for empty lines.")
+        result = -1
 
-        try:
-            result = wer(hyps_path, refs_path)
-        except UnicodeDecodeError:
-            print("Unable to compute WER score")
-            result = -1
-        except ZeroDivisionError:
-            print("Cannot divide by zero. Check for empty lines.")
-            result = -1
-
-        return float(np.round(float(result) * 100, 2))
+    return result * 100
 
 
 def compute_meteor_score(lang: str, hyps: List[str], refs: List[List[str]]) -> Optional[float]:
@@ -79,4 +70,4 @@ def compute_meteor_score(lang: str, hyps: List[str], refs: List[List[str]]) -> O
         env["LC_ALL"] = "C"
         result = subprocess.run(args, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8")
 
-        return float(np.round(float(result.stdout.strip()) * 100, 2))
+        return float(result.stdout.strip()) * 100

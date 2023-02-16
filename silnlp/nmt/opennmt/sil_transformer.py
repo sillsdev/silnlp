@@ -104,37 +104,13 @@ class SILTransformer(Transformer):
             alignment_head_num_units=alignment_head_num_units,
         )
 
-        self._pre_norm = pre_norm
         self._num_units = num_units
-        self._num_encoder_layers = num_encoder_layers
-        self._num_decoder_layers = num_decoder_layers
-        self._num_heads = num_heads
-        self._with_relative_position = maximum_relative_position is not None
-        self._position_encoder_class = position_encoder_class
-        self._ffn_activation = ffn_activation
-        self._alignment_layer = -1
-        self._alignment_heads = 1
-        if attention_reduction == MultiHeadAttentionReduction.AVERAGE_LAST_LAYER:
-            self._alignment_heads = 0
-
         self._dictionary: Optional[Trie] = None
 
         if not isinstance(target_inputter, WordEmbedder):
             raise TypeError("Target inputter must be a WordEmbedder")
-        if EmbeddingsSharingLevel.share_input_embeddings(share_embeddings):
-            if isinstance(source_inputter, ParallelInputter):
-                source_inputters = source_inputter.inputters
-            else:
-                source_inputters = [source_inputter]
-            for inputter in source_inputters:
-                if not isinstance(inputter, WordEmbedder):
-                    raise TypeError("Sharing embeddings requires all inputters to be a " "WordEmbedder")
 
-        examples_inputter = SILSequenceToSequenceInputter(
-            source_inputter,
-            target_inputter,
-            share_parameters=EmbeddingsSharingLevel.share_input_embeddings(share_embeddings),
-        )
+        examples_inputter = SILSequenceToSequenceInputter(source_inputter, target_inputter)
         super(SequenceToSequence, self).__init__(examples_inputter)
         self.encoder = encoder
         self.decoder = decoder
