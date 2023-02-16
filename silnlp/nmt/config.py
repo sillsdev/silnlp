@@ -1,3 +1,4 @@
+import argparse
 import itertools
 import logging
 import random
@@ -5,6 +6,7 @@ from abc import ABC, abstractmethod
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from enum import Enum, Flag, auto
+from itertools import zip_longest
 from pathlib import Path
 from statistics import mean
 from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, Type, Union, cast
@@ -12,6 +14,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, Type
 import pandas as pd
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books
 from tqdm import tqdm
+import yaml
 
 from ..alignment.config import get_aligner_name
 from ..alignment.utils import add_alignment_scores
@@ -33,11 +36,79 @@ from ..common.corpus import (
     write_corpus,
 )
 from ..common.environment import SIL_NLP_ENV
-from ..common.utils import NoiseMethod, Side, create_noise_methods, get_mt_exp_dir, is_set, set_seed
+from ..common.utils import (
+    NoiseMethod,
+    Side,
+    create_noise_methods,
+    get_git_revision_hash,
+    get_mt_exp_dir,
+    is_set,
+    set_seed,
+)
 from .augment import AugmentMethod, create_augment_methods
 from .tokenizer import Tokenizer
 
 LOGGER = logging.getLogger(__package__ + ".config")
+
+_DEFAULT_NEW_OPENNMT_CONFIG: dict = {
+    "data": {
+        "share_vocab": False,
+        "character_coverage": 1.0,
+        "mirror": False,
+        "mixed_src": False,
+        "seed": 111,
+    },
+    "eval": {"multi_ref_eval": False},
+    "params": {
+        "length_penalty": 0.2,
+        "dropout": 0.2,
+        "transformer_dropout": 0.1,
+        "transformer_attention_dropout": 0.1,
+        "transformer_ffn_dropout": 0.1,
+        "word_dropout": 0.1,
+    },
+    "train": {"maximum_features_length": 150, "maximum_labels_length": 150},
+}
+
+
+_DEFAULT_NEW_HUGGINGFACE_CONFIG: dict = {
+    "data": {
+        "corpus_pairs": {
+            "src": "eBible/eng-eng",
+            "test_size": 250,
+            "trg": "eBible/fra-fra",
+            "type": "train,test,val",
+            "val_size": 250,
+        },
+        "lang_codes": {
+            "eng": "eng_Latn",
+            "fra": "fra_Latn",
+        },
+        "seed": 111,
+        "terms": {
+            "dictionary": False,
+            "include_glosses": False,
+            "train": True,
+        },
+    },
+    "eval": {
+        "early_stopping": {
+            "min_improvement": 0.1,
+            "steps": 4,
+        },
+        "per_device_eval_batch_size": 16,
+    },
+    "infer": {"infer_batch_size": 16},
+    "model": "facebook/nllb-200-distilled-600M",
+    "params": {
+        "label_smoothing_factor": 0.2,
+        "warmup_steps": 4000,
+    },
+    "train": {
+        "gradient_accumulation_steps": 4,
+        "per_device_train_batch_size": 16,
+    },
+}
 
 BASIC_DATA_PROJECT = "BASIC"
 
@@ -1247,3 +1318,239 @@ class Config(ABC):
     @abstractmethod
     def _write_dictionary(self, tokenizer: Tokenizer, pair: CorpusPair) -> int:
         ...
+
+
+def load_config(exp_name: str) -> Config:
+    exp_dir = get_mt_exp_dir(exp_name)
+    config_path = exp_dir / "config.yml"
+
+    with config_path.open("r", encoding="utf-8") as file:
+        config = yaml.safe_load(file)
+
+    return Config(exp_dir, config)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Create a NMT experiment config file")
+    parser.add_argument("experiment", help="Experiment name")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--opennmt", action="store_true")
+    group.add_argument("--huggingface", action="store_true")
+    parser.add_argument(
+        "--type", default="huggingface", help="Experiment type. The options are 'OpenNMT' or 'huggingface'"
+    )
+    parser.add_argument("--src", nargs="*", metavar="corpus", default=[], help="Source corpora pairs")
+    parser.add_argument("--trg", nargs="*", metavar="corpus", default=[], help="Target corpora pairs")
+    parser.add_argument("--vocab-size", type=int, help="Shared vocabulary size")
+    parser.add_argument("--src-vocab-size", type=int, help="Source vocabulary size")
+    parser.add_argument("--trg-vocab-size", type=int, help="Target vocabulary size")
+    parser.add_argument("--parent", type=str, help="Parent experiment name")
+    parser.add_argument("--mirror", default=False, action="store_true", help="Mirror train and validation data sets")
+    parser.add_argument("--force", default=False, action="store_true", help="Overwrite existing config file")
+    parser.add_argument("--seed", type=int, help="Randomization seed")
+    parser.add_argument("--model", type=str, help="The neural network model")
+    parser.add_argument(
+        "--family", type=str, help="The language family details to use for eBible huggingface experiments"
+    )
+
+    args = parser.parse_args()
+
+    get_git_revision_hash()
+
+    if args.huggingface:
+
+        #exp_dir = get_mt_exp_dir(args.experiment)
+        #config_path = exp_dir / "config.yml"
+        #if config_path.is_file() and not args.force:
+        #    LOGGER.warning(
+        #        f'The experiment config file {config_path} already exists. Use "--force" if you want to overwrite the existing config.'
+        #    )
+        #    return
+
+        #exp_dir.mkdir(exist_ok=True, parents=True)
+
+        language_family_details = {
+            "Afro-Asiatic": {
+                "1st_pair": {"src": "hau-hausa", "trg": "daa-daaNT"},
+                "2nd_pair": {"src": "hau-hausa", "trg": "fuh-fuhbkf"},
+                "lang_codes": {"hau": "hau_Latn", "daa": "daa_Latn"},
+                "related_lang_code": {"fuh": "fuh_Latn"},
+            },
+            "Austronesian": {
+                "1st_pair": {"src": "ksd-ksd", "trg": "kqw-kqw"},
+                "2nd_pair": {"src": "ksd-ksd", "trg": "rai-rai"},
+                "lang_codes": {"ksd": "ksd_Latn", "kqw": "kqw_Latn"},
+                "related_lang_code": {"rai": "rai_Latn"},
+            },
+            "Dravidian": {
+                "1st_pair": {"src": "tam-tam2017", "trg": "mal-mal"},
+                "2nd_pair": {"src": "tam-tam2017", "trg": "kan-kan2017"},
+                "lang_codes": {"tam": "tam_Taml", "mal": "mal_Mlym"},
+                "related_lang_code": {"kah": "kah_Knda"},
+            },
+            "Indo-European": {
+                "1st_pair": {"src": "hin-hin2017", "trg": "pan-pan"},
+                "2nd_pair": {"src": "hin-hin2017", "trg": "guj-guj2017"},
+                "lang_codes": {"hin": "hin_Deva", "pan": "pan_Gurm"},
+                "related_lang_code": {"guj": "guj_Gujr"},
+            },
+            "Niger-Congo": {
+                "1st_pair": {"src": "hau-hausa", "trg": "daa-daaNT"},
+                "2nd_pair": {"src": "hau-hausa", "trg": "fuh-fuhbkf"},
+                "lang_codes": {"hau": "hau_Latn", "daa": "daa_Latn"},
+                "related_lang_code": {"fuh": "fuh_Latn"},
+            },
+            "Otomanguean": {
+                "1st_pair": {"src": "spa-sparvg", "trg": "zat-zatNTps"},
+                "2nd_pair": {"src": "spa-sparvg", "trg": "zad-zadNT"},
+                "lang_codes": {"spa": "spa_Latn", "zat": "zat_Latn"},
+                "related_lang_code": {"zad": "zad_Latn"},
+            },
+            "Sino-Tibetan": {
+                "1st_pair": {"src": "npi-npiulb", "trg": "taj-taj"},
+                "2nd_pair": {"src": "npi-npiulb", "trg": "lif-lifNT"},
+                "lang_codes": {"npi": "npi_Deva", "taj": "taj_Deva"},
+                "related_lang_code": {"lif": "lif_Deva"},
+            },
+            "Trans-NewGuinea": {
+                "1st_pair": {"src": "tpi-tpiOTNT", "trg": "yut-yut"},
+                "2nd_pair": {"src": "tpi-tpiOTNT", "trg": "nca-nca"},
+                "lang_codes": {"tpi": "tpi_Latn", "yut": "yut_Latn"},
+                "related_lang_code": {"nca": "nca_Latn"},
+            },
+        }
+
+        folder_prefix = "eBible.NMT."
+        scripture_folder = "eBible/"
+        language_details = language_family_details[args.family]
+        exp_dir = get_mt_exp_dir("")
+        
+        family_folder =  exp_dir / (folder_prefix + args.family)
+        existing_config_files = [Path(configfile) for configfile in family_folder.rglob("config.yml")]
+        s_drive_exp_folder = Path("S:/MT/experiments")
+        dest_family_folder = s_drive_exp_folder / (folder_prefix + args.family)
+
+        print(f"Looking in {family_folder} for config files.")
+        print(f"Found {len(existing_config_files)} config files for {args.family} ")
+
+        for existing_config_file in existing_config_files:
+            destination_folder = dest_family_folder / existing_config_file.parent.name            
+            destination_config_file = destination_folder / existing_config_file.name
+
+            with existing_config_file.open("r", encoding="utf-8") as file:
+                config = yaml.safe_load(file)
+        
+            data_config: dict = config["data"]
+            corpus_pairs = data_config["corpus_pairs"]
+            #print(existing_config_file, existing_config_file.is_file())
+            #print(len(corpus_pairs))
+
+            greek_source = scripture_folder + "grc-grcsbl"
+
+            if not config["data"]["corpus_pairs"][0]["src"] == greek_source:
+                config["data"]["corpus_pairs"][0]["src"] = scripture_folder + language_details["1st_pair"]["src"]
+
+            config["data"]["corpus_pairs"][0]["trg"] = scripture_folder + language_details["1st_pair"]["trg"]
+            config["data"]["lang_codes"] = language_details["lang_codes"]
+            if len(corpus_pairs) == 2:
+                if not config["data"]["corpus_pairs"][1]["src"] == greek_source:
+                    config["data"]["corpus_pairs"][1]["src"] = scripture_folder + language_details["2nd_pair"]["src"]
+                
+                config["data"]["corpus_pairs"][1]["trg"] = scripture_folder + language_details["2nd_pair"]["trg"]
+                
+                related_code = list(language_details["related_lang_code"].keys())[0]
+                related_ws = language_details["related_lang_code"][related_code]
+                #print(related_code, " : " , related_ws)
+                config["data"]["lang_codes"][related_code] = related_ws
+
+            # For testing save with a new name
+            if False:
+                new_config_file = existing_config_file.with_name("new_config.yml")
+                with new_config_file.open("w", encoding="utf-8") as file:
+                    yaml.dump(config, file)
+                print(f"Wrote new config to {new_config_file}")
+            
+            # Save to S drive as config.yml
+            if True:
+                #print(destination_config_file.parent , type(destination_config_file.parent))
+                # Create any required folders
+                destination_config_file.parent.mkdir(exist_ok=True, parents=True)
+                with destination_config_file.open("w", encoding="utf-8") as file:
+                    yaml.dump(config, file)
+                print( str(destination_config_file)[len(str(s_drive_exp_folder)) + 1:-11] )
+        exit()
+
+
+        config = _DEFAULT_NEW_HUGGINGFACE_CONFIG.copy()
+
+        if args.model is not None:
+            config["model"] = args.model
+
+        data_config: dict = config["data"]
+
+        corpus_pairs: List[dict] = []
+
+        corpus_pairs.append({"src": src_corpus, "trg": trg_corpus})
+        data_config["corpus_pairs"] = corpus_pairs
+
+        if args.parent is not None:
+
+            data_config["parent"] = args.parent
+
+            SIL_NLP_ENV.copy_experiment_from_bucket(args.parent, extensions="config.yml")
+            parent_config = load_config(args.parent)
+            for key in [
+                "share_vocab",
+                "vocab_size",
+                "src_vocab_size",
+                "trg_vocab_size",
+                "casing",
+                "src_casing",
+                "trg_casing",
+            ]:
+                if key in parent_config.data:
+                    data_config[key] = parent_config.data[key]
+        if args.vocab_size is not None:
+            data_config["vocab_size"] = args.vocab_size
+        elif args.src_vocab_size is not None or args.trg_vocab_size is not None:
+            data_config["share_vocab"] = False
+            if args.src_vocab_size is not None:
+                data_config["src_vocab_size"] = args.src_vocab_size
+            elif "vocab_size" in data_config:
+                data_config["src_vocab_size"] = data_config["vocab_size"]
+                del data_config["vocab_size"]
+            if args.trg_vocab_size is not None:
+                data_config["trg_vocab_size"] = args.trg_vocab_size
+            elif "vocab_size" in data_config:
+                data_config["trg_vocab_size"] = data_config["vocab_size"]
+                del data_config["vocab_size"]
+        if data_config["share_vocab"]:
+            if "vocab_size" not in data_config:
+                data_config["vocab_size"] = 24000
+            if "casing" not in data_config:
+                data_config["casing"] = "lower"
+        else:
+            if "src_vocab_size" not in data_config:
+                data_config["src_vocab_size"] = 8000
+            if "trg_vocab_size" not in data_config:
+                data_config["trg_vocab_size"] = 8000
+            if "src_casing" not in data_config:
+                data_config["src_casing"] = data_config.get("casing", "lower")
+            if "trg_casing" not in data_config:
+                data_config["trg_casing"] = data_config.get("casing", "lower")
+            if "casing" in data_config:
+                del data_config["casing"]
+        if args.seed is not None:
+            data_config["seed"] = args.seed
+        if args.mirror:
+            data_config["mirror"] = True
+        with config_path.open("w", encoding="utf-8") as file:
+            yaml.dump(config, file)
+        LOGGER.info(f"Config file created: {config_path}")
+
+    else:
+        raise RuntimeError(f'Use either "--opennmt" or "--huggingface" to specify the model type.')
+
+
+if __name__ == "__main__":
+    main()
