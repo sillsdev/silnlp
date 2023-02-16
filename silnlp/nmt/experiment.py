@@ -23,6 +23,7 @@ class SILExperiment:
     run_prep: bool = False
     run_train: bool = False
     run_test: bool = False
+    score_by_book: bool = False
 
     def __post_init__(self):
         self.clearml = SILClearML(self.name, self.clearml_queue)
@@ -69,6 +70,7 @@ class SILExperiment:
             experiment=self.name,
             last=True,
             best=True,
+            by_book=self.score_by_book,
             scorers={"bleu", "sentencebleu", "chrf3", "wer", "ter"},
         )
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("scores-*.csv", "test.trg-predictions.*"))
@@ -91,6 +93,8 @@ def main() -> None:
     parser.add_argument("--preprocess", default=False, action="store_true", help="Run the preprocess step.")
     parser.add_argument("--train", default=False, action="store_true", help="Run the train step.")
     parser.add_argument("--test", default=False, action="store_true", help="Run the test step.")
+    parser.add_argument("--score-by-book", default=False, action="store_true", help="Score individual books")
+
     args = parser.parse_args()
 
     if args.memory_growth:
@@ -111,6 +115,7 @@ def main() -> None:
         run_prep=args.preprocess,
         run_train=args.train,
         run_test=args.test,
+        score_by_book=args.score_by_book,
     )
     exp.run()
 

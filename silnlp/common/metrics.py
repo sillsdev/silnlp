@@ -2,7 +2,7 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence, cast
+from typing import List, Optional
 
 import numpy as np
 import psutil
@@ -14,12 +14,12 @@ from ..common.corpus import write_corpus
 METEOR_FULLY_SUPPORTED_LANGS = {"en", "cz", "de", "es", "fr", "ar"}
 
 
-def compute_ter_score(hyps: Iterable[str], refs: List[Iterable[str]]) -> float:
-    result = sacrebleu.corpus_ter(cast(Sequence[str], hyps), cast(Sequence[Sequence[str]], refs))
+def compute_ter_score(hyps: List[str], refs: List[List[str]]) -> float:
+    result = sacrebleu.corpus_ter(hyps, refs)
     return float(np.round(float(result.score), 2))
 
 
-def compute_wer_score(hyps: Iterable[str], refs: Iterable[str]) -> float:
+def compute_wer_score(hyps: List[str], refs: List[List[str]]) -> float:
     with tempfile.TemporaryDirectory() as td:
         temp_dir = Path(td)
         hyps_path = temp_dir / "hyps.txt"
@@ -40,7 +40,7 @@ def compute_wer_score(hyps: Iterable[str], refs: Iterable[str]) -> float:
         return float(np.round(float(result) * 100, 2))
 
 
-def compute_meteor_score(lang: str, hyps: Iterable[str], refs: List[Iterable[str]]) -> Optional[float]:
+def compute_meteor_score(lang: str, hyps: List[str], refs: List[List[str]]) -> Optional[float]:
     if lang.lower() not in METEOR_FULLY_SUPPORTED_LANGS:
         return None
 

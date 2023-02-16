@@ -1,9 +1,10 @@
 import argparse
 import logging
 import random
+from contextlib import ExitStack
 from io import StringIO
 from pathlib import Path
-from typing import IO, Dict, Iterable, List, Optional, Sequence, Set, Tuple, cast
+from typing import IO, Dict, List, Optional, Set, TextIO, Tuple
 
 import numpy as np
 import sacrebleu
@@ -59,8 +60,9 @@ class PairScore:
 
 
 def score_individual_books(
-    book_dict: dict,
+    book_dict: Dict[str, Tuple[List[str], List[List[str]]]],
     src_iso: str,
+    trg_iso: str,
     predictions_detok_file_name: str,
     scorers: Set[str],
     config: Config,
@@ -69,130 +71,113 @@ def score_individual_books(
     overall_sys: List[str] = []
     book_scores: List[PairScore] = []
 
-    for book in book_dict.keys():
-        for trg_iso, book_tuple in book_dict[book].items():
-            pair_sys = book_tuple[0]
-            pair_refs = book_tuple[1]
-            overall_sys.extend(pair_sys)
+    for book, book_tuple in book_dict.items():
+        pair_sys = book_tuple[0]
+        pair_refs = book_tuple[1]
+        overall_sys.extend(pair_sys)
 
-            bleu_score = None
-            if "bleu" in scorers:
-                bleu_score = sacrebleu.corpus_bleu(
-                    pair_sys,
-                    pair_refs,
-                    lowercase=True,
-                    tokenize=config.data.get("sacrebleu_tokenize", "13a"),
-                )
+        bleu_score = None
+        if "bleu" in scorers:
+            bleu_score = sacrebleu.corpus_bleu(
+                pair_sys,
+                pair_refs,
+                lowercase=True,
+                tokenize=config.data.get("sacrebleu_tokenize", "13a"),
+            )
 
-            if "sentencebleu" in scorers:
-                write_sentence_bleu(
-                    config.exp_dir / (predictions_detok_file_name + ".scores.tsv"),
-                    pair_sys,
-                    pair_refs,
-                    lowercase=True,
-                    tokenize=config.data.get("sacrebleu_tokenize", "13a"),
-                )
+        if "sentencebleu" in scorers:
+            write_sentence_bleu(
+                config.exp_dir / (predictions_detok_file_name + ".scores.tsv"),
+                pair_sys,
+                pair_refs,
+                lowercase=True,
+                tokenize=config.data.get("sacrebleu_tokenize", "13a"),
+            )
 
-            other_scores: Dict[str, float] = {}
-            if "chrf3" in scorers:
-                chrf3_score = sacrebleu.corpus_chrf(pair_sys, pair_refs, char_order=6, beta=3, remove_whitespace=True)
-                other_scores["CHRF3"] = np.round(float(chrf3_score.score), 2)
+        other_scores: Dict[str, float] = {}
+        if "chrf3" in scorers:
+            chrf3_score = sacrebleu.corpus_chrf(pair_sys, pair_refs, char_order=6, beta=3, remove_whitespace=True)
+            other_scores["CHRF3"] = np.round(float(chrf3_score.score), 2)
 
-            if "meteor" in scorers:
-                meteor_score = compute_meteor_score(trg_iso, pair_sys, pair_refs)
-                if meteor_score is not None:
-                    other_scores["METEOR"] = meteor_score
+        if "meteor" in scorers:
+            meteor_score = compute_meteor_score(trg_iso, pair_sys, pair_refs)
+            if meteor_score is not None:
+                other_scores["METEOR"] = meteor_score
 
-            if "wer" in scorers:
-                wer_score = compute_wer_score(pair_sys, cast(List[str], pair_refs))
-                if wer_score >= 0:
-                    other_scores["WER"] = wer_score
+        if "wer" in scorers:
+            wer_score = compute_wer_score(pair_sys, pair_refs)
+            if wer_score >= 0:
+                other_scores["WER"] = wer_score
 
-            if "ter" in scorers:
-                ter_score = compute_ter_score(pair_sys, pair_refs)
-                if ter_score >= 0:
-                    other_scores["TER"] = ter_score
-            score = PairScore(book, src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores)
-            book_scores.append(score)
+        if "ter" in scorers:
+            ter_score = compute_ter_score(pair_sys, pair_refs)
+            if ter_score >= 0:
+                other_scores["TER"] = ter_score
+        score = PairScore(book, src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores)
+        book_scores.append(score)
     return book_scores
 
 
 def process_individual_books(
     tokenizer: Tokenizer,
-    src_file_path: Path,
     pred_file_path: Path,
     ref_file_paths: List[Path],
     vref_file_path: Path,
-    default_trg_iso: str,
     select_rand_ref_line: bool,
     books: Set[int],
-):
+) -> Dict[str, Tuple[List[str], List[List[str]]]]:
     # Output data structure
-    book_dict: Dict[str, dict] = {}
-    ref_files = []
-
-    try:
+    book_dict: Dict[str, Tuple[List[str], List[List[str]]]] = {}
+    with ExitStack() as stack:
         # Get all references
+        ref_files: List[TextIO] = []
         for ref_file_path in ref_file_paths:
-            file = ref_file_path.open("r", encoding="utf-8")
-            ref_files.append(file)
+            ref_files.append(stack.enter_context(ref_file_path.open("r", encoding="utf-8")))
 
-        with vref_file_path.open("r", encoding="utf-8") as vref_file, pred_file_path.open(
-            "r", encoding="utf-8"
-        ) as pred_file, src_file_path.open("r", encoding="utf-8") as src_file:
-            for lines in zip(pred_file, vref_file, src_file, *ref_files):
-                # Get file lines
-                pred_line = lines[0].strip()
-                detok_pred = tokenizer.detokenize(pred_line)
-                vref = lines[1].strip()
-                src_line = lines[2].strip()
-                # Get book
-                if vref != "":
-                    vref = VerseRef.from_string(vref.strip(), ORIGINAL_VERSIFICATION)
-                    # Check if book in books
-                    if vref.book_num in books:
-                        # Get iso
-                        book_iso = default_trg_iso
-                        if src_line.startswith("<2"):
-                            index = src_line.index(">")
-                            val = src_line[2:index]
-                            if val != "qaa":
-                                book_iso = val
-                        # If book not in dictionary add the book
-                        if vref.book not in book_dict:
-                            book_dict[vref.book] = {}
-                        if book_iso not in book_dict[vref.book]:
-                            book_dict[vref.book][book_iso] = ([], [])
-                        book_pred, book_refs = book_dict[vref.book][book_iso]
+        vref_file = stack.enter_context(vref_file_path.open("r", encoding="utf-8"))
+        pred_file = stack.enter_context(pred_file_path.open("r", encoding="utf-8"))
 
-                        # Add detokenized prediction to nested dictionary
-                        book_pred.append(detok_pred)
+        for lines in zip(pred_file, vref_file, *ref_files):
+            # Get file lines
+            pred_line = lines[0].strip()
+            detok_pred = tokenizer.detokenize(pred_line)
+            vref = lines[1].strip()
+            # Get book
+            if vref == "":
+                continue
+            vref = VerseRef.from_string(vref, ORIGINAL_VERSIFICATION)
+            # Check if book in books
+            if len(books) > 0 and vref.book_num not in books:
+                continue
+            # If book not in dictionary add the book
+            if vref.book not in book_dict:
+                book_dict[vref.book] = ([], [])
+            book_pred, book_refs = book_dict[vref.book]
 
-                        # Check if random ref line selected or not
-                        if select_rand_ref_line:
-                            ref_index = random.randint(0, len(ref_files) - 1)
-                            ref_line = lines[ref_index + 3].strip()
-                            if len(book_refs) == 0:
-                                book_refs.append([])
-                            book_refs[0].append(ref_line)
-                        else:
-                            # For each reference text, add to book_refs
-                            for ref_index in range(len(ref_files)):
-                                ref_line = lines[ref_index + 3].strip()
-                                if len(book_refs) == ref_index:
-                                    book_refs.append([])
-                                book_refs[ref_index].append(ref_line)
-    finally:
-        if ref_files is not None:
-            for ref_file in ref_files:
-                ref_file.close()
+            # Add detokenized prediction to nested dictionary
+            book_pred.append(detok_pred)
+
+            # Check if random ref line selected or not
+            if select_rand_ref_line:
+                ref_lines: List[str] = [l.strip() for l in lines[2:] if len(l.strip()) > 0]
+                ref_index = random.randint(0, len(ref_lines) - 1)
+                ref_line = ref_lines[ref_index + 2].strip()
+                if len(book_refs) == 0:
+                    book_refs.append([])
+                book_refs[0].append(ref_line)
+            else:
+                # For each reference text, add to book_refs
+                for ref_index in range(len(ref_files)):
+                    ref_line = lines[ref_index + 2].strip()
+                    if len(book_refs) == ref_index:
+                        book_refs.append([])
+                    book_refs[ref_index].append(ref_line)
     return book_dict
 
 
 def load_test_data(
     tokenizer: Tokenizer,
     vref_file_name: str,
-    src_file_name: str,
     pred_file_name: str,
     ref_pattern: str,
     output_file_name: str,
@@ -200,13 +185,15 @@ def load_test_data(
     config: Config,
     books: Set[int],
     by_book: bool,
-) -> Tuple[Dict[str, Tuple[List[str], List[List[str]]]], Dict[str, dict]]:
-    dataset: Dict[str, Tuple[List[str], List[List[str]]]] = {}
-    src_file_path = config.exp_dir / src_file_name
+) -> Tuple[List[str], List[List[str]], Dict[str, Tuple[List[str], List[List[str]]]]]:
+    sys: List[str] = []
+    refs: List[List[str]] = []
+    book_dict: Dict[str, Tuple[List[str], List[List[str]]]] = {}
     pred_file_path = config.exp_dir / pred_file_name
-    with src_file_path.open("r", encoding="utf-8") as src_file, pred_file_path.open(
-        "r", encoding="utf-8"
-    ) as pred_file, (config.exp_dir / output_file_name).open("w", encoding="utf-8") as out_file:
+    with ExitStack() as stack:
+        pred_file = stack.enter_context(pred_file_path.open("r", encoding="utf-8"))
+        out_file = stack.enter_context((config.exp_dir / output_file_name).open("w", encoding="utf-8"))
+
         ref_file_paths = list(config.exp_dir.glob(ref_pattern))
         select_rand_ref_line = False
         if len(ref_file_paths) > 1:
@@ -221,63 +208,43 @@ def load_test_data(
         vref_file: Optional[IO] = None
         vref_file_path = config.exp_dir / vref_file_name
         if len(books) > 0 and vref_file_path.is_file():
-            vref_file = vref_file_path.open("r", encoding="utf-8")
-        try:
-            for ref_file_path in ref_file_paths:
-                ref_files.append(ref_file_path.open("r", encoding="utf-8"))
-            default_trg_iso = config.default_trg_iso
-            for lines in zip(src_file, pred_file, *ref_files):
-                if vref_file is not None:
-                    vref_line = vref_file.readline().strip()
-                    if vref_line != "":
-                        vref = VerseRef.from_string(vref_line, ORIGINAL_VERSIFICATION)
-                        if vref.book_num not in books:
-                            continue
-                src_line = lines[0].strip()
-                pred_line = lines[1].strip()
-                detok_pred_line = tokenizer.detokenize(pred_line)
-                iso = default_trg_iso
-                if src_line.startswith("<2"):
-                    index = src_line.index(">")
-                    val = src_line[2:index]
-                    if val != "qaa":
-                        iso = val
-                if iso not in dataset:
-                    dataset[iso] = ([], [])
-                sys, refs = dataset[iso]
-                sys.append(detok_pred_line)
-                if select_rand_ref_line:
-                    ref_lines: List[str] = [l for l in map(lambda l: l.strip(), lines[2:]) if len(l) > 0]
-                    ref_index = random.randint(0, len(ref_lines) - 1)
-                    ref_line = ref_lines[ref_index]
-                    if len(refs) == 0:
-                        refs.append([])
-                    refs[0].append(ref_line)
-                else:
-                    for ref_index in range(len(ref_files)):
-                        ref_line = lines[ref_index + 2].strip()
-                        if len(refs) == ref_index:
-                            refs.append([])
-                        refs[ref_index].append(ref_line)
-                out_file.write(detok_pred_line + "\n")
-            book_dict: Dict[str, dict] = {}
-            if by_book:
-                book_dict = process_individual_books(
-                    tokenizer,
-                    src_file_path,
-                    pred_file_path,
-                    ref_file_paths,
-                    vref_file_path,
-                    default_trg_iso,
-                    select_rand_ref_line,
-                    books,
-                )
-        finally:
+            vref_file = stack.enter_context(vref_file_path.open("r", encoding="utf-8"))
+        for ref_file_path in ref_file_paths:
+            ref_files.append(stack.enter_context(ref_file_path.open("r", encoding="utf-8")))
+        for lines in zip(pred_file, *ref_files):
             if vref_file is not None:
-                vref_file.close()
-            for ref_file in ref_files:
-                ref_file.close()
-    return dataset, book_dict
+                vref_line = vref_file.readline().strip()
+                if vref_line != "":
+                    vref = VerseRef.from_string(vref_line, ORIGINAL_VERSIFICATION)
+                    if vref.book_num not in books:
+                        continue
+            pred_line = lines[0].strip()
+            detok_pred_line = tokenizer.detokenize(pred_line)
+            sys.append(detok_pred_line)
+            if select_rand_ref_line:
+                ref_lines: List[str] = [l.strip() for l in lines[1:] if len(l.strip()) > 0]
+                ref_index = random.randint(0, len(ref_lines) - 1)
+                ref_line = ref_lines[ref_index]
+                if len(refs) == 0:
+                    refs.append([])
+                refs[0].append(ref_line)
+            else:
+                for ref_index in range(len(ref_files)):
+                    ref_line = lines[ref_index + 1].strip()
+                    if len(refs) == ref_index:
+                        refs.append([])
+                    refs[ref_index].append(ref_line)
+            out_file.write(detok_pred_line + "\n")
+        if by_book:
+            book_dict = process_individual_books(
+                tokenizer,
+                pred_file_path,
+                ref_file_paths,
+                vref_file_path,
+                select_rand_ref_line,
+                books,
+            )
+    return sys, refs, book_dict
 
 
 def sentence_bleu(
@@ -401,6 +368,7 @@ def test_checkpoint(
 
     LOGGER.info(f"Scoring {checkpoint_name}")
     default_src_iso = config.default_src_iso
+    default_trg_iso = config.default_trg_iso
     scores: List[PairScore] = []
     overall_sys: List[str] = []
     overall_refs: List[List[str]] = []
@@ -408,12 +376,15 @@ def test_checkpoint(
         vref_file_names, source_file_names, translation_file_names, refs_patterns, translation_detok_file_names
     ):
         src_iso = default_src_iso
+        trg_iso = default_trg_iso
         if features_file_name != "test.src.txt":
-            src_iso = features_file_name.split(".")[1]
-        dataset, book_dict = load_test_data(
+            parts = features_file_name.split(".")
+            src_iso = parts[1]
+            trg_iso = parts[2]
+
+        pair_sys, pair_refs, book_dict = load_test_data(
             tokenizer,
             vref_file_name,
-            features_file_name,
             predictions_file_name,
             refs_pattern,
             predictions_detok_file_name,
@@ -423,67 +394,64 @@ def test_checkpoint(
             by_book,
         )
 
-        for trg_iso, (pair_sys, pair_refs) in dataset.items():
-            start_index = len(overall_sys)
-            overall_sys.extend(pair_sys)
-            for i, ref in enumerate(pair_refs):
-                if i == len(overall_refs):
-                    overall_refs.append([""] * start_index)
-                overall_refs[i].extend(ref)
-            # ensure that all refs are the same length as the sys
-            for overall_ref in filter(lambda r: len(r) < len(overall_sys), overall_refs):
-                overall_ref.extend([""] * (len(overall_sys) - len(overall_ref)))
-            bleu_score = None
-            if "bleu" in scorers:
-                bleu_score = sacrebleu.corpus_bleu(
-                    pair_sys,
-                    cast(Sequence[Sequence[str]], pair_refs),
-                    lowercase=True,
-                    tokenize=config.data.get("sacrebleu_tokenize", "13a"),
+        start_index = len(overall_sys)
+        overall_sys.extend(pair_sys)
+        for i, ref in enumerate(pair_refs):
+            if i == len(overall_refs):
+                overall_refs.append([""] * start_index)
+            overall_refs[i].extend(ref)
+        # ensure that all refs are the same length as the sys
+        for overall_ref in filter(lambda r: len(r) < len(overall_sys), overall_refs):
+            overall_ref.extend([""] * (len(overall_sys) - len(overall_ref)))
+        bleu_score = None
+        if "bleu" in scorers:
+            bleu_score = sacrebleu.corpus_bleu(
+                pair_sys,
+                pair_refs,
+                lowercase=True,
+                tokenize=config.data.get("sacrebleu_tokenize", "13a"),
+            )
+
+        if "sentencebleu" in scorers:
+            write_sentence_bleu(
+                config.exp_dir / (predictions_detok_file_name + ".scores.tsv"),
+                pair_sys,
+                pair_refs,
+                lowercase=True,
+                tokenize=config.data.get("sacrebleu_tokenize", "13a"),
+            )
+
+        other_scores: Dict[str, float] = {}
+        if "chrf3" in scorers:
+            chrf3_score = sacrebleu.corpus_chrf(pair_sys, pair_refs, char_order=6, beta=3, remove_whitespace=True)
+            other_scores["CHRF3"] = np.round(float(chrf3_score.score), 2)
+
+        if "meteor" in scorers:
+            meteor_score = compute_meteor_score(trg_iso, pair_sys, pair_refs)
+            if meteor_score is not None:
+                other_scores["METEOR"] = meteor_score
+
+        if "wer" in scorers:
+            wer_score = compute_wer_score(pair_sys, pair_refs)
+            if wer_score >= 0:
+                other_scores["WER"] = wer_score
+
+        if "ter" in scorers:
+            ter_score = compute_ter_score(pair_sys, pair_refs)
+            if ter_score >= 0:
+                other_scores["TER"] = ter_score
+
+        scores.append(PairScore("ALL", src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores))
+        if by_book:
+            if len(book_dict) != 0:
+                book_scores = score_individual_books(
+                    book_dict, src_iso, trg_iso, predictions_detok_file_name, scorers, config, ref_projects
                 )
-
-            if "sentencebleu" in scorers:
-                write_sentence_bleu(
-                    config.exp_dir / (predictions_detok_file_name + ".scores.tsv"),
-                    pair_sys,
-                    cast(List[List[str]], pair_refs),
-                    lowercase=True,
-                    tokenize=config.data.get("sacrebleu_tokenize", "13a"),
-                )
-
-            other_scores: Dict[str, float] = {}
-            if "chrf3" in scorers:
-                chrf3_score = sacrebleu.corpus_chrf(
-                    pair_sys, cast(Sequence[Sequence[str]], pair_refs), char_order=6, beta=3, remove_whitespace=True
-                )
-                other_scores["CHRF3"] = np.round(float(chrf3_score.score), 2)
-
-            if "meteor" in scorers:
-                meteor_score = compute_meteor_score(trg_iso, pair_sys, cast(List[Iterable[str]], pair_refs))
-                if meteor_score is not None:
-                    other_scores["METEOR"] = meteor_score
-
-            if "wer" in scorers:
-                wer_score = compute_wer_score(pair_sys, cast(List[str], pair_refs))
-                if wer_score >= 0:
-                    other_scores["WER"] = wer_score
-
-            if "ter" in scorers:
-                ter_score = compute_ter_score(pair_sys, cast(List[Iterable[str]], pair_refs))
-                if ter_score >= 0:
-                    other_scores["TER"] = ter_score
-
-            scores.append(PairScore("ALL", src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores))
-            if by_book is True:
-                if len(book_dict) != 0:
-                    book_scores = score_individual_books(
-                        book_dict, src_iso, predictions_detok_file_name, scorers, config, ref_projects
-                    )
-                    scores.extend(book_scores)
-                else:
-                    LOGGER.error("Error: book_dict did not load correctly. Not scoring individual books.")
+                scores.extend(book_scores)
+            else:
+                LOGGER.error("Error: book_dict did not load correctly. Not scoring individual books.")
     if len(config.src_isos) > 1 or len(config.trg_isos) > 1:
-        bleu = sacrebleu.corpus_bleu(overall_sys, cast(Sequence[Sequence[str]], overall_refs), lowercase=True)
+        bleu = sacrebleu.corpus_bleu(overall_sys, overall_refs, lowercase=True)
         scores.append(PairScore("ALL", "ALL", "ALL", bleu, len(overall_sys), ref_projects))
 
     scores_file_root = f"scores-{suffix_str}"
