@@ -107,7 +107,7 @@ def score_pair(
     if "ter" in scorers:
         ter_score = sacrebleu.corpus_ter(pair_sys, pair_refs)
         if ter_score.score >= 0:
-            other_scores["TER"] = ter_score.score * 100
+            other_scores["TER"] = ter_score.score
 
     if "spbleu" in scorers:
         spbleu_score = sacrebleu.corpus_bleu(
