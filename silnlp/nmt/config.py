@@ -296,7 +296,7 @@ class NMTModel(ABC):
         ...
 
     @abstractmethod
-    def translate_text_files(
+    def translate_test_files(
         self,
         input_paths: List[Path],
         translation_paths: List[Path],
@@ -331,7 +331,11 @@ class Config(ABC):
 
         terms_config: dict = data_config["terms"]
         self.src_isos: Set[str] = set()
+        self.val_src_isos: Set[str] = set()
+        self.test_src_isos: Set[str] = set()
         self.trg_isos: Set[str] = set()
+        self.val_trg_isos: Set[str] = set()
+        self.test_trg_isos: Set[str] = set()
         self.src_file_paths: Set[Path] = set()
         self.trg_file_paths: Set[Path] = set()
         self._tags: Set[str] = set()
@@ -343,6 +347,12 @@ class Config(ABC):
             pair_trg_isos = {tf.iso for tf in corpus_pair.trg_files}
             self.src_isos.update(pair_src_isos)
             self.trg_isos.update(pair_trg_isos)
+            if corpus_pair.is_val:
+                self.val_src_isos.update(pair_src_isos)
+                self.val_trg_isos.update(pair_trg_isos)
+            if corpus_pair.is_test:
+                self.test_src_isos.update(pair_src_isos)
+                self.test_trg_isos.update(pair_trg_isos)
             self.src_file_paths.update(sf.path for sf in corpus_pair.src_files)
             self.trg_file_paths.update(tf.path for tf in corpus_pair.trg_files)
             if corpus_pair.is_scripture:
@@ -374,16 +384,28 @@ class Config(ABC):
         self._multiple_test_iso_pairs = sum(1 for iso_pair in self._iso_pairs.values() if iso_pair.has_test_data) > 1
 
     @property
-    def default_src_iso(self) -> str:
-        if len(self.src_isos) == 0:
+    def default_test_src_iso(self) -> str:
+        if len(self.test_src_isos) == 0:
             return ""
-        return next(iter(self.src_isos))
+        return next(iter(self.test_src_isos))
 
     @property
-    def default_trg_iso(self) -> str:
-        if len(self.trg_isos) == 0:
+    def default_val_src_iso(self) -> str:
+        if len(self.val_src_isos) == 0:
             return ""
-        return next(iter(self.trg_isos))
+        return next(iter(self.val_src_isos))
+
+    @property
+    def default_test_trg_iso(self) -> str:
+        if len(self.test_trg_isos) == 0:
+            return ""
+        return next(iter(self.test_trg_isos))
+
+    @property
+    def default_val_trg_iso(self) -> str:
+        if len(self.val_trg_isos) == 0:
+            return ""
+        return next(iter(self.val_trg_isos))
 
     @property
     def model(self) -> str:
@@ -471,7 +493,7 @@ class Config(ABC):
     def _parse_ref_file_path(self, ref_file_path: Path) -> Tuple[str, str]:
         parts = ref_file_path.name.split(".")
         if len(parts) == 5:
-            return self.default_trg_iso, parts[3]
+            return self.default_test_trg_iso, parts[3]
         return parts[2], parts[5]
 
     def _build_corpora(self, tokenizer: Tokenizer, stats: bool) -> int:
@@ -729,7 +751,7 @@ class Config(ABC):
             stem = vref_path.stem
             test_indices: Set[int] = set()
             if stem == "test.vref":
-                pair_test_indices[(self.default_src_iso, self.default_trg_iso)] = test_indices
+                pair_test_indices[(self.default_test_src_iso, self.default_test_trg_iso)] = test_indices
             else:
                 _, src_iso, trg_iso, _ = stem.split(".", maxsplit=4)
                 pair_test_indices[(src_iso, trg_iso)] = test_indices

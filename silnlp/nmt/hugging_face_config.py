@@ -238,14 +238,24 @@ class HuggingFaceConfig(Config):
         return Path(self.train["output_dir"])
 
     @property
-    def src_lang(self) -> str:
+    def val_src_lang(self) -> str:
         lang_codes: Dict[str, str] = self.data["lang_codes"]
-        return lang_codes.get(self.default_src_iso, self.default_src_iso)
+        return lang_codes.get(self.default_val_src_iso, self.default_val_src_iso)
 
     @property
-    def trg_lang(self) -> str:
+    def test_src_lang(self) -> str:
         lang_codes: Dict[str, str] = self.data["lang_codes"]
-        return lang_codes.get(self.default_trg_iso, self.default_trg_iso)
+        return lang_codes.get(self.default_test_src_iso, self.default_test_src_iso)
+
+    @property
+    def val_trg_lang(self) -> str:
+        lang_codes: Dict[str, str] = self.data["lang_codes"]
+        return lang_codes.get(self.default_val_trg_iso, self.default_val_trg_iso)
+
+    @property
+    def test_trg_lang(self) -> str:
+        lang_codes: Dict[str, str] = self.data["lang_codes"]
+        return lang_codes.get(self.default_test_trg_iso, self.default_test_trg_iso)
 
     def create_model(self, mixed_precision: bool = False, num_devices: int = 1) -> NMTModel:
         return HuggingFaceNMTModel(self, mixed_precision, num_devices)
@@ -416,9 +426,9 @@ class HuggingFaceNMTModel(NMTModel):
 
         model.resize_token_embeddings(len(tokenizer))
 
-        tokenizer.src_lang = self._config.src_lang
-        tokenizer.tgt_lang = self._config.trg_lang
-        trg_lang_id = tokenizer.convert_tokens_to_ids(self._config.trg_lang)
+        tokenizer.src_lang = self._config.val_src_lang
+        tokenizer.tgt_lang = self._config.val_trg_lang
+        trg_lang_id = tokenizer.convert_tokens_to_ids(self._config.val_trg_lang)
         model.config.decoder_start_token_id = trg_lang_id
         model.config.forced_bos_token_id = trg_lang_id
 
@@ -583,7 +593,7 @@ class HuggingFaceNMTModel(NMTModel):
         with path.open("w") as file:
             yaml.dump(config, file)
 
-    def translate_text_files(
+    def translate_test_files(
         self,
         input_paths: List[Path],
         translation_paths: List[Path],
@@ -594,7 +604,11 @@ class HuggingFaceNMTModel(NMTModel):
         model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(str(checkpoint_path))
         tokenizer = self._config.get_tokenizer()
         pipeline = PretokenizedTranslationPipeline(
-            model=model, tokenizer=tokenizer, src_lang=self._config.src_lang, tgt_lang=self._config.trg_lang, device=0
+            model=model,
+            tokenizer=tokenizer,
+            src_lang=self._config.test_src_lang,
+            tgt_lang=self._config.test_trg_lang,
+            device=0,
         )
         for input_path, translation_path, vref_path in zip(
             input_paths,

@@ -728,7 +728,7 @@ class OpenNMTModel(NMTModel):
     def save_effective_config(self, path: Path) -> None:
         self._runner.save_effective_config(str(path), training=True)
 
-    def translate_text_files(
+    def translate_test_files(
         self,
         input_paths: List[Path],
         translation_paths: List[Path],
