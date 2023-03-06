@@ -3,21 +3,28 @@ import difflib as dl
 import filecmp
 import logging
 import os
+from glob import glob
 import re
 import string
+import math
 from pathlib import Path
 from typing import Any, Iterable, List, Optional
+from tqdm import tqdm
 
 import matplotlib.pyplot as plt
 import pandas as pd
+import sacrebleu
 from sacrebleu.metrics.bleu import BLEU, BLEUScore
 
+from ..common.metrics import compute_wer_score
 from ..common.corpus import load_corpus
 from ..common.utils import get_git_revision_hash
 from .config import get_mt_exp_dir
 from .sp_utils import decode_sp, decode_sp_lines
 
 logging.basicConfig()
+logging.getLogger("sacrebleu").setLevel(logging.ERROR)
+
 
 first_time_diff: bool = True
 wrap_format = None
@@ -29,21 +36,22 @@ replace_format = None
 delete_format = None
 unknown_format = None
 dictionary_format = None
-bleu_format = None
+score_format = None
 
 VREF = "VREF"
 SRC_SENTENCE = "Source Sentence"
 TRG_SENTENCE = "Target Sentence"
-EXP1_SRC_TOKENS = "Exp1 Source Tokens"
-EXP2_SRC_TOKENS = "Exp2 Source Tokens"
-EXP1_PREDICTION = "Exp1 Prediction"
-EXP2_PREDICTION = "Exp2 Prediction"
-EXP1_SCORE = "Exp1 Score"
-EXP2_SCORE = "Exp2 Score"
-SCORE_DELTA = "Score Delta"
+SRC_TOKENS = "Source Tokens"
+PREDICTION = "Prediction"
+BLEU_SCORE = "BLEU"
+SPBLEU_SCORE = "spBLEU"
+CHRF3_SCORE = "chrF3"
+WER_SCORE = "WER"
+TER_SCORE = "TER"
 DICT_SRC = "Source"
 DICT_TRG = "Target"
 
+_SUPPORTED_SCORERS = { BLEU_SCORE, SPBLEU_SCORE, CHRF3_SCORE, WER_SCORE, TER_SCORE }
 
 def sentence_bleu(
     hypothesis: str,
@@ -72,51 +80,96 @@ def sentence_bleu(
 histogram_offset = 0
 
 
-def add_histogram(writer: pd.ExcelWriter, sheet_name: str, data: pd.Series, bin_size: int, title: str, x_axis: str):
+def strip_lang_code(line: str) -> str:
+    return re.sub(r' ?</s> ?[a-zA-Z]{3}_[a-zA-Z]{4}$', '', line)
+
+
+def strip_lang_codes(lines: Iterable[str]) -> Iterable[str]:
+    return map(strip_lang_code, lines)
+
+
+def get_experiment_type(exp_dir: str) -> str:
+    if os.path.exists(os.path.join(exp_dir, "scores.csv")):
+        return "SMT"
+    elif len(glob(os.path.join(exp_dir, "scores-*.csv"))) > 0:
+        return "NMT"
+    else:
+        return "Unknown"
+
+
+def get_best_checkpoint(exp_dir: str) -> int:
+    step_num_best = 1000000000
+    score_files = glob(os.path.join(exp_dir, "scores-*.csv"))
+    if len(score_files) == 0:
+        if os.path.exists(os.path.join(exp_dir, "scores.csv")):
+            return 0
+    for score_file in score_files:
+        step_num = int(os.path.basename(score_file).split('.')[0].split('-')[1])
+        if step_num < step_num_best:
+            step_num_best = step_num
+    return step_num_best
+
+
+def get_last_checkpoint(exp_dir: str) -> int:
+    step_num_last = 0
+    score_files = glob(os.path.join(exp_dir, "scores-*.csv"))
+    if len(score_files) == 0:
+        if os.path.exists(os.path.join(exp_dir, "scores.csv")):
+            return 0
+    for score_file in score_files:
+        step_num = int(os.path.basename(score_file).split('.')[0].split('-')[1])
+        if step_num > step_num_last:
+            step_num_last = step_num
+    return step_num_last
+
+
+def add_histograms(writer: pd.ExcelWriter, sheet_name: str, df: pd.DataFrame, scorers: List[str], bin_size: int):
     global histogram_offset
+    for scorer in scorers:
+        for supported_scorer in _SUPPORTED_SCORERS:
+            if scorer == supported_scorer.lower():
+                counts, b, bars = plt.hist(df[supported_scorer],
+                                           bins=range(0, math.ceil(df[supported_scorer].max())+bin_size, bin_size))
+#                                           bins=range(int(max(df[supported_scorer].min()-bin_size),0),
+#                                                      int(min(df[supported_scorer].max()+bin_size),100),
+#                                                      bin_size)
+#                                          )
+                binDf = pd.DataFrame({f"{supported_scorer}": b[:-1], "Count": counts})
+                binDf.to_excel(writer, index=False, sheet_name=sheet_name, startrow=histogram_offset, startcol=0)
+                sheet = writer.book.get_worksheet_by_name(sheet_name)
+                chart = writer.book.add_chart({"type": "column"})
+            #    chart.set_title({"name": title})
+                chart.add_series(
+                    {
+                        "categories": [sheet_name, histogram_offset + 1, 0, histogram_offset + 1 + binDf.shape[0], 0],
+                        "values": [sheet_name, histogram_offset + 1, 1, histogram_offset + 1 + binDf.shape[0], 1],
+                        "data_labels": {"value": True, "num_format": "0"},
+                    }
+                )
+                chart.set_legend({"none": True})
+                chart.set_x_axis({"name": supported_scorer})
+                chart.set_y_axis({"name": "Number of Verses"})
+                sheet.insert_chart(f"D{histogram_offset+2}", chart)
+                histogram_offset += binDf.shape[0] + 2
 
-    counts, b, bars = plt.hist(
-        data, bins=range(int(min(data.values) - bin_size), int(max(data.values) + bin_size), bin_size)
-    )
-    df = pd.DataFrame({"bin": b[:-1], "count": counts})
-    df.to_excel(writer, index=False, sheet_name=sheet_name, startrow=histogram_offset, startcol=0)
-    sheet = writer.book.get_worksheet_by_name(sheet_name)
-    chart = writer.book.add_chart({"type": "column"})
-    chart.set_title({"name": title})
-    chart.add_series(
-        {
-            "categories": [sheet_name, histogram_offset + 1, 0, histogram_offset + 1 + df.shape[0], 0],
-            "values": [sheet_name, histogram_offset + 1, 1, histogram_offset + 1 + df.shape[0], 1],
-            "data_labels": {"value": True, "num_format": "0"},
-        }
-    )
-    chart.set_legend({"none": True})
-    chart.set_x_axis({"name": x_axis})
-    chart.set_y_axis({"name": "Number of Verses"})
-    sheet.insert_chart(f"D{histogram_offset+2}", chart)
-    histogram_offset += df.shape[0] + 2
 
+def add_stats(df: pd.DataFrame, sheet):
+    global score_format
 
-def add_stats(df: pd.DataFrame, sheet, exp1: str, exp2: str):
-    global bleu_format
-
-    sheet.write_string("A1", "BLEU Scores")
-    sheet.write_string("B1", exp1)
-    sheet.write_string("C1", exp2)
-    sheet.write_string("D1", "Delta Scores")
+    sheet.write_string("A1", "Score Summary")
     sheet.write_string("A2", "Mean")
     sheet.write_string("A3", "Median")
     sheet.write_string("A4", "STD")
-    sheet.write_number("B2", df[EXP1_SCORE].mean(), bleu_format)
-    sheet.write_number("B3", df[EXP1_SCORE].median(), bleu_format)
-    sheet.write_number("B4", df[EXP1_SCORE].std(), bleu_format)
-    sheet.write_number("C2", df[EXP2_SCORE].mean(), bleu_format)
-    sheet.write_number("C3", df[EXP2_SCORE].median(), bleu_format)
-    sheet.write_number("C4", df[EXP2_SCORE].std(), bleu_format)
-    sheet.write_number("D2", df[SCORE_DELTA].mean(), bleu_format)
-    sheet.write_number("D3", df[SCORE_DELTA].median(), bleu_format)
-    sheet.write_number("D4", df[SCORE_DELTA].std(), bleu_format)
-
+    column_list = ["B", "C", "D", "E", "F"]
+    column_idx = 0
+    for column_name in [BLEU_SCORE, SPBLEU_SCORE, CHRF3_SCORE, WER_SCORE, TER_SCORE]:
+        if column_name in df:
+            column_id = column_list[column_idx]
+            sheet.write_string(f"{column_id}1", f"{column_name}")
+            sheet.write_number(f"{column_id}2", df[column_name].mean(), score_format)
+            sheet.write_number(f"{column_id}3", df[column_name].median(), score_format)
+            sheet.write_number(f"{column_id}4", df[column_name].std(), score_format)
+            column_idx += 1
 
 def adjust_column_widths(df: pd.DataFrame, sheet, col_width: int):
     # Iterate through each column and set the width == the max length in that column.  If the max length is too high,
@@ -217,20 +270,14 @@ def apply_unknown_formatting(df: pd.DataFrame, sheet, stats_offset: int, corpus:
             sheet.write_rich_string(f"{column}{stats_offset+index+2}", *segments)
 
 
-def apply_diff_formatting(df: pd.DataFrame, sheet, stats_offset: int):
+def apply_pred_diff_formatting(df: pd.DataFrame, sheet, ref_column: str, pred_column: str, sheet_col: str, stats_offset: int):
     for index, row in df.iterrows():
-        ref = row[TRG_SENTENCE]
-        p1 = row[EXP1_PREDICTION]
-        p2 = row[EXP2_PREDICTION]
-        if ref != "":
-            if p1 != "" and p1 != ref:
-                segments = get_diff_segments(ref, p1)
-                sheet.write_rich_string(f"E{stats_offset+index+2}", *segments)
-                sheet.write_comment(f"E{stats_offset+index+2}", p1)
-            if p2 != "" and p2 != ref:
-                segments = get_diff_segments(ref, p2)
-                sheet.write_rich_string(f"G{stats_offset+index+2}", *segments)
-                sheet.write_comment(f"G{stats_offset+index+2}", p2)
+        ref = row[ref_column]
+        pred = row[pred_column]
+        if ref != "" and pred != "" and ref != pred:
+            segments = get_diff_segments(ref, pred)
+            sheet.write_rich_string(f'{sheet_col}{stats_offset+index+2}', *segments)
+            sheet.write_comment(f'{sheet_col}{stats_offset+index+2}', pred)
 
 
 def apply_dict_formatting(df: pd.DataFrame, sheet, stats_offset: int, dictDf: pd.DataFrame):
@@ -293,17 +340,19 @@ def add_legend(writer: pd.ExcelWriter, sheet_name: str):
     sheet.write_rich_string("A7", dictionary_format, "Green (underline)", normal_format, ": Source dictionary word")
 
 
-def load_dictionary(exp1_dir: Path, exp2_dir: Path):
+def load_dictionary(exp1_dir: Path, exp2_dir: Path = None):
     dictDf = pd.DataFrame(columns=[DICT_SRC, DICT_TRG])
 
     src_file_name = os.path.join(exp1_dir, "dict.src.txt")
     trg_file_name = os.path.join(exp1_dir, "dict.trg.txt")
     if not os.path.exists(src_file_name) or not os.path.exists(trg_file_name):
-        src_file_name = os.path.join(exp2_dir, "dict.src.txt")
-        trg_file_name = os.path.join(exp2_dir, "dict.trg.txt")
-        if not os.path.exists(src_file_name) or not os.path.exists(trg_file_name):
-            print("Warning: no dictionary files available")
-            return None
+        if exp_dir is not None:
+            src_file_name = os.path.join(exp2_dir, "dict.src.txt")
+            trg_file_name = os.path.join(exp2_dir, "dict.trg.txt")
+            if not os.path.exists(src_file_name) or not os.path.exists(trg_file_name):
+                print("Warning: no dictionary files available")
+                return None
+        return None
 
     dictDf[DICT_SRC] = [decode_sp(line.split("\t")[0]).lower() for line in load_corpus(Path(src_file_name))]
     dictDf[DICT_TRG] = [decode_sp(line.split("\t")[0]).lower() for line in load_corpus(Path(trg_file_name))]
@@ -333,9 +382,8 @@ def add_digits_analysis(writer, df: pd.DataFrame, col_width: int):
             trg_digits = get_digit_list(trg)
             if len(trg_digits) > 0:
                 src_digits = get_digit_list(row[SRC_SENTENCE])
-                p1_digits = get_digit_list(row[EXP1_PREDICTION])
-                p2_digits = get_digit_list(row[EXP2_PREDICTION])
-                all_digits = list(set(src_digits) | set(trg_digits) | set(p1_digits) | set(p2_digits))
+                exp_digits = get_digit_list(row[PREDICTION])
+                all_digits = list(set(src_digits) | set(trg_digits) | set(exp_digits))
                 for digit_str in all_digits:
                     digit_rows.append(
                         [
@@ -343,8 +391,7 @@ def add_digits_analysis(writer, df: pd.DataFrame, col_width: int):
                             digit_str,
                             digit_str in src_digits,
                             digit_str in trg_digits,
-                            digit_str in p1_digits,
-                            digit_str in p2_digits,
+                            digit_str in exp_digits,
                         ]
                     )
 
@@ -354,6 +401,39 @@ def add_digits_analysis(writer, df: pd.DataFrame, col_width: int):
     sheet = writer.sheets[sheet_name]
     sheet.autofilter(0, 0, digits_df.shape[0], digits_df.shape[1] - 1)
 
+
+def add_scores(df: pd.DataFrame, scorers: List[str], preserve_case: bool, tokenize: bool):
+    for scorer in scorers:
+        scores: List[float] = []
+        scorer = scorer.lower()
+        if scorer == BLEU_SCORE.lower():
+            for index, row in tqdm(df.iterrows(), desc='Calculating BLEU scores ...'):
+                bleu = sentence_bleu(row[PREDICTION], [row[TRG_SENTENCE]],
+                                     lowercase=not preserve_case, tokenize=tokenize)
+                scores.append(bleu.score)
+            df[BLEU_SCORE] = scores
+        elif scorer == SPBLEU_SCORE.lower():
+            for index, row in tqdm(df.iterrows(), desc='Calculating spBLEU scores ...'):
+                spbleu_score = sacrebleu.corpus_bleu([row[PREDICTION]], [[row[TRG_SENTENCE]]],
+                                                     lowercase=not preserve_case, tokenize="flores200")
+                scores.append(spbleu_score.score)
+            df[SPBLEU_SCORE] = scores
+        elif scorer == CHRF3_SCORE.lower():
+            for index, row in tqdm(df.iterrows(), desc='Calculating chrF3 scores ...'):
+                chrf3_score = sacrebleu.corpus_chrf([row[PREDICTION]], [[row[TRG_SENTENCE]]],
+                                                    char_order=6, beta=3, remove_whitespace=True)
+                scores.append(chrf3_score.score)
+            df[CHRF3_SCORE] = scores
+        elif scorer == WER_SCORE.lower():
+            for index, row in tqdm(df.iterrows(), desc='Calculating WER scores ...'):
+                wer_score = compute_wer_score([row[PREDICTION]], [[row[TRG_SENTENCE]]])
+                scores.append(wer_score if wer_score >= 0 else 0)
+            df[WER_SCORE] = scores
+        elif scorer == TER_SCORE.lower():
+            for index, row in tqdm(df.iterrows(), desc='Calculating TER scores ...'):
+                ter_score = sacrebleu.corpus_ter([row[PREDICTION]], [[row[TRG_SENTENCE]]])
+                scores.append(ter_score.score if ter_score.score >= 0 else 0)
+            df[TER_SCORE] = scores
 
 def main() -> None:
     global wrap_format
@@ -365,16 +445,14 @@ def main() -> None:
     global delete_format
     global unknown_format
     global dictionary_format
-    global bleu_format
+    global score_format
     text_wrap_column_width = 35
 
     parser = argparse.ArgumentParser(description="Compare the predictions across 2 experiments")
     parser.add_argument("exp1", type=str, help="Experiment 1 folder")
-    parser.add_argument("step1", type=int, help="Experiment 1 step")
-    parser.add_argument("exp2", type=str, help="Experiment 2 folder")
-    parser.add_argument("step2", type=int, help="Experiment 2 step")
+    parser.add_argument("--last", default=False, action="store_true", help='Use the last result (instead of best)')
     parser.add_argument(
-        "--show-diffs", default=False, action="store_true", help="Show difference (prediction vs reference"
+        "--show-diffs", default=False, action="store_true", help="Show difference (prediction vs reference)"
     )
     parser.add_argument("--show-unknown", default=False, action="store_true", help="Show unknown words in source verse")
     parser.add_argument("--show-dict", default=False, action="store_true", help="Show dictionary words in source verse")
@@ -394,6 +472,15 @@ def main() -> None:
     parser.add_argument(
         "--tokenize", type=str, default="13a", help="Sacrebleu tokenizer (none,13a,intl,zh,ja-mecab,char)"
     )
+    parser.add_argument(
+        "--scorers",
+        nargs="*",
+        metavar="scorer",
+        choices=[scorer.lower() for scorer in _SUPPORTED_SCORERS],
+        default=[BLEU_SCORE.lower()],
+        type=str.lower,
+        help=f"List of scorers - {_SUPPORTED_SCORERS}",
+    )
     args = parser.parse_args()
 
     print("Git commit:", get_git_revision_hash())
@@ -402,9 +489,14 @@ def main() -> None:
 
     exp1_name = args.exp1
     exp1_dir = get_mt_exp_dir(exp1_name)
-    exp2_name = args.exp2
-    exp2_dir = get_mt_exp_dir(exp2_name)
-    output_path = os.path.join(exp1_dir, "diff_predictions.xlsx")
+    exp1_type = get_experiment_type(exp1_dir)
+    if exp1_type != "SMT" and exp1_type != "NMT":
+        print("Can't determine experiment type!")
+        return
+
+    exp1_step = 0 if exp1_type == "SMT" \
+                  else get_last_checkpoint(exp1_dir) if args.last else get_best_checkpoint(exp1_dir)
+    output_path = os.path.join(exp1_dir, f"diff_predictions.{exp1_step}.xlsx")
 
     # Set up to generate the Excel output
     writer: pd.ExcelWriter = pd.ExcelWriter(output_path, engine="xlsxwriter")
@@ -418,86 +510,50 @@ def main() -> None:
     replace_format = workbook.add_format({"color": "purple", "bold": True})
     unknown_format = workbook.add_format({"color": "orange", "underline": True})
     dictionary_format = workbook.add_format({"color": "green", "underline": True})
-    bleu_format = workbook.add_format({"num_format": "0.00"})
+    score_format = workbook.add_format({"num_format": "0.00"})
 
-    exp1_test_trg_filename = os.path.join(exp1_dir, "test.trg.detok.txt")
-    exp2_test_trg_filename = os.path.join(exp2_dir, "test.trg.detok.txt")
-
-    vref_file = None  # Are VREF's available, and do they match?
+    vref_file = None  # Is VREF file available?
     if os.path.exists(os.path.join(exp1_dir, "test.vref.txt")):
         vref_file = os.path.join(exp1_dir, "test.vref.txt")
-        if os.path.exists(os.path.join(exp2_dir, "test.vref.txt")) and not filecmp.cmp(
-            os.path.join(exp1_dir, "test.vref.txt"), os.path.join(exp2_dir, "test.vref.txt")
-        ):
-            print(f"{exp1_name} and {exp2_name} have different test set verse references; exiting")
-            return
-    elif os.path.exists(os.path.join(exp2_dir, "test.vref.txt")):
-        vref_file = os.path.join(exp2_dir, "test.vref.text")
 
     if args.show_unknown:
         src_words = load_words(decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, "train.src.txt")))))
         trg_words = load_words(decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, "train.trg.txt")))))
 
-    exp1_file_name = os.path.join(exp1_dir, f"test.trg-predictions.detok.txt.{args.step1}")
+    if exp1_type == "NMT":
+        exp1_test_trg_filename = os.path.join(exp1_dir, "test.trg.detok.txt")
+        exp1_file_name = os.path.join(exp1_dir, f"test.trg-predictions.detok.txt.{exp1_step}")
+    else:
+        exp1_test_trg_filename = os.path.join(exp1_dir, "test.trg.txt")
+        exp1_file_name = os.path.join(exp1_dir, f"test.trg-predictions.txt")
     if not os.path.exists(exp1_file_name):
         print(f"Predictions file not found: {exp1_file_name}")
         return
+
     print(f"Experiment 1: {exp1_file_name}")
-    sheet_name = f"{args.step1}"
+    sheet_name = f"{exp1_step}"
 
-    exp2_file_name = os.path.join(exp2_dir, f"test.trg-predictions.detok.txt.{args.step2}")
-    if not os.path.exists(exp2_file_name):
-        print(f"Predictions file (best) not found: {exp2_file_name}")
-        return
-    print(f"-- vs Experiment 2: {exp2_file_name}")
-    sheet_name += f" vs {args.step2}"
-
-    dictDf = load_dictionary(exp1_dir, exp2_dir) if args.include_dict or args.show_dict else None
+    dictDf = load_dictionary(exp1_dir) if args.include_dict or args.show_dict else None
 
     # Create the initial data frame
     df = pd.DataFrame(
-        columns=[
-            VREF,
-            SRC_SENTENCE,
-            TRG_SENTENCE,
-            EXP1_SRC_TOKENS,
-            EXP1_PREDICTION,
-            EXP2_SRC_TOKENS,
-            EXP2_PREDICTION,
-            EXP1_SCORE,
-            EXP2_SCORE,
-            SCORE_DELTA,
-        ]
+        columns=[ VREF, SRC_SENTENCE, TRG_SENTENCE, PREDICTION ]
     )
+
     # Load the datasets
     df[VREF] = list(load_corpus(Path(vref_file))) if vref_file is not None else ""
-    df[SRC_SENTENCE] = list(decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, "test.src.txt")))))
+    df[SRC_SENTENCE] = list(strip_lang_codes(decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, "test.src.txt"))))))
     df[TRG_SENTENCE] = list(load_corpus(Path(exp1_test_trg_filename)))
-    df[EXP1_SRC_TOKENS] = list(load_corpus(Path(os.path.join(exp1_dir, "test.src.txt"))))
-    df[EXP1_PREDICTION] = list(load_corpus(Path(exp1_file_name)))
-    df[EXP2_SRC_TOKENS] = list(load_corpus(Path(os.path.join(exp2_dir, "test.src.txt"))))
-    df[EXP2_PREDICTION] = list(load_corpus(Path(exp2_file_name)))
+    df[PREDICTION] = list(load_corpus(Path(exp1_file_name)))
+    prediction_col = "D"
 
-    # Calculate the sentence BLEU scores for each prediction
-    exp1_scores: List[float] = []
-    exp2_scores: List[float] = []
-    for index, row in df.iterrows():
-        bleu = sentence_bleu(
-            row[EXP1_PREDICTION], [row[TRG_SENTENCE]], lowercase=not args.preserve_case, tokenize=args.tokenize
-        )
-        exp1_scores.append(bleu.score)
-        bleu = sentence_bleu(
-            row[EXP2_PREDICTION], [row[TRG_SENTENCE]], lowercase=not args.preserve_case, tokenize=args.tokenize
-        )
-        exp2_scores.append(bleu.score)
+    if exp1_type == "NMT":
+        df.insert(2, SRC_TOKENS, list(strip_lang_codes(load_corpus(Path(os.path.join(exp1_dir, "test.src.txt"))))))
+        prediction_col = "E"
 
-    # Update the DF with the scores and score differences
-    df[EXP1_SCORE] = exp1_scores
-    df[EXP2_SCORE] = exp2_scores
-    df[SCORE_DELTA] = df[EXP2_SCORE] - df[EXP1_SCORE]
+    add_scores(df, args.scorers, args.preserve_case, args.tokenize)
 
-    add_legend(writer, "Legend")
-
+    df.sort_values(VREF, inplace=True)
     df.to_excel(writer, index=False, float_format="%.2f", sheet_name=sheet_name, startrow=stats_offset)
     sheet = writer.sheets[sheet_name]
     sheet.autofilter(stats_offset, 0, stats_offset + df.shape[0], df.shape[1] - 1)
@@ -506,18 +562,17 @@ def main() -> None:
         apply_unknown_formatting(df, sheet, stats_offset, "src", src_words)
         apply_unknown_formatting(df, sheet, stats_offset, "trg", trg_words)
     if args.show_diffs:
-        apply_diff_formatting(df, sheet, stats_offset)
+        apply_pred_diff_formatting(df, sheet, TRG_SENTENCE, PREDICTION, prediction_col, stats_offset)
+        add_legend(writer, "Legend")
     if args.show_dict and dictDf is not None:
         apply_dict_formatting(df, sheet, stats_offset, dictDf)
 
     adjust_column_widths(df, sheet, text_wrap_column_width)
-    add_stats(df, sheet, f"{args.exp1}({args.step1})", f"{args.exp2}({args.step2})")
+    add_stats(df, sheet)
 
     data_offset = stats_offset + 2
 
-    add_histogram(writer, "Charts", df[SCORE_DELTA], 2, "Delta BLEU Scores", "Delta BLEU")
-    add_histogram(writer, "Charts", df[EXP1_SCORE], 5, "Experiment 1", "BLEU")
-    add_histogram(writer, "Charts", df[EXP2_SCORE], 5, "Experiment 2", "BLEU")
+    add_histograms(writer, "Charts", df, args.scorers, 5)
 
     if args.analyze_digits:
         add_digits_analysis(writer, df, text_wrap_column_width + 20)
