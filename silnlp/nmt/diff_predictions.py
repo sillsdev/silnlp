@@ -183,25 +183,6 @@ def adjust_column_widths(df: pd.DataFrame, sheet, col_width: int):
             sheet.set_column(i, i, max(column_len, len(col)) - 2)
 
 
-def get_diff_segments(ref: str, pred: str) -> List:
-    segments: List[Optional[str]] = []
-    seq_matcher = dl.SequenceMatcher(None, ref, pred)
-    for tag, i1, i2, j1, j2 in seq_matcher.get_opcodes():
-        if tag == "equal":
-            segments.append(equal_format)
-            segments.append(pred[j1:j2])
-        elif tag == "insert":
-            segments.append(insert_format)
-            segments.append(pred[j1:j2])
-        elif tag == "replace":
-            segments.append(replace_format)
-            segments.append(pred[j1:j2])
-        elif tag == "delete":
-            segments.append(delete_format)
-            segments.append(ref[i1:i2])
-    return segments
-
-
 # Add the em-dash
 all_punctuation = string.punctuation + "\u2014"
 # Add smart quotes
@@ -216,6 +197,32 @@ def strip_punct(s: str):
 
 def split_punct(s: str):
     return re.findall(all_punctuation, s)
+
+
+def get_diff_segments(ref: str, pred: str) -> List:
+    segments: List[Optional[str]] = []
+#    ref_split = ref.split()
+#    pred_split = pred.split()
+    ref_split = re.findall(rf"[\w']+|[{all_punctuation}]", ref)
+    pred_split = re.findall(rf"[\w']+|[{all_punctuation}]", pred)
+    seq_matcher = dl.SequenceMatcher(None, ref_split, pred_split)
+    for tag, i1, i2, j1, j2 in seq_matcher.get_opcodes():
+        if tag == "equal":
+            segments.append(equal_format)
+            segments.append(' '.join(pred_split[j1:j2]) + ' ')
+        elif tag == "insert":
+            segments.append(insert_format)
+            segments.append(' '.join(pred_split[j1:j2]) + ' ')
+        elif tag == "replace":
+            segments.append(replace_format)
+            segments.append(' '.join(pred_split[j1:j2]) + ' ')
+        elif tag == "delete":
+            segments.append(delete_format)
+            segments.append(' '.join(ref_split[i1:i2]) + ' ')
+    if len(segments) <= 2:
+        segments.append(insert_format)
+        segments.append(delete_format)
+    return segments
 
 
 def load_words(lines: Iterable[str]) -> List[str]:
@@ -276,7 +283,10 @@ def apply_pred_diff_formatting(df: pd.DataFrame, sheet, ref_column: str, pred_co
         pred = row[pred_column]
         if ref != "" and pred != "" and ref != pred:
             segments = get_diff_segments(ref, pred)
-            sheet.write_rich_string(f'{sheet_col}{stats_offset+index+2}', *segments)
+            rc = sheet.write_rich_string(f'{sheet_col}{stats_offset+index+2}', *segments)
+            if rc != 0:
+                print(f'Unable to apply diff formatting to prediction (error: {rc}) for verse {row[VREF]}, >>>{pred}<<<')
+                print(f'{segments}')
             sheet.write_comment(f'{sheet_col}{stats_offset+index+2}', pred)
 
 
@@ -530,7 +540,7 @@ def main() -> None:
         print(f"Predictions file not found: {exp1_file_name}")
         return
 
-    print(f"Experiment 1: {exp1_file_name}")
+    print(f"Analyzing predictions file: {exp1_file_name}")
     sheet_name = f"{exp1_step}"
 
     dictDf = load_dictionary(exp1_dir) if args.include_dict or args.show_dict else None
@@ -554,6 +564,7 @@ def main() -> None:
     add_scores(df, args.scorers, args.preserve_case, args.tokenize)
 
     df.sort_values(VREF, inplace=True)
+    df = df.reset_index(drop=True)
     df.to_excel(writer, index=False, float_format="%.2f", sheet_name=sheet_name, startrow=stats_offset)
     sheet = writer.sheets[sheet_name]
     sheet.autofilter(stats_offset, 0, stats_offset + df.shape[0], df.shape[1] - 1)
