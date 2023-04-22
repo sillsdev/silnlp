@@ -120,6 +120,7 @@ def main() -> None:
         SIL_NLP_ENV.set_machine_translation_dir(SIL_NLP_ENV.data_dir / args.mt_dir)
     
     pprint(attrs(SIL_NLP_ENV))
+    input("Press Ctrl+C to exit or enter to continue.")
 
     if args.memory_growth:
         enable_memory_growth()
