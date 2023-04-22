@@ -3,7 +3,10 @@ import logging
 import os
 import time
 from dataclasses import dataclass
+from inspect import getmembers
 from pathlib import Path
+from pprint import pprint
+from types import FunctionType
 from typing import Iterable, Optional, Tuple, Union
 
 from machine.scripture import VerseRef, book_number_to_id, get_books
@@ -195,22 +198,16 @@ class TranslationTask:
             step_str = "last"
         return translator, clearml.config, step_str
 
-from types import FunctionType
-from inspect import getmembers
-from pprint import pprint
 
 def api(obj):
-    return [name for name in dir(obj) if name[0] != '_']
+    return [name for name in dir(obj) if name[0] != "_"]
+
 
 def attrs(obj):
     disallowed_properties = {
-        name for name, value in getmembers(type(obj)) 
-        if isinstance(value, (property, FunctionType))
+        name for name, value in getmembers(type(obj)) if isinstance(value, (property, FunctionType))
     }
-    return {
-        name: getattr(obj, name) for name in api(obj) 
-        if name not in disallowed_properties and hasattr(obj, name)
-    }
+    return {name: getattr(obj, name) for name in api(obj) if name not in disallowed_properties and hasattr(obj, name)}
 
 
 def main() -> None:
@@ -271,7 +268,6 @@ def main() -> None:
         translator.translate_files(args.src, args.trg, args.src_iso, args.trg_iso)
     else:
         raise RuntimeError("A Scripture book, file, or file prefix must be specified.")
-    
 
 
 if __name__ == "__main__":
