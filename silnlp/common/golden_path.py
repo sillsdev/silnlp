@@ -107,13 +107,18 @@ def compute_log_prob(args: Tuple[int, int, List[Path], Set[int], int, str]) -> T
 
 
 def compute_log_probs(
-    paths: List[List[int]], corpus_paths: List[Path], book_nums: List[int], executor: ProcessPoolExecutor, aligner: str
+    paths: List[List[int]],
+    corpus_paths: List[Path],
+    book_nums: List[int],
+    executor: ProcessPoolExecutor,
+    aligner: str,
+    force_book_num: int,
 ) -> Tuple[np.ndarray, np.ndarray]:
     work: List[Tuple[int, int, List[Path], Set[int], int, str]] = []
     for i, path in enumerate(paths):
         prev_book_nums = {book_nums[book_id] for book_id in path}
         for j, next_book_num in enumerate(book_nums):
-            if next_book_num not in prev_book_nums:
+            if (force_book_num == -1 or force_book_num == next_book_num) and next_book_num not in prev_book_nums:
                 work.append((i, j, corpus_paths, prev_book_nums, next_book_num, aligner))
 
     log_probs = np.full([len(paths), len(book_nums)], -np.inf)
@@ -134,8 +139,9 @@ def search_step(
     length_penalty: float,
     executor: ProcessPoolExecutor,
     aligner: str,
+    force_book_num: int,
 ) -> Tuple[List[List[int]], np.ndarray, np.ndarray]:
-    log_probs, lengths = compute_log_probs(paths, corpus_paths, book_nums, executor, aligner)
+    log_probs, lengths = compute_log_probs(paths, corpus_paths, book_nums, executor, aligner, force_book_num)
     total_probs = log_probs + cum_log_probs.reshape([-1, 1])
     total_lengths = lengths + cum_lengths.reshape([-1, 1])
     scores = total_probs.copy()
@@ -144,12 +150,17 @@ def search_step(
     scores = scores.reshape([-1])
     total_probs = total_probs.reshape([-1])
     total_lengths = total_lengths.reshape([-1])
-    sample_ids = top_k(scores, min(beam_width, len(scores)))
+    actual_beam_width = beam_width
+    if force_book_num != -1:
+        actual_beam_width = 1
+    elif len(scores) < beam_width:
+        actual_beam_width = len(scores)
+    sample_ids = top_k(scores, actual_beam_width)
     cum_log_probs = total_probs.take(sample_ids)
     cum_lengths = total_lengths.take(sample_ids)
     book_ids = sample_ids % len(book_nums)
     path_ids = sample_ids // len(book_nums)
-    paths = [paths[path_ids[i]] + [book_ids[i]] for i in range(min(beam_width, len(scores)))]
+    paths = [paths[path_ids[i]] + [book_ids[i]] for i in range(actual_beam_width)]
     return paths, cum_log_probs, cum_lengths
 
 
@@ -172,22 +183,17 @@ def beam_search(
     cum_lengths = np.zeros(1)
     for step in range(len(book_nums)):
         LOGGER.info(f"Step {step + 1}")
-        if step < len(start_book_nums):
-            cur_beam_width = 1
-            cur_book_nums = [start_book_nums[step]]
-        else:
-            cur_beam_width = beam_width
-            cur_book_nums = book_nums
         paths, cum_log_probs, cum_lengths = search_step(
             paths,
             cum_log_probs,
             cum_lengths,
             corpus_paths,
-            cur_book_nums,
-            cur_beam_width,
+            book_nums,
+            beam_width,
             length_penalty,
             executor,
             aligner,
+            start_book_nums[step] if step < len(start_book_nums) else -1,
         )
 
         for i, (path, score) in enumerate(zip(paths, cum_log_probs.tolist())):
