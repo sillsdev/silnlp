@@ -358,8 +358,8 @@ def test_checkpoint(
         translation_detok_file_names.append(f"test.trg-predictions.detok.txt.{suffix_str}")
     else:
         # test data is split into separate files
-        for src_iso in sorted(config.src_isos):
-            for trg_iso in sorted(config.trg_isos):
+        for src_iso in sorted(config.test_src_isos):
+            for trg_iso in sorted(config.test_trg_isos):
                 if src_iso == trg_iso:
                     continue
                 prefix = f"test.{src_iso}.{trg_iso}"
@@ -385,7 +385,7 @@ def test_checkpoint(
                 vref_paths.append(config.exp_dir / vref_file_names[i])
     if len(translation_paths) > 0:
         LOGGER.info(f"Inferencing {checkpoint_name}...")
-        model.translate_text_files(
+        model.translate_test_files(
             source_paths,
             translation_paths,
             vref_paths,
@@ -393,16 +393,14 @@ def test_checkpoint(
         )
 
     LOGGER.info(f"Scoring {checkpoint_name}")
-    default_src_iso = config.default_src_iso
-    default_trg_iso = config.default_trg_iso
     scores: List[PairScore] = []
     overall_sys: List[str] = []
     overall_refs: List[List[str]] = []
     for vref_file_name, features_file_name, predictions_file_name, refs_pattern, predictions_detok_file_name in zip(
         vref_file_names, source_file_names, translation_file_names, refs_patterns, translation_detok_file_names
     ):
-        src_iso = default_src_iso
-        trg_iso = default_trg_iso
+        src_iso = config.default_test_src_iso
+        trg_iso = config.default_test_trg_iso
         if features_file_name != "test.src.txt":
             parts = features_file_name.split(".")
             src_iso = parts[1]
@@ -444,7 +442,7 @@ def test_checkpoint(
                 scores.extend(book_scores)
             else:
                 LOGGER.error("Error: book_dict did not load correctly. Not scoring individual books.")
-    if len(config.src_isos) > 1 or len(config.trg_isos) > 1:
+    if len(config.test_src_isos) > 1 or len(config.test_trg_isos) > 1:
         bleu = sacrebleu.corpus_bleu(overall_sys, overall_refs, lowercase=True)
         scores.append(PairScore("ALL", "ALL", "ALL", bleu, len(overall_sys), ref_projects))
 

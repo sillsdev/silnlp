@@ -728,7 +728,7 @@ class OpenNMTModel(NMTModel):
     def save_effective_config(self, path: Path) -> None:
         self._runner.save_effective_config(str(path), training=True)
 
-    def translate_text_files(
+    def translate_test_files(
         self,
         input_paths: List[Path],
         translation_paths: List[Path],
@@ -739,7 +739,7 @@ class OpenNMTModel(NMTModel):
         if vref_paths is None:
             features_paths = [str(ip) for ip in input_paths]
         else:
-            features_paths = [(str(ip), str(vp)) for ip, vp in zip(input_paths, vref_paths)]
+            features_paths = [[str(ip), str(vp)] for ip, vp in zip(input_paths, vref_paths)]
         predictions_paths = [str(p) for p in translation_paths]
         checkpoint_path, _ = self.get_checkpoint_path(checkpoint)
         self._runner.infer_multiple(features_paths, predictions_paths, str(checkpoint_path))

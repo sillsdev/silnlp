@@ -63,7 +63,7 @@ class TranslationTask:
             return
 
         if trg_iso is None:
-            trg_iso = config.default_trg_iso
+            trg_iso = config.default_test_trg_iso
 
         output_dir = config.exp_dir / "infer" / step_str
         output_dir.mkdir(exist_ok=True, parents=True)
@@ -99,9 +99,9 @@ class TranslationTask:
             raise RuntimeError("Start and end sequence numbers must be specified.")
 
         if src_iso is None:
-            src_iso = config.default_src_iso
+            src_iso = config.default_test_src_iso
         if trg_iso is None:
-            trg_iso = config.default_trg_iso
+            trg_iso = config.default_test_trg_iso
 
         cwd = Path.cwd()
         for i in range(start_seq, end_seq + 1):
@@ -121,9 +121,9 @@ class TranslationTask:
         )
 
         if src_iso is None:
-            src_iso = config.default_src_iso
+            src_iso = config.default_test_src_iso
         if trg_iso is None:
-            trg_iso = config.default_trg_iso
+            trg_iso = config.default_test_trg_iso
 
         src_path = Path(src)
         if not src_path.exists() and not src_path.is_absolute():
