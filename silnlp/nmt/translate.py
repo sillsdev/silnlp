@@ -250,8 +250,9 @@ def main() -> None:
         enable_memory_growth()
 
     pprint(attrs(SIL_NLP_ENV))
-    input("Press Ctrl+C to exit or enter to continue.")
-
+    print("Press Ctrl+C to exit. Will continue automatically in 30 seconds.")
+    time.sleep(30)
+    
     translator = TranslationTask(
         name=args.experiment,
         checkpoint=args.checkpoint,

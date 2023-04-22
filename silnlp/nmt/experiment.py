@@ -1,5 +1,6 @@
 import argparse
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from pprint import pprint
@@ -120,7 +121,8 @@ def main() -> None:
         SIL_NLP_ENV.set_machine_translation_dir(SIL_NLP_ENV.data_dir / args.mt_dir)
     
     pprint(attrs(SIL_NLP_ENV))
-    input("Press Ctrl+C to exit or enter to continue.")
+    print("Press Ctrl+C to exit. Will continue automatically in 30 seconds.")
+    time.sleep(30)
 
     if args.memory_growth:
         enable_memory_growth()
