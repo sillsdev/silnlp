@@ -210,6 +210,24 @@ def attrs(obj):
     return {name: getattr(obj, name) for name in api(obj) if name not in disallowed_properties and hasattr(obj, name)}
 
 
+def show_attrs(cli_args, envs=SIL_NLP_ENV, action=""):
+    for k,v in attrs(envs).items():
+        print(k,v, type(v))
+
+    for k in cli_args.__dict__:
+        v = cli_args.__dict__[k] 
+        
+        if v is not None:
+            print(k, v, type(v)) 
+            #print(f"{k}  :  {v}   : Path exists : {v.is_dir()}")
+            #else:    
+            #    print(f"{k}  :  {v}")
+            
+    print(action)
+    print("Press Ctrl+C to exit. Will continue automatically in 30 seconds.")
+    time.sleep(30)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Translates text using an NMT model")
     parser.add_argument("experiment", help="Experiment name")
@@ -249,9 +267,6 @@ def main() -> None:
     if args.memory_growth:
         enable_memory_growth()
 
-    pprint(attrs(SIL_NLP_ENV))
-    print("Press Ctrl+C to exit. Will continue automatically in 30 seconds.")
-    time.sleep(30)
     
     translator = TranslationTask(
         name=args.experiment,
@@ -260,12 +275,15 @@ def main() -> None:
     )
 
     if len(args.books) > 0:
+        show_attrs(cli_args = args, action=f"Will attempt to translate books {args.books} into {args.trg_iso}")
         translator.translate_books(args.books, args.src_project, args.trg_iso)
     elif args.src_prefix is not None:
+        show_attrs(cli_args = args, action=f"Will attempt to tranlate matching files from {args.src_iso} into {args.trg_iso}.")
         translator.translate_text_files(
             args.src_prefix, args.trg_prefix, args.start_seq, args.end_seq, args.src_iso, args.trg_iso
         )
     elif args.src is not None:
+        show_attrs(cli_args = args, action=f"Will attempt to tranlate {args.src} from {args.src_iso} into {args.trg_iso}.")
         translator.translate_files(args.src, args.trg, args.src_iso, args.trg_iso)
     else:
         raise RuntimeError("A Scripture book, file, or file prefix must be specified.")
