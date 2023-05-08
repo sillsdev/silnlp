@@ -6,11 +6,11 @@ from typing import List
 import sacrebleu
 
 from ..common.corpus import load_corpus
-from ..common.metrics import compute_meteor_score, compute_ter_score, compute_wer_score
+from ..common.metrics import compute_meteor_score, compute_wer_score
 from ..common.utils import check_dotnet, get_git_revision_hash, get_mt_exp_dir, get_repo_dir
 from .config import load_config
 
-SUPPORTED_SCORERS = {"bleu", "chrf3", "meteor", "wer", "ter"}
+SUPPORTED_SCORERS = {"bleu", "spbleu", "chrf3", "meteor", "wer", "ter"}
 
 
 def get_iso(lang: str) -> str:
@@ -105,13 +105,21 @@ def main() -> None:
                 if wer_score == 0:
                     continue
                 scorer_name = "WER"
-                score_str = f"{wer_score:.2f}"
+                score_str = f"{wer_score/100:.2f}"
             elif scorer == "ter":
-                ter_score = compute_ter_score(sys, [ref])
-                if ter_score == 0:
-                    continue
-                scorer_name = "TER"
-                score_str = f"{ter_score:.2f}"
+                ter_score = sacrebleu.corpus_ter(sys, [ref])
+                if ter_score.score >= 0:
+                    scorer_name = "TER"
+                    score_str = f"{ter_score.score:.2f}"
+            elif scorer == "spbleu":
+                spbleu_score = sacrebleu.corpus_bleu(
+                    sys,
+                    [ref],
+                    lowercase=True,
+                    tokenize="flores200",
+                )
+                scorer_name = "spBLEU"
+                score_str = f"{spbleu_score.score:.2f}"
             else:
                 continue
 
