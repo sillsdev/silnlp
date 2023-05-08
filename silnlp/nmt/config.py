@@ -75,7 +75,7 @@ class DataFile:
         if len(parts) < 2:
             raise RuntimeError(f"The filename {file_name} needs to be of the format <iso>-<project>")
         self.iso = parts[0]
-        self.project = parts[1] if self.path.parent == SIL_NLP_ENV.mt_scripture_dir else BASIC_DATA_PROJECT
+        self.project = parts[1] if str(self.path.parent).startswith(str(SIL_NLP_ENV.mt_scripture_dir)) else BASIC_DATA_PROJECT
 
     @property
     def is_scripture(self) -> bool:
@@ -556,6 +556,9 @@ class Config(ABC):
                 project_isos[src_file.project] = src_file.iso
                 project_isos[trg_file.project] = trg_file.iso
                 corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path)
+                if len(pair.src_noise) > 0:
+                    corpus["source"] = [ self._noise(pair.src_noise, x) for x in corpus["source"] ]
+
                 if len(pair.corpus_books) > 0:
                     cur_train = include_books(corpus, pair.corpus_books)
                     if len(pair.corpus_books.intersection(pair.test_books)) > 0:
@@ -702,8 +705,10 @@ class Config(ABC):
                 tokenizer.set_src_lang(src_iso)
                 tokenizer.set_trg_lang(trg_iso)
                 self._append_corpus(self.val_src_filename(), tokenizer.tokenize_all(Side.SOURCE, pair_val["source"]))
+                self._append_corpus(self.val_src_detok_filename(), pair_val["source"])
             val_count = sum(len(pair_val) for pair_val in val.values())
             self._write_val_trg(tokenizer, val)
+            self._write_val_trg(None, val)
             val_vref = itertools.chain.from_iterable(pair_val["vref"] for pair_val in val.values())
             self._append_corpus(self.val_vref_filename(), (str(vr) for vr in val_vref))
 
@@ -716,6 +721,7 @@ class Config(ABC):
                 self.test_src_filename(src_iso, trg_iso),
                 tokenizer.tokenize_all(Side.SOURCE, pair_test["source"]),
             )
+            self._append_corpus(self.test_src_detok_filename(src_iso, trg_iso), pair_test["source"])
             test_count += len(pair_test)
 
             columns: List[str] = [c for c in pair_test.columns if c.startswith("target")]
@@ -852,6 +858,8 @@ class Config(ABC):
             train_src_file = stack.enter_context(self._open_append(self.train_src_filename()))
             train_trg_file = stack.enter_context(self._open_append(self.train_trg_filename()))
             train_vref_file = stack.enter_context(self._open_append(self.train_vref_filename()))
+            train_src_detok_file = stack.enter_context(self._open_append(self.train_src_detok_filename()))
+            train_trg_detok_file = stack.enter_context(self._open_append(self.train_trg_detok_filename()))
 
             for _, row in train.iterrows():
                 if mixed_src:
@@ -870,6 +878,8 @@ class Config(ABC):
                 train_src_file.write(tokenizer.tokenize(Side.SOURCE, src_sentence) + "\n")
                 train_trg_file.write(tokenizer.tokenize(Side.TARGET, trg_sentence) + "\n")
                 train_vref_file.write(str(vref) + "\n")
+                train_src_detok_file.write(src_sentence + "\n")
+                train_trg_detok_file.write(trg_sentence + "\n")
                 train_count += 1
 
                 src_augments, trg_augments = self._augment_sentence(
@@ -892,6 +902,8 @@ class Config(ABC):
             train_src_file = stack.enter_context(self._open_append(self.train_src_filename()))
             train_trg_file = stack.enter_context(self._open_append(self.train_trg_filename()))
             train_vref_file = stack.enter_context(self._open_append(self.train_vref_filename()))
+            train_src_detok_file = stack.enter_context(self._open_append(self.train_src_detok_filename()))
+            train_trg_detok_file = stack.enter_context(self._open_append(self.train_trg_detok_filename()))
 
             for _, term in terms.iterrows():
                 src_term = term["source"]
@@ -912,6 +924,9 @@ class Config(ABC):
                     train_trg_file.write(ttv + "\n")
                     train_vref_file.write("\n")
                     train_count += 1
+
+                train_src_detok_file.write(src_term + "\n")
+                train_trg_detok_file.write(trg_term + "\n")
         return train_count
 
     def _collect_terms(
@@ -956,8 +971,9 @@ class Config(ABC):
         with ExitStack() as stack:
             ref_files: List[TextIO] = []
             for (src_iso, trg_iso), pair_val in val.items():
-                tokenizer.set_src_lang(src_iso)
-                tokenizer.set_trg_lang(trg_iso)
+                if tokenizer is not None:
+                    tokenizer.set_src_lang(src_iso)
+                    tokenizer.set_trg_lang(trg_iso)
                 columns: List[str] = [c for c in pair_val.columns if c.startswith("target")]
                 if self.root["eval"]["multi_ref_eval"]:
                     val_project_count = self._get_val_ref_count(src_iso, trg_iso)
@@ -967,20 +983,28 @@ class Config(ABC):
                                 ref_files.append(stack.enter_context(self._open_append(self.val_trg_filename(ci))))
                             if ci < len(columns):
                                 col = columns[ci]
-                                ref_files[ci].write(
-                                    tokenizer.tokenize(Side.TARGET, cast(str, pair_val.loc[index, col]).strip()) + "\n"
-                                )
+                                if tokenizer is not None:
+                                    ref_files[ci].write(
+                                        tokenizer.tokenize(Side.TARGET, cast(str, pair_val.loc[index, col]).strip()) + "\n"
+                                    )
+                                else:
+                                    ref_files[ci].write(pair_val.loc[index, col] + "\n")
                             else:
                                 ref_files[ci].write("\n")
                 else:
                     for index in pair_val.index:
                         if len(ref_files) == 0:
-                            ref_files.append(stack.enter_context(self._open_append(self.val_trg_filename())))
+                            fn = self.val_trg_filename() if tokenizer is not None else self.val_trg_detok_filename()
+                            ref_files.append(stack.enter_context(self._open_append(fn)))
                         columns_with_data = [c for c in columns if cast(str, pair_val.loc[index, c]).strip() != ""]
                         col = random.choice(columns_with_data)
-                        ref_files[0].write(
-                            tokenizer.tokenize(Side.TARGET, cast(str, pair_val.loc[index, col]).strip()) + "\n"
-                        )
+                        if tokenizer is not None:
+                            ref_files[0].write(
+                                tokenizer.tokenize(Side.TARGET, cast(str, pair_val.loc[index, col]).strip()) + "\n"
+                            )
+                        else:
+                            ref_files[0].write(pair_val.loc[index, col] + "\n")
+
 
     def _append_corpus(self, filename: str, sentences: Iterable[str]) -> None:
         write_corpus(self.exp_dir / filename, sentences, append=True)
@@ -1223,8 +1247,14 @@ class Config(ABC):
     def train_src_filename(self) -> str:
         return "train.src.txt"
 
+    def train_src_detok_filename(self) -> str:
+        return "train.src.detok.txt"
+
     def train_trg_filename(self) -> str:
         return "train.trg.txt"
+
+    def train_trg_detok_filename(self) -> str:
+        return "train.trg.detok.txt"
 
     def train_vref_filename(self) -> str:
         return "train.vref.txt"
@@ -1232,14 +1262,23 @@ class Config(ABC):
     def val_src_filename(self) -> str:
         return "val.src.txt"
 
+    def val_src_detok_filename(self) -> str:
+        return "val.src.detok.txt"
+
     def val_vref_filename(self) -> str:
         return "val.vref.txt"
 
     def val_trg_filename(self, index: int = 0) -> str:
         return f"val.trg.txt.{index}" if self.root["eval"]["multi_ref_eval"] else "val.trg.txt"
 
+    def val_trg_detok_filename(self, index: int = 0) -> str:
+        return f"val.trg.detok.txt.{index}" if self.root["eval"]["multi_ref_eval"] else "val.trg.detok.txt"
+
     def test_src_filename(self, src_iso: str, trg_iso: str) -> str:
         return f"test.{src_iso}.{trg_iso}.src.txt" if self._multiple_test_iso_pairs else "test.src.txt"
+
+    def test_src_detok_filename(self, src_iso: str, trg_iso: str) -> str:
+        return f"test.{src_iso}.{trg_iso}.src.detok.txt" if self._multiple_test_iso_pairs else "test.src.detok.txt"
 
     def test_vref_filename(self, src_iso: str, trg_iso: str) -> str:
         return f"test.{src_iso}.{trg_iso}.vref.txt" if self._multiple_test_iso_pairs else "test.vref.txt"
