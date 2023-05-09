@@ -27,20 +27,46 @@ The SILNLP repo itself is hosted on Github, mainly written in Python and calls S
 
 ## Environment Setup
 
+The SILNLP code can be run on either Windows or Linux operating systems. If using an Ubuntu distribution, the only compatible version is 20.04.
+
 __Download and install__ the following before creating any projects or starting any code, preferably in this order to avoid most warnings:
 
 1. [Git](https://git-scm.com/downloads)
 2. [Python 3.7](https://www.python.org/downloads/) (latest minor version, ie 3.7.9)
    * Will also work with Python 3.8, but not Python 3.9 because of a [llvmlite incompatability](https://stackoverflow.com/questions/65798319/llvmlite-failed-to-install-error-building-llvmlite)
-3. Poetry via Powershell using the following command:
-```
-(Invoke-WebRequest -Uri https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py -UseBasicParsing).Content | python
-```
-4. Install [.NET Core SDK](https://dotnet.microsoft.com/download)
+   * Can alternatively install Python using [miniconda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/windows.html) if you're planning to use more than one version of Python. If following this method, activate your conda environment before installing Poetry.
+3. Poetry
+
+   * Windows:
+
+      In Powershell, run:
+      ```
+      (Invoke-WebRequest -Uri https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py -UseBasicParsing).Content | python
+      ```
+
+   * Linux:
+
+      In terminal, run:
+      ```
+      curl -sSL https://install.python-poetry.org | python3 -
+      ```
+      Add the following line to your .bashrc file in your home directory:
+      ```
+      export PATH="$HOME/.local/bin:$PATH"
+      ```
+
+4. .NET Core SDK
    * Note - the .NET SDK is needed for [SIL.Machine.Tool](https://github.com/sillsdev/machine).  Many of the scripts in this repo require this .Net package.  The .Net package will be installed and updated when the silnlp is initialized in `__init__.py`.
-5. Install C++ Redistributable
+   * Windows: [.NET Core SDK](https://dotnet.microsoft.com/download)
+   * Linux: Installation instructions can be found [here](https://learn.microsoft.com/en-us/dotnet/core/install/linux-ubuntu-2004)
+5. C++ Redistributable
    * Note - this may already be installed.  If it is not installed you may get cryptic errors such as "System.DllNotFoundException: Unable to load DLL 'thot' or one of its dependencies"
-   * Download from https://support.microsoft.com/en-us/topic/the-latest-supported-visual-c-downloads-2647da03-1eea-4433-9aff-95f26a218cc0 and install
+   * Windows: Download from https://support.microsoft.com/en-us/topic/the-latest-supported-visual-c-downloads-2647da03-1eea-4433-9aff-95f26a218cc0 and install
+   * Linux: Instead of installing the redistributable, run the following commands:
+      ```
+      sudo apt-get update
+      sudo apt-get install build-essential gdb
+      ```
 
 ---
 ## Development Environment setup
@@ -77,15 +103,18 @@ Lastly, setup PyCharm to use the Black code formatter by following the instructi
 
 ### Option 2: Visual Studio Code setup
 1. Install Visual Studio Code
-2. Open up silnlp folder in VSC
-3. In CMD window, type `poetry install` to create the virual environment for silnlp
-4. Choose the newly created virual environment as the "Python Interpreter"
-5. In `settings.json`, add the following options:
-``` json
-    "python.formatting.provider": "black",
-    "python.linting.pylintEnabled": true,
-    "editor.formatOnSave": true,
-```
+2. Install Python extension for VSCode
+3. Open up silnlp folder in VSC
+4. In CMD window, type `poetry install` to create the virtual environment for silnlp
+   * If using conda, activate your conda environment first before `poetry install`. Poetry will then install all the dependencies into the conda environment.
+5. Choose the newly created virtual environment as the "Python Interpreter" in the command palette (ctrl+shift+P)
+   * If using conda, choose the conda environment as the interpreter
+6. Open the command palette and select "Preferences: Open User Settings (JSON)". In the `settings.json` file, add the following options:
+   ``` json
+      "python.formatting.provider": "black",
+      "python.linting.pylintEnabled": true,
+      "editor.formatOnSave": true,
+   ```
 
 ## S3 bucket setup
 We use Amazon S3 storage for storing our experiment data. Here is some workspace setup to enable a decent workflow.
@@ -97,7 +126,11 @@ The following will allow the boto3 and S3Path libraries in Python correctly talk
 * The aws configure command will create a folder in your home directory named '.aws' it should contain two plain text files named 'config' and 'credentials'. The config file should contain the region and the credentials file should contain your access_key_id and your secret_access_key.
 (Home directory on windows is usually C:\Users\<Username>\ and on linux it is /home/username)
 
-### Windows: Install and configure rclone
+### Install and configure rclone
+
+
+**Windows**
+
 The following will mount /aqua-ml-data on your S drive and allow you to explore, read and write.
 * Install WinFsp: http://www.secfs.net/winfsp/rel/  (Click the button to "Download WinFsp Installer" not the "SSHFS-Win (x64)" installer)
 * Download rclone from: https://rclone.org/downloads/
@@ -110,16 +143,39 @@ The following will mount /aqua-ml-data on your S drive and allow you to explore,
 C:\Users\David\Software\rclone>call rclone mount --vfs-cache-mode full --use-server-modtime s3aqua:aqua-ml-data S:
 The service rclone has been started.
 ```
-### To start S: drive every time you open Windows
+
+**Linux**
+
+The following will mount /aqua-ml-data to an S folder in your home directory and allow you to explore, read and write.
+* Download rclone from: https://rclone.org/install/
+* Take the `scripts/rclone/rclone.conf` file from this SILNLP repo and copy it to `~/.config/rclone/rclone.conf` (creating folders if necessary)
+* Create a folder called "S" in your user directory 
+* Run the following command:
+   ```
+   rclone mount --vfs-cache-mode full --use-server-modtime s3aqua:aqua-ml-data ~/S
+   ```
+### To start S: drive on start up
+
+**Windows**
+
 Put a shortcut to the mount_to_s.bat file in the Startup folder.
 * In Windows Explorer put `shell:startup` in the address bar or open `C:\Users\<Username>\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup`
 * Right click to add a new shortcut. Choose `mount_to_s.bat` as the target, you can leave the name as the default.  
 
 Now your AWS S3 bucket should be mounted as S: drive when you start Windows.
 
+**Linux**
+* Run `crontab -e`
+* Paste `@reboot rclone mount --vfs-cache-mode full --use-server-modtime s3aqua:aqua-ml-data ~/S` into the file, save and exit
+* Reboot Linux
+
+Now your AWS S3 bucket should be mounted as ~/S when you start Linux.
+
+
 ### Setup environment variable
 The following will cause the SILNLP tools to select the S3 bucket for local silnlp operations
-* Set the environment variable SIL_NLP_DATA_PATH to /aqua-ml-data
+* Windows: Set the environment variable SIL_NLP_DATA_PATH to "S:/"
+* Linux: Set the environment variable SIL_NLP_DATA_PATH to "~/S"
 ---
 
 ## Setup ClearML on local PC
