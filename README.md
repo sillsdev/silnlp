@@ -56,6 +56,7 @@ __Download and install__ the following before creating any projects or starting 
       ```
 
 4. .NET Core SDK
+   * The necessary versions are 7.0 and 3.1. If your machine is only able to install version 7.0, you can set the DOTNET_ROLL_FORWARD environment variable to "LatestMajor", which will allow you to run anything that depends on dotnet 3.1.
    * Note - the .NET SDK is needed for [SIL.Machine.Tool](https://github.com/sillsdev/machine).  Many of the scripts in this repo require this .Net package.  The .Net package will be installed and updated when the silnlp is initialized in `__init__.py`.
    * Windows: [.NET Core SDK](https://dotnet.microsoft.com/download)
    * Linux: Installation instructions can be found [here](https://learn.microsoft.com/en-us/dotnet/core/install/linux-ubuntu-2004)
