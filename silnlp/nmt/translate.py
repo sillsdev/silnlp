@@ -3,7 +3,10 @@ import logging
 import os
 import time
 from dataclasses import dataclass
+from inspect import getmembers
 from pathlib import Path
+from pprint import pprint
+from types import FunctionType
 from typing import Iterable, Optional, Tuple, Union
 
 from machine.scripture import VerseRef, book_number_to_id, get_books
@@ -196,6 +199,17 @@ class TranslationTask:
         return translator, clearml.config, step_str
 
 
+def api(obj):
+    return [name for name in dir(obj) if name[0] != "_"]
+
+
+def attrs(obj):
+    disallowed_properties = {
+        name for name, value in getmembers(type(obj)) if isinstance(value, (property, FunctionType))
+    }
+    return {name: getattr(obj, name) for name in api(obj) if name not in disallowed_properties and hasattr(obj, name)}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Translates text using an NMT model")
     parser.add_argument("experiment", help="Experiment name")
@@ -235,6 +249,10 @@ def main() -> None:
     if args.memory_growth:
         enable_memory_growth()
 
+    pprint(attrs(SIL_NLP_ENV))
+    print("Press Ctrl+C to exit. Will continue automatically in 30 seconds.")
+    time.sleep(30)
+    
     translator = TranslationTask(
         name=args.experiment,
         checkpoint=args.checkpoint,
