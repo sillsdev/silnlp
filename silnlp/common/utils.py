@@ -2,7 +2,6 @@ import logging
 import os
 import random
 import subprocess
-import time
 from abc import ABC, abstractmethod
 from enum import Enum, Flag, auto
 from inspect import getmembers
@@ -57,10 +56,6 @@ def show_attrs(cli_args, envs=SIL_NLP_ENV, actions=[]):
 
     for action in actions:
         print(action)
-
-    print()
-    print("Press Ctrl+C to exit. Will continue automatically in 30 seconds.")
-    time.sleep(30)
 
 
 def get_repo_dir() -> Path:
