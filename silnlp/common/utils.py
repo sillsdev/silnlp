@@ -2,9 +2,12 @@ import logging
 import os
 import random
 import subprocess
+import time
 from abc import ABC, abstractmethod
 from enum import Enum, Flag, auto
-from pathlib import Path
+from inspect import getmembers
+from pathlib import Path, PurePath
+from types import FunctionType
 from typing import Any, List, Optional, Set, Type
 
 import numpy as np
@@ -17,6 +20,47 @@ LOGGER = logging.getLogger(__name__)
 class Side(Enum):
     SOURCE = auto()
     TARGET = auto()
+
+
+def api(obj):
+    return [name for name in dir(obj) if name[0] != "_"]
+
+
+def attrs(obj):
+    disallowed_properties = {
+        name for name, value in getmembers(type(obj)) if isinstance(value, (property, FunctionType))
+    }
+    return {name: getattr(obj, name) for name in api(obj) if name not in disallowed_properties and hasattr(obj, name)}
+
+
+def print_table(rows):
+
+    for arg, value in rows:
+        if isinstance(value, PurePath):
+            print(f"{str(arg):<30} : {str(value):<41} | {str(type(value)):<30} | {str(value.exists()):>6}")
+        else:
+            print(f"{str(arg):<30} : {str(value):<41} | {str(type(value)):<30}")
+
+    print()
+
+
+def show_attrs(cli_args, envs=SIL_NLP_ENV, actions=[]):
+
+    env_rows = [(k, v) for k, v in attrs(envs).items()]
+    arg_rows = [(k, v) for k, v in cli_args.__dict__.items() if v is not None]
+
+    print("\nEnvironment Variables:")
+    print_table(env_rows)
+
+    print("Command line arguments:")
+    print_table(arg_rows)
+
+    for action in actions:
+        print(action)
+
+    print()
+    print("Press Ctrl+C to exit. Will continue automatically in 30 seconds.")
+    time.sleep(30)
 
 
 def get_repo_dir() -> Path:
