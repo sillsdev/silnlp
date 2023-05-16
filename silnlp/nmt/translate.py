@@ -3,10 +3,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
-from inspect import getmembers
 from pathlib import Path
-from pprint import pprint
-from types import FunctionType
 from typing import Iterable, Optional, Tuple, Union
 
 from machine.scripture import VerseRef, book_number_to_id, get_books
@@ -15,7 +12,7 @@ from ..common.environment import SIL_NLP_ENV
 from ..common.paratext import book_file_name_digits, get_project_dir
 from ..common.tf_utils import enable_eager_execution, enable_memory_growth
 from ..common.translator import Translator
-from ..common.utils import get_git_revision_hash
+from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import SILClearML
 from .config import CheckpointType, Config, NMTModel
 
@@ -199,35 +196,6 @@ class TranslationTask:
         return translator, clearml.config, step_str
 
 
-def api(obj):
-    return [name for name in dir(obj) if name[0] != "_"]
-
-
-def attrs(obj):
-    disallowed_properties = {
-        name for name, value in getmembers(type(obj)) if isinstance(value, (property, FunctionType))
-    }
-    return {name: getattr(obj, name) for name in api(obj) if name not in disallowed_properties and hasattr(obj, name)}
-
-
-def show_attrs(cli_args, envs=SIL_NLP_ENV, action=""):
-    for k,v in attrs(envs).items():
-        print(k,v, type(v))
-
-    for k in cli_args.__dict__:
-        v = cli_args.__dict__[k] 
-        
-        if v is not None:
-            print(k, v, type(v)) 
-            #print(f"{k}  :  {v}   : Path exists : {v.is_dir()}")
-            #else:    
-            #    print(f"{k}  :  {v}")
-            
-    print(action)
-    print("Press Ctrl+C to exit. Will continue automatically in 30 seconds.")
-    time.sleep(30)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Translates text using an NMT model")
     parser.add_argument("experiment", help="Experiment name")
@@ -267,7 +235,6 @@ def main() -> None:
     if args.memory_growth:
         enable_memory_growth()
 
-    
     translator = TranslationTask(
         name=args.experiment,
         checkpoint=args.checkpoint,
@@ -275,15 +242,19 @@ def main() -> None:
     )
 
     if len(args.books) > 0:
-        show_attrs(cli_args = args, action=f"Will attempt to translate books {args.books} into {args.trg_iso}")
+        show_attrs(cli_args=args, actions=[f"Will attempt to translate books {args.books} into {args.trg_iso}"])
         translator.translate_books(args.books, args.src_project, args.trg_iso)
     elif args.src_prefix is not None:
-        show_attrs(cli_args = args, action=f"Will attempt to tranlate matching files from {args.src_iso} into {args.trg_iso}.")
+        show_attrs(
+            cli_args=args, actions=[f"Will attempt to tranlate matching files from {args.src_iso} into {args.trg_iso}."]
+        )
         translator.translate_text_files(
             args.src_prefix, args.trg_prefix, args.start_seq, args.end_seq, args.src_iso, args.trg_iso
         )
     elif args.src is not None:
-        show_attrs(cli_args = args, action=f"Will attempt to tranlate {args.src} from {args.src_iso} into {args.trg_iso}.")
+        show_attrs(
+            cli_args=args, actions=[f"Will attempt to tranlate {args.src} from {args.src_iso} into {args.trg_iso}."]
+        )
         translator.translate_files(args.src, args.trg, args.src_iso, args.trg_iso)
     else:
         raise RuntimeError("A Scripture book, file, or file prefix must be specified.")

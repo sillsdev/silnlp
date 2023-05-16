@@ -1,14 +1,14 @@
 import argparse
 import os
-import time
+#import time
 from dataclasses import dataclass
 from pathlib import Path
-from pprint import pprint
+#from types import FunctionType
 from typing import Optional
 
 from ..common.environment import SIL_NLP_ENV
 from ..common.tf_utils import enable_memory_growth
-from ..common.utils import get_git_revision_hash
+from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import SILClearML
 from .config import Config, get_mt_exp_dir
 from .test import test
@@ -79,21 +79,6 @@ class SILExperiment:
             self.name, patterns=("scores-*.csv", "test.*trg-predictions.*"), overwrite=True
         )
 
-from types import FunctionType
-from inspect import getmembers
-
-def api(obj):
-    return [name for name in dir(obj) if name[0] != '_']
-
-def attrs(obj):
-    disallowed_properties = {
-        name for name, value in getmembers(type(obj)) 
-        if isinstance(value, (property, FunctionType))
-    }
-    return {
-        name: getattr(obj, name) for name in api(obj) 
-        if name not in disallowed_properties and hasattr(obj, name)
-    }
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run experiment - preprocess, train, and test")
@@ -119,10 +104,8 @@ def main() -> None:
 
     if args.mt_dir is not None:
         SIL_NLP_ENV.set_machine_translation_dir(SIL_NLP_ENV.data_dir / args.mt_dir)
-    
-    pprint(attrs(SIL_NLP_ENV))
-    print("Press Ctrl+C to exit. Will continue automatically in 30 seconds.")
-    time.sleep(30)
+
+    show_attrs(cli_args=args)
 
     if args.memory_growth:
         enable_memory_growth()
