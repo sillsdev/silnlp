@@ -225,6 +225,7 @@ def main() -> None:
         type=str,
         help="Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run it locally and register it with ClearML.",
     )
+    parser.add_argument("--debug", default=False, action="store_true", help="Show information about the environment variables and arguments.")
     args = parser.parse_args()
 
     get_git_revision_hash()
@@ -242,19 +243,25 @@ def main() -> None:
     )
 
     if len(args.books) > 0:
-        show_attrs(cli_args=args, actions=[f"Will attempt to translate books {args.books} into {args.trg_iso}"])
+        if args.debug:
+            show_attrs(cli_args=args, actions=[f"Will attempt to translate books {args.books} into {args.trg_iso}"])
+            exit()
         translator.translate_books(args.books, args.src_project, args.trg_iso)
     elif args.src_prefix is not None:
-        show_attrs(
-            cli_args=args, actions=[f"Will attempt to tranlate matching files from {args.src_iso} into {args.trg_iso}."]
-        )
+        if args.debug:
+            show_attrs(
+                cli_args=args, actions=[f"Will attempt to tranlate matching files from {args.src_iso} into {args.trg_iso}."]
+            )
+            exit()
         translator.translate_text_files(
             args.src_prefix, args.trg_prefix, args.start_seq, args.end_seq, args.src_iso, args.trg_iso
         )
     elif args.src is not None:
-        show_attrs(
-            cli_args=args, actions=[f"Will attempt to tranlate {args.src} from {args.src_iso} into {args.trg_iso}."]
-        )
+        if args.debug:
+            show_attrs(
+                cli_args=args, actions=[f"Will attempt to tranlate {args.src} from {args.src_iso} into {args.trg_iso}."]
+            )
+            exit()
         translator.translate_files(args.src, args.trg, args.src_iso, args.trg_iso)
     else:
         raise RuntimeError("A Scripture book, file, or file prefix must be specified.")
