@@ -9,6 +9,7 @@ from ..common.corpus import load_corpus
 from ..common.metrics import compute_meteor_score, compute_wer_score
 from ..common.utils import check_dotnet, get_git_revision_hash, get_mt_exp_dir, get_repo_dir
 from .config import load_config
+from ..common.environment import SIL_NLP_ENV
 
 SUPPORTED_SCORERS = {"bleu", "spbleu", "chrf3", "meteor", "wer", "ter"}
 
@@ -42,6 +43,7 @@ def main() -> None:
 
     exp_name = args.experiment
     exp_dir = get_mt_exp_dir(exp_name)
+    SIL_NLP_ENV.copy_experiment_from_bucket(exp_name)
     config = load_config(exp_name)
     src_iso = get_iso(config["src_lang"])
     trg_iso = get_iso(config["trg_lang"])
