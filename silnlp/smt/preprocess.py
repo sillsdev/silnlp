@@ -59,6 +59,7 @@ def main() -> None:
 
     exp_name: str = args.experiment
     exp_dir = get_mt_exp_dir(exp_name)
+    SIL_NLP_ENV.copy_experiment_from_bucket(exp_name)
     config = load_config(exp_name)
 
     set_seed(config["seed"])

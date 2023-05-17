@@ -5,6 +5,7 @@ from typing import List
 
 from ..common.utils import check_dotnet, get_git_revision_hash, get_mt_exp_dir, get_repo_dir
 from .config import load_config
+from ..common.environment import SIL_NLP_ENV
 
 
 def main() -> None:
@@ -17,6 +18,7 @@ def main() -> None:
     for exp_name in args.experiments:
         print(f"=== Training ({exp_name}) ===")
         exp_dir = get_mt_exp_dir(exp_name)
+        SIL_NLP_ENV.copy_experiment_from_bucket(exp_name)
         config = load_config(exp_name)
 
         check_dotnet()
