@@ -2,7 +2,6 @@ import argparse
 import yaml
 
 from ..common.utils import get_git_revision_hash, get_mt_exp_dir, merge_dict
-from ..common.environment import SIL_NLP_ENV
 
 
 _BASE_CONFIG: dict = {
