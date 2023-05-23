@@ -4,6 +4,7 @@ import logging
 from ..common.tf_utils import enable_eager_execution, enable_memory_growth
 from ..common.utils import get_git_revision_hash
 from .config_utils import load_config
+from ..common.environment import SIL_NLP_ENV
 
 LOGGER = logging.getLogger(__package__ + ".train")
 
@@ -35,6 +36,7 @@ def main() -> None:
         enable_memory_growth()
 
     for exp_name in args.experiments:
+        SIL_NLP_ENV.copy_experiment_from_bucket(exp_name)
         config = load_config(exp_name)
         config.set_seed()
         model = config.create_model(args.mixed_precision, args.num_devices)

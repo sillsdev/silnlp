@@ -16,6 +16,7 @@ from ..common.utils import get_git_revision_hash
 from .config import CheckpointType, Config, NMTModel
 from .config_utils import load_config
 from .tokenizer import Tokenizer
+from ..common.environment import SIL_NLP_ENV
 
 LOGGER = logging.getLogger(__package__ + ".test")
 
@@ -471,6 +472,7 @@ def test(
     by_book: bool = False,
 ):
     exp_name = experiment
+    SIL_NLP_ENV.copy_experiment_from_bucket(exp_name)
     config = load_config(exp_name)
 
     if not any(config.exp_dir.glob("test*.src.txt")):
