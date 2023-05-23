@@ -3,6 +3,7 @@ import logging
 
 from ..common.utils import get_git_revision_hash
 from .config_utils import load_config
+from ..common.environment import SIL_NLP_ENV
 
 LOGGER = logging.getLogger(__package__ + ".preprocess")
 
@@ -16,6 +17,7 @@ def main() -> None:
     get_git_revision_hash()
 
     exp_name = args.experiment
+    SIL_NLP_ENV.copy_experiment_from_bucket(exp_name)
     config = load_config(exp_name)
 
     config.set_seed()
