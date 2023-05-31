@@ -23,6 +23,7 @@ from .dotnet_machine_aligner import (
     Ibm4DotnetMachineAligner,
     ParatextDotnetMachineAligner,
 )
+from .eflomal import EflomalAligner
 from .fast_align import FastAlign
 from .giza_aligner import HmmGizaAligner, Ibm1GizaAligner, Ibm2GizaAligner, Ibm3GizaAligner, Ibm4GizaAligner
 from .machine_aligner import (
@@ -61,6 +62,7 @@ ALIGNERS: Dict[str, Tuple[Type[Aligner], str]] = {
     "clear3_fa": (ClearAligner, "Clear-3-FA"),
     "clear3_hmm": (ClearAligner, "Clear-3-HMM"),
     "clab_fast_align": (FastAlign, "clab-FastAlign"),
+    "eflomal": (EflomalAligner, "Eflomal"),
 }
 
 

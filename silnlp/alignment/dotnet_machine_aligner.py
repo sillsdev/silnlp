@@ -5,8 +5,8 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ..common.utils import check_dotnet, get_repo_dir
 from ..common.environment import get_env_path
+from ..common.utils import check_dotnet, get_repo_dir
 from .aligner import Aligner
 from .lexicon import Lexicon
 
@@ -73,9 +73,8 @@ class DotnetMachineAligner(Aligner):
         lexicon = self.get_direct_lexicon()
         if self._has_inverse_model:
             inverse_lexicon = self.get_inverse_lexicon()
-            print("Symmetrizing lexicons...", end="", flush=True)
+            LOGGER.info("Symmetrizing lexicons")
             lexicon = Lexicon.symmetrize(lexicon, inverse_lexicon)
-            print(" done.")
         lexicon.write(out_file_path)
 
     def get_direct_lexicon(self, include_special_tokens: bool = False) -> Lexicon:
@@ -115,9 +114,9 @@ class DotnetMachineAligner(Aligner):
             "ibm4-iters=5",
         ]
         if self.model_type == "ibm4":
-            src_classes_path = self.model_dir / f"src_trg.src.classes"
+            src_classes_path = self.model_dir / "src_trg.src.classes"
             args.extend(["-tp", f"src-classes={src_classes_path}"])
-            trg_classes_path = self.model_dir / f"src_trg.trg.classes"
+            trg_classes_path = self.model_dir / "src_trg.trg.classes"
             args.extend(["-tp", f"trg-classes={trg_classes_path}"])
         if self._lowercase:
             args.append("-l")

@@ -63,6 +63,7 @@ sacremoses = "^0.0.53"
 evaluate = "^0.3.0"
 python-docx = "^0.8.11"
 iso639-lang = "^2.1.0"
+eflomal = "^0.1"
 
 [tool.poetry.dev-dependencies]
 mypy = "^0.812"

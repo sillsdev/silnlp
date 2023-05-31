@@ -1,10 +1,13 @@
 import argparse
+import logging
 from pathlib import Path
 from typing import Set
 
 from .config import get_aligner
 from .lexicon import Lexicon
 from .utils import get_experiment_dirs, get_experiment_name
+
+LOGGER = logging.getLogger(__package__ + ".generate_clear_models")
 
 
 def main() -> None:
@@ -16,14 +19,14 @@ def main() -> None:
 
     for exp_dir in get_experiment_dirs(args.experiments):
         exp_name = get_experiment_name(exp_dir)
-        print(f"=== Generating models ({exp_name}) ===")
+        LOGGER.info(f"Generating models for {exp_name}")
         aligner = get_aligner(args.aligner, exp_dir)
         output_dir = Path(args.output, exp_name)
         output_dir.mkdir(parents=True, exist_ok=True)
 
         aligner.align(output_dir / "alignments.txt", sym_heuristic="intersection")
 
-        print("Extracting translation model...", end="", flush=True)
+        LOGGER.info("Extracting translation model")
         direct_lexicon = aligner.get_direct_lexicon()
         lexicon = Lexicon()
         if aligner.has_inverse_model:
@@ -48,7 +51,6 @@ def main() -> None:
                     if prob > 0.1:
                         lexicon[src_word, trg_word] = prob
         lexicon.write(output_dir / "transModel.tsv")
-        print(" done.")
 
 
 if __name__ == "__main__":

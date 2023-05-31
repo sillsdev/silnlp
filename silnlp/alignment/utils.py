@@ -1,3 +1,4 @@
+import logging
 import tempfile
 from pathlib import Path, PurePath
 from statistics import mean
@@ -10,6 +11,8 @@ from ..common.environment import SIL_NLP_ENV
 from .config import get_aligner
 from .lexicon import Lexicon
 from .machine_aligner import MachineAligner
+
+LOGGER = logging.getLogger(__name__)
 
 
 def get_experiment_dirs(exp_pattern: str) -> List[Path]:
@@ -58,7 +61,9 @@ def compute_alignment_score(
                 prob = max(direct_prob, inverse_prob)
                 probs.append(prob)
         else:
-            print(f"No pairs in alignment! src >>{src_sentence}<< trg >>{trg_sentence}<< alignment >>{alignment}<<")
+            LOGGER.warn(
+                f"No pairs in alignment! src >>{src_sentence}<< trg >>{trg_sentence}<< alignment >>{alignment}<<"
+            )
 
     for j in unaligned_trg_indices:
         probs.append(max(direct_lexicon["NULL", trg_words[j]], 1e-9))

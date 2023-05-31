@@ -223,9 +223,15 @@ def main() -> None:
         "--clearml-queue",
         default=None,
         type=str,
-        help="Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run it locally and register it with ClearML.",
+        help="Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run "
+        + "it locally and register it with ClearML.",
     )
-    parser.add_argument("--debug", default=False, action="store_true", help="Show information about the environment variables and arguments.")
+    parser.add_argument(
+        "--debug",
+        default=False,
+        action="store_true",
+        help="Show information about the environment variables and arguments.",
+    )
     args = parser.parse_args()
 
     get_git_revision_hash()
@@ -250,7 +256,8 @@ def main() -> None:
     elif args.src_prefix is not None:
         if args.debug:
             show_attrs(
-                cli_args=args, actions=[f"Will attempt to tranlate matching files from {args.src_iso} into {args.trg_iso}."]
+                cli_args=args,
+                actions=[f"Will attempt to tranlate matching files from {args.src_iso} into {args.trg_iso}."],
             )
             exit()
         translator.translate_text_files(

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from enum import Enum, Flag, auto
 from pathlib import Path
 from statistics import mean
-from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, Type, Union, cast
+from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, Union, cast
 
 import pandas as pd
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books
@@ -75,7 +75,9 @@ class DataFile:
         if len(parts) < 2:
             raise RuntimeError(f"The filename {file_name} needs to be of the format <iso>-<project>")
         self.iso = parts[0]
-        self.project = parts[1] if str(self.path.parent).startswith(str(SIL_NLP_ENV.mt_scripture_dir)) else BASIC_DATA_PROJECT
+        self.project = (
+            parts[1] if str(self.path.parent).startswith(str(SIL_NLP_ENV.mt_scripture_dir)) else BASIC_DATA_PROJECT
+        )
 
     @property
     def is_scripture(self) -> bool:
@@ -301,7 +303,7 @@ class NMTModel(ABC):
         input_paths: List[Path],
         translation_paths: List[Path],
         vref_paths: Optional[List[Path]] = None,
-        checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
+        ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
         ...
 
@@ -312,12 +314,12 @@ class NMTModel(ABC):
         src_iso: str,
         trg_iso: str,
         vrefs: Optional[Iterable[VerseRef]] = None,
-        checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
+        ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Iterable[str]:
         ...
 
     @abstractmethod
-    def get_checkpoint_path(self, checkpoint: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
+    def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
         ...
 
 
@@ -557,7 +559,7 @@ class Config(ABC):
                 project_isos[trg_file.project] = trg_file.iso
                 corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path)
                 if len(pair.src_noise) > 0:
-                    corpus["source"] = [ self._noise(pair.src_noise, x) for x in corpus["source"] ]
+                    corpus["source"] = [self._noise(pair.src_noise, x) for x in corpus["source"]]
 
                 if len(pair.corpus_books) > 0:
                     cur_train = include_books(corpus, pair.corpus_books)
@@ -967,7 +969,7 @@ class Config(ABC):
                     terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
         return terms
 
-    def _write_val_trg(self, tokenizer: Tokenizer, val: Dict[Tuple[str, str], pd.DataFrame]) -> None:
+    def _write_val_trg(self, tokenizer: Optional[Tokenizer], val: Dict[Tuple[str, str], pd.DataFrame]) -> None:
         with ExitStack() as stack:
             ref_files: List[TextIO] = []
             for (src_iso, trg_iso), pair_val in val.items():
@@ -985,7 +987,8 @@ class Config(ABC):
                                 col = columns[ci]
                                 if tokenizer is not None:
                                     ref_files[ci].write(
-                                        tokenizer.tokenize(Side.TARGET, cast(str, pair_val.loc[index, col]).strip()) + "\n"
+                                        tokenizer.tokenize(Side.TARGET, cast(str, pair_val.loc[index, col]).strip())
+                                        + "\n"
                                     )
                                 else:
                                     ref_files[ci].write(pair_val.loc[index, col] + "\n")
@@ -1004,7 +1007,6 @@ class Config(ABC):
                             )
                         else:
                             ref_files[0].write(pair_val.loc[index, col] + "\n")
-
 
     def _append_corpus(self, filename: str, sentences: Iterable[str]) -> None:
         write_corpus(self.exp_dir / filename, sentences, append=True)

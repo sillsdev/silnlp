@@ -1,8 +1,7 @@
 import shutil
 from pathlib import Path
-from typing import Iterable
 
-from nltk.translate import Alignment
+from machine.corpora import AlignedWordPair
 
 from ..common.corpus import load_corpus
 from .aligner import Aligner
@@ -28,16 +27,14 @@ class ClearAligner(Aligner):
 
     def get_direct_lexicon(self, include_special_tokens: bool = False) -> Lexicon:
         lexicon = Lexicon()
-        source: Iterable[str] = load_corpus(self.model_dir / "src.txt")
-        target: Iterable[str] = load_corpus(self.model_dir / "trg.txt")
-        alignments: Iterable[str] = filter(
-            lambda a: not a.startswith("#"), load_corpus(self.model_dir / "alignments.txt")
-        )
+        source = load_corpus(self.model_dir / "src.txt")
+        target = load_corpus(self.model_dir / "trg.txt")
+        alignments = filter(lambda a: not a.startswith("#"), load_corpus(self.model_dir / "alignments.txt"))
 
         for src_str, trg_str, alignment_str in zip(source, target, alignments):
             src_words = src_str.split()
             trg_words = trg_str.split()
-            alignment = Alignment.fromstring(alignment_str)
+            alignment = AlignedWordPair.from_string(alignment_str)
             for src_index, trg_index in alignment:
                 if src_index >= len(src_words) or trg_index >= len(trg_words):
                     continue

@@ -1,4 +1,5 @@
 import argparse
+import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
@@ -18,6 +19,8 @@ from .metrics import (
     load_vrefs,
 )
 from .utils import get_experiment_dirs, get_experiment_name
+
+LOGGER = logging.getLogger(__package__ + ".test")
 
 
 def add_alignments(dest: Dict[str, List[Alignment]], src: Dict[str, List[Alignment]]) -> None:
@@ -63,19 +66,19 @@ def test(exp_dirs: List[Path], by_book: bool, books: Set[int], test_size: Option
             df = pd.concat([df, book_df])
 
     for book in sorted(set(df.index.get_level_values("Book")), key=lambda b: 0 if b == "ALL" else book_id_to_number(b)):
-        if by_book:
-            print(f"--- {book} ---")
         for index, row in df.loc[[book]].iterrows():
             aer: float = row["AER"]
             f_score: float = row["F-Score"]
             precision: float = row["Precision"]
             recall: float = row["Recall"]
-            print(f"--- {index[1]} ---")
-            print("Alignments")
-            print(f"- AER: {aer:.4f}")
-            print(f"- F-Score: {f_score:.4f}")
-            print(f"- Precision: {precision:.4f}")
-            print(f"- Recall: {recall:.4f}")
+            if by_book:
+                LOGGER.info(f"{index[1]} alignment metrics ({book})")
+            else:
+                LOGGER.info(f"{index[1]} alignment metrics")
+            LOGGER.info(f"AER: {aer:.4f}")
+            LOGGER.info(f"F-Score: {f_score:.4f}")
+            LOGGER.info(f"Precision: {precision:.4f}")
+            LOGGER.info(f"Recall: {recall:.4f}")
 
             if book == "ALL":
                 f_score_at_1: float = row["F-Score@1"]
@@ -87,16 +90,16 @@ def test(exp_dirs: List[Path], by_book: bool, books: Set[int], test_size: Option
                 mean_avg_precision: float = row["MAP"]
                 ao_at_1: float = row["AO@1"]
                 rbo: float = row["RBO"]
-                print("Lexicon")
-                print(f"- F-Score@1: {f_score_at_1:.4f}")
-                print(f"- Precision@1: {precision_at_1:.4f}")
-                print(f"- Recall@1: {recall_at_1:.4f}")
-                print(f"- F-Score@3: {f_score_at_3:.4f}")
-                print(f"- Precision@3: {precision_at_3:.4f}")
-                print(f"- Recall@3: {recall_at_3:.4f}")
-                print(f"- MAP: {mean_avg_precision:.4f}")
-                print(f"- AO@1: {ao_at_1:.4f}")
-                print(f"- RBO: {rbo:.4f}")
+                LOGGER.info(f"{index[1]} lexicon metrics")
+                LOGGER.info(f"F-Score@1: {f_score_at_1:.4f}")
+                LOGGER.info(f"Precision@1: {precision_at_1:.4f}")
+                LOGGER.info(f"Recall@1: {recall_at_1:.4f}")
+                LOGGER.info(f"F-Score@3: {f_score_at_3:.4f}")
+                LOGGER.info(f"Precision@3: {precision_at_3:.4f}")
+                LOGGER.info(f"Recall@3: {recall_at_3:.4f}")
+                LOGGER.info(f"MAP: {mean_avg_precision:.4f}")
+                LOGGER.info(f"AO@1: {ao_at_1:.4f}")
+                LOGGER.info(f"RBO: {rbo:.4f}")
 
     scores_file_name = "scores.csv"
     if test_size is not None:
@@ -117,21 +120,21 @@ def main() -> None:
     books = get_books(args.books)
     test_size: Optional[int] = args.test_size
     if test_size is not None:
-        print(f"Test size: {test_size}")
+        LOGGER.info(f"Test size: {test_size}")
 
     combine_pattern: str = args.combine_pattern
     combinations: Dict[Path, List[str]] = {}
     for exp_dir in get_experiment_dirs(args.experiments):
         exp_name = get_experiment_name(exp_dir)
-        print(f"=== Computing metrics ({exp_name}) ===")
         config = load_config(exp_dir)
         set_seed(config["seed"])
         if config["by_book"]:
             for book, book_exp_dir in get_all_book_paths(exp_dir):
                 if book_exp_dir.is_dir():
-                    print(f"--- {book} ---")
+                    LOGGER.info(f"Computing metrics for {exp_name}, book: {book}")
                     test([book_exp_dir], False, books, test_size, book_exp_dir)
         else:
+            LOGGER.info(f"Computing metrics for {exp_name}")
             test([exp_dir], args.by_book, books, test_size, exp_dir)
         if (
             args.experiments != exp_name
@@ -146,7 +149,7 @@ def main() -> None:
 
     for parent_dir, combination in combinations.items():
         exp_name = get_experiment_name(parent_dir) + "/" + "+".join(combination)
-        print(f"=== Computing combined metrics ({exp_name}) ===")
+        LOGGER.info(f"Computing combined metrics for {exp_name}")
         exp_dirs = [parent_dir / name for name in combination]
         test(exp_dirs, args.by_book, books, None, parent_dir)
 

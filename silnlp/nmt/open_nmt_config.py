@@ -733,7 +733,7 @@ class OpenNMTModel(NMTModel):
         input_paths: List[Path],
         translation_paths: List[Path],
         vref_paths: Optional[List[Path]] = None,
-        checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
+        ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
         features_paths: List[Union[str, Sequence[str]]]
         if vref_paths is None:
@@ -741,7 +741,7 @@ class OpenNMTModel(NMTModel):
         else:
             features_paths = [[str(ip), str(vp)] for ip, vp in zip(input_paths, vref_paths)]
         predictions_paths = [str(p) for p in translation_paths]
-        checkpoint_path, _ = self.get_checkpoint_path(checkpoint)
+        checkpoint_path, _ = self.get_checkpoint_path(ckpt)
         self._runner.infer_multiple(features_paths, predictions_paths, str(checkpoint_path))
 
     def translate(
@@ -750,19 +750,19 @@ class OpenNMTModel(NMTModel):
         src_iso: str,
         trg_iso: str,
         vrefs: Optional[Iterable[VerseRef]] = None,
-        checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
+        ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Iterable[str]:
         tokenizer = self._config.create_tokenizer()
         tokenizer.set_trg_lang(trg_iso)
         features_list: List[List[str]] = [[tokenizer.tokenize(Side.SOURCE, s) for s in sentences]]
         if vrefs is not None:
             features_list.append([str(vref) if vref.verse_num != 0 else "" for vref in vrefs])
-        checkpoint_path, _ = self.get_checkpoint_path(checkpoint)
+        checkpoint_path, _ = self.get_checkpoint_path(ckpt)
         translations = self._runner.infer_list(features_list, str(checkpoint_path))
         return (decode_sp(t[0]) for t in translations)
 
-    def get_checkpoint_path(self, checkpoint: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
-        return _get_checkpoint_path(self._config.model_dir, checkpoint)
+    def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
+        return _get_checkpoint_path(self._config.model_dir, ckpt)
 
 
 class OpenNMTTokenizer(Tokenizer):
