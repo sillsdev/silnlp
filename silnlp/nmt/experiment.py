@@ -43,13 +43,6 @@ class SILExperiment:
             self.test()
 
     def preprocess(self):
-        # Do some basic checks before starting the experiment
-        exp_dir = Path(get_mt_exp_dir(self.name))
-        if not exp_dir.exists():
-            raise RuntimeError(f"ERROR: Experiment folder {exp_dir} does not exist.")
-        config_file = Path(exp_dir, "config.yml")
-        if not config_file.exists():
-            raise RuntimeError(f"ERROR: Config file does not exist in experiment folder {exp_dir}.")
         self.config.preprocess(self.make_stats)
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
 
@@ -117,6 +110,24 @@ def main() -> None:
         args.preprocess = True
         args.train = True
         args.test = True
+    
+    # Do some basic checks before starting the experiment
+    exp_dir = get_mt_exp_dir(args.experiment)
+    if not exp_dir.is_dir():
+        raise RuntimeError(f"ERROR: Experiment folder {exp_dir} does not exist.")
+    config_file = exp_dir / "config.yml"
+    if not config_file.is_file():
+        raise RuntimeError(f"ERROR: Cannot find config file {config_file}.")
+    if config_file.stat().st_size < 200:
+        
+        with open(config_file, 'r', encoding='utf-8') as config:
+            config_lines = [line.rstrip() for line in config.readlines()]
+        print(f"\nThe config file {config_file} contains only:\n")
+        for config_line in config_lines:
+            print(config_line)
+        print()
+        raise RuntimeError(f"\nERROR : Config file {config_file} is too short.")
+    
 
     exp = SILExperiment(
         name=args.experiment,
@@ -130,6 +141,8 @@ def main() -> None:
         run_test=args.test,
         score_by_book=args.score_by_book,
     )
+
+
     exp.run()
 
 

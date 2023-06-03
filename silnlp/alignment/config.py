@@ -75,7 +75,7 @@ STEMMERS: Dict[str, Type[Stemmer]] = {
 def get_aligner(id: str, exp_dir: Path) -> Aligner:
     aligner = ALIGNERS.get(id)
     if aligner is None:
-        raise RuntimeError("An invalid aligner Id was specified.")
+        raise RuntimeError(f"An invalid aligner ID: '{id}' was specified. Valid aligners are {ALIGNERS.keys()}")
     aligner_cls: Type = aligner[0]
     return aligner_cls(exp_dir / (id + os.path.sep))
 
@@ -83,7 +83,7 @@ def get_aligner(id: str, exp_dir: Path) -> Aligner:
 def get_aligner_name(id: str) -> str:
     aligner = ALIGNERS.get(id)
     if aligner is None:
-        raise RuntimeError("An invalid aligner Id was specified.")
+        raise RuntimeError(f"An invalid aligner ID: '{id}' was specified. Valid aligners are {ALIGNERS.keys()}")
     return aligner[1]
 
 
@@ -97,7 +97,7 @@ def get_stemmer(stemmer_config: Union[dict, str]) -> Stemmer:
         del kwargs["name"]
     stemmer_cls = STEMMERS.get(id)
     if stemmer_cls is None:
-        raise RuntimeError("An invalid stemmer Id was specified.")
+        raise RuntimeError(f"An invalid stemmer ID: '{id}' was specified. Valid stemmers are {STEMMERS.keys()}")
 
     return stemmer_cls(**kwargs)
 
