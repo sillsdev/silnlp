@@ -27,8 +27,11 @@ from transformers import (
     HfArgumentParser,
     M2M100ForConditionalGeneration,
     M2M100Tokenizer,
+    NllbTokenizer,
+    NllbTokenizerFast,
     PreTrainedModel,
     PreTrainedTokenizer,
+    PreTrainedTokenizerFast,
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
     TranslationPipeline,
@@ -38,6 +41,7 @@ from transformers.tokenization_utils import BatchEncoding, TruncationStrategy
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import PaddingStrategy, to_py_obj
 from transformers.utils.logging import tqdm
+from transformers.convert_slow_tokenizer import convert_slow_tokenizer
 
 from ..common.corpus import count_lines, get_terms
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
@@ -272,22 +276,32 @@ class HuggingFaceConfig(Config):
 
     def _build_vocabs(self) -> None:
         if self.data["add_new_lang_code"]:
-            tokenizer = AutoTokenizer.from_pretrained(self.model, use_fast=True)
             lang_codes: Dict[str, str] = self.data["lang_codes"]
             updated = False
             for iso in self.src_isos | self.trg_isos:
                 lang_code = lang_codes.get(iso, iso)
-                if lang_code not in tokenizer.lang_code_to_id:
-                    add_lang_code_to_tokenizer(tokenizer, lang_code)
+                if lang_code not in self._tokenizer.lang_code_to_id:
+                    add_lang_code_to_tokenizer(self._tokenizer, lang_code)
                     updated = True
             if updated:
-                tokenizer.save_pretrained(self.exp_dir)
+                self._tokenizer.save_pretrained(self.exp_dir)
 
     def get_tokenizer(self) -> PreTrainedTokenizer:
         if self._tokenizer is None:
-            model_name_or_path = str(self.exp_dir) if (self.exp_dir / "tokenizer_config.json").is_file() else self.model
-            self._tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True)
-            self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
+            if (self.exp_dir / "sentencepiece.bpe.model").is_file() and not (
+                self.exp_dir / "tokenizer_config.json"
+            ).is_file():
+                self._tokenizer = NllbTokenizer.from_pretrained(str(self.exp_dir))
+                self._tokenizer = convert_slow_tokenizer(self._tokenizer)
+                self._tokenizer = NllbTokenizerFast(tokenizer_object=self._tokenizer)
+                self._tokenizer.save_pretrained(str(self.exp_dir))
+            else:
+                model_name_or_path = (
+                    str(self.exp_dir) if (self.exp_dir / "tokenizer_config.json").is_file() else self.model
+                )
+                self._tokenizer = NllbTokenizerFast.from_pretrained(model_name_or_path, use_fast=True)
+        self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
+        self._build_vocabs()
         return self._tokenizer
 
     def _write_dictionary(self, tokenizer: Tokenizer, pair: CorpusPair) -> int:

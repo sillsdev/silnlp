@@ -75,7 +75,9 @@ class DataFile:
         if len(parts) < 2:
             raise RuntimeError(f"The filename {file_name} needs to be of the format <iso>-<project>")
         self.iso = parts[0]
-        self.project = parts[1] if str(self.path.parent).startswith(str(SIL_NLP_ENV.mt_scripture_dir)) else BASIC_DATA_PROJECT
+        self.project = (
+            parts[1] if str(self.path.parent).startswith(str(SIL_NLP_ENV.mt_scripture_dir)) else BASIC_DATA_PROJECT
+        )
 
     @property
     def is_scripture(self) -> bool:
@@ -463,7 +465,6 @@ class Config(ABC):
                 LOGGER.error("The source file " + str(file) + " does not exist.")
                 return
 
-        self._build_vocabs()
         tokenizer = self.create_tokenizer()
         self._build_corpora(tokenizer, stats)
         LOGGER.info("Preprocessing completed")
@@ -557,7 +558,7 @@ class Config(ABC):
                 project_isos[trg_file.project] = trg_file.iso
                 corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path)
                 if len(pair.src_noise) > 0:
-                    corpus["source"] = [ self._noise(pair.src_noise, x) for x in corpus["source"] ]
+                    corpus["source"] = [self._noise(pair.src_noise, x) for x in corpus["source"]]
 
                 if len(pair.corpus_books) > 0:
                     cur_train = include_books(corpus, pair.corpus_books)
@@ -985,7 +986,8 @@ class Config(ABC):
                                 col = columns[ci]
                                 if tokenizer is not None:
                                     ref_files[ci].write(
-                                        tokenizer.tokenize(Side.TARGET, cast(str, pair_val.loc[index, col]).strip()) + "\n"
+                                        tokenizer.tokenize(Side.TARGET, cast(str, pair_val.loc[index, col]).strip())
+                                        + "\n"
                                     )
                                 else:
                                     ref_files[ci].write(pair_val.loc[index, col] + "\n")
@@ -1004,7 +1006,6 @@ class Config(ABC):
                             )
                         else:
                             ref_files[0].write(pair_val.loc[index, col] + "\n")
-
 
     def _append_corpus(self, filename: str, sentences: Iterable[str]) -> None:
         write_corpus(self.exp_dir / filename, sentences, append=True)
