@@ -31,7 +31,6 @@ from transformers import (
     NllbTokenizerFast,
     PreTrainedModel,
     PreTrainedTokenizer,
-    PreTrainedTokenizerFast,
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
     TranslationPipeline,
@@ -162,6 +161,19 @@ def add_lang_code_to_tokenizer(tokenizer: PreTrainedTokenizer, lang_code: str) -
         tokenizer.id_to_lang_token[lang_id] = lang_code
 
 
+def find_missing_characters(tokenizer: PreTrainedTokenizer, corpus: List[Path]) -> List[str]:
+    # create dictionary vocab of tokenizer
+    vocab = tokenizer.get_vocab().keys()
+    # create set of characters found in corpus
+    charset = set()
+    for file in corpus:
+        with file.open() as f:
+            charset = charset | set(f.read())
+    missing_characters = list(charset - vocab)
+    # find characters not in NLLB tokenizer
+    return missing_characters
+
+
 def is_sublist(sub: List[int], lst: List[int]) -> bool:
     ln = len(sub)
     if ln >= len(lst):
@@ -283,6 +295,14 @@ class HuggingFaceConfig(Config):
                 if lang_code not in self._tokenizer.lang_code_to_id:
                     add_lang_code_to_tokenizer(self._tokenizer, lang_code)
                     updated = True
+            missing_characters = find_missing_characters(
+                self._tokenizer, list(self.src_file_paths) + list(self.trg_file_paths)
+            )
+            if missing_characters:
+                missing_characters_underscore = ["_" + c for c in missing_characters]
+                missing_characters = missing_characters + missing_characters_underscore
+                self._tokenizer.add_tokens(missing_characters)
+                updated = True
             if updated:
                 self._tokenizer.save_pretrained(self.exp_dir)
 
