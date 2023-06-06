@@ -1,10 +1,10 @@
 import argparse
 import logging
 
+from ..common.environment import SIL_NLP_ENV
 from ..common.tf_utils import enable_eager_execution, enable_memory_growth
 from ..common.utils import get_git_revision_hash
 from .config_utils import load_config
-from ..common.environment import SIL_NLP_ENV
 
 LOGGER = logging.getLogger(__package__ + ".train")
 
@@ -42,12 +42,12 @@ def main() -> None:
         model = config.create_model(args.mixed_precision, args.num_devices)
         model.save_effective_config(config.exp_dir / f"effective-config-{rev_hash}.yml")
 
-        print(f"=== Training ({exp_name}) ===")
+        LOGGER.info(f"Training {exp_name}")
         try:
             model.train()
         except RuntimeError as e:
             LOGGER.warning(str(e))
-        print("Training completed")
+        LOGGER.info(f"Finished training {exp_name}")
 
 
 if __name__ == "__main__":

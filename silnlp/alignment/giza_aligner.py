@@ -1,4 +1,4 @@
-import os
+import logging
 import platform
 import subprocess
 from pathlib import Path
@@ -10,6 +10,8 @@ from ..common.corpus import load_corpus, write_corpus
 from ..common.environment import get_env_path
 from .aligner import Aligner
 from .lexicon import Lexicon
+
+LOGGER = logging.getLogger(__name__)
 
 
 class GizaAligner(Aligner):
@@ -88,9 +90,8 @@ class GizaAligner(Aligner):
     def extract_lexicon(self, out_file_path: Path) -> None:
         direct_lexicon = self.get_direct_lexicon()
         inverse_lexicon = self.get_inverse_lexicon()
-        print("Symmetrizing lexicons...", end="", flush=True)
+        LOGGER.info("Symmetrizing lexicons")
         lexicon = Lexicon.symmetrize(direct_lexicon, inverse_lexicon)
-        print(" done.")
         lexicon.write(out_file_path)
 
     def _execute_mkcls(self, input_file_path: Path) -> None:

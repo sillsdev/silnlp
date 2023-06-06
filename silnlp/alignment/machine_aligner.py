@@ -189,7 +189,7 @@ class MachineAligner(Aligner):
                             trg_word = trg_words[trg_word_index]
                             out_file.write(f"{src_word}\t{trg_word}\t{prob}\n")
                         except IndexError:
-                            print(
+                            LOGGER.error(
                                 f"Index error! Source Word/Index: {src_word}/{src_word_index},"
                                 f"Target Index: {trg_word_index}, Probability: {prob}"
                             )

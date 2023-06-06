@@ -5,7 +5,7 @@ from math import sqrt
 from pathlib import Path
 from statistics import mean, median
 from tempfile import TemporaryDirectory
-from typing import Dict, FrozenSet, Iterable, List, Optional, Set
+from typing import Dict, FrozenSet, Iterable, List, Optional
 
 import matplotlib.pyplot as plt
 import networkx as nx

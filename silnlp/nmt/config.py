@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from enum import Enum, Flag, auto
 from pathlib import Path
 from statistics import mean
-from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, Type, Union, cast
+from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, Union, cast
 
 import pandas as pd
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books
@@ -303,7 +303,7 @@ class NMTModel(ABC):
         input_paths: List[Path],
         translation_paths: List[Path],
         vref_paths: Optional[List[Path]] = None,
-        checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
+        ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
         ...
 
@@ -314,12 +314,12 @@ class NMTModel(ABC):
         src_iso: str,
         trg_iso: str,
         vrefs: Optional[Iterable[VerseRef]] = None,
-        checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
+        ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Iterable[str]:
         ...
 
     @abstractmethod
-    def get_checkpoint_path(self, checkpoint: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
+    def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
         ...
 
 
@@ -968,7 +968,7 @@ class Config(ABC):
                     terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
         return terms
 
-    def _write_val_trg(self, tokenizer: Tokenizer, val: Dict[Tuple[str, str], pd.DataFrame]) -> None:
+    def _write_val_trg(self, tokenizer: Optional[Tokenizer], val: Dict[Tuple[str, str], pd.DataFrame]) -> None:
         with ExitStack() as stack:
             ref_files: List[TextIO] = []
             for (src_iso, trg_iso), pair_val in val.items():

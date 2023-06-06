@@ -10,13 +10,13 @@ import sacrebleu
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_number_to_id, get_books
 from sacrebleu.metrics import BLEU, BLEUScore
 
+from ..common.environment import SIL_NLP_ENV
 from ..common.metrics import compute_meteor_score, compute_wer_score
 from ..common.tf_utils import enable_eager_execution, enable_memory_growth
 from ..common.utils import get_git_revision_hash
 from .config import CheckpointType, Config, NMTModel
 from .config_utils import load_config
 from .tokenizer import Tokenizer
-from ..common.environment import SIL_NLP_ENV
 
 LOGGER = logging.getLogger(__package__ + ".test")
 
@@ -186,7 +186,7 @@ def process_individual_books(
 
             # Check if random ref line selected or not
             if select_rand_ref_line:
-                ref_lines: List[str] = [l.strip() for l in lines[2:] if len(l.strip()) > 0]
+                ref_lines: List[str] = [line.strip() for line in lines[2:] if len(line.strip()) > 0]
                 ref_index = random.randint(0, len(ref_lines) - 1)
                 ref_line = ref_lines[ref_index + 2].strip()
                 if len(book_refs) == 0:
@@ -249,7 +249,7 @@ def load_test_data(
             detok_pred_line = tokenizer.detokenize(pred_line)
             sys.append(detok_pred_line)
             if select_rand_ref_line:
-                ref_lines: List[str] = [l.strip() for l in lines[1:] if len(l.strip()) > 0]
+                ref_lines: List[str] = [line.strip() for line in lines[1:] if len(line.strip()) > 0]
                 ref_index = random.randint(0, len(ref_lines) - 1)
                 ref_line = ref_lines[ref_index]
                 if len(refs) == 0:
@@ -385,7 +385,7 @@ def test_checkpoint(
             if vref_paths is not None:
                 vref_paths.append(config.exp_dir / vref_file_names[i])
     if len(translation_paths) > 0:
-        LOGGER.info(f"Inferencing {checkpoint_name}...")
+        LOGGER.info(f"Inferencing {checkpoint_name}")
         model.translate_test_files(
             source_paths,
             translation_paths,
@@ -520,8 +520,8 @@ def test(
                 scorers,
                 books_nums,
             )
-        except:
-            LOGGER.info("No average checkpoint available.")
+        except ValueError:
+            LOGGER.warn("No average checkpoint available.")
 
     if best:
         step = best_step

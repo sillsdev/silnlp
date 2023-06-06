@@ -60,7 +60,7 @@ def extract_lexicons(aligner_ids: List[str], exp_dir: Path) -> None:
         aligner_id = aligner_id.strip().lower()
         aligner = get_aligner(aligner_id, exp_dir)
         aligner_name = get_aligner_name(aligner_id)
-        print(f"--- {aligner_name} ---")
+        LOGGER.info(f"Extracting lexicon using {aligner_name}")
         aligner.extract_lexicon(exp_dir / f"lexicon.{aligner_id}.txt")
 
 

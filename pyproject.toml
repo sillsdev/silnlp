@@ -28,6 +28,19 @@ version = "1.0.0"
 description = ""
 authors = ["SIL International"]
 
+[tool.poetry.scripts]
+silnlp-extract-corpora = "silnlp.common.extract_corpora:main"
+
+silnlp-nmt-preprocess = "silnlp.nmt.preprocess:main"
+silnlp-nmt-train = "silnlp.nmt.train:main"
+silnlp-nmt-test = "silnlp.nmt.test:main"
+silnlp-nmt-translate = "silnlp.nmt.translate:main"
+
+silnlp-alignment-preprocess = "silnlp.alignment.preprocess:main"
+silnlp-alignment-align = "silnlp.alignment.align:main"
+silnlp-alignment-test = "silnlp.alignment.test:main"
+silnlp-alignment-aggregate-results = "silnlp.alignment.aggregate_results:main"
+
 [tool.poetry.dependencies]
 python = ">=3.8,<3.9"
 pandas = "^1.0.4"
@@ -63,6 +76,7 @@ sacremoses = "^0.0.53"
 evaluate = "^0.3.0"
 python-docx = "^0.8.11"
 iso639-lang = "^2.1.0"
+eflomal = "^0.1"
 
 [tool.poetry.dev-dependencies]
 mypy = "^0.812"

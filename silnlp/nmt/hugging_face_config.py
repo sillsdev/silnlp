@@ -17,7 +17,7 @@ from datasets import Dataset
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
 from sacremoses import MosesPunctNormalizer
 from torch import Tensor, TensorType
-from torch.utils.checkpoint import checkpoint
+from torch.utils.checkpoint import checkpoint  # noqa: 401
 from transformers import (
     AutoConfig,
     AutoModelForSeq2SeqLM,
@@ -632,9 +632,9 @@ class HuggingFaceNMTModel(NMTModel):
         input_paths: List[Path],
         translation_paths: List[Path],
         vref_paths: Optional[List[Path]] = None,
-        checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
+        ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
-        checkpoint_path, _ = self.get_checkpoint_path(checkpoint)
+        checkpoint_path, _ = self.get_checkpoint_path(ckpt)
         model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(str(checkpoint_path))
         tokenizer = self._config.get_tokenizer()
         pipeline = PretokenizedTranslationPipeline(
@@ -675,10 +675,10 @@ class HuggingFaceNMTModel(NMTModel):
         src_iso: str,
         trg_iso: str,
         vrefs: Optional[Iterable[VerseRef]] = None,
-        checkpoint: Union[CheckpointType, str, int] = CheckpointType.LAST,
+        ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Iterable[str]:
         if self._config.model_dir.exists():
-            checkpoint_path, _ = self.get_checkpoint_path(checkpoint)
+            checkpoint_path, _ = self.get_checkpoint_path(ckpt)
             model_name = str(checkpoint_path)
         else:
             model_name = self._config.model
@@ -701,30 +701,30 @@ class HuggingFaceNMTModel(NMTModel):
         ):
             yield prediction["translation_text"]
 
-    def get_checkpoint_path(self, checkpoint: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
+    def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
         step: Optional[int] = None
-        if isinstance(checkpoint, str):
-            checkpoint = checkpoint.lower()
-            if "avg" in checkpoint:
-                checkpoint = CheckpointType.AVERAGE
-            elif "best" in checkpoint:
-                checkpoint = CheckpointType.BEST
-            elif "last" in checkpoint:
-                checkpoint = CheckpointType.LAST
+        if isinstance(ckpt, str):
+            ckpt = ckpt.lower()
+            if "avg" in ckpt:
+                ckpt = CheckpointType.AVERAGE
+            elif "best" in ckpt:
+                ckpt = CheckpointType.BEST
+            elif "last" in ckpt:
+                ckpt = CheckpointType.LAST
             else:
-                step = int(checkpoint)
-                checkpoint = CheckpointType.OTHER
-        if checkpoint is CheckpointType.BEST:
-            ckpt = get_best_checkpoint(self._config.model_dir)
+                step = int(ckpt)
+                ckpt = CheckpointType.OTHER
+        if ckpt is CheckpointType.BEST:
+            ckpt_path = get_best_checkpoint(self._config.model_dir)
             step = int(ckpt.name[11:])
-        elif checkpoint is CheckpointType.LAST:
-            ckpt = Path(get_last_checkpoint(self._config.model_dir))
+        elif ckpt is CheckpointType.LAST:
+            ckpt_path = Path(get_last_checkpoint(self._config.model_dir))
             step = int(ckpt.name[11:])
-        elif checkpoint is CheckpointType.OTHER and step is not None:
-            ckpt = self._config.model_dir / f"checkpoint-{step}"
+        elif ckpt is CheckpointType.OTHER and step is not None:
+            ckpt_path = self._config.model_dir / f"checkpoint-{step}"
         else:
-            raise ValueError(f"Unsupported checkpoint type: {checkpoint}.")
-        return ckpt, step
+            raise ValueError(f"Unsupported checkpoint type: {ckpt}.")
+        return ckpt_path, step
 
     def _create_training_arguments(self) -> Seq2SeqTrainingArguments:
         parser = HfArgumentParser(Seq2SeqTrainingArguments)
