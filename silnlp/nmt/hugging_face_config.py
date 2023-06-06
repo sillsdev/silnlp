@@ -42,6 +42,7 @@ from transformers.utils import PaddingStrategy, to_py_obj
 from transformers.utils.logging import tqdm
 from transformers.convert_slow_tokenizer import convert_slow_tokenizer
 
+from ..common.environment import SIL_NLP_ENV
 from ..common.corpus import count_lines, get_terms
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
 from .config import CheckpointType, Config, CorpusPair, NMTModel
@@ -319,8 +320,8 @@ class HuggingFaceConfig(Config):
                 model_name_or_path = (
                     str(self.exp_dir)
                     if (self.exp_dir / "tokenizer_config.json").is_file()
-                    else str(Path("silnlp", "assets"))
-                    if Path("silnlp", "assets", "tokenizer_config.json")
+                    else str(SIL_NLP_ENV.assets_dir)
+                    if (SIL_NLP_ENV.assets_dir / "tokenizer_config.json").is_file()
                     else self.model
                 )
                 self._tokenizer = NllbTokenizerFast.from_pretrained(model_name_or_path, use_fast=True)
