@@ -317,7 +317,11 @@ class HuggingFaceConfig(Config):
                 self._tokenizer.save_pretrained(str(self.exp_dir))
             else:
                 model_name_or_path = (
-                    str(self.exp_dir) if (self.exp_dir / "tokenizer_config.json").is_file() else self.model
+                    str(self.exp_dir)
+                    if (self.exp_dir / "tokenizer_config.json").is_file()
+                    else str(Path("silnlp", "assets"))
+                    if Path("silnlp", "assets", "tokenizer_config.json")
+                    else self.model
                 )
                 self._tokenizer = NllbTokenizerFast.from_pretrained(model_name_or_path, use_fast=True)
         self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
