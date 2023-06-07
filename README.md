@@ -36,7 +36,6 @@ __Download and install__ the following before creating any projects or starting 
    * Will also work with Python 3.8, but not Python 3.9 because of a [llvmlite incompatability](https://stackoverflow.com/questions/65798319/llvmlite-failed-to-install-error-building-llvmlite)
    * Can alternatively install Python using [miniconda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/windows.html) if you're planning to use more than one version of Python. If following this method, activate your conda environment before installing Poetry.
 3. [Poetry](https://python-poetry.org/docs/#installation)
-   * Note that the specific version of poetry probably isn't required for running locally. However it can cause problems if the local version is different than the version on ClearML.
    * Note that whether the command should call python or python3 depends on which is required on your machine.
    * It may (or may not) be possible to run the curl command within a VSCode terminal. If that causes permission errors close VS Code and try it in an elevated CMD prompt.
 
