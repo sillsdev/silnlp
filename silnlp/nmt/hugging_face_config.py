@@ -721,10 +721,10 @@ class HuggingFaceNMTModel(NMTModel):
                 ckpt = CheckpointType.OTHER
         if ckpt is CheckpointType.BEST:
             ckpt_path = get_best_checkpoint(self._config.model_dir)
-            step = int(ckpt.name[11:])
+            step = int(ckpt_path.name[11:])
         elif ckpt is CheckpointType.LAST:
             ckpt_path = Path(get_last_checkpoint(self._config.model_dir))
-            step = int(ckpt.name[11:])
+            step = int(ckpt_path.name[11:])
         elif ckpt is CheckpointType.OTHER and step is not None:
             ckpt_path = self._config.model_dir / f"checkpoint-{step}"
         else:
