@@ -35,25 +35,38 @@ __Download and install__ the following before creating any projects or starting 
 2. [Python 3.7](https://www.python.org/downloads/) (latest minor version, ie 3.7.9)
    * Will also work with Python 3.8, but not Python 3.9 because of a [llvmlite incompatability](https://stackoverflow.com/questions/65798319/llvmlite-failed-to-install-error-building-llvmlite)
    * Can alternatively install Python using [miniconda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/windows.html) if you're planning to use more than one version of Python. If following this method, activate your conda environment before installing Poetry.
-3. Poetry
+3. [Poetry](https://python-poetry.org/docs/#installation)
+   * Note that the specific version of poetry probably isn't required for running locally. However it can cause problems if the local version is different than the version on ClearML.
+   * Note that whether the command should call python or python3 depends on which is required on your machine.
+   * It may (or may not) be possible to run the curl command within a VSCode terminal. If that causes permission errors close VS Code and try it in an elevated CMD prompt.
 
-   * Windows:
 
+   Windows:
+
+   At an administrator CMD prompt or a terminal within VSCode run:
+      ```
+      curl -sSL https://install.python-poetry.org | python - --version 1.2.2 
+      ```
+      
+    
+      
       In Powershell, run:
       ```
       (Invoke-WebRequest -Uri https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py -UseBasicParsing).Content | python
       ```
 
-   * Linux:
+
+   ### Linux:
 
       In terminal, run:
       ```
-      curl -sSL https://install.python-poetry.org | python3 -
+      curl -sSL https://install.python-poetry.org | python3 - 
       ```
       Add the following line to your .bashrc file in your home directory:
       ```
       export PATH="$HOME/.local/bin:$PATH"
       ```
+      
 
 4. .NET Core SDK
    * The necessary versions are 7.0 and 3.1. If your machine is only able to install version 7.0, you can set the DOTNET_ROLL_FORWARD environment variable to "LatestMajor", which will allow you to run anything that depends on dotnet 3.1.
