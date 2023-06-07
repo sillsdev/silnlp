@@ -83,7 +83,11 @@ def load_all_lexicons(exp_dir: Path) -> Dict[str, Lexicon]:
 def load_vrefs(vref_file_path: Path) -> List[VerseRef]:
     vrefs: List[VerseRef] = []
     for line in load_corpus(vref_file_path):
-        vrefs.append(VerseRef.from_string(line))
+        if line[0].isdigit():
+            vref = VerseRef.from_bbbcccvvv(int(line))
+        else:
+            vref = VerseRef.from_string(line)
+        vrefs.append(vref)
     return vrefs
 
 

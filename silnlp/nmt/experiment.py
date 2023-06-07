@@ -1,9 +1,7 @@
 import argparse
 import os
-#import time
 from dataclasses import dataclass
 from pathlib import Path
-#from types import FunctionType
 from typing import Optional
 
 from ..common.environment import SIL_NLP_ENV
@@ -91,7 +89,8 @@ def main() -> None:
         "--clearml-queue",
         default=None,
         type=str,
-        help="Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run it locally and register it with ClearML.",
+        help="Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run "
+        + "it locally and register it with ClearML.",
     )
     parser.add_argument("--save-checkpoints", default=False, action="store_true", help="Save checkpoints to S3 bucket")
     parser.add_argument("--preprocess", default=False, action="store_true", help="Run the preprocess step.")
@@ -99,7 +98,12 @@ def main() -> None:
     parser.add_argument("--test", default=False, action="store_true", help="Run the test step.")
     parser.add_argument("--score-by-book", default=False, action="store_true", help="Score individual books")
     parser.add_argument("--mt-dir", default=None, type=str, help="The machine translation directory.")
-    parser.add_argument("--debug", default=False, action="store_true", help="Show information about the environment variables and arguments.")
+    parser.add_argument(
+        "--debug",
+        default=False,
+        action="store_true",
+        help="Show information about the environment variables and arguments.",
+    )
 
     args = parser.parse_args()
 
