@@ -13,6 +13,13 @@
 		// Path is relataive to the devcontainer.json file.
 		"dockerfile": "Dockerfile"
 	},
+	"containerEnv": {
+		"AWS_REGION": "${localEnv:AWS_REGION}",
+		"AWS_ACCESS_KEY_ID": "${localEnv:AWS_ACCESS_KEY_ID}",
+		"AWS_SECRET_ACCESS_KEY": "${localEnv:AWS_SECRET_ACCESS_KEY}",
+		"CLEARML_API_ACCESS_KEY": "${localEnv:CLEARML_API_ACCESS_KEY}",
+		"CLEARML_API_SECRET_KEY": "${localEnv:CLEARML_API_SECRET_KEY}"
+	},
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
@@ -27,7 +34,16 @@
 			// Set *default* container specific settings.json values on container create.
 			"settings": {
 				"python.defaultInterpreterPath": "/usr/local/bin/python",
-				"python.formatting.provider": "black",
+				"python.linting.enabled": true,
+				"python.formatting.autopep8Path": "/usr/local/py-utils/bin/autopep8",
+				"python.formatting.blackPath": "/usr/local/py-utils/bin/black",
+				"python.formatting.yapfPath": "/usr/local/py-utils/bin/yapf",
+				"python.linting.banditPath": "/usr/local/py-utils/bin/bandit",
+				"python.linting.flake8Path": "/usr/local/py-utils/bin/flake8",
+				"python.linting.mypyPath": "/usr/local/py-utils/bin/mypy",
+				"python.linting.pycodestylePath": "/usr/local/py-utils/bin/pycodestyle",
+				"python.linting.pydocstylePath": "/usr/local/py-utils/bin/pydocstyle",
+				"python.linting.pylintPath": "/usr/local/py-utils/bin/pylint",
 				"python.linting.pylintEnabled": true,
 				"editor.formatOnSave": true,
 				"editor.formatOnType": true
@@ -39,7 +55,10 @@
 				"ms-python.pylint",
 				"ms-python.black-formatter",
 				"ms-vscode.cpptools-extension-pack",
-				"ms-azuretools.vscode-docker"
+				"ms-azuretools.vscode-docker",
+				"ms-python.flake8",
+				"eamodio.gitlens",
+				"donjayamanne.githistory"
 			]
 		}
 	}
