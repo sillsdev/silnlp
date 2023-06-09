@@ -49,6 +49,7 @@ ALIGNERS: Dict[str, Tuple[Type[Aligner], str]] = {
     "dotnet_ibm4": (Ibm4DotnetMachineAligner, ".NET-IBM-4"),
     "dotnet_hmm": (HmmDotnetMachineAligner, ".NET-HMM"),
     "dotnet_pt": (ParatextDotnetMachineAligner, ".NET-PT"),
+    "pt": (ParatextDotnetMachineAligner, "PT"),
     "giza_ibm1": (Ibm1GizaAligner, "Giza-IBM-1"),
     "giza_ibm2": (Ibm2GizaAligner, "Giza-IBM-2"),
     "giza_hmm": (HmmGizaAligner, "Giza-HMM"),
