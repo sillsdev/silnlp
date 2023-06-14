@@ -688,7 +688,10 @@ class HuggingFaceNMTModel(NMTModel):
         else:
             model_name = self._config.model
         model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+        if model.config.max_length < 512:
+            model.config.max_length = 512
         tokenizer = self._config.get_tokenizer()
+        model.resize_token_embeddings(len(tokenizer))
         lang_codes: Dict[str, str] = self._config.data["lang_codes"]
         pipeline = TranslationPipeline(
             model=model,
