@@ -296,20 +296,21 @@ class HuggingFaceConfig(Config):
                 if lang_code not in self._tokenizer.lang_code_to_id:
                     add_lang_code_to_tokenizer(self._tokenizer, lang_code)
                     updated = True
-            missing_characters = find_missing_characters(
-                self._tokenizer, list(self.src_file_paths) + list(self.trg_file_paths)
-            )
-            if missing_characters:
-                missing_characters_underscore = ["_" + c for c in missing_characters]
-                missing_characters = missing_characters + missing_characters_underscore
-                self._tokenizer.add_tokens(missing_characters)
-                updated = True
+            if self.root.get("update_tokenizer"):
+                missing_characters = find_missing_characters(
+                    self._tokenizer, list(self.src_file_paths) + list(self.trg_file_paths)
+                )
+                if missing_characters:
+                    missing_characters_underscore = ["_" + c for c in missing_characters]
+                    missing_characters = missing_characters + missing_characters_underscore
+                    self._tokenizer.add_tokens(missing_characters)
+                    updated = True
             if updated:
                 self._tokenizer.save_pretrained(self.exp_dir)
 
     def get_tokenizer(self) -> PreTrainedTokenizer:
         if self._tokenizer is None:
-            if (self.exp_dir / "sentencepiece.bpe.model").is_file() and not (
+            if self.root.get("update_tokenizer") and (self.exp_dir / "sentencepiece.bpe.model").is_file() and not (
                 self.exp_dir / "tokenizer_config.json"
             ).is_file():
                 self._tokenizer = NllbTokenizer.from_pretrained(str(self.exp_dir))
@@ -321,7 +322,7 @@ class HuggingFaceConfig(Config):
                     str(self.exp_dir)
                     if (self.exp_dir / "tokenizer_config.json").is_file()
                     else str(SIL_NLP_ENV.assets_dir)
-                    if (SIL_NLP_ENV.assets_dir / "tokenizer_config.json").is_file()
+                    if self.root.get("update_tokenizer") and (SIL_NLP_ENV.assets_dir / "tokenizer_config.json").is_file()
                     else self.model
                 )
                 self._tokenizer = NllbTokenizerFast.from_pretrained(model_name_or_path, use_fast=True)
