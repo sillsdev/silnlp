@@ -320,7 +320,7 @@ class HuggingFaceConfig(Config):
             else:
                 model_name_or_path = (
                     str(self.exp_dir)
-                    if (self.exp_dir / "tokenizer_config.json").is_file()
+                    if not self.root.get("update_tokenizer") and (self.exp_dir / "tokenizer_config.json").is_file()
                     else str(SIL_NLP_ENV.assets_dir)
                     if self.root.get("update_tokenizer") and (SIL_NLP_ENV.assets_dir / "tokenizer_config.json").is_file()
                     else self.model
