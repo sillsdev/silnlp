@@ -174,7 +174,6 @@ def find_missing_characters(tokenizer: PreTrainedTokenizer, corpus: List[Path]) 
     # find characters not in NLLB tokenizer
     return missing_characters
 
-
 def is_sublist(sub: List[int], lst: List[int]) -> bool:
     ln = len(sub)
     if ln >= len(lst):
@@ -286,6 +285,23 @@ class HuggingFaceConfig(Config):
             self.train["max_source_length"],
             self.train["max_target_length"],
         )
+    
+    def _add_tokens(self, missing_characters: List[str]) -> None:
+        missing_characters_underscore = ["_" + c for c in missing_characters]
+        missing_tokens = missing_characters + missing_characters_underscore
+        self._tokenizer.save_pretrained(self.exp_dir)
+        with open(self.exp_dir / "tokenizer.json", "r+", encoding="utf-8-sig") as f:
+            data = json.load(f)
+            vocab_len = len(data["model"]["vocab"].keys())
+            added_tokens_max_id = max([added_token["id"] for added_token in data["added_tokens"]]) 
+            start_id = max(vocab_len, added_tokens_max_id + 1)
+            for i,token in enumerate(missing_tokens):
+                data["model"]["vocab"][token] = start_id + i
+            f.seek(0)
+            json.dump(data, f, ensure_ascii=False, indent=4)
+            f.truncate()
+        self._tokenizer = NllbTokenizerFast.from_pretrained(self.exp_dir, use_fast=True)
+        return
 
     def _build_vocabs(self) -> None:
         if self.data["add_new_lang_code"]:
@@ -296,17 +312,15 @@ class HuggingFaceConfig(Config):
                 if lang_code not in self._tokenizer.lang_code_to_id:
                     add_lang_code_to_tokenizer(self._tokenizer, lang_code)
                     updated = True
-            if self.root.get("update_tokenizer"):
-                missing_characters = find_missing_characters(
-                    self._tokenizer, list(self.src_file_paths) + list(self.trg_file_paths)
-                )
-                if missing_characters:
-                    missing_characters_underscore = ["_" + c for c in missing_characters]
-                    missing_characters = missing_characters + missing_characters_underscore
-                    self._tokenizer.add_tokens(missing_characters)
-                    updated = True
             if updated:
                 self._tokenizer.save_pretrained(self.exp_dir)
+        if self.root.get("update_tokenizer"):
+            missing_characters = find_missing_characters(
+                self._tokenizer, list(self.src_file_paths) + list(self.trg_file_paths)
+            )
+            if missing_characters:
+                self._add_tokens(missing_characters)
+            
 
     def get_tokenizer(self) -> PreTrainedTokenizer:
         if self._tokenizer is None:
