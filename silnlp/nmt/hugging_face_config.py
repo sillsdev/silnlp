@@ -706,7 +706,6 @@ class HuggingFaceNMTModel(NMTModel):
         if model.config.max_length < 512:
             model.config.max_length = 512
         tokenizer = self._config.get_tokenizer()
-        model.resize_token_embeddings(len(tokenizer))
         lang_codes: Dict[str, str] = self._config.data["lang_codes"]
         pipeline = TranslationPipeline(
             model=model,
