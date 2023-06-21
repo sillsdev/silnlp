@@ -71,7 +71,7 @@ class SILExperiment:
             last=True,
             best=True,
             by_book=self.score_by_book,
-            scorers={"bleu", "sentencebleu", "chrf3", "wer", "ter", "spbleu"},
+            scorers={"bleu", "chrf3", "wer", "ter", "spbleu"},
         )
         SIL_NLP_ENV.copy_experiment_to_bucket(
             self.name, patterns=("scores-*.csv", "test.*trg-predictions.*"), overwrite=True

@@ -22,7 +22,7 @@ LOGGER = logging.getLogger(__package__ + ".test")
 
 logging.getLogger("sacrebleu").setLevel(logging.ERROR)
 
-_SUPPORTED_SCORERS = {"bleu", "sentencebleu", "chrf3", "meteor", "wer", "ter", "spbleu"}
+_SUPPORTED_SCORERS = {"bleu", "chrf3", "meteor", "wer", "ter", "spbleu"}
 
 
 class PairScore:
@@ -75,15 +75,6 @@ def score_pair(
     bleu_score = None
     if "bleu" in scorers:
         bleu_score = sacrebleu.corpus_bleu(
-            pair_sys,
-            pair_refs,
-            lowercase=True,
-            tokenize=config.data.get("sacrebleu_tokenize", "13a"),
-        )
-
-    if "sentencebleu" in scorers:
-        write_sentence_bleu(
-            config.exp_dir / (predictions_detok_file_name + ".scores.tsv"),
             pair_sys,
             pair_refs,
             lowercase=True,
@@ -272,58 +263,6 @@ def load_test_data(
                 books,
             )
     return sys, refs, book_dict
-
-
-def sentence_bleu(
-    hypothesis: str,
-    references: List[str],
-    smooth_method: str = "exp",
-    smooth_value: float = None,
-    lowercase: bool = False,
-    tokenize: str = "13a",
-    use_effective_order: bool = True,
-) -> BLEUScore:
-    """
-    Substitute for the sacrebleu version of sentence_bleu, which uses settings that aren't consistent with
-    the values we use for corpus_bleu, and isn't fully parameterized
-    """
-    metric = BLEU(
-        smooth_method=smooth_method,
-        smooth_value=smooth_value,
-        force=False,
-        lowercase=lowercase,
-        tokenize=tokenize,
-        effective_order=use_effective_order,
-    )
-    return metric.sentence_score(hypothesis, references)
-
-
-def write_sentence_bleu(
-    scores_path: Path,
-    preds: List[str],
-    refs: List[List[str]],
-    lowercase: bool = False,
-    tokenize: str = "13a",
-):
-    with scores_path.open("w", encoding="utf-8", newline="\n") as scores_file:
-        scores_file.write("Verse\tBLEU\t1-gram\t2-gram\t3-gram\t4-gram\tBP\tPrediction")
-        for ref in refs:
-            scores_file.write("\tReference")
-        scores_file.write("\n")
-        verse_num = 0
-        for pred in preds:
-            sentences: List[str] = []
-            for ref in refs:
-                sentences.append(ref[verse_num])
-            bleu = sentence_bleu(pred, sentences, lowercase=lowercase, tokenize=tokenize)
-            scores_file.write(
-                f"{verse_num + 1}\t{bleu.score:.2f}\t{bleu.precisions[0]:.2f}\t{bleu.precisions[1]:.2f}\t"
-                f"{bleu.precisions[2]:.2f}\t{bleu.precisions[3]:.2f}\t{bleu.bp:.3f}\t" + pred.rstrip("\n")
-            )
-            for sentence in sentences:
-                scores_file.write("\t" + sentence.rstrip("\n"))
-            scores_file.write("\n")
-            verse_num += 1
 
 
 def test_checkpoint(
