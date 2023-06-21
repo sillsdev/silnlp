@@ -6,12 +6,12 @@ from typing import List
 import sacrebleu
 
 from ..common.corpus import load_corpus
-from ..common.metrics import compute_meteor_score, compute_wer_score
+from ..common.metrics import compute_wer_score
 from ..common.utils import check_dotnet, get_git_revision_hash, get_mt_exp_dir, get_repo_dir
 from .config import load_config
 from ..common.environment import SIL_NLP_ENV
 
-SUPPORTED_SCORERS = {"bleu", "spbleu", "chrf3", "meteor", "wer", "ter"}
+SUPPORTED_SCORERS = {"bleu", "spbleu", "chrf3", "wer", "ter"}
 
 
 def get_iso(lang: str) -> str:
@@ -96,12 +96,6 @@ def main() -> None:
                 chrf3_score: float = chrf3.score
                 scorer_name = "chrF3"
                 score_str = f"{chrf3_score:.2f}"
-            elif scorer == "meteor":
-                meteor_score = compute_meteor_score(trg_iso, sys, [ref])
-                if meteor_score is None:
-                    continue
-                scorer_name = "METEOR"
-                score_str = f"{meteor_score:.2f}"
             elif scorer == "wer":
                 wer_score = compute_wer_score(sys, ref)
                 if wer_score == 0:

@@ -11,7 +11,7 @@ from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_number_to_i
 from sacrebleu.metrics import BLEU, BLEUScore
 
 from ..common.environment import SIL_NLP_ENV
-from ..common.metrics import compute_meteor_score, compute_wer_score
+from ..common.metrics import compute_wer_score
 from ..common.tf_utils import enable_eager_execution, enable_memory_growth
 from ..common.utils import get_git_revision_hash
 from .config import CheckpointType, Config, NMTModel
@@ -22,7 +22,7 @@ LOGGER = logging.getLogger(__package__ + ".test")
 
 logging.getLogger("sacrebleu").setLevel(logging.ERROR)
 
-_SUPPORTED_SCORERS = {"bleu", "chrf3", "meteor", "wer", "ter", "spbleu"}
+_SUPPORTED_SCORERS = {"bleu", "chrf3", "wer", "ter", "spbleu"}
 
 
 class PairScore:
@@ -85,11 +85,6 @@ def score_pair(
     if "chrf3" in scorers:
         chrf3_score = sacrebleu.corpus_chrf(pair_sys, pair_refs, char_order=6, beta=3, remove_whitespace=True)
         other_scores["CHRF3"] = chrf3_score.score
-
-    if "meteor" in scorers:
-        meteor_score = compute_meteor_score(trg_iso, pair_sys, pair_refs)
-        if meteor_score is not None:
-            other_scores["METEOR"] = meteor_score
 
     if "wer" in scorers:
         wer_score = compute_wer_score(pair_sys, pair_refs)
