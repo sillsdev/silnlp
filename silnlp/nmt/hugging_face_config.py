@@ -286,17 +286,15 @@ class HuggingFaceConfig(Config):
             self.train["max_target_length"],
         )
     
-    def _add_tokens(self, missing_characters: List[str]) -> None:
-        missing_characters_underscore = ["_" + c for c in missing_characters]
-        missing_tokens = missing_characters + missing_characters_underscore
+    def _add_tokens(self, missing_tokens: List[str]) -> None:
         self._tokenizer.save_pretrained(self.exp_dir)
-        with open(self.exp_dir / "tokenizer.json", "r+", encoding="utf-8-sig") as f:
+        with open(self.exp_dir / "tokenizer.json", "r+", encoding="utf-8") as f:
             data = json.load(f)
             vocab_len = len(data["model"]["vocab"].keys())
-            added_tokens_max_id = max([added_token["id"] for added_token in data["added_tokens"]]) 
-            start_id = max(vocab_len, added_tokens_max_id + 1)
+            #added_tokens_max_id = max([added_token["id"] for added_token in data["added_tokens"]]) 
+            #start_id = max(vocab_len, added_tokens_max_id + 1)
             for i,token in enumerate(missing_tokens):
-                data["model"]["vocab"][token] = start_id + i
+                data["model"]["vocab"][token] = vocab_len + i
             f.seek(0)
             json.dump(data, f, ensure_ascii=False, indent=4)
             f.truncate()
@@ -311,6 +309,8 @@ class HuggingFaceConfig(Config):
                 lang_code = lang_codes.get(iso, iso)
                 if lang_code not in self._tokenizer.lang_code_to_id:
                     add_lang_code_to_tokenizer(self._tokenizer, lang_code)
+                    if self.root.get("update_tokenizer"):
+                        self._add_tokens([lang_code])
                     updated = True
             if updated:
                 self._tokenizer.save_pretrained(self.exp_dir)
@@ -319,7 +319,9 @@ class HuggingFaceConfig(Config):
                 self._tokenizer, list(self.src_file_paths) + list(self.trg_file_paths)
             )
             if missing_characters:
-                self._add_tokens(missing_characters)
+                missing_characters_underscore = ["_" + c for c in missing_characters]
+                missing_tokens = missing_characters + missing_characters_underscore
+                self._add_tokens(missing_tokens)
             
 
     def get_tokenizer(self) -> PreTrainedTokenizer:
