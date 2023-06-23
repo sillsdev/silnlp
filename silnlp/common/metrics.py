@@ -1,13 +1,6 @@
-import os
-import subprocess
-import tempfile
-from pathlib import Path
-from typing import List, Optional
+from typing import List
 
-import psutil
 from opennmt.utils.wer import sentence_wer
-
-from ..common.corpus import write_corpus
 
 
 def compute_wer_score(hyps: List[str], refs: List[List[str]]) -> float:

@@ -11,7 +11,7 @@ from ..common.utils import check_dotnet, get_git_revision_hash, get_mt_exp_dir, 
 from .config import load_config
 from ..common.environment import SIL_NLP_ENV
 
-SUPPORTED_SCORERS = {"bleu", "spbleu", "chrf3", "wer", "ter"}
+SUPPORTED_SCORERS = {"bleu", "spbleu", "chrf", "chrf3", "chrf+", "chrf++", "wer", "ter"}
 
 
 def get_iso(lang: str) -> str:
@@ -91,11 +91,26 @@ def main() -> None:
                 score_str = f"{bleu.score:.2f}/{bleu.precisions[0]:.2f}/{bleu.precisions[1]:.2f}"
                 score_str += f"/{bleu.precisions[2]:.2f}/{bleu.precisions[3]:.2f}/{bleu.bp:.3f}/{bleu.sys_len:d}"
                 score_str += f"/{bleu.ref_len:d}"
+            elif scorer == "chrf":
+                chrf = sacrebleu.corpus_chrf(sys, [ref], char_order=6, beta=2, remove_whitespace=True)
+                chrf_score: float = chrf.score
+                scorer_name = "chrF"
+                score_str = f"{chrf_score:.2f}"
             elif scorer == "chrf3":
                 chrf3 = sacrebleu.corpus_chrf(sys, [ref], char_order=6, beta=3, remove_whitespace=True)
                 chrf3_score: float = chrf3.score
                 scorer_name = "chrF3"
                 score_str = f"{chrf3_score:.2f}"
+            elif scorer == "chrf+":
+                chrfplus = sacrebleu.corpus_chrf(sys, [ref], char_order=6, beta=2, remove_whitespace=True, word_order=1)
+                chrfplus_score: float = chrfplus.score
+                scorer_name = "chrF+"
+                score_str = f"{chrfplus_score:.2f}"
+            elif scorer == "chrf++":
+                chrfplusplus = sacrebleu.corpus_chrf(sys, [ref], char_order=6, beta=2, remove_whitespace=True)
+                chrfplusplus_score: float = chrfplusplus.score
+                scorer_name = "chrF++"
+                score_str = f"{chrfplusplus_score:.2f}"
             elif scorer == "wer":
                 wer_score = compute_wer_score(sys, ref)
                 if wer_score == 0:

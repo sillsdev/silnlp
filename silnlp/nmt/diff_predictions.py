@@ -45,13 +45,16 @@ SRC_TOKENS = "Source Tokens"
 PREDICTION = "Prediction"
 BLEU_SCORE = "BLEU"
 SPBLEU_SCORE = "spBLEU"
+CHRF2_SCORE = "chrF"
 CHRF3_SCORE = "chrF3"
+CHRFPLUS_SCORE = "chrF+"
+CHRFPLUSPLUS_SCORE = "chrF++"
 WER_SCORE = "WER"
 TER_SCORE = "TER"
 DICT_SRC = "Source"
 DICT_TRG = "Target"
 
-_SUPPORTED_SCORERS = { BLEU_SCORE, SPBLEU_SCORE, CHRF3_SCORE, WER_SCORE, TER_SCORE }
+_SUPPORTED_SCORERS = { BLEU_SCORE, SPBLEU_SCORE, CHRF_SCORE, CHRF3_SCORE, CHRFPLUS_SCORE, CHRFPLUSPLUS_SCORE, WER_SCORE, TER_SCORE }
 
 def sentence_bleu(
     hypothesis: str,
@@ -162,7 +165,7 @@ def add_stats(df: pd.DataFrame, sheet):
     sheet.write_string("A4", "STD")
     column_list = ["B", "C", "D", "E", "F"]
     column_idx = 0
-    for column_name in [BLEU_SCORE, SPBLEU_SCORE, CHRF3_SCORE, WER_SCORE, TER_SCORE]:
+    for column_name in [BLEU_SCORE, SPBLEU_SCORE, CHRF3_SCORE, CHRFPLUS_SCORE, CHRFPLUSPLUS_SCORE, WER_SCORE, TER_SCORE]:
         if column_name in df:
             column_id = column_list[column_idx]
             sheet.write_string(f"{column_id}1", f"{column_name}")
@@ -428,12 +431,30 @@ def add_scores(df: pd.DataFrame, scorers: List[str], preserve_case: bool, tokeni
                                                      lowercase=not preserve_case, tokenize="flores200")
                 scores.append(spbleu_score.score)
             df[SPBLEU_SCORE] = scores
+        elif scorer == CHRF_SCORE.lower():
+            for index, row in tqdm(df.iterrows(), desc='Calculating chrF scores ...'):
+                chrf_score = sacrebleu.corpus_chrf(
+                    [row[PREDICTION]], [[row[TRG_SENTENCE]]], char_order=6, beta=2, remove_whitespace=True)
+                scores.append(chrf_score.score)
+            df[CHRF_SCORE] = scores
         elif scorer == CHRF3_SCORE.lower():
             for index, row in tqdm(df.iterrows(), desc='Calculating chrF3 scores ...'):
-                chrf3_score = sacrebleu.corpus_chrf([row[PREDICTION]], [[row[TRG_SENTENCE]]],
-                                                    char_order=6, beta=3, remove_whitespace=True)
+                chrf3_score = sacrebleu.corpus_chrf(
+                    [row[PREDICTION]], [[row[TRG_SENTENCE]]], char_order=6, beta=3, remove_whitespace=True)
                 scores.append(chrf3_score.score)
             df[CHRF3_SCORE] = scores
+        elif scorer == CHRFPLUS_SCORE.lower():
+            for index, row in tqdm(df.iterrows(), desc='Calculating chrF+ scores ...'):
+                chrfplus_score = sacrebleu.corpus_chrf(
+                    [row[PREDICTION]], [[row[TRG_SENTENCE]]], char_order=6, beta=2, remove_whitespace=True, word_order=1)
+                scores.append(chrfplus_score.score)
+            df[CHRFPLUS_SCORE] = scores
+        elif scorer == CHRFPLUSPLUS_SCORE.lower():
+            for index, row in tqdm(df.iterrows(), desc='Calculating chrF++ scores ...'):
+                chrfplusplus_score = sacrebleu.corpus_chrf(
+                    [row[PREDICTION]], [[row[TRG_SENTENCE]]], char_order=6, beta=2, remove_whitespace=True, word_order=2)
+                scores.append(chrfplusplus_score.score)
+            df[CHRFPLUSPLUS_SCORE] = scores
         elif scorer == WER_SCORE.lower():
             for index, row in tqdm(df.iterrows(), desc='Calculating WER scores ...'):
                 wer_score = compute_wer_score([row[PREDICTION]], [[row[TRG_SENTENCE]]])

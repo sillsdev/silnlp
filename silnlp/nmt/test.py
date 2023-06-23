@@ -22,7 +22,7 @@ LOGGER = logging.getLogger(__package__ + ".test")
 
 logging.getLogger("sacrebleu").setLevel(logging.ERROR)
 
-_SUPPORTED_SCORERS = {"bleu", "chrf3", "wer", "ter", "spbleu"}
+_SUPPORTED_SCORERS = {"bleu", "chrf", "chrf3", "chrf+", "chrf++", "wer", "ter", "spbleu"}
 
 
 class PairScore:
@@ -82,9 +82,21 @@ def score_pair(
         )
 
     other_scores: Dict[str, float] = {}
+    if "chrf" in scorers:
+        chrf_score = sacrebleu.corpus_chrf(pair_sys, pair_refs, char_order=6, beta=2, remove_whitespace=True)
+        other_scores["CHRF"] = chrf_score.score
+
     if "chrf3" in scorers:
         chrf3_score = sacrebleu.corpus_chrf(pair_sys, pair_refs, char_order=6, beta=3, remove_whitespace=True)
         other_scores["CHRF3"] = chrf3_score.score
+
+    if "chrf+" in scorers:
+        chrfplus_score = sacrebleu.corpus_chrf(pair_sys, pair_refs, char_order=6, beta=2, remove_whitespace=True, word_order=1)
+        other_scores["CHRF+"] = chrfplus_score.score
+
+    if "chrf++" in scorers:
+        chrfplusplus_score = sacrebleu.corpus_chrf(pair_sys, pair_refs, char_order=6, beta=2, remove_whitespace=True, word_order=2)
+        other_scores["CHRF++"] = chrfplusplus_score.score
 
     if "wer" in scorers:
         wer_score = compute_wer_score(pair_sys, pair_refs)
