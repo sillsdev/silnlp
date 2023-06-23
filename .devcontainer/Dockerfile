@@ -20,8 +20,7 @@ RUN apt-get install -y \
     build-essential \
     gdb \
     curl \
-    unzip \
-    nano
+    unzip
 
 # Make some useful symlinks that are expected to exist
 RUN ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python3  & \

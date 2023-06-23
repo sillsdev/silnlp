@@ -342,8 +342,8 @@ class HuggingFaceConfig(Config):
                     else self.model
                 )
                 self._tokenizer = NllbTokenizerFast.from_pretrained(model_name_or_path, use_fast=True)
-        self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
-        self._build_vocabs()
+            self._build_vocabs()
+            self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
         return self._tokenizer
 
     def _write_dictionary(self, tokenizer: Tokenizer, pair: CorpusPair) -> int:
