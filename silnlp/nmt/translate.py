@@ -78,7 +78,7 @@ class TranslationTask:
                     displayed_error_already = True
                 else:
                     LOGGER.error(f"Was not able to translate {book}.")
-        SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
+        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM"), overwrite=True)
 
     def translate_text_files(
         self,
@@ -110,7 +110,7 @@ class TranslationTask:
                 translator.translate_text(src_file_path, trg_file_path, src_iso, trg_iso)
                 end = time.time()
                 print(f"Translated {src_file_path.name} to {trg_file_path.name} in {((end-start)/60):.2f} minutes")
-        SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
+        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM"), overwrite=True)
 
     def translate_files(self, src: str, trg: Optional[str], src_iso: Optional[str], trg_iso: Optional[str]) -> None:
         translator, config, step_str = self._init_translation_task(
@@ -166,7 +166,7 @@ class TranslationTask:
                 translator.translate_docx(src_file_path, trg_file_path, src_iso, trg_iso)
             elif ext == ".usfm" or ext == ".sfm":
                 translator.translate_usfm(src_file_path, trg_file_path, src_iso, trg_iso)
-        SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
+        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM"), overwrite=True)
 
     def _init_translation_task(self, experiment_suffix: str) -> Tuple[Translator, Config, str]:
         clearml = SILClearML(
