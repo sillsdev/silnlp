@@ -554,7 +554,9 @@ def test(
                 scorers,
                 books_nums,
             )
-
+    SIL_NLP_ENV.copy_experiment_to_bucket(
+        exp_name, patterns=("scores-*.csv", "test.*trg-predictions.*"), overwrite=True
+    )
     for step in sorted(results.keys()):
         num_refs = results[step][0].num_refs
         if num_refs == 0:

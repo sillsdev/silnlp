@@ -170,7 +170,7 @@ def find_missing_characters(tokenizer: PreTrainedTokenizer, corpus: List[Path]) 
     for file in corpus:
         with file.open("r", encoding="utf-8-sig") as f:
             charset = charset | set(f.read())
-    missing_characters = list(charset - vocab)
+    missing_characters = sorted(list(charset - vocab))
     # find characters not in NLLB tokenizer
     return missing_characters
 

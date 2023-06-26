@@ -22,6 +22,7 @@ def main() -> None:
 
     config.set_seed()
     config.preprocess(args.stats)
+    SIL_NLP_ENV.copy_experiment_to_bucket(exp_name)
 
 
 if __name__ == "__main__":
