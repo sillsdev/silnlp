@@ -435,6 +435,7 @@ class OpenNMTConfig(Config):
         if not self.data["tokenize"]:
             return NullTokenizer()
 
+        self._build_vocabs()
         if self.share_vocab:
             model_prefix = self.exp_dir / "sp"
             src_spp = sp.SentencePieceProcessor()
