@@ -48,7 +48,8 @@ class SILClearML:
             self._load_config()
 
             self.task.set_base_docker(
-                docker_image="nvidia/cuda:11.2.2-cudnn8-runtime-ubuntu20.04"
+                docker_image="ghcr.io/sillsdev/silnlp:latest",
+                docker_arguments="-v /home/clearml/.clearml/hf-cache:/root/.cache/huggingface"
             )
             if self.queue_name.lower() not in ("local", "locally"):
                 self.task.execute_remotely(queue_name=self.queue_name)
