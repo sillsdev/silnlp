@@ -2,17 +2,20 @@
 // README at: https://github.com/devcontainers/templates/tree/main/src/ubuntu
 {
 	"name": "SILNLP",
+	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
+	"build": {
+		"context": "..",
+		// Path is relative to the devcontainer.json file.
+		"dockerfile": "Dockerfile"
+	},
 	"runArgs": [
 		"--gpus",
 		"all",
 		"-v",
-		"${env:HOME}/.aws:/root/.aws" // Mount user's AWS credentials into the container
+		"${env:HOME}/.aws:/root/.aws", // Mount user's AWS credentials into the container
+		"-v",
+		"/home/clearml/.clearml/hf-cache:/root/.cache/huggingface"
 	],
-	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-	"build": {
-		// Path is relataive to the devcontainer.json file.
-		"dockerfile": "Dockerfile"
-	},
 	"containerEnv": {
 		"AWS_REGION": "${localEnv:AWS_REGION}",
 		"AWS_ACCESS_KEY_ID": "${localEnv:AWS_ACCESS_KEY_ID}",

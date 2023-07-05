@@ -89,6 +89,4 @@ pytest = "^6.2.4"
 [[tool.poetry.source]]
 name = "torch"
 url = "https://download.pytorch.org/whl/cu111"
-default = false
-secondary = true
-
+priority = "explicit"
