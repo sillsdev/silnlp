@@ -35,7 +35,7 @@ WORKDIR /root
 # Install apt packages
 RUN apt-get update
 RUN apt-get upgrade -y
-RUN apt-get install -y \
+RUN apt-get install --no-install-recommends -y \
     git \
     python$PYTHON_VERSION \
     python3-pip \
