@@ -46,4 +46,5 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2
     ./aws/install && \
     rm awscliv2.zip
 RUN rm -rf /var/lib/apt/lists/*
+RUN poetry config virtualenvs.create true && poetry config virtualenvs.in-project true
 CMD ["bash"]
