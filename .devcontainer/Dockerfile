@@ -1,6 +1,6 @@
 ARG CUDA_VERSION=11.2.2-cudnn8-runtime-ubuntu20.04
 ARG PYTHON_VERSION=3.8
-ARG POETRY_VERSION=1.5.1
+ARG POETRY_VERSION=1.3.2
 FROM nvidia/cuda:$CUDA_VERSION
 ARG PYTHON_VERSION
 ARG POETRY_VERSION
@@ -46,5 +46,6 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2
     ./aws/install && \
     rm awscliv2.zip
 RUN rm -rf /var/lib/apt/lists/*
-RUN poetry config virtualenvs.create true && poetry config virtualenvs.in-project true
+RUN poetry config virtualenvs.create true && \
+    poetry config virtualenvs.in-project true
 CMD ["bash"]

@@ -48,7 +48,7 @@ class SILClearML:
             self._load_config()
 
             self.task.set_base_docker(
-                docker_image="ghcr.io/sillsdev/silnlp:1.01.2",
+                docker_image="ghcr.io/sillsdev/silnlp:1.01.3",
                 docker_arguments="-v /home/clearml/.clearml/hf-cache:/root/.cache/huggingface"
             )
             if self.queue_name.lower() not in ("local", "locally"):
