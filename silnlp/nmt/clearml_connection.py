@@ -48,8 +48,15 @@ class SILClearML:
             self._load_config()
 
             self.task.set_base_docker(
-                docker_image="ghcr.io/sillsdev/silnlp:1.01.4",
-                docker_arguments="-v /home/clearml/.clearml/hf-cache:/root/.cache/huggingface"
+                #docker_image="ghcr.io/sillsdev/silnlp:1.01.4",
+                docker_image="nvidia/cuda:11.2.2-cudnn8-runtime-ubuntu20.04",
+                docker_arguments="-v /home/clearml/.clearml/hf-cache:/root/.cache/huggingface",
+                docker_setup_bash_script=[
+                    "apt install -y python3-venv",
+                    "python3 -m pip install --user pipx",
+                    "PATH=$PATH:/root/.local/bin",
+                    "pipx install poetry==1.2.2"
+                ]
             )
             if self.queue_name.lower() not in ("local", "locally"):
                 self.task.execute_remotely(queue_name=self.queue_name)
