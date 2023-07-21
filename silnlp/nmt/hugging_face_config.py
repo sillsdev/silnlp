@@ -41,8 +41,10 @@ from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import PaddingStrategy, to_py_obj
 from transformers.utils.logging import tqdm
 from transformers.convert_slow_tokenizer import convert_slow_tokenizer
+from tokenizers import SentencePieceBPETokenizer
+from tokenizers.trainers import BpeTrainer
 
-from ..common.environment import SIL_NLP_ENV
+from ..common.environment import SIL_NLP_ENV, download_if_s3_paths
 from ..common.corpus import count_lines, get_terms
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
 from .config import CheckpointType, Config, CorpusPair, NMTModel
@@ -287,7 +289,7 @@ class HuggingFaceConfig(Config):
         )
     
     def _add_tokens(self, missing_tokens: List[str]) -> None:
-        self._tokenizer.save_pretrained(self.exp_dir)
+        self._tokenizer.save_pretrained(str(self.exp_dir))
         with open(self.exp_dir / "tokenizer.json", "r+", encoding="utf-8") as f:
             data = json.load(f)
             vocab_len = len(data["model"]["vocab"].keys())
@@ -298,10 +300,44 @@ class HuggingFaceConfig(Config):
             f.seek(0)
             json.dump(data, f, ensure_ascii=False, indent=4)
             f.truncate()
-        self._tokenizer = NllbTokenizerFast.from_pretrained(self.exp_dir, use_fast=True)
+        self._tokenizer = NllbTokenizerFast.from_pretrained(str(self.exp_dir), use_fast=True)
+        return
+
+    def _add_merges(self, sp_tokenizer) -> None:
+        sp_tokenizer.save(str(self.exp_dir / "tokenizer_sp.json"))
+        with open(self.exp_dir / "tokenizer.json", "r+", encoding="utf-8") as tok_file:
+            with open(self.exp_dir / "tokenizer_sp.json", "r+", encoding="utf-8") as sp_file:
+                tok_data = json.load(tok_file)
+                sp_data = json.load(sp_file)
+                tok_data["model"]["merges"] =  sp_data["model"]["merges"] + tok_data["model"]["merges"]
+                tok_file.seek(0)
+                json.dump(tok_data, tok_file, ensure_ascii=False, indent=4)
+                tok_file.truncate()
+        self._tokenizer = NllbTokenizerFast.from_pretrained(str(self.exp_dir), use_fast=True)
+        return
+
+    def _train_sp_tokenizer(self, files, vocab_size) -> SentencePieceBPETokenizer:
+        reference_tok = NllbTokenizerFast.from_pretrained(str(SIL_NLP_ENV.assets_dir), use_fast=True)
+        sp_tok = SentencePieceBPETokenizer()
+        sp_tok.normalizer = reference_tok.backend_tokenizer.normalizer
+        sp_tok.train(
+            files,
+            vocab_size=vocab_size,
+            min_frequency=2,
+            special_tokens=["<s>", "<pad>", "</s>", "<unk>", "<mask>"]
+        )
+        return sp_tok
+
+    def _add_trained_tokens(self, file_paths, vocab_size) -> None:
+        files = [str(f) for f in download_if_s3_paths(file_paths)]
+        sp_tokenizer = self._train_sp_tokenizer(files, vocab_size)
+        missing_tokens = sorted(list(set(sp_tokenizer.get_vocab().keys()) - set(self._tokenizer.get_vocab().keys())))
+        self._add_tokens(missing_tokens)
+        self._add_merges(sp_tokenizer)
         return
 
     def _build_vocabs(self) -> None:
+        tokenizer_dict = self.root.get("tokenizer")
         if self.data["add_new_lang_code"]:
             lang_codes: Dict[str, str] = self.data["lang_codes"]
             updated = False
@@ -309,24 +345,33 @@ class HuggingFaceConfig(Config):
                 lang_code = lang_codes.get(iso, iso)
                 if lang_code not in self._tokenizer.lang_code_to_id:
                     add_lang_code_to_tokenizer(self._tokenizer, lang_code)
-                    if self.root.get("update_tokenizer"):
+                    if tokenizer_dict and (tokenizer_dict.get("update_src") or tokenizer_dict.get("update_trg")):
                         self._add_tokens([lang_code])
                     updated = True
             if updated:
                 self._tokenizer.save_pretrained(self.exp_dir)
-        if self.root.get("update_tokenizer"):
-            missing_characters = find_missing_characters(
-                self._tokenizer, list(self.src_file_paths) + list(self.trg_file_paths)
-            )
-            if missing_characters:
-                missing_characters_underscore = ["_" + c for c in missing_characters]
-                missing_tokens = missing_characters + missing_characters_underscore
-                self._add_tokens(missing_tokens)
-            
+        if tokenizer_dict and (tokenizer_dict.get("update_src") or tokenizer_dict.get("update_trg")):
+            if tokenizer_dict.get("trained_tokens") and (SIL_NLP_ENV.assets_dir / "tokenizer_config.json").is_file():
+                if tokenizer_dict.get("share_vocab") and tokenizer_dict.get("update_src") and tokenizer_dict.get("update_trg"):
+                    self._add_trained_tokens(list(self.src_file_paths) + list(self.trg_file_paths), tokenizer_dict.get("src_vocab_size") + tokenizer_dict.get("trg_vocab_size"))
+                else:
+                    if tokenizer_dict.get("update_src"):
+                        self._add_trained_tokens(list(self.src_file_paths), tokenizer_dict.get("src_vocab_size"))
+                    if tokenizer_dict.get("update_trg"):
+                        self._add_trained_tokens(list(self.trg_file_paths), tokenizer_dict.get("trg_vocab_size"))
+            else:
+                missing_characters = find_missing_characters(
+                    self._tokenizer, list(self.src_file_paths) + list(self.trg_file_paths)
+                )
+                if missing_characters:
+                    missing_characters_underscore = ["_" + c for c in missing_characters]
+                    missing_tokens = missing_characters + missing_characters_underscore
+                    self._add_tokens(missing_tokens)
 
     def get_tokenizer(self) -> PreTrainedTokenizer:
         if self._tokenizer is None:
-            if self.root.get("update_tokenizer") and (self.exp_dir / "sentencepiece.bpe.model").is_file() and not (
+            tokenizer_dict = self.root.get("tokenizer")
+            if tokenizer_dict and (tokenizer_dict.get("update_src") or tokenizer_dict.get("update_trg")) and (self.exp_dir / "sentencepiece.bpe.model").is_file() and not (
                 self.exp_dir / "tokenizer_config.json"
             ).is_file():
                 self._tokenizer = NllbTokenizer.from_pretrained(str(self.exp_dir))
@@ -336,9 +381,9 @@ class HuggingFaceConfig(Config):
             else:
                 model_name_or_path = (
                     str(self.exp_dir)
-                    if not self.root.get("update_tokenizer") and (self.exp_dir / "tokenizer_config.json").is_file()
+                    if (not tokenizer_dict or not (tokenizer_dict.get("update_src") or tokenizer_dict.get("update_trg"))) and (self.exp_dir / "tokenizer_config.json").is_file()
                     else str(SIL_NLP_ENV.assets_dir)
-                    if self.root.get("update_tokenizer") and (SIL_NLP_ENV.assets_dir / "tokenizer_config.json").is_file()
+                    if (tokenizer_dict and (tokenizer_dict.get("update_src") or tokenizer_dict.get("update_trg"))) and (SIL_NLP_ENV.assets_dir / "tokenizer_config.json").is_file()
                     else self.model
                 )
                 self._tokenizer = NllbTokenizerFast.from_pretrained(model_name_or_path, use_fast=True)
