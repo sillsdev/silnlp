@@ -465,6 +465,7 @@ class Config(ABC):
                 LOGGER.error("The source file " + str(file) + " does not exist.")
                 return
 
+        self._build_vocabs()
         tokenizer = self.create_tokenizer()
         self._build_corpora(tokenizer, stats)
         LOGGER.info("Preprocessing completed")
