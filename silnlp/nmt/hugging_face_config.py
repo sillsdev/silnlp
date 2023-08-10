@@ -342,7 +342,7 @@ class HuggingFaceConfig(Config):
         return missing_tokens, sp_tokenizer
 
     def _build_vocabs(self) -> None:
-        tokenizer_dict = self.root.get("tokenizer")
+        tokenizer_dict = self.root.get("data").get("tokenizer")
         self._tokenizer = self.get_tokenizer()
         tokens = []
         trained_tokenizers = []
@@ -388,7 +388,7 @@ class HuggingFaceConfig(Config):
 
     def get_tokenizer(self) -> PreTrainedTokenizer:
         if self._tokenizer is None:
-            tokenizer_dict = self.root.get("tokenizer")
+            tokenizer_dict = self.root.get("data").get("tokenizer")
             if tokenizer_dict and (tokenizer_dict.get("update_src") or tokenizer_dict.get("update_trg")) and (self.exp_dir / "sentencepiece.bpe.model").is_file() and not (
                 self.exp_dir / "tokenizer_config.json"
             ).is_file():
@@ -543,7 +543,7 @@ class HuggingFaceNMTModel(NMTModel):
 
         old_embeddings = model.get_input_embeddings()
         old_num_tokens = old_embeddings.weight.size(dim=0)
-        tokenizer_dict = self._config.root.get("tokenizer")
+        tokenizer_dict = self._config.root.get("data").get("tokenizer")
         if len(tokenizer) > old_num_tokens and tokenizer_dict.get("init_unk"):
             vocab = tokenizer.get_vocab()
             unk_embedding = old_embeddings.weight.data[vocab["<unk>"]]
