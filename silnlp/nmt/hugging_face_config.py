@@ -11,7 +11,6 @@ import datasets.utils.logging as datasets_logging
 import evaluate
 import numpy as np
 import torch
-from torch import nn
 import transformers.utils.logging as transformers_logging
 import yaml
 from datasets import Dataset
@@ -20,13 +19,11 @@ from sacremoses import MosesPunctNormalizer
 from torch import Tensor, TensorType
 from torch.utils.checkpoint import checkpoint  # noqa: 401
 from transformers import (
-    AdamW,
     AutoConfig,
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
     DataCollatorForSeq2Seq,
     EarlyStoppingCallback,
-    get_constant_schedule,
     HfArgumentParser,
     M2M100ForConditionalGeneration,
     M2M100Tokenizer,
