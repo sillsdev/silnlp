@@ -338,7 +338,7 @@ class HuggingFaceConfig(Config):
         missing_tokens = sorted(list(set(sp_tokenizer.get_vocab().keys()) - set(self._tokenizer.get_vocab().keys())))
         return missing_tokens, sp_tokenizer
 
-    def _build_vocabs(self) -> None:
+    def _build_vocabs(self, stats: bool=False) -> None:
         tokenizer_dict = self.root.get("data").get("tokenizer")
         self._tokenizer = self.get_tokenizer()
         tokens = []
@@ -379,6 +379,11 @@ class HuggingFaceConfig(Config):
                 elif tokenizer_dict.get("update_trg"):
                     file_paths = list(self.trg_file_paths)
                 missing_tokens = find_missing_characters(self._tokenizer, file_paths)
+            if stats:    
+                with ExitStack() as stack:
+                    stats_file: Optional[TextIO] = None
+                    stats_file = stack.enter_context((self.exp_dir / "tokenization_stats.txt").open("w", encoding="utf-8", newline="\n"))
+                    stats_file.write(f"Added tokens: {len(missing_tokens)}")
             tokens += missing_tokens
         if tokens:
             self._add_tokens(tokens, trained_tokenizers)
