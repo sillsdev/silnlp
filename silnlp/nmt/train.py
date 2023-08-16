@@ -45,6 +45,7 @@ def main() -> None:
         LOGGER.info(f"Training {exp_name}")
         try:
             model.train()
+            SIL_NLP_ENV.copy_experiment_to_bucket(exp_name)
         except RuntimeError as e:
             LOGGER.warning(str(e))
         LOGGER.info(f"Finished training {exp_name}")

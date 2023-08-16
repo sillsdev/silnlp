@@ -3,9 +3,10 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 from pathlib import Path, PurePath
 from platform import system, uname
-from typing import Iterable, List, Optional, Sequence, Union
+from typing import Iterable, List, Optional, Sequence, Union, Callable
 
 import boto3
 from dotenv import load_dotenv
@@ -163,7 +164,7 @@ class SilNlpEnv:
                     LOGGER.debug("File already exists in local cache: " + rel_path)
                 else:
                     LOGGER.info("Downloading " + rel_path)
-                    data_bucket.download_file(obj.object_key, str(temp_dest_path))
+                    try_n_times(lambda: data_bucket.download_file(obj.object_key, str(temp_dest_path)))
 
     def copy_experiment_to_bucket(self, name: str, patterns: Union[str, Sequence[str]] = [], overwrite: bool = False):
         if not self.is_bucket:
@@ -196,7 +197,7 @@ class SilNlpEnv:
                         LOGGER.debug("File already exists in S3 bucket: " + dest_file)
                     else:
                         LOGGER.info("Uploading " + dest_file)
-                        data_bucket.upload_file(source_file, dest_file)
+                        try_n_times(lambda: data_bucket.upload_file(source_file, dest_file))
 
     def get_source_experiment_path(self, tmp_path: Path) -> str:
         end_of_path = str(tmp_path)[len(str(self.mt_experiments_dir)) :]
@@ -221,9 +222,22 @@ def download_if_s3_paths(paths: Iterable[S3Path]) -> List[Path]:
                 data_bucket = s3.Bucket(str(SIL_NLP_ENV.data_dir).strip("\\/"))
                 s3_setup = True
             temp_path = temp_root / path.name
-            data_bucket.download_file(path.key, str(temp_path))
+            try_n_times(lambda: data_bucket.download_file(path.key, str(temp_path)))
             return_paths.append(temp_path)
     return return_paths
+
+
+def try_n_times(func: Callable, n=10):
+    for i in range(n):
+        try:
+            func()
+            break
+        except Exception as e:
+            if i < n - 1:
+                LOGGER.exception(f"Failed {i+1} of {n} times.  Retrying.")
+                time.sleep(5)
+            else:
+                raise e
 
 
 def pathify(path: Path) -> Path:
