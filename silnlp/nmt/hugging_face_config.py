@@ -340,7 +340,7 @@ class HuggingFaceConfig(Config):
 
     def _build_vocabs(self, stats: bool=False) -> None:
         tokenizer_dict = self.root.get("data").get("tokenizer")
-        self._tokenizer = self.get_tokenizer()
+        self._tokenizer = self.get_tokenizer(preprocess=True)
         tokens = []
         trained_tokenizers = []
         if self.data["add_new_lang_code"]:
@@ -388,25 +388,29 @@ class HuggingFaceConfig(Config):
         if tokens:
             self._add_tokens(tokens, trained_tokenizers)
 
-    def get_tokenizer(self) -> PreTrainedTokenizer:
+    def get_tokenizer(self, preprocess: bool=False) -> PreTrainedTokenizer:
         if self._tokenizer is None:
-            tokenizer_dict = self.root.get("data").get("tokenizer")
-            if tokenizer_dict and (tokenizer_dict.get("update_src") or tokenizer_dict.get("update_trg")) and (self.exp_dir / "sentencepiece.bpe.model").is_file() and not (
-                self.exp_dir / "tokenizer_config.json"
-            ).is_file():
-                self._tokenizer = NllbTokenizer.from_pretrained(str(self.exp_dir))
-                self._tokenizer = convert_slow_tokenizer(self._tokenizer)
-                self._tokenizer = NllbTokenizerFast(tokenizer_object=self._tokenizer)
-                self._tokenizer.save_pretrained(str(self.exp_dir))
-            else:
-                if (not tokenizer_dict or not (tokenizer_dict.get("update_src") or tokenizer_dict.get("update_trg"))) and (self.exp_dir / "tokenizer_config.json").is_file():
-                    model_name_or_path = str(self.exp_dir)
-                elif (tokenizer_dict and (tokenizer_dict.get("update_src") or tokenizer_dict.get("update_trg"))) and (SIL_NLP_ENV.assets_dir / "tokenizer_config.json").is_file():
-                    model_name_or_path = str(SIL_NLP_ENV.assets_dir)
-                else:
-                    model_name_or_path = self.model
+            if not preprocess:
+                model_name_or_path = str(self.exp_dir) if (self.exp_dir / "tokenizer_config.json").is_file() else self.model
                 self._tokenizer = NllbTokenizerFast.from_pretrained(model_name_or_path, use_fast=True)
-            self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
+            else:
+                tokenizer_dict = self.root.get("data").get("tokenizer")
+                if tokenizer_dict and (tokenizer_dict.get("update_src") or tokenizer_dict.get("update_trg")) and (self.exp_dir / "sentencepiece.bpe.model").is_file() and not (
+                    self.exp_dir / "tokenizer_config.json"
+                ).is_file():
+                    self._tokenizer = NllbTokenizer.from_pretrained(str(self.exp_dir))
+                    self._tokenizer = convert_slow_tokenizer(self._tokenizer)
+                    self._tokenizer = NllbTokenizerFast(tokenizer_object=self._tokenizer)
+                    self._tokenizer.save_pretrained(str(self.exp_dir))
+                else:
+                    if (not tokenizer_dict or not (tokenizer_dict.get("update_src") or tokenizer_dict.get("update_trg"))) and (self.exp_dir / "tokenizer_config.json").is_file():
+                        model_name_or_path = str(self.exp_dir)
+                    elif (tokenizer_dict and (tokenizer_dict.get("update_src") or tokenizer_dict.get("update_trg"))) and (SIL_NLP_ENV.assets_dir / "tokenizer_config.json").is_file():
+                        model_name_or_path = str(SIL_NLP_ENV.assets_dir)
+                    else:
+                        model_name_or_path = self.model
+                    self._tokenizer = NllbTokenizerFast.from_pretrained(model_name_or_path, use_fast=True)
+                self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
         return self._tokenizer
 
     def _write_dictionary(self, tokenizer: Tokenizer, pair: CorpusPair) -> int:
