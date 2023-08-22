@@ -5,7 +5,7 @@ from copy import deepcopy
 from enum import Enum
 from itertools import repeat
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
+from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, TypeVar, Union, cast
 
 import datasets.utils.logging as datasets_logging
 import evaluate
@@ -383,7 +383,7 @@ class HuggingFaceConfig(Config):
                 with ExitStack() as stack:
                     stats_file: Optional[TextIO] = None
                     stats_file = stack.enter_context((self.exp_dir / "tokenization_stats.txt").open("w", encoding="utf-8", newline="\n"))
-                    stats_file.write(f"Added tokens: {len(missing_tokens)}")
+                    stats_file.write(f"Added tokens: {len(missing_tokens)}\n")
             tokens += missing_tokens
         if tokens:
             self._add_tokens(tokens, trained_tokenizers)
