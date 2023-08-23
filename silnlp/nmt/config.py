@@ -520,7 +520,7 @@ class Config(ABC):
                         for line in f:
                             src_data.append(len(line.split()))
                 stats_file.write(f"Src segment length statistics:\n")
-                stats_file.write(f"Num seg lengths > 200: {sum(seg_length > 200 for seg_length in src_data)}\n")
+                stats_file.write(f"Num seg lengths >= 200: {sum(seg_length >= 200 for seg_length in src_data)}\n")
                 stats_file.write(f"Max seg length: {max(src_data)}\n")
                 stats_file.write(f"Avg seg length: {sum(src_data)/len(src_data)}\n")
                 trg_data = []
@@ -529,7 +529,7 @@ class Config(ABC):
                         for line in f:
                             trg_data.append(len(line.split()))
                 stats_file.write(f"Trg segment length statistics:\n")
-                stats_file.write(f"Num seg lengths > 200: {sum(seg_length > 200 for seg_length in trg_data)}\n")
+                stats_file.write(f"Num seg lengths >= 200: {sum(seg_length >= 200 for seg_length in trg_data)}\n")
                 stats_file.write(f"Max seg length: {max(trg_data)}\n")
                 stats_file.write(f"Avg seg length: {sum(trg_data)/len(trg_data)}\n")
         return train_count
