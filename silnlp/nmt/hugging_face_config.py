@@ -5,7 +5,7 @@ from copy import deepcopy
 from enum import Enum
 from itertools import repeat
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
+from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, TypeVar, Union, cast
 
 import datasets.utils.logging as datasets_logging
 import evaluate
@@ -340,7 +340,7 @@ class HuggingFaceConfig(Config):
 
     def _build_vocabs(self, stats: bool=False) -> None:
         tokenizer_dict = self.root.get("data").get("tokenizer")
-        self._tokenizer = self.get_tokenizer()
+        self._tokenizer = self.get_or_create_tokenizer()
         tokens = []
         trained_tokenizers = []
         if self.data["add_new_lang_code"]:
@@ -383,12 +383,12 @@ class HuggingFaceConfig(Config):
                 with ExitStack() as stack:
                     stats_file: Optional[TextIO] = None
                     stats_file = stack.enter_context((self.exp_dir / "tokenization_stats.txt").open("w", encoding="utf-8", newline="\n"))
-                    stats_file.write(f"Added tokens: {len(missing_tokens)}")
+                    stats_file.write(f"Added tokens: {len(missing_tokens)}\n")
             tokens += missing_tokens
         if tokens:
             self._add_tokens(tokens, trained_tokenizers)
 
-    def get_tokenizer(self) -> PreTrainedTokenizer:
+    def get_or_create_tokenizer(self) -> PreTrainedTokenizer:
         if self._tokenizer is None:
             tokenizer_dict = self.root.get("data").get("tokenizer")
             if tokenizer_dict and (tokenizer_dict.get("update_src") or tokenizer_dict.get("update_trg")) and (self.exp_dir / "sentencepiece.bpe.model").is_file() and not (
@@ -406,6 +406,13 @@ class HuggingFaceConfig(Config):
                 else:
                     model_name_or_path = self.model
                 self._tokenizer = NllbTokenizerFast.from_pretrained(model_name_or_path, use_fast=True)
+            self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
+        return self._tokenizer
+
+    def get_tokenizer(self) -> PreTrainedTokenizer:
+        if self._tokenizer is None:
+            model_name_or_path = str(self.exp_dir) if (self.exp_dir / "tokenizer_config.json").is_file() else self.model
+            self._tokenizer = NllbTokenizerFast.from_pretrained(model_name_or_path, use_fast=True)
             self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
         return self._tokenizer
 
