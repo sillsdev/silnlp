@@ -450,7 +450,7 @@ class OpenNMTConfig(Config):
 
         return OpenNMTTokenizer(src_spp, trg_spp, self.write_trg_tag)
 
-    def _build_vocabs(self) -> None:
+    def _build_vocabs(self, stats: bool=False) -> None:
         if not self.data["tokenize"]:
             return
 
