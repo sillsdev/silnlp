@@ -1326,7 +1326,7 @@ class Config(ABC):
         return self._iso_pairs[(src_iso, trg_iso)].has_multiple_test_projects
 
     @abstractmethod
-    def _build_vocabs(self) -> None:
+    def _build_vocabs(self, stats: bool=False) -> None:
         ...
 
     @abstractmethod
