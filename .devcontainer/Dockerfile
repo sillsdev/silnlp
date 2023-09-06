@@ -1,5 +1,5 @@
-ARG CUDA_VERSION=11.2.2-cudnn8-runtime-ubuntu20.04
-ARG PYTHON_VERSION=3.8
+ARG CUDA_VERSION=12.1.0-cudnn8-runtime-ubuntu22.04
+ARG PYTHON_VERSION=3.10
 ARG POETRY_VERSION=1.2.2
 FROM nvidia/cuda:$CUDA_VERSION
 ARG PYTHON_VERSION
@@ -15,22 +15,27 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 # Install .NET SDK
 RUN apt-get update
 RUN apt-get install --no-install-recommends -y wget
-RUN wget https://packages.microsoft.com/config/ubuntu/20.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb && \
+RUN wget https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb && \
     dpkg -i packages-microsoft-prod.deb && \
     rm packages-microsoft-prod.deb
 # Install apt packages
 RUN apt-get update
 RUN apt-get upgrade -y
+#RUN apt install software-properties-common -y
+#RUN add-apt-repository ppa:deadsnakes/ppa
 RUN apt-get install --no-install-recommends -y \
     git \
     python$PYTHON_VERSION \
     python3-pip \
     python$PYTHON_VERSION-venv \
+    python$PYTHON_VERSION-dev \
     build-essential \
     gdb \
     curl \
     unzip \
     dotnet-sdk-7.0
+#RUN apt-get update
+#RUN apt-get install --no-install-recommends -y python$PYTHON_VERSION-dev
 # Make some useful symlinks that are expected to exist
 RUN ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python3  & \
     ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python

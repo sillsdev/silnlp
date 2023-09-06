@@ -1,6 +1,6 @@
 [tool.black]
 line-length = 120
-target-version = ['py38']
+target-version = ['py310']
 include = '\.pyi?$'
 exclude = '''
 /(
@@ -42,7 +42,7 @@ silnlp-alignment-test = "silnlp.alignment.test:main"
 silnlp-alignment-aggregate-results = "silnlp.alignment.aggregate_results:main"
 
 [tool.poetry.dependencies]
-python = ">=3.8,<3.9"
+python = ">=3.10,<3.11"
 pandas = "^1.0.4"
 sentencepiece = "^0.1.97"
 nltk = "^3.5"
@@ -55,7 +55,7 @@ scikit-learn = "1.1.2"
 numpy = "^1.23.1"
 OpenNMT-tf = "^2.31.0"
 lit-nlp = "0.4.1"
-tensorflow = "2.7.3"
+tensorflow = "2.8.4"
 google-cloud-translate = "^3.0.2"
 scipy = "1.8"
 clearml = ">=1.4.1"
@@ -69,9 +69,9 @@ ctranslate2 = "^3.5.1"
 tensorflow-addons = "0.17.1"
 libclang = "14.0.6"
 sil-machine = {extras = ["thot"], version = "^0.9.1"}
-transformers = "^4.23.1"
+transformers = "4.23.1"
 datasets = "^2.7.1"
-torch = {version = "1.10.1", source = "torch"}
+torch = {version = "1.12.1", source = "torch"}
 sacremoses = "^0.0.53"
 evaluate = "^0.3.0"
 python-docx = "^0.8.11"
@@ -88,6 +88,6 @@ pytest = "^6.2.4"
 
 [[tool.poetry.source]]
 name = "torch"
-url = "https://download.pytorch.org/whl/cu111"
+url = "https://download.pytorch.org/whl/cu113"
 default = false
 secondary = true
