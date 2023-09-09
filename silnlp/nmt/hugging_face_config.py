@@ -969,6 +969,10 @@ class HuggingFaceTokenizer(Tokenizer):
 
     def normalize(self, side: Side, line: str) -> str:
         return self.detokenize(self.tokenize(side, line))
+    
+    def normalize_no_tokenization(self, line: str) -> str:
+        line = self._mpn.normalize(line)
+        return self._tokenizer.backend_tokenizer.normalizer.normalize_str(line)
 
     def detokenize(self, line: str) -> str:
         tokens = line.split()

@@ -29,6 +29,10 @@ class Tokenizer(ABC):
         ...
 
     @abstractmethod
+    def normalize_no_tokenization(self, line: str) -> str:
+        ...    
+
+    @abstractmethod
     def detokenize(self, line: str) -> str:
         ...
 
@@ -46,6 +50,10 @@ class Tokenizer(ABC):
     def normalize_all(self, side: Side, lines: Iterable[str]) -> Iterable[str]:
         for line in lines:
             yield self.normalize(side, line)
+    
+    def normalize_no_tokenization_all(self, lines: Iterable[str]) -> Iterable[str]:
+        for line in lines:
+            yield self.normalize_no_tokenization(line)
 
     def detokenize_all(self, lines: Iterable[str]) -> Iterable[str]:
         for line in lines:
