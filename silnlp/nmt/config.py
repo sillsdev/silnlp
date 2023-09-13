@@ -754,7 +754,7 @@ class Config(ABC):
                 project = column[len("target_") :]
                 self._append_corpus(
                     self.test_trg_filename(src_iso, trg_iso, project),
-                    tokenizer.normalize_all(Side.TARGET, pair_test[column]),
+                    tokenizer.normalize_target_all(pair_test[column]),
                 )
                 test_projects.remove(project)
             if self._has_multiple_test_projects(src_iso, trg_iso):
@@ -1132,7 +1132,7 @@ class Config(ABC):
 
                 if pair.is_test and (test_indices is None or index in test_indices):
                     test_src_file.write(tokenizer.tokenize(Side.SOURCE, src_sentence) + "\n")
-                    test_trg_file.write(tokenizer.normalize(Side.TARGET, trg_sentence) + "\n")
+                    test_trg_file.write(tokenizer.normalize_target(Side.TARGET, trg_sentence) + "\n")
                     if test_vref_file is not None:
                         test_vref_file.write("\n")
                     for test_trg_project_file in test_trg_project_files:
