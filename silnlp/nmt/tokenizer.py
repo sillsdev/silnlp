@@ -25,11 +25,7 @@ class Tokenizer(ABC):
         ...
 
     @abstractmethod
-    def normalize(self, side: Side, line: str) -> str:
-        ...
-
-    @abstractmethod
-    def normalize_no_tokenization(self, line: str) -> str:
+    def normalize_target(self, line: str) -> str:
         ...    
 
     @abstractmethod
@@ -46,14 +42,10 @@ class Tokenizer(ABC):
     ) -> Iterable[str]:
         for line in lines:
             yield self.tokenize(side, line, add_dummy_prefix, sample_subwords, add_special_tokens)
-
-    def normalize_all(self, side: Side, lines: Iterable[str]) -> Iterable[str]:
-        for line in lines:
-            yield self.normalize(side, line)
     
-    def normalize_no_tokenization_all(self, lines: Iterable[str]) -> Iterable[str]:
+    def normalize_target_all(self, lines: Iterable[str]) -> Iterable[str]:
         for line in lines:
-            yield self.normalize_no_tokenization(line)
+            yield self.normalize_target(line)
 
     def detokenize_all(self, lines: Iterable[str]) -> Iterable[str]:
         for line in lines:
