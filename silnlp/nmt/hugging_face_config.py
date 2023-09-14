@@ -163,19 +163,6 @@ def add_lang_code_to_tokenizer(tokenizer: PreTrainedTokenizer, lang_code: str) -
         tokenizer.lang_token_to_id[lang_code] = lang_id
         tokenizer.id_to_lang_token[lang_id] = lang_code
 
-
-def find_missing_characters(tokenizer: PreTrainedTokenizer, corpus: List[Path]) -> List[str]:
-    # create dictionary vocab of tokenizer
-    vocab = tokenizer.get_vocab().keys()
-    # create set of characters found in corpus
-    charset = set()
-    for file in corpus:
-        with file.open("r", encoding="utf-8-sig") as f:
-            charset = charset | set(f.read())
-    missing_characters = sorted(list(charset - vocab))
-    # find characters not in NLLB tokenizer
-    return missing_characters
-
 def is_sublist(sub: List[int], lst: List[int]) -> bool:
     ln = len(sub)
     if ln >= len(lst):
@@ -337,6 +324,23 @@ class HuggingFaceConfig(Config):
         sp_tokenizer = self._train_sp_tokenizer(files, vocab_size)
         missing_tokens = sorted(list(set(sp_tokenizer.get_vocab().keys()) - set(self._tokenizer.get_vocab().keys())))
         return missing_tokens, sp_tokenizer
+    
+    def _find_missing_characters(self, corpus: List[Path]) -> List[str]:
+        vocab = self._tokenizer.get_vocab().keys()
+        charset = set()
+        for file in corpus:
+            with file.open("r", encoding="utf-8-sig") as f:
+                charset = charset | set(f.read())
+        hf_tokenizer = HuggingFaceTokenizer(
+            self._tokenizer, 
+            self.data["lang_codes"],
+            self.train["max_source_length"],
+            self.train["max_target_length"]
+        )
+        charset = set(hf_tokenizer.normalize_target_all(charset))
+        charset = [char.strip() for char in charset]
+        missing_characters = list(filter(None, sorted(list(charset - vocab))))
+        return missing_characters
 
     def _build_vocabs(self, stats: bool=False) -> None:
         tokenizer_dict = self.root.get("data").get("tokenizer")
@@ -378,7 +382,7 @@ class HuggingFaceConfig(Config):
                     file_paths = list(self.src_file_paths)
                 elif tokenizer_dict.get("update_trg"):
                     file_paths = list(self.trg_file_paths)
-                missing_tokens = find_missing_characters(self._tokenizer, file_paths)
+                missing_tokens = self._find_missing_characters(file_paths)
             if stats:    
                 with ExitStack() as stack:
                     stats_file: Optional[TextIO] = None
