@@ -41,7 +41,8 @@ from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import PaddingStrategy, to_py_obj
 from transformers.utils.logging import tqdm
 from transformers.convert_slow_tokenizer import convert_slow_tokenizer
-from tokenizers import SentencePieceBPETokenizer
+from tokenizers import NormalizedString, Regex, SentencePieceBPETokenizer
+from tokenizers.normalizers import Normalizer
 from tokenizers.trainers import BpeTrainer
 
 from ..common.environment import SIL_NLP_ENV, download_if_s3_paths
@@ -294,29 +295,22 @@ class HuggingFaceConfig(Config):
         self._tokenizer = NllbTokenizerFast.from_pretrained(str(self.exp_dir), use_fast=True)
         return
 
-    def _add_merges(self, sp_tokenizer) -> None:
-        sp_tokenizer.save(str(self.exp_dir / "tokenizer_sp.json"))
-        with open(self.exp_dir / "tokenizer.json", "r+", encoding="utf-8") as tok_file:
-            with open(self.exp_dir / "tokenizer_sp.json", "r+", encoding="utf-8") as sp_file:
-                tok_data = json.load(tok_file)
-                sp_data = json.load(sp_file)
-                tok_data["model"]["merges"] =  sp_data["model"]["merges"] + tok_data["model"]["merges"]
-                tok_file.seek(0)
-                json.dump(tok_data, tok_file, ensure_ascii=False, indent=4)
-                tok_file.truncate()
-        self._tokenizer = NllbTokenizerFast.from_pretrained(str(self.exp_dir), use_fast=True)
-        return
-
     def _train_sp_tokenizer(self, files, vocab_size) -> SentencePieceBPETokenizer:
-        reference_tok = NllbTokenizerFast.from_pretrained(str(SIL_NLP_ENV.assets_dir), use_fast=True)
         sp_tok = SentencePieceBPETokenizer()
-        sp_tok.normalizer = reference_tok.backend_tokenizer.normalizer
+        hf_tokenizer = HuggingFaceTokenizer(
+            self._tokenizer, 
+            self.data["lang_codes"],
+            self.train["max_source_length"],
+            self.train["max_target_length"]
+        )
+        sp_tok.normalizer = Normalizer.custom(hf_tokenizer)
         sp_tok.train(
             files,
             vocab_size=vocab_size,
             min_frequency=2,
             special_tokens=["<s>", "<pad>", "</s>", "<unk>", "<mask>"]
         )
+        sp_tok.normalizer = self._tokenizer.backend_tokenizer.normalizer
         return sp_tok
 
     def _create_trained_tokens(self, file_paths, vocab_size) -> (list, SentencePieceBPETokenizer):
@@ -691,7 +685,7 @@ class HuggingFaceNMTModel(NMTModel):
             compute_metrics=compute_metrics,
         )
         early_stopping: Optional[dict] = self._config.eval["early_stopping"]
-        if early_stopping is not None:
+        if early_stopping:
             trainer.add_callback(
                 EarlyStoppingCallback(
                     early_stopping_patience=early_stopping["steps"],
@@ -970,6 +964,10 @@ class HuggingFaceTokenizer(Tokenizer):
             tokens.remove("▁")
             tokens.remove("\ufffc")
         return " ".join(tokens)
+
+    def normalize(self, line: NormalizedString) -> None:
+        line.replace(Regex(".+"), self._mpn.normalize(str(line.normalized)))
+        self._tokenizer.backend_tokenizer.normalizer.normalize(line)
 
     def normalize_target(self, line: str) -> str:
         line = self._mpn.normalize(line)

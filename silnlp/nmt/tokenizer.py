@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Iterable
 
+from tokenizers import NormalizedString
+
 from ..common.utils import Side
 
 
@@ -22,6 +24,10 @@ class Tokenizer(ABC):
         sample_subwords: bool = False,
         add_special_tokens: bool = True,
     ) -> str:
+        ...
+
+    @abstractmethod
+    def normalize(self, line: NormalizedString) -> None:
         ...
 
     @abstractmethod
