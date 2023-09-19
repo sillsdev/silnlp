@@ -332,8 +332,8 @@ class HuggingFaceConfig(Config):
             self.train["max_target_length"]
         )
         charset = set(hf_tokenizer.normalize_target_all(charset))
-        charset = [char.strip() for char in charset]
-        missing_characters = list(filter(None, sorted(list(charset - vocab))))
+        charset = set(filter(None, {char.strip() for char in charset}))
+        missing_characters = sorted(list(charset - vocab))
         return missing_characters
 
     def _build_vocabs(self, stats: bool=False) -> None:
@@ -348,8 +348,6 @@ class HuggingFaceConfig(Config):
                 lang_code = lang_codes.get(iso, iso)
                 if lang_code not in self._tokenizer.lang_code_to_id:
                     add_lang_code_to_tokenizer(self._tokenizer, lang_code)
-                    if tokenizer_dict and (tokenizer_dict.get("update_src") or tokenizer_dict.get("update_trg")):
-                        tokens += [lang_code]
                     updated = True
             if updated:
                 self._tokenizer.save_pretrained(self.exp_dir)
