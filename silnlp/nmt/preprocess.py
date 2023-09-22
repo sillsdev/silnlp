@@ -1,9 +1,9 @@
 import argparse
 import logging
 
+from ..common.environment import SIL_NLP_ENV
 from ..common.utils import get_git_revision_hash
 from .config_utils import load_config
-from ..common.environment import SIL_NLP_ENV
 
 LOGGER = logging.getLogger(__package__ + ".preprocess")
 

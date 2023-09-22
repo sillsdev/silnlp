@@ -462,7 +462,7 @@ class Config(ABC):
         # confirm that input file paths exist
         for file in self.src_file_paths | self.trg_file_paths:
             if not file.is_file():
-                LOGGER.error("The source file " + str(file) + " does not exist.")
+                LOGGER.error(f"The source file {str(file)} does not exist.")
                 return
 
         self._build_vocabs(stats)
@@ -510,7 +510,7 @@ class Config(ABC):
                 train_count += self._write_scripture_data_sets(tokenizer, pair, stats)
             else:
                 train_count += self._write_basic_data_sets(tokenizer, pair)
-        if stats:    
+        if stats:
             with ExitStack() as stack:
                 stats_file: Optional[TextIO] = None
                 stats_file = stack.enter_context(self._open_append("tokenization_stats.txt"))
@@ -519,7 +519,7 @@ class Config(ABC):
                     with open(self.exp_dir / src_tok_file, "r+", encoding="utf-8") as f:
                         for line in f:
                             src_data.append(len(line.split()))
-                stats_file.write(f"Src segment length statistics:\n")
+                stats_file.write("Src segment length statistics:\n")
                 stats_file.write(f"Num seg lengths >= 200: {sum(seg_length >= 200 for seg_length in src_data)}\n")
                 stats_file.write(f"Max seg length: {max(src_data)}\n")
                 stats_file.write(f"Avg seg length: {sum(src_data)/len(src_data)}\n")
@@ -528,7 +528,7 @@ class Config(ABC):
                     with open(self.exp_dir / trg_tok_file, "r+", encoding="utf-8") as f:
                         for line in f:
                             trg_data.append(len(line.split()))
-                stats_file.write(f"Trg segment length statistics:\n")
+                stats_file.write("Trg segment length statistics:\n")
                 stats_file.write(f"Num seg lengths >= 200: {sum(seg_length >= 200 for seg_length in trg_data)}\n")
                 stats_file.write(f"Max seg length: {max(trg_data)}\n")
                 stats_file.write(f"Avg seg length: {sum(trg_data)/len(trg_data)}\n")
@@ -1326,7 +1326,7 @@ class Config(ABC):
         return self._iso_pairs[(src_iso, trg_iso)].has_multiple_test_projects
 
     @abstractmethod
-    def _build_vocabs(self, stats: bool=False) -> None:
+    def _build_vocabs(self, stats: bool = False) -> None:
         ...
 
     @abstractmethod
