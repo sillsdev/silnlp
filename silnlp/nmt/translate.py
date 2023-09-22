@@ -266,7 +266,8 @@ def main() -> None:
     elif args.src is not None:
         if args.debug:
             show_attrs(
-                cli_args=args, actions=[f"Will attempt to translate {args.src} from {args.src_iso} into {args.trg_iso}."]
+                cli_args=args,
+                actions=[f"Will attempt to translate {args.src} from {args.src_iso} into {args.trg_iso}."],
             )
             exit()
         translator.translate_files(args.src, args.trg, args.src_iso, args.trg_iso)
