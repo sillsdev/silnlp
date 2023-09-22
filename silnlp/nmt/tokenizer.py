@@ -27,10 +27,6 @@ class Tokenizer(ABC):
         ...
 
     @abstractmethod
-    def normalize(self, line: NormalizedString) -> None:
-        ...
-
-    @abstractmethod
     def normalize_target(self, line: str) -> str:
         ...
 
@@ -74,9 +70,6 @@ class NullTokenizer(Tokenizer):
         add_special_tokens: bool = True,
     ) -> str:
         return line
-
-    def normalize(self, line: NormalizedString) -> None:
-        ...
 
     def normalize_target(self, line: str) -> str:
         return line
