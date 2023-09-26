@@ -11,7 +11,7 @@ from lxml import etree
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
 
 from .. import sfm
-from ..sfm import usfm
+from ..sfm import style, usfm
 from .corpus import load_corpus, write_corpus
 from .paratext import get_book_path, get_iso, get_project_dir
 
@@ -161,6 +161,15 @@ def update_segments(segments: List[Segment], translations: List[str]) -> None:
             first_para.elem.insert(first_para.child_indices[0], sfm.Text(translation, parent=first_para.elem))
 
 
+def get_stylesheet(project_path: Path) -> dict:
+    custom_stylesheet_path = project_path / "custom.sty"
+    if custom_stylesheet_path.exists():
+        with custom_stylesheet_path.open("r", encoding="utf-8-sig") as file:
+            custom_stylesheet = style.parse(file)
+        return style.update_sheet(usfm.relaxed_stylesheet, custom_stylesheet)
+    return usfm.relaxed_stylesheet
+
+
 class Translator(ABC):
     @abstractmethod
     def translate(
@@ -177,13 +186,19 @@ class Translator(ABC):
             settings_tree = etree.parse(settings_file)
         src_iso = get_iso(settings_tree)
         book_path = get_book_path(src_project, book)
-        self.translate_usfm(book_path, output_path, src_iso, trg_iso)
+        stylesheet = get_stylesheet(src_project_dir)
+        self.translate_usfm(book_path, output_path, src_iso, trg_iso, stylesheet)
 
-    def translate_usfm(self, src_file_path: Path, trg_file_path: Path, src_iso: str, trg_iso: str) -> None:
+    def translate_usfm(
+        self,
+        src_file_path: Path,
+        trg_file_path: Path,
+        src_iso: str,
+        trg_iso: str,
+        stylesheet: dict = usfm.relaxed_stylesheet,
+    ) -> None:
         with src_file_path.open(mode="r", encoding="utf-8-sig") as book_file:
-            doc: List[sfm.Element] = list(
-                usfm.parser(book_file, stylesheet=usfm.relaxed_stylesheet, canonicalise_footnotes=False)
-            )
+            doc: List[sfm.Element] = list(usfm.parser(book_file, stylesheet=stylesheet, canonicalise_footnotes=False))
 
         book = ""
         for elem in doc:
