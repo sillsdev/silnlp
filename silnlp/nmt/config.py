@@ -462,10 +462,10 @@ class Config(ABC):
         # confirm that input file paths exist
         for file in self.src_file_paths | self.trg_file_paths:
             if not file.is_file():
-                LOGGER.error("The source file " + str(file) + " does not exist.")
+                LOGGER.error(f"The source file {str(file)} does not exist.")
                 return
 
-        self._build_vocabs()
+        self._build_vocabs(stats)
         tokenizer = self.create_tokenizer()
         self._build_corpora(tokenizer, stats)
         LOGGER.info("Preprocessing completed")
@@ -510,6 +510,28 @@ class Config(ABC):
                 train_count += self._write_scripture_data_sets(tokenizer, pair, stats)
             else:
                 train_count += self._write_basic_data_sets(tokenizer, pair)
+        if stats:
+            with ExitStack() as stack:
+                stats_file: Optional[TextIO] = None
+                stats_file = stack.enter_context(self._open_append("tokenization_stats.txt"))
+                src_data = []
+                for src_tok_file in self.exp_dir.glob("*.src.txt"):
+                    with open(self.exp_dir / src_tok_file, "r+", encoding="utf-8") as f:
+                        for line in f:
+                            src_data.append(len(line.split()))
+                stats_file.write("Src segment length statistics:\n")
+                stats_file.write(f"Num seg lengths >= 200: {sum(seg_length >= 200 for seg_length in src_data)}\n")
+                stats_file.write(f"Max seg length: {max(src_data)}\n")
+                stats_file.write(f"Avg seg length: {sum(src_data)/len(src_data)}\n")
+                trg_data = []
+                for trg_tok_file in self.exp_dir.glob("*.trg.txt"):
+                    with open(self.exp_dir / trg_tok_file, "r+", encoding="utf-8") as f:
+                        for line in f:
+                            trg_data.append(len(line.split()))
+                stats_file.write("Trg segment length statistics:\n")
+                stats_file.write(f"Num seg lengths >= 200: {sum(seg_length >= 200 for seg_length in trg_data)}\n")
+                stats_file.write(f"Max seg length: {max(trg_data)}\n")
+                stats_file.write(f"Avg seg length: {sum(trg_data)/len(trg_data)}\n")
         return train_count
 
     def _delete_files(self, pattern: str) -> None:
@@ -732,7 +754,7 @@ class Config(ABC):
                 project = column[len("target_") :]
                 self._append_corpus(
                     self.test_trg_filename(src_iso, trg_iso, project),
-                    tokenizer.normalize_all(Side.TARGET, pair_test[column]),
+                    tokenizer.normalize_target_all(pair_test[column]),
                 )
                 test_projects.remove(project)
             if self._has_multiple_test_projects(src_iso, trg_iso):
@@ -1110,7 +1132,7 @@ class Config(ABC):
 
                 if pair.is_test and (test_indices is None or index in test_indices):
                     test_src_file.write(tokenizer.tokenize(Side.SOURCE, src_sentence) + "\n")
-                    test_trg_file.write(tokenizer.normalize(Side.TARGET, trg_sentence) + "\n")
+                    test_trg_file.write(tokenizer.normalize_target(Side.TARGET, trg_sentence) + "\n")
                     if test_vref_file is not None:
                         test_vref_file.write("\n")
                     for test_trg_project_file in test_trg_project_files:
@@ -1304,7 +1326,7 @@ class Config(ABC):
         return self._iso_pairs[(src_iso, trg_iso)].has_multiple_test_projects
 
     @abstractmethod
-    def _build_vocabs(self) -> None:
+    def _build_vocabs(self, stats: bool = False) -> None:
         ...
 
     @abstractmethod

@@ -48,6 +48,7 @@ class SILClearML:
             self._load_config()
 
             self.task.set_base_docker(
+                # docker_image="ghcr.io/sillsdev/silnlp:1.01.4",
                 docker_image="nvidia/cuda:11.2.2-cudnn8-runtime-ubuntu20.04",
                 docker_arguments="-v /home/clearml/.clearml/hf-cache:/root/.cache/huggingface",
                 docker_setup_bash_script=[

@@ -440,24 +440,23 @@ unicode-backport = ["unicodedata2"]
 
 [[package]]
 name = "clearml"
-version = "1.6.2"
+version = "1.11.1"
 description = "ClearML - Auto-Magical Experiment Manager, Version Control, and MLOps for AI"
 optional = false
 python-versions = "*"
 files = [
-    {file = "clearml-1.6.2-py2.py3-none-any.whl", hash = "sha256:5288a4036cb92db55f808b68274c1994ccd7ec57546798b73f321271703b5d6c"},
+    {file = "clearml-1.11.1-py2.py3-none-any.whl", hash = "sha256:e90492a7f8d6972a8d2c87b5ac93737a0e6ed50a9791ee2bf24b0dfec14347a3"},
 ]
 
 [package.dependencies]
 attrs = ">=18.0"
 furl = ">=2.0.0"
-future = ">=0.16.0"
 jsonschema = ">=2.6.0"
 numpy = ">=1.10"
 pathlib2 = ">=2.3.0"
 Pillow = ">=4.1.1"
 psutil = ">=3.4.2"
-pyjwt = ">=2.4.0,<2.5.0"
+pyjwt = {version = ">=2.4.0,<2.5.0", markers = "python_version > \"3.5\""}
 pyparsing = ">=2.0.3"
 python-dateutil = ">=2.6.1"
 PyYAML = ">=3.12"
