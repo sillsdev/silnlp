@@ -8,6 +8,7 @@ from machine.scripture import ALL_BOOK_IDS, book_id_to_number, is_ot_nt
 from ..common.environment import SIL_NLP_ENV
 from ..common.flatcat_stemmer import FlatCatStemmer
 from ..common.null_stemmer import NullStemmer
+from ..common.packages_utils import is_eflomal_available
 from ..common.snowball_stemmer import SnowballStemmer
 from ..common.stemmer import Stemmer
 from ..common.utils import merge_dict
@@ -23,7 +24,10 @@ from .dotnet_machine_aligner import (
     Ibm4DotnetMachineAligner,
     ParatextDotnetMachineAligner,
 )
-from .eflomal import EflomalAligner
+
+if is_eflomal_available():
+    from .eflomal import EflomalAligner
+
 from .fast_align import FastAlign
 from .giza_aligner import HmmGizaAligner, Ibm1GizaAligner, Ibm2GizaAligner, Ibm3GizaAligner, Ibm4GizaAligner
 from .machine_aligner import (
