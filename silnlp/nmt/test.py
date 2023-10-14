@@ -487,7 +487,6 @@ def test(
 
     tokenizer = config.create_tokenizer()
     model = config.create_model()
-    _, best_step = model.get_checkpoint_path(CheckpointType.BEST)
     results: Dict[int, List[PairScore]] = {}
     step: int
     if checkpoint is not None:
@@ -523,7 +522,9 @@ def test(
         except ValueError:
             LOGGER.warn("No average checkpoint available.")
 
-    if best:
+    best_step = 0
+    if best and config.has_val_split:
+        _, best_step = model.get_checkpoint_path(CheckpointType.BEST)
         step = best_step
         if step not in results:
             results[step] = test_checkpoint(

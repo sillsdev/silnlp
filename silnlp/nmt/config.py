@@ -454,6 +454,12 @@ class Config(ABC):
     def has_parent(self) -> bool:
         return "parent" in self.data
 
+    @property
+    def has_val_split(self) -> bool:
+        return any(
+            pair.is_val and (pair.size if pair.val_size is None else pair.val_size) > 0 for pair in self.corpus_pairs
+        )
+
     def set_seed(self) -> None:
         seed = self.data["seed"]
         set_seed(seed)

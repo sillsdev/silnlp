@@ -239,6 +239,12 @@ class HuggingFaceConfig(Config):
 
         super().__init__(exp_dir, config)
 
+        # disable evaluation if there is no validation split
+        if not self.has_val_split:
+            config["eval"]["evaluation_strategy"] = "no"
+            config["eval"]["load_best_model_at_end"] = False
+            config["eval"]["early_stopping"] = None
+
     @property
     def model_dir(self) -> Path:
         return Path(self.train["output_dir"])
