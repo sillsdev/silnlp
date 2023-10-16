@@ -32,7 +32,7 @@ class SILClearML:
         if self.queue_name is None:
             self.task = None
             self._load_config()
-            LOGGER.info(f"No ClearML task initiated.")
+            LOGGER.info("No ClearML task initiated.")
             return
 
         from clearml import Task
