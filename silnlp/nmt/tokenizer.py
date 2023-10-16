@@ -1,8 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Iterable
 
-from tokenizers import NormalizedString
-
 from ..common.utils import Side
 
 
@@ -27,7 +25,7 @@ class Tokenizer(ABC):
         ...
 
     @abstractmethod
-    def normalize_target(self, line: str) -> str:
+    def normalize(self, side: Side, line: str) -> str:
         ...
 
     @abstractmethod
@@ -45,9 +43,9 @@ class Tokenizer(ABC):
         for line in lines:
             yield self.tokenize(side, line, add_dummy_prefix, sample_subwords, add_special_tokens)
 
-    def normalize_target_all(self, lines: Iterable[str]) -> Iterable[str]:
+    def normalize_all(self, side: Side, lines: Iterable[str]) -> Iterable[str]:
         for line in lines:
-            yield self.normalize_target(line)
+            yield self.normalize(side, line)
 
     def detokenize_all(self, lines: Iterable[str]) -> Iterable[str]:
         for line in lines:
@@ -71,7 +69,7 @@ class NullTokenizer(Tokenizer):
     ) -> str:
         return line
 
-    def normalize_target(self, line: str) -> str:
+    def normalize(self, side: Side, line: str) -> str:
         return line
 
     def detokenize(self, line: str) -> str:

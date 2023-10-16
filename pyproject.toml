@@ -69,7 +69,6 @@ ctranslate2 = "^3.5.1"
 tensorflow-addons = "0.17.1"
 libclang = "14.0.6"
 sil-machine = {extras = ["thot"], version = "^0.9.1"}
-transformers = "^4.23.1"
 datasets = "^2.7.1"
 torch = {version = "1.10.1", source = "torch"}
 sacremoses = "^0.0.53"
@@ -77,6 +76,8 @@ evaluate = "^0.3.0"
 python-docx = "^0.8.11"
 iso639-lang = "^2.1.0"
 eflomal = { version = "^0.1", optional = true }
+accelerate = "^0.23.0"
+transformers = "^4.34.1"
 
 [tool.poetry.dev-dependencies]
 mypy = "^0.812"

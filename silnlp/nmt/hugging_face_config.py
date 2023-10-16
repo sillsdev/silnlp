@@ -10,7 +10,6 @@ from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, Type
 import datasets.utils.logging as datasets_logging
 import evaluate
 import numpy as np
-import torch
 import transformers.utils.logging as transformers_logging
 import yaml
 from datasets import Dataset
@@ -29,6 +28,8 @@ from transformers import (
     HfArgumentParser,
     M2M100ForConditionalGeneration,
     M2M100Tokenizer,
+    MBartTokenizer,
+    MBartTokenizerFast,
     NllbTokenizer,
     NllbTokenizerFast,
     PreTrainedModel,
@@ -55,10 +56,8 @@ def prepare_decoder_input_ids_from_labels(self: M2M100ForConditionalGeneration, 
     # shift ids to the right
     shifted_input_ids = labels.new_zeros(labels.shape)
     shifted_input_ids[:, 1:] = labels[:, :-1].clone()
-    # copy lang id from the end to the beginning
-    extended_labels = torch.cat((labels, labels.new_full((labels.shape[0], 1), -100)), dim=1)
-    lang_index = extended_labels.argmin(dim=1, keepdim=True) - 1
-    shifted_input_ids[:, 0] = labels.gather(dim=1, index=lang_index).squeeze()
+    assert self.config.decoder_start_token_id is not None
+    shifted_input_ids[:, 0] = self.config.decoder_start_token_id
 
     if self.config.pad_token_id is None:
         raise ValueError("self.model.config.pad_token_id has to be defined.")
@@ -211,13 +210,14 @@ class HuggingFaceConfig(Config):
                     "save_steps": 1000,
                     "per_device_train_batch_size": 16,
                     "save_strategy": "steps",
-                    "save_total_limit": 1,
+                    "save_total_limit": 2,
                     "gradient_accumulation_steps": 4,
                     "max_steps": 100000,
                     "group_by_length": True,
                     "output_dir": str(exp_dir / "run"),
                     "delete_checkpoint_optimizer_state": True,
                     "delete_checkpoint_tokenizer": True,
+                    "log_level": "info",
                 },
                 "eval": {
                     "evaluation_strategy": "steps",
@@ -251,6 +251,7 @@ class HuggingFaceConfig(Config):
             config["eval"]["evaluation_strategy"] = "no"
             config["eval"]["load_best_model_at_end"] = False
             config["eval"]["early_stopping"] = None
+            config["eval"]["metric_for_best_model"] = None
 
     @property
     def model_dir(self) -> Path:
@@ -294,8 +295,9 @@ class HuggingFaceConfig(Config):
         )
 
     def _add_tokens(
-        self, missing_tokens: List[str], trained_tokenizers: List[SentencePieceBPETokenizer] = None
+        self, missing_tokens: List[str], trained_tokenizers: Optional[List[SentencePieceBPETokenizer]] = None
     ) -> None:
+        assert self._tokenizer is not None
         self._tokenizer.save_pretrained(str(self.exp_dir))
         with open(self.exp_dir / "tokenizer.json", "r+", encoding="utf-8") as file:
             data = json.load(file)
@@ -315,18 +317,20 @@ class HuggingFaceConfig(Config):
         return
 
     def _train_sp_tokenizer(self, files, vocab_size) -> SentencePieceBPETokenizer:
+        assert self._tokenizer is not None
         sp_tok = SentencePieceBPETokenizer()
         hf_tokenizer = HuggingFaceTokenizer(
             self._tokenizer, self.data["lang_codes"], self.train["max_source_length"], self.train["max_target_length"]
         )
-        sp_tok.normalizer = Normalizer.custom(hf_tokenizer)
+        sp_tok.normalizer = Normalizer.custom(CustomNormalizerWrapper(hf_tokenizer))
         sp_tok.train(
             files, vocab_size=vocab_size, min_frequency=2, special_tokens=["<s>", "<pad>", "</s>", "<unk>", "<mask>"]
         )
         sp_tok.normalizer = self._tokenizer.backend_tokenizer.normalizer
         return sp_tok
 
-    def _create_trained_tokens(self, file_paths, vocab_size) -> (list, SentencePieceBPETokenizer):
+    def _create_trained_tokens(self, file_paths, vocab_size) -> Tuple[List[str], SentencePieceBPETokenizer]:
+        assert self._tokenizer is not None
         files = [str(f) for f in download_if_s3_paths(file_paths)]
         sp_tokenizer = self._train_sp_tokenizer(files, vocab_size)
         sp_keys, tok_keys = sp_tokenizer.get_vocab().keys(), self._tokenizer.get_vocab().keys()
@@ -334,23 +338,24 @@ class HuggingFaceConfig(Config):
         return missing_tokens, sp_tokenizer
 
     def _find_missing_characters(self, corpus: List[Path]) -> List[str]:
+        assert self._tokenizer is not None
         vocab = self._tokenizer.get_vocab().keys()
-        charset = set()
+        charset: Set[str] = set()
         for file in corpus:
             with file.open("r", encoding="utf-8-sig") as f:
                 charset = charset | set(f.read())
         hf_tokenizer = HuggingFaceTokenizer(
             self._tokenizer, self.data["lang_codes"], self.train["max_source_length"], self.train["max_target_length"]
         )
-        charset = set(hf_tokenizer.normalize_target_all(charset))
+        charset = set(hf_tokenizer.normalize_all(Side.TARGET, charset))
         charset = set(filter(None, {char.strip() for char in charset}))
         missing_characters = sorted(list(charset - vocab))
         return missing_characters
 
     def _build_vocabs(self, stats: bool = False) -> None:
-        tok_dict = self.root.get("data").get("tokenizer")
+        tok_dict = self.data.get("tokenizer")
         self._tokenizer = self.get_or_create_tokenizer()
-        tokens = []
+        tokens: List[str] = []
         trained_tokenizers = []
         if self.data["add_new_lang_code"]:
             lang_codes: Dict[str, str] = self.data["lang_codes"]
@@ -410,7 +415,7 @@ class HuggingFaceConfig(Config):
 
     def get_or_create_tokenizer(self) -> PreTrainedTokenizer:
         if self._tokenizer is None:
-            tok_dict = self.root.get("data").get("tokenizer")
+            tok_dict = self.data.get("tokenizer")
             if (
                 tok_dict
                 and (tok_dict.get("update_src") or tok_dict.get("update_trg"))
@@ -561,6 +566,10 @@ class HuggingFaceNMTModel(NMTModel):
     def train(self) -> None:
         training_args = self._create_training_arguments()
 
+        if training_args.should_log:
+            # The default of training_args.log_level is passive, so we set log level at info here to have that default.
+            transformers_logging.set_verbosity_info()
+
         log_level = training_args.get_process_log_level()
         datasets_logging.set_verbosity(log_level)
         transformers_logging.set_verbosity(log_level)
@@ -573,14 +582,17 @@ class HuggingFaceNMTModel(NMTModel):
             dropout=self._config.params["dropout"],
             attention_dropout=self._config.params["attention_dropout"],
             activation_dropout=self._config.params["activation_dropout"],
+            label2id={},
+            id2label={},
+            num_labels=0,
         )
-        model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(self._config.model, config=model_config)
+        model = cast(PreTrainedModel, AutoModelForSeq2SeqLM.from_pretrained(self._config.model, config=model_config))
         tokenizer = self._config.get_tokenizer()
 
         old_embeddings = model.get_input_embeddings()
         old_num_tokens = old_embeddings.weight.size(dim=0)
-        tok_dict = self._config.root.get("data").get("tokenizer")
-        if len(tokenizer) > old_num_tokens and tok_dict.get("init_unk"):
+        tok_dict = self._config.data.get("tokenizer")
+        if len(tokenizer) > old_num_tokens and tok_dict is not None and tok_dict.get("init_unk"):
             vocab = tokenizer.get_vocab()
             unk_embedding = old_embeddings.weight.data[vocab["<unk>"]]
             model.resize_token_embeddings(len(tokenizer))
@@ -588,13 +600,32 @@ class HuggingFaceNMTModel(NMTModel):
             embeddings.weight.data[old_num_tokens:, :] = unk_embedding
             model.tie_weights()
         elif len(tokenizer) != old_num_tokens:
-            model.resize_token_embeddings(len(tokenizer))
+            model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if training_args.fp16 else None)
 
-        tokenizer.src_lang = self._config.val_src_lang
-        tokenizer.tgt_lang = self._config.val_trg_lang
-        trg_lang_id = tokenizer.convert_tokens_to_ids(self._config.val_trg_lang)
-        model.config.decoder_start_token_id = trg_lang_id
-        model.config.forced_bos_token_id = trg_lang_id
+        # Set decoder_start_token_id
+        if (
+            self._config.val_trg_lang != ""
+            and model.config.decoder_start_token_id is None
+            and isinstance(tokenizer, (MBartTokenizer, MBartTokenizerFast))
+        ):
+            if isinstance(tokenizer, MBartTokenizer):
+                model.config.decoder_start_token_id = tokenizer.lang_code_to_id[self._config.val_trg_lang]
+            else:
+                model.config.decoder_start_token_id = tokenizer.convert_tokens_to_ids(self._config.val_trg_lang)
+
+        if model.config.decoder_start_token_id is None:
+            raise ValueError("Make sure that `config.decoder_start_token_id` is correctly defined")
+
+        if self._config.val_src_lang != "" and self._config.val_trg_lang != "":
+            tokenizer.src_lang = self._config.val_src_lang
+            tokenizer.tgt_lang = self._config.val_trg_lang
+
+            # For multilingual translation models like mBART-50 and M2M100 we need to force the target language token
+            # as the first generated token.
+            forced_bos_token_id = tokenizer.lang_code_to_id[self._config.val_trg_lang]
+            model.config.forced_bos_token_id = forced_bos_token_id
+            if model.generation_config is not None:
+                model.generation_config.forced_bos_token_id = forced_bos_token_id
 
         def load_text_dataset(src_path: Path, trg_path: Path) -> Optional[Dataset]:
             if not src_path.is_file() or not trg_path.is_file():
@@ -765,14 +796,12 @@ class HuggingFaceNMTModel(NMTModel):
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
         checkpoint_path, _ = self.get_checkpoint_path(ckpt)
-        model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(str(checkpoint_path))
+        model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(
+            str(checkpoint_path), device_map="auto", torch_dtype="auto"
+        )
         tokenizer = self._config.get_tokenizer()
         pipeline = PretokenizedTranslationPipeline(
-            model=model,
-            tokenizer=tokenizer,
-            src_lang=self._config.test_src_lang,
-            tgt_lang=self._config.test_trg_lang,
-            device=0,
+            model=model, tokenizer=tokenizer, src_lang=self._config.test_src_lang, tgt_lang=self._config.test_trg_lang
         )
         for input_path, translation_path, vref_path in zip(
             input_paths,
@@ -812,7 +841,9 @@ class HuggingFaceNMTModel(NMTModel):
             model_name = str(checkpoint_path)
         else:
             model_name = self._config.model
-        model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+        model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(
+            model_name, device_map="auto", torch_dtype="auto"
+        )
         if model.config.max_length < 512:
             model.config.max_length = 512
         tokenizer = self._config.get_tokenizer()
@@ -822,16 +853,17 @@ class HuggingFaceNMTModel(NMTModel):
             tokenizer=tokenizer,
             src_lang=lang_codes.get(src_iso, src_iso),
             tgt_lang=lang_codes.get(trg_iso, trg_iso),
-            device=0,
         )
         if not isinstance(sentences, list):
             sentences = list(sentences)
-        for prediction in tqdm(
+        for outputs in tqdm(
             self._translate_sentences(tokenizer, pipeline, sentences, vrefs),
             total=len(sentences),
             unit="ex",
         ):
-            yield prediction["translation_text"]
+            if isinstance(outputs, dict):
+                outputs = [outputs]
+            yield from (p["translation_text"] for p in outputs)
 
     def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
         step: Optional[int] = None
@@ -994,11 +1026,11 @@ class HuggingFaceTokenizer(Tokenizer):
             tokens.remove("\ufffc")
         return " ".join(tokens)
 
-    def normalize(self, line: NormalizedString) -> None:
+    def normalize_normalized_string(self, line: NormalizedString) -> None:
         line.replace(Regex(".+"), self._mpn.normalize(str(line.normalized)))
         self._tokenizer.backend_tokenizer.normalizer.normalize(line)
 
-    def normalize_target(self, line: str) -> str:
+    def normalize(self, side: Side, line: str) -> str:
         line = self._mpn.normalize(line)
         return self._tokenizer.backend_tokenizer.normalizer.normalize_str(line)
 
@@ -1006,6 +1038,14 @@ class HuggingFaceTokenizer(Tokenizer):
         tokens = line.split()
         tokens = [p for p in tokens if p not in self._all_special_tokens]
         return self._tokenizer.clean_up_tokenization(self._tokenizer.convert_tokens_to_string(tokens))
+
+
+class CustomNormalizerWrapper:
+    def __init__(self, tokenizer: HuggingFaceTokenizer) -> None:
+        self._tokenizer = tokenizer
+
+    def normalize(self, line: NormalizedString) -> None:
+        self._tokenizer.normalize_normalized_string(line)
 
 
 class PretokenizedTranslationPipeline(TranslationPipeline):
