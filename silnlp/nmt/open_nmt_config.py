@@ -161,6 +161,16 @@ def get_last_checkpoint(model_dir: Path) -> Tuple[Path, int]:
         return checkpoint_path, step
 
 
+def has_best_checkpoint(model_dir: Path) -> bool:
+    export_path = model_dir / "export"
+    models = list(d.name for d in export_path.iterdir())
+    for model in sorted(models, key=lambda m: int(m), reverse=True):
+        path = export_path / model
+        if path.is_dir():
+            return True
+    return False
+
+
 @register_scorer(name="bleu_sp")
 class BLEUSentencepieceScorer(Scorer):
     def __init__(self):
@@ -427,6 +437,10 @@ class OpenNMTConfig(Config):
     @property
     def model_dir(self) -> Path:
         return Path(self.root["model_dir"])
+
+    @property
+    def has_best_checkpoint(self) -> bool:
+        return has_best_checkpoint(self.model_dir)
 
     def create_model(self, mixed_precision: bool = False, num_devices: int = 1) -> NMTModel:
         return OpenNMTModel(self, mixed_precision, num_devices)

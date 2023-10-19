@@ -523,7 +523,7 @@ def test(
             LOGGER.warn("No average checkpoint available.")
 
     best_step = 0
-    if best and config.has_val_split:
+    if best and config.has_best_checkpoint:
         _, best_step = model.get_checkpoint_path(CheckpointType.BEST)
         step = best_step
         if step not in results:

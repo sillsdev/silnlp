@@ -459,6 +459,11 @@ class Config(ABC):
         return any(
             pair.is_val and (pair.size if pair.val_size is None else pair.val_size) > 0 for pair in self.corpus_pairs
         )
+    
+    @property
+    @abstractmethod
+    def has_best_checkpoint(self) -> bool:
+        ...
 
     def set_seed(self) -> None:
         seed = self.data["seed"]

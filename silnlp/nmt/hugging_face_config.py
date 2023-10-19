@@ -129,6 +129,13 @@ def get_best_checkpoint(model_dir: Path) -> Path:
     return model_dir / Path(trainer_state["best_model_checkpoint"]).name
 
 
+def has_best_checkpoint(model_dir: Path) -> bool:
+    trainer_state_path = model_dir / "trainer_state.json"
+    with trainer_state_path.open("r", encoding="utf-8") as f:
+        trainer_state = json.load(f)
+    return "best_model_checkpoint" in trainer_state and trainer_state["best_model_checkpoint"] is not None
+
+
 OPTIMIZER_STATE_FILES = {"optimizer.pt", "rng_state.pth", "scaler.pt", "scheduler.pt"}
 
 
@@ -268,6 +275,10 @@ class HuggingFaceConfig(Config):
     def test_trg_lang(self) -> str:
         lang_codes: Dict[str, str] = self.data["lang_codes"]
         return lang_codes.get(self.default_test_trg_iso, self.default_test_trg_iso)
+
+    @property
+    def has_best_checkpoint(self) -> bool:
+        return has_best_checkpoint(self.model_dir)
 
     def create_model(self, mixed_precision: bool = False, num_devices: int = 1) -> NMTModel:
         return HuggingFaceNMTModel(self, mixed_precision, num_devices)
