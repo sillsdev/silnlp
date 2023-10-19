@@ -6,7 +6,7 @@ import tempfile
 import time
 from pathlib import Path, PurePath
 from platform import system, uname
-from typing import Iterable, List, Optional, Sequence, Union, Callable
+from typing import Callable, Iterable, List, Optional, Sequence, Union
 
 import boto3
 from dotenv import load_dotenv
@@ -71,7 +71,8 @@ class SilNlpEnv:
                 if not hasattr(self, "mt_experiments_dir"):
                     if temp_path.is_dir():
                         LOGGER.info(
-                            f"Using cache dir: {sil_nlp_cache_dir} as per environment variable SIL_NLP_CACHE_EXPERIMENT_DIR."
+                            f"Using cache dir: {sil_nlp_cache_dir} as per environment variable "
+                            + "SIL_NLP_CACHE_EXPERIMENT_DIR."
                         )
                         self.mt_experiments_dir = temp_path
                     else:
@@ -114,20 +115,23 @@ class SilNlpEnv:
                     return S3Path(sil_nlp_data_path)
                 else:
                     raise Exception(
-                        f"The path defined by environment variable SIL_NLP_DATA_PATH ({sil_nlp_data_path}) is not a real or s3 directory."
+                        f"The path defined by environment variable SIL_NLP_DATA_PATH ({sil_nlp_data_path}) is not a "
+                        + "real or s3 directory."
                     )
 
         gutenberg_path = Path("G:/Shared drives/Gutenberg")
         if gutenberg_path.is_dir():
             LOGGER.info(
-                f"Using workspace: {gutenberg_path}.  To change the workspace, set the environment variable SIL_NLP_DATA_PATH."
+                f"Using workspace: {gutenberg_path}.  To change the workspace, set the environment variable "
+                + "SIL_NLP_DATA_PATH."
             )
             return gutenberg_path
 
         s3root = S3Path("/aqua-ml-data")
         if s3root.is_dir():
             LOGGER.info(
-                f"Using s3 workspace workspace: {s3root}.  To change the workspace, set the environment variable SIL_NLP_DATA_PATH."
+                f"Using s3 workspace workspace: {s3root}.  To change the workspace, set the environment variable "
+                + "SIL_NLP_DATA_PATH."
             )
             self.is_bucket = True
             return s3root
@@ -138,18 +142,19 @@ class SilNlpEnv:
         if not self.is_bucket:
             return
         name = str(name)
-        experiment_path = str(self.mt_dir.relative_to(self.data_dir) / "experiments") + "/"
-        name = name.split(experiment_path)[-1]
+        experiments_path = str(self.mt_dir.relative_to(self.data_dir) / "experiments") + "/"
+        name = name.split(experiments_path)[-1]
         if len(name) == 0:
             raise Exception(
                 f"No experiment name is given.  Data still in the cache directory of {self.mt_experiments_dir}"
             )
         s3 = boto3.resource("s3")
         data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
-        len_aqua_path = len(experiment_path)
-        objs = list(data_bucket.object_versions.filter(Prefix=experiment_path + name))
+        len_aqua_path = len(experiments_path)
+        experiment_path = experiments_path + name
+        objs = list(data_bucket.object_versions.filter(Prefix=experiment_path + "/"))
         if len(objs) == 0:
-            LOGGER.info("No files found in the bucket under: " + experiment_path + name)
+            LOGGER.info("No files found in the bucket under: " + experiment_path)
             return
         if isinstance(patterns, str):
             patterns = [patterns]
