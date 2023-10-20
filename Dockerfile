@@ -48,7 +48,9 @@ RUN apt-get install --no-install-recommends -y \
     nano \
     cmake \
     tar \
-    vim
+    vim \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # Make some useful symlinks that are expected to exist
 RUN ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python3  & \
@@ -70,11 +72,7 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2
 
 # Install dependencies from poetry
 COPY --from=builder /src/requirements.txt .
-RUN mkdir tmp
-RUN export TMPDIR=/root/tmp
 RUN pip install --no-cache-dir -r requirements.txt && rm requirements.txt
-RUN unset TMPDIR
-RUN rm -rf tmp
 
 # Install silnlp
 COPY --from=builder /src/dist/*.whl .
