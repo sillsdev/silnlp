@@ -28,6 +28,7 @@ from transformers import (
     HfArgumentParser,
     M2M100ForConditionalGeneration,
     M2M100Tokenizer,
+    MBart50Tokenizer,
     MBartTokenizer,
     MBartTokenizerFast,
     NllbTokenizer,
@@ -165,7 +166,12 @@ def add_lang_code_to_tokenizer(tokenizer: PreTrainedTokenizer, lang_code: str) -
     tokenizer.add_special_tokens({"additional_special_tokens": tokenizer.additional_special_tokens + [lang_code]})
     lang_id = tokenizer.convert_tokens_to_ids(lang_code)
     tokenizer.lang_code_to_id[lang_code] = lang_id
-    if isinstance(tokenizer, M2M100Tokenizer):
+    if isinstance(tokenizer, (NllbTokenizer, MBart50Tokenizer, MBartTokenizer)):
+        tokenizer.id_to_lang_code[lang_id] = lang_code
+        tokenizer.fairseq_tokens_to_ids[lang_code] = lang_id
+        tokenizer.fairseq_ids_to_tokens[lang_id] = lang_code
+    elif isinstance(tokenizer, M2M100Tokenizer):
+        tokenizer.lang_code_to_token[lang_code] = lang_code
         tokenizer.lang_token_to_id[lang_code] = lang_id
         tokenizer.id_to_lang_token[lang_id] = lang_code
 
@@ -357,16 +363,6 @@ class HuggingFaceConfig(Config):
         self._tokenizer = self.get_or_create_tokenizer()
         tokens: List[str] = []
         trained_tokenizers = []
-        if self.data["add_new_lang_code"]:
-            lang_codes: Dict[str, str] = self.data["lang_codes"]
-            updated = False
-            for iso in self.src_isos | self.trg_isos:
-                lang_code = lang_codes.get(iso, iso)
-                if lang_code not in self._tokenizer.lang_code_to_id:
-                    add_lang_code_to_tokenizer(self._tokenizer, lang_code)
-                    updated = True
-            if updated:
-                self._tokenizer.save_pretrained(self.exp_dir)
         if tok_dict and (tok_dict.get("update_src") or tok_dict.get("update_trg")):
             if tok_dict.get("trained_tokens") and (SIL_NLP_ENV.assets_dir / "tokenizer_config.json").is_file():
                 if not tok_dict.get("share_vocab") and tok_dict.get("update_src") and tok_dict.get("update_trg"):
@@ -412,6 +408,17 @@ class HuggingFaceConfig(Config):
             tokens += missing_tokens
         if tokens:
             self._add_tokens(tokens, trained_tokenizers)
+
+        if self.data["add_new_lang_code"]:
+            lang_codes: Dict[str, str] = self.data["lang_codes"]
+            updated = False
+            for iso in self.src_isos | self.trg_isos:
+                lang_code = lang_codes.get(iso, iso)
+                if lang_code not in self._tokenizer.lang_code_to_id:
+                    add_lang_code_to_tokenizer(self._tokenizer, lang_code)
+                    updated = True
+            if updated:
+                self._tokenizer.save_pretrained(self.exp_dir)
 
     def get_or_create_tokenizer(self) -> PreTrainedTokenizer:
         if self._tokenizer is None:
@@ -595,7 +602,7 @@ class HuggingFaceNMTModel(NMTModel):
         if len(tokenizer) > old_num_tokens and tok_dict is not None and tok_dict.get("init_unk"):
             vocab = tokenizer.get_vocab()
             unk_embedding = old_embeddings.weight.data[vocab["<unk>"]]
-            model.resize_token_embeddings(len(tokenizer))
+            model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if training_args.fp16 else None)
             embeddings = model.get_input_embeddings()
             embeddings.weight.data[old_num_tokens:, :] = unk_embedding
             model.tie_weights()
@@ -622,7 +629,7 @@ class HuggingFaceNMTModel(NMTModel):
 
             # For multilingual translation models like mBART-50 and M2M100 we need to force the target language token
             # as the first generated token.
-            forced_bos_token_id = tokenizer.lang_code_to_id[self._config.val_trg_lang]
+            forced_bos_token_id = tokenizer.convert_tokens_to_ids(self._config.val_trg_lang)
             model.config.forced_bos_token_id = forced_bos_token_id
             if model.generation_config is not None:
                 model.generation_config.forced_bos_token_id = forced_bos_token_id
