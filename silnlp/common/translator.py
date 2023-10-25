@@ -170,22 +170,22 @@ def get_stylesheet(project_path: Path) -> dict:
     return usfm.relaxed_stylesheet
 
 
-def remove_footnotes_from_element(cur_elem: sfm.Element) -> None:
-    footnote_idxs = []
+def remove_inline_elements_from_element(cur_elem: sfm.Element) -> None:
+    inline_idxs = []
     for i, child in enumerate(cur_elem):
         if isinstance(child, sfm.Element):
-            if child.name in ["f", "fe", "fm"]:
-                footnote_idxs.append(i)
+            if child.meta.get("TextType") == "NoteText" or child.name in ["fm", "rq", "xtSeeAlso"]:
+                inline_idxs.append(i)
             else:
-                remove_footnotes_from_element(child)
+                remove_inline_elements_from_element(child)
 
-    for idx in reversed(footnote_idxs):
+    for idx in reversed(inline_idxs):
         del cur_elem[idx]
 
 
-def remove_footnotes(doc: List[sfm.Element]) -> None:
+def remove_inline_elements(doc: List[sfm.Element]) -> None:
     for root in doc:
-        remove_footnotes_from_element(root)
+        remove_inline_elements_from_element(root)
 
 
 class Translator(ABC):
@@ -199,7 +199,7 @@ class Translator(ABC):
         write_corpus(trg_file_path, self.translate(load_corpus(src_file_path), src_iso, trg_iso))
 
     def translate_book(
-        self, src_project: str, book: str, output_path: Path, trg_iso: str, ignore_footnotes: bool = False
+        self, src_project: str, book: str, output_path: Path, trg_iso: str, include_inline_elements: bool = False
     ) -> None:
         src_project_dir = get_project_dir(src_project)
         with (src_project_dir / "Settings.xml").open("rb") as settings_file:
@@ -207,7 +207,7 @@ class Translator(ABC):
         src_iso = get_iso(settings_tree)
         book_path = get_book_path(src_project, book)
         stylesheet = get_stylesheet(src_project_dir)
-        self.translate_usfm(book_path, output_path, src_iso, trg_iso, stylesheet, ignore_footnotes)
+        self.translate_usfm(book_path, output_path, src_iso, trg_iso, stylesheet, include_inline_elements)
 
     def translate_usfm(
         self,
@@ -216,7 +216,7 @@ class Translator(ABC):
         src_iso: str,
         trg_iso: str,
         stylesheet: dict = usfm.relaxed_stylesheet,
-        ignore_footnotes: bool = False,
+        include_inline_elements: bool = False,
     ) -> None:
         with src_file_path.open(mode="r", encoding="utf-8-sig") as book_file:
             doc: List[sfm.Element] = list(usfm.parser(book_file, stylesheet=stylesheet, canonicalise_footnotes=False))
@@ -229,8 +229,8 @@ class Translator(ABC):
         if book == "":
             raise RuntimeError("The USFM file doesn't contain an id marker.")
 
-        if ignore_footnotes:
-            remove_footnotes(doc)
+        if not include_inline_elements:
+            remove_inline_elements(doc)
 
         segments = collect_segments(book, doc)
 

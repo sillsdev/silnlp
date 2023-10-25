@@ -45,7 +45,7 @@ class TranslationTask:
         books: str,
         src_project: Optional[str],
         trg_iso: Optional[str],
-        ignore_footnotes: bool = False,
+        include_inline_elements: bool = False,
     ):
         translator, config, step_str = self._init_translation_task(experiment_suffix=f"_{self.checkpoint}_{books}")
         book_nums = get_books(books)
@@ -72,7 +72,7 @@ class TranslationTask:
             output_path = output_dir / f"{book_file_name_digits(book_num)}{book}.SFM"
             try:
                 LOGGER.info(f"Translating {book} ...")
-                translator.translate_book(src_project, book, output_path, trg_iso, ignore_footnotes)
+                translator.translate_book(src_project, book, output_path, trg_iso, include_inline_elements)
             except Exception as e:
                 if not displayed_error_already:
                     LOGGER.error(f"Was not able to translate {book}.  Error: {e.args[0]}")
@@ -119,7 +119,7 @@ class TranslationTask:
         trg: Optional[str],
         src_iso: Optional[str],
         trg_iso: Optional[str],
-        ignore_footnotes: bool = False,
+        include_inline_elements: bool = False,
     ) -> None:
         translator, config, step_str = self._init_translation_task(
             experiment_suffix=f"_{self.checkpoint}_{os.path.basename(src)}"
@@ -174,7 +174,7 @@ class TranslationTask:
                 translator.translate_docx(src_file_path, trg_file_path, src_iso, trg_iso)
             elif ext == ".usfm" or ext == ".sfm":
                 translator.translate_usfm(
-                    src_file_path, trg_file_path, src_iso, trg_iso, ignore_footnotes=ignore_footnotes
+                    src_file_path, trg_file_path, src_iso, trg_iso, include_inline_elements=include_inline_elements
                 )
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM"), overwrite=True)
 
@@ -224,10 +224,10 @@ def main() -> None:
     parser.add_argument("--src-iso", default=None, type=str, help="The source language (iso code) to translate from")
     parser.add_argument("--trg-iso", default=None, type=str, help="The target language (iso code) to translate to")
     parser.add_argument(
-        "--ignore-footnotes",
+        "--include-inline-elements",
         default=False,
         action="store_true",
-        help="Ignore footnotes for projects in USFM format",
+        help="Include inline elements for projects in USFM format",
     )
     parser.add_argument(
         "--eager-execution",
@@ -268,7 +268,7 @@ def main() -> None:
         if args.debug:
             show_attrs(cli_args=args, actions=[f"Will attempt to translate books {args.books} into {args.trg_iso}"])
             exit()
-        translator.translate_books(args.books, args.src_project, args.trg_iso, args.ignore_footnotes)
+        translator.translate_books(args.books, args.src_project, args.trg_iso, args.include_inline_elements)
     elif args.src_prefix is not None:
         if args.debug:
             show_attrs(
@@ -286,7 +286,7 @@ def main() -> None:
                 actions=[f"Will attempt to translate {args.src} from {args.src_iso} into {args.trg_iso}."],
             )
             exit()
-        translator.translate_files(args.src, args.trg, args.src_iso, args.trg_iso, args.ignore_footnotes)
+        translator.translate_files(args.src, args.trg, args.src_iso, args.trg_iso, args.include_inline_elements)
     else:
         raise RuntimeError("A Scripture book, file, or file prefix must be specified.")
 
