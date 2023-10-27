@@ -27,6 +27,35 @@ The SILNLP repo itself is hosted on Github, mainly written in Python and calls S
 
 ## Environment Setup
 
+### Option 1: Docker Container
+
+1. Download and install [Docker Desktop](https://www.docker.com/get-started/).
+2. Pull Docker image
+   
+   In a terminal, run:
+   ```
+   docker pull ghcr.io/sillsdev/silnlp:0.1.2
+   ```
+   * For Windows, use CMD Prompt
+
+3. Create Docker container based on the image
+      
+   In a terminal, run:
+   ```
+   docker create -it --name silnlp ghcr.io/sillsdev/silnlp:0.1.2
+   ```
+
+4. Start container
+   
+   In a terminal, run:
+   ```
+      docker start silnlp
+      docker exec -it silnlp bash
+   ```
+   * To leave the container, run ```exit```, and to stop it, run ```docker stop silnlp```. It can be started again by repeating the two lines above. Stopping the container will not erase any changes made in the container environment, but removing  it will.
+
+### Option 2: Manual Installation
+
 The SILNLP code can be run on either Windows or Linux operating systems. If using an Ubuntu distribution, the only compatible version is 20.04.
 
 __Download and install__ the following before creating any projects or starting any code, preferably in this order to avoid most warnings:
@@ -55,9 +84,9 @@ __Download and install__ the following before creating any projects or starting 
       ```
 
 
-   ### Linux:
+   Linux:
 
-      In terminal, run:
+   In terminal, run:
       ```
       curl -sSL https://install.python-poetry.org | python3 - 
       ```
