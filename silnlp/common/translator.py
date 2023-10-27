@@ -170,21 +170,6 @@ def get_stylesheet(project_path: Path) -> dict:
     return usfm.relaxed_stylesheet
 
 
-def add_newline_to_empty_verses(cur_elem: sfm.Element) -> None:
-    empty_verse_idxs = []
-    for i, child in enumerate(cur_elem):
-        if isinstance(child, sfm.Element):
-            if child.name == "v" and (
-                i == len(cur_elem) - 1 or (isinstance(cur_elem[i + 1], sfm.Element) and cur_elem[i + 1].name == "v")
-            ):
-                empty_verse_idxs.append(i)
-            else:
-                add_newline_to_empty_verses(child)
-
-    for idx in reversed(empty_verse_idxs):
-        cur_elem.insert(idx + 1, sfm.Text("\n", parent=cur_elem))
-
-
 class Translator(ABC):
     @abstractmethod
     def translate(
@@ -229,9 +214,6 @@ class Translator(ABC):
         translations = list(self.translate(sentences, src_iso, trg_iso, vrefs))
 
         update_segments(segments, translations)
-
-        for root in doc:
-            add_newline_to_empty_verses(root)
 
         with trg_file_path.open(mode="w", encoding="utf-8", newline="\n") as output_file:
             output_file.write(sfm.generate(doc))

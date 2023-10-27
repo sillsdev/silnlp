@@ -963,6 +963,14 @@ def generate(doc):
                 and not body.endswith((" ", "\r\n", "\n"))
             ):
                 end = "*"
+
+            empty_verse1 = re.compile(r"(?<=\\v \d) (?=(\\v)|$)")
+            empty_verse2 = re.compile(r"(?<=\\v \d{2}) (?=(\\v)|$)")
+            empty_verse3 = re.compile(r"(?<=\\v \d{3}) (?=(\\v)|$)")
+            body = re.sub(empty_verse1, "\n", body)
+            body = re.sub(empty_verse2, "\n", body)
+            body = re.sub(empty_verse3, "\n", body)
+
         elif styletype == "Character":
             body = " "
         elif styletype == "Paragraph":
