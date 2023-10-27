@@ -5,7 +5,7 @@ from copy import deepcopy
 from enum import Enum
 from itertools import repeat
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, TypeVar, Union, cast
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, TextIO, Tuple, TypeVar, Union, cast
 
 import datasets.utils.logging as datasets_logging
 import evaluate
@@ -17,14 +17,16 @@ from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
 from sacremoses import MosesPunctNormalizer
 from tokenizers import NormalizedString, Regex, SentencePieceBPETokenizer
 from tokenizers.normalizers import Normalizer
-from torch import Tensor, TensorType
+from torch import Tensor, TensorType, nn, optim
 from torch.utils.checkpoint import checkpoint  # noqa: 401
+from torch.utils.data import Sampler
 from transformers import (
     AutoConfig,
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
     DataCollatorForSeq2Seq,
     EarlyStoppingCallback,
+    EvalPrediction,
     HfArgumentParser,
     M2M100ForConditionalGeneration,
     M2M100Tokenizer,
@@ -35,8 +37,10 @@ from transformers import (
     NllbTokenizerFast,
     PreTrainedModel,
     PreTrainedTokenizer,
+    PreTrainedTokenizerBase,
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
+    TrainerCallback,
     TranslationPipeline,
     set_seed,
 )
@@ -742,7 +746,7 @@ class HuggingFaceNMTModel(NMTModel):
             result = {k: round(v, 4) for k, v in result.items()}
             return result
 
-        trainer = Seq2SeqTrainer(
+        trainer = SilSeq2SeqTrainer(
             model,
             training_args,
             data_collator,
@@ -750,6 +754,7 @@ class HuggingFaceNMTModel(NMTModel):
             eval_dataset,
             tokenizer,
             compute_metrics=compute_metrics,
+            sequential_sampling=self._config.train.get("sequential_sampling", False),
         )
         early_stopping: Optional[dict] = self._config.eval["early_stopping"]
         if early_stopping:
@@ -1090,3 +1095,40 @@ class DataCollatorForSeq2SeqNoising:
                 feature["attention_mask"] = feature["attention_mask"][: len(feature["input_ids"])]
 
         return self._data_collator(features, return_tensors)
+
+
+class SilSeq2SeqTrainer(Seq2SeqTrainer):
+    def __init__(
+        self,
+        model: Optional[Union[PreTrainedModel, nn.Module]] = None,
+        args: Optional[Seq2SeqTrainingArguments] = None,
+        data_collator: Optional[Any] = None,
+        train_dataset: Optional[Dataset] = None,
+        eval_dataset: Optional[Union[Dataset, Dict[str, Dataset]]] = None,
+        tokenizer: Optional[PreTrainedTokenizerBase] = None,
+        model_init: Optional[Callable[[], PreTrainedModel]] = None,
+        compute_metrics: Optional[Callable[[EvalPrediction], Dict]] = None,
+        callbacks: Optional[List[TrainerCallback]] = None,
+        optimizers: Tuple[Optional[optim.Optimizer], Optional[optim.lr_scheduler.LambdaLR]] = (None, None),
+        preprocess_logits_for_metrics: Optional[Callable[[Tensor, Tensor], Tensor]] = None,
+        sequential_sampling: bool = False,
+    ):
+        super().__init__(
+            model,
+            args,
+            data_collator,
+            train_dataset,
+            eval_dataset,
+            tokenizer,
+            model_init,
+            compute_metrics,
+            callbacks,
+            optimizers,
+            preprocess_logits_for_metrics,
+        )
+        self._sequential_sampling = sequential_sampling
+
+    def _get_train_sampler(self) -> Optional[Sampler]:
+        if self._sequential_sampling:
+            return None
+        return super()._get_train_sampler()
