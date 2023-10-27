@@ -52,6 +52,11 @@ __all__ = (
 )  # functions
 
 
+EMPTY_VERSE_1 = re.compile(r"(?<=\\v \d) (?=(\\v)|$)")
+EMPTY_VERSE_2 = re.compile(r"(?<=\\v \d{2}) (?=(\\v)|$)")
+EMPTY_VERSE_3 = re.compile(r"(?<=\\v \d{3}) (?=(\\v)|$)")
+
+
 class Position(NamedTuple):
     line: int
     col: int
@@ -964,12 +969,9 @@ def generate(doc):
             ):
                 end = "*"
 
-            empty_verse1 = re.compile(r"(?<=\\v \d) (?=(\\v)|$)")
-            empty_verse2 = re.compile(r"(?<=\\v \d{2}) (?=(\\v)|$)")
-            empty_verse3 = re.compile(r"(?<=\\v \d{3}) (?=(\\v)|$)")
-            body = re.sub(empty_verse1, "\n", body)
-            body = re.sub(empty_verse2, "\n", body)
-            body = re.sub(empty_verse3, "\n", body)
+            body = re.sub(EMPTY_VERSE_1, "\n", body)
+            body = re.sub(EMPTY_VERSE_2, "\n", body)
+            body = re.sub(EMPTY_VERSE_3, "\n", body)
 
         elif styletype == "Character":
             body = " "
