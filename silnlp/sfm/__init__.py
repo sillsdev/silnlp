@@ -52,6 +52,11 @@ __all__ = (
 )  # functions
 
 
+EMPTY_VERSE_1 = re.compile(r"(?<=\\v \d) (?=(\\v)|$)")
+EMPTY_VERSE_2 = re.compile(r"(?<=\\v \d{2}) (?=(\\v)|$)")
+EMPTY_VERSE_3 = re.compile(r"(?<=\\v \d{3}) (?=(\\v)|$)")
+
+
 class Position(NamedTuple):
     line: int
     col: int
@@ -963,6 +968,11 @@ def generate(doc):
                 and not body.endswith((" ", "\r\n", "\n"))
             ):
                 end = "*"
+
+            body = re.sub(EMPTY_VERSE_1, "\n", body)
+            body = re.sub(EMPTY_VERSE_2, "\n", body)
+            body = re.sub(EMPTY_VERSE_3, "\n", body)
+
         elif styletype == "Character":
             body = " "
         elif styletype == "Paragraph":
