@@ -808,12 +808,14 @@ class HuggingFaceNMTModel(NMTModel):
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
         checkpoint_path, _ = self.get_checkpoint_path(ckpt)
-        model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(
-            str(checkpoint_path), device_map="auto", torch_dtype="auto"
-        )
+        model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(str(checkpoint_path))
         tokenizer = self._config.get_tokenizer()
         pipeline = PretokenizedTranslationPipeline(
-            model=model, tokenizer=tokenizer, src_lang=self._config.test_src_lang, tgt_lang=self._config.test_trg_lang
+            model=model,
+            tokenizer=tokenizer,
+            src_lang=self._config.test_src_lang,
+            tgt_lang=self._config.test_trg_lang,
+            device=0,
         )
         for input_path, translation_path, vref_path in zip(
             input_paths,
@@ -853,9 +855,7 @@ class HuggingFaceNMTModel(NMTModel):
             model_name = str(checkpoint_path)
         else:
             model_name = self._config.model
-        model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(
-            model_name, device_map="auto", torch_dtype="auto"
-        )
+        model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name)
         if model.config.max_length < 512:
             model.config.max_length = 512
         tokenizer = self._config.get_tokenizer()
@@ -865,6 +865,7 @@ class HuggingFaceNMTModel(NMTModel):
             tokenizer=tokenizer,
             src_lang=lang_codes.get(src_iso, src_iso),
             tgt_lang=lang_codes.get(trg_iso, trg_iso),
+            device=0,
         )
         if not isinstance(sentences, list):
             sentences = list(sentences)
