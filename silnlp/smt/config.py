@@ -1,8 +1,22 @@
 import argparse
+import logging
+
 import yaml
+from machine.tokenization import (
+    WHITESPACE_DETOKENIZER,
+    WHITESPACE_TOKENIZER,
+    Detokenizer,
+    LatinWordDetokenizer,
+    LatinWordTokenizer,
+    RangeTokenizer,
+    ZwspWordDetokenizer,
+    ZwspWordTokenizer,
+)
+from machine.translation.thot import ThotWordAlignmentModelType
 
 from ..common.utils import get_git_revision_hash, get_mt_exp_dir, merge_dict
 
+LOGGER = logging.getLogger(__package__ + ".config")
 
 _BASE_CONFIG: dict = {
     "model": "hmm",
@@ -26,6 +40,44 @@ def load_config(exp_name: str) -> dict:
         return merge_dict(config, loaded_config)
 
 
+def get_thot_word_alignment_type(word_alignment_type: str) -> ThotWordAlignmentModelType:
+    if word_alignment_type == "fast_align" or word_alignment_type == "fastAlign":
+        return ThotWordAlignmentModelType.FAST_ALIGN
+    if word_alignment_type == "ibm1":
+        return ThotWordAlignmentModelType.IBM1
+    if word_alignment_type == "ibm2":
+        return ThotWordAlignmentModelType.IBM2
+    if word_alignment_type == "hmm":
+        return ThotWordAlignmentModelType.HMM
+    if word_alignment_type == "ibm3":
+        return ThotWordAlignmentModelType.IBM3
+    if word_alignment_type == "ibm4":
+        return ThotWordAlignmentModelType.IBM4
+    return ThotWordAlignmentModelType.HMM
+
+
+def create_word_tokenizer(tokenizer_type: str) -> RangeTokenizer[str, int, str]:
+    tokenizer_type = tokenizer_type.lower()
+    if tokenizer_type == "latin":
+        return LatinWordTokenizer()
+    if tokenizer_type == "zwsp":
+        return ZwspWordTokenizer()
+    if tokenizer_type == "whitespace":
+        return WHITESPACE_TOKENIZER
+    return WHITESPACE_TOKENIZER
+
+
+def create_word_detokenizer(tokenizer_type: str) -> Detokenizer[str, str]:
+    tokenizer_type = tokenizer_type.lower()
+    if tokenizer_type == "latin":
+        return LatinWordDetokenizer()
+    if tokenizer_type == "zwsp":
+        return ZwspWordDetokenizer()
+    if tokenizer_type == "whitespace":
+        return WHITESPACE_DETOKENIZER
+    return WHITESPACE_DETOKENIZER
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Creates a NMT experiment config file")
     parser.add_argument("experiment", help="Experiment name")
@@ -43,8 +95,9 @@ def main() -> None:
     exp_dir = get_mt_exp_dir(args.experiment)
     config_path = exp_dir / "config.yml"
     if config_path.is_file() and not args.force:
-        print(
-            f'The experiment config file {config_path} already exists. Use "--force" if you want to overwrite the existing config.'
+        LOGGER.warn(
+            f'The experiment config file {config_path} already exists. Use "--force" if you want to overwrite the '
+            + "existing config."
         )
         return
 
