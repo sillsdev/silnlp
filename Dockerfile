@@ -48,7 +48,6 @@ RUN apt-get install --no-install-recommends -y \
     nano \
     cmake \
     tar \
-    vim \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -64,19 +63,9 @@ RUN apt-get update && \
     apt-get install --no-install-recommends -y dotnet-sdk-7.0
 ENV DOTNET_ROLL_FORWARD=LatestMajor
 
-# Install AWS CLI
-RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
-    unzip awscliv2.zip && \
-    ./aws/install && \
-    rm awscliv2.zip
-
 # Install dependencies from poetry
 COPY --from=builder /src/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && rm requirements.txt
-
-# Install silnlp
-COPY --from=builder /src/dist/*.whl .
-RUN pip install --no-deps *.whl && rm *.whl
 
 # Install eflomal
 RUN git clone https://github.com/robertostling/eflomal.git
@@ -120,6 +109,11 @@ ENV METEOR_PATH=/usr/local/bin
 ENV SIL_NLP_DATA_PATH=/aqua-ml-data
 RUN mkdir -p .cache/silnlp
 ENV SIL_NLP_CACHE_EXPERIMENT_DIR=/root/.cache/silnlp
+ENV CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
+
+# Clone silnlp and make it the starting directory
+RUN git clone https://github.com/sillsdev/silnlp.git
+WORKDIR /root/silnlp
 
 # Default docker run behavior
 ENTRYPOINT [ "/bin/bash", "-it" ]
