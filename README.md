@@ -34,7 +34,7 @@ The SILNLP repo itself is hosted on Github, mainly written in Python and calls S
    
    In a terminal, run:
    ```
-   docker pull ghcr.io/sillsdev/silnlp:0.1.2
+   docker pull ghcr.io/sillsdev/silnlp:latest
    ```
    * For Windows, use CMD Prompt
 
@@ -42,17 +42,38 @@ The SILNLP repo itself is hosted on Github, mainly written in Python and calls S
       
    In a terminal, run:
    ```
-   docker create -it --name silnlp ghcr.io/sillsdev/silnlp:0.1.2
+   docker create -it --name silnlp ghcr.io/sillsdev/silnlp:latest
    ```
 
-4. Start container
+4. Create file for environment variables
+
+   __If you do not intend to use SILNLP with ClearML and AWS, you can skip this step.__
    
+   Create a text file with the following content and insert your credentials.
+   ```
+   CLEARML_API_ACCESS_KEY=xxxxx
+   CLEARML_API_SECRET_KEY=xxxxx
+   AWS_ACCESS_KEY_ID=xxxxx
+   AWS_SECRET_ACCESS_KEY=xxxxx
+   ```
+   * Note that this does not give you direct access to an AWS S3 bucket from within the Docker container, it only allows you to run scripts referencing files in the bucket.
+
+5. Start container
+   
+   If you completed step 4: \
    In a terminal, run:
    ```
       docker start silnlp
-      docker exec -it silnlp bash
+      docker exec -it --env-file path/to/env_vars_file silnlp bash
    ```
-   * To leave the container, run ```exit```, and to stop it, run ```docker stop silnlp```. It can be started again by repeating the two lines above. Stopping the container will not erase any changes made in the container environment, but removing  it will.
+   If you did not complete step 4: \
+   In a terminal, run:
+   ```
+   docker start silnlp
+   docker exec -it silnlp bash
+   ```
+   * After this step, the terminal should change to say `root@xxxxx:~/silnlp#`, where `xxxxx` is a string of letters and numbers, instead of your current working directory. This is the command line for the docker container, and you're able to run SILNLP scripts from here.
+   * To leave the container, run `exit`, and to stop it, run `docker stop silnlp`. It can be started again by repeating step 5. Stopping the container will not erase any changes made in the container environment, but removing  it will.
 
 ### Option 2: Manual Installation
 
