@@ -278,7 +278,7 @@ def sentence_bleu(
     hypothesis: str,
     references: List[str],
     smooth_method: str = "exp",
-    smooth_value: float = None,
+    smooth_value: Optional[float] = None,
     lowercase: bool = False,
     tokenize: str = "13a",
     use_effective_order: bool = True,
@@ -569,7 +569,7 @@ def test(
             checkpoint_name = f"best checkpoint {step}"
         else:
             checkpoint_name = f"checkpoint {step}"
-        books_str = "ALL" if len(books_nums) == 0 else ", ".join(sorted(books_nums.keys()))
+        books_str = "ALL" if len(books_nums) == 0 else ", ".join(sorted(str(num) for num in books_nums.keys()))
         LOGGER.info(f"Test results for {checkpoint_name} ({num_refs} reference(s), books: {books_str})")
         for score in results[step]:
             output = StringIO()
