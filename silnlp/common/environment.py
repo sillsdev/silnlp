@@ -47,8 +47,28 @@ class SilNlpEnv:
             self.pt_dir = self.data_dir / os.getenv("SIL_NLP_PT_DIR", "")
         else:
             self.pt_dir = self.data_dir / "Paratext"
-        self.pt_projects_dir = self.pt_dir / "projects"
         self.pt_terms_dir = self.pt_dir / "terms"
+        if self.is_bucket:
+            sil_nlp_cache_dir = os.getenv("SIL_NLP_CACHE_PROJECT_DIR")
+            if sil_nlp_cache_dir is not None:
+                temp_path = Path(sil_nlp_cache_dir)
+                if not hasattr(self, "pt_projects_dir"):
+                    if temp_path.is_dir():
+                        LOGGER.info(
+                            f"Using cache dir: {sil_nlp_cache_dir} as per environment variable "
+                            + "SIL_NLP_CACHE_PROJECT_DIR."
+                        )
+                        self.pt_projects_dir = temp_path
+                    else:
+                        raise Exception(
+                            "The path in SIL_NLP_CACHE_PROJECT_DIR does not exist.  Create it first: "
+                            + sil_nlp_cache_dir
+                        )
+            else:
+                self.pt_projects_dir = Path(tempfile.TemporaryDirectory().name)
+                self.pt_projects_dir.mkdir()
+        else:
+            self.pt_projects_dir = self.pt_dir / "projects"
 
     def set_machine_translation_dir(self, mt_dir: Optional[Path] = None):
         if mt_dir is not None:
@@ -137,6 +157,39 @@ class SilNlpEnv:
             return s3root
 
         raise FileExistsError("No valid path exists")
+
+    def copy_pt_project_from_bucket(self, name: Union[str, Path], patterns: Union[str, Sequence[str]] = []):
+        if not self.is_bucket:
+            return
+        name = str(name)
+        pt_projects_path = str(self.pt_dir.relative_to(self.data_dir) / "projects") + "/"
+        name = name.split(pt_projects_path)[-1]
+        if len(name) == 0:
+            raise Exception(
+                f"No paratext project name is given.  Data still in the cache directory of {self.pt_projects_dir}"
+            )
+        s3 = boto3.resource("s3")
+        data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
+        len_aqua_path = len(pt_projects_path)
+        pt_projects_path = pt_projects_path + name
+        objs = list(data_bucket.object_versions.filter(Prefix=pt_projects_path + "/"))
+        if len(objs) == 0:
+            LOGGER.info("No files found in the bucket under: " + pt_projects_path)
+            return
+        if isinstance(patterns, str):
+            patterns = [patterns]
+        for obj in objs:
+            rel_path = str(obj.object_key)[len_aqua_path:]
+            pure_path = PurePath(rel_path)
+            if len(patterns) == 0 or any(pure_path.match(pattern) for pattern in patterns):
+                # copy over project files and experiment files
+                temp_dest_path = self.pt_projects_dir / rel_path
+                temp_dest_path.parent.mkdir(parents=True, exist_ok=True)
+                if temp_dest_path.exists():
+                    LOGGER.debug("File already exists in local cache: " + rel_path)
+                else:
+                    LOGGER.info("Downloading " + rel_path)
+                    try_n_times(lambda: data_bucket.download_file(obj.object_key, str(temp_dest_path)))
 
     def copy_experiment_from_bucket(self, name: Union[str, Path], patterns: Union[str, Sequence[str]] = []):
         if not self.is_bucket:
