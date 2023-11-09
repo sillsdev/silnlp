@@ -4,6 +4,7 @@ from typing import Iterable, Optional
 from google.cloud import translate_v2 as translate
 from machine.scripture import VerseRef, book_id_to_number
 
+from ..common.environment import SIL_NLP_ENV
 from .paratext import book_file_name_digits
 from .translator import Translator
 from .utils import get_git_revision_hash, get_mt_exp_dir
@@ -37,6 +38,9 @@ def main() -> None:
 
     get_git_revision_hash()
 
+    SIL_NLP_ENV.copy_experiment_from_bucket(args.experiment)
+    SIL_NLP_ENV.copy_pt_project_from_bucket(args.src_project)
+
     root_dir = get_mt_exp_dir(args.experiment)
     src_project: str = args.src_project
     book: str = args.book
@@ -50,6 +54,8 @@ def main() -> None:
 
     translator = GoogleTranslator()
     translator.translate_book(src_project, book, output_path, trg_iso)
+
+    SIL_NLP_ENV.copy_experiment_to_bucket(args.experiment)
 
 
 if __name__ == "__main__":

@@ -258,6 +258,8 @@ def main() -> None:
     if args.memory_growth:
         enable_memory_growth()
 
+    SIL_NLP_ENV.copy_pt_project_from_bucket(args.src_project)
+
     translator = TranslationTask(
         name=args.experiment,
         checkpoint=args.checkpoint,
