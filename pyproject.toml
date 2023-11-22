@@ -68,7 +68,7 @@ sacrebleu = "^2.3.1"
 ctranslate2 = "^3.5.1"
 tensorflow-addons = "0.17.1"
 libclang = "14.0.6"
-sil-machine = {extras = ["thot"], version = "^0.9.1"}
+sil-machine = {extras = ["thot"], version = "^1.0.1"}
 datasets = "^2.7.1"
 torch = {version = "1.10.1", source = "torch"}
 sacremoses = "^0.0.53"
