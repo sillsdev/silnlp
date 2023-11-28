@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional, Tuple, Union
 
-from machine.scripture import VerseRef, book_number_to_id, get_books
+from machine.scripture import VerseRef, book_number_to_id, get_chapters
 
 from ..common.environment import SIL_NLP_ENV
 from ..common.paratext import book_file_name_digits, get_project_dir
@@ -44,11 +44,14 @@ class TranslationTask:
         self,
         books: str,
         src_project: Optional[str],
+        trg_project: Optional[str],
         trg_iso: Optional[str],
         include_inline_elements: bool = False,
     ):
-        translator, config, step_str = self._init_translation_task(experiment_suffix=f"_{self.checkpoint}_{books}")
-        book_nums = get_books(books)
+        book_nums = get_chapters(books)
+        translator, config, step_str = self._init_translation_task(
+            experiment_suffix=f"_{self.checkpoint}_{[book_number_to_id(book) for book in book_nums.keys()]}"
+        )
 
         if src_project is None:
             if len(config.src_projects) != 1:
@@ -59,6 +62,12 @@ class TranslationTask:
         if not src_project_dir.is_dir():
             LOGGER.error(f"Source project {src_project} not found in projects folder {src_project_dir}")
             return
+
+        if any(len(book_nums[book]) > 0 for book in book_nums) and trg_project is not None:
+            trg_project_dir = get_project_dir(trg_project)
+            if not trg_project_dir.is_dir():
+                LOGGER.error(f"Target project {trg_project} not found in projects folder {trg_project_dir}")
+                return
 
         if trg_iso is None:
             trg_iso = config.default_test_trg_iso
@@ -72,7 +81,27 @@ class TranslationTask:
             output_path = output_dir / f"{book_file_name_digits(book_num)}{book}.SFM"
             try:
                 LOGGER.info(f"Translating {book} ...")
-                translator.translate_book(src_project, book, output_path, trg_iso, include_inline_elements)
+                if (
+                    trg_project is not None and len(book_nums[book_num]) > 0
+                ):  # Pass target project to fill in missing chapters if only some are being translated
+                    translator.translate_book(
+                        src_project,
+                        book,
+                        output_path,
+                        trg_iso,
+                        book_nums[book_num],
+                        trg_project,
+                        include_inline_elements,
+                    )
+                else:
+                    translator.translate_book(
+                        src_project,
+                        book,
+                        output_path,
+                        trg_iso,
+                        book_nums[book_num],
+                        include_inline_elements=include_inline_elements,
+                    )
             except Exception as e:
                 if not displayed_error_already:
                     LOGGER.error(f"Was not able to translate {book}.  Error: {e.args[0]}")
@@ -219,7 +248,17 @@ def main() -> None:
     parser.add_argument("--end-seq", default=None, type=int, help="Ending file sequence #")
     parser.add_argument("--src-project", default=None, type=str, help="The source project to translate")
     parser.add_argument(
-        "--books", metavar="books", nargs="+", default=[], help="The books to translate; e.g., 'NT', 'OT', 'GEN,EXO'"
+        "--trg-project",
+        default=None,
+        type=str,
+        help="The target project to use as the output for chapters that aren't translated",
+    )
+    parser.add_argument(
+        "--books",
+        metavar="books",
+        nargs="+",
+        default=[],
+        help="The books to translate; e.g., 'NT', 'OT', 'GEN,EXO', can also select chapters; e.g., 'MAT-REV;-LUK10-30', 'MAT1,2,3,5-11'",
     )
     parser.add_argument("--src-iso", default=None, type=str, help="The source language (iso code) to translate from")
     parser.add_argument("--trg-iso", default=None, type=str, help="The target language (iso code) to translate to")
@@ -259,6 +298,8 @@ def main() -> None:
         enable_memory_growth()
 
     SIL_NLP_ENV.copy_pt_project_from_bucket(args.src_project)
+    if args.trg_project is not None:
+        SIL_NLP_ENV.copy_pt_project_from_bucket(args.trg_project)
 
     translator = TranslationTask(
         name=args.experiment,
@@ -268,9 +309,13 @@ def main() -> None:
 
     if len(args.books) > 0:
         if args.debug:
-            show_attrs(cli_args=args, actions=[f"Will attempt to translate books {args.books} into {args.trg_iso}"])
+            show_attrs(
+                cli_args=args, actions=[f"Will attempt to translate books {';'.join(args.books)} into {args.trg_iso}"]
+            )
             exit()
-        translator.translate_books(args.books, args.src_project, args.trg_iso, args.include_inline_elements)
+        translator.translate_books(
+            ";".join(args.books), args.src_project, args.trg_project, args.trg_iso, args.include_inline_elements
+        )
     elif args.src_prefix is not None:
         if args.debug:
             show_attrs(

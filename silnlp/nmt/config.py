@@ -10,13 +10,13 @@ from statistics import mean
 from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, Union, cast
 
 import pandas as pd
-from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books
+from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_chapters
 from tqdm import tqdm
 
 from ..alignment.config import get_aligner_name
 from ..alignment.utils import add_alignment_scores
 from ..common.corpus import (
-    exclude_books,
+    exclude_chapters,
     filter_parallel_corpus,
     get_mt_corpus_path,
     get_scripture_parallel_corpus,
@@ -26,7 +26,7 @@ from ..common.corpus import (
     get_terms_glosses_path,
     get_terms_list,
     get_terms_renderings_path,
-    include_books,
+    include_chapters,
     load_corpus,
     split_corpus,
     split_parallel_corpus,
@@ -98,8 +98,8 @@ class CorpusPair:
     disjoint_test: bool
     disjoint_val: bool
     score_threshold: float
-    corpus_books: Set[int]
-    test_books: Set[int]
+    corpus_books: Dict[int, List[int]]
+    test_books: Dict[int, List[int]]
     use_test_set_from: str
     src_terms_files: List[DataFile]
     trg_terms_files: List[DataFile]
@@ -198,8 +198,10 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
             pair["disjoint_val"] = False
         disjoint_val: bool = pair["disjoint_val"]
         score_threshold: float = pair.get("score_threshold", 0.0)
-        corpus_books = get_books(pair.get("corpus_books", []))
-        test_books = get_books(pair.get("test_books", []))
+        corpus_books_string = pair.get("corpus_books", "")
+        corpus_books = get_chapters(corpus_books_string) if len(corpus_books_string) > 0 else {}
+        test_books_string = pair.get("test_books", "")
+        test_books = get_chapters(test_books_string) if len(test_books_string) > 0 else {}
         use_test_set_from: str = pair.get("use_test_set_from", "")
 
         src_terms_files = get_terms_files(src_files) if is_set(type, DataFileType.TRAIN) else []
@@ -595,11 +597,11 @@ class Config(ABC):
                     corpus["source"] = [self._noise(pair.src_noise, x) for x in corpus["source"]]
 
                 if len(pair.corpus_books) > 0:
-                    cur_train = include_books(corpus, pair.corpus_books)
-                    if len(pair.corpus_books.intersection(pair.test_books)) > 0:
-                        cur_train = exclude_books(cur_train, pair.test_books)
+                    cur_train = include_chapters(corpus, pair.corpus_books)
+                    if len(pair.test_books) > 0:
+                        cur_train = exclude_chapters(cur_train, pair.test_books)
                 elif len(pair.test_books) > 0:
-                    cur_train = exclude_books(corpus, pair.test_books)
+                    cur_train = exclude_chapters(corpus, pair.test_books)
                 else:
                     cur_train = corpus
 
@@ -622,7 +624,7 @@ class Config(ABC):
                         test_indices = set(random.sample(indices, min(split_size, len(indices))))
 
                     if len(pair.test_books) > 0:
-                        cur_test = include_books(corpus, pair.test_books)
+                        cur_test = include_chapters(corpus, pair.test_books)
                         if test_size > 0:
                             _, cur_test = split_parallel_corpus(
                                 cur_test,
