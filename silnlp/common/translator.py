@@ -207,14 +207,11 @@ class Translator(ABC):
             settings_tree = etree.parse(settings_file)
         src_iso = get_iso(settings_tree)
         book_path = get_book_path(src_project, book)
-        if book_path.is_file:
-            LOGGER.info(f"Found the file for Book {book} at: {book_path}")
-        else:
-            LOGGER.error(f"Can't find the file for Book {book} at: {book_path}")
-
         stylesheet = get_stylesheet(src_project_dir)
         if not book_path.is_file:
-            raise RuntimeError(f"Can't find file {book_path}")
+            raise RuntimeError(f"Can't find file {book_path} for book {book}")
+        else:
+            LOGGER.info(f"Found the file {book_path} for book {book}")
         self.translate_usfm(book_path, output_path, src_iso, trg_iso, stylesheet, include_inline_elements)
 
     def translate_usfm(
