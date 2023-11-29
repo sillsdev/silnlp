@@ -1,6 +1,7 @@
 import string
 from abc import ABC, abstractmethod
 from itertools import groupby
+import logging
 from pathlib import Path
 from typing import Iterable, List, Optional, Union
 
@@ -15,8 +16,8 @@ from ..sfm import style, usfm
 from .corpus import load_corpus, write_corpus
 from .paratext import get_book_path, get_iso, get_project_dir
 
+LOGGER = logging.getLogger(__package__ + ".translate")
 nltk.download("punkt")
-
 
 class Paragraph:
     def __init__(self, elem: sfm.Element, child_indices: Iterable[int] = [], text: str = ""):
@@ -206,7 +207,14 @@ class Translator(ABC):
             settings_tree = etree.parse(settings_file)
         src_iso = get_iso(settings_tree)
         book_path = get_book_path(src_project, book)
+        if book_path.is_file:
+            LOGGER.info(f"Found the file for Book {book} at: {book_path}")
+        else:
+            LOGGER.error(f"Can't find the file for Book {book} at: {book_path}")
+
         stylesheet = get_stylesheet(src_project_dir)
+        if not book_path.is_file:
+            raise RuntimeError(f"Can't find file {book_path}")
         self.translate_usfm(book_path, output_path, src_iso, trg_iso, stylesheet, include_inline_elements)
 
     def translate_usfm(
@@ -227,7 +235,7 @@ class Translator(ABC):
                 book = str(elem[0]).strip()[:3]
                 break
         if book == "":
-            raise RuntimeError("The USFM file doesn't contain an id marker.")
+            raise RuntimeError(f"The USFM file {src_file_path} doesn't contain an id marker.")
 
         if not include_inline_elements:
             remove_inline_elements(doc)
