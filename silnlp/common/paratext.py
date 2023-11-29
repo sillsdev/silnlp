@@ -446,9 +446,6 @@ def parse_project_settings(project_dir: Path) -> Any:
     return settings_tree
 
 
-# Requires: directory of paratext project, book, chapter
-# Modifies: none
-# Effects: Return last verse of chapter in book, returns 0 if can't find chapter and verses
 def get_last_verse(project_dir: str, book: str, chapter: int) -> int:
     last_verse = "0"
     book_path = get_book_path(project_dir, book)
@@ -472,45 +469,49 @@ def get_last_verse(project_dir: str, book: str, chapter: int) -> int:
     return int(last_verse)
 
 
+# OT versification detection algorithm from:
+# https://github.com/BibleNLP/ebible/blob/main/code/notebooks/eBible%20-%20Extract%20projects.ipynb
 def detect_OT_versification(project_dir: str) -> VersificationType:
     dan_3 = get_last_verse(project_dir, "DAN", 3)
     dan_5 = get_last_verse(project_dir, "DAN", 5)
     dan_13 = get_last_verse(project_dir, "DAN", 13)
 
     if dan_3 == 30:
-        versification = VersificationType(4)
+        versification = VersificationType.ENGLISH
     elif dan_3 == 33 and dan_5 == 30:
-        versification = VersificationType(1)
+        versification = VersificationType.ORIGINAL
     elif dan_3 == 33 and dan_5 == 31:
-        versification = VersificationType(5)
+        versification = VersificationType.RUSSIAN_PROTESTANT
     elif dan_3 == 97:
-        versification = VersificationType(2)
+        versification = VersificationType.SEPTUAGINT
     elif dan_3 == 100:
         if dan_13 == 65:
-            versification = VersificationType(3)
+            versification = VersificationType.VULGATE
         else:
-            versification = VersificationType(6)
+            versification = VersificationType.RUSSIAN_ORTHODOX
     else:
-        versification = VersificationType(0)
+        versification = VersificationType.UNKNOWN
 
     return versification
 
 
+# NT versification detection algorithm from:
+# https://github.com/BibleNLP/ebible/blob/main/code/notebooks/eBible%20-%20Extract%20projects.ipynb
 def detect_NT_versification(project_dir: str) -> List[VersificationType]:
     jhn_6 = get_last_verse(project_dir, "JHN", 6)
     act_19 = get_last_verse(project_dir, "ACT", 19)
     rom_16 = get_last_verse(project_dir, "ROM", 16)
 
     if jhn_6 == 72:
-        versification = [VersificationType(3)]
+        versification = [VersificationType.VULGATE]
     elif act_19 == 41:
-        versification = [VersificationType(4)]
+        versification = [VersificationType.ENGLISH]
     elif rom_16 == 24:
-        versification = [VersificationType(5), VersificationType(6)]
+        versification = [VersificationType.RUSSIAN_PROTESTANT, VersificationType.RUSSIAN_ORTHODOX]
     elif jhn_6 == 71 and act_19 == 40:
-        versification = [VersificationType(1), VersificationType(2)]
+        versification = [VersificationType.ORIGINAL, VersificationType.SEPTUAGINT]
     else:
-        versification = [VersificationType(0)]
+        versification = [VersificationType.UNKNOWN]
 
     return versification
 
@@ -529,20 +530,18 @@ def check_versification(project_dir: str) -> Tuple[bool, List[VersificationType]
     rom_book_path = get_book_path(project_dir, "ROM")
     check_nt = bool(jhn_book_path.is_file() and act_book_path.is_file() and rom_book_path.is_file())
 
-    ot_versification: VersificationType = VersificationType(0)
-    nt_versification: List[VersificationType] = [VersificationType(0)]
     if check_ot:
-        ot_versification = detect_OT_versification(project_dir)
-        if ot_versification == VersificationType(0):
+        ot_versification: VersificationType = detect_OT_versification(project_dir)
+        if ot_versification == VersificationType.UNKNOWN:
             LOGGER.warning(f"Unknown versification detected for {project_dir}.")
-            return (matching, [VersificationType(0)])
+            return (matching, [ot_versification])
     if check_nt:
-        nt_versification = detect_NT_versification(project_dir)
-        if nt_versification[0] == VersificationType(0):
+        nt_versification: List[VersificationType] = detect_NT_versification(project_dir)
+        if nt_versification[0] == VersificationType.UNKNOWN:
             LOGGER.warning(f"Unknown versification detected for {project_dir}.")
-            return (matching, [VersificationType(0)])
+            return (matching, nt_versification)
 
-    detected_versification: List[VersificationType] = [VersificationType(0)]
+    detected_versification: List[VersificationType] = [VersificationType.UNKNOWN]
     if check_ot and check_nt:
         if ot_versification not in nt_versification:
             LOGGER.warning(
