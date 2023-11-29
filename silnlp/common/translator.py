@@ -208,7 +208,7 @@ class Translator(ABC):
         src_iso = get_iso(settings_tree)
         book_path = get_book_path(src_project, book)
         stylesheet = get_stylesheet(src_project_dir)
-        if not book_path.is_file:
+        if not book_path.is_file():
             raise RuntimeError(f"Can't find file {book_path} for book {book}")
         else:
             LOGGER.info(f"Found the file {book_path} for book {book}")
@@ -224,7 +224,14 @@ class Translator(ABC):
         include_inline_elements: bool = False,
     ) -> None:
         with src_file_path.open(mode="r", encoding="utf-8-sig") as book_file:
+            #test_sfm = usfm.parser(book_file, stylesheet=stylesheet, canonicalise_footnotes=False)
+            #for att in dir(test_sfm):
+            #    if att not in ['_sty', '__dict__', '__doc__']: 
+            #        LOGGER.info(f"{att} : {getattr(test_sfm,att)}")
+            
             doc: List[sfm.Element] = list(usfm.parser(book_file, stylesheet=stylesheet, canonicalise_footnotes=False))
+
+        LOGGER.info(f"File {src_file_path} parsed correctly.")
 
         book = ""
         for elem in doc:
@@ -241,6 +248,8 @@ class Translator(ABC):
 
         sentences = (s.text.strip() for s in segments)
         vrefs = (s.ref for s in segments)
+
+
         translations = list(self.translate(sentences, src_iso, trg_iso, vrefs))
 
         update_segments(segments, translations)
