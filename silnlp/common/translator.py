@@ -1,7 +1,7 @@
+import logging
 import string
 from abc import ABC, abstractmethod
 from itertools import groupby
-import logging
 from pathlib import Path
 from typing import Iterable, List, Optional, Union
 
@@ -18,6 +18,7 @@ from .paratext import get_book_path, get_iso, get_project_dir
 
 LOGGER = logging.getLogger(__package__ + ".translate")
 nltk.download("punkt")
+
 
 class Paragraph:
     def __init__(self, elem: sfm.Element, child_indices: Iterable[int] = [], text: str = ""):
@@ -224,14 +225,7 @@ class Translator(ABC):
         include_inline_elements: bool = False,
     ) -> None:
         with src_file_path.open(mode="r", encoding="utf-8-sig") as book_file:
-            #test_sfm = usfm.parser(book_file, stylesheet=stylesheet, canonicalise_footnotes=False)
-            #for att in dir(test_sfm):
-            #    if att not in ['_sty', '__dict__', '__doc__']: 
-            #        LOGGER.info(f"{att} : {getattr(test_sfm,att)}")
-            
             doc: List[sfm.Element] = list(usfm.parser(book_file, stylesheet=stylesheet, canonicalise_footnotes=False))
-
-        LOGGER.info(f"File {src_file_path} parsed correctly.")
 
         book = ""
         for elem in doc:
@@ -248,7 +242,7 @@ class Translator(ABC):
 
         sentences = (s.text.strip() for s in segments)
         vrefs = (s.ref for s in segments)
-
+        LOGGER.info(f"File {src_file_path} parsed correctly.")
 
         translations = list(self.translate(sentences, src_iso, trg_iso, vrefs))
 
