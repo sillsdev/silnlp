@@ -18,7 +18,7 @@ from machine.corpora import (
     create_versification_ref_corpus,
     extract_scripture_corpus,
 )
-from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_id_to_number, get_books
+from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, VersificationType, book_id_to_number, get_books
 from machine.tokenization import WhitespaceTokenizer
 
 from .corpus import get_terms_glosses_path, get_terms_metadata_path, get_terms_vrefs_path, load_corpus
@@ -444,3 +444,130 @@ def parse_project_settings(project_dir: Path) -> Any:
     with settings_filename.open("rb") as settings_file:
         settings_tree = etree.parse(settings_file)
     return settings_tree
+
+
+def get_last_verse(project_dir: str, book: str, chapter: int) -> int:
+    last_verse = "0"
+    book_path = get_book_path(project_dir, book)
+    try:
+        with book_path.open("r", encoding="utf-8", newline="\n") as book_file:
+            in_chapter = False
+            for line in book_file:
+                chapter_marker = re.search(r"\\c ? ?([0-9]+).*", line)
+                if chapter_marker:
+                    if chapter_marker.group(1) == str(chapter):
+                        in_chapter = True
+                    else:
+                        in_chapter = False
+
+                verse_marker = re.search(r"\\v ? ?([0-9]+).*", line)
+                if verse_marker:
+                    if in_chapter:
+                        last_verse = verse_marker.group(1)
+    except OSError as e:
+        LOGGER.warning(f"Unable to open {book_path}: {e}")
+    return int(last_verse)
+
+
+# OT versification detection algorithm from:
+# https://github.com/BibleNLP/ebible/blob/main/code/notebooks/eBible%20-%20Extract%20projects.ipynb
+def detect_OT_versification(project_dir: str) -> VersificationType:
+    dan_3 = get_last_verse(project_dir, "DAN", 3)
+    dan_5 = get_last_verse(project_dir, "DAN", 5)
+    dan_13 = get_last_verse(project_dir, "DAN", 13)
+
+    if dan_3 == 30:
+        versification = VersificationType.ENGLISH
+    elif dan_3 == 33 and dan_5 == 30:
+        versification = VersificationType.ORIGINAL
+    elif dan_3 == 33 and dan_5 == 31:
+        versification = VersificationType.RUSSIAN_PROTESTANT
+    elif dan_3 == 97:
+        versification = VersificationType.SEPTUAGINT
+    elif dan_3 == 100:
+        if dan_13 == 65:
+            versification = VersificationType.VULGATE
+        else:
+            versification = VersificationType.RUSSIAN_ORTHODOX
+    else:
+        versification = VersificationType.UNKNOWN
+
+    return versification
+
+
+# NT versification detection algorithm from:
+# https://github.com/BibleNLP/ebible/blob/main/code/notebooks/eBible%20-%20Extract%20projects.ipynb
+def detect_NT_versification(project_dir: str) -> List[VersificationType]:
+    jhn_6 = get_last_verse(project_dir, "JHN", 6)
+    act_19 = get_last_verse(project_dir, "ACT", 19)
+    rom_16 = get_last_verse(project_dir, "ROM", 16)
+
+    if jhn_6 == 72:
+        versification = [VersificationType.VULGATE]
+    elif act_19 == 41:
+        versification = [VersificationType.ENGLISH]
+    elif rom_16 == 24:
+        versification = [VersificationType.RUSSIAN_PROTESTANT, VersificationType.RUSSIAN_ORTHODOX]
+    elif jhn_6 == 71 and act_19 == 40:
+        versification = [VersificationType.ORIGINAL, VersificationType.SEPTUAGINT]
+    else:
+        versification = [VersificationType.UNKNOWN]
+
+    return versification
+
+
+def check_versification(project_dir: str) -> Tuple[bool, List[VersificationType]]:
+    project_versification: str = parse_project_settings(project_dir).getroot().findtext("Versification", "0")
+    project_versification: VersificationType = VersificationType(int(project_versification))
+
+    check_ot, check_nt, matching = False, False, False
+
+    dan_book_path = get_book_path(project_dir, "DAN")
+    check_ot = bool(dan_book_path.is_file())
+
+    jhn_book_path = get_book_path(project_dir, "JHN")
+    act_book_path = get_book_path(project_dir, "ACT")
+    rom_book_path = get_book_path(project_dir, "ROM")
+    check_nt = bool(jhn_book_path.is_file() and act_book_path.is_file() and rom_book_path.is_file())
+
+    if check_ot:
+        ot_versification: VersificationType = detect_OT_versification(project_dir)
+        if ot_versification == VersificationType.UNKNOWN:
+            LOGGER.warning(f"Unknown versification detected for {project_dir}.")
+            return (matching, [ot_versification])
+    if check_nt:
+        nt_versification: List[VersificationType] = detect_NT_versification(project_dir)
+        if nt_versification[0] == VersificationType.UNKNOWN:
+            LOGGER.warning(f"Unknown versification detected for {project_dir}.")
+            return (matching, nt_versification)
+
+    detected_versification: List[VersificationType] = [VersificationType.UNKNOWN]
+    if check_ot and check_nt:
+        if ot_versification not in nt_versification:
+            LOGGER.warning(
+                f"Detected OT versification {ot_versification} and detected NT versification(s) "
+                f"{', '.join([str(int(versification)) for versification in nt_versification])} do not match."
+            )
+            return (matching, [ot_versification] + nt_versification)
+        detected_versification = [ot_versification]
+    elif not check_ot and check_nt:
+        detected_versification = nt_versification
+    elif check_ot and not check_nt:
+        detected_versification = [ot_versification]
+    else:
+        LOGGER.warning(
+            f"Insufficient information to detect versification for {project_dir}. "
+            "Versification detection for the OT requires the book of Daniel. "
+            "Versification detection for the NT requires the books of John, Acts, and Romans."
+        )
+        return (matching, detected_versification)
+
+    if project_versification not in detected_versification:
+        LOGGER.warning(
+            f"Project versification setting {project_versification} does not match detected versification(s) "
+            f"{', '.join([str(int(versification)) for versification in detected_versification])}."
+        )
+        return (matching, detected_versification)
+
+    matching = True
+    return (matching, detected_versification)
