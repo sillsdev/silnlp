@@ -73,9 +73,9 @@ class TranslationTask:
                 LOGGER.info(f"Translating {book} ...")
                 translator.translate_book(src_project, book, output_path, trg_iso, include_inline_elements)
             except Exception as e:
-                error_str = ' '.join([str(s) for s in e.args])
+                error_str = " ".join([str(s) for s in e.args])
                 LOGGER.error(f"Was not able to translate {book}.  Error: {error_str}")
-                    
+
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM"), overwrite=True)
 
     def translate_text_files(
