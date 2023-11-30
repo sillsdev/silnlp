@@ -1,7 +1,6 @@
 import string
 from abc import ABC, abstractmethod
 from itertools import groupby
-import logging
 from pathlib import Path
 from typing import Iterable, List, Optional, Union
 
@@ -16,8 +15,8 @@ from ..sfm import style, usfm
 from .corpus import load_corpus, write_corpus
 from .paratext import get_book_path, get_iso, get_project_dir
 
-LOGGER = logging.getLogger(__package__ + ".translate")
 nltk.download("punkt")
+
 
 class Paragraph:
     def __init__(self, elem: sfm.Element, child_indices: Iterable[int] = [], text: str = ""):
@@ -208,10 +207,6 @@ class Translator(ABC):
         src_iso = get_iso(settings_tree)
         book_path = get_book_path(src_project, book)
         stylesheet = get_stylesheet(src_project_dir)
-        if not book_path.is_file():
-            raise RuntimeError(f"Can't find file {book_path} for book {book}")
-        else:
-            LOGGER.info(f"Found the file {book_path} for book {book}")
         self.translate_usfm(book_path, output_path, src_iso, trg_iso, stylesheet, include_inline_elements)
 
     def translate_usfm(
@@ -224,14 +219,7 @@ class Translator(ABC):
         include_inline_elements: bool = False,
     ) -> None:
         with src_file_path.open(mode="r", encoding="utf-8-sig") as book_file:
-            #test_sfm = usfm.parser(book_file, stylesheet=stylesheet, canonicalise_footnotes=False)
-            #for att in dir(test_sfm):
-            #    if att not in ['_sty', '__dict__', '__doc__']: 
-            #        LOGGER.info(f"{att} : {getattr(test_sfm,att)}")
-            
             doc: List[sfm.Element] = list(usfm.parser(book_file, stylesheet=stylesheet, canonicalise_footnotes=False))
-
-        LOGGER.info(f"File {src_file_path} parsed correctly.")
 
         book = ""
         for elem in doc:
@@ -239,7 +227,7 @@ class Translator(ABC):
                 book = str(elem[0]).strip()[:3]
                 break
         if book == "":
-            raise RuntimeError(f"The USFM file {src_file_path} doesn't contain an id marker.")
+            raise RuntimeError("The USFM file doesn't contain an id marker.")
 
         if not include_inline_elements:
             remove_inline_elements(doc)
@@ -248,8 +236,6 @@ class Translator(ABC):
 
         sentences = (s.text.strip() for s in segments)
         vrefs = (s.ref for s in segments)
-
-
         translations = list(self.translate(sentences, src_iso, trg_iso, vrefs))
 
         update_segments(segments, translations)
