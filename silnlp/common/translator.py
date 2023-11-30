@@ -223,15 +223,8 @@ class Translator(ABC):
         stylesheet: dict = usfm.relaxed_stylesheet,
         include_inline_elements: bool = False,
     ) -> None:
-        with src_file_path.open(mode="r", encoding="utf-8-sig") as book_file:
-            #test_sfm = usfm.parser(book_file, stylesheet=stylesheet, canonicalise_footnotes=False)
-            #for att in dir(test_sfm):
-            #    if att not in ['_sty', '__dict__', '__doc__']: 
-            #        LOGGER.info(f"{att} : {getattr(test_sfm,att)}")
-            
+        with src_file_path.open(mode="r", encoding="utf-8-sig") as book_file:            
             doc: List[sfm.Element] = list(usfm.parser(book_file, stylesheet=stylesheet, canonicalise_footnotes=False))
-
-        LOGGER.info(f"File {src_file_path} parsed correctly.")
 
         book = ""
         for elem in doc:
@@ -248,7 +241,7 @@ class Translator(ABC):
 
         sentences = (s.text.strip() for s in segments)
         vrefs = (s.ref for s in segments)
-
+        LOGGER.info(f"File {src_file_path} parsed correctly.")
 
         translations = list(self.translate(sentences, src_iso, trg_iso, vrefs))
 
