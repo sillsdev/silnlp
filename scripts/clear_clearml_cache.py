@@ -1,28 +1,27 @@
-import glob
-import os
-import shutil
-from pathlib import Path
+from clearml import Task
 
-from silnlp.nmt.clearml_connection import SILClearML
+task = Task.init(
+    project_name="clear_cache",
+    task_name="clear_cache",
+)
+task.set_base_docker(
+    docker_image="nvidia/cuda:11.2.2-cudnn8-runtime-ubuntu20.04",
+    docker_arguments="-v /home/clearml/.clearml/hf-cache:/root/.cache/huggingface",
+    docker_setup_bash_script=[
+        "apt install -y python3-venv",
+        "python3 -m pip install --user pipx",
+        "PATH=$PATH:/root/.local/bin",
+        "pipx install poetry==1.2.2",
+        "rm -rf /root/.cache/pip/{*,.*}",
+        "rm -rf /root/.cache/pypoetry/{*,.*}",
+        "rm -rf /root/.clearml/pip-download-cache/{*,.*}",
+        # "rm -rf /clearml_agent_cache/{*,.*}",
+        # "rm -rf /root/.clearml/venvs-cache/{*,.*}",
+        # "rm -rf /root/.cache/vcs-cache/{*,.*}",
+        # "rm -rf /root/.cache/huggingface/{*,.*}"
+        # "rm -rf /var/cache/apt/archives/{*,.*}"
+    ],
+)
+task.execute_remotely(queue_name="production")
 
-SILClearML("utilities/clear_cache", "production")
-
-
-def remove_files(path):
-    print("deleting " + path)
-    files = glob.glob(path + "/*")
-    for f in files:
-        if Path.is_dir(Path(f)):
-            shutil.rmtree(f)
-        else:
-            os.remove(f)
-
-
-# shutil.rmtree("/root/.cache/huggingface")
-# shutil.rmtree("/var/cache/apt/archives")
-remove_files("/root/.cache/pip")
-remove_files("/root/.cache/pypoetry")
-remove_files("/root/.clearml/pip-download-cache")
-# shutil.rmtree("/clearml_agent_cache")
-# shutil.rmtree("/root/.clearml/venvs-cache")
-# shutil.rmtree("/root/.cache/vcs-cache")
+print("Finished clearing caches.")
