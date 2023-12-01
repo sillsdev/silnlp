@@ -162,6 +162,26 @@ def exclude_books(corpus: pd.DataFrame, books: Set[int]) -> pd.DataFrame:
     return corpus[corpus.apply(lambda r: r["vref"].book_num not in books, axis=1)].copy()
 
 
+def include_chapters(corpus: pd.DataFrame, books: dict) -> pd.DataFrame:
+    return corpus[
+        corpus.apply(
+            lambda r: r["vref"].book_num in books
+            and (len(books[r["vref"].book_num]) == 0 or r["vref"].chapter_num in books[r["vref"].book_num]),
+            axis=1,
+        )
+    ].copy()
+
+
+def exclude_chapters(corpus: pd.DataFrame, books: dict) -> pd.DataFrame:
+    return corpus[
+        corpus.apply(
+            lambda r: r["vref"].book_num not in books
+            or (len(books[r["vref"].book_num]) > 0 and r["vref"].chapter_num not in books[r["vref"].book_num]),
+            axis=1,
+        )
+    ].copy()
+
+
 def get_terms_metadata_path(list_name: str, mt_terms_dir: Path = SIL_NLP_ENV.mt_terms_dir) -> Path:
     md_path = SIL_NLP_ENV.assets_dir / f"{list_name}-metadata.txt"
     if md_path.is_file():
