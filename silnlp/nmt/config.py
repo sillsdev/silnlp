@@ -346,6 +346,7 @@ class Config(ABC):
         self.has_scripture_data = False
         self._iso_pairs: Dict[Tuple[str, str], IsoPairInfo] = {}
         self.src_projects: Set[str] = set()
+        self.trg_projects: Set[str] = set()
         for corpus_pair in self.corpus_pairs:
             pair_src_isos = {sf.iso for sf in corpus_pair.src_files}
             pair_trg_isos = {tf.iso for tf in corpus_pair.trg_files}
@@ -364,6 +365,7 @@ class Config(ABC):
                 self.src_file_paths.update(sf.path for sf in corpus_pair.src_terms_files)
                 self.trg_file_paths.update(tf.path for tf in corpus_pair.trg_terms_files)
                 self.src_projects.update(sf.project for sf in corpus_pair.src_files)
+                self.trg_projects.update(sf.project for sf in corpus_pair.trg_files)
                 if terms_config["include_glosses"]:
                     if "en" in pair_src_isos:
                         self.src_file_paths.update(get_terms_glosses_file_paths(corpus_pair.src_terms_files))

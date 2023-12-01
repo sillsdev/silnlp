@@ -58,32 +58,47 @@ class TranslationTask:
                 raise RuntimeError("A source project must be specified.")
             src_project = next(iter(config.src_projects))
 
+        SIL_NLP_ENV.copy_pt_project_from_bucket(src_project)
+
         src_project_dir = get_project_dir(src_project)
         if not src_project_dir.is_dir():
             LOGGER.error(f"Source project {src_project} not found in projects folder {src_project_dir}")
             return
 
-        if any(len(book_nums[book]) > 0 for book in book_nums) and trg_project is not None:
-            trg_project_dir = get_project_dir(trg_project)
-            if not trg_project_dir.is_dir():
-                LOGGER.error(f"Target project {trg_project} not found in projects folder {trg_project_dir}")
-                return
+        if any(len(book_nums[book]) > 0 for book in book_nums):
+            use_trg_project = True
+            if trg_project is None:
+                if len(config.trg_projects) != 1:
+                    use_trg_project = False
+                else:
+                    trg_project = next(iter(config.trg_projects))
+
+            if use_trg_project:
+                SIL_NLP_ENV.copy_pt_project_from_bucket(trg_project)
+
+                trg_project_dir = get_project_dir(trg_project)
+                if not trg_project_dir.is_dir():
+                    LOGGER.error(f"Target project {trg_project} not found in projects folder {trg_project_dir}")
+                    return
 
         if trg_iso is None:
             trg_iso = config.default_test_trg_iso
 
         output_dir = config.exp_dir / "infer" / step_str
         output_dir.mkdir(exist_ok=True, parents=True)
+        if trg_project is not None:
+            output_dir_trg_project = output_dir / trg_project
+            output_dir_trg_project.mkdir(exist_ok=True)
 
         displayed_error_already = False
         for book_num in book_nums:
             book = book_number_to_id(book_num)
-            output_path = output_dir / f"{book_file_name_digits(book_num)}{book}.SFM"
             try:
                 LOGGER.info(f"Translating {book} ...")
                 if (
                     trg_project is not None and len(book_nums[book_num]) > 0
                 ):  # Pass target project to fill in missing chapters if only some are being translated
+                    output_path = output_dir_trg_project / f"{book_file_name_digits(book_num)}{book}.SFM"
                     translator.translate_book(
                         src_project,
                         book,
@@ -94,6 +109,7 @@ class TranslationTask:
                         include_inline_elements,
                     )
                 else:
+                    output_path = output_dir / f"{book_file_name_digits(book_num)}{book}.SFM"
                     translator.translate_book(
                         src_project,
                         book,
@@ -296,10 +312,6 @@ def main() -> None:
 
     if args.memory_growth:
         enable_memory_growth()
-
-    SIL_NLP_ENV.copy_pt_project_from_bucket(args.src_project)
-    if args.trg_project is not None:
-        SIL_NLP_ENV.copy_pt_project_from_bucket(args.trg_project)
 
     translator = TranslationTask(
         name=args.experiment,
