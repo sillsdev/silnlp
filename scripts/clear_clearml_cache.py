@@ -1,29 +1,27 @@
-import glob
-import os
-
 from clearml import Task
-
-# Warning!  This does not work - it needs to be further debugged.
 
 task = Task.init(
     project_name="clear_cache",
     task_name="clear_cache",
 )
-
+task.set_base_docker(
+    docker_image="nvidia/cuda:11.2.2-cudnn8-runtime-ubuntu20.04",
+    docker_arguments="-v /home/clearml/.clearml/hf-cache:/root/.cache/huggingface",
+    docker_setup_bash_script=[
+        "apt install -y python3-venv",
+        "python3 -m pip install --user pipx",
+        "PATH=$PATH:/root/.local/bin",
+        "pipx install poetry==1.7.1",
+        "rm -rf /root/.cache/pip/{*,.*}",
+        "rm -rf /root/.cache/pypoetry/{*,.*}",
+        "rm -rf /root/.clearml/pip-download-cache/{*,.*}",
+        # "rm -rf /clearml_agent_cache/{*,.*}",
+        # "rm -rf /root/.clearml/venvs-cache/{*,.*}",
+        # "rm -rf /root/.cache/vcs-cache/{*,.*}",
+        # "rm -rf /root/.cache/huggingface/{*,.*}"
+        # "rm -rf /var/cache/apt/archives/{*,.*}"
+    ],
+)
 task.execute_remotely(queue_name="production")
 
-
-def remove_files(path):
-    print("deleting " + path)
-    files = glob.glob(path + "/*")
-    for f in files:
-        os.remove(f)
-
-
-# remove_files("/root/.cache/huggingface")
-# remove_files("/var/cache/apt/archives")
-remove_files("/root/.cache/pip")
-remove_files("/root/.cache/pypoetry")
-remove_files("/root/.clearml/pip-download-cache")
-# remove_files("/clearml_agent_cache")
-# remove_files("/root/.clearml/venvs-cache")
+print("Finished clearing caches.")
