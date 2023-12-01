@@ -1,3 +1,4 @@
+import logging
 import string
 from abc import ABC, abstractmethod
 from itertools import groupby
@@ -15,6 +16,7 @@ from ..sfm import style, usfm
 from .corpus import load_corpus, write_corpus
 from .paratext import get_book_path, get_iso, get_project_dir
 
+LOGGER = logging.getLogger(__package__ + ".translate")
 nltk.download("punkt")
 
 
@@ -258,6 +260,12 @@ class Translator(ABC):
         src_iso = get_iso(settings_tree)
         book_path = get_book_path(src_project, book)
         stylesheet = get_stylesheet(src_project_dir)
+
+        if not book_path.is_file():
+            raise RuntimeError(f"Can't find file {book_path} for book {book}")
+        else:
+            LOGGER.info(f"Found the file {book_path} for book {book}")
+
         self.translate_usfm(
             book_path, output_path, src_iso, trg_iso, chapters, trg_project, stylesheet, include_inline_elements
         )
@@ -282,7 +290,7 @@ class Translator(ABC):
                 book = str(elem[0]).strip()[:3]
                 break
         if book == "":
-            raise RuntimeError("The USFM file doesn't contain an id marker.")
+            raise RuntimeError(f"The USFM file {src_file_path} doesn't contain an id marker.")
 
         if not include_inline_elements:
             remove_inline_elements(doc)
@@ -291,6 +299,7 @@ class Translator(ABC):
 
         sentences = [s.text.strip() for s in segments]
         vrefs = [s.ref for s in segments]
+        LOGGER.info(f"File {src_file_path} parsed correctly.")
 
         # Translate select chapters
         if len(chapters) > 0:

@@ -212,6 +212,7 @@ The service rclone has been started.
 The following will mount /aqua-ml-data to an S folder in your home directory and allow you to explore, read and write.
 * Download rclone from: https://rclone.org/install/
 * Take the `scripts/rclone/rclone.conf` file from this SILNLP repo and copy it to `~/.config/rclone/rclone.conf` (creating folders if necessary)
+* Add your credentials in the appropriate fields in `~/.config/rclone/rclone.conf`
 * Create a folder called "S" in your user directory 
 * Run the following command:
    ```
@@ -237,11 +238,30 @@ Now your AWS S3 bucket should be mounted as ~/S when you start Linux.
 
 ### Setup environment variable
 The following will cause the SILNLP tools to select the S3 bucket for local silnlp operations
-* Windows: Set the environment variable SIL_NLP_DATA_PATH to "S:/"
-* Linux: Set the environment variable SIL_NLP_DATA_PATH to "~/S"
+
+**Windows or Linux**
+* Set the environment variable SIL_NLP_DATA_PATH to "/aqua-ml-data"
+* Create the directory "/home/user/.cache/silnlp", replacing "user" with your username
+* Set the environment variables SIL_NLP_CACHE_EXPERIMENT_DIR and SIL_NLP_CACHE_PROJECT_DIR to "/home/user/.cache/silnlp"
+
 ---
 
 ## Setup ClearML on local PC
 To use Clear ML for managing experiments see the [ClearML Setup](clear_ml_windows_setup.md)
 
+## Additional Information for Development Environments
 
+### Additional Environment Variables
+Set the following environment variables with your respective credentials: CLEARML_API_ACCESS_KEY, CLEARML_API_SECRET_KEY, AWS_ACCESS_KEY_ID, and AWS_SECRET_ACCESS_KEY
+* Windows users: see [here](https://github.com/sillsdev/silnlp/wiki/Install-silnlp-on-Windows-10#permanently-set-environment-variables) for instructions on setting environment variables permanently
+* Linux users: To set environment variables permanently, add each variable as a new line to the `.bashrc` file in your home directory with the format 
+   ```
+   export VAR="VAL"
+   ```
+
+### Setting Up and Running Experiments
+See the [wiki](https://github.com/sillsdev/silnlp/wiki) for information on setting up and running experiments. The most important pages for getting started are the ones on [file structure](https://github.com/sillsdev/silnlp/wiki/Folder-structure-and-file-naming-conventions), [model configuration](https://github.com/sillsdev/silnlp/wiki/Configure-a-model), and [running experiments](https://github.com/sillsdev/silnlp/wiki/NMT:-Usage). A lot of the instructions are specific to NMT, but are still helpful starting points for doing other things like [alignment](https://github.com/sillsdev/silnlp/wiki/Alignment:-Usage).
+
+If you are using VS Code, see [this](https://github.com/sillsdev/silnlp/wiki/Using-the-Python-Debugger) page for information on using the debugger.
+
+If you need to use a tool that is supported by SILNLP but is not installable as a Python library (which is probably the case if you get an error like "RuntimeError: eflomal is not installed."), follow the appropriate instructions [here](https://github.com/sillsdev/silnlp/wiki/Installing-External-Libraries).

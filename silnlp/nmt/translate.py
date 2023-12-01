@@ -90,7 +90,6 @@ class TranslationTask:
             output_dir_trg_project = output_dir / trg_project
             output_dir_trg_project.mkdir(exist_ok=True)
 
-        displayed_error_already = False
         for book_num in book_nums:
             book = book_number_to_id(book_num)
             try:
@@ -119,11 +118,9 @@ class TranslationTask:
                         include_inline_elements=include_inline_elements,
                     )
             except Exception as e:
-                if not displayed_error_already:
-                    LOGGER.error(f"Was not able to translate {book}.  Error: {e.args[0]}")
-                    displayed_error_already = True
-                else:
-                    LOGGER.error(f"Was not able to translate {book}.")
+                error_str = " ".join([str(s) for s in e.args])
+                LOGGER.error(f"Was not able to translate {book}.  Error: {error_str}")
+
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM"), overwrite=True)
 
     def translate_text_files(

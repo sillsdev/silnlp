@@ -6,7 +6,7 @@ from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books
 
 from ..common.corpus import count_lines
 from ..common.environment import SIL_NLP_ENV
-from .paratext import extract_project, extract_term_renderings, get_project_dir
+from .paratext import check_versification, extract_project, extract_term_renderings, get_project_dir
 
 LOGGER = logging.getLogger(__package__ + ".extract_corpora")
 
@@ -75,6 +75,7 @@ def main() -> None:
         for project in projects_found:
             LOGGER.info(f"Extracting {project}...")
             project_dir = get_project_dir(project)
+            check_versification(project_dir)
             corpus_filename, verse_count = extract_project(
                 project_dir,
                 SIL_NLP_ENV.mt_scripture_dir,
