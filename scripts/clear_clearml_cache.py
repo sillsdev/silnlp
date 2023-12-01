@@ -11,7 +11,7 @@ task.set_base_docker(
         "apt install -y python3-venv",
         "python3 -m pip install --user pipx",
         "PATH=$PATH:/root/.local/bin",
-        "pipx install poetry==1.2.2",
+        "pipx install poetry==1.7.1",
         "rm -rf /root/.cache/pip/{*,.*}",
         "rm -rf /root/.cache/pypoetry/{*,.*}",
         "rm -rf /root/.clearml/pip-download-cache/{*,.*}",
