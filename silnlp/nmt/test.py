@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import IO, Dict, List, Optional, Set, TextIO, Tuple
 
 import sacrebleu
-from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_number_to_id, get_books
+from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_number_to_id, get_chapters
 from sacrebleu.metrics import BLEU, BLEUScore
 
 from ..common.environment import SIL_NLP_ENV
@@ -151,7 +151,7 @@ def process_individual_books(
     ref_file_paths: List[Path],
     vref_file_path: Path,
     select_rand_ref_line: bool,
-    books: Set[int],
+    books: Dict[int, List[int]],
 ) -> Dict[str, Tuple[List[str], List[List[str]]]]:
     # Output data structure
     book_dict: Dict[str, Tuple[List[str], List[List[str]]]] = {}
@@ -210,7 +210,7 @@ def load_test_data(
     output_file_name: str,
     ref_projects: Set[str],
     config: Config,
-    books: Set[int],
+    books: Dict[int, List[int]],
     by_book: bool,
 ) -> Tuple[List[str], List[List[str]], Dict[str, Tuple[List[str], List[List[str]]]]]:
     sys: List[str] = []
@@ -336,7 +336,7 @@ def test_checkpoint(
     checkpoint_type: CheckpointType,
     step: int,
     scorers: Set[str],
-    books: Set[int],
+    books: Dict[int, List[int]],
 ) -> List[PairScore]:
     config.set_seed()
     vref_file_names: List[str] = []
@@ -344,7 +344,7 @@ def test_checkpoint(
     translation_file_names: List[str] = []
     refs_patterns: List[str] = []
     translation_detok_file_names: List[str] = []
-    suffix_str = "_".join(map(lambda n: book_number_to_id(n), sorted(books)))
+    suffix_str = "_".join(map(lambda n: book_number_to_id(n), sorted(books.keys())))
     if len(suffix_str) > 0:
         suffix_str += "-"
     suffix_str += "avg" if step == -1 else str(step)
@@ -479,7 +479,7 @@ def test(
         LOGGER.info("No test dataset.")
         return
 
-    books_nums = get_books(books)
+    books_nums = get_chapters(";".join(books))
 
     if len(scorers) == 0:
         scorers.add("bleu")
