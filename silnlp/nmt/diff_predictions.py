@@ -1,6 +1,5 @@
 import argparse
 import difflib as dl
-import filecmp
 import logging
 import math
 import os
@@ -326,15 +325,13 @@ def apply_dict_formatting(df: pd.DataFrame, sheet, stats_offset: int, dictDf: pd
             sheet.write_rich_string(f"{column}{stats_offset+index+2}", *segments)
 
 
-def add_training_corpora(writer, exp1_dir: Path, exp2_dir: Path, col_width: int):
+def add_training_corpora(writer, exp1_dir: Path, col_width: int):
     sheet_name = "Training Data"
 
     df = pd.DataFrame(columns=[VREF, SRC_SENTENCE, TRG_SENTENCE])
 
     if os.path.exists(os.path.join(exp1_dir, "train.vref.txt")):
         df[VREF] = list(load_corpus(Path(os.path.join(exp1_dir, "train.vref.txt"))))
-    elif exp2_dir is not None and os.path.exists(os.path.join(exp2_dir, "train.vref.txt")):
-        df[VREF] = list(load_corpus(Path(os.path.join(exp2_dir, "train.vref.txt"))))
 
     df[SRC_SENTENCE] = list(decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, "train.src.txt")))))
     df[TRG_SENTENCE] = list(decode_sp_lines(load_corpus(Path(os.path.join(exp1_dir, "train.trg.txt")))))
@@ -357,18 +354,13 @@ def add_legend(writer: pd.ExcelWriter, sheet_name: str):
     sheet.write_rich_string("A7", dictionary_format, "Green (underline)", normal_format, ": Source dictionary word")
 
 
-def load_dictionary(exp1_dir: Path, exp2_dir: Path = None):
+def load_dictionary(exp_dir: Path):
     dictDf = pd.DataFrame(columns=[DICT_SRC, DICT_TRG])
 
-    src_file_name = os.path.join(exp1_dir, "dict.src.txt")
-    trg_file_name = os.path.join(exp1_dir, "dict.trg.txt")
+    src_file_name = os.path.join(exp_dir, "dict.src.txt")
+    trg_file_name = os.path.join(exp_dir, "dict.trg.txt")
     if not os.path.exists(src_file_name) or not os.path.exists(trg_file_name):
-        if exp_dir is not None:
-            src_file_name = os.path.join(exp2_dir, "dict.src.txt")
-            trg_file_name = os.path.join(exp2_dir, "dict.trg.txt")
-            if not os.path.exists(src_file_name) or not os.path.exists(trg_file_name):
-                print("Warning: no dictionary files available")
-                return None
+        print("Warning: dictionary files available")
         return None
 
     dictDf[DICT_SRC] = [decode_sp(line.split("\t")[0]).lower() for line in load_corpus(Path(src_file_name))]
@@ -510,13 +502,13 @@ def main() -> None:
 
     exp1_name = args.exp1
     exp1_dir = get_mt_exp_dir(exp1_name)
-    exp1_type = get_experiment_type(exp1_dir)
+    exp1_type = get_experiment_type(str(exp1_dir))
     if exp1_type != "SMT" and exp1_type != "NMT":
         print("Can't determine experiment type!")
         return
 
     exp1_step = (
-        0 if exp1_type == "SMT" else get_last_checkpoint(exp1_dir) if args.last else get_best_checkpoint(exp1_dir)
+        0 if exp1_type == "SMT" else get_last_checkpoint(str(exp1_dir)) if args.last else get_best_checkpoint(str(exp1_dir))
     )
     output_path = os.path.join(exp1_dir, f"diff_predictions.{exp1_step}.xlsx")
 
@@ -601,7 +593,7 @@ def main() -> None:
         add_digits_analysis(writer, df, text_wrap_column_width + 20)
 
     if args.include_train:
-        add_training_corpora(writer, exp1_dir, exp2_dir, text_wrap_column_width + 20)
+        add_training_corpora(writer, exp1_dir, text_wrap_column_width + 20)
 
     if args.include_dict and dictDf is not None:
         add_dictionary(writer, dictDf, text_wrap_column_width + 20)

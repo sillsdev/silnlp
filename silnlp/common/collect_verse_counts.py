@@ -28,7 +28,7 @@ def main() -> None:
     extract_files_path = Path(args.folder, args.files)
     extract_files_list = glob.glob(str(extract_files_path))
     for extract_file_name in tqdm(extract_files_list):
-        with open(SIL_NLP_ENV.assets_dir / "vref.txt", 'r', encoding='utf-8') as vref_file,\
+        with open(SIL_NLP_ENV.assets_dir / "vref.txt", 'r', encoding='utf-8') as vref_file, \
              open(extract_file_name, 'r', encoding='utf-8') as extract_file:
             book_list = []
             for vref, verse in zip(vref_file, extract_file):
