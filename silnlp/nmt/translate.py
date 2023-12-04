@@ -318,12 +318,10 @@ def main() -> None:
 
     if len(args.books) > 0:
         if args.debug:
-            show_attrs(
-                cli_args=args, actions=[f"Will attempt to translate books {';'.join(args.books)} into {args.trg_iso}"]
-            )
+            show_attrs(cli_args=args, actions=[f"Will attempt to translate books {args.books} into {args.trg_iso}"])
             exit()
         translator.translate_books(
-            ";".join(args.books), args.src_project, args.trg_project, args.trg_iso, args.include_inline_elements
+            args.books, args.src_project, args.trg_project, args.trg_iso, args.include_inline_elements
         )
     elif args.src_prefix is not None:
         if args.debug:

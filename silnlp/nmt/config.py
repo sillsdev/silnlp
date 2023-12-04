@@ -198,10 +198,8 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
             pair["disjoint_val"] = False
         disjoint_val: bool = pair["disjoint_val"]
         score_threshold: float = pair.get("score_threshold", 0.0)
-        corpus_books_string = pair.get("corpus_books", "")
-        corpus_books = get_chapters(corpus_books_string) if len(corpus_books_string) > 0 else {}
-        test_books_string = pair.get("test_books", "")
-        test_books = get_chapters(test_books_string) if len(test_books_string) > 0 else {}
+        corpus_books = get_chapters(pair.get("corpus_books", []))
+        test_books = get_chapters(pair.get("test_books", []))
         use_test_set_from: str = pair.get("use_test_set_from", "")
 
         src_terms_files = get_terms_files(src_files) if is_set(type, DataFileType.TRAIN) else []

@@ -479,7 +479,7 @@ def test(
         LOGGER.info("No test dataset.")
         return
 
-    books_nums = get_chapters(";".join(books))
+    books_nums = get_chapters(books)
 
     if len(scorers) == 0:
         scorers.add("bleu")
