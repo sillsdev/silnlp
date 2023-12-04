@@ -517,7 +517,7 @@ def detect_NT_versification(project_dir: str) -> List[VersificationType]:
 
 
 def check_versification(project_dir: str) -> Tuple[bool, List[VersificationType]]:
-    project_versification: str = parse_project_settings(project_dir).getroot().findtext("Versification", "0")
+    project_versification: str = parse_project_settings(project_dir).getroot().findtext("Versification", "4")
     project_versification: VersificationType = VersificationType(int(project_versification))
 
     check_ot, check_nt, matching = False, False, False
