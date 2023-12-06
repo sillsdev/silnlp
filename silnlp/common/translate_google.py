@@ -53,7 +53,7 @@ def main() -> None:
     output_dir.mkdir(exist_ok=True)
 
     translator = GoogleTranslator()
-    translator.translate_book(src_project, book, output_path, trg_iso)
+    translator.translate_book(src_project, book, output_path, trg_iso, experiment_ckpt_str=args.experiment)
 
     SIL_NLP_ENV.copy_experiment_to_bucket(args.experiment)
 

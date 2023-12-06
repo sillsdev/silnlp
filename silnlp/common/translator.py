@@ -1,6 +1,7 @@
 import logging
 import string
 from abc import ABC, abstractmethod
+from datetime import date
 from itertools import groupby
 from pathlib import Path
 from typing import Iterable, List, Optional, Union
@@ -234,6 +235,27 @@ def insert_translation_into_trg_sentences(
     return ret
 
 
+def insert_draft_remark(
+    doc: List[sfm.Element],
+    book: str,
+    description: str,
+    experiment_ckpt_str: str,
+) -> List[sfm.Element]:
+    remark = f"This draft of {book} was machine translated on {date.today()} from the {description} using model {experiment_ckpt_str}. It should be reviewed and edited carefully.\n"
+    rmk_elem = sfm.Element(
+        "rem",
+        parent=doc[0][0].parent,
+        meta={
+            "Endmarker": None,
+            "StyleType": "Paragraph",
+        },
+        content=[sfm.Text(remark)],
+    )
+
+    doc[0].insert(1, rmk_elem)
+    return doc
+
+
 class Translator(ABC):
     @abstractmethod
     def translate(
@@ -253,6 +275,7 @@ class Translator(ABC):
         chapters: List[int] = [],
         trg_project: str = "",
         include_inline_elements: bool = False,
+        experiment_ckpt_str: str = "",
     ) -> None:
         src_project_dir = get_project_dir(src_project)
         with (src_project_dir / "Settings.xml").open("rb") as settings_file:
@@ -267,7 +290,15 @@ class Translator(ABC):
             LOGGER.info(f"Found the file {book_path} for book {book}")
 
         self.translate_usfm(
-            book_path, output_path, src_iso, trg_iso, chapters, trg_project, stylesheet, include_inline_elements
+            book_path,
+            output_path,
+            src_iso,
+            trg_iso,
+            chapters,
+            trg_project,
+            stylesheet,
+            include_inline_elements,
+            experiment_ckpt_str,
         )
 
     def translate_usfm(
@@ -280,14 +311,19 @@ class Translator(ABC):
         trg_project_path: str = "",
         stylesheet: dict = usfm.relaxed_stylesheet,
         include_inline_elements: bool = False,
+        experiment_ckpt_str: str = "",
     ) -> None:
         with src_file_path.open(mode="r", encoding="utf-8-sig") as book_file:
             doc: List[sfm.Element] = list(usfm.parser(book_file, stylesheet=stylesheet, canonicalise_footnotes=False))
 
         book = ""
+        description = ""
         for elem in doc:
             if elem.name == "id":
-                book = str(elem[0]).strip()[:3]
+                doc_str = str(elem[0]).strip()
+                book = doc_str[:3]
+                if len(doc_str) > 3:
+                    description = doc_str[3:].strip(" -")
                 break
         if book == "":
             raise RuntimeError(f"The USFM file {src_file_path} doesn't contain an id marker.")
@@ -332,8 +368,11 @@ class Translator(ABC):
                         partial_translation, vrefs_to_translate, trg_sentences, trg_vrefs, chapters
                     )
                     update_segments(trg_segments, translations)
+                    trg_doc = insert_draft_remark(trg_doc, book, description, experiment_ckpt_str)
+
                     with trg_file_path.open(mode="w", encoding="utf-8", newline="\n") as output_file:
                         output_file.write(sfm.generate(trg_doc))
+
                     return
 
             translations = [""] * len(sentences)
@@ -343,6 +382,7 @@ class Translator(ABC):
             translations = list(self.translate(sentences, src_iso, trg_iso, vrefs))
 
         update_segments(segments, translations)
+        doc = insert_draft_remark(doc, book, description, experiment_ckpt_str)
 
         with trg_file_path.open(mode="w", encoding="utf-8", newline="\n") as output_file:
             output_file.write(sfm.generate(doc))
