@@ -106,6 +106,7 @@ class TranslationTask:
                         book_nums[book_num],
                         trg_project,
                         include_inline_elements,
+                        f"{self.name}:{self.checkpoint}",
                     )
                 else:
                     output_path = output_dir / f"{book_file_name_digits(book_num)}{book}.SFM"
@@ -116,6 +117,7 @@ class TranslationTask:
                         trg_iso,
                         book_nums[book_num],
                         include_inline_elements=include_inline_elements,
+                        experiment_ckpt_str=f"{self.name}:{self.checkpoint}",
                     )
             except Exception as e:
                 error_str = " ".join([str(s) for s in e.args])
@@ -216,7 +218,12 @@ class TranslationTask:
                 translator.translate_docx(src_file_path, trg_file_path, src_iso, trg_iso)
             elif ext == ".usfm" or ext == ".sfm":
                 translator.translate_usfm(
-                    src_file_path, trg_file_path, src_iso, trg_iso, include_inline_elements=include_inline_elements
+                    src_file_path,
+                    trg_file_path,
+                    src_iso,
+                    trg_iso,
+                    include_inline_elements=include_inline_elements,
+                    experiment_ckpt_str=f"{self.name}:{self.checkpoint}",
                 )
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM"), overwrite=True)
 
