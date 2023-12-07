@@ -1,4 +1,4 @@
-from typing import Iterable, List, Sequence
+from typing import Iterable, Sequence
 
 from ..common.stemmer import Stemmer
 

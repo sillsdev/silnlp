@@ -33,7 +33,6 @@ def attrs(obj):
 
 
 def print_table(rows):
-
     for arg, value in rows:
         if isinstance(value, PurePath):
             print(f"{str(arg):<30} : {str(value):<41} | {str(type(value)):<30} | {str(value.exists()):>6}")
@@ -44,7 +43,6 @@ def print_table(rows):
 
 
 def show_attrs(cli_args, envs=SIL_NLP_ENV, actions=[]):
-
     env_rows = [(k, v) for k, v in attrs(envs).items()]
     arg_rows = [(k, v) for k, v in cli_args.__dict__.items() if v is not None]
 
@@ -121,7 +119,7 @@ def check_dotnet() -> None:
                 stderr=subprocess.DEVNULL,
             )
             _is_dotnet_installed = True
-        except:
+        except Exception:
             _is_dotnet_installed = False
 
     if not _is_dotnet_installed:

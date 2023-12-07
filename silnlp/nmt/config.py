@@ -11,6 +11,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, Unio
 
 import pandas as pd
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_chapters
+from machine.translation import WordGraph
 from tqdm import tqdm
 
 from ..alignment.config import get_aligner_name
@@ -320,6 +321,17 @@ class NMTModel(ABC):
 
     @abstractmethod
     def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
+        ...
+
+    @abstractmethod
+    def get_word_graphs(
+        self,
+        sentences: Iterable[str],
+        src_iso: str,
+        trg_iso: str,
+        vrefs: Optional[Iterable[VerseRef]] = None,
+        ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
+    ) -> Iterable[WordGraph]:
         ...
 
 

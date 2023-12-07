@@ -5,7 +5,7 @@ from copy import deepcopy
 from enum import Enum
 from itertools import repeat
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, TextIO, Tuple, TypeVar, Union, cast
+from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, TypeVar, Union, cast
 
 import datasets.utils.logging as datasets_logging
 import evaluate
@@ -17,16 +17,14 @@ from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
 from sacremoses import MosesPunctNormalizer
 from tokenizers import NormalizedString, Regex, SentencePieceBPETokenizer
 from tokenizers.normalizers import Normalizer
-from torch import Tensor, TensorType, nn, optim
+from torch import LongTensor, Tensor, TensorType
 from torch.utils.checkpoint import checkpoint  # noqa: 401
-from torch.utils.data import Sampler
 from transformers import (
     AutoConfig,
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
-    DataCollatorForSeq2Seq,
+    BeamScorer,
     EarlyStoppingCallback,
-    EvalPrediction,
     HfArgumentParser,
     M2M100ForConditionalGeneration,
     M2M100Tokenizer,
@@ -37,23 +35,30 @@ from transformers import (
     NllbTokenizerFast,
     PreTrainedModel,
     PreTrainedTokenizer,
-    PreTrainedTokenizerBase,
-    Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
-    TrainerCallback,
     TranslationPipeline,
     set_seed,
 )
 from transformers.convert_slow_tokenizer import convert_slow_tokenizer
+from transformers.generation import (
+    BeamSearchDecoderOnlyOutput,
+    BeamSearchEncoderDecoderOutput,
+    GenerationMixin,
+    LogitsProcessorList,
+    StoppingCriteriaList,
+)
 from transformers.tokenization_utils import BatchEncoding, TruncationStrategy
 from transformers.trainer_utils import get_last_checkpoint
-from transformers.utils import PaddingStrategy, to_py_obj
+from transformers.utils import to_py_obj
 from transformers.utils.logging import tqdm
 
 from ..common.corpus import count_lines, get_terms
 from ..common.environment import SIL_NLP_ENV, download_if_s3_paths
-from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
+from ..common.utils import ReplaceRandomToken, Side, create_noise_methods, merge_dict
 from .config import CheckpointType, Config, CorpusPair, NMTModel
+from .huggingface.data_collator import DataCollatorForSeq2SeqNoising
+from .huggingface.generation.beam_search import WordGraphBeamScorerDecorator, WordGraphBeamSearchEncoderDecoderOutput
+from .huggingface.trainer_seq2seq import SilSeq2SeqTrainer
 from .tokenizer import NullTokenizer, Tokenizer
 
 
@@ -73,6 +78,62 @@ def prepare_decoder_input_ids_from_labels(self: M2M100ForConditionalGeneration, 
 
 
 M2M100ForConditionalGeneration.prepare_decoder_input_ids_from_labels = prepare_decoder_input_ids_from_labels
+
+original_beam_search = GenerationMixin.beam_search
+
+
+def beam_search(
+    self: GenerationMixin,
+    input_ids: LongTensor,
+    beam_scorer: BeamScorer,
+    logits_processor: Optional[LogitsProcessorList] = None,
+    stopping_criteria: Optional[StoppingCriteriaList] = None,
+    max_length: Optional[int] = None,
+    pad_token_id: Optional[int] = None,
+    eos_token_id: Optional[Union[int, List[int]]] = None,
+    output_attentions: Optional[bool] = None,
+    output_hidden_states: Optional[bool] = None,
+    output_scores: Optional[bool] = None,
+    return_dict_in_generate: Optional[bool] = None,
+    synced_gpus: bool = False,
+    **model_kwargs,
+) -> Union[Union[BeamSearchEncoderDecoderOutput, BeamSearchDecoderOnlyOutput], LongTensor]:
+    generate_word_graph: bool = getattr(self, "generate_word_graph", False)
+    if generate_word_graph:
+        beam_scorer = WordGraphBeamScorerDecorator(beam_scorer, input_ids)
+    output = original_beam_search(
+        self,
+        input_ids,
+        beam_scorer,
+        logits_processor,
+        stopping_criteria,
+        max_length,
+        pad_token_id,
+        eos_token_id,
+        output_attentions,
+        output_hidden_states,
+        output_scores,
+        return_dict_in_generate,
+        synced_gpus,
+        **model_kwargs,
+    )
+    if isinstance(beam_scorer, WordGraphBeamScorerDecorator):
+        return WordGraphBeamSearchEncoderDecoderOutput(
+            sequences=output.sequences,
+            sequences_scores=output.sequences_scores,
+            scores=output.scores,
+            beam_indices=output.beam_indices,
+            encoder_attentions=output.encoder_attentions,
+            encoder_hidden_states=output.encoder_hidden_states,
+            decoder_attentions=output.decoder_attentions,
+            cross_attentions=output.cross_attentions,
+            decoder_hidden_states=output.decoder_hidden_states,
+            word_graphs=beam_scorer.word_graphs,
+        )
+    return output
+
+
+GenerationMixin.beam_search = beam_search
 
 TRAINING_ARGS_CONFIG_MAPPING = {
     "train": {
@@ -1067,69 +1128,3 @@ class PretokenizedTranslationPipeline(TranslationPipeline):
         tgt_lang_id = self.tokenizer.convert_tokens_to_ids(tgt_lang)
         model_inputs["forced_bos_token_id"] = tgt_lang_id
         return model_inputs
-
-
-class DataCollatorForSeq2SeqNoising:
-    def __init__(
-        self,
-        tokenizer: PreTrainedTokenizer,
-        model: Optional[Any] = None,
-        padding: Union[bool, str, PaddingStrategy] = True,
-        max_length: Optional[int] = None,
-        pad_to_multiple_of: Optional[int] = None,
-        label_pad_token_id: int = -100,
-        src_noise: List[NoiseMethod] = [],
-        return_tensors: str = "pt",
-    ):
-        self._data_collator = DataCollatorForSeq2Seq(
-            tokenizer, model, padding, max_length, pad_to_multiple_of, label_pad_token_id, return_tensors
-        )
-        self._src_noise = src_noise
-
-    def __call__(self, features, return_tensors=None):
-        if len(self._src_noise) > 0:
-            for feature in features:
-                input_ids = feature["input_ids"][:-2]
-                for noise_method in self._src_noise:
-                    input_ids = noise_method(input_ids)
-                feature["input_ids"] = input_ids + feature["input_ids"][-2:]
-                feature["attention_mask"] = feature["attention_mask"][: len(feature["input_ids"])]
-
-        return self._data_collator(features, return_tensors)
-
-
-class SilSeq2SeqTrainer(Seq2SeqTrainer):
-    def __init__(
-        self,
-        model: Optional[Union[PreTrainedModel, nn.Module]] = None,
-        args: Optional[Seq2SeqTrainingArguments] = None,
-        data_collator: Optional[Any] = None,
-        train_dataset: Optional[Dataset] = None,
-        eval_dataset: Optional[Union[Dataset, Dict[str, Dataset]]] = None,
-        tokenizer: Optional[PreTrainedTokenizerBase] = None,
-        model_init: Optional[Callable[[], PreTrainedModel]] = None,
-        compute_metrics: Optional[Callable[[EvalPrediction], Dict]] = None,
-        callbacks: Optional[List[TrainerCallback]] = None,
-        optimizers: Tuple[Optional[optim.Optimizer], Optional[optim.lr_scheduler.LambdaLR]] = (None, None),
-        preprocess_logits_for_metrics: Optional[Callable[[Tensor, Tensor], Tensor]] = None,
-        sequential_sampling: bool = False,
-    ):
-        super().__init__(
-            model,
-            args,
-            data_collator,
-            train_dataset,
-            eval_dataset,
-            tokenizer,
-            model_init,
-            compute_metrics,
-            callbacks,
-            optimizers,
-            preprocess_logits_for_metrics,
-        )
-        self._sequential_sampling = sequential_sampling
-
-    def _get_train_sampler(self) -> Optional[Sampler]:
-        if self._sequential_sampling:
-            return None
-        return super()._get_train_sampler()
