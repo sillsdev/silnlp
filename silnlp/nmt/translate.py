@@ -121,7 +121,7 @@ class TranslationTask:
                     )
             except Exception as e:
                 error_str = " ".join([str(s) for s in e.args])
-                LOGGER.error(f"Was not able to translate {book}.  Error: {error_str}")
+                LOGGER.error(f"Was not able to translate {book}.  {type(e).__name__}: {error_str}")
 
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM"), overwrite=True)
 
