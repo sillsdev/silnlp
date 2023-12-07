@@ -84,18 +84,18 @@ class TranslationTask:
         if trg_iso is None:
             trg_iso = config.default_test_trg_iso
 
-        output_dir = config.exp_dir / "infer" / step_str
+        output_dir = config.exp_dir / "infer" / step_str / src_project
         output_dir.mkdir(exist_ok=True, parents=True)
         if trg_project is not None:
             output_dir_trg_project = output_dir / trg_project
             output_dir_trg_project.mkdir(exist_ok=True)
 
-        for book_num in book_nums:
+        for book_num, chapters in book_nums.items():
             book = book_number_to_id(book_num)
             try:
                 LOGGER.info(f"Translating {book} ...")
                 if (
-                    trg_project is not None and len(book_nums[book_num]) > 0
+                    trg_project is not None and len(chapters) > 0
                 ):  # Pass target project to fill in missing chapters if only some are being translated
                     output_path = output_dir_trg_project / f"{book_file_name_digits(book_num)}{book}.SFM"
                     translator.translate_book(
@@ -103,7 +103,7 @@ class TranslationTask:
                         book,
                         output_path,
                         trg_iso,
-                        book_nums[book_num],
+                        chapters,
                         trg_project,
                         include_inline_elements,
                         f"{self.name}:{self.checkpoint}",
@@ -115,7 +115,7 @@ class TranslationTask:
                         book,
                         output_path,
                         trg_iso,
-                        book_nums[book_num],
+                        chapters,
                         include_inline_elements=include_inline_elements,
                         experiment_ckpt_str=f"{self.name}:{self.checkpoint}",
                     )
