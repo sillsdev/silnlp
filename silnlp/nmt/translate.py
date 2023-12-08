@@ -120,8 +120,7 @@ class TranslationTask:
                         experiment_ckpt_str=f"{self.name}:{self.checkpoint}",
                     )
             except Exception as e:
-                error_str = " ".join([str(s) for s in e.args])
-                LOGGER.error(f"Was not able to translate {book}.  {type(e).__name__}: {error_str}")
+                LOGGER.exception(f"Was not able to translate {book}.")
 
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM"), overwrite=True)
 
