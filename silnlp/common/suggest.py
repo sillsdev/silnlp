@@ -3,7 +3,7 @@ from io import TextIOWrapper
 import os.path
 from pathlib import Path
 import time
-from typing import List
+from typing import List, Optional
 
 from machine.corpora import ParallelTextCorpus
 from machine.tokenization import (
@@ -11,7 +11,6 @@ from machine.tokenization import (
     WhitespaceDetokenizer,
     LatinWordTokenizer,
     LatinWordDetokenizer,
-    NullTokenizer,
     ZwspWordTokenizer,
     ZwspWordDetokenizer,
 )
@@ -24,14 +23,16 @@ from machine.translation import (
 from machine.translation.thot import ThotSmtModel, ThotWordAlignmentModelType
 
 from .corpus import get_scripture_parallel_corpus
+from .environment import SIL_NLP_ENV
+from .utils import get_git_revision_hash, get_mt_exp_dir
+
+from ..smt.config import load_config
 
 NORMALIZATION_FORMS = ["nfc, nfd, nfkc, nfkd"]
 
 
 def get_tokenizer(tokenizer: str):
-    if tokenizer is None:
-        return NullTokenizer()
-    elif tokenizer == "whitespace":
+    if tokenizer == "whitespace":
         return WhitespaceTokenizer()
     elif tokenizer == "latin":
         return LatinWordTokenizer()
@@ -42,9 +43,7 @@ def get_tokenizer(tokenizer: str):
 
 
 def get_detokenizer(detokenizer: str):
-    if detokenizer is None:
-        return WhitespaceDetokenizer()
-    elif detokenizer == "whitespace":
+    if detokenizer == "whitespace":
         return WhitespaceDetokenizer()
     elif detokenizer == "latin":
         return LatinWordDetokenizer()
@@ -55,17 +54,17 @@ def get_detokenizer(detokenizer: str):
 
 
 def suggest(
-    model_path: str,
-    src: str,
-    trg: str,
+    model_path: Path,
+    src: Path,
+    trg: Path,
     aligner: str,
     source_tokenizer: str,
     target_tokenizer: str,
     confidence: float,
     num_suggestions: int,
-    trace: str,
+    trace: Optional[str],
     approve_aligned: bool,
-    normalization_form: str,
+    normalization_form: Optional[str],
     escape_spaces: bool,
     cased: bool,
     quiet: bool,
@@ -80,9 +79,8 @@ def suggest(
     middle_suggestion_count = 0
     accepted_suggestion_counts = [0] * num_suggestions
 
-    if os.path.isfile(trace):
-        trace_file = None
-    else:
+    trace_file = None
+    if trace is not None:
         trace_file = open(trace, "w", encoding="utf-8")
 
     suggester = PhraseTranslationSuggester(confidence)
@@ -96,7 +94,7 @@ def suggest(
 
     model = ThotSmtModel(
         ThotWordAlignmentModelType[aligner.upper()],
-        Path(model_path) / "smt.cfg",
+        model_path / "smt.cfg",
         source_tokenizer=source_tokenizer,
         target_tokenizer=target_tokenizer,
         target_detokenizer=target_detokenizer,
@@ -109,7 +107,7 @@ def suggest(
         print("Suggesting...")
     start = time.time()
 
-    corpus_df = get_scripture_parallel_corpus(Path(src), Path(trg))
+    corpus_df = get_scripture_parallel_corpus(src, trg)
     corpus = ParallelTextCorpus.from_pandas(corpus_df, None, "vref", "source", "target", None)
     corpus = corpus.tokenize(source_tokenizer, target_tokenizer)
     if normalization_form is not None and normalization_form in NORMALIZATION_FORMS:
@@ -316,12 +314,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Simulates the generation of translation suggestions during an interactive translation session."
     )
-    parser.add_argument("model", help="Path to model")
-    parser.add_argument("src", type=str, help="Source corpus")
-    parser.add_argument("trg", type=str, help="Target corpus")
-    parser.add_argument("aligner", default=None, type=str, help="The word alignment model type")
-    parser.add_argument("-st", "--source-tokenizer", default=None, type=str, help="Source tokenizer")
-    parser.add_argument("-tt", "--target-tokenizer", default=None, type=str, help="Target tokenizer")
+    parser.add_argument("experiment", help="Experiment name")
     parser.add_argument("-c", "--confidence", default=0.2, type=float, help="Confidence threshold")
     parser.add_argument("-n", default=1, type=int, help="Number of suggestions to generate")
     parser.add_argument("-t", "--trace", default=None, type=str, help="Trace file")
@@ -332,32 +325,34 @@ def main() -> None:
         action="store_true",
         help="Approve aligned part of source segment",
     )
-    parser.add_argument(
-        "-nf",
-        "--normalization-form",
-        default=None,
-        type=str,
-        help="Normalizes text to the specified form. Forms: nfc, nfd, nfkc, nfkd",
-    )
-    parser.add_argument("--escape-spaces", default=False, action="store_true", help="Escape spaces")
-    parser.add_argument("--cased", default=False, action="store_true", help="Do not make corpus lowercase")
     parser.add_argument("-q", "--quiet", default=False, action="store_true", help="Only display results")
     args = parser.parse_args()
 
+    get_git_revision_hash()
+
+    exp_name = args.experiment
+    exp_dir = get_mt_exp_dir(exp_name)
+    SIL_NLP_ENV.copy_experiment_from_bucket(exp_name)
+    config = load_config(exp_name)
+
+    engine_dir = exp_dir / f"engine{os.sep}"
+    src_file_path = exp_dir / "test.src.txt"
+    trg_file_path = exp_dir / "test.trg.txt"
+
     suggest(
-        args.model,
-        args.src,
-        args.trg,
-        args.aligner,
-        args.source_tokenizer,
-        args.target_tokenizer,
+        engine_dir,
+        src_file_path,
+        trg_file_path,
+        config["model"],
+        config["src_tokenizer"],
+        config["trg_tokenizer"],
         args.confidence,
         args.n,
         args.trace,
         args.approve_aligned,
-        args.normalization_form,
-        args.escape_spaces,
-        args.cased,
+        config.get("normalization_form", None),
+        config.get("escape_spaces", False),
+        config.get("lowercase", True),
         args.quiet,
     )
 
