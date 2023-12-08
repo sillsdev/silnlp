@@ -484,7 +484,7 @@ class Config(ABC):
         LOGGER.info("Preprocessing completed")
 
     @abstractmethod
-    def create_model(self, mixed_precision: bool = False, num_devices: int = 1) -> NMTModel:
+    def create_model(self, mixed_precision: bool = True, num_devices: int = 1) -> NMTModel:
         ...
 
     @abstractmethod

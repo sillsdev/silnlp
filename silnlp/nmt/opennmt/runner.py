@@ -417,7 +417,7 @@ def create_model(model_name: str, config: dict, write_trg_tag: bool) -> Model:
     return model
 
 
-def create_runner(model_name: str, config: dict, write_trg_tag: bool, mixed_precision: bool = False) -> SILRunner:
+def create_runner(model_name: str, config: dict, write_trg_tag: bool, mixed_precision: bool = True) -> SILRunner:
     model = create_model(model_name, config, write_trg_tag)
 
     return SILRunner(model, config, auto_config=True, mixed_precision=mixed_precision, seed=config["data"]["seed"])

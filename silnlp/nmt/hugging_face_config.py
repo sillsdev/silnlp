@@ -93,6 +93,7 @@ TRAINING_ARGS_CONFIG_MAPPING = {
         "save_steps",
         "save_strategy",
         "save_total_limit",
+        "tf32",
     },
     "eval": {
         "eval_accumulation_steps",
@@ -228,6 +229,7 @@ class HuggingFaceConfig(Config):
                     "delete_checkpoint_optimizer_state": True,
                     "delete_checkpoint_tokenizer": True,
                     "log_level": "info",
+                    "tf32": True,
                 },
                 "eval": {
                     "evaluation_strategy": "steps",
@@ -291,7 +293,7 @@ class HuggingFaceConfig(Config):
     def has_best_checkpoint(self) -> bool:
         return has_best_checkpoint(self.model_dir)
 
-    def create_model(self, mixed_precision: bool = False, num_devices: int = 1) -> NMTModel:
+    def create_model(self, mixed_precision: bool = True, num_devices: int = 1) -> NMTModel:
         return HuggingFaceNMTModel(self, mixed_precision, num_devices)
 
     def create_tokenizer(self) -> Tokenizer:
