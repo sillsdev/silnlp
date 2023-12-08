@@ -80,6 +80,8 @@ def train(exp_name: str) -> None:
         model_type,
         parallel_corpus,
         engine_config_file_path,
+        lowercase_source=True,
+        lowercase_target=True,
     ) as trainer, tqdm(total=1.0, bar_format="{percentage:3.0f}%|{bar:40}|{desc}", leave=False) as pbar:
 
         def progress(status: ProgressStatus) -> None:
