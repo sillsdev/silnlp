@@ -15,10 +15,10 @@ from machine.translation import (
 )
 from machine.translation.thot import ThotSmtModel, ThotWordAlignmentModelType
 
-from ..smt.config import load_config, create_word_tokenizer, create_word_detokenizer
-from .corpus import get_scripture_parallel_corpus
-from .environment import SIL_NLP_ENV
-from .utils import get_git_revision_hash, get_mt_exp_dir
+from ..common.corpus import get_scripture_parallel_corpus
+from ..common.environment import SIL_NLP_ENV
+from ..common.utils import get_git_revision_hash, get_mt_exp_dir
+from .config import load_config, create_word_tokenizer, create_word_detokenizer
 
 LOGGER = logging.getLogger(__package__ + ".suggest")
 
@@ -59,15 +59,7 @@ def suggest(
     target_detokenizer = create_word_detokenizer(target_tokenizer)
     target_tokenizer = create_word_tokenizer(target_tokenizer)
 
-    model = ThotSmtModel(
-        ThotWordAlignmentModelType[aligner.upper()],
-        model_path / "smt.cfg",
-        source_tokenizer=source_tokenizer,
-        target_tokenizer=target_tokenizer,
-        target_detokenizer=target_detokenizer,
-        lowercase_source=True,
-        lowercase_target=True,
-    )
+    model = ThotSmtModel(ThotWordAlignmentModelType[aligner.upper()], model_path / "smt.cfg")
 
     if not quiet:
         LOGGER.info("done.")
