@@ -44,6 +44,7 @@ The SILNLP repo itself is hosted on Github, mainly written in Python and calls S
    ```
    docker create -it --name silnlp ghcr.io/sillsdev/silnlp:latest
    ```
+   A docker container should be created. You should be able to see a container named 'silnlp' on the Containers page of Docker Desktop.
 
 4. Create file for environment variables
 

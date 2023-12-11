@@ -1,15 +1,18 @@
 import argparse
-import os
-import subprocess
+from contextlib import ExitStack
 from typing import List
 
 import sacrebleu
+from machine.corpora import TextFileTextCorpus, TextRow
+from machine.translation import MAX_SEGMENT_LENGTH
+from machine.translation.thot import ThotSmtModel
+from tqdm import tqdm
 
 from ..common.corpus import load_corpus
-from ..common.metrics import compute_meteor_score, compute_wer_score
-from ..common.utils import check_dotnet, get_git_revision_hash, get_mt_exp_dir, get_repo_dir
-from .config import load_config
 from ..common.environment import SIL_NLP_ENV
+from ..common.metrics import compute_meteor_score, compute_wer_score
+from ..common.utils import get_git_revision_hash, get_mt_exp_dir
+from .config import create_word_detokenizer, create_word_tokenizer, get_thot_word_alignment_type, load_config
 
 SUPPORTED_SCORERS = {"bleu", "spbleu", "chrf3", "meteor", "wer", "ter"}
 
@@ -17,6 +20,10 @@ SUPPORTED_SCORERS = {"bleu", "spbleu", "chrf3", "meteor", "wer", "ter"}
 def get_iso(lang: str) -> str:
     index = lang.find("-")
     return lang[:index]
+
+
+def is_valid(row: TextRow) -> bool:
+    return not row.is_empty and len(row.segment) <= MAX_SEGMENT_LENGTH
 
 
 def main() -> None:
@@ -52,25 +59,33 @@ def main() -> None:
     predictions_file_path = exp_dir / "test.trg-predictions.txt"
 
     if args.force_infer or not predictions_file_path.is_file():
-        check_dotnet()
         src_file_path = exp_dir / "test.src.txt"
-        engine_dir = exp_dir / f"engine{os.sep}"
-        args_list: List[str] = [
-            "dotnet",
-            "machine",
-            "translate",
-            str(engine_dir),
-            str(src_file_path),
-            str(predictions_file_path),
-            "-t",
-            config["trg_tokenizer"],
-            "-rt",
-            config["trg_tokenizer"],
-            "-mt",
-            config["model"],
-            "-l",
-        ]
-        subprocess.run(args_list, cwd=get_repo_dir())
+        engine_config_file_path = exp_dir / "engine" / "smt.cfg"
+
+        src_corpus = (
+            TextFileTextCorpus(src_file_path)
+            .tokenize(create_word_tokenizer(config["src_tokenizer"]))
+            .unescape_spaces()
+            .lowercase()
+        )
+
+        detokenizer = create_word_detokenizer(config["trg_tokenizer"])
+
+        with ExitStack() as stack:
+            model = stack.enter_context(
+                ThotSmtModel(get_thot_word_alignment_type(config["model"]), engine_config_file_path)
+            )
+            out_file = stack.enter_context(predictions_file_path.open("w", encoding="utf-8", newline="\n"))
+            count = src_corpus.count()
+            rows = stack.enter_context(src_corpus.get_rows())
+
+            for row in tqdm(rows, total=count, bar_format="{l_bar}{bar:40}{r_bar}"):
+                if is_valid(row):
+                    result = model.translate(row.segment)
+                    translation = detokenizer.detokenize(result.target_tokens)
+                    out_file.write(translation + "\n")
+                else:
+                    out_file.write("\n")
 
     sys = list(load_corpus(predictions_file_path))
     ref = list(load_corpus(ref_file_path))
@@ -103,7 +118,7 @@ def main() -> None:
                 scorer_name = "METEOR"
                 score_str = f"{meteor_score:.2f}"
             elif scorer == "wer":
-                wer_score = compute_wer_score(sys, ref)
+                wer_score = compute_wer_score(sys, [ref])
                 if wer_score == 0:
                     continue
                 scorer_name = "WER"

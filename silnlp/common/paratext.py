@@ -44,7 +44,7 @@ def get_project_dir(project: str) -> Path:
     return SIL_NLP_ENV.pt_projects_dir / project
 
 
-def get_iso(settings_tree: etree.ElementTree) -> str:
+def get_iso(settings_tree: etree._ElementTree) -> str:
     iso = settings_tree.getroot().findtext("LanguageIsoCode")
     assert iso is not None
     index = iso.index(":")
@@ -63,7 +63,7 @@ def extract_project(
     settings_tree = parse_project_settings(project_dir)
     iso = get_iso(settings_tree)
 
-    ref_corpus = create_versification_ref_corpus()
+    ref_corpus: TextCorpus = create_versification_ref_corpus()
 
     ltg_dir = project_dir / "LTG"
     if extract_lemmas and ltg_dir.is_dir():
@@ -120,7 +120,7 @@ def extract_project(
                     output_vref_stream.write(("" if project_vref is None else str(project_vref)) + "\n")
                 segment_count += 1
         return output_filename, segment_count
-    except:
+    except Exception:
         if output_filename.is_file():
             output_filename.unlink()
         if output_vref_filename.is_file():
@@ -130,11 +130,11 @@ def extract_project(
 
 def get_lemma_text_corpus(project_dir: Path) -> TextCorpus:
     tokenizer = WhitespaceTokenizer()
-    surface_corpus = ParatextTextCorpus(project_dir)
-    lemma_corpus = UsfmFileTextCorpus(
-        "usfm.sty", "utf-8-sig", project_dir / "LTG", surface_corpus.versification, glob_pattern="*.LTG"
+    pt_corpus = ParatextTextCorpus(project_dir)
+    lemma_corpus: TextCorpus = UsfmFileTextCorpus(
+        project_dir / "LTG", versification=pt_corpus.versification, file_pattern="*.LTG"
     )
-    surface_corpus = surface_corpus.tokenize(tokenizer)
+    surface_corpus = pt_corpus.tokenize(tokenizer)
     lemma_corpus = lemma_corpus.tokenize(tokenizer)
     new_texts: List[Text] = []
     for surface_text, lemma_text in zip(surface_corpus.texts, lemma_corpus.texts):
@@ -157,10 +157,7 @@ def get_lemma_text_corpus(project_dir: Path) -> TextCorpus:
                         surface_text.id,
                         surface_row.ref,
                         [] if len(lemmas_text) == 0 else [lemmas_text],
-                        surface_row.is_sentence_start,
-                        surface_row.is_in_range,
-                        surface_row.is_range_start,
-                        len(lemmas_text) == 0,
+                        surface_row.flags,
                     )
                 )
         new_texts.append(MemoryText(surface_text.id, new_rows))
@@ -243,6 +240,8 @@ def extract_terms_list(
                 refs_list: List[VerseRef] = []
                 if refs_elem is not None:
                     for verse_elem in refs_elem.findall("Verse"):
+                        if verse_elem.text is None:
+                            continue
                         bbbcccvvv = int(verse_elem.text[:9])
                         vref = VerseRef.from_bbbcccvvv(bbbcccvvv)
                         vref.change_versification(ORIGINAL_VERSIFICATION)
@@ -296,7 +295,7 @@ def _process_gloss_string(gloss_str: str) -> List[str]:
     return glosses
 
 
-def extract_terms_list_from_renderings(project: str, renderings_tree: etree.ElementTree, output_dir: Path) -> None:
+def extract_terms_list_from_renderings(project: str, renderings_tree: etree._ElementTree, output_dir: Path) -> None:
     terms_metadata_path = get_terms_metadata_path(project, mt_terms_dir=output_dir)
     with terms_metadata_path.open("w", encoding="utf-8", newline="\n") as terms_metadata_file:
         for rendering_elem in renderings_tree.getroot().findall("TermRendering"):
@@ -517,7 +516,7 @@ def detect_NT_versification(project_dir: str) -> List[VersificationType]:
 
 
 def check_versification(project_dir: str) -> Tuple[bool, List[VersificationType]]:
-    project_versification: str = parse_project_settings(project_dir).getroot().findtext("Versification", "0")
+    project_versification: str = parse_project_settings(project_dir).getroot().findtext("Versification", "4")
     project_versification: VersificationType = VersificationType(int(project_versification))
 
     check_ot, check_nt, matching = False, False, False

@@ -1,6 +1,7 @@
 import logging
 import string
 from abc import ABC, abstractmethod
+from datetime import date
 from itertools import groupby
 from pathlib import Path
 from typing import Iterable, List, Optional, Union
@@ -190,6 +191,71 @@ def remove_inline_elements(doc: List[sfm.Element]) -> None:
         remove_inline_elements_from_element(root)
 
 
+def insert_translation_into_trg_sentences(
+    sentences: List[str],
+    vrefs: List[VerseRef],
+    trg_sentences: List[str],
+    trg_vrefs: List[VerseRef],
+    chapters: List[int],
+) -> List[str]:
+    ret = [""] * len(trg_sentences)
+    translation_idx = 0
+    for i in range(len(trg_sentences)):
+        if trg_vrefs[i].chapter_num not in chapters:
+            ret[i] = trg_sentences[i]
+            continue
+        # Skip over rest of verse since the whole verse is put into the first entry
+        if (
+            i > 0
+            and trg_vrefs[i].chapter_num == trg_vrefs[i - 1].chapter_num
+            and trg_vrefs[i].verse_num == trg_vrefs[i - 1].verse_num
+        ):
+            continue
+        # If translation_idx gets behind, catch up
+        while translation_idx < len(sentences) and (
+            trg_vrefs[i].chapter_num > vrefs[translation_idx].chapter_num
+            or (
+                trg_vrefs[i].chapter_num == vrefs[translation_idx].chapter_num
+                and trg_vrefs[i].verse_num > vrefs[translation_idx].verse_num
+            )
+        ):
+            translation_idx += 1
+
+        # Put all parts of the translated verse into the first entry for that verse
+        while (
+            translation_idx < len(sentences)
+            and vrefs[translation_idx].chapter_num == trg_vrefs[i].chapter_num
+            and vrefs[translation_idx].verse_num == trg_vrefs[i].verse_num
+        ):
+            if ret[i] != "":
+                ret[i] += " "
+            ret[i] += sentences[translation_idx]
+            translation_idx += 1
+
+    return ret
+
+
+def insert_draft_remark(
+    doc: List[sfm.Element],
+    book: str,
+    description: str,
+    experiment_ckpt_str: str,
+) -> List[sfm.Element]:
+    remark = f"This draft of {book} was machine translated on {date.today()} from the {description} using model {experiment_ckpt_str}. It should be reviewed and edited carefully.\n"
+    rmk_elem = sfm.Element(
+        "rem",
+        parent=doc[0][0].parent,
+        meta={
+            "Endmarker": None,
+            "StyleType": "Paragraph",
+        },
+        content=[sfm.Text(remark)],
+    )
+
+    doc[0].insert(1, rmk_elem)
+    return doc
+
+
 class Translator(ABC):
     @abstractmethod
     def translate(
@@ -201,7 +267,15 @@ class Translator(ABC):
         write_corpus(trg_file_path, self.translate(load_corpus(src_file_path), src_iso, trg_iso))
 
     def translate_book(
-        self, src_project: str, book: str, output_path: Path, trg_iso: str, include_inline_elements: bool = False
+        self,
+        src_project: str,
+        book: str,
+        output_path: Path,
+        trg_iso: str,
+        chapters: List[int] = [],
+        trg_project: str = "",
+        include_inline_elements: bool = False,
+        experiment_ckpt_str: str = "",
     ) -> None:
         src_project_dir = get_project_dir(src_project)
         with (src_project_dir / "Settings.xml").open("rb") as settings_file:
@@ -209,11 +283,23 @@ class Translator(ABC):
         src_iso = get_iso(settings_tree)
         book_path = get_book_path(src_project, book)
         stylesheet = get_stylesheet(src_project_dir)
+
         if not book_path.is_file():
             raise RuntimeError(f"Can't find file {book_path} for book {book}")
         else:
             LOGGER.info(f"Found the file {book_path} for book {book}")
-        self.translate_usfm(book_path, output_path, src_iso, trg_iso, stylesheet, include_inline_elements)
+
+        self.translate_usfm(
+            book_path,
+            output_path,
+            src_iso,
+            trg_iso,
+            chapters,
+            trg_project,
+            stylesheet,
+            include_inline_elements,
+            experiment_ckpt_str,
+        )
 
     def translate_usfm(
         self,
@@ -221,16 +307,23 @@ class Translator(ABC):
         trg_file_path: Path,
         src_iso: str,
         trg_iso: str,
+        chapters: List[int] = [],
+        trg_project_path: str = "",
         stylesheet: dict = usfm.relaxed_stylesheet,
         include_inline_elements: bool = False,
+        experiment_ckpt_str: str = "",
     ) -> None:
         with src_file_path.open(mode="r", encoding="utf-8-sig") as book_file:
             doc: List[sfm.Element] = list(usfm.parser(book_file, stylesheet=stylesheet, canonicalise_footnotes=False))
 
         book = ""
+        description = ""
         for elem in doc:
             if elem.name == "id":
-                book = str(elem[0]).strip()[:3]
+                doc_str = str(elem[0]).strip()
+                book = doc_str[:3]
+                if len(doc_str) > 3:
+                    description = doc_str[3:].strip(" -")
                 break
         if book == "":
             raise RuntimeError(f"The USFM file {src_file_path} doesn't contain an id marker.")
@@ -240,13 +333,56 @@ class Translator(ABC):
 
         segments = collect_segments(book, doc)
 
-        sentences = (s.text.strip() for s in segments)
-        vrefs = (s.ref for s in segments)
+        sentences = [s.text.strip() for s in segments]
+        vrefs = [s.ref for s in segments]
         LOGGER.info(f"File {src_file_path} parsed correctly.")
 
-        translations = list(self.translate(sentences, src_iso, trg_iso, vrefs))
+        # Translate select chapters
+        if len(chapters) > 0:
+            idxs_to_translate = []
+            sentences_to_translate = []
+            vrefs_to_translate = []
+            for i in range(len(sentences)):
+                if vrefs[i].chapter_num in chapters:
+                    idxs_to_translate.append(i)
+                    sentences_to_translate.append(sentences[i])
+                    vrefs_to_translate.append(vrefs[i])
+
+            partial_translation = list(self.translate(sentences_to_translate, src_iso, trg_iso, vrefs_to_translate))
+
+            # Get translation from pre-existing target project to fill in translation
+            if trg_project_path != "":
+                trg_project_book_path = get_book_path(trg_project_path, book)
+                if trg_project_book_path.exists():
+                    with trg_project_book_path.open(mode="r", encoding="utf-8-sig") as book_file:
+                        trg_doc: List[sfm.Element] = list(
+                            usfm.parser(book_file, stylesheet=stylesheet, canonicalise_footnotes=False)
+                        )
+                    if not include_inline_elements:
+                        remove_inline_elements(trg_doc)
+                    trg_segments = collect_segments(book, trg_doc)
+                    trg_sentences = [s.text.strip() for s in trg_segments]
+                    trg_vrefs = [s.ref for s in trg_segments]
+
+                    translations = insert_translation_into_trg_sentences(
+                        partial_translation, vrefs_to_translate, trg_sentences, trg_vrefs, chapters
+                    )
+                    update_segments(trg_segments, translations)
+                    trg_doc = insert_draft_remark(trg_doc, book, description, experiment_ckpt_str)
+
+                    with trg_file_path.open(mode="w", encoding="utf-8", newline="\n") as output_file:
+                        output_file.write(sfm.generate(trg_doc))
+
+                    return
+
+            translations = [""] * len(sentences)
+            for i, idx in enumerate(idxs_to_translate):
+                translations[idx] = partial_translation[i]
+        else:
+            translations = list(self.translate(sentences, src_iso, trg_iso, vrefs))
 
         update_segments(segments, translations)
+        doc = insert_draft_remark(doc, book, description, experiment_ckpt_str)
 
         with trg_file_path.open(mode="w", encoding="utf-8", newline="\n") as output_file:
             output_file.write(sfm.generate(doc))
