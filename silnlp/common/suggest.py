@@ -1,19 +1,12 @@
 import argparse
 from io import TextIOWrapper
+import logging
 import os.path
 from pathlib import Path
 import time
 from typing import List, Optional
 
 from machine.corpora import ParallelTextCorpus
-from machine.tokenization import (
-    WhitespaceTokenizer,
-    WhitespaceDetokenizer,
-    LatinWordTokenizer,
-    LatinWordDetokenizer,
-    ZwspWordTokenizer,
-    ZwspWordDetokenizer,
-)
 from machine.translation import (
     PhraseTranslationSuggester,
     InteractiveTranslatorFactory,
@@ -22,35 +15,12 @@ from machine.translation import (
 )
 from machine.translation.thot import ThotSmtModel, ThotWordAlignmentModelType
 
+from ..smt.config import load_config, create_word_tokenizer, create_word_detokenizer
 from .corpus import get_scripture_parallel_corpus
 from .environment import SIL_NLP_ENV
 from .utils import get_git_revision_hash, get_mt_exp_dir
 
-from ..smt.config import load_config
-
-NORMALIZATION_FORMS = ["nfc, nfd, nfkc, nfkd"]
-
-
-def get_tokenizer(tokenizer: str):
-    if tokenizer == "whitespace":
-        return WhitespaceTokenizer()
-    elif tokenizer == "latin":
-        return LatinWordTokenizer()
-    elif tokenizer == "zwsp":
-        return ZwspWordTokenizer()
-    else:
-        raise ValueError(f"Invalid tokenizer {tokenizer}")
-
-
-def get_detokenizer(detokenizer: str):
-    if detokenizer == "whitespace":
-        return WhitespaceDetokenizer()
-    elif detokenizer == "latin":
-        return LatinWordDetokenizer()
-    elif detokenizer == "zwsp":
-        return ZwspWordDetokenizer()
-    else:
-        raise ValueError(f"Invalid detokenizer {detokenizer}")
+LOGGER = logging.getLogger(__package__ + ".suggest")
 
 
 def suggest(
@@ -64,9 +34,6 @@ def suggest(
     num_suggestions: int,
     trace: Optional[str],
     approve_aligned: bool,
-    normalization_form: Optional[str],
-    escape_spaces: bool,
-    cased: bool,
     quiet: bool,
 ):
     action_count = 0
@@ -86,11 +53,11 @@ def suggest(
     suggester = PhraseTranslationSuggester(confidence)
 
     if not quiet:
-        print("Loading model...")
+        LOGGER.info("Loading model...")
 
-    source_tokenizer = get_tokenizer(source_tokenizer)
-    target_detokenizer = get_detokenizer(target_tokenizer)
-    target_tokenizer = get_tokenizer(target_tokenizer)
+    source_tokenizer = create_word_tokenizer(source_tokenizer)
+    target_detokenizer = create_word_detokenizer(target_tokenizer)
+    target_tokenizer = create_word_tokenizer(target_tokenizer)
 
     model = ThotSmtModel(
         ThotWordAlignmentModelType[aligner.upper()],
@@ -98,24 +65,20 @@ def suggest(
         source_tokenizer=source_tokenizer,
         target_tokenizer=target_tokenizer,
         target_detokenizer=target_detokenizer,
-        lowercase_source=(not cased),
-        lowercase_target=(not cased),
+        lowercase_source=True,
+        lowercase_target=True,
     )
 
     if not quiet:
-        print("done.")
-        print("Suggesting...")
+        LOGGER.info("done.")
+        LOGGER.info("Suggesting...")
     start = time.time()
 
     corpus_df = get_scripture_parallel_corpus(src, trg)
     corpus = ParallelTextCorpus.from_pandas(corpus_df, None, "vref", "source", "target", None)
     corpus = corpus.tokenize(source_tokenizer, target_tokenizer)
-    if normalization_form is not None and normalization_form in NORMALIZATION_FORMS:
-        corpus = corpus.normalize(normalization_form)
-    if escape_spaces:
-        corpus = corpus.escape_spaces()
-    if not cased:
-        corpus = corpus.lowercase()
+    corpus = corpus.escape_spaces()
+    corpus = corpus.lowercase()
 
     translator_factory = InteractiveTranslatorFactory(model, target_tokenizer, target_detokenizer)
 
@@ -222,41 +185,41 @@ def suggest(
             trace_file.write("\n")
 
     if not quiet:
-        print("done.")
+        LOGGER.info("done.")
 
     if trace_file is not None:
         trace_file.close()
 
     # Print stats
-    print(f"Execution time: {time.time() - start}s")
-    print(f"# of Segments: {segment_count + 1}")
-    print(f"# of Suggestions: {total_suggestion_count}")
-    print(f"# of Correct Suggestions: {total_accepted_suggestion_count}")
-    print("Correct Suggestion Types")
+    LOGGER.info(f"Execution time: {time.time() - start}s")
+    LOGGER.info(f"# of Segments: {segment_count + 1}")
+    LOGGER.info(f"# of Suggestions: {total_suggestion_count}")
+    LOGGER.info(f"# of Correct Suggestions: {total_accepted_suggestion_count}")
+    LOGGER.info("Correct Suggestion Types")
     full_pcnt = 0 if full_suggestion_count == 0 else float(full_suggestion_count) / total_accepted_suggestion_count
-    print(f"- Full: {full_pcnt:.4f}")
+    LOGGER.info(f"- Full: {full_pcnt:.4f}")
     init_pcnt = 0 if init_suggestion_count == 0 else float(init_suggestion_count) / total_accepted_suggestion_count
-    print(f"- Initial: {init_pcnt:.4f}")
+    LOGGER.info(f"- Initial: {init_pcnt:.4f}")
     final_pcnt = 0 if final_suggestion_count == 0 else float(final_suggestion_count) / total_accepted_suggestion_count
-    print(f"- Final: {final_pcnt:.4f}")
+    LOGGER.info(f"- Final: {final_pcnt:.4f}")
     middle_pcnt = (
         0 if middle_suggestion_count == 0 else float(middle_suggestion_count) / total_accepted_suggestion_count
     )
-    print(f"- Middle: {middle_pcnt:.4f}")
-    print("Correct Suggestion N")
+    LOGGER.info(f"- Middle: {middle_pcnt:.4f}")
+    LOGGER.info("Correct Suggestion N")
     for i in range(len(accepted_suggestion_counts)):
         pcnt = (
             0
             if accepted_suggestion_counts[i] == 0
             else float(accepted_suggestion_counts[i]) / total_accepted_suggestion_count
         )
-        print(f"- {i+1}: {pcnt:.4f}")
+        LOGGER.info(f"- {i+1}: {pcnt:.4f}")
     ksmr = 0 if action_count == 0 else float(action_count) / char_count
-    print(f"KSMR: {ksmr:.4f}")
+    LOGGER.info(f"KSMR: {ksmr:.4f}")
     precision = (
         0 if total_accepted_suggestion_count == 0 else float(total_accepted_suggestion_count) / total_suggestion_count
     )
-    print(f"Precision: {precision:.4f}")
+    LOGGER.info(f"Precision: {precision:.4f}")
 
 
 def write_prefix(trace_file: TextIOWrapper, suggestion_result: str, prefix: str):
@@ -350,9 +313,6 @@ def main() -> None:
         args.n,
         args.trace,
         args.approve_aligned,
-        config.get("normalization_form", None),
-        config.get("escape_spaces", False),
-        config.get("lowercase", True),
         args.quiet,
     )
 
