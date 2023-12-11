@@ -291,7 +291,7 @@ class HuggingFaceConfig(Config):
     def has_best_checkpoint(self) -> bool:
         return has_best_checkpoint(self.model_dir)
 
-    def create_model(self, mixed_precision: bool = False, num_devices: int = 1) -> NMTModel:
+    def create_model(self, mixed_precision: bool = True, num_devices: int = 1) -> NMTModel:
         return HuggingFaceNMTModel(self, mixed_precision, num_devices)
 
     def create_tokenizer(self) -> Tokenizer:
@@ -911,7 +911,7 @@ class HuggingFaceNMTModel(NMTModel):
             for param in params:
                 if param in section_config:
                     args[param] = section_config[param]
-        merge_dict(args, {"fp16": self._mixed_precision})
+        merge_dict(args, {"fp16": self._mixed_precision, "tf32": self._mixed_precision})
         return parser.parse_dict(args)[0]
 
     def _get_dictionary(self) -> Dict[VerseRef, Set[str]]:

@@ -16,7 +16,7 @@ from .test import test
 class SILExperiment:
     name: str
     make_stats: bool = False
-    mixed_precision: bool = False
+    mixed_precision: bool = True
     num_devices: int = 1
     clearml_queue: Optional[str] = None
     save_checkpoints: bool = False
@@ -82,7 +82,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run experiment - preprocess, train, and test")
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument("--stats", default=False, action="store_true", help="Output corpus statistics")
-    parser.add_argument("--mixed-precision", default=False, action="store_true", help="Enable mixed precision")
+    parser.add_argument("--disable-mixed-precision", default=False, action="store_true", help="Disable mixed precision")
     parser.add_argument("--memory-growth", default=False, action="store_true", help="Enable memory growth")
     parser.add_argument("--num-devices", type=int, default=1, help="Number of devices to train on")
     parser.add_argument(
@@ -125,7 +125,7 @@ def main() -> None:
     exp = SILExperiment(
         name=args.experiment,
         make_stats=args.stats,
-        mixed_precision=args.mixed_precision,
+        mixed_precision=not args.disable_mixed_precision,
         num_devices=args.num_devices,
         clearml_queue=args.clearml_queue,
         save_checkpoints=args.save_checkpoints,
