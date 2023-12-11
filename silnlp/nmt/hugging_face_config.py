@@ -93,7 +93,6 @@ TRAINING_ARGS_CONFIG_MAPPING = {
         "save_steps",
         "save_strategy",
         "save_total_limit",
-        "tf32",
     },
     "eval": {
         "eval_accumulation_steps",
@@ -229,7 +228,6 @@ class HuggingFaceConfig(Config):
                     "delete_checkpoint_optimizer_state": True,
                     "delete_checkpoint_tokenizer": True,
                     "log_level": "info",
-                    "tf32": True,
                 },
                 "eval": {
                     "evaluation_strategy": "steps",
@@ -913,7 +911,7 @@ class HuggingFaceNMTModel(NMTModel):
             for param in params:
                 if param in section_config:
                     args[param] = section_config[param]
-        merge_dict(args, {"fp16": self._mixed_precision})
+        merge_dict(args, {"fp16": self._mixed_precision, "tf32": self._mixed_precision})
         return parser.parse_dict(args)[0]
 
     def _get_dictionary(self) -> Dict[VerseRef, Set[str]]:
