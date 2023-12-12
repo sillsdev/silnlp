@@ -424,6 +424,11 @@ class HuggingFaceConfig(Config):
             if updated:
                 self._tokenizer.save_pretrained(self.exp_dir)
 
+        if len(self._tags) > 0:
+            self._tokenizer.add_special_tokens(
+                {"additional_special_tokens": list(self._tags)}, replace_additional_special_tokens=False
+            )
+
     def get_or_create_tokenizer(self) -> PreTrainedTokenizer:
         if self._tokenizer is None:
             tok_dict = self.data.get("tokenizer")
