@@ -195,7 +195,7 @@ def _reify(sheet):
                 r[f] = str(v)
 
 
-def update_sheet(sheet, ammendments={}, field_replace=False, **kwds):
+def update_sheet(sheet, ammendments={}, field_replace=False, ignore_occurs_under=False, **kwds):
     """
     Merge update an existing sheet with records from a supplied dictionary and
     any keyword arguments as well. Only non defaulted fields for each record
@@ -266,7 +266,10 @@ def update_sheet(sheet, ammendments={}, field_replace=False, **kwds):
         try:
             meta = sheet[marker]
             if not field_replace:
-                meta["OccursUnder"].update(new_meta.pop("OccursUnder", set()))
+                if ignore_occurs_under:
+                    new_meta.pop("OccursUnder")
+                else:
+                    meta["OccursUnder"].update(new_meta.pop("OccursUnder", set()))
                 meta["TextProperties"].update(new_meta.pop("TextProperties", set()))
             meta.update(fv for fv in new_meta.items() if fv[0] not in _fields or fv[1] != _fields[fv[0]][1])
         except KeyError:

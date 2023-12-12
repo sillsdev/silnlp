@@ -169,7 +169,7 @@ def get_stylesheet(project_path: Path) -> dict:
     if custom_stylesheet_path.exists():
         with custom_stylesheet_path.open("r", encoding="utf-8-sig") as file:
             custom_stylesheet = style.parse(file)
-        return style.update_sheet(usfm.relaxed_stylesheet, custom_stylesheet)
+        return style.update_sheet(usfm.relaxed_stylesheet, custom_stylesheet, ignore_occurs_under=True)
     return usfm.relaxed_stylesheet
 
 
