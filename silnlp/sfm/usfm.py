@@ -328,8 +328,8 @@ class parser(sfm.parser):
         }
         return style.update_sheet(
             sty,
-            style.update_sheet(metas, private_metas, field_replace=style.FieldReplace.IGNORE),
-            field_replace=style.FieldReplace.IGNORE,
+            style.update_sheet(metas, private_metas, field_update=style.FieldUpdate.IGNORE),
+            field_update=style.FieldUpdate.IGNORE,
         )
 
     def _force_close(self, parent, tok):

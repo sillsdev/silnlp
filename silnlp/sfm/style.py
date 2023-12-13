@@ -32,7 +32,7 @@ def _munge_records(rs):
     yield from ((r.pop("Marker").lstrip(), r) for r in rs)
 
 
-class FieldReplace(Enum):
+class FieldUpdate(Enum):
     REPLACE = 1
     MERGE = 2
     IGNORE = 3
@@ -202,7 +202,7 @@ def _reify(sheet):
                 r[f] = str(v)
 
 
-def update_sheet(sheet, ammendments={}, field_replace=FieldReplace.MERGE, **kwds):
+def update_sheet(sheet, ammendments={}, field_update=FieldUpdate.MERGE, **kwds):
     """
     Merge update an existing sheet with records from a supplied dictionary and
     any keyword arguments as well. Only non defaulted fields for each record
@@ -215,8 +215,9 @@ def update_sheet(sheet, ammendments={}, field_replace=FieldReplace.MERGE, **kwds
     sheet: The sheet to be updated.
     ammendments: A Mapping from marker names to marker records continaing
         the fields to be updated.
-    field_replace: When True replace OccursUnder and TextProperties.
-        When False merge them instead. Defaults to False.
+    field_update: When Replace, replace OccursUnder and TextProperties.
+        When Merge, merge update OccursUnder and TextProperties. Defaults to Merge.
+        When Ignore, don't update OccursUnder and TextProperties.
     **kwds: marker id keywords assigned to marker records continaing
         the fields to be updated.
     >>> from pprint import pprint
@@ -272,10 +273,10 @@ def update_sheet(sheet, ammendments={}, field_replace=FieldReplace.MERGE, **kwds
     for marker, new_meta in ammendments.items():
         try:
             meta = sheet[marker]
-            if field_replace == FieldReplace.IGNORE:
+            if field_update == FieldUpdate.IGNORE:
                 new_meta.pop("OccursUnder")
                 new_meta.pop("TextProperties")
-            elif field_replace == FieldReplace.MERGE:
+            elif field_update == FieldUpdate.MERGE:
                 meta["OccursUnder"].update(new_meta.pop("OccursUnder", set()))
                 meta["TextProperties"].update(new_meta.pop("TextProperties", set()))
             meta.update(fv for fv in new_meta.items() if fv[0] not in _fields or fv[1] != _fields[fv[0]][1])
