@@ -1040,7 +1040,7 @@ class HuggingFaceTokenizer(Tokenizer):
         if not add_dummy_prefix:
             tokens.remove("▁")
             tokens.remove("\ufffc")
-        return " ".join([t.strip() for t in tokens])
+        return " ".join(t.strip() for t in tokens)
 
     def normalize_normalized_string(self, line: NormalizedString) -> None:
         line.replace(Regex(".+"), self._mpn.normalize(str(line.normalized)))
