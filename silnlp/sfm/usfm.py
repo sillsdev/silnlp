@@ -326,7 +326,11 @@ class parser(sfm.parser):
             ).copy()
             for n, m in private_metas.items()
         }
-        return style.update_sheet(sty, style.update_sheet(metas, private_metas))
+        return style.update_sheet(
+            sty,
+            style.update_sheet(metas, private_metas, field_update=style.FieldUpdate.IGNORE),
+            field_update=style.FieldUpdate.IGNORE,
+        )
 
     def _force_close(self, parent, tok):
         if tok is not sfm.parser._eos and (
