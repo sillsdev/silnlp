@@ -15,7 +15,7 @@ import yaml
 from datasets import Dataset
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
 from sacremoses import MosesPunctNormalizer
-from tokenizers import NormalizedString, Regex, SentencePieceBPETokenizer
+from tokenizers import AddedToken, NormalizedString, Regex, SentencePieceBPETokenizer
 from tokenizers.normalizers import Normalizer
 from torch import Tensor, TensorType, nn, optim
 from torch.utils.checkpoint import checkpoint  # noqa: 401
@@ -423,6 +423,9 @@ class HuggingFaceConfig(Config):
                     updated = True
             if updated:
                 self._tokenizer.save_pretrained(self.exp_dir)
+
+        if len(self._tags) > 0:
+            self._tokenizer.add_tokens([AddedToken(tag, rstrip=True, special=True) for tag in self._tags])
 
     def get_or_create_tokenizer(self) -> PreTrainedTokenizer:
         if self._tokenizer is None:
@@ -1037,7 +1040,7 @@ class HuggingFaceTokenizer(Tokenizer):
         if not add_dummy_prefix:
             tokens.remove("▁")
             tokens.remove("\ufffc")
-        return " ".join(tokens)
+        return " ".join(t.strip() for t in tokens)
 
     def normalize_normalized_string(self, line: NormalizedString) -> None:
         line.replace(Regex(".+"), self._mpn.normalize(str(line.normalized)))
