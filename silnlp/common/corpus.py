@@ -78,14 +78,24 @@ def get_scripture_parallel_corpus(
 
     if remove_empty_sentences:
         for i in range(len(vrefs) - 1, -1, -1):
-            if len(src_sentences[i]) == 0 or len(trg_sentences[i]) == 0:
+            if (
+                len(src_sentences[i]) == 0
+                or len(trg_sentences[i]) == 0
+                or src_sentences[i] == "..."
+                or trg_sentences[i] == "..."
+            ):
                 vrefs.pop(i)
                 src_sentences.pop(i)
                 trg_sentences.pop(i)
                 indices.pop(i)
     else:
         for i in range(len(vrefs) - 1, -1, -1):
-            if len(src_sentences[i]) == 0 or len(trg_sentences[i]) == 0:
+            if (
+                len(src_sentences[i]) == 0
+                or len(trg_sentences[i]) == 0
+                or src_sentences[i] == "..."
+                or trg_sentences[i] == "..."
+            ):
                 src_sentences[i] = ""
                 trg_sentences[i] = ""
 
