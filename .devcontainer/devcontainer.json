@@ -44,7 +44,10 @@
 				},
 				"editor.formatOnSave": true,
 				"editor.formatOnType": true,
-				"isort.args":["--profile", "black"]
+				"isort.args": [
+					"--profile",
+					"black"
+				]
 			},
 			// Add the IDs of extensions you want installed when the container is created.
 			"extensions": [
@@ -57,7 +60,10 @@
 				"ms-python.flake8",
 				"ms-python.isort",
 				"eamodio.gitlens",
-				"donjayamanne.githistory"
+				"donjayamanne.githistory",
+				"mhutchie.git-graph",
+				"ms-toolsai.jupyter",
+				"GitHub.copilot"
 			]
 		}
 	}
