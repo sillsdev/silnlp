@@ -25,10 +25,9 @@ class SILClearML:
         self.name = self.name.replace("\\", "/")
         name_parts = self.name.split("/")
         project = name_parts[0]
-        if len(name_parts) == 1:
-            exp_name = name_parts[0]
-        else:
-            exp_name = name_parts[1]
+        exp_name = name_parts[-1]
+        if len(name_parts) > 2:
+            exp_name = '/'.join(name_parts[1:])
         if self.queue_name is None:
             self.task = None
             self._load_config()
