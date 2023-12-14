@@ -524,6 +524,23 @@ files = [
 ]
 
 [[package]]
+name = "coloredlogs"
+version = "15.0.1"
+description = "Colored terminal output for Python's logging module"
+optional = false
+python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
+files = [
+    {file = "coloredlogs-15.0.1-py2.py3-none-any.whl", hash = "sha256:612ee75c546f53e92e70049c9dbfcc18c935a2b9a53b66085ce9ef6a6e5c0934"},
+    {file = "coloredlogs-15.0.1.tar.gz", hash = "sha256:7c991aa71a4577af2f82600d8f8f3a89f936baeaf9b50a9c197da014e5bf16b0"},
+]
+
+[package.dependencies]
+humanfriendly = ">=9.1"
+
+[package.extras]
+cron = ["capturer (>=2.4)"]
+
+[[package]]
 name = "contextlib2"
 version = "21.6.0"
 description = "Backports and enhancements for the contextlib module"
@@ -1270,6 +1287,20 @@ torch = ["torch"]
 typing = ["pydantic (<2.0)", "types-PyYAML", "types-requests", "types-simplejson", "types-toml", "types-tqdm", "types-urllib3"]
 
 [[package]]
+name = "humanfriendly"
+version = "10.0"
+description = "Human friendly output for text interfaces using Python"
+optional = false
+python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
+files = [
+    {file = "humanfriendly-10.0-py2.py3-none-any.whl", hash = "sha256:1697e1a8a8f550fd43c2865cd84542fc175a61dcb779b6fee18cf6b6ccba1477"},
+    {file = "humanfriendly-10.0.tar.gz", hash = "sha256:6b0b831ce8f15f7300721aa49829fc4e83921a9a301cc7f606be6686a2288ddc"},
+]
+
+[package.dependencies]
+pyreadline3 = {version = "*", markers = "sys_platform == \"win32\" and python_version >= \"3.8\""}
+
+[[package]]
 name = "idna"
 version = "3.3"
 description = "Internationalized Domain Names in Applications (IDNA)"
@@ -1439,6 +1470,23 @@ parso = ">=0.8.0,<0.9.0"
 [package.extras]
 qa = ["flake8 (==3.8.3)", "mypy (==0.782)"]
 testing = ["Django (<3.1)", "colorama", "docopt", "pytest (<7.0.0)"]
+
+[[package]]
+name = "jinja2"
+version = "3.1.2"
+description = "A very fast and expressive template engine."
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "Jinja2-3.1.2-py3-none-any.whl", hash = "sha256:6088930bfe239f0e6710546ab9c19c9ef35e29792895fed6e6e31a023a182a61"},
+    {file = "Jinja2-3.1.2.tar.gz", hash = "sha256:31351a702a408a9e7595a8fc6150fc3f43bb6bf7e319770cbc0db9df9437e852"},
+]
+
+[package.dependencies]
+MarkupSafe = ">=2.0"
+
+[package.extras]
+i18n = ["Babel (>=2.7)"]
 
 [[package]]
 name = "jmespath"
@@ -2156,6 +2204,23 @@ morfessor = ">=2.0.2alpha1"
 docs = ["sphinx", "sphinxcontrib-napoleon"]
 
 [[package]]
+name = "mpmath"
+version = "1.3.0"
+description = "Python library for arbitrary-precision floating-point arithmetic"
+optional = false
+python-versions = "*"
+files = [
+    {file = "mpmath-1.3.0-py3-none-any.whl", hash = "sha256:a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c"},
+    {file = "mpmath-1.3.0.tar.gz", hash = "sha256:7a28eb2a9774d00c7bc92411c19a89209d5da7c4c9a9e227be8330a23a25b91f"},
+]
+
+[package.extras]
+develop = ["codecov", "pycodestyle", "pytest (>=4.6)", "pytest-cov", "wheel"]
+docs = ["sphinx"]
+gmpy = ["gmpy2 (>=2.1.0a4)"]
+tests = ["pytest (>=4.6)"]
+
+[[package]]
 name = "multidict"
 version = "6.0.2"
 description = "multidict implementation"
@@ -2492,6 +2557,50 @@ numpy = ">=1.7"
 [package.extras]
 docs = ["numpydoc", "sphinx (==1.2.3)", "sphinx-rtd-theme", "sphinxcontrib-napoleon"]
 tests = ["pytest", "pytest-cov", "pytest-pep8"]
+
+[[package]]
+name = "optimum"
+version = "1.16.0"
+description = "Optimum Library is an extension of the Hugging Face Transformers library, providing a framework to integrate third-party libraries from Hardware Partners and interface with their specific functionality."
+optional = false
+python-versions = ">=3.7.0"
+files = [
+    {file = "optimum-1.16.0-py3-none-any.whl", hash = "sha256:fbccc56cc01b4c1d20af7aaf37fca6c0a63c3b2a9bfc8063fe6c6349cb15035d"},
+    {file = "optimum-1.16.0.tar.gz", hash = "sha256:297ca10022159f42ace59a391c7ba084d792d919d62c72fd75a5871c1c0cbcbd"},
+]
+
+[package.dependencies]
+coloredlogs = "*"
+datasets = "*"
+huggingface-hub = ">=0.8.0"
+numpy = "*"
+packaging = "*"
+sympy = "*"
+torch = ">=1.9"
+transformers = {version = ">=4.26.0", extras = ["sentencepiece"]}
+
+[package.extras]
+amd = ["optimum-amd"]
+benchmark = ["evaluate (>=0.2.0)", "optuna", "scikit-learn", "seqeval", "torchvision", "tqdm"]
+dev = ["Pillow", "accelerate", "black (>=23.1,<24.0)", "diffusers (>=0.17.0)", "einops", "invisible-watermark", "parameterized", "pytest", "pytest-xdist", "requests", "ruff (==0.1.5)", "sacremoses", "torchaudio", "torchvision"]
+diffusers = ["diffusers"]
+doc-build = ["accelerate"]
+exporters = ["onnx", "onnxruntime", "timm"]
+exporters-gpu = ["onnx", "onnxruntime-gpu", "timm"]
+exporters-tf = ["h5py", "numpy (<1.24.0)", "onnx", "onnxruntime", "tensorflow (>=2.4,<=2.12.1)", "tf2onnx", "timm"]
+furiosa = ["optimum-furiosa"]
+graphcore = ["optimum-graphcore"]
+habana = ["optimum-habana", "transformers (>=4.33.0,<4.35.0)"]
+intel = ["optimum-intel (>=1.12.0)"]
+neural-compressor = ["optimum-intel[neural-compressor] (>=1.12.0)"]
+neuron = ["optimum-neuron[neuron]"]
+neuronx = ["optimum-neuron[neuronx]"]
+nncf = ["optimum-intel[nncf] (>=1.12.0)"]
+onnxruntime = ["datasets (>=1.2.1)", "evaluate", "onnx", "onnxruntime (>=1.11.0)", "protobuf (>=3.20.1)"]
+onnxruntime-gpu = ["accelerate", "datasets (>=1.2.1)", "evaluate", "onnx", "onnxruntime-gpu (>=1.11.0)", "protobuf (>=3.20.1)"]
+openvino = ["optimum-intel[openvino] (>=1.12.0)"]
+quality = ["black (>=23.1,<24.0)", "ruff (==0.1.5)"]
+tests = ["Pillow", "accelerate", "diffusers (>=0.17.0)", "einops", "invisible-watermark", "parameterized", "pytest", "pytest-xdist", "requests", "sacremoses", "torchaudio", "torchvision"]
 
 [[package]]
 name = "orderedmultidict"
@@ -3141,6 +3250,17 @@ files = [
 
 [package.extras]
 diagrams = ["jinja2", "railroad-diagrams"]
+
+[[package]]
+name = "pyreadline3"
+version = "3.4.1"
+description = "A python implementation of GNU readline."
+optional = false
+python-versions = "*"
+files = [
+    {file = "pyreadline3-3.4.1-py3-none-any.whl", hash = "sha256:b0efb6516fd4fb07b45949053826a62fa4cb353db5be2bbb4a7aa1fdd1e345fb"},
+    {file = "pyreadline3-3.4.1.tar.gz", hash = "sha256:6f3d1f7b8a31ba32b73917cefc1f28cc660562f39aea8646d30bd6eff21f7bae"},
+]
 
 [[package]]
 name = "pyrsistent"
@@ -4137,6 +4257,20 @@ pure-eval = "*"
 tests = ["cython", "littleutils", "pygments", "pytest", "typeguard"]
 
 [[package]]
+name = "sympy"
+version = "1.12"
+description = "Computer algebra system (CAS) in Python"
+optional = false
+python-versions = ">=3.8"
+files = [
+    {file = "sympy-1.12-py3-none-any.whl", hash = "sha256:c3588cd4295d0c0f603d0f2ae780587e64e2efeedb3521e46b9bb1d08d184fa5"},
+    {file = "sympy-1.12.tar.gz", hash = "sha256:ebf595c8dac3e0fdc4152c51878b498396ec7f30e7a914d6071e674d49420fb8"},
+]
+
+[package.dependencies]
+mpmath = ">=0.19"
+
+[[package]]
 name = "tabulate"
 version = "0.8.10"
 description = "Pretty-print tabular data"
@@ -4484,27 +4618,37 @@ files = [
 
 [[package]]
 name = "torch"
-version = "1.10.1+cu111"
+version = "2.1.1+cu121"
 description = "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
 optional = false
-python-versions = ">=3.6.2"
+python-versions = ">=3.8.0"
 files = [
-    {file = "torch-1.10.1+cu111-cp36-cp36m-linux_x86_64.whl", hash = "sha256:5e568474fbf05d55cd90a4044ad5651aade8ab05f2784b7d8bd34dace0ef49a1"},
-    {file = "torch-1.10.1+cu111-cp36-cp36m-win_amd64.whl", hash = "sha256:7cfb25f317cb43777b4e912aa23203476dd9bb0f4cb416ef75a2caca0bb5c547"},
-    {file = "torch-1.10.1+cu111-cp37-cp37m-linux_x86_64.whl", hash = "sha256:ffc5c834a2c053145093af583612ff15e7f6634b3648bfcc616b815daca3617e"},
-    {file = "torch-1.10.1+cu111-cp37-cp37m-win_amd64.whl", hash = "sha256:e0b7e02e3da86716d2c615ad68513b99714b219479d0e215794867641889fd7f"},
-    {file = "torch-1.10.1+cu111-cp38-cp38-linux_x86_64.whl", hash = "sha256:3d35d58cadb5abbfa25a474a33598a6bdc168c4306c3c20968159e6f3a4a2e46"},
-    {file = "torch-1.10.1+cu111-cp38-cp38-win_amd64.whl", hash = "sha256:d17821a159ba8fc4d70751ac84d11e7bd33f9582e3ccd5bd11d18352b22a3435"},
-    {file = "torch-1.10.1+cu111-cp39-cp39-linux_x86_64.whl", hash = "sha256:4789aca7facaaced7bf515db47bef8026ffa4695483070b8fb924d20eca70616"},
-    {file = "torch-1.10.1+cu111-cp39-cp39-win_amd64.whl", hash = "sha256:cdcd68b7d66624ff727996181bf8a1d27960c86ce4116fab0b1c250a8fa227dc"},
+    {file = "torch-2.1.1+cu121-cp310-cp310-linux_x86_64.whl", hash = "sha256:ec76d11350c8e887a34d36602cd37f50639bc9cda9faea4d43f2070e9792e4a4"},
+    {file = "torch-2.1.1+cu121-cp310-cp310-win_amd64.whl", hash = "sha256:44d1f28af7bd2c51b633175e9b99465f88ced80038f0cad57f25794f994637d2"},
+    {file = "torch-2.1.1+cu121-cp311-cp311-linux_x86_64.whl", hash = "sha256:83bfe1134dfa8ab86553c15da5dffa190a86d822afafe8ea6de1169c10d971aa"},
+    {file = "torch-2.1.1+cu121-cp311-cp311-win_amd64.whl", hash = "sha256:cbc1b55879aca47584172a885c35677073110311cdbba3589e80938b15bbc8ad"},
+    {file = "torch-2.1.1+cu121-cp38-cp38-linux_x86_64.whl", hash = "sha256:87ccb683e642a98b8ef05455ef6d86467b62075a4325f4d5f9aa2e8932f60739"},
+    {file = "torch-2.1.1+cu121-cp38-cp38-win_amd64.whl", hash = "sha256:1c2891bba2e76a07cd3395c165c6196d5ee0a7c6cba4f52d7aed4fe125ea1ddf"},
+    {file = "torch-2.1.1+cu121-cp39-cp39-linux_x86_64.whl", hash = "sha256:28245f62d1073c27d6f0de03a81ad49d5333c4606591ed88fed1edb97f05533d"},
+    {file = "torch-2.1.1+cu121-cp39-cp39-win_amd64.whl", hash = "sha256:2b5b58eff9efef68c25c1260e28e516c665fedae241ef426a43381d7a9076e64"},
 ]
 
 [package.dependencies]
+filelock = "*"
+fsspec = "*"
+jinja2 = "*"
+networkx = "*"
+sympy = "*"
+triton = "2.1.0"
 typing-extensions = "*"
+
+[package.extras]
+dynamo = ["jinja2"]
+opt-einsum = ["opt-einsum (>=3.3)"]
 
 [package.source]
 type = "legacy"
-url = "https://download.pytorch.org/whl/cu111"
+url = "https://download.pytorch.org/whl/cu121"
 reference = "torch"
 
 [[package]]
@@ -4577,10 +4721,12 @@ filelock = "*"
 huggingface-hub = ">=0.16.4,<1.0"
 numpy = ">=1.17"
 packaging = ">=20.0"
+protobuf = {version = "*", optional = true, markers = "extra == \"sentencepiece\""}
 pyyaml = ">=5.1"
 regex = "!=2019.12.17"
 requests = "*"
 safetensors = ">=0.3.1"
+sentencepiece = {version = ">=0.1.91,<0.1.92 || >0.1.92", optional = true, markers = "extra == \"sentencepiece\""}
 tokenizers = ">=0.14,<0.15"
 tqdm = ">=4.27"
 
@@ -4629,6 +4775,31 @@ torch-vision = ["Pillow (<10.0.0)", "torchvision"]
 torchhub = ["filelock", "huggingface-hub (>=0.16.4,<1.0)", "importlib-metadata", "numpy (>=1.17)", "packaging (>=20.0)", "protobuf", "regex (!=2019.12.17)", "requests", "sentencepiece (>=0.1.91,!=0.1.92)", "tokenizers (>=0.14,<0.15)", "torch (>=1.10,!=1.12.0)", "tqdm (>=4.27)"]
 video = ["av (==9.2.0)", "decord (==0.6.0)"]
 vision = ["Pillow (<10.0.0)"]
+
+[[package]]
+name = "triton"
+version = "2.1.0"
+description = "A language and compiler for custom Deep Learning operations"
+optional = false
+python-versions = "*"
+files = [
+    {file = "triton-2.1.0-0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:66439923a30d5d48399b08a9eae10370f6c261a5ec864a64983bae63152d39d7"},
+    {file = "triton-2.1.0-0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:919b06453f0033ea52c13eaf7833de0e57db3178d23d4e04f9fc71c4f2c32bf8"},
+    {file = "triton-2.1.0-0-cp37-cp37m-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:ae4bb8a91de790e1866405211c4d618379781188f40d5c4c399766914e84cd94"},
+    {file = "triton-2.1.0-0-cp38-cp38-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:39f6fb6bdccb3e98f3152e3fbea724f1aeae7d749412bbb1fa9c441d474eba26"},
+    {file = "triton-2.1.0-0-cp39-cp39-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:21544e522c02005a626c8ad63d39bdff2f31d41069592919ef281e964ed26446"},
+    {file = "triton-2.1.0-0-pp37-pypy37_pp73-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:143582ca31dd89cd982bd3bf53666bab1c7527d41e185f9e3d8a3051ce1b663b"},
+    {file = "triton-2.1.0-0-pp38-pypy38_pp73-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:82fc5aeeedf6e36be4e4530cbdcba81a09d65c18e02f52dc298696d45721f3bd"},
+    {file = "triton-2.1.0-0-pp39-pypy39_pp73-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:81a96d110a738ff63339fc892ded095b31bd0d205e3aace262af8400d40b6fa8"},
+]
+
+[package.dependencies]
+filelock = "*"
+
+[package.extras]
+build = ["cmake (>=3.18)", "lit"]
+tests = ["autopep8", "flake8", "isort", "numpy", "pytest", "scipy (>=1.7.1)"]
+tutorials = ["matplotlib", "pandas", "tabulate"]
 
 [[package]]
 name = "typeguard"
@@ -5055,4 +5226,4 @@ eflomal = ["eflomal"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.8,<3.9"
-content-hash = "7dbe5d423f2f8fcd4748e7561d8c794915015d95054bf6c625181e4cff8efd50"
+content-hash = "c1a77f4de84c0402c5a72169639e77bde22bc38222bc33b319e13c5333fa7ce8"

@@ -74,7 +74,7 @@ tensorflow-addons = "0.17.1"
 libclang = "14.0.6"
 sil-machine = {extras = ["thot"], version = "^1.0.2"}
 datasets = "^2.7.1"
-torch = {version = "1.10.1", source = "torch"}
+torch = {version = "2.1.1", source = "torch"}
 sacremoses = "^0.0.53"
 evaluate = "^0.3.0"
 python-docx = "^0.8.11"
@@ -82,6 +82,7 @@ iso639-lang = "^2.1.0"
 eflomal = { version = "^0.1", optional = true }
 accelerate = "^0.23.0"
 transformers = "^4.34.1"
+optimum = "^1.16.0"
 
 [tool.poetry.group.dev.dependencies]
 types-pyyaml = "^6.0.12.12"
@@ -101,6 +102,6 @@ eflomal = ["eflomal"]
 
 [[tool.poetry.source]]
 name = "torch"
-url = "https://download.pytorch.org/whl/cu111"
+url = "https://download.pytorch.org/whl/cu121"
 priority = "explicit"
 

@@ -14,6 +14,7 @@ import transformers.utils.logging as transformers_logging
 import yaml
 from datasets import Dataset
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
+from optimum.bettertransformer import BetterTransformer
 from sacremoses import MosesPunctNormalizer
 from tokenizers import NormalizedString, Regex, SentencePieceBPETokenizer
 from tokenizers.normalizers import Normalizer
@@ -598,6 +599,7 @@ class HuggingFaceNMTModel(NMTModel):
             num_labels=0,
         )
         model = cast(PreTrainedModel, AutoModelForSeq2SeqLM.from_pretrained(self._config.model, config=model_config))
+        model = BetterTransformer.transform(model)
         tokenizer = self._config.get_tokenizer()
 
         old_embeddings = model.get_input_embeddings()
@@ -809,6 +811,7 @@ class HuggingFaceNMTModel(NMTModel):
     ) -> None:
         checkpoint_path, _ = self.get_checkpoint_path(ckpt)
         model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(str(checkpoint_path))
+        model = BetterTransformer.transform(model)
         tokenizer = self._config.get_tokenizer()
         pipeline = PretokenizedTranslationPipeline(
             model=model,
@@ -856,6 +859,7 @@ class HuggingFaceNMTModel(NMTModel):
         else:
             model_name = self._config.model
         model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+        model = BetterTransformer.transform(model)
         if model.config.max_length < 512:
             model.config.max_length = 512
         tokenizer = self._config.get_tokenizer()
