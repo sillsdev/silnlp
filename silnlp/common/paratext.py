@@ -71,8 +71,6 @@ def extract_project(
     else:
         project_corpus = ParatextTextCorpus(project_dir, include_markers=include_markers)
 
-    project_corpus = project_corpus.filter(lambda tr: tr.text != "...")
-
     output_basename = f"{iso}-{project_dir.name}"
     if len(include_books) > 0 or len(exclude_books) > 0:
         output_basename += "_"
