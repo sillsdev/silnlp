@@ -28,9 +28,14 @@ The SILNLP repo itself is hosted on Github, mainly written in Python and calls S
 ## Environment Setup
 
 ### Option 1: Docker Container
+1. If using a local GPU, install the corresponding [NVIDIA driver](https://www.nvidia.com/download/index.aspx).
+   
+   On Ubuntu, the driver can alternatively be installed through the GUI by opening Software & Updates, navigating to Additional Drivers in the top menu, and selecting the newest NVIDIA driver with the labels proprietary and tested.
 
-1. Download and install [Docker Desktop](https://www.docker.com/get-started/).
-2. Pull Docker image
+   After installing the driver, reboot your system.
+
+2. Download and install [Docker Desktop](https://www.docker.com/get-started/).
+3. Pull Docker image
    
    In a terminal, run:
    ```
@@ -38,15 +43,19 @@ The SILNLP repo itself is hosted on Github, mainly written in Python and calls S
    ```
    * For Windows, use CMD Prompt
 
-3. Create Docker container based on the image
-      
-   In a terminal, run:
+4. Create Docker container based on the image
+   
+   If you're using a local GPU, then in a terminal, run:
+   ```
+   docker create -it --gpus all --name silnlp ghcr.io/sillsdev/silnlp:latest
+   ```
+   Otherwise, run:
    ```
    docker create -it --name silnlp ghcr.io/sillsdev/silnlp:latest
    ```
    A docker container should be created. You should be able to see a container named 'silnlp' on the Containers page of Docker Desktop.
 
-4. Create file for environment variables
+5. Create file for environment variables
 
    __If you do not intend to use SILNLP with ClearML and AWS, you can skip this step.__
    
@@ -59,22 +68,22 @@ The SILNLP repo itself is hosted on Github, mainly written in Python and calls S
    ```
    * Note that this does not give you direct access to an AWS S3 bucket from within the Docker container, it only allows you to run scripts referencing files in the bucket.
 
-5. Start container
+6. Start container
    
-   If you completed step 4: \
+   If you completed step 5: \
    In a terminal, run:
    ```
       docker start silnlp
       docker exec -it --env-file path/to/env_vars_file silnlp bash
    ```
-   If you did not complete step 4: \
+   If you did not complete step 5: \
    In a terminal, run:
    ```
    docker start silnlp
    docker exec -it silnlp bash
    ```
    * After this step, the terminal should change to say `root@xxxxx:~/silnlp#`, where `xxxxx` is a string of letters and numbers, instead of your current working directory. This is the command line for the docker container, and you're able to run SILNLP scripts from here.
-   * To leave the container, run `exit`, and to stop it, run `docker stop silnlp`. It can be started again by repeating step 5. Stopping the container will not erase any changes made in the container environment, but removing  it will.
+   * To leave the container, run `exit`, and to stop it, run `docker stop silnlp`. It can be started again by repeating step 6. Stopping the container will not erase any changes made in the container environment, but removing  it will.
 
 ### Option 2: Manual Installation
 
@@ -82,11 +91,14 @@ The SILNLP code can be run on either Windows or Linux operating systems. If usin
 
 __Download and install__ the following before creating any projects or starting any code, preferably in this order to avoid most warnings:
 
-1. [Git](https://git-scm.com/downloads)
-2. [Python 3.7](https://www.python.org/downloads/) (latest minor version, ie 3.7.9)
+1. If using a local GPU: [NVIDIA driver](https://www.nvidia.com/download/index.aspx)
+   * On Ubuntu, the driver can alternatively be installed through the GUI by opening Software & Updates, navigating to Additional Drivers in the top menu, and selecting the newest NVIDIA driver with the labels proprietary and tested.
+   * After installing the driver, reboot your system.
+2. [Git](https://git-scm.com/downloads)
+3. [Python 3.7](https://www.python.org/downloads/) (latest minor version, ie 3.7.9)
    * Will also work with Python 3.8, but not Python 3.9 because of a [llvmlite incompatability](https://stackoverflow.com/questions/65798319/llvmlite-failed-to-install-error-building-llvmlite)
    * Can alternatively install Python using [miniconda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/windows.html) if you're planning to use more than one version of Python. If following this method, activate your conda environment before installing Poetry.
-3. [Poetry](https://python-poetry.org/docs/#installation)
+4. [Poetry](https://python-poetry.org/docs/#installation)
    * Note that whether the command should call python or python3 depends on which is required on your machine.
    * It may (or may not) be possible to run the curl command within a VSCode terminal. If that causes permission errors close VS Code and try it in an elevated CMD prompt.
 
@@ -118,12 +130,12 @@ __Download and install__ the following before creating any projects or starting 
       ```
       
 
-4. .NET Core SDK
+5. .NET Core SDK
    * The necessary versions are 7.0 and 3.1. If your machine is only able to install version 7.0, you can set the DOTNET_ROLL_FORWARD environment variable to "LatestMajor", which will allow you to run anything that depends on dotnet 3.1.
    * Note - the .NET SDK is needed for [SIL.Machine.Tool](https://github.com/sillsdev/machine).  Many of the scripts in this repo require this .Net package.  The .Net package will be installed and updated when the silnlp is initialized in `__init__.py`.
    * Windows: [.NET Core SDK](https://dotnet.microsoft.com/download)
    * Linux: Installation instructions can be found [here](https://learn.microsoft.com/en-us/dotnet/core/install/linux-ubuntu-2004)
-5. C++ Redistributable
+6. C++ Redistributable
    * Note - this may already be installed.  If it is not installed you may get cryptic errors such as "System.DllNotFoundException: Unable to load DLL 'thot' or one of its dependencies"
    * Windows: Download from https://support.microsoft.com/en-us/topic/the-latest-supported-visual-c-downloads-2647da03-1eea-4433-9aff-95f26a218cc0 and install
    * Linux: Instead of installing the redistributable, run the following commands:
