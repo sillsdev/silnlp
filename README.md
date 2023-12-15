@@ -70,20 +70,20 @@ The SILNLP repo itself is hosted on Github, mainly written in Python and calls S
 
 6. Start container
    
-   If you completed step 4: \
+   If you completed step 5: \
    In a terminal, run:
    ```
       docker start silnlp
       docker exec -it --env-file path/to/env_vars_file silnlp bash
    ```
-   If you did not complete step 4: \
+   If you did not complete step 5: \
    In a terminal, run:
    ```
    docker start silnlp
    docker exec -it silnlp bash
    ```
    * After this step, the terminal should change to say `root@xxxxx:~/silnlp#`, where `xxxxx` is a string of letters and numbers, instead of your current working directory. This is the command line for the docker container, and you're able to run SILNLP scripts from here.
-   * To leave the container, run `exit`, and to stop it, run `docker stop silnlp`. It can be started again by repeating step 5. Stopping the container will not erase any changes made in the container environment, but removing  it will.
+   * To leave the container, run `exit`, and to stop it, run `docker stop silnlp`. It can be started again by repeating step 6. Stopping the container will not erase any changes made in the container environment, but removing  it will.
 
 ### Option 2: Manual Installation
 
