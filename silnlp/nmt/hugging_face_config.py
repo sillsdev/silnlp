@@ -1,4 +1,6 @@
 import json
+import logging
+import os
 import re
 from contextlib import ExitStack
 from copy import deepcopy
@@ -10,6 +12,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Set, TextIO, T
 import datasets.utils.logging as datasets_logging
 import evaluate
 import numpy as np
+import torch
 import transformers.utils.logging as transformers_logging
 import yaml
 from datasets import Dataset
@@ -45,9 +48,18 @@ from transformers import (
     set_seed,
 )
 from transformers.convert_slow_tokenizer import convert_slow_tokenizer
+from transformers.modeling_utils import unwrap_model
 from transformers.tokenization_utils import BatchEncoding, TruncationStrategy
+from transformers.trainer import TRAINING_ARGS_NAME
 from transformers.trainer_utils import get_last_checkpoint
-from transformers.utils import PaddingStrategy, to_py_obj
+from transformers.utils import (
+    SAFE_WEIGHTS_NAME,
+    WEIGHTS_NAME,
+    PaddingStrategy,
+    is_peft_available,
+    is_safetensors_available,
+    to_py_obj,
+)
 from transformers.utils.logging import tqdm
 
 from ..common.corpus import count_lines, get_terms
@@ -55,6 +67,14 @@ from ..common.environment import SIL_NLP_ENV, download_if_s3_paths
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
 from .config import CheckpointType, Config, CorpusPair, NMTModel
 from .tokenizer import NullTokenizer, Tokenizer
+
+if is_safetensors_available():
+    import safetensors.torch
+
+if is_peft_available():
+    from peft import PeftModel
+
+LOGGER = logging.getLogger(__name__)
 
 
 def prepare_decoder_input_ids_from_labels(self: M2M100ForConditionalGeneration, labels: Tensor) -> Tensor:
@@ -601,6 +621,7 @@ class HuggingFaceNMTModel(NMTModel):
             num_labels=0,
         )
         model = cast(PreTrainedModel, AutoModelForSeq2SeqLM.from_pretrained(self._config.model, config=model_config))
+        model = model.to_bettertransformer()
         tokenizer = self._config.get_tokenizer()
 
         old_embeddings = model.get_input_embeddings()
@@ -812,6 +833,7 @@ class HuggingFaceNMTModel(NMTModel):
     ) -> None:
         checkpoint_path, _ = self.get_checkpoint_path(ckpt)
         model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(str(checkpoint_path))
+        model = model.to_bettertransformer()
         tokenizer = self._config.get_tokenizer()
         pipeline = PretokenizedTranslationPipeline(
             model=model,
@@ -859,6 +881,7 @@ class HuggingFaceNMTModel(NMTModel):
         else:
             model_name = self._config.model
         model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+        model = model.to_bettertransformer()
         if model.config.max_length < 512:
             model.config.max_length = 512
         tokenizer = self._config.get_tokenizer()
@@ -1136,3 +1159,36 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         if self._sequential_sampling:
             return None
         return super()._get_train_sampler()
+
+    def _save(self, output_dir: Optional[str] = None, state_dict=None):
+        # If we are executing this function, we are the process zero, so we don't check for that.
+        output_dir = output_dir if output_dir is not None else self.args.output_dir
+        os.makedirs(output_dir, exist_ok=True)
+        LOGGER.info(f"Saving model checkpoint to {output_dir} using custom _save function")
+
+        supported_classes = (PreTrainedModel,) if not is_peft_available() else (PreTrainedModel, PeftModel)
+        # Save a trained model and configuration using `save_pretrained()`.
+        # They can then be reloaded using `from_pretrained()`
+        if not isinstance(self.model, supported_classes):
+            if state_dict is None:
+                state_dict = self.model.state_dict()
+
+            if isinstance(unwrap_model(self.model), supported_classes):
+                unwrap_model(self.model).save_pretrained(
+                    output_dir, state_dict=state_dict, safe_serialization=self.args.save_safetensors
+                )
+            else:
+                LOGGER.info("Trainer.model is not a `PreTrainedModel`, only saving its state dict.")
+                if self.args.save_safetensors:
+                    safetensors.torch.save_file(state_dict, os.path.join(output_dir, SAFE_WEIGHTS_NAME))
+                else:
+                    torch.save(state_dict, os.path.join(output_dir, WEIGHTS_NAME))
+        else:
+            self.model = self.model.reverse_bettertransformer()
+            self.model.save_pretrained(output_dir, state_dict=state_dict, safe_serialization=self.args.save_safetensors)
+            self.model = self.model.to_bettertransformer()
+        if self.tokenizer is not None:
+            self.tokenizer.save_pretrained(output_dir)
+
+        # Good practice: save your training arguments together with the trained model
+        torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
