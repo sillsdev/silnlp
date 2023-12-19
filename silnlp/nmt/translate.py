@@ -35,6 +35,7 @@ class TranslationTask:
     name: str
     checkpoint: str = "last"
     clearml_queue: Optional[str] = None
+    commit: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.checkpoint is None:
@@ -232,6 +233,7 @@ class TranslationTask:
             self.clearml_queue,
             project_suffix="_infer",
             experiment_suffix=experiment_suffix,
+            commit=self.commit
         )
         self.name = clearml.name
 
@@ -306,6 +308,8 @@ def main() -> None:
         action="store_true",
         help="Show information about the environment variables and arguments.",
     )
+    parser.add_argument('--commit',type=str, default=None,help="The git commit id of silnlp with which to run the remote job")
+
     args = parser.parse_args()
 
     get_git_revision_hash()
@@ -320,6 +324,7 @@ def main() -> None:
         name=args.experiment,
         checkpoint=args.checkpoint,
         clearml_queue=args.clearml_queue,
+        commit=args.commit
     )
 
     if len(args.books) > 0:

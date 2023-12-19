@@ -24,9 +24,10 @@ class SILExperiment:
     run_train: bool = False
     run_test: bool = False
     score_by_book: bool = False
+    commit: Optional[str] = None
 
     def __post_init__(self):
-        self.clearml = SILClearML(self.name, self.clearml_queue)
+        self.clearml = SILClearML(self.name, self.clearml_queue, commit=self.commit)
         self.name: str = self.clearml.name
         self.config: Config = self.clearml.config
         self.rev_hash = get_git_revision_hash()
@@ -104,6 +105,7 @@ def main() -> None:
         action="store_true",
         help="Show information about the environment variables and arguments.",
     )
+    parser.add_argument('--commit',type=str, default=None,help="The git commit id of silnlp with which to run the remote job")
 
     args = parser.parse_args()
 
@@ -133,6 +135,7 @@ def main() -> None:
         run_train=args.train,
         run_test=args.test,
         score_by_book=args.score_by_book,
+        commit=args.commit
     )
     exp.run()
 
