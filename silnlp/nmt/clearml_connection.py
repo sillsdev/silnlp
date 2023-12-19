@@ -20,6 +20,7 @@ class SILClearML:
     project_suffix: str = ""
     experiment_suffix: str = ""
     clearml_project_folder: str = ""
+    commit: Optional[str] = None
 
     def __post_init__(self) -> None:
         self.name = self.name.replace("\\", "/")
@@ -39,6 +40,7 @@ class SILClearML:
         from clearml.backend_api.session.session import LoginError
 
         try:
+            self.task: Task
             self.task = Task.init(
                 project_name=self.project_prefix + project + self.project_suffix,
                 task_name=exp_name + self.experiment_suffix,
@@ -58,6 +60,8 @@ class SILClearML:
                     "pipx install poetry==1.7.1",
                 ],
             )
+            if self.commit:
+                self.task.set_script(commit=self.commit)
             if self.queue_name.lower() not in ("local", "locally"):
                 self.task.execute_remotely(queue_name=self.queue_name)
         except LoginError as e:
