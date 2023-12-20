@@ -164,12 +164,23 @@ def update_segments(segments: List[Segment], translations: List[str]) -> None:
             first_para.elem.insert(first_para.child_indices[0], sfm.Text(translation, parent=first_para.elem))
 
 
-def get_stylesheet(project_path: Path) -> dict:
+def get_stylesheet(project_path: Path, field_update: str = "merge") -> dict:
+    if field_update.lower() == "replace":
+        field_update = style.FieldUpdate.REPLACE
+    elif field_update.lower() == "merge":
+        field_update = style.FieldUpdate.MERGE
+    elif field_update.lower() == "ignore":
+        field_update = style.FieldUpdate.IGNORE
+    else:
+        raise ValueError(
+            f"{field_update} is not a valid value for field_update. Must be one of 'replace', 'merge', or 'ignore'."
+        )
+
     custom_stylesheet_path = project_path / "custom.sty"
     if custom_stylesheet_path.exists():
         with custom_stylesheet_path.open("r", encoding="utf-8-sig") as file:
             custom_stylesheet = style.parse(file)
-        return style.update_sheet(usfm.relaxed_stylesheet, custom_stylesheet, field_update=style.FieldUpdate.IGNORE)
+        return style.update_sheet(usfm.relaxed_stylesheet, custom_stylesheet, field_update=field_update)
     return usfm.relaxed_stylesheet
 
 
@@ -275,6 +286,7 @@ class Translator(ABC):
         chapters: List[int] = [],
         trg_project: str = "",
         include_inline_elements: bool = False,
+        stylesheet_field_update: str = "merge",
         experiment_ckpt_str: str = "",
     ) -> None:
         src_project_dir = get_project_dir(src_project)
@@ -282,7 +294,7 @@ class Translator(ABC):
             settings_tree = etree.parse(settings_file)
         src_iso = get_iso(settings_tree)
         book_path = get_book_path(src_project, book)
-        stylesheet = get_stylesheet(src_project_dir)
+        stylesheet = get_stylesheet(src_project_dir, stylesheet_field_update)
 
         if not book_path.is_file():
             raise RuntimeError(f"Can't find file {book_path} for book {book}")

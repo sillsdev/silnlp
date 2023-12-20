@@ -47,6 +47,7 @@ class TranslationTask:
         trg_project: Optional[str],
         trg_iso: Optional[str],
         include_inline_elements: bool = False,
+        stylesheet_field_update: str = "merge",
     ):
         book_nums = get_chapters(books)
         translator, config, step_str = self._init_translation_task(
@@ -106,6 +107,7 @@ class TranslationTask:
                         chapters,
                         trg_project,
                         include_inline_elements,
+                        stylesheet_field_update,
                         f"{self.name}:{self.checkpoint}",
                     )
                 else:
@@ -117,6 +119,7 @@ class TranslationTask:
                         trg_iso,
                         chapters,
                         include_inline_elements=include_inline_elements,
+                        stylesheet_field_update=stylesheet_field_update,
                         experiment_ckpt_str=f"{self.name}:{self.checkpoint}",
                     )
             except Exception as e:
@@ -288,6 +291,12 @@ def main() -> None:
         help="Include inline elements for projects in USFM format",
     )
     parser.add_argument(
+        "--stylesheet-field-update",
+        default="merge",
+        type=str,
+        help="What to do with the OccursUnder and TextProperties fields of a project's custom stylesheet. Possible values are 'replace', 'merge', and 'ignore'.",
+    )
+    parser.add_argument(
         "--eager-execution",
         default=False,
         action="store_true",
@@ -327,7 +336,12 @@ def main() -> None:
             show_attrs(cli_args=args, actions=[f"Will attempt to translate books {args.books} into {args.trg_iso}"])
             exit()
         translator.translate_books(
-            ";".join(args.books), args.src_project, args.trg_project, args.trg_iso, args.include_inline_elements
+            ";".join(args.books),
+            args.src_project,
+            args.trg_project,
+            args.trg_iso,
+            args.include_inline_elements,
+            args.stylesheet_field_update,
         )
     elif args.src_prefix is not None:
         if args.debug:
