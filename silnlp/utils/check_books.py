@@ -11,8 +11,8 @@ from ..common.paratext import get_book_path, get_project_dir
 from ..common.translator import collect_segments, get_stylesheet
 from ..sfm import usfm
 from .collect_verse_counts import DT_canon, NT_canon, OT_canon
-        
-valid_canons = ['NT', 'OT', 'DT']
+
+valid_canons = ["NT", "OT", "DT"]
 valid_books = []
 valid_books.extend(OT_canon)
 valid_books.extend(NT_canon)
@@ -92,26 +92,26 @@ def main() -> None:
 
         books_to_check = [book for book in books if book in valid_books]
         print(f"Individual books specified are: {books_to_check}\n")
-        
+
         OT_books_found = [book for book in OT_canon if book in books_found]
         NT_books_found = [book for book in NT_canon if book in books_found]
         DT_books_found = [book for book in DT_canon if book in books_found]
-        
-        #print(f"OT_books_found are {OT_books_found}")
-        #print(f"OT_canon is {OT_canon}")
+
+        # print(f"OT_books_found are {OT_books_found}")
+        # print(f"OT_canon is {OT_canon}")
 
         for canon_to_add in canons_to_add:
-            if canon_to_add == 'OT':
-                #print("Adding OT books")
+            if canon_to_add == "OT":
+                # print("Adding OT books")
                 books_to_check.extend(OT_books_found)
-                #print(f"Books_to_check are {books_to_check}.")
-            if canon_to_add == 'NT':
-                #print("Adding NT books")
+                # print(f"Books_to_check are {books_to_check}.")
+            if canon_to_add == "NT":
+                # print("Adding NT books")
                 books_to_check.extend(NT_books_found)
-            if canon_to_add == 'DT':
-                #print("Adding DT books")
+            if canon_to_add == "DT":
+                # print("Adding DT books")
                 books_to_check.extend(DT_books_found)
-        
+
         print(f"All books to check are: {books_to_check}\n")
 
         if not books_to_check:
@@ -128,11 +128,12 @@ def main() -> None:
             parse_book(src_project_dir, book_num_to_check)
 
         invalid_books = [book for book in books if book not in valid_books and book not in valid_canons]
-        
+
         if invalid_books:
             print(f"Books can include a corpus identifier such as NT OT or DT or a book identifier.")
             print(f"Valid book identifiers are: {valid_books}")
             print(f"WARNING: These unknown books were not checked: {invalid_books}")
+
 
 if __name__ == "__main__":
     main()
