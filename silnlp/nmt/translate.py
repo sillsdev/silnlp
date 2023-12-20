@@ -308,7 +308,7 @@ def main() -> None:
         action="store_true",
         help="Show information about the environment variables and arguments.",
     )
-    parser.add_argument('--commit',type=str, default=None,help="The git commit id of silnlp with which to run the remote job")
+    parser.add_argument('--commit',type=str, default=None,help="The silnlp git commit id with which to run a remote job")
 
     args = parser.parse_args()
 

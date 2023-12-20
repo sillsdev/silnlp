@@ -40,8 +40,7 @@ class SILClearML:
         from clearml.backend_api.session.session import LoginError
 
         try:
-            self.task: Task
-            self.task = Task.init(
+            self.task: Task = Task.init(
                 project_name=self.project_prefix + project + self.project_suffix,
                 task_name=exp_name + self.experiment_suffix,
             )
