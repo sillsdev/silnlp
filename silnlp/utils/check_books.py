@@ -1,6 +1,7 @@
 import argparse
 import logging
-from pathlib import Path
+#from pathlib import Path
+import textwrap
 from typing import List
 
 from lxml import etree
@@ -69,11 +70,32 @@ def parse_book(src_project_dir: str, book: str):
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Translates text using an NMT model")
+   
+    parser = argparse.ArgumentParser(
+        prog='check_books',
+        description="Checks sfm files for a project with the same parser as translate.py",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent('''\
+             Books can include corpora NT OT or DT and individual books.
+             Old Testament books are :
+             GEN, EXO, LEV, NUM, DEU, JOS, JDG, RUT, 1SA, 2SA, 1KI, 2KI, 1CH, 2CH, EZR, NEH, EST, JOB, PSA, PRO, ECC, 
+             SNG, ISA, JER, LAM, EZK, DAN, HOS, JOL, AMO, OBA, JON, MIC, NAM, HAB, ZEP, HAG, ZEC, MAL
+             
+             New Testament books are :
+             MAT, MRK, LUK, JHN, ACT, ROM, 1CO, 2CO, GAL, EPH, PHP, COL, 1TH,
+             2TH, 1TI, 2TI, TIT, PHM, HEB, JAS, 1PE, 2PE, 1JN, 2JN, 3JN, JUD, REV
+
+             Deuterocanonical books are:
+             TOB, JDT, ESG, WIS, SIR, BAR, LJE, S3Y, SUS, BEL, 1MA, 
+             2MA, 3MA, 4MA, 1ES, 2ES, MAN, PS2, ODA, PSS, EZA, JUB, ENO
+         '''))
+    
     parser.add_argument("--src-project", default=None, type=str, help="The source project to translate")
     parser.add_argument(
         "--books", metavar="books", nargs="+", default=[], help="The books to check; e.g., 'NT', 'OT', 'GEN EXO'"
     )
+    
+    parser.print_help()
     args = parser.parse_args()
     src_project_dir = get_project_dir(args.src_project)
 
@@ -118,7 +140,9 @@ def main() -> None:
             print(f"No books were specified - will check all books.")
             books_to_check = books_found
         else:
-            books_to_check = list(set(books_found).intersection(books_to_check))
+            # Get list of books to check in usual Biblical order.
+            books_to_check = [book for book in valid_books if book in books_to_check]
+
             print(f"Of the books specified these were found: {books_to_check}")
 
         book_nums = get_chapters(books_to_check)
@@ -130,8 +154,6 @@ def main() -> None:
         invalid_books = [book for book in books if book not in valid_books and book not in valid_canons]
 
         if invalid_books:
-            print(f"Books can include a corpus identifier such as NT OT or DT or a book identifier.")
-            print(f"Valid book identifiers are: {valid_books}")
             print(f"WARNING: These unknown books were not checked: {invalid_books}")
 
 
