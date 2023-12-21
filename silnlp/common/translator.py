@@ -165,13 +165,9 @@ def update_segments(segments: List[Segment], translations: List[str]) -> None:
 
 
 def get_stylesheet(project_path: Path, field_update: str = "merge") -> dict:
-    if field_update.lower() == "replace":
-        field_update = style.FieldUpdate.REPLACE
-    elif field_update.lower() == "merge":
-        field_update = style.FieldUpdate.MERGE
-    elif field_update.lower() == "ignore":
-        field_update = style.FieldUpdate.IGNORE
-    else:
+    try:
+        field_update: style.FieldUpdate = style.FieldUpdate[field_update.upper()]
+    except Exception:
         raise ValueError(
             f"{field_update} is not a valid value for field_update. Must be one of 'replace', 'merge', or 'ignore'."
         )
