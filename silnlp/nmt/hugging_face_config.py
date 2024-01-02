@@ -621,7 +621,8 @@ class HuggingFaceNMTModel(NMTModel):
             num_labels=0,
         )
         model = cast(PreTrainedModel, AutoModelForSeq2SeqLM.from_pretrained(self._config.model, config=model_config))
-        model = model.to_bettertransformer()
+        if self._config.train.get("better_transformer"):
+            model = model.to_bettertransformer()
         tokenizer = self._config.get_tokenizer()
 
         old_embeddings = model.get_input_embeddings()
@@ -779,6 +780,7 @@ class HuggingFaceNMTModel(NMTModel):
             tokenizer,
             compute_metrics=compute_metrics,
             sequential_sampling=self._config.train.get("sequential_sampling", False),
+            better_transformer=self._config.train.get("better_transformer", False),
         )
         early_stopping: Optional[dict] = self._config.eval["early_stopping"]
         if early_stopping:
@@ -833,7 +835,8 @@ class HuggingFaceNMTModel(NMTModel):
     ) -> None:
         checkpoint_path, _ = self.get_checkpoint_path(ckpt)
         model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(str(checkpoint_path))
-        model = model.to_bettertransformer()
+        if self._config.infer.get("better_transformer"):
+            model = model.to_bettertransformer()
         tokenizer = self._config.get_tokenizer()
         pipeline = PretokenizedTranslationPipeline(
             model=model,
@@ -881,7 +884,8 @@ class HuggingFaceNMTModel(NMTModel):
         else:
             model_name = self._config.model
         model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-        model = model.to_bettertransformer()
+        if self._config.infer.get("better_transformer"):
+            model = model.to_bettertransformer()
         if model.config.max_length < 512:
             model.config.max_length = 512
         tokenizer = self._config.get_tokenizer()
@@ -1139,6 +1143,7 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         optimizers: Tuple[Optional[optim.Optimizer], Optional[optim.lr_scheduler.LambdaLR]] = (None, None),
         preprocess_logits_for_metrics: Optional[Callable[[Tensor, Tensor], Tensor]] = None,
         sequential_sampling: bool = False,
+        better_transformer: bool = False,
     ):
         super().__init__(
             model,
@@ -1154,6 +1159,7 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
             preprocess_logits_for_metrics,
         )
         self._sequential_sampling = sequential_sampling
+        self._better_transformer = better_transformer
 
     def _get_train_sampler(self) -> Optional[Sampler]:
         if self._sequential_sampling:
@@ -1184,9 +1190,16 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
                 else:
                     torch.save(state_dict, os.path.join(output_dir, WEIGHTS_NAME))
         else:
-            self.model = self.model.reverse_bettertransformer()
-            self.model.save_pretrained(output_dir, state_dict=state_dict, safe_serialization=self.args.save_safetensors)
-            self.model = self.model.to_bettertransformer()
+            if self._better_transformer:
+                self.model = self.model.reverse_bettertransformer()
+                self.model.save_pretrained(
+                    output_dir, state_dict=state_dict, safe_serialization=self.args.save_safetensors
+                )
+                self.model = self.model.to_bettertransformer()
+            else:
+                self.model.save_pretrained(
+                    output_dir, state_dict=state_dict, safe_serialization=self.args.save_safetensors
+                )
         if self.tokenizer is not None:
             self.tokenizer.save_pretrained(output_dir)
 

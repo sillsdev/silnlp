@@ -81,7 +81,7 @@ python-docx = "^0.8.11"
 iso639-lang = "^2.1.0"
 eflomal = { version = "^0.1", optional = true }
 accelerate = "^0.23.0"
-transformers = "^4.34.1"
+transformers = "^4.36.2"
 optimum = "^1.16.0"
 
 [tool.poetry.group.dev.dependencies]
