@@ -74,7 +74,7 @@ tensorflow-addons = "0.17.1"
 libclang = "14.0.6"
 sil-machine = {extras = ["thot"], version = "^1.0.2"}
 datasets = "^2.7.1"
-torch = {version = "2.1.1", source = "torch"}
+torch = {version = "2.1.2", source = "torch"}
 sacremoses = "^0.0.53"
 evaluate = "^0.3.0"
 python-docx = "^0.8.11"
