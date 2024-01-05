@@ -56,7 +56,7 @@ def parse_book(src_project_dir: str, book: str):
             segments = collect_segments(book, doc)
             vrefs = [s.ref for s in segments]
 
-            return f"Contains {len(vrefs)} verses."
+            return len(vrefs)
 
 
 def main() -> None:
@@ -64,7 +64,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         prog="check_books",
         description="Checks sfm files for a project with the same parser as translate.py",
-        formatter_class=argparse.RawDescriptionHelpFormatter)
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
 
     # parser.add_argument(
     #     "--books", metavar="books", nargs="+", default=[], help="The books to check; e.g., 'NT', 'OT', 'GEN EXO'"
@@ -73,35 +74,45 @@ def main() -> None:
     # parser.print_help()
     projects = list()
     args = parser.parse_args()
-    
+
     projects_dir = get_project_dir("")
     for project_dir in projects_dir.glob("*"):
         if project_dir.is_dir():
             projects.append(project_dir)
-    
+
     print(f"Found {len(projects)} folders in {projects_dir}")
 
-    results = list()
-    for project_dir in projects:
+    errors = list()
+    for project_dir in projects[:10]:
         print(f"Checking {project_dir}")
 
         sfm_files = get_sfm_files(project_dir)
-        if sfm_files:        
+        if sfm_files:
             project = {}
             books_found = [sfm_file.name[2:5] for sfm_file in sfm_files]
             books_to_check = [book for book in valid_books if book in books_found]
 
-            #book_nums = get_chapters(books_to_check)
-            #book_nums_to_check = [book_number_to_id(book) for book in book_nums.keys()]
-            print(f"books_to_check are {books_to_check}")
-            
+            # book_nums = get_chapters(books_to_check)
+            # book_nums_to_check = [book_number_to_id(book) for book in book_nums.keys()]
+            print(f"books found are {books_to_check}")
+
             for book_to_check in books_to_check:
                 try:
                     result = parse_book(project_dir, book_to_check)
-                except RuntimeError as err: 
+                except RuntimeError as err:
                     result = f"{err}"
                 project[book_to_check] = result
-                print(book_to_check,result)
+
+                #print(result, type(result))
+                if type(result) is not int:
+                    errors.append(f"{book_to_check}  :  {result}\n")
+                    print(book_to_check, result)
+        else:
+            print(f"No sfm files found in {project_dir}")
+
+    with open("E:\Work\Corpora\PT_project_errors.txt", 'w', encoding='utf-8') as error_file:
+        error_file.writelines(errors)
+
 
 if __name__ == "__main__":
     main()
