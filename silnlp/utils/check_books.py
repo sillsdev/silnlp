@@ -1,6 +1,7 @@
 import argparse
 import logging
-#from pathlib import Path
+
+# from pathlib import Path
 import textwrap
 from typing import List
 
@@ -20,6 +21,10 @@ valid_books.extend(NT_canon)
 valid_books.extend(DT_canon)
 
 LOGGER = logging.getLogger(__package__ + ".translate")
+
+
+def get_sfm_files(project_dir):
+    return [file for file in project_dir.glob("*") if file.is_file() and file.suffix[1:].lower() in ["sfm", "usfm"]]
 
 
 def parse_book(src_project_dir: str, book: str):
@@ -70,12 +75,13 @@ def parse_book(src_project_dir: str, book: str):
 
 
 def main() -> None:
-   
+
     parser = argparse.ArgumentParser(
-        prog='check_books',
+        prog="check_books",
         description="Checks sfm files for a project with the same parser as translate.py",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=textwrap.dedent('''\
+        epilog=textwrap.dedent(
+            """\
              Books can include corpora NT OT or DT and individual books.
              Old Testament books are :
              GEN, EXO, LEV, NUM, DEU, JOS, JDG, RUT, 1SA, 2SA, 1KI, 2KI, 1CH, 2CH, EZR, NEH, EST, JOB, PSA, PRO, ECC, 
@@ -88,25 +94,47 @@ def main() -> None:
              Deuterocanonical books are:
              TOB, JDT, ESG, WIS, SIR, BAR, LJE, S3Y, SUS, BEL, 1MA, 
              2MA, 3MA, 4MA, 1ES, 2ES, MAN, PS2, ODA, PSS, EZA, JUB, ENO
-         '''))
-    
-    parser.add_argument("--src-project", default=None, type=str, help="The source project to translate")
+         """
+        ),
+    )
+
+    parser.add_argument("--project", default=None, type=str, help="A single Paratext project folder to check")
     parser.add_argument(
         "--books", metavar="books", nargs="+", default=[], help="The books to check; e.g., 'NT', 'OT', 'GEN EXO'"
     )
-    
-    parser.print_help()
-    args = parser.parse_args()
-    src_project_dir = get_project_dir(args.src_project)
 
-    sfm_files = [
-        file for file in src_project_dir.glob("*") if file.is_file() and file.suffix[1:].lower() in ["sfm", "usfm"]
-    ]
+    # parser.print_help()
+
+    args = parser.parse_args()
+    if args.project:
+        project_dir = get_project_dir(args.project)
+        if not project_dir.exists():
+            raise RuntimeError(f"Can't find the project folder: '{project_dir}'")
+        projects = {project_dir: get_sfm_files(project_dir)}
+    else:
+        projects_dir = get_project_dir("")
+        projects = {}
+
+        for project_dir in projects_dir.glob("*"):
+            if project_dir.is_dir():
+                sfm_files = get_sfm_files(project_dir)
+                if sfm_files:
+                    projects[project_dir] = sfm_files
+
+    sfm_file_count = 0
+    for project_dir, sfm_files in projects.items():
+        sfm_file_count += len(sfm_files)
+        print(project_dir)
+    
+    print(f"There are {len(projects)} project folders containing {sfm_file_count} sfm files.")
+    exit()
+
+
     books_found = [sfm_file.name[2:5] for sfm_file in sfm_files]
-    print(f"Found these books {' '.join([book for book in books_found])} in the project_directory: {src_project_dir}")
+    print(f"Found these books {' '.join([book for book in books_found])} in the project_directory: {project_dir}")
 
     if not sfm_files:
-        print(f"No sfm or SFM files found in project folder: {src_project_dir}")
+        print(f"No sfm or SFM files found in project folder: {project_dir}")
     else:
         books = args.books
         canons_to_add = [canon for canon in books if canon in valid_canons]
@@ -149,7 +177,7 @@ def main() -> None:
         book_nums_to_check = [book_number_to_id(book) for book in book_nums.keys()]
 
         for book_num_to_check in book_nums_to_check:
-            parse_book(src_project_dir, book_num_to_check)
+            parse_book(project_dir, book_num_to_check)
 
         invalid_books = [book for book in books if book not in valid_books and book not in valid_canons]
 
