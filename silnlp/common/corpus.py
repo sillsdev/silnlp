@@ -142,11 +142,19 @@ def filter_parallel_corpus(corpus: pd.DataFrame, score_threshold: float) -> pd.D
     return corpus
 
 
-def split_corpus(corpus_size: int, split_size: Union[float, int], used_indices: Set[int] = set()) -> Optional[Set[int]]:
+def split_corpus(
+    corpus_size: Union[int, Set[int]], split_size: Union[float, int], used_indices: Set[int] = set()
+) -> Optional[Set[int]]:
+    if isinstance(corpus_size, set):
+        available_indices = corpus_size
+        corpus_size = len(available_indices)
+    else:
+        available_indices = range(corpus_size)
+
     if isinstance(split_size, float):
         split_size = int(split_size if split_size > 1 else corpus_size * split_size)
     population = (
-        range(corpus_size) if len(used_indices) == 0 else [i for i in range(corpus_size) if i not in used_indices]
+        available_indices if len(used_indices) == 0 else [i for i in available_indices if i not in used_indices]
     )
     if split_size >= len(population):
         return None

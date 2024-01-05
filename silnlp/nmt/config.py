@@ -566,9 +566,11 @@ class Config(ABC):
         LOGGER.info(f"Preprocessing {src_corpora_str} -> {trg_corpora_str}")
         test_size = pair.size if pair.test_size is None else pair.test_size
         val_size = pair.size if pair.val_size is None else pair.val_size
+        train_size = pair.size
 
         test_indices: Optional[Set[int]] = None
         val_indices: Optional[Set[int]] = None
+        train_indices: Optional[Set[int]] = None
 
         train: Optional[pd.DataFrame] = None
         val: Dict[Tuple[str, str], pd.DataFrame] = {}
@@ -693,6 +695,10 @@ class Config(ABC):
                 if pair.is_train:
                     cur_train["source_lang"] = src_file.iso
                     cur_train["target_lang"] = trg_file.iso
+
+                    train_indices = split_corpus(set(cur_train.index), train_size)
+                    _, cur_train = split_parallel_corpus(cur_train, train_size, train_indices)
+
                     if self.mirror:
                         mirror_cur_train = cur_train.rename(
                             columns={
