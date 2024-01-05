@@ -696,12 +696,7 @@ class Config(ABC):
                     cur_train["source_lang"] = src_file.iso
                     cur_train["target_lang"] = trg_file.iso
 
-                    indices = set(cur_train.index)
-                    split_size = train_size
-                    if isinstance(split_size, float):
-                        split_size = int(split_size if split_size > 1 else corpus_count * split_size)
-                    train_indices = set(random.sample(indices, min(split_size, len(indices))))
-
+                    train_indices = split_corpus(set(cur_train.index), train_size)
                     _, cur_train = split_parallel_corpus(cur_train, train_size, train_indices)
 
                     if self.mirror:
