@@ -1,5 +1,5 @@
 from typing import Optional
-from clowder.environment import Investigation, DuplicateExperimentException
+from clowder.environment import DuplicateInvestigationException, Investigation
 from clowder.status import Status
 from clowder.consts import ENV, get_env
 
@@ -28,11 +28,11 @@ def create_from_template(from_investigation_name: str, new_investigation_name: s
         new_investigation = ENV.get_investigation(new_investigation_name)
         new_investigation.import_setup_from(old_investigation)
         return
-    except DuplicateExperimentException:
+    except DuplicateInvestigationException:
         pass
     except:
         delete(new_investigation_name)
-    raise DuplicateExperimentException(
+    raise DuplicateInvestigationException(
         f"Investigation with name {from_investigation_name} already exists in the current context"
     )
 

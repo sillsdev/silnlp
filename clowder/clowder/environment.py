@@ -27,15 +27,7 @@ from clowder.consts import (
     ENTRYPOINT_ATTRIBUTE,
     GDRIVE_SCOPE,
 )
-
-
-class MissingConfigurationFile(IOError):
-    "Missing clowder configuration file"
-
-
-class DuplicateExperimentException(Exception):
-    "Duplicate experiments within investigation"
-
+from clowder.configuration_exception import MissingConfigurationFile
 
 class DuplicateInvestigationException(Exception):
     """There is already an investigation in the current context with that name"""
