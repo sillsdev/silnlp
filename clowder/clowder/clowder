@@ -18,14 +18,16 @@ app = typer.Typer()
 @app.command("untrack")
 def untrack(investigation_name: str):
     """Untrack investigation with name `investigation_name` in the current context"""
-    print(functions.untrack(investigation_name))
+    functions.untrack(investigation_name)
+    print(f"[green]Successfully untracked {investigation_name}[/green]")
 
 
 @app.command("track")
 def track(investigation_name: Optional[str] = None):
     """Tracks all investigations in the current context. If given an `--investigation-name`, this
-    will only track a single investigation with that name in the current context"""
-    print(functions.track(investigation_name))
+    will only track a single investigation with that For your security, you've been signed out of your current session.  name in the current context"""
+    functions.track(investigation_name)
+    print(f"[green]Successfully tracked {investigation_name if investigation_name else 'all investigations in this context'}[/green]")
 
 
 @app.command("create-from-template")
@@ -33,7 +35,8 @@ def create_from_template(from_investigation_name: str, new_investigation_name: s
     """Creates a new investigation with name `investigation_name` in the current context
     copying the 'investigation' spreadsheet and 'config.yml' into the new investigation
     from an existing investigation with name `from_investigation_name`"""
-    print(functions.create_from_template(from_investigation_name, new_investigation_name))
+    functions.create_from_template(from_investigation_name, new_investigation_name)
+    print(f"[green]Investigation {new_investigation_name} successfully created")
 
 
 @app.command("delete")
