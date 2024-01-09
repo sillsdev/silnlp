@@ -1,9 +1,12 @@
 from typing import Optional
-from clowder.environment import ENV, Investigation, DuplicateExperimentException, Environment
+from clowder.environment import Investigation, DuplicateExperimentException
 from clowder.status import Status
+from clowder.consts import ENV, get_env
+
+if ENV is None:
+    ENV = get_env()
 
 # TODO remote logging (ignore for mvp)
-
 
 def untrack(investigation_name: str):
     ENV.get_investigation(investigation_name).delete(delete_from_clearml=False, delete_from_gdrive=False, delete_from_s3=False)  # type: ignore
