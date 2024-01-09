@@ -26,7 +26,7 @@ def create_from_template(from_investigation_name: str, new_investigation_name: s
         create(new_investigation_name)
         new_investigation = ENV.get_investigation(new_investigation_name)
         new_investigation.import_setup_from(old_investigation)
-        pass
+        return
     except DuplicateExperimentException:
         pass
     except:
