@@ -15,9 +15,18 @@ import gspread_dataframe as gd
 from status import Status
 from time import sleep
 from tqdm import tqdm
-from clowder.consts import NAME_ATTRIBUTE, RESULTS_CLEARML_METRIC_ATTRIBUTE, RESULTS_CSVS_ATTRIBUTE, ENTRYPOINT_ATTRIBUTE, CLEARML_QUEUE, CLEARML_URL, get_env
+from clowder.consts import (
+    NAME_ATTRIBUTE,
+    RESULTS_CLEARML_METRIC_ATTRIBUTE,
+    RESULTS_CSVS_ATTRIBUTE,
+    ENTRYPOINT_ATTRIBUTE,
+    CLEARML_QUEUE,
+    CLEARML_URL,
+    get_env,
+)
 
 ENV = None
+
 
 class MissingConfigurationFile(IOError):
     "Missing clowder configuration file"
