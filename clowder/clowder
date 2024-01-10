@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 
-import sys
 import os
+import sys
 from pathlib import Path
 
 sys.path.append(str(Path(os.curdir).parent.absolute().parent.absolute()))
 
 from typing import Optional
+
 import typer
 from rich import print
+
 from clowder import functions
 from clowder.status import Status
 

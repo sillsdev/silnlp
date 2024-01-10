@@ -1,7 +1,8 @@
 from typing import Optional
+
+from clowder.consts import ENV, get_env
 from clowder.environment import DuplicateInvestigationException, Investigation
 from clowder.status import Status
-from clowder.consts import ENV, get_env
 
 if ENV is None:
     ENV = get_env()
@@ -76,7 +77,7 @@ def run(investigation_name: str, force_rerun: bool = False) -> bool:
 def status(investigation_name: Optional[str], _sync: bool = True) -> dict:
     """Returns status of investigation with name `investigation_name` in the current context"""
     if _sync:
-        sync(investigation_name)
+        sync(investigation_name, gather_results=False)
     if investigation_name is not None:
         if ENV.investigation_exists(investigation_name):
             return {

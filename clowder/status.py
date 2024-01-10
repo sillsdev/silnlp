@@ -1,4 +1,5 @@
 from enum import Enum
+
 from clearml import Task
 
 
@@ -16,7 +17,9 @@ class Status(Enum):
             return current_status
         if len(list(filter(lambda s: s == Task.TaskStatusEnum.completed, statuses))) == len(statuses):
             return Status.Completed
-        if len(list(filter(lambda s: s == Task.TaskStatusEnum.stopped, statuses))) == len(statuses):
+        if len(
+            list(filter(lambda s: s in [Task.TaskStatusEnum.stopped, Task.TaskStatusEnum.completed], statuses))
+        ) == len(statuses):
             return Status.Canceled
         if len(list(filter(lambda s: s == Task.TaskStatusEnum.failed, statuses))) > 0:
             return Status.Failed
