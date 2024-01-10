@@ -1,30 +1,31 @@
-from typing import Optional, Union
-import gspread
-from clearml import Task
-import s3path
-from io import StringIO
-import subprocess
-import pandas as pd
 import re
-import jinja2
-from clearml import Task
-import yaml
-import numpy as np
-from gspread import Worksheet
-import gspread_dataframe as gd
-from status import Status
+import subprocess
+from io import StringIO
 from time import sleep
+from typing import Optional, Union
+
+import gspread
+import gspread_dataframe as gd
+import jinja2
+import numpy as np
+import pandas as pd
+import s3path
+import yaml
+from clearml import Task
+from gspread import Worksheet
+from status import Status
 from tqdm import tqdm
+
+from clowder.configuration_exception import MissingConfigurationFile
 from clowder.consts import (
+    CLEARML_QUEUE,
+    CLEARML_URL,
+    ENTRYPOINT_ATTRIBUTE,
     NAME_ATTRIBUTE,
     RESULTS_CLEARML_METRIC_ATTRIBUTE,
     RESULTS_CSVS_ATTRIBUTE,
-    ENTRYPOINT_ATTRIBUTE,
-    CLEARML_QUEUE,
-    CLEARML_URL,
     get_env,
 )
-from clowder.configuration_exception import MissingConfigurationFile
 
 ENV = None
 
@@ -74,6 +75,7 @@ class Investigation:
         if ENTRYPOINT_ATTRIBUTE not in experiments_df.columns:
             raise MissingConfigurationFile("Missing entrypoint column in ExperimentsSetup sheet")
         experiments_df.set_index(experiments_df.name, inplace=True)
+        experiments_df.drop("", inplace=True)
         if experiments_df.index.duplicated().sum() > 0:
             raise MissingConfigurationFile(
                 "Duplicate names in experiments google sheet.  Each name needs to be unique."
@@ -133,6 +135,7 @@ class Investigation:
             match = re.search(r"new task id=(.*)", result.stdout)
             clearml_id = match.group(1) if match is not None else "unknown"
             temp_meta[row[NAME_ATTRIBUTE]]["clearml_id"] = clearml_id
+            temp_meta[row[NAME_ATTRIBUTE]]["results_already_gathered"] = False
         ENV.current_meta["investigations"][self.name]["experiments"] = temp_meta
         ENV.meta.flush()
         return now_running
@@ -151,6 +154,7 @@ class Investigation:
                     continue
                 if name not in remote_meta_content["experiments"]:
                     remote_meta_content["experiments"][name] = {}
+                    remote_meta_content["experiments"][exp]["results_already_gathered"] = False
                 remote_meta_content["experiments"][name]["clearml_id"] = task.id
                 remote_meta_content["experiments"][name][
                     "clearml_task_url"
@@ -160,7 +164,7 @@ class Investigation:
             self.id, "clowder.meta.yml", yaml.safe_dump(remote_meta_content), "application/x-yaml"
         )
         statuses = []
-
+        completed_exp = []
         # Update locally
         for exp in ENV.current_meta["investigations"][self.name]["experiments"].keys():
             if "experiments" not in remote_meta_content or exp not in remote_meta_content["experiments"]:
@@ -174,30 +178,49 @@ class Investigation:
             ENV.current_meta["investigations"][self.name]["experiments"][exp]["status"] = remote_meta_content[
                 "experiments"
             ][exp]["status"]
+            ENV.current_meta["investigations"][self.name]["experiments"][exp][
+                "results_already_gathered"
+            ] = remote_meta_content["experiments"][exp].get("results_already_gathered", False)
             statuses.append(remote_meta_content["experiments"][exp]["status"])
+            if remote_meta_content["experiments"][exp]["status"] == Task.TaskStatusEnum.completed.value:
+                completed_exp.append(exp)
         ENV.meta.flush()
         self.status = Status.from_clearml_task_statuses(statuses, self.status)  # type: ignore
         if self.status == Status.Completed:
             print(f"Investigation {self.name} is complete!")
             if gather_results:
-                print("Results of investigation must be collected. This may take a while.")
-                self._generate_results()  # TODO aggregate over completed experiments even if incomplete overall
+                print("Results of investigation are being collected. This may take a while.")
+                self._generate_results()
             else:
                 print("In order to see results, rerun with gather_results set to True.")
+        elif len(completed_exp) > 0 and gather_results:
+            print(f"Results of experiments [{', '.join(completed_exp)}] must be collected. This may take a while.")
+            self._generate_results(completed_exp)
+            remote_meta_content = yaml.safe_load(ENV._read_gdrive_file_as_string(meta_folder_id))
+            for exp in completed_exp:
+                remote_meta_content["experiments"][exp]["results_already_gathered"] = True
+                ENV.current_meta["investigations"][self.name]["experiments"][exp]["results_already_gathered"] = True
+            ENV._write_gdrive_file_in_folder(
+                self.id, "clowder.meta.yml", yaml.safe_dump(remote_meta_content), "application/x-yaml"
+            )
+            ENV.flush()
         return True
 
-    def _generate_results(self):
+    def _generate_results(self, for_experiments: Optional[list] = None):
         spreadsheet = ENV.gc.open_by_key(self.sheet_id)
-        worksheets = spreadsheet.worksheets()
-        setup_sheet: Worksheet = list(filter(lambda s: s.title == "ExperimentsSetup", worksheets))[0]
-        setup_df = pd.DataFrame(setup_sheet.get_all_records())
+        setup_df = self._get_experiments_df()
         results: dict[str, pd.DataFrame] = {}
         experiment_folders = ENV._dict_of_gdrive_files(self.experiments_folder_id)
         print("Copying over results...")
         for _, row in tqdm(setup_df.iterrows()):
-            ENV._copy_s3_folder_to_gdrive(
-                self.investigation_s3_path / row[NAME_ATTRIBUTE], experiment_folders[row[NAME_ATTRIBUTE]]["id"]
-            )
+            if for_experiments is not None and row[NAME_ATTRIBUTE] not in for_experiments:
+                continue
+            if not ENV.current_meta["investigations"][self.name]["experiments"][row[NAME_ATTRIBUTE]].get(
+                "results_already_gathered", False
+            ):
+                ENV._copy_s3_folder_to_gdrive(
+                    self.investigation_s3_path / row[NAME_ATTRIBUTE], experiment_folders[row[NAME_ATTRIBUTE]]["id"]
+                )
             for name in row[RESULTS_CSVS_ATTRIBUTE].split(";"):
                 name = name.strip()
                 s3_filepath: s3path.S3Path = (
@@ -237,6 +260,7 @@ class Investigation:
             results["clearml_metrics"] = metrics_df
 
         print("Processing results data...")
+        quota = 0
         for name, df in tqdm(results.items()):
             for w in spreadsheet.worksheets():
                 if w.title == name:
@@ -244,7 +268,8 @@ class Investigation:
             s = spreadsheet.add_worksheet(name, rows=0, cols=0)
             gd.set_with_dataframe(s, df)
             min_max_df = self._min_and_max_per_col(df)
-            for row_index, row in df.iterrows():
+            row_index = 0
+            for _, row in df.iterrows():
                 col_index = 0
                 for col in df.columns:
                     if not np.issubdtype(df.dtypes[col], np.number):
@@ -259,9 +284,14 @@ class Investigation:
                     range = max - min
                     r, g, b = self._color_func((row[col] - min) / (range) if range != 0 else 1.0)
                     s.format(f"{ref}", {"backgroundColor": {"red": r, "green": g, "blue": b}})
-
                     col_index += 1
-                    sleep(1)  # TODO avoids exceeded per minute read quota - find better solution
+                    quota += 1
+                    if quota > 18:
+                        sleep(
+                            1
+                        )  # TODO avoids exceeded per minute read/write quota - find better solution: batching and guide to change quotas
+                        quota = 0
+            row_index += 1
 
     def _process_scores_csv(self, df: pd.DataFrame) -> pd.DataFrame:
         ret = df[["score"]]

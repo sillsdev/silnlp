@@ -2,32 +2,33 @@ import warnings
 
 warnings.filterwarnings("ignore", r"Blowfish")
 
-import os
 import datetime
-from typing import Any, Optional, Union
+import os
 from pathlib import Path
+from typing import Any, Optional, Union
+
 import gspread
-from clearml import Task
+import gspread_dataframe as gd
+import pandas as pd
 import s3path
+import yaml
+from clearml import Task
 from oauth2client.service_account import ServiceAccountCredentials
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive, GoogleDriveFile
 from pydrive2.files import MediaIoReadable
-from pathlib import Path
-import pandas as pd
-from clearml import Task
-import yaml
-import gspread_dataframe as gd
 from status import Status
-from clowder.investigation import Investigation
+
+from clowder.configuration_exception import MissingConfigurationFile
 from clowder.consts import (
+    ENTRYPOINT_ATTRIBUTE,
+    GDRIVE_SCOPE,
     NAME_ATTRIBUTE,
     RESULTS_CLEARML_METRIC_ATTRIBUTE,
     RESULTS_CSVS_ATTRIBUTE,
-    ENTRYPOINT_ATTRIBUTE,
-    GDRIVE_SCOPE,
 )
-from clowder.configuration_exception import MissingConfigurationFile
+from clowder.investigation import Investigation
+
 
 class DuplicateInvestigationException(Exception):
     """There is already an investigation in the current context with that name"""
