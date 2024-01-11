@@ -833,8 +833,12 @@ class HuggingFaceNMTModel(NMTModel):
         vref_paths: Optional[List[Path]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
-        checkpoint_path, _ = self.get_checkpoint_path(ckpt)
-        model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(str(checkpoint_path))
+        if self._config.model_dir.exists():
+            checkpoint_path, _ = self.get_checkpoint_path(ckpt)
+            model_name = str(checkpoint_path)
+        else:
+            model_name = self._config.model
+        model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name)
         if self._config.infer.get("better_transformer"):
             model = model.to_bettertransformer()
         tokenizer = self._config.get_tokenizer()
