@@ -63,7 +63,6 @@ def parse_book(src_project_dir: str, book: str):
                     raise RuntimeError(f"The USFM file {book_path} doesn't contain an id marker.")
 
                 segments = collect_segments(book, doc)
-                #            sentences = [s.text.strip() for s in segments]
                 vrefs = [s.ref for s in segments]
 
                 LOGGER.info(f"{book} in project {src_project_dir} parsed correctly and contains {len(vrefs)} verses.")
@@ -104,51 +103,50 @@ def main() -> None:
     )
 
     # parser.print_help()
-
+    projects = list()
     args = parser.parse_args()
     if args.project:
         project_dir = get_project_dir(args.project)
         if not project_dir.exists():
             raise RuntimeError(f"Can't find the project folder: '{project_dir}'")
-        projects = {project_dir: get_sfm_files(project_dir)}
+        projects.append(project_dir)
+        print(f"Found {project_dir}")
     else:
         projects_dir = get_project_dir("")
-        projects = {}
-
         for project_dir in projects_dir.glob("*"):
             if project_dir.is_dir():
-                sfm_files = get_sfm_files(project_dir)
-                if sfm_files:
-                    projects[project_dir] = sfm_files
+                projects.append(project_dir)
+        print(f"Found {len(projects)} folders in {projects_dir}")
 
-    sfm_file_count = 0
-    for project_dir, sfm_files in projects.items():
-        sfm_file_count += len(sfm_files)
-        print(project_dir)
-    
-    print(f"There are {len(projects)} project folders containing {sfm_file_count} sfm files.")
-    exit()
+    results = list()
+    for project_dir in projects:
+        print(f"Checking {project_dir}")
+        sfm_files = get_sfm_files(project_dir)
+        if sfm_files:
+            project = {project_dir: {"sfm_files": sfm_files}}
 
+            books_found = [sfm_file.name[2:5] for sfm_file in sfm_files]
 
-    books_found = [sfm_file.name[2:5] for sfm_file in sfm_files]
-    print(f"Found these books {' '.join([book for book in books_found])} in the project_directory: {project_dir}")
+            print(
+                f"Found these books {' '.join([book for book in books_found])} in the project_directory: {project_dir}"
+            )
 
-    if not sfm_files:
-        print(f"No sfm or SFM files found in project folder: {project_dir}")
-    else:
-        books = args.books
-        canons_to_add = [canon for canon in books if canon in valid_canons]
-        print(f"Canons specified are: {canons_to_add}")
+            if not sfm_files:
+                print(f"No sfm or usfm files found in project folder: {project_dir}")
+            else:
+                books = args.books
+                canons_to_add = [canon for canon in books if canon in valid_canons]
+                # print(f"Canons specified are: {canons_to_add}")
 
-        books_to_check = [book for book in books if book in valid_books]
-        print(f"Individual books specified are: {books_to_check}\n")
+                books_to_check = [book for book in books if book in valid_books]
+                # print(f"Individual books specified are: {books_to_check}\n")
 
-        OT_books_found = [book for book in OT_canon if book in books_found]
-        NT_books_found = [book for book in NT_canon if book in books_found]
-        DT_books_found = [book for book in DT_canon if book in books_found]
+                OT_books_found = [book for book in OT_canon if book in books_found]
+                NT_books_found = [book for book in NT_canon if book in books_found]
+                DT_books_found = [book for book in DT_canon if book in books_found]
 
-        # print(f"OT_books_found are {OT_books_found}")
-        # print(f"OT_canon is {OT_canon}")
+            # print(f"OT_books_found are {OT_books_found}")
+            # print(f"OT_canon is {OT_canon}")
 
         for canon_to_add in canons_to_add:
             if canon_to_add == "OT":
@@ -162,7 +160,7 @@ def main() -> None:
                 # print("Adding DT books")
                 books_to_check.extend(DT_books_found)
 
-        print(f"All books to check are: {books_to_check}\n")
+        print(f"Books to check are: {books_to_check}\n")
 
         if not books_to_check:
             print(f"No books were specified - will check all books.")
@@ -173,11 +171,20 @@ def main() -> None:
 
             print(f"Of the books specified these were found: {books_to_check}")
 
-        book_nums = get_chapters(books_to_check)
-        book_nums_to_check = [book_number_to_id(book) for book in book_nums.keys()]
+        # book_nums = get_chapters(books_to_check)
+        # book_nums_to_check = [book_number_to_id(book) for book in book_nums.keys()]
 
-        for book_num_to_check in book_nums_to_check:
-            parse_book(project_dir, book_num_to_check)
+        for book_to_check in books_to_check:
+            try:
+                parse_book(project_dir, book_to_check)
+            except RuntimeError as err:
+                print(f"Couldn't parse {book_to_check} in project {project_dir}.\n Error was: {err}")
+
+        # for book_num_to_check in book_nums_to_check:
+        #     try:
+        #         parse_book(project_dir, book_num_to_check)
+        #     except RuntimeError as err:
+        #         print(f"Couldn't parse {src}")
 
         invalid_books = [book for book in books if book not in valid_books and book not in valid_canons]
 
