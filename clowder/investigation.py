@@ -140,7 +140,7 @@ class Investigation:
         ENV.meta.flush()
         return now_running
 
-    def sync(self, gather_results=True):
+    def sync(self, gather_results=True, copy_all_results_to_gdrive: bool = True):
         # Fetch info from clearml
         clearml_tasks_dict: dict[str, Union[Task, None]] = ENV._get_clearml_tasks(self.name)
         # Update gdrive, fetch
@@ -190,12 +190,12 @@ class Investigation:
             print(f"Investigation {self.name} is complete!")
             if gather_results:
                 print("Results of investigation are being collected. This may take a while.")
-                self._generate_results()
+                self._generate_results(copy_all_results_to_gdrive=copy_all_results_to_gdrive)
             else:
                 print("In order to see results, rerun with gather_results set to True.")
         elif len(completed_exp) > 0 and gather_results:
             print(f"Results of experiments [{', '.join(completed_exp)}] must be collected. This may take a while.")
-            self._generate_results(completed_exp)
+            self._generate_results(completed_exp, copy_all_results_to_gdrive=copy_all_results_to_gdrive)
             remote_meta_content = yaml.safe_load(ENV._read_gdrive_file_as_string(meta_folder_id))
             for exp in completed_exp:
                 remote_meta_content["experiments"][exp]["results_already_gathered"] = True
@@ -206,7 +206,7 @@ class Investigation:
             ENV.flush()
         return True
 
-    def _generate_results(self, for_experiments: Optional[list] = None):
+    def _generate_results(self, for_experiments: Optional[list] = None, copy_all_results_to_gdrive: bool = True):
         spreadsheet = ENV.gc.open_by_key(self.sheet_id)
         setup_df = self._get_experiments_df()
         results: dict[str, pd.DataFrame] = {}
@@ -217,7 +217,7 @@ class Investigation:
                 continue
             if not ENV.current_meta["investigations"][self.name]["experiments"][row[NAME_ATTRIBUTE]].get(
                 "results_already_gathered", False
-            ):
+            ) and copy_all_results_to_gdrive:
                 ENV._copy_s3_folder_to_gdrive(
                     self.investigation_s3_path / row[NAME_ATTRIBUTE], experiment_folders[row[NAME_ATTRIBUTE]]["id"]
                 )

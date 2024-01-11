@@ -70,14 +70,14 @@ def run(investigation_name: str, force_rerun: bool = False) -> bool:
     now_running = investigation.start_investigation(force_rerun)
     if now_running:
         investigation.status = Status.Running
-    sync(investigation_name)
+    sync(investigation_name, gather_results=False)
     return now_running
 
 
 def status(investigation_name: Optional[str], _sync: bool = True) -> dict:
     """Returns status of investigation with name `investigation_name` in the current context"""
     if _sync:
-        sync(investigation_name, gather_results=False)
+        sync(investigation_name, gather_results=False, copy_all_results_to_gdrive=False)
     if investigation_name is not None:
         if ENV.investigation_exists(investigation_name):
             return {
@@ -93,12 +93,12 @@ def status(investigation_name: Optional[str], _sync: bool = True) -> dict:
     }
 
 
-def sync(investigation_name: Optional[str], gather_results: bool = True):
+def sync(investigation_name: Optional[str], gather_results: bool = True, copy_all_results_to_gdrive: bool = True):
     if investigation_name is not None:
-        ENV.get_investigation(investigation_name).sync(gather_results=gather_results)
+        ENV.get_investigation(investigation_name).sync(gather_results=gather_results, copy_all_results_to_gdrive=copy_all_results_to_gdrive)
     else:
         for investigation in ENV.investigations:
-            investigation.sync(gather_results=gather_results)
+            investigation.sync(gather_results=gather_results, copy_all_results_to_gdrive=copy_all_results_to_gdrive)
 
 
 def create(investigation_name: str):
