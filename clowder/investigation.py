@@ -154,7 +154,7 @@ class Investigation:
                     continue
                 if name not in remote_meta_content["experiments"]:
                     remote_meta_content["experiments"][name] = {}
-                    remote_meta_content["experiments"][exp]["results_already_gathered"] = False
+                    remote_meta_content["experiments"][name]["results_already_gathered"] = False
                 remote_meta_content["experiments"][name]["clearml_id"] = task.id
                 remote_meta_content["experiments"][name][
                     "clearml_task_url"
@@ -288,7 +288,7 @@ class Investigation:
                     s.format(f"{ref}", {"backgroundColor": {"red": r, "green": g, "blue": b}})
                     col_index += 1
                     quota += 1
-                    if quota > 18:
+                    if quota > 3:
                         sleep(
                             1
                         )  # TODO avoids exceeded per minute read/write quota - find better solution: batching and guide to change quotas
