@@ -93,9 +93,9 @@ def status(investigation_name: Optional[str] = None, sync: bool = True, verbose:
 
 
 @app.command("sync")
-def sync(investigation_name: Optional[str] = None, gather_results: bool = True):
+def sync(investigation_name: Optional[str] = None, gather_results: bool = True, copy_all_results_to_gdrive: bool = True):
     """Sync status/data for investigation with name `investigation_name` in the current context"""
-    functions.sync(investigation_name, gather_results)
+    functions.sync(investigation_name, gather_results, copy_all_results_to_gdrive=copy_all_results_to_gdrive)
     print(
         f"[green]Successfully synced {investigation_name if investigation_name else 'all investigations in this context'}[/green]"
     )

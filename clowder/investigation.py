@@ -203,7 +203,7 @@ class Investigation:
             ENV._write_gdrive_file_in_folder(
                 self.id, "clowder.meta.yml", yaml.safe_dump(remote_meta_content), "application/x-yaml"
             )
-            ENV.flush()
+            ENV.meta.flush()
         return True
 
     def _generate_results(self, for_experiments: Optional[list] = None, copy_all_results_to_gdrive: bool = True):
@@ -246,6 +246,8 @@ class Investigation:
         metrics_names_list = list(metrics_names)
         if len(metrics_names_list) > 0 and metrics_names_list[0] != "":
             for index, row in setup_df.iterrows():
+                if for_experiments is not None and row[NAME_ATTRIBUTE] not in for_experiments:
+                    continue
                 task = tasks[row[NAME_ATTRIBUTE]]
                 if task is None:
                     continue
@@ -291,7 +293,7 @@ class Investigation:
                             1
                         )  # TODO avoids exceeded per minute read/write quota - find better solution: batching and guide to change quotas
                         quota = 0
-            row_index += 1
+                row_index += 1
 
     def _process_scores_csv(self, df: pd.DataFrame) -> pd.DataFrame:
         ret = df[["score"]]
