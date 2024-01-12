@@ -540,7 +540,7 @@ def test(
                 books_nums,
             )
 
-    if last or (not best and checkpoint is None and not avg):
+    if last or (not best and checkpoint is None and not avg and config.model_dir.exists()):
         _, step = model.get_checkpoint_path(CheckpointType.LAST)
         if step not in results:
             results[step] = test_checkpoint(
@@ -555,6 +555,22 @@ def test(
                 scorers,
                 books_nums,
             )
+
+    if not config.model_dir.exists():
+        LOGGER.info("Model has no checkpoints. Testing with base model.")
+        results[0] = test_checkpoint(
+            config,
+            model,
+            tokenizer,
+            force_infer,
+            by_book,
+            ref_projects,
+            CheckpointType.OTHER,
+            0,
+            scorers,
+            books_nums,
+        )
+
     SIL_NLP_ENV.copy_experiment_to_bucket(
         exp_name, patterns=("scores-*.csv", "test.*trg-predictions.*"), overwrite=True
     )
