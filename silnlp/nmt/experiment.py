@@ -69,8 +69,8 @@ class SILExperiment:
         SIL_NLP_ENV.copy_experiment_from_bucket(self.name)
         test(
             experiment=self.name,
-            last=True,
-            best=True,
+            last=self.config.model_dir.exists(),
+            best=self.config.model_dir.exists(),
             by_book=self.score_by_book,
             scorers={"bleu", "sentencebleu", "chrf3", "wer", "ter", "spbleu"},
         )
@@ -105,7 +105,9 @@ def main() -> None:
         action="store_true",
         help="Show information about the environment variables and arguments.",
     )
-    parser.add_argument('--commit',type=str, default=None,help="The silnlp git commit id with which to run a remote job")
+    parser.add_argument(
+        "--commit", type=str, default=None, help="The silnlp git commit id with which to run a remote job"
+    )
 
     args = parser.parse_args()
 
@@ -135,7 +137,7 @@ def main() -> None:
         run_train=args.train,
         run_test=args.test,
         score_by_book=args.score_by_book,
-        commit=args.commit
+        commit=args.commit,
     )
     exp.run()
 
