@@ -38,7 +38,7 @@ def create_from_template(from_investigation_name: str, new_investigation_name: s
     copying the 'investigation' spreadsheet and 'config.yml' into the new investigation
     from an existing investigation with name `from_investigation_name`"""
     functions.create_from_template(from_investigation_name, new_investigation_name)
-    print(f"[green]Investigation {new_investigation_name} successfully created")
+    print(f"[green]Investigation {new_investigation_name} successfully created[/green]")
 
 
 @app.command("delete")

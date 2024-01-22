@@ -14,6 +14,7 @@ import yaml
 from clearml import Task
 from gspread import Worksheet
 from status import Status
+from rich import print
 from tqdm import tqdm
 
 from clowder.configuration_exception import MissingConfigurationFile
@@ -123,7 +124,8 @@ class Investigation:
             ]:
                 continue
             experiment_path: s3path.S3Path = self.investigation_s3_path / row[NAME_ATTRIBUTE]
-            command = f"python -m {row['entrypoint']} --memory-growth --clearml-queue {CLEARML_QUEUE} {'/'.join(str(experiment_path.absolute()).split('/')[4:])}"
+            command = f'python -m {row["entrypoint"]} --clearml-queue {CLEARML_QUEUE} "{"/".join(str(experiment_path.absolute()).split("/")[4:])}"'
+            print("[green]Running command: [/green]", command)
             result = subprocess.run(
                 command,
                 shell=True,
@@ -131,8 +133,10 @@ class Investigation:
                 text=True,
             )
             print(result.stdout)
+            if result.stdout == "":
+                print(f"[red]{result.stderr}[/red]")
             now_running = True
-            match = re.search(r"new task id=(.*)", result.stdout)
+            match = re.search(r"task id=(.*)", result.stdout)
             clearml_id = match.group(1) if match is not None else "unknown"
             temp_meta[row[NAME_ATTRIBUTE]]["clearml_id"] = clearml_id
             temp_meta[row[NAME_ATTRIBUTE]]["results_already_gathered"] = False
@@ -198,7 +202,8 @@ class Investigation:
             self._generate_results(completed_exp, copy_all_results_to_gdrive=copy_all_results_to_gdrive)
             remote_meta_content = yaml.safe_load(ENV._read_gdrive_file_as_string(meta_folder_id))
             for exp in completed_exp:
-                remote_meta_content["experiments"][exp]["results_already_gathered"] = True
+                if copy_all_results_to_gdrive:
+                    remote_meta_content["experiments"][exp]["results_already_gathered"] = True
                 ENV.current_meta["investigations"][self.name]["experiments"][exp]["results_already_gathered"] = True
             ENV._write_gdrive_file_in_folder(
                 self.id, "clowder.meta.yml", yaml.safe_dump(remote_meta_content), "application/x-yaml"
@@ -221,20 +226,22 @@ class Investigation:
                 ENV._copy_s3_folder_to_gdrive(
                     self.investigation_s3_path / row[NAME_ATTRIBUTE], experiment_folders[row[NAME_ATTRIBUTE]]["id"]
                 )
-            for name in row[RESULTS_CSVS_ATTRIBUTE].split(";"):
-                name = name.strip()
-                s3_filepath: s3path.S3Path = (
-                    self.investigation_s3_path / row[NAME_ATTRIBUTE] / name
-                )  # TODO - use result that's already been copied over to gdrive
-                with s3_filepath.open() as f:
-                    df = pd.read_csv(StringIO(f.read()))
-                    if "scores" in name:
-                        name = "scores"
-                        df = self._process_scores_csv(df)
-                    df.insert(0, NAME_ATTRIBUTE, [row[NAME_ATTRIBUTE]])
-                    if name not in results:
-                        results[name] = pd.DataFrame()
-                    results[name] = pd.concat([results[name], df], join="outer", ignore_index=True)
+            csv_results_files = row[RESULTS_CSVS_ATTRIBUTE].split(";")
+            if len(csv_results_files) > 0 and csv_results_files[0].strip() != "":
+                for name in csv_results_files:
+                    name = name.strip()
+                    s3_filepath: s3path.S3Path = (
+                        self.investigation_s3_path / row[NAME_ATTRIBUTE] / name
+                    )  # TODO - use result that's already been copied over to gdrive
+                    with s3_filepath.open() as f:
+                        df = pd.read_csv(StringIO(f.read()))
+                        if "scores" in name:
+                            name = "scores"
+                            df = self._process_scores_csv(df)
+                        df.insert(0, NAME_ATTRIBUTE, [row[NAME_ATTRIBUTE]])
+                        if name not in results:
+                            results[name] = pd.DataFrame()
+                        results[name] = pd.concat([results[name], df], join="outer", ignore_index=True)
 
         tasks = ENV._get_clearml_tasks(self.name)
         metrics_data = {}
@@ -288,9 +295,9 @@ class Investigation:
                     s.format(f"{ref}", {"backgroundColor": {"red": r, "green": g, "blue": b}})
                     col_index += 1
                     quota += 1
-                    if quota > 3:
+                    if quota > 1:
                         sleep(
-                            1
+                            2
                         )  # TODO avoids exceeded per minute read/write quota - find better solution: batching and guide to change quotas
                         quota = 0
                 row_index += 1
