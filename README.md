@@ -35,15 +35,17 @@ The SILNLP repo itself is hosted on Github, mainly written in Python and calls S
    After installing the driver, reboot your system.
 
 2. Download and install [Docker Desktop](https://www.docker.com/get-started/).
-3. Pull Docker image
+   * Reboot after installing, confirm that all installation steps are complete before the next step.
+4. Pull Docker image
    
    In a terminal, run:
    ```
    docker pull ghcr.io/sillsdev/silnlp:latest
    ```
    * For Windows, use CMD Prompt
+   * If there is an error like "request returned Internal Server Error for API route and version <url>, check if the server supports the requested API version" Check that the Docker Desktop installation steps are complete. Reopen CMD prompt and try again.
 
-4. Create Docker container based on the image
+5. Create Docker container based on the image
    
    If you're using a local GPU, then in a terminal, run:
    ```
@@ -55,7 +57,7 @@ The SILNLP repo itself is hosted on Github, mainly written in Python and calls S
    ```
    A docker container should be created. You should be able to see a container named 'silnlp' on the Containers page of Docker Desktop.
 
-5. Create file for environment variables
+6. Create file for environment variables
 
    __If you do not intend to use SILNLP with ClearML and AWS, you can skip this step.__
    
@@ -68,7 +70,7 @@ The SILNLP repo itself is hosted on Github, mainly written in Python and calls S
    ```
    * Note that this does not give you direct access to an AWS S3 bucket from within the Docker container, it only allows you to run scripts referencing files in the bucket.
 
-6. Start container
+7. Start container
    
    If you completed step 5: \
    In a terminal, run:
