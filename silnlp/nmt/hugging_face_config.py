@@ -849,6 +849,7 @@ class HuggingFaceNMTModel(NMTModel):
             tgt_lang=self._config.test_trg_lang,
             device=0,
         )
+        pipeline.model = torch.compile(pipeline.model)
         for input_path, translation_path, vref_path in zip(
             input_paths,
             translation_paths,
@@ -901,6 +902,7 @@ class HuggingFaceNMTModel(NMTModel):
             tgt_lang=lang_codes.get(trg_iso, trg_iso),
             device=0,
         )
+        pipeline.model = torch.compile(pipeline.model)
         if not isinstance(sentences, list):
             sentences = list(sentences)
         for outputs in tqdm(
