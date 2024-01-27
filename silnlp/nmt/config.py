@@ -1,3 +1,4 @@
+import csv
 import itertools
 import logging
 import random
@@ -6,11 +7,12 @@ from contextlib import ExitStack
 from dataclasses import dataclass, field
 from enum import Enum, Flag, auto
 from pathlib import Path
-from statistics import mean
+from statistics import mean, median, stdev
 from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, Union, cast
 
 import pandas as pd
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_chapters
+from machine.tokenization import LatinWordTokenizer
 from tqdm import tqdm
 
 from ..alignment.config import get_aligner_name
@@ -523,29 +525,92 @@ class Config(ABC):
                 train_count += self._write_scripture_data_sets(tokenizer, pair, stats)
             else:
                 train_count += self._write_basic_data_sets(tokenizer, pair)
-        if stats:
-            with ExitStack() as stack:
-                stats_file: Optional[TextIO] = None
-                stats_file = stack.enter_context(self._open_append("tokenization_stats.txt"))
-                src_data = []
-                for src_tok_file in self.exp_dir.glob("*.src.txt"):
-                    with open(self.exp_dir / src_tok_file, "r+", encoding="utf-8") as f:
-                        for line in f:
-                            src_data.append(len(line.split()))
-                stats_file.write("Src segment length statistics:\n")
-                stats_file.write(f"Num seg lengths >= 200: {sum(seg_length >= 200 for seg_length in src_data)}\n")
-                stats_file.write(f"Max seg length: {max(src_data)}\n")
-                stats_file.write(f"Avg seg length: {sum(src_data)/len(src_data)}\n")
-                trg_data = []
-                for trg_tok_file in self.exp_dir.glob("*.trg.txt"):
-                    with open(self.exp_dir / trg_tok_file, "r+", encoding="utf-8") as f:
-                        for line in f:
-                            trg_data.append(len(line.split()))
-                stats_file.write("Trg segment length statistics:\n")
-                stats_file.write(f"Num seg lengths >= 200: {sum(seg_length >= 200 for seg_length in trg_data)}\n")
-                stats_file.write(f"Max seg length: {max(trg_data)}\n")
-                stats_file.write(f"Avg seg length: {sum(trg_data)/len(trg_data)}\n")
+
+        self._calculate_tokenization_stats()
+
         return train_count
+
+    def _calculate_tokenization_stats(self) -> None:
+        LOGGER.info(f"Calculating tokenization statistics")
+
+        stats_path = self.exp_dir / "tokenization_stats.csv"
+        existing_stats = pd.read_csv(stats_path, header=[0, 1])
+
+        src_tokens_per_verse, src_chars_per_token = [], []
+        for src_tok_file in self.exp_dir.glob("*.src.txt"):
+            with open(self.exp_dir / src_tok_file, "r+", encoding="utf-8") as f:
+                for line in f:
+                    src_tokens_per_verse.append(len(line.split()))
+                    src_chars_per_token.extend([len(token) for token in line.split()])
+
+        trg_tokens_per_verse, trg_chars_per_token = [], []
+        for trg_tok_file in self.exp_dir.glob("*.trg.txt"):
+            with open(self.exp_dir / trg_tok_file, "r+", encoding="utf-8") as f:
+                for line in f:
+                    trg_tokens_per_verse.append(len(line.split()))
+                    trg_chars_per_token.extend([len(token) for token in line.split()])
+
+        src_chars_per_verse, src_words_per_verse, src_chars_per_word = [], [], []
+        for src_detok_file in self.exp_dir.glob("*.src.detok.txt"):
+            with open(self.exp_dir / src_detok_file, "r+", encoding="utf-8") as f:
+                for line in f:
+                    src_chars_per_verse.append(len(line))
+                    word_line = " ".join(LatinWordTokenizer().tokenize(line))
+                    src_words_per_verse.append(len(word_line.split()))
+                    src_chars_per_word.extend([len(word) for word in word_line.split()])
+
+        trg_chars_per_verse, trg_words_per_verse, trg_chars_per_word = [], [], []
+        for trg_detok_file in self.exp_dir.glob("*.trg.detok.txt"):
+            with open(self.exp_dir / trg_detok_file, "r+", encoding="utf-8") as f:
+                for line in f:
+                    trg_chars_per_verse.append(len(line))
+                    word_line = " ".join(LatinWordTokenizer().tokenize(line))
+                    trg_words_per_verse.append(len(word_line.split()))
+                    trg_chars_per_word.extend([len(word) for word in word_line.split()])
+
+        def distribution_df(
+            top_header: str,
+            src_data: List[int],
+            trg_data: List[int],
+        ) -> pd.DataFrame:
+            columns = pd.MultiIndex.from_product([[top_header], ["Min", "Max", "Median", "Mean", "Std Dev"]])
+            distribution_data = [
+                [min(src_data), max(src_data), median(src_data), mean(src_data), stdev(src_data)],
+                [min(trg_data), max(trg_data), median(trg_data), mean(trg_data), stdev(trg_data)],
+            ]
+            return pd.DataFrame(distribution_data, columns=columns)
+
+        top_header = "Tokens/Verse"
+        tokens_verse_df = distribution_df(top_header, src_tokens_per_verse, trg_tokens_per_verse)
+        num_verses_200_df = pd.DataFrame(
+            {
+                (top_header, "Num Verses >= 200 Tokens"): [
+                    sum(seg_length >= 200 for seg_length in src_tokens_per_verse),
+                    sum(seg_length >= 200 for seg_length in trg_tokens_per_verse),
+                ]
+            }
+        )
+        tokens_verse_df = pd.concat([tokens_verse_df, num_verses_200_df], axis=1)
+        existing_stats = pd.concat([existing_stats, tokens_verse_df], axis=1)
+
+        top_header = "Characters/Verse"
+        chars_verse_df = distribution_df(top_header, src_chars_per_verse, trg_chars_per_verse)
+        existing_stats = pd.concat([existing_stats, chars_verse_df], axis=1)
+
+        top_header = "Characters/Token"
+        chars_token_df = distribution_df(top_header, src_chars_per_token, trg_chars_per_token)
+        existing_stats = pd.concat([existing_stats, chars_token_df], axis=1)
+
+        top_header = "Words/Verse"
+        words_verse_df = distribution_df(top_header, src_words_per_verse, trg_words_per_verse)
+        existing_stats = pd.concat([existing_stats, words_verse_df], axis=1)
+
+        top_header = "Characters/Word"
+        chars_word_df = distribution_df(top_header, src_chars_per_word, trg_chars_per_word)
+        existing_stats = pd.concat([existing_stats, chars_word_df], axis=1)
+
+        existing_stats.to_csv(stats_path, index=False)
+        existing_stats.to_excel(stats_path.with_suffix(".xlsx"))
 
     def _delete_files(self, pattern: str) -> None:
         for old_file_path in self.exp_dir.glob(pattern):
