@@ -432,7 +432,7 @@ class HuggingFaceConfig(Config):
             stats_columns = pd.MultiIndex.from_tuples(
                 [
                     (" ", "Translation Side"),
-                    (" ", "Added Tokens"),
+                    (" ", "Num Tokens Added to Vocab"),
                 ]
             )
             if tok_dict.get("share_vocab") and tok_dict.get("update_src") and tok_dict.get("update_trg"):
