@@ -1,10 +1,10 @@
-import csv
 import itertools
 import logging
 import random
 from abc import ABC, abstractmethod
 from contextlib import ExitStack
 from dataclasses import dataclass, field
+from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum, Flag, auto
 from pathlib import Path
 from statistics import mean, median, stdev
@@ -531,7 +531,7 @@ class Config(ABC):
         return train_count
 
     def _calculate_tokenization_stats(self) -> None:
-        LOGGER.info(f"Calculating tokenization statistics")
+        LOGGER.info("Calculating tokenization statistics")
 
         stats_path = self.exp_dir / "tokenization_stats.csv"
         existing_stats = pd.read_csv(stats_path, header=[0, 1])
@@ -575,8 +575,20 @@ class Config(ABC):
         ) -> pd.DataFrame:
             columns = pd.MultiIndex.from_product([[top_header], ["Min", "Max", "Median", "Mean", "Std Dev"]])
             distribution_data = [
-                [min(src_data), max(src_data), median(src_data), mean(src_data), stdev(src_data)],
-                [min(trg_data), max(trg_data), median(trg_data), mean(trg_data), stdev(trg_data)],
+                [
+                    min(src_data),
+                    max(src_data),
+                    median(src_data),
+                    Decimal(str(mean(src_data))).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP),
+                    Decimal(str(stdev(src_data))).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP),
+                ],
+                [
+                    min(trg_data),
+                    max(trg_data),
+                    median(trg_data),
+                    Decimal(str(mean(trg_data))).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP),
+                    Decimal(str(stdev(trg_data))).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP),
+                ],
             ]
             return pd.DataFrame(distribution_data, columns=columns)
 
