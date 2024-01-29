@@ -265,7 +265,7 @@ class HuggingFaceConfig(Config):
                     "predict_with_generate": True,
                     "detokenize": True,
                 },
-                "infer": {"infer_batch_size": 16, "num_beams": 2, "max_length": 512},
+                "infer": {"infer_batch_size": 16, "num_beams": 2},
                 "params": {
                     "optim": "adamw_torch",
                     "label_smoothing_factor": 0.2,
@@ -273,6 +273,7 @@ class HuggingFaceConfig(Config):
                     "dropout": 0.1,
                     "attention_dropout": 0.1,
                     "activation_dropout": 0.0,
+                    "is_t5": False
                 },
             },
             config,
@@ -443,7 +444,8 @@ class HuggingFaceConfig(Config):
             updated = False
             for iso in self.src_isos | self.trg_isos:
                 lang_code = lang_codes.get(iso, iso)
-                if (not isinstance(self._tokenizer, (T5Tokenizer, T5TokenizerFast)) and lang_code not in self._tokenizer.lang_code_to_id) or (isinstance(self._tokenizer, (T5Tokenizer, T5TokenizerFast)) and lang_code not in self._tokenizer.all_special_tokens):
+                if ((not isinstance(self._tokenizer, (T5Tokenizer, T5TokenizerFast)) and lang_code not in self._tokenizer.lang_code_to_id) 
+                or (isinstance(self._tokenizer, (T5Tokenizer, T5TokenizerFast)) and lang_code not in self._tokenizer.all_special_tokens)):
                     add_lang_code_to_tokenizer(self._tokenizer, lang_code)
                     updated = True
             if updated:
@@ -624,7 +626,6 @@ class HuggingFaceNMTModel(NMTModel):
             label2id={},
             id2label={},
             num_labels=0,
-            # max_new_tokens=512,
         )
         model = cast(PreTrainedModel, AutoModelForSeq2SeqLM.from_pretrained(self._config.model, config=model_config))
         if self._config.train.get("better_transformer"):
@@ -637,26 +638,23 @@ class HuggingFaceNMTModel(NMTModel):
         if len(tokenizer) > old_num_tokens and tok_dict is not None and tok_dict.get("init_unk"):
             vocab = tokenizer.get_vocab()
             unk_embedding = old_embeddings.weight.data[vocab["<unk>"]]
-            model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if training_args.bf16 else None)
+            model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if training_args.fp16 or training_args.bf16 else None)
             embeddings = model.get_input_embeddings()
             embeddings.weight.data[old_num_tokens:, :] = unk_embedding
             model.tie_weights()
         elif len(tokenizer) != old_num_tokens:
-            model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if training_args.bf16 else None)
+            model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if training_args.fp16 or training_args.bf16 else None)
 
         peft_config = LoraConfig(
             task_type=TaskType.SEQ_2_SEQ_LM,
             r=4,
             lora_alpha=32,
             lora_dropout=0.1,
-            target_modules=["q", "v", "k", "o"],
+            target_modules=["q", "v", "k", "o", "wi_0", "wi_1", "wo"],
             modules_to_save=["embed_tokens"],
         )
         model = get_peft_model(model, peft_config)
         model.enable_input_require_grads()  # Converting to PeftModel causes gradient calculation to be disabled
-
-        if model.generation_config is not None:
-                model.generation_config.max_new_tokens = self._config.train["max_target_length"]
 
         # Set decoder_start_token_id
         if (
@@ -740,7 +738,7 @@ class HuggingFaceNMTModel(NMTModel):
             tokenizer,
             model,
             label_pad_token_id=-100,
-            pad_to_multiple_of=8 if training_args.bf16 else None,
+            pad_to_multiple_of=8 if training_args.fp16 or training_args.bf16 else None,
             src_noise=src_noise,
         )
 
@@ -753,6 +751,7 @@ class HuggingFaceNMTModel(NMTModel):
                 preds = preds[0]
 
             # Replace -100 in the labels as we can't decode them.
+            preds = np.where(preds != -100, preds, tokenizer.pad_token_id)
             labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
             if self._config.eval["detokenize"]:
                 decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
@@ -858,7 +857,8 @@ class HuggingFaceNMTModel(NMTModel):
             model_name = str(checkpoint_path)
         else:
             model_name = self._config.model
-        model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=torch.bfloat16 if self._mixed_precision else "auto")
+        dtype = torch.bfloat16 if self._config.params["is_t5"] else torch.float16
+        model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=dtype if self._mixed_precision else "auto")
         if self._config.infer.get("better_transformer"):
             model = model.to_bettertransformer()
         tokenizer = self._config.get_tokenizer()
@@ -908,7 +908,8 @@ class HuggingFaceNMTModel(NMTModel):
             model_name = str(checkpoint_path)
         else:
             model_name = self._config.model
-        model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=torch.bfloat16 if self._mixed_precision else "auto")
+        dtype = torch.bfloat16 if self._config.params["is_t5"] else torch.float16
+        model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=dtype if self._mixed_precision else "auto")
         if self._config.infer.get("better_transformer"):
             model = model.to_bettertransformer()
         if model.config.max_length < 512:
@@ -967,7 +968,9 @@ class HuggingFaceNMTModel(NMTModel):
             for param in params:
                 if param in section_config:
                     args[param] = section_config[param]
-        merge_dict(args, {"bf16": self._mixed_precision, "tf32": self._mixed_precision})
+        merge_dict(args, {"fp16": self._mixed_precision and not self._config.params["is_t5"], 
+                          "bf16": self._mixed_precision and self._config.params["is_t5"], 
+                          "tf32": self._mixed_precision})
         return parser.parse_dict(args)[0]
 
     def _get_dictionary(self) -> Dict[VerseRef, Set[str]]:
@@ -1012,9 +1015,9 @@ class HuggingFaceNMTModel(NMTModel):
         num_beams: Optional[int] = self._config.infer.get("num_beams")
         if num_beams is None:
             num_beams = self._config.params.get("generation_num_beams")
-        max_length: Optional[int] = self._config.infer.get("max_length") # very slow inferencing after this
+        max_length: Optional[int] = self._config.params.get("generation_max_length")
         if max_length is None:
-            max_length = self._config.params.get("generation_max_length")
+            max_length = 512
 
         dictionary = self._get_dictionary()
         if vrefs is None or len(dictionary) == 0:
@@ -1077,13 +1080,13 @@ class HuggingFaceTokenizer(Tokenizer):
     ) -> str:
         if isinstance(self._tokenizer, (NllbTokenizer, NllbTokenizerFast)):
             line = self._mpn.normalize(line)
+        if not add_dummy_prefix:
+            line = "\ufffc" + line
         if isinstance(self._tokenizer, (T5Tokenizer, T5TokenizerFast)):
             if side == Side.SOURCE:
                 line = self._tokenizer.tgt_lang + " " + line
             # else:
             #     line = self._tokenizer.pad_token + " " + line
-        if not add_dummy_prefix:
-            line = "\ufffc" + line
         if side == Side.SOURCE:
             max_length = self._max_source_length
             if not add_dummy_prefix:
