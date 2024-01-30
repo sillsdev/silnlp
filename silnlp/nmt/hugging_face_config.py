@@ -72,7 +72,7 @@ if is_safetensors_available():
     import safetensors.torch
 
 if is_peft_available():
-    from peft import PeftModel
+    from peft import LoraConfig, PeftModel, TaskType, get_peft_model
 
 LOGGER = logging.getLogger(__name__)
 
@@ -145,6 +145,15 @@ TRAINING_ARGS_CONFIG_MAPPING = {
     },
 }
 
+LORA_TARGET_MODULES = {
+    "nllb": ["q_proj", "v_proj", "k_proj", "out_proj", "fc1", "fc2"],
+    "madlad": ["q", "v", "k", "o", "wi_0", "wi_1", "wo"]
+}
+
+LORA_MODULES_TO_SAVE = {
+    "nllb": ["embed_tokens"],
+    "madlad": ["embed_tokens"]
+}
 
 def get_best_checkpoint(model_dir: Path) -> Path:
     trainer_state_path = model_dir / "trainer_state.json"
@@ -248,6 +257,8 @@ class HuggingFaceConfig(Config):
                     "delete_checkpoint_optimizer_state": True,
                     "delete_checkpoint_tokenizer": True,
                     "log_level": "info",
+                    "use_lora": False,
+                    "lora_config": {}
                 },
                 "eval": {
                     "evaluation_strategy": "steps",
@@ -637,6 +648,36 @@ class HuggingFaceNMTModel(NMTModel):
             model.tie_weights()
         elif len(tokenizer) != old_num_tokens:
             model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if training_args.fp16 else None)
+
+        if self._config.train["use_lora"]:
+            lora_config = self._config.train["lora_config"]
+
+            if "target_modules" not in lora_config:
+                if "nllb" in self._config.model:
+                    lora_config["target_modules"] = LORA_TARGET_MODULES["nllb"]
+                elif "madlad" in self._config.model:
+                    lora_config["target_modules"] = LORA_TARGET_MODULES["madlad"]
+            if "modules_to_save" not in lora_config:
+                if "nllb" in self._config.model:
+                    lora_config["modules_to_save"] = LORA_MODULES_TO_SAVE["nllb"]
+                elif "madlad" in self._config.model:
+                    lora_config["modules_to_save"] = LORA_MODULES_TO_SAVE["madlad"]
+            
+            if isinstance(lora_config["target_modules"], str):
+                lora_config["target_modules"] = lora_config["target_modules"].split(",")
+            if isinstance(lora_config["modules_to_save"], str):
+                lora_config["modules_to_save"] = lora_config["modules_to_save"].split(",")
+
+            peft_config = LoraConfig(
+                task_type=TaskType.SEQ_2_SEQ_LM,
+                r=lora_config.get("r", 4),
+                lora_alpha=lora_config.get("alpha", 32),
+                lora_dropout=lora_config.get("dropout", .1),
+                target_modules=lora_config["target_modules"],
+                modules_to_save=lora_config["modules_to_save"],
+            )
+            model = get_peft_model(model, peft_config)
+            model.enable_input_require_grads()  # Converting to PeftModel causes gradient calculation to be disabled
 
         # Set decoder_start_token_id
         if (
