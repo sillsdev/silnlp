@@ -1,7 +1,7 @@
 import argparse
 import logging
 
-#from pathlib import Path
+# from pathlib import Path
 import textwrap
 from typing import List
 
@@ -71,12 +71,13 @@ def parse_book(src_project_dir: str, book: str):
 
 
 def main() -> None:
-   
+
     parser = argparse.ArgumentParser(
-        prog='check_books',
+        prog="check_books",
         description="Checks sfm files for a project with the same parser as translate.py",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=textwrap.dedent('''\
+        epilog=textwrap.dedent(
+            """\
              Books can include corpora NT OT or DT and individual books.
              Old Testament books are :
              GEN, EXO, LEV, NUM, DEU, JOS, JDG, RUT, 1SA, 2SA, 1KI, 2KI, 1CH, 2CH, EZR, NEH, EST, JOB, PSA, PRO, ECC, 
@@ -89,13 +90,15 @@ def main() -> None:
              Deuterocanonical books are:
              TOB, JDT, ESG, WIS, SIR, BAR, LJE, S3Y, SUS, BEL, 1MA, 
              2MA, 3MA, 4MA, 1ES, 2ES, MAN, PS2, ODA, PSS, EZA, JUB, ENO
-         '''))
-    
+         """
+        ),
+    )
+
     parser.add_argument("--src-project", default=None, type=str, help="The source project to translate")
     parser.add_argument(
         "--books", metavar="books", nargs="+", default=[], help="The books to check; e.g., 'NT', 'OT', 'GEN EXO'"
     )
-    
+
     parser.print_help()
     args = parser.parse_args()
     src_project_dir = get_project_dir(args.src_project)
