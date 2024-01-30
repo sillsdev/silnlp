@@ -1,7 +1,7 @@
-import sys
-import pathlib
-import os
 import logging
+import os
+import pathlib
+import sys
 
 # Initialize logger
 LOGGER = logging.getLogger(__name__)
