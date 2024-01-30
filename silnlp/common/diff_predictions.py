@@ -508,7 +508,11 @@ def main() -> None:
         return
 
     exp1_step = (
-        0 if exp1_type == "SMT" else get_last_checkpoint(str(exp1_dir)) if args.last else get_best_checkpoint(str(exp1_dir))
+        0
+        if exp1_type == "SMT"
+        else get_last_checkpoint(str(exp1_dir))
+        if args.last
+        else get_best_checkpoint(str(exp1_dir))
     )
     output_path = os.path.join(exp1_dir, f"diff_predictions.{exp1_step}.xlsx")
 
