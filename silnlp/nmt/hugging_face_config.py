@@ -1,3 +1,4 @@
+import csv
 import json
 import logging
 import os
@@ -12,6 +13,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Set, TextIO, T
 import datasets.utils.logging as datasets_logging
 import evaluate
 import numpy as np
+import pandas as pd
 import torch
 import transformers.utils.logging as transformers_logging
 import yaml
@@ -385,8 +387,10 @@ class HuggingFaceConfig(Config):
     def _build_vocabs(self, stats: bool = False) -> None:
         tok_dict = self.data.get("tokenizer")
         self._tokenizer = self.get_or_create_tokenizer()
-        tokens: List[str] = []
         trained_tokenizers = []
+        missing_tokens: List[str] = []
+        src_missing_tokens: List[str] = []
+        trg_missing_tokens: List[str] = []
         if tok_dict and (tok_dict.get("update_src") or tok_dict.get("update_trg")):
             if tok_dict.get("trained_tokens") and (SIL_NLP_ENV.assets_dir / "tokenizer_config.json").is_file():
                 if not tok_dict.get("share_vocab") and tok_dict.get("update_src") and tok_dict.get("update_trg"):
@@ -409,29 +413,45 @@ class HuggingFaceConfig(Config):
                         missing_tokens, trained_tokenizer = self._create_trained_tokens(
                             list(self.src_file_paths), tok_dict.get("src_vocab_size")
                         )
+                        src_missing_tokens = missing_tokens
                     elif tok_dict.get("update_trg"):
                         missing_tokens, trained_tokenizer = self._create_trained_tokens(
                             list(self.trg_file_paths), tok_dict.get("trg_vocab_size")
                         )
+                        trg_missing_tokens = missing_tokens
                     trained_tokenizers.append(trained_tokenizer)
             else:
+                if tok_dict.get("update_src"):
+                    missing_tokens = src_missing_tokens = self._find_missing_characters(list(self.src_file_paths))
+                if tok_dict.get("update_trg"):
+                    missing_tokens = trg_missing_tokens = self._find_missing_characters(list(self.trg_file_paths))
                 if tok_dict.get("update_src") and tok_dict.get("update_trg"):
-                    file_paths = list(self.src_file_paths) + list(self.trg_file_paths)
-                elif tok_dict.get("update_src"):
-                    file_paths = list(self.src_file_paths)
-                elif tok_dict.get("update_trg"):
-                    file_paths = list(self.trg_file_paths)
-                missing_tokens = self._find_missing_characters(file_paths)
-            if stats:
-                with ExitStack() as stack:
-                    stats_file: Optional[TextIO] = None
-                    stats_file = stack.enter_context(
-                        (self.exp_dir / "tokenization_stats.txt").open("w", encoding="utf-8", newline="\n")
-                    )
-                    stats_file.write(f"Added tokens: {len(missing_tokens)}\n")
-            tokens += missing_tokens
-        if tokens:
-            self._add_tokens(tokens, trained_tokenizers)
+                    trg_missing_tokens = sorted(list(set(trg_missing_tokens) - set(src_missing_tokens)))
+                    missing_tokens = src_missing_tokens + trg_missing_tokens
+
+            stats_columns = pd.MultiIndex.from_tuples(
+                [
+                    (" ", "Translation Side"),
+                    (" ", "Num Tokens Added to Vocab"),
+                ]
+            )
+            if tok_dict.get("share_vocab") and tok_dict.get("update_src") and tok_dict.get("update_trg"):
+                # TODO: Calculate representative split of tokens for shared vocab case
+                stats_data = [
+                    ["Source", f"{int(len(missing_tokens)/2)}"],
+                    ["Target", f"{len(missing_tokens) - int(len(missing_tokens)/2)}"],
+                ]
+            else:
+                stats_data = [
+                    ["Source", f"{len(src_missing_tokens)}"],
+                    ["Target", f"{len(trg_missing_tokens)}"],
+                ]
+            stats_df = pd.DataFrame(stats_data, columns=stats_columns)
+            stats_df.to_csv(self.exp_dir / "tokenization_stats.csv", index=False)
+            stats_df.to_excel(self.exp_dir / "tokenization_stats.xlsx")
+
+        if missing_tokens:
+            self._add_tokens(missing_tokens, trained_tokenizers)
 
         if self.data["add_new_lang_code"]:
             lang_codes: Dict[str, str] = self.data["lang_codes"]
@@ -838,7 +858,9 @@ class HuggingFaceNMTModel(NMTModel):
             model_name = str(checkpoint_path)
         else:
             model_name = self._config.model
-        model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=torch.float16 if self._mixed_precision else "auto")
+        model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(
+            model_name, torch_dtype=torch.float16 if self._mixed_precision else "auto"
+        )
         if self._config.infer.get("better_transformer"):
             model = model.to_bettertransformer()
         tokenizer = self._config.get_tokenizer()
@@ -888,7 +910,9 @@ class HuggingFaceNMTModel(NMTModel):
             model_name = str(checkpoint_path)
         else:
             model_name = self._config.model
-        model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=torch.float16 if self._mixed_precision else "auto")
+        model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(
+            model_name, torch_dtype=torch.float16 if self._mixed_precision else "auto"
+        )
         if self._config.infer.get("better_transformer"):
             model = model.to_bettertransformer()
         if model.config.max_length < 512:
