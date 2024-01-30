@@ -534,7 +534,10 @@ class Config(ABC):
         LOGGER.info("Calculating tokenization statistics")
 
         stats_path = self.exp_dir / "tokenization_stats.csv"
-        existing_stats = pd.read_csv(stats_path, header=[0, 1])
+        if stats_path.is_file():
+            existing_stats = pd.read_csv(stats_path, header=[0, 1])
+        else:
+            existing_stats = pd.DataFrame({(" ", "Translation Side"): ["Source", "Target"]})
 
         src_tokens_per_verse, src_chars_per_token = [], []
         for src_tok_file in self.exp_dir.glob("*.src.txt"):
