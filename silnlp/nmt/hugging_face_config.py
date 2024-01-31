@@ -224,6 +224,16 @@ def prune_sublists(words_ids: List[List[List[int]]]) -> List[List[List[int]]]:
     return result
 
 
+SUPPORTED_T5_MODELS = ["madlad"]
+
+
+def is_t5_model(name: str) -> bool:
+    for model in SUPPORTED_T5_MODELS:
+        if model in name:
+            return True
+    return False
+
+
 class HuggingFaceConfig(Config):
     def __init__(self, exp_dir: Path, config: dict) -> None:
         config = merge_dict(
@@ -273,7 +283,6 @@ class HuggingFaceConfig(Config):
                     "dropout": 0.1,
                     "attention_dropout": 0.1,
                     "activation_dropout": 0.0,
-                    "is_t5": False
                 },
             },
             config,
@@ -603,6 +612,7 @@ class HuggingFaceNMTModel(NMTModel):
         self._mixed_precision = mixed_precision
         set_seed(self._config.data["seed"])
         self._dictionary: Optional[Dict[VerseRef, Set[str]]] = None
+        self._is_t5 = is_t5_model(self._config.model)
 
     def train(self) -> None:
         training_args = self._create_training_arguments()
@@ -857,7 +867,7 @@ class HuggingFaceNMTModel(NMTModel):
             model_name = str(checkpoint_path)
         else:
             model_name = self._config.model
-        dtype = torch.bfloat16 if self._config.params["is_t5"] else torch.float16
+        dtype = torch.bfloat16 if self._is_t5 else torch.float16
         model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=dtype if self._mixed_precision else "auto")
         if self._config.infer.get("better_transformer"):
             model = model.to_bettertransformer()
@@ -908,7 +918,7 @@ class HuggingFaceNMTModel(NMTModel):
             model_name = str(checkpoint_path)
         else:
             model_name = self._config.model
-        dtype = torch.bfloat16 if self._config.params["is_t5"] else torch.float16
+        dtype = torch.bfloat16 if self._is_t5 else torch.float16
         model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=dtype if self._mixed_precision else "auto")
         if self._config.infer.get("better_transformer"):
             model = model.to_bettertransformer()
@@ -968,8 +978,8 @@ class HuggingFaceNMTModel(NMTModel):
             for param in params:
                 if param in section_config:
                     args[param] = section_config[param]
-        merge_dict(args, {"fp16": self._mixed_precision and not self._config.params["is_t5"], 
-                          "bf16": self._mixed_precision and self._config.params["is_t5"], 
+        merge_dict(args, {"fp16": self._mixed_precision and not self._is_t5, 
+                          "bf16": self._mixed_precision and self._is_t5, 
                           "tf32": self._mixed_precision})
         return parser.parse_dict(args)[0]
 
@@ -1015,9 +1025,10 @@ class HuggingFaceNMTModel(NMTModel):
         num_beams: Optional[int] = self._config.infer.get("num_beams")
         if num_beams is None:
             num_beams = self._config.params.get("generation_num_beams")
-        max_length: Optional[int] = self._config.params.get("generation_max_length")
-        if max_length is None:
-            max_length = 512
+        max_length = pipeline.model.config.max_length
+        if "madlad" in self._config.model:
+            max_length = 256
+        
 
         dictionary = self._get_dictionary()
         if vrefs is None or len(dictionary) == 0:
