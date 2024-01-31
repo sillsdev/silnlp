@@ -3,6 +3,8 @@ import subprocess
 from io import StringIO
 from time import sleep
 from typing import Optional, Union
+import os
+from pathlib import Path
 
 import gspread
 import gspread_dataframe as gd
@@ -76,7 +78,8 @@ class Investigation:
         if ENTRYPOINT_ATTRIBUTE not in experiments_df.columns:
             raise MissingConfigurationFile("Missing entrypoint column in ExperimentsSetup sheet")
         experiments_df.set_index(experiments_df.name, inplace=True)
-        experiments_df.drop("", inplace=True)
+        if "" in experiments_df.index:
+            experiments_df.drop("", inplace=True)
         if experiments_df.index.duplicated().sum() > 0:
             raise MissingConfigurationFile(
                 "Duplicate names in experiments google sheet.  Each name needs to be unique."
@@ -123,8 +126,11 @@ class Investigation:
                 Task.TaskStatusEnum.queued,
             ]:
                 continue
+            if row["entrypoint"] == "":
+                continue
             experiment_path: s3path.S3Path = self.investigation_s3_path / row[NAME_ATTRIBUTE]
-            command = f'python -m {row["entrypoint"]} --clearml-queue {CLEARML_QUEUE} "{"/".join(str(experiment_path.absolute()).split("/")[4:])}"'
+            complete_entrypoint = row["entrypoint"].replace('$EXP',"/".join(str(experiment_path.absolute()).split("/")[4:])).replace('$ON_CLEARML',f'--clearml-queue {CLEARML_QUEUE}').replace('$LOCAL_EXP_DIR',str(Path(os.environ.get('SIL_NLP_DATA_PATH')) / 'MT/experiments'))
+            command = f'python -m {complete_entrypoint}'
             print("[green]Running command: [/green]", command)
             result = subprocess.run(
                 command,
@@ -133,8 +139,10 @@ class Investigation:
                 text=True,
             )
             print(result.stdout)
-            if result.stdout == "":
+            if result.returncode != 0:
                 print(f"[red]{result.stderr}[/red]")
+                temp_meta[row[NAME_ATTRIBUTE]]['status'] = Task.TaskStatusEnum.failed.value
+                continue
             now_running = True
             match = re.search(r"task id=(.*)", result.stdout)
             clearml_id = match.group(1) if match is not None else "unknown"
@@ -154,16 +162,19 @@ class Investigation:
             if "experiments" not in remote_meta_content:
                 remote_meta_content["experiments"] = {}
             for name, task in clearml_tasks_dict.items():
-                if task is None:
+                if task is None and self.experiments[name].get('clearml_id',None) != "unknown":
                     continue
                 if name not in remote_meta_content["experiments"]:
                     remote_meta_content["experiments"][name] = {}
                     remote_meta_content["experiments"][name]["results_already_gathered"] = False
-                remote_meta_content["experiments"][name]["clearml_id"] = task.id
-                remote_meta_content["experiments"][name][
-                    "clearml_task_url"
-                ] = f"https://{CLEARML_URL}/projects/*/experiments/{task.id}/output/execution"
-                remote_meta_content["experiments"][name]["status"] = task.get_status()
+                if self.experiments[name]['clearml_id'] != "unknown":                    
+                    remote_meta_content["experiments"][name]["clearml_id"] = task.id
+                    remote_meta_content["experiments"][name][
+                        "clearml_task_url"
+                    ] = f"https://{CLEARML_URL}/projects/*/experiments/{task.id}/output/execution"
+                    remote_meta_content["experiments"][name]["status"] = task.get_status()
+                else:
+                    remote_meta_content["experiments"][name]["status"] = Task.TaskStatusEnum.completed.value
         ENV._write_gdrive_file_in_folder(
             self.id, "clowder.meta.yml", yaml.safe_dump(remote_meta_content), "application/x-yaml"
         )
@@ -173,12 +184,15 @@ class Investigation:
         for exp in ENV.current_meta["investigations"][self.name]["experiments"].keys():
             if "experiments" not in remote_meta_content or exp not in remote_meta_content["experiments"]:
                 continue
-            ENV.current_meta["investigations"][self.name]["experiments"][exp]["clearml_id"] = remote_meta_content[
-                "experiments"
-            ][exp]["clearml_id"]
-            ENV.current_meta["investigations"][self.name]["experiments"][exp]["clearml_task_url"] = remote_meta_content[
-                "experiments"
-            ][exp]["clearml_task_url"]
+            if 'clearml_id' in ENV.current_meta["investigations"][self.name]["experiments"][exp] and 'clearml_id' in remote_meta_content[
+                    "experiments"
+                ][exp]:
+                ENV.current_meta["investigations"][self.name]["experiments"][exp]["clearml_id"] = remote_meta_content[
+                    "experiments"
+                ][exp]["clearml_id"]
+                ENV.current_meta["investigations"][self.name]["experiments"][exp]["clearml_task_url"] = remote_meta_content[
+                    "experiments"
+                ][exp]["clearml_task_url"]
             ENV.current_meta["investigations"][self.name]["experiments"][exp]["status"] = remote_meta_content[
                 "experiments"
             ][exp]["status"]
@@ -218,7 +232,7 @@ class Investigation:
         experiment_folders = ENV._dict_of_gdrive_files(self.experiments_folder_id)
         print("Copying over results...")
         for _, row in tqdm(setup_df.iterrows()):
-            if for_experiments is not None and row[NAME_ATTRIBUTE] not in for_experiments:
+            if (for_experiments is not None and row[NAME_ATTRIBUTE] not in for_experiments) or (row[ENTRYPOINT_ATTRIBUTE] == ""):
                 continue
             if not ENV.current_meta["investigations"][self.name]["experiments"][row[NAME_ATTRIBUTE]].get(
                 "results_already_gathered", False
@@ -230,15 +244,27 @@ class Investigation:
             if len(csv_results_files) > 0 and csv_results_files[0].strip() != "":
                 for name in csv_results_files:
                     name = name.strip()
-                    s3_filepath: s3path.S3Path = (
-                        self.investigation_s3_path / row[NAME_ATTRIBUTE] / name
-                    )  # TODO - use result that's already been copied over to gdrive
+                    if "token" not in name:
+                        continue
+                    s3_filepath: s3path.S3Path = list(
+                        (
+                        self.investigation_s3_path / row[NAME_ATTRIBUTE]
+                        ).glob(
+                            name if len(name.split('?')) <= 1 else name.split('?')[0]
+                            )
+                        )[0]  # TODO - use result that's already been copied over to gdrive
+                    
                     with s3_filepath.open() as f:
-                        df = pd.read_csv(StringIO(f.read()))
+                        df = None
+                        if 'tokenizer' not in name:
+                            df = pd.read_csv(StringIO(f.read()), header=[0,1])
+                        else:
+                            df = pd.read_csv(StringIO(f.read()))
                         if "scores" in name:
                             name = "scores"
                             df = self._process_scores_csv(df)
-                        df.insert(0, NAME_ATTRIBUTE, [row[NAME_ATTRIBUTE]])
+                        if len(df.index) == 1:
+                            df.insert(0, NAME_ATTRIBUTE, [row[NAME_ATTRIBUTE]])
                         if name not in results:
                             results[name] = pd.DataFrame()
                         results[name] = pd.concat([results[name], df], join="outer", ignore_index=True)
@@ -269,38 +295,59 @@ class Investigation:
             results["clearml_metrics"] = metrics_df
 
         print("Processing results data...")
-        quota = 0
         for name, df in tqdm(results.items()):
+            name_elements = name.split("?")
+            name = name_elements[0]
+            color_mode = "column" #overall column, row, nocolor #TODO enum?
+            if len(name_elements) > 1 and name_elements[1] in ["overall", "column", "row", "nocolor"]:
+                color_mode = name_elements[1]
             for w in spreadsheet.worksheets():
                 if w.title == name:
                     spreadsheet.del_worksheet(w)
             s = spreadsheet.add_worksheet(name, rows=0, cols=0)
             gd.set_with_dataframe(s, df)
+            if color_mode != 'nocolor':
+                self.color_code(df, s, color_mode)
+
+    def color_code(self, df: pd.DataFrame, s: Worksheet, mode:str):
+        quota = 0
+        min_max_df = None
+        if mode == 'row':
+            min_max_df = self._min_and_max_per_row(df)
+        elif mode == 'overall':
+            min_max_df = self._min_and_max_overall(df)
+        else:
             min_max_df = self._min_and_max_per_col(df)
-            row_index = 0
-            for _, row in df.iterrows():
-                col_index = 0
-                for col in df.columns:
-                    if not np.issubdtype(df.dtypes[col], np.number):
-                        col_index += 1
-                        continue
-                    ref = s.cell(
+        row_index = 0
+        if isinstance(min_max_df.index[0], tuple):
+            row_index += len(min_max_df.index[0]) - 1
+        for label, row in df.iterrows():
+            col_index = 0
+            for col in df.columns:
+                if not np.issubdtype(df.dtypes[col], np.number):
+                    col_index += 1
+                    continue
+                ref = s.cell(
                         row_index + 2, col_index + 1  # type: ignore
                     ).address  # +2 = 1 + 1 - 1 for zero- vs. one-indexed and 1 to skip column names
-                    col: str
-                    max = min_max_df.at[col, "max"]
-                    min = min_max_df.at[col, "min"]
-                    range = max - min
-                    r, g, b = self._color_func((row[col] - min) / (range) if range != 0 else 1.0)
-                    s.format(f"{ref}", {"backgroundColor": {"red": r, "green": g, "blue": b}})
-                    col_index += 1
-                    quota += 1
-                    if quota > 1:
-                        sleep(
+                min_max_row: str = col
+                if mode == 'row':
+                    min_max_row = label
+                elif mode == 'overall':
+                    min_max_row = 0
+                max = min_max_df.at[min_max_row, "max"]
+                min = min_max_df.at[min_max_row, "min"]
+                range = max - min
+                r, g, b = self._color_func((row[col] - min) / (range) if range != 0 else 1.0)
+                s.format(f"{ref}", {"backgroundColor": {"red": r, "green": g, "blue": b}})
+                col_index += 1
+                quota += 1
+                if quota > 1:
+                    sleep(
                             2
                         )  # TODO avoids exceeded per minute read/write quota - find better solution: batching and guide to change quotas
-                        quota = 0
-                row_index += 1
+                    quota = 0
+            row_index += 1
 
     def _process_scores_csv(self, df: pd.DataFrame) -> pd.DataFrame:
         ret = df[["score"]]
@@ -321,6 +368,20 @@ class Investigation:
         for col in df.columns:
             ret[col] = [df[col].max(), df[col].min()]
         return pd.DataFrame.from_dict(ret, orient="index", columns=["max", "min"])
+    
+    def _min_and_max_per_row(self, df: pd.DataFrame): #TODO
+        df = df.select_dtypes(include="number")
+        ret = {}
+        col: str
+        for index, row in df.iterrows():
+            ret[index] = [row.max(), row.min()]
+        return pd.DataFrame.from_dict(ret, orient="index", columns=["max", "min"])
+    
+    def _min_and_max_overall(self, df: pd.DataFrame): #TODO
+        max = df.max(numeric_only=True).max()
+        min = df.min(numeric_only=True).min()
+        return pd.DataFrame.from_dict({0:[max,min]}, orient="index", columns=["max", "min"])
+
 
     def _color_func(self, x: float) -> tuple:
         if x > 0.5:

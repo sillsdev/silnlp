@@ -41,8 +41,10 @@ class InvestigationNotFoundError(Exception):
 class ClowderMeta:
     def __init__(self, meta_filepath: str) -> None:
         self.filepath = meta_filepath
-        if not Path.exists(Path("..", ".clowder")):
-            os.mkdir("../.clowder")
+        if meta_filepath is None:            
+            if not Path.exists(Path("..", ".clowder")):
+                os.mkdir("../.clowder")
+            meta_filepath = './clowder/clowder.master.meta.yml'
         if not Path.is_file(Path(self.filepath)):
             data = {"temp": {"investigations": {}}, "current_root": "temp"}
             with open(self.filepath, "w") as f:
@@ -59,14 +61,14 @@ class ClowderMeta:
 
 class ClowderEnvironment:
     def __init__(self):
-        self.meta = ClowderMeta("../.clowder/clowder.master.meta.yml")
+        self.meta = ClowderMeta(str(Path(os.environ.get("CLOWDER_META_DIR","../.clowder")) / "clowder.master.meta.yml"))
         self.INVESTIGATIONS_GDRIVE_FOLDER = self.root
         try:
             self.GOOGLE_CREDENTIALS_FILE = (
                 self._get_env_var("GOOGLE_CREDENTIALS_FILE")
                 if os.environ.get("GOOGLE_CREDENTIALS_FILE") is not None
-                else "../.clowder/"
-                + list(filter(lambda p: "clowder" in p and ".json" in p, os.listdir("../.clowder/")))[
+                else os.environ.get("CLOWDER_META_DIR","../.clowder") + "/"
+                + list(filter(lambda p: "clowder" in p and ".json" in p, os.listdir(os.environ.get("CLOWDER_META_DIR","../.clowder") + "/")))[
                     0
                 ]  # TODO more robust
             )
@@ -157,11 +159,12 @@ class ClowderEnvironment:
         experiments = self.current_meta["investigations"][investigation_name]["experiments"]
         tasks = {}
         for experiment_name, obj in experiments.items():
-            clearml_id = obj["clearml_id"]
+            clearml_id = obj.get("clearml_id")
             if clearml_id is None or clearml_id == "unknown":
-                continue
-            task: Optional[Task] = Task.get_task(task_id=clearml_id)
-            tasks[experiment_name] = task
+                tasks[experiment_name] = None
+            else:
+                task: Optional[Task] = Task.get_task(task_id=clearml_id)
+                tasks[experiment_name] = task
         return tasks
 
     def track_investigation_by_name(self, investigation_name: str):

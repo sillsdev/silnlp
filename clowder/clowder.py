@@ -141,7 +141,7 @@ def _map_status_color(status: Status) -> str:
     if status.value == Status.Failed.value:
         return "red"
     return "white"
-
+    
 
 if __name__ == "__main__":
     app()

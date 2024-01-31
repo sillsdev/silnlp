@@ -108,7 +108,7 @@ NT_canon = [
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Collect various counts from a corpus of Bible extracts")
-    parser.add_argument("--input-folder", help="Folder with corpus of Bible extracts", required=True)
+    parser.add_argument("--input-folder", default=SIL_NLP_ENV.mt_scripture_dir, help="Folder with corpus of Bible extracts")
     parser.add_argument("--output-folder", help="Folder in which to save results", required=True)
     parser.add_argument(
         "--files",
