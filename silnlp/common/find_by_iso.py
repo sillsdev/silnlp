@@ -2,6 +2,7 @@ import argparse
 from pathlib import Path
 import pickle
 from typing import List
+import os
 
 def file_names_from_disk(folder):
     print(f"Fetching file names from folder {folder}")
@@ -40,12 +41,13 @@ def main() -> None:
     args = parser.parse_args()
     folder = Path(args.folder)
     print(f"The folder is {folder}")
-
-    cache_file = Path("find_by_iso.pkl")
+    home = Path(os.path.expanduser('~'))
+    cache_file = home / "find_by_iso.pkl"
+    
     filenames = get_filenames(folder, cache_file)
-    iso_filenames = [filename for filename in filenames if filename.split('-')[0] in args.isocodes]
+    iso_filenames = [filename[:-4] for filename in filenames if filename.split('-')[0] in args.isocodes]
     for iso_filename in iso_filenames:
-        print(iso_filename)
+        print(f"      - {iso_filename}")
 
 if __name__ == "__main__":
     main()
