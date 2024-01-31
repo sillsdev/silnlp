@@ -87,7 +87,7 @@ def status(investigation_name: Optional[str] = None, sync: bool = True, verbose:
             for exp_name, exp_obj in obj["experiments"].items():
                 print(f"\t[bold]{exp_name}[/bold]")
                 print(f"\tStatus:\t{exp_obj['status']}")
-                print(f"\tClearML url:\t{exp_obj['clearml_task_url']}")
+                print(f"\tClearML url:\t{exp_obj.get('clearml_task_url')}")
         else:
             print(inv_name, f"[{color}]\t{obj['status'].value}[/{color}]")
 
