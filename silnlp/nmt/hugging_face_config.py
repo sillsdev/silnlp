@@ -429,29 +429,35 @@ class HuggingFaceConfig(Config):
                     trg_missing_tokens = sorted(list(set(trg_missing_tokens) - set(src_missing_tokens)))
                     missing_tokens = src_missing_tokens + trg_missing_tokens
 
-            stats_columns = pd.MultiIndex.from_tuples(
-                [
-                    (" ", "Translation Side"),
-                    (" ", "Num Tokens Added to Vocab"),
-                ]
-            )
+            if missing_tokens:
+                self._add_tokens(missing_tokens, trained_tokenizers)
+
             if tok_dict.get("share_vocab") and tok_dict.get("update_src") and tok_dict.get("update_trg"):
                 # TODO: Calculate representative split of tokens for shared vocab case
                 stats_data = [
-                    ["Source", f"{int(len(missing_tokens)/2)}"],
-                    ["Target", f"{len(missing_tokens) - int(len(missing_tokens)/2)}"],
+                    ["Source", int(len(missing_tokens) / 2)],
+                    ["Target", len(missing_tokens) - int(len(missing_tokens) / 2)],
                 ]
             else:
                 stats_data = [
-                    ["Source", f"{len(src_missing_tokens)}"],
-                    ["Target", f"{len(trg_missing_tokens)}"],
+                    ["Source", len(src_missing_tokens)],
+                    ["Target", len(trg_missing_tokens)],
                 ]
-            stats_df = pd.DataFrame(stats_data, columns=stats_columns)
-            stats_df.to_csv(self.exp_dir / "tokenization_stats.csv", index=False)
-            stats_df.to_excel(self.exp_dir / "tokenization_stats.xlsx")
+        else:
+            stats_data = [
+                ["Source", 0],
+                ["Target", 0],
+            ]
 
-        if missing_tokens:
-            self._add_tokens(missing_tokens, trained_tokenizers)
+        stats_columns = pd.MultiIndex.from_tuples(
+            [
+                (" ", "Translation Side"),
+                (" ", "Num Tokens Added to Vocab"),
+            ]
+        )
+        stats_df = pd.DataFrame(stats_data, columns=stats_columns)
+        stats_df.to_csv(self.exp_dir / "tokenization_stats.csv", index=False)
+        stats_df.to_excel(self.exp_dir / "tokenization_stats.xlsx")
 
         if self.data["add_new_lang_code"]:
             lang_codes: Dict[str, str] = self.data["lang_codes"]
