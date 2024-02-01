@@ -29,7 +29,9 @@ def track(investigation_name: Optional[str] = None):
     """Tracks all investigations in the current context. If given an `--investigation-name`, this
     will only track a single investigation with that For your security, you've been signed out of your current session.  name in the current context"""
     functions.track(investigation_name)
-    print(f"[green]Successfully tracked {investigation_name if investigation_name else 'all investigations in this context'}[/green]")
+    print(
+        f"[green]Successfully tracked {investigation_name if investigation_name else 'all investigations in this context'}[/green]"
+    )
 
 
 @app.command("create-from-template")
@@ -93,8 +95,13 @@ def status(investigation_name: Optional[str] = None, sync: bool = True, verbose:
 
 
 @app.command("sync")
-def sync(investigation_name: Optional[str] = None, gather_results: bool = True, copy_all_results_to_gdrive: bool = True):
-    """Sync status/data for investigation with name `investigation_name` in the current context"""
+def sync(
+    investigation_name: Optional[str] = None, gather_results: bool = True, copy_all_results_to_gdrive: bool = True
+):
+    """Sync status/data for investigation with name `investigation_name` in the current context.
+    Use --no-gather-results to sync without aggregating results data. Use --no-copy-all-results-to-gdrive
+    to avoid copying all results files to gdrive experiments folders (results data will still be aggregated in the spreadsheet);
+    this flag is helpful if you want to conserve time or space on gdrive."""
     functions.sync(investigation_name, gather_results, copy_all_results_to_gdrive=copy_all_results_to_gdrive)
     print(
         f"[green]Successfully synced {investigation_name if investigation_name else 'all investigations in this context'}[/green]"
@@ -141,7 +148,7 @@ def _map_status_color(status: Status) -> str:
     if status.value == Status.Failed.value:
         return "red"
     return "white"
-    
+
 
 if __name__ == "__main__":
     app()

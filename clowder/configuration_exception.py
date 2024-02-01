@@ -1,2 +1,2 @@
-class MissingConfigurationFile(IOError):
+class MissingConfigurationFileError(IOError):
     "Missing clowder configuration file"

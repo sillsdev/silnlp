@@ -1,10 +1,10 @@
+import os
 import re
 import subprocess
 from io import StringIO
+from pathlib import Path
 from time import sleep
 from typing import Optional, Union
-import os
-from pathlib import Path
 
 import gspread
 import gspread_dataframe as gd
@@ -15,11 +15,11 @@ import s3path
 import yaml
 from clearml import Task
 from gspread import Worksheet
-from status import Status
 from rich import print
+from status import Status
 from tqdm import tqdm
 
-from clowder.configuration_exception import MissingConfigurationFile
+from clowder.configuration_exception import MissingConfigurationFileError
 from clowder.consts import (
     CLEARML_QUEUE,
     CLEARML_URL,
@@ -74,14 +74,14 @@ class Investigation:
         worksheet: gspread.Spreadsheet = ENV.gc.open_by_key(self.sheet_id)
         experiments_df: pd.DataFrame = pd.DataFrame(worksheet.sheet1.get_all_records())
         if NAME_ATTRIBUTE not in experiments_df.columns:
-            raise MissingConfigurationFile("Missing name column in ExperimentsSetup sheet")
+            raise MissingConfigurationFileError("Missing name column in ExperimentsSetup sheet")
         if ENTRYPOINT_ATTRIBUTE not in experiments_df.columns:
-            raise MissingConfigurationFile("Missing entrypoint column in ExperimentsSetup sheet")
+            raise MissingConfigurationFileError("Missing entrypoint column in ExperimentsSetup sheet")
         experiments_df.set_index(experiments_df.name, inplace=True)
         if "" in experiments_df.index:
             experiments_df.drop("", inplace=True)
         if experiments_df.index.duplicated().sum() > 0:
-            raise MissingConfigurationFile(
+            raise MissingConfigurationFileError(
                 "Duplicate names in experiments google sheet.  Each name needs to be unique."
             )
         return experiments_df
@@ -129,8 +129,15 @@ class Investigation:
             if row["entrypoint"] == "":
                 continue
             experiment_path: s3path.S3Path = self.investigation_s3_path / row[NAME_ATTRIBUTE]
-            complete_entrypoint = row["entrypoint"].replace('$EXP',"/".join(str(experiment_path.absolute()).split("/")[4:])).replace('$ON_CLEARML',f'--clearml-queue {CLEARML_QUEUE}').replace('$LOCAL_EXP_DIR',str(Path(os.environ.get('SIL_NLP_DATA_PATH')) / 'MT/experiments'))
-            command = f'python -m {complete_entrypoint}'
+            complete_entrypoint = (
+                row["entrypoint"]
+                .replace("$EXP", "/".join(str(experiment_path.absolute()).split("/")[4:]))
+                .replace("$ON_CLEARML", f"--clearml-queue {CLEARML_QUEUE}")
+                .replace("$LOCAL_EXP_DIR", str(Path(os.environ.get("SIL_NLP_DATA_PATH")) / "MT/experiments"))
+            )
+            if "silnlp" not in complete_entrypoint:
+                raise ValueError("Entrypoints must be silnlp jobs")  # TODO make more robust against misuse
+            command = f"python -m {complete_entrypoint}"
             print("[green]Running command: [/green]", command)
             result = subprocess.run(
                 command,
@@ -141,7 +148,7 @@ class Investigation:
             print(result.stdout)
             if result.returncode != 0:
                 print(f"[red]{result.stderr}[/red]")
-                temp_meta[row[NAME_ATTRIBUTE]]['status'] = Task.TaskStatusEnum.failed.value
+                temp_meta[row[NAME_ATTRIBUTE]]["status"] = Task.TaskStatusEnum.failed.value
                 continue
             now_running = True
             match = re.search(r"task id=(.*)", result.stdout)
@@ -162,12 +169,12 @@ class Investigation:
             if "experiments" not in remote_meta_content:
                 remote_meta_content["experiments"] = {}
             for name, task in clearml_tasks_dict.items():
-                if task is None and self.experiments[name].get('clearml_id',None) != "unknown":
+                if task is None and self.experiments[name].get("clearml_id", None) != "unknown":
                     continue
                 if name not in remote_meta_content["experiments"]:
                     remote_meta_content["experiments"][name] = {}
                     remote_meta_content["experiments"][name]["results_already_gathered"] = False
-                if self.experiments[name]['clearml_id'] != "unknown":                    
+                if self.experiments[name]["clearml_id"] != "unknown":
                     remote_meta_content["experiments"][name]["clearml_id"] = task.id
                     remote_meta_content["experiments"][name][
                         "clearml_task_url"
@@ -184,15 +191,16 @@ class Investigation:
         for exp in ENV.current_meta["investigations"][self.name]["experiments"].keys():
             if "experiments" not in remote_meta_content or exp not in remote_meta_content["experiments"]:
                 continue
-            if 'clearml_id' in ENV.current_meta["investigations"][self.name]["experiments"][exp] and 'clearml_id' in remote_meta_content[
-                    "experiments"
-                ][exp]:
+            if (
+                "clearml_id" in ENV.current_meta["investigations"][self.name]["experiments"][exp]
+                and "clearml_id" in remote_meta_content["experiments"][exp]
+            ):
                 ENV.current_meta["investigations"][self.name]["experiments"][exp]["clearml_id"] = remote_meta_content[
                     "experiments"
                 ][exp]["clearml_id"]
-                ENV.current_meta["investigations"][self.name]["experiments"][exp]["clearml_task_url"] = remote_meta_content[
-                    "experiments"
-                ][exp]["clearml_task_url"]
+                ENV.current_meta["investigations"][self.name]["experiments"][exp][
+                    "clearml_task_url"
+                ] = remote_meta_content["experiments"][exp]["clearml_task_url"]
             ENV.current_meta["investigations"][self.name]["experiments"][exp]["status"] = remote_meta_content[
                 "experiments"
             ][exp]["status"]
@@ -232,37 +240,53 @@ class Investigation:
         experiment_folders = ENV._dict_of_gdrive_files(self.experiments_folder_id)
         print("Copying over results...")
         for _, row in tqdm(setup_df.iterrows()):
-            if (for_experiments is not None and row[NAME_ATTRIBUTE] not in for_experiments) or (row[ENTRYPOINT_ATTRIBUTE] == ""):
+            if (for_experiments is not None and row[NAME_ATTRIBUTE] not in for_experiments) or (
+                row[ENTRYPOINT_ATTRIBUTE] == ""
+            ):
                 continue
-            if not ENV.current_meta["investigations"][self.name]["experiments"][row[NAME_ATTRIBUTE]].get(
-                "results_already_gathered", False
-            ) and copy_all_results_to_gdrive:
+            if (
+                not ENV.current_meta["investigations"][self.name]["experiments"][row[NAME_ATTRIBUTE]].get(
+                    "results_already_gathered", False
+                )
+                and copy_all_results_to_gdrive
+            ):
                 ENV._copy_s3_folder_to_gdrive(
                     self.investigation_s3_path / row[NAME_ATTRIBUTE], experiment_folders[row[NAME_ATTRIBUTE]]["id"]
                 )
             csv_results_files = row[RESULTS_CSVS_ATTRIBUTE].split(";")
             if len(csv_results_files) > 0 and csv_results_files[0].strip() != "":
                 for name in csv_results_files:
-                    name = name.strip()
                     if "token" not in name:
                         continue
-                    s3_filepath: s3path.S3Path = list(
-                        (
-                        self.investigation_s3_path / row[NAME_ATTRIBUTE]
-                        ).glob(
-                            name if len(name.split('?')) <= 1 else name.split('?')[0]
+                    name = name.strip()
+                    if name == "scores-best":
+                        scores = list((self.investigation_s3_path / row[NAME_ATTRIBUTE]).glob("scores*"))
+                        scores_vals = list(map(lambda s: int(s.name.split("-")[1].split(".")[0]), scores))
+                        s3_filepath: s3path.S3Path = scores[
+                            scores_vals.index(min(scores_vals))
+                        ]  # TODO - use result that's already been copied over to gdrive
+                    elif name == "scores-last":
+                        scores = list((self.investigation_s3_path / row[NAME_ATTRIBUTE]).glob("scores*"))
+                        scores_vals = list(map(lambda s: int(s.name.split("-")[1].split(".")[0]), scores))
+                        s3_filepath: s3path.S3Path = scores[
+                            scores_vals.index(max(scores_vals))
+                        ]  # TODO - use result that's already been copied over to gdrive
+                    else:
+                        s3_filepath: s3path.S3Path = list(
+                            (self.investigation_s3_path / row[NAME_ATTRIBUTE]).glob(
+                                name if len(name.split("?")) <= 1 else name.split("?")[0]
                             )
-                        )[0]  # TODO - use result that's already been copied over to gdrive
-                    
+                        )[
+                            0
+                        ]  # TODO - use result that's already been copied over to gdrive
                     with s3_filepath.open() as f:
                         df = None
-                        if 'tokenizer' not in name:
-                            df = pd.read_csv(StringIO(f.read()), header=[0,1])
+                        if "tokenization" in name:
+                            df = pd.read_csv(StringIO(f.read()), header=[0, 1])
                         else:
                             df = pd.read_csv(StringIO(f.read()))
                         if "scores" in name:
-                            name = "scores"
-                            df = self._process_scores_csv(df)
+                            df = self._process_scores_csv(df)  # TODO ADD STEPS
                         if len(df.index) == 1:
                             df.insert(0, NAME_ATTRIBUTE, [row[NAME_ATTRIBUTE]])
                         if name not in results:
@@ -298,7 +322,7 @@ class Investigation:
         for name, df in tqdm(results.items()):
             name_elements = name.split("?")
             name = name_elements[0]
-            color_mode = "column" #overall column, row, nocolor #TODO enum?
+            color_mode = "column"  # overall column, row, nocolor #TODO enum?
             if len(name_elements) > 1 and name_elements[1] in ["overall", "column", "row", "nocolor"]:
                 color_mode = name_elements[1]
             for w in spreadsheet.worksheets():
@@ -306,15 +330,15 @@ class Investigation:
                     spreadsheet.del_worksheet(w)
             s = spreadsheet.add_worksheet(name, rows=0, cols=0)
             gd.set_with_dataframe(s, df)
-            if color_mode != 'nocolor':
+            if color_mode != "nocolor":
                 self.color_code(df, s, color_mode)
 
-    def color_code(self, df: pd.DataFrame, s: Worksheet, mode:str):
+    def color_code(self, df: pd.DataFrame, s: Worksheet, mode: str):
         quota = 0
         min_max_df = None
-        if mode == 'row':
+        if mode == "row":
             min_max_df = self._min_and_max_per_row(df)
-        elif mode == 'overall':
+        elif mode == "overall":
             min_max_df = self._min_and_max_overall(df)
         else:
             min_max_df = self._min_and_max_per_col(df)
@@ -328,12 +352,12 @@ class Investigation:
                     col_index += 1
                     continue
                 ref = s.cell(
-                        row_index + 2, col_index + 1  # type: ignore
-                    ).address  # +2 = 1 + 1 - 1 for zero- vs. one-indexed and 1 to skip column names
+                    row_index + 2, col_index + 1  # type: ignore
+                ).address  # +2 = 1 + 1 - 1 for zero- vs. one-indexed and 1 to skip column names
                 min_max_row: str = col
-                if mode == 'row':
+                if mode == "row":
                     min_max_row = label
-                elif mode == 'overall':
+                elif mode == "overall":
                     min_max_row = 0
                 max = min_max_df.at[min_max_row, "max"]
                 min = min_max_df.at[min_max_row, "min"]
@@ -344,8 +368,8 @@ class Investigation:
                 quota += 1
                 if quota > 1:
                     sleep(
-                            2
-                        )  # TODO avoids exceeded per minute read/write quota - find better solution: batching and guide to change quotas
+                        2
+                    )  # TODO avoids exceeded per minute read/write quota - find better solution: batching and guide to change quotas
                     quota = 0
             row_index += 1
 
@@ -368,20 +392,19 @@ class Investigation:
         for col in df.columns:
             ret[col] = [df[col].max(), df[col].min()]
         return pd.DataFrame.from_dict(ret, orient="index", columns=["max", "min"])
-    
-    def _min_and_max_per_row(self, df: pd.DataFrame): #TODO
+
+    def _min_and_max_per_row(self, df: pd.DataFrame):  # TODO
         df = df.select_dtypes(include="number")
         ret = {}
         col: str
         for index, row in df.iterrows():
             ret[index] = [row.max(), row.min()]
         return pd.DataFrame.from_dict(ret, orient="index", columns=["max", "min"])
-    
-    def _min_and_max_overall(self, df: pd.DataFrame): #TODO
+
+    def _min_and_max_overall(self, df: pd.DataFrame):  # TODO
         max = df.max(numeric_only=True).max()
         min = df.min(numeric_only=True).min()
-        return pd.DataFrame.from_dict({0:[max,min]}, orient="index", columns=["max", "min"])
-
+        return pd.DataFrame.from_dict({0: [max, min]}, orient="index", columns=["max", "min"])
 
     def _color_func(self, x: float) -> tuple:
         if x > 0.5:

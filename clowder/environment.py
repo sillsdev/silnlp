@@ -19,7 +19,7 @@ from pydrive2.drive import GoogleDrive, GoogleDriveFile
 from pydrive2.files import MediaIoReadable
 from status import Status
 
-from clowder.configuration_exception import MissingConfigurationFile
+from clowder.configuration_exception import MissingConfigurationFileError
 from clowder.consts import (
     ENTRYPOINT_ATTRIBUTE,
     GDRIVE_SCOPE,
@@ -41,13 +41,13 @@ class InvestigationNotFoundError(Exception):
 class ClowderMeta:
     def __init__(self, meta_filepath: str) -> None:
         self.filepath = meta_filepath
-        if meta_filepath is None:            
-            if not Path.exists(Path("..", ".clowder")):
-                os.mkdir("../.clowder")
-            meta_filepath = './clowder/clowder.master.meta.yml'
+        if meta_filepath is None or meta_filepath == "":
+            if not Path.exists(Path(".clowder")):
+                os.mkdir(".clowder")
+            self.filepath = str(Path(".clowder", "clowder.master.meta.yml"))
         if not Path.is_file(Path(self.filepath)):
             data = {"temp": {"investigations": {}}, "current_root": "temp"}
-            with open(self.filepath, "w") as f:
+            with open(self.filepath, "w+") as f:
                 yaml.safe_dump(data, f)
         with open(self.filepath, "r") as f:
             self.data: Any = yaml.safe_load(f)
@@ -61,19 +61,25 @@ class ClowderMeta:
 
 class ClowderEnvironment:
     def __init__(self):
-        self.meta = ClowderMeta(str(Path(os.environ.get("CLOWDER_META_DIR","../.clowder")) / "clowder.master.meta.yml"))
+        self.meta = ClowderMeta(os.environ.get("CLOWDER_META"))
         self.INVESTIGATIONS_GDRIVE_FOLDER = self.root
         try:
             self.GOOGLE_CREDENTIALS_FILE = (
                 self._get_env_var("GOOGLE_CREDENTIALS_FILE")
                 if os.environ.get("GOOGLE_CREDENTIALS_FILE") is not None
-                else os.environ.get("CLOWDER_META_DIR","../.clowder") + "/"
-                + list(filter(lambda p: "clowder" in p and ".json" in p, os.listdir(os.environ.get("CLOWDER_META_DIR","../.clowder") + "/")))[
-                    0
-                ]  # TODO more robust
+                else str(
+                    Path(self.meta.filepath).parent
+                    / list(
+                        filter(
+                            lambda p: "clowder" in p and ".json" in p, os.listdir(str(Path(self.meta.filepath).parent))
+                        )
+                    )[0]
+                )  # TODO more robust
             )
         except IndexError:
-            raise MissingConfigurationFile("No google credentials file found in .clowder directory")
+            raise MissingConfigurationFileError(
+                "No Google credentials file found in .clowder directory. Please copy your credentials file into the .clowder directory."
+            )
         self.EXPERIMENTS_S3_FOLDER = (
             "/aqua-ml-data/MT/experiments/clowder/"  # self._get_env_var("EXPERIMENTS_S3_FOLDER")
         )
@@ -276,7 +282,9 @@ class ClowderEnvironment:
         files = self._dict_of_gdrive_files(folder_id)
         meta_file = files.get("clowder.meta.yml", None)
         if meta_file is None:
-            raise MissingConfigurationFile(f"No clowder.meta.yml file could be found in folder with id {folder_id}")
+            raise MissingConfigurationFileError(
+                f"No clowder.meta.yml file could be found in folder with id {folder_id}"
+            )
         remote_meta = yaml.safe_load(self._read_gdrive_file_as_string(meta_file["id"]))
         if "experiments_folder_id" not in remote_meta:
             experiments_folder_id = self._create_gdrive_folder("experiments", folder_id)
