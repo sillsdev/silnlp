@@ -66,8 +66,6 @@ from transformers.utils import (
 )
 from transformers.utils.logging import tqdm
 
-from peft import get_peft_model, LoraConfig, TaskType
-
 from ..common.corpus import count_lines, get_terms
 from ..common.environment import SIL_NLP_ENV, download_if_s3_paths
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
@@ -235,13 +233,12 @@ def prune_sublists(words_ids: List[List[List[int]]]) -> List[List[List[int]]]:
             result.append(temp_variants)
     return result
 
-
-SUPPORTED_T5_MODELS = ["madlad"]
+SUPPORTED_T5_MODELS = ["google/madlad400"]
 
 
 def is_t5_model(name: str) -> bool:
-    for model in SUPPORTED_T5_MODELS:
-        if model in name:
+    for model_prefix in SUPPORTED_T5_MODELS:
+        if name.startswith(model_prefix):
             return True
     return False
 
@@ -693,20 +690,6 @@ class HuggingFaceNMTModel(NMTModel):
         elif len(tokenizer) != old_num_tokens:
             model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if training_args.fp16 or training_args.bf16 else None)
 
-        peft_config = LoraConfig(
-            task_type=TaskType.SEQ_2_SEQ_LM,
-            r=4,
-            lora_alpha=32,
-            lora_dropout=0.1,
-            target_modules=["q", "v", "k", "o", "wi_0", "wi_1", "wo"],
-            modules_to_save=["embed_tokens"],
-        )
-        model = get_peft_model(model, peft_config)
-        model.enable_input_require_grads()  # Converting to PeftModel causes gradient calculation to be disabled
-
-        if model.generation_config is not None:
-                model.generation_config.max_new_tokens = self._config.train["max_target_length"]
-
         if self._config.train["use_lora"]:
             lora_config = self._config.train["lora_config"]
 
@@ -756,9 +739,14 @@ class HuggingFaceNMTModel(NMTModel):
             # For multilingual translation models like mBART-50 and M2M100 we need to force the target language token
             # as the first generated token.
             forced_bos_token_id = tokenizer.convert_tokens_to_ids(self._config.val_trg_lang)
+            if self._config.model.startswith("google/madlad400"):
+                forced_bos_token_id = tokenizer.pad_token_id
             model.config.forced_bos_token_id = forced_bos_token_id
             if model.generation_config is not None:
                 model.generation_config.forced_bos_token_id = forced_bos_token_id
+
+        if self._config.model.startswith("google/madlad400"):
+            model.generation_config.max_new_tokens = 256
 
         def load_text_dataset(src_path: Path, trg_path: Path) -> Optional[Dataset]:
             if not src_path.is_file() or not trg_path.is_file():
@@ -1095,7 +1083,7 @@ class HuggingFaceNMTModel(NMTModel):
         if num_beams is None:
             num_beams = self._config.params.get("generation_num_beams")
         max_length = pipeline.model.config.max_length
-        if "madlad" in self._config.model:
+        if self._config.model.startswith("google/madlad400"):
             max_length = 256
         
 
@@ -1165,8 +1153,8 @@ class HuggingFaceTokenizer(Tokenizer):
         if isinstance(self._tokenizer, (T5Tokenizer, T5TokenizerFast)):
             if side == Side.SOURCE:
                 line = self._tokenizer.tgt_lang + " " + line
-            # else:
-            #     line = self._tokenizer.pad_token + " " + line
+            else:
+                line = self._tokenizer.pad_token + " " + line
         if side == Side.SOURCE:
             max_length = self._max_source_length
             if not add_dummy_prefix:
