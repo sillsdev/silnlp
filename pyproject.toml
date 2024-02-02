@@ -94,6 +94,7 @@ gspread = "^5.11.2"
 pydrive2 = "^1.17.0"
 jinja2 = "^3.1.2"
 peft = "0.7.0"
+typer = "^0.9.0"
 
 [tool.poetry.group.dev.dependencies]
 types-pyyaml = "^6.0.12.12"
