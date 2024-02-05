@@ -17,7 +17,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive, GoogleDriveFile
 from pydrive2.files import MediaIoReadable
-from status import Status
+from clowder.status import Status
 
 from clowder.configuration_exception import MissingConfigurationFileError
 from clowder.consts import (

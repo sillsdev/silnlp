@@ -16,7 +16,7 @@ import yaml
 from clearml import Task
 from gspread import Worksheet
 from rich import print
-from status import Status
+from clowder.status import Status
 from tqdm import tqdm
 
 from clowder.configuration_exception import MissingConfigurationFileError

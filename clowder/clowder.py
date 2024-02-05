@@ -1,10 +1,4 @@
-#!/usr/bin/env python3
-
-import os
-import sys
 from pathlib import Path
-
-sys.path.append(str(Path(os.curdir).parent.absolute().parent.absolute()))
 
 from typing import Optional
 
@@ -15,7 +9,6 @@ from clowder import functions
 from clowder.status import Status
 
 app = typer.Typer()
-
 
 @app.command("untrack")
 def untrack(investigation_name: str):
@@ -149,6 +142,8 @@ def _map_status_color(status: Status) -> str:
         return "red"
     return "white"
 
+def main():
+    app()
 
 if __name__ == "__main__":
-    app()
+    main()
