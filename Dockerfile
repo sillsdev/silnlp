@@ -116,4 +116,4 @@ RUN git clone https://github.com/sillsdev/silnlp.git
 WORKDIR /root/silnlp
 
 # Default docker run behavior
-ENTRYPOINT [ "/bin/bash", "-it" ]
+CMD [ "/bin/bash", "-it" ]
