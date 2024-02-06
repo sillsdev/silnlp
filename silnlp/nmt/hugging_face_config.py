@@ -933,7 +933,7 @@ class HuggingFaceNMTModel(NMTModel):
         dtype = torch.bfloat16 if self._is_t5 else torch.float16
         if self._config.train["use_lora"]:
             base_model = AutoModelForSeq2SeqLM.from_pretrained(self._config.model, torch_dtype=dtype if self._mixed_precision else "auto", ignore_mismatched_sizes=True)
-            if self._config.model.startswith("google/madlad400") and len(tokenizer) != base_model.get_input_embeddings().weight.size(dim=0):
+            if len(tokenizer) != base_model.get_input_embeddings().weight.size(dim=0):
                 base_model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if self._mixed_precision else None)
             model = PeftModel.from_pretrained(base_model, model_name)
         else:
@@ -992,12 +992,11 @@ class HuggingFaceNMTModel(NMTModel):
         dtype = torch.bfloat16 if self._is_t5 else torch.float16
         if self._config.train["use_lora"]:
             base_model = AutoModelForSeq2SeqLM.from_pretrained(self._config.model, torch_dtype=dtype if self._mixed_precision else "auto", ignore_mismatched_sizes=True)
-            if self._config.model.startswith("google/madlad400") and len(tokenizer) != base_model.get_input_embeddings().weight.size(dim=0):
+            if len(tokenizer) != base_model.get_input_embeddings().weight.size(dim=0):
                 base_model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if self._mixed_precision else None)
             model = PeftModel.from_pretrained(base_model, model_name)
         else:
             model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=dtype if self._mixed_precision else "auto")
-        # model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=dtype if self._mixed_precision else "auto")
         if self._config.infer.get("better_transformer"):
             model = model.to_bettertransformer()
         if model.config.max_length < 512:
