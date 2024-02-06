@@ -302,6 +302,10 @@ class HuggingFaceConfig(Config):
 
         super().__init__(exp_dir, config)
 
+        if self.model.startswith("google/madlad400"):
+            self.train["max_source_length"] = 256
+            self.train["max_target_length"] = 256
+
         # disable evaluation if there is no validation split
         if not self.has_val_split:
             config["eval"]["evaluation_strategy"] = "no"
@@ -919,16 +923,24 @@ class HuggingFaceNMTModel(NMTModel):
         vref_paths: Optional[List[Path]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
+        tokenizer = self._config.get_tokenizer()
+
         if self._config.model_dir.exists():
             checkpoint_path, _ = self.get_checkpoint_path(ckpt)
             model_name = str(checkpoint_path)
         else:
             model_name = self._config.model
         dtype = torch.bfloat16 if self._is_t5 else torch.float16
-        model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=dtype if self._mixed_precision else "auto")
+        if self._config.train["use_lora"]:
+            base_model = AutoModelForSeq2SeqLM.from_pretrained(self._config.model, torch_dtype=dtype if self._mixed_precision else "auto", ignore_mismatched_sizes=True)
+            if self._config.model.startswith("google/madlad400") and len(tokenizer) != base_model.get_input_embeddings().weight.size(dim=0):
+                base_model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if self._mixed_precision else None)
+            model = PeftModel.from_pretrained(base_model, model_name)
+        else:
+            model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=dtype if self._mixed_precision else "auto")
         if self._config.infer.get("better_transformer"):
             model = model.to_bettertransformer()
-        tokenizer = self._config.get_tokenizer()
+
         pipeline = PretokenizedTranslationPipeline(
             model=model,
             tokenizer=tokenizer,
@@ -970,18 +982,27 @@ class HuggingFaceNMTModel(NMTModel):
         vrefs: Optional[Iterable[VerseRef]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Iterable[str]:
+        tokenizer = self._config.get_tokenizer()
+
         if self._config.model_dir.exists():
             checkpoint_path, _ = self.get_checkpoint_path(ckpt)
             model_name = str(checkpoint_path)
         else:
             model_name = self._config.model
         dtype = torch.bfloat16 if self._is_t5 else torch.float16
-        model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=dtype if self._mixed_precision else "auto")
+        if self._config.train["use_lora"]:
+            base_model = AutoModelForSeq2SeqLM.from_pretrained(self._config.model, torch_dtype=dtype if self._mixed_precision else "auto", ignore_mismatched_sizes=True)
+            if self._config.model.startswith("google/madlad400") and len(tokenizer) != base_model.get_input_embeddings().weight.size(dim=0):
+                base_model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if self._mixed_precision else None)
+            model = PeftModel.from_pretrained(base_model, model_name)
+        else:
+            model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=dtype if self._mixed_precision else "auto")
+        # model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=dtype if self._mixed_precision else "auto")
         if self._config.infer.get("better_transformer"):
             model = model.to_bettertransformer()
         if model.config.max_length < 512:
             model.config.max_length = 512
-        tokenizer = self._config.get_tokenizer()
+        
         lang_codes: Dict[str, str] = self._config.data["lang_codes"]
         pipeline = TranslationPipeline(
             model=model,
