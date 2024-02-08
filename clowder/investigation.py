@@ -256,8 +256,6 @@ class Investigation:
             csv_results_files = row[RESULTS_CSVS_ATTRIBUTE].split(";")
             if len(csv_results_files) > 0 and csv_results_files[0].strip() != "":
                 for name in csv_results_files:
-                    if "token" not in name:
-                        continue
                     name = name.strip()
                     if name == "scores-best":
                         scores = list((self.investigation_s3_path / row[NAME_ATTRIBUTE]).glob("scores*"))
@@ -334,7 +332,6 @@ class Investigation:
                 self.color_code(df, s, color_mode)
 
     def color_code(self, df: pd.DataFrame, s: Worksheet, mode: str):
-        quota = 0
         min_max_df = None
         if mode == "row":
             min_max_df = self._min_and_max_per_row(df)
@@ -365,12 +362,6 @@ class Investigation:
                 r, g, b = self._color_func((row[col] - min) / (range) if range != 0 else 1.0)
                 s.format(f"{ref}", {"backgroundColor": {"red": r, "green": g, "blue": b}})
                 col_index += 1
-                quota += 1
-                if quota > 1:
-                    sleep(
-                        2
-                    )  # TODO avoids exceeded per minute read/write quota - find better solution: batching and guide to change quotas
-                    quota = 0
             row_index += 1
 
     def _process_scores_csv(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -380,7 +371,7 @@ class Investigation:
         ret.columns = pd.Index(column_names)
         ret["BLEU-details"] = ret["BLEU"]
         ret["BLEU"] = ret["BLEU"].apply(lambda x: x.split("/")[0])
-        ret[["BLEU", "CHRF3", "WER", "TER", "spBLEU"]] = ret[["BLEU", "CHRF3", "WER", "TER", "spBLEU"]].apply(
+        ret[["BLEU", "spBLEU", "CHRF3", "WER", "TER"]] = ret[["BLEU", "spBLEU", "CHRF3", "WER", "TER"]].apply(
             pd.to_numeric, axis=0
         )  # TODO more robust (ignore for mvp)
         return ret
