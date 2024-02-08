@@ -332,6 +332,7 @@ class Investigation:
                 self.color_code(df, s, color_mode)
 
     def color_code(self, df: pd.DataFrame, s: Worksheet, mode: str):
+        quota = 0
         min_max_df = None
         if mode == "row":
             min_max_df = self._min_and_max_per_row(df)
@@ -362,6 +363,12 @@ class Investigation:
                 r, g, b = self._color_func((row[col] - min) / (range) if range != 0 else 1.0)
                 s.format(f"{ref}", {"backgroundColor": {"red": r, "green": g, "blue": b}})
                 col_index += 1
+                quota += 1
+                if quota > 1:
+                    sleep(
+                        2
+                    )  # TODO avoids exceeded per minute read/write quota - find better solution: batching and guide to change quotas
+                    quota = 0
             row_index += 1
 
     def _process_scores_csv(self, df: pd.DataFrame) -> pd.DataFrame:
