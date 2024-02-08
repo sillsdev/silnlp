@@ -64,7 +64,12 @@ def cancel(investigation_name: str):
 
 @app.command("run")
 def run(investigation_name: str, force_rerun: bool = False):
-    print(functions.run(investigation_name, force_rerun))
+    """Runs all experiments in investigation `investigation_name` except those that are already completed or currently in progess.
+    Use `--force-rerun` to forcibly rerun previously run experiments within this investigation"""
+    if functions.run(investigation_name, force_rerun):
+        print(f"[green]Investigation {investigation_name} successfully started[/green]")
+    else:
+        print(f"[red]Investigation {investigation_name} cannot be run. Is it already in progress? [/red]")
 
 
 @app.command("status")

@@ -62,6 +62,7 @@ def cancel(investigation_name: str):
 
 
 def run(investigation_name: str, force_rerun: bool = False) -> bool:
+    """Runs all experiments in investigation `investigation_name` except those that are already completed or currently in progess."""
     print(f"Syncing {investigation_name} before running")
     sync(investigation_name, gather_results=False)
     investigation = ENV.get_investigation(investigation_name)
