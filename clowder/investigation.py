@@ -284,7 +284,14 @@ class Investigation:
                         else:
                             df = pd.read_csv(StringIO(f.read()))
                         if "scores" in name:
-                            df = self._process_scores_csv(df)  # TODO ADD STEPS
+                            num_steps = "unknown"
+                            if '-' in s3_filepath.parts[-1]:
+                                name_elements = s3_filepath.parts[-1].split('-')
+                                if len(name_elements) > 1 and '.csv' in name_elements[1]:
+                                    steps_element = name_elements[1][:-4]
+                                    if steps_element.isdigit():
+                                        num_steps = int(steps_element)
+                            df = self._process_scores_csv(df, num_steps)  # TODO ADD STEPS
                         if len(df.index) == 1:
                             df.insert(0, NAME_ATTRIBUTE, [row[NAME_ATTRIBUTE]])
                         if name not in results:
@@ -341,7 +348,7 @@ class Investigation:
         else:
             min_max_df = self._min_and_max_per_col(df)
         row_index = 0
-        if isinstance(min_max_df.index[0], tuple):
+        if len(min_max_df.index) > 0 and isinstance(min_max_df.index[0], tuple):
             row_index += len(min_max_df.index[0]) - 1
         for label, row in df.iterrows():
             col_index = 0
@@ -371,7 +378,7 @@ class Investigation:
                     quota = 0
             row_index += 1
 
-    def _process_scores_csv(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _process_scores_csv(self, df: pd.DataFrame, num_steps: str) -> pd.DataFrame:
         ret = df[["score"]]
         column_names = df[["scorer"]].values.flatten()
         ret = ret.transpose()
@@ -381,6 +388,8 @@ class Investigation:
         ret[["BLEU", "spBLEU", "CHRF3", "WER", "TER"]] = ret[["BLEU", "spBLEU", "CHRF3", "WER", "TER"]].apply(
             pd.to_numeric, axis=0
         )  # TODO more robust (ignore for mvp)
+        ret["NumberOfSteps"] = num_steps
+        ret = ret[["BLEU", "spBLEU", "CHRF3", "WER", "TER", "NumberOfSteps","BLEU-details"]]
         return ret
 
     def _min_and_max_per_col(self, df: pd.DataFrame):
