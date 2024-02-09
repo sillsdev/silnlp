@@ -57,8 +57,12 @@ def urlfor(investigation_name: str) -> str:
     return f"https://drive.google.com/drive/u/0/folders/{idfor(investigation_name)}"
 
 
-def cancel(investigation_name: str):
-    ENV.get_investigation(investigation_name).cancel()
+def cancel(investigation_name: str) -> bool:
+    investigation = ENV.get_investigation(investigation_name)
+    investigation.sync(gather_results=False, copy_all_results_to_gdrive=False)
+    anything_was_canceled = investigation.cancel()
+    investigation.sync(gather_results=False, copy_all_results_to_gdrive=False)
+    return anything_was_canceled
 
 
 def run(investigation_name: str, force_rerun: bool = False) -> bool:

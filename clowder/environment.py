@@ -2,7 +2,6 @@ import warnings
 
 warnings.filterwarnings("ignore", r"Blowfish")
 
-import datetime
 import os
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -17,7 +16,6 @@ from oauth2client.service_account import ServiceAccountCredentials
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive, GoogleDriveFile
 from pydrive2.files import MediaIoReadable
-from clowder.status import Status
 
 from clowder.configuration_exception import MissingConfigurationFileError
 from clowder.consts import (
@@ -28,6 +26,7 @@ from clowder.consts import (
     RESULTS_CSVS_ATTRIBUTE,
 )
 from clowder.investigation import Investigation
+from clowder.status import Status
 
 
 class DuplicateInvestigationException(Exception):
@@ -337,18 +336,6 @@ class ClowderEnvironment:
                 pass
 
     # TODO types!
-
-    def log(self, investigation_name: str, data: str):
-        current_log = self._read_gdrive_file_as_string(
-            self.current_meta["investigation"][investigation_name]["clowder_log_id"]
-        )
-        new_id = self._write_gdrive_file_in_folder(
-            self.current_meta["investigation"][investigation_name]["id"],
-            "clowder.log",
-            current_log + "\n" + datetime.datetime.now().isoformat() + " | " + data,
-        )
-        self.current_meta["investigation"][investigation_name]["clowder_log_id"] = new_id
-        self.meta.flush()
 
     def _copy_gdrive_folder_to_s3(self, folder_id: str, s3_path: s3path.S3Path):
         # print(f"Copying folder {folder_id} to {s3_path}")

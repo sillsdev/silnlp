@@ -1,5 +1,4 @@
 from pathlib import Path
-
 from typing import Optional
 
 import typer
@@ -9,6 +8,7 @@ from clowder import functions
 from clowder.status import Status
 
 app = typer.Typer()
+
 
 @app.command("untrack")
 def untrack(investigation_name: str):
@@ -59,7 +59,10 @@ def idfor(investigation_name: str):
 @app.command("cancel")
 def cancel(investigation_name: str):
     """Cancels a running investigation with name `investigation_name` in the current context"""
-    functions.cancel(investigation_name)
+    if functions.cancel(investigation_name):
+        print(f"[green]Investigation {investigation_name} successfully canceled[/green]")
+    else:
+        print(f"[red]Investigation {investigation_name} has no active experiments that can be canceled[/red]")
 
 
 @app.command("run")
@@ -147,8 +150,10 @@ def _map_status_color(status: Status) -> str:
         return "red"
     return "white"
 
+
 def main():
     app()
+
 
 if __name__ == "__main__":
     main()

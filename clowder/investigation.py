@@ -1,8 +1,10 @@
+import datetime
 import os
 import re
 import subprocess
 from io import StringIO
 from pathlib import Path
+from pprint import pformat
 from time import sleep
 from typing import Optional, Union
 
@@ -16,7 +18,6 @@ import yaml
 from clearml import Task
 from gspread import Worksheet
 from rich import print
-from clowder.status import Status
 from tqdm import tqdm
 
 from clowder.configuration_exception import MissingConfigurationFileError
@@ -29,6 +30,7 @@ from clowder.consts import (
     RESULTS_CSVS_ATTRIBUTE,
     get_env,
 )
+from clowder.status import Status
 
 ENV = None
 
@@ -87,6 +89,7 @@ class Investigation:
         return experiments_df
 
     def setup(self):
+        self.lof("Attempting to set-up experiments")
         experiments_df = self._get_experiments_df()
         self.experiments_folder_id = ENV._create_gdrive_folder("experiments", self.id)
         ENV.current_meta["investigations"][self.name]["experiments_folder_id"] = self.experiments_folder_id
@@ -95,18 +98,21 @@ class Investigation:
             experiment_folder_id = ENV._create_gdrive_folder(str(name), self.experiments_folder_id)
             self._setup_experiment(params, experiment_folder_id)
         ENV._copy_gdrive_folder_to_s3(self.experiments_folder_id, self.investigation_s3_path)
+        self.log("Investigation experiments were set-up")
 
     def _setup_experiment(self, params: pd.Series, folder_id: str):
         files = ENV._dict_of_gdrive_files(self.id)
-        # print(params, folder_id)
         silnlp_config_yml = ENV._read_gdrive_file_as_string(files["config.yml"]["id"])  # TODO save config? Per type?
         rtemplate = jinja2.Environment(loader=jinja2.BaseLoader()).from_string(silnlp_config_yml)
         rendered_config = rtemplate.render(params.to_dict())
-        # print(rendered_config)
         ENV._write_gdrive_file_in_folder(folder_id, "config.yml", rendered_config)
 
     def start_investigation(self, force_rerun: bool = False) -> bool:
         experiments_df: pd.DataFrame = self._get_experiments_df()
+        pd.set_option("display.max_columns", None)
+        pd.set_option("display.max_rows", None)
+        pd.set_option("display.max_colwidth", None)
+        self.log(f"Attempting to run investigation with set-up:\n{pformat(experiments_df)}")
         now_running = False
         temp_meta = {}
         for _, row in experiments_df.iterrows():
@@ -148,6 +154,7 @@ class Investigation:
             print(result.stdout)
             if result.returncode != 0:
                 print(f"[red]{result.stderr}[/red]")
+                self.log(f"Experiments {row[NAME_ATTRIBUTE]} failed to run with error:\n{result.stderr}")
                 temp_meta[row[NAME_ATTRIBUTE]]["status"] = Task.TaskStatusEnum.failed.value
                 continue
             now_running = True
@@ -157,9 +164,16 @@ class Investigation:
             temp_meta[row[NAME_ATTRIBUTE]]["results_already_gathered"] = False
         ENV.current_meta["investigations"][self.name]["experiments"] = temp_meta
         ENV.meta.flush()
+        if now_running:
+            self.log(f"Investigation started. Experiments started: {temp_meta.keys()}")
+        else:
+            self.log("Starting investigation was attempted")
         return now_running
 
     def sync(self, gather_results=True, copy_all_results_to_gdrive: bool = True):
+        self.log(
+            f"Attempting to sync investigation (gather-results={gather_results}, copy-all-results-to-gdrive={copy_all_results_to_gdrive})"
+        )
         # Fetch info from clearml
         clearml_tasks_dict: dict[str, Union[Task, None]] = ENV._get_clearml_tasks(self.name)
         # Update gdrive, fetch
@@ -214,6 +228,7 @@ class Investigation:
         self.status = Status.from_clearml_task_statuses(statuses, self.status)  # type: ignore
         if self.status == Status.Completed:
             print(f"Investigation {self.name} is complete!")
+            self.log(f"Investigation is complete")
             if gather_results:
                 print("Results of investigation are being collected. This may take a while.")
                 self._generate_results(copy_all_results_to_gdrive=copy_all_results_to_gdrive)
@@ -221,6 +236,7 @@ class Investigation:
                 print("In order to see results, rerun with gather_results set to True.")
         elif len(completed_exp) > 0 and gather_results:
             print(f"Results of experiments [{', '.join(completed_exp)}] must be collected. This may take a while.")
+            self.log(f"Collecting results of completed experiments {','.join(completed_exp)}")
             self._generate_results(completed_exp, copy_all_results_to_gdrive=copy_all_results_to_gdrive)
             remote_meta_content = yaml.safe_load(ENV._read_gdrive_file_as_string(meta_folder_id))
             for exp in completed_exp:
@@ -231,6 +247,9 @@ class Investigation:
                 self.id, "clowder.meta.yml", yaml.safe_dump(remote_meta_content), "application/x-yaml"
             )
             ENV.meta.flush()
+        self.log(
+            f"Synced investigation: status={self.status.value} (gather-results={gather_results}, copy-all-results-to-gdrive={copy_all_results_to_gdrive})"
+        )
         return True
 
     def _generate_results(self, for_experiments: Optional[list] = None, copy_all_results_to_gdrive: bool = True):
@@ -285,9 +304,9 @@ class Investigation:
                             df = pd.read_csv(StringIO(f.read()))
                         if "scores" in name:
                             num_steps = "unknown"
-                            if '-' in s3_filepath.parts[-1]:
-                                name_elements = s3_filepath.parts[-1].split('-')
-                                if len(name_elements) > 1 and '.csv' in name_elements[1]:
+                            if "-" in s3_filepath.parts[-1]:
+                                name_elements = s3_filepath.parts[-1].split("-")
+                                if len(name_elements) > 1 and ".csv" in name_elements[1]:
                                     steps_element = name_elements[1][:-4]
                                     if steps_element.isdigit():
                                         num_steps = int(steps_element)
@@ -336,9 +355,9 @@ class Investigation:
             s = spreadsheet.add_worksheet(name, rows=0, cols=0)
             gd.set_with_dataframe(s, df)
             if color_mode != "nocolor":
-                self.color_code(df, s, color_mode)
+                self._color_code(df, s, color_mode)
 
-    def color_code(self, df: pd.DataFrame, s: Worksheet, mode: str):
+    def _color_code(self, df: pd.DataFrame, s: Worksheet, mode: str):
         quota = 0
         min_max_df = None
         if mode == "row":
@@ -389,7 +408,7 @@ class Investigation:
             pd.to_numeric, axis=0
         )  # TODO more robust (ignore for mvp)
         ret["NumberOfSteps"] = num_steps
-        ret = ret[["BLEU", "spBLEU", "CHRF3", "WER", "TER", "NumberOfSteps","BLEU-details"]]
+        ret = ret[["BLEU", "spBLEU", "CHRF3", "WER", "TER", "NumberOfSteps", "BLEU-details"]]
         return ret
 
     def _min_and_max_per_col(self, df: pd.DataFrame):
@@ -403,7 +422,6 @@ class Investigation:
     def _min_and_max_per_row(self, df: pd.DataFrame):  # TODO
         df = df.select_dtypes(include="number")
         ret = {}
-        col: str
         for index, row in df.iterrows():
             ret[index] = [row.max(), row.min()]
         return pd.DataFrame.from_dict(ret, orient="index", columns=["max", "min"])
@@ -418,11 +436,20 @@ class Investigation:
             return ((209 - (209 - 27) * (x - 0.5) / 0.5) / 255, 209 / 255, 27 / 255)
         return (209 / 255, (27 + (209 - 27) * x / 0.5) / 255, 27 / 255)
 
-    def cancel(self):
+    def cancel(self) -> bool:
+        self.log("Attempting to cancel investigation")
+        canceled_anything = False
         for _, obj in ENV.current_meta["investigations"][self.name]["experiments"].items():
-            task: Optional[Task] = Task.get_task(task_id=obj["clearml_id"])
-            if task is not None:
-                task.mark_stopped(status_message="Task was stopped by user")
+            if "clearml_id" in obj:
+                task: Optional[Task] = Task.get_task(task_id=obj["clearml_id"])
+                if task is not None:
+                    task.mark_stopped(status_message="Task was stopped by user")
+                    canceled_anything = True
+        if canceled_anything:
+            self.log("Investigation canceled")
+        else:
+            self.log("No active experiments to cancel")
+        return canceled_anything
 
     def delete(self, delete_from_clearml: bool = True, delete_from_gdrive: bool = True, delete_from_s3: bool = True):
         if delete_from_clearml:
@@ -454,6 +481,18 @@ class Investigation:
         gd.set_with_dataframe(sheet, other_sheet_df)
         config_data = ENV._read_gdrive_file_as_string(ENV._dict_of_gdrive_files(other.id)["config.yml"]["id"])
         ENV._write_gdrive_file_in_folder(self.id, "config.yml", config_data, "application/x-yaml")
+        self.log(f"Imported set up from investigation {other.name}")
+
+    def log(self, data):
+        current_log = ENV._read_gdrive_file_as_string(self.log_id)
+        id = ENV._write_gdrive_file_in_folder(
+            self.id,
+            "clowder.log",
+            current_log + "\n" + datetime.datetime.now().isoformat() + " | " + data,
+        )
+        self.log_id = id
+        ENV.current_meta["investigations"][self.name]["clowder_log_id"] = id
+        ENV.meta.flush()
 
     @staticmethod
     def from_meta(data: dict):
