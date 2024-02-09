@@ -89,7 +89,7 @@ class Investigation:
         return experiments_df
 
     def setup(self):
-        self.lof("Attempting to set-up experiments")
+        self.log("Attempting to set-up experiments")
         experiments_df = self._get_experiments_df()
         self.experiments_folder_id = ENV._create_gdrive_folder("experiments", self.id)
         ENV.current_meta["investigations"][self.name]["experiments_folder_id"] = self.experiments_folder_id
