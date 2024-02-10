@@ -1,8 +1,8 @@
-from pathlib import Path
 from typing import Optional
 
 import typer
 from rich import print
+from typing_extensions import Annotated
 
 from clowder import functions
 from clowder.status import Status
@@ -18,7 +18,7 @@ def untrack(investigation_name: str):
 
 
 @app.command("track")
-def track(investigation_name: Optional[str] = None):
+def track(investigation_name: Annotated[Optional[str], typer.Argument()] = None):
     """Tracks all investigations in the current context. If given an `--investigation-name`, this
     will only track a single investigation with that For your security, you've been signed out of your current session.  name in the current context"""
     functions.track(investigation_name)
@@ -75,8 +75,19 @@ def run(investigation_name: str, force_rerun: bool = False):
         print(f"[red]Investigation {investigation_name} cannot be run. Is it already in progress? [/red]")
 
 
+@app.command("setup")
+def setup(investigation_name: str):
+    """Sets up the experiments as would happen before running - making experiment folders in GDrive and S3 as needed
+    and rendering the config template into child configs. Note that setup will be run as part of the `run` command.
+    This function is typically only useful for seeing generated configs before committing to running experiments."""
+    functions.setup(investigation_name)
+    print(f"[green]Investigation {investigation_name} successfully set up[/green]")
+
+
 @app.command("status")
-def status(investigation_name: Optional[str] = None, sync: bool = True, verbose: bool = False):
+def status(
+    investigation_name: Annotated[Optional[str], typer.Argument()] = None, sync: bool = True, verbose: bool = False
+):
     """Prints status of investigation with name `investigation_name` in the current context.
     Use `--verbose` to see more detailed information. Use `--no-sync` if you want to see
     the current status without syncing with remote services"""
@@ -84,20 +95,22 @@ def status(investigation_name: Optional[str] = None, sync: bool = True, verbose:
         color = _map_status_color(obj["status"])
         if verbose:
             print(f"[bold]{inv_name}[/bold]")
-            print(f"\tStatus:[{color}]\t{obj['status'].value}[/{color}]")
-            print(f"\tGDrive url:\t{obj['gdrive_url']}")
-            print(f"\tExperiments:")
+            print("\tStatus:".ljust(15), f"[{color}]{obj['status'].value}[/{color}]")
+            print("\tGDrive url:".ljust(15), f"{obj['gdrive_url']}")
+            print("\tExperiments:".ljust(15))
             for exp_name, exp_obj in obj["experiments"].items():
-                print(f"\t[bold]{exp_name}[/bold]")
-                print(f"\tStatus:\t{exp_obj['status']}")
-                print(f"\tClearML url:\t{exp_obj.get('clearml_task_url')}")
+                print(f"\t  [bold]{exp_name}[/bold]")
+                print(f"\t  Status:".ljust(15), f"{exp_obj['status']}")
+                print(f"\t  ClearML url:".ljust(15), f"{exp_obj.get('clearml_task_url')}")
         else:
-            print(inv_name, f"[{color}]\t{obj['status'].value}[/{color}]")
+            print(inv_name.ljust(25), f"[{color}]{obj['status'].value}[/{color}]")
 
 
 @app.command("sync")
 def sync(
-    investigation_name: Optional[str] = None, gather_results: bool = True, copy_all_results_to_gdrive: bool = True
+    investigation_name: Annotated[Optional[str], typer.Argument()] = None,
+    gather_results: bool = True,
+    copy_all_results_to_gdrive: bool = True,
 ):
     """Sync status/data for investigation with name `investigation_name` in the current context.
     Use --no-gather-results to sync without aggregating results data. Use --no-copy-all-results-to-gdrive

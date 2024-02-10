@@ -233,7 +233,7 @@ class Investigation:
                 print("Results of investigation are being collected. This may take a while.")
                 self._generate_results(copy_all_results_to_gdrive=copy_all_results_to_gdrive)
             else:
-                print("In order to see results, rerun with gather_results set to True.")
+                print("In order to see results, run sync with gather_results set to True.")
         elif len(completed_exp) > 0 and gather_results:
             print(f"Results of experiments [{', '.join(completed_exp)}] must be collected. This may take a while.")
             self.log(f"Collecting results of completed experiments {','.join(completed_exp)}")

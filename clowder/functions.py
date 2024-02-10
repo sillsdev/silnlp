@@ -81,6 +81,13 @@ def run(investigation_name: str, force_rerun: bool = False) -> bool:
     return now_running
 
 
+def setup(investigation_name: str):
+    """Sets up the experiments as would happen before running - making experiment folders in GDrive and S3 as needed
+    and rendering the config template into child configs"""
+    investigation = ENV.get_investigation(investigation_name)
+    investigation.setup()
+
+
 def status(investigation_name: Optional[str], _sync: bool = True) -> dict:
     """Returns status of investigation with name `investigation_name` in the current context"""
     if _sync:

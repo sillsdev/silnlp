@@ -365,9 +365,18 @@ class ClowderEnvironment:
         s3_path.unlink(missing_ok=True)
 
     def _delete_s3_folder(self, s3_path: s3path.S3Path):
+        ret = s3_path.exists()
         for child in s3_path.iterdir():
             if child.is_dir():
-                self._delete_s3_folder(child)
+                try:
+                    self._delete_s3_folder(child)
+                except FileNotFoundError:
+                    print(f"Failed to delete {child} - does not exist")
             else:
                 self._delete_s3_file(child)
-        s3_path.rmdir()
+        try:
+            s3_path.rmdir()
+        except FileNotFoundError:
+            # Occasionally get these errors - things are deleted properly
+            pass
+        return ret
