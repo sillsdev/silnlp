@@ -203,13 +203,13 @@ def delete_tokenizer(checkpoint_path: Path) -> None:
 def add_lang_code_to_tokenizer(tokenizer: PreTrainedTokenizer, lang_code: str) -> None:
     tokenizer.add_special_tokens({"additional_special_tokens": tokenizer.additional_special_tokens + [lang_code]})
     lang_id = tokenizer.convert_tokens_to_ids(lang_code)
-    if isinstance(tokenizer, (NllbTokenizer, MBart50Tokenizer, MBartTokenizer)):
+    if not isinstance(tokenizer, (T5Tokenizer, T5TokenizerFast)):
         tokenizer.lang_code_to_id[lang_code] = lang_id
+    if isinstance(tokenizer, (NllbTokenizer, MBart50Tokenizer, MBartTokenizer)):
         tokenizer.id_to_lang_code[lang_id] = lang_code
         tokenizer.fairseq_tokens_to_ids[lang_code] = lang_id
         tokenizer.fairseq_ids_to_tokens[lang_id] = lang_code
     elif isinstance(tokenizer, M2M100Tokenizer):
-        tokenizer.lang_code_to_id[lang_code] = lang_id
         tokenizer.lang_code_to_token[lang_code] = lang_code
         tokenizer.lang_token_to_id[lang_code] = lang_id
         tokenizer.id_to_lang_token[lang_id] = lang_code
@@ -492,8 +492,11 @@ class HuggingFaceConfig(Config):
             updated = False
             for iso in self.src_isos | self.trg_isos:
                 lang_code = lang_codes.get(iso, iso)
-                if ((not isinstance(self._tokenizer, (T5Tokenizer, T5TokenizerFast)) and lang_code not in self._tokenizer.lang_code_to_id) 
-                or (isinstance(self._tokenizer, (T5Tokenizer, T5TokenizerFast)) and lang_code not in self._tokenizer.all_special_tokens)):
+                if isinstance(self._tokenizer, (T5Tokenizer, T5TokenizerFast)):
+                    if lang_code not in self._tokenizer.all_special_tokens:
+                        add_lang_code_to_tokenizer(self._tokenizer, lang_code)
+                        updated = True
+                elif lang_code not in self._tokenizer.lang_code_to_id:
                     add_lang_code_to_tokenizer(self._tokenizer, lang_code)
                     updated = True
             if updated:
@@ -733,24 +736,27 @@ class HuggingFaceNMTModel(NMTModel):
             else:
                 model.config.decoder_start_token_id = tokenizer.convert_tokens_to_ids(self._config.val_trg_lang)
 
+        if self._config.model.startswith("google/madlad400"):
+            model.config.decoder_start_token_id = tokenizer.pad_token_id
+            model.generation_config.decoder_start_token_id = tokenizer.pad_token_id
+            model.config.max_length = 256
+            model.generation_config.max_new_tokens = 256
+            tokenizer.tgt_lang = self._config.val_trg_lang
+
         if model.config.decoder_start_token_id is None:
             raise ValueError("Make sure that `config.decoder_start_token_id` is correctly defined")
 
-        if self._config.val_src_lang != "" and self._config.val_trg_lang != "":
+        if (self._config.val_src_lang != "" and self._config.val_trg_lang != "" 
+            and isinstance(tokenizer, (MBartTokenizer, MBartTokenizerFast, M2M100Tokenizer, NllbTokenizer, NllbTokenizerFast))):
             tokenizer.src_lang = self._config.val_src_lang
             tokenizer.tgt_lang = self._config.val_trg_lang
 
             # For multilingual translation models like mBART-50 and M2M100 we need to force the target language token
             # as the first generated token.
             forced_bos_token_id = tokenizer.convert_tokens_to_ids(self._config.val_trg_lang)
-            if self._config.model.startswith("google/madlad400"):
-                forced_bos_token_id = tokenizer.pad_token_id
             model.config.forced_bos_token_id = forced_bos_token_id
             if model.generation_config is not None:
                 model.generation_config.forced_bos_token_id = forced_bos_token_id
-
-        if self._config.model.startswith("google/madlad400"):
-            model.generation_config.max_new_tokens = 256
 
         def load_text_dataset(src_path: Path, trg_path: Path) -> Optional[Dataset]:
             if not src_path.is_file() or not trg_path.is_file():
@@ -924,23 +930,7 @@ class HuggingFaceNMTModel(NMTModel):
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
         tokenizer = self._config.get_tokenizer()
-
-        if self._config.model_dir.exists():
-            checkpoint_path, _ = self.get_checkpoint_path(ckpt)
-            model_name = str(checkpoint_path)
-        else:
-            model_name = self._config.model
-        dtype = torch.bfloat16 if self._is_t5 else torch.float16
-        if self._config.train["use_lora"]:
-            base_model = AutoModelForSeq2SeqLM.from_pretrained(self._config.model, torch_dtype=dtype if self._mixed_precision else "auto", ignore_mismatched_sizes=True)
-            if len(tokenizer) != base_model.get_input_embeddings().weight.size(dim=0):
-                base_model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if self._mixed_precision else None)
-            model = PeftModel.from_pretrained(base_model, model_name)
-        else:
-            model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=dtype if self._mixed_precision else "auto")
-        if self._config.infer.get("better_transformer"):
-            model = model.to_bettertransformer()
-
+        model = self._create_inference_model(ckpt, tokenizer)
         pipeline = PretokenizedTranslationPipeline(
             model=model,
             tokenizer=tokenizer,
@@ -983,25 +973,9 @@ class HuggingFaceNMTModel(NMTModel):
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Iterable[str]:
         tokenizer = self._config.get_tokenizer()
-
-        if self._config.model_dir.exists():
-            checkpoint_path, _ = self.get_checkpoint_path(ckpt)
-            model_name = str(checkpoint_path)
-        else:
-            model_name = self._config.model
-        dtype = torch.bfloat16 if self._is_t5 else torch.float16
-        if self._config.train["use_lora"]:
-            base_model = AutoModelForSeq2SeqLM.from_pretrained(self._config.model, torch_dtype=dtype if self._mixed_precision else "auto", ignore_mismatched_sizes=True)
-            if len(tokenizer) != base_model.get_input_embeddings().weight.size(dim=0):
-                base_model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if self._mixed_precision else None)
-            model = PeftModel.from_pretrained(base_model, model_name)
-        else:
-            model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=dtype if self._mixed_precision else "auto")
-        if self._config.infer.get("better_transformer"):
-            model = model.to_bettertransformer()
+        model = self._create_inference_model(ckpt, tokenizer)
         if model.config.max_length < 512:
             model.config.max_length = 512
-        
         lang_codes: Dict[str, str] = self._config.data["lang_codes"]
         pipeline = TranslationPipeline(
             model=model,
@@ -1102,10 +1076,6 @@ class HuggingFaceNMTModel(NMTModel):
         num_beams: Optional[int] = self._config.infer.get("num_beams")
         if num_beams is None:
             num_beams = self._config.params.get("generation_num_beams")
-        max_length = pipeline.model.config.max_length
-        if self._config.model.startswith("google/madlad400"):
-            max_length = 256
-        
 
         dictionary = self._get_dictionary()
         if vrefs is None or len(dictionary) == 0:
@@ -1115,7 +1085,6 @@ class HuggingFaceNMTModel(NMTModel):
                 batch_size=batch_size,
                 return_text=not return_tensors,
                 return_tensors=return_tensors,
-                max_length=max_length
             )
         else:
             for batch, force_words in batch_sentences(sentences, vrefs, batch_size, dictionary):
@@ -1132,8 +1101,27 @@ class HuggingFaceNMTModel(NMTModel):
                     batch_size=batch_size,
                     return_text=not return_tensors,
                     return_tensors=return_tensors,
-                    max_length=max_length
                 )
+    
+    def _create_inference_model(self, ckpt: Union[CheckpointType, str, int], tokenizer: PreTrainedTokenizer) -> PreTrainedModel:
+        if self._config.model_dir.exists():
+            checkpoint_path, _ = self.get_checkpoint_path(ckpt)
+            model_name = str(checkpoint_path)
+        else:
+            model_name = self._config.model
+
+        dtype = torch.bfloat16 if self._is_t5 else torch.float16
+        if self._config.train["use_lora"] and model_name != self._config.model:
+            base_model = AutoModelForSeq2SeqLM.from_pretrained(self._config.model, torch_dtype=dtype if self._mixed_precision else "auto", ignore_mismatched_sizes=True)
+            if len(tokenizer) != base_model.get_input_embeddings().weight.size(dim=0):
+                base_model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if self._mixed_precision else None)
+            model = PeftModel.from_pretrained(base_model, model_name)
+        else:
+            model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=dtype if self._mixed_precision else "auto")
+        if self._config.infer.get("better_transformer"):
+            model = model.to_bettertransformer()
+        
+        return model
 
 
 class HuggingFaceTokenizer(Tokenizer):
@@ -1170,13 +1158,11 @@ class HuggingFaceTokenizer(Tokenizer):
             line = self._mpn.normalize(line)
         if not add_dummy_prefix:
             line = "\ufffc" + line
-        if isinstance(self._tokenizer, (T5Tokenizer, T5TokenizerFast)):
-            if side == Side.SOURCE:
-                line = self._tokenizer.tgt_lang + " " + line
-            else:
-                line = self._tokenizer.pad_token + " " + line
         if side == Side.SOURCE:
             max_length = self._max_source_length
+            if isinstance(self._tokenizer, (T5Tokenizer, T5TokenizerFast)):
+                line = self._tokenizer.tgt_lang + " " + line
+                max_length += 1
             if not add_dummy_prefix:
                 max_length += 2
             tokens = self._tokenizer(
