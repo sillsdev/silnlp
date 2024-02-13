@@ -646,8 +646,8 @@ class OpenNMTConfig(Config):
             max_train_size,
         )
 
-    def _build_corpora(self, tokenizer: Tokenizer, stats: bool) -> int:
-        train_count = super()._build_corpora(tokenizer, stats)
+    def _build_corpora(self, tokenizer: Tokenizer, stats: bool, force_align: bool) -> int:
+        train_count = super()._build_corpora(tokenizer, stats, force_align)
         if self.data["guided_alignment"]:
             self._create_train_alignments(train_count)
         return train_count

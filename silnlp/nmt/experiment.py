@@ -16,6 +16,7 @@ from .test import test
 class SILExperiment:
     name: str
     make_stats: bool = False
+    force_align: bool = False
     mixed_precision: bool = True
     num_devices: int = 1
     clearml_queue: Optional[str] = None
@@ -49,7 +50,7 @@ class SILExperiment:
         config_file = Path(exp_dir, "config.yml")
         if not config_file.exists():
             raise RuntimeError(f"ERROR: Config file does not exist in experiment folder {exp_dir}.")
-        self.config.preprocess(self.make_stats)
+        self.config.preprocess(self.make_stats, self.force_align)
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
 
     def train(self):
@@ -83,6 +84,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run experiment - preprocess, train, and test")
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument("--stats", default=False, action="store_true", help="Output corpus statistics")
+    parser.add_argument("--force-align", default=False, action="store_true", help="Force recalculation of all alignment scores")
     parser.add_argument("--disable-mixed-precision", default=False, action="store_true", help="Disable mixed precision")
     parser.add_argument("--memory-growth", default=False, action="store_true", help="Enable memory growth")
     parser.add_argument("--num-devices", type=int, default=1, help="Number of devices to train on")
@@ -129,6 +131,7 @@ def main() -> None:
     exp = SILExperiment(
         name=args.experiment,
         make_stats=args.stats,
+        force_align=args.force_align,
         mixed_precision=not args.disable_mixed_precision,
         num_devices=args.num_devices,
         clearml_queue=args.clearml_queue,
