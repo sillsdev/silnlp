@@ -285,8 +285,6 @@ def get_data_file_pairs(corpus_pair: CorpusPair) -> Iterable[Tuple[DataFile, Dat
     else:
         for src_file in corpus_pair.src_files:
             for trg_file in corpus_pair.trg_files:
-                if src_file.iso == trg_file.iso:
-                    continue
                 yield (src_file, trg_file)
 
 
@@ -638,7 +636,7 @@ class Config(ABC):
         if stats_path.is_file():
             stats_df = pd.read_csv(stats_path)
         else:
-            stats_df = pd.DataFrame(columns=["src_project","trg_project","count","align_score","filtered_count","filtered_align_score"])
+            stats_df = pd.DataFrame(columns=["src_project","trg_project","project_count","count","align_score","filtered_count","filtered_align_score"])
 
         curr_stats = []
         for _,row in stats_df.iterrows():
@@ -647,12 +645,14 @@ class Config(ABC):
                 curr_stats.append(f"{row['src_project']}")
             else:
                 # Stats from current experiment
-                curr_stats.append(f"{row['src_project']}_{row['trg_project']}")
+                src_project = row["src_project"].split("-", maxsplit=1)[1]
+                trg_project = row["trg_project"].split("-", maxsplit=1)[1]
+                curr_stats.append(f"{src_project}_{trg_project}")
 
         for filepath in self.exp_dir.glob("*.csv"):
             if filepath.stem not in curr_stats and filepath.stem not in ["corpus-stats", "tokenization_stats"]:
                 pair_scores = pd.read_csv(filepath)["score"]
-                stats_df.loc[len(stats_df.index)] = [filepath.stem, "", len(pair_scores), round(mean(pair_scores), 4), len(pair_scores), round(mean(pair_scores), 4)]
+                stats_df.loc[len(stats_df.index)] = [filepath.stem, "", len(pair_scores), len(pair_scores), round(mean(pair_scores), 4), len(pair_scores), round(mean(pair_scores), 4)]
         
         stats_df.to_csv(stats_path, index=False)
 
@@ -695,12 +695,13 @@ class Config(ABC):
             if stats and pair.size < self.stats_max_size:
                 stats_file = stack.enter_context(self._open("corpus-stats.csv"))
                 if stats_file.tell() == 0:
-                    stats_file.write("src_project,trg_project,count,align_score,filtered_count,filtered_align_score\n")
+                    stats_file.write("src_project,trg_project,project_count,count,align_score,filtered_count,filtered_align_score\n")
 
             for src_file, trg_file in get_data_file_pairs(pair):
                 project_isos[src_file.project] = src_file.iso
                 project_isos[trg_file.project] = trg_file.iso
                 corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path)
+                project_count = len(corpus.index)
                 if len(pair.src_noise) > 0:
                     corpus["source"] = [self._noise(pair.src_noise, x) for x in corpus["source"]]
 
@@ -777,13 +778,14 @@ class Config(ABC):
                     if stats_file is not None:
                         LOGGER.info(
                             f"{src_file.project} -> {trg_file.project} stats -"
+                            f"project count: {project_count},"
                             f" count: {corpus_count},"
                             f" alignment: {alignment_score:.4f},"
                             f" filtered count: {filtered_count},"
                             f" alignment (filtered): {filtered_alignment_score:.4f}"
                         )
                         stats_file.write(
-                            f"{src_file.project},{trg_file.project},{corpus_count},{alignment_score:.4f},"
+                            f"{src_file.iso}-{src_file.project},{trg_file.iso}-{trg_file.project},{project_count},{corpus_count},{alignment_score:.4f},"
                             f"{filtered_count},{filtered_alignment_score:.4f}\n"
                         )
                     cur_train.drop("score", axis=1, inplace=True, errors="ignore")
