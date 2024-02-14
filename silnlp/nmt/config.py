@@ -473,7 +473,7 @@ class Config(ABC):
         seed = self.data["seed"]
         set_seed(seed)
 
-    def preprocess(self, stats: bool) -> None:
+    def preprocess(self, stats: bool, force_align: bool) -> None:
         # confirm that input file paths exist
         for file in self.src_file_paths | self.trg_file_paths:
             if not file.is_file():
@@ -482,7 +482,7 @@ class Config(ABC):
 
         self._build_vocabs(stats)
         tokenizer = self.create_tokenizer()
-        self._build_corpora(tokenizer, stats)
+        self._build_corpora(tokenizer, stats, force_align)
         LOGGER.info("Preprocessing completed")
 
     @abstractmethod
@@ -513,7 +513,7 @@ class Config(ABC):
             return self.default_test_trg_iso, parts[3]
         return parts[2], parts[5]
 
-    def _build_corpora(self, tokenizer: Tokenizer, stats: bool) -> int:
+    def _build_corpora(self, tokenizer: Tokenizer, stats: bool, force_align: bool) -> int:
         self._delete_files("train.*.txt")
         self._delete_files("val.*.txt")
         self._delete_files("test.*.txt")
@@ -522,10 +522,12 @@ class Config(ABC):
         train_count = 0
         for pair in self.corpus_pairs:
             if pair.is_scripture:
-                train_count += self._write_scripture_data_sets(tokenizer, pair, stats)
+                train_count += self._write_scripture_data_sets(tokenizer, pair, stats, force_align)
             else:
                 train_count += self._write_basic_data_sets(tokenizer, pair)
 
+        if stats:
+            self._report_extra_stats()
         self._calculate_tokenization_stats()
 
         return train_count
@@ -631,11 +633,35 @@ class Config(ABC):
         for old_file_path in self.exp_dir.glob(pattern):
             old_file_path.unlink()
 
+    def _report_extra_stats(self) -> None:
+        stats_path = self.exp_dir / "corpus-stats.csv"
+        if stats_path.is_file():
+            stats_df = pd.read_csv(stats_path)
+        else:
+            stats_df = pd.DataFrame(columns=["src_project","trg_project","count","align_score","filtered_count","filtered_align_score"])
+
+        curr_stats = []
+        for _,row in stats_df.iterrows():
+            if pd.isna(row["trg_project"]):
+                # Extra stats already added
+                curr_stats.append(f"{row['src_project']}")
+            else:
+                # Stats from current experiment
+                curr_stats.append(f"{row['src_project']}_{row['trg_project']}")
+
+        for filepath in self.exp_dir.glob("*.csv"):
+            if filepath.stem not in curr_stats and filepath.stem not in ["corpus-stats", "tokenization_stats"]:
+                pair_scores = pd.read_csv(filepath)["score"]
+                stats_df.loc[len(stats_df.index)] = [filepath.stem, "", len(pair_scores), round(mean(pair_scores), 4), len(pair_scores), round(mean(pair_scores), 4)]
+        
+        stats_df.to_csv(stats_path, index=False)
+
     def _write_scripture_data_sets(
         self,
         tokenizer: Tokenizer,
         pair: CorpusPair,
         stats: bool,
+        force_align: bool,
     ) -> int:
         src_corpora_str = ", ".join(sf.path.stem for sf in pair.src_files)
         if len(pair.src_files) > 1:
@@ -667,7 +693,7 @@ class Config(ABC):
         with ExitStack() as stack:
             stats_file: Optional[TextIO] = None
             if stats and pair.size < self.stats_max_size:
-                stats_file = stack.enter_context(self._open_append("corpus-stats.csv"))
+                stats_file = stack.enter_context(self._open("corpus-stats.csv"))
                 if stats_file.tell() == 0:
                     stats_file.write("src_project,trg_project,count,align_score,filtered_count,filtered_align_score\n")
 
@@ -689,11 +715,19 @@ class Config(ABC):
 
                 corpus_count = len(cur_train)
                 if pair.is_train and (stats_file is not None or pair.score_threshold > 0):
-                    aligner_id = self.data["aligner"]
-                    LOGGER.info(f"Computing alignment scores using {get_aligner_name(aligner_id)}")
-                    add_alignment_scores(cur_train, aligner_id)
-                    if stats_file is not None:
-                        cur_train.to_csv(self.exp_dir / f"{src_file.project}_{trg_file.project}.csv", index=False)
+                    pair_stats_path = self.exp_dir / f"{src_file.project}_{trg_file.project}.csv"
+                    if pair_stats_path.is_file() and not force_align:
+                        LOGGER.info(f"Using pre-existing alignment scores from {pair_stats_path}")
+                        pair_stats = pd.read_csv(pair_stats_path)
+                        pair_stats["idx"] = cur_train.index
+                        pair_stats.set_index("idx", inplace=True)
+                        cur_train["score"] = pair_stats["score"]
+                    else:
+                        aligner_id = self.data["aligner"]
+                        LOGGER.info(f"Computing alignment scores using {get_aligner_name(aligner_id)}")
+                        add_alignment_scores(cur_train, aligner_id)
+                        if stats_file is not None:
+                            cur_train.to_csv(pair_stats_path, index=False)
 
                 if pair.is_test:
                     if pair.disjoint_test and test_indices is None:
@@ -1134,6 +1168,9 @@ class Config(ABC):
 
     def _fill_corpus(self, filename: str, size: int) -> None:
         write_corpus(self.exp_dir / filename, ("" for _ in range(size)), append=True)
+
+    def _open(self, filename: str) -> TextIO:
+        return (self.exp_dir / filename).open("w", encoding="utf-8", newline="\n")
 
     def _open_append(self, filename: str) -> TextIO:
         return (self.exp_dir / filename).open("a", encoding="utf-8", newline="\n")
