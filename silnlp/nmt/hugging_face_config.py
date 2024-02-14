@@ -152,11 +152,11 @@ TRAINING_ARGS_CONFIG_MAPPING = {
 LORA_DEFAULT_CONFIGS = {
     "facebook/nllb-200": {
         "target_modules": ["q_proj", "v_proj", "k_proj", "out_proj", "fc1", "fc2"],
-        "modules_to_save": ["embed_tokens"]
+        "modules_to_save": ["embed_tokens", "lm_head"]
     },
     "google/madlad400": {
         "target_modules": ["q", "v", "k", "o", "wi_0", "wi_1", "wo"],
-        "modules_to_save": ["embed_tokens"]
+        "modules_to_save": ["embed_tokens", "lm_head"]
     }
 }
 
@@ -725,38 +725,8 @@ class HuggingFaceNMTModel(NMTModel):
             model = get_peft_model(model, peft_config)
             model.enable_input_require_grads()  # Converting to PeftModel causes gradient calculation to be disabled
 
-        # Set decoder_start_token_id
-        if (
-            self._config.val_trg_lang != ""
-            and model.config.decoder_start_token_id is None
-            and isinstance(tokenizer, (MBartTokenizer, MBartTokenizerFast))
-        ):
-            if isinstance(tokenizer, MBartTokenizer):
-                model.config.decoder_start_token_id = tokenizer.lang_code_to_id[self._config.val_trg_lang]
-            else:
-                model.config.decoder_start_token_id = tokenizer.convert_tokens_to_ids(self._config.val_trg_lang)
-
-        if self._config.model.startswith("google/madlad400"):
-            model.config.decoder_start_token_id = tokenizer.pad_token_id
-            model.generation_config.decoder_start_token_id = tokenizer.pad_token_id
-            model.config.max_length = 256
-            model.generation_config.max_new_tokens = 256
-            tokenizer.tgt_lang = self._config.val_trg_lang
-
-        if model.config.decoder_start_token_id is None:
-            raise ValueError("Make sure that `config.decoder_start_token_id` is correctly defined")
-
-        if (self._config.val_src_lang != "" and self._config.val_trg_lang != "" 
-            and isinstance(tokenizer, (MBartTokenizer, MBartTokenizerFast, M2M100Tokenizer, NllbTokenizer, NllbTokenizerFast))):
-            tokenizer.src_lang = self._config.val_src_lang
-            tokenizer.tgt_lang = self._config.val_trg_lang
-
-            # For multilingual translation models like mBART-50 and M2M100 we need to force the target language token
-            # as the first generated token.
-            forced_bos_token_id = tokenizer.convert_tokens_to_ids(self._config.val_trg_lang)
-            model.config.forced_bos_token_id = forced_bos_token_id
-            if model.generation_config is not None:
-                model.generation_config.forced_bos_token_id = forced_bos_token_id
+        # Change specific variables based on the type of model
+        model, tokenizer = self._configure_model(model, tokenizer)
 
         def load_text_dataset(src_path: Path, trg_path: Path) -> Optional[Dataset]:
             if not src_path.is_file() or not trg_path.is_file():
@@ -1120,8 +1090,46 @@ class HuggingFaceNMTModel(NMTModel):
             model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=dtype if self._mixed_precision else "auto")
         if self._config.infer.get("better_transformer"):
             model = model.to_bettertransformer()
+        if self._config.train["use_lora"] or model_name == self._config.model:
+            model, tokenizer = self._configure_model(model, tokenizer)
         
         return model
+    
+    def _configure_model(self, model: PreTrainedModel, tokenizer: PreTrainedTokenizer) -> Tuple[PreTrainedModel, PreTrainedTokenizer]:
+        # Set decoder_start_token_id
+        if (
+            self._config.val_trg_lang != ""
+            and model.config.decoder_start_token_id is None
+            and isinstance(tokenizer, (MBartTokenizer, MBartTokenizerFast))
+        ):
+            if isinstance(tokenizer, MBartTokenizer):
+                model.config.decoder_start_token_id = tokenizer.lang_code_to_id[self._config.val_trg_lang]
+            else:
+                model.config.decoder_start_token_id = tokenizer.convert_tokens_to_ids(self._config.val_trg_lang)
+
+        if self._config.model.startswith("google/madlad400"):
+            model.config.decoder_start_token_id = tokenizer.pad_token_id
+            model.generation_config.decoder_start_token_id = tokenizer.pad_token_id
+            model.config.max_length = 256
+            model.generation_config.max_new_tokens = 256
+            tokenizer.tgt_lang = self._config.val_trg_lang
+
+        if model.config.decoder_start_token_id is None:
+            raise ValueError("Make sure that `config.decoder_start_token_id` is correctly defined")
+
+        if (self._config.val_src_lang != "" and self._config.val_trg_lang != "" 
+            and isinstance(tokenizer, (MBartTokenizer, MBartTokenizerFast, M2M100Tokenizer, NllbTokenizer, NllbTokenizerFast))):
+            tokenizer.src_lang = self._config.val_src_lang
+            tokenizer.tgt_lang = self._config.val_trg_lang
+
+            # For multilingual translation models like mBART-50 and M2M100 we need to force the target language token
+            # as the first generated token.
+            forced_bos_token_id = tokenizer.convert_tokens_to_ids(self._config.val_trg_lang)
+            model.config.forced_bos_token_id = forced_bos_token_id
+            if model.generation_config is not None:
+                model.generation_config.forced_bos_token_id = forced_bos_token_id
+        
+        return model, tokenizer
 
 
 class HuggingFaceTokenizer(Tokenizer):
