@@ -34,6 +34,7 @@ from ..common.corpus import (
     split_parallel_corpus,
     write_corpus,
 )
+from ..common.determine_script import get_script
 from ..common.environment import SIL_NLP_ENV
 from ..common.utils import NoiseMethod, Side, create_noise_methods, get_mt_exp_dir, is_set, set_seed
 from .augment import AugmentMethod, create_augment_methods
@@ -636,7 +637,8 @@ class Config(ABC):
         if stats_path.is_file():
             stats_df = pd.read_csv(stats_path)
         else:
-            stats_df = pd.DataFrame(columns=["src_project","trg_project","project_count","count","align_score","filtered_count","filtered_align_score"])
+            stats_df = pd.DataFrame(columns=["src_project","trg_project","src_script","trg_script","project_count",
+                                             "count","align_score","filtered_count","filtered_align_score"])
 
         curr_stats = []
         for _,row in stats_df.iterrows():
@@ -651,8 +653,12 @@ class Config(ABC):
 
         for filepath in self.exp_dir.glob("*.csv"):
             if filepath.stem not in curr_stats and filepath.stem not in ["corpus-stats", "tokenization_stats"]:
-                pair_scores = pd.read_csv(filepath)["score"]
-                stats_df.loc[len(stats_df.index)] = [filepath.stem, "", len(pair_scores), len(pair_scores), round(mean(pair_scores), 4), len(pair_scores), round(mean(pair_scores), 4)]
+                pair_stats = pd.read_csv(filepath)
+                src_script = get_script("".join(pair_stats["source"]))
+                trg_script = get_script("".join(pair_stats["target"]))
+                stats_df.loc[len(stats_df.index)] = [filepath.stem,"",src_script,trg_script,len(pair_stats["score"]),
+                                                     len(pair_stats["score"]),round(mean(pair_stats["score"]), 4),
+                                                     len(pair_stats["score"]),round(mean(pair_stats["score"]), 4)]
         
         stats_df.to_csv(stats_path, index=False)
 
@@ -694,8 +700,7 @@ class Config(ABC):
             stats_file: Optional[TextIO] = None
             if stats and pair.size < self.stats_max_size:
                 stats_file = stack.enter_context(self._open("corpus-stats.csv"))
-                if stats_file.tell() == 0:
-                    stats_file.write("src_project,trg_project,project_count,count,align_score,filtered_count,filtered_align_score\n")
+                stats_file.write("src_project,trg_project,src_script,trg_script,project_count,count,align_score,filtered_count,filtered_align_score\n")
 
             for src_file, trg_file in get_data_file_pairs(pair):
                 project_isos[src_file.project] = src_file.iso
@@ -775,18 +780,23 @@ class Config(ABC):
                         filtered_count = unfiltered_len - len(cur_train)
                         filtered_alignment_score = mean(cur_train["score"]) if stats_file is not None else 0
 
+                    src_script = get_script("".join(cur_train["source"]))
+                    trg_script = get_script("".join(cur_train["target"]))
+
                     if stats_file is not None:
                         LOGGER.info(
                             f"{src_file.project} -> {trg_file.project} stats -"
-                            f"project count: {project_count},"
+                            f" source script: {src_script}, target script: {trg_script},"
+                            f" project count: {project_count},"
                             f" count: {corpus_count},"
                             f" alignment: {alignment_score:.4f},"
                             f" filtered count: {filtered_count},"
                             f" alignment (filtered): {filtered_alignment_score:.4f}"
                         )
                         stats_file.write(
-                            f"{src_file.iso}-{src_file.project},{trg_file.iso}-{trg_file.project},{project_count},{corpus_count},{alignment_score:.4f},"
-                            f"{filtered_count},{filtered_alignment_score:.4f}\n"
+                            f"{src_file.iso}-{src_file.project},{trg_file.iso}-{trg_file.project},"
+                            f"{src_script},{trg_script},{project_count},{corpus_count},"
+                            f"{alignment_score:.4f},{filtered_count},{filtered_alignment_score:.4f}\n"
                         )
                     cur_train.drop("score", axis=1, inplace=True, errors="ignore")
 
