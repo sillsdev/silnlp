@@ -2,7 +2,7 @@ import argparse
 import logging
 from collections import Counter
 
-LOGGER = logging.getLogger(__package__ + ".determine_script")
+LOGGER = logging.getLogger(__package__ + ".script_utils")
 
 SCRIPT_DATA = {
     "names": ['Common', 'Latin', 'Greek', 'Cyrillic', 'Armenian', 'Hebrew', 'Arabic',
@@ -556,6 +556,19 @@ SCRIPT_DATA = {
         (0xe0020, 0xe007f, 0, 13), (0xe0100, 0xe01ef, 40, 23)
     ]}
 
+REPRESENTED_SCRIPTS = {
+    "facebook/nllb-200": ["Arabic", "Latin", "Ethiopic", "Bengali", "Devanagari", "Cyrillic", 
+                          "Tibetan", "Greek", "Gujarati", "Hebrew", "Armenian", "Japanese", 
+                          "Kannada", "Georgian", "Khmer", "Hangul", "Lao", "Malayalam", 
+                          "Myanmar", "Oriya", "Gurmukhi", "Sinhala", "Telugu", "Thai", 
+                          "Tamil", "Tifinagh", "Han"],
+    "google/madlad400": ["Latin", "Cyrillic", "Han", "Japanese", "Thai", "Arabic", "Greek", 
+                         "Hangul", "Hebrew", "Devanagari", "Tamil", "Malayalam", "Telugu", 
+                         "Bengali", "Georgian", "Kannada", "Gujarati", "Sinhala", "Armenian", 
+                         "Myanmar", "Khmer", "Lao", "Ethiopic", "Oriya", "Tibetan", "Syriac", 
+                         "Cherokee", "Tifinagh", "Thaana", "Gurmukhi", "Canadian_Aboriginal"]
+}
+
 def script(char):
     """ Return the script associated with the unicode character. """
     l = 0
@@ -575,6 +588,15 @@ def get_script(text: str) -> str:
     counts = Counter([script(char) for char in text])
     return counts.most_common()[0][0]
 
+def is_represented(script: str, model: str) -> bool:
+    for model_prefix in REPRESENTED_SCRIPTS:
+        if model.startswith(model_prefix):
+            if script in REPRESENTED_SCRIPTS[model_prefix]:
+                return True
+            elif script in ['Hiragana', 'Katakana'] and 'Japanese' in REPRESENTED_SCRIPTS[model_prefix]:
+                return True
+    return False
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -584,7 +606,6 @@ def main() -> None:
     with open(args.input, encoding="utf-8") as f:
         text = f.read()
 
-    LOGGER.info("Determining script...")
     file_script = get_script(text)
     LOGGER.info(f"Script: {file_script}")
 
