@@ -34,6 +34,7 @@ from ..common.corpus import (
     split_parallel_corpus,
     write_corpus,
 )
+from ..common.script_utils import get_script, is_represented
 from ..common.environment import SIL_NLP_ENV
 from ..common.utils import NoiseMethod, Side, create_noise_methods, get_mt_exp_dir, is_set, set_seed
 from .augment import AugmentMethod, create_augment_methods
@@ -285,8 +286,6 @@ def get_data_file_pairs(corpus_pair: CorpusPair) -> Iterable[Tuple[DataFile, Dat
     else:
         for src_file in corpus_pair.src_files:
             for trg_file in corpus_pair.trg_files:
-                if src_file.iso == trg_file.iso:
-                    continue
                 yield (src_file, trg_file)
 
 
@@ -638,7 +637,9 @@ class Config(ABC):
         if stats_path.is_file():
             stats_df = pd.read_csv(stats_path)
         else:
-            stats_df = pd.DataFrame(columns=["src_project","trg_project","count","align_score","filtered_count","filtered_align_score"])
+            stats_df = pd.DataFrame(columns=["src_project","trg_project","project_count",
+                                             "count","align_score","filtered_count","filtered_align_score",
+                                             "src_script","src_script_in_model","trg_script","trg_script_in_model"])
 
         curr_stats = []
         for _,row in stats_df.iterrows():
@@ -647,12 +648,21 @@ class Config(ABC):
                 curr_stats.append(f"{row['src_project']}")
             else:
                 # Stats from current experiment
-                curr_stats.append(f"{row['src_project']}_{row['trg_project']}")
+                src_project = row["src_project"].split("-", maxsplit=1)[1]
+                trg_project = row["trg_project"].split("-", maxsplit=1)[1]
+                curr_stats.append(f"{src_project}_{trg_project}")
 
         for filepath in self.exp_dir.glob("*.csv"):
             if filepath.stem not in curr_stats and filepath.stem not in ["corpus-stats", "tokenization_stats"]:
-                pair_scores = pd.read_csv(filepath)["score"]
-                stats_df.loc[len(stats_df.index)] = [filepath.stem, "", len(pair_scores), round(mean(pair_scores), 4), len(pair_scores), round(mean(pair_scores), 4)]
+                pair_stats = pd.read_csv(filepath)
+                src_script = get_script("".join(pair_stats["source"]))
+                src_script_in_model = is_represented(src_script, self.model)
+                trg_script = get_script("".join(pair_stats["target"]))
+                trg_script_in_model = is_represented(trg_script, self.model)
+                stats_df.loc[len(stats_df.index)] = [filepath.stem,"",len(pair_stats["score"]),
+                                                     len(pair_stats["score"]),round(mean(pair_stats["score"]), 4),
+                                                     len(pair_stats["score"]),round(mean(pair_stats["score"]), 4),
+                                                     src_script,src_script_in_model,trg_script,trg_script_in_model]
         
         stats_df.to_csv(stats_path, index=False)
 
@@ -694,13 +704,15 @@ class Config(ABC):
             stats_file: Optional[TextIO] = None
             if stats and pair.size < self.stats_max_size:
                 stats_file = stack.enter_context(self._open("corpus-stats.csv"))
-                if stats_file.tell() == 0:
-                    stats_file.write("src_project,trg_project,count,align_score,filtered_count,filtered_align_score\n")
+                stats_file.write("src_project,trg_project,project_count,"
+                                 "count,align_score,filtered_count,filtered_align_score,"
+                                 "src_script,src_script_in_model,trg_script,trg_script_in_model\n")
 
             for src_file, trg_file in get_data_file_pairs(pair):
                 project_isos[src_file.project] = src_file.iso
                 project_isos[trg_file.project] = trg_file.iso
                 corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path)
+                project_count = len(corpus.index)
                 if len(pair.src_noise) > 0:
                     corpus["source"] = [self._noise(pair.src_noise, x) for x in corpus["source"]]
 
@@ -774,17 +786,26 @@ class Config(ABC):
                         filtered_count = unfiltered_len - len(cur_train)
                         filtered_alignment_score = mean(cur_train["score"]) if stats_file is not None else 0
 
+                    src_script = get_script("".join(cur_train["source"]))
+                    src_script_in_model = is_represented(src_script, self.model)
+                    trg_script = get_script("".join(cur_train["target"]))
+                    trg_script_in_model = is_represented(trg_script, self.model)
+
                     if stats_file is not None:
                         LOGGER.info(
                             f"{src_file.project} -> {trg_file.project} stats -"
+                            f" project count: {project_count},"
                             f" count: {corpus_count},"
                             f" alignment: {alignment_score:.4f},"
                             f" filtered count: {filtered_count},"
-                            f" alignment (filtered): {filtered_alignment_score:.4f}"
+                            f" alignment (filtered): {filtered_alignment_score:.4f},"
+                            f" source script: {src_script}, source script in model: {src_script_in_model},"
+                            f" target script: {trg_script}, target script in model: {trg_script_in_model}"
                         )
                         stats_file.write(
-                            f"{src_file.project},{trg_file.project},{corpus_count},{alignment_score:.4f},"
-                            f"{filtered_count},{filtered_alignment_score:.4f}\n"
+                            f"{src_file.iso}-{src_file.project},{trg_file.iso}-{trg_file.project},"
+                            f"{project_count},{corpus_count},{alignment_score:.4f},{filtered_count},{filtered_alignment_score:.4f},"
+                            f"{src_script},{src_script_in_model},{trg_script},{trg_script_in_model}\n"
                         )
                     cur_train.drop("score", axis=1, inplace=True, errors="ignore")
 
