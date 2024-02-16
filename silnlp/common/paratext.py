@@ -590,7 +590,8 @@ def check_versification(project_dir: str) -> Tuple[bool, List[VersificationType]
             f"Project versification setting {project_versification} does not match detected versification(s) "
             f"{', '.join([str(int(versification)) for versification in detected_versification])}. "
             f"The detected versification(s) were based on {', '.join(key_verses)} "
-            "being the last verse of its/their respective chapter(s)."
+            f"being the last verse of {'their' if len(key_verses)>=2 else 'its'} "
+            f"respective chapter{'s' if len(key_verses)>=2 else ''}."
         )
         return (matching, detected_versification)
 
