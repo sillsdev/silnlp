@@ -470,49 +470,66 @@ def get_last_verse(project_dir: str, book: str, chapter: int) -> int:
 
 # OT versification detection algorithm from:
 # https://github.com/BibleNLP/ebible/blob/main/code/notebooks/eBible%20-%20Extract%20projects.ipynb
-def detect_OT_versification(project_dir: str) -> VersificationType:
+def detect_OT_versification(project_dir: str) -> Tuple[VersificationType, List[str]]:
     dan_3 = get_last_verse(project_dir, "DAN", 3)
     dan_5 = get_last_verse(project_dir, "DAN", 5)
     dan_13 = get_last_verse(project_dir, "DAN", 13)
 
+    key_last_verses = []
+
     if dan_3 == 30:
         versification = VersificationType.ENGLISH
+        key_last_verses.append("Daniel 3:" + str(dan_3))
     elif dan_3 == 33 and dan_5 == 30:
         versification = VersificationType.ORIGINAL
+        key_last_verses.append("Daniel 3:" + str(dan_3))
+        key_last_verses.append("Daniel 5:" + str(dan_5))
     elif dan_3 == 33 and dan_5 == 31:
         versification = VersificationType.RUSSIAN_PROTESTANT
+        key_last_verses.append("Daniel 3:" + str(dan_3))
+        key_last_verses.append("Daniel 5:" + str(dan_5))
     elif dan_3 == 97:
         versification = VersificationType.SEPTUAGINT
+        key_last_verses.append("Daniel 3:" + str(dan_3))
     elif dan_3 == 100:
         if dan_13 == 65:
             versification = VersificationType.VULGATE
         else:
             versification = VersificationType.RUSSIAN_ORTHODOX
+        key_last_verses.append("Daniel 3:" + str(dan_3))
+        key_last_verses.append("Daniel 13:" + str(dan_13))
     else:
         versification = VersificationType.UNKNOWN
 
-    return versification
+    return versification, key_last_verses
 
 
 # NT versification detection algorithm from:
 # https://github.com/BibleNLP/ebible/blob/main/code/notebooks/eBible%20-%20Extract%20projects.ipynb
-def detect_NT_versification(project_dir: str) -> List[VersificationType]:
+def detect_NT_versification(project_dir: str) -> Tuple[List[VersificationType], List[str]]:
     jhn_6 = get_last_verse(project_dir, "JHN", 6)
     act_19 = get_last_verse(project_dir, "ACT", 19)
     rom_16 = get_last_verse(project_dir, "ROM", 16)
 
+    key_last_verses = []
+
     if jhn_6 == 72:
         versification = [VersificationType.VULGATE]
+        key_last_verses.append("John 6:" + str(jhn_6))
     elif act_19 == 41:
         versification = [VersificationType.ENGLISH]
+        key_last_verses.append("Acts 19:" + str(act_19))
     elif rom_16 == 24:
         versification = [VersificationType.RUSSIAN_PROTESTANT, VersificationType.RUSSIAN_ORTHODOX]
+        key_last_verses.append("Romans 16:" + str(rom_16))
     elif jhn_6 == 71 and act_19 == 40:
         versification = [VersificationType.ORIGINAL, VersificationType.SEPTUAGINT]
+        key_last_verses.append("John 6:" + str(jhn_6))
+        key_last_verses.append("Acts 19:" + str(act_19))
     else:
         versification = [VersificationType.UNKNOWN]
 
-    return versification
+    return versification, key_last_verses
 
 
 def check_versification(project_dir: str) -> Tuple[bool, List[VersificationType]]:
@@ -530,12 +547,14 @@ def check_versification(project_dir: str) -> Tuple[bool, List[VersificationType]
     check_nt = bool(jhn_book_path.is_file() and act_book_path.is_file() and rom_book_path.is_file())
 
     if check_ot:
-        ot_versification: VersificationType = detect_OT_versification(project_dir)
+        ot_versification: VersificationType
+        ot_versification, key_ot_verses = detect_OT_versification(project_dir)
         if ot_versification == VersificationType.UNKNOWN:
             LOGGER.warning(f"Unknown versification detected for {project_dir}.")
             return (matching, [ot_versification])
     if check_nt:
-        nt_versification: List[VersificationType] = detect_NT_versification(project_dir)
+        nt_versification: List[VersificationType]
+        nt_versification, key_nt_verses = detect_NT_versification(project_dir)
         if nt_versification[0] == VersificationType.UNKNOWN:
             LOGGER.warning(f"Unknown versification detected for {project_dir}.")
             return (matching, nt_versification)
@@ -544,15 +563,20 @@ def check_versification(project_dir: str) -> Tuple[bool, List[VersificationType]
     if check_ot and check_nt:
         if ot_versification not in nt_versification:
             LOGGER.warning(
-                f"Detected OT versification {ot_versification} and detected NT versification(s) "
-                f"{', '.join([str(int(versification)) for versification in nt_versification])} do not match."
+                f"The detected OT versification {ot_versification} and the detected NT versification(s) "
+                f"{', '.join([str(int(versification)) for versification in nt_versification])} do not match. "
+                f"The detected versifications were based on {', '.join(key_ot_verses + key_nt_verses)} "
+                "being the last verse of their respective chapters."
             )
             return (matching, [ot_versification] + nt_versification)
         detected_versification = [ot_versification]
+        key_verses = key_ot_verses + key_nt_verses
     elif not check_ot and check_nt:
         detected_versification = nt_versification
+        key_verses = key_nt_verses
     elif check_ot and not check_nt:
         detected_versification = [ot_versification]
+        key_verses = key_ot_verses
     else:
         LOGGER.warning(
             f"Insufficient information to detect versification for {project_dir}. "
@@ -564,7 +588,10 @@ def check_versification(project_dir: str) -> Tuple[bool, List[VersificationType]
     if project_versification not in detected_versification:
         LOGGER.warning(
             f"Project versification setting {project_versification} does not match detected versification(s) "
-            f"{', '.join([str(int(versification)) for versification in detected_versification])}."
+            f"{', '.join([str(int(versification)) for versification in detected_versification])}. "
+            f"The detected versification(s) were based on {', '.join(key_verses)} "
+            f"being the last verse of {'their' if len(key_verses)>=2 else 'its'} "
+            f"respective chapter{'s' if len(key_verses)>=2 else ''}."
         )
         return (matching, detected_versification)
 
