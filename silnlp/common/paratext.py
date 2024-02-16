@@ -548,13 +548,13 @@ def check_versification(project_dir: str) -> Tuple[bool, List[VersificationType]
 
     if check_ot:
         ot_versification: VersificationType
-        ot_versification, key_nt_verses = detect_OT_versification(project_dir)
+        ot_versification, key_ot_verses = detect_OT_versification(project_dir)
         if ot_versification == VersificationType.UNKNOWN:
             LOGGER.warning(f"Unknown versification detected for {project_dir}.")
             return (matching, [ot_versification])
     if check_nt:
         nt_versification: List[VersificationType]
-        nt_versification, key_ot_verses = detect_NT_versification(project_dir)
+        nt_versification, key_nt_verses = detect_NT_versification(project_dir)
         if nt_versification[0] == VersificationType.UNKNOWN:
             LOGGER.warning(f"Unknown versification detected for {project_dir}.")
             return (matching, nt_versification)
