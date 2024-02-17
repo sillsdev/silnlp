@@ -85,9 +85,7 @@ class SILExperiment:
 
     def translate(self):
         translate_configs = self.config.translate
-
         for translate_config in translate_configs:
-        
             translator = TranslationTask(
             name=self.name,
             checkpoint=translate_config.get("checkpoint", "last"),
@@ -97,7 +95,6 @@ class SILExperiment:
             if len(translate_config.get("books", [])) > 0:
                 if isinstance(translate_config["books"], list):
                     translate_config["books"] = ";".join(translate_config["books"])
-
                 translator.translate_books(
                     translate_config["books"],
                     translate_config.get("src_project"),
