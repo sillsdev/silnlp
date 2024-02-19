@@ -149,6 +149,17 @@ def current_context():
     print(functions.current_context())
 
 
+@app.command("untrack-context")
+def untrack_context(root_folder_id: str):
+    """Untrack context with folder id `root_folder_id`"""
+    functions.untrack_context(root_folder_id)
+    print(f"[green]Sucessfully untracked context {root_folder_id}[/green]")
+
+@app.command("list-contexts")
+def list_contexts():
+    """Lists all currently tracked contexts"""
+    print('\n'.join(functions.list_contexts()))
+
 def _map_status_color(status: Status) -> str:
     # Mysterious comparison behavior; comparing by value instead
     if status.value == Status.Created.value:

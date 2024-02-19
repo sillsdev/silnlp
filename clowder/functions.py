@@ -7,7 +7,9 @@ from clowder.status import Status
 if ENV is None:
     ENV = get_env()
 
-# TODO remote logging (ignore for mvp)
+
+class ContextNotFoundException(Exception):
+    pass
 
 
 def untrack(investigation_name: str):
@@ -130,6 +132,19 @@ def use_context(root_folder_id: str):
         ENV.meta.data[root_folder_id] = {"investigations": {}}
     ENV.meta.flush()
 
+
+def untrack_context(root_folder_id: str):
+    """Untrack context with folder id `root_folder_id`"""
+    if root_folder_id not in ENV.meta.data:
+        raise ContextNotFoundException(f"Context {root_folder_id} is not tracked")
+    if ENV.root == root_folder_id:
+        use_context("temp")
+    del ENV.meta.data[root_folder_id]
+    ENV.meta.flush()
+
+def list_contexts() -> "list[str]":
+    """Lists all currently tracked contexts"""
+    return ENV.meta.data.keys() - set(["current_root"])
 
 def list_inv() -> "list[Investigation]":
     """Lists all investigations in the current context"""
