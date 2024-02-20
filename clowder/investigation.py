@@ -405,7 +405,7 @@ class Investigation:
                 out_df = out_df[["score"]]                
                 out_df = out_df.transpose()
                 out_df.columns = pd.Index(["BLEU"])
-                out_df["BLEU"] = out_df["BLEU"].apply(lambda x: x.split("/")[0])
+                out_df["BLEU"] = out_df["BLEU"].apply(lambda x: str(x).split("/")[0] if '/' in str(x) else str(x))
                 out_df["BLEU"] = out_df["BLEU"].apply(pd.to_numeric)
                 out_df[["spBLEU", "CHRF3", "WER", "TER","BLEU-details"]] = None
                 out_df["NumberOfSteps"] = num_steps
@@ -417,7 +417,7 @@ class Investigation:
                 out_df = out_df.transpose()
                 out_df.columns = pd.Index(column_names)
                 out_df["BLEU-details"] = out_df["BLEU"]
-                out_df["BLEU"] = out_df["BLEU"].apply(lambda x: x.split("/")[0])
+                out_df["BLEU"] = out_df["BLEU"].apply(lambda x: str(x).split("/")[0] if '/' in str(x) else str(x))
                 out_df[["BLEU", "spBLEU", "CHRF3", "WER", "TER"]] = out_df[["BLEU", "spBLEU", "CHRF3", "WER", "TER"]].apply(
                     pd.to_numeric, axis=0
                 )  # TODO more robust (ignore for mvp)
