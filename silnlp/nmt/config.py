@@ -206,6 +206,9 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
 
         src_terms_files = get_terms_files(src_files) if is_set(type, DataFileType.TRAIN) else []
         trg_terms_files = get_terms_files(trg_files) if is_set(type, DataFileType.TRAIN) else []
+        print(f'This is the output of get_terms_files: {get_terms_files(src_files)}')
+        print(f'This is the output of the the conditional: {is_set(type, DataFileType.TRAIN)}')
+        print(f'Source terms files: {src_terms_files} \n Trg terms files: {trg_terms_files}')
 
         if "lexical" not in pair:
             pair["lexical"] = is_set(type, DataFileType.DICT)
