@@ -252,7 +252,7 @@ Now your AWS S3 bucket should be mounted as ~/S when you start Linux.
 
 
 ### Setup environment variable
-The following will cause the SILNLP tools to select the S3 bucket for local silnlp operations
+The following will cause the SILNLP tools to select the S3 bucket for local silnlp operations. If you are using the Docker container, these variables will already be set and the cache will be located at `/root/.cache/silnlp`.
 
 **Windows or Linux**
 * Set the environment variable SIL_NLP_DATA_PATH to "/aqua-ml-data"
