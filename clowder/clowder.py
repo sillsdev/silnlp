@@ -19,8 +19,9 @@ def untrack(investigation_name: str):
 
 @app.command("track")
 def track(investigation_name: Annotated[Optional[str], typer.Argument()] = None):
-    """Tracks all investigations in the current context. If given an `--investigation-name`, this
-    will only track a single investigation with that For your security, you've been signed out of your current session.  name in the current context"""
+    """Tracks all investigations in the current context. If given an investigation name
+    as an argument, this command will only track a single investigation with that name 
+    (if there are any) in the current context root folder"""
     functions.track(investigation_name)
     print(
         f"[green]Successfully tracked {investigation_name if investigation_name else 'all investigations in this context'}[/green]"
