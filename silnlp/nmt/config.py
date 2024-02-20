@@ -442,10 +442,6 @@ class Config(ABC):
         return self.root["eval"]
 
     @property
-    def translate(self) -> list:
-        return self.root["translate"]
-
-    @property
     def mirror(self) -> bool:
         return self.data["mirror"]
 

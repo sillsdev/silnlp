@@ -3,6 +3,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+import yaml
 
 from ..common.environment import SIL_NLP_ENV
 from ..common.tf_utils import enable_memory_growth
@@ -84,40 +85,43 @@ class SILExperiment:
         )
 
     def translate(self):
-        translate_configs = self.config.translate
-        for translate_config in translate_configs:
+        SIL_NLP_ENV.copy_experiment_from_bucket(self.name)
+        with (self.config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as file:
+                translate_configs = yaml.safe_load(file)
+
+        for config in translate_configs.get("translate", []):
             translator = TranslationTask(
             name=self.name,
-            checkpoint=translate_config.get("checkpoint", "last"),
+            checkpoint=config.get("checkpoint", "last"),
             commit=self.commit
             )
 
-            if len(translate_config.get("books", [])) > 0:
-                if isinstance(translate_config["books"], list):
-                    translate_config["books"] = ";".join(translate_config["books"])
+            if len(config.get("books", [])) > 0:
+                if isinstance(config["books"], list):
+                    config["books"] = ";".join(config["books"])
                 translator.translate_books(
-                    translate_config["books"],
-                    translate_config.get("src_project"),
-                    translate_config.get("trg_project"),
-                    translate_config.get("trg_iso"),
-                    translate_config.get("include_inline_elements", False),
-                    translate_config.get("stylesheet_field_update", "merge"),
+                    config["books"],
+                    config.get("src_project"),
+                    config.get("trg_project"),
+                    config.get("trg_iso"),
+                    config.get("include_inline_elements", False),
+                    config.get("stylesheet_field_update", "merge"),
                 )
-            elif translate_config.get("src_prefix"):
+            elif config.get("src_prefix"):
                 translator.translate_text_files(
-                    translate_config.get("src_prefix"), 
-                    translate_config.get("trg_prefix"), 
-                    translate_config.get("start_seq"), 
-                    translate_config.get("end_seq"), 
-                    translate_config.get("src_iso"), 
-                    translate_config.get("trg_iso")
+                    config.get("src_prefix"), 
+                    config.get("trg_prefix"), 
+                    config.get("start_seq"), 
+                    config.get("end_seq"), 
+                    config.get("src_iso"), 
+                    config.get("trg_iso")
                 )
-            elif translate_config.get("src"):
-                translator.translate_files(translate_config.get("src"), 
-                                        translate_config.get("trg"), 
-                                        translate_config.get("src_iso"), 
-                                        translate_config.get("trg_iso"), 
-                                        translate_config.get("include_inline_elements", False))
+            elif config.get("src"):
+                translator.translate_files(config.get("src"), 
+                                        config.get("trg"), 
+                                        config.get("src_iso"), 
+                                        config.get("trg_iso"), 
+                                        config.get("include_inline_elements", False))
             else:
                 raise RuntimeError("A Scripture book, file, or file prefix must be specified for translation.")
 

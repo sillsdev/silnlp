@@ -295,7 +295,6 @@ class HuggingFaceConfig(Config):
                     "attention_dropout": 0.1,
                     "activation_dropout": 0.0,
                 },
-                "translate": []
             },
             config,
         )
