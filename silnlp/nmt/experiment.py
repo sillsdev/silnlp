@@ -3,6 +3,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+import yaml
 
 from ..common.environment import SIL_NLP_ENV
 from ..common.tf_utils import enable_memory_growth
@@ -10,6 +11,7 @@ from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import SILClearML
 from .config import Config, get_mt_exp_dir
 from .test import test
+from .translate import TranslationTask
 
 
 @dataclass
@@ -24,6 +26,7 @@ class SILExperiment:
     run_prep: bool = False
     run_train: bool = False
     run_test: bool = False
+    run_translate: bool = False
     score_by_book: bool = False
     commit: Optional[str] = None
 
@@ -41,6 +44,8 @@ class SILExperiment:
             self.train()
         if self.run_test:
             self.test()
+        if self.run_translate:
+            self.translate()
 
     def preprocess(self):
         # Do some basic checks before starting the experiment
@@ -79,6 +84,47 @@ class SILExperiment:
             self.name, patterns=("scores-*.csv", "test.*trg-predictions.*"), overwrite=True
         )
 
+    def translate(self):
+        SIL_NLP_ENV.copy_experiment_from_bucket(self.name)
+        with (self.config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as file:
+                translate_configs = yaml.safe_load(file)
+
+        for config in translate_configs.get("translate", []):
+            translator = TranslationTask(
+            name=self.name,
+            checkpoint=config.get("checkpoint", "last"),
+            commit=self.commit
+            )
+
+            if len(config.get("books", [])) > 0:
+                if isinstance(config["books"], list):
+                    config["books"] = ";".join(config["books"])
+                translator.translate_books(
+                    config["books"],
+                    config.get("src_project"),
+                    config.get("trg_project"),
+                    config.get("trg_iso"),
+                    config.get("include_inline_elements", False),
+                    config.get("stylesheet_field_update", "merge"),
+                )
+            elif config.get("src_prefix"):
+                translator.translate_text_files(
+                    config.get("src_prefix"), 
+                    config.get("trg_prefix"), 
+                    config.get("start_seq"), 
+                    config.get("end_seq"), 
+                    config.get("src_iso"), 
+                    config.get("trg_iso")
+                )
+            elif config.get("src"):
+                translator.translate_files(config.get("src"), 
+                                        config.get("trg"), 
+                                        config.get("src_iso"), 
+                                        config.get("trg_iso"), 
+                                        config.get("include_inline_elements", False))
+            else:
+                raise RuntimeError("A Scripture book, file, or file prefix must be specified for translation.")
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run experiment - preprocess, train, and test")
@@ -99,6 +145,7 @@ def main() -> None:
     parser.add_argument("--preprocess", default=False, action="store_true", help="Run the preprocess step.")
     parser.add_argument("--train", default=False, action="store_true", help="Run the train step.")
     parser.add_argument("--test", default=False, action="store_true", help="Run the test step.")
+    parser.add_argument("--translate", default=False, action="store_true", help="Create drafts.")
     parser.add_argument("--score-by-book", default=False, action="store_true", help="Score individual books")
     parser.add_argument("--mt-dir", default=None, type=str, help="The machine translation directory.")
     parser.add_argument(
@@ -139,6 +186,7 @@ def main() -> None:
         run_prep=args.preprocess,
         run_train=args.train,
         run_test=args.test,
+        run_translate=args.translate,
         score_by_book=args.score_by_book,
         commit=args.commit,
     )
