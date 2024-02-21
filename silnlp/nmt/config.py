@@ -472,7 +472,7 @@ class Config(ABC):
         seed = self.data["seed"]
         set_seed(seed)
 
-    def preprocess(self, stats: bool, force_align: bool) -> None:
+    def preprocess(self, stats: bool, force_align: bool = False) -> None:
         # confirm that input file paths exist
         for file in self.src_file_paths | self.trg_file_paths:
             if not file.is_file():
