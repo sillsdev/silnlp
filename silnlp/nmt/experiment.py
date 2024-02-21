@@ -55,6 +55,7 @@ class SILExperiment:
         config_file = Path(exp_dir, "config.yml")
         if not config_file.exists():
             raise RuntimeError(f"ERROR: Config file does not exist in experiment folder {exp_dir}.")
+        SIL_NLP_ENV.copy_experiment_from_bucket(self.name)
         self.config.preprocess(self.make_stats, self.force_align)
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
 

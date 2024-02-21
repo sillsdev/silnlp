@@ -1,0 +1,38 @@
+{
+  "added_tokens_decoder": {
+    "0": {
+      "content": "<unk>",
+      "lstrip": false,
+      "normalized": false,
+      "rstrip": false,
+      "single_word": false,
+      "special": true
+    },
+    "1": {
+      "content": "<s>",
+      "lstrip": false,
+      "normalized": false,
+      "rstrip": false,
+      "single_word": false,
+      "special": true
+    },
+    "2": {
+      "content": "</s>",
+      "lstrip": false,
+      "normalized": false,
+      "rstrip": false,
+      "single_word": false,
+      "special": true
+    }
+  },
+  "additional_special_tokens": [],
+  "clean_up_tokenization_spaces": true,
+  "eos_token": "</s>",
+  "extra_ids": 0,
+  "legacy": false,
+  "model_max_length": 1000000000000000019884624838656,
+  "pad_token": "<s>",
+  "sp_model_kwargs": {},
+  "tokenizer_class": "T5Tokenizer",
+  "unk_token": "<unk>"
+}

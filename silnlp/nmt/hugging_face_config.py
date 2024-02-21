@@ -233,14 +233,14 @@ def prune_sublists(words_ids: List[List[List[int]]]) -> List[List[List[int]]]:
             result.append(temp_variants)
     return result
 
+SUPPORTED_MODEL_PREFIXES = ["facebook/nllb-200", "google/madlad400"]
 SUPPORTED_T5_MODELS = ["google/madlad400"]
 
-
-def is_t5_model(name: str) -> bool:
-    for model_prefix in SUPPORTED_T5_MODELS:
-        if name.startswith(model_prefix):
-            return True
-    return False
+def get_model_prefix(model: str) -> str:
+    for prefix in SUPPORTED_MODEL_PREFIXES:
+        if model.startswith(prefix):
+            return prefix
+    return ""
 
 
 class HuggingFaceConfig(Config):
@@ -299,10 +299,11 @@ class HuggingFaceConfig(Config):
             config,
         )
         self._tokenizer: Optional[PreTrainedTokenizer] = None
+        self.model_prefix = get_model_prefix(config.get("model", ""))
 
         super().__init__(exp_dir, config)
 
-        if self.model.startswith("google/madlad400"):
+        if self.model_prefix == "google/madlad400":
             self.train["max_source_length"] = 256
             self.train["max_target_length"] = 256
 
@@ -361,9 +362,16 @@ class HuggingFaceConfig(Config):
         self._tokenizer.save_pretrained(str(self.exp_dir))
         with open(self.exp_dir / "tokenizer.json", "r+", encoding="utf-8") as file:
             data = json.load(file)
-            vocab_len = len(data["model"]["vocab"].keys())
-            for i, token in enumerate(missing_tokens):
-                data["model"]["vocab"][token] = vocab_len + i
+
+            if self.model_prefix == "google/madlad400":
+                vocab_len = len(data["model"]["vocab"])
+                for i, token in enumerate(missing_tokens):
+                    data["model"]["vocab"].append([token, vocab_len + i])
+            else:
+                vocab_len = len(data["model"]["vocab"].keys())
+                for i, token in enumerate(missing_tokens):
+                    data["model"]["vocab"][token] = vocab_len + i
+
             if trained_tokenizers:
                 for trained_tok in trained_tokenizers:
                     trained_tok.save(str(self.exp_dir / "tokenizer_trained.json"))
@@ -420,7 +428,7 @@ class HuggingFaceConfig(Config):
         src_missing_tokens: List[str] = []
         trg_missing_tokens: List[str] = []
         if tok_dict and (tok_dict.get("update_src") or tok_dict.get("update_trg")):
-            if tok_dict.get("trained_tokens") and (SIL_NLP_ENV.assets_dir / "tokenizer_config.json").is_file():
+            if tok_dict.get("trained_tokens") and (SIL_NLP_ENV.assets_dir / "tokenizers" / self.model_prefix /"tokenizer_config.json").is_file():
                 if not tok_dict.get("share_vocab") and tok_dict.get("update_src") and tok_dict.get("update_trg"):
                     src_missing_tokens, src_trained_tokenizer = self._create_trained_tokens(
                         list(self.src_file_paths), tok_dict.get("src_vocab_size")
@@ -511,22 +519,28 @@ class HuggingFaceConfig(Config):
             if (
                 tok_dict
                 and (tok_dict.get("update_src") or tok_dict.get("update_trg"))
-                and (self.exp_dir / "sentencepiece.bpe.model").is_file()
+                and ((self.exp_dir / "sentencepiece.bpe.model").is_file() or (self.exp_dir / "spiece.model").is_file())
                 and not (self.exp_dir / "tokenizer_config.json").is_file()
             ):
-                self._tokenizer = NllbTokenizer.from_pretrained(str(self.exp_dir))
-                self._tokenizer = convert_slow_tokenizer(self._tokenizer)
-                self._tokenizer = NllbTokenizerFast(tokenizer_object=self._tokenizer)
-                self._tokenizer.save_pretrained(str(self.exp_dir))
+                if self.model_prefix == "facebook/nllb-200":
+                    self._tokenizer = NllbTokenizer.from_pretrained(str(self.exp_dir))
+                    self._tokenizer = convert_slow_tokenizer(self._tokenizer)
+                    self._tokenizer = NllbTokenizerFast(tokenizer_object=self._tokenizer)
+                    self._tokenizer.save_pretrained(str(self.exp_dir))
+                else:
+                    self._tokenizer = T5Tokenizer.from_pretrained(str(self.exp_dir))
+                    self._tokenizer = convert_slow_tokenizer(self._tokenizer)
+                    self._tokenizer = T5TokenizerFast(tokenizer_object=self._tokenizer)
+                    self._tokenizer.save_pretrained(str(self.exp_dir))
             else:
                 if (not tok_dict or not (tok_dict.get("update_src") or tok_dict.get("update_trg"))) and (
                     self.exp_dir / "tokenizer_config.json"
                 ).is_file():
                     model_name_or_path = str(self.exp_dir)
                 elif (tok_dict and (tok_dict.get("update_src") or tok_dict.get("update_trg"))) and (
-                    SIL_NLP_ENV.assets_dir / "tokenizer_config.json"
+                    SIL_NLP_ENV.assets_dir / "tokenizers" / self.model_prefix / "tokenizer_config.json"
                 ).is_file():
-                    model_name_or_path = str(SIL_NLP_ENV.assets_dir)
+                    model_name_or_path = str(SIL_NLP_ENV.assets_dir / "tokenizers" / self.model_prefix)
                 else:
                     model_name_or_path = self.model
                 self._tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True)
@@ -654,7 +668,7 @@ class HuggingFaceNMTModel(NMTModel):
         self._mixed_precision = mixed_precision
         set_seed(self._config.data["seed"])
         self._dictionary: Optional[Dict[VerseRef, Set[str]]] = None
-        self._is_t5 = is_t5_model(self._config.model)
+        self._is_t5 = self._config.model_prefix in SUPPORTED_T5_MODELS
 
     def train(self) -> None:
         training_args = self._create_training_arguments()
@@ -699,19 +713,10 @@ class HuggingFaceNMTModel(NMTModel):
 
         if self._config.train["use_lora"]:
             lora_config = self._config.train["lora_config"]
-
-            if "target_modules" not in lora_config:
-                for model_prefix in LORA_DEFAULT_CONFIGS:
-                    if self._config.model.startswith(model_prefix):
-                        lora_config["target_modules"] = LORA_DEFAULT_CONFIGS[model_prefix]["target_modules"]
-            if "modules_to_save" not in lora_config:
-                for model_prefix in LORA_DEFAULT_CONFIGS:
-                    if self._config.model.startswith(model_prefix):
-                        lora_config["modules_to_save"] = LORA_DEFAULT_CONFIGS[model_prefix]["modules_to_save"]
             
-            if isinstance(lora_config["target_modules"], str):
+            if isinstance(lora_config.get("target_modules", []), str):
                 lora_config["target_modules"] = lora_config["target_modules"].split(",")
-            if isinstance(lora_config["modules_to_save"], str):
+            if isinstance(lora_config.get("modules_to_save", []), str):
                 lora_config["modules_to_save"] = lora_config["modules_to_save"].split(",")
 
             peft_config = LoraConfig(
@@ -719,8 +724,8 @@ class HuggingFaceNMTModel(NMTModel):
                 r=lora_config.get("r", 4),
                 lora_alpha=lora_config.get("alpha", 32),
                 lora_dropout=lora_config.get("dropout", .1),
-                target_modules=lora_config["target_modules"],
-                modules_to_save=lora_config["modules_to_save"],
+                target_modules=lora_config.get("target_modules", LORA_DEFAULT_CONFIGS[self._config.model_prefix]["target_modules"]),
+                modules_to_save=lora_config.get("modules_to_save", LORA_DEFAULT_CONFIGS[self._config.model_prefix]["modules_to_save"]),
             )
             model = get_peft_model(model, peft_config)
             model.enable_input_require_grads()  # Converting to PeftModel causes gradient calculation to be disabled
