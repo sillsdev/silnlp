@@ -1103,7 +1103,7 @@ class Config(ABC):
                     cur_terms["target_lang"] = trg_terms_file.iso
                     terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
         return terms
-
+        
     def _write_val_trg(self, tokenizer: Optional[Tokenizer], val: Dict[Tuple[str, str], pd.DataFrame]) -> None:
         with ExitStack() as stack:
             ref_files: List[TextIO] = []
