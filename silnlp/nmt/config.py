@@ -370,11 +370,18 @@ class Config(ABC):
                 self.src_projects.update(sf.project for sf in corpus_pair.src_files)
                 self.trg_projects.update(sf.project for sf in corpus_pair.trg_files)
                 if terms_config["include_glosses"]:
-                    if "en" in pair_src_isos:
+                    print(f'pair_src_isos is {pair_src_isos}')
+                    if "en" in pair_src_isos or "fr" in pair_src_isos:
                         self.src_file_paths.update(get_terms_glosses_file_paths(corpus_pair.src_terms_files))
-                    if "en" in pair_trg_isos:
+                        print(f'corpus_pair.src_terms_files is {corpus_pair.src_terms_files}')
+                        ## this one below is getting empty input and giving empty output:
+                        print(f'get_terms_glosses_file_paths output is {get_terms_glosses_file_paths(corpus_pair.src_terms_files)}')
+                    if "en" in pair_trg_isos or "fr" in pair_trg_isos:
                         self.trg_file_paths.update(get_terms_glosses_file_paths(corpus_pair.trg_terms_files))
             self._tags.update(f"<{tag}>" for tag in corpus_pair.tags)
+
+            print(f'src_files contains {corpus_pair.src_files}')
+            print(f'trg_files contains {corpus_pair.trg_files}')
 
             for src_file in corpus_pair.src_files:
                 for trg_file in corpus_pair.trg_files:
@@ -816,10 +823,12 @@ class Config(ABC):
             )
 
         terms_config = self.data["terms"]
+        print(f'self.data[\'terms\'] terms here in 826 is {self.data["terms"]}')
         terms_train_count = 0
         if terms_config["train"]:
             terms_train_count = self._write_terms(tokenizer, pair, tags_str)
         train_count += terms_train_count
+        print(f'terms_train_count is {terms_train_count}')
 
         dict_count = 0
         if terms_config["dictionary"]:
@@ -1066,6 +1075,8 @@ class Config(ABC):
         if categories is not None and len(categories) == 0:
             return None
         categories_set: Optional[Set[str]] = None if categories is None else set(categories)
+        print(f'scr_terms_files are {pair.src_terms_files}')
+        print(f'trg_terms_files are {pair.trg_terms_files}')
         all_src_terms = [(src_terms_file, get_terms(src_terms_file.path)) for src_terms_file in pair.src_terms_files]
         all_trg_terms = [(trg_terms_file, get_terms(trg_terms_file.path)) for trg_terms_file in pair.trg_terms_files]
         for src_terms_file, src_terms in all_src_terms:
@@ -1089,6 +1100,14 @@ class Config(ABC):
                     cur_terms = get_terms_data_frame(trg_terms, categories_set, filter_books)
                     cur_terms = cur_terms.rename(columns={"rendering": "target", "gloss": "source"})
                     cur_terms["source_lang"] = "en"
+                    cur_terms["target_lang"] = trg_terms_file.iso
+                    terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
+            if "fr" in self.src_isos:
+                print('yep')
+                for trg_terms_file, trg_terms in all_trg_terms:
+                    cur_terms = get_terms_data_frame(trg_terms, categories_set, filter_books)
+                    cur_terms = cur_terms.rename(columns={"rendering": "target", "gloss": "source"})
+                    cur_terms["source_lang"] = "fr"
                     cur_terms["target_lang"] = trg_terms_file.iso
                     terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
         return terms
