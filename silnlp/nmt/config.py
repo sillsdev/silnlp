@@ -367,10 +367,11 @@ class Config(ABC):
                 self.src_projects.update(sf.project for sf in corpus_pair.src_files)
                 self.trg_projects.update(sf.project for sf in corpus_pair.trg_files)
                 if terms_config["include_glosses"]:
-                    if "en" in pair_src_isos or "fr" in pair_src_isos:
-                        self.src_file_paths.update(get_terms_glosses_file_paths(corpus_pair.src_terms_files))
-                    if "en" in pair_trg_isos or "fr" in pair_trg_isos:
-                        self.trg_file_paths.update(get_terms_glosses_file_paths(corpus_pair.trg_terms_files))
+                    for gloss_iso in ["fr","en","id"]:
+                        if gloss_iso in pair_src_isos:
+                            self.src_file_paths.update(get_terms_glosses_file_paths(corpus_pair.src_terms_files))
+                        if gloss_iso in pair_trg_isos:
+                            self.trg_file_paths.update(get_terms_glosses_file_paths(corpus_pair.trg_terms_files))
             self._tags.update(f"<{tag}>" for tag in corpus_pair.tags)
 
             for src_file in corpus_pair.src_files:
@@ -1074,34 +1075,21 @@ class Config(ABC):
                 cur_terms["target_lang"] = trg_terms_file.iso
                 terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
         if terms_config["include_glosses"]:
-            if "en" in self.trg_isos:
-                for src_terms_file, src_terms in all_src_terms:
-                    cur_terms = get_terms_data_frame(src_terms, categories_set, filter_books)
-                    cur_terms = cur_terms.rename(columns={"rendering": "source", "gloss": "target"})
-                    cur_terms["source_lang"] = src_terms_file.iso
-                    cur_terms["target_lang"] = "en"
-                    terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
-            if "en" in self.src_isos:
-                for trg_terms_file, trg_terms in all_trg_terms:
-                    cur_terms = get_terms_data_frame(trg_terms, categories_set, filter_books)
-                    cur_terms = cur_terms.rename(columns={"rendering": "target", "gloss": "source"})
-                    cur_terms["source_lang"] = "en"
-                    cur_terms["target_lang"] = trg_terms_file.iso
-                    terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
-            if "fr" in self.trg_isos:
-                for src_terms_file, src_terms in all_src_terms:
-                    cur_terms = get_terms_data_frame(src_terms, categories_set, filter_books)
-                    cur_terms = cur_terms.rename(columns={"rendering": "source", "gloss": "target"})
-                    cur_terms["source_lang"] = src_terms_file.iso
-                    cur_terms["target_lang"] = "fr"
-                    terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
-            if "fr" in self.src_isos:
-                for trg_terms_file, trg_terms in all_trg_terms:
-                    cur_terms = get_terms_data_frame(trg_terms, categories_set, filter_books)
-                    cur_terms = cur_terms.rename(columns={"rendering": "target", "gloss": "source"})
-                    cur_terms["source_lang"] = "fr"
-                    cur_terms["target_lang"] = trg_terms_file.iso
-                    terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
+            for gloss_iso in ["en", "fr", "id"]:
+                if gloss_iso in self.trg_isos:
+                    for src_terms_file, src_terms in all_src_terms:
+                        cur_terms = get_terms_data_frame(src_terms, categories_set, filter_books)
+                        cur_terms = cur_terms.rename(columns={"rendering": "source", "gloss": "target"})
+                        cur_terms["source_lang"] = src_terms_file.iso
+                        cur_terms["target_lang"] = gloss_iso
+                        terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
+                if gloss_iso in self.src_isos:
+                    for trg_terms_file, trg_terms in all_trg_terms:
+                        cur_terms = get_terms_data_frame(trg_terms, categories_set, filter_books)
+                        cur_terms = cur_terms.rename(columns={"rendering": "target", "gloss": "source"})
+                        cur_terms["source_lang"] = gloss_iso
+                        cur_terms["target_lang"] = trg_terms_file.iso
+                        terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
         return terms
         
     def _write_val_trg(self, tokenizer: Optional[Tokenizer], val: Dict[Tuple[str, str], pd.DataFrame]) -> None:
