@@ -45,6 +45,8 @@ class SilNlpEnv:
             return
         elif os.getenv("SIL_NLP_PT_DIR"):
             self.pt_dir = self.data_dir / os.getenv("SIL_NLP_PT_DIR", "")
+        elif os.getenv("OVERRIDE_FULL_SIL_NLP_PT_DIR"):
+            self.pt_dir = self.data_dir / os.getenv("OVERRIDE_FULL_SIL_NLP_PT_DIR")
         else:
             self.pt_dir = self.data_dir / "Paratext"
         self.pt_terms_dir = self.pt_dir / "terms"
@@ -81,9 +83,14 @@ class SilNlpEnv:
         else:
             self.mt_dir = self.data_dir / "MT"
         self.mt_corpora_dir = self.mt_dir / "corpora"
-
-        self.mt_terms_dir = self.mt_dir / "terms"
-        self.mt_scripture_dir = self.mt_dir / "scripture"
+        if os.getenv("OVERRIDE_FULL_SIL_NLP_TERMS_DIR"):
+            self.mt_terms_dir = self.data_dir / Path(os.getenv("OVERRIDE_FULL_SIL_NLP_TERMS_DIR"))
+        else:
+            self.mt_terms_dir = self.mt_dir / "terms"
+        if os.getenv("OVERRIDE_FULL_SIL_NLP_SCRIPTURE_DIR"):
+            self.mt_scripture_dir = self.data_dir / Path(os.getenv("OVERRIDE_FULL_SIL_NLP_SCRIPTURE_DIR"))
+        else:    
+            self.mt_scripture_dir = self.mt_dir / "scripture"
         if self.is_bucket:
             sil_nlp_cache_dir = os.getenv("SIL_NLP_CACHE_EXPERIMENT_DIR")
             if sil_nlp_cache_dir is not None:
