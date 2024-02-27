@@ -1002,6 +1002,8 @@ class HuggingFaceNMTModel(NMTModel):
         merge_dict(args, {"fp16": self._mixed_precision and not self._is_t5, 
                           "bf16": self._mixed_precision and self._is_t5, 
                           "tf32": self._mixed_precision})
+        if self._is_t5 and "learning_rate" not in args.keys():
+            args["learning_rate"] = 3e-4
         return parser.parse_dict(args)[0]
 
     def _get_dictionary(self) -> Dict[VerseRef, Set[str]]:
