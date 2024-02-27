@@ -142,13 +142,30 @@ def untrack_context(root_folder_id: str):
     del ENV.meta.data[root_folder_id]
     ENV.meta.flush()
 
+
 def list_contexts() -> "list[str]":
     """Lists all currently tracked contexts"""
     return ENV.meta.data.keys() - set(["current_root"])
 
+
 def list_inv() -> "list[Investigation]":
     """Lists all investigations in the current context"""
     return ENV.investigations
+
+
+def use_data(folder_id: str):
+    """Use scripture data from a particular gdrive folder specified by folder-id.
+    (Other users will not be able to access this data). Data should be uploaded to
+    the gdrive folder as complete Paratext project folders. This data folder will
+    be associated only with the current context"""
+    ENV.use_data(folder_id)
+
+
+def current_data():
+    """Return the data folder id associated with this context if any"""
+    if "data_folder" in ENV.current_meta:
+        return ENV.current_meta["data_folder"]
+    return None
 
 
 def current_context() -> str:

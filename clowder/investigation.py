@@ -4,7 +4,8 @@ import re
 import subprocess
 from io import StringIO
 from pathlib import Path
-from pprint import pformat, pprint as print
+from pprint import pformat
+from pprint import pprint as print
 from time import sleep
 from typing import Optional, Union
 
@@ -13,7 +14,6 @@ import gspread_dataframe as gd
 import jinja2
 import numpy as np
 import pandas as pd
-import s3path
 import yaml
 from clearml import Task
 from gspread import Worksheet
@@ -56,7 +56,7 @@ class Investigation:
         self.sheet_id = sheet_id
         self.log_id = log_id
         self._status: Status = Status(status)
-        self.investigation_s3_path = s3path.S3Path(ENV.EXPERIMENTS_S3_FOLDER) / (self.name + "_" + self.id)
+        self.investigation_storage_path = ENV.EXPERIMENTS_FOLDER / (self.name + "_" + self.id)
 
     @property
     def status(self):
@@ -97,7 +97,7 @@ class Investigation:
         for name, params in experiments_df.iterrows():
             experiment_folder_id = ENV._create_gdrive_folder(str(name), self.experiments_folder_id)
             self._setup_experiment(params, experiment_folder_id)
-        ENV._copy_gdrive_folder_to_s3(self.experiments_folder_id, self.investigation_s3_path)
+        ENV._copy_gdrive_folder_to_storage(self.experiments_folder_id, self.investigation_storage_path)
         self.log("Investigation experiments were set-up")
 
     def _setup_experiment(self, params: pd.Series, folder_id: str):
@@ -134,16 +134,20 @@ class Investigation:
                 continue
             if row["entrypoint"] == "":
                 continue
-            experiment_path: s3path.S3Path = self.investigation_s3_path / row[NAME_ATTRIBUTE]
+            experiment_path: Path = self.investigation_storage_path / row[NAME_ATTRIBUTE]
             complete_entrypoint = (
                 row["entrypoint"]
-                .replace("$EXP", "/".join(str(experiment_path.absolute()).split("/")[4:]))
+                .replace("$EXP", "clowder" + str(experiment_path.absolute()).split("clowder")[1])
                 .replace("$ON_CLEARML", f"--clearml-queue {CLEARML_QUEUE}")
                 .replace("$LOCAL_EXP_DIR", str(Path(os.environ.get("SIL_NLP_DATA_PATH")) / "MT/experiments"))
             )
+            data_dir_override = ""
+            if "data_folder" in ENV.current_meta:
+                folder_id = ENV.current_meta["data_folder"]
+                data_dir_override = f"SIL_NLP_MT_SCRIPTURE_DIR=MT/experiments/clowder/data/{folder_id}/scripture/ SIL_NLP_MT_TERMS_DIR=MT/experiments/clowder/data/{folder_id}/terms/ "
             if "silnlp" not in complete_entrypoint:
                 raise ValueError("Entrypoints must be silnlp jobs")  # TODO make more robust against misuse
-            command = f"python -m {complete_entrypoint}"
+            command = f"{data_dir_override} python -m {complete_entrypoint}"
             print("[green]Running command: [/green]", command)
             result = subprocess.run(
                 command,
@@ -152,8 +156,9 @@ class Investigation:
                 text=True,
             )
             print(result.stdout)
-            if result.returncode != 0:
+            if result.stderr != "":
                 print(f"[red]{result.stderr}[/red]")
+            if result.returncode != 0:
                 self.log(f"Experiments {row[NAME_ATTRIBUTE]} failed to run with error:\n{result.stderr}")
                 temp_meta[row[NAME_ATTRIBUTE]]["status"] = Task.TaskStatusEnum.failed.value
                 continue
@@ -269,34 +274,35 @@ class Investigation:
                 )
                 and copy_all_results_to_gdrive
             ):
-                ENV._copy_s3_folder_to_gdrive(
-                    self.investigation_s3_path / row[NAME_ATTRIBUTE], experiment_folders[row[NAME_ATTRIBUTE]]["id"]
+                ENV._copy_storage_folder_to_gdrive(
+                    self.investigation_storage_path / row[NAME_ATTRIBUTE], experiment_folders[row[NAME_ATTRIBUTE]]["id"]
                 )
             csv_results_files = row[RESULTS_CSVS_ATTRIBUTE].split(";")
             if len(csv_results_files) > 0 and csv_results_files[0].strip() != "":
                 for name in csv_results_files:
                     name = name.strip()
-                    if name == "scores-best":
-                        scores = list((self.investigation_s3_path / row[NAME_ATTRIBUTE]).glob("scores*"))
-                        scores_vals = list(map(lambda s: int(s.name.split("-")[1].split(".")[0]), scores))
-                        s3_filepath: s3path.S3Path = scores[
-                            scores_vals.index(min(scores_vals))
-                        ]  # TODO - use result that's already been copied over to gdrive
-                    elif name == "scores-last":
-                        scores = list((self.investigation_s3_path / row[NAME_ATTRIBUTE]).glob("scores*"))
-                        scores_vals = list(map(lambda s: int(s.name.split("-")[1].split(".")[0]), scores))
-                        s3_filepath: s3path.S3Path = scores[
-                            scores_vals.index(max(scores_vals))
-                        ]  # TODO - use result that's already been copied over to gdrive
-                    else:
-                        s3_filepath: s3path.S3Path = list(
-                            (self.investigation_s3_path / row[NAME_ATTRIBUTE]).glob(
-                                name if len(name.split("?")) <= 1 else name.split("?")[0]
-                            )
-                        )[
-                            0
-                        ]  # TODO - use result that's already been copied over to gdrive
-                    with s3_filepath.open() as f:
+                    try:
+                        if name == "scores-best":
+                            scores = list((self.investigation_storage_path / row[NAME_ATTRIBUTE]).glob("scores*"))
+                            scores_vals = list(map(lambda s: int(s.name.split("-")[1].split(".")[0]), scores))
+                            storage_filepath: Path = scores[scores_vals.index(min(scores_vals))]
+                        elif name == "scores-last":
+                            scores = list((self.investigation_storage_path / row[NAME_ATTRIBUTE]).glob("scores*"))
+                            scores_vals = list(map(lambda s: int(s.name.split("-")[1].split(".")[0]), scores))
+                            storage_filepath: Path = scores[scores_vals.index(max(scores_vals))]
+                        else:
+                            storage_filepath: Path = list(
+                                (self.investigation_storage_path / row[NAME_ATTRIBUTE]).glob(
+                                    name if len(name.split("?")) <= 1 else name.split("?")[0]
+                                )
+                            )[
+                                0
+                            ]  # TODO - use result that's already been copied over to gdrive?
+                    except IndexError:
+                        raise FileNotFoundError(
+                            f"No such results file {name} found in {self.investigation_storage_path / row[NAME_ATTRIBUTE]}"
+                        )
+                    with storage_filepath.open() as f:
                         df = None
                         if "tokenization" in name:
                             df = pd.read_csv(StringIO(f.read()), header=[0, 1])
@@ -304,8 +310,8 @@ class Investigation:
                             df = pd.read_csv(StringIO(f.read()))
                         if "scores" in name:
                             num_steps = "unknown"
-                            if "-" in s3_filepath.parts[-1]:
-                                name_elements = s3_filepath.parts[-1].split("-")
+                            if "-" in storage_filepath.parts[-1]:
+                                name_elements = storage_filepath.parts[-1].split("-")
                                 if len(name_elements) > 1 and ".csv" in name_elements[1]:
                                     steps_element = name_elements[1][:-4]
                                     if steps_element.isdigit():
@@ -436,21 +442,21 @@ class Investigation:
             ret[col] = [df[col].max(), df[col].min()]
         return pd.DataFrame.from_dict(ret, orient="index", columns=["max", "min"])
 
-    def _min_and_max_per_row(self, df: pd.DataFrame):  # TODO
+    def _min_and_max_per_row(self, df: pd.DataFrame):
         df = df.select_dtypes(include="number")
         ret = {}
         for index, row in df.iterrows():
             ret[index] = [row.max(), row.min()]
         return pd.DataFrame.from_dict(ret, orient="index", columns=["max", "min"])
 
-    def _min_and_max_overall(self, df: pd.DataFrame):  # TODO
+    def _min_and_max_overall(self, df: pd.DataFrame):
         max = df.max(numeric_only=True).max()
         min = df.min(numeric_only=True).min()
         return pd.DataFrame.from_dict({0: [max, min]}, orient="index", columns=["max", "min"])
 
     def _color_func(self, x: float) -> tuple:
         if np.isnan(x):
-            return (1.0,1.0,1.0)
+            return (1.0, 1.0, 1.0)
         if x > 0.5:
             return ((209 - (209 - 27) * (x - 0.5) / 0.5) / 255, 209 / 255, 27 / 255)
         return (209 / 255, (27 + (209 - 27) * x / 0.5) / 255, 27 / 255)
@@ -486,9 +492,9 @@ class Investigation:
                 print(f"Failed to delete investigation {self.name} from Google Drive")
         if delete_from_s3:
             try:
-                ENV._delete_s3_folder(self.investigation_s3_path)
+                ENV._delete_storage_folder(self.investigation_storage_path)
             except:
-                print(f"Failed to delete investigation {self.name} from the S3 bucket")
+                print(f"Failed to delete investigation {self.name} from storage (s3/local)")
 
         del ENV.current_meta["investigations"][self.name]
         ENV.meta.flush()

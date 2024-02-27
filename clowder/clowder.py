@@ -20,7 +20,7 @@ def untrack(investigation_name: str):
 @app.command("track")
 def track(investigation_name: Annotated[Optional[str], typer.Argument()] = None):
     """Tracks all investigations in the current context. If given an investigation name
-    as an argument, this command will only track a single investigation with that name 
+    as an argument, this command will only track a single investigation with that name
     (if there are any) in the current context root folder"""
     functions.track(investigation_name)
     print(
@@ -154,12 +154,29 @@ def current_context():
 def untrack_context(root_folder_id: str):
     """Untrack context with folder id `root_folder_id`"""
     functions.untrack_context(root_folder_id)
-    print(f"[green]Sucessfully untracked context {root_folder_id}[/green]")
+    print(f"[green]Successfully untracked context {root_folder_id}[/green]")
+
 
 @app.command("list-contexts")
 def list_contexts():
     """Lists all currently tracked contexts"""
-    print('\n'.join(functions.list_contexts()))
+    print("\n".join(functions.list_contexts()))
+
+
+@app.command("use-data-folder")
+def use_data_folder(folder_id: str):
+    """Use scripture data from a particular gdrive folder specified by folder-id.
+    (Other users will not be able to access this data). Data should be uploaded to
+    the gdrive folder as complete Paratext project folders. This data folder will
+    be associated only with the current context"""
+    functions.use_data(folder_id)
+
+
+@app.command("current-data-folder")
+def current_data_folder():
+    """Print the data folder id associated with this context if any"""
+    print(functions.current_data())
+
 
 def _map_status_color(status: Status) -> str:
     # Mysterious comparison behavior; comparing by value instead

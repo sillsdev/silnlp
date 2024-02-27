@@ -3,19 +3,20 @@ import warnings
 warnings.filterwarnings("ignore", r"Blowfish")
 
 import os
+import subprocess
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import gspread
 import gspread_dataframe as gd
 import pandas as pd
-import s3path
 import yaml
 from clearml import Task
 from oauth2client.service_account import ServiceAccountCredentials
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive, GoogleDriveFile
 from pydrive2.files import MediaIoReadable
+from s3path import S3Path
 
 from clowder.configuration_exception import MissingConfigurationFileError
 from clowder.consts import (
@@ -27,6 +28,7 @@ from clowder.consts import (
 )
 from clowder.investigation import Investigation
 from clowder.status import Status
+from silnlp.common.environment import SIL_NLP_ENV
 
 
 class DuplicateInvestigationException(Exception):
@@ -79,9 +81,7 @@ class ClowderEnvironment:
             raise MissingConfigurationFileError(
                 "No Google credentials file found in .clowder directory. Please copy your credentials file into the .clowder directory."
             )
-        self.EXPERIMENTS_S3_FOLDER = (
-            "/aqua-ml-data/MT/experiments/clowder/"  # self._get_env_var("EXPERIMENTS_S3_FOLDER")
-        )
+        self.EXPERIMENTS_FOLDER = SIL_NLP_ENV.mt_experiments_dir / "clowder"
         self._setup_google_drive()
         self.gc = gspread.service_account(filename=Path(self.GOOGLE_CREDENTIALS_FILE))
 
@@ -194,6 +194,40 @@ class ClowderEnvironment:
 
     def track_all_investigations(self):
         self._track_all_investigations_in_folder(self.root)
+
+    def use_data(self, folder_id: str):
+        files_in_data_folder = self._dict_of_gdrive_files(folder_id)
+        pt_projects = set()
+        for name, file in files_in_data_folder.items():
+            contents = self._dict_of_gdrive_files(file["id"])
+            if "Settings.xml" in contents.keys():
+                pt_projects.add(name)
+            # TODO remove notes
+
+        storage_files = self.EXPERIMENTS_FOLDER / "data" / folder_id
+        if storage_files.exists() and storage_files.is_dir():
+            self._delete_storage_folder(storage_files)
+
+        self._copy_gdrive_folder_to_storage(
+            folder_id, storage_files / "projects", where=lambda f: f["title"] in pt_projects
+        )
+
+        # extract corpora
+        for proj in pt_projects:
+            command = f'SIL_NLP_MT_SCRIPTURE_DIR={self.EXPERIMENTS_FOLDER / "data" / folder_id / "scripture" } SIL_NLP_MT_TERMS_DIR={self.EXPERIMENTS_FOLDER / "data" / folder_id / "terms"} SIL_NLP_PT_DIR={self.EXPERIMENTS_FOLDER / "data" / folder_id } python -m silnlp.common.extract_corpora {proj}'
+            result = subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+            )
+            if result.stdout != "":
+                print(result.stdout)
+            if result.stderr != "":
+                print(result.stderr)
+
+        self.current_meta["data_folder"] = folder_id
+        self.meta.flush()
 
     def _get_env_var(self, name: str) -> str:
         var = os.environ.get(name)
@@ -335,25 +369,27 @@ class ClowderEnvironment:
             except DuplicateInvestigationException:
                 pass
 
-    # TODO types!
-
-    def _copy_gdrive_folder_to_s3(self, folder_id: str, s3_path: s3path.S3Path):
-        # print(f"Copying folder {folder_id} to {s3_path}")
+    def _copy_gdrive_folder_to_storage(
+        self, folder_id: str, path: Path, where: Callable[[GoogleDriveFile], bool] = lambda _: True
+    ):
         for file in self._list_gdrive_files(folder_id):
-            s3_file = s3_path / file["title"]
+            if not where(file):
+                continue
+            storage_file: Path = path / file["title"]
             if file["mimeType"] == "application/vnd.google-apps.folder":
-                self._copy_gdrive_folder_to_s3(file["id"], s3_file)
+                self._copy_gdrive_folder_to_storage(file["id"], storage_file)
             else:
-                with s3_file.open("wb") as f:
+                if not isinstance(storage_file, S3Path):
+                    storage_file.parent.mkdir(parents=True, exist_ok=True)
+                with storage_file.open("wb") as f:
                     data = self._read_gdrive_file_as_bytes(file["id"])
-                    # print(data.decode("utf-8"))
                     f.write(data)
 
-    def _copy_s3_folder_to_gdrive(self, s3_path: s3path.S3Path, folder_id: str):
-        for file in s3_path.iterdir():
+    def _copy_storage_folder_to_gdrive(self, path: Path, folder_id: str):
+        for file in path.iterdir():
             if file.is_dir():
                 id = self._create_gdrive_folder(file.name, folder_id)
-                self._copy_s3_folder_to_gdrive(file, id)
+                self._copy_storage_folder_to_gdrive(file, id)
             else:
                 try:
                     with file.open("r") as f:
@@ -361,21 +397,21 @@ class ClowderEnvironment:
                 except:
                     print(f"Failed to copy file {file.name} to GDrive folder {folder_id}")
 
-    def _delete_s3_file(self, s3_path: s3path.S3Path):
-        s3_path.unlink(missing_ok=True)
+    def _delete_storage_file(self, path: Path):
+        path.unlink(missing_ok=True)
 
-    def _delete_s3_folder(self, s3_path: s3path.S3Path):
-        ret = s3_path.exists()
-        for child in s3_path.iterdir():
+    def _delete_storage_folder(self, path: Path):
+        ret = path.exists()
+        for child in path.iterdir():
             if child.is_dir():
                 try:
-                    self._delete_s3_folder(child)
+                    self._delete_storage_folder(child)
                 except FileNotFoundError:
                     print(f"Failed to delete {child} - does not exist")
             else:
-                self._delete_s3_file(child)
+                self._delete_storage_file(child)
         try:
-            s3_path.rmdir()
+            path.rmdir()
         except FileNotFoundError:
             # Occasionally get these errors - things are deleted properly
             pass
