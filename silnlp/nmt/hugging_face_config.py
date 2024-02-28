@@ -20,7 +20,7 @@ import yaml
 from datasets import Dataset
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
 from sacremoses import MosesPunctNormalizer
-from tokenizers import AddedToken, NormalizedString, Regex, SentencePieceBPETokenizer
+from tokenizers import AddedToken, NormalizedString, Regex, SentencePieceBPETokenizer, SentencePieceUnigramTokenizer
 from tokenizers.normalizers import Normalizer
 from torch import Tensor, TensorType, nn, optim
 from torch.utils.checkpoint import checkpoint  # noqa: 401
@@ -242,6 +242,17 @@ def get_model_prefix(model: str) -> str:
             return prefix
     return ""
 
+SP_TOKENIZER_CONFIG = {
+    "facebook/nllb-200": {
+        "type": "BPE",
+        "special_tokens": ["<s>", "<pad>", "</s>", "<unk>", "<mask>"]
+    },
+    "google/madlad400": {
+        "type": "Unigram",
+        "special_tokens": ["<unk>", "<s>", "</s>"],
+        "unk_token": "<unk>"
+    }
+}
 
 class HuggingFaceConfig(Config):
     def __init__(self, exp_dir: Path, config: dict) -> None:
@@ -356,48 +367,64 @@ class HuggingFaceConfig(Config):
         )
 
     def _add_tokens(
-        self, missing_tokens: List[str], trained_tokenizers: Optional[List[SentencePieceBPETokenizer]] = None
+        self, missing_tokens: List[str], trained_tokenizers: Optional[List[Union[SentencePieceBPETokenizer, SentencePieceUnigramTokenizer]]] = None
     ) -> None:
         assert self._tokenizer is not None
         self._tokenizer.save_pretrained(str(self.exp_dir))
         with open(self.exp_dir / "tokenizer.json", "r+", encoding="utf-8") as file:
             data = json.load(file)
-
-            if self.model_prefix == "google/madlad400":
-                vocab_len = len(data["model"]["vocab"])
-                for i, token in enumerate(missing_tokens):
-                    data["model"]["vocab"].append([token, vocab_len + i])
-            else:
+            if data["model"]["type"] == "BPE":
                 vocab_len = len(data["model"]["vocab"].keys())
                 for i, token in enumerate(missing_tokens):
                     data["model"]["vocab"][token] = vocab_len + i
-
-            if trained_tokenizers:
-                for trained_tok in trained_tokenizers:
-                    trained_tok.save(str(self.exp_dir / "tokenizer_trained.json"))
-                    with open(self.exp_dir / "tokenizer_trained.json", "r+", encoding="utf-8") as trained_file:
-                        trained_data = json.load(trained_file)
-                        data["model"]["merges"] = trained_data["model"]["merges"] + data["model"]["merges"]
+                if trained_tokenizers:
+                    for trained_tok in trained_tokenizers:
+                        trained_tok.save(str(self.exp_dir / "tokenizer_trained.json"))
+                        with open(self.exp_dir / "tokenizer_trained.json", "r+", encoding="utf-8") as trained_file:
+                            trained_data = json.load(trained_file)
+                            data["model"]["merges"] = trained_data["model"]["merges"] + data["model"]["merges"]
+            elif data["model"]["type"] == "Unigram":
+                if trained_tokenizers:
+                    for trained_tok in trained_tokenizers:
+                        trained_tok.save(str(self.exp_dir / "tokenizer_trained.json"))
+                        with open(self.exp_dir / "tokenizer_trained.json", "r+", encoding="utf-8") as trained_file:
+                            trained_data = json.load(trained_file)
+                            # Use the probability from the base tokenizer for tokens already in the base tokenizer
+                            base_toks = [t[0] for t in data["model"]["vocab"]]
+                            for i in reversed(range(len(trained_data["model"]["vocab"]))):
+                                if trained_data["model"]["vocab"][i][0] in base_toks:
+                                    del trained_data["model"]["vocab"][i]
+                            data["model"]["vocab"] = data["model"]["vocab"] + trained_data["model"]["vocab"]
+                else:
+                    for token in missing_tokens:
+                        data["model"]["vocab"].append([token, 0])
             file.seek(0)
             json.dump(data, file, ensure_ascii=False, indent=4)
             file.truncate()
         self._tokenizer = AutoTokenizer.from_pretrained(str(self.exp_dir), use_fast=True)
         return
 
-    def _train_sp_tokenizer(self, files, vocab_size) -> SentencePieceBPETokenizer:
+    def _train_sp_tokenizer(self, files, vocab_size) -> Union[SentencePieceBPETokenizer, SentencePieceUnigramTokenizer]:
         assert self._tokenizer is not None
-        sp_tok = SentencePieceBPETokenizer()
+        sp_tok_config = SP_TOKENIZER_CONFIG[self.model_prefix]
+        sp_tok = SentencePieceBPETokenizer() if sp_tok_config["type"] == "BPE" else SentencePieceUnigramTokenizer()
         hf_tokenizer = HuggingFaceTokenizer(
             self._tokenizer, self.data["lang_codes"], self.train["max_source_length"], self.train["max_target_length"]
         )
         sp_tok.normalizer = Normalizer.custom(CustomNormalizerWrapper(hf_tokenizer))
-        sp_tok.train(
-            files, vocab_size=vocab_size, min_frequency=2, special_tokens=["<s>", "<pad>", "</s>", "<unk>", "<mask>"]
-        )
+
+        if sp_tok_config["type"] == "BPE":
+            sp_tok.train(
+                files, vocab_size=vocab_size, min_frequency=2, special_tokens=sp_tok_config["special_tokens"]
+            )
+        elif sp_tok_config["type"] == "Unigram":
+            sp_tok.train(
+                files, vocab_size=vocab_size, special_tokens=sp_tok_config["special_tokens"], unk_token=sp_tok_config["unk_token"]
+            )
         sp_tok.normalizer = self._tokenizer.backend_tokenizer.normalizer
         return sp_tok
 
-    def _create_trained_tokens(self, file_paths, vocab_size) -> Tuple[List[str], SentencePieceBPETokenizer]:
+    def _create_trained_tokens(self, file_paths, vocab_size) -> Tuple[List[str], Union[SentencePieceBPETokenizer, SentencePieceUnigramTokenizer]]:
         assert self._tokenizer is not None
         files = [str(f) for f in download_if_s3_paths(file_paths)]
         sp_tokenizer = self._train_sp_tokenizer(files, vocab_size)
@@ -501,7 +528,7 @@ class HuggingFaceConfig(Config):
             for iso in self.src_isos | self.trg_isos:
                 lang_code = lang_codes.get(iso, iso)
                 if isinstance(self._tokenizer, (T5Tokenizer, T5TokenizerFast)):
-                    if lang_code not in self._tokenizer.all_special_tokens:
+                    if lang_code not in self._tokenizer.all_special_tokens and iso in self.trg_isos:
                         add_lang_code_to_tokenizer(self._tokenizer, lang_code)
                         updated = True
                 elif lang_code not in self._tokenizer.lang_code_to_id:
@@ -527,10 +554,11 @@ class HuggingFaceConfig(Config):
                     self._tokenizer = convert_slow_tokenizer(self._tokenizer)
                     self._tokenizer = NllbTokenizerFast(tokenizer_object=self._tokenizer)
                     self._tokenizer.save_pretrained(str(self.exp_dir))
-                else:
+                elif self.model_prefix == "google/madlad400":
                     self._tokenizer = T5Tokenizer.from_pretrained(str(self.exp_dir))
                     self._tokenizer = convert_slow_tokenizer(self._tokenizer)
                     self._tokenizer = T5TokenizerFast(tokenizer_object=self._tokenizer)
+                    self._tokenizer.add_special_tokens({"additional_special_tokens": ["<s>"]}, replace_additional_special_tokens=False)
                     self._tokenizer.save_pretrained(str(self.exp_dir))
             else:
                 if (not tok_dict or not (tok_dict.get("update_src") or tok_dict.get("update_trg"))) and (
