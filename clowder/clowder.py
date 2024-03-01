@@ -54,7 +54,7 @@ def urlfor(investigation_name: str):
 @app.command("idfor")
 def idfor(investigation_name: str):
     """Prints GDrive ID for investigation with name `investigation_name` in current context"""
-    print(functions.idfor(investigation_name))
+    print(f"[green]{functions.idfor(investigation_name)}[/green]")
 
 
 @app.command("cancel")
@@ -67,13 +67,16 @@ def cancel(investigation_name: str):
 
 
 @app.command("run")
-def run(investigation_name: str, force_rerun: bool = False):
+def run(investigation_name: str, force_rerun: bool = False, experiments: str = ""):
     """Runs all experiments in investigation `investigation_name` except those that are already completed or currently in progess.
-    Use `--force-rerun` to forcibly rerun previously run experiments within this investigation"""
-    if functions.run(investigation_name, force_rerun):
+    Use `--force-rerun` to forcibly rerun previously run experiments within this investigation. Pass `--experiments` as a comma-delimited
+    list of experiment names  (i.e., the names of the rows in the investigation spreadsheet - e.g., "verse-counts;alignments") to
+    run just those experiments."""
+    experiments_list = experiments.split(';') if experiments != "" else []
+    if functions.run(investigation_name, force_rerun, experiments_list):
         print(f"[green]Investigation {investigation_name} successfully started[/green]")
     else:
-        print(f"[red]Investigation {investigation_name} cannot be run. Is it already in progress? [/red]")
+        print(f"[red]Investigation {investigation_name} cannot be run.[/red]")
 
 
 @app.command("setup")
@@ -111,12 +114,12 @@ def status(
 def sync(
     investigation_name: Annotated[Optional[str], typer.Argument()] = None,
     gather_results: bool = True,
-    copy_all_results_to_gdrive: bool = True,
+    copy_all_results_to_gdrive: bool = False
 ):
     """Sync status/data for investigation with name `investigation_name` in the current context.
-    Use --no-gather-results to sync without aggregating results data. Use --no-copy-all-results-to-gdrive
-    to avoid copying all results files to gdrive experiments folders (results data will still be aggregated in the spreadsheet);
-    this flag is helpful if you want to conserve time or space on gdrive."""
+    Use --no-gather-results to sync without aggregating results data. Use --copy-all-results-to-gdrive
+    to copy all results files to gdrive experiments folders (results data will still be aggregated in the 
+    spreadsheet even when this is false)."""
     functions.sync(investigation_name, gather_results, copy_all_results_to_gdrive=copy_all_results_to_gdrive)
     print(
         f"[green]Successfully synced {investigation_name if investigation_name else 'all investigations in this context'}[/green]"
@@ -141,13 +144,13 @@ def use_context(root_folder_id: str):
 def list():
     """Lists the names of all investigations in the current context"""
     for inv in functions.list_inv():
-        print(inv.name)
+        print(f"[green]{inv.name}[/green]")
 
 
 @app.command("current-context")
 def current_context():
     """Prints the GDrive folder id for the current context"""
-    print(functions.current_context())
+    print(f"[green]{functions.current_context()}[/green]")
 
 
 @app.command("untrack-context")
@@ -160,7 +163,7 @@ def untrack_context(root_folder_id: str):
 @app.command("list-contexts")
 def list_contexts():
     """Lists all currently tracked contexts"""
-    print("\n".join(functions.list_contexts()))
+    print("[green]"+'\n'.join(functions.list_contexts())+"[/green]")
 
 
 @app.command("use-data-folder")
@@ -175,7 +178,7 @@ def use_data_folder(folder_id: str):
 @app.command("current-data-folder")
 def current_data_folder():
     """Print the data folder id associated with this context if any"""
-    print(functions.current_data())
+    print(f"[green]{functions.current_data()}[/green]")
 
 
 def _map_status_color(status: Status) -> str:

@@ -67,7 +67,7 @@ def cancel(investigation_name: str) -> bool:
     return anything_was_canceled
 
 
-def run(investigation_name: str, force_rerun: bool = False) -> bool:
+def run(investigation_name: str, force_rerun: bool = False, experiments: 'list[str]' = []) -> bool:
     """Runs all experiments in investigation `investigation_name` except those that are already completed or currently in progess."""
     print(f"Syncing {investigation_name} before running")
     sync(investigation_name, gather_results=False)
@@ -75,7 +75,7 @@ def run(investigation_name: str, force_rerun: bool = False) -> bool:
     if investigation.status.value == Status.Running.value:
         return False
     investigation.setup()
-    now_running = investigation.start_investigation(force_rerun)
+    now_running = investigation.start_investigation(force_rerun, experiments)
     if now_running:
         investigation.status = Status.Running
     print(f"Syncing {investigation_name} after running")
@@ -110,7 +110,7 @@ def status(investigation_name: Optional[str], _sync: bool = True) -> dict:
     }
 
 
-def sync(investigation_name: Optional[str], gather_results: bool = True, copy_all_results_to_gdrive: bool = True):
+def sync(investigation_name: Optional[str], gather_results: bool = True, copy_all_results_to_gdrive: bool = False):
     if investigation_name is not None:
         ENV.get_investigation(investigation_name).sync(
             gather_results=gather_results, copy_all_results_to_gdrive=copy_all_results_to_gdrive

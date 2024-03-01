@@ -107,7 +107,7 @@ class Investigation:
         rendered_config = rtemplate.render(params.to_dict())
         ENV._write_gdrive_file_in_folder(folder_id, "config.yml", rendered_config)
 
-    def start_investigation(self, force_rerun: bool = False) -> bool:
+    def start_investigation(self, force_rerun: bool = False, experiments: 'list[str]' = []) -> bool:
         experiments_df: pd.DataFrame = self._get_experiments_df()
         pd.set_option("display.max_columns", None)
         pd.set_option("display.max_rows", None)
@@ -134,6 +134,8 @@ class Investigation:
                 continue
             if row["entrypoint"] == "":
                 continue
+            if len(experiments) > 0 and row[NAME_ATTRIBUTE] not in experiments:
+                continue
             experiment_path: Path = self.investigation_storage_path / row[NAME_ATTRIBUTE]
             complete_entrypoint = (
                 row["entrypoint"]
@@ -156,12 +158,14 @@ class Investigation:
                 text=True,
             )
             print(result.stdout)
-            if result.stderr != "":
-                print(f"[red]{result.stderr}[/red]")
             if result.returncode != 0:
-                self.log(f"Experiments {row[NAME_ATTRIBUTE]} failed to run with error:\n{result.stderr}")
+                self.log(f"Experiment {row[NAME_ATTRIBUTE]} failed to run with error:\n{result.stderr}")
+                print(f"[red]Experiment {row[NAME_ATTRIBUTE]} failed to run with error:\n{result.stderr}[/red]")
                 temp_meta[row[NAME_ATTRIBUTE]]["status"] = Task.TaskStatusEnum.failed.value
+                temp_meta[row[NAME_ATTRIBUTE]]["clearml_id"] = "unknown"
                 continue
+            elif result.stderr != "":
+                print(f"{result.stderr}")
             now_running = True
             match = re.search(r"task id=(.*)", result.stdout)
             clearml_id = match.group(1) if match is not None else "unknown"
@@ -200,7 +204,7 @@ class Investigation:
                     ] = f"https://{CLEARML_URL}/projects/*/experiments/{task.id}/output/execution"
                     remote_meta_content["experiments"][name]["status"] = task.get_status()
                 else:
-                    remote_meta_content["experiments"][name]["status"] = Task.TaskStatusEnum.completed.value
+                    remote_meta_content["experiments"][name]["status"] = self.experiments[name].get("status", Task.TaskStatusEnum.completed.value)
         ENV._write_gdrive_file_in_folder(
             self.id, "clowder.meta.yml", yaml.safe_dump(remote_meta_content), "application/x-yaml"
         )
