@@ -66,6 +66,9 @@ from transformers.utils import (
 )
 from transformers.utils.logging import tqdm
 
+from optimum.intel import INCSeq2SeqTrainer
+from neural_compressor import WeightPruningConfig
+
 from ..common.corpus import count_lines, get_terms
 from ..common.environment import SIL_NLP_ENV, download_if_s3_paths
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
@@ -836,8 +839,16 @@ class HuggingFaceNMTModel(NMTModel):
             result["gen_len"] = np.mean(prediction_lens)
             result = {k: round(v, 4) for k, v in result.items()}
             return result
+        
+        pruning_config = WeightPruningConfig(
+            pruning_type="magnitude",
+            start_step=0,
+            end_step=15,
+            target_sparsity=0.2,
+            pruning_scope="local",
+        )
 
-        trainer = SilSeq2SeqTrainer(
+        trainer = SilINCSeq2SeqTrainer(
             model,
             training_args,
             data_collator,
@@ -845,6 +856,7 @@ class HuggingFaceNMTModel(NMTModel):
             eval_dataset,
             tokenizer,
             compute_metrics=compute_metrics,
+            pruning_config=pruning_config,
             sequential_sampling=self._config.train.get("sequential_sampling", False),
             better_transformer=self._config.train.get("better_transformer", False),
         )
@@ -1331,3 +1343,45 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
 
         # Good practice: save your training arguments together with the trained model
         torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
+
+class SilINCSeq2SeqTrainer(INCSeq2SeqTrainer):
+    def __init__(
+        self,
+        model: Optional[Union[PreTrainedModel, nn.Module]] = None,
+        args: Optional[Seq2SeqTrainingArguments] = None,
+        data_collator: Optional[Any] = None,
+        train_dataset: Optional[Dataset] = None,
+        eval_dataset: Optional[Union[Dataset, Dict[str, Dataset]]] = None,
+        tokenizer: Optional[PreTrainedTokenizerBase] = None,
+        model_init: Optional[Callable[[], PreTrainedModel]] = None,
+        compute_metrics: Optional[Callable[[EvalPrediction], Dict]] = None,
+        callbacks: Optional[List[TrainerCallback]] = None,
+        optimizers: Tuple[Optional[optim.Optimizer], Optional[optim.lr_scheduler.LambdaLR]] = (None, None),
+        preprocess_logits_for_metrics: Optional[Callable[[Tensor, Tensor], Tensor]] = None,
+        pruning_config: Optional[WeightPruningConfig] = None,
+        sequential_sampling: bool = False,
+        better_transformer: bool = False,
+    ):
+        super().__init__(
+            model,
+            args,
+            data_collator,
+            train_dataset,
+            eval_dataset,
+            tokenizer,
+            model_init,
+            compute_metrics,
+            callbacks,
+            optimizers,
+            preprocess_logits_for_metrics,
+            pruning_config=pruning_config,
+            task="translation",
+            save_onnx_model=True
+        )
+        self._sequential_sampling = sequential_sampling
+        self._better_transformer = better_transformer
+
+    def _get_train_sampler(self) -> Optional[Sampler]:
+        if self._sequential_sampling:
+            return None
+        return super()._get_train_sampler()
