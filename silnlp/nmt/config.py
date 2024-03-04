@@ -195,10 +195,10 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
         val_size: Optional[Union[float, int]] = pair.get("val_size")
 
         if "disjoint_test" not in pair:
-            pair["disjoint_test"] = False
+            pair["disjoint_test"] = True
         disjoint_test: bool = pair["disjoint_test"]
         if "disjoint_val" not in pair:
-            pair["disjoint_val"] = False
+            pair["disjoint_val"] = True
         disjoint_val: bool = pair["disjoint_val"]
         score_threshold: float = pair.get("score_threshold", 0.0)
         corpus_books = get_chapters(pair.get("corpus_books", []))
