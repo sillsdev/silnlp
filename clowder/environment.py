@@ -65,17 +65,16 @@ class ClowderEnvironment:
         self.meta = ClowderMeta(os.environ.get("CLOWDER_META"))
         self.INVESTIGATIONS_GDRIVE_FOLDER = self.root
         try:
-            self.GOOGLE_CREDENTIALS_FILE = (
-                self._get_env_var("GOOGLE_CREDENTIALS_FILE")
-                if os.environ.get("GOOGLE_CREDENTIALS_FILE") is not None
-                else str(
+            self.GOOGLE_CREDENTIALS_FILE = os.environ.get(
+                "GOOGLE_CREDENTIALS_FILE",
+                str(
                     Path(self.meta.filepath).parent
                     / list(
                         filter(
                             lambda p: "clowder" in p and ".json" in p, os.listdir(str(Path(self.meta.filepath).parent))
                         )
                     )[0]
-                )  # TODO more robust
+                ),  # TODO more robust
             )
         except IndexError:
             raise MissingConfigurationFileError(
@@ -101,6 +100,12 @@ class ClowderEnvironment:
     @property
     def investigations(self) -> "list[Investigation]":
         return [self.get_investigation(inv_name) for inv_name in self.current_meta["investigations"].keys()]
+
+    @property
+    def data_folder(self) -> str:
+        if "data_folder" in self.current_meta:
+            return self.current_meta["data_folder"]
+        return None
 
     def get_investigation(self, investigation_name: str) -> Investigation:
         inv_data = self.current_meta["investigations"].get(investigation_name, None)
@@ -158,19 +163,29 @@ class ClowderEnvironment:
         self.add_investigation(investigation_name, investigation_data)
         return self.get_investigation(investigation_name)
 
-    def _get_clearml_tasks(self, investigation_name: str) -> "dict[str, Union[None,Task]]":
-        if "experiments" not in self.current_meta["investigations"][investigation_name]:
-            self.current_meta["investigations"][investigation_name]["experiments"] = {}
-        experiments = self.current_meta["investigations"][investigation_name]["experiments"]
-        tasks = {}
-        for experiment_name, obj in experiments.items():
-            clearml_id = obj.get("clearml_id")
-            if clearml_id is None or clearml_id == "unknown":
-                tasks[experiment_name] = None
-            else:
-                task: Optional[Task] = Task.get_task(task_id=clearml_id)
-                tasks[experiment_name] = task
-        return tasks
+    def get_remote_meta(self, investigation_name: str):
+        meta_folder_id = self.current_meta["investigations"][investigation_name]["clowder_meta_yml_id"]
+        return yaml.safe_load(self._read_gdrive_file_as_string(meta_folder_id))
+
+    def set_remote_meta(self, investigation_name: str, content: str):
+        self._write_gdrive_file_in_folder(
+            self.get_investigation(investigation_name).id,
+            "clowder.meta.yml",
+            yaml.safe_dump(content),
+            "application/x-yaml",
+        )
+
+    def copy_experiment_data(self, investigation_name: str, experiment_name: str):
+        if not self.current_meta["investigations"][investigation_name]["experiments"][experiment_name].get(
+            "results_already_gathered", False
+        ):
+            experiment_folders = self._dict_of_gdrive_files(
+                self.get_investigation(investigation_name).experiments_folder_id
+            )
+            self._copy_storage_folder_to_gdrive(
+                self.get_investigation(investigation_name).investigation_storage_path / experiment_name,
+                experiment_folders[experiment_name]["id"],
+            )
 
     def track_investigation_by_name(self, investigation_name: str):
         try:
@@ -202,7 +217,7 @@ class ClowderEnvironment:
             contents = self._dict_of_gdrive_files(file["id"])
             if "Settings.xml" in contents.keys():
                 pt_projects.add(name)
-            # TODO remove notes
+            # TODO remove notes?
 
         storage_files = self.EXPERIMENTS_FOLDER / "data" / folder_id
         if storage_files.exists() and storage_files.is_dir():
@@ -229,11 +244,6 @@ class ClowderEnvironment:
         self.current_meta["data_folder"] = folder_id
         self.meta.flush()
 
-    def _get_env_var(self, name: str) -> str:
-        var = os.environ.get(name)
-        assert var is not None, name + " needs to be set."
-        return var
-
     def _setup_google_drive(self):
         gauth = GoogleAuth()
         gauth.auth_method = "service"
@@ -245,9 +255,6 @@ class ClowderEnvironment:
     def _dict_of_gdrive_files(self, folder_id: str) -> "dict[str, GoogleDriveFile]":
         files = self._google_drive.ListFile({"q": f"trashed=false and '{folder_id}' in parents"}).GetList()
         return {f["title"]: f for f in files}
-
-    def _list_gdrive_files(self, folder_id: str) -> "list[GoogleDriveFile]":
-        return list(self._dict_of_gdrive_files(folder_id).values())
 
     def _read_gdrive_file_as_string(self, file_id: str) -> str:
         return self._read_gdrive_file_as_bytes(file_id).decode("utf-8")
@@ -372,7 +379,7 @@ class ClowderEnvironment:
     def _copy_gdrive_folder_to_storage(
         self, folder_id: str, path: Path, where: Callable[[GoogleDriveFile], bool] = lambda _: True
     ):
-        for file in self._list_gdrive_files(folder_id):
+        for file in self._dict_of_gdrive_files(folder_id).values():
             if not where(file):
                 continue
             storage_file: Path = path / file["title"]

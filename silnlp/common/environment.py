@@ -87,7 +87,7 @@ class SilNlpEnv:
             self.mt_terms_dir = self.mt_dir / "terms"
         if os.getenv("SIL_NLP_MT_SCRIPTURE_DIR"):
             self.mt_scripture_dir = self.data_dir / os.getenv("SIL_NLP_MT_SCRIPTURE_DIR")
-        else:    
+        else:
             self.mt_scripture_dir = self.mt_dir / "scripture"
         if self.is_bucket:
             sil_nlp_cache_dir = os.getenv("SIL_NLP_CACHE_EXPERIMENT_DIR")

@@ -68,11 +68,11 @@ def cancel(investigation_name: str):
 
 @app.command("run")
 def run(investigation_name: str, force_rerun: bool = False, experiments: str = ""):
-    """Runs all experiments in investigation `investigation_name` except those that are already completed or currently in progess.
+    """Runs all experiments in investigation `investigation_name` except those that are already completed or currently in progress.
     Use `--force-rerun` to forcibly rerun previously run experiments within this investigation. Pass `--experiments` as a comma-delimited
     list of experiment names  (i.e., the names of the rows in the investigation spreadsheet - e.g., "verse-counts;alignments") to
     run just those experiments."""
-    experiments_list = experiments.split(';') if experiments != "" else []
+    experiments_list = experiments.split(";") if experiments != "" else []
     if functions.run(investigation_name, force_rerun, experiments_list):
         print(f"[green]Investigation {investigation_name} successfully started[/green]")
     else:
@@ -114,11 +114,11 @@ def status(
 def sync(
     investigation_name: Annotated[Optional[str], typer.Argument()] = None,
     gather_results: bool = True,
-    copy_all_results_to_gdrive: bool = False
+    copy_all_results_to_gdrive: bool = False,
 ):
     """Sync status/data for investigation with name `investigation_name` in the current context.
     Use --no-gather-results to sync without aggregating results data. Use --copy-all-results-to-gdrive
-    to copy all results files to gdrive experiments folders (results data will still be aggregated in the 
+    to copy all results files to gdrive experiments folders (results data will still be aggregated in the
     spreadsheet even when this is false)."""
     functions.sync(investigation_name, gather_results, copy_all_results_to_gdrive=copy_all_results_to_gdrive)
     print(
@@ -163,7 +163,7 @@ def untrack_context(root_folder_id: str):
 @app.command("list-contexts")
 def list_contexts():
     """Lists all currently tracked contexts"""
-    print("[green]"+'\n'.join(functions.list_contexts())+"[/green]")
+    print("[green]" + "\n".join(functions.list_contexts()) + "[/green]")
 
 
 @app.command("use-data-folder")

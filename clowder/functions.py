@@ -67,8 +67,8 @@ def cancel(investigation_name: str) -> bool:
     return anything_was_canceled
 
 
-def run(investigation_name: str, force_rerun: bool = False, experiments: 'list[str]' = []) -> bool:
-    """Runs all experiments in investigation `investigation_name` except those that are already completed or currently in progess."""
+def run(investigation_name: str, force_rerun: bool = False, experiments: "list[str]" = []) -> bool:
+    """Runs all experiments in investigation `investigation_name` except those that are already completed or currently in progress."""
     print(f"Syncing {investigation_name} before running")
     sync(investigation_name, gather_results=False)
     investigation = ENV.get_investigation(investigation_name)
@@ -163,9 +163,7 @@ def use_data(folder_id: str):
 
 def current_data():
     """Return the data folder id associated with this context if any"""
-    if "data_folder" in ENV.current_meta:
-        return ENV.current_meta["data_folder"]
-    return None
+    return ENV.data_folder
 
 
 def current_context() -> str:
