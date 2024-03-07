@@ -743,6 +743,11 @@ class Config(ABC):
                             cur_train.to_csv(pair_stats_path, index=False)
 
                 if pair.is_test:
+                    if len(pair.test_books) > 0:
+                        cur_test = include_chapters(corpus, pair.test_books)
+                        if test_indices is None:
+                            test_indices = cur_test.index
+
                     if pair.disjoint_test and test_indices is None:
                         indices: Set[int] = set(cur_train.index)
                         if pair.disjoint_val and val_indices is not None:
@@ -753,7 +758,6 @@ class Config(ABC):
                         test_indices = set(random.sample(indices, min(split_size, len(indices))))
 
                     if len(pair.test_books) > 0:
-                        cur_test = include_chapters(corpus, pair.test_books)
                         if test_size > 0:
                             _, cur_test = split_parallel_corpus(
                                 cur_test,
