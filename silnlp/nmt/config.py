@@ -792,9 +792,9 @@ class Config(ABC):
                         filtered_alignment_score = mean(cur_train["score"]) if stats_file is not None else 0
 
                     src_script = get_script("".join(cur_train["source"]))
-                    src_script_in_model = is_represented(src_script, self.model)
+                    src_script_in_model = is_represented(src_script, self.model) if self.model != "SILTransformerBase" else None
                     trg_script = get_script("".join(cur_train["target"]))
-                    trg_script_in_model = is_represented(trg_script, self.model)
+                    trg_script_in_model = is_represented(trg_script, self.model) if self.model != "SILTransformerBase" else None
 
                     if stats_file is not None:
                         LOGGER.info(
