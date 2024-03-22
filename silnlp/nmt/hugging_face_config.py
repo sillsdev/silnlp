@@ -160,6 +160,18 @@ LORA_DEFAULT_CONFIGS = {
     }
 }
 
+SP_TOKENIZER_CONFIG = {
+    "facebook/nllb-200": {
+        "type": "BPE",
+        "special_tokens": ["<s>", "<pad>", "</s>", "<unk>", "<mask>"]
+    },
+    "google/madlad400": {
+        "type": "Unigram",
+        "special_tokens": ["<unk>", "<s>", "</s>"],
+        "unk_token": "<unk>"
+    }
+}
+
 def get_best_checkpoint(model_dir: Path) -> Path:
     trainer_state_path = model_dir / "trainer_state.json"
     with trainer_state_path.open("r", encoding="utf-8") as f:
@@ -187,6 +199,7 @@ def delete_optimizer_state(checkpoint_path: Path) -> None:
 TOKENIZER_FILES = {
     "sentencepiece.bpe.model",
     "special_tokens_map.json",
+    "spiece.model",
     "tokenizer.json",
     "tokenizer_config.json",
     "added_tokens.json",
@@ -241,18 +254,6 @@ def get_model_prefix(model: str) -> str:
         if model.startswith(prefix):
             return prefix
     return ""
-
-SP_TOKENIZER_CONFIG = {
-    "facebook/nllb-200": {
-        "type": "BPE",
-        "special_tokens": ["<s>", "<pad>", "</s>", "<unk>", "<mask>"]
-    },
-    "google/madlad400": {
-        "type": "Unigram",
-        "special_tokens": ["<unk>", "<s>", "</s>"],
-        "unk_token": "<unk>"
-    }
-}
 
 class HuggingFaceConfig(Config):
     def __init__(self, exp_dir: Path, config: dict) -> None:
@@ -397,7 +398,7 @@ class HuggingFaceConfig(Config):
                             data["model"]["vocab"] = data["model"]["vocab"] + trained_data["model"]["vocab"]
                 else:
                     for token in missing_tokens:
-                        data["model"]["vocab"].append([token, 0])
+                        data["model"]["vocab"].append([token, -18])
             file.seek(0)
             json.dump(data, file, ensure_ascii=False, indent=4)
             file.truncate()
@@ -1115,7 +1116,7 @@ class HuggingFaceNMTModel(NMTModel):
 
         dtype = torch.bfloat16 if self._is_t5 else torch.float16
         if self._config.train["use_lora"] and model_name != self._config.model:
-            base_model = AutoModelForSeq2SeqLM.from_pretrained(self._config.model, torch_dtype=dtype if self._mixed_precision else "auto", ignore_mismatched_sizes=True)
+            base_model = AutoModelForSeq2SeqLM.from_pretrained(self._config.model, torch_dtype=dtype if self._mixed_precision else "auto")
             if len(tokenizer) != base_model.get_input_embeddings().weight.size(dim=0):
                 base_model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if self._mixed_precision else None)
             model = PeftModel.from_pretrained(base_model, model_name)
@@ -1123,7 +1124,9 @@ class HuggingFaceNMTModel(NMTModel):
             model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=dtype if self._mixed_precision else "auto")
         if self._config.infer.get("better_transformer"):
             model = model.to_bettertransformer()
-        if self._config.train["use_lora"] or model_name == self._config.model:
+        if model_name == self._config.model and len(tokenizer) != model.get_input_embeddings().weight.size(dim=0):
+            model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if self._mixed_precision else None)
+        if self._config.model.startswith("google/madlad400") or model_name == self._config.model:
             model, tokenizer = self._configure_model(model, tokenizer)
         
         return model
