@@ -20,7 +20,7 @@ import yaml
 from datasets import Dataset
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
 from sacremoses import MosesPunctNormalizer
-from tokenizers import AddedToken, NormalizedString, Regex, SentencePieceBPETokenizer
+from tokenizers import AddedToken, NormalizedString, Regex, SentencePieceBPETokenizer, SentencePieceUnigramTokenizer
 from tokenizers.normalizers import Normalizer
 from torch import Tensor, TensorType, nn, optim
 from torch.utils.checkpoint import checkpoint  # noqa: 401
@@ -160,6 +160,18 @@ LORA_DEFAULT_CONFIGS = {
     }
 }
 
+SP_TOKENIZER_CONFIG = {
+    "facebook/nllb-200": {
+        "type": "BPE",
+        "special_tokens": ["<s>", "<pad>", "</s>", "<unk>", "<mask>"]
+    },
+    "google/madlad400": {
+        "type": "Unigram",
+        "special_tokens": ["<unk>", "<s>", "</s>"],
+        "unk_token": "<unk>"
+    }
+}
+
 def get_best_checkpoint(model_dir: Path) -> Path:
     trainer_state_path = model_dir / "trainer_state.json"
     with trainer_state_path.open("r", encoding="utf-8") as f:
@@ -187,6 +199,7 @@ def delete_optimizer_state(checkpoint_path: Path) -> None:
 TOKENIZER_FILES = {
     "sentencepiece.bpe.model",
     "special_tokens_map.json",
+    "spiece.model",
     "tokenizer.json",
     "tokenizer_config.json",
     "added_tokens.json",
@@ -233,15 +246,14 @@ def prune_sublists(words_ids: List[List[List[int]]]) -> List[List[List[int]]]:
             result.append(temp_variants)
     return result
 
+SUPPORTED_MODEL_PREFIXES = ["facebook/nllb-200", "google/madlad400"]
 SUPPORTED_T5_MODELS = ["google/madlad400"]
 
-
-def is_t5_model(name: str) -> bool:
-    for model_prefix in SUPPORTED_T5_MODELS:
-        if name.startswith(model_prefix):
-            return True
-    return False
-
+def get_model_prefix(model: str) -> str:
+    for prefix in SUPPORTED_MODEL_PREFIXES:
+        if model.startswith(prefix):
+            return prefix
+    return ""
 
 class HuggingFaceConfig(Config):
     def __init__(self, exp_dir: Path, config: dict) -> None:
@@ -299,10 +311,11 @@ class HuggingFaceConfig(Config):
             config,
         )
         self._tokenizer: Optional[PreTrainedTokenizer] = None
+        self.model_prefix = get_model_prefix(config.get("model", ""))
 
         super().__init__(exp_dir, config)
 
-        if self.model.startswith("google/madlad400"):
+        if self.model_prefix == "google/madlad400":
             self.train["max_source_length"] = 256
             self.train["max_target_length"] = 256
 
@@ -355,41 +368,64 @@ class HuggingFaceConfig(Config):
         )
 
     def _add_tokens(
-        self, missing_tokens: List[str], trained_tokenizers: Optional[List[SentencePieceBPETokenizer]] = None
+        self, missing_tokens: List[str], trained_tokenizers: Optional[List[Union[SentencePieceBPETokenizer, SentencePieceUnigramTokenizer]]] = None
     ) -> None:
         assert self._tokenizer is not None
         self._tokenizer.save_pretrained(str(self.exp_dir))
         with open(self.exp_dir / "tokenizer.json", "r+", encoding="utf-8") as file:
             data = json.load(file)
-            vocab_len = len(data["model"]["vocab"].keys())
-            for i, token in enumerate(missing_tokens):
-                data["model"]["vocab"][token] = vocab_len + i
-            if trained_tokenizers:
-                for trained_tok in trained_tokenizers:
-                    trained_tok.save(str(self.exp_dir / "tokenizer_trained.json"))
-                    with open(self.exp_dir / "tokenizer_trained.json", "r+", encoding="utf-8") as trained_file:
-                        trained_data = json.load(trained_file)
-                        data["model"]["merges"] = trained_data["model"]["merges"] + data["model"]["merges"]
+            if data["model"]["type"] == "BPE":
+                vocab_len = len(data["model"]["vocab"].keys())
+                for i, token in enumerate(missing_tokens):
+                    data["model"]["vocab"][token] = vocab_len + i
+                if trained_tokenizers:
+                    for trained_tok in trained_tokenizers:
+                        trained_tok.save(str(self.exp_dir / "tokenizer_trained.json"))
+                        with open(self.exp_dir / "tokenizer_trained.json", "r+", encoding="utf-8") as trained_file:
+                            trained_data = json.load(trained_file)
+                            data["model"]["merges"] = trained_data["model"]["merges"] + data["model"]["merges"]
+            elif data["model"]["type"] == "Unigram":
+                if trained_tokenizers:
+                    for trained_tok in trained_tokenizers:
+                        trained_tok.save(str(self.exp_dir / "tokenizer_trained.json"))
+                        with open(self.exp_dir / "tokenizer_trained.json", "r+", encoding="utf-8") as trained_file:
+                            trained_data = json.load(trained_file)
+                            # Use the probability from the base tokenizer for tokens already in the base tokenizer
+                            base_toks = [t[0] for t in data["model"]["vocab"]]
+                            for i in reversed(range(len(trained_data["model"]["vocab"]))):
+                                if trained_data["model"]["vocab"][i][0] in base_toks:
+                                    del trained_data["model"]["vocab"][i]
+                            data["model"]["vocab"] = data["model"]["vocab"] + trained_data["model"]["vocab"]
+                else:
+                    for token in missing_tokens:
+                        data["model"]["vocab"].append([token, -18])
             file.seek(0)
             json.dump(data, file, ensure_ascii=False, indent=4)
             file.truncate()
         self._tokenizer = AutoTokenizer.from_pretrained(str(self.exp_dir), use_fast=True)
         return
 
-    def _train_sp_tokenizer(self, files, vocab_size) -> SentencePieceBPETokenizer:
+    def _train_sp_tokenizer(self, files, vocab_size) -> Union[SentencePieceBPETokenizer, SentencePieceUnigramTokenizer]:
         assert self._tokenizer is not None
-        sp_tok = SentencePieceBPETokenizer()
+        sp_tok_config = SP_TOKENIZER_CONFIG[self.model_prefix]
+        sp_tok = SentencePieceBPETokenizer() if sp_tok_config["type"] == "BPE" else SentencePieceUnigramTokenizer()
         hf_tokenizer = HuggingFaceTokenizer(
             self._tokenizer, self.data["lang_codes"], self.train["max_source_length"], self.train["max_target_length"]
         )
         sp_tok.normalizer = Normalizer.custom(CustomNormalizerWrapper(hf_tokenizer))
-        sp_tok.train(
-            files, vocab_size=vocab_size, min_frequency=2, special_tokens=["<s>", "<pad>", "</s>", "<unk>", "<mask>"]
-        )
+
+        if sp_tok_config["type"] == "BPE":
+            sp_tok.train(
+                files, vocab_size=vocab_size, min_frequency=2, special_tokens=sp_tok_config["special_tokens"]
+            )
+        elif sp_tok_config["type"] == "Unigram":
+            sp_tok.train(
+                files, vocab_size=vocab_size, special_tokens=sp_tok_config["special_tokens"], unk_token=sp_tok_config["unk_token"]
+            )
         sp_tok.normalizer = self._tokenizer.backend_tokenizer.normalizer
         return sp_tok
 
-    def _create_trained_tokens(self, file_paths, vocab_size) -> Tuple[List[str], SentencePieceBPETokenizer]:
+    def _create_trained_tokens(self, file_paths, vocab_size) -> Tuple[List[str], Union[SentencePieceBPETokenizer, SentencePieceUnigramTokenizer]]:
         assert self._tokenizer is not None
         files = [str(f) for f in download_if_s3_paths(file_paths)]
         sp_tokenizer = self._train_sp_tokenizer(files, vocab_size)
@@ -420,7 +456,7 @@ class HuggingFaceConfig(Config):
         src_missing_tokens: List[str] = []
         trg_missing_tokens: List[str] = []
         if tok_dict and (tok_dict.get("update_src") or tok_dict.get("update_trg")):
-            if tok_dict.get("trained_tokens") and (SIL_NLP_ENV.assets_dir / "tokenizer_config.json").is_file():
+            if tok_dict.get("trained_tokens") and (SIL_NLP_ENV.assets_dir / "tokenizers" / self.model_prefix /"tokenizer_config.json").is_file():
                 if not tok_dict.get("share_vocab") and tok_dict.get("update_src") and tok_dict.get("update_trg"):
                     src_missing_tokens, src_trained_tokenizer = self._create_trained_tokens(
                         list(self.src_file_paths), tok_dict.get("src_vocab_size")
@@ -493,7 +529,7 @@ class HuggingFaceConfig(Config):
             for iso in self.src_isos | self.trg_isos:
                 lang_code = lang_codes.get(iso, iso)
                 if isinstance(self._tokenizer, (T5Tokenizer, T5TokenizerFast)):
-                    if lang_code not in self._tokenizer.all_special_tokens:
+                    if lang_code not in self._tokenizer.all_special_tokens and iso in self.trg_isos:
                         add_lang_code_to_tokenizer(self._tokenizer, lang_code)
                         updated = True
                 elif lang_code not in self._tokenizer.lang_code_to_id:
@@ -511,22 +547,29 @@ class HuggingFaceConfig(Config):
             if (
                 tok_dict
                 and (tok_dict.get("update_src") or tok_dict.get("update_trg"))
-                and (self.exp_dir / "sentencepiece.bpe.model").is_file()
+                and ((self.exp_dir / "sentencepiece.bpe.model").is_file() or (self.exp_dir / "spiece.model").is_file())
                 and not (self.exp_dir / "tokenizer_config.json").is_file()
             ):
-                self._tokenizer = NllbTokenizer.from_pretrained(str(self.exp_dir))
-                self._tokenizer = convert_slow_tokenizer(self._tokenizer)
-                self._tokenizer = NllbTokenizerFast(tokenizer_object=self._tokenizer)
-                self._tokenizer.save_pretrained(str(self.exp_dir))
+                if self.model_prefix == "facebook/nllb-200":
+                    self._tokenizer = NllbTokenizer.from_pretrained(str(self.exp_dir))
+                    self._tokenizer = convert_slow_tokenizer(self._tokenizer)
+                    self._tokenizer = NllbTokenizerFast(tokenizer_object=self._tokenizer)
+                    self._tokenizer.save_pretrained(str(self.exp_dir))
+                elif self.model_prefix == "google/madlad400":
+                    self._tokenizer = T5Tokenizer.from_pretrained(str(self.exp_dir))
+                    self._tokenizer = convert_slow_tokenizer(self._tokenizer)
+                    self._tokenizer = T5TokenizerFast(tokenizer_object=self._tokenizer)
+                    self._tokenizer.add_special_tokens({"additional_special_tokens": ["<s>"]}, replace_additional_special_tokens=False)
+                    self._tokenizer.save_pretrained(str(self.exp_dir))
             else:
                 if (not tok_dict or not (tok_dict.get("update_src") or tok_dict.get("update_trg"))) and (
                     self.exp_dir / "tokenizer_config.json"
                 ).is_file():
                     model_name_or_path = str(self.exp_dir)
                 elif (tok_dict and (tok_dict.get("update_src") or tok_dict.get("update_trg"))) and (
-                    SIL_NLP_ENV.assets_dir / "tokenizer_config.json"
+                    SIL_NLP_ENV.assets_dir / "tokenizers" / self.model_prefix / "tokenizer_config.json"
                 ).is_file():
-                    model_name_or_path = str(SIL_NLP_ENV.assets_dir)
+                    model_name_or_path = str(SIL_NLP_ENV.assets_dir / "tokenizers" / self.model_prefix)
                 else:
                     model_name_or_path = self.model
                 self._tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True)
@@ -654,7 +697,7 @@ class HuggingFaceNMTModel(NMTModel):
         self._mixed_precision = mixed_precision
         set_seed(self._config.data["seed"])
         self._dictionary: Optional[Dict[VerseRef, Set[str]]] = None
-        self._is_t5 = is_t5_model(self._config.model)
+        self._is_t5 = self._config.model_prefix in SUPPORTED_T5_MODELS
 
     def train(self) -> None:
         training_args = self._create_training_arguments()
@@ -699,19 +742,10 @@ class HuggingFaceNMTModel(NMTModel):
 
         if self._config.train["use_lora"]:
             lora_config = self._config.train["lora_config"]
-
-            if "target_modules" not in lora_config:
-                for model_prefix in LORA_DEFAULT_CONFIGS:
-                    if self._config.model.startswith(model_prefix):
-                        lora_config["target_modules"] = LORA_DEFAULT_CONFIGS[model_prefix]["target_modules"]
-            if "modules_to_save" not in lora_config:
-                for model_prefix in LORA_DEFAULT_CONFIGS:
-                    if self._config.model.startswith(model_prefix):
-                        lora_config["modules_to_save"] = LORA_DEFAULT_CONFIGS[model_prefix]["modules_to_save"]
             
-            if isinstance(lora_config["target_modules"], str):
+            if isinstance(lora_config.get("target_modules", []), str):
                 lora_config["target_modules"] = lora_config["target_modules"].split(",")
-            if isinstance(lora_config["modules_to_save"], str):
+            if isinstance(lora_config.get("modules_to_save", []), str):
                 lora_config["modules_to_save"] = lora_config["modules_to_save"].split(",")
 
             peft_config = LoraConfig(
@@ -719,8 +753,8 @@ class HuggingFaceNMTModel(NMTModel):
                 r=lora_config.get("r", 4),
                 lora_alpha=lora_config.get("alpha", 32),
                 lora_dropout=lora_config.get("dropout", .1),
-                target_modules=lora_config["target_modules"],
-                modules_to_save=lora_config["modules_to_save"],
+                target_modules=lora_config.get("target_modules", LORA_DEFAULT_CONFIGS[self._config.model_prefix]["target_modules"]),
+                modules_to_save=lora_config.get("modules_to_save", LORA_DEFAULT_CONFIGS[self._config.model_prefix]["modules_to_save"]),
             )
             model = get_peft_model(model, peft_config)
             model.enable_input_require_grads()  # Converting to PeftModel causes gradient calculation to be disabled
@@ -1084,7 +1118,7 @@ class HuggingFaceNMTModel(NMTModel):
 
         dtype = torch.bfloat16 if self._is_t5 else torch.float16
         if self._config.train["use_lora"] and model_name != self._config.model:
-            base_model = AutoModelForSeq2SeqLM.from_pretrained(self._config.model, torch_dtype=dtype if self._mixed_precision else "auto", ignore_mismatched_sizes=True)
+            base_model = AutoModelForSeq2SeqLM.from_pretrained(self._config.model, torch_dtype=dtype if self._mixed_precision else "auto")
             if len(tokenizer) != base_model.get_input_embeddings().weight.size(dim=0):
                 base_model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if self._mixed_precision else None)
             model = PeftModel.from_pretrained(base_model, model_name)
@@ -1092,7 +1126,9 @@ class HuggingFaceNMTModel(NMTModel):
             model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=dtype if self._mixed_precision else "auto")
         if self._config.infer.get("better_transformer"):
             model = model.to_bettertransformer()
-        if self._config.train["use_lora"] or model_name == self._config.model:
+        if model_name == self._config.model and len(tokenizer) != model.get_input_embeddings().weight.size(dim=0):
+            model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if self._mixed_precision else None)
+        if self._config.model.startswith("google/madlad400") or model_name == self._config.model:
             model, tokenizer = self._configure_model(model, tokenizer)
         
         return model
