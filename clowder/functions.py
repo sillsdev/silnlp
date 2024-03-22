@@ -67,15 +67,15 @@ def cancel(investigation_name: str) -> bool:
     return anything_was_canceled
 
 
-def run(investigation_name: str, force_rerun: bool = False) -> bool:
-    """Runs all experiments in investigation `investigation_name` except those that are already completed or currently in progess."""
+def run(investigation_name: str, force_rerun: bool = False, experiments: "list[str]" = []) -> bool:
+    """Runs all experiments in investigation `investigation_name` except those that are already completed or currently in progress."""
     print(f"Syncing {investigation_name} before running")
     sync(investigation_name, gather_results=False)
     investigation = ENV.get_investigation(investigation_name)
     if investigation.status.value == Status.Running.value:
         return False
     investigation.setup()
-    now_running = investigation.start_investigation(force_rerun)
+    now_running = investigation.start_investigation(force_rerun, experiments)
     if now_running:
         investigation.status = Status.Running
     print(f"Syncing {investigation_name} after running")
@@ -110,7 +110,7 @@ def status(investigation_name: Optional[str], _sync: bool = True) -> dict:
     }
 
 
-def sync(investigation_name: Optional[str], gather_results: bool = True, copy_all_results_to_gdrive: bool = True):
+def sync(investigation_name: Optional[str], gather_results: bool = True, copy_all_results_to_gdrive: bool = False):
     if investigation_name is not None:
         ENV.get_investigation(investigation_name).sync(
             gather_results=gather_results, copy_all_results_to_gdrive=copy_all_results_to_gdrive
@@ -142,13 +142,28 @@ def untrack_context(root_folder_id: str):
     del ENV.meta.data[root_folder_id]
     ENV.meta.flush()
 
+
 def list_contexts() -> "list[str]":
     """Lists all currently tracked contexts"""
     return ENV.meta.data.keys() - set(["current_root"])
 
+
 def list_inv() -> "list[Investigation]":
     """Lists all investigations in the current context"""
     return ENV.investigations
+
+
+def use_data(folder_id: str):
+    """Use scripture data from a particular gdrive folder specified by folder-id.
+    (Other users will not be able to access this data). Data should be uploaded to
+    the gdrive folder as complete Paratext project folders. This data folder will
+    be associated only with the current context"""
+    ENV.use_data(folder_id)
+
+
+def current_data():
+    """Return the data folder id associated with this context if any"""
+    return ENV.data_folder
 
 
 def current_context() -> str:

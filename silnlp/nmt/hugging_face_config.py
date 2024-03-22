@@ -214,7 +214,7 @@ def delete_tokenizer(checkpoint_path: Path) -> None:
 
 
 def add_lang_code_to_tokenizer(tokenizer: PreTrainedTokenizer, lang_code: str) -> None:
-    tokenizer.add_special_tokens({"additional_special_tokens": tokenizer.additional_special_tokens + [lang_code]})
+    tokenizer.add_special_tokens({"additional_special_tokens": [lang_code]}, replace_additional_special_tokens=False)
     lang_id = tokenizer.convert_tokens_to_ids(lang_code)
     if not isinstance(tokenizer, (T5Tokenizer, T5TokenizerFast)):
         tokenizer.lang_code_to_id[lang_code] = lang_id
@@ -1036,6 +1036,8 @@ class HuggingFaceNMTModel(NMTModel):
         merge_dict(args, {"fp16": self._mixed_precision and not self._is_t5, 
                           "bf16": self._mixed_precision and self._is_t5, 
                           "tf32": self._mixed_precision})
+        if self._is_t5 and "learning_rate" not in args.keys():
+            args["learning_rate"] = 3e-4
         return parser.parse_dict(args)[0]
 
     def _get_dictionary(self) -> Dict[VerseRef, Set[str]]:

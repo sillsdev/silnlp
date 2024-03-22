@@ -195,10 +195,10 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
         val_size: Optional[Union[float, int]] = pair.get("val_size")
 
         if "disjoint_test" not in pair:
-            pair["disjoint_test"] = False
+            pair["disjoint_test"] = True
         disjoint_test: bool = pair["disjoint_test"]
         if "disjoint_val" not in pair:
-            pair["disjoint_val"] = False
+            pair["disjoint_val"] = True
         disjoint_val: bool = pair["disjoint_val"]
         score_threshold: float = pair.get("score_threshold", 0.0)
         corpus_books = get_chapters(pair.get("corpus_books", []))
@@ -366,10 +366,11 @@ class Config(ABC):
                 self.src_projects.update(sf.project for sf in corpus_pair.src_files)
                 self.trg_projects.update(sf.project for sf in corpus_pair.trg_files)
                 if terms_config["include_glosses"]:
-                    if "en" in pair_src_isos:
-                        self.src_file_paths.update(get_terms_glosses_file_paths(corpus_pair.src_terms_files))
-                    if "en" in pair_trg_isos:
-                        self.trg_file_paths.update(get_terms_glosses_file_paths(corpus_pair.trg_terms_files))
+                    for gloss_iso in ["fr","en","id"]:
+                        if gloss_iso in pair_src_isos:
+                            self.src_file_paths.update(get_terms_glosses_file_paths(corpus_pair.src_terms_files))
+                        if gloss_iso in pair_trg_isos:
+                            self.trg_file_paths.update(get_terms_glosses_file_paths(corpus_pair.trg_terms_files))
             self._tags.update(f"<{tag}>" for tag in corpus_pair.tags)
 
             for src_file in corpus_pair.src_files:
@@ -742,6 +743,11 @@ class Config(ABC):
                             cur_train.to_csv(pair_stats_path, index=False)
 
                 if pair.is_test:
+                    if len(pair.test_books) > 0:
+                        cur_test = include_chapters(corpus, pair.test_books)
+                        if test_indices is None:
+                            test_indices = cur_test.index
+
                     if pair.disjoint_test and test_indices is None:
                         indices: Set[int] = set(cur_train.index)
                         if pair.disjoint_val and val_indices is not None:
@@ -752,7 +758,6 @@ class Config(ABC):
                         test_indices = set(random.sample(indices, min(split_size, len(indices))))
 
                     if len(pair.test_books) > 0:
-                        cur_test = include_chapters(corpus, pair.test_books)
                         if test_size > 0:
                             _, cur_test = split_parallel_corpus(
                                 cur_test,
@@ -787,9 +792,9 @@ class Config(ABC):
                         filtered_alignment_score = mean(cur_train["score"]) if stats_file is not None else 0
 
                     src_script = get_script("".join(cur_train["source"]))
-                    src_script_in_model = is_represented(src_script, self.model)
+                    src_script_in_model = is_represented(src_script, self.model) if self.model != "SILTransformerBase" else None
                     trg_script = get_script("".join(cur_train["target"]))
-                    trg_script_in_model = is_represented(trg_script, self.model)
+                    trg_script_in_model = is_represented(trg_script, self.model) if self.model != "SILTransformerBase" else None
 
                     if stats_file is not None:
                         LOGGER.info(
@@ -1129,22 +1134,23 @@ class Config(ABC):
                 cur_terms["target_lang"] = trg_terms_file.iso
                 terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
         if terms_config["include_glosses"]:
-            if "en" in self.trg_isos:
-                for src_terms_file, src_terms in all_src_terms:
-                    cur_terms = get_terms_data_frame(src_terms, categories_set, filter_books)
-                    cur_terms = cur_terms.rename(columns={"rendering": "source", "gloss": "target"})
-                    cur_terms["source_lang"] = src_terms_file.iso
-                    cur_terms["target_lang"] = "en"
-                    terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
-            if "en" in self.src_isos:
-                for trg_terms_file, trg_terms in all_trg_terms:
-                    cur_terms = get_terms_data_frame(trg_terms, categories_set, filter_books)
-                    cur_terms = cur_terms.rename(columns={"rendering": "target", "gloss": "source"})
-                    cur_terms["source_lang"] = "en"
-                    cur_terms["target_lang"] = trg_terms_file.iso
-                    terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
+            for gloss_iso in ["en", "fr", "id"]:
+                if gloss_iso in self.trg_isos:
+                    for src_terms_file, src_terms in all_src_terms:
+                        cur_terms = get_terms_data_frame(src_terms, categories_set, filter_books)
+                        cur_terms = cur_terms.rename(columns={"rendering": "source", "gloss": "target"})
+                        cur_terms["source_lang"] = src_terms_file.iso
+                        cur_terms["target_lang"] = gloss_iso
+                        terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
+                if gloss_iso in self.src_isos:
+                    for trg_terms_file, trg_terms in all_trg_terms:
+                        cur_terms = get_terms_data_frame(trg_terms, categories_set, filter_books)
+                        cur_terms = cur_terms.rename(columns={"rendering": "target", "gloss": "source"})
+                        cur_terms["source_lang"] = gloss_iso
+                        cur_terms["target_lang"] = trg_terms_file.iso
+                        terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
         return terms
-
+        
     def _write_val_trg(self, tokenizer: Optional[Tokenizer], val: Dict[Tuple[str, str], pd.DataFrame]) -> None:
         with ExitStack() as stack:
             ref_files: List[TextIO] = []
