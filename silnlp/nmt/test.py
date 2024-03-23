@@ -22,7 +22,7 @@ LOGGER = logging.getLogger(__package__ + ".test")
 
 logging.getLogger("sacrebleu").setLevel(logging.ERROR)
 
-_SUPPORTED_SCORERS = {"bleu", "sentencebleu", "chrf3", "meteor", "wer", "ter", "spbleu"}
+_SUPPORTED_SCORERS = {"bleu", "sentencebleu", "chrf3", "chrf3+", "chrf3++", "meteor", "wer", "ter", "spbleu"}
 
 
 class PairScore:
@@ -94,6 +94,14 @@ def score_pair(
     if "chrf3" in scorers:
         chrf3_score = sacrebleu.corpus_chrf(pair_sys, pair_refs, char_order=6, beta=3, remove_whitespace=True)
         other_scores["CHRF3"] = chrf3_score.score
+
+    if "chrf3+" in scorers:
+        chrfp_score = sacrebleu.corpus_chrf(pair_sys, pair_refs, char_order=6, beta=3, word_order=1, remove_whitespace=True, eps_smoothing=True)
+        other_scores["CHRF3+"] = chrfp_score.score
+
+    if "chrf3++" in scorers:
+        chrfpp_score = sacrebleu.corpus_chrf(pair_sys, pair_refs, char_order=6, beta=3, word_order=2, remove_whitespace=True, eps_smoothing=True)
+        other_scores["CHRF3++"] = chrfpp_score.score
 
     if "meteor" in scorers:
         meteor_score = compute_meteor_score(trg_iso, pair_sys, pair_refs)
