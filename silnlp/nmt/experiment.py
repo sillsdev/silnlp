@@ -80,7 +80,7 @@ class SILExperiment:
             last=self.config.model_dir.exists(),
             best=self.config.model_dir.exists(),
             by_book=self.score_by_book,
-            scorers=self.scorers.union({"bleu", "sentencebleu", "chrf3", "wer", "ter", "spbleu"}),
+            scorers=self.scorers,
         )
         SIL_NLP_ENV.copy_experiment_to_bucket(
             self.name, patterns=("scores-*.csv", "test.*trg-predictions.*"), overwrite=True
@@ -164,7 +164,7 @@ def main() -> None:
         nargs="*",
         metavar="scorer",
         choices=_SUPPORTED_SCORERS,
-        default=[],
+        default=["bleu", "sentencebleu", "chrf3", "chrf3++", "wer", "ter", "spbleu"],
         help=f"List of scorers - {_SUPPORTED_SCORERS}",
     )
 
