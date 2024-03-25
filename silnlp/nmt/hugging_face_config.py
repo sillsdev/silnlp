@@ -172,6 +172,13 @@ SP_TOKENIZER_CONFIG = {
     }
 }
 
+EVAL_METRICS_MODULES = {
+    "bleu": "sacrebleu",
+    "chrf3": "chrf",
+    "chrf3+": "chrf",
+    "chrf3++": "chrf"
+}
+
 def get_best_checkpoint(model_dir: Path) -> Path:
     trainer_state_path = model_dir / "trainer_state.json"
     with trainer_state_path.open("r", encoding="utf-8") as f:
@@ -823,7 +830,11 @@ class HuggingFaceNMTModel(NMTModel):
             src_noise=src_noise,
         )
 
-        metric = evaluate.load("sacrebleu")
+        metric_name = self._config.eval["metric_for_best_model"]
+        metric_module = EVAL_METRICS_MODULES.get(metric_name)
+        if metric_module is None:
+            raise ValueError(f"{metric_name} is not a supported metric.")
+        metric = evaluate.load(metric_module)
         all_special_ids = set(tokenizer.all_special_ids)
 
         def compute_metrics(eval_preds):
@@ -858,13 +869,24 @@ class HuggingFaceNMTModel(NMTModel):
                     for label in labels
                 ]
 
-            result = metric.compute(
-                predictions=decoded_preds,
-                references=decoded_labels,
-                lowercase=True,
-                force=not self._config.eval["detokenize"],
-            )
-            result = {"bleu": result["score"]}
+            if metric_name == "bleu":
+                result = metric.compute(
+                    predictions=decoded_preds,
+                    references=decoded_labels,
+                    lowercase=True,
+                    force=not self._config.eval["detokenize"],
+                )
+            elif metric_module == "chrf":
+                result = metric.compute(
+                    predictions=decoded_preds,
+                    references=decoded_labels,
+                    char_order=6,
+                    word_order=metric_name.count("+"),
+                    beta=3,
+                    lowercase=True,
+                    eps_smoothing="+" in metric_name
+                )
+            result = {metric_name: result["score"]}
 
             prediction_lens = [np.count_nonzero(pred != tokenizer.pad_token_id) for pred in preds]
             result["gen_len"] = np.mean(prediction_lens)
