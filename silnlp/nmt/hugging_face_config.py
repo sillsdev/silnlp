@@ -764,7 +764,10 @@ class HuggingFaceNMTModel(NMTModel):
                 modules_to_save=lora_config.get("modules_to_save", LORA_DEFAULT_CONFIGS[self._config.model_prefix]["modules_to_save"]),
             )
             model = get_peft_model(model, peft_config)
-            model.enable_input_require_grads()  # Converting to PeftModel causes gradient calculation to be disabled
+            
+            # Necessary to allow gradients to propogate through frozen layers when using PEFT + gradient checkpointing + Trainer
+            if self._config.train["gradient_checkpointing"]:
+                model.enable_input_require_grads()
 
         # Change specific variables based on the type of model
         model, tokenizer = self._configure_model(model, tokenizer)
@@ -830,7 +833,7 @@ class HuggingFaceNMTModel(NMTModel):
             src_noise=src_noise,
         )
 
-        metric_name = self._config.eval["metric_for_best_model"]
+        metric_name = self._config.eval["metric_for_best_model"].lower()
         metric_module = EVAL_METRICS_MODULES.get(metric_name)
         if metric_module is None:
             raise ValueError(f"{metric_name} is not a supported metric.")
