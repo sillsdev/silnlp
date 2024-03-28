@@ -1,5 +1,6 @@
 import logging
 import string
+import tempfile
 from abc import ABC, abstractmethod
 from datetime import date
 from itertools import groupby
@@ -198,6 +199,26 @@ def remove_inline_elements(doc: List[sfm.Element]) -> None:
         remove_inline_elements_from_element(root)
 
 
+def insert_blank_verses_into_target_element(cur_elem: sfm.Element, chapters: List[int]) -> None:
+    insert_idxs = []
+    for i, child in enumerate(cur_elem):
+        if isinstance(child, sfm.Element):
+            if child.name == "c" and int(child.args[0]) not in chapters:
+                continue
+            if child.name == "v" and (i == len(cur_elem) - 1 or (isinstance(cur_elem[i + 1], sfm.Element) and cur_elem[i + 1].name == "v")):
+                insert_idxs.append(i + 1)
+            else:
+                insert_blank_verses_into_target_element(child, chapters)
+
+    for idx in reversed(insert_idxs):
+        cur_elem.insert(idx, sfm.Text("\n", parent=cur_elem))
+
+
+def insert_blank_verses_into_target(doc: List[sfm.Element], chapters: List[int]) -> None:
+    for root in doc:
+        insert_blank_verses_into_target_element(root, chapters)
+
+
 def insert_translation_into_trg_sentences(
     sentences: List[str],
     vrefs: List[VerseRef],
@@ -366,8 +387,15 @@ class Translator(ABC):
                         trg_doc: List[sfm.Element] = list(
                             usfm.parser(book_file, stylesheet=stylesheet, canonicalise_footnotes=False)
                         )
-                    if not include_inline_elements:
-                        remove_inline_elements(trg_doc)
+                    # Unstack empty verses grouped on the same line
+                    with tempfile.TemporaryDirectory() as td:
+                        tmp_path = Path(td) / "tmp.SFM"
+                        with tmp_path.open(mode="w", encoding="utf-8", newline="\n") as tmp_file:
+                            tmp_file.write(sfm.generate(trg_doc))
+                        with tmp_path.open(mode="r", encoding="utf-8-sig") as tmp_file:
+                            trg_doc = list(usfm.parser(tmp_file, canonicalise_footnotes=False))
+                    # Create place for translations to be inserted
+                    insert_blank_verses_into_target(trg_doc, chapters)
                     trg_segments = collect_segments(book, trg_doc)
                     trg_sentences = [s.text.strip() for s in trg_segments]
                     trg_vrefs = [s.ref for s in trg_segments]
