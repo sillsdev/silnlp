@@ -152,32 +152,21 @@ TRAINING_ARGS_CONFIG_MAPPING = {
 LORA_DEFAULT_CONFIGS = {
     "facebook/nllb-200": {
         "target_modules": ["q_proj", "v_proj", "k_proj", "out_proj", "fc1", "fc2"],
-        "modules_to_save": ["embed_tokens", "lm_head"]
+        "modules_to_save": ["embed_tokens", "lm_head"],
     },
     "google/madlad400": {
         "target_modules": ["q", "v", "k", "o", "wi_0", "wi_1", "wo"],
-        "modules_to_save": ["embed_tokens", "lm_head"]
-    }
+        "modules_to_save": ["embed_tokens", "lm_head"],
+    },
 }
 
 SP_TOKENIZER_CONFIG = {
-    "facebook/nllb-200": {
-        "type": "BPE",
-        "special_tokens": ["<s>", "<pad>", "</s>", "<unk>", "<mask>"]
-    },
-    "google/madlad400": {
-        "type": "Unigram",
-        "special_tokens": ["<unk>", "<s>", "</s>"],
-        "unk_token": "<unk>"
-    }
+    "facebook/nllb-200": {"type": "BPE", "special_tokens": ["<s>", "<pad>", "</s>", "<unk>", "<mask>"]},
+    "google/madlad400": {"type": "Unigram", "special_tokens": ["<unk>", "<s>", "</s>"], "unk_token": "<unk>"},
 }
 
-EVAL_METRICS_MODULES = {
-    "bleu": "sacrebleu",
-    "chrf3": "chrf",
-    "chrf3+": "chrf",
-    "chrf3++": "chrf"
-}
+EVAL_METRICS_MODULES = {"bleu": "sacrebleu", "chrf3": "chrf", "chrf3+": "chrf", "chrf3++": "chrf"}
+
 
 def get_best_checkpoint(model_dir: Path) -> Path:
     trainer_state_path = model_dir / "trainer_state.json"
@@ -253,14 +242,17 @@ def prune_sublists(words_ids: List[List[List[int]]]) -> List[List[List[int]]]:
             result.append(temp_variants)
     return result
 
+
 SUPPORTED_MODEL_PREFIXES = ["facebook/nllb-200", "google/madlad400"]
 SUPPORTED_T5_MODELS = ["google/madlad400"]
+
 
 def get_model_prefix(model: str) -> str:
     for prefix in SUPPORTED_MODEL_PREFIXES:
         if model.startswith(prefix):
             return prefix
     return ""
+
 
 class HuggingFaceConfig(Config):
     def __init__(self, exp_dir: Path, config: dict) -> None:
@@ -292,7 +284,7 @@ class HuggingFaceConfig(Config):
                     "delete_checkpoint_tokenizer": True,
                     "log_level": "info",
                     "use_lora": False,
-                    "lora_config": {}
+                    "lora_config": {},
                 },
                 "eval": {
                     "evaluation_strategy": "steps",
@@ -375,7 +367,9 @@ class HuggingFaceConfig(Config):
         )
 
     def _add_tokens(
-        self, missing_tokens: List[str], trained_tokenizers: Optional[List[Union[SentencePieceBPETokenizer, SentencePieceUnigramTokenizer]]] = None
+        self,
+        missing_tokens: List[str],
+        trained_tokenizers: Optional[List[Union[SentencePieceBPETokenizer, SentencePieceUnigramTokenizer]]] = None,
     ) -> None:
         assert self._tokenizer is not None
         self._tokenizer.save_pretrained(str(self.exp_dir))
@@ -422,17 +416,20 @@ class HuggingFaceConfig(Config):
         sp_tok.normalizer = Normalizer.custom(CustomNormalizerWrapper(hf_tokenizer))
 
         if sp_tok_config["type"] == "BPE":
-            sp_tok.train(
-                files, vocab_size=vocab_size, min_frequency=2, special_tokens=sp_tok_config["special_tokens"]
-            )
+            sp_tok.train(files, vocab_size=vocab_size, min_frequency=2, special_tokens=sp_tok_config["special_tokens"])
         elif sp_tok_config["type"] == "Unigram":
             sp_tok.train(
-                files, vocab_size=vocab_size, special_tokens=sp_tok_config["special_tokens"], unk_token=sp_tok_config["unk_token"]
+                files,
+                vocab_size=vocab_size,
+                special_tokens=sp_tok_config["special_tokens"],
+                unk_token=sp_tok_config["unk_token"],
             )
         sp_tok.normalizer = self._tokenizer.backend_tokenizer.normalizer
         return sp_tok
 
-    def _create_trained_tokens(self, file_paths, vocab_size) -> Tuple[List[str], Union[SentencePieceBPETokenizer, SentencePieceUnigramTokenizer]]:
+    def _create_trained_tokens(
+        self, file_paths, vocab_size
+    ) -> Tuple[List[str], Union[SentencePieceBPETokenizer, SentencePieceUnigramTokenizer]]:
         assert self._tokenizer is not None
         files = [str(f) for f in download_if_s3_paths(file_paths)]
         sp_tokenizer = self._train_sp_tokenizer(files, vocab_size)
@@ -444,13 +441,14 @@ class HuggingFaceConfig(Config):
         assert self._tokenizer is not None
         vocab = self._tokenizer.get_vocab().keys()
         charset: Set[str] = set()
-        for file in corpus:
-            with file.open("r", encoding="utf-8-sig") as f:
-                charset = charset | set(f.read())
         hf_tokenizer = HuggingFaceTokenizer(
             self._tokenizer, self.data["lang_codes"], self.train["max_source_length"], self.train["max_target_length"]
         )
-        charset = set(hf_tokenizer.normalize_all(Side.TARGET, charset))
+        for file in corpus:
+            with file.open("r", encoding="utf-8-sig") as f:
+                for line in f:
+                    charset = charset | set(hf_tokenizer.normalize(Side.TARGET, line))
+
         charset = set(filter(None, {char.strip() for char in charset}))
         missing_characters = sorted(list(charset - vocab))
         return missing_characters
@@ -463,7 +461,10 @@ class HuggingFaceConfig(Config):
         src_missing_tokens: List[str] = []
         trg_missing_tokens: List[str] = []
         if tok_dict and (tok_dict.get("update_src") or tok_dict.get("update_trg")):
-            if tok_dict.get("trained_tokens") and (SIL_NLP_ENV.assets_dir / "tokenizers" / self.model_prefix /"tokenizer_config.json").is_file():
+            if (
+                tok_dict.get("trained_tokens")
+                and (SIL_NLP_ENV.assets_dir / "tokenizers" / self.model_prefix / "tokenizer_config.json").is_file()
+            ):
                 if not tok_dict.get("share_vocab") and tok_dict.get("update_src") and tok_dict.get("update_trg"):
                     src_missing_tokens, src_trained_tokenizer = self._create_trained_tokens(
                         list(self.src_file_paths), tok_dict.get("src_vocab_size")
@@ -566,7 +567,9 @@ class HuggingFaceConfig(Config):
                     self._tokenizer = T5Tokenizer.from_pretrained(str(self.exp_dir))
                     self._tokenizer = convert_slow_tokenizer(self._tokenizer)
                     self._tokenizer = T5TokenizerFast(tokenizer_object=self._tokenizer)
-                    self._tokenizer.add_special_tokens({"additional_special_tokens": ["<s>"]}, replace_additional_special_tokens=False)
+                    self._tokenizer.add_special_tokens(
+                        {"additional_special_tokens": ["<s>"]}, replace_additional_special_tokens=False
+                    )
                     self._tokenizer.save_pretrained(str(self.exp_dir))
             else:
                 if (not tok_dict or not (tok_dict.get("update_src") or tok_dict.get("update_trg"))) and (
@@ -740,16 +743,20 @@ class HuggingFaceNMTModel(NMTModel):
         if len(tokenizer) > old_num_tokens and tok_dict is not None and tok_dict.get("init_unk"):
             vocab = tokenizer.get_vocab()
             unk_embedding = old_embeddings.weight.data[vocab["<unk>"]]
-            model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if training_args.fp16 or training_args.bf16 else None)
+            model.resize_token_embeddings(
+                len(tokenizer), pad_to_multiple_of=8 if training_args.fp16 or training_args.bf16 else None
+            )
             embeddings = model.get_input_embeddings()
             embeddings.weight.data[old_num_tokens:, :] = unk_embedding
             model.tie_weights()
         elif len(tokenizer) != old_num_tokens:
-            model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if training_args.fp16 or training_args.bf16 else None)
+            model.resize_token_embeddings(
+                len(tokenizer), pad_to_multiple_of=8 if training_args.fp16 or training_args.bf16 else None
+            )
 
         if self._config.train["use_lora"]:
             lora_config = self._config.train["lora_config"]
-            
+
             if isinstance(lora_config.get("target_modules", []), str):
                 lora_config["target_modules"] = lora_config["target_modules"].split(",")
             if isinstance(lora_config.get("modules_to_save", []), str):
@@ -759,12 +766,16 @@ class HuggingFaceNMTModel(NMTModel):
                 task_type=TaskType.SEQ_2_SEQ_LM,
                 r=lora_config.get("r", 4),
                 lora_alpha=lora_config.get("alpha", 32),
-                lora_dropout=lora_config.get("dropout", .1),
-                target_modules=lora_config.get("target_modules", LORA_DEFAULT_CONFIGS[self._config.model_prefix]["target_modules"]),
-                modules_to_save=lora_config.get("modules_to_save", LORA_DEFAULT_CONFIGS[self._config.model_prefix]["modules_to_save"]),
+                lora_dropout=lora_config.get("dropout", 0.1),
+                target_modules=lora_config.get(
+                    "target_modules", LORA_DEFAULT_CONFIGS[self._config.model_prefix]["target_modules"]
+                ),
+                modules_to_save=lora_config.get(
+                    "modules_to_save", LORA_DEFAULT_CONFIGS[self._config.model_prefix]["modules_to_save"]
+                ),
             )
             model = get_peft_model(model, peft_config)
-            
+
             # Necessary to allow gradients to propogate through frozen layers when using PEFT + gradient checkpointing + Trainer
             if self._config.train["gradient_checkpointing"]:
                 model.enable_input_require_grads()
@@ -887,7 +898,7 @@ class HuggingFaceNMTModel(NMTModel):
                     word_order=metric_name.count("+"),
                     beta=3,
                     lowercase=True,
-                    eps_smoothing="+" in metric_name
+                    eps_smoothing="+" in metric_name,
                 )
             result = {metric_name: result["score"]}
 
@@ -1058,9 +1069,14 @@ class HuggingFaceNMTModel(NMTModel):
             for param in params:
                 if param in section_config:
                     args[param] = section_config[param]
-        merge_dict(args, {"fp16": self._mixed_precision and not self._is_t5, 
-                          "bf16": self._mixed_precision and self._is_t5, 
-                          "tf32": self._mixed_precision})
+        merge_dict(
+            args,
+            {
+                "fp16": self._mixed_precision and not self._is_t5,
+                "bf16": self._mixed_precision and self._is_t5,
+                "tf32": self._mixed_precision,
+            },
+        )
         if self._is_t5 and "learning_rate" not in args.keys():
             args["learning_rate"] = 3e-4
         return parser.parse_dict(args)[0]
@@ -1133,8 +1149,10 @@ class HuggingFaceNMTModel(NMTModel):
                     return_text=not return_tensors,
                     return_tensors=return_tensors,
                 )
-    
-    def _create_inference_model(self, ckpt: Union[CheckpointType, str, int], tokenizer: PreTrainedTokenizer) -> PreTrainedModel:
+
+    def _create_inference_model(
+        self, ckpt: Union[CheckpointType, str, int], tokenizer: PreTrainedTokenizer
+    ) -> PreTrainedModel:
         if self._config.model_dir.exists():
             checkpoint_path, _ = self.get_checkpoint_path(ckpt)
             model_name = str(checkpoint_path)
@@ -1143,22 +1161,30 @@ class HuggingFaceNMTModel(NMTModel):
 
         dtype = torch.bfloat16 if self._is_t5 else torch.float16
         if self._config.train["use_lora"] and model_name != self._config.model:
-            base_model = AutoModelForSeq2SeqLM.from_pretrained(self._config.model, torch_dtype=dtype if self._mixed_precision else "auto")
+            base_model = AutoModelForSeq2SeqLM.from_pretrained(
+                self._config.model, torch_dtype=dtype if self._mixed_precision else "auto"
+            )
             if len(tokenizer) != base_model.get_input_embeddings().weight.size(dim=0):
-                base_model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if self._mixed_precision else None)
+                base_model.resize_token_embeddings(
+                    len(tokenizer), pad_to_multiple_of=8 if self._mixed_precision else None
+                )
             model = PeftModel.from_pretrained(base_model, model_name)
         else:
-            model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=dtype if self._mixed_precision else "auto")
+            model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(
+                model_name, torch_dtype=dtype if self._mixed_precision else "auto"
+            )
         if self._config.infer.get("better_transformer"):
             model = model.to_bettertransformer()
         if model_name == self._config.model and len(tokenizer) != model.get_input_embeddings().weight.size(dim=0):
             model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if self._mixed_precision else None)
         if self._config.model.startswith("google/madlad400") or model_name == self._config.model:
             model, tokenizer = self._configure_model(model, tokenizer)
-        
+
         return model
-    
-    def _configure_model(self, model: PreTrainedModel, tokenizer: PreTrainedTokenizer) -> Tuple[PreTrainedModel, PreTrainedTokenizer]:
+
+    def _configure_model(
+        self, model: PreTrainedModel, tokenizer: PreTrainedTokenizer
+    ) -> Tuple[PreTrainedModel, PreTrainedTokenizer]:
         # Set decoder_start_token_id
         if (
             self._config.val_trg_lang != ""
@@ -1180,8 +1206,13 @@ class HuggingFaceNMTModel(NMTModel):
         if model.config.decoder_start_token_id is None:
             raise ValueError("Make sure that `config.decoder_start_token_id` is correctly defined")
 
-        if (self._config.val_src_lang != "" and self._config.val_trg_lang != "" 
-            and isinstance(tokenizer, (MBartTokenizer, MBartTokenizerFast, M2M100Tokenizer, NllbTokenizer, NllbTokenizerFast))):
+        if (
+            self._config.val_src_lang != ""
+            and self._config.val_trg_lang != ""
+            and isinstance(
+                tokenizer, (MBartTokenizer, MBartTokenizerFast, M2M100Tokenizer, NllbTokenizer, NllbTokenizerFast)
+            )
+        ):
             tokenizer.src_lang = self._config.val_src_lang
             tokenizer.tgt_lang = self._config.val_trg_lang
 
@@ -1191,7 +1222,7 @@ class HuggingFaceNMTModel(NMTModel):
             model.config.forced_bos_token_id = forced_bos_token_id
             if model.generation_config is not None:
                 model.generation_config.forced_bos_token_id = forced_bos_token_id
-        
+
         return model, tokenizer
 
 
