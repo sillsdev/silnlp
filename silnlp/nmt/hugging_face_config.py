@@ -755,30 +755,7 @@ class HuggingFaceNMTModel(NMTModel):
             )
 
         if self._config.train["use_lora"]:
-            lora_config = self._config.train["lora_config"]
-
-            if isinstance(lora_config.get("target_modules", []), str):
-                lora_config["target_modules"] = lora_config["target_modules"].split(",")
-            if isinstance(lora_config.get("modules_to_save", []), str):
-                lora_config["modules_to_save"] = lora_config["modules_to_save"].split(",")
-
-            peft_config = LoraConfig(
-                task_type=TaskType.SEQ_2_SEQ_LM,
-                r=lora_config.get("r", 4),
-                lora_alpha=lora_config.get("alpha", 32),
-                lora_dropout=lora_config.get("dropout", 0.1),
-                target_modules=lora_config.get(
-                    "target_modules", LORA_DEFAULT_CONFIGS[self._config.model_prefix]["target_modules"]
-                ),
-                modules_to_save=lora_config.get(
-                    "modules_to_save", LORA_DEFAULT_CONFIGS[self._config.model_prefix]["modules_to_save"]
-                ),
-            )
-            model = get_peft_model(model, peft_config)
-
-            # Necessary to allow gradients to propogate through frozen layers when using PEFT + gradient checkpointing + Trainer
-            if self._config.train["gradient_checkpointing"]:
-                model.enable_input_require_grads()
+            model = self._convert_to_lora_model(model, len(tokenizer) != old_num_tokens)
 
         # Change specific variables based on the type of model
         model, tokenizer = self._configure_model(model, tokenizer)
@@ -1111,6 +1088,55 @@ class HuggingFaceNMTModel(NMTModel):
 
         return self._dictionary
 
+    def _convert_to_lora_model(self, model: PreTrainedModel, is_tokenizer_updated: bool) -> PreTrainedModel:
+        # Only tie embedding weights together rather than the entire modules so that peft recognizes each one
+        if is_tokenizer_updated:
+            if self._config.model_prefix == "facebook/nllb-200":
+                model.base_model.encoder.embed_tokens = torch.nn.Embedding(model.config.vocab_size, model.config.d_model, model.config.pad_token_id)
+                model.base_model.decoder.embed_tokens = torch.nn.Embedding(model.config.vocab_size, model.config.d_model, model.config.pad_token_id)
+            elif self._config.model_prefix == "google/madlad400":
+                pass
+            model.tie_weights()
+
+        lora_config = self._config.train["lora_config"]
+        target_modules = lora_config.get("target_modules", LORA_DEFAULT_CONFIGS[self._config.model_prefix]["target_modules"])
+        modules_to_save = lora_config.get("modules_to_save", LORA_DEFAULT_CONFIGS[self._config.model_prefix]["modules_to_save"])
+        if isinstance(target_modules, str):
+            target_modules = target_modules.split(",")
+        if isinstance(modules_to_save, str):
+            modules_to_save = modules_to_save.split(",")
+        peft_config = LoraConfig(
+            task_type=TaskType.SEQ_2_SEQ_LM,
+            r=lora_config.get("r", 4),
+            lora_alpha=lora_config.get("alpha", 32),
+            lora_dropout=lora_config.get("dropout", 0.1),
+            target_modules=target_modules,
+            modules_to_save=modules_to_save,
+        )
+        model = get_peft_model(model, peft_config)
+
+        # Tie LoRA versions of the embedding weights together
+        if self._config.model_prefix == "facebook/nllb-200":
+            if "embed_tokens" in target_modules:
+                embedding_A = model.base_model.model.model.encoder.embed_tokens.lora_embedding_A.default
+                embedding_B = model.base_model.model.model.encoder.embed_tokens.lora_embedding_B.default
+                model.base_model.model.model.decoder.embed_tokens.lora_embedding_A.default = embedding_A
+                model.base_model.model.lm_head.lora_B.default.weight = embedding_A
+                model.base_model.model.model.decoder.embed_tokens.lora_embedding_B.default = embedding_B
+                model.base_model.model.lm_head.lora_A.default.weight = embedding_B
+            elif "embed_tokens" in modules_to_save:
+                embedding = model.base_model.model.model.encoder.embed_tokens.modules_to_save.default.weight
+                model.base_model.model.model.decoder.embed_tokens.modules_to_save.default.weight = embedding
+                model.base_model.model.lm_head.modules_to_save.default.weight = embedding
+        elif self._config.model_prefix == "google/madlad400":
+            pass
+
+        # Necessary to allow gradients to propogate through frozen layers when using PEFT + gradient checkpointing + Trainer
+        if self._config.train["gradient_checkpointing"]:
+            model.enable_input_require_grads()
+
+        return model
+
     def _translate_sentences(
         self,
         tokenizer: PreTrainedTokenizer,
@@ -1177,7 +1203,7 @@ class HuggingFaceNMTModel(NMTModel):
             model = model.to_bettertransformer()
         if model_name == self._config.model and len(tokenizer) != model.get_input_embeddings().weight.size(dim=0):
             model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if self._mixed_precision else None)
-        if self._config.model.startswith("google/madlad400") or model_name == self._config.model:
+        if self._config.model_prefix == "google/madlad400" or model_name == self._config.model:
             model, tokenizer = self._configure_model(model, tokenizer)
 
         return model
@@ -1196,7 +1222,7 @@ class HuggingFaceNMTModel(NMTModel):
             else:
                 model.config.decoder_start_token_id = tokenizer.convert_tokens_to_ids(self._config.val_trg_lang)
 
-        if self._config.model.startswith("google/madlad400"):
+        if self._config.model_prefix == "google/madlad400":
             model.config.decoder_start_token_id = tokenizer.pad_token_id
             model.generation_config.decoder_start_token_id = tokenizer.pad_token_id
             model.config.max_length = 256
