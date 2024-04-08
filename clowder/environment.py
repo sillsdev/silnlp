@@ -244,6 +244,11 @@ class ClowderEnvironment:
         self.current_meta["data_folder"] = folder_id
         self.meta.flush()
 
+    def list_resources(self):
+        if self.data_folder:
+            return (list(map(lambda s: s.name, self.EXPERIMENTS_FOLDER / "data" / self.data_folder / "scripture").glob("*")))
+        return list(map(lambda s: s.name, SIL_NLP_ENV.mt_scripture_dir.glob("*")))
+
     def _setup_google_drive(self):
         gauth = GoogleAuth()
         gauth.auth_method = "service"

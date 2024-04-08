@@ -71,7 +71,7 @@ class Investigation:
 
     @property
     def experiments(self):
-        return ENV.current_meta["investigations"][self.name]["experiments"]
+        return ENV.current_meta["investigations"][self.name].get("experiments", {})
 
     def _get_experiments_df(self):
         worksheet: gspread.Spreadsheet = ENV.gc.open_by_key(self.sheet_id)
@@ -175,7 +175,7 @@ class Investigation:
         )
         print(result.stdout)
         if result.returncode != 0:
-            ENV.log(f"Experiment {experiment_name} failed to run with error:\n{result.stderr}")
+            self.log(f"Experiment {experiment_name} failed to run with error:\n{result.stderr}")
             print(f"[red]Experiment {experiment_name} failed to run with error:\n{result.stderr}[/red]")
             temp_meta["status"] = Task.TaskStatusEnum.failed.value
             temp_meta["clearml_id"] = "unknown"
@@ -384,7 +384,7 @@ class Investigation:
                     col_index += 1
                     continue
                 ref = f"{get_column_letter(col_index + 1)}{row_index + 2}"  # +2 = 1 + 1 - 1 for zero- vs. one-indexed and 1 to skip column names
-                min_max_row: Union[str,int] = col
+                min_max_row: Union[str, int] = col
                 if mode == "row":
                     min_max_row = label
                 elif mode == "overall":

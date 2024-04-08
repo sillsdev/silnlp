@@ -181,6 +181,12 @@ def current_data_folder():
     print(f"[green]{functions.current_data()}[/green]")
 
 
+@app.command("list-resources")
+def list_resources():
+    """Print filenames of available text resources"""
+    print("[green]" + "\n".join(functions.list_resources()) + "[/green]")
+
+
 def _map_status_color(status: Status) -> str:
     # Mysterious comparison behavior; comparing by value instead
     if status.value == Status.Created.value:

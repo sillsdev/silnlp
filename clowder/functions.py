@@ -166,5 +166,9 @@ def current_data():
     return ENV.data_folder
 
 
+def list_resources() -> "list[str]":
+    return ENV.list_resources()
+
+
 def current_context() -> str:
     return ENV.root

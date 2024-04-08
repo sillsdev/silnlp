@@ -1,0 +1,60 @@
+# Generated with Clowder
+{% if type == "stats" %}
+type: stats
+{% elif type == "align" %}
+data:
+  aligner: fast_align
+  corpus_pairs:
+  - corpus_books: {{ align_set }} 
+    type: train
+    src: {% for t in src_texts.split(';') %}  
+    - {{ t -}}{% endfor %}
+    trg: {% for t in trg_texts.split(';') %}  
+    - {{ t -}}{% endfor %}
+    mapping: many_to_many
+    test_size: 0
+    val_size: 0
+  tokenize: false
+  share_vocab: false
+{% elif type == "model" %}
+data:
+  corpus_pairs:
+  - corpus_books: {{ train_set }}
+    src: {{ src }}
+    trg: {{ trg }}
+    type: train,val,test
+  lang_codes:
+    {{ src_lang }}
+    {{ trg_lang }}
+  seed: 111
+  terms:
+    dictionary: false
+    include_glosses: true
+    train: true
+  tokenizer:
+    init_unk: false
+    share_vocab: false
+    src_vocab_size: 2000
+    trained_tokens: false
+    trg_vocab_size: 2000
+    update_src: true
+    update_trg: true
+eval:
+  early_stopping:
+    min_improvement: 0.1
+    steps: 4
+  per_device_eval_batch_size: 8
+infer:
+  infer_batch_size: 8
+model: facebook/nllb-200-distilled-1.3B
+params:
+  label_smoothing_factor: 0.2
+  warmup_steps: 4000
+train:
+  gradient_accumulation_steps: 8
+  per_device_train_batch_size: 8
+{% elif type == "draft" %}
+type: draft
+{% else %}
+# No template for type {{ type }} - please check your spelling or add a new section to the config template
+{% endif %}

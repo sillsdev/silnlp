@@ -1,0 +1,5 @@
+name,entrypoint,results-csvs,results-clearml-metrics,type,src_texts,trg_texts,src_lang,trg_lang,src,trg,align_set,train_set
+stats,"silnlp.common.collect_verse_counts --output-folder=""$LOCAL_EXP_DIR/$EXP"" --files=""$FILES""",verse_counts.csv;verse_percentages.csv?overall,,stats,,,,,,,,
+align,silnlp.nmt.preprocess $EXP --stats,corpus-stats.csv; tokenization_stats.csv,,align,,,,,,,,
+model,silnlp.nmt.experiment $EXP $ON_CLEARML --memory-growth,scores-best;scores-last,train_runtime,model,,,,,,,,
+draft,"silnlp.nmt.translate $EXP  $ON_CLEARML --src-project ""$SRC"" --memory-growth",,,draft,,,,,,,,
