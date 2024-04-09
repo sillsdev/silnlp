@@ -755,7 +755,7 @@ class HuggingFaceNMTModel(NMTModel):
             )
 
         if self._config.train["use_lora"]:
-            model = self._convert_to_lora_model(model, len(tokenizer) != old_num_tokens)
+            model = self._convert_to_lora_model(model)
 
         # Change specific variables based on the type of model
         model, tokenizer = self._configure_model(model, tokenizer)
@@ -1087,16 +1087,26 @@ class HuggingFaceNMTModel(NMTModel):
                     terms.add(trg_line.strip())
 
         return self._dictionary
+    
+    # Tie embedding weights to "shared" module weights and untie the embeddings modules if necessary
+    def _create_tied_embedding_weights(self, model: PreTrainedModel) -> PreTrainedModel:
+        encoder_embeddings = torch.nn.Embedding(model.config.vocab_size, model.config.d_model, model.config.pad_token_id)
+        decoder_embeddings = torch.nn.Embedding(model.config.vocab_size, model.config.d_model, model.config.pad_token_id)
 
-    def _convert_to_lora_model(self, model: PreTrainedModel, is_tokenizer_updated: bool) -> PreTrainedModel:
+        if self._config.model_prefix == "facebook/nllb-200":
+            model.base_model.encoder.embed_tokens = encoder_embeddings
+            model.base_model.decoder.embed_tokens = decoder_embeddings
+        elif self._config.model_prefix == "google/madlad400":
+            model.encoder.embed_tokens = encoder_embeddings
+            model.decoder.embed_tokens = decoder_embeddings
+            model.config.tie_word_embeddings = True
+        
+        model.tie_weights()
+        return model
+
+    def _convert_to_lora_model(self, model: PreTrainedModel) -> PreTrainedModel:
         # Only tie embedding weights together rather than the entire modules so that peft recognizes each one
-        if is_tokenizer_updated:
-            if self._config.model_prefix == "facebook/nllb-200":
-                model.base_model.encoder.embed_tokens = torch.nn.Embedding(model.config.vocab_size, model.config.d_model, model.config.pad_token_id)
-                model.base_model.decoder.embed_tokens = torch.nn.Embedding(model.config.vocab_size, model.config.d_model, model.config.pad_token_id)
-            elif self._config.model_prefix == "google/madlad400":
-                pass
-            model.tie_weights()
+        model = self._create_tied_embedding_weights(model)
 
         lora_config = self._config.train["lora_config"]
         target_modules = lora_config.get("target_modules", LORA_DEFAULT_CONFIGS[self._config.model_prefix]["target_modules"])
@@ -1116,20 +1126,15 @@ class HuggingFaceNMTModel(NMTModel):
         model = get_peft_model(model, peft_config)
 
         # Tie LoRA versions of the embedding weights together
-        if self._config.model_prefix == "facebook/nllb-200":
-            if "embed_tokens" in target_modules:
-                embedding_A = model.base_model.model.model.encoder.embed_tokens.lora_embedding_A.default
-                embedding_B = model.base_model.model.model.encoder.embed_tokens.lora_embedding_B.default
-                model.base_model.model.model.decoder.embed_tokens.lora_embedding_A.default = embedding_A
-                model.base_model.model.lm_head.lora_B.default.weight = embedding_A
-                model.base_model.model.model.decoder.embed_tokens.lora_embedding_B.default = embedding_B
-                model.base_model.model.lm_head.lora_A.default.weight = embedding_B
-            elif "embed_tokens" in modules_to_save:
+        if "embed_tokens" in modules_to_save:
+            if self._config.model_prefix == "facebook/nllb-200":
                 embedding = model.base_model.model.model.encoder.embed_tokens.modules_to_save.default.weight
                 model.base_model.model.model.decoder.embed_tokens.modules_to_save.default.weight = embedding
                 model.base_model.model.lm_head.modules_to_save.default.weight = embedding
-        elif self._config.model_prefix == "google/madlad400":
-            pass
+            elif self._config.model_prefix == "google/madlad400":
+                embedding = model.base_model.model.encoder.embed_tokens.modules_to_save.default.weight
+                model.base_model.model.decoder.embed_tokens.modules_to_save.default.weight = embedding
+                model.base_model.model.lm_head.embed_tokens.modules_to_save.default.weight = embedding
 
         # Necessary to allow gradients to propogate through frozen layers when using PEFT + gradient checkpointing + Trainer
         if self._config.train["gradient_checkpointing"]:
@@ -1194,6 +1199,7 @@ class HuggingFaceNMTModel(NMTModel):
                 base_model.resize_token_embeddings(
                     len(tokenizer), pad_to_multiple_of=8 if self._mixed_precision else None
                 )
+            model = self._create_tied_embedding_weights(model)
             model = PeftModel.from_pretrained(base_model, model_name)
         else:
             model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(
@@ -1437,12 +1443,12 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
             if self._better_transformer:
                 self.model = self.model.reverse_bettertransformer()
                 self.model.save_pretrained(
-                    output_dir, state_dict=state_dict, safe_serialization=self.args.save_safetensors
+                    output_dir, state_dict=state_dict, safe_serialization=self.args.save_safetensors, save_embedding_layers=True
                 )
                 self.model = self.model.to_bettertransformer()
             else:
                 self.model.save_pretrained(
-                    output_dir, state_dict=state_dict, safe_serialization=self.args.save_safetensors
+                    output_dir, state_dict=state_dict, safe_serialization=self.args.save_safetensors, save_embedding_layers=True
                 )
         if self.tokenizer is not None:
             self.tokenizer.save_pretrained(output_dir)
