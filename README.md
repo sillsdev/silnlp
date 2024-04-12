@@ -214,7 +214,8 @@ The following will mount /aqua-ml-data on your S drive and allow you to explore,
 * Download rclone from: https://rclone.org/downloads/
 * Unzip to your desktop (or some convient location). 
 * Add the folder that contains rclone.exe to your PATH environment variable.
-* Take the `scripts/rclone/rclone.conf` file from this SILNLP repo and copy it to `~\AppData\Roaming\rclone` (creating folders if necessary) 
+* Take the `scripts/rclone/rclone.conf` file from this SILNLP repo and copy it to `~\AppData\Roaming\rclone` (creating folders if necessary)
+* Add your credentials in the appropriate fields in `~\AppData\Roaming\rclone`
 * Take the `scripts/rclone/mount_to_s.bat` file from this SILNLP repo and copy it to the folder that contains the unzipped rclone.
 * Double-click the bat file. A command window should open and remain open. You should see something like:
 ```
