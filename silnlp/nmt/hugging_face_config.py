@@ -1134,7 +1134,7 @@ class HuggingFaceNMTModel(NMTModel):
             elif self._config.model_prefix == "google/madlad400":
                 embedding = model.base_model.model.encoder.embed_tokens.modules_to_save.default.weight
                 model.base_model.model.decoder.embed_tokens.modules_to_save.default.weight = embedding
-                model.base_model.model.lm_head.embed_tokens.modules_to_save.default.weight = embedding
+                model.base_model.model.lm_head.modules_to_save.default.weight = embedding
 
         # Necessary to allow gradients to propogate through frozen layers when using PEFT + gradient checkpointing + Trainer
         if self._config.train["gradient_checkpointing"]:
@@ -1199,7 +1199,7 @@ class HuggingFaceNMTModel(NMTModel):
                 base_model.resize_token_embeddings(
                     len(tokenizer), pad_to_multiple_of=8 if self._mixed_precision else None
                 )
-            model = self._create_tied_embedding_weights(model)
+            base_model = self._create_tied_embedding_weights(base_model)
             model = PeftModel.from_pretrained(base_model, model_name)
         else:
             model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(
