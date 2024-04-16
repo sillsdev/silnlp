@@ -46,14 +46,13 @@ class PairScore:
         self.book = book
 
     def writeHeader(self, file: IO) -> None:
-        file.write("book,src_iso,trg_iso,num_refs,references,sent_len,BLEU,chrF3,chrF3+,chrF3++,spBLEU,METEOR,WER,TER,BLEUDetails\n")
-        
+        file.write(
+            "book,src_iso,trg_iso,num_refs,references,sent_len,"
+            "BLEU,chrF3,chrF3+,chrF3++,spBLEU,METEOR,WER,TER,BLEUDetails\n"
+        )
 
     def write(self, file: IO) -> None:
-        file.write(
-            f"{self.book},{self.src_iso},{self.trg_iso},"
-            f"{self.num_refs},{self.refs},{self.sent_len:d},"
-        )
+        file.write(f"{self.book},{self.src_iso},{self.trg_iso}," f"{self.num_refs},{self.refs},{self.sent_len:d},")
         if self.bleu is not None:
             file.write(f"{self.bleu.score:.2f}")
         file.write(",")
@@ -105,11 +104,15 @@ def score_pair(
         other_scores["chrf3"] = chrf3_score.score
 
     if "chrf3+" in scorers:
-        chrfp_score = sacrebleu.corpus_chrf(pair_sys, pair_refs, char_order=6, beta=3, word_order=1, remove_whitespace=True, eps_smoothing=True)
+        chrfp_score = sacrebleu.corpus_chrf(
+            pair_sys, pair_refs, char_order=6, beta=3, word_order=1, remove_whitespace=True, eps_smoothing=True
+        )
         other_scores["chrf3+"] = chrfp_score.score
 
     if "chrf3++" in scorers:
-        chrfpp_score = sacrebleu.corpus_chrf(pair_sys, pair_refs, char_order=6, beta=3, word_order=2, remove_whitespace=True, eps_smoothing=True)
+        chrfpp_score = sacrebleu.corpus_chrf(
+            pair_sys, pair_refs, char_order=6, beta=3, word_order=2, remove_whitespace=True, eps_smoothing=True
+        )
         other_scores["chrf3++"] = chrfpp_score.score
 
     if "spbleu" in scorers:
@@ -605,7 +608,10 @@ def test(
             checkpoint_name = f"checkpoint {step}"
         books_str = "ALL" if len(books_nums) == 0 else ", ".join(sorted(str(num) for num in books_nums.keys()))
         LOGGER.info(f"Test results for {checkpoint_name} ({num_refs} reference(s), books: {books_str})")
-        LOGGER.info("book,src_iso,trg_iso,num_refs,references,sent_len,BLEU,chrF3,chrF3+,chrF3++,spBLEU,METEOR,WER,TER,BLEUDetails")
+        LOGGER.info(
+            "book,src_iso,trg_iso,num_refs,references,sent_len,"
+            "BLEU,chrF3,chrF3+,chrF3++,spBLEU,METEOR,WER,TER,BLEUDetails"
+        )
         for score in results[step]:
             output = StringIO()
             score.write(output)
