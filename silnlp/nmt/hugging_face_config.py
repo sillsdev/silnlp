@@ -1087,11 +1087,15 @@ class HuggingFaceNMTModel(NMTModel):
                     terms.add(trg_line.strip())
 
         return self._dictionary
-    
+
     # Tie embedding weights to "shared" module weights and untie the embeddings modules if necessary
     def _create_tied_embedding_weights(self, model: PreTrainedModel) -> PreTrainedModel:
-        encoder_embeddings = torch.nn.Embedding(model.config.vocab_size, model.config.d_model, model.config.pad_token_id)
-        decoder_embeddings = torch.nn.Embedding(model.config.vocab_size, model.config.d_model, model.config.pad_token_id)
+        encoder_embeddings = torch.nn.Embedding(
+            model.config.vocab_size, model.config.d_model, model.config.pad_token_id
+        )
+        decoder_embeddings = torch.nn.Embedding(
+            model.config.vocab_size, model.config.d_model, model.config.pad_token_id
+        )
 
         if self._config.model_prefix == "facebook/nllb-200":
             model.base_model.encoder.embed_tokens = encoder_embeddings
@@ -1100,7 +1104,7 @@ class HuggingFaceNMTModel(NMTModel):
             model.encoder.embed_tokens = encoder_embeddings
             model.decoder.embed_tokens = decoder_embeddings
             model.config.tie_word_embeddings = True
-        
+
         model.tie_weights()
         return model
 
@@ -1109,8 +1113,12 @@ class HuggingFaceNMTModel(NMTModel):
         model = self._create_tied_embedding_weights(model)
 
         lora_config = self._config.train["lora_config"]
-        target_modules = lora_config.get("target_modules", LORA_DEFAULT_CONFIGS[self._config.model_prefix]["target_modules"])
-        modules_to_save = lora_config.get("modules_to_save", LORA_DEFAULT_CONFIGS[self._config.model_prefix]["modules_to_save"])
+        target_modules = lora_config.get(
+            "target_modules", LORA_DEFAULT_CONFIGS[self._config.model_prefix]["target_modules"]
+        )
+        modules_to_save = lora_config.get(
+            "modules_to_save", LORA_DEFAULT_CONFIGS[self._config.model_prefix]["modules_to_save"]
+        )
         if isinstance(target_modules, str):
             target_modules = target_modules.split(",")
         if isinstance(modules_to_save, str):
@@ -1443,12 +1451,18 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
             if self._better_transformer:
                 self.model = self.model.reverse_bettertransformer()
                 self.model.save_pretrained(
-                    output_dir, state_dict=state_dict, safe_serialization=self.args.save_safetensors, save_embedding_layers=True
+                    output_dir,
+                    state_dict=state_dict,
+                    safe_serialization=self.args.save_safetensors,
+                    save_embedding_layers=True,
                 )
                 self.model = self.model.to_bettertransformer()
             else:
                 self.model.save_pretrained(
-                    output_dir, state_dict=state_dict, safe_serialization=self.args.save_safetensors, save_embedding_layers=True
+                    output_dir,
+                    state_dict=state_dict,
+                    safe_serialization=self.args.save_safetensors,
+                    save_embedding_layers=True,
                 )
         if self.tokenizer is not None:
             self.tokenizer.save_pretrained(output_dir)
