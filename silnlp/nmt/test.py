@@ -565,7 +565,6 @@ def test(
             )
 
     if not config.model_dir.exists():
-        LOGGER.info("Model has no checkpoints. Testing with base model.")
         results[0] = test_checkpoint(
             config,
             model,
