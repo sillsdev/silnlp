@@ -46,23 +46,29 @@ class PairScore:
         self.book = book
 
     def writeHeader(self, file: IO) -> None:
-        file.write(
-            "book,src_iso,trg_iso,num_refs,references,sent_len,"
-            "BLEU,chrF3,chrF3+,chrF3++,spBLEU,METEOR,WER,TER,BLEUDetails\n"
+        header = (
+            "book,src_iso,trg_iso,num_refs,references,sent_len"
+            + (",BLEU" if self.bleu is not None else "")
+            + ("," if len(self.other_scores) > 0 else "")
+            + ",".join(self.other_scores.keys())
+            + (",BLEUDetails" if self.bleu is not None else "")
+            + "\n"
         )
+        file.write(header)
 
     def write(self, file: IO) -> None:
-        file.write(f"{self.book},{self.src_iso},{self.trg_iso}," f"{self.num_refs},{self.refs},{self.sent_len:d},")
+        file.write(f"{self.book},{self.src_iso},{self.trg_iso}," f"{self.num_refs},{self.refs},{self.sent_len:d}")
         if self.bleu is not None:
-            file.write(f"{self.bleu.score:.2f}")
-        file.write(",")
-        others = [""] * len(_SUPPORTED_SCORERS)
-        for scorer in self.other_scores.keys():
-            others[list(_SUPPORTED_SCORERS).index(scorer.lower())] = f"{self.other_scores[scorer]:.2f}"
-        file.write(",".join(others[2:]) + ",")
+            file.write(f",{self.bleu.score:.2f}")
+        for val in self.other_scores.values():
+            if self.src_iso == "ALL" and self.trg_iso == "ALL":
+                # Other scores aren't actually calculated for the summary
+                file.write(",")
+            else:
+                file.write(f",{val:.2f}")
         if self.bleu is not None:
             file.write(
-                f"{self.bleu.precisions[0]:.2f}/{self.bleu.precisions[1]:.2f}/"
+                f",{self.bleu.precisions[0]:.2f}/{self.bleu.precisions[1]:.2f}/"
                 f"{self.bleu.precisions[2]:.2f}/{self.bleu.precisions[3]:.2f}/{self.bleu.bp:.3f}/"
                 f"{self.bleu.sys_len:d}/{self.bleu.ref_len:d}"
             )
@@ -466,7 +472,7 @@ def test_checkpoint(
                 LOGGER.error("Error: book_dict did not load correctly. Not scoring individual books.")
     if len(config.test_src_isos) > 1 or len(config.test_trg_isos) > 1:
         bleu = sacrebleu.corpus_bleu(overall_sys, overall_refs, lowercase=True)
-        scores.append(PairScore("ALL", "ALL", "ALL", bleu, len(overall_sys), ref_projects))
+        scores.append(PairScore("ALL", "ALL", "ALL", bleu, len(overall_sys), ref_projects, scores[0].other_scores))
 
     scores_file_root = f"scores-{suffix_str}"
     if len(ref_projects) > 0:
@@ -608,10 +614,16 @@ def test(
             checkpoint_name = f"checkpoint {step}"
         books_str = "ALL" if len(books_nums) == 0 else ", ".join(sorted(str(num) for num in books_nums.keys()))
         LOGGER.info(f"Test results for {checkpoint_name} ({num_refs} reference(s), books: {books_str})")
-        LOGGER.info(
-            "book,src_iso,trg_iso,num_refs,references,sent_len,"
-            "BLEU,chrF3,chrF3+,chrF3++,spBLEU,METEOR,WER,TER,BLEUDetails"
-        )
+        header = "book,src_iso,trg_iso,num_refs,references,sent_len"
+        if len(results[step]) > 0:
+            pair_score = results[step][0]
+            header += (
+                (",BLEU" if pair_score.bleu is not None else "")
+                + ("," if len(pair_score.other_scores) > 0 else "")
+                + ",".join(pair_score.other_scores.keys())
+                + (",BLEUDetails" if pair_score.bleu is not None else "")
+            )
+        LOGGER.info(header)
         for score in results[step]:
             output = StringIO()
             score.write(output)
