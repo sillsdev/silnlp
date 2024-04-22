@@ -8,10 +8,12 @@ ENTRYPOINT_ATTRIBUTE = "entrypoint"
 NAME_ATTRIBUTE = "name"
 
 
-def get_env():
+def get_env(auth=None):
     global ENV
     if ENV is None:
         from clowder.environment import ClowderEnvironment
-
-        ENV = ClowderEnvironment()
+        if auth is not None:
+            ENV = ClowderEnvironment(auth)
+        else:
+            ENV = ClowderEnvironment()
     return ENV

@@ -43,6 +43,10 @@ Your new investigation is initialized with a few key files:
 
 Clowder is intended to be intuitive, but if you wonder what any commands do or what commands are available, run `clowder [command] --help` or `clowder --help` to see more information.
 
+
+***Running a translation job***
+In order to run a translate.py job, make a new experiment row where the name of the new row matches the name of the training experiment whose model you'd like to use followed by '_draft'. For example, if you had a training run 'NLLB1.3B.en-fr', name the translation experiment 'NLLB1.3B.en-fr_draft'. This enables the special '$EXP' placeholder to be rendered properly. 
+
 ***Warning!***
 
 Interrupting a clowder command or manually editing/deleting any of the clowder.meta.ymls, filenames, or directory structures may result in an invalid state. Accidentally editing or deleting files on Google drive may not be rectifiable (unless you can undo your changes successfully), but accidental changes locally, for example to the clowder.master.meta.yml, can usually be fixed by untracking and retracking affected investigations. Please use clowder commands for managing clowder investigations as much as possible. The main points of interaction outside these commands are editing the ExperimentsSetup sheet and the config.yml. Other files may be added to the investigation folder (e.g. notes, results summary, etc.) and other sheets can be added to the investigation spreadsheet safely (as long as there are no naming conflicts), but please do not edit or delete any of the other files.

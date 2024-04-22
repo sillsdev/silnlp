@@ -152,6 +152,8 @@ class Investigation:
     def _run_experiment(self, experiment_row: pd.Series):
         temp_meta = {}
         experiment_name = experiment_row[NAME_ATTRIBUTE]
+        if '_draft' in experiment_name:
+            experiment_name = experiment_name[:experiment_name.index('_draft')]
         experiment_path: Path = self.investigation_storage_path / experiment_name
         complete_entrypoint = (
             experiment_row["entrypoint"]
@@ -284,6 +286,12 @@ class Investigation:
             if len(csv_results_files) > 0 and csv_results_files[0].strip() != "":
                 for name in csv_results_files:
                     name = name.strip()
+                    if name == "draft":
+                        exp_folder_id = ENV._dict_of_gdrive_files(self.experiments_folder_id)[row[NAME_ATTRIBUTE]]["id"]
+                        draft_folder_id = ENV._create_gdrive_folder('drafts', exp_folder_id)
+                        exp_name = row[NAME_ATTRIBUTE][:row[NAME_ATTRIBUTE].index('_draft')]
+                        ENV._copy_storage_folder_to_gdrive(list(list((self.investigation_storage_path / exp_name / "infer").glob('*'))[0].glob('*'))[0], draft_folder_id)
+                        continue
                     try:
                         if name == "scores-best":
                             scores = list((self.investigation_storage_path / row[NAME_ATTRIBUTE]).glob("scores*"))
@@ -403,7 +411,8 @@ class Investigation:
                 )
                 col_index += 1
             row_index += 1
-        s.batch_format(formats)
+        if len(formats) > 0:
+            s.batch_format(formats)
 
     def _get_clearml_tasks(self) -> "dict[str, Union[None,Task]]":
         if "experiments" not in ENV.current_meta["investigations"][self.name]:
@@ -483,7 +492,7 @@ class Investigation:
         self.log("Attempting to cancel investigation")
         canceled_anything = False
         for _, obj in ENV.current_meta["investigations"][self.name]["experiments"].items():
-            if "clearml_id" in obj:
+            if "clearml_id" in obj and obj['clearml_id'] != 'unknown':
                 task: Optional[Task] = Task.get_task(task_id=obj["clearml_id"])
                 if task is not None:
                     task.mark_stopped(status_message="Task was stopped by user")

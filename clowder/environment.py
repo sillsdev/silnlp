@@ -61,7 +61,7 @@ class ClowderMeta:
 
 
 class ClowderEnvironment:
-    def __init__(self):
+    def __init__(self, auth=None):
         self.meta = ClowderMeta(os.environ.get("CLOWDER_META"))
         self.INVESTIGATIONS_GDRIVE_FOLDER = self.root
         try:
@@ -81,7 +81,7 @@ class ClowderEnvironment:
                 "No Google credentials file found in .clowder directory. Please copy your credentials file into the .clowder directory."
             )
         self.EXPERIMENTS_FOLDER = SIL_NLP_ENV.mt_experiments_dir / "clowder"
-        self._setup_google_drive()
+        self._setup_google_drive(auth)
         self.gc = gspread.service_account(filename=Path(self.GOOGLE_CREDENTIALS_FILE))
 
     @property
@@ -246,15 +246,18 @@ class ClowderEnvironment:
 
     def list_resources(self):
         if self.data_folder:
-            return (list(map(lambda s: s.name, self.EXPERIMENTS_FOLDER / "data" / self.data_folder / "scripture").glob("*")))
+            return list(map(lambda s: s.name, (self.EXPERIMENTS_FOLDER / "data" / self.data_folder / "scripture").glob("*")))
         return list(map(lambda s: s.name, SIL_NLP_ENV.mt_scripture_dir.glob("*")))
 
-    def _setup_google_drive(self):
-        gauth = GoogleAuth()
-        gauth.auth_method = "service"
-        gauth.credentials = ServiceAccountCredentials.from_json_keyfile_name(
-            self.GOOGLE_CREDENTIALS_FILE, scopes=GDRIVE_SCOPE
-        )
+    def _setup_google_drive(self, auth=None):
+        if auth is None:
+            gauth = GoogleAuth()
+            gauth.auth_method = "service"
+            gauth.credentials = ServiceAccountCredentials.from_json_keyfile_name(
+                self.GOOGLE_CREDENTIALS_FILE, scopes=GDRIVE_SCOPE
+            )
+        else:
+            gauth = auth
         self._google_drive = GoogleDrive(gauth)
 
     def _dict_of_gdrive_files(self, folder_id: str) -> "dict[str, GoogleDriveFile]":

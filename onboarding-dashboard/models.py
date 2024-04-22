@@ -23,7 +23,7 @@ class Status(Enum):
         drafting_exps = list(filter(lambda exp: 'draft' in exp[0],experiments))
         if len(drafting_exps) > 0 and len(list(filter(lambda exp: exp[1]['status'] == 'completed', drafting_exps))) == len(drafting_exps):
             return Status.Drafted
-        model_exps = list(filter(lambda exp: 'model' in exp[0],experiments))
+        model_exps = list(filter(lambda exp: 'NLLB' in exp[0] and 'draft' not in exp[0],experiments))
         if len(model_exps) > 0 and len(list(filter(lambda exp: exp[1]['status'] == 'completed', model_exps))) == len(model_exps):
             return Status.RanModels
         align_exps = list(filter(lambda exp: 'align' in exp[0],experiments))
@@ -51,11 +51,11 @@ class Investigation:
             with st.container(border=True):
                 c1,c2,c3,c4 = st.columns([3,3,1,1])
                 with c1:
-                    st.write(self.name)
+                    st.write(f'**{self.name}**')
                 with c2:
                     st.write(self.status.name)
                 with c3:
-                    if st.button("Details", key=f"{self.id}_details_button"):
+                    if st.button("Details", key=f"{self.id}_details_button", type='primary'):
                         st.session_state.current_investigation = self
                         st.switch_page("pages/InvestigationDetails.py")
                 with c4:
