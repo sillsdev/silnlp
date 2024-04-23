@@ -48,10 +48,13 @@ class PairScore:
     def writeHeader(self, file: IO) -> None:
         header = (
             "book,src_iso,trg_iso,num_refs,references,sent_len"
-            + (",BLEU" if self.bleu is not None else "")
+            + (
+                ",BLEU,1gram_prec,2gram_prec,3gram_prec,4gram_prec,brevity_penalty,total_sys_len,total_ref_len"
+                if self.bleu is not None
+                else ""
+            )
             + ("," if len(self.other_scores) > 0 else "")
             + ",".join(self.other_scores.keys())
-            + (",BLEUDetails" if self.bleu is not None else "")
             + "\n"
         )
         file.write(header)
@@ -59,19 +62,13 @@ class PairScore:
     def write(self, file: IO) -> None:
         file.write(f"{self.book},{self.src_iso},{self.trg_iso}," f"{self.num_refs},{self.refs},{self.sent_len:d}")
         if self.bleu is not None:
-            file.write(f",{self.bleu.score:.2f}")
-        for val in self.other_scores.values():
-            if self.src_iso == "ALL" and self.trg_iso == "ALL":
-                # Other scores aren't actually calculated for the summary
-                file.write(",")
-            else:
-                file.write(f",{val:.2f}")
-        if self.bleu is not None:
             file.write(
-                f",{self.bleu.precisions[0]:.2f}/{self.bleu.precisions[1]:.2f}/"
-                f"{self.bleu.precisions[2]:.2f}/{self.bleu.precisions[3]:.2f}/{self.bleu.bp:.3f}/"
-                f"{self.bleu.sys_len:d}/{self.bleu.ref_len:d}"
+                f",{self.bleu.score:.2f},{self.bleu.precisions[0]:.2f},{self.bleu.precisions[1]:.2f}"
+                f",{self.bleu.precisions[2]:.2f},{self.bleu.precisions[3]:.2f},{self.bleu.bp:.3f}"
+                f",{self.bleu.sys_len:d},{self.bleu.ref_len:d}"
             )
+        for val in self.other_scores.values():
+            file.write(f",{val:.2f}")
         file.write("\n")
 
 
@@ -107,19 +104,19 @@ def score_pair(
     other_scores: Dict[str, float] = {}
     if "chrf3" in scorers:
         chrf3_score = sacrebleu.corpus_chrf(pair_sys, pair_refs, char_order=6, beta=3, remove_whitespace=True)
-        other_scores["chrf3"] = chrf3_score.score
+        other_scores["chrF3"] = chrf3_score.score
 
     if "chrf3+" in scorers:
         chrfp_score = sacrebleu.corpus_chrf(
             pair_sys, pair_refs, char_order=6, beta=3, word_order=1, remove_whitespace=True, eps_smoothing=True
         )
-        other_scores["chrf3+"] = chrfp_score.score
+        other_scores["chrF3+"] = chrfp_score.score
 
     if "chrf3++" in scorers:
         chrfpp_score = sacrebleu.corpus_chrf(
             pair_sys, pair_refs, char_order=6, beta=3, word_order=2, remove_whitespace=True, eps_smoothing=True
         )
-        other_scores["chrf3++"] = chrfpp_score.score
+        other_scores["chrF3++"] = chrfpp_score.score
 
     if "spbleu" in scorers:
         spbleu_score = sacrebleu.corpus_bleu(
@@ -128,22 +125,22 @@ def score_pair(
             lowercase=True,
             tokenize="flores200",
         )
-        other_scores["spbleu"] = spbleu_score.score
+        other_scores["spBLEU"] = spbleu_score.score
 
     if "meteor" in scorers:
         meteor_score = compute_meteor_score(trg_iso, pair_sys, pair_refs)
         if meteor_score is not None:
-            other_scores["meteor"] = meteor_score
+            other_scores["METEOR"] = meteor_score
 
     if "wer" in scorers:
         wer_score = compute_wer_score(pair_sys, pair_refs)
         if wer_score >= 0:
-            other_scores["wer"] = wer_score
+            other_scores["WER"] = wer_score
 
     if "ter" in scorers:
         ter_score = sacrebleu.corpus_ter(pair_sys, pair_refs)
         if ter_score.score >= 0:
-            other_scores["ter"] = ter_score.score
+            other_scores["TER"] = ter_score.score
 
     return PairScore(book, src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores)
 
@@ -472,7 +469,7 @@ def test_checkpoint(
                 LOGGER.error("Error: book_dict did not load correctly. Not scoring individual books.")
     if len(config.test_src_isos) > 1 or len(config.test_trg_isos) > 1:
         bleu = sacrebleu.corpus_bleu(overall_sys, overall_refs, lowercase=True)
-        scores.append(PairScore("ALL", "ALL", "ALL", bleu, len(overall_sys), ref_projects, scores[0].other_scores))
+        scores.append(PairScore("ALL", "ALL", "ALL", bleu, len(overall_sys), ref_projects))
 
     scores_file_root = f"scores-{suffix_str}"
     if len(ref_projects) > 0:
@@ -618,10 +615,13 @@ def test(
         if len(results[step]) > 0:
             pair_score = results[step][0]
             header += (
-                (",BLEU" if pair_score.bleu is not None else "")
+                (
+                    ",BLEU,1gram_prec,2gram_prec,3gram_prec,4gram_prec,brevity_penalty,total_sys_len,total_ref_len"
+                    if pair_score.bleu is not None
+                    else ""
+                )
                 + ("," if len(pair_score.other_scores) > 0 else "")
                 + ",".join(pair_score.other_scores.keys())
-                + (",BLEUDetails" if pair_score.bleu is not None else "")
             )
         LOGGER.info(header)
         for score in results[step]:
