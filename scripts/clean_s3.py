@@ -1,3 +1,4 @@
+import argparse
 import re
 import time
 
@@ -6,9 +7,8 @@ import boto3
 MONTH_IN_SECONDS = 2628288
 
 
-def main() -> None:
-
-    max_age = 3 * MONTH_IN_SECONDS
+def clean_s3(dry_run: bool) -> None:
+    max_age = 2 * MONTH_IN_SECONDS
     regex_to_delete = re.compile(
         r"^MT/experiments/.+/run/(checkpoint.*(pytorch_model\.bin|\.safetensors)$|ckpt.+\.(data-00000-of-00001|index)$)"
     )
@@ -16,7 +16,7 @@ def main() -> None:
     s3 = boto3.client("s3")
     paginator = s3.get_paginator("list_objects_v2")
     total_deleted = 0
-    memory_freed = 0
+    storage_space_freed = 0
     for page in paginator.paginate(Bucket="aqua-ml-data"):
         for obj in page["Contents"]:
             if regex_to_delete.search(obj["Key"]) is None:
@@ -27,11 +27,26 @@ def main() -> None:
                 continue
             print(obj["Key"])
             print(f"{(now - last_modified) / MONTH_IN_SECONDS} months old")
-            s3.delete_object(Bucket="aqua-ml-data", Key=obj["Key"])
+            if not dry_run:
+                s3.delete_object(Bucket="aqua-ml-data", Key=obj["Key"])
+                print("Deleted")
             total_deleted += 1
-            memory_freed += obj["Size"]
-    print(f"Number of files deleted: {total_deleted}")
-    print(f"Memory freed (GB): {memory_freed / 2 ** 30}")
+            storage_space_freed += obj["Size"]
+    print("Number of files " + ("that would be " if dry_run else "") + f"deleted: {total_deleted}")
+    print("Storage space " + ("that would be " if dry_run else "") + f"freed (GB): {storage_space_freed / 2 ** 30}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Remove old model files from S3 bucket")
+    parser.add_argument(
+        "--dry-run",
+        default=False,
+        action="store_true",
+        help="Don't delete any files, just report what would be deleted and how much space would be saved",
+    )
+    args = parser.parse_args()
+
+    clean_s3(args.dry_run)
 
 
 if __name__ == "__main__":
