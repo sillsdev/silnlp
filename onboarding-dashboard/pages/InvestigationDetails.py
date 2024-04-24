@@ -14,7 +14,7 @@ from pprint import pprint
 import numpy as np
 from urllib import request
 import json
-from utils import check_error, check_required
+from utils import check_error, check_required, simplify_books, expand_books
 
 st.markdown(
     """
@@ -54,7 +54,9 @@ def add_experiment(values: dict) -> None:
     gd.set_with_dataframe(sheet.sheet1, df)
 
 @st.cache_data(show_spinner=False)
-def get_results(results_name:str, investigation_name:str = st.session_state.current_investigation.name, keep_name:bool = False) -> pd.DataFrame:
+def get_results(results_name:str, investigation_name:str = None, keep_name:bool = False) -> pd.DataFrame:
+    if investigation_name is None:
+        investigation_name = st.session_state.current_investigation.name #Don't use defaults to avoid uninitialized current_investigation
     sheet = functions.ENV.gc.open_by_key(functions.ENV.get_investigation(investigation_name).sheet_id)
     df: pd.DataFrame = gd.get_as_dataframe(list(filter(lambda w: w.title == results_name, sheet.worksheets()))[0])
     df = df.dropna(how='all')
@@ -100,21 +102,6 @@ def sync():
         st.session_state.current_investigation = Investigation.from_clowder(functions.ENV.get_investigation(st.session_state.current_investigation.name))
         st.session_state.investigations.append(st.session_state.current_investigation)
     st.rerun()
-
-def simplify_books(books: 'list[str]'):
-    if set(BOOKS_ABBREVS[BOOKS_ABBREVS.index('GEN'):BOOKS_ABBREVS.index('MAL')+1]).issubset(books):
-        for b in BOOKS_ABBREVS[BOOKS_ABBREVS.index('GEN'):BOOKS_ABBREVS.index('MAL')+1]:
-            books.remove(b)
-        books.append('OT')
-    if set(BOOKS_ABBREVS[BOOKS_ABBREVS.index('MAT'):BOOKS_ABBREVS.index('REV')+1]).issubset(books):
-        for b in BOOKS_ABBREVS[BOOKS_ABBREVS.index('MAT'):BOOKS_ABBREVS.index('REV')+1]:
-            books.remove(b)
-        books.append('NT')
-    if set(BOOKS_ABBREVS[BOOKS_ABBREVS.index('REV')+1:]).issubset(books):
-        for b in BOOKS_ABBREVS[BOOKS_ABBREVS.index('REV')+1:]:
-            books.remove(b)
-        books.append('DT')    
-    return books
 
 def get_drafts(investigation_name: str):
     investigation = functions.ENV.get_investigation(investigation_name)
@@ -195,8 +182,29 @@ if 'current_investigation' in st.session_state:
             if st.session_state.current_investigation.status.value >= Status.RanModels.value:
                 results_models = get_results('scores-best', keep_name=True)
                 st.dataframe(results_models.style.highlight_max(subset=results_models.select_dtypes(include='number').columns, color='green').format(precision=2))
-            with st.form(key=f'{st.session_state.current_investigation.id}-run-models'):
-                training_sources = st.multiselect("Training sources", resources, default=results_align.loc[[results_align['align_score'].idxmax()],['src_project']].values[0] if results_align is not None and len(results_align.index) > 0 else None)
+            st.write("Models")
+            models = st.session_state.models if 'models' in st.session_state else []
+            if len(models) == 0:
+                st.write("*No models added*")
+            for model in models:
+                with st.container(border=True):
+                    c1,c2 = st.columns([5,1])
+                    with c1:
+                        st.write(f'**{model["name"]}**') #TODO kill more options at rerun
+                    with c2:
+                        if st.button("Remove", type='primary', key=f'remove_{model["name"]}'):
+                            st.session_state.models.remove(model)
+                            st.rerun()
+                    training_source_display = st.selectbox("Training source", resources,key=f"ts_{model['name']}",index=resources.index(model['training_source']), disabled=True)
+                    training_target_display = st.selectbox("Training target", resources,key=f"tt_{model['name']}", index=resources.index(model["training_target"]), disabled=True)
+                    if 'bt_src' in model:
+                        backtranslation_source_display = st.selectbox("Back translation training source",resources, key=f"bts_{model['name']}", index=resources.index(model['bt_src']), disabled=True)
+                        backtranslation_books_display = st.multiselect("Books to train on from back translation as well", BOOKS_ABBREVS, key=f"btb_{model['name']}", disabled=True, default=model['bt_books'])
+                    books = st.multiselect("Books to train on", BOOKS_ABBREVS,key=f"b_{model['name']}", default=model["books"], disabled=True)
+            st.write("Add a model" if len(models) == 0 else "Add another model")
+            models_form = st.form(key=f'{st.session_state.current_investigation.id}-run-models')
+            with models_form:    
+                training_source = st.selectbox("Training source", resources, index=resources.index(results_align.loc[[results_align['align_score'].idxmax()],['src_project']].values[0]) if results_align is not None and len(results_align.index) > 0 else None)
                 training_target = st.selectbox("Training target", resources, index=resources.index(results_align.loc[[0],['trg_project']].values[0]) if results_align is not None and len(results_align.index) > 0 else None)
                 default_books = []
                 if results_stats is not None and len(results_stats.index) > 0 and results_align is not None and len(results_align.index) > 0:
@@ -208,39 +216,72 @@ if 'current_investigation' in st.session_state:
                                 default_books.append(book)
                 default_books = simplify_books(default_books)
                 books = st.multiselect("Books to train on", BOOKS_ABBREVS, default=default_books if len(default_books) > 0 else None)
+            
+            backtranslation_source = None
+            backtranslation_books = None
+            if st.toggle('More options'):
+                backtranslation_source = models_form.selectbox("Back translation training source", resources, index=resources.index(results_align.loc[[results_align['align_score'].idxmax()],['src_project']].values[0]) if results_align is not None and len(results_align.index) > 0 else None)
+                backtranslation_books = models_form.multiselect("Books to train on from back translation as well", BOOKS_ABBREVS) #TODO smart defaults
 
-                models_already_running = len(list(filter(lambda kv: 'NLLB' in kv[0] and 'draft' not in kv[0] and kv[1]['status'] in ['in_progress','queued'],functions.ENV.get_investigation(st.session_state.current_investigation.name).experiments.items()))) > 0
+            check_error('models')
+            if models_form.form_submit_button('Add model'):
+                check_required('models',training_source, training_target,books) #TODO change + template mixed src
+                if 'models' not in st.session_state:
+                    st.session_state.models = []
+                is_mixed_src = backtranslation_source not in ['',None,[]] and backtranslation_books not in ['',None,[]]
+                model = dict()
+                if not is_mixed_src:
+                    model['training_source'] = training_source
+                    model['training_target'] = training_target
+                    model['books'] = books
+                    model['name'] = f"NLLB.1.3B.{training_source}-{training_target}.[{','.join(books)}]"
+                else:
+                    model['training_source'] = training_source
+                    model['training_target'] = training_target
+                    model['books'] = simplify_books(list(set(expand_books(books)) - set(expand_books(backtranslation_books))))
+                    model['bt_src'] = backtranslation_source
+                    model['bt_books'] = backtranslation_books
+                    model['name'] = f"NLLB.1.3B.{training_source}+{backtranslation_source}-{training_target}.[{','.join(books)}]"
+                if len(list(filter(lambda m: m["name"] == model["name"], st.session_state.models))) > 0:
+                    st.session_state.errors['models'] = 'A model with this configuration has already been added'
+                    st.rerun()
+                st.session_state.models.append(model)
+                st.rerun()
+                
+
+
+            models_already_running = len(list(filter(lambda kv: 'NLLB' in kv[0] and 'draft' not in kv[0] and kv[1]['status'] in ['in_progress','queued'],functions.ENV.get_investigation(st.session_state.current_investigation.name).experiments.items()))) > 0
+            if models_already_running:
+                st.write('Your models are training. Check back after a few hours.')
+            if st.button("Run models" if not models_already_running else "Cancel", type='primary' if not models_already_running else 'secondary'):
                 if models_already_running:
-                    st.write('Your models are training. Check back after a few hours.')
-                check_error('models')
-                if st.form_submit_button("Run" if not models_already_running else "Cancel", type='primary' if not models_already_running else 'secondary'): #TODO disable button if already running, cancel instead?
-                    if models_already_running:
-                        with st.spinner("This might take a few minutes..."):
-                            functions.cancel(st.session_state.current_investigation.name)
-                            sync()
-                    exps = []
-                    check_required('models',training_sources, training_target,books)
-                    model_row = template_df[template_df["name"] == "model"]
-                    for training_source in training_sources:
-                        model_setup = model_row.to_dict(orient="records")[0]
-                        model_name = f"NLLB.1.3B.{training_source}-{training_target}.[{','.join(books)}]"
-                        exps.append(model_name)
-                        model_setup['name'] = model_name
-                        model_setup['src'] = training_source
-                        model_setup['trg'] = training_target
-                        src_lang = training_source.split('-')[0]
-                        trg_lang = training_target.split('-')[0]
-                        src_lang_tag_mapping = get_lang_tag_mapping(src_lang)
-                        trg_lang_tag_mapping = get_lang_tag_mapping(trg_lang)
-                        model_setup['src_lang'] = f'{src_lang}: {src_lang_tag_mapping}'
-                        model_setup['trg_lang'] = f'{trg_lang}: {trg_lang_tag_mapping}'
-                        model_setup['train_set'] = ','.join(books)
-                        add_experiment(model_setup)
                     with st.spinner("This might take a few minutes..."):
-                        functions.run(st.session_state.current_investigation.name, experiments=exps)       
+                        functions.cancel(st.session_state.current_investigation.name)
                         sync()
+                exps = []
+                model_row = template_df[template_df["name"] == "model"]
+                for model in models:
+                    model_setup = model_row.to_dict(orient="records")[0]
+                    exps.append(model["name"])
+                    model_setup['name'] = model["name"]
+                    model_setup['src'] = model["training_source"]
+                    model_setup['trg'] = model["training_target"]
+                    src_lang = model["training_source"].split('-')[0]
+                    trg_lang = training_target.split('-')[0]
+                    src_lang_tag_mapping = get_lang_tag_mapping(src_lang)
+                    trg_lang_tag_mapping = get_lang_tag_mapping(trg_lang)
+                    model_setup['src_lang'] = f'{src_lang}: {src_lang_tag_mapping}'
+                    model_setup['trg_lang'] = f'{trg_lang}: {trg_lang_tag_mapping}'
+                    model_setup['train_set'] = ','.join(model['books'])
+                    if 'bt_books' in model:
+                        model_setup['bt_books'] = ','.join(model['bt_books'])
+                        model_setup['bt_src'] = model['bt_src']
+                    add_experiment(model_setup)
+                with st.spinner("This might take a few minutes..."):
+                    functions.run(st.session_state.current_investigation.name, experiments=exps)       
+                    sync()
         with st.expander("**Draft Books**", st.session_state.current_investigation.status in [Status.RanModels]):
-            #TODO what if already run?
+            #TODO draft per model name
             if st.session_state.current_investigation.status.value >= Status.Drafted.value:
                 drafts = get_drafts(st.session_state.current_investigation.name)
                 st.write('*Available Drafts*')

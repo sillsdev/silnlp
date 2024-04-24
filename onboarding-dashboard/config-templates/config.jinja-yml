@@ -23,6 +23,15 @@ data:
     src: {{ src }}
     trg: {{ trg }}
     type: train,val,test
+  {% if bt_books != "" %}
+  - corpus_books: {{ bt_books }}
+    mapping: mixed_src
+    src:
+    - {{ src }}
+    - {{ bt_src }}
+    trg: {{ trg }}
+    type: train,val
+  {% endif %}
   lang_codes:
     {{ src_lang }}
     {{ trg_lang }}
