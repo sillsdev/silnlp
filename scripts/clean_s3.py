@@ -8,7 +8,7 @@ MONTH_IN_SECONDS = 2628288
 
 
 def clean_s3(dry_run: bool) -> None:
-    max_age = 2 * MONTH_IN_SECONDS
+    max_age = 3 * MONTH_IN_SECONDS
     regex_to_delete = re.compile(
         r"^MT/experiments/.+/run/(checkpoint.*(pytorch_model\.bin|\.safetensors)$|ckpt.+\.(data-00000-of-00001|index)$)"
     )
