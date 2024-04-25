@@ -49,7 +49,7 @@ class PairScore:
         header = (
             "book,src_iso,trg_iso,num_refs,references,sent_len"
             + (
-                ",BLEU,1gram_prec,2gram_prec,3gram_prec,4gram_prec,brevity_penalty,total_sys_len,total_ref_len"
+                ",BLEU,BLEU_1gram_prec,BLEU_2gram_prec,BLEU_3gram_prec,BLEU_4gram_prec,BLEU_brevity_penalty,BLEU_total_sys_len,BLEU_total_ref_len"
                 if self.bleu is not None
                 else ""
             )
@@ -616,7 +616,7 @@ def test(
             pair_score = results[step][0]
             header += (
                 (
-                    ",BLEU,1gram_prec,2gram_prec,3gram_prec,4gram_prec,brevity_penalty,total_sys_len,total_ref_len"
+                    ",BLEU,BLEU_1gram_prec,BLEU_2gram_prec,BLEU_3gram_prec,BLEU_4gram_prec,BLEU_brevity_penalty,BLEU_total_sys_len,BLEU_total_ref_len"
                     if pair_score.bleu is not None
                     else ""
                 )
