@@ -1100,12 +1100,13 @@ class HuggingFaceNMTModel(NMTModel):
         if self._config.model_prefix == "facebook/nllb-200":
             model.base_model.encoder.embed_tokens = encoder_embeddings
             model.base_model.decoder.embed_tokens = decoder_embeddings
+            model.tie_weights()
         elif self._config.model_prefix == "google/madlad400":
             model.encoder.embed_tokens = encoder_embeddings
             model.decoder.embed_tokens = decoder_embeddings
-            model.config.tie_word_embeddings = True
+            model._tie_or_clone_weights(model.encoder.embed_tokens, model.shared)
+            model._tie_or_clone_weights(model.decoder.embed_tokens, model.shared)
 
-        model.tie_weights()
         return model
 
     def _convert_to_lora_model(self, model: PreTrainedModel) -> PreTrainedModel:
@@ -1133,14 +1134,15 @@ class HuggingFaceNMTModel(NMTModel):
         )
         model = get_peft_model(model, peft_config)
 
-        if ("embed_tokens" in modules_to_save and "lm_head" not in modules_to_save) or (
-            "lm_head" in modules_to_save and "embed_tokens" not in modules_to_save
+        if self._config.model_prefix == "facebook/nllb-200" and (
+            ("embed_tokens" in modules_to_save and "lm_head" not in modules_to_save)
+            or ("lm_head" in modules_to_save and "embed_tokens" not in modules_to_save)
         ):
             LOGGER.warning(
-                "Models are typically trained with the embeddings tied. Add both embed_tokens and lm_head to modules_to_save to do this while using LoRA."
+                "NLLB is typically trained with the embeddings tied. Add both embed_tokens and lm_head to modules_to_save to do this while using LoRA."
             )
 
-        # Tie LoRA versions of the embedding weights together
+        # Tie LoRA copies of the embedding weights together
         if "embed_tokens" in modules_to_save:
             if self._config.model_prefix == "facebook/nllb-200":
                 embedding = model.base_model.model.model.encoder.embed_tokens.modules_to_save.default.weight
@@ -1150,8 +1152,6 @@ class HuggingFaceNMTModel(NMTModel):
             elif self._config.model_prefix == "google/madlad400":
                 embedding = model.base_model.model.encoder.embed_tokens.modules_to_save.default.weight
                 model.base_model.model.decoder.embed_tokens.modules_to_save.default.weight = embedding
-                if "lm_head" in modules_to_save:
-                    model.base_model.model.lm_head.modules_to_save.default.weight = embedding
 
         # Necessary to allow gradients to propogate through frozen layers when using PEFT + gradient checkpointing + Trainer
         if self._config.train["gradient_checkpointing"]:
