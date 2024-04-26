@@ -1152,6 +1152,18 @@ class HuggingFaceNMTModel(NMTModel):
             elif self._config.model_prefix == "google/madlad400":
                 embedding = model.base_model.model.encoder.embed_tokens.modules_to_save.default.weight
                 model.base_model.model.decoder.embed_tokens.modules_to_save.default.weight = embedding
+        elif "embed_tokens" in target_modules:
+            if self._config.model_prefix == "facebook/nllb-200":
+                # TODO: figure out how to tie embedding weights and lm_head weights together
+                embedding_A = model.base_model.model.model.encoder.embed_tokens.lora_embedding_A.default
+                embedding_B = model.base_model.model.model.encoder.embed_tokens.lora_embedding_B.default
+                model.base_model.model.model.decoder.embed_tokens.lora_embedding_A.default = embedding_A
+                model.base_model.model.model.decoder.embed_tokens.lora_embedding_B.default = embedding_B
+            elif self._config.model_prefix == "google/madlad400":
+                embedding_A = model.base_model.model.encoder.embed_tokens.lora_embedding_A.default
+                embedding_B = model.base_model.model.encoder.embed_tokens.lora_embedding_B.default
+                model.base_model.model.decoder.embed_tokens.lora_embedding_A.default = embedding_A
+                model.base_model.model.decoder.embed_tokens.lora_embedding_B.default = embedding_B
 
         # Necessary to allow gradients to propogate through frozen layers when using PEFT + gradient checkpointing + Trainer
         if self._config.train["gradient_checkpointing"]:
