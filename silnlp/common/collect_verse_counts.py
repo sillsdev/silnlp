@@ -117,6 +117,10 @@ def main() -> None:
         help="Comma-delimited list of patterns of extract file names to count (e.g. 'arb-*.txt;de-NT.txt)",
         required=True,
     )
+    parser.add_argument(
+        '--deutero', default=False, action='store_true',
+        help="Include counts for Deuterocanon books",
+    )
     args = parser.parse_args()
 
     verse_counts = []
@@ -161,17 +165,22 @@ def main() -> None:
                     }
                 )
 
-    # Initialize the data frames
-    verse_count_df = pd.DataFrame(columns=OT_canon + NT_canon + DT_canon)
+    # Initialize the data 
+    if args.deutero: 
+        Project_scope = OT_canon + NT_canon + DT_canon
+    else:
+        Project_scope = OT_canon + NT_canon
+
+    verse_count_df = pd.DataFrame(columns=Project_scope)
     verse_count_df["file"] = [os.path.basename(extract_file_name) for extract_file_name in extract_files]
     verse_count_df = verse_count_df.set_index("file")
 
-    verse_percentage_df = pd.DataFrame(columns=OT_canon + NT_canon + DT_canon)
+    verse_percentage_df = pd.DataFrame(columns=Project_scope)
     verse_percentage_df["file"] = [os.path.basename(extract_file_name) for extract_file_name in extract_files]
     verse_percentage_df = verse_percentage_df.set_index("file")
 
     partially_complete_books = {}
-
+    
     # Copy the counts to the data frame
     for totals in verse_counts:
         f = totals["file"]
@@ -200,19 +209,21 @@ def main() -> None:
         df.to_csv(output_path)
 
     verse_count_df.insert(loc=0, column="Books", value=verse_count_df.apply(lambda row: sum([(1 if ele > 0 else 0) for ele in row]), axis=1))
-    verse_count_df.insert(loc=1, column="Total", value=verse_count_df[OT_canon + NT_canon + DT_canon].sum(axis=1))
+    verse_count_df.insert(loc=1, column="Total", value=verse_count_df[Project_scope].sum(axis=1))
     verse_count_df.insert(loc=2, column="OT", value=verse_count_df[OT_canon].sum(axis=1))
     verse_count_df.insert(loc=3, column="NT", value=verse_count_df[NT_canon].sum(axis=1))
-    verse_count_df.insert(loc=4, column="DT", value=verse_count_df[DT_canon].sum(axis=1))
+    if args.deutero:
+        verse_count_df.insert(loc=4, column="DT", value=verse_count_df[DT_canon].sum(axis=1))
     verse_count_df.fillna(0, inplace=True)
 
     verse_percentage_df.insert(
-        loc=0, column="Total", value=verse_percentage_df[OT_canon + NT_canon + DT_canon].mean(axis=1).round(1)
+        loc=0, column="Total", value=verse_percentage_df[Project_scope].mean(axis=1).round(1)
     )
     verse_percentage_df.fillna(0.0, inplace=True)  # Replace with 0's before averaging
     verse_percentage_df.insert(loc=1, column="OT", value=verse_percentage_df[OT_canon].mean(axis=1).round(1))
     verse_percentage_df.insert(loc=2, column="NT", value=verse_percentage_df[NT_canon].mean(axis=1).round(1))
-    verse_percentage_df.insert(loc=3, column="DT", value=verse_percentage_df[DT_canon].mean(axis=1).round(1))
+    if args.deutero:
+        verse_percentage_df.insert(loc=3, column="DT", value=verse_percentage_df[DT_canon].mean(axis=1).round(1))
 
     output_path = Path(args.output_folder, "verse_counts.csv")
     verse_count_df.to_csv(output_path)
