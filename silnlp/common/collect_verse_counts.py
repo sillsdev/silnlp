@@ -1,0 +1,230 @@
+import argparse
+from collections import Counter
+from pathlib import Path
+
+import pandas as pd
+from tqdm import tqdm
+
+from .environment import SIL_NLP_ENV
+
+OT_canon = [
+    "GEN",
+    "EXO",
+    "LEV",
+    "NUM",
+    "DEU",
+    "JOS",
+    "JDG",
+    "RUT",
+    "1SA",
+    "2SA",
+    "1KI",
+    "2KI",
+    "1CH",
+    "2CH",
+    "EZR",
+    "NEH",
+    "EST",
+    "JOB",
+    "PSA",
+    "PRO",
+    "ECC",
+    "SNG",
+    "ISA",
+    "JER",
+    "LAM",
+    "EZK",
+    "DAN",
+    "HOS",
+    "JOL",
+    "AMO",
+    "OBA",
+    "JON",
+    "MIC",
+    "NAM",
+    "HAB",
+    "ZEP",
+    "HAG",
+    "ZEC",
+    "MAL",
+]
+DT_canon = [
+    "TOB",
+    "JDT",
+    "ESG",
+    "WIS",
+    "SIR",
+    "BAR",
+    "LJE",
+    "S3Y",
+    "SUS",
+    "BEL",
+    "1MA",
+    "2MA",
+    "3MA",
+    "4MA",
+    "1ES",
+    "2ES",
+    "MAN",
+    "PS2",
+    "ODA",
+    "PSS",
+    "EZA",
+    "JUB",
+    "ENO",
+]
+NT_canon = [
+    "MAT",
+    "MRK",
+    "LUK",
+    "JHN",
+    "ACT",
+    "ROM",
+    "1CO",
+    "2CO",
+    "GAL",
+    "EPH",
+    "PHP",
+    "COL",
+    "1TH",
+    "2TH",
+    "1TI",
+    "2TI",
+    "TIT",
+    "PHM",
+    "HEB",
+    "JAS",
+    "1PE",
+    "2PE",
+    "1JN",
+    "2JN",
+    "3JN",
+    "JUD",
+    "REV",
+]
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Collect various counts from a corpus of Bible extracts")
+    parser.add_argument(
+        "--input-folder", default=SIL_NLP_ENV.mt_scripture_dir, help="Folder with corpus of Bible extracts"
+    )
+    parser.add_argument("--output-folder", help="Folder in which to save results", required=True)
+    parser.add_argument(
+        "--files",
+        help="List of patterns of extract file names to count (e.g. 'arb-*.txt de-NT.txt)",
+        required=False,
+    )
+    args = parser.parse_args()
+
+    verse_counts = []
+    complete_book_counts = {}
+    complete_book_counts_already_collected = False
+    extract_files = set()
+    input_folder = Path(args.input_folder)
+    if not args.files:
+        extract_files = [file for file in input_folder.glob("*.txt")]
+    else:
+        extract_files = []
+        files_list = args.files.replace(';',' ').replace(',',' ').split()
+        for file in files_list:
+            if not file.endswith(".txt"):
+                file = file + ".txt"
+            extract_files.append(input_folder / file)
+    print(f"Will count verses in {len(extract_files)} scripture files.")
+
+    with open(SIL_NLP_ENV.assets_dir / "vref.txt", "r", encoding="utf-8") as vref_file:
+        for extract_file in tqdm(extract_files):
+            with open(extract_file, "r", encoding="utf-8" ) as e_file:
+                # Rewind the file pointer back to the beginning of vref_file
+                vref_file.seek(0)
+                
+                book_list = []
+                chapter_counts = {}
+                cur_book = None
+                for vref, verse in zip(vref_file, e_file):
+                    cur_book = vref.split(" ")[0]
+                    cur_chapter = int(vref.split(" ")[1].split(":")[0].strip())
+                    if cur_book not in complete_book_counts:
+                        complete_book_counts[cur_book] = []
+                    if not complete_book_counts_already_collected:
+                        complete_book_counts[cur_book].append(cur_chapter)
+                    if verse == "\n":
+                        continue
+                    if cur_book not in chapter_counts:
+                        chapter_counts[cur_book] = []
+                    chapter_counts[cur_book].append(cur_chapter)
+                    book_list.append(cur_book)
+                chapter_counts = {k: Counter(v) for k, v in chapter_counts.items()}
+                if not complete_book_counts_already_collected:
+                    complete_book_counts = {k: Counter(v) for k, v in complete_book_counts.items()}
+                complete_book_counts_already_collected = True
+                verse_counts.append(
+                    {
+                        "file": extract_file.name,
+                        "per_book_counts": Counter(book_list),
+                        "per_chapter_counts": chapter_counts,
+                    }
+                )    
+
+    # Initialize the data frames
+    verse_count_df = pd.DataFrame(columns=OT_canon + NT_canon + DT_canon)
+    verse_count_df["file"] = [extract_file.name for extract_file in extract_files]
+    verse_count_df = verse_count_df.set_index("file")
+
+    verse_percentage_df = pd.DataFrame(columns=OT_canon + NT_canon + DT_canon)
+    verse_percentage_df["file"] = [extract_file.name for extract_file in extract_files]
+    verse_percentage_df = verse_percentage_df.set_index("file")
+
+    partially_complete_books = {}
+
+    # Copy the counts to the data frame
+    for totals in verse_counts:
+        f = totals["file"]
+        counts = totals["per_book_counts"]
+        for ele in counts:
+            verse_count_df.loc[f][ele] = counts[ele]
+            verse_percentage_df.loc[f][ele] = 100 * round(counts[ele] / sum(complete_book_counts[ele].values()), 3)
+            if verse_percentage_df.loc[f][ele] < 100 and verse_percentage_df.loc[f][ele] > 0:
+                if f not in partially_complete_books:
+                    partially_complete_books[f] = []
+                partially_complete_books[f].append(ele)
+
+    for filename, books in partially_complete_books.items():
+        df = pd.DataFrame(
+            columns=[i for i in range(1, max([len(complete_book_counts[book].keys()) for book in books]))]
+        )
+        chapter_counts = list(filter(lambda x: x["file"] == filename, verse_counts))[0]["per_chapter_counts"]
+        df["book"] = books
+        df = df.set_index("book")
+        for book in books:
+            for col in df.columns:
+                if int(col) <= len(complete_book_counts[book].keys()):
+                    df.loc[book][col] = 100 * round(chapter_counts[book][col] / complete_book_counts[book][col], 3)
+
+        output_path = Path(args.output_folder, f"{filename[:-4]}_detailed_percentages.csv")
+        df.to_csv(output_path)
+
+    verse_count_df.insert(loc=0, column="Books", value=verse_count_df.apply(lambda row: sum([(1 if ele > 0 else 0) for ele in row]), axis=1))
+    verse_count_df.insert(loc=1, column="Total", value=verse_count_df[OT_canon + NT_canon + DT_canon].sum(axis=1))
+    verse_count_df.insert(loc=2, column="OT", value=verse_count_df[OT_canon].sum(axis=1))
+    verse_count_df.insert(loc=3, column="NT", value=verse_count_df[NT_canon].sum(axis=1))
+    verse_count_df.insert(loc=4, column="DT", value=verse_count_df[DT_canon].sum(axis=1))
+    verse_count_df.fillna(0, inplace=True)
+
+    verse_percentage_df.insert(
+        loc=0, column="Total", value=verse_percentage_df[OT_canon + NT_canon + DT_canon].mean(axis=1).round(1)
+    )
+    verse_percentage_df.fillna(0.0, inplace=True)  # Replace with 0's before averaging
+    verse_percentage_df.insert(loc=1, column="OT", value=verse_percentage_df[OT_canon].mean(axis=1).round(1))
+    verse_percentage_df.insert(loc=2, column="NT", value=verse_percentage_df[NT_canon].mean(axis=1).round(1))
+    verse_percentage_df.insert(loc=3, column="DT", value=verse_percentage_df[DT_canon].mean(axis=1).round(1))
+
+    output_path = Path(args.output_folder, "verse_counts.csv")
+    verse_count_df.to_csv(output_path)
+    output_path = Path(args.output_folder, "verse_percentages.csv")
+    verse_percentage_df.to_csv(output_path)
+
+
+if __name__ == "__main__":
+    main()
