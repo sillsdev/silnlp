@@ -1,0 +1,5 @@
+[tool.poetry]
+name = "silnlp"
+version = "1.0.0"
+description = ""
+authors = ["SIL International"]
