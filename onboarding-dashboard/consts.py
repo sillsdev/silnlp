@@ -1,5 +1,5 @@
-BOOKS_ABBREVS =  [
-    "OT", 
+BOOKS_ABBREVS = [
+    "OT",
     "GEN",
     "EXO",
     "LEV",
@@ -90,5 +90,5 @@ BOOKS_ABBREVS =  [
     "PSS",
     "EZA",
     "JUB",
-    "ENO"
+    "ENO",
 ]

@@ -117,7 +117,11 @@ def sync(investigation_name: Optional[str], gather_results: bool = True, copy_al
         )
     else:
         for investigation in ENV.investigations:
-            investigation.sync(gather_results=gather_results, copy_all_results_to_gdrive=copy_all_results_to_gdrive)
+            try:
+                investigation.sync(gather_results=gather_results, copy_all_results_to_gdrive=copy_all_results_to_gdrive)
+            except Exception as e:
+                print(f"Failed to track {investigation.name}: {e}")
+
 
 
 def create(investigation_name: str):
@@ -127,20 +131,24 @@ def create(investigation_name: str):
 
 def use_context(root_folder_id: str):
     """Change context to folder with id `root_folder_id` reflected in `root` field"""
-    ENV.root = root_folder_id
-    if root_folder_id not in ENV.meta.data:
-        ENV.meta.data[root_folder_id] = {"investigations": {}}
-    ENV.meta.flush()
+    with ENV.meta.lock:
+        ENV.meta.load()
+        ENV.root = root_folder_id
+        if root_folder_id not in ENV.meta.data:
+            ENV.meta.data[root_folder_id] = {"investigations": {}}
+        ENV.meta.flush()
 
 
 def untrack_context(root_folder_id: str):
     """Untrack context with folder id `root_folder_id`"""
-    if root_folder_id not in ENV.meta.data:
-        raise ContextNotFoundException(f"Context {root_folder_id} is not tracked")
-    if ENV.root == root_folder_id:
-        use_context("temp")
-    del ENV.meta.data[root_folder_id]
-    ENV.meta.flush()
+    with ENV.meta.lock:
+        ENV.meta.load()
+        if root_folder_id not in ENV.meta.data:
+            raise ContextNotFoundException(f"Context {root_folder_id} is not tracked")
+        if ENV.root == root_folder_id:
+            use_context("temp")
+        del ENV.meta.data[root_folder_id]
+        ENV.meta.flush()
 
 
 def list_contexts() -> "list[str]":
@@ -165,6 +173,9 @@ def current_data():
     """Return the data folder id associated with this context if any"""
     return ENV.data_folder
 
+def unlink_data():
+    """Remove the current context's association with its current private data folder"""
+    ENV.unlink_data()
 
 def list_resources() -> "list[str]":
     return ENV.list_resources()

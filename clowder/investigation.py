@@ -24,6 +24,7 @@ from tqdm import tqdm
 from clowder.configuration_exception import MissingConfigurationFileError
 from clowder.consts import (
     CLEARML_QUEUE,
+    CLEARML_QUEUE_CPU,
     CLEARML_URL,
     ENTRYPOINT_ATTRIBUTE,
     NAME_ATTRIBUTE,
@@ -65,9 +66,11 @@ class Investigation:
 
     @status.setter
     def status(self, enum: Status):
-        ENV.current_meta["investigations"][self.name]["status"] = enum.value
-        ENV.meta.flush()
-        self._status = enum
+        with ENV.meta.lock:
+            ENV.meta.load()
+            ENV.current_meta["investigations"][self.name]["status"] = enum.value
+            ENV.meta.flush()
+            self._status = enum
 
     @property
     def experiments(self):
@@ -93,8 +96,10 @@ class Investigation:
         self.log("Attempting to set-up experiments")
         experiments_df = self._get_experiments_df()
         self.experiments_folder_id = ENV._create_gdrive_folder("experiments", self.id)
-        ENV.current_meta["investigations"][self.name]["experiments_folder_id"] = self.experiments_folder_id
-        ENV.meta.flush()
+        with ENV.meta.lock:
+            ENV.meta.load()
+            ENV.current_meta["investigations"][self.name]["experiments_folder_id"] = self.experiments_folder_id
+            ENV.meta.flush()
         for name, params in experiments_df.iterrows():
             experiment_folder_id = ENV._create_gdrive_folder(str(name), self.experiments_folder_id)
             self._setup_experiment(params, experiment_folder_id)
@@ -116,33 +121,35 @@ class Investigation:
         self.log(f"Attempting to run investigation with set-up:\n{pformat(experiments_df)}")
         now_running = False
         temp_meta = {}
-        for _, row in experiments_df.iterrows():
-            if row[NAME_ATTRIBUTE] not in ENV.current_meta["investigations"][self.name]["experiments"]:
-                ENV.current_meta["investigations"][self.name]["experiments"][row[NAME_ATTRIBUTE]] = {}
-            temp_meta[row[NAME_ATTRIBUTE]] = ENV.current_meta["investigations"][self.name]["experiments"][
-                row[NAME_ATTRIBUTE]
-            ]
-            if (
-                not force_rerun
-                and ENV.current_meta["investigations"][self.name]["experiments"][row[NAME_ATTRIBUTE]].get("status")
-                == Task.TaskStatusEnum.completed
-            ):
-                continue
-            elif ENV.current_meta["investigations"][self.name]["experiments"][row[NAME_ATTRIBUTE]].get("status") in [
-                Task.TaskStatusEnum.in_progress,
-                Task.TaskStatusEnum.queued,
-            ]:
-                continue
-            if row["entrypoint"] == "":
-                continue
-            if len(experiments) > 0 and row[NAME_ATTRIBUTE] not in experiments:
-                continue
-            experiment_running, experiment_meta = self._run_experiment(row)
-            if experiment_running:
-                now_running = True
-            temp_meta[row[NAME_ATTRIBUTE]] = experiment_meta
-        ENV.current_meta["investigations"][self.name]["experiments"] = temp_meta
-        ENV.meta.flush()
+        with ENV.meta.lock:
+            ENV.meta.load()
+            for _, row in experiments_df.iterrows():
+                if row[NAME_ATTRIBUTE] not in ENV.current_meta["investigations"][self.name]["experiments"]:
+                    ENV.current_meta["investigations"][self.name]["experiments"][row[NAME_ATTRIBUTE]] = {}
+                temp_meta[row[NAME_ATTRIBUTE]] = ENV.current_meta["investigations"][self.name]["experiments"][
+                    row[NAME_ATTRIBUTE]
+                ]
+                if (
+                    not force_rerun
+                    and ENV.current_meta["investigations"][self.name]["experiments"][row[NAME_ATTRIBUTE]].get("status")
+                    == Task.TaskStatusEnum.completed
+                ):
+                    continue
+                elif ENV.current_meta["investigations"][self.name]["experiments"][row[NAME_ATTRIBUTE]].get("status") in [
+                    Task.TaskStatusEnum.in_progress,
+                    Task.TaskStatusEnum.queued,
+                ]:
+                    continue
+                if row["entrypoint"] == "":
+                    continue
+                if len(experiments) > 0 and row[NAME_ATTRIBUTE] not in experiments:
+                    continue
+                experiment_running, experiment_meta = self._run_experiment(row)
+                if experiment_running:
+                    now_running = True
+                temp_meta[row[NAME_ATTRIBUTE]] = experiment_meta
+            ENV.current_meta["investigations"][self.name]["experiments"] = temp_meta
+            ENV.meta.flush()
         if now_running:
             self.log(f"Investigation started. Experiments started: {temp_meta.keys()}")
         else:
@@ -152,12 +159,13 @@ class Investigation:
     def _run_experiment(self, experiment_row: pd.Series):
         temp_meta = {}
         experiment_name = experiment_row[NAME_ATTRIBUTE]
-        if '_draft' in experiment_name:
-            experiment_name = experiment_name[:experiment_name.index('_draft')]
+        if "_draft" in experiment_name:
+            experiment_name = experiment_name[: experiment_name.index("_draft")]
         experiment_path: Path = self.investigation_storage_path / experiment_name
         complete_entrypoint = (
             experiment_row["entrypoint"]
             .replace("$EXP", "clowder" + str(experiment_path.absolute()).split("clowder")[1])
+            .replace("$ON_CLEARML_CPU", f"--clearml-queue {CLEARML_QUEUE_CPU}")            
             .replace("$ON_CLEARML", f"--clearml-queue {CLEARML_QUEUE}")
             .replace("$LOCAL_EXP_DIR", str(Path(os.environ.get("SIL_NLP_DATA_PATH")) / "MT/experiments"))
         )
@@ -221,29 +229,31 @@ class Investigation:
         statuses = []
         completed_exp = []
         # Update locally
-        for exp in ENV.current_meta["investigations"][self.name]["experiments"].keys():
-            if "experiments" not in remote_meta_content or exp not in remote_meta_content["experiments"]:
-                continue
-            if (
-                "clearml_id" in ENV.current_meta["investigations"][self.name]["experiments"][exp]
-                and "clearml_id" in remote_meta_content["experiments"][exp]
-            ):
-                ENV.current_meta["investigations"][self.name]["experiments"][exp]["clearml_id"] = remote_meta_content[
+        with ENV.meta.lock:
+            ENV.meta.load()
+            for exp in ENV.current_meta["investigations"][self.name]["experiments"].keys():
+                if "experiments" not in remote_meta_content or exp not in remote_meta_content["experiments"]:
+                    continue
+                if (
+                    "clearml_id" in ENV.current_meta["investigations"][self.name]["experiments"][exp]
+                    and "clearml_id" in remote_meta_content["experiments"][exp]
+                ):
+                    ENV.current_meta["investigations"][self.name]["experiments"][exp]["clearml_id"] = remote_meta_content[
+                        "experiments"
+                    ][exp]["clearml_id"]
+                    ENV.current_meta["investigations"][self.name]["experiments"][exp][
+                        "clearml_task_url"
+                    ] = remote_meta_content["experiments"][exp]["clearml_task_url"]
+                ENV.current_meta["investigations"][self.name]["experiments"][exp]["status"] = remote_meta_content[
                     "experiments"
-                ][exp]["clearml_id"]
+                ][exp]["status"]
                 ENV.current_meta["investigations"][self.name]["experiments"][exp][
-                    "clearml_task_url"
-                ] = remote_meta_content["experiments"][exp]["clearml_task_url"]
-            ENV.current_meta["investigations"][self.name]["experiments"][exp]["status"] = remote_meta_content[
-                "experiments"
-            ][exp]["status"]
-            ENV.current_meta["investigations"][self.name]["experiments"][exp][
-                "results_already_gathered"
-            ] = remote_meta_content["experiments"][exp].get("results_already_gathered", False)
-            statuses.append(remote_meta_content["experiments"][exp]["status"])
-            if remote_meta_content["experiments"][exp]["status"] == Task.TaskStatusEnum.completed.value:
-                completed_exp.append(exp)
-        ENV.meta.flush()
+                    "results_already_gathered"
+                ] = remote_meta_content["experiments"][exp].get("results_already_gathered", False)
+                statuses.append(remote_meta_content["experiments"][exp]["status"])
+                if remote_meta_content["experiments"][exp]["status"] == Task.TaskStatusEnum.completed.value:
+                    completed_exp.append(exp)
+            ENV.meta.flush()
         self.status = Status.from_clearml_task_statuses(statuses, self.status)  # type: ignore
         if self.status == Status.Completed:
             print(f"Investigation {self.name} is complete!")
@@ -257,13 +267,15 @@ class Investigation:
             print(f"Results of experiments [{', '.join(completed_exp)}] must be collected. This may take a while.")
             self.log(f"Collecting results of completed experiments {','.join(completed_exp)}")
             self._generate_results(completed_exp, copy_all_results_to_gdrive=copy_all_results_to_gdrive)
-            remote_meta_content = ENV.get_remote_meta(self.name)
-            for exp in completed_exp:
-                if copy_all_results_to_gdrive:
-                    remote_meta_content["experiments"][exp]["results_already_gathered"] = True
-                ENV.current_meta["investigations"][self.name]["experiments"][exp]["results_already_gathered"] = True
-            ENV.set_remote_meta(self.name, remote_meta_content)
-            ENV.meta.flush()
+            with ENV.meta.lock:
+                ENV.meta.load()
+                remote_meta_content = ENV.get_remote_meta(self.name)
+                for exp in completed_exp:
+                    if copy_all_results_to_gdrive:
+                        remote_meta_content["experiments"][exp]["results_already_gathered"] = True
+                    ENV.current_meta["investigations"][self.name]["experiments"][exp]["results_already_gathered"] = True
+                ENV.set_remote_meta(self.name, remote_meta_content)
+                ENV.meta.flush()
         self.log(
             f"Synced investigation: status={self.status.value} (gather-results={gather_results}, copy-all-results-to-gdrive={copy_all_results_to_gdrive})"
         )
@@ -287,10 +299,15 @@ class Investigation:
                 for name in csv_results_files:
                     name = name.strip()
                     if name == "draft":
-                        exp_folder_id = ENV._dict_of_gdrive_files(self.experiments_folder_id)[row[NAME_ATTRIBUTE]]["id"]
-                        draft_folder_id = ENV._create_gdrive_folder('drafts', exp_folder_id)
-                        exp_name = row[NAME_ATTRIBUTE][:row[NAME_ATTRIBUTE].index('_draft')]
-                        ENV._copy_storage_folder_to_gdrive(list(list((self.investigation_storage_path / exp_name / "infer").glob('*'))[0].glob('*'))[0], draft_folder_id)
+                        draft_folder_id = ENV._create_gdrive_folder("drafts", self.experiments_folder_id)
+                        exp_name = row[NAME_ATTRIBUTE][: row[NAME_ATTRIBUTE].index("_draft")]
+                        model_drafts_folder_id = ENV._create_gdrive_folder(exp_name, draft_folder_id)
+                        ENV._copy_storage_folder_to_gdrive(
+                            list(list((self.investigation_storage_path / exp_name / "infer").glob("*"))[0].glob("*"))[
+                                0
+                            ],
+                            model_drafts_folder_id,
+                        )
                         continue
                     try:
                         if name == "scores-best":
@@ -492,7 +509,7 @@ class Investigation:
         self.log("Attempting to cancel investigation")
         canceled_anything = False
         for _, obj in ENV.current_meta["investigations"][self.name]["experiments"].items():
-            if "clearml_id" in obj and obj['clearml_id'] != 'unknown':
+            if "clearml_id" in obj and obj["clearml_id"] != "unknown":
                 task: Optional[Task] = Task.get_task(task_id=obj["clearml_id"])
                 if task is not None:
                     task.mark_stopped(status_message="Task was stopped by user")
@@ -504,27 +521,29 @@ class Investigation:
         return canceled_anything
 
     def delete(self, delete_from_clearml: bool = True, delete_from_gdrive: bool = True, delete_from_s3: bool = True):
-        if delete_from_clearml:
-            try:
-                for _, obj in ENV.current_meta["investigations"][self.name].get("experiments", {}).items():
-                    task: Optional[Task] = Task.get_task(task_id=obj["clearml_id"])
-                    if task is not None:
-                        task.delete()
-            except:
-                print(f"Failed to delete investigation {self.name} from ClearML")
-        if delete_from_gdrive:
-            try:
-                ENV._delete_gdrive_folder(self.id)
-            except:
-                print(f"Failed to delete investigation {self.name} from Google Drive")
-        if delete_from_s3:
-            try:
-                ENV._delete_storage_folder(self.investigation_storage_path)
-            except:
-                print(f"Failed to delete investigation {self.name} from storage (s3/local)")
+        with ENV.meta.lock:
+            ENV.meta.load()
+            if delete_from_clearml:
+                try:
+                    for _, obj in ENV.current_meta["investigations"][self.name].get("experiments", {}).items():
+                        task: Optional[Task] = Task.get_task(task_id=obj["clearml_id"])
+                        if task is not None:
+                            task.delete()
+                except:
+                    print(f"Failed to delete investigation {self.name} from ClearML")
+            if delete_from_gdrive:
+                try:
+                    ENV._delete_gdrive_folder(self.id)
+                except:
+                    print(f"Failed to delete investigation {self.name} from Google Drive")
+            if delete_from_s3:
+                try:
+                    ENV._delete_storage_folder(self.investigation_storage_path)
+                except:
+                    print(f"Failed to delete investigation {self.name} from storage (s3/local)")
 
-        del ENV.current_meta["investigations"][self.name]
-        ENV.meta.flush()
+            del ENV.current_meta["investigations"][self.name]
+            ENV.meta.flush()
         self = None
 
     def import_setup_from(self, other):
@@ -543,8 +562,10 @@ class Investigation:
             current_log + "\n" + datetime.datetime.now().isoformat() + " | " + data,
         )
         self.log_id = id
-        ENV.current_meta["investigations"][self.name]["clowder_log_id"] = id
-        ENV.meta.flush()
+        with ENV.meta.lock:
+            ENV.meta.load()
+            ENV.current_meta["investigations"][self.name]["clowder_log_id"] = id
+            ENV.meta.flush()
 
     @staticmethod
     def from_meta(data: dict):

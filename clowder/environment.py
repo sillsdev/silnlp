@@ -1,5 +1,7 @@
 import warnings
 
+from filelock import FileLock
+
 warnings.filterwarnings("ignore", r"Blowfish")
 
 import os
@@ -52,17 +54,22 @@ class ClowderMeta:
                 yaml.safe_dump(data, f)
         with open(self.filepath, "r") as f:
             self.data: Any = yaml.safe_load(f)
-
+        self.lock = FileLock("meta.lock")
+    def load(self):
+        with open(self.filepath, "r") as f:
+            self.data: Any = yaml.safe_load(f)
     def flush(self):
         with open(self.filepath, "w") as f:
             yaml.safe_dump(self.data, f)
-        with open(self.filepath, "r") as f:
-            self.data: Any = yaml.safe_load(f)
+
 
 
 class ClowderEnvironment:
-    def __init__(self, auth=None):
+    def __init__(self, auth=None, context=None):
         self.meta = ClowderMeta(os.environ.get("CLOWDER_META"))
+        self.context = context
+        if context not in self.meta.data:
+            self.meta.data[context] = {"investigations": {}}
         self.INVESTIGATIONS_GDRIVE_FOLDER = self.root
         try:
             self.GOOGLE_CREDENTIALS_FILE = os.environ.get(
@@ -82,16 +89,23 @@ class ClowderEnvironment:
             )
         self.EXPERIMENTS_FOLDER = SIL_NLP_ENV.mt_experiments_dir / "clowder"
         self._setup_google_drive(auth)
-        self.gc = gspread.service_account(filename=Path(self.GOOGLE_CREDENTIALS_FILE))
+        if auth is None:
+            self.gc = gspread.service_account(filename=Path(self.GOOGLE_CREDENTIALS_FILE))
+        else:
+            self.gc = gspread.authorize(auth.credentials)
 
     @property
     def root(self):
+        if self.context is not None:
+            return self.meta.data[self.context]
         return self.meta.data["current_root"]
 
     @root.setter
     def root(self, value):
-        self.meta.data["current_root"] = value
-        self.meta.flush()
+        with self.meta.lock:
+            self.meta.load()
+            self.meta.data["current_root"] = value
+            self.meta.flush()
 
     @property
     def current_meta(self):
@@ -119,8 +133,10 @@ class ClowderEnvironment:
         return investigation_name in self.current_meta["investigations"]
 
     def add_investigation(self, investigation_name: str, investigation_data: dict):
-        self.current_meta["investigations"][investigation_name] = investigation_data
-        self.meta.flush()
+        with self.meta.lock:
+            self.meta.load()
+            self.current_meta["investigations"][investigation_name] = investigation_data
+            self.meta.flush()
 
     def create_investigation(self, investigation_name: str) -> Investigation:
         if self.investigation_exists(investigation_name):
@@ -227,6 +243,7 @@ class ClowderEnvironment:
             folder_id, storage_files / "projects", where=lambda f: f["title"] in pt_projects
         )
 
+
         # extract corpora
         for proj in pt_projects:
             command = f'SIL_NLP_MT_SCRIPTURE_DIR={self.EXPERIMENTS_FOLDER / "data" / folder_id / "scripture" } SIL_NLP_MT_TERMS_DIR={self.EXPERIMENTS_FOLDER / "data" / folder_id / "terms"} SIL_NLP_PT_DIR={self.EXPERIMENTS_FOLDER / "data" / folder_id } python -m silnlp.common.extract_corpora {proj}'
@@ -236,17 +253,29 @@ class ClowderEnvironment:
                 capture_output=True,
                 text=True,
             )
+            print(result)
             if result.stdout != "":
                 print(result.stdout)
             if result.stderr != "":
                 print(result.stderr)
-
-        self.current_meta["data_folder"] = folder_id
-        self.meta.flush()
+        with self.meta.lock:
+            self.meta.load()
+            self.current_meta["data_folder"] = folder_id
+            self.meta.flush()
+    
+    def unlink_data(self):
+        with self.meta.lock:
+            self.meta.load()
+            if 'data_folder' in self.current_meta:
+                del self.current_meta['data_folder']
+                self.meta.flush()
 
     def list_resources(self):
         if self.data_folder:
-            return list(map(lambda s: s.name, (self.EXPERIMENTS_FOLDER / "data" / self.data_folder / "scripture").glob("*")))
+            print(self.EXPERIMENTS_FOLDER / "data" / self.data_folder / "scripture")
+            return list(
+                map(lambda s: s.name, (self.EXPERIMENTS_FOLDER / "data" / self.data_folder / "scripture").glob("*"))
+            )
         return list(map(lambda s: s.name, SIL_NLP_ENV.mt_scripture_dir.glob("*")))
 
     def _setup_google_drive(self, auth=None):
@@ -383,6 +412,8 @@ class ClowderEnvironment:
                 self._track_investigation_in_folder(file)
             except DuplicateInvestigationException:
                 pass
+            except Exception as e:
+                print(f"Failed to track {file}: {e}")
 
     def _copy_gdrive_folder_to_storage(
         self, folder_id: str, path: Path, where: Callable[[GoogleDriveFile], bool] = lambda _: True
