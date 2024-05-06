@@ -123,6 +123,11 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.deutero: 
+        project_scope = OT_canon + NT_canon + DT_canon
+    else:
+        project_scope = OT_canon + NT_canon
+
     verse_counts = []
     complete_book_counts = {}
     complete_book_counts_already_collected = False
@@ -143,6 +148,8 @@ def main() -> None:
                 for vref, verse in zip(vref_file, extract_file):
                     cur_book = vref.split(" ")[0]
                     cur_chapter = int(vref.split(" ")[1].split(":")[0].strip())
+                    #if cur_book not in project_scope:
+                    #    continue
                     if cur_book not in complete_book_counts:
                         complete_book_counts[cur_book] = []
                     if not complete_book_counts_already_collected:
@@ -165,21 +172,17 @@ def main() -> None:
                     }
                 )
 
-    # Initialize the data 
-    if args.deutero: 
-        Project_scope = OT_canon + NT_canon + DT_canon
-    else:
-        Project_scope = OT_canon + NT_canon
-
-    verse_count_df = pd.DataFrame(columns=Project_scope)
+    # Initialize the data frames
+    verse_count_df = pd.DataFrame(columns=project_scope)
     verse_count_df["file"] = [os.path.basename(extract_file_name) for extract_file_name in extract_files]
     verse_count_df = verse_count_df.set_index("file")
 
-    verse_percentage_df = pd.DataFrame(columns=Project_scope)
+    verse_percentage_df = pd.DataFrame(columns=project_scope)
     verse_percentage_df["file"] = [os.path.basename(extract_file_name) for extract_file_name in extract_files]
     verse_percentage_df = verse_percentage_df.set_index("file")
 
     partially_complete_books = {}
+    omitted_books = {}
     
     # Copy the counts to the data frame
     for totals in verse_counts:
@@ -188,10 +191,18 @@ def main() -> None:
         for ele in counts:
             verse_count_df.loc[f][ele] = counts[ele]
             verse_percentage_df.loc[f][ele] = 100 * round(counts[ele] / sum(complete_book_counts[ele].values()), 3)
+            if ele not in project_scope:
+                if counts[ele] > 0:
+                    if f not in omitted_books:
+                        omitted_books[f] = []
+                    omitted_books[f].append(ele)
+                continue
             if verse_percentage_df.loc[f][ele] < 100 and verse_percentage_df.loc[f][ele] > 0:
                 if f not in partially_complete_books:
                     partially_complete_books[f] = []
                 partially_complete_books[f].append(ele)
+    for filename, books in omitted_books.items():
+        print(f'Warning: file {filename} contains text in books {books}. Use --deutero to include counts for these books.')
 
     for filename, books in partially_complete_books.items():
         df = pd.DataFrame(
@@ -209,7 +220,7 @@ def main() -> None:
         df.to_csv(output_path)
 
     verse_count_df.insert(loc=0, column="Books", value=verse_count_df.apply(lambda row: sum([(1 if ele > 0 else 0) for ele in row]), axis=1))
-    verse_count_df.insert(loc=1, column="Total", value=verse_count_df[Project_scope].sum(axis=1))
+    verse_count_df.insert(loc=1, column="Total", value=verse_count_df[project_scope].sum(axis=1))
     verse_count_df.insert(loc=2, column="OT", value=verse_count_df[OT_canon].sum(axis=1))
     verse_count_df.insert(loc=3, column="NT", value=verse_count_df[NT_canon].sum(axis=1))
     if args.deutero:
@@ -217,7 +228,7 @@ def main() -> None:
     verse_count_df.fillna(0, inplace=True)
 
     verse_percentage_df.insert(
-        loc=0, column="Total", value=verse_percentage_df[Project_scope].mean(axis=1).round(1)
+        loc=0, column="Total", value=verse_percentage_df[project_scope].mean(axis=1).round(1)
     )
     verse_percentage_df.fillna(0.0, inplace=True)  # Replace with 0's before averaging
     verse_percentage_df.insert(loc=1, column="OT", value=verse_percentage_df[OT_canon].mean(axis=1).round(1))
