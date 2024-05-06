@@ -206,6 +206,8 @@ class Investigation:
                     remote_meta_content["experiments"][name] = {}
                     remote_meta_content["experiments"][name]["results_already_gathered"] = False
                 if self.experiments[name]["clearml_id"] != "unknown":
+                    if remote_meta_content["experiments"][name].get("clearml_id", None) != self.experiments[name]["clearml_id"]:
+                        task = Task.get_task(task_id=remote_meta_content["experiments"][name]["clearml_id"])
                     remote_meta_content["experiments"][name]["clearml_id"] = task.id
                     remote_meta_content["experiments"][name][
                         "clearml_task_url"
