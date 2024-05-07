@@ -148,8 +148,6 @@ def main() -> None:
                 for vref, verse in zip(vref_file, extract_file):
                     cur_book = vref.split(" ")[0]
                     cur_chapter = int(vref.split(" ")[1].split(":")[0].strip())
-                    #if cur_book not in project_scope:
-                    #    continue
                     if cur_book not in complete_book_counts:
                         complete_book_counts[cur_book] = []
                     if not complete_book_counts_already_collected:
@@ -196,11 +194,10 @@ def main() -> None:
                     if f not in omitted_books:
                         omitted_books[f] = []
                     omitted_books[f].append(ele)
-                continue
-            if verse_percentage_df.loc[f][ele] < 100 and verse_percentage_df.loc[f][ele] > 0:
-                if f not in partially_complete_books:
-                    partially_complete_books[f] = []
-                partially_complete_books[f].append(ele)
+                elif verse_percentage_df.loc[f][ele] < 100 and verse_percentage_df.loc[f][ele] > 0:
+                    if f not in partially_complete_books:
+                        partially_complete_books[f] = []
+                    partially_complete_books[f].append(ele)
     for filename, books in omitted_books.items():
         print(f'Warning: file {filename} contains text in books {books}. Use --deutero to include counts for these books.')
 
