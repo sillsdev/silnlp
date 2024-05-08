@@ -194,10 +194,11 @@ def main() -> None:
                     if f not in omitted_books:
                         omitted_books[f] = []
                     omitted_books[f].append(ele)
-                elif verse_percentage_df.loc[f][ele] < 100 and verse_percentage_df.loc[f][ele] > 0:
-                    if f not in partially_complete_books:
-                        partially_complete_books[f] = []
-                    partially_complete_books[f].append(ele)
+            elif verse_percentage_df.loc[f][ele] < 100 and verse_percentage_df.loc[f][ele] > 0:
+                if f not in partially_complete_books:
+                    partially_complete_books[f] = []
+                partially_complete_books[f].append(ele)
+
     for filename, books in omitted_books.items():
         print(f'Warning: file {filename} contains text in books {books}. Use --deutero to include counts for these books.')
 
