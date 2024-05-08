@@ -120,8 +120,6 @@ else:
                     st.switch_page("Home.py")
                 # except Exception as e:
                 #     st.error(f"Something went wrong while attempting to run experiment. Please try again. Error: {e}")
-        if st.button("Bypass for testing"):
-            st.session_state.set_up = True
-            st.switch_page("Home.py")
+
     else:
         st.title("You do not have access to this application.")
