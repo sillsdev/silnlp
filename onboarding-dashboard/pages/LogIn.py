@@ -1,6 +1,5 @@
 import os
 import sys
-import webbrowser
 
 import google_auth_oauthlib.flow
 import streamlit as st
@@ -61,13 +60,12 @@ def auth_flow():
         _, c2, _ = st.columns(3)
         with c2:
             st.title("Welcome")
-            if st.button("Sign in with Google", type="primary"):
-                authorization_url, _ = flow.authorization_url(
+            authorization_url, _ = flow.authorization_url(
                     access_type="offline",
                     include_granted_scopes="true",
-                )
-                webbrowser.open(authorization_url)
-
+            )
+            st.page_link(page=authorization_url,label="Sign in with Google", type="primary")
+                
 
 if "google_auth_code" not in st.session_state:
     auth_flow()
