@@ -61,11 +61,11 @@ def auth_flow():
         with c2:
             st.title("Welcome")
             authorization_url, _ = flow.authorization_url(
-                    access_type="offline",
-                    include_granted_scopes="true",
+                access_type="offline",
+                include_granted_scopes="true",
             )
-            st.page_link(page=authorization_url,label="Sign in with Google", type="primary")
-                
+            st.page_link(page=authorization_url, label="Sign in with Google")
+
 
 if "google_auth_code" not in st.session_state:
     auth_flow()
