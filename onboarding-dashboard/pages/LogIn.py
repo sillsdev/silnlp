@@ -64,7 +64,8 @@ def auth_flow():
                 access_type="offline",
                 include_granted_scopes="true",
             )
-            st.page_link(page=authorization_url, label="Sign in with Google")
+            with st.container(border=True):
+                st.page_link(page=authorization_url, label="Sign in with Google")
 
 
 if "google_auth_code" not in st.session_state:
