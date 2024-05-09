@@ -66,7 +66,7 @@ def get_resources():
 if "investigations" not in st.session_state:
     st.session_state.investigations = get_investigations()
 
-investigation_tab, resource_tab, settings_tab = st.tabs(["Investigations", "Resources", "Settings"])
+investigation_tab, resource_tab, settings_tab, debug_tab = st.tabs(["Investigations", "Resources", "Settings", "Debug"])
 
 with investigation_tab:
     st.header("Investigations")
@@ -151,3 +151,6 @@ with resource_tab:
                             functions.use_data(data_folder.split("folders/")[1])
                     except Exception as e:
                         st.error(f"Something went wrong while fetching resource data. Please try again. Error: {e}")
+    
+    with debug_tab:
+        st.write(functions.ENV.meta.data)

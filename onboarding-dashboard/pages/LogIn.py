@@ -115,7 +115,6 @@ else:
                 else:
                     check_required("set_up", root, func=(lambda p: p is not None and p != "" and "folders/" in p))
                 with st.spinner("This might take a few minutes..."):
-                    # try:
                     functions.use_context(root.split("folders/")[1])
                     if is_external_user:
                         functions.track(None)
@@ -125,8 +124,6 @@ else:
                         functions.unlink_data()
                     st.session_state.set_up = True
                     st.switch_page("Home.py")
-                # except Exception as e:
-                #     st.error(f"Something went wrong while attempting to run experiment. Please try again. Error: {e}")
 
     else:
         st.title("You do not have access to this application.")
