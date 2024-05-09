@@ -31,8 +31,6 @@ if not os.path.exists("client_secrets.json"):
     with open("client_secrets.json", "w") as f:
         f.write(os.environ.get("GOOGLE_CLIENT_SECRET", ""))
 
-print("THIS IS IT!", os.environ.get('AWS_ACCESS_KEY_ID'))
-
 def auth_flow():
     gauth = GoogleAuth()
     auth_code = st.query_params.get("code")
@@ -42,7 +40,7 @@ def auth_flow():
         scopes=["https://www.googleapis.com/auth/userinfo.email", "openid", "https://www.googleapis.com/auth/drive"],
         redirect_uri=redirect_uri,
     )
-    if auth_code:
+    if auth_code and ('google_auth_code' not in st.session_state or auth_code != st.session_state.google_auth_code):
         gauth.GetFlow()
         gauth.flow.redirect_uri = redirect_uri
         gauth.Authenticate(auth_code)
@@ -89,6 +87,7 @@ else:
     is_allowed_user = is_internal_user or is_external_user
     if is_allowed_user:
         st.header("Set Up")
+        st.write("THIS",os.environ.get('AWS_ACCESS_KEY_ID'))
         with st.form(key="set_up_form") as f:
             root = st.text_input(
                 "Link to investigations root folder",
