@@ -1,10 +1,7 @@
-# Instructions for setting up Clear-ML on Linux.
-
-These were tested on Pop!_OS.
-See [Clear-ML Windows setup](clear_ml_windows_setup.md) for instructions to set up Clear-ML on Windows.
+# Instructions for setting up Clear-ML.
 
 ## Install the clearml python package.
-Open a terminal and use pip to install Clear-ML.
+Open a terminal (or Command Prompt on Windows) and use pip to install Clear-ML.
 `pip install clearml`
 
 ## Add your AWS storage vault credentials (If using AWS S3).

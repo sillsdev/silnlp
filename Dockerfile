@@ -105,11 +105,16 @@ RUN mv meteor-1.5/meteor-1.5.jar /usr/local/bin
 RUN rm -rf meteor-1.5
 ENV METEOR_PATH=/usr/local/bin
 
+# Create caches
+RUN mkdir -p .cache/silnlp/experiments
+RUN mkdir .cache/silnlp/projects
+ENV SIL_NLP_CACHE_EXPERIMENT_DIR=/root/.cache/silnlp/experiments
+ENV SIL_NLP_CACHE_PROJECT_DIR=/root/.cache/silnlp/projects
+
 # Other environment variables
 ENV SIL_NLP_DATA_PATH=/aqua-ml-data
-RUN mkdir -p .cache/silnlp
-ENV SIL_NLP_CACHE_EXPERIMENT_DIR=/root/.cache/silnlp
 ENV CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
+ENV AWS_REGION="us-east-1"
 
 # Clone silnlp and make it the starting directory
 RUN git clone https://github.com/sillsdev/silnlp.git

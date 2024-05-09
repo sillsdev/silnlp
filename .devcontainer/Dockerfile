@@ -38,14 +38,19 @@ RUN ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python3  & \
 RUN python3 -m venv $POETRY_VENV \
     && $POETRY_VENV/bin/pip install -U pip setuptools \
     && $POETRY_VENV/bin/pip install poetry==${POETRY_VERSION}
-# Add `poetry` to PATH
+# Add `poetry` to PATH and configure
 ENV PATH="${PATH}:${POETRY_VENV}/bin"
-# Install AWS CLI
-RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
-    unzip awscliv2.zip && \
-    ./aws/install && \
-    rm awscliv2.zip
-RUN rm -rf /var/lib/apt/lists/*
 RUN poetry config virtualenvs.create true && \
     poetry config virtualenvs.in-project true
+# Clean up
+RUN rm -rf /var/lib/apt/lists/*
+# Create caches
+RUN mkdir -p /root/.cache/silnlp/experiments
+RUN mkdir /root/.cache/silnlp/projects
+ENV SIL_NLP_CACHE_EXPERIMENT_DIR=/root/.cache/silnlp/experiments
+ENV SIL_NLP_CACHE_PROJECT_DIR=/root/.cache/silnlp/projects
+# Set environment variables
+ENV CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
+ENV SIL_NLP_DATA_PATH=/aqua-ml-data
+ENV AWS_REGION="us-east-1"
 CMD ["bash"]

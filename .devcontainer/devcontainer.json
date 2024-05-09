@@ -17,7 +17,6 @@
 		"/home/clearml/.clearml/hf-cache:/root/.cache/huggingface"
 	],
 	"containerEnv": {
-		"AWS_REGION": "${localEnv:AWS_REGION}",
 		"AWS_ACCESS_KEY_ID": "${localEnv:AWS_ACCESS_KEY_ID}",
 		"AWS_SECRET_ACCESS_KEY": "${localEnv:AWS_SECRET_ACCESS_KEY}",
 		"CLEARML_API_ACCESS_KEY": "${localEnv:CLEARML_API_ACCESS_KEY}",
@@ -44,7 +43,10 @@
 				},
 				"editor.formatOnSave": true,
 				"editor.formatOnType": true,
-				"isort.args":["--profile", "black"]
+				"isort.args": [
+					"--profile",
+					"black"
+				]
 			},
 			// Add the IDs of extensions you want installed when the container is created.
 			"extensions": [

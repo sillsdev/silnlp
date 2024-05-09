@@ -1,0 +1,105 @@
+# Manual Setup
+
+## SILNLP Prerequisites
+These are the main requirements for the SILNLP code to run on a local machine. The SILNLP repo itself is hosted on Github, mainly written in Python and calls SIL.Machine.Tool. 'Machine' as we tend to call it, is a .NET application that has many functions for manipulating USFM data. Most of the language data we have for low resource languages in USFM format. Since Machine is a .Net application it depends upon the __.NET core SDK__ which works on Windows and Linux. Since there are many python packages that need to be used, with complex versioning requirements we use a Python package called Poetry to mangage all of those. So here is a rough heirarchy of SILNLP with the major dependencies.
+
+| Requirement           | Reason                                                            |
+| --------------------- | ----------------------------------------------------------------- |
+| GIT                   | to get the repo from [github](https://github.com/sillsdev/silnlp) |
+| Python                | to run the silnlp code                                            |
+| Poetry                | to manage all the Python packages and versions                    |
+| SIL.Machine.Tool      | to support many functions for data manipulation                   |
+| .Net core SDK         | Required by SIL.Machine.Tool                                      |
+| NVIDIA GPU            | Required to run on a local machine                                |
+| Nvidia drivers        | Required for the GPU                                              |
+| CUDA Toolkit          | Required for the Machine learning with the GPU                    |
+| Environment variables | To tell SILNLP where to find the data, etc.                       |
+
+## Setup
+
+The SILNLP code can be run on either Windows or Linux operating systems. If using an Ubuntu distribution, the only compatible version is 20.04.
+
+__Download and install__ the following before creating any projects or starting any code, preferably in this order to avoid most warnings:
+
+1. If using a local GPU: [NVIDIA driver](https://www.nvidia.com/download/index.aspx)
+   * On Ubuntu, the driver can alternatively be installed through the GUI by opening Software & Updates, navigating to Additional Drivers in the top menu, and selecting the newest NVIDIA driver with the labels proprietary and tested.
+   * After installing the driver, reboot your system.
+2. [Git](https://git-scm.com/downloads)
+3. [Python 3.8](https://www.python.org/downloads/) (latest minor version, ie 3.8.19)
+   * Can alternatively install Python using [miniconda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/windows.html) if you're planning to use more than one version of Python. If following this method, activate your conda environment before installing Poetry.
+4. [Poetry](https://python-poetry.org/docs/#installation)
+   * Note that whether the command should call python or python3 depends on which is required on your machine.
+   * It may (or may not) be possible to run the curl command within a VS Code terminal. If that causes permission errors close VS Code and try it in an elevated CMD prompt.
+
+   Windows:
+   At an administrator CMD prompt or a terminal within VS Code run:
+      ```
+      curl -sSL https://install.python-poetry.org | python - --version 1.7.1
+      ```
+      In Powershell, run:
+      ```
+      (Invoke-WebRequest -Uri https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py -UseBasicParsing).Content | python
+      ```
+
+   Linux:
+   In terminal, run:
+      ```
+      curl -sSL https://install.python-poetry.org | python3 - --version 1.7.1
+      ```
+      Add the following line to your .bashrc file in your home directory:
+      ```
+      export PATH="$HOME/.local/bin:$PATH"
+      ```
+5. .NET Core SDK
+   * The necessary versions are 7.0 and 3.1. If your machine is only able to install version 7.0, you can set the DOTNET_ROLL_FORWARD environment variable to "LatestMajor", which will allow you to run anything that depends on dotnet 3.1.
+   * Note - the .NET SDK is needed for [SIL.Machine.Tool](https://github.com/sillsdev/machine).  Many of the scripts in this repo require this .Net package.  The .Net package will be installed and updated when the silnlp is initialized in `__init__.py`.
+   * Windows: [.NET Core SDK](https://dotnet.microsoft.com/download)
+   * Linux: Installation instructions can be found [here](https://learn.microsoft.com/en-us/dotnet/core/install/linux-ubuntu-2004)
+6. C++ Redistributable
+   * Note - this may already be installed.  If it is not installed you may get cryptic errors such as "System.DllNotFoundException: Unable to load DLL 'thot' or one of its dependencies"
+   * Windows: Download from https://support.microsoft.com/en-us/topic/the-latest-supported-visual-c-downloads-2647da03-1eea-4433-9aff-95f26a218cc0 and install
+   * Linux: Instead of installing the redistributable, run the following commands:
+      ```
+      sudo apt-get update
+      sudo apt-get install build-essential gdb
+      ```
+
+### Visual Studio Code setup
+
+1. Install Visual Studio Code
+2. Install Python extension for VS Code
+3. Open up silnlp folder in VSC
+4. In CMD window, type `poetry install` to create the virtual environment for silnlp
+   * If using conda, activate your conda environment first before `poetry install`. Poetry will then install all the dependencies into the conda environment.
+5. Choose the newly created virtual environment as the "Python Interpreter" in the command palette (ctrl+shift+P)
+   * If using conda, choose the conda environment as the interpreter
+6. Open the command palette and select "Preferences: Open User Settings (JSON)". In the `settings.json` file, add the following options:
+   ``` json
+      "python.formatting.provider": "black",
+      "python.linting.pylintEnabled": true,
+      "editor.formatOnSave": true,
+   ```
+
+### S3 bucket setup
+
+See [S3 bucket setup](s3_bucket_setup.md).
+
+### ClearML setup
+
+See [ClearML setup](clear_ml_setup.md).
+
+### Additional Environment Variables
+Set the following environment variables with your respective credentials: CLEARML_API_ACCESS_KEY, CLEARML_API_SECRET_KEY, AWS_ACCESS_KEY_ID, and AWS_SECRET_ACCESS_KEY
+* Windows users: see [here](https://github.com/sillsdev/silnlp/wiki/Install-silnlp-on-Windows-10#permanently-set-environment-variables) for instructions on setting environment variables permanently
+* Linux users: To set environment variables permanently, add each variable as a new line to the `.bashrc` file in your home directory with the format 
+   ```
+   export VAR="VAL"
+   ```
+
+### Setting Up and Running Experiments
+
+See the [wiki](https://github.com/sillsdev/silnlp/wiki) for information on setting up and running experiments. The most important pages for getting started are the ones on [file structure](https://github.com/sillsdev/silnlp/wiki/Folder-structure-and-file-naming-conventions), [model configuration](https://github.com/sillsdev/silnlp/wiki/Configure-a-model), and [running experiments](https://github.com/sillsdev/silnlp/wiki/NMT:-Usage). A lot of the instructions are specific to NMT, but are still helpful starting points for doing other things like [alignment](https://github.com/sillsdev/silnlp/wiki/Alignment:-Usage).
+
+See [this](https://github.com/sillsdev/silnlp/wiki/Using-the-Python-Debugger) page for information on using the VS code debugger.
+
+If you need to use a tool that is supported by SILNLP but is not installable as a Python library (which is probably the case if you get an error like "RuntimeError: eflomal is not installed."), follow the appropriate instructions [here](https://github.com/sillsdev/silnlp/wiki/Installing-External-Libraries).
