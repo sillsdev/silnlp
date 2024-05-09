@@ -31,6 +31,7 @@ if not os.path.exists("client_secrets.json"):
     with open("client_secrets.json", "w") as f:
         f.write(os.environ.get("GOOGLE_CLIENT_SECRET", ""))
 
+print("THIS IS IT!", os.environ.get('AWS_ACCESS_KEY_ID'))
 
 def auth_flow():
     gauth = GoogleAuth()
