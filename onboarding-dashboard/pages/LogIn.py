@@ -12,6 +12,9 @@ parent_dir = os.path.dirname(parent_dir)
 sys.path.append(parent_dir)
 from utils import check_error, check_required
 
+if not os.path.exists(os.environ.get('SIL_NLP_CACHE_EXPERIMENT_DIR', '~/.cache/silnlp')):
+    os.makedirs(os.environ.get('SIL_NLP_CACHE_EXPERIMENT_DIR', '~/.cache/silnlp'))
+
 from clowder import consts
 
 st.set_page_config(page_title="OnboardingDashboard", initial_sidebar_state="collapsed")
@@ -40,10 +43,14 @@ def auth_flow():
         scopes=["https://www.googleapis.com/auth/userinfo.email", "openid", "https://www.googleapis.com/auth/drive"],
         redirect_uri=redirect_uri,
     )
-    if auth_code and ('google_auth_code' not in st.session_state or auth_code != st.session_state.google_auth_code):
+    if auth_code:
         gauth.GetFlow()
         gauth.flow.redirect_uri = redirect_uri
-        gauth.Authenticate(auth_code)
+        try:
+            gauth.Authenticate(auth_code)
+        except Exception as e:
+            st.error(f"Something went wrong while authenticating. Please try again. Error: {e}")
+            return
         user_info_service = build(
             serviceName="oauth2",
             version="v2",
@@ -87,7 +94,6 @@ else:
     is_allowed_user = is_internal_user or is_external_user
     if is_allowed_user:
         st.header("Set Up")
-        st.write("THIS",os.environ.get('AWS_ACCESS_KEY_ID'))
         with st.form(key="set_up_form") as f:
             root = st.text_input(
                 "Link to investigations root folder",
