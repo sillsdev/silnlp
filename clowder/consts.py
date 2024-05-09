@@ -8,6 +8,13 @@ RESULTS_CLEARML_METRIC_ATTRIBUTE = "results-clearml-metrics"
 ENTRYPOINT_ATTRIBUTE = "entrypoint"
 NAME_ATTRIBUTE = "name"
 
+import os
+def set_up_creds():
+    if not os.path.exists('./.clowder'):
+        os.mkdir('./.clowder')
+        with open('./.clowder/clowder-000.json') as f:
+            f.write(os.environ.get('CLOWDER_CREDENTIALS','{}'))
+
 
 def get_env(auth=None):
     global ENV

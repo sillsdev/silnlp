@@ -15,12 +15,8 @@ from utils import check_error, check_required
 if not os.path.exists(os.environ.get('SIL_NLP_CACHE_EXPERIMENT_DIR', '~/.cache/silnlp')):
     os.makedirs(os.environ.get('SIL_NLP_CACHE_EXPERIMENT_DIR', '~/.cache/silnlp'))
 
-if not os.path.exists('./.clowder'):
-    os.mkdir('./.clowder')
-    with open('./.clowder/clowder-000.json') as f:
-        f.write(os.environ.get('CLOWDER_CREDENTIALS','{}'))
-
 from clowder import consts
+consts.set_up_creds()
 
 st.set_page_config(page_title="OnboardingDashboard", initial_sidebar_state="collapsed")
 
