@@ -162,6 +162,7 @@ class ClowderEnvironment:
             "clowder_log_id": clowder_log_id,
             "clowder_config_yml_id": clowder_config_yml_id,
             "sheet_id": sheet_id,
+            "experiments":{}
         }
         clowder_meta_yml_id = self._write_gdrive_file_in_folder(
             folder_id, "clowder.meta.yml", yaml.safe_dump(remote_meta_content), "application/x-yaml"
@@ -175,6 +176,7 @@ class ClowderEnvironment:
             "clowder_log_id": clowder_log_id,
             "clowder_config_yml_id": clowder_config_yml_id,
             "sheet_id": sheet_id,
+            "experiments":{}
         }
         self.add_investigation(investigation_name, investigation_data)
         return self.get_investigation(investigation_name)
