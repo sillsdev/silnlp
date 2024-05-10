@@ -32,6 +32,8 @@ from clowder.investigation import Investigation
 from clowder.status import Status
 from silnlp.common.environment import SIL_NLP_ENV
 
+from time import time
+
 
 class DuplicateInvestigationException(Exception):
     """There is already an investigation in the current context with that name"""
@@ -66,6 +68,7 @@ class ClowderMeta:
 
 class ClowderEnvironment:
     def __init__(self, auth=None, context=None):
+        print(self)
         self.meta = ClowderMeta(os.environ.get("CLOWDER_META"))
         self.context = context
         if context not in self.meta.data:
