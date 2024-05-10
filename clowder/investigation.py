@@ -175,7 +175,7 @@ class Investigation:
             data_dir_override = f"SIL_NLP_MT_SCRIPTURE_DIR=MT/experiments/clowder/data/{folder_id}/scripture/ SIL_NLP_MT_TERMS_DIR=MT/experiments/clowder/data/{folder_id}/terms/ "
         if "silnlp" not in complete_entrypoint:
             raise ValueError("Entrypoints must be silnlp jobs")  # TODO make more robust against misuse
-        command = f"{data_dir_override} poetry run python -m {complete_entrypoint}"
+        command = f"{data_dir_override} python -m {complete_entrypoint}"
         print("[green]Running command: [/green]", command)
         result = subprocess.run(
             command,
