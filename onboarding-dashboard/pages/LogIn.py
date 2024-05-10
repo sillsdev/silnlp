@@ -58,8 +58,7 @@ def auth_flow():
             credentials=gauth.credentials,
         )
         user_info = user_info_service.userinfo().get().execute()
-        assert user_info.get("email"), "Email not found in infos"
-        st.session_state.google_auth_code = auth_code
+        st.session_state.google_auth = gauth
         st.session_state.user_info = user_info
         consts.get_env(gauth)
         st.rerun()
@@ -75,7 +74,7 @@ def auth_flow():
                 st.page_link(page=authorization_url, label="Sign in with Google")
 
 
-if "google_auth_code" not in st.session_state:
+if "google_auth" not in st.session_state:
     auth_flow()
 else:
     internal_emails = os.environ.get("ONBOARDING_INTERNAL_USER_EMAILS", None)
@@ -106,8 +105,9 @@ else:
                 )
             check_error("set_up")
             if st.form_submit_button("Set Up", type="primary"):
-                from clowder import functions
-
+                from clowder import consts
+                consts.ENV = consts.get_env(st.session_state.google_auth)
+                from clowder import functions 
                 if is_external_user:
                     check_required(
                         "set_up", root, data_folder, func=(lambda p: p is not None and p != "" and "folders/" in p)
