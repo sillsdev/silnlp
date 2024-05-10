@@ -68,7 +68,7 @@ class ClowderMeta:
 
 class ClowderEnvironment:
     def __init__(self, auth=None, context=None):
-        print(self)
+        print("CREATING NEW META", "AUTH=", auth, "\tCTX=", context, self)
         self.meta = ClowderMeta(os.environ.get("CLOWDER_META"))
         self.context = context
         if context not in self.meta.data:
