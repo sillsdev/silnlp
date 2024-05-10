@@ -111,6 +111,7 @@ def status(investigation_name: Optional[str], _sync: bool = True) -> dict:
 
 
 def sync(investigation_name: Optional[str], gather_results: bool = True, copy_all_results_to_gdrive: bool = False):
+    print("USING META", "AUTH=", ENV.auth, "\tCTX=", ENV.context, ENV)
     if investigation_name is not None:
         ENV.get_investigation(investigation_name).sync(
             gather_results=gather_results, copy_all_results_to_gdrive=copy_all_results_to_gdrive
