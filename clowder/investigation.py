@@ -162,7 +162,7 @@ class Investigation:
         if "_draft" in experiment_name:
             experiment_name = experiment_name[: experiment_name.index("_draft")]
         experiment_path: Path = self.investigation_storage_path / experiment_name
-        complete_entrypoint = (
+        complete_entrypoint = ("poetry run " + 
             experiment_row["entrypoint"]
             .replace("$EXP", "clowder" + str(experiment_path.absolute()).split("clowder")[1])
             .replace("$ON_CLEARML_CPU", f"--clearml-queue {CLEARML_QUEUE_CPU}")            
