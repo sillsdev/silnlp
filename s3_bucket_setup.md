@@ -3,14 +3,12 @@
 We use Amazon S3 storage for storing our experiment data. Here is some workspace setup to enable a decent workflow.
 
 ### Install and configure AWS S3 storage
-The following will allow the boto3 and S3Path libraries in Python correctly talk to the S3 bucket.
 * Install the aws-cli from: https://aws.amazon.com/cli/
 * In cmd, type: `aws configure` and enter your AWS access_key_id and secret_access_key and the region (we use region = us-east-1).
 * The aws configure command will create a folder in your home directory named '.aws' it should contain two plain text files named 'config' and 'credentials'. The config file should contain the region and the credentials file should contain your access_key_id and your secret_access_key.
 (Home directory on windows is usually C:\Users\<Username>\ and on linux it is /home/username)
 
 ### Install and configure rclone
-
 
 **Windows**
 

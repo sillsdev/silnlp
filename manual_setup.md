@@ -1,7 +1,7 @@
 # Manual Setup
 
 ## SILNLP Prerequisites
-These are the main requirements for the SILNLP code to run on a local machine. The SILNLP repo itself is hosted on Github, mainly written in Python and calls SIL.Machine.Tool. 'Machine' as we tend to call it, is a .NET application that has many functions for manipulating USFM data. Most of the language data we have for low resource languages in USFM format. Since Machine is a .Net application it depends upon the __.NET core SDK__ which works on Windows and Linux. Since there are many python packages that need to be used, with complex versioning requirements we use a Python package called Poetry to mangage all of those. So here is a rough heirarchy of SILNLP with the major dependencies.
+These are the main requirements for the SILNLP code to run on a local machine. The SILNLP repo itself is hosted on Github, mainly written in Python and calls SIL.Machine.Tool. 'Machine' as we tend to call it, is an application that has many functions for manipulating USFM data. Most of the language data we have for low resource languages is in USFM format. Since there are many Python packages that need to be used with complex versioning requirements, we use a Python package called Poetry to mangage all of those. So here is a rough heirarchy of SILNLP with the major dependencies.
 
 | Requirement           | Reason                                                            |
 | --------------------- | ----------------------------------------------------------------- |
@@ -9,7 +9,6 @@ These are the main requirements for the SILNLP code to run on a local machine. T
 | Python                | to run the silnlp code                                            |
 | Poetry                | to manage all the Python packages and versions                    |
 | SIL.Machine.Tool      | to support many functions for data manipulation                   |
-| .Net core SDK         | Required by SIL.Machine.Tool                                      |
 | NVIDIA GPU            | Required to run on a local machine                                |
 | Nvidia drivers        | Required for the GPU                                              |
 | CUDA Toolkit          | Required for the Machine learning with the GPU                    |
@@ -50,12 +49,7 @@ __Download and install__ the following before creating any projects or starting 
       ```
       export PATH="$HOME/.local/bin:$PATH"
       ```
-5. .NET Core SDK
-   * The necessary versions are 7.0 and 3.1. If your machine is only able to install version 7.0, you can set the DOTNET_ROLL_FORWARD environment variable to "LatestMajor", which will allow you to run anything that depends on dotnet 3.1.
-   * Note - the .NET SDK is needed for [SIL.Machine.Tool](https://github.com/sillsdev/machine).  Many of the scripts in this repo require this .Net package.  The .Net package will be installed and updated when the silnlp is initialized in `__init__.py`.
-   * Windows: [.NET Core SDK](https://dotnet.microsoft.com/download)
-   * Linux: Installation instructions can be found [here](https://learn.microsoft.com/en-us/dotnet/core/install/linux-ubuntu-2004)
-6. C++ Redistributable
+5. C++ Redistributable
    * Note - this may already be installed.  If it is not installed you may get cryptic errors such as "System.DllNotFoundException: Unable to load DLL 'thot' or one of its dependencies"
    * Windows: Download from https://support.microsoft.com/en-us/topic/the-latest-supported-visual-c-downloads-2647da03-1eea-4433-9aff-95f26a218cc0 and install
    * Linux: Instead of installing the redistributable, run the following commands:
@@ -88,13 +82,14 @@ See [S3 bucket setup](s3_bucket_setup.md).
 
 See [ClearML setup](clear_ml_setup.md).
 
+### Create SILNLP cache
+* Create the directory "/home/user/.cache/silnlp", replacing "user" with your username.
+* Create the directory "/home/user/.cache/silnlp/experiments" and set the environment variable SIL_NLP_CACHE_EXPERIMENT_DIR to that path.
+* Create the directory "/home/user/.cache/silnlp/projects" and set the environment variable SIL_NLP_CACHE_PROJECT_DIR to that path.
+
 ### Additional Environment Variables
-Set the following environment variables with your respective credentials: CLEARML_API_ACCESS_KEY, CLEARML_API_SECRET_KEY, AWS_ACCESS_KEY_ID, and AWS_SECRET_ACCESS_KEY
-* Windows users: see [here](https://github.com/sillsdev/silnlp/wiki/Install-silnlp-on-Windows-10#permanently-set-environment-variables) for instructions on setting environment variables permanently
-* Linux users: To set environment variables permanently, add each variable as a new line to the `.bashrc` file in your home directory with the format 
-   ```
-   export VAR="VAL"
-   ```
+* Set the following environment variables with your respective credentials: CLEARML_API_ACCESS_KEY, CLEARML_API_SECRET_KEY, AWS_ACCESS_KEY_ID, and AWS_SECRET_ACCESS_KEY.
+* Set SIL_NLP_DATA_PATH to "/aqua-ml-data" and CLEARML_API_HOST to "https://api.sil.hosted.allegro.ai".
 
 ### Setting Up and Running Experiments
 
@@ -103,3 +98,17 @@ See the [wiki](https://github.com/sillsdev/silnlp/wiki) for information on setti
 See [this](https://github.com/sillsdev/silnlp/wiki/Using-the-Python-Debugger) page for information on using the VS code debugger.
 
 If you need to use a tool that is supported by SILNLP but is not installable as a Python library (which is probably the case if you get an error like "RuntimeError: eflomal is not installed."), follow the appropriate instructions [here](https://github.com/sillsdev/silnlp/wiki/Installing-External-Libraries).
+
+## Setting environment variables permanently
+Windows users: see [here](https://github.com/sillsdev/silnlp/wiki/Install-silnlp-on-Windows-10#permanently-set-environment-variables) for instructions on setting environment variables permanently
+
+Linux users: To set environment variables permanently, add each variable as a new line to the `.bashrc` file in your home directory with the format 
+   ```
+   export VAR="VAL"
+   ```
+
+## .NET Machine alignment models
+
+To be able to run the .NET versions of the Machine alignment models, you will need to install .NET Core SDK 8.0.
+   * Windows: [.NET Core SDK](https://dotnet.microsoft.com/download)
+   * Linux: Installation instructions can be found [here](https://learn.microsoft.com/en-us/dotnet/core/install/linux-ubuntu-2004).

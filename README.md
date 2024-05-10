@@ -10,7 +10,7 @@ SIL NLP provides a set of pipelines for performing experiments on various NLP ta
 ---
 
 ## SILNLP Prerequisites
-These are the main requirements for the SILNLP code to run on a local machine. The SILNLP repo itself is hosted on Github, mainly written in Python and calls SIL.Machine.Tool. 'Machine' as we tend to call it, is a .NET application that has many functions for manipulating USFM data. Most of the language data we have for low resource languages in USFM format. Since Machine is a .Net application it depends upon the __.NET core SDK__ which works on Windows and Linux. Since there are many python packages that need to be used, with complex versioning requirements we use a Python package called Poetry to mangage all of those. So here is a rough heirarchy of SILNLP with the major dependencies.
+These are the main requirements for the SILNLP code to run on a local machine. The SILNLP repo itself is hosted on Github, mainly written in Python and calls SIL.Machine.Tool. 'Machine' as we tend to call it, is an application that has many functions for manipulating USFM data. Most of the language data we have for low resource languages is in USFM format. Since there are many Python packages that need to be used with complex versioning requirements, we use a Python package called Poetry to mangage all of those. So here is a rough heirarchy of SILNLP with the major dependencies.
 
 | Requirement           | Reason                                                            |
 | --------------------- | ----------------------------------------------------------------- |
@@ -18,7 +18,6 @@ These are the main requirements for the SILNLP code to run on a local machine. T
 | Python                | to run the silnlp code                                            |
 | Poetry                | to manage all the Python packages and versions                    |
 | SIL.Machine.Tool      | to support many functions for data manipulation                   |
-| .Net core SDK         | Required by SIL.Machine.Tool                                      |
 | NVIDIA GPU            | Required to run on a local machine                                |
 | Nvidia drivers        | Required for the GPU                                              |
 | CUDA Toolkit          | Required for the Machine learning with the GPU                    |
@@ -58,32 +57,28 @@ These are the main requirements for the SILNLP code to run on a local machine. T
    A docker container should be created. You should be able to see a container named 'silnlp' on the Containers page of Docker Desktop.
 
 5. Create file for environment variables
-
-   __If you do not intend to use SILNLP with ClearML and AWS, you can skip this step. If you need to generate ClearML credentials, see [ClearML setup](clear_ml_setup.md).__
    
-   Create a text file with the following content and insert your credentials.
+   Create a text file with the following content and edit as necessary:
    ```
+   CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
    CLEARML_API_ACCESS_KEY=xxxxx
    CLEARML_API_SECRET_KEY=xxxxx
+   AWS_REGION="us-east-1"
    AWS_ACCESS_KEY_ID=xxxxx
    AWS_SECRET_ACCESS_KEY=xxxxx
+   SIL_NLP_DATA_PATH="/aqua-ml-data"
    ```
+   * If you do not intend to use SILNLP with ClearML and/or AWS, you can leave out the respective variables. If you need to generate ClearML credentials, see [ClearML setup](clear_ml_setup.md).
    * Note that this does not give you direct access to an AWS S3 bucket from within the Docker container, it only allows you to run scripts referencing files in the bucket.
 
 6. Start container
    
-   If you completed step 5: \
    In a terminal, run:
    ```
       docker start silnlp
       docker exec -it --env-file path/to/env_vars_file silnlp bash
    ```
-   If you did not complete step 5: \
-   In a terminal, run:
-   ```
-   docker start silnlp
-   docker exec -it silnlp bash
-   ```
+
    * After this step, the terminal should change to say `root@xxxxx:~/silnlp#`, where `xxxxx` is a string of letters and numbers, instead of your current working directory. This is the command line for the docker container, and you're able to run SILNLP scripts from here.
    * To leave the container, run `exit`, and to stop it, run `docker stop silnlp`. It can be started again by repeating step 6. Stopping the container will not erase any changes made in the container environment, but removing  it will.
 
@@ -110,34 +105,35 @@ Follow the instructions below to set up a Dev Container in VS Code. This is the 
    * Add your user to the docker group by using a terminal to run: `sudo usermod -aG docker $USER`
    * Sign out and back in again so your changes take effect
 
-3. Set up the [S3 bucket](s3_bucket_setup.md).
+3. Set up [ClearML](clear_ml_setup.md).
 
-4. Set up [ClearML](clear_ml_setup.md).
+4. Define environment variables.
 
-5. Define environment variables.
-
-   Set the following environment variables with your respective credentials: CLEARML_API_ACCESS_KEY, CLEARML_API_SECRET_KEY, AWS_ACCESS_KEY_ID, and AWS_SECRET_ACCESS_KEY
+   Set the following environment variables with your respective credentials: CLEARML_API_ACCESS_KEY, CLEARML_API_SECRET_KEY, AWS_ACCESS_KEY_ID, and AWS_SECRET_ACCESS_KEY. Additionally, set AWS_REGION. The typical value is "us-east-1".
    * Windows users: see [here](https://github.com/sillsdev/silnlp/wiki/Install-silnlp-on-Windows-10#permanently-set-environment-variables) for instructions on setting environment variables permanently
    * Linux users: To set environment variables permanently, add each variable as a new line to the `.bashrc` file in your home directory with the format 
       ```
       export VAR="VAL"
       ```
 
-6. Install Visual Studio Code.
+5. Install Visual Studio Code.
 
-7. Clone the silnlp repo.
+6. Clone the silnlp repo.
 
-8. Open up silnlp folder in VS Code.
+7. Open up silnlp folder in VS Code.
 
-9. Install the Dev Containers extension for VS Code.
+8. Install the Dev Containers extension for VS Code.
 
-10. Build the dev container and open the silnlp folder in the container.
+9. Build the dev container and open the silnlp folder in the container.
       * Click on the Remote Indicator in the bottom left corner.
       * Select "Reopen in Container" and choose the silnlp dev container if necessary. This will take a while the first time because the container has to build.
       * If it was successful, the window will refresh and it will say "Dev Container: SILNLP" in the bottom left corner.
+      * Note: If you don't have a local GPU, you may need to comment out the `gpus --all` part of the `runArgs` field of the `.devcontainer/devcontainer.json` file.
 
-11. Install and activate Poetry environment.
+10. Install and activate Poetry environment.
       * In the VS Code terminal, run `poetry install` to install the necessary Python libraries, and then run `poetry shell` to enter the environment in the terminal. 
+
+11. (Optional) Locally mount the S3 bucket. This will allow you to interact directly with the S3 bucket from your local terminal (outside of the dev container). See instructions [here](s3_bucket_setup.md).
 
 To get back into the dev container and poetry environment each subsequent time, open the silnlp folder in VS Code, select the "Reopen in Container" option from the Remote Connection menu (bottom left corner), and use the `poetry shell` command in the terminal.
 
@@ -147,3 +143,9 @@ See the [wiki](https://github.com/sillsdev/silnlp/wiki) for information on setti
 See [this](https://github.com/sillsdev/silnlp/wiki/Using-the-Python-Debugger) page for information on using the VS code debugger.
 
 If you need to use a tool that is supported by SILNLP but is not installable as a Python library (which is probably the case if you get an error like "RuntimeError: eflomal is not installed."), follow the appropriate instructions [here](https://github.com/sillsdev/silnlp/wiki/Installing-External-Libraries).
+
+## .NET Machine alignment models
+
+If you need to run the .NET versions of the Machine alignment models, you will need to install .NET Core SDK 8.0.
+   * Windows: [.NET Core SDK](https://dotnet.microsoft.com/download)
+   * Linux: Installation instructions can be found [here](https://learn.microsoft.com/en-us/dotnet/core/install/linux-ubuntu-2004).

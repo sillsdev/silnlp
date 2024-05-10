@@ -14,9 +14,10 @@
 		"-v",
 		"${env:HOME}/.aws:/root/.aws", // Mount user's AWS credentials into the container
 		"-v",
-		"/home/clearml/.clearml/hf-cache:/root/.cache/huggingface"
+		"${env:HOME}/clearml/.clearml/hf-cache:/root/.cache/huggingface"
 	],
 	"containerEnv": {
+		"AWS_REGION": "${localEnv:AWS_REGION}",
 		"AWS_ACCESS_KEY_ID": "${localEnv:AWS_ACCESS_KEY_ID}",
 		"AWS_SECRET_ACCESS_KEY": "${localEnv:AWS_SECRET_ACCESS_KEY}",
 		"CLEARML_API_ACCESS_KEY": "${localEnv:CLEARML_API_ACCESS_KEY}",

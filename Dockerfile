@@ -55,14 +55,6 @@ RUN apt-get install --no-install-recommends -y \
 RUN ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python3  & \
     ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python
 
-# Install .NET SDK
-RUN wget https://packages.microsoft.com/config/ubuntu/20.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb && \
-    dpkg -i packages-microsoft-prod.deb && \
-    rm packages-microsoft-prod.deb
-RUN apt-get update && \
-    apt-get install --no-install-recommends -y dotnet-sdk-7.0
-ENV DOTNET_ROLL_FORWARD=LatestMajor
-
 # Install dependencies from poetry
 COPY --from=builder /src/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && rm requirements.txt
@@ -110,11 +102,6 @@ RUN mkdir -p .cache/silnlp/experiments
 RUN mkdir .cache/silnlp/projects
 ENV SIL_NLP_CACHE_EXPERIMENT_DIR=/root/.cache/silnlp/experiments
 ENV SIL_NLP_CACHE_PROJECT_DIR=/root/.cache/silnlp/projects
-
-# Other environment variables
-ENV SIL_NLP_DATA_PATH=/aqua-ml-data
-ENV CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
-ENV AWS_REGION="us-east-1"
 
 # Clone silnlp and make it the starting directory
 RUN git clone https://github.com/sillsdev/silnlp.git
