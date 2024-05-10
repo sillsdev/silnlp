@@ -33,7 +33,7 @@ st.markdown(
 
 @st.cache_data(show_spinner=False)
 def get_resources():
-    with st.spinner("This might take a few minutes..."):
+    with st.spinner("Fetching resources. This might take a few minutes..."):
         try:
             return list(map(lambda fn: fn[:-4], functions.list_resources()))
         except Exception as e:
@@ -92,6 +92,7 @@ def get_results(results_name: str, investigation_name: str = None, keep_name: bo
 
 @st.cache_data(show_spinner=False)
 def set_config():
+    print(f"Writing config for {st.session_state.current_investigation}")
     config_data = ""
     with open("onboarding-dashboard/config-templates/config.jinja-yml", "r") as f:
         config_data = f.read()
@@ -128,7 +129,7 @@ def get_lang_tag_mapping(tag: str):
 
 
 def sync():
-    # try:
+    try:
         functions.sync(st.session_state.current_investigation.name)
         if st.session_state.current_investigation in st.session_state.investigations:
             st.session_state.investigations.remove(st.session_state.current_investigation)
@@ -137,8 +138,8 @@ def sync():
             )
             st.session_state.investigations.append(st.session_state.current_investigation)
             st.rerun()
-    # except Exception as e:
-    #     st.error(f"Something went wrong while syncing. Please try again. Error: {e}")
+    except Exception as e:
+        st.error(f"Something went wrong while syncing. Please try again. Error: {e}")
 
 
 @st.cache_data(show_spinner=False)
