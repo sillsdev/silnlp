@@ -18,6 +18,7 @@ import pandas as pd
 import torch
 import transformers.utils.logging as transformers_logging
 import yaml
+from accelerate import infer_auto_device_map, init_empty_weights
 from accelerate.utils.memory import should_reduce_batch_size
 from datasets import Dataset
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
@@ -778,9 +779,18 @@ class HuggingFaceNMTModel(NMTModel):
             num_labels=0,
             attn_implementation=self._config.params.get("attn_implementation", "eager"),
         )
+        device_map = {
+            "lm_head": 0,
+            "model.shared": 0,
+            "model.encoder": 0,
+            "model.decoder.embed_tokens": 0,
+            "model.decoder.embed_positions": 1,
+            "model.decoder.layers": 1,
+            "model.decoder.layer_norm": 1,
+        }
         model = cast(
             PreTrainedModel,
-            AutoModelForSeq2SeqLM.from_pretrained(self._config.model, config=model_config),
+            AutoModelForSeq2SeqLM.from_pretrained(self._config.model, config=model_config, device_map=device_map),
         )
         if self._config.train.get("better_transformer"):
             model = model.to_bettertransformer()
@@ -1005,11 +1015,7 @@ class HuggingFaceNMTModel(NMTModel):
         tokenizer = self._config.get_tokenizer()
         model = self._create_inference_model(ckpt, tokenizer)
         pipeline = PretokenizedTranslationPipeline(
-            model=model,
-            tokenizer=tokenizer,
-            src_lang=self._config.test_src_lang,
-            tgt_lang=self._config.test_trg_lang,
-            device=0,
+            model=model, tokenizer=tokenizer, src_lang=self._config.test_src_lang, tgt_lang=self._config.test_trg_lang
         )
         pipeline.model = torch.compile(pipeline.model)
         for input_path, translation_path, vref_path in zip(
@@ -1565,10 +1571,20 @@ class HuggingFaceNMTModel(NMTModel):
             base_model = self._create_tied_embedding_weights(base_model)
             model = PeftModel.from_pretrained(base_model, model_name)
         else:
+            device_map = {
+                "lm_head": 0,
+                "model.shared": 0,
+                "model.encoder": 0,
+                "model.decoder.embed_tokens": 0,
+                "model.decoder.embed_positions": 1,
+                "model.decoder.layers": 1,
+                "model.decoder.layer_norm": 1,
+            }
             model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(
                 model_name,
                 torch_dtype=dtype if self._mixed_precision else "auto",
                 attn_implementation=self._config.params.get("attn_implementation", "eager"),
+                device_map=device_map,
             )
         if self._config.infer.get("better_transformer"):
             model = model.to_bettertransformer()
