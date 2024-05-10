@@ -116,11 +116,11 @@ else:
                     check_required("set_up", root, func=(lambda p: p is not None and p != "" and "folders/" in p))
                 with st.spinner("This might take a few minutes..."):
                     functions.use_context(root.split("folders/")[1])
-                    if is_external_user:
+                    if len(functions.list_inv()) == 0:
                         functions.track(None)
+                    if is_external_user:
                         functions.use_data(data_folder.split("folders/")[1])
                     else:
-                        functions.track(None)
                         functions.unlink_data()
                     st.session_state.set_up = True
                     st.switch_page("Home.py")
