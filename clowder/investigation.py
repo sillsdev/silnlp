@@ -162,7 +162,7 @@ class Investigation:
         if "_draft" in experiment_name:
             experiment_name = experiment_name[: experiment_name.index("_draft")]
         experiment_path: Path = self.investigation_storage_path / experiment_name
-        complete_entrypoint = ("poetry run " + 
+        complete_entrypoint = (
             experiment_row["entrypoint"]
             .replace("$EXP", "clowder" + str(experiment_path.absolute()).split("clowder")[1])
             .replace("$ON_CLEARML_CPU", f"--clearml-queue {CLEARML_QUEUE_CPU}")            
@@ -175,7 +175,7 @@ class Investigation:
             data_dir_override = f"SIL_NLP_MT_SCRIPTURE_DIR=MT/experiments/clowder/data/{folder_id}/scripture/ SIL_NLP_MT_TERMS_DIR=MT/experiments/clowder/data/{folder_id}/terms/ "
         if "silnlp" not in complete_entrypoint:
             raise ValueError("Entrypoints must be silnlp jobs")  # TODO make more robust against misuse
-        command = f"{data_dir_override} python -m {complete_entrypoint}"
+        command = f"{data_dir_override} poetry run python -m {complete_entrypoint}"
         print("[green]Running command: [/green]", command)
         result = subprocess.run(
             command,
