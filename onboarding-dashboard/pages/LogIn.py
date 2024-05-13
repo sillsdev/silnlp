@@ -66,15 +66,12 @@ def auth_flow():
         st.session_state.user_info = user_info
         st.rerun()
     else:
-        _, c2, _ = st.columns(3)
-        with c2:
-            st.title("Welcome")
-            authorization_url, _ = flow.authorization_url(
-                access_type="offline",
-                include_granted_scopes="true",
-            )
-            with st.container(border=True):
-                st.page_link(page=authorization_url, label="Sign in with Google")
+        st.title("Welcome")
+        authorization_url, _ = flow.authorization_url(
+            access_type="offline",
+            include_granted_scopes="true",
+        )
+        st.page_link(page=authorization_url, label="Sign in with Google")
 
 
 if "google_auth" not in st.session_state:
