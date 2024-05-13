@@ -10,14 +10,13 @@ SIL NLP provides a set of pipelines for performing experiments on various NLP ta
 ---
 
 ## SILNLP Prerequisites
-These are the main requirements for the SILNLP code to run on a local machine. The SILNLP repo itself is hosted on Github, mainly written in Python and calls SIL.Machine.Tool. 'Machine' as we tend to call it, is an application that has many functions for manipulating USFM data. Most of the language data we have for low resource languages is in USFM format. Since there are many Python packages that need to be used with complex versioning requirements, we use a Python package called Poetry to mangage all of those. So here is a rough heirarchy of SILNLP with the major dependencies.
+These are the main requirements for the SILNLP code to run on a local machine. Since there are many Python packages that need to be used with complex versioning requirements, we use a Python package called Poetry to mangage all of those. So here is a rough heirarchy of SILNLP with the major dependencies.
 
 | Requirement           | Reason                                                            |
 | --------------------- | ----------------------------------------------------------------- |
 | GIT                   | to get the repo from [github](https://github.com/sillsdev/silnlp) |
 | Python                | to run the silnlp code                                            |
 | Poetry                | to manage all the Python packages and versions                    |
-| SIL.Machine.Tool      | to support many functions for data manipulation                   |
 | NVIDIA GPU            | Required to run on a local machine                                |
 | Nvidia drivers        | Required for the GPU                                              |
 | CUDA Toolkit          | Required for the Machine learning with the GPU                    |
@@ -146,6 +145,6 @@ If you need to use a tool that is supported by SILNLP but is not installable as 
 
 ## .NET Machine alignment models
 
-If you need to run the .NET versions of the Machine alignment models, you will need to install .NET Core SDK 8.0.
+If you need to run the .NET versions of the Machine alignment models, you will need to install .NET Core SDK 8.0. After installing, run `dotnet tool restore`.
    * Windows: [.NET Core SDK](https://dotnet.microsoft.com/download)
    * Linux: Installation instructions can be found [here](https://learn.microsoft.com/en-us/dotnet/core/install/linux-ubuntu-2004).
