@@ -33,22 +33,25 @@ from clowder.environment import DuplicateInvestigationException
 def copy_resource_to_gdrive(r: BytesIO):
     if not zipfile.is_zipfile(r):
         return
-    id = functions.ENV._create_gdrive_folder(r.name[:-4], functions.current_data())
-    with zipfile.ZipFile(r) as f:
-        for file in f.filelist:
-            if "Notes" in file.filename:
-                continue
-            subid = id
-            if "/" in file.filename:
-                path_parts = file.filename.split("/")
-                for part in path_parts:
-                    subid = functions.ENV._create_gdrive_folder(part, subid)
-            functions.ENV._write_gdrive_file_in_folder(subid, file.filename.split("/")[-1], f.read(file).decode())
+    data_folder = functions.current_data(env=st.session_state.clowder_env)
+    with functions._lock:
+        functions.ENV = st.session_state.clowder_env
+        id = functions.ENV._create_gdrive_folder(r.name[:-4], data_folder)
+        with zipfile.ZipFile(r) as f:
+            for file in f.filelist:
+                if "Notes" in file.filename:
+                    continue
+                subid = id
+                if "/" in file.filename:
+                    path_parts = file.filename.split("/")
+                    for part in path_parts:
+                        subid = functions.ENV._create_gdrive_folder(part, subid)
+                functions.ENV._write_gdrive_file_in_folder(subid, file.filename.split("/")[-1], f.read(file).decode())
 
 
 def get_investigations() -> list:
     try:
-        return list(map(lambda i: Investigation.from_clowder(i), functions.list_inv()))
+        return list(map(lambda i: Investigation.from_clowder(i), functions.list_inv(env=st.session_state.clowder_env)))
     except Exception as e:
         st.error(f"Something went wrong while fetching investigation data. Please try again. Error: {e}")
         return []
@@ -57,7 +60,7 @@ def get_investigations() -> list:
 @st.cache_data(show_spinner=False)
 def get_resources():
     try:
-        return list(map(lambda fn: fn[:-4], functions.list_resources()))
+        return list(map(lambda fn: fn[:-4], functions.list_resources(env=st.session_state.clowder_env)))
     except Exception as e:
         st.error(f"Something went wrong while fetching resource data. Please try again. Error: {e}")
         return []
@@ -87,7 +90,7 @@ with investigation_tab:
             try:
                 with st.spinner("This may take a few minutes..."):
                     try:
-                        functions.create(name)
+                        functions.create(name, env=st.session_state.clowder_env)
                         st.session_state.investigations = get_investigations()
                     except Exception as e:
                         st.error(f"Something went wrong while fetching resource data. Please try again. Error: {e}")
@@ -119,7 +122,7 @@ with resource_tab:
                             print("Copying", f.filename)
                             copy_resource_to_gdrive(resource)
                     try:
-                        functions.use_data(functions.current_data())
+                        functions.use_data(functions.current_data(env=st.session_state.clowder_env))
                         st.cache_data.clear()
                         st.rerun()
                     except Exception as e:
@@ -131,13 +134,13 @@ with resource_tab:
             root = st.text_input(
                 "Link to investigations root folder",
                 placeholder="https://drive.google.com/drive/u/0/folders/0000000000000000000",
-                value=f"https://drive.google.com/drive/u/0/folders/{functions.current_context()}",
+                value=f"https://drive.google.com/drive/u/0/folders/{functions.current_context(env=st.session_state.clowder_env)}",
             )
             data_folder = st.text_input(
                 "Link to data folder",
                 placeholder="https://drive.google.com/drive/u/0/folders/0000000000000000000",
-                value=f"https://drive.google.com/drive/u/0/folders/{functions.current_data()}"
-                if functions.current_data() is not None
+                value=f"https://drive.google.com/drive/u/0/folders/{functions.current_data(env=st.session_state.clowder_env)}"
+                if functions.current_data(env=st.session_state.clowder_env) is not None
                 else "",
             )
             check_error("set_up")
@@ -145,10 +148,11 @@ with resource_tab:
                 check_required("set_up", root, func=(lambda p: p is not None and p != "" and "folders/" in p))
                 with st.spinner("This might take a few minutes..."):
                     try:
-                        functions.use_context(root.split("folders/")[1])
-                        functions.track(None)
+                        from clowder.environment import ClowderEnvironment
+                        st.session_state.clowder_env = ClowderEnvironment(auth=st.session_state.google_auth, context=root.split("folders/")[1])
+                        functions.track(None, env=st.session_state.clowder_env)
                         if data_folder is not None:
-                            functions.use_data(data_folder.split("folders/")[1])
+                            functions.use_data(data_folder.split("folders/")[1], env=st.session_state.clowder_env)
                     except Exception as e:
                         st.error(f"Something went wrong while fetching resource data. Please try again. Error: {e}")
     

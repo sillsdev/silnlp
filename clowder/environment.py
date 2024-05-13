@@ -101,7 +101,7 @@ class ClowderEnvironment:
     @property
     def root(self):
         if self.context is not None:
-            return self.meta.data[self.context]
+            return self.context
         return self.meta.data["current_root"]
 
     @root.setter

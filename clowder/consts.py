@@ -15,16 +15,11 @@ def set_up_creds():
         with open('./.clowder/clowder-000.json', 'w') as f:
             f.write(os.environ.get('CLOWDER_CREDENTIALS','{}'))
             os.environ['GOOGLE_CREDENTIALS_FILE'] = os.path.abspath('./.clowder/clowder-000.json')
-            print(os.environ.get('GOOGLE_CREDENTIALS_FILE'))
 
 
-def get_env(auth=None):
+def get_env():
     global ENV
     if ENV is None:
         from clowder.environment import ClowderEnvironment
-
-        if auth is not None:
-            ENV = ClowderEnvironment(auth)
-        else:
-            ENV = ClowderEnvironment()
+        ENV = ClowderEnvironment()
     return ENV

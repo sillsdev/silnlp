@@ -17,6 +17,10 @@ if not os.path.exists(os.environ.get('SIL_NLP_CACHE_EXPERIMENT_DIR', '~/.cache/s
 
 from clowder import consts
 consts.set_up_creds()
+if consts.ENV is not None:
+    print("META IS" , "AUTH=", consts.ENV.auth, "\tCTX=", consts.ENV.context, consts.ENV)
+else:
+    print("META IS NONE")
 
 st.set_page_config(page_title="OnboardingDashboard", initial_sidebar_state="collapsed")
 
@@ -60,7 +64,6 @@ def auth_flow():
         user_info = user_info_service.userinfo().get().execute()
         st.session_state.google_auth = gauth
         st.session_state.user_info = user_info
-        consts.get_env(gauth)
         st.rerun()
     else:
         _, c2, _ = st.columns(3)
@@ -105,8 +108,6 @@ else:
                 )
             check_error("set_up")
             if st.form_submit_button("Set Up", type="primary"):
-                from clowder import consts
-                consts.ENV = consts.get_env(st.session_state.google_auth)
                 from clowder import functions 
                 if is_external_user:
                     check_required(
@@ -115,7 +116,9 @@ else:
                 else:
                     check_required("set_up", root, func=(lambda p: p is not None and p != "" and "folders/" in p))
                 with st.spinner("This might take a few minutes..."):
-                    functions.use_context(root.split("folders/")[1])
+                    from clowder.environment import ClowderEnvironment
+                    st.session_state.clowder_env = ClowderEnvironment(auth=st.session_state.google_auth, context=root.split("folders/")[1])
+                    functions.ENV = st.session_state.clowder_env
                     if len(functions.list_inv()) == 0:
                         functions.track(None)
                     if is_external_user:
