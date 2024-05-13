@@ -17,10 +17,6 @@ if not os.path.exists(os.environ.get('SIL_NLP_CACHE_EXPERIMENT_DIR', '~/.cache/s
 
 from clowder import consts
 consts.set_up_creds()
-if consts.ENV is not None:
-    print("META IS" , "AUTH=", consts.ENV.auth, "\tCTX=", consts.ENV.context, consts.ENV)
-else:
-    print("META IS NONE")
 
 st.set_page_config(page_title="OnboardingDashboard", initial_sidebar_state="collapsed")
 

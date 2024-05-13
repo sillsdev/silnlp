@@ -68,13 +68,11 @@ class ClowderMeta:
 
 class ClowderEnvironment:
     def __init__(self, auth=None, context=None):
-        print("CREATING NEW META", "AUTH=", auth, "\tCTX=", context, self)
-        self.auth = auth #TODO remove
         self.meta = ClowderMeta(os.environ.get("CLOWDER_META"))
         with self.meta.lock:
             self.meta.load()
             self.context = context
-            if context not in self.meta.data:
+            if context not in self.meta.data and self.context is not None:
                 self.meta.data[context] = {"investigations": {}}
             self.meta.flush()
         self.INVESTIGATIONS_GDRIVE_FOLDER = self.root

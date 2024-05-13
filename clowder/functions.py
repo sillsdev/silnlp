@@ -32,7 +32,7 @@ def track(investigation_name: Optional[str], env = None):
             ENV.track_investigation_by_name(investigation_name)
         else:
             ENV.track_all_investigations()
-    sync(investigation_name, gather_results=False)
+    sync(investigation_name, gather_results=False, env=env)
 
 
 def create_from_template(from_investigation_name: str, new_investigation_name: str,  env = None):
@@ -151,7 +151,6 @@ def sync(investigation_name: Optional[str], gather_results: bool = True, copy_al
         if env is not None:
             global ENV
             ENV = env
-        print("USING META", "AUTH=", ENV.auth, "\tCTX=", ENV.context, ENV)
         if investigation_name is not None:
             ENV.get_investigation(investigation_name).sync(
                 gather_results=gather_results, copy_all_results_to_gdrive=copy_all_results_to_gdrive

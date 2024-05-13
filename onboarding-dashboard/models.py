@@ -22,7 +22,12 @@ class Status(Enum):
 
     @staticmethod
     def from_clowder_investigation(i: investigation.Investigation):
-        experiments = list(i.experiments.items())
+        with functions._lock:
+            import clowder.investigation as inv
+            inv.ENV = st.session_state.clowder_env
+            functions.ENV = st.session_state.clowder_env
+            experiments = list(i.experiments.items())
+
         drafting_exps = list(filter(lambda exp: "draft" in exp[0], experiments))
         if len(drafting_exps) > 0 and len(
             list(filter(lambda exp: exp[1]["status"] == "completed", drafting_exps))
