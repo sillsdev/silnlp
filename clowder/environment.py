@@ -71,9 +71,12 @@ class ClowderEnvironment:
         print("CREATING NEW META", "AUTH=", auth, "\tCTX=", context, self)
         self.auth = auth #TODO remove
         self.meta = ClowderMeta(os.environ.get("CLOWDER_META"))
-        self.context = context
-        if context not in self.meta.data:
-            self.meta.data[context] = {"investigations": {}}
+        with self.meta.lock:
+            self.meta.load()
+            self.context = context
+            if context not in self.meta.data:
+                self.meta.data[context] = {"investigations": {}}
+            self.meta.flush()
         self.INVESTIGATIONS_GDRIVE_FOLDER = self.root
         try:
             self.GOOGLE_CREDENTIALS_FILE = os.environ.get(
