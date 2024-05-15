@@ -67,7 +67,8 @@ RUN rm -rf eflomal
 ENV EFLOMAL_PATH=/usr/local/bin
 
 # Install fast_align
-RUN apt-get install --no-install-recommends -y libgoogle-perftools-dev libsparsehash-dev
+RUN apt-get update && \
+    apt-get install --no-install-recommends -y libgoogle-perftools-dev libsparsehash-dev
 RUN git clone https://github.com/clab/fast_align.git
 RUN mkdir fast_align/build
 RUN cmake -S fast_align -B fast_align/build
