@@ -12,8 +12,8 @@ parent_dir = os.path.dirname(parent_dir)
 sys.path.append(parent_dir)
 from utils import check_error, check_required
 
-if not os.path.exists(os.environ.get('SIL_NLP_CACHE_EXPERIMENT_DIR', '~/.cache/silnlp')):
-    os.makedirs(os.environ.get('SIL_NLP_CACHE_EXPERIMENT_DIR', '~/.cache/silnlp'))
+# if not os.path.exists(os.environ.get('SIL_NLP_CACHE_EXPERIMENT_DIR', '~/.cache/silnlp')):
+#     os.makedirs(os.environ.get('SIL_NLP_CACHE_EXPERIMENT_DIR', '~/.cache/silnlp'))
 
 from clowder import consts
 consts.set_up_creds()
