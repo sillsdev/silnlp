@@ -34,6 +34,7 @@ st.markdown(
 if not os.path.exists("client_secrets.json"):
     with open("client_secrets.json", "w") as f:
         f.write(os.environ.get("GOOGLE_CLIENT_SECRET", ""))
+        os.environ['GOOGLE_CREDENTIALS_FILE'] = "client_secrets.json"
 
 def auth_flow():
     gauth = GoogleAuth()
