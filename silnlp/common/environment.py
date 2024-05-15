@@ -234,6 +234,7 @@ class SilNlpEnv:
                     try_n_times(lambda: data_bucket.download_file(obj.object_key, str(temp_dest_path)))
 
     def copy_experiment_to_bucket(self, name: str, patterns: Union[str, Sequence[str]] = [], overwrite: bool = False):
+        print('Here:', self.is_bucket)
         if not self.is_bucket:
             return
         name = str(name)
@@ -256,6 +257,7 @@ class SilNlpEnv:
         for root, _, files in os.walk(temp_folder, topdown=False):
             s3_dest_path = str(experiment_path + root[len_exp_dir + 1 :].replace("\\", "/"))
             for file in files:
+                print(file)
                 pure_path = PurePath(file)
                 if len(patterns) == 0 or any(pure_path.match(pattern) for pattern in patterns):
                     source_file = os.path.join(root, file)
