@@ -114,7 +114,7 @@ def format_path(path: Union[str, Path]):
         output_path = S3Path(output_path)
         if output_path.parent.exists():
             output_path = f's3:/{output_path}'
-    print(output_path)
+    print(f"Writing to {output_path}")
     return output_path
 
 def main() -> None:
@@ -234,7 +234,9 @@ def main() -> None:
 
     verse_count_df.to_csv(format_path(output_folder / "verse_counts.csv"))
     verse_percentage_df.to_csv(format_path(output_folder / "verse_percentages.csv"))
-
+    if isinstance(output_folder, S3Path):
+        print("Copying to bucket...")
+        SIL_NLP_ENV.copy_experiment_to_bucket(args.output_exp)
 
 if __name__ == "__main__":
     main()
