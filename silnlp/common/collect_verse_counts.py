@@ -154,9 +154,7 @@ def main() -> None:
         print(extract_files)
         print(f"Processing files with pattern {file}")
         for extract_file_name in tqdm(extract_files_list):
-            with open(SIL_NLP_ENV.assets_dir / "vref.txt", "r", encoding="utf-8") as vref_file, open(
-                extract_file_name, "r", encoding="utf-8"
-            ) as extract_file:
+            with open(SIL_NLP_ENV.assets_dir / "vref.txt", "r", encoding="utf-8") as vref_file, extract_file_name.open("r", encoding="utf-8") as extract_file:
                 book_list = []
                 chapter_counts = {}
                 cur_book = None
