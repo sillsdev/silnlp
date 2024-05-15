@@ -145,6 +145,8 @@ def main() -> None:
         file = file.strip()
         print(file)
         extract_files_parent_path = Path(args.input_folder)
+        if not extract_files_parent_path.exists():
+            extract_files_parent_path = S3Path(args.input_folder)
         print(extract_files_parent_path)
         extract_files_list = list(extract_files_parent_path.glob(file))
         print(extract_files_list)
