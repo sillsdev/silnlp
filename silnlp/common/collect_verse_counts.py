@@ -8,6 +8,8 @@ from s3path import S3Path
 import pandas as pd
 from tqdm import tqdm
 
+from typing import Union
+
 from ..common.environment import SIL_NLP_ENV
 
 OT_canon = [
@@ -106,7 +108,7 @@ NT_canon = [
     "REV",
 ]
 
-def format_path(path: str):
+def format_path(path: Union[str, Path]):
     output_path = Path(path)
     if not output_path.parent.exists():
         output_path = S3Path(output_path)
@@ -119,13 +121,21 @@ def main() -> None:
     parser.add_argument(
         "--input-folder", default=SIL_NLP_ENV.mt_scripture_dir, help="Folder with corpus of Bible extracts"
     )
-    parser.add_argument("--output-folder", help="Folder in which to save results", required=True)
+    parser.add_argument("--output-folder", help="Folder in which to save results", default="", required=False)
+    parser.add_argument("--output-exp", help="Experiment folder in which to save results (e.g., FT-Language/Model)", default="", required=False)
     parser.add_argument(
         "--files",
         help="Comma-delimited list of patterns of extract file names to count (e.g. 'arb-*.txt;de-NT.txt)",
         required=True,
     )
     args = parser.parse_args()
+
+    if len(args.output_folder) > 0:
+        output_folder = Path(args.output_folder)
+    elif len(args.output_exp) > 0:
+        output_folder = SIL_NLP_ENV.mt_experiments_dir / args.output_exp
+    else:
+        raise ValueError("One of --output-exp or --output-folder must be set")
 
     verse_counts = []
     complete_book_counts = {}
@@ -193,7 +203,6 @@ def main() -> None:
                 partially_complete_books[f].append(ele)
 
     for filename, books in partially_complete_books.items():
-        print("HERE")
         df = pd.DataFrame(
             columns=[i for i in range(1, max([len(complete_book_counts[book].keys()) for book in books]))]
         )
@@ -205,7 +214,7 @@ def main() -> None:
                 if int(col) <= len(complete_book_counts[book].keys()):
                     df.loc[book][col] = 100 * round(chapter_counts[book][col] / complete_book_counts[book][col], 3)
 
-        df.to_csv(format_path(f"{args.output_folder}/{filename[:-4]}_detailed_percentages.csv"))
+        df.to_csv(format_path(output_folder / f"{filename[:-4]}_detailed_percentages.csv"))
 
     verse_count_df.insert(loc=0, column="Books", value=verse_count_df.astype(bool).sum(axis=1))
     verse_count_df.insert(loc=1, column="Total", value=verse_count_df[OT_canon + NT_canon + DT_canon].sum(axis=1))
@@ -222,8 +231,8 @@ def main() -> None:
     verse_percentage_df.insert(loc=2, column="NT", value=verse_percentage_df[NT_canon].mean(axis=1).round(1))
     verse_percentage_df.insert(loc=3, column="DT", value=verse_percentage_df[DT_canon].mean(axis=1).round(1))
 
-    verse_count_df.to_csv(format_path(f"{args.output_folder}/verse_counts.csv"))
-    verse_percentage_df.to_csv(format_path(f"{args.output_folder}/verse_percentages.csv"))
+    verse_count_df.to_csv(format_path(output_folder / "verse_counts.csv"))
+    verse_percentage_df.to_csv(format_path(output_folder / "verse_percentages.csv"))
 
 
 if __name__ == "__main__":
