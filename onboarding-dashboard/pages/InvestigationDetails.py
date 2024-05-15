@@ -175,7 +175,7 @@ if "current_investigation" in st.session_state:
             "**Gather Stats**", st.session_state.current_investigation.status in [Status.Created, Status.GatheredStats]
         ):
             if st.session_state.current_investigation.status.value >= Status.GatheredStats.value:
-                results_stats = get_results("verse_percentages.csv", st.session_state.current_investigation)
+                results_stats = get_results("verse_percentages.csv", st.session_state.current_investigation.name)
                 st.dataframe(results_stats.style.format(precision=0))
             with st.form(key=f"{st.session_state.current_investigation.id}-gather-stats"):
                 texts = st.multiselect("Texts", resources)
@@ -205,13 +205,13 @@ if "current_investigation" in st.session_state:
                 st.session_state.current_investigation.status in [Status.GatheredStats, Status.Aligned],
             ):
                 if st.session_state.current_investigation.status.value >= Status.Aligned.value:
-                    results_align = get_results("corpus-stats.csv", st.session_state.current_investigation)
+                    results_align = get_results("corpus-stats.csv", st.session_state.current_investigation.name)
                     st.dataframe(
                         results_align.style.highlight_max(
                             subset=results_align.select_dtypes(include="number").columns, color="green"
                         ).format(precision=3)
                     )
-                    results_tokenization = get_results("tokenization_stats.csv", st.session_state.current_investigation, keep_name=True)
+                    results_tokenization = get_results("tokenization_stats.csv", st.session_state.current_investigation.name, keep_name=True)
                     st.dataframe(results_tokenization)
                 with st.form(key=f"{st.session_state.current_investigation.id}-run-alignments"):
                     training_sources = st.multiselect(
@@ -294,7 +294,7 @@ if "current_investigation" in st.session_state:
                 "**Run Models**", st.session_state.current_investigation.status in [Status.Aligned, Status.RanModels]
             ):
                 if st.session_state.current_investigation.status.value >= Status.RanModels.value:
-                    results_models = get_results("scores-best", st.session_state.current_investigation, keep_name=True)
+                    results_models = get_results("scores-best", st.session_state.current_investigation.name, keep_name=True)
                     st.dataframe(
                         results_models.style.highlight_max(
                             subset=results_models.select_dtypes(include="number").columns, color="green"
