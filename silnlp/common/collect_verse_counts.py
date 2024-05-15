@@ -114,6 +114,7 @@ def format_path(path: Union[str, Path]):
         output_path = S3Path(output_path)
         if output_path.parent.exists():
             output_path = f's3:/{output_path}'
+    print(output_path)
     return output_path
 
 def main() -> None:
