@@ -144,9 +144,13 @@ def main() -> None:
     extract_files = set()
     for file in args.files.split(";"):
         file = file.strip()
+        print(file)
         extract_files_path = Path(args.input_folder, file)
+        print(extract_files_path)
         extract_files_list = glob.glob(str(extract_files_path))
+        print(extract_files_list)
         extract_files = extract_files.union(set(extract_files_list))
+        print(extract_files)
         print(f"Processing files with pattern {file}")
         for extract_file_name in tqdm(extract_files_list):
             with open(SIL_NLP_ENV.assets_dir / "vref.txt", "r", encoding="utf-8") as vref_file, open(
@@ -155,8 +159,12 @@ def main() -> None:
                 book_list = []
                 chapter_counts = {}
                 cur_book = None
+                first_line = True
                 for vref, verse in zip(vref_file, extract_file):
                     cur_book = vref.split(" ")[0]
+                    if first_line:
+                        print("FIRST VERSE:",verse)
+                        first_line = False
                     cur_chapter = int(vref.split(" ")[1].split(":")[0].strip())
                     if cur_book not in complete_book_counts:
                         complete_book_counts[cur_book] = []
