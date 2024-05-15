@@ -3,6 +3,7 @@ import glob
 import os
 from collections import Counter
 from pathlib import Path
+from s3path import S3Path
 
 import pandas as pd
 from tqdm import tqdm
@@ -105,6 +106,13 @@ NT_canon = [
     "REV",
 ]
 
+def format_path(path: str):
+    output_path = Path(path)
+    if not output_path.parent.exists():
+        output_path = S3Path(output_path)
+        if output_path.parent.exists():
+            output_path = f's3:/{output_path}'
+    return output_path
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Collect various counts from a corpus of Bible extracts")
@@ -185,6 +193,7 @@ def main() -> None:
                 partially_complete_books[f].append(ele)
 
     for filename, books in partially_complete_books.items():
+        print("HERE")
         df = pd.DataFrame(
             columns=[i for i in range(1, max([len(complete_book_counts[book].keys()) for book in books]))]
         )
@@ -196,8 +205,7 @@ def main() -> None:
                 if int(col) <= len(complete_book_counts[book].keys()):
                     df.loc[book][col] = 100 * round(chapter_counts[book][col] / complete_book_counts[book][col], 3)
 
-        output_path = Path(args.output_folder, f"{filename[:-4]}_detailed_percentages.csv")
-        df.to_csv(output_path)
+        df.to_csv(format_path(f"{args.output_folder}/{filename[:-4]}_detailed_percentages.csv"))
 
     verse_count_df.insert(loc=0, column="Books", value=verse_count_df.astype(bool).sum(axis=1))
     verse_count_df.insert(loc=1, column="Total", value=verse_count_df[OT_canon + NT_canon + DT_canon].sum(axis=1))
@@ -214,10 +222,8 @@ def main() -> None:
     verse_percentage_df.insert(loc=2, column="NT", value=verse_percentage_df[NT_canon].mean(axis=1).round(1))
     verse_percentage_df.insert(loc=3, column="DT", value=verse_percentage_df[DT_canon].mean(axis=1).round(1))
 
-    output_path = Path(args.output_folder, "verse_counts.csv")
-    verse_count_df.to_csv(output_path)
-    output_path = Path(args.output_folder, "verse_percentages.csv")
-    verse_percentage_df.to_csv(output_path)
+    verse_count_df.to_csv(format_path(f"{args.output_folder}/verse_counts.csv"))
+    verse_percentage_df.to_csv(format_path(f"{args.output_folder}/verse_percentages.csv"))
 
 
 if __name__ == "__main__":
