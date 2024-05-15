@@ -233,7 +233,9 @@ def main() -> None:
     verse_percentage_df.insert(loc=3, column="DT", value=verse_percentage_df[DT_canon].mean(axis=1).round(1))
 
     verse_count_df.to_csv(format_path(output_folder / "verse_counts.csv"))
+    print(verse_count_df)
     verse_percentage_df.to_csv(format_path(output_folder / "verse_percentages.csv"))
+    print(verse_percentage_df)
     if len(args.output_exp) > 0:
         print("Copying to bucket...")
         SIL_NLP_ENV.copy_experiment_to_bucket(args.output_exp)
