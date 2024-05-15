@@ -234,9 +234,9 @@ def main() -> None:
 
     verse_count_df.to_csv(format_path(output_folder / "verse_counts.csv"))
     verse_percentage_df.to_csv(format_path(output_folder / "verse_percentages.csv"))
-    if isinstance(output_folder, S3Path):
-        print("Copying to bucket...")
-        SIL_NLP_ENV.copy_experiment_to_bucket(args.output_exp)
+    if isinstance(output_folder, str) and output_folder.startswith('s3'):
+        print("Copying from bucket...")
+        SIL_NLP_ENV.copy_experiment_from_bucket(args.output_exp)
 
 if __name__ == "__main__":
     main()
