@@ -1,5 +1,4 @@
 import argparse
-import glob
 import os
 from collections import Counter
 from pathlib import Path
@@ -145,9 +144,9 @@ def main() -> None:
     for file in args.files.split(";"):
         file = file.strip()
         print(file)
-        extract_files_path = Path(args.input_folder, file)
-        print(extract_files_path)
-        extract_files_list = glob.glob(str(extract_files_path))
+        extract_files_parent_path = Path(args.input_folder)
+        print(extract_files_parent_path)
+        extract_files_list = list(extract_files_parent_path.glob(file))
         print(extract_files_list)
         extract_files = extract_files.union(set(extract_files_list))
         print(extract_files)
