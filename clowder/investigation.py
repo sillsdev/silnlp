@@ -14,7 +14,6 @@ import gspread_dataframe as gd
 import jinja2
 import numpy as np
 import pandas as pd
-import yaml
 from clearml import Task
 from gspread import Worksheet
 from openpyxl.utils import get_column_letter
@@ -33,6 +32,8 @@ from clowder.consts import (
     get_env,
 )
 from clowder.status import Status
+from silnlp.common.environment import SIL_NLP_ENV
+
 
 ENV = None
 
@@ -213,6 +214,9 @@ class Investigation:
             for name, task in clearml_tasks_dict.items():
                 if task is None and self.experiments[name].get("clearml_id", None) != "unknown":
                     continue
+                if SIL_NLP_ENV.is_bucket:
+                    print("Copying from bucket...")
+                    SIL_NLP_ENV.copy_experiment_from_bucket(self.investigation_storage_path / name)
                 if name not in remote_meta_content["experiments"]:
                     remote_meta_content["experiments"][name] = {}
                     remote_meta_content["experiments"][name]["results_already_gathered"] = False

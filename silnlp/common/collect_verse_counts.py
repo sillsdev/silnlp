@@ -143,15 +143,11 @@ def main() -> None:
     extract_files = set()
     for file in args.files.split(";"):
         file = file.strip()
-        print(file)
         extract_files_parent_path = Path(args.input_folder)
         if not extract_files_parent_path.exists():
             extract_files_parent_path = S3Path(args.input_folder)
-        print(extract_files_parent_path)
         extract_files_list = list(extract_files_parent_path.glob(file))
-        print(extract_files_list)
         extract_files = extract_files.union(set(extract_files_list))
-        print(extract_files)
         print(f"Processing files with pattern {file}")
         for extract_file_name in tqdm(extract_files_list):
             with open(SIL_NLP_ENV.assets_dir / "vref.txt", "r", encoding="utf-8") as vref_file, extract_file_name.open("r", encoding="utf-8") as extract_file:
