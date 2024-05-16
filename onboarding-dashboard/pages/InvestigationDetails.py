@@ -81,6 +81,8 @@ def get_results(results_name: str, investigation_name: str = None, keep_name: bo
         sheet = functions.ENV.gc.open_by_key(functions.ENV.get_investigation(investigation_name).sheet_id)
         df: pd.DataFrame = gd.get_as_dataframe(list(filter(lambda w: w.title == results_name, sheet.worksheets()))[0])
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         st.error(f"Something went wrong while fetching results data. Please try again. Error: {e}")
         return pd.DataFrame()
     df = df.dropna(how="all")
