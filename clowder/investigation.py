@@ -216,7 +216,7 @@ class Investigation:
                     continue
                 if SIL_NLP_ENV.is_bucket:
                     print("Copying from bucket...")
-                    SIL_NLP_ENV.copy_experiment_from_bucket(self.investigation_storage_path / name)
+                    SIL_NLP_ENV.copy_experiment_from_bucket(f"clowder/{self.name}_{self.id}/{name}")
                 if name not in remote_meta_content["experiments"]:
                     remote_meta_content["experiments"][name] = {}
                     remote_meta_content["experiments"][name]["results_already_gathered"] = False
