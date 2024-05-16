@@ -206,6 +206,7 @@ if "current_investigation" in st.session_state:
             ):
                 if st.session_state.current_investigation.status.value >= Status.Aligned.value:
                     results_align = get_results("corpus-stats.csv", st.session_state.current_investigation.name)
+                    print(":RET:", results_align)
                     st.dataframe(
                         results_align.style.highlight_max(
                             subset=results_align.select_dtypes(include="number").columns, color="green"
