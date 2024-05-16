@@ -162,7 +162,8 @@ def get_drafts(investigation_name: str):
 
 # TODO DESCRIPTIVE TEXT
 if "current_investigation" in st.session_state:
-    st.page_link("Home", label="Back")
+    st.page_link("Home.py", label="Back")
+    
     if 'synced_dict' not in st.session_state or st.session_state.current_investigation.name not in st.session_state.synced_dict or not st.session_state.synced_dict[st.session_state.current_investigation.name]:
         sync(rerun=False)
         if 'synced_dict' not in st.session_state:
