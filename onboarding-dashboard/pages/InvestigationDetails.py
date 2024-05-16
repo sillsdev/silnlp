@@ -162,7 +162,6 @@ def get_drafts(investigation_name: str):
 
 # TODO DESCRIPTIVE TEXT
 if "current_investigation" in st.session_state:
-    st.page_link("Home.py", label="Back")
     if 'synced_dict' not in st.session_state or st.session_state.current_investigation.name not in st.session_state.synced_dict or not st.session_state.synced_dict[st.session_state.current_investigation.name]:
         with st.spinner(f"Fetching up-to-date data on {st.session_state.current_investigation.name}..."):
             sync(rerun=False)
@@ -175,6 +174,7 @@ if "current_investigation" in st.session_state:
     results_stats = None
     results_align = None
     results_models = None
+    st.page_link("Home.py", label="Back")
     c1, c2 = st.columns(2)
     st.title(st.session_state.current_investigation.name)
     st.progress(
