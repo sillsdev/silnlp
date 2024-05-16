@@ -218,7 +218,7 @@ if "current_investigation" in st.session_state:
                         "Training sources",
                         resources,
                         default=list(results_stats["file"].apply(lambda f: f[:-4]))
-                        if results_stats is not None
+                        if results_stats is not None and 'file' in results_stats.columns
                         else None,
                     )
                     training_target = st.selectbox("Training target", resources, index=None)
