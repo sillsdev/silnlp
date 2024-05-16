@@ -159,7 +159,6 @@ def get_drafts(investigation_name: str):
 
 # TODO DESCRIPTIVE TEXT
 if "current_investigation" in st.session_state:
-    sync()
     if st.session_state.current_investigation.status == Status.Created:
         set_config()
     resources = get_resources()
