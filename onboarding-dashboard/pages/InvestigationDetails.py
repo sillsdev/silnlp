@@ -51,7 +51,8 @@ template_df = get_template()
 def add_experiment(values: dict) -> None:
     try:
         with functions._lock:
-            functions.ENV = st.session_state.clowder_env
+            import clowder.investigation as inv
+            inv.ENV = st.session_state.clowder_env
             sheet = functions.ENV.gc.open_by_key(
                 functions.ENV.get_investigation(st.session_state.current_investigation.name).sheet_id
             )
@@ -81,7 +82,8 @@ def get_results(results_name: str, investigation_name: str = None, keep_name: bo
         )  # Don't use defaults to avoid uninitialized current_investigation
     try:
         with functions._lock:
-            functions.ENV = st.session_state.clowder_env
+            import clowder.investigation as inv
+            inv.ENV = st.session_state.clowder_env
             sheet = functions.ENV.gc.open_by_key(functions.ENV.get_investigation(investigation_name).sheet_id)
             df: pd.DataFrame = gd.get_as_dataframe(list(filter(lambda w: w.title == results_name, sheet.worksheets()))[0])
     except Exception as e:
@@ -104,7 +106,8 @@ def set_config():
         config_data = f.read()
     try:
         with functions._lock:
-            functions.ENV = st.session_state.clowder_env
+            import clowder.investigation as inv
+            inv.ENV = st.session_state.clowder_env
             functions.ENV._write_gdrive_file_in_folder(
                 functions.ENV.get_investigation(st.session_state.current_investigation.name).id, "config.yml", config_data
             )
@@ -142,7 +145,8 @@ def sync(rerun:bool=True):
         if st.session_state.current_investigation in st.session_state.investigations:
             st.session_state.investigations.remove(st.session_state.current_investigation)
             with functions._lock:
-                functions.ENV = st.session_state.clowder_env
+                import clowder.investigation as inv
+                inv.ENV = st.session_state.clowder_env
                 st.session_state.current_investigation = Investigation.from_clowder(
                     functions.ENV.get_investigation(st.session_state.current_investigation.name)
                 )
@@ -157,7 +161,8 @@ def sync(rerun:bool=True):
 def get_drafts(investigation_name: str):
     try:
         with functions._lock:
-            functions.ENV = st.session_state.clowder_env
+            import clowder.investigation as inv
+            inv.ENV = st.session_state.clowder_env
             investigation = functions.ENV.get_investigation(investigation_name)
             drafts_folder_id = functions.ENV._dict_of_gdrive_files(investigation.experiments_folder_id)["drafts"]["id"]
             drafts = dict()
@@ -264,10 +269,8 @@ if "current_investigation" in st.session_state:
                             default_books = None
                     books = st.multiselect("Books to align on (Optional)", BOOKS_ABBREVS, default=default_books)
                     with functions._lock:
-                        functions.ENV = st.session_state.clowder_env
-                        print(st.session_state.clowder_env)
-                        print(functions.ENV.root)
-                        print(functions.ENV.current_meta["investigations"].keys())
+                        import clowder.investigation as inv
+                        inv.ENV = st.session_state.clowder_env
                         alignments_already_running = (
                             len(
                                 list(
@@ -461,10 +464,8 @@ if "current_investigation" in st.session_state:
                     st.session_state.models.append(model)
                     st.rerun()
                 with functions._lock:
-                    functions.ENV = st.session_state.clowder_env
-                    print(st.session_state.clowder_env)
-                    print(functions.ENV.root)
-                    print(functions.ENV.current_meta["investigations"].keys())
+                    import clowder.investigation as inv
+                    inv.ENV = st.session_state.clowder_env
                     models_already_running = (
                         len(
                             list(
