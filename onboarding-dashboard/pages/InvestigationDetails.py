@@ -223,7 +223,7 @@ if "current_investigation" in st.session_state:
                     )
                     training_target = st.selectbox("Training target", resources, index=None)
                     default_books = None
-                    if results_stats is not None:
+                    if results_stats is not None and 'file' in results_stats.columns:
                         texts_series = pd.DataFrame(
                             list(set(training_sources) | set([training_target])), columns=["file"]
                         )
