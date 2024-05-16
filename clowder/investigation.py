@@ -255,7 +255,7 @@ class Investigation:
                 statuses.append(remote_meta_content["experiments"][exp]["status"])
                 if SIL_NLP_ENV.is_bucket:
                     print("Copying from bucket...")
-                    SIL_NLP_ENV.copy_experiment_from_bucket(f"clowder/{self.name}_{self.id}/{name}")
+                    SIL_NLP_ENV.copy_experiment_from_bucket(f"clowder/{self.name}_{self.id}/{exp}")
                 if remote_meta_content["experiments"][exp]["status"] == Task.TaskStatusEnum.completed.value:
                     completed_exp.append(exp)
             ENV.meta.flush()
