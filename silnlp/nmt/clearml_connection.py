@@ -71,9 +71,7 @@ class SILClearML:
                 LOGGER.error(
                     f"Was not able to connect to ClearML to execute on queue {self.queue_name}).  Stopping execution."
                 )
-                import traceback
-                traceback.print_exc()
-                exit()
+                exit(1)
             self.task = None
 
     def _determine_clearml_project_name(self) -> None:
