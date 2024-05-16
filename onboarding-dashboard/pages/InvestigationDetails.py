@@ -129,7 +129,7 @@ def get_lang_tag_mapping(tag: str):
 
 
 def sync():
-    try: #TODO
+    # try: #TODO
         functions.sync(st.session_state.current_investigation.name)
         if st.session_state.current_investigation in st.session_state.investigations:
             st.session_state.investigations.remove(st.session_state.current_investigation)
@@ -138,8 +138,8 @@ def sync():
             )
             st.session_state.investigations.append(st.session_state.current_investigation)
             st.rerun()
-    except Exception as e:
-        st.error(f"Something went wrong while syncing. Please try again. Error: {e}")
+    # except Exception as e:
+    #     st.error(f"Something went wrong while syncing. Please try again. Error: {e}")
 
 
 @st.cache_data(show_spinner=False)
