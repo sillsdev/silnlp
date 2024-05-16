@@ -214,9 +214,6 @@ class Investigation:
             for name, task in clearml_tasks_dict.items():
                 if task is None and self.experiments[name].get("clearml_id", None) != "unknown":
                     continue
-                if SIL_NLP_ENV.is_bucket:
-                    print("Copying from bucket...")
-                    SIL_NLP_ENV.copy_experiment_from_bucket(f"clowder/{self.name}_{self.id}/{name}")
                 if name not in remote_meta_content["experiments"]:
                     remote_meta_content["experiments"][name] = {}
                     remote_meta_content["experiments"][name]["results_already_gathered"] = False
@@ -256,6 +253,9 @@ class Investigation:
                     "results_already_gathered"
                 ] = remote_meta_content["experiments"][exp].get("results_already_gathered", False)
                 statuses.append(remote_meta_content["experiments"][exp]["status"])
+                if SIL_NLP_ENV.is_bucket:
+                    print("Copying from bucket...")
+                    SIL_NLP_ENV.copy_experiment_from_bucket(f"clowder/{self.name}_{self.id}/{name}")
                 if remote_meta_content["experiments"][exp]["status"] == Task.TaskStatusEnum.completed.value:
                     completed_exp.append(exp)
             ENV.meta.flush()
