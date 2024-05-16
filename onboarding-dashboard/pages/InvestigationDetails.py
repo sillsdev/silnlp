@@ -50,10 +50,12 @@ template_df = get_template()
 
 def add_experiment(values: dict) -> None:
     try:
-        sheet = functions.ENV.gc.open_by_key(
-            functions.ENV.get_investigation(st.session_state.current_investigation.name).sheet_id
-        )
-        df: pd.DataFrame = gd.get_as_dataframe(sheet.sheet1)
+        with functions._lock:
+            functions.ENV = st.session_state.clowder_env
+            sheet = functions.ENV.gc.open_by_key(
+                functions.ENV.get_investigation(st.session_state.current_investigation.name).sheet_id
+            )
+            df: pd.DataFrame = gd.get_as_dataframe(sheet.sheet1)
     except Exception as e:
         st.error(f"Something went wrong while adding experiment. Please try again. Error: {e}")
         return
@@ -78,8 +80,10 @@ def get_results(results_name: str, investigation_name: str = None, keep_name: bo
             st.session_state.current_investigation.name
         )  # Don't use defaults to avoid uninitialized current_investigation
     try:
-        sheet = functions.ENV.gc.open_by_key(functions.ENV.get_investigation(investigation_name).sheet_id)
-        df: pd.DataFrame = gd.get_as_dataframe(list(filter(lambda w: w.title == results_name, sheet.worksheets()))[0])
+        with functions._lock:
+            functions.ENV = st.session_state.clowder_env
+            sheet = functions.ENV.gc.open_by_key(functions.ENV.get_investigation(investigation_name).sheet_id)
+            df: pd.DataFrame = gd.get_as_dataframe(list(filter(lambda w: w.title == results_name, sheet.worksheets()))[0])
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -99,9 +103,11 @@ def set_config():
     with open("onboarding-dashboard/config-templates/config.jinja-yml", "r") as f:
         config_data = f.read()
     try:
-        functions.ENV._write_gdrive_file_in_folder(
-            functions.ENV.get_investigation(st.session_state.current_investigation.name).id, "config.yml", config_data
-        )
+        with functions._lock:
+            functions.ENV = st.session_state.clowder_env
+            functions.ENV._write_gdrive_file_in_folder(
+                functions.ENV.get_investigation(st.session_state.current_investigation.name).id, "config.yml", config_data
+            )
     except Exception as e:
         st.error(f"Something went wrong while setting up configuration. Please try again. Error: {e}")
 
@@ -135,9 +141,11 @@ def sync(rerun:bool=True):
         functions.sync(st.session_state.current_investigation.name)
         if st.session_state.current_investigation in st.session_state.investigations:
             st.session_state.investigations.remove(st.session_state.current_investigation)
-            st.session_state.current_investigation = Investigation.from_clowder(
-                functions.ENV.get_investigation(st.session_state.current_investigation.name)
-            )
+            with functions._lock:
+                functions.ENV = st.session_state.clowder_env
+                st.session_state.current_investigation = Investigation.from_clowder(
+                    functions.ENV.get_investigation(st.session_state.current_investigation.name)
+                )
             st.session_state.investigations.append(st.session_state.current_investigation)
             if rerun:
                 st.rerun()
@@ -148,13 +156,15 @@ def sync(rerun:bool=True):
 @st.cache_data(show_spinner=False)
 def get_drafts(investigation_name: str):
     try:
-        investigation = functions.ENV.get_investigation(investigation_name)
-        drafts_folder_id = functions.ENV._dict_of_gdrive_files(investigation.experiments_folder_id)["drafts"]["id"]
-        drafts = dict()
-        for name, folder in functions.ENV._dict_of_gdrive_files(drafts_folder_id).items():
-            drafts[name] = {}
-            for filename, file in functions.ENV._dict_of_gdrive_files(folder["id"]).items():
-                drafts[name][filename] = functions.ENV._read_gdrive_file_as_string(file["id"])
+        with functions._lock:
+            functions.ENV = st.session_state.clowder_env
+            investigation = functions.ENV.get_investigation(investigation_name)
+            drafts_folder_id = functions.ENV._dict_of_gdrive_files(investigation.experiments_folder_id)["drafts"]["id"]
+            drafts = dict()
+            for name, folder in functions.ENV._dict_of_gdrive_files(drafts_folder_id).items():
+                drafts[name] = {}
+                for filename, file in functions.ENV._dict_of_gdrive_files(folder["id"]).items():
+                    drafts[name][filename] = functions.ENV._read_gdrive_file_as_string(file["id"])
         return drafts
     except Exception as e:
         st.error(f"Something went wrong while fetching drafts. Please try again. Error: {e}")
@@ -253,19 +263,21 @@ if "current_investigation" in st.session_state:
                         if len(default_books) == 0:
                             default_books = None
                     books = st.multiselect("Books to align on (Optional)", BOOKS_ABBREVS, default=default_books)
-                    alignments_already_running = (
-                        len(
-                            list(
-                                filter(
-                                    lambda kv: "align" in kv[0] and kv[1]["status"] in ["in_progress", "queued"],
-                                    functions.ENV.get_investigation(
-                                        st.session_state.current_investigation.name
-                                    ).experiments.items(),
+                    with functions._lock:
+                        functions.ENV = st.session_state.clowder_env
+                        alignments_already_running = (
+                            len(
+                                list(
+                                    filter(
+                                        lambda kv: "align" in kv[0] and kv[1]["status"] in ["in_progress", "queued"],
+                                        functions.ENV.get_investigation(
+                                            st.session_state.current_investigation.name
+                                        ).experiments.items(),
+                                    )
                                 )
                             )
+                            > 0
                         )
-                        > 0
-                    )
                     if alignments_already_running:
                         st.write("Your alignments are running. Check back in 15 minutes.")
                     check_error("align")
@@ -445,22 +457,23 @@ if "current_investigation" in st.session_state:
                         st.rerun()
                     st.session_state.models.append(model)
                     st.rerun()
-
-                models_already_running = (
-                    len(
-                        list(
-                            filter(
-                                lambda kv: "NLLB" in kv[0]
-                                and "draft" not in kv[0]
-                                and kv[1]["status"] in ["in_progress", "queued"],
-                                functions.ENV.get_investigation(
-                                    st.session_state.current_investigation.name
-                                ).experiments.items(),
+                with functions._lock:
+                    functions.ENV = st.session_state.clowder_env
+                    models_already_running = (
+                        len(
+                            list(
+                                filter(
+                                    lambda kv: "NLLB" in kv[0]
+                                    and "draft" not in kv[0]
+                                    and kv[1]["status"] in ["in_progress", "queued"],
+                                    functions.ENV.get_investigation(
+                                        st.session_state.current_investigation.name
+                                    ).experiments.items(),
+                                )
                             )
                         )
+                        > 0
                     )
-                    > 0
-                )
                 if models_already_running:
                     st.write("Your models are training. Check back after a few hours.")
                 if st.button(

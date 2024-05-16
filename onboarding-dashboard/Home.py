@@ -157,4 +157,6 @@ with resource_tab:
                         st.error(f"Something went wrong while fetching resource data. Please try again. Error: {e}")
     
     with debug_tab:
-        st.write(functions.ENV.meta.data)
+        with functions._lock:
+            functions.ENV = st.session_state.clowder_env
+            st.write(functions.ENV.meta.data)
