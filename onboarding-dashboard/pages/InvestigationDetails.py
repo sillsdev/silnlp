@@ -130,7 +130,7 @@ def get_lang_tag_mapping(tag: str):
     raise ValueError("Language tag does not exist")
 
 
-def sync():
+def sync(rerun:bool=True):
     try:
         functions.sync(st.session_state.current_investigation.name)
         if st.session_state.current_investigation in st.session_state.investigations:
@@ -139,7 +139,8 @@ def sync():
                 functions.ENV.get_investigation(st.session_state.current_investigation.name)
             )
             st.session_state.investigations.append(st.session_state.current_investigation)
-            st.rerun()
+            if rerun:
+                st.rerun()
     except Exception as e:
         st.error(f"Something went wrong while syncing. Please try again. Error: {e}")
 
@@ -161,6 +162,12 @@ def get_drafts(investigation_name: str):
 
 # TODO DESCRIPTIVE TEXT
 if "current_investigation" in st.session_state:
+    st.page_link("Home", "Back")
+    if 'synced_dict' not in st.session_state or st.session_state.current_investigation.name not in st.session_state.synced_dict or not st.session_state.synced_dict[st.session_state.current_investigation.name]:
+        sync(rerun=False)
+        if 'synced_dict' not in st.session_state:
+            st.session_state.synced_dict = {}
+        st.session_state.synced_dict[st.session_state.current_investigation.name] = True
     if st.session_state.current_investigation.status == Status.Created:
         set_config()
     resources = get_resources()
