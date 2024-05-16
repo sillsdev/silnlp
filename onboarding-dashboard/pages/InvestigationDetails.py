@@ -265,6 +265,7 @@ if "current_investigation" in st.session_state:
                     books = st.multiselect("Books to align on (Optional)", BOOKS_ABBREVS, default=default_books)
                     with functions._lock:
                         functions.ENV = st.session_state.clowder_env
+                        print(functions.ENV.root)
                         alignments_already_running = (
                             len(
                                 list(
@@ -459,6 +460,7 @@ if "current_investigation" in st.session_state:
                     st.rerun()
                 with functions._lock:
                     functions.ENV = st.session_state.clowder_env
+                    print(functions.ENV.root)
                     models_already_running = (
                         len(
                             list(
