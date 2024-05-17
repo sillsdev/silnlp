@@ -116,7 +116,7 @@ with resource_tab:
                     st.write(resource)
     with c2:
         with st.form(key=f"add_resource"):
-            resources = st.file_uploader("Resource", type="zip", accept_multiple_files=True)
+            resources = st.file_uploader("Resource", type="zip", accept_multiple_files=True, disabled='is_internal_user' not in st.session_state or st.session_state.is_internal_user)
             check_error("add_resource")
             if st.form_submit_button("Add", type="primary"):
                 check_required("add_resource", resources)

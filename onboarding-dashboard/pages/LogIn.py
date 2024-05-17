@@ -87,6 +87,7 @@ else:
 
     is_internal_user = st.session_state.user_info["email"] in internal_emails
     is_external_user = st.session_state.user_info["email"] in external_emails
+    st.session_state.is_internal_user = is_internal_user
     is_allowed_user = is_internal_user or is_external_user
     if is_allowed_user:
         st.header("Set Up")
