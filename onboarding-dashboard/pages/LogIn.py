@@ -51,6 +51,7 @@ def auth_flow():
             gauth.Authenticate(auth_code)
         except Exception as e:
             st.error(f"Something went wrong while authenticating. Please try again. Error: {e}")
+            st.query_params.clear()
             st.page_link('pages/LogIn.py', label='Try again')
             return
         user_info_service = build(
