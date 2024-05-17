@@ -118,7 +118,7 @@ with resource_tab:
         with st.form(key=f"add_resource"):
             resources = st.file_uploader("Resource", type="zip", accept_multiple_files=True, disabled='is_internal_user' not in st.session_state or st.session_state.is_internal_user)
             check_error("add_resource")
-            if st.form_submit_button("Add", type="primary"):
+            if st.form_submit_button("Add", type="primary", disabled='is_internal_user' not in st.session_state or st.session_state.is_internal_user):
                 check_required("add_resource", resources)
                 with st.spinner("This might take a few minutes..."):
                     for resource in resources:
