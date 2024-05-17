@@ -201,7 +201,10 @@ if "current_investigation" in st.session_state:
         ):
             if st.session_state.current_investigation.status.value >= Status.GatheredStats.value:
                 results_stats = get_results("verse_percentages.csv", st.session_state.current_investigation.name)
-                st.dataframe(results_stats.style.format(precision=0))
+                if len(results_stats.index) > 0:
+                    st.dataframe(results_stats.style.format(precision=0))
+                else:
+                    st.write("**No results found**")
             with st.form(key=f"{st.session_state.current_investigation.id}-gather-stats"):
                 texts = st.multiselect("Texts", resources)
                 check_error("stats")
@@ -231,12 +234,14 @@ if "current_investigation" in st.session_state:
             ):
                 if st.session_state.current_investigation.status.value >= Status.Aligned.value:
                     results_align = get_results("corpus-stats.csv", st.session_state.current_investigation.name)
-                    print(":RET:", results_align)
-                    st.dataframe(
-                        results_align.style.highlight_max(
-                            subset=results_align.select_dtypes(include="number").columns, color="green"
-                        ).format(precision=3)
-                    )
+                    if len(results_align.index) > 0:
+                        st.dataframe(
+                            results_align.style.highlight_max(
+                                subset=results_align.select_dtypes(include="number").columns, color="green"
+                            ).format(precision=3)
+                        )
+                    else:
+                        st.write("**No results found**")
                     results_tokenization = get_results("tokenization_stats.csv", st.session_state.current_investigation.name, keep_name=True)
                     st.dataframe(results_tokenization)
                 with st.form(key=f"{st.session_state.current_investigation.id}-run-alignments"):
@@ -324,11 +329,14 @@ if "current_investigation" in st.session_state:
             ):
                 if st.session_state.current_investigation.status.value >= Status.RanModels.value:
                     results_models = get_results("scores-best", st.session_state.current_investigation.name, keep_name=True)
-                    st.dataframe(
-                        results_models.style.highlight_max(
-                            subset=results_models.select_dtypes(include="number").columns, color="green"
-                        ).format(precision=2)
-                    )
+                    if len(results_models) > 0:
+                        st.dataframe(
+                            results_models.style.highlight_max(
+                                subset=results_models.select_dtypes(include="number").columns, color="green"
+                            ).format(precision=2)
+                        )
+                    else:
+                        st.write("**No results found**")
                 st.write("Models")
                 models = st.session_state.models if "models" in st.session_state else []
                 if len(models) == 0:
