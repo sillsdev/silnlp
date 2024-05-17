@@ -84,7 +84,7 @@ def get_results(results_name: str, investigation_name: str = None, keep_name: bo
         with functions._lock:
             import clowder.investigation as inv
             inv.ENV = st.session_state.clowder_env
-            print(inv.ENV, functions.ENV)
+            print(st.session_state.user_info, inv.ENV, functions.ENV)
             sheet = functions.ENV.gc.open_by_key(functions.ENV.get_investigation(investigation_name).sheet_id)
             df: pd.DataFrame = gd.get_as_dataframe(list(filter(lambda w: w.title == results_name, sheet.worksheets()))[0])
     except Exception as e:
