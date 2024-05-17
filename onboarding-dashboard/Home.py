@@ -140,13 +140,14 @@ with resource_tab:
                 placeholder="https://drive.google.com/drive/u/0/folders/0000000000000000000",
                 value=f"https://drive.google.com/drive/u/0/folders/{functions.current_context(env=st.session_state.clowder_env)}",
             )
-            data_folder = st.text_input(
-                "Link to data folder",
-                placeholder="https://drive.google.com/drive/u/0/folders/0000000000000000000",
-                value=f"https://drive.google.com/drive/u/0/folders/{functions.current_data(env=st.session_state.clowder_env)}"
-                if functions.current_data(env=st.session_state.clowder_env) is not None
-                else "",
-            )
+            if 'is_internal_user' in st.session_state and not st.session_state.is_internal_user:
+                data_folder = st.text_input(
+                    "Link to data folder",
+                    placeholder="https://drive.google.com/drive/u/0/folders/0000000000000000000",
+                    value=f"https://drive.google.com/drive/u/0/folders/{functions.current_data(env=st.session_state.clowder_env)}"
+                    if functions.current_data(env=st.session_state.clowder_env) is not None
+                    else "",
+                )
             check_error("set_up")
             if st.form_submit_button("Save Changes", type="primary"):
                 check_required("set_up", root, func=(lambda p: p is not None and p != "" and "folders/" in p))
