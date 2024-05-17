@@ -37,6 +37,8 @@ def get_resources():
         try:
             return list(map(lambda fn: fn[:-4], functions.list_resources()))
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             st.error(f"Something went wrong while fetching resource data. Please try again. Error: {e}")
 
 
@@ -115,6 +117,8 @@ def set_config():
                 functions.ENV.get_investigation(st.session_state.current_investigation.name).id, "config.yml", config_data
             )
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         st.error(f"Something went wrong while setting up configuration. Please try again. Error: {e}")
 
 
@@ -158,6 +162,8 @@ def sync(rerun:bool=True):
             if rerun:
                 st.rerun()
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         st.error(f"Something went wrong while syncing. Please try again. Error: {e}")
 
 
@@ -177,6 +183,8 @@ def get_drafts(investigation_name: str):
                     drafts[name][filename] = functions.ENV._read_gdrive_file_as_string(file["id"])
         return drafts
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         st.error(f"Something went wrong while fetching drafts. Please try again. Error: {e}")
 
 
@@ -227,6 +235,8 @@ if "current_investigation" in st.session_state:
                                 st.session_state.current_investigation.name, experiments=["stats"], force_rerun=True
                             )
                         except Exception as e:
+                            import traceback
+                            traceback.print_exc()
                             st.error(
                                 f"Something went wrong while attempting to run experiment. Please try again. Error: {e}"
                             )
@@ -307,6 +317,8 @@ if "current_investigation" in st.session_state:
                                 try:
                                     functions.cancel(st.session_state.current_investigation.name)
                                 except Exception as e:
+                                    import traceback
+                                    traceback.print_exc()
                                     st.error(
                                         f"Something went wrong while attempting to cancel experiment. Please try again. Error: {e}"
                                     )
@@ -325,6 +337,8 @@ if "current_investigation" in st.session_state:
                                     st.session_state.current_investigation.name, experiments=["align"], force_rerun=True
                                 )
                             except Exception as e:
+                                import traceback
+                                traceback.print_exc()
                                 st.error(
                                     f"Something went wrong while attempting to run experiment. Please try again. Error: {e}"
                                 )
@@ -508,6 +522,8 @@ if "current_investigation" in st.session_state:
                             try:
                                 functions.cancel(st.session_state.current_investigation.name)
                             except Exception as e:
+                                import traceback
+                                traceback.print_exc()
                                 st.error(
                                     f"Something went wrong while attempting to cancel experiment. Please try again. Error: {e}"
                                 )
@@ -535,6 +551,8 @@ if "current_investigation" in st.session_state:
                         try:
                             functions.run(st.session_state.current_investigation.name, experiments=exps)
                         except Exception as e:
+                            import traceback
+                            traceback.print_exc()
                             st.error(
                                 f"Something went wrong while attempting to run experiment. Please try again. Error: {e}"
                             )
@@ -582,6 +600,8 @@ if "current_investigation" in st.session_state:
                                 st.toast("Check back in a few hours!")
                                 sleep(4)
                             except Exception as e:
+                                import traceback
+                                traceback.print_exc()
                                 st.error(
                                     f"Something went wrong while attempting to run experiment. Please try again. Error: {e}"
                                 )

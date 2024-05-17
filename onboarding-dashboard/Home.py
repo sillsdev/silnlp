@@ -50,11 +50,13 @@ def copy_resource_to_gdrive(r: BytesIO):
 
 
 def get_investigations() -> list:
-    # try:
-    return list(map(lambda i: Investigation.from_clowder(i), functions.list_inv(env=st.session_state.clowder_env)))
-    # except Exception as e:
-    #     st.error(f"Something went wrong while fetching investigation data. Please try again. Error: {e}")
-    #     return []
+    try:
+        return list(map(lambda i: Investigation.from_clowder(i), functions.list_inv(env=st.session_state.clowder_env)))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        st.error(f"Something went wrong while fetching investigation data. Please try again. Error: {e}")
+        return []
 
 
 @st.cache_data(show_spinner=False)
@@ -62,6 +64,8 @@ def get_resources():
     try:
         return list(map(lambda fn: fn[:-4], functions.list_resources(env=st.session_state.clowder_env)))
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         st.error(f"Something went wrong while fetching resource data. Please try again. Error: {e}")
         return []
 
