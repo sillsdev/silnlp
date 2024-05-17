@@ -89,7 +89,6 @@ class ClowderEnvironment:
                 ),  # TODO more robust
             )
         except IndexError:
-            print(os.listdir(str(Path(self.meta.filepath).parent)))
             raise MissingConfigurationFileError(
                 "No Google credentials file found in .clowder directory. Please copy your credentials file into the .clowder directory."
             )
@@ -280,7 +279,6 @@ class ClowderEnvironment:
 
     def list_resources(self):
         if self.data_folder:
-            print(self.EXPERIMENTS_FOLDER / "data" / self.data_folder / "scripture")
             return list(
                 map(lambda s: s.name, (self.EXPERIMENTS_FOLDER / "data" / self.data_folder / "scripture").glob("*"))
             )
