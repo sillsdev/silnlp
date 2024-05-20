@@ -113,12 +113,12 @@ else:
                     check_required("set_up", root, func=(lambda p: p is not None and p != "" and "folders/" in p))
                 with st.spinner("This might take a few minutes..."):
                     from clowder.environment import ClowderEnvironment
-                    st.session_state.clowder_env = ClowderEnvironment(auth=st.session_state.google_auth, context=root.split("folders/")[1])
+                    st.session_state.clowder_env = ClowderEnvironment(auth=st.session_state.google_auth, context=root.split("folders/")[1].split('?')[0])
                     functions.ENV = st.session_state.clowder_env
                     if len(functions.list_inv()) == 0:
                         functions.track(None)
                     if is_external_user:
-                        functions.use_data(data_folder.split("folders/")[1])
+                        functions.use_data(data_folder.split("folders/")[1].split('?')[0])
                     else:
                         functions.unlink_data()
                     st.session_state.set_up = True
