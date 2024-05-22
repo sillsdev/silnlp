@@ -218,6 +218,8 @@ class Investigation:
                     remote_meta_content["experiments"][name] = {}
                     remote_meta_content["experiments"][name]["results_already_gathered"] = False
                 if self.experiments[name]["clearml_id"] != "unknown":
+                    if remote_meta_content["experiments"][name].get("clearml_id", None) != self.experiments[name]["clearml_id"]:
+                        task = Task.get_task(task_id=remote_meta_content["experiments"][name]["clearml_id"])
                     remote_meta_content["experiments"][name]["clearml_id"] = task.id
                     remote_meta_content["experiments"][name][
                         "clearml_task_url"
@@ -349,7 +351,7 @@ class Investigation:
                                     steps_element = name_elements[1][:-4]
                                     if steps_element.isdigit():
                                         num_steps = int(steps_element)
-                            df = self._process_scores_csv(df, num_steps)
+                            df.insert(len(df.columns), "num_steps", np.repeat(num_steps, len(df.index)))
                         df.insert(0, NAME_ATTRIBUTE, np.repeat(row[NAME_ATTRIBUTE], len(df.index)))
                         if name not in results:
                             results[name] = pd.DataFrame()
@@ -448,40 +450,6 @@ class Investigation:
                 task: Optional[Task] = Task.get_task(task_id=clearml_id)
                 tasks[experiment_name] = task
         return tasks
-
-    def _process_scores_csv(self, df: pd.DataFrame, num_steps: str) -> pd.DataFrame:
-        groups = df.groupby(["src_iso", "trg_iso"]).groups
-        dfs = []
-        for (src_iso, trg_iso), _ in groups.items():
-            out_df = df.loc[(df["src_iso"] == src_iso) & (df["trg_iso"] == trg_iso), :]
-            if src_iso == "ALL" and trg_iso == "ALL":
-                out_df = out_df[["score"]]
-                out_df = out_df.transpose()
-                out_df.columns = pd.Index(["BLEU"])
-                out_df["BLEU"] = out_df["BLEU"].apply(lambda x: str(x).split("/")[0])
-                out_df["BLEU"] = out_df["BLEU"].apply(pd.to_numeric)
-                out_df[["spBLEU", "CHRF3", "WER", "TER", "BLEU-details"]] = None
-                out_df["NumberOfSteps"] = num_steps
-                out_df = out_df[["BLEU", "spBLEU", "CHRF3", "WER", "TER", "NumberOfSteps", "BLEU-details"]]
-            else:
-                out_df = out_df[["score", "scorer"]]
-                column_names = out_df[["scorer"]].values.flatten()
-                out_df = out_df[["score"]]
-                out_df = out_df.transpose()
-                out_df.columns = pd.Index(column_names)
-                out_df["BLEU-details"] = out_df["BLEU"]
-                out_df["BLEU"] = out_df["BLEU"].apply(lambda x: str(x).split("/")[0])
-                out_df[["BLEU", "spBLEU", "CHRF3", "WER", "TER"]] = out_df[
-                    ["BLEU", "spBLEU", "CHRF3", "WER", "TER"]
-                ].apply(
-                    pd.to_numeric, axis=0
-                )  # TODO more robust (ignore for mvp)
-                out_df["NumberOfSteps"] = num_steps
-                out_df = out_df[["BLEU", "spBLEU", "CHRF3", "WER", "TER", "NumberOfSteps", "BLEU-details"]]
-            out_df.insert(0, "src_iso", src_iso)
-            out_df.insert(0, "trg_iso", trg_iso)
-            dfs.append(out_df)
-        return pd.concat(dfs, join="outer", ignore_index=True)
 
     def _min_and_max_per_col(self, df: pd.DataFrame):
         df = df.select_dtypes(include="number")
