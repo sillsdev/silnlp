@@ -24,29 +24,30 @@ class Status(Enum):
     def from_clowder_investigation(i: investigation.Investigation):
         with functions._lock:
             import clowder.investigation as inv
+
             inv.ENV = st.session_state.clowder_env
             functions.ENV = st.session_state.clowder_env
             experiments = list(i.experiments.items())
 
         drafting_exps = list(filter(lambda exp: "draft" in exp[0], experiments))
         if len(drafting_exps) > 0 and len(
-            list(filter(lambda exp: exp[1].get('status',None) == "completed", drafting_exps))
+            list(filter(lambda exp: exp[1].get("status", None) == "completed", drafting_exps))
         ) == len(drafting_exps):
             return Status.Drafted
         model_exps = list(filter(lambda exp: "NLLB" in exp[0] and "draft" not in exp[0], experiments))
-        if len(model_exps) > 0 and len(list(filter(lambda exp: exp[1].get('status',None) == "completed", model_exps))) == len(
-            model_exps
-        ):
+        if len(model_exps) > 0 and len(
+            list(filter(lambda exp: exp[1].get("status", None) == "completed", model_exps))
+        ) == len(model_exps):
             return Status.RanModels
         align_exps = list(filter(lambda exp: "align" in exp[0], experiments))
-        if len(align_exps) > 0 and len(list(filter(lambda exp: exp[1].get('status',None) == "completed", align_exps))) == len(
-            align_exps
-        ):
+        if len(align_exps) > 0 and len(
+            list(filter(lambda exp: exp[1].get("status", None) == "completed", align_exps))
+        ) == len(align_exps):
             return Status.Aligned
         stats_exp = list(filter(lambda exp: "stats" in exp[0], experiments))
-        if len(stats_exp) > 0 and len(list(filter(lambda exp: exp[1].get('status',None) == "completed", stats_exp))) == len(
-            stats_exp
-        ):
+        if len(stats_exp) > 0 and len(
+            list(filter(lambda exp: exp[1].get("status", None) == "completed", stats_exp))
+        ) == len(stats_exp):
             return Status.GatheredStats
         return Status.Created
 

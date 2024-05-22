@@ -5,6 +5,7 @@ import google_auth_oauthlib.flow
 import streamlit as st
 from googleapiclient.discovery import build
 from pydrive2.auth import GoogleAuth
+from streamlit_cookies_controller import CookieController
 
 parent_dir = os.path.dirname(os.path.realpath(__file__))
 parent_dir = os.path.dirname(parent_dir)
@@ -12,10 +13,11 @@ parent_dir = os.path.dirname(parent_dir)
 sys.path.append(parent_dir)
 from utils import check_error, check_required
 
-if not os.path.exists(os.environ.get('SIL_NLP_CACHE_EXPERIMENT_DIR', '~/.cache/silnlp')):
-    os.makedirs(os.environ.get('SIL_NLP_CACHE_EXPERIMENT_DIR', '~/.cache/silnlp'))
+if not os.path.exists(os.environ.get("SIL_NLP_CACHE_EXPERIMENT_DIR", "~/.cache/silnlp")):
+    os.makedirs(os.environ.get("SIL_NLP_CACHE_EXPERIMENT_DIR", "~/.cache/silnlp"))
 
 from clowder import consts
+
 consts.set_up_creds()
 
 st.set_page_config(page_title="OnboardingDashboard", initial_sidebar_state="collapsed")
@@ -31,9 +33,12 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+cookie_controller = CookieController()
+
 if not os.path.exists("client_secrets.json"):
     with open("client_secrets.json", "w") as f:
         f.write(os.environ.get("GOOGLE_CLIENT_SECRET", ""))
+
 
 def auth_flow():
     gauth = GoogleAuth()
@@ -52,7 +57,7 @@ def auth_flow():
         except Exception as e:
             st.error(f"Something went wrong while authenticating. Please try again. Error: {e}")
             st.query_params.clear()
-            st.page_link('pages/LogIn.py', label='Try again')
+            st.page_link("pages/LogIn.py", label="Try again")
             return
         user_info_service = build(
             serviceName="oauth2",
@@ -70,7 +75,6 @@ def auth_flow():
             include_granted_scopes="true",
         )
         st.page_link(page=authorization_url, label="Sign in with Google")
-
 
 if "google_auth" not in st.session_state:
     auth_flow()
@@ -97,14 +101,18 @@ else:
             root = st.text_input(
                 "Link to investigations root folder",
                 placeholder="https://drive.google.com/drive/u/0/folders/0000000000000000000",
+                value=cookie_controller.get("root"),
             )
             if is_external_user:
                 data_folder = st.text_input(
-                    "Link to data folder", placeholder="https://drive.google.com/drive/u/0/folders/0000000000000000000"
+                    "Link to data folder",
+                    placeholder="https://drive.google.com/drive/u/0/folders/0000000000000000000",
+                    value=cookie_controller.get("data_folder"),
                 )
             check_error("set_up")
             if st.form_submit_button("Set Up", type="primary"):
-                from clowder import functions 
+                from clowder import functions
+
                 if is_external_user:
                     check_required(
                         "set_up", root, data_folder, func=(lambda p: p is not None and p != "" and "folders/" in p)
@@ -113,14 +121,19 @@ else:
                     check_required("set_up", root, func=(lambda p: p is not None and p != "" and "folders/" in p))
                 with st.spinner("This might take a few minutes..."):
                     from clowder.environment import ClowderEnvironment
-                    st.session_state.clowder_env = ClowderEnvironment(auth=st.session_state.google_auth, context=root.split("folders/")[1].split('?')[0])
+
+                    st.session_state.clowder_env = ClowderEnvironment(
+                        auth=st.session_state.google_auth, context=root.split("folders/")[1].split("?")[0]
+                    )
                     functions.ENV = st.session_state.clowder_env
                     if len(functions.list_inv()) == 0:
                         functions.track(None)
                     if is_external_user:
-                        functions.use_data(data_folder.split("folders/")[1].split('?')[0])
+                        functions.use_data(data_folder.split("folders/")[1].split("?")[0])
                     else:
                         functions.unlink_data()
+                    cookie_controller.set("root", root)
+                    cookie_controller.set("data_folder", data_folder)
                     st.session_state.set_up = True
                     st.switch_page("Home.py")
 

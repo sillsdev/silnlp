@@ -54,6 +54,7 @@ def get_investigations() -> list:
         return list(map(lambda i: Investigation.from_clowder(i), functions.list_inv(env=st.session_state.clowder_env)))
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         st.error(f"Something went wrong while fetching investigation data. Please try again. Error: {e}")
         return []
@@ -65,6 +66,7 @@ def get_resources():
         return list(map(lambda fn: fn[:-4], functions.list_resources(env=st.session_state.clowder_env)))
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         st.error(f"Something went wrong while fetching resource data. Please try again. Error: {e}")
         return []
@@ -116,9 +118,18 @@ with resource_tab:
                     st.write(resource)
     with c2:
         with st.form(key=f"add_resource"):
-            resources = st.file_uploader("Resource", type="zip", accept_multiple_files=True, disabled='is_internal_user' not in st.session_state or st.session_state.is_internal_user)
+            resources = st.file_uploader(
+                "Resource",
+                type="zip",
+                accept_multiple_files=True,
+                disabled="is_internal_user" not in st.session_state or st.session_state.is_internal_user,
+            )
             check_error("add_resource")
-            if st.form_submit_button("Add", type="primary", disabled='is_internal_user' not in st.session_state or st.session_state.is_internal_user):
+            if st.form_submit_button(
+                "Add",
+                type="primary",
+                disabled="is_internal_user" not in st.session_state or st.session_state.is_internal_user,
+            ):
                 check_required("add_resource", resources)
                 with st.spinner("This might take a few minutes..."):
                     for resource in resources:
@@ -140,7 +151,7 @@ with resource_tab:
                 placeholder="https://drive.google.com/drive/u/0/folders/0000000000000000000",
                 value=f"https://drive.google.com/drive/u/0/folders/{functions.current_context(env=st.session_state.clowder_env)}",
             )
-            if 'is_internal_user' in st.session_state and not st.session_state.is_internal_user:
+            if "is_internal_user" in st.session_state and not st.session_state.is_internal_user:
                 data_folder = st.text_input(
                     "Link to data folder",
                     placeholder="https://drive.google.com/drive/u/0/folders/0000000000000000000",
@@ -154,7 +165,10 @@ with resource_tab:
                 with st.spinner("This might take a few minutes..."):
                     try:
                         from clowder.environment import ClowderEnvironment
-                        st.session_state.clowder_env = ClowderEnvironment(auth=st.session_state.google_auth, context=root.split("folders/")[1])
+
+                        st.session_state.clowder_env = ClowderEnvironment(
+                            auth=st.session_state.google_auth, context=root.split("folders/")[1]
+                        )
                         functions.track(None, env=st.session_state.clowder_env)
                         if data_folder is not None:
                             functions.use_data(data_folder.split("folders/")[1], env=st.session_state.clowder_env)

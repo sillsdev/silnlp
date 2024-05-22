@@ -38,6 +38,7 @@ def get_resources():
             return list(map(lambda fn: fn[:-4], functions.list_resources()))
         except Exception as e:
             import traceback
+
             traceback.print_exc()
             st.error(f"Something went wrong while fetching resource data. Please try again. Error: {e}")
 
@@ -54,6 +55,7 @@ def add_experiment(values: dict) -> None:
     try:
         with functions._lock:
             import clowder.investigation as inv
+
             inv.ENV = st.session_state.clowder_env
             functions.ENV = st.session_state.clowder_env
             sheet = functions.ENV.gc.open_by_key(
@@ -86,12 +88,16 @@ def get_results(results_name: str, investigation_name: str = None, keep_name: bo
     try:
         with functions._lock:
             import clowder.investigation as inv
+
             inv.ENV = st.session_state.clowder_env
             functions.ENV = st.session_state.clowder_env
             sheet = functions.ENV.gc.open_by_key(functions.ENV.get_investigation(investigation_name).sheet_id)
-            df: pd.DataFrame = gd.get_as_dataframe(list(filter(lambda w: w.title == results_name, sheet.worksheets()))[0])
+            df: pd.DataFrame = gd.get_as_dataframe(
+                list(filter(lambda w: w.title == results_name, sheet.worksheets()))[0]
+            )
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         st.error(f"Something went wrong while fetching results data. Please try again. Error: {e}")
         return pd.DataFrame()
@@ -111,13 +117,17 @@ def set_config():
     try:
         with functions._lock:
             import clowder.investigation as inv
+
             inv.ENV = st.session_state.clowder_env
             functions.ENV = st.session_state.clowder_env
             functions.ENV._write_gdrive_file_in_folder(
-                functions.ENV.get_investigation(st.session_state.current_investigation.name).id, "config.yml", config_data
+                functions.ENV.get_investigation(st.session_state.current_investigation.name).id,
+                "config.yml",
+                config_data,
             )
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         st.error(f"Something went wrong while setting up configuration. Please try again. Error: {e}")
 
@@ -146,13 +156,14 @@ def get_lang_tag_mapping(tag: str):
     raise ValueError("Language tag does not exist")
 
 
-def sync(rerun:bool=True, container=None):
+def sync(rerun: bool = True, container=None):
     try:
         functions.sync(st.session_state.current_investigation.name)
         if st.session_state.current_investigation in st.session_state.investigations:
             st.session_state.investigations.remove(st.session_state.current_investigation)
             with functions._lock:
                 import clowder.investigation as inv
+
                 inv.ENV = st.session_state.clowder_env
                 functions.ENV = st.session_state.clowder_env
                 st.session_state.current_investigation = Investigation.from_clowder(
@@ -163,10 +174,11 @@ def sync(rerun:bool=True, container=None):
                 st.rerun()
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         if container is not None:
             container.error(f"Something went wrong while syncing. Please try again. Error: {e}")
-        else:    
+        else:
             st.error(f"Something went wrong while syncing. Please try again. Error: {e}")
 
 
@@ -175,6 +187,7 @@ def get_drafts(investigation_name: str):
     try:
         with functions._lock:
             import clowder.investigation as inv
+
             inv.ENV = st.session_state.clowder_env
             functions.ENV = st.session_state.clowder_env
             investigation = functions.ENV.get_investigation(investigation_name)
@@ -187,16 +200,21 @@ def get_drafts(investigation_name: str):
         return drafts
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         st.error(f"Something went wrong while fetching drafts. Please try again. Error: {e}")
 
 
 # TODO DESCRIPTIVE TEXT
 if "current_investigation" in st.session_state:
-    if 'synced_dict' not in st.session_state or st.session_state.current_investigation.name not in st.session_state.synced_dict or not st.session_state.synced_dict[st.session_state.current_investigation.name]:
+    if (
+        "synced_dict" not in st.session_state
+        or st.session_state.current_investigation.name not in st.session_state.synced_dict
+        or not st.session_state.synced_dict[st.session_state.current_investigation.name]
+    ):
         with st.spinner(f"Fetching up-to-date data on {st.session_state.current_investigation.name}..."):
             sync(rerun=False)
-        if 'synced_dict' not in st.session_state:
+        if "synced_dict" not in st.session_state:
             st.session_state.synced_dict = {}
         st.session_state.synced_dict[st.session_state.current_investigation.name] = True
     if st.session_state.current_investigation.status == Status.Created:
@@ -239,6 +257,7 @@ if "current_investigation" in st.session_state:
                             )
                         except Exception as e:
                             import traceback
+
                             traceback.print_exc()
                             st.error(
                                 f"Something went wrong while attempting to run experiment. Please try again. Error: {e}"
@@ -260,19 +279,21 @@ if "current_investigation" in st.session_state:
                         )
                     else:
                         st.write("**No results found**")
-                    results_tokenization = get_results("tokenization_stats.csv", st.session_state.current_investigation.name, keep_name=True)
+                    results_tokenization = get_results(
+                        "tokenization_stats.csv", st.session_state.current_investigation.name, keep_name=True
+                    )
                     st.dataframe(results_tokenization)
                 with st.form(key=f"{st.session_state.current_investigation.id}-run-alignments"):
                     training_sources = st.multiselect(
                         "Training sources",
                         resources,
                         default=list(results_stats["file"].apply(lambda f: f[:-4]))
-                        if results_stats is not None and 'file' in results_stats.columns
+                        if results_stats is not None and "file" in results_stats.columns
                         else None,
                     )
                     training_target = st.selectbox("Training target", resources, index=None)
                     default_books = None
-                    if results_stats is not None and 'file' in results_stats.columns:
+                    if results_stats is not None and "file" in results_stats.columns:
                         texts_series = pd.DataFrame(
                             list(set(training_sources) | set([training_target])), columns=["file"]
                         )
@@ -293,6 +314,7 @@ if "current_investigation" in st.session_state:
                     books = st.multiselect("Books to align on (Optional)", BOOKS_ABBREVS, default=default_books)
                     with functions._lock:
                         import clowder.investigation as inv
+
                         inv.ENV = st.session_state.clowder_env
                         functions.ENV = st.session_state.clowder_env
                         alignments_already_running = (
@@ -321,6 +343,7 @@ if "current_investigation" in st.session_state:
                                     functions.cancel(st.session_state.current_investigation.name)
                                 except Exception as e:
                                     import traceback
+
                                     traceback.print_exc()
                                     st.error(
                                         f"Something went wrong while attempting to cancel experiment. Please try again. Error: {e}"
@@ -341,6 +364,7 @@ if "current_investigation" in st.session_state:
                                 )
                             except Exception as e:
                                 import traceback
+
                                 traceback.print_exc()
                                 st.error(
                                     f"Something went wrong while attempting to run experiment. Please try again. Error: {e}"
@@ -351,7 +375,9 @@ if "current_investigation" in st.session_state:
                 "**Run Models**", st.session_state.current_investigation.status in [Status.Aligned, Status.RanModels]
             ):
                 if st.session_state.current_investigation.status.value >= Status.RanModels.value:
-                    results_models = get_results("scores-best", st.session_state.current_investigation.name, keep_name=True)
+                    results_models = get_results(
+                        "scores-best", st.session_state.current_investigation.name, keep_name=True
+                    )
                     if len(results_models) > 0:
                         st.dataframe(
                             results_models.style.highlight_max(
@@ -496,6 +522,7 @@ if "current_investigation" in st.session_state:
                     st.rerun()
                 with functions._lock:
                     import clowder.investigation as inv
+
                     inv.ENV = st.session_state.clowder_env
                     functions.ENV = st.session_state.clowder_env
                     models_already_running = (
@@ -526,6 +553,7 @@ if "current_investigation" in st.session_state:
                                 functions.cancel(st.session_state.current_investigation.name)
                             except Exception as e:
                                 import traceback
+
                                 traceback.print_exc()
                                 st.error(
                                     f"Something went wrong while attempting to cancel experiment. Please try again. Error: {e}"
@@ -555,6 +583,7 @@ if "current_investigation" in st.session_state:
                             functions.run(st.session_state.current_investigation.name, experiments=exps)
                         except Exception as e:
                             import traceback
+
                             traceback.print_exc()
                             st.error(
                                 f"Something went wrong while attempting to run experiment. Please try again. Error: {e}"
@@ -604,6 +633,7 @@ if "current_investigation" in st.session_state:
                                 sleep(4)
                             except Exception as e:
                                 import traceback
+
                                 traceback.print_exc()
                                 st.error(
                                     f"Something went wrong while attempting to run experiment. Please try again. Error: {e}"
