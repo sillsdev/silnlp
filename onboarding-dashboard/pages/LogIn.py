@@ -98,16 +98,26 @@ else:
     if is_allowed_user:
         st.header("Set Up")
         with st.form(key="set_up_form") as f:
+            current_root = None
+            try:
+                current_root = cookie_controller.get("root")
+            except:
+                pass
+            current_data_folder = None
+            try:
+                current_data_folder = cookie_controller.get("data_folder")
+            except:
+                pass
             root = st.text_input(
                 "Link to investigations root folder",
                 placeholder="https://drive.google.com/drive/u/0/folders/0000000000000000000",
-                value=cookie_controller.get("root"),
+                value=current_root,
             )
             if is_external_user:
                 data_folder = st.text_input(
                     "Link to data folder",
                     placeholder="https://drive.google.com/drive/u/0/folders/0000000000000000000",
-                    value=cookie_controller.get("data_folder"),
+                    value=current_data_folder,
                 )
             check_error("set_up")
             if st.form_submit_button("Set Up", type="primary"):
