@@ -146,7 +146,7 @@ def get_lang_tag_mapping(tag: str):
     raise ValueError("Language tag does not exist")
 
 
-def sync(rerun:bool=True):
+def sync(rerun:bool=True, container=None):
     try:
         functions.sync(st.session_state.current_investigation.name)
         if st.session_state.current_investigation in st.session_state.investigations:
@@ -164,7 +164,10 @@ def sync(rerun:bool=True):
     except Exception as e:
         import traceback
         traceback.print_exc()
-        st.error(f"Something went wrong while syncing. Please try again. Error: {e}")
+        if container is not None:
+            container.error(f"Something went wrong while syncing. Please try again. Error: {e}")
+        else:    
+            st.error(f"Something went wrong while syncing. Please try again. Error: {e}")
 
 
 @st.cache_data(show_spinner=False)
@@ -607,9 +610,10 @@ if "current_investigation" in st.session_state:
                                 )
                             sync()
         c1, c2, _ = st.columns([1, 1, 15])
+        error_container = st.container()
         with c1:
             if st.button("⟳"):
-                sync()
+                sync(container=error_container)
         with c2:
             if st.button("🗑️", type="primary", key=f"{st.session_state.current_investigation.id}_delete_button"):
                 st.session_state.investigation_to_delete = st.session_state.current_investigation
