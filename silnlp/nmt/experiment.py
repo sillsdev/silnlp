@@ -1,8 +1,8 @@
 import argparse
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Set
 import yaml
 
 from ..common.environment import SIL_NLP_ENV
@@ -10,7 +10,7 @@ from ..common.tf_utils import enable_memory_growth
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import SILClearML
 from .config import Config, get_mt_exp_dir
-from .test import test
+from .test import test, _SUPPORTED_SCORERS
 from .translate import TranslationTask
 
 
@@ -27,6 +27,7 @@ class SILExperiment:
     run_train: bool = False
     run_test: bool = False
     run_translate: bool = False
+    scorers: Set[str] = field(default_factory=set)
     score_by_book: bool = False
     commit: Optional[str] = None
 
@@ -55,6 +56,7 @@ class SILExperiment:
         config_file = Path(exp_dir, "config.yml")
         if not config_file.exists():
             raise RuntimeError(f"ERROR: Config file does not exist in experiment folder {exp_dir}.")
+        SIL_NLP_ENV.copy_experiment_from_bucket(self.name)
         self.config.preprocess(self.make_stats, self.force_align)
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
 
@@ -78,7 +80,7 @@ class SILExperiment:
             last=self.config.model_dir.exists(),
             best=self.config.model_dir.exists(),
             by_book=self.score_by_book,
-            scorers={"bleu", "sentencebleu", "chrf3", "wer", "ter", "spbleu"},
+            scorers=self.scorers,
         )
         SIL_NLP_ENV.copy_experiment_to_bucket(
             self.name, patterns=("scores-*.csv", "test.*trg-predictions.*"), overwrite=True
@@ -157,6 +159,14 @@ def main() -> None:
     parser.add_argument(
         "--commit", type=str, default=None, help="The silnlp git commit id with which to run a remote job"
     )
+    parser.add_argument(
+        "--scorers",
+        nargs="*",
+        metavar="scorer",
+        choices=_SUPPORTED_SCORERS,
+        default=["bleu", "sentencebleu", "chrf3", "chrf3+", "chrf3++", "spbleu"],
+        help=f"List of scorers - {_SUPPORTED_SCORERS}",
+    )
 
     args = parser.parse_args()
 
@@ -187,6 +197,7 @@ def main() -> None:
         run_train=args.train,
         run_test=args.test,
         run_translate=args.translate,
+        scorers=set(s.lower() for s in args.scorers),
         score_by_book=args.score_by_book,
         commit=args.commit,
     )

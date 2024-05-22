@@ -45,12 +45,14 @@ PREDICTION = "Prediction"
 BLEU_SCORE = "BLEU"
 SPBLEU_SCORE = "spBLEU"
 CHRF3_SCORE = "chrF3"
+CHRF3P_SCORE = "chrF3+"
+CHRF3PP_SCORE = "chrF3++"
 WER_SCORE = "WER"
 TER_SCORE = "TER"
 DICT_SRC = "Source"
 DICT_TRG = "Target"
 
-_SUPPORTED_SCORERS = {BLEU_SCORE, SPBLEU_SCORE, CHRF3_SCORE, WER_SCORE, TER_SCORE}
+_SUPPORTED_SCORERS = {BLEU_SCORE, SPBLEU_SCORE, CHRF3_SCORE, CHRF3P_SCORE, CHRF3PP_SCORE, WER_SCORE, TER_SCORE}
 
 
 def sentence_bleu(
@@ -163,7 +165,7 @@ def add_stats(df: pd.DataFrame, sheet):
     sheet.write_string("A4", "STD")
     column_list = ["B", "C", "D", "E", "F"]
     column_idx = 0
-    for column_name in [BLEU_SCORE, SPBLEU_SCORE, CHRF3_SCORE, WER_SCORE, TER_SCORE]:
+    for column_name in [BLEU_SCORE, SPBLEU_SCORE, CHRF3_SCORE, CHRF3P_SCORE, CHRF3PP_SCORE, WER_SCORE, TER_SCORE]:
         if column_name in df:
             column_id = column_list[column_idx]
             sheet.write_string(f"{column_id}1", f"{column_name}")
@@ -436,6 +438,20 @@ def add_scores(df: pd.DataFrame, scorers: List[str], preserve_case: bool, tokeni
                 )
                 scores.append(chrf3_score.score)
             df[CHRF3_SCORE] = scores
+        elif scorer == CHRF3P_SCORE.lower():
+            for index, row in tqdm(df.iterrows(), desc="Calculating chrF3+ scores ..."):
+                chrf3p_score = sacrebleu.corpus_chrf(
+                    [row[PREDICTION]], [[row[TRG_SENTENCE]]], char_order=6, beta=3, word_order=1, remove_whitespace=True, eps_smoothing=True
+                )
+                scores.append(chrf3p_score.score)
+            df[CHRF3P_SCORE] = scores
+        elif scorer == CHRF3PP_SCORE.lower():
+            for index, row in tqdm(df.iterrows(), desc="Calculating chrF3++ scores ..."):
+                chrf3pp_score = sacrebleu.corpus_chrf(
+                    [row[PREDICTION]], [[row[TRG_SENTENCE]]], char_order=6, beta=3, word_order=2, remove_whitespace=True, eps_smoothing=True
+                )
+                scores.append(chrf3pp_score.score)
+            df[CHRF3PP_SCORE] = scores
         elif scorer == WER_SCORE.lower():
             for index, row in tqdm(df.iterrows(), desc="Calculating WER scores ..."):
                 wer_score = compute_wer_score([row[PREDICTION]], [[row[TRG_SENTENCE]]])
