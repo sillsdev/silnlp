@@ -87,16 +87,10 @@ class TranslationTask:
             trg_iso = config.default_test_trg_iso
 
         output_dir = config.exp_dir / "infer" / step_str / src_project
-        if not config.model_dir.exists():
-            output_dir = config.exp_dir / "infer" / "base" / src_project
         output_dir.mkdir(exist_ok=True, parents=True)
         if trg_project is not None:
             output_dir_trg_project = output_dir / trg_project
             output_dir_trg_project.mkdir(exist_ok=True)
-
-        experiment_ckpt_str = f"{self.name}:{self.checkpoint}"
-        if not config.model_dir.exists():
-            experiment_ckpt_str = f"{self.name}:base"
 
         for book_num, chapters in book_nums.items():
             book = book_number_to_id(book_num)
@@ -115,7 +109,7 @@ class TranslationTask:
                         trg_project,
                         include_inline_elements,
                         stylesheet_field_update,
-                        experiment_ckpt_str,
+                        f"{self.name}:{self.checkpoint}",
                     )
                 else:
                     output_path = output_dir / f"{book_file_name_digits(book_num)}{book}.SFM"
@@ -127,7 +121,7 @@ class TranslationTask:
                         chapters,
                         include_inline_elements=include_inline_elements,
                         stylesheet_field_update=stylesheet_field_update,
-                        experiment_ckpt_str=experiment_ckpt_str,
+                        experiment_ckpt_str=f"{self.name}:{self.checkpoint}",
                     )
             except Exception as e:
                 LOGGER.exception(f"Was not able to translate {book}.")
@@ -198,8 +192,6 @@ class TranslationTask:
 
         else:
             trg_path = config.exp_dir / "infer" / step_str
-            if not config.model_dir.exists():
-                trg_path = config.exp_dir / "infer" / "base"
             trg_path.mkdir(exist_ok=True, parents=True)
 
         if src_path.is_file():
@@ -228,16 +220,13 @@ class TranslationTask:
             elif ext == ".docx":
                 translator.translate_docx(src_file_path, trg_file_path, src_iso, trg_iso)
             elif ext == ".usfm" or ext == ".sfm":
-                experiment_ckpt_str = f"{self.name}:{self.checkpoint}"
-                if not config.model_dir.exists():
-                    experiment_ckpt_str = f"{self.name}:base"
                 translator.translate_usfm(
                     src_file_path,
                     trg_file_path,
                     src_iso,
                     trg_iso,
                     include_inline_elements=include_inline_elements,
-                    experiment_ckpt_str=experiment_ckpt_str,
+                    experiment_ckpt_str=f"{self.name}:{self.checkpoint}",
                 )
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM"), overwrite=True)
 
@@ -247,7 +236,7 @@ class TranslationTask:
             self.clearml_queue,
             project_suffix="_infer",
             experiment_suffix=experiment_suffix,
-            commit=self.commit,
+            commit=self.commit
         )
         self.name = clearml.name
 
@@ -328,9 +317,7 @@ def main() -> None:
         action="store_true",
         help="Show information about the environment variables and arguments.",
     )
-    parser.add_argument(
-        "--commit", type=str, default=None, help="The silnlp git commit id with which to run a remote job"
-    )
+    parser.add_argument('--commit',type=str, default=None,help="The silnlp git commit id with which to run a remote job")
 
     args = parser.parse_args()
 
@@ -343,7 +330,10 @@ def main() -> None:
         enable_memory_growth()
 
     translator = TranslationTask(
-        name=args.experiment, checkpoint=args.checkpoint, clearml_queue=args.clearml_queue, commit=args.commit
+        name=args.experiment,
+        checkpoint=args.checkpoint,
+        clearml_queue=args.clearml_queue,
+        commit=args.commit
     )
 
     if len(args.books) > 0:

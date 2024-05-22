@@ -14,7 +14,7 @@
 		"-v",
 		"${env:HOME}/.aws:/root/.aws", // Mount user's AWS credentials into the container
 		"-v",
-		"${env:HOME}/clearml/.clearml/hf-cache:/root/.cache/huggingface"
+		"/home/clearml/.clearml/hf-cache:/root/.cache/huggingface"
 	],
 	"containerEnv": {
 		"AWS_REGION": "${localEnv:AWS_REGION}",
@@ -44,10 +44,7 @@
 				},
 				"editor.formatOnSave": true,
 				"editor.formatOnType": true,
-				"isort.args": [
-					"--profile",
-					"black"
-				]
+				"isort.args":["--profile", "black"]
 			},
 			// Add the IDs of extensions you want installed when the container is created.
 			"extensions": [

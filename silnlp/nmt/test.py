@@ -22,7 +22,7 @@ LOGGER = logging.getLogger(__package__ + ".test")
 
 logging.getLogger("sacrebleu").setLevel(logging.ERROR)
 
-_SUPPORTED_SCORERS = ["bleu", "sentencebleu", "chrf3", "chrf3+", "chrf3++", "spbleu", "meteor", "wer", "ter"]
+_SUPPORTED_SCORERS = {"bleu", "sentencebleu", "chrf3", "meteor", "wer", "ter", "spbleu"}
 
 
 class PairScore:
@@ -46,30 +46,19 @@ class PairScore:
         self.book = book
 
     def writeHeader(self, file: IO) -> None:
-        header = (
-            "book,src_iso,trg_iso,num_refs,references,sent_len"
-            + (
-                ",BLEU,BLEU_1gram_prec,BLEU_2gram_prec,BLEU_3gram_prec,BLEU_4gram_prec,BLEU_brevity_penalty,BLEU_total_sys_len,BLEU_total_ref_len"
-                if self.bleu is not None
-                else ""
-            )
-            + ("," if len(self.other_scores) > 0 else "")
-            + ",".join(self.other_scores.keys())
-            + "\n"
-        )
-        file.write(header)
+        file.write("book,src_iso,trg_iso,num_refs,references,sent_len,scorer,score\n")
 
     def write(self, file: IO) -> None:
-        file.write(f"{self.book},{self.src_iso},{self.trg_iso}," f"{self.num_refs},{self.refs},{self.sent_len:d}")
         if self.bleu is not None:
+            file.write(f"{self.book},{self.src_iso},{self.trg_iso},{self.num_refs},{self.refs},{self.sent_len:d},")
             file.write(
-                f",{self.bleu.score:.2f},{self.bleu.precisions[0]:.2f},{self.bleu.precisions[1]:.2f}"
-                f",{self.bleu.precisions[2]:.2f},{self.bleu.precisions[3]:.2f},{self.bleu.bp:.3f}"
-                f",{self.bleu.sys_len:d},{self.bleu.ref_len:d}"
+                f"BLEU,{self.bleu.score:.2f}/{self.bleu.precisions[0]:.2f}/{self.bleu.precisions[1]:.2f}/"
+                f"{self.bleu.precisions[2]:.2f}/{self.bleu.precisions[3]:.2f}/{self.bleu.bp:.3f}/"
+                f"{self.bleu.sys_len:d}/{self.bleu.ref_len:d}\n"
             )
-        for val in self.other_scores.values():
-            file.write(f",{val:.2f}")
-        file.write("\n")
+        for key, val in self.other_scores.items():
+            file.write(f"{self.book},{self.src_iso},{self.trg_iso},{self.num_refs},{self.refs},{self.sent_len:d},")
+            file.write(f"{key},{val:.2f}\n")
 
 
 def score_pair(
@@ -104,28 +93,7 @@ def score_pair(
     other_scores: Dict[str, float] = {}
     if "chrf3" in scorers:
         chrf3_score = sacrebleu.corpus_chrf(pair_sys, pair_refs, char_order=6, beta=3, remove_whitespace=True)
-        other_scores["chrF3"] = chrf3_score.score
-
-    if "chrf3+" in scorers:
-        chrfp_score = sacrebleu.corpus_chrf(
-            pair_sys, pair_refs, char_order=6, beta=3, word_order=1, remove_whitespace=True, eps_smoothing=True
-        )
-        other_scores["chrF3+"] = chrfp_score.score
-
-    if "chrf3++" in scorers:
-        chrfpp_score = sacrebleu.corpus_chrf(
-            pair_sys, pair_refs, char_order=6, beta=3, word_order=2, remove_whitespace=True, eps_smoothing=True
-        )
-        other_scores["chrF3++"] = chrfpp_score.score
-
-    if "spbleu" in scorers:
-        spbleu_score = sacrebleu.corpus_bleu(
-            pair_sys,
-            pair_refs,
-            lowercase=True,
-            tokenize="flores200",
-        )
-        other_scores["spBLEU"] = spbleu_score.score
+        other_scores["CHRF3"] = chrf3_score.score
 
     if "meteor" in scorers:
         meteor_score = compute_meteor_score(trg_iso, pair_sys, pair_refs)
@@ -142,6 +110,14 @@ def score_pair(
         if ter_score.score >= 0:
             other_scores["TER"] = ter_score.score
 
+    if "spbleu" in scorers:
+        spbleu_score = sacrebleu.corpus_bleu(
+            pair_sys,
+            pair_refs,
+            lowercase=True,
+            tokenize="flores200",
+        )
+        other_scores["spBLEU"] = spbleu_score.score
     return PairScore(book, src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores)
 
 
@@ -507,7 +483,7 @@ def test(
 
     if len(scorers) == 0:
         scorers.add("bleu")
-    scorers.intersection_update(set(_SUPPORTED_SCORERS))
+    scorers.intersection_update(_SUPPORTED_SCORERS)
 
     tokenizer = config.create_tokenizer()
     model = config.create_model()
@@ -581,6 +557,7 @@ def test(
             )
 
     if not config.model_dir.exists():
+        LOGGER.info("Model has no checkpoints. Testing with base model.")
         results[0] = test_checkpoint(
             config,
             model,
@@ -610,19 +587,6 @@ def test(
             checkpoint_name = f"checkpoint {step}"
         books_str = "ALL" if len(books_nums) == 0 else ", ".join(sorted(str(num) for num in books_nums.keys()))
         LOGGER.info(f"Test results for {checkpoint_name} ({num_refs} reference(s), books: {books_str})")
-        header = "book,src_iso,trg_iso,num_refs,references,sent_len"
-        if len(results[step]) > 0:
-            pair_score = results[step][0]
-            header += (
-                (
-                    ",BLEU,BLEU_1gram_prec,BLEU_2gram_prec,BLEU_3gram_prec,BLEU_4gram_prec,BLEU_brevity_penalty,BLEU_total_sys_len,BLEU_total_ref_len"
-                    if pair_score.bleu is not None
-                    else ""
-                )
-                + ("," if len(pair_score.other_scores) > 0 else "")
-                + ",".join(pair_score.other_scores.keys())
-            )
-        LOGGER.info(header)
         for score in results[step]:
             output = StringIO()
             score.write(output)

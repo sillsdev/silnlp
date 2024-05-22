@@ -220,7 +220,7 @@ def main() -> None:
 
         df.to_csv(format_path(output_folder / f"{filename[:-4]}_detailed_percentages.csv"))
 
-    verse_count_df.insert(loc=0, column="Books", value=verse_count_df.apply(lambda row: sum([(1 if ele > 0 else 0) for ele in row]), axis=1))
+    verse_count_df.insert(loc=0, column="Books", value=verse_count_df.astype(bool).sum(axis=1))
     verse_count_df.insert(loc=1, column="Total", value=verse_count_df[OT_canon + NT_canon + DT_canon].sum(axis=1))
     verse_count_df.insert(loc=2, column="OT", value=verse_count_df[OT_canon].sum(axis=1))
     verse_count_df.insert(loc=3, column="NT", value=verse_count_df[NT_canon].sum(axis=1))

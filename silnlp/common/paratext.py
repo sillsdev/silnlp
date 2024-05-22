@@ -449,7 +449,7 @@ def get_last_verse(project_dir: str, book: str, chapter: int) -> int:
     last_verse = "0"
     book_path = get_book_path(project_dir, book)
     try:
-        with book_path.open("r", encoding="utf-8", newline="\n", errors="ignore") as book_file:
+        with book_path.open("r", encoding="utf-8", newline="\n") as book_file:
             in_chapter = False
             for line in book_file:
                 chapter_marker = re.search(r"\\c ? ?([0-9]+).*", line)

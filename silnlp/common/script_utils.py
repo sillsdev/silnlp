@@ -1860,9 +1860,6 @@ def script(char):
 
 
 def get_script(text: str) -> str:
-    if len(text) == 0:
-        return "None"
-
     counts = Counter([script(char) for char in text])
     return counts.most_common()[0][0]
 

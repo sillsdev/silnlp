@@ -2848,13 +2848,13 @@ files = [
 
 [[package]]
 name = "peft"
-version = "0.8.0"
+version = "0.7.0"
 description = "Parameter-Efficient Fine-Tuning (PEFT)"
 optional = false
 python-versions = ">=3.8.0"
 files = [
-    {file = "peft-0.8.0-py3-none-any.whl", hash = "sha256:c4f7d7dd2a6e1b11a1cb06b501c32ba254dfe96ccb4cdd30182ee8ce9b374725"},
-    {file = "peft-0.8.0.tar.gz", hash = "sha256:138ad8bbea64bc95ede981c48b7283498a81e43dfc55e9cc0b51fabd9586538e"},
+    {file = "peft-0.7.0-py3-none-any.whl", hash = "sha256:1b0b42e9fb73a1a2cb731c6be6a14cb94a10c565288f745fc6670003c73ec545"},
+    {file = "peft-0.7.0.tar.gz", hash = "sha256:3e7a256f974022f727081dfe12a12b553b907756e65ce04905152364e1a4c95d"},
 ]
 
 [package.dependencies]
@@ -5441,4 +5441,4 @@ eflomal = ["eflomal"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.8,<3.9"
-content-hash = "d025534ab4e001a0a57c8dda155c4a8ddecd1d48da0973d0865821b22584ca48"
+content-hash = "8e3bb5cba49477da74ae923192dbfd5d615548f985d7d7d2277a0c297974a9b3"
