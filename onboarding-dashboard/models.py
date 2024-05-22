@@ -30,21 +30,21 @@ class Status(Enum):
 
         drafting_exps = list(filter(lambda exp: "draft" in exp[0], experiments))
         if len(drafting_exps) > 0 and len(
-            list(filter(lambda exp: exp[1]["status"] == "completed", drafting_exps))
+            list(filter(lambda exp: exp[1].get('status',None) == "completed", drafting_exps))
         ) == len(drafting_exps):
             return Status.Drafted
         model_exps = list(filter(lambda exp: "NLLB" in exp[0] and "draft" not in exp[0], experiments))
-        if len(model_exps) > 0 and len(list(filter(lambda exp: exp[1]["status"] == "completed", model_exps))) == len(
+        if len(model_exps) > 0 and len(list(filter(lambda exp: exp[1].get('status',None) == "completed", model_exps))) == len(
             model_exps
         ):
             return Status.RanModels
         align_exps = list(filter(lambda exp: "align" in exp[0], experiments))
-        if len(align_exps) > 0 and len(list(filter(lambda exp: exp[1]["status"] == "completed", align_exps))) == len(
+        if len(align_exps) > 0 and len(list(filter(lambda exp: exp[1].get('status',None) == "completed", align_exps))) == len(
             align_exps
         ):
             return Status.Aligned
         stats_exp = list(filter(lambda exp: "stats" in exp[0], experiments))
-        if len(stats_exp) > 0 and len(list(filter(lambda exp: exp[1]["status"] == "completed", stats_exp))) == len(
+        if len(stats_exp) > 0 and len(list(filter(lambda exp: exp[1].get('status',None) == "completed", stats_exp))) == len(
             stats_exp
         ):
             return Status.GatheredStats
