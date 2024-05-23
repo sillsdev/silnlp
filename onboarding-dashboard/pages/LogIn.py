@@ -142,8 +142,11 @@ else:
                         functions.use_data(data_folder.split("folders/")[1].split("?")[0])
                     else:
                         functions.unlink_data()
-                    cookie_controller.set("root", root)
-                    cookie_controller.set("data_folder", data_folder)
+                    try:
+                        cookie_controller.set("root", root)
+                        cookie_controller.set("data_folder", data_folder)
+                    except:
+                        pass
                     st.session_state.set_up = True
                     st.switch_page("Home.py")
 
