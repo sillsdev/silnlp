@@ -92,19 +92,28 @@ See [ClearML setup](clear_ml_setup.md).
 
 ### Setting Up and Running Experiments
 
-See the [wiki](https://github.com/sillsdev/silnlp/wiki) for information on setting up and running experiments. The most important pages for getting started are the ones on [file structure](https://github.com/sillsdev/silnlp/wiki/Folder-structure-and-file-naming-conventions), [model configuration](https://github.com/sillsdev/silnlp/wiki/Configure-a-model), and [running experiments](https://github.com/sillsdev/silnlp/wiki/NMT:-Usage). A lot of the instructions are specific to NMT, but are still helpful starting points for doing other things like [alignment](https://github.com/sillsdev/silnlp/wiki/Alignment:-Usage).
+See the [wiki](../../wiki) for information on setting up and running experiments. The most important pages for getting started are the ones on [file structure](../../wiki/Folder-structure-and-file-naming-conventions), [model configuration](../../wiki/Configure-a-model), and [running experiments](../../wiki/NMT:-Usage). A lot of the instructions are specific to NMT, but are still helpful starting points for doing other things like [alignment](../../wiki/Alignment:-Usage).
 
-See [this](https://github.com/sillsdev/silnlp/wiki/Using-the-Python-Debugger) page for information on using the VS code debugger.
+See [this](../../wiki/Using-the-Python-Debugger) page for information on using the VS code debugger.
 
-If you need to use a tool that is supported by SILNLP but is not installable as a Python library (which is probably the case if you get an error like "RuntimeError: eflomal is not installed."), follow the appropriate instructions [here](https://github.com/sillsdev/silnlp/wiki/Installing-External-Libraries).
+If you need to use a tool that is supported by SILNLP but is not installable as a Python library (which is probably the case if you get an error like "RuntimeError: eflomal is not installed."), follow the appropriate instructions [here](../../wiki/Installing-External-Libraries).
 
 ## Setting environment variables permanently
-Windows users: see [here](https://github.com/sillsdev/silnlp/wiki/Install-silnlp-on-Windows-10#permanently-set-environment-variables) for instructions on setting environment variables permanently
 
-Linux users: To set environment variables permanently, add each variable as a new line to the `.bashrc` file in your home directory with the format 
+Linux: To set environment variables permanently, add each variable as a new line to the `.bashrc` file in your home directory with the format 
    ```
    export VAR="VAL"
    ```
+   Close and reopen any open terminals for the changes to take effect.
+
+Windows:
+1. Open Settings and go to the System tab.
+2. Under the "Device Specifications" section, in the "Related links", click "Advanced system settings".
+3. Click "Environment Variables".
+4. In the "System Variables" section, click "New".
+5. Enter the name and value of the variable and click "Ok". Repeat for as many variables as you need.
+6. Click "Ok" on the Environment Variables page to save your changes.
+7. Close and reopen any open command prompt terminals for the changes to take effect.
 
 ## .NET Machine alignment models
 
