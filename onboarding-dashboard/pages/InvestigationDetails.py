@@ -148,7 +148,7 @@ def get_lang_tag_mapping(tag: str):
     for obj in data:
         if "iso639_3" not in obj:
             continue
-        if obj["tag"].split("-")[0] == tag:
+        if obj["tag"].split("-")[0] == tag or ('tags' in obj and tag in list(map(lambda t: t.split("-")[0], obj["tags"]))):
             script = obj["script"]
             if script == "Kore":
                 script = "Hang"  # Follow Serval behavior
