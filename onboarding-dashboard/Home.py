@@ -19,6 +19,7 @@ if "set_up" not in st.session_state or st.session_state.set_up == False:
 
 import os
 import sys
+import subprocess
 
 from models import Investigation
 
@@ -28,7 +29,7 @@ from utils import check_error, check_required
 
 from clowder import functions
 from clowder.environment import DuplicateInvestigationException
-
+from silnlp.common.environment import SIL_NLP_ENV
 
 def copy_resource_to_gdrive(r: BytesIO):
     if not zipfile.is_zipfile(r):
@@ -42,12 +43,23 @@ def copy_resource_to_gdrive(r: BytesIO):
                 if "Notes" in file.filename:
                     continue
                 subid = id
+                print(f"Copying {file.filename} to gdrive...")
                 if "/" in file.filename:
                     path_parts = file.filename.split("/")
                     for part in path_parts:
                         subid = functions.ENV._create_gdrive_folder(part, subid)
                 functions.ENV._write_gdrive_file_in_folder(subid, file.filename.split("/")[-1], f.read(file).decode())
 
+def copy_resource_to_s3(r: BytesIO):
+    if not zipfile.is_zipfile(r):
+        return
+    with zipfile.ZipFile(r) as f:
+        for file in f.filelist:
+            if "Notes" in file.filename:
+                continue
+            print(f"Copying {file.filename} to s3...")
+            path = SIL_NLP_ENV.pt_projects_dir / file.filename
+            path.write_text(f.read(file).decode())
 
 def get_investigations() -> list:
     try:
@@ -122,26 +134,42 @@ with resource_tab:
                 "Resource",
                 type="zip",
                 accept_multiple_files=True,
-                disabled="is_internal_user" not in st.session_state or st.session_state.is_internal_user,
             )
             check_error("add_resource")
             if st.form_submit_button(
                 "Add",
                 type="primary",
-                disabled="is_internal_user" not in st.session_state or st.session_state.is_internal_user,
             ):
                 check_required("add_resource", resources)
                 with st.spinner("This might take a few minutes..."):
-                    for resource in resources:
-                        with zipfile.ZipFile(resource) as f:
-                            print("Copying", f.filename)
-                            copy_resource_to_gdrive(resource)
-                    try:
-                        functions.use_data(functions.current_data(env=st.session_state.clowder_env))
-                        st.cache_data.clear()
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Something went wrong while adding resource data. Please try again. Error: {e}")
+                    if st.session_state.is_internal_user:
+                        for resource in resources:
+                            with zipfile.ZipFile(resource) as f:
+                                copy_resource_to_s3(resource)
+                                project = f.filename[:-4]
+                                command = f'{os.environ.get("PYTHON", "python")} -m silnlp.common.extract_corpora {project}'
+                                result = subprocess.run(
+                                    command,
+                                    shell=True,
+                                    capture_output=True,
+                                    text=True,
+                                )
+                                print(result)
+                                if result.stdout != "":
+                                    print(result.stdout)
+                                if result.stderr != "":
+                                    print(result.stderr)
+                                SIL_NLP_ENV.copy_pt_project_from_bucket(project)
+                    else:
+                        for resource in resources:
+                            with zipfile.ZipFile(resource) as f:
+                                copy_resource_to_gdrive(resource)
+                        try:
+                            functions.use_data(functions.current_data(env=st.session_state.clowder_env))
+                            st.cache_data.clear()
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Something went wrong while adding resource data. Please try again. Error: {e}")
 
     with settings_tab:
         st.header("Change Set Up")

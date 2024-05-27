@@ -240,7 +240,6 @@ class ClowderEnvironment:
             contents = self._dict_of_gdrive_files(file["id"])
             if "Settings.xml" in contents.keys():
                 pt_projects.add(name)
-            # TODO remove notes?
 
         storage_files = self.EXPERIMENTS_FOLDER / "data" / folder_id
         if storage_files.exists() and storage_files.is_dir():
