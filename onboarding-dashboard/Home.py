@@ -59,7 +59,7 @@ def copy_resource_to_s3(r: BytesIO):
                 continue
             path = SIL_NLP_ENV.pt_projects_dir / file.filename
             print(f"Copying {file.filename} to s3 path {path}...")
-            if not isinstance(path, S3Path) and not path.exists():
+            if not isinstance(path, S3Path) and not path.parent.exists():
                 path.mkdir(parents=True, exist_ok=True)
             path.write_text(f.read(file).decode())
 
