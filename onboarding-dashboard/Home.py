@@ -55,7 +55,7 @@ def copy_resource_to_s3(r: BytesIO):
         return
     with zipfile.ZipFile(r) as f:
         for file in f.filelist:
-            if "Notes" in file.filename:
+            if "Notes" in file.filename or "Print" in file.filename:
                 continue
             path = SIL_NLP_ENV.pt_projects_dir / file.filename
             print(f"Copying {file.filename} to s3 path {path}...")
