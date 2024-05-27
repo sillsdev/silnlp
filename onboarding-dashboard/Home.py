@@ -148,8 +148,8 @@ with resource_tab:
                         for resource in resources:
                             with zipfile.ZipFile(resource) as f:
                                 copy_resource_to_s3(resource)
-                                SIL_NLP_ENV.copy_pt_project_from_bucket(project)
                                 project = f.filename[:-4]
+                                SIL_NLP_ENV.copy_pt_project_from_bucket(project)
                                 command = f'{os.environ.get("PYTHON", "python")} -m silnlp.common.extract_corpora {project}'
                                 print(f"Running {command}")
                                 result = subprocess.run(
