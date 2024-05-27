@@ -40,7 +40,7 @@ def copy_resource_to_gdrive(r: BytesIO):
         id = functions.ENV._create_gdrive_folder(r.name[:-4], data_folder)
         with zipfile.ZipFile(r) as f:
             for file in f.filelist:
-                if "Notes" in file.filename:
+                if "Notes" in file.filename or "Print" in file.filename:
                     continue
                 subid = id
                 print(f"Copying {file.filename} to gdrive...")
