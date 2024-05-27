@@ -150,13 +150,14 @@ with resource_tab:
                                 copy_resource_to_s3(resource)
                                 project = f.filename[:-4]
                                 command = f'{os.environ.get("PYTHON", "python")} -m silnlp.common.extract_corpora {project}'
+                                print(f"Running {command}")
                                 result = subprocess.run(
                                     command,
                                     shell=True,
                                     capture_output=True,
                                     text=True,
                                 )
-                                print(result)
+                                print("Result", result)
                                 if result.stdout != "":
                                     print(result.stdout)
                                 if result.stderr != "":
