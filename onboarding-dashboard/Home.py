@@ -161,7 +161,10 @@ with resource_tab:
                                     print(result.stdout)
                                 if result.stderr != "":
                                     print(result.stderr)
+                                    st.error(f"Something went wrong while adding resource data. Please try again.")
                                 SIL_NLP_ENV.copy_pt_project_from_bucket(project)
+                        st.cache_data.clear()
+                        st.rerun()
                     else:
                         for resource in resources:
                             with zipfile.ZipFile(resource) as f:
