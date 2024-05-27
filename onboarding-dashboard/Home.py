@@ -2,7 +2,7 @@ import zipfile
 from io import BytesIO
 
 import streamlit as st
-
+from s3path import S3Path
 st.markdown(
     """
 <style>
@@ -57,8 +57,10 @@ def copy_resource_to_s3(r: BytesIO):
         for file in f.filelist:
             if "Notes" in file.filename:
                 continue
-            print(f"Copying {file.filename} to s3...")
             path = SIL_NLP_ENV.pt_projects_dir / file.filename
+            print(f"Copying {file.filename} to s3 path {path}...")
+            if not isinstance(path, S3Path) and not path.exists():
+                path.mkdir(parents=True, exist_ok=True)
             path.write_text(f.read(file).decode())
 
 def get_investigations() -> list:
