@@ -34,8 +34,8 @@ from ..common.corpus import (
     split_parallel_corpus,
     write_corpus,
 )
-from ..common.script_utils import get_script, is_represented
 from ..common.environment import SIL_NLP_ENV
+from ..common.script_utils import get_script, is_represented
 from ..common.utils import NoiseMethod, Side, create_noise_methods, get_mt_exp_dir, is_set, set_seed
 from .augment import AugmentMethod, create_augment_methods
 from .tokenizer import Tokenizer
@@ -291,12 +291,10 @@ def get_data_file_pairs(corpus_pair: CorpusPair) -> Iterable[Tuple[DataFile, Dat
 
 class NMTModel(ABC):
     @abstractmethod
-    def train(self) -> None:
-        ...
+    def train(self) -> None: ...
 
     @abstractmethod
-    def save_effective_config(self, path: Path) -> None:
-        ...
+    def save_effective_config(self, path: Path) -> None: ...
 
     @abstractmethod
     def translate_test_files(
@@ -305,8 +303,7 @@ class NMTModel(ABC):
         translation_paths: List[Path],
         vref_paths: Optional[List[Path]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @abstractmethod
     def translate(
@@ -316,12 +313,10 @@ class NMTModel(ABC):
         trg_iso: str,
         vrefs: Optional[Iterable[VerseRef]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
-    ) -> Iterable[str]:
-        ...
+    ) -> Iterable[str]: ...
 
     @abstractmethod
-    def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
-        ...
+    def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]: ...
 
 
 class Config(ABC):
@@ -366,7 +361,7 @@ class Config(ABC):
                 self.src_projects.update(sf.project for sf in corpus_pair.src_files)
                 self.trg_projects.update(sf.project for sf in corpus_pair.trg_files)
                 if terms_config["include_glosses"]:
-                    for gloss_iso in ["fr","en","id"]:
+                    for gloss_iso in ["fr", "en", "id"]:
                         if gloss_iso in pair_src_isos:
                             self.src_file_paths.update(get_terms_glosses_file_paths(corpus_pair.src_terms_files))
                         if gloss_iso in pair_trg_isos:
@@ -419,8 +414,7 @@ class Config(ABC):
 
     @property
     @abstractmethod
-    def model_dir(self) -> Path:
-        ...
+    def model_dir(self) -> Path: ...
 
     @property
     def params(self) -> dict:
@@ -466,8 +460,7 @@ class Config(ABC):
 
     @property
     @abstractmethod
-    def has_best_checkpoint(self) -> bool:
-        ...
+    def has_best_checkpoint(self) -> bool: ...
 
     def set_seed(self) -> None:
         seed = self.data["seed"]
@@ -486,12 +479,10 @@ class Config(ABC):
         LOGGER.info("Preprocessing completed")
 
     @abstractmethod
-    def create_model(self, mixed_precision: bool = True, num_devices: int = 1) -> NMTModel:
-        ...
+    def create_model(self, mixed_precision: bool = True, num_devices: int = 1) -> NMTModel: ...
 
     @abstractmethod
-    def create_tokenizer(self) -> Tokenizer:
-        ...
+    def create_tokenizer(self) -> Tokenizer: ...
 
     def is_train_project(self, ref_file_path: Path) -> bool:
         trg_iso, trg_project = self._parse_ref_file_path(ref_file_path)
@@ -638,12 +629,24 @@ class Config(ABC):
         if stats_path.is_file():
             stats_df = pd.read_csv(stats_path)
         else:
-            stats_df = pd.DataFrame(columns=["src_project","trg_project","project_count",
-                                             "count","align_score","filtered_count","filtered_align_score",
-                                             "src_script","src_script_in_model","trg_script","trg_script_in_model"])
+            stats_df = pd.DataFrame(
+                columns=[
+                    "src_project",
+                    "trg_project",
+                    "project_count",
+                    "count",
+                    "align_score",
+                    "filtered_count",
+                    "filtered_align_score",
+                    "src_script",
+                    "src_script_in_model",
+                    "trg_script",
+                    "trg_script_in_model",
+                ]
+            )
 
         curr_stats = []
-        for _,row in stats_df.iterrows():
+        for _, row in stats_df.iterrows():
             if pd.isna(row["trg_project"]):
                 # Extra stats already added
                 curr_stats.append(f"{row['src_project']}")
@@ -660,11 +663,20 @@ class Config(ABC):
                 src_script_in_model = is_represented(src_script, self.model)
                 trg_script = get_script("".join(pair_stats["target"]))
                 trg_script_in_model = is_represented(trg_script, self.model)
-                stats_df.loc[len(stats_df.index)] = [filepath.stem,"",len(pair_stats["score"]),
-                                                     len(pair_stats["score"]),round(mean(pair_stats["score"]), 4),
-                                                     len(pair_stats["score"]),round(mean(pair_stats["score"]), 4),
-                                                     src_script,src_script_in_model,trg_script,trg_script_in_model]
-        
+                stats_df.loc[len(stats_df.index)] = [
+                    filepath.stem,
+                    "",
+                    len(pair_stats["score"]),
+                    len(pair_stats["score"]),
+                    round(mean(pair_stats["score"]), 4),
+                    len(pair_stats["score"]),
+                    round(mean(pair_stats["score"]), 4),
+                    src_script,
+                    src_script_in_model,
+                    trg_script,
+                    trg_script_in_model,
+                ]
+
         stats_df.to_csv(stats_path, index=False)
 
     def _write_scripture_data_sets(
@@ -705,9 +717,11 @@ class Config(ABC):
             stats_file: Optional[TextIO] = None
             if stats and pair.size < self.stats_max_size:
                 stats_file = stack.enter_context(self._open("corpus-stats.csv"))
-                stats_file.write("src_project,trg_project,project_count,"
-                                 "count,align_score,filtered_count,filtered_align_score,"
-                                 "src_script,src_script_in_model,trg_script,trg_script_in_model\n")
+                stats_file.write(
+                    "src_project,trg_project,project_count,"
+                    "count,align_score,filtered_count,filtered_align_score,"
+                    "src_script,src_script_in_model,trg_script,trg_script_in_model\n"
+                )
 
             for src_file, trg_file in get_data_file_pairs(pair):
                 project_isos[src_file.project] = src_file.iso
@@ -792,9 +806,13 @@ class Config(ABC):
                         filtered_alignment_score = mean(cur_train["score"]) if stats_file is not None else 0
 
                     src_script = get_script("".join(cur_train["source"]))
-                    src_script_in_model = is_represented(src_script, self.model) if self.model != "SILTransformerBase" else None
+                    src_script_in_model = (
+                        is_represented(src_script, self.model) if self.model != "SILTransformerBase" else None
+                    )
                     trg_script = get_script("".join(cur_train["target"]))
-                    trg_script_in_model = is_represented(trg_script, self.model) if self.model != "SILTransformerBase" else None
+                    trg_script_in_model = (
+                        is_represented(trg_script, self.model) if self.model != "SILTransformerBase" else None
+                    )
 
                     if stats_file is not None:
                         LOGGER.info(
@@ -1150,7 +1168,7 @@ class Config(ABC):
                         cur_terms["target_lang"] = trg_terms_file.iso
                         terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
         return terms
-        
+
     def _write_val_trg(self, tokenizer: Optional[Tokenizer], val: Dict[Tuple[str, str], pd.DataFrame]) -> None:
         with ExitStack() as stack:
             ref_files: List[TextIO] = []
@@ -1489,9 +1507,7 @@ class Config(ABC):
         return self._iso_pairs[(src_iso, trg_iso)].has_multiple_test_projects
 
     @abstractmethod
-    def _build_vocabs(self, stats: bool = False) -> None:
-        ...
+    def _build_vocabs(self, stats: bool = False) -> None: ...
 
     @abstractmethod
-    def _write_dictionary(self, tokenizer: Tokenizer, pair: CorpusPair) -> int:
-        ...
+    def _write_dictionary(self, tokenizer: Tokenizer, pair: CorpusPair) -> int: ...
