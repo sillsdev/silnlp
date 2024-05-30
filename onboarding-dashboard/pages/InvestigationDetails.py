@@ -635,7 +635,7 @@ if "current_investigation" in st.session_state:
                     if draft_already_running:
                         st.write("Your drafting job is running. Check back after a few hours.")
                     check_error("draft")
-                    if st.form_submit_button("Run" if not draft_already_running else "Cancel", type="primary" if not draft_already_running else "secondary", disabled=draft_already_running):
+                    if st.form_submit_button("Run" if not draft_already_running else "Cancel", type="primary" if not draft_already_running else "secondary"):
                         if draft_already_running:
                             with st.spinner("This might take a few minutes..."):
                                 try:
