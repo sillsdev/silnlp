@@ -612,7 +612,7 @@ if "current_investigation" in st.session_state:
                         model_options = list(results_models["name"])
                         idx_of_best_model = int(results_models["CHRF3"].idxmax())
                     model = st.selectbox("Model", model_options, index=idx_of_best_model)
-                    books = st.multiselect("Book to draft", BOOKS_ABBREVS)
+                    books = st.multiselect("Books to draft", BOOKS_ABBREVS)
                     with functions._lock:
                         import clowder.investigation as inv
 
