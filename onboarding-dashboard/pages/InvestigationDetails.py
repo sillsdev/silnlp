@@ -612,18 +612,52 @@ if "current_investigation" in st.session_state:
                         model_options = list(results_models["name"])
                         idx_of_best_model = int(results_models["CHRF3"].idxmax())
                     model = st.selectbox("Model", model_options, index=idx_of_best_model)
-                    book = st.selectbox("Book to draft", BOOKS_ABBREVS, index=None)
+                    books = st.multiselect("Book to draft", BOOKS_ABBREVS)
+                    with functions._lock:
+                        import clowder.investigation as inv
+
+                        inv.ENV = st.session_state.clowder_env
+                        functions.ENV = st.session_state.clowder_env
+                        draft_already_running = (
+                            len(
+                                list(
+                                    filter(
+                                        lambda kv: "draft" in kv[0]
+                                        and kv[1]["status"] in ["in_progress", "queued"],
+                                        functions.ENV.get_investigation(
+                                            st.session_state.current_investigation.name
+                                        ).experiments.items(),
+                                    )
+                                )
+                            )
+                            > 0
+                        )
+                    if draft_already_running:
+                        st.write("Your drafting job is running. Check back after a few hours.")
                     check_error("draft")
-                    if st.form_submit_button("Run", type="primary"):
-                        check_required("draft", drafting_source, model, book)
+                    if st.form_submit_button("Run" if not draft_already_running else "Cancel", type="primary" if not draft_already_running else "secondary", disabled=not draft_already_running):
+                        if draft_already_running:
+                            with st.spinner("This might take a few minutes..."):
+                                try:
+                                    functions.cancel(st.session_state.current_investigation.name)
+                                except Exception as e:
+                                    import traceback
+
+                                    traceback.print_exc()
+                                    st.error(
+                                        f"Something went wrong while attempting to cancel drafting job. Please try again. Error: {e}"
+                                    )
+                                sync()
+                        check_required("draft", drafting_source, model, books)
+                        books_string = ';'.join(books)
                         draft_row = template_df[template_df["name"] == "draft"]
                         draft_setup = draft_row.to_dict(orient="records")[0]
-                        draft_name = f"{model}_draft_{book}_{drafting_source}"
+                        draft_name = f"{model}_draft_{books_string}_{drafting_source}"
                         draft_setup["name"] = draft_name
                         draft_setup["entrypoint"] = (
                             draft_setup["entrypoint"]
                             .replace("$SRC", "".join(drafting_source.split("-")[1:]))
-                            .replace("$BOOK", book)
+                            .replace("$BOOKS", books_string)
                         )
                         add_experiment(draft_setup)
                         with st.spinner("This might take a few minutes..."):
