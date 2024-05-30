@@ -158,7 +158,7 @@ def get_lang_tag_mapping(tag: str):
 
 def sync(rerun: bool = True, container=None):
     try:
-        functions.sync(st.session_state.current_investigation.name)
+        functions.sync(st.session_state.current_investigation.name, env=st.session_state.clowder_env)
         if st.session_state.current_investigation in st.session_state.investigations:
             st.session_state.investigations.remove(st.session_state.current_investigation)
             with functions._lock:
