@@ -2,4 +2,4 @@ name,entrypoint,results-csvs,results-clearml-metrics,type,src_texts,trg_texts,sr
 stats,"silnlp.common.collect_verse_counts --output-exp=""$EXP"" --files=""$FILES""",verse_counts.csv;verse_percentages.csv?overall,,stats,,,,,,,,,,
 align,silnlp.nmt.experiment $EXP $ON_CLEARML_CPU --preprocess --stats,corpus-stats.csv; tokenization_stats.csv,,align,,,,,,,,,,
 model,silnlp.nmt.experiment $EXP $ON_CLEARML --memory-growth,scores-best;scores-last,train_runtime,model,,,,,,,,,,
-draft,"silnlp.nmt.translate $EXP  $ON_CLEARML --src-project ""$SRC"" --memory-growth --checkpoint best --books $BOOKS",draft,,draft,,,,,,,,,,
+draft,"silnlp.nmt.translate $EXP  $ON_CLEARML --src-project ""$SRC"" --memory-growth --checkpoint best --books ""$BOOKS""",draft,,draft,,,,,,,,,,
