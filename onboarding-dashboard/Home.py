@@ -196,7 +196,12 @@ with resource_tab:
                 )
             check_error("set_up")
             if st.form_submit_button("Save Changes", type="primary"):
-                check_required("set_up", root, func=(lambda p: p is not None and p != "" and "folders/" in p))
+                if data_folder is not None:
+                    check_required(
+                        "set_up", root, data_folder, func=(lambda p: p is not None and p != "" and "folders/" in p)
+                    )
+                else:
+                    check_required("set_up", root, func=(lambda p: p is not None and p != "" and "folders/" in p))                
                 with st.spinner("This might take a few minutes..."):
                     try:
                         from clowder.environment import ClowderEnvironment
@@ -204,7 +209,8 @@ with resource_tab:
                         st.session_state.clowder_env = ClowderEnvironment(
                             auth=st.session_state.google_auth, context=root.split("folders/")[1]
                         )
-                        functions.track(None, env=st.session_state.clowder_env)
+                        if len(functions.list_inv(env=st.session_state.clowder_env)) == 0:
+                            functions.track(None, env=st.session_state.clowder_env)
                         if data_folder is not None:
                             functions.use_data(data_folder.split("folders/")[1], env=st.session_state.clowder_env)
                     except Exception as e:

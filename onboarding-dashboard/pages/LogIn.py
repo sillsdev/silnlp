@@ -136,12 +136,12 @@ else:
                         auth=st.session_state.google_auth, context=root.split("folders/")[1].split("?")[0]
                     )
                     functions.ENV = st.session_state.clowder_env
-                    if len(functions.list_inv()) == 0:
-                        functions.track(None)
+                    if len(functions.list_inv(env=st.session_state.clowder_env)) == 0:
+                        functions.track(None, env=st.session_state.clowder_env)
                     if is_external_user:
                         functions.use_data(data_folder.split("folders/")[1].split("?")[0])
                     else:
-                        functions.unlink_data()
+                        functions.unlink_data(env=st.session_state.clowder_env)
                     try:
                         cookie_controller.set("root", root)
                         cookie_controller.set("data_folder", data_folder)
