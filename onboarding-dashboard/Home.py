@@ -185,6 +185,7 @@ with resource_tab:
                 placeholder="https://drive.google.com/drive/u/0/folders/0000000000000000000",
                 value=f"https://drive.google.com/drive/u/0/folders/{functions.current_context(env=st.session_state.clowder_env)}",
             )
+            data_folder = None
             if "is_internal_user" in st.session_state and not st.session_state.is_internal_user:
                 data_folder = st.text_input(
                     "Link to data folder",
