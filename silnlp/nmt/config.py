@@ -1,6 +1,7 @@
 import itertools
 import logging
 import random
+import re
 from abc import ABC, abstractmethod
 from contextlib import ExitStack
 from dataclasses import dataclass, field
@@ -43,6 +44,8 @@ from .tokenizer import Tokenizer
 LOGGER = logging.getLogger(__package__ + ".config")
 
 BASIC_DATA_PROJECT = "BASIC"
+
+ALIGNMENT_SCORES_FILE = re.compile(r"([a-z]{2,3}-.+)_([a-z]{2,3}-.+)")
 
 
 class CheckpointType(Enum):
@@ -627,7 +630,7 @@ class Config(ABC):
     def _report_extra_stats(self) -> None:
         stats_path = self.exp_dir / "corpus-stats.csv"
         if stats_path.is_file():
-            stats_df = pd.read_csv(stats_path)
+            stats_df = pd.read_csv(stats_path, keep_default_na=False).set_index(["src_project", "trg_project"])
         else:
             stats_df = pd.DataFrame(
                 columns=[
@@ -643,41 +646,48 @@ class Config(ABC):
                     "trg_script",
                     "trg_script_in_model",
                 ]
-            )
-
-        curr_stats = []
-        for _, row in stats_df.iterrows():
-            if pd.isna(row["trg_project"]):
-                # Extra stats already added
-                curr_stats.append(f"{row['src_project']}")
-            else:
-                # Stats from current experiment
-                src_project = row["src_project"].split("-", maxsplit=1)[1]
-                trg_project = row["trg_project"].split("-", maxsplit=1)[1]
-                curr_stats.append(f"{src_project}_{trg_project}")
+            ).set_index(["src_project", "trg_project"])
 
         for filepath in self.exp_dir.glob("*.csv"):
-            if filepath.stem not in curr_stats and filepath.stem not in ["corpus-stats", "tokenization_stats"]:
+            match = ALIGNMENT_SCORES_FILE.fullmatch(filepath.stem)
+            project_pair = match.group(1, 2) if match is not None else (filepath.stem, "")
+
+            if project_pair not in stats_df.index and filepath.stem not in ["corpus-stats", "tokenization_stats"]:
+                project_count = ""
+                if project_pair[1] == "":
+                    LOGGER.info(
+                        f"Project pair for {filepath} unclear. Some statisitcs may be missing."
+                    )  # TODO: put in helper function get_full_pair?
+                else:
+                    src_path = get_mt_corpus_path(project_pair[0])
+                    trg_path = get_mt_corpus_path(project_pair[1])
+                    try:
+                        corpus = get_scripture_parallel_corpus(src_path, trg_path)
+                        project_count = len(corpus.index)
+                    except:
+                        LOGGER.info(
+                            f"Original source or target project for {project_pair} not found. Some statisitcs may be missing."
+                        )
+
                 pair_stats = pd.read_csv(filepath)
                 src_script = get_script("".join(pair_stats["source"]))
                 src_script_in_model = is_represented(src_script, self.model)
                 trg_script = get_script("".join(pair_stats["target"]))
                 trg_script_in_model = is_represented(trg_script, self.model)
-                stats_df.loc[len(stats_df.index)] = [
-                    filepath.stem,
+
+                stats_df.loc[project_pair, :] = [
+                    project_count,
+                    len(pair_stats["score"]),
+                    mean(pair_stats["score"]),
                     "",
-                    len(pair_stats["score"]),
-                    len(pair_stats["score"]),
-                    round(mean(pair_stats["score"]), 4),
-                    len(pair_stats["score"]),
-                    round(mean(pair_stats["score"]), 4),
+                    "",
                     src_script,
                     src_script_in_model,
                     trg_script,
                     trg_script_in_model,
                 ]
 
-        stats_df.to_csv(stats_path, index=False)
+        stats_df.to_csv(stats_path, index=True)
 
     def _write_scripture_data_sets(
         self,
@@ -713,98 +723,117 @@ class Config(ABC):
         if pair.use_test_set_from != "":
             self._populate_pair_test_indices(pair.use_test_set_from, pair_test_indices)
 
-        with ExitStack() as stack:
-            stats_file: Optional[TextIO] = None
-            if stats and pair.size < self.stats_max_size:
-                stats_file = stack.enter_context(self._open("corpus-stats.csv"))
-                stats_file.write(
-                    "src_project,trg_project,project_count,"
-                    "count,align_score,filtered_count,filtered_align_score,"
-                    "src_script,src_script_in_model,trg_script,trg_script_in_model\n"
+        if stats and pair.size < self.stats_max_size:
+            stats_path = self.exp_dir / "corpus-stats.csv"
+            if stats_path.is_file():
+                stats_df = pd.read_csv(stats_path, keep_default_na=False).set_index(["src_project", "trg_project"])
+            else:
+                stats_df = pd.DataFrame(
+                    columns=[
+                        "src_project",
+                        "trg_project",
+                        "project_count",
+                        "count",
+                        "align_score",
+                        "filtered_count",
+                        "filtered_align_score",
+                        "src_script",
+                        "src_script_in_model",
+                        "trg_script",
+                        "trg_script_in_model",
+                    ]
+                ).set_index(["src_project", "trg_project"])
+            stats_df.sort_index(inplace=True)
+        else:
+            stats = False
+
+        for src_file, trg_file in get_data_file_pairs(pair):
+            project_isos[src_file.project] = src_file.iso
+            project_isos[trg_file.project] = trg_file.iso
+            corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path)
+            project_count = len(corpus.index)
+            if len(pair.src_noise) > 0:
+                corpus["source"] = [self._noise(pair.src_noise, x) for x in corpus["source"]]
+
+            if len(pair.corpus_books) > 0:
+                cur_train = include_chapters(corpus, pair.corpus_books)
+                if len(pair.test_books) > 0:
+                    cur_train = exclude_chapters(cur_train, pair.test_books)
+            elif len(pair.test_books) > 0:
+                cur_train = exclude_chapters(corpus, pair.test_books)
+            else:
+                cur_train = corpus
+
+            corpus_count = len(cur_train)
+            if pair.is_train and (stats or pair.score_threshold > 0):
+                pair_stats_path = (
+                    self.exp_dir / f"{src_file.iso}-{src_file.project}_{trg_file.iso}-{trg_file.project}.csv"
                 )
-
-            for src_file, trg_file in get_data_file_pairs(pair):
-                project_isos[src_file.project] = src_file.iso
-                project_isos[trg_file.project] = trg_file.iso
-                corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path)
-                project_count = len(corpus.index)
-                if len(pair.src_noise) > 0:
-                    corpus["source"] = [self._noise(pair.src_noise, x) for x in corpus["source"]]
-
-                if len(pair.corpus_books) > 0:
-                    cur_train = include_chapters(corpus, pair.corpus_books)
-                    if len(pair.test_books) > 0:
-                        cur_train = exclude_chapters(cur_train, pair.test_books)
-                elif len(pair.test_books) > 0:
-                    cur_train = exclude_chapters(corpus, pair.test_books)
+                if pair_stats_path.is_file() and not force_align:
+                    LOGGER.info(f"Using pre-existing alignment scores from {pair_stats_path}")
+                    pair_stats = pd.read_csv(pair_stats_path)
+                    pair_stats["idx"] = cur_train.index
+                    pair_stats.set_index("idx", inplace=True)
+                    cur_train["score"] = pair_stats["score"]
                 else:
-                    cur_train = corpus
+                    aligner_id = self.data["aligner"]
+                    LOGGER.info(f"Computing alignment scores using {get_aligner_name(aligner_id)}")
+                    add_alignment_scores(cur_train, aligner_id)
+                    if stats:
+                        cur_train.to_csv(pair_stats_path, index=False)
 
-                corpus_count = len(cur_train)
-                if pair.is_train and (stats_file is not None or pair.score_threshold > 0):
-                    pair_stats_path = self.exp_dir / f"{src_file.project}_{trg_file.project}.csv"
-                    if pair_stats_path.is_file() and not force_align:
-                        LOGGER.info(f"Using pre-existing alignment scores from {pair_stats_path}")
-                        pair_stats = pd.read_csv(pair_stats_path)
-                        pair_stats["idx"] = cur_train.index
-                        pair_stats.set_index("idx", inplace=True)
-                        cur_train["score"] = pair_stats["score"]
-                    else:
-                        aligner_id = self.data["aligner"]
-                        LOGGER.info(f"Computing alignment scores using {get_aligner_name(aligner_id)}")
-                        add_alignment_scores(cur_train, aligner_id)
-                        if stats_file is not None:
-                            cur_train.to_csv(pair_stats_path, index=False)
+            if pair.is_test:
+                if len(pair.test_books) > 0:
+                    cur_test = include_chapters(corpus, pair.test_books)
+                    if test_indices is None:
+                        test_indices = cur_test.index
 
-                if pair.is_test:
-                    if len(pair.test_books) > 0:
-                        cur_test = include_chapters(corpus, pair.test_books)
-                        if test_indices is None:
-                            test_indices = cur_test.index
+                if pair.disjoint_test and test_indices is None:
+                    indices: Set[int] = set(cur_train.index)
+                    if pair.disjoint_val and val_indices is not None:
+                        indices.difference_update(val_indices)
+                    split_size = test_size
+                    if isinstance(split_size, float):
+                        split_size = int(split_size if split_size > 1 else corpus_count * split_size)
+                    test_indices = set(random.sample(indices, min(split_size, len(indices))))
 
-                    if pair.disjoint_test and test_indices is None:
-                        indices: Set[int] = set(cur_train.index)
-                        if pair.disjoint_val and val_indices is not None:
-                            indices.difference_update(val_indices)
-                        split_size = test_size
-                        if isinstance(split_size, float):
-                            split_size = int(split_size if split_size > 1 else corpus_count * split_size)
-                        test_indices = set(random.sample(indices, min(split_size, len(indices))))
-
-                    if len(pair.test_books) > 0:
-                        if test_size > 0:
-                            _, cur_test = split_parallel_corpus(
-                                cur_test,
-                                test_size,
-                                pair_test_indices.get((src_file.iso, trg_file.iso), test_indices),
-                            )
-                    else:
-                        cur_train, cur_test = split_parallel_corpus(
-                            cur_train, test_size, pair_test_indices.get((src_file.iso, trg_file.iso), test_indices)
+                if len(pair.test_books) > 0:
+                    if test_size > 0:
+                        _, cur_test = split_parallel_corpus(
+                            cur_test,
+                            test_size,
+                            pair_test_indices.get((src_file.iso, trg_file.iso), test_indices),
                         )
-
-                    cur_test.drop("score", axis=1, inplace=True, errors="ignore")
-                    self._add_to_eval_data_set(
-                        src_file.iso,
-                        trg_file.iso,
-                        trg_file.project,
-                        tags_str,
-                        test,
-                        pair_test_indices,
-                        cur_test,
+                else:
+                    cur_train, cur_test = split_parallel_corpus(
+                        cur_train, test_size, pair_test_indices.get((src_file.iso, trg_file.iso), test_indices)
                     )
 
-                if pair.is_train:
-                    alignment_score = cur_train["score"].mean() if stats_file is not None else 0
+                cur_test.drop("score", axis=1, inplace=True, errors="ignore")
+                self._add_to_eval_data_set(
+                    src_file.iso,
+                    trg_file.iso,
+                    trg_file.project,
+                    tags_str,
+                    test,
+                    pair_test_indices,
+                    cur_test,
+                )
 
-                    filtered_count = 0
-                    filtered_alignment_score = alignment_score
-                    if pair.score_threshold > 0:
-                        unfiltered_len = len(cur_train)
-                        cur_train = filter_parallel_corpus(cur_train, pair.score_threshold)
-                        filtered_count = unfiltered_len - len(cur_train)
-                        filtered_alignment_score = mean(cur_train["score"]) if stats_file is not None else 0
+            if pair.is_train:
+                project_pair = (f"{src_file.iso}-{src_file.project}", f"{trg_file.iso}-{trg_file.project}")
+                calculate_stats = stats and (project_pair not in stats_df.index or force_align)
+                alignment_score = cur_train["score"].mean() if calculate_stats else 0
 
+                filtered_count = 0
+                filtered_alignment_score = alignment_score
+                if pair.score_threshold > 0:
+                    unfiltered_len = len(cur_train)
+                    cur_train = filter_parallel_corpus(cur_train, pair.score_threshold)
+                    filtered_count = unfiltered_len - len(cur_train)
+                    filtered_alignment_score = mean(cur_train["score"]) if calculate_stats else 0
+
+                if calculate_stats:
                     src_script = get_script("".join(cur_train["source"]))
                     src_script_in_model = (
                         is_represented(src_script, self.model) if self.model != "SILTransformerBase" else None
@@ -814,75 +843,87 @@ class Config(ABC):
                         is_represented(trg_script, self.model) if self.model != "SILTransformerBase" else None
                     )
 
-                    if stats_file is not None:
-                        LOGGER.info(
-                            f"{src_file.project} -> {trg_file.project} stats -"
-                            f" project count: {project_count},"
-                            f" count: {corpus_count},"
-                            f" alignment: {alignment_score:.4f},"
-                            f" filtered count: {filtered_count},"
-                            f" alignment (filtered): {filtered_alignment_score:.4f},"
-                            f" source script: {src_script}, source script in model: {src_script_in_model},"
-                            f" target script: {trg_script}, target script in model: {trg_script_in_model}"
-                        )
-                        stats_file.write(
-                            f"{src_file.iso}-{src_file.project},{trg_file.iso}-{trg_file.project},"
-                            f"{project_count},{corpus_count},{alignment_score:.4f},{filtered_count},{filtered_alignment_score:.4f},"
-                            f"{src_script},{src_script_in_model},{trg_script},{trg_script_in_model}\n"
-                        )
-                    cur_train.drop("score", axis=1, inplace=True, errors="ignore")
+                    stats_df.loc[project_pair, :] = [
+                        project_count,
+                        corpus_count,
+                        alignment_score,
+                        filtered_count,
+                        filtered_alignment_score,
+                        src_script,
+                        src_script_in_model,
+                        trg_script,
+                        trg_script_in_model,
+                    ]
 
-                if pair.is_val:
-                    if pair.disjoint_val and val_indices is None:
-                        indices = set(cur_train.index)
-                        if pair.disjoint_test and test_indices is not None:
-                            indices.difference_update(test_indices)
-                        split_size = val_size
-                        if isinstance(split_size, float):
-                            split_size = int(split_size if split_size > 1 else corpus_count * split_size)
-                        val_indices = set(random.sample(indices, min(split_size, len(indices))))
-
-                    cur_train, cur_val = split_parallel_corpus(
-                        cur_train, val_size, pair_val_indices.get((src_file.iso, trg_file.iso), val_indices)
+                if stats:
+                    # Use values from the df because not all values get recalculated
+                    row = stats_df.loc[project_pair].iloc[0]
+                    LOGGER.info(
+                        f"{src_file.project} -> {trg_file.project} stats -"
+                        f" project count: {project_count},"
+                        f" count: {row['count']},"
+                        f" alignment: {row['align_score']},"
+                        f" filtered count: {row['filtered_count']},"
+                        f" alignment (filtered): {row['filtered_align_score']},"
+                        f" source script: {row['src_script']}, source script in model: {row['src_script_in_model']},"
+                        f" target script: {row['trg_script']}, target script in model: {row['trg_script_in_model']}"
                     )
 
-                    self._add_to_eval_data_set(
-                        src_file.iso, trg_file.iso, trg_file.project, tags_str, val, pair_val_indices, cur_val
+                cur_train.drop("score", axis=1, inplace=True, errors="ignore")
+
+            if pair.is_val:
+                if pair.disjoint_val and val_indices is None:
+                    indices = set(cur_train.index)
+                    if pair.disjoint_test and test_indices is not None:
+                        indices.difference_update(test_indices)
+                    split_size = val_size
+                    if isinstance(split_size, float):
+                        split_size = int(split_size if split_size > 1 else corpus_count * split_size)
+                    val_indices = set(random.sample(indices, min(split_size, len(indices))))
+
+                cur_train, cur_val = split_parallel_corpus(
+                    cur_train, val_size, pair_val_indices.get((src_file.iso, trg_file.iso), val_indices)
+                )
+
+                self._add_to_eval_data_set(
+                    src_file.iso, trg_file.iso, trg_file.project, tags_str, val, pair_val_indices, cur_val
+                )
+
+            if pair.is_train:
+                cur_train["source_lang"] = src_file.iso
+                cur_train["target_lang"] = trg_file.iso
+
+                train_indices = split_corpus(set(cur_train.index), train_size)
+                _, cur_train = split_parallel_corpus(cur_train, train_size, train_indices)
+
+                if self.mirror:
+                    mirror_cur_train = cur_train.rename(
+                        columns={
+                            "source": "target",
+                            "target": "source",
+                            "source_lang": "target_lang",
+                            "target_lang": "source_lang",
+                        }
                     )
-
-                if pair.is_train:
-                    cur_train["source_lang"] = src_file.iso
-                    cur_train["target_lang"] = trg_file.iso
-
-                    train_indices = split_corpus(set(cur_train.index), train_size)
-                    _, cur_train = split_parallel_corpus(cur_train, train_size, train_indices)
-
-                    if self.mirror:
-                        mirror_cur_train = cur_train.rename(
-                            columns={
-                                "source": "target",
-                                "target": "source",
-                                "source_lang": "target_lang",
-                                "target_lang": "source_lang",
-                            }
-                        )
-                        train = self._add_to_train_data_set(
-                            trg_file.project,
-                            src_file.project,
-                            pair.mapping == DataFileMapping.MIXED_SRC,
-                            tags_str,
-                            train,
-                            mirror_cur_train,
-                        )
-
                     train = self._add_to_train_data_set(
-                        src_file.project,
                         trg_file.project,
+                        src_file.project,
                         pair.mapping == DataFileMapping.MIXED_SRC,
                         tags_str,
                         train,
-                        cur_train,
+                        mirror_cur_train,
                     )
+
+                train = self._add_to_train_data_set(
+                    src_file.project,
+                    trg_file.project,
+                    pair.mapping == DataFileMapping.MIXED_SRC,
+                    tags_str,
+                    train,
+                    cur_train,
+                )
+        if stats:
+            stats_df.to_csv(stats_path, index=True)
 
         train_count = 0
         if train is not None and len(train) > 0:
@@ -1213,9 +1254,6 @@ class Config(ABC):
 
     def _fill_corpus(self, filename: str, size: int) -> None:
         write_corpus(self.exp_dir / filename, ("" for _ in range(size)), append=True)
-
-    def _open(self, filename: str) -> TextIO:
-        return (self.exp_dir / filename).open("w", encoding="utf-8", newline="\n")
 
     def _open_append(self, filename: str) -> TextIO:
         return (self.exp_dir / filename).open("a", encoding="utf-8", newline="\n")
