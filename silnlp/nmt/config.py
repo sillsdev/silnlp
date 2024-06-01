@@ -630,7 +630,9 @@ class Config(ABC):
     def _report_extra_stats(self) -> None:
         stats_path = self.exp_dir / "corpus-stats.csv"
         if stats_path.is_file():
-            stats_df = pd.read_csv(stats_path, keep_default_na=False).set_index(["src_project", "trg_project"])
+            stats_df = pd.read_csv(stats_path, dtype=str, keep_default_na=False).set_index(
+                ["src_project", "trg_project"]
+            )
         else:
             stats_df = pd.DataFrame(
                 columns=[
@@ -645,7 +647,8 @@ class Config(ABC):
                     "src_script_in_model",
                     "trg_script",
                     "trg_script_in_model",
-                ]
+                ],
+                dtype=str,
             ).set_index(["src_project", "trg_project"])
 
         for filepath in self.exp_dir.glob("*.csv"):
@@ -655,9 +658,7 @@ class Config(ABC):
             if project_pair not in stats_df.index and filepath.stem not in ["corpus-stats", "tokenization_stats"]:
                 project_count = ""
                 if project_pair[1] == "":
-                    LOGGER.info(
-                        f"Project pair for {filepath} unclear. Some statisitcs may be missing."
-                    )  # TODO: put in helper function get_full_pair?
+                    LOGGER.info(f"Project pair for {filepath} unclear. Some statisitcs may be missing.")
                 else:
                     src_path = get_mt_corpus_path(project_pair[0])
                     trg_path = get_mt_corpus_path(project_pair[1])
@@ -678,7 +679,7 @@ class Config(ABC):
                 stats_df.loc[project_pair, :] = [
                     project_count,
                     len(pair_stats["score"]),
-                    mean(pair_stats["score"]),
+                    "{:.4f}".format(mean(pair_stats["score"])),
                     "",
                     "",
                     src_script,
@@ -726,7 +727,9 @@ class Config(ABC):
         if stats and pair.size < self.stats_max_size:
             stats_path = self.exp_dir / "corpus-stats.csv"
             if stats_path.is_file():
-                stats_df = pd.read_csv(stats_path, keep_default_na=False).set_index(["src_project", "trg_project"])
+                stats_df = pd.read_csv(stats_path, dtype=str, keep_default_na=False).set_index(
+                    ["src_project", "trg_project"]
+                )
             else:
                 stats_df = pd.DataFrame(
                     columns=[
@@ -741,7 +744,8 @@ class Config(ABC):
                         "src_script_in_model",
                         "trg_script",
                         "trg_script_in_model",
-                    ]
+                    ],
+                    dtype=str,
                 ).set_index(["src_project", "trg_project"])
             stats_df.sort_index(inplace=True)
         else:
@@ -834,11 +838,11 @@ class Config(ABC):
                     filtered_alignment_score = mean(cur_train["score"]) if calculate_stats else 0
 
                 if calculate_stats:
-                    src_script = get_script("".join(cur_train["source"]))
+                    src_script = get_script("".join(cur_train["source"][: min(len(cur_train["source"]), 3000)]))
                     src_script_in_model = (
                         is_represented(src_script, self.model) if self.model != "SILTransformerBase" else None
                     )
-                    trg_script = get_script("".join(cur_train["target"]))
+                    trg_script = get_script("".join(cur_train["target"][: min(len(cur_train["target"]), 3000)]))
                     trg_script_in_model = (
                         is_represented(trg_script, self.model) if self.model != "SILTransformerBase" else None
                     )
@@ -846,9 +850,9 @@ class Config(ABC):
                     stats_df.loc[project_pair, :] = [
                         project_count,
                         corpus_count,
-                        alignment_score,
+                        "{:.4f}".format(alignment_score),
                         filtered_count,
-                        filtered_alignment_score,
+                        "{:.4f}".format(filtered_alignment_score),
                         src_script,
                         src_script_in_model,
                         trg_script,
@@ -857,16 +861,16 @@ class Config(ABC):
 
                 if stats:
                     # Use values from the df because not all values get recalculated
-                    row = stats_df.loc[project_pair].iloc[0]
+                    row = stats_df.loc[project_pair]
                     LOGGER.info(
                         f"{src_file.project} -> {trg_file.project} stats -"
                         f" project count: {project_count},"
-                        f" count: {row['count']},"
-                        f" alignment: {row['align_score']},"
-                        f" filtered count: {row['filtered_count']},"
-                        f" alignment (filtered): {row['filtered_align_score']},"
-                        f" source script: {row['src_script']}, source script in model: {row['src_script_in_model']},"
-                        f" target script: {row['trg_script']}, target script in model: {row['trg_script_in_model']}"
+                        f" count: {row.at['count']},"
+                        f" alignment: {row.at['align_score']},"
+                        f" filtered count: {row.at['filtered_count']},"
+                        f" alignment (filtered): {row.at['filtered_align_score']},"
+                        f" source script: {row.at['src_script']}, source script in model: {row.at['src_script_in_model']},"
+                        f" target script: {row.at['trg_script']}, target script in model: {row.at['trg_script_in_model']}"
                     )
 
                 cur_train.drop("score", axis=1, inplace=True, errors="ignore")
