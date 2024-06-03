@@ -21,6 +21,7 @@ class SILClearML:
     experiment_suffix: str = ""
     clearml_project_folder: str = ""
     commit: Optional[str] = None
+    prev_task_id: Optional[str] = None
 
     def __post_init__(self) -> None:
         self.name = self.name.replace("\\", "/")
@@ -28,7 +29,7 @@ class SILClearML:
         project = name_parts[0]
         exp_name = name_parts[-1]
         if len(name_parts) > 2:
-            exp_name = '/'.join(name_parts[1:])
+            exp_name = "/".join(name_parts[1:])
         if self.queue_name is None:
             self.task = None
             self._load_config()
@@ -42,6 +43,7 @@ class SILClearML:
             self.task: Task = Task.init(
                 project_name=self.project_prefix + project + self.project_suffix,
                 task_name=exp_name + self.experiment_suffix,
+                continue_last_task=self.prev_task_id if self.prev_task_id is not None else False,
             )
 
             self._determine_clearml_project_name()

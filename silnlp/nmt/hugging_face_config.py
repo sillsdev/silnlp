@@ -102,6 +102,7 @@ TRAINING_ARGS_CONFIG_MAPPING = {
     "train": {
         "gradient_accumulation_steps",
         "gradient_checkpointing",
+        "gradient_checkpointing_kwargs",
         "group_by_length",
         "log_level",
         "logging_dir",
@@ -894,6 +895,7 @@ class HuggingFaceNMTModel(NMTModel):
             compute_metrics=compute_metrics,
             sequential_sampling=self._config.train.get("sequential_sampling", False),
             better_transformer=self._config.train.get("better_transformer", False),
+            exp_name=self._config.exp_dir.relative_to(SIL_NLP_ENV.mt_experiments_dir),
         )
         early_stopping: Optional[dict] = self._config.eval["early_stopping"]
         if early_stopping:
@@ -1424,6 +1426,7 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         preprocess_logits_for_metrics: Optional[Callable[[Tensor, Tensor], Tensor]] = None,
         sequential_sampling: bool = False,
         better_transformer: bool = False,
+        exp_name: Optional[str] = None,
     ):
         super().__init__(
             model,
@@ -1440,6 +1443,7 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         )
         self._sequential_sampling = sequential_sampling
         self._better_transformer = better_transformer
+        self._exp_name = exp_name
 
     def _get_train_sampler(self) -> Optional[Sampler]:
         if self._sequential_sampling:
@@ -1491,3 +1495,5 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
 
         # Good practice: save your training arguments together with the trained model
         torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
+        if self._exp_name is not None:
+            SIL_NLP_ENV.copy_experiment_to_bucket(self._exp_name)
