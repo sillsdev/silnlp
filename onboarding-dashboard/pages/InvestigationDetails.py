@@ -311,7 +311,7 @@ if "current_investigation" in st.session_state:
                         default_books = simplify_books(default_books)
                         if len(default_books) == 0:
                             default_books = None
-                    books = st.multiselect("Books to align on (Optional)", BOOKS_ABBREVS, default=default_books)
+                    books = st.multiselect("Books to align on", BOOKS_ABBREVS, default=default_books)
                     with functions._lock:
                         import clowder.investigation as inv
 
@@ -349,7 +349,7 @@ if "current_investigation" in st.session_state:
                                         f"Something went wrong while attempting to cancel experiment. Please try again. Error: {e}"
                                     )
                                 sync()
-                        check_required("align", training_sources, training_target)
+                        check_required("align", training_sources, training_target, books)
                         align_row = template_df[template_df["name"] == "align"]
                         align_setup = align_row.to_dict(orient="records")[0]
                         align_setup["src_texts"] = ";".join(training_sources)
