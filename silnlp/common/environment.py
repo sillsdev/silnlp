@@ -9,8 +9,11 @@ from platform import system, uname
 from typing import Callable, Iterable, List, Optional, Sequence, Union
 
 import boto3
+import boto3.s3.transfer as s3transfer
+import botocore
 from dotenv import load_dotenv
 from s3path import S3Path
+from tqdm import tqdm
 
 load_dotenv()
 
