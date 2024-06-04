@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import shutil
 from contextlib import ExitStack
 from copy import deepcopy
 from enum import Enum
@@ -896,6 +897,8 @@ class HuggingFaceNMTModel(NMTModel):
             sequential_sampling=self._config.train.get("sequential_sampling", False),
             better_transformer=self._config.train.get("better_transformer", False),
             exp_name=self._config.exp_dir.relative_to(SIL_NLP_ENV.mt_experiments_dir),
+            delete_checkpoint_optimizer_state=self._config.train["delete_checkpoint_optimizer_state"],
+            delete_checkpoint_tokenizer=self._config.train["delete_checkpoint_tokenizer"],
         )
         early_stopping: Optional[dict] = self._config.eval["early_stopping"]
         if early_stopping:
@@ -1427,6 +1430,8 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         sequential_sampling: bool = False,
         better_transformer: bool = False,
         exp_name: Optional[str] = None,
+        delete_checkpoint_optimizer_state: bool = False,
+        delete_checkpoint_tokenizer: bool = False,
     ):
         super().__init__(
             model,
@@ -1444,6 +1449,8 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         self._sequential_sampling = sequential_sampling
         self._better_transformer = better_transformer
         self._exp_name = exp_name
+        self._delete_checkpoint_optimizer_state = delete_checkpoint_optimizer_state
+        self._delete_checkpoint_tokenizer = delete_checkpoint_tokenizer
 
     def _get_train_sampler(self) -> Optional[Sampler]:
         if self._sequential_sampling:
@@ -1495,5 +1502,40 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
 
         # Good practice: save your training arguments together with the trained model
         torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
+
+    def _rotate_checkpoints(self, use_mtime=False, output_dir=None) -> None:
+        if self._delete_checkpoint_optimizer_state or self._delete_checkpoint_tokenizer:
+            for child in Path(self.args.output_dir).iterdir():
+                if child.is_dir() and child.name.startswith("checkpoint-"):
+                    if self._delete_checkpoint_optimizer_state:
+                        delete_optimizer_state(child)
+                    if self._delete_checkpoint_tokenizer:
+                        delete_tokenizer(child)
+
         if self._exp_name is not None:
             SIL_NLP_ENV.copy_experiment_to_bucket(self._exp_name)
+
+        if self.args.save_total_limit is None or self.args.save_total_limit <= 0:
+            return
+
+        # Check if we should delete older checkpoint(s)
+        checkpoints_sorted = self._sorted_checkpoints(use_mtime=use_mtime, output_dir=output_dir)
+        if len(checkpoints_sorted) <= self.args.save_total_limit:
+            return
+
+        # If save_total_limit=1 with load_best_model_at_end=True, we could end up deleting the last checkpoint, which
+        # we don't do to allow resuming.
+        save_total_limit = self.args.save_total_limit
+        if (
+            self.state.best_model_checkpoint is not None
+            and self.args.save_total_limit == 1
+            and checkpoints_sorted[-1] != self.state.best_model_checkpoint
+        ):
+            save_total_limit = 2
+
+        number_of_checkpoints_to_delete = max(0, len(checkpoints_sorted) - save_total_limit)
+        checkpoints_to_be_deleted = checkpoints_sorted[:number_of_checkpoints_to_delete]
+        for del_checkpoint in checkpoints_to_be_deleted:
+            LOGGER.info(f"Deleting older checkpoint [{del_checkpoint}] due to args.save_total_limit")
+            shutil.rmtree(del_checkpoint, ignore_errors=True)
+            SIL_NLP_ENV.delete_from_bucket(Path(del_checkpoint).relative_to(SIL_NLP_ENV.mt_experiments_dir))

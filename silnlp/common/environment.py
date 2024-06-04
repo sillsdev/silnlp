@@ -265,6 +265,19 @@ class SilNlpEnv:
                         LOGGER.info("Uploading " + dest_file)
                         try_n_times(lambda: data_bucket.upload_file(source_file, dest_file))
 
+    def delete_from_bucket(self, name: str) -> None:
+        if not self.is_bucket:
+            return
+        name = str(name)
+        if len(name) == 0:
+            raise Exception("No experiment name is given.")
+        experiment_path = str(self.mt_dir.relative_to(self.data_dir) / "experiments") + "/"
+        s3 = boto3.resource("s3")
+        data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
+        for obj in data_bucket.object_versions.filter(Prefix=experiment_path + name):
+            LOGGER.info("Deleting " + str(obj.object_key))
+            try_n_times(obj.delete())
+
     def get_source_experiment_path(self, tmp_path: Path) -> str:
         end_of_path = str(tmp_path)[len(str(self.mt_experiments_dir)) :]
         source_path = end_of_path.replace("\\", "/")
