@@ -121,162 +121,59 @@ __Download and install__ the following before creating any projects or starting 
 
 
    Linux:
+   * Add your user to the docker group by using a terminal to run: `sudo usermod -aG docker $USER`
+   * Sign out and back in again so your changes take effect
 
-   In terminal, run:
-      ```
-      curl -sSL https://install.python-poetry.org | python3 - 
-      ```
-      Add the following line to your .bashrc file in your home directory:
-      ```
-      export PATH="$HOME/.local/bin:$PATH"
-      ```
-      
+3. Set up [ClearML](clear_ml_setup.md).
 
-5. .NET Core SDK
-   * The necessary versions are 7.0 and 3.1. If your machine is only able to install version 7.0, you can set the DOTNET_ROLL_FORWARD environment variable to "LatestMajor", which will allow you to run anything that depends on dotnet 3.1.
-   * Note - the .NET SDK is needed for [SIL.Machine.Tool](https://github.com/sillsdev/machine).  Many of the scripts in this repo require this .Net package.  The .Net package will be installed and updated when the silnlp is initialized in `__init__.py`.
+4. Define environment variables.
+
+   Set the following environment variables with your respective credentials: CLEARML_API_ACCESS_KEY, CLEARML_API_SECRET_KEY, AWS_ACCESS_KEY_ID, and AWS_SECRET_ACCESS_KEY. Additionally, set AWS_REGION. The typical value is "us-east-1".
+   * Linux: To set environment variables permanently, add each variable as a new line to the `.bashrc` file in your home directory with the format 
+      ```
+      export VAR="VAL"
+      ```
+      Close and reopen any open terminals for the changes to take effect.
+   
+   * Windows:
+      1. Open Settings and go to the System tab.
+      2. Under the "Device Specifications" section, in the "Related links", click "Advanced system settings".
+      3. Click "Environment Variables".
+      4. In the "System Variables" section, click "New".
+      5. Enter the name and value of the variable and click "Ok". Repeat for as many variables as you need.
+      6. Click "Ok" on the Environment Variables page to save your changes.
+      7. Close and reopen any open command prompt terminals for the changes to take effect.
+
+5. Install Visual Studio Code.
+
+6. Clone the silnlp repo.
+
+7. Open up silnlp folder in VS Code.
+
+8. Install the Dev Containers extension for VS Code.
+
+9. Build the dev container and open the silnlp folder in the container.
+      * Click on the Remote Indicator in the bottom left corner.
+      * Select "Reopen in Container" and choose the silnlp dev container if necessary. This will take a while the first time because the container has to build.
+      * If it was successful, the window will refresh and it will say "Dev Container: SILNLP" in the bottom left corner.
+      * Note: If you don't have a local GPU, you may need to comment out the `gpus --all` part of the `runArgs` field of the `.devcontainer/devcontainer.json` file.
+
+10. Install and activate Poetry environment.
+      * In the VS Code terminal, run `poetry install` to install the necessary Python libraries, and then run `poetry shell` to enter the environment in the terminal. 
+
+11. (Optional) Locally mount the S3 bucket. This will allow you to interact directly with the S3 bucket from your local terminal (outside of the dev container). See instructions [here](s3_bucket_setup.md).
+
+To get back into the dev container and poetry environment each subsequent time, open the silnlp folder in VS Code, select the "Reopen in Container" option from the Remote Connection menu (bottom left corner), and use the `poetry shell` command in the terminal.
+
+## Setting Up and Running Experiments
+See the [wiki](../../wiki) for information on setting up and running experiments. The most important pages for getting started are the ones on [file structure](../../wiki/Folder-structure-and-file-naming-conventions), [model configuration](../../wiki/Configure-a-model), and [running experiments](../../wiki/NMT:-Usage). A lot of the instructions are specific to NMT, but are still helpful starting points for doing other things like [alignment](../../wiki/Alignment:-Usage).
+
+See [this](../../wiki/Using-the-Python-Debugger) page for information on using the VS code debugger.
+
+If you need to use a tool that is supported by SILNLP but is not installable as a Python library (which is probably the case if you get an error like "RuntimeError: eflomal is not installed."), follow the appropriate instructions [here](../../wiki/Installing-External-Libraries).
+
+## .NET Machine alignment models
+
+If you need to run the .NET versions of the Machine alignment models, you will need to install .NET Core SDK 8.0. After installing, run `dotnet tool restore`.
    * Windows: [.NET Core SDK](https://dotnet.microsoft.com/download)
-   * Linux: Installation instructions can be found [here](https://learn.microsoft.com/en-us/dotnet/core/install/linux-ubuntu-2004)
-6. C++ Redistributable
-   * Note - this may already be installed.  If it is not installed you may get cryptic errors such as "System.DllNotFoundException: Unable to load DLL 'thot' or one of its dependencies"
-   * Windows: Download from https://support.microsoft.com/en-us/topic/the-latest-supported-visual-c-downloads-2647da03-1eea-4433-9aff-95f26a218cc0 and install
-   * Linux: Instead of installing the redistributable, run the following commands:
-      ```
-      sudo apt-get update
-      sudo apt-get install build-essential gdb
-      ```
-
----
-## Development Environment setup
-### Option 1: PyCharm Setup
-If you wish, you can use [PyCharm 2020.1](https://www.jetbrains.com/pycharm/) as your Python IDE.
-First, you will need to install the Poetry plugin for PyCharm.
-
-1. Go to `File -> Settings -> Plugins`.
-2. Search for "Poetry" and install the plugin.
-
-Once the Poetry plugin is installed, you can clone the the repo using PyCharm. If you have already cloned the repo, you can open the folder in PyCharm and skip these steps.
-
-1. Go to `VCS -> Get from Version Control...`.
-2. Enter `https://github.com/sillsdev/silnlp.git` in the URL field.
-3. Click the `Clone`.
-4. Enter your Github credentials if necessary.
-
-Next, you will need to setup the interpreter for the project.
-
-1. Go to `File -> Settings -> Project -> Project Interpreter`.
-2. Click the gear button and select `Add...`.
-3. Choose `Poetry Environment` and click `OK`.
-4. PyCharm will setup the Poetry environment and install all dependencies.
-5. Once PyCharm finishes the setup, click `OK`.
-
-You will need to configure PyCharm to work properly with the project.
-
-1. Go to `File -> Settings -> Editor -> Inspections`.
-2. In the `Profile` dropdown, select `Project Default`.
-3. Uncheck the `Python -> Package requirements` setting.
-4. In the `Python -> PEP 8 coding style violation` setting, ignore the errors `E402` and `E203`.
-
-Lastly, setup PyCharm to use the Black code formatter by following the instructions [here](https://black.readthedocs.io/en/stable/editor_integration.html#pycharm-intellij-idea).
-
-### Option 2: Visual Studio Code setup
-1. Install Visual Studio Code
-2. Install Python extension for VSCode
-3. Open up silnlp folder in VSC
-4. In CMD window, type `poetry install` to create the virtual environment for silnlp
-   * If using conda, activate your conda environment first before `poetry install`. Poetry will then install all the dependencies into the conda environment.
-5. Choose the newly created virtual environment as the "Python Interpreter" in the command palette (ctrl+shift+P)
-   * If using conda, choose the conda environment as the interpreter
-6. Open the command palette and select "Preferences: Open User Settings (JSON)". In the `settings.json` file, add the following options:
-   ``` json
-      "python.formatting.provider": "black",
-      "python.linting.pylintEnabled": true,
-      "editor.formatOnSave": true,
-   ```
-
-## S3 bucket setup
-We use Amazon S3 storage for storing our experiment data. Here is some workspace setup to enable a decent workflow.
-
-### Install and configure AWS S3 storage
-The following will allow the boto3 and S3Path libraries in Python correctly talk to the S3 bucket.
-* Install the aws-cli from: https://aws.amazon.com/cli/
-* In cmd, type: `aws configure` and enter your AWS access_key_id and secret_access_key and the region (we use region = us-east-1).
-* The aws configure command will create a folder in your home directory named '.aws' it should contain two plain text files named 'config' and 'credentials'. The config file should contain the region and the credentials file should contain your access_key_id and your secret_access_key.
-(Home directory on windows is usually C:\Users\<Username>\ and on linux it is /home/username)
-
-### Install and configure rclone
-
-
-**Windows**
-
-The following will mount /aqua-ml-data on your S drive and allow you to explore, read and write.
-* Install WinFsp: http://www.secfs.net/winfsp/rel/  (Click the button to "Download WinFsp Installer" not the "SSHFS-Win (x64)" installer)
-* Download rclone from: https://rclone.org/downloads/
-* Unzip to your desktop (or some convient location). 
-* Add the folder that contains rclone.exe to your PATH environment variable.
-* Take the `scripts/rclone/rclone.conf` file from this SILNLP repo and copy it to `~\AppData\Roaming\rclone` (creating folders if necessary) 
-* Take the `scripts/rclone/mount_to_s.bat` file from this SILNLP repo and copy it to the folder that contains the unzipped rclone.
-* Double-click the bat file. A command window should open and remain open. You should see something like:
-```
-C:\Users\David\Software\rclone>call rclone mount --vfs-cache-mode full --use-server-modtime s3aqua:aqua-ml-data S:
-The service rclone has been started.
-```
-
-**Linux**
-
-The following will mount /aqua-ml-data to an S folder in your home directory and allow you to explore, read and write.
-* Download rclone from: https://rclone.org/install/
-* Take the `scripts/rclone/rclone.conf` file from this SILNLP repo and copy it to `~/.config/rclone/rclone.conf` (creating folders if necessary)
-* Add your credentials in the appropriate fields in `~/.config/rclone/rclone.conf`
-* Create a folder called "S" in your user directory 
-* Run the following command:
-   ```
-   rclone mount --vfs-cache-mode full --use-server-modtime s3aqua:aqua-ml-data ~/S
-   ```
-### To start S: drive on start up
-
-**Windows**
-
-Put a shortcut to the mount_to_s.bat file in the Startup folder.
-* In Windows Explorer put `shell:startup` in the address bar or open `C:\Users\<Username>\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup`
-* Right click to add a new shortcut. Choose `mount_to_s.bat` as the target, you can leave the name as the default.  
-
-Now your AWS S3 bucket should be mounted as S: drive when you start Windows.
-
-**Linux**
-* Run `crontab -e`
-* Paste `@reboot rclone mount --vfs-cache-mode full --use-server-modtime s3aqua:aqua-ml-data ~/S` into the file, save and exit
-* Reboot Linux
-
-Now your AWS S3 bucket should be mounted as ~/S when you start Linux.
-
-
-### Setup environment variable
-The following will cause the SILNLP tools to select the S3 bucket for local silnlp operations. If you are using the Docker container, these variables will already be set and the cache will be located at `/root/.cache/silnlp`.
-
-**Windows or Linux**
-* Set the environment variable SIL_NLP_DATA_PATH to "/aqua-ml-data"
-* Create the directory "/home/user/.cache/silnlp", replacing "user" with your username
-* Set the environment variables SIL_NLP_CACHE_EXPERIMENT_DIR and SIL_NLP_CACHE_PROJECT_DIR to "/home/user/.cache/silnlp"
-
----
-
-## Setup ClearML on local PC
-To use Clear ML for managing experiments see the [ClearML Setup](clear_ml_windows_setup.md)
-
-## Additional Information for Development Environments
-
-### Additional Environment Variables
-Set the following environment variables with your respective credentials: CLEARML_API_ACCESS_KEY, CLEARML_API_SECRET_KEY, AWS_ACCESS_KEY_ID, and AWS_SECRET_ACCESS_KEY
-* Windows users: see [here](https://github.com/sillsdev/silnlp/wiki/Install-silnlp-on-Windows-10#permanently-set-environment-variables) for instructions on setting environment variables permanently
-* Linux users: To set environment variables permanently, add each variable as a new line to the `.bashrc` file in your home directory with the format 
-   ```
-   export VAR="VAL"
-   ```
-
-### Setting Up and Running Experiments
-See the [wiki](https://github.com/sillsdev/silnlp/wiki) for information on setting up and running experiments. The most important pages for getting started are the ones on [file structure](https://github.com/sillsdev/silnlp/wiki/Folder-structure-and-file-naming-conventions), [model configuration](https://github.com/sillsdev/silnlp/wiki/Configure-a-model), and [running experiments](https://github.com/sillsdev/silnlp/wiki/NMT:-Usage). A lot of the instructions are specific to NMT, but are still helpful starting points for doing other things like [alignment](https://github.com/sillsdev/silnlp/wiki/Alignment:-Usage).
-
-If you are using VS Code, see [this](https://github.com/sillsdev/silnlp/wiki/Using-the-Python-Debugger) page for information on using the debugger.
-
-If you need to use a tool that is supported by SILNLP but is not installable as a Python library (which is probably the case if you get an error like "RuntimeError: eflomal is not installed."), follow the appropriate instructions [here](https://github.com/sillsdev/silnlp/wiki/Installing-External-Libraries).
+   * Linux: Installation instructions can be found [here](https://learn.microsoft.com/en-us/dotnet/core/install/linux-ubuntu-2004).

@@ -92,6 +92,11 @@ class TranslationTask:
             output_dir_trg_project = output_dir / trg_project
             output_dir_trg_project.mkdir(exist_ok=True)
 
+        experiment_ckpt_str = f"{self.name}:{self.checkpoint}"
+        if not config.model_dir.exists():
+            experiment_ckpt_str = f"{self.name}:base"
+
+        translation_failed = []
         for book_num, chapters in book_nums.items():
             book = book_number_to_id(book_num)
             try:
@@ -124,9 +129,13 @@ class TranslationTask:
                         experiment_ckpt_str=f"{self.name}:{self.checkpoint}",
                     )
             except Exception as e:
+                translation_failed.append(book)
                 LOGGER.exception(f"Was not able to translate {book}.")
 
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM"), overwrite=True)
+
+        if len(translation_failed) > 0:
+            raise ValueError(f"Some books failed to translate: {' '.join(translation_failed)}")
 
     def translate_text_files(
         self,
