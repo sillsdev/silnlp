@@ -1,6 +1,5 @@
 import argparse
 import glob
-import os
 from collections import Counter
 from pathlib import Path
 
@@ -45,10 +44,26 @@ def main() -> None:
     args = parser.parse_args()
     folder = Path(args.folder)
     verses_csv = Path(args.output)
+    output_folder = verses_csv.parent
 
     # Step 1: Read existing results if verses.csv exists
     if verses_csv.is_file():
+        # Check for lock files and ask the user to close them.
+        
+        libre_office_lockfile = output_folder / ".~lock.verses.csv#"
+        excel_lockfile =  output_folder / "~$verses.xlsx"
+
+        if libre_office_lockfile.is_file():
+            print("Please close verses.csv in Libre Office Calc and try again.")
+            exit()
+
+        if excel_lockfile.is_file():
+            print("Please close verses.xslx in Excel and try again.")
+            exit()
+
         existing_df = pd.read_csv(verses_csv, index_col=0)
+
+        
     else:
         existing_df = pd.DataFrame(columns=["file", "Books", "Total", "OT", "NT"] + ALL_BOOKS)
         existing_df.set_index("file", inplace=True)
@@ -85,23 +100,25 @@ def main() -> None:
     if results:
         new_df = pd.DataFrame(results)
         new_df.set_index("file", inplace=True)
-        existing_df = pd.concat([existing_df, new_df], axis=0, sort=False)
+        updated_df = pd.concat([existing_df, new_df], axis=0, sort=False)
+    else:
+        updated_df = existing_df
 
     # Ensure all columns for all books are present
     for book in ALL_BOOKS:
-        if book not in existing_df.columns:
-            existing_df[book] = 0
+        if book not in updated_df.columns:
+            updated_df[book] = 0
 
-    # Step 5: Sort results alphabetically by file names
-    existing_df.sort_index(inplace=True)
+    # Step 5: Sort results alphabetically by file names ignoring case.
+    sorted_df = updated_df.reindex(sorted(updated_df.index, key=lambda x: x.lower()))
 
     # Step 6: Write out the new verses.csv file, overwriting the previous one
-    existing_df.to_csv(verses_csv)
+    sorted_df.to_csv(verses_csv)
 
     # Step 7: Write out the file also as an Excel .xlsx file
     output_xlsx = verses_csv.with_suffix(".xlsx")
-    existing_df.to_excel(output_xlsx)
-    print(f"Wrote {len(existing_df)} verse counts to {verses_csv} and to {output_xlsx}")
+    sorted_df.to_excel(output_xlsx)
+    print(f"Wrote {len(sorted_df)} verse counts to {verses_csv} and to {output_xlsx}")
 
 if __name__ == "__main__":
     main()
