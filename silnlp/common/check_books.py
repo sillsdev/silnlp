@@ -1,16 +1,18 @@
 import argparse
 import logging
+import xml.dom.minidom as minidom
+import lxml.etree as etree
 
-# from pathlib import Path
+from xml.etree.ElementTree import ElementTree, SubElement, Comment, tostring
 import textwrap
 from typing import List
 
-from lxml import etree
+#from lxml import etree
 from machine.scripture import book_number_to_id, get_chapters
 
 from .. import sfm
-from ..common.paratext import get_book_path, get_project_dir
-from ..common.translator import collect_segments, get_stylesheet
+from .paratext import get_book_path, get_project_dir, parse_project_settings
+from .translator import collect_segments, get_stylesheet
 from ..sfm import usfm
 from .collect_verse_counts import DT_canon, NT_canon, OT_canon
 
@@ -22,19 +24,22 @@ valid_books.extend(DT_canon)
 
 LOGGER = logging.getLogger(__package__ + ".translate")
 
+def prettify(elem):
+    """Return a pretty-printed XML string for the Element.
+    """
+    rough_string = ElementTree.tostring(elem, 'utf-8')
+    reparsed = minidom.parseString(rough_string)
+    return reparsed.toprettyxml(indent="    ")
 
-def parse_book(src_project_dir: str, book: str):
+def parse_book(project_dir: str, book: str, stylesheet_field_update: str, verbose: bool):
 
+    """ Check whether a book will parse correctly or not. 
+    Return True if it parses with the current settings and False otherwise.
+    """
     errors = []
 
-    # print(src_project_dir)
-
-    #    with (src_project_dir / "Settings.xml").open("rb") as settings_file:
-    #        settings_tree = etree.parse(settings_file)
-
-    # src_iso = get_iso(settings_tree)
-    book_path = get_book_path(src_project_dir, book)
-    stylesheet = get_stylesheet(src_project_dir)
+    book_path = get_book_path(project_dir, book)
+    stylesheet = get_stylesheet(project_dir, stylesheet_field_update)
 
     if not book_path.is_file():
         raise RuntimeError(f"Can't find file {book_path} for book {book}")
@@ -47,6 +52,7 @@ def parse_book(src_project_dir: str, book: str):
                     usfm.parser(book_file, stylesheet=stylesheet, canonicalise_footnotes=False)
                 )
             except Exception as e:
+                parsed_without_errors = False
                 errors.append(e)
 
             if not errors:
@@ -56,18 +62,26 @@ def parse_book(src_project_dir: str, book: str):
                         book = str(elem[0]).strip()[:3]
                         break
                 if book == "":
-                    raise RuntimeError(f"The USFM file {book_path} doesn't contain an id marker.")
+                    parsed_without_errors = False
+                    if verbose:
+                        raise RuntimeError(f"The USFM file {book_path} doesn't contain an id marker.")
 
                 segments = collect_segments(book, doc)
                 #            sentences = [s.text.strip() for s in segments]
                 vrefs = [s.ref for s in segments]
+                if verbose:
+                    LOGGER.info(f"{book} in project {project_dir} parsed correctly and contains {len(vrefs)} verses.")
+                parsed_without_errors = True
 
-                LOGGER.info(f"{book} in project {src_project_dir} parsed correctly and contains {len(vrefs)} verses.")
             else:
-                LOGGER.info(f"The following error occured while parsing {book} in project {src_project_dir}")
-                for error in errors:
-                    error_str = " ".join([str(s) for s in error.args])
-                    LOGGER.info(error_str)
+                if verbose:
+                    LOGGER.info(f"The following error occured while parsing {book} in project {project_dir}")
+                    for error in errors:
+                        error_str = " ".join([str(s) for s in error.args])
+                        LOGGER.info(error_str)
+                parsed_without_errors = False
+    
+    return parsed_without_errors
 
 
 def main() -> None:
@@ -94,30 +108,72 @@ def main() -> None:
         ),
     )
 
-    parser.add_argument("--src-project", default=None, type=str, help="The source project to translate")
+    parser.add_argument("project", type=str, help="The name of the Project Folder")
     parser.add_argument(
         "--books", metavar="books", nargs="+", default=[], help="The books to check; e.g., 'NT', 'OT', 'GEN EXO'"
     )
+    
+    parser.add_argument(
+        "--stylesheet-field-update",
+        default="merge",
+        type=str,
+        help="What to do with the OccursUnder and TextProperties fields of a project's custom stylesheet. Possible values are 'replace', 'merge', and 'ignore'.",
+    )
+    
+    parser.add_argument(
+        "--verbose",
+        default=False,
+        action="store_true",
+        help="Print more messages.",
+    )
 
-    parser.print_help()
+
+
+    #parser.print_help()
     args = parser.parse_args()
-    src_project_dir = get_project_dir(args.src_project)
+    project_dir = get_project_dir(args.project)
+    stylesheet_field_update = args.stylesheet_field_update
+    verbose = args.verbose
+
+    settings_tree = parse_project_settings(project_dir)
+    print(etree.tostring(settings_tree, pretty_print=True).decode())
+
+    
+    exit()
 
     sfm_files = [
-        file for file in src_project_dir.glob("*") if file.is_file() and file.suffix[1:].lower() in ["sfm", "usfm"]
+        file for file in project_dir.glob("*") if file.is_file() and file.suffix[1:].lower() in ["sfm", "usfm"]
     ]
-    books_found = [sfm_file.name[2:5] for sfm_file in sfm_files]
-    print(f"Found these books {' '.join([book for book in books_found])} in the project_directory: {src_project_dir}")
+    
+
+    books_found = []
+    # Not all projects use Numbers in the filenames.
+    
+    # TODO use the filenaming information from the Settings.xml file to find the right names.
+    # There is probably code in SILNLP that knows how to do that already.
+
+    for sfm_file in sfm_files:
+        if sfm_file.name[:2].isdigit():
+            books_found.append(sfm_file.name[2:5])
+        else:
+            books_found.append(sfm_file.name[:3])
+
+
+    #books_found = [ sfm_file.name[2:5] for sfm_file in sfm_files if sfm_file.name[:2].isdigit() else sfm_file.name[:3] ]
+    if verbose:
+        print(f"Found these books {' '.join([book for book in books_found])} in the project_directory: {project_dir}")
 
     if not sfm_files:
-        print(f"No sfm or SFM files found in project folder: {src_project_dir}")
+        print(f"No sfm or SFM files found in project folder: {project_dir}")
     else:
         books = args.books
         canons_to_add = [canon for canon in books if canon in valid_canons]
-        print(f"Canons specified are: {canons_to_add}")
+        if verbose:
+            print(f"Canons specified are: {canons_to_add}")
 
         books_to_check = [book for book in books if book in valid_books]
-        print(f"Individual books specified are: {books_to_check}\n")
+        if verbose:
+            print(f"Individual books specified are: {books_to_check}\n")
 
         OT_books_found = [book for book in OT_canon if book in books_found]
         NT_books_found = [book for book in NT_canon if book in books_found]
@@ -138,27 +194,39 @@ def main() -> None:
                 # print("Adding DT books")
                 books_to_check.extend(DT_books_found)
 
-        print(f"All books to check are: {books_to_check}\n")
+        if verbose:
+            print(f"All books to check are: {books_to_check}\n")
 
         if not books_to_check:
-            print(f"No books were specified - will check all books.")
+            if verbose:
+                print(f"No books were specified - will check all books.")
             books_to_check = books_found
         else:
             # Get list of books to check in usual Biblical order.
             books_to_check = [book for book in valid_books if book in books_to_check]
-
+        
+        if verbose:
             print(f"Of the books specified these were found: {books_to_check}")
 
         book_nums = get_chapters(books_to_check)
-        book_nums_to_check = [book_number_to_id(book) for book in book_nums.keys()]
+        books_to_check = [book_number_to_id(book) for book in book_nums.keys()]
+        
+        parsed = []
+        failed_to_parse = []
 
-        for book_num_to_check in book_nums_to_check:
-            parse_book(src_project_dir, book_num_to_check)
+        for book_to_check in books_to_check:
+            if parse_book(project_dir, book_to_check, stylesheet_field_update, verbose):
+                parsed.append(book_to_check)
+            else:
+                failed_to_parse.append(book_to_check)
 
         invalid_books = [book for book in books if book not in valid_books and book not in valid_canons]
 
         if invalid_books:
-            print(f"WARNING: These unknown books were not checked: {invalid_books}")
+            print(f"\nWARNING: These unknown books were not checked: {invalid_books}")
+    
+    print(f"\nThese books parsed OK: {' '.join(book for book in parsed)}")
+    print(f"These books failed to parse: {' '.join(book for book in failed_to_parse)}")
 
 
 if __name__ == "__main__":
