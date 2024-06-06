@@ -47,8 +47,27 @@ def main() -> None:
     parser.add_argument("--clearml", default=False, action="store_true", help="Register Extraction in ClearML")
 
     args = parser.parse_args()
+    project_patterns: Set[str] = set(args.projects)
 
-    projects: Set[str] = set(args.projects)
+    project_path = SIL_NLP_ENV.pt_projects_dir
+    patterns_without_matching_projects = []
+
+    projects_found = []
+    for project_pattern in project_patterns:
+        matching_projects = project_path.glob(f"*{project_pattern}*")
+        if not matching_projects:
+            patterns_without_matching_projects.append(project_pattern)
+        else:
+            for matching_project in matching_projects:
+                project_dir = project_path / matching_project
+                if project_dir.is_dir():
+                    projects_found.append(matching_project)
+
+    projects_found = set(projects_found)
+
+    print("Found these projects to extract:")
+    for project_found in projects_found:
+        print(f"{project_found.name}")
 
     if args.clearml:
         import datetime
@@ -58,14 +77,6 @@ def main() -> None:
         Task.init(
             project_name="LangTech_ExtractCorpora", task_name=str(args.projects) + "_" + str(datetime.datetime.now())
         )
-
-    # Which projects have data we can find?
-    projects_found: Set[str] = set()
-    for project in projects:
-        SIL_NLP_ENV.copy_pt_project_from_bucket(project)
-        project_path = SIL_NLP_ENV.pt_projects_dir / project
-        if project_path.is_dir():
-            projects_found.add(project)
 
     # Process the projects that have data and tell the user.
     if len(projects_found) > 0:
@@ -96,9 +107,10 @@ def main() -> None:
         LOGGER.warning(f"Couldn't find any data to process for any project in {SIL_NLP_ENV.pt_projects_dir}.")
 
     # Tell the user which projects couldn't be found.
-    for project in projects:
-        if project not in projects_found:
-            LOGGER.warning(f"Couldn't find project {project} in {SIL_NLP_ENV.pt_projects_dir}.")
+    for pattern_without_matching_projects in patterns_without_matching_projects:
+        LOGGER.warning(
+            f"Couldn't find any project matching pattern: *{pattern_without_matching_projects}* in {SIL_NLP_ENV.pt_projects_dir}."
+        )
 
 
 if __name__ == "__main__":
