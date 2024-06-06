@@ -6,6 +6,7 @@ from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books
 
 from ..common.corpus import count_lines
 from ..common.environment import SIL_NLP_ENV
+from ..common.count_verses import count_verses
 from .paratext import check_versification, extract_project, extract_term_renderings, get_project_dir
 
 LOGGER = logging.getLogger(__package__ + ".extract_corpora")
@@ -111,7 +112,9 @@ def main() -> None:
         LOGGER.warning(
             f"Couldn't find any project matching pattern: *{pattern_without_matching_projects}* in {SIL_NLP_ENV.pt_projects_dir}."
         )
-
+    
+    verses_csv = SIL_NLP_ENV.mt_experiments_dir / "verses" / "verses.csv" 
+    count_verses(SIL_NLP_ENV.pt_projects_dir, SIL_NLP_ENV.mt_experiments_dir, verses_csv)
 
 if __name__ == "__main__":
     main()
