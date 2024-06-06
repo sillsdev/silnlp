@@ -98,7 +98,7 @@ def main() -> None:
 
     parser.add_argument("project", type=str, help="The name of the Project Folder")
     parser.add_argument(
-        "--books", metavar="books", nargs="+", default=[], help="The books to check; e.g., 'NT', 'OT', 'GEN EXO'"
+        "books", metavar="books", nargs="+", default=[], help="The books to check; e.g., 'NT', 'OT', 'GEN EXO'"
     )
     
     parser.add_argument(
@@ -169,19 +169,20 @@ def main() -> None:
         book_path = get_book_path(project_dir, book_to_check)
     
         if not book_path.is_file():
-            missing.append(book_path)
+            missing.append(f"{book_to_check} {book_path}")
         else:
             if parse_book(project_dir, book_to_check, stylesheet_field_update, verbose):
-                parsed.append(book_to_check)
+                parsed.append(f"{book_to_check} {book_path}")
             else:
-                failed_to_parse.append(book_to_check)
+                failed_to_parse.append(f"{book_to_check} {book_path}")
 
-    print(f"\nThese books parsed OK: {' '.join(book for book in parsed)}")
-    print(f"These books failed to parse: {' '.join(book for book in failed_to_parse)}")
-    if missing:
-        print("These books were not found: ")
-        for book_path in missing:
-            print(book_path)
+    
+    for book in parsed:
+        print(f"Parsed OK: {book}")
+    for book in failed_to_parse:
+        print(f"Failed to parse: {book}")
+    for book in missing:
+        print(f"Couldn't find: {book}")
 
 if __name__ == "__main__":
     main()
