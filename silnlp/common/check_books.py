@@ -1,19 +1,13 @@
 import argparse
 import logging
-
-import lxml.etree as etree
-
 import textwrap
 from typing import List
 
-#from lxml import etree
-from machine.scripture import book_number_to_id, get_chapters
-
 from .. import sfm
-from .paratext import get_book_path, get_project_dir, parse_project_settings
-from .translator import collect_segments, get_stylesheet
 from ..sfm import usfm
 from .collect_verse_counts import DT_canon, NT_canon, OT_canon
+from .paratext import get_book_path, get_project_dir, parse_project_settings
+from .translator import collect_segments, get_stylesheet
 
 valid_canons = ["NT", "OT", "DT"]
 valid_books = []
@@ -21,24 +15,23 @@ valid_books.extend(OT_canon)
 valid_books.extend(NT_canon)
 valid_books.extend(DT_canon)
 
+
 LOGGER = logging.getLogger(__package__ + ".translate")
 
 
 def parse_book(project_dir, book, stylesheet_field_update: str, verbose: bool):
 
-    """ Check whether a book will parse correctly or not. 
+    """Check whether a book will parse correctly or not.
     Return True if it parses with the current settings and False otherwise.
     """
     errors = []
-    
+
     book_path = get_book_path(project_dir, book)
     stylesheet = get_stylesheet(project_dir)
 
     with book_path.open(mode="r", encoding="utf-8-sig") as book_file:
         try:
-            doc: List[sfm.Element] = list(
-                usfm.parser(book_file, stylesheet=stylesheet, canonicalise_footnotes=False)
-            )
+            doc: List[sfm.Element] = list(usfm.parser(book_file, stylesheet=stylesheet, canonicalise_footnotes=False))
         except Exception as e:
             parsed_without_errors = False
             errors.append(e)
@@ -98,16 +91,16 @@ def main() -> None:
 
     parser.add_argument("project", type=str, help="The name of the Project Folder")
     parser.add_argument(
-        "books", metavar="books", nargs="+", default=[], help="The books to check; e.g., 'NT', 'OT', 'GEN EXO'"
+        "--books", metavar="books", nargs="+", default=[], help="The books to check; e.g., 'NT', 'OT', 'GEN EXO'"
     )
-    
+
     parser.add_argument(
         "--stylesheet-field-update",
         default="merge",
         type=str,
         help="What to do with the OccursUnder and TextProperties fields of a project's custom stylesheet. Possible values are 'replace', 'merge', and 'ignore'.",
     )
-    
+
     parser.add_argument(
         "--verbose",
         default=False,
@@ -115,17 +108,15 @@ def main() -> None:
         help="Print more messages.",
     )
 
-
-
-    #parser.print_help()
+    # parser.print_help()
     args = parser.parse_args()
     project_dir = get_project_dir(args.project)
     stylesheet_field_update = args.stylesheet_field_update
     verbose = args.verbose
-    
+
     settings_tree = parse_project_settings(project_dir)
-    #print(etree.tostring(settings_tree, pretty_print=True).decode())
-       
+    # print(etree.tostring(settings_tree, pretty_print=True).decode())
+
     # TODO use the filenaming information from the Settings.xml file to find the right names.
     # There is probably code in SILNLP that knows how to do that already.
     books = args.books
@@ -138,7 +129,7 @@ def main() -> None:
         if verbose:
             print(f"No books were specified - will check all books.")
         books_to_check = valid_books
-    
+
     else:
         canons_to_add = [canon for canon in books if canon in valid_canons]
         if verbose:
@@ -157,9 +148,9 @@ def main() -> None:
                 books_to_check.extend(NT_canon)
             if canon_to_add == "DT":
                 books_to_check.extend(DT_canon)
-        
+
         # Sort books to check in the usual order.
-        books_to_check =  [book for book in valid_books if book in books_to_check]
+        books_to_check = [book for book in valid_books if book in books_to_check]
 
     parsed = []
     failed_to_parse = []
@@ -167,7 +158,7 @@ def main() -> None:
 
     for book_to_check in books_to_check:
         book_path = get_book_path(project_dir, book_to_check)
-    
+
         if not book_path.is_file():
             missing.append(f"{book_to_check} {book_path}")
         else:
@@ -176,13 +167,13 @@ def main() -> None:
             else:
                 failed_to_parse.append(f"{book_to_check} {book_path}")
 
-    
     for book in parsed:
         print(f"Parsed OK: {book}")
     for book in failed_to_parse:
         print(f"Failed to parse: {book}")
     for book in missing:
         print(f"Couldn't find: {book}")
+
 
 if __name__ == "__main__":
     main()

@@ -1,10 +1,13 @@
 import argparse
 import csv
-import pandas as pd
-from pathlib import Path
 from collections import defaultdict
-from ..common.environment import SIL_NLP_ENV
+from pathlib import Path
+
+import pandas as pd
+
 from ..common.count_verses import check_for_lock_file
+from ..common.environment import SIL_NLP_ENV
+
 
 def aggregate_csv(folder_path):
     # Dictionary to store rows by header type
@@ -51,7 +54,7 @@ def write_to_excel(data_by_header, folder, output_filename):
             # Create a DataFrame for the current header
             df = pd.DataFrame(rows[1:], columns=rows[0])
             # Convert columns to appropriate data types
-            df = df.apply(pd.to_numeric, errors='ignore')
+            df = df.apply(pd.to_numeric, errors="ignore")
             # Generate a unique sheet name
             sheet_name = f"Table_{i + 1}"
             # Write the DataFrame to the Excel file
@@ -62,29 +65,34 @@ def write_to_excel(data_by_header, folder, output_filename):
 def main():
     parser = argparse.ArgumentParser(description="Aggregate CSV files in a folder.")
     parser.add_argument("folder", type=Path, help="Path to the folder containing CSV files.")
-    parser.add_argument("--output_filename", type=str, default="scores", help="Filename for the results files. Usually the default 'scores' is fine. Don't include the file extension.")
+    parser.add_argument(
+        "--output_filename",
+        type=str,
+        default="scores",
+        help="Filename for the results files. Usually the default 'scores' is fine. Don't include the file extension.",
+    )
     args = parser.parse_args()
 
     folder = Path(args.folder)
-    
+
     csv_filename = args.output_filename
     excel_filename = f"{folder}_{args.output_filename}"
 
     if not folder.is_dir():
-        folder = Path(SIL_NLP_ENV.mt_experiments_dir) / args.folder 
+        folder = Path(SIL_NLP_ENV.mt_experiments_dir) / args.folder
 
     # Check for lock files and ask the user to close them.
     check_for_lock_file(folder, csv_filename, "csv")
     check_for_lock_file(folder, excel_filename, "xlsx")
-        
+
     data = aggregate_csv(folder)
-    
+
     # Write the aggregated data to a new CSV file
     write_to_csv(data, folder, csv_filename)
 
-
     # Write the aggregated data to an Excel file
     write_to_excel(data, folder, excel_filename)
+
 
 if __name__ == "__main__":
     main()
