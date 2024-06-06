@@ -36,6 +36,30 @@ def get_verse_counts(file_path: Path, vref_path: Path):
                 verse_counts[cur_book] += 1
     return verse_counts
 
+
+def check_for_lock_file(folder: Path, filename: str, file_type: str):
+    """ Check for lock files and ask the user to close them then exit(). """
+
+    import sys
+    if file_type[0] == '.':
+        file_type = file_type[1:]
+
+    if file_type.lower() == 'csv':
+        lockfile = folder / f".~lock.{filename}.{file_type}#"
+        
+        if lockfile.is_file():
+            print(f"Found lock file: {lockfile}")
+            print(f"Please close {filename}.{file_type} in folder {folder} in Libre Office Calc OR delete the lock file and try again.")
+            sys.exit()
+    
+    elif file_type.lower() == 'xlsx':
+        lockfile =  folder / f"~${filename}.{file_type}"
+        
+        if lockfile.is_file():
+            print(f"Found lock file: {lockfile}")
+            print(f"Please close {filename}.{file_type} in folder {folder} which is open in Excel OR delete the lock file and try again.")
+            sys.exit()
+        
 def main() -> None:
     parser = argparse.ArgumentParser(description="Count the verses in each file from a corpus of Bibles")
     parser.add_argument("--folder", default=SIL_NLP_ENV.mt_scripture_dir, help="Folder containing Bibles as text files.")
@@ -48,22 +72,11 @@ def main() -> None:
 
     # Step 1: Read existing results if verses.csv exists
     if verses_csv.is_file():
-        # Check for lock files and ask the user to close them.
-        
-        libre_office_lockfile = output_folder / ".~lock.verses.csv#"
-        excel_lockfile =  output_folder / "~$verses.xlsx"
-
-        if libre_office_lockfile.is_file():
-            print("Please close verses.csv in Libre Office Calc and try again.")
-            exit()
-
-        if excel_lockfile.is_file():
-            print("Please close verses.xslx in Excel and try again.")
-            exit()
+        check_for_lock_file(output_folder, "verses", "csv")
+        check_for_lock_file(output_folder, "verses", "xlsx")
 
         existing_df = pd.read_csv(verses_csv, index_col=0)
 
-        
     else:
         existing_df = pd.DataFrame(columns=["file", "Books", "Total", "OT", "NT"] + ALL_BOOKS)
         existing_df.set_index("file", inplace=True)
