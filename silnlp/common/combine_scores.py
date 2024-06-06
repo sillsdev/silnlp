@@ -50,6 +50,8 @@ def write_to_excel(data_by_header, folder, output_filename):
         for i, (header, rows) in enumerate(data_by_header.items()):
             # Create a DataFrame for the current header
             df = pd.DataFrame(rows[1:], columns=rows[0])
+            # Convert columns to appropriate data types
+            df = df.apply(pd.to_numeric, errors='ignore')
             # Generate a unique sheet name
             sheet_name = f"Table_{i + 1}"
             # Write the DataFrame to the Excel file
@@ -64,22 +66,25 @@ def main():
     args = parser.parse_args()
 
     folder = Path(args.folder)
-    output_filename = args.output_filename
+    
+    csv_filename = args.output_filename
+    excel_filename = f"{folder}_{args.output_filename}"
 
     if not folder.is_dir():
         folder = Path(SIL_NLP_ENV.mt_experiments_dir) / args.folder 
 
     # Check for lock files and ask the user to close them.
-    check_for_lock_file(folder, output_filename, "csv")
-    check_for_lock_file(folder, output_filename, "xlsx")
+    check_for_lock_file(folder, csv_filename, "csv")
+    check_for_lock_file(folder, excel_filename, "xlsx")
         
     data = aggregate_csv(folder)
     
     # Write the aggregated data to a new CSV file
-    write_to_csv(data, folder, output_filename)
+    write_to_csv(data, folder, csv_filename)
+
 
     # Write the aggregated data to an Excel file
-    write_to_excel(data, folder, output_filename)
+    write_to_excel(data, folder, excel_filename)
 
 if __name__ == "__main__":
     main()
