@@ -109,7 +109,7 @@ Follow the instructions below to set up a Dev Container in VS Code. This is the 
 4. Define environment variables.
 
    Set the following environment variables with your respective credentials: CLEARML_API_ACCESS_KEY, CLEARML_API_SECRET_KEY, AWS_ACCESS_KEY_ID, and AWS_SECRET_ACCESS_KEY. Additionally, set AWS_REGION. The typical value is "us-east-1".
-   * Linux: To set environment variables permanently, add each variable as a new line to the `.bashrc` file in your home directory with the format 
+   * Linux / macOS users: To set environment variables permanently, add each variable as a new line to the `.bashrc` file (Linux) or `.profile` file (macOS) in your home directory with the format 
       ```
       export VAR="VAL"
       ```
@@ -157,3 +157,4 @@ If you need to use a tool that is supported by SILNLP but is not installable as 
 If you need to run the .NET versions of the Machine alignment models, you will need to install .NET Core SDK 8.0. After installing, run `dotnet tool restore`.
    * Windows: [.NET Core SDK](https://dotnet.microsoft.com/download)
    * Linux: Installation instructions can be found [here](https://learn.microsoft.com/en-us/dotnet/core/install/linux-ubuntu-2004).
+   * macOS: Installation instructions can be found [here](https://learn.microsoft.com/en-us/dotnet/core/install/macos).
