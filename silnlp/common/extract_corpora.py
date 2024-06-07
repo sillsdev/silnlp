@@ -114,7 +114,7 @@ def main() -> None:
         LOGGER.warning(
             f"Couldn't find any project matching pattern: *{pattern_without_matching_projects}* in {SIL_NLP_ENV.pt_projects_dir}."
         )
-    seconds = 15
+    seconds = 30
     print(
         f"Waiting {seconds} seconds for the files to arrive in {SIL_NLP_ENV.mt_scripture_dir} before counting the verses."
     )
