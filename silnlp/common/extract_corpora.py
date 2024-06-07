@@ -1,12 +1,14 @@
 import argparse
 import logging
+from time import sleep
 from typing import List, Set
 
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books
+from tqdm import tqdm
 
 from ..common.corpus import count_lines
-from ..common.environment import SIL_NLP_ENV
 from ..common.count_verses import count_verses
+from ..common.environment import SIL_NLP_ENV
 from .paratext import check_versification, extract_project, extract_term_renderings, get_project_dir
 
 LOGGER = logging.getLogger(__package__ + ".extract_corpora")
@@ -112,9 +114,16 @@ def main() -> None:
         LOGGER.warning(
             f"Couldn't find any project matching pattern: *{pattern_without_matching_projects}* in {SIL_NLP_ENV.pt_projects_dir}."
         )
-    
-    verses_csv = SIL_NLP_ENV.mt_experiments_dir / "verses" / "verses.csv" 
+    seconds = 15
+    print(
+        f"Waiting {seconds} seconds for the files to arrive in {SIL_NLP_ENV.mt_scripture_dir} before counting the verses."
+    )
+    for second in tqdm(range(seconds)):
+        sleep(1)
+
+    verses_csv = SIL_NLP_ENV.mt_experiments_dir / "verses" / "verses.csv"
     count_verses(SIL_NLP_ENV.pt_projects_dir, SIL_NLP_ENV.mt_experiments_dir, verses_csv)
+
 
 if __name__ == "__main__":
     main()

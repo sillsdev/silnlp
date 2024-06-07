@@ -174,7 +174,7 @@ def count_verses(input_folder, output_folder, verses_csv):
 
     # Step 3: Identify new files to process
     new_files = text_files - known_files
-    print(f"Found {len(new_files)} which are not among the {len(known_files)} files already counted in {verses_csv}")
+    print(f"Found {len(new_files)} new files that are not among the {len(known_files)} files already counted in {verses_csv}")
 
     # Step 4: Gather verse counts for new files
     results = []
