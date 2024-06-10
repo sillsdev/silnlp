@@ -176,48 +176,49 @@ def count_verses(input_folder, output_folder, verses_csv):
     new_files = text_files - known_files
     print(f"Found {len(new_files)} new files that are not among the {len(known_files)} files already counted in {verses_csv}")
 
-    # Step 4: Gather verse counts for new files
-    results = []
-    for file in tqdm(new_files):
-        file_path = input_folder / file
-        verse_counts = get_verse_counts(file_path, SIL_NLP_ENV.assets_dir / "vref.txt")
-        ot_count = sum(verse_counts[book] for book in OT_canon)
-        nt_count = sum(verse_counts[book] for book in NT_canon)
-        total_count = ot_count + nt_count
-        book_count = sum(1 for book in ALL_BOOKS if verse_counts[book] > 0)
-        result = {
-            "file": file,
-            "Books": book_count,
-            "Total": total_count,
-            "OT": ot_count,
-            "NT": nt_count,
-        }
-        result.update(verse_counts)
-        results.append(result)
+    if new_files:
+        # Step 4: Gather verse counts for new files
+        results = []
+        for file in tqdm(new_files):
+            file_path = input_folder / file
+            verse_counts = get_verse_counts(file_path, SIL_NLP_ENV.assets_dir / "vref.txt")
+            ot_count = sum(verse_counts[book] for book in OT_canon)
+            nt_count = sum(verse_counts[book] for book in NT_canon)
+            total_count = ot_count + nt_count
+            book_count = sum(1 for book in ALL_BOOKS if verse_counts[book] > 0)
+            result = {
+                "file": file,
+                "Books": book_count,
+                "Total": total_count,
+                "OT": ot_count,
+                "NT": nt_count,
+            }
+            result.update(verse_counts)
+            results.append(result)
 
-    # Convert results to DataFrame
-    if results:
-        new_df = pd.DataFrame(results)
-        new_df.set_index("file", inplace=True)
-        updated_df = pd.concat([existing_df, new_df], axis=0, sort=False)
-    else:
-        updated_df = existing_df
+        # Convert results to DataFrame
+        if results:
+            new_df = pd.DataFrame(results)
+            new_df.set_index("file", inplace=True)
+            updated_df = pd.concat([existing_df, new_df], axis=0, sort=False)
+        else:
+            updated_df = existing_df
 
-    # Ensure all columns for all books are present
-    for book in ALL_BOOKS:
-        if book not in updated_df.columns:
-            updated_df[book] = 0
+        # Ensure all columns for all books are present
+        for book in ALL_BOOKS:
+            if book not in updated_df.columns:
+                updated_df[book] = 0
 
-    # Step 5: Sort results alphabetically by file names ignoring case.
-    sorted_df = updated_df.reindex(sorted(updated_df.index, key=lambda x: x.lower()))
+        # Step 5: Sort results alphabetically by file names ignoring case.
+        sorted_df = updated_df.reindex(sorted(updated_df.index, key=lambda x: x.lower()))
 
-    # Step 6: Write out the new verses.csv file, overwriting the previous one
-    sorted_df.to_csv(verses_csv)
+        # Step 6: Write out the new verses.csv file, overwriting the previous one
+        sorted_df.to_csv(verses_csv)
 
-    # Step 7: Write out the file also as an Excel .xlsx file
-    output_xlsx = verses_csv.with_suffix(".xlsx")
-    sorted_df.to_excel(output_xlsx)
-    print(f"Wrote {len(sorted_df)} verse counts to {verses_csv} and to {output_xlsx}")
+        # Step 7: Write out the file also as an Excel .xlsx file
+        output_xlsx = verses_csv.with_suffix(".xlsx")
+        sorted_df.to_excel(output_xlsx)
+        print(f"Wrote {len(sorted_df)} verse counts to {verses_csv} and to {output_xlsx}")
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Count the verses in each file from a corpus of Bibles")
