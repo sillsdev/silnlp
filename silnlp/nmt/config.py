@@ -658,7 +658,7 @@ class Config(ABC):
             if project_pair not in stats_df.index and filepath.stem not in ["corpus-stats", "tokenization_stats"]:
                 project_count = ""
                 if project_pair[1] == "":
-                    LOGGER.info(f"Project pair for {filepath} unclear. Some statisitcs may be missing.")
+                    LOGGER.info(f"Project pair for {filepath} unclear. Some statistics may be missing.")
                 else:
                     src_path = get_mt_corpus_path(project_pair[0])
                     trg_path = get_mt_corpus_path(project_pair[1])
@@ -667,7 +667,7 @@ class Config(ABC):
                         project_count = len(corpus.index)
                     except:
                         LOGGER.info(
-                            f"Original source or target project for {project_pair} not found. Some statisitcs may be missing."
+                            f"Original source or target project for {project_pair} not found. Some statistics may be missing."
                         )
 
                 pair_stats = pd.read_csv(filepath)
