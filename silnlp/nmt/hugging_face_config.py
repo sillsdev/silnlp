@@ -1513,8 +1513,8 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
                     if self._delete_checkpoint_tokenizer:
                         delete_tokenizer(child)
 
-        if self._exp_name is not None:
-            SIL_NLP_ENV.copy_experiment_to_bucket(self._exp_name)
+        # if self._exp_name is not None:
+        #    SIL_NLP_ENV.copy_experiment_to_bucket(self._exp_name)
 
         if self.args.save_total_limit is None or self.args.save_total_limit <= 0:
             return
@@ -1539,4 +1539,4 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         for del_checkpoint in checkpoints_to_be_deleted:
             LOGGER.info(f"Deleting older checkpoint [{del_checkpoint}] due to args.save_total_limit")
             shutil.rmtree(del_checkpoint, ignore_errors=True)
-            SIL_NLP_ENV.delete_from_bucket(Path(del_checkpoint).relative_to(SIL_NLP_ENV.mt_experiments_dir))
+            SIL_NLP_ENV.delete_from_bucket(str(Path(del_checkpoint).relative_to(SIL_NLP_ENV.mt_experiments_dir)))

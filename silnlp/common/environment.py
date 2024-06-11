@@ -276,7 +276,9 @@ class SilNlpEnv:
         data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
         for obj in data_bucket.object_versions.filter(Prefix=experiment_path + name):
             LOGGER.info("Deleting " + str(obj.object_key))
-            try_n_times(obj.delete())
+            try_n_times(
+                lambda: s3.meta.client.delete_object(Bucket=str(self.data_dir).strip("\\/"), Key=obj.object_key)
+            )
 
     def get_source_experiment_path(self, tmp_path: Path) -> str:
         end_of_path = str(tmp_path)[len(str(self.mt_experiments_dir)) :]
