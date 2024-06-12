@@ -14,7 +14,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-if "set_up" not in st.session_state or st.session_state.set_up == False:
+if "set_up" not in st.session_state or not st.session_state.set_up:
     st.switch_page("pages/LogIn.py")
 
 import os
