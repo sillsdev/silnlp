@@ -243,6 +243,7 @@ if "current_investigation" in st.session_state:
                 texts = st.multiselect("Texts", resources)
                 check_error("stats")
                 if st.form_submit_button("Run", type="primary"):
+                    get_results.clear("verse_percentages.csv", st.session_state.current_investigation.name)
                     check_required("stats", texts)
                     stats_row = template_df[template_df["name"] == "stats"]
                     stats_setup = stats_row.to_dict(orient="records")[0]
@@ -358,6 +359,10 @@ if "current_investigation" in st.session_state:
                             align_setup["align_set"] = ",".join(books)
                         add_experiment(align_setup)
                         with st.spinner("This might take a few minutes..."):
+                            get_results.clear("corpus-stats.csv", st.session_state.current_investigation.name)
+                            get_results.clear(
+                                "tokenization_stats.csv", st.session_state.current_investigation.name, keep_name=True
+                            )
                             try:
                                 functions.run(
                                     st.session_state.current_investigation.name, experiments=["align"], force_rerun=True
@@ -579,6 +584,9 @@ if "current_investigation" in st.session_state:
                             model_setup["bt_src"] = model["bt_src"]
                         add_experiment(model_setup)
                     with st.spinner("This might take a few minutes..."):
+                        get_results.clear(
+                            "scores-best", st.session_state.current_investigation.name, keep_name=True
+                        )
                         try:
                             functions.run(st.session_state.current_investigation.name, experiments=exps)
                         except Exception as e:
