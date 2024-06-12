@@ -39,12 +39,12 @@ __Download and install__ the following before creating any projects or starting 
       (Invoke-WebRequest -Uri https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py -UseBasicParsing).Content | python
       ```
 
-   Linux:
+   Linux / macOS:
    In terminal, run:
       ```
       curl -sSL https://install.python-poetry.org | python3 - --version 1.7.1
       ```
-      Add the following line to your .bashrc file in your home directory:
+      Add the following line to your .bashrc file (Linux) or .profile file (macOS) in your home directory:
       ```
       export PATH="$HOME/.local/bin:$PATH"
       ```
@@ -82,9 +82,10 @@ See [S3 bucket setup](s3_bucket_setup.md).
 See [ClearML setup](clear_ml_setup.md).
 
 ### Create SILNLP cache
-* Create the directory "/home/user/.cache/silnlp", replacing "user" with your username.
-* Create the directory "/home/user/.cache/silnlp/experiments" and set the environment variable SIL_NLP_CACHE_EXPERIMENT_DIR to that path.
-* Create the directory "/home/user/.cache/silnlp/projects" and set the environment variable SIL_NLP_CACHE_PROJECT_DIR to that path.
+* Home directory ($HOME) on windows is usually C:\Users\<Username>\; on linux it is /home/username; and on macOS it is /Users/<Username>/. In your home directory, create the following directories.
+* Create the directory "$HOME/.cache/silnlp"
+* Create the directory "$HOME/.cache/silnlp/experiments" and set the environment variable SIL_NLP_CACHE_EXPERIMENT_DIR to that path.
+* Create the directory "$HOME/.cache/silnlp/projects" and set the environment variable SIL_NLP_CACHE_PROJECT_DIR to that path.
 
 ### Additional Environment Variables
 * Set the following environment variables with your respective credentials: CLEARML_API_ACCESS_KEY, CLEARML_API_SECRET_KEY, AWS_ACCESS_KEY_ID, and AWS_SECRET_ACCESS_KEY.
@@ -100,7 +101,7 @@ If you need to use a tool that is supported by SILNLP but is not installable as 
 
 ## Setting environment variables permanently
 
-Linux: To set environment variables permanently, add each variable as a new line to the `.bashrc` file in your home directory with the format 
+Linux / macOS users: To set environment variables permanently, add each variable as a new line to the `.bashrc` file (Linux) or `.profile` file (macOS) in your home directory with the format 
    ```
    export VAR="VAL"
    ```
@@ -120,3 +121,4 @@ Windows:
 If you need to run the .NET versions of the Machine alignment models, you will need to install .NET Core SDK 8.0. After installing, run `dotnet tool restore`.
    * Windows: [.NET Core SDK](https://dotnet.microsoft.com/download)
    * Linux: Installation instructions can be found [here](https://learn.microsoft.com/en-us/dotnet/core/install/linux-ubuntu-2004).
+   * macOS: Installation instructions can be found [here](https://learn.microsoft.com/en-us/dotnet/core/install/macos).
