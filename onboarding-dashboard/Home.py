@@ -1,5 +1,6 @@
 import zipfile
 from io import BytesIO
+import os
 
 import streamlit as st
 from s3path import S3Path
@@ -14,10 +15,17 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-if "set_up" not in st.session_state or st.session_state.set_up == False:
-    st.switch_page("pages/LogIn.py")
+disable_g_auth = False
+if os.environ.get("DISABLE_G_AUTH", '').lower() == "true":
+    disable_g_auth = True
 
-import os
+if disable_g_auth:
+    if "set_up" not in st.session_state or st.session_state.set_up == False:
+        st.switch_page("pages/LogInNoGAuth.py")
+else:
+    if "set_up" not in st.session_state or st.session_state.set_up == False:
+        st.switch_page("pages/LogIn.py")
+
 import sys
 import subprocess
 
