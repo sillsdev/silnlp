@@ -1056,7 +1056,7 @@ class HuggingFaceNMTModel(NMTModel):
                 "tf32": self._mixed_precision,
             },
         )
-        if self._is_t5 and "learning_rate" not in args.keys():
+        if self._config.train["use_lora"] and "learning_rate" not in args.keys():
             args["learning_rate"] = 3e-4
         return parser.parse_dict(args)[0]
 
