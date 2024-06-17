@@ -924,8 +924,8 @@ class HuggingFaceNMTModel(NMTModel):
                         delete_optimizer_state(child)
                     if delete_checkpoint_tokenizer:
                         delete_tokenizer(child)
-                    if delete_checkpoint_adapter and (child / "adapter").is_dir():
-                        shutil.rmtree(child / "adapter")
+                    if delete_checkpoint_adapter:
+                        self._merge_and_delete_adapter(child, len(tokenizer), training_args.save_safetensors)
 
     def save_effective_config(self, path: Path) -> None:
         training_args = self._create_training_arguments()
@@ -1092,6 +1092,27 @@ class HuggingFaceNMTModel(NMTModel):
 
         return self._dictionary
 
+    # Untie full embedding modules and instead tie embedding weights
+    def _create_tied_embedding_weights(self, model: PreTrainedModel) -> PreTrainedModel:
+        encoder_embeddings = torch.nn.Embedding(
+            model.config.vocab_size, model.config.d_model, model.config.pad_token_id
+        )
+        decoder_embeddings = torch.nn.Embedding(
+            model.config.vocab_size, model.config.d_model, model.config.pad_token_id
+        )
+
+        if self._config.model_prefix == "facebook/nllb-200":
+            model.base_model.encoder.embed_tokens = encoder_embeddings
+            model.base_model.decoder.embed_tokens = decoder_embeddings
+            model.tie_weights()
+        elif self._config.model_prefix == "google/madlad400":
+            model.encoder.embed_tokens = encoder_embeddings
+            model.decoder.embed_tokens = decoder_embeddings
+            model._tie_or_clone_weights(model.encoder.embed_tokens, model.shared)
+            model._tie_or_clone_weights(model.decoder.embed_tokens, model.shared)
+
+        return model
+
     def _convert_to_lora_model(self, model: PreTrainedModel) -> PreTrainedModel:
         lora_config = self._config.train["lora_config"]
         target_modules = lora_config.get(
@@ -1107,7 +1128,7 @@ class HuggingFaceNMTModel(NMTModel):
 
         # Only tie embedding weights together rather than the entire modules so that peft recognizes each one
         if "embed_tokens" in modules_to_save or "embed_tokens" in target_modules:
-            model = create_tied_embedding_weights(model, self._config.model_prefix)
+            model = self._create_tied_embedding_weights(model)
 
         peft_config = LoraConfig(
             task_type=TaskType.SEQ_2_SEQ_LM,
@@ -1155,6 +1176,33 @@ class HuggingFaceNMTModel(NMTModel):
             model.enable_input_require_grads()
 
         return model
+
+    def _merge_and_delete_adapter(self, checkpoint_path: Path, vocab_size: int, save_safetensors: bool) -> None:
+        adapter_path = checkpoint_path / "adapter"
+
+        base = AutoModelForSeq2SeqLM.from_pretrained(self._config.model)
+        base.resize_token_embeddings(vocab_size, pad_to_multiple_of=8 if self._mixed_precision else None)
+        base = self._create_tied_embedding_weights(base)
+
+        model_to_merge = PeftModel.from_pretrained(base, adapter_path)
+        merged_model = model_to_merge.merge_and_unload()
+
+        if self._config.model_prefix == "facebook/nllb-200":
+            embedding_weights = merged_model.model.encoder.embed_tokens.weight
+            merged_model.model.shared.weight = embedding_weights
+            merged_model.model.decoder.embed_tokens.weight = embedding_weights
+            merged_model.lm_head.weight = embedding_weights
+        elif self._config.model_prefix == "google/madlad400":
+            embedding_weights = merged_model.encoder.embed_tokens.weight
+            merged_model.shared.weight = embedding_weights
+            merged_model.decoder.embed_tokens.weight = embedding_weights
+
+        merged_model.save_pretrained(
+            checkpoint_path,
+            safe_serialization=save_safetensors,
+        )
+
+        shutil.rmtree(adapter_path)
 
     def _translate_sentences(
         self,
@@ -1260,24 +1308,6 @@ class HuggingFaceNMTModel(NMTModel):
                 model.generation_config.forced_bos_token_id = forced_bos_token_id
 
         return model, tokenizer
-
-
-# Untie full embedding modules and instead tie embedding weights
-def create_tied_embedding_weights(model: PreTrainedModel, model_prefix: str) -> PreTrainedModel:
-    encoder_embeddings = torch.nn.Embedding(model.config.vocab_size, model.config.d_model, model.config.pad_token_id)
-    decoder_embeddings = torch.nn.Embedding(model.config.vocab_size, model.config.d_model, model.config.pad_token_id)
-
-    if model_prefix == "facebook/nllb-200":
-        model.base_model.encoder.embed_tokens = encoder_embeddings
-        model.base_model.decoder.embed_tokens = decoder_embeddings
-        model.tie_weights()
-    elif model_prefix == "google/madlad400":
-        model.encoder.embed_tokens = encoder_embeddings
-        model.decoder.embed_tokens = decoder_embeddings
-        model._tie_or_clone_weights(model.encoder.embed_tokens, model.shared)
-        model._tie_or_clone_weights(model.decoder.embed_tokens, model.shared)
-
-    return model
 
 
 class HuggingFaceTokenizer(Tokenizer):
@@ -1464,32 +1494,12 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         elif isinstance(self.model, PeftModel):
             if self._better_transformer:
                 self.model = self.model.reverse_bettertransformer()
-
             self.model.save_pretrained(
                 output_dir + "/adapter",
                 state_dict=state_dict,
                 safe_serialization=self.args.save_safetensors,
                 save_embedding_layers=False,
             )
-
-            base = AutoModelForSeq2SeqLM.from_pretrained(self.model.name_or_path)
-            base.resize_token_embeddings(
-                len(self.tokenizer), pad_to_multiple_of=8 if self.args.fp16 or self.args.bf16 else None
-            )
-            base = create_tied_embedding_weights(base, get_model_prefix(self.model.name_or_path))
-
-            model_to_merge = PeftModel.from_pretrained(base, output_dir + "/adapter")
-            merged_model = model_to_merge.merge_and_unload()
-            embedding_weights = merged_model.model.encoder.embed_tokens.weight
-            merged_model.model.shared.weight = embedding_weights
-            merged_model.model.decoder.embed_tokens.weight = embedding_weights
-            merged_model.lm_head.weight = embedding_weights
-            merged_model.save_pretrained(
-                output_dir,
-                state_dict=state_dict,
-                safe_serialization=self.args.save_safetensors,
-            )
-
             if self._better_transformer:
                 self.model = self.model.to_bettertransformer()
         else:
