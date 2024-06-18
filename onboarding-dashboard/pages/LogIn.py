@@ -1,6 +1,7 @@
 import os
 import sys
 
+import boto3
 import google_auth_oauthlib.flow
 import streamlit as st
 from googleapiclient.discovery import build
@@ -14,7 +15,7 @@ sys.path.append(parent_dir)
 from utils import check_error, check_required
 
 bypass_auth = False
-if os.environ.get("BYPASS_AUTH", '').lower() == "true":
+if os.environ.get("BYPASS_AUTH", "").lower() == "true":
     bypass_auth = True
 
 if not os.path.exists(os.environ.get("SIL_NLP_CACHE_EXPERIMENT_DIR", "~/.cache/silnlp")):
@@ -54,7 +55,11 @@ def auth_flow():
         redirect_uri = os.environ.get("REDIRECT_URL", "http://localhost:8501/LogIn")
         flow = google_auth_oauthlib.flow.Flow.from_client_secrets_file(
             "client_secrets.json",
-            scopes=["https://www.googleapis.com/auth/userinfo.email", "openid", "https://www.googleapis.com/auth/drive"],
+            scopes=[
+                "https://www.googleapis.com/auth/userinfo.email",
+                "openid",
+                "https://www.googleapis.com/auth/drive",
+            ],
             redirect_uri=redirect_uri,
         )
         if auth_code:
@@ -83,6 +88,7 @@ def auth_flow():
                 include_granted_scopes="true",
             )
             st.page_link(page=authorization_url, label="Sign in with Google")
+
 
 if "google_auth" not in st.session_state:
     auth_flow()
@@ -135,11 +141,10 @@ else:
             if st.form_submit_button("Set Up", type="primary"):
                 from clowder import functions
 
-                if not bypass_auth:
-                    if is_external_user:
-                        check_required(
-                            "set_up", root, data_folder, func=(lambda p: p is not None and p != "" and "folders/" in p)
-                        )
+                if not bypass_auth and is_external_user:
+                    check_required(
+                        "set_up", root, data_folder, func=(lambda p: p is not None and p != "" and "folders/" in p)
+                    )
                 else:
                     check_required("set_up", root, func=(lambda p: p is not None and p != "" and "folders/" in p))
                 with st.spinner("This might take a few minutes..."):
@@ -154,6 +159,7 @@ else:
                             auth=st.session_state.google_auth, context=root.split("folders/")[1].split("?")[0]
                         )
                     functions.ENV = st.session_state.clowder_env
+                    boto3.resource("s3")
                     if len(functions.list_inv(env=st.session_state.clowder_env)) == 0:
                         functions.track(None, env=st.session_state.clowder_env)
                     if not bypass_auth and is_external_user:
