@@ -916,7 +916,7 @@ class HuggingFaceNMTModel(NMTModel):
 
         delete_checkpoint_optimizer_state = self._config.train["delete_checkpoint_optimizer_state"]
         delete_checkpoint_tokenizer = self._config.train["delete_checkpoint_tokenizer"]
-        delete_checkpoint_adapter = self._config.train["use_lora"]
+        delete_checkpoint_adapter = self._config.train["use_lora"] and self._config.model_prefix == "facebook/nllb-200"
         if delete_checkpoint_optimizer_state or delete_checkpoint_tokenizer or delete_checkpoint_adapter:
             for child in Path(training_args.output_dir).iterdir():
                 if child.is_dir() and child.name.startswith("checkpoint-"):
@@ -1192,10 +1192,6 @@ class HuggingFaceNMTModel(NMTModel):
             merged_model.model.shared.weight = embedding_weights
             merged_model.model.decoder.embed_tokens.weight = embedding_weights
             merged_model.lm_head.weight = embedding_weights
-        elif self._config.model_prefix == "google/madlad400":
-            embedding_weights = merged_model.encoder.embed_tokens.weight
-            merged_model.shared.weight = embedding_weights
-            merged_model.decoder.embed_tokens.weight = embedding_weights
 
         merged_model.save_pretrained(
             checkpoint_path,
@@ -1254,9 +1250,24 @@ class HuggingFaceNMTModel(NMTModel):
             model_name = self._config.model
 
         dtype = torch.bfloat16 if self._is_t5 else torch.float16
-        model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(
-            model_name, torch_dtype=dtype if self._mixed_precision else "auto"
-        )
+        if (
+            self._config.train["use_lora"]
+            and self._config.model_prefix == "google/madlad400"
+            and model_name != self._config.model
+        ):
+            base_model = AutoModelForSeq2SeqLM.from_pretrained(
+                self._config.model, torch_dtype=dtype if self._mixed_precision else "auto"
+            )
+            if len(tokenizer) != base_model.get_input_embeddings().weight.size(dim=0):
+                base_model.resize_token_embeddings(
+                    len(tokenizer), pad_to_multiple_of=8 if self._mixed_precision else None
+                )
+            base_model = self._create_tied_embedding_weights(base_model)
+            model = PeftModel.from_pretrained(base_model, model_name)
+        else:
+            model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(
+                model_name, torch_dtype=dtype if self._mixed_precision else "auto"
+            )
         if self._config.infer.get("better_transformer"):
             model = model.to_bettertransformer()
         if model_name == self._config.model and len(tokenizer) != model.get_input_embeddings().weight.size(dim=0):
@@ -1494,8 +1505,9 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         elif isinstance(self.model, PeftModel):
             if self._better_transformer:
                 self.model = self.model.reverse_bettertransformer()
+            output_dir += "/adapter" if self.model.name_or_path.startswith("facebook/nllb-200") else ""
             self.model.save_pretrained(
-                output_dir + "/adapter",
+                output_dir,
                 state_dict=state_dict,
                 safe_serialization=self.args.save_safetensors,
                 save_embedding_layers=False,
