@@ -65,6 +65,7 @@ def auth_flow():
         if auth_code:
             gauth.GetFlow()
             gauth.flow.redirect_uri = redirect_uri
+            gauth.settings.get_refresh_token = True
             try:
                 gauth.Authenticate(auth_code)
             except Exception as e:
