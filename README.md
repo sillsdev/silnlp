@@ -33,6 +33,8 @@ These are the main requirements for the SILNLP code to run on a local machine. S
 2. Download and install [Docker Desktop](https://www.docker.com/get-started/).
    * If using Linux (not WSL), add your user to the docker group by using a terminal to run: `sudo usermod -aG docker $USER`
    * Reboot after installing, confirm that all installation steps are complete before the next step.
+   
+   If using a local GPU, you'll also need to install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#installation) and configure Docker so that it can use the [NVIDIA Container Runtime](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#configuring-docker).
 
 3. Pull Docker image
    
@@ -91,7 +93,6 @@ Follow the instructions below to set up a Dev Container in VS Code. This is the 
 
 2. Download and install [Docker Desktop](https://www.docker.com/get-started/).
    * Reboot after installing and completing the relevant steps below, confirm that all installation steps are complete before the next step.
-   * Linux users should have no additional steps given that they follow Docker's distribution-specific setup.
 
    Windows (non-WSL) and macOS:
    * Open Settings in Docker Desktop and under the Resources tab, update File Sharing with any locations your source code is kept.
@@ -100,9 +101,13 @@ Follow the instructions below to set up a Dev Container in VS Code. This is the 
    * Enable WSL 2 backend:
       * Open Settings in Docker Desktop and check "Use WSL 2 based engine" under the General tab. It may already be checked.
       * To verify, check under the Resources tab in Settings for a message saying that you are using the WSL 2 backend.
+
    Linux:
    * Add your user to the docker group by using a terminal to run: `sudo usermod -aG docker $USER`
    * Sign out and back in again so your changes take effect
+
+
+   If using a local GPU, you'll also need to install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#installation) and configure Docker so that it can use the [NVIDIA Container Runtime](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#configuring-docker).
 
 3. Set up [ClearML](clear_ml_setup.md).
 
