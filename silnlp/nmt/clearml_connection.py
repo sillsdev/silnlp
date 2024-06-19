@@ -28,7 +28,7 @@ class SILClearML:
         project = name_parts[0]
         exp_name = name_parts[-1]
         if len(name_parts) > 2:
-            exp_name = '/'.join(name_parts[1:])
+            exp_name = "/".join(name_parts[1:])
         if self.queue_name is None:
             self.task = None
             self._load_config()
@@ -50,7 +50,7 @@ class SILClearML:
             self.task.set_base_docker(
                 # docker_image="ghcr.io/sillsdev/silnlp:1.01.4",
                 docker_image="nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu20.04",
-                docker_arguments="-v /home/clearml/.clearml/hf-cache:/root/.cache/huggingface",
+                docker_arguments="--env TOKENIZERS_PARALLELISM=false",
                 docker_setup_bash_script=[
                     "apt install -y python3-venv",
                     "python3 -m pip install --user pipx",
