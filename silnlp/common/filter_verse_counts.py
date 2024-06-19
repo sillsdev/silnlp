@@ -4,19 +4,23 @@ from pathlib import Path
 import yaml
 from ..common.environment import SIL_NLP_ENV
 
+
 def get_filenames_from_yaml(config_file):
     with open(config_file, 'r') as f:
         config = yaml.safe_load(f)
 
     filenames = set()
     for pair in config['data']['corpus_pairs']:
-        filenames.update(pair['src'])
-        filenames.update(pair['trg'])
+        src_files = pair['src'] if isinstance(pair['src'], list) else [pair['src']]
+        trg_files = pair['trg'] if isinstance(pair['trg'], list) else [pair['trg']]
+        filenames.update(src_files)
+        filenames.update(trg_files)
 
     # Add ".txt" extension to each filename
     filenames = [f"{filename}.txt" for filename in filenames]
 
     return list(filenames)
+
 
 def get_filenames_from_txt(files_txt_path):
     with open(files_txt_path, "r") as f:
@@ -62,12 +66,16 @@ def main():
     
     if alignment_config_file.is_file():
         filenames = get_filenames_from_yaml(alignment_config_file)
+        print(f"Found filenames in the alignment config file: {alignment_config_file}")
     elif files_txt_file.is_file():
         filenames = get_filenames_from_txt(files_txt_file)
+        print(f"Found in the text file: {files_txt_file}")
     else:
         print(f"Couldn't find either an alignment config file {alignment_config_file} or a list of files in {files_txt_file}.")
         exit()
-
+    for filename in filenames:
+        print(filename)
+    
     filter_verses(verse_counts_file, filenames, output_csv_file)
 
 if __name__ == "__main__":
