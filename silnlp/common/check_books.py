@@ -22,17 +22,19 @@ LOGGER = logging.getLogger(__package__ + ".translate")
 def parse_book(project_dir, book, stylesheet_field_update: str, verbose: bool):
 
     """Check whether a book will parse correctly or not.
-    Return True if it parses with the current settings and False otherwise.
+    Return the segments if it parses with the current settings and False otherwise.
     """
+
     errors = []
 
     book_path = get_book_path(project_dir, book)
     stylesheet = get_stylesheet(project_dir)
 
-    with book_path.open(mode="r", encoding="utf-8-sig") as book_file:
+    with open(book_path, mode="r", encoding="utf-8-sig") as book_file:
         try:
             doc: List[sfm.Element] = list(usfm.parser(book_file, stylesheet=stylesheet, canonicalise_footnotes=False))
         except Exception as e:
+            print(f"Couldn't get the doc for {book_path} \nwith stylesheet: {stylesheet}")
             parsed_without_errors = False
             errors.append(e)
 
@@ -52,14 +54,14 @@ def parse_book(project_dir, book, stylesheet_field_update: str, verbose: bool):
             vrefs = [s.ref for s in segments]
             if verbose:
                 LOGGER.info(f"{book} in project {project_dir} parsed correctly and contains {len(vrefs)} verses.")
-            parsed_without_errors = True
+            return segments
 
         else:
-            if verbose:
-                LOGGER.info(f"The following error occured while parsing {book} in project {project_dir}")
-                for error in errors:
-                    error_str = " ".join([str(s) for s in error.args])
-                    LOGGER.info(error_str)
+            LOGGER.info(f"The following error occured while parsing {book} in project {project_dir}")
+            for error in errors:
+                error_str = " ".join([str(s) for s in error.args])
+                LOGGER.info(error_str)
+            
             parsed_without_errors = False
 
     return parsed_without_errors
@@ -160,19 +162,29 @@ def main() -> None:
         book_path = get_book_path(project_dir, book_to_check)
 
         if not book_path.is_file():
-            missing.append(f"{book_to_check} {book_path}")
+            missing.append(book_to_check)
         else:
-            if parse_book(project_dir, book_to_check, stylesheet_field_update, verbose):
-                parsed.append(f"{book_to_check} {book_path}")
+            segments = parse_book(project_dir, book_to_check, stylesheet_field_update, verbose)
+            if segments:
+                parsed.append(book_to_check)
             else:
-                failed_to_parse.append(f"{book_to_check} {book_path}")
+                failed_to_parse.append(book_to_check)
 
-    for book in parsed:
-        print(f"Parsed OK: {book}")
-    for book in failed_to_parse:
-        print(f"Failed to parse: {book}")
-    for book in missing:
-        print(f"Couldn't find: {book}")
+            if verbose and len(books_to_check) == 1:
+                print(f"\nHere are the segments from {book_to_check}.")
+                for segment in segments:
+                    if not segment.is_empty:
+                        print(segment.ref, segment.text, end='')
+                        
+                
+
+    parsed_books = ' '.join(book for book in parsed)
+    failed_books = ' '.join(book for book in failed_to_parse)
+    missing_books = ' '.join(book for book in missing)
+
+    print(f"Couldn't find these books: {missing_books}")
+    print(f"These books parsed OK: {parsed_books}")
+    print(f"These failed to parse: {failed_books}")
 
 
 if __name__ == "__main__":
