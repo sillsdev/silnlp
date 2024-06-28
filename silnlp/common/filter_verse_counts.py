@@ -2,7 +2,44 @@ import argparse
 import pandas as pd
 from pathlib import Path
 import yaml
+
+from machine.scripture import ALL_BOOK_IDS, book_id_to_number, is_nt, is_ot
+from tqdm import tqdm
+
 from ..common.environment import SIL_NLP_ENV
+
+DT_canon = [
+    "TOB",
+    "JDT",
+    "ESG",
+    "WIS",
+    "SIR",
+    "BAR",
+    "LJE",
+    "S3Y",
+    "SUS",
+    "BEL",
+    "1MA",
+    "2MA",
+    "3MA",
+    "4MA",
+    "1ES",
+    "2ES",
+    "MAN",
+    "PS2",
+    "ODA",
+    "PSS",
+    "EZA",
+    "JUB",
+    "ENO",
+]
+
+
+OT_canon = [book for book in ALL_BOOK_IDS if is_ot(book_id_to_number(book))]
+NT_canon = [book for book in ALL_BOOK_IDS if is_nt(book_id_to_number(book))]
+
+INCLCUDED_BOOKS = OT_canon + NT_canon + DT_canon
+IGNORED_BOOKS = [book for book in ALL_BOOK_IDS if book not in INCLCUDED_BOOKS]
 
 
 def get_filenames_from_yaml(config_file):
@@ -50,6 +87,7 @@ def filter_verses(verses_csv_path, filenames, output_csv_path):
     sorted_df.to_excel(output_xlsx_path)
     print(f"Wrote {len(sorted_df)} verse counts to {output_csv_path} and to {output_xlsx_path}")
 
+
 def main():
     parser = argparse.ArgumentParser(description="Filter verses.csv based on filenames in files.txt or config.yml.")
     parser.add_argument("folder", type=Path, help="Path to the folder containing files.txt or config.yml.")
@@ -58,7 +96,12 @@ def main():
     verse_counts_file = SIL_NLP_ENV.mt_experiments_dir / "verses" / "verses.csv"
     
     experiment_folder = SIL_NLP_ENV.mt_experiments_dir / args.folder
-    experiment_align_folder = experiment_folder / "align"
+    
+    if experiment_folder.name == 'align':
+        experiment_align_folder = experiment_folder 
+    else: 
+        experiment_align_folder = experiment_folder / "align"
+        
     alignment_config_file = experiment_align_folder / "config.yml"
     files_txt_file = experiment_align_folder / "files.txt"
 

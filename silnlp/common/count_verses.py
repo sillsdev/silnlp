@@ -88,7 +88,7 @@ def check_for_lock_files(folder):
 
 def count_verses(input_folder, output_folder, recount=False):
 
-    verses_csv = output_folder / "verses.csv"
+    verses_csv = output_folder / "verses" / "verses.csv"
     output_xlsx = verses_csv.with_suffix(".xlsx")
 
     if verses_csv.is_file() or output_xlsx.is_file():
@@ -181,7 +181,7 @@ def main() -> None:
     parser.add_argument("--input", default=SIL_NLP_ENV.mt_scripture_dir, help="Folder containing Bibles as text files.")
     parser.add_argument(
         "--output",
-        default=f"{SIL_NLP_ENV.mt_experiments_dir}/verses",
+        default = SIL_NLP_ENV.mt_experiments_dir / "verses" ,
         help="Folder in which to save results",
     )
     parser.add_argument("--recount", action="store_true", help="Delete existing count files and recount all verses.")
@@ -189,6 +189,8 @@ def main() -> None:
     args = parser.parse_args()
     input_folder = Path(args.input)
     output_folder = Path(args.output)
+    print(f"Output folder is {output_folder}")
+
     recount = args.recount
 
     # print("All books IDS:")
