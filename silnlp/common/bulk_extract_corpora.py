@@ -11,6 +11,7 @@ from tqdm.contrib.concurrent import process_map
 
 logging.disable(logging.CRITICAL)
 from ..common.corpus import count_lines, write_corpus
+from ..common.count_verses import count_verses
 from ..common.environment import SIL_NLP_ENV
 from .paratext import extract_project, extract_term_renderings
 
@@ -82,6 +83,9 @@ def main() -> None:
     if args.error_log is not None:
         write_corpus(Path(args.error_log), (f"{project}\t{msg}" for project, msg in errors))
 
+    if corpus_output == SIL_NLP_ENV.pt_projects_dir:
+        verses_csv = SIL_NLP_ENV.mt_experiments_dir / "verses" / "verses.csv" 
+        count_verses(SIL_NLP_ENV.pt_projects_dir, SIL_NLP_ENV.mt_experiments_dir, verses_csv)
 
 if __name__ == "__main__":
     main()
