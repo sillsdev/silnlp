@@ -18,6 +18,9 @@ st.markdown(
 if "set_up" not in st.session_state or not st.session_state.set_up:
     st.switch_page("pages/LogIn.py")
 
+if st.session_state.google_auth.access_token_expired:
+    st.session_state.google_auth.Refresh()
+
 import os
 import subprocess
 import sys

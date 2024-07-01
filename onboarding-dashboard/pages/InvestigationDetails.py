@@ -30,7 +30,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-
 @st.cache_data(show_spinner=False)
 def get_resources():
     with st.spinner("Fetching resources. This might take a few minutes..."):
@@ -207,6 +206,8 @@ def get_drafts(investigation_name: str):
 
 # TODO DESCRIPTIVE TEXT
 if "current_investigation" in st.session_state:
+    if st.session_state.google_auth.access_token_expired:
+        st.session_state.google_auth.Refresh()
     if (
         "synced_dict" not in st.session_state
         or st.session_state.current_investigation.name not in st.session_state.synced_dict
