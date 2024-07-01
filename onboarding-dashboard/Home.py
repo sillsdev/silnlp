@@ -33,8 +33,7 @@ from clowder import functions
 from clowder.environment import DuplicateInvestigationException
 from silnlp.common.environment import SIL_NLP_ENV
 
-RESOURCE_SUBLIST_LENGTH = 100
-
+RESOURCE_SUBLIST_LENGTH = 50
 
 def copy_resource_to_gdrive(r: BytesIO):
     if not zipfile.is_zipfile(r):
@@ -93,7 +92,6 @@ def get_resources():
         st.error(f"Something went wrong while fetching resource data. Please try again. Error: {e}")
         return []
 
-
 @st.cache_data(show_spinner=False)
 def get_resource_dict():
     res_dict = {}
@@ -103,9 +101,10 @@ def get_resource_dict():
         return {"_": res}
     for index in range(0, len(res), l):
         begin_t = res[index][:3]
-        end_t = res[min(index + l, len(res)) - 1][:3]
-        res_dict[(begin_t, end_t)] = res[index : index + l]
+        end_t = res[min(index+l, len(res))-1][:3]
+        res_dict[(begin_t, end_t)] = res[index:index+l]
     return res_dict
+        
 
 
 if "investigations" not in st.session_state:
@@ -172,14 +171,14 @@ with resource_tab:
     with c1:
         with st.container(height=500):
             res_dict = get_resource_dict()
-            if len(res_dict) == 1:
+            if(len(res_dict)==1):
                 for resource in res_dict["_"]:
                     with st.container(border=True):
                         st.write(resource)
             else:
                 for key in sorted(res_dict.keys()):
                     begin, end = key
-                    with st.expander(f"**`{begin}` &mdash; `{end}`**"):
+                    with st.expander(f"**{begin} &mdash; {end}**"):
                         resource_fragment(res_dict, key)
     with c2:
         with st.form(key=f"add_resource"):
