@@ -27,7 +27,6 @@ from models import Investigation
 parent_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(parent_dir)
 
-import pandas as pd
 from utils import check_error, check_required
 
 from clowder import functions
@@ -95,8 +94,44 @@ def get_resources():
         return []
 
 
+@st.cache_data(show_spinner=False)
+def get_resource_dict():
+    res_dict = {}
+    res = sorted(get_resources())
+    l = RESOURCE_SUBLIST_LENGTH
+    if len(res) < l:
+        return {"_": res}
+    for index in range(0, len(res), l):
+        begin_t = res[index][:3]
+        end_t = res[min(index + l, len(res)) - 1][:3]
+        res_dict[(begin_t, end_t)] = res[index : index + l]
+    return res_dict
+
+
 if "investigations" not in st.session_state:
     st.session_state.investigations = get_investigations()
+
+if "resource_load" not in st.session_state:
+    st.session_state.resource_load = {}
+
+
+@st.experimental_fragment
+def resource_fragment(res_dict, key):
+    if key in st.session_state.resource_load:
+        resources = res_dict[key]
+        for resource in resources:
+            with st.container(border=True):
+                st.write(resource)
+    else:
+        st.button("Load", on_click=update_resource_load(key), key=f"butt-{key}")
+
+
+def update_resource_load(key):
+    def fn():
+        st.session_state.resource_load[key] = True
+
+    return fn
+
 
 investigation_tab, resource_tab, settings_tab = st.tabs(["Investigations", "Resources", "Settings"])
 
@@ -135,10 +170,17 @@ with resource_tab:
     st.header("Resources")
     c1, c2 = st.columns([0.5, 0.5])
     with c1:
-        res = get_resources()
-        data = {"Resource": res}
-        df = pd.DataFrame(data)
-        st.dataframe(df, use_container_width=True, hide_index=True, height=500)
+        with st.container(height=500):
+            res_dict = get_resource_dict()
+            if len(res_dict) == 1:
+                for resource in res_dict["_"]:
+                    with st.container(border=True):
+                        st.write(resource)
+            else:
+                for key in sorted(res_dict.keys()):
+                    begin, end = key
+                    with st.expander(f"**`{begin}` &mdash; `{end}`**"):
+                        resource_fragment(res_dict, key)
     with c2:
         with st.form(key=f"add_resource"):
             resources = st.file_uploader(
