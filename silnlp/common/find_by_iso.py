@@ -1,6 +1,5 @@
 import argparse
 import json
-import os
 from pathlib import Path
 
 from ..common.environment import SIL_NLP_ENV
