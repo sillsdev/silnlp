@@ -26,6 +26,7 @@ from models import Investigation
 
 parent_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(parent_dir)
+from time import perf_counter
 
 from utils import check_error, check_required
 
@@ -33,7 +34,6 @@ from clowder import functions
 from clowder.environment import DuplicateInvestigationException
 from silnlp.common.environment import SIL_NLP_ENV
 
-RESOURCE_SUBLIST_LENGTH = 50
 
 def copy_resource_to_gdrive(r: BytesIO):
     if not zipfile.is_zipfile(r):
@@ -83,28 +83,26 @@ def get_investigations() -> list:
 @st.cache_data(show_spinner=False)
 def get_resources():
     try:
-        fn_res = functions.list_resources(env=st.session_state.clowder_env)
-        return list(map(lambda fn: fn[:-4], fn_res))
+        start = perf_counter()
+        fn_res = functions.list_resources(env=st.session_state.clowder_env, generator=True)
+        print(f"Split 1 (fn): {perf_counter() - start}")
+        m = map(lambda fn: fn[:-4], fn_res)
+        print(f"Split 2 (map): {perf_counter() - start}")
+        l = []
+        i = 0
+        for _ in m:
+            if i % 100 == 0:
+                print(f"Split 3.{i} (for): {perf_counter() - start}")
+            l.append(_)
+            i += 1
+        print(f"Split 4 (map): {perf_counter() - start}")
+        return l
     except Exception as e:
         import traceback
 
         traceback.print_exc()
         st.error(f"Something went wrong while fetching resource data. Please try again. Error: {e}")
         return []
-
-@st.cache_data(show_spinner=False)
-def get_resource_dict():
-    res_dict = {}
-    res = sorted(get_resources())
-    l = RESOURCE_SUBLIST_LENGTH
-    if len(res) < l:
-        return {"_": res}
-    for index in range(0, len(res), l):
-        begin_t = res[index][:3]
-        end_t = res[min(index+l, len(res))-1][:3]
-        res_dict[(begin_t, end_t)] = res[index:index+l]
-    return res_dict
-        
 
 
 if "investigations" not in st.session_state:
@@ -170,16 +168,21 @@ with resource_tab:
     c1, c2 = st.columns([0.5, 0.5])
     with c1:
         with st.container(height=500):
-            res_dict = get_resource_dict()
-            if(len(res_dict)==1):
-                for resource in res_dict["_"]:
-                    with st.container(border=True):
-                        st.write(resource)
-            else:
-                for key in sorted(res_dict.keys()):
-                    begin, end = key
-                    with st.expander(f"**{begin} &mdash; {end}**"):
-                        resource_fragment(res_dict, key)
+            start = perf_counter()
+            res_dict = {}
+            res = get_resources()
+            print(f"Split 1 (res): {perf_counter() - start}")
+            for resource in res:
+                letter = resource[0].upper()
+                try:
+                    res_dict[letter].append(resource)
+                except KeyError:
+                    res_dict[letter] = [resource]
+            print(f"Split 2 (dict): {perf_counter() - start}")
+            for key in sorted(res_dict.keys()):
+                with st.expander(key):
+                    resource_fragment(res_dict, key)
+            print(f"Split 3 (write): {perf_counter() - start}")
     with c2:
         with st.form(key=f"add_resource"):
             resources = st.file_uploader(
