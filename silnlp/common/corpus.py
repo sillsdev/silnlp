@@ -43,8 +43,17 @@ def get_scripture_parallel_corpus(
     with (SIL_NLP_ENV.assets_dir / "vref.txt").open("r", encoding="utf-8") as vref_file, src_file_path.open(
         "r", encoding="utf-8"
     ) as src_file, trg_file_path.open("r", encoding="utf-8") as trg_file:
+        # Read lines before using zip to catch last lines of src/trg file if the other ends in one or more empty lines
+        vref_lines = vref_file.readlines()
+        src_lines = src_file.readlines()
+        trg_lines = trg_file.readlines()
+        if src_lines[-1].endswith("\n"):
+            src_lines.append("")
+        if trg_lines[-1].endswith("\n"):
+            trg_lines.append("")
+
         index = 0
-        for vref_line, src_line, trg_line in zip(vref_file, src_file, trg_file):
+        for vref_line, src_line, trg_line in zip(vref_lines, src_lines, trg_lines):
             vref_line = vref_line.strip()
             src_line = src_line.strip()
             trg_line = trg_line.strip()
@@ -89,15 +98,8 @@ def get_scripture_parallel_corpus(
                 trg_sentences.pop(i)
                 indices.pop(i)
     else:
-        for i in range(len(vrefs) - 1, -1, -1):
-            if (
-                len(src_sentences[i]) == 0
-                or len(trg_sentences[i]) == 0
-                or src_sentences[i] == "..."
-                or trg_sentences[i] == "..."
-            ):
-                src_sentences[i] = ""
-                trg_sentences[i] = ""
+        src_sentences = ["" if sent == "..." else sent for sent in src_sentences]
+        trg_sentences = ["" if sent == "..." else sent for sent in trg_sentences]
 
     data = {"vref": vrefs, "source": src_sentences, "target": trg_sentences}
     return pd.DataFrame(data, index=indices)
