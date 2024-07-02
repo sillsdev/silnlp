@@ -67,10 +67,9 @@ ALIGNERS: Dict[str, Tuple[Type[Aligner], str]] = {
     "clear3_fa": (ClearAligner, "Clear-3-FA"),
     "clear3_hmm": (ClearAligner, "Clear-3-HMM"),
     "clab_fast_align": (FastAlign, "clab-FastAlign"),
+    "eflomal": (EflomalAligner, "Eflomal"),
 }
 
-if is_eflomal_available():
-    ALIGNERS["eflomal"] = (EflomalAligner, "Eflomal")
 
 STEMMERS: Dict[str, Type[Stemmer]] = {
     "snowball": SnowballStemmer,
