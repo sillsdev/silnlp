@@ -65,6 +65,20 @@ def get_equivalent_isocodes(iso_codes: Union[IsoCode, List[IsoCode], IsoCodeSet]
     return result
 
 
+def get_tla_iso(iso_code) -> IsoCode:
+    if len(iso_code) == 3:
+        return iso_code
+    if len(iso_code) == 2:
+        isocodes = ISO_EQUIVALENTS.get(iso_code)
+        #print(f"Iso code is {iso_code}")
+        #print(isocodes, type(isocodes))
+        #exit()
+        for isocode in isocodes:
+            if len(isocode) == 3:
+                return isocode
+    raise RuntimeError("Couldn't find a three letter version of iso code; {iso_code}")
+
+
 def find_related_languages(iso_codes: Union[IsoCode, List[IsoCode], IsoCodeSet], verbose=False) -> IsoCodeSet:
     iso_codes = get_equivalent_isocodes(iso_codes)
     related_codes = set()
@@ -133,7 +147,7 @@ def confirm_write_config(config, config_file, message):
 def read_corpus_stats(file_path):
     with open(file_path, 'r', newline='', encoding='utf-8') as csvfile:
         reader = csv.DictReader(csvfile)
-        return [row for row in reader if float(row['filtered_count']) >= 5000 and float(row['filtered_align_score']) >= 0.2]
+        return [row for row in reader if float(row['count']) >= 5000 and float(row['align_score']) >= 0.2]
 
 
 def trim_date(project_name):
@@ -155,7 +169,7 @@ def create_experiment_series_folder(experiment_name: str) -> Tuple[Path, Path]:
     return experiment_series_dir, align_dir
 
 
-def create_align_config(align_dir: Path, target_file: str, related_scriptures: List[str], source_files: List[str]):
+def create_align_config(align_dir: Path, target_file: str, related_scriptures: List[str], source_files: List[str]) -> Path:
     config = {
         "data": {
             "aligner": "fast_align",
@@ -175,7 +189,7 @@ def create_align_config(align_dir: Path, target_file: str, related_scriptures: L
 
     align_config_file = align_dir / "config.yml"
     confirm_write_config(config, align_config_file, message="Alignment config file")
-    return 
+    return align_config_file
 
 
 def run_alignments(experiment_series_dir: Path):
@@ -285,17 +299,37 @@ def main():
     print(f"Found {len(related_isos)} languages spoken in the same country or in the same language family.")
 
     related_nllb_isos = select_nllb_languages(related_isos)
-    print(f"Found {len(related_nllb_isos)} languages also known to NLLB.")
-    for related_nllb_iso in related_nllb_isos:
-        lang_info = LANGUAGE_DATA[related_nllb_iso]
-        print(f"{related_nllb_iso}: {lang_info['Name']}, {lang_info['Country']}, {lang_info['Family']}")
+    if related_nllb_isos:
+        print(f"Of these {len(related_nllb_isos)} languages are known to NLLB.")
+        for related_nllb_iso in related_nllb_isos:
+            lang_info = LANGUAGE_DATA[related_nllb_iso]
+            print(f"{related_nllb_iso}: {lang_info['Name']}, {lang_info['Country']}, {lang_info['Family']}")
+    else:
+        print(f"None of these {len(related_isos)} languages are known to NLLB.")
 
-    related_scriptures = find_scriptures_by_iso(set(related_nllb_isos), scripture_dir)
-    print(f"Found {len(related_scriptures)} in the {scripture_dir} folder.")
-    for related_scripture in related_scriptures:
-        print(f"{related_scripture}")
+    if related_nllb_isos:
+        related_scriptures = find_scriptures_by_iso(set(related_nllb_isos), scripture_dir)
+        print(f"Found {len(related_scriptures)} in the {scripture_dir} folder.")
+    else:
+        related_scriptures = []
+
+    if related_scriptures:
+        print(f"\nFound {len(related_scriptures)} scripture files in the related languages in NLLB.")
+        for related_scripture in related_scriptures:
+            print(f"{related_scripture}")
+    else:
+        print(f"\nDidn't find any scripture files in related languages that are in NLLB.")
 
     source_files = [source.split(".")[0] for source in args.sources]  # Remove file extension if present
+    source_isos = set(extract_iso_code(source) for source in args.sources)
+    source_nllb_isos = select_nllb_languages(source_isos)
+    
+    if source_nllb_isos:
+        print(f"Found {len(source_nllb_isos)} source languages also known to NLLB.")
+        for source_nllb_iso in source_nllb_isos:
+            lang_info = LANGUAGE_DATA[source_nllb_iso]
+            print(f"{source_nllb_iso}: {lang_info['Name']}, {lang_info['Country']}, {lang_info['Family']}")
+
 
     # Create experiment folder and config file
     experiment_name = args.experiment or f"FT-{target_lang_name}"
@@ -323,6 +357,7 @@ def main():
     corpus_stats_file = experiment_series_dir / "align" / "corpus-stats.csv"
     filtered_rows = read_corpus_stats(corpus_stats_file)
     
+    lang_codes = {}
     for row in filtered_rows:
         src_project = row['src_project']
         trg_project = row['trg_project']
@@ -332,8 +367,19 @@ def main():
         # Extract language codes 
         src_lang_iso = extract_iso_code(src_project)
         trg_lang_iso = extract_iso_code(trg_project)    
+        
+        tla_src_lang_iso = get_tla_iso(src_lang_iso)
+        tla_trg_lang_iso = get_tla_iso(trg_lang_iso)
 
-        lang_codes = {src_lang_iso: NLLB_LANG_CODES[src_lang_iso] , trg_lang_iso: NLLB_LANG_CODES[trg_lang_iso]}
+        if tla_src_lang_iso in NLLB_LANG_CODES:
+            lang_codes[src_lang_iso] = NLLB_LANG_CODES[tla_src_lang_iso]
+        else :
+            lang_codes[src_lang_iso] = f"{src_lang_iso}_Latn   CHECK SCRIPT"
+
+        if tla_trg_lang_iso in NLLB_LANG_CODES:
+            lang_codes[trg_lang_iso] = NLLB_LANG_CODES[tla_trg_lang_iso]
+        else: 
+            lang_codes[trg_lang_iso] = f"{trg_lang_iso}_Latn   CHECK SCRIPT"
         
         experiment_config_file = create_experiment_config(experiment_dir, src_project, trg_project, lang_codes)
         
@@ -341,6 +387,8 @@ def main():
         if source_project and books:
             translate = True
             create_translate_config(experiment_dir, source_project, books, checkpoint="best")
+        else:
+            translate = False
             
         # Run preprocessing
         if choose_yes_no_cancel(
