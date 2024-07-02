@@ -1,14 +1,15 @@
 import argparse
 import logging
-import os
 import multiprocessing
-import matplotlib.pyplot as plt
+import os
 from pathlib import Path
 from typing import List
 
-from .utils import compute_alignment_scores
-from .config import ALIGNERS
+import matplotlib.pyplot as plt
+
 from ..common.corpus import get_scripture_parallel_corpus, tokenize_corpus
+from .config import ALIGNERS
+from .utils import compute_alignment_scores
 
 LOGGER = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ def align_set(src_input_path: Path, trg_input_path: Path, output_dir: Path, alig
     src_synced_path = output_dir / src_input_path.name
     trg_synced_path = output_dir / trg_input_path.name
     pcorp_df = get_scripture_parallel_corpus(src_input_path, trg_input_path, remove_empty_sentences=False)
+    pcorp_df = pcorp_df.loc[(pcorp_df["source"].str.len() > 0) & (pcorp_df["target"].str.len() > 0)]
     with src_synced_path.open("w+", encoding="utf-8") as source_file:
         source_file.write("\n".join(sentence for sentence in pcorp_df["source"]))
     with trg_synced_path.open("w+", encoding="utf-8") as target_file:
