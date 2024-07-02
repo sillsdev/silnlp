@@ -51,6 +51,7 @@ def auth_flow():
         st.session_state.google_auth = None
     else:
         gauth = GoogleAuth()
+        gauth.settings["get_refresh_token"] = True
         auth_code = st.query_params.get("code")
         redirect_uri = os.environ.get("REDIRECT_URL", "http://localhost:8501/LogIn")
         flow = google_auth_oauthlib.flow.Flow.from_client_secrets_file(
