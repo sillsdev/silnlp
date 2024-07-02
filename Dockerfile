@@ -61,7 +61,7 @@ COPY --from=builder /src/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && rm requirements.txt
 
 # Set eflomal path
-ENV EFLOMAL_PATH=/workspaces/silnlp/.venv/lib/python3.8/site-packages/eflomal/bin
+ENV EFLOMAL_PATH=/usr/local/lib/python3.8/dist-packages/eflomal/bin
 
 # Install fast_align
 RUN apt-get update && \
