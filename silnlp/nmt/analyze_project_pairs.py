@@ -14,14 +14,13 @@ from ..common.script_utils import get_script, is_represented
 from ..common.utils import get_git_revision_hash
 from .clearml_connection import SILClearML
 from .config import Config, get_data_file_pairs
-from .config_utils import load_config
 
 LOGGER = logging.getLogger(__package__ + ".analyze_project_pairs")
 
 
-def preprocess_stats(config: Config, force_align: bool = False, deutero: bool = False):
+def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = False):
     stats_path = config.exp_dir / "corpus-stats.csv"
-    if stats_path.is_file():
+    if stats_path.is_file() and not force_align:
         stats_df = pd.read_csv(stats_path, dtype=str, keep_default_na=False).set_index(["src_project", "trg_project"])
     else:
         stats_df = pd.DataFrame(
@@ -29,9 +28,9 @@ def preprocess_stats(config: Config, force_align: bool = False, deutero: bool = 
                 "src_project",
                 "trg_project",
                 "count",
-                "parallel",
                 "src_only",
                 "trg_only",
+                "parallel",
                 "align_score",
                 "filtered_count",
                 "filtered_align_score",
@@ -49,44 +48,44 @@ def preprocess_stats(config: Config, force_align: bool = False, deutero: bool = 
             project_pair = (f"{src_file.iso}-{src_file.project}", f"{trg_file.iso}-{trg_file.project}")
             corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path, False)
             corpus = corpus.loc[(corpus["source"].str.len() > 0) | (corpus["target"].str.len() > 0)]
-            if not deutero:
-                corpus = corpus.loc[[is_ot_nt(vref.book_num) for vref in corpus["vref"]]]
-
-            if len(pair.corpus_books) > 0:
-                corpus = include_chapters(corpus, pair.corpus_books)
+            align_corpus = corpus.loc[(corpus["source"].str.len() > 0) & (corpus["target"].str.len() > 0)]
 
             # Align pair
             pair_stats_path = config.exp_dir / f"{project_pair[0]}_{project_pair[1]}.csv"
             if pair_stats_path.is_file() and not force_align:
                 LOGGER.info(f"Using pre-existing alignment scores from {pair_stats_path}")
                 pair_stats = pd.read_csv(pair_stats_path)
-                pair_stats["idx"] = corpus.index
+                pair_stats["idx"] = align_corpus.index
                 pair_stats.set_index("idx", inplace=True)
-                corpus["score"] = pair_stats["score"]
+                align_corpus["score"] = pair_stats["score"]
             else:
                 aligner_id = config.data["aligner"]
                 LOGGER.info(f"Computing alignment scores using {get_aligner_name(aligner_id)}")
-                add_alignment_scores(corpus, aligner_id)
-                corpus.to_csv(pair_stats_path, index=False)
+                add_alignment_scores(align_corpus, aligner_id)
+                align_corpus.to_csv(pair_stats_path, index=False)
+
+            if not deutero:
+                corpus = corpus.loc[[is_ot_nt(vref.book_num) for vref in corpus["vref"]]]
+                align_corpus = align_corpus.loc[[is_ot_nt(vref.book_num) for vref in align_corpus["vref"]]]
+            if len(pair.corpus_books) > 0:
+                corpus = include_chapters(corpus, pair.corpus_books)
+                align_corpus = include_chapters(align_corpus, pair.corpus_books)
 
             # Compute stats
             if project_pair not in stats_df.index or force_align:
                 pair_count = len(corpus.index)
-                src_only_count = 0
-                trg_only_count = 0
-                for _, row in corpus.iterrows():
-                    src_only_count += len(row["target"]) == 0
-                    trg_only_count += len(row["source"]) == 0
-                parallel_count = pair_count - src_only_count - trg_only_count
+                parallel_count = len(align_corpus.index)
+                src_only_count = len(corpus.loc[corpus["target"].str.len() == 0].index)
+                trg_only_count = len(corpus.loc[corpus["source"].str.len() == 0].index)
 
-                alignment_score = corpus["score"].mean()
+                alignment_score = align_corpus["score"].mean()
                 filtered_count = 0
                 filtered_alignment_score = alignment_score
                 if pair.score_threshold > 0:
-                    unfiltered_len = len(corpus)
-                    corpus = filter_parallel_corpus(corpus, pair.score_threshold)
-                    filtered_count = unfiltered_len - len(corpus)
-                    filtered_alignment_score = mean(corpus["score"])
+                    unfiltered_len = len(align_corpus)
+                    align_corpus = filter_parallel_corpus(align_corpus, pair.score_threshold)
+                    filtered_count = unfiltered_len - len(align_corpus)
+                    filtered_alignment_score = mean(align_corpus["score"])
 
                 src_script = get_script("".join(corpus["source"][: min(len(corpus["source"]), 3000)]))
                 src_script_in_model = (
@@ -99,9 +98,9 @@ def preprocess_stats(config: Config, force_align: bool = False, deutero: bool = 
 
                 stats_df.loc[project_pair, :] = [
                     pair_count,
-                    parallel_count,
                     src_only_count,
                     trg_only_count,
+                    parallel_count,
                     "{:.4f}".format(alignment_score),
                     filtered_count,
                     "{:.4f}".format(filtered_alignment_score),
@@ -116,9 +115,9 @@ def preprocess_stats(config: Config, force_align: bool = False, deutero: bool = 
             LOGGER.info(
                 f"{src_file.project} -> {trg_file.project} stats -"
                 f" count: {row.at['count']},"
-                f" parallel count: {row.at['parallel']}"
                 f" source only count: {row.at['src_only']}"
                 f" target only count: {row.at['trg_only']}"
+                f" parallel count: {row.at['parallel']}"
                 f" alignment: {row.at['align_score']},"
                 f" filtered count: {row.at['filtered_count']},"
                 f" alignment (filtered): {row.at['filtered_align_score']},"
@@ -140,7 +139,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Collect verse counts and compute alignment scores")
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument(
-        "--force-align", default=False, action="store_true", help="Force recalculation of all alignment scores"
+        "--recalculate",
+        default=False,
+        action="store_true",
+        help="Force recalculation of all verse counts and alignment scores",
     )
     parser.add_argument("--deutero", default=False, action="store_true", help="Include deuterocanonical books")
     parser.add_argument(
@@ -165,16 +167,20 @@ def main() -> None:
     config.set_seed()
 
     # Confirm that input file paths exist
-    for file in config.src_file_paths | config.trg_file_paths:
+    data_files = []
+    for pair in config.corpus_pairs:
+        data_files += [f.path for f in pair.src_files] + [f.path for f in pair.trg_files]
+    for file in data_files:
         if not file.is_file():
             LOGGER.error(f"The source file {str(file)} does not exist.")
             return
 
-    # TODO: use caching
-    collect_verse_counts(SIL_NLP_ENV.mt_scripture_dir, config.exp_dir, args.deutero)
+    file_patterns = ";".join([f.name for f in data_files])
+    collect_verse_counts(SIL_NLP_ENV.mt_scripture_dir, config.exp_dir, file_patterns, args.deutero, args.recalculate)
 
-    preprocess_stats(config, args.force_align, args.deutero)
+    get_corpus_stats(config, args.recalculate, args.deutero)
 
+    # Create summary outputs
     """
     at this point there will be these files:
     - detailed_percentages.csv for each project w/ incomplete books: verse percentages per chapter for each incomplete book (>0 verses)
@@ -190,7 +196,7 @@ def main() -> None:
     # create excel file with alignment scores at each level
     aggregate_alignments(config)
 
-    SIL_NLP_ENV.copy_experiment_to_bucket(exp_name)
+    SIL_NLP_ENV.copy_experiment_to_bucket(exp_name, overwrite=args.recalculate)
 
 
 if __name__ == "__main__":
