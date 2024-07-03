@@ -31,13 +31,11 @@ parent_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(parent_dir)
 
 import pandas as pd
-from utils import check_error, check_required
+from utils import check_error, check_required, check_success, set_success
 
 from clowder import functions
 from clowder.environment import DuplicateInvestigationException
 from silnlp.common.environment import SIL_NLP_ENV
-
-RESOURCE_SUBLIST_LENGTH = 100
 
 
 def copy_resource_to_gdrive(r: BytesIO):
@@ -112,13 +110,10 @@ with investigation_tab:
 
     with st.form(key="new_investigation", clear_on_submit=True):
         st.write("### Create a new investigation ###")
-        if "error" in st.session_state:
-            st.error(st.session_state.error)
+        check_error("create_investigation")
         name = st.text_input("Name")
         if st.form_submit_button(type="primary"):
-            if name is None or len(name) == 0:
-                st.session_state.error = "Please fill in all required fields"
-                st.rerun()
+            check_required("create_investigation", name)
             try:
                 with st.spinner("This may take a few minutes..."):
                     try:
@@ -130,9 +125,9 @@ with investigation_tab:
             except DuplicateInvestigationException:
                 st.session_state.error = "An investigation with that name already exists"
                 st.rerun()
-            if "error" in st.session_state:
-                del st.session_state.error
+            set_success("create_investigation", "Investigation successfully created!")
             st.rerun()
+        check_success("create_investigation")
 
 with resource_tab:
     st.header("Resources")
@@ -177,6 +172,8 @@ with resource_tab:
                                 if result.returncode != 0:
                                     print(result.stderr)
                                     st.error(f"Something went wrong while adding resource data. Please try again.")
+                                else:
+                                    set_success("add_resource", "Resource(s) successfully uploaded!")
                                 SIL_NLP_ENV.copy_pt_project_to_bucket(project)
                         st.cache_data.clear()
                         st.rerun()
@@ -186,10 +183,12 @@ with resource_tab:
                                 copy_resource_to_gdrive(resource)
                         try:
                             functions.use_data(functions.current_data(env=st.session_state.clowder_env))
+                            set_success("add_resource", "Resource(s) successfully uploaded!")
                             st.cache_data.clear()
                             st.rerun()
                         except Exception as e:
                             st.error(f"Something went wrong while adding resource data. Please try again. Error: {e}")
+            check_success("add_resource")
 
 with settings_tab:
     st.header("Change Set Up")
@@ -229,5 +228,7 @@ with settings_tab:
                         functions.track(None, env=st.session_state.clowder_env)
                     if data_folder is not None:
                         functions.use_data(data_folder.split("folders/")[1], env=st.session_state.clowder_env)
+                    set_success("set_up", "Successfully changed set-up!")
                 except Exception as e:
                     st.error(f"Something went wrong while fetching resource data. Please try again. Error: {e}")
+            check_success("set_up")

@@ -37,3 +37,4 @@ tests/**/temp*
 # omit clowder config files
 *.clowder
 *secret*
+*.lock
