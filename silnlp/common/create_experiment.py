@@ -9,6 +9,7 @@ from typing import Dict, List, Set, Tuple, Union
 import yaml
 
 from .environment import SIL_NLP_ENV
+from .iso_info import ALT_ISO
 from .find_by_iso import NLLB_LANG_CODES, load_language_data
 
 NLLB_ISOS = NLLB_LANG_CODES.keys()
@@ -43,42 +44,29 @@ def choose_yes_no_cancel(prompt: str) -> bool:
     else:
         sys.exit(0)
 
-
-def read_iso_codes(csv_file: Path) -> Dict[IsoCode, IsoCodeSet]:
-    iso_dict = {}
-    with open(csv_file, newline="", encoding="utf-8") as csvfile:
-        reader = csv.DictReader(csvfile)
-        for row in reader:
-            three_letter, two_letter = row["Three"], row["Two"]
-            iso_dict.setdefault(three_letter, set()).add(two_letter)
-            iso_dict.setdefault(two_letter, set()).add(three_letter)
-    return iso_dict
-
-
-ISO_EQUIVALENTS = read_iso_codes(THREE_TO_TWO_CSV)
-
-
 def get_equivalent_isocodes(iso_codes: Union[IsoCode, List[IsoCode], IsoCodeSet]) -> IsoCodeSet:
-    if isinstance(iso_codes, str):
-        iso_codes = [iso_codes]
-    result = set(iso_codes)
+    add_iso_codes = set()
+
     for iso_code in iso_codes:
-        result.update(ISO_EQUIVALENTS.get(iso_code, set()))
-    return result
+        add_iso_codes.update(set(iso_code))
+        add_iso = ALT_ISO.get_alternative(iso_code)
+        if add_iso is not None:
+            add_iso_codes.update(set(add_iso))
+    return add_iso_codes
 
 
 def get_tla_iso(iso_code) -> IsoCode:
     if len(iso_code) == 3:
         return iso_code
     if len(iso_code) == 2:
-        isocodes = ISO_EQUIVALENTS.get(iso_code)
-        # print(f"Iso code is {iso_code}")
-        # print(isocodes, type(isocodes))
-        # exit()
-        for isocode in isocodes:
-            if len(isocode) == 3:
-                return isocode
-    raise RuntimeError("Couldn't find a three letter version of iso code; {iso_code}")
+        tla_code = ALT_ISO.get_alternative(iso_code)
+        print(f"Iso code is {iso_code} tla_code is {tla_code}")
+        exit()
+    
+    if len(tla_code) == 3:
+        return tla_code
+    else:
+        return None
 
 
 def find_related_languages(iso_codes: Union[IsoCode, List[IsoCode], IsoCodeSet], verbose=False) -> IsoCodeSet:
@@ -200,11 +188,13 @@ def create_align_config(
 def run_alignments(experiment_series_dir: Path):
     align_dir = experiment_series_dir / "align"
     command = f"poetry run python -m silnlp.nmt.preprocess --stats {align_dir}"
+    print(command)
     subprocess.run(command, shell=True, check=True)
 
 
 def run_preprocess(experiment: str):
     command = f"poetry run python -m silnlp.nmt.experiment --preprocess {experiment}"
+    print(command)
     subprocess.run(command, shell=True, check=True)
 
 
@@ -213,7 +203,7 @@ def run_training(experiment: str, translate):
         command = f"poetry run python -m silnlp.nmt.experiment --save-checkpoints --memory-growth --clearml-queue jobs_backlog --translate {experiment}"
     else:
         command = f"poetry run python -m silnlp.nmt.experiment --save-checkpoints --memory-growth --clearml-queue jobs_backlog {experiment}"
-
+    print(command)
     subprocess.run(command, shell=True, check=True)
 
 
@@ -222,7 +212,7 @@ def filter_verse_counts(experiment_series_dir):
     subprocess.run(command, shell=True, check=True)
 
 
-def create_experiment_config(experiment_dir: Path, target: str, sources: List[str], iso_codes: Dict[str, str]):
+def create_experiment_config(experiment_dir: Path, target: str, sources: List[str], lang_codes: Dict[str, str]):
     config = {
         "data": {
             "corpus_pairs": [
@@ -236,7 +226,7 @@ def create_experiment_config(experiment_dir: Path, target: str, sources: List[st
                     "val_size": 250,
                 }
             ],
-            "lang_codes": iso_codes,
+            "lang_codes": lang_codes,
             "seed": 111,
         },
         "eval": {
@@ -357,7 +347,7 @@ def main():
         src_project = row["src_project"]
         trg_project = row["trg_project"]
 
-        experiment_dir = create_experiment_folder(experiment_series_dir, src_project, trg_project)
+        experiment_dir = create_experiment_folder(experiment_series_dir, trg_project=trg_project, src_project=src_project)
 
         # Extract language codes
         src_lang_iso = extract_iso_code(src_project)
@@ -369,14 +359,14 @@ def main():
         if tla_src_lang_iso in NLLB_LANG_CODES:
             lang_codes[src_lang_iso] = NLLB_LANG_CODES[tla_src_lang_iso]
         else:
-            lang_codes[src_lang_iso] = f"{src_lang_iso}_Latn   CHECK SCRIPT"
+            lang_codes[src_lang_iso] = f"{src_lang_iso}_Latn"
 
         if tla_trg_lang_iso in NLLB_LANG_CODES:
             lang_codes[trg_lang_iso] = NLLB_LANG_CODES[tla_trg_lang_iso]
         else:
-            lang_codes[trg_lang_iso] = f"{trg_lang_iso}_Latn   CHECK SCRIPT"
-
-        experiment_config_file = create_experiment_config(experiment_dir, src_project, trg_project, lang_codes)
+            lang_codes[trg_lang_iso] = f"{trg_lang_iso}_Latn"
+        
+        experiment_config_file = create_experiment_config(experiment_dir,  target=trg_project, sources=[src_project], lang_codes=lang_codes)
 
         # if a source_project and books are specified create translate_config.yml in the experiment folder
         if source_project and books:
