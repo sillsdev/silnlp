@@ -208,7 +208,7 @@ class SilNlpEnv:
             raise Exception(
                 f"No Paratext project name is given.  Data still in the temp directory of {self.pt_projects_dir}"
             )
-        projects_path = str(self.pt_projects_dir) + "/"
+        projects_path = "Paratext/projects/"
         s3 = boto3.resource("s3")
         data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
         temp_folder = str(self.pt_projects_dir / name)
