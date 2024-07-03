@@ -178,6 +178,7 @@ with resource_tab:
                                 if result.stderr != "":
                                     print(result.stderr)
                                     st.error(f"Something went wrong while adding resource data. Please try again.")
+                                SIL_NLP_ENV.copy_pt_project_to_bucket(project)
                         st.cache_data.clear()
                         st.rerun()
                     else:
@@ -231,7 +232,3 @@ with settings_tab:
                         functions.use_data(data_folder.split("folders/")[1], env=st.session_state.clowder_env)
                 except Exception as e:
                     st.error(f"Something went wrong while fetching resource data. Please try again. Error: {e}")
-
-if st.button("Copy PT projects to bucket"):
-    for name in [f.name for f in os.scandir(SIL_NLP_ENV.pt_projects_dir) if f.is_dir()]:
-        SIL_NLP_ENV.copy_pt_project_to_bucket(name)
