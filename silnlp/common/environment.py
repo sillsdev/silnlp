@@ -175,7 +175,7 @@ class SilNlpEnv:
         name = name.split(pt_projects_path)[-1]
         if len(name) == 0:
             raise Exception(
-                f"No paratext project name is given.  Data still in the cache directory of {self.pt_projects_dir}"
+                f"No Paratext project name is given.  Data still in the cache directory of {self.pt_projects_dir}"
             )
         s3 = boto3.resource("s3")
         data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
@@ -199,6 +199,39 @@ class SilNlpEnv:
                 else:
                     LOGGER.info("Downloading " + rel_path)
                     try_n_times(lambda: data_bucket.download_file(obj.object_key, str(temp_dest_path)))
+    
+    def copy_pt_project_to_bucket(self, name: str, patterns: Union[str, Sequence[str]] = [], overwrite: bool = False):
+        if not self.is_bucket:
+            return
+        name = str(name)
+        if len(name) == 0:
+            raise Exception(
+                f"No Paratext project name is given.  Data still in the temp directory of {self.pt_projects_dir}"
+            )
+        projects_path = str(self.pt_projects_dir) + "/"
+        s3 = boto3.resource("s3")
+        data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
+        temp_folder = str(self.pt_projects_dir / name)
+        # we don't need to delete all existing files - it will just overwrite them
+        len_projects_dir = len(str(self.pt_projects_dir))
+        files_already_in_s3 = set()
+        for obj in data_bucket.object_versions.filter(Prefix=projects_path + name):
+            files_already_in_s3.add(str(obj.object_key))
+
+        if isinstance(patterns, str):
+            patterns = [patterns]
+        for root, _, files in os.walk(temp_folder, topdown=False):
+            s3_dest_path = str(projects_path + root[len_projects_dir + 1 :].replace("\\", "/"))
+            for file in files:
+                pure_path = PurePath(file)
+                if len(patterns) == 0 or any(pure_path.match(pattern) for pattern in patterns):
+                    source_file = os.path.join(root, file)
+                    dest_file = s3_dest_path + "/" + file
+                    if not overwrite and dest_file in files_already_in_s3:
+                        LOGGER.debug("File already exists in S3 bucket: " + dest_file)
+                    else:
+                        LOGGER.info("Uploading " + dest_file)
+                        try_n_times(lambda: data_bucket.upload_file(source_file, dest_file))
 
     def copy_experiment_from_bucket(self, name: Union[str, Path], patterns: Union[str, Sequence[str]] = []):
         if not self.is_bucket:
@@ -234,7 +267,6 @@ class SilNlpEnv:
                     try_n_times(lambda: data_bucket.download_file(obj.object_key, str(temp_dest_path)))
 
     def copy_experiment_to_bucket(self, name: str, patterns: Union[str, Sequence[str]] = [], overwrite: bool = False):
-        print('Here:', self.is_bucket)
         if not self.is_bucket:
             return
         name = str(name)
@@ -257,7 +289,6 @@ class SilNlpEnv:
         for root, _, files in os.walk(temp_folder, topdown=False):
             s3_dest_path = str(experiment_path + root[len_exp_dir + 1 :].replace("\\", "/"))
             for file in files:
-                print(file)
                 pure_path = PurePath(file)
                 if len(patterns) == 0 or any(pure_path.match(pattern) for pattern in patterns):
                     source_file = os.path.join(root, file)

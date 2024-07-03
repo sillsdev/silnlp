@@ -191,43 +191,47 @@ with resource_tab:
                         except Exception as e:
                             st.error(f"Something went wrong while adding resource data. Please try again. Error: {e}")
 
-    with settings_tab:
-        st.header("Change Set Up")
-        with st.form(key="set_up_form") as f:
-            root = st.text_input(
-                "Link to investigations root folder",
+with settings_tab:
+    st.header("Change Set Up")
+    with st.form(key="set_up_form") as f:
+        root = st.text_input(
+            "Link to investigations root folder",
+            placeholder="https://drive.google.com/drive/u/0/folders/0000000000000000000",
+            value=f"https://drive.google.com/drive/u/0/folders/{functions.current_context(env=st.session_state.clowder_env)}",
+        )
+        data_folder = None
+        if "is_internal_user" in st.session_state and not st.session_state.is_internal_user:
+            data_folder = st.text_input(
+                "Link to data folder",
                 placeholder="https://drive.google.com/drive/u/0/folders/0000000000000000000",
-                value=f"https://drive.google.com/drive/u/0/folders/{functions.current_context(env=st.session_state.clowder_env)}",
+                value=(
+                    f"https://drive.google.com/drive/u/0/folders/{functions.current_data(env=st.session_state.clowder_env)}"
+                    if functions.current_data(env=st.session_state.clowder_env) is not None
+                    else ""
+                ),
             )
-            data_folder = None
-            if "is_internal_user" in st.session_state and not st.session_state.is_internal_user:
-                data_folder = st.text_input(
-                    "Link to data folder",
-                    placeholder="https://drive.google.com/drive/u/0/folders/0000000000000000000",
-                    value=(
-                        f"https://drive.google.com/drive/u/0/folders/{functions.current_data(env=st.session_state.clowder_env)}"
-                        if functions.current_data(env=st.session_state.clowder_env) is not None
-                        else ""
-                    ),
+        check_error("set_up")
+        if st.form_submit_button("Save Changes", type="primary"):
+            if data_folder is not None:
+                check_required(
+                    "set_up", root, data_folder, func=(lambda p: p is not None and p != "" and "folders/" in p)
                 )
-            check_error("set_up")
-            if st.form_submit_button("Save Changes", type="primary"):
-                if data_folder is not None:
-                    check_required(
-                        "set_up", root, data_folder, func=(lambda p: p is not None and p != "" and "folders/" in p)
-                    )
-                else:
-                    check_required("set_up", root, func=(lambda p: p is not None and p != "" and "folders/" in p))
-                with st.spinner("This might take a few minutes..."):
-                    try:
-                        from clowder.environment import ClowderEnvironment
+            else:
+                check_required("set_up", root, func=(lambda p: p is not None and p != "" and "folders/" in p))
+            with st.spinner("This might take a few minutes..."):
+                try:
+                    from clowder.environment import ClowderEnvironment
 
-                        st.session_state.clowder_env = ClowderEnvironment(
-                            auth=st.session_state.google_auth, context=root.split("folders/")[1]
-                        )
-                        if len(functions.list_inv(env=st.session_state.clowder_env)) == 0:
-                            functions.track(None, env=st.session_state.clowder_env)
-                        if data_folder is not None:
-                            functions.use_data(data_folder.split("folders/")[1], env=st.session_state.clowder_env)
-                    except Exception as e:
-                        st.error(f"Something went wrong while fetching resource data. Please try again. Error: {e}")
+                    st.session_state.clowder_env = ClowderEnvironment(
+                        auth=st.session_state.google_auth, context=root.split("folders/")[1]
+                    )
+                    if len(functions.list_inv(env=st.session_state.clowder_env)) == 0:
+                        functions.track(None, env=st.session_state.clowder_env)
+                    if data_folder is not None:
+                        functions.use_data(data_folder.split("folders/")[1], env=st.session_state.clowder_env)
+                except Exception as e:
+                    st.error(f"Something went wrong while fetching resource data. Please try again. Error: {e}")
+
+if st.button("Copy PT projects to bucket"):
+    for name in [f.name for f in os.scandir(SIL_NLP_ENV.pt_projects_dir) if f.is_dir()]:
+        SIL_NLP_ENV.copy_pt_project_to_bucket(name)
