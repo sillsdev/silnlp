@@ -307,12 +307,16 @@ class Investigation:
                         draft_folder_id = ENV._create_gdrive_folder("drafts", self.experiments_folder_id)
                         exp_name = row[NAME_ATTRIBUTE][: row[NAME_ATTRIBUTE].index("_draft")]
                         model_drafts_folder_id = ENV._create_gdrive_folder(exp_name, draft_folder_id)
-                        ENV._copy_storage_folder_to_gdrive(
-                            list(list((self.investigation_storage_path / exp_name / "infer").glob("*"))[0].glob("*"))[
-                                0
-                            ],
-                            model_drafts_folder_id,
-                        )
+                        try:
+                            ENV._copy_storage_folder_to_gdrive(
+                                list(list((self.investigation_storage_path / exp_name / "infer").glob("*"))[0].glob("*"))[
+                                    0
+                                ],
+                                model_drafts_folder_id,
+                            )
+                        except IndexError:
+                            print((self.investigation_storage_path / exp_name).iterdir())
+                            raise FileNotFoundError(f"No draft found for {exp_name}")
                         continue
                     try:
                         if name == "scores-best":
