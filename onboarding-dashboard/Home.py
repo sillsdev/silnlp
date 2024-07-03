@@ -143,7 +143,7 @@ with resource_tab:
         df = pd.DataFrame(data)
         st.dataframe(df, use_container_width=True, hide_index=True, height=500)
     with c2:
-        with st.form(key=f"add_resource"):
+        with st.form(key=f"add_resource", clear_on_submit=True):
             resources = st.file_uploader(
                 "Resource",
                 type="zip",
@@ -177,9 +177,7 @@ with resource_tab:
                                 if result.returncode != 0:
                                     print(result.stderr)
                                     st.error(f"Something went wrong while adding resource data. Please try again.")
-                                print(f"Starting copying {project}")
                                 SIL_NLP_ENV.copy_pt_project_to_bucket(project)
-                                print(f"Finished copying {project}")
                         st.cache_data.clear()
                         st.rerun()
                     else:
