@@ -28,6 +28,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+
 @st.cache_data(show_spinner=False)
 def get_resources():
     with st.spinner("Fetching resources. This might take a few minutes..."):
@@ -247,7 +248,7 @@ def split_target_sources():
     else:
         targ_index = st.session_state.results_stats["NT"].idxmin()
     return (
-        list(st.session_state.results_stats.drop(targ_index)["file"].apply(lambda f: f[:-4])),
+        [f[:-4] for f in st.session_state.results_stats.drop(targ_index)["file"]],
         st.session_state.results_stats.iloc[targ_index]["file"][:-4],
     )
 
@@ -256,8 +257,9 @@ def get_default_books(training_sources, training_target):
     default_books = None
     if st.session_state.results_stats is not None and "file" in st.session_state.results_stats.columns:
         texts_series = pd.DataFrame(list(set(training_sources) | set([training_target])), columns=["file"])
-        st.session_state.results_stats["file"] = st.session_state.results_stats["file"].apply(lambda f: f[:-4])
-        rel_stats = pd.merge(texts_series, st.session_state.results_stats, how="inner")
+        results_stats_df_copy = st.session_state.results_stats.copy()
+        results_stats_df_copy["file"] = results_stats_df_copy["file"].apply(lambda f: f[:-4])
+        rel_stats = pd.merge(texts_series, results_stats_df_copy, how="inner")
         default_books = BOOKS_ABBREVS.copy()
         for _, row in rel_stats.iterrows():
             to_remove = set(["OT", "NT", "DT"])
@@ -549,6 +551,7 @@ def render_model_section():
             > 0
         )
     if models_already_running:
+        st.toast("Your models are training. Check back after a few hours.")
         st.write("Your models are training. Check back after a few hours.")
     if st.button(
         "Run models" if not models_already_running else "Cancel",
@@ -686,7 +689,7 @@ def render_draft_section():
 
 # TODO DESCRIPTIVE TEXT
 if "current_investigation" in st.session_state:
-    if st.session_state.google_auth.access_token_expired:
+    if st.session_state.google_auth is not None and st.session_state.google_auth.access_token_expired:
         st.session_state.google_auth.Refresh()
     if (
         "synced_dict" not in st.session_state
