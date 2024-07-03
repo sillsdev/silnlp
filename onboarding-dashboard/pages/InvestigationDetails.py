@@ -13,7 +13,7 @@ import pandas as pd
 import streamlit as st
 from consts import BOOKS_ABBREVS
 from models import Investigation, Status
-from utils import check_error, check_required, expand_books, simplify_books
+from utils import check_error, check_required, check_success, set_success, expand_books, simplify_books
 
 from clowder import functions
 
@@ -229,12 +229,14 @@ def render_stats_section():
             with st.spinner("This might take a few minutes..."):
                 try:
                     functions.run(st.session_state.current_investigation.name, experiments=["stats"], force_rerun=True)
+                    set_success("stats", "Gathering stats has been successfully run!")
                 except Exception as e:
                     import traceback
 
                     traceback.print_exc()
                     st.error(f"Something went wrong while attempting to run experiment. Please try again. Error: {e}")
                 sync()
+        check_success("stats")
 
 
 def split_target_sources():
@@ -337,6 +339,7 @@ def render_alignment_section():
                 with st.spinner("This might take a few minutes..."):
                     try:
                         functions.cancel(st.session_state.current_investigation.name)
+                        set_success("align", "Alignments have been successfully canceled!")
                     except Exception as e:
                         import traceback
 
@@ -358,12 +361,14 @@ def render_alignment_section():
                 get_results.clear("tokenization_stats.csv", st.session_state.current_investigation.name, keep_name=True)
                 try:
                     functions.run(st.session_state.current_investigation.name, experiments=["align"], force_rerun=True)
+                    set_success("align", "Alignments have been successfully run!")
                 except Exception as e:
                     import traceback
 
                     traceback.print_exc()
                     st.error(f"Something went wrong while attempting to run experiment. Please try again. Error: {e}")
                 sync()
+        check_success("align")
 
 
 @st.experimental_fragment
@@ -522,9 +527,9 @@ def render_model_section():
             model["books"] = simplify_books(list(set(expand_books(books)) - set(expand_books(backtranslation_books))))
             model["bt_src"] = backtranslation_source
             model["bt_books"] = backtranslation_books
-            model["name"] = (
-                f"NLLB.1.3B.{training_source}+{backtranslation_source}-{training_target}.[{','.join(books)}]"
-            )
+            model[
+                "name"
+            ] = f"NLLB.1.3B.{training_source}+{backtranslation_source}-{training_target}.[{','.join(books)}]"
         if len(list(filter(lambda m: m["name"] == model["name"], st.session_state.models))) > 0:
             st.session_state.errors["models"] = "A model with this configuration has already been added"
             st.rerun()
@@ -562,6 +567,7 @@ def render_model_section():
             with st.spinner("This might take a few minutes..."):
                 try:
                     functions.cancel(st.session_state.current_investigation.name)
+                    set_success("models", "Models have been successfully canceled!")
                 except Exception as e:
                     import traceback
 
@@ -593,12 +599,14 @@ def render_model_section():
             get_results.clear("scores-best", st.session_state.current_investigation.name, keep_name=True)
             try:
                 functions.run(st.session_state.current_investigation.name, experiments=exps)
+                set_success("models", "Models have been successfully run!")
             except Exception as e:
                 import traceback
 
                 traceback.print_exc()
                 st.error(f"Something went wrong while attempting to run experiment. Please try again. Error: {e}")
             sync()
+    check_success("models")
 
 
 def draft_is_running():
@@ -643,7 +651,7 @@ def render_draft_section():
         draft_already_running = draft_is_running()
         if draft_already_running:
             st.write("Your drafting job is running. Check back after a few hours.")
-        check_error("draft")
+        check_error("drafts")
         _button_text = "Run" if not draft_already_running else "Cancel"
         _button_type = "primary" if not draft_already_running else "secondary"
         if st.form_submit_button(
@@ -654,6 +662,7 @@ def render_draft_section():
                 with st.spinner("This might take a few minutes..."):
                     try:
                         functions.cancel(st.session_state.current_investigation.name)
+                        set_success("drafts", "Drafting jobs have been successfully canceled!")
                     except Exception as e:
                         import traceback
 
@@ -677,14 +686,14 @@ def render_draft_section():
             with st.spinner("This might take a few minutes..."):
                 try:
                     functions.run(st.session_state.current_investigation.name, experiments=[draft_name])
-                    st.toast("Check back in a few hours!")
-                    sleep(4)
+                    set_success("drafts", "Drafting jobs have been successfully run!")
                 except Exception as e:
                     import traceback
 
                     traceback.print_exc()
                     st.error(f"Something went wrong while attempting to run experiment. Please try again. Error: {e}")
                 sync()
+        check_success("drafts")
 
 
 # TODO DESCRIPTIVE TEXT
