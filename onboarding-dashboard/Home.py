@@ -3,6 +3,7 @@ from io import BytesIO
 
 import streamlit as st
 from s3path import S3Path
+
 st.markdown(
     """
 <style>
@@ -17,19 +18,27 @@ st.markdown(
 if "set_up" not in st.session_state or not st.session_state.set_up:
     st.switch_page("pages/LogIn.py")
 
+if st.session_state.google_auth.access_token_expired:
+    st.session_state.google_auth.Refresh()
+
 import os
-import sys
 import subprocess
+import sys
 
 from models import Investigation
 
 parent_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(parent_dir)
+
+import pandas as pd
 from utils import check_error, check_required
 
 from clowder import functions
 from clowder.environment import DuplicateInvestigationException
 from silnlp.common.environment import SIL_NLP_ENV
+
+RESOURCE_SUBLIST_LENGTH = 100
+
 
 def copy_resource_to_gdrive(r: BytesIO):
     if not zipfile.is_zipfile(r):
@@ -50,6 +59,7 @@ def copy_resource_to_gdrive(r: BytesIO):
                         subid = functions.ENV._create_gdrive_folder(part, subid)
                 functions.ENV._write_gdrive_file_in_folder(subid, file.filename.split("/")[-1], f.read(file).decode())
 
+
 def copy_resource_to_s3(r: BytesIO):
     if not zipfile.is_zipfile(r):
         return
@@ -62,6 +72,7 @@ def copy_resource_to_s3(r: BytesIO):
             if not isinstance(path, S3Path) and not path.parent.exists():
                 path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(f.read(file).decode())
+
 
 def get_investigations() -> list:
     try:
@@ -77,7 +88,8 @@ def get_investigations() -> list:
 @st.cache_data(show_spinner=False)
 def get_resources():
     try:
-        return list(map(lambda fn: fn[:-4], functions.list_resources(env=st.session_state.clowder_env)))
+        fn_res = functions.list_resources(env=st.session_state.clowder_env)
+        return list(map(lambda fn: fn[:-4], fn_res))
     except Exception as e:
         import traceback
 
@@ -124,12 +136,12 @@ with investigation_tab:
 
 with resource_tab:
     st.header("Resources")
-    c1, c2 = st.columns(2)
+    c1, c2 = st.columns([0.5, 0.5])
     with c1:
-        with st.container(height=500):
-            for resource in get_resources():
-                with st.container(border=True):
-                    st.write(resource)
+        res = get_resources()
+        data = {"Resource": res}
+        df = pd.DataFrame(data)
+        st.dataframe(df, use_container_width=True, hide_index=True, height=500)
     with c2:
         with st.form(key=f"add_resource"):
             resources = st.file_uploader(
@@ -150,7 +162,9 @@ with resource_tab:
                                 copy_resource_to_s3(resource)
                                 project = f.filename[:-4]
                                 SIL_NLP_ENV.copy_pt_project_from_bucket(project)
-                                command = f'{os.environ.get("PYTHON", "python")} -m silnlp.common.extract_corpora {project}'
+                                command = (
+                                    f'{os.environ.get("PYTHON", "python")} -m silnlp.common.extract_corpora {project}'
+                                )
                                 print(f"Running {command}")
                                 result = subprocess.run(
                                     command,
@@ -190,9 +204,11 @@ with resource_tab:
                 data_folder = st.text_input(
                     "Link to data folder",
                     placeholder="https://drive.google.com/drive/u/0/folders/0000000000000000000",
-                    value=f"https://drive.google.com/drive/u/0/folders/{functions.current_data(env=st.session_state.clowder_env)}"
-                    if functions.current_data(env=st.session_state.clowder_env) is not None
-                    else "",
+                    value=(
+                        f"https://drive.google.com/drive/u/0/folders/{functions.current_data(env=st.session_state.clowder_env)}"
+                        if functions.current_data(env=st.session_state.clowder_env) is not None
+                        else ""
+                    ),
                 )
             check_error("set_up")
             if st.form_submit_button("Save Changes", type="primary"):
@@ -201,7 +217,7 @@ with resource_tab:
                         "set_up", root, data_folder, func=(lambda p: p is not None and p != "" and "folders/" in p)
                     )
                 else:
-                    check_required("set_up", root, func=(lambda p: p is not None and p != "" and "folders/" in p))                
+                    check_required("set_up", root, func=(lambda p: p is not None and p != "" and "folders/" in p))
                 with st.spinner("This might take a few minutes..."):
                     try:
                         from clowder.environment import ClowderEnvironment
