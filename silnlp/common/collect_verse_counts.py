@@ -88,16 +88,12 @@ def collect_verse_counts(
     projects_to_process = project_names
 
     bucket_files = ["verse_counts.csv", "verse_percentages.csv", "complete_counts.csv"]
-    partial_counts_bucket_files = [f"{f}.csv" for f in project_names]
     SIL_NLP_ENV.copy_experiment_from_bucket("verse_counts", bucket_files)
-    SIL_NLP_ENV.copy_experiment_from_bucket("verse_counts/partially_complete_books", partial_counts_bucket_files)
+    SIL_NLP_ENV.copy_experiment_from_bucket(
+        "verse_counts/partially_complete_books", [f"{f}.csv" for f in project_names]
+    )
     partial_books_path = SIL_NLP_ENV.mt_experiments_dir / "verse_counts" / "partially_complete_books"
     partial_books_path.mkdir(exist_ok=True, parents=True)
-
-    if recount:
-        for project in project_names:
-            (partial_books_path / f"{project}.csv").unlink(missing_ok=True)
-            (partial_books_out_path / f"{project}_detailed_percentages.csv").unlink(missing_ok=True)
 
     # Initialize the data frames and determine which files need to be processed
     verse_counts_path = SIL_NLP_ENV.mt_experiments_dir / "verse_counts" / "verse_counts.csv"
@@ -125,6 +121,7 @@ def collect_verse_counts(
 
     # Get counts for unprocessed files
     complete_verse_counts = get_complete_verse_counts()
+    partially_complete_projects = []
     for extract_file_name in tqdm(extract_files):
         project_name = extract_file_name.stem
         if project_name not in projects_to_process:
@@ -155,6 +152,7 @@ def collect_verse_counts(
                 partially_complete_books.append(book)
 
         if len(partially_complete_books) > 0:
+            partially_complete_projects.append(project_name)
             df = pd.DataFrame(
                 columns=list(
                     range(1, max([len(complete_verse_counts[book].keys()) for book in partially_complete_books]) + 1)
@@ -181,10 +179,10 @@ def collect_verse_counts(
     verse_counts_df.loc[to_sum, "DT"] = verse_counts_df.loc[to_sum][DT_CANON].sum(axis=1)
     verse_counts_df.fillna(0, inplace=True)
 
-    verse_percentages_df.fillna(0.0, inplace=True)  # Replace with 0's before averaging
     verse_percentages_df.loc[projects_to_process, "Total"] = (
         verse_percentages_df.loc[projects_to_process][OT_CANON + NT_CANON + DT_CANON].mean(axis=1).round(1)
     )
+    verse_percentages_df.fillna(0.0, inplace=True)  # Replace with 0's before averaging
     verse_percentages_df.loc[projects_to_process, "OT"] = (
         verse_percentages_df.loc[projects_to_process][OT_CANON].mean(axis=1).round(1)
     )
@@ -225,18 +223,22 @@ def collect_verse_counts(
 
     # Copy over chapter counts for partially complete books
     for project in project_names:
-        if (partial_books_path / f"{project}.csv").is_file():
+        cache_path = partial_books_path / f"{project}.csv"  # change var name
+        if cache_path.is_file():
             out_path = partial_books_out_path / f"{project}_detailed_percentages.csv"
-            df = pd.read_csv(partial_books_path / f"{project}.csv", index_col="book")
+            df = pd.read_csv(cache_path, index_col="book")
 
-            if not deutero:
+            if project in projects_to_process and project not in partially_complete_projects:
+                df = df.drop(df.index)
+                df.to_csv(cache_path)
+            elif not deutero:
                 df = df.drop(index=DT_CANON, errors="ignore")
                 df = df.dropna(axis=1, how="all")
-                if len(df.index) == 0:
-                    out_path.unlink(missing_ok=True)
-                    continue
 
-            df.to_csv(out_path)
+            if len(df.index) == 0:
+                out_path.unlink(missing_ok=True)
+            else:
+                df.to_csv(out_path)
     if len(list(partial_books_out_path.iterdir())) == 0:
         partial_books_out_path.rmdir()
 
@@ -244,7 +246,7 @@ def collect_verse_counts(
     if len(projects_to_process) > 0:
         SIL_NLP_ENV.copy_experiment_to_bucket("verse_counts", bucket_files, True)
         SIL_NLP_ENV.copy_experiment_to_bucket(
-            "verse_counts/partially_complete_books", partial_counts_bucket_files, True
+            "verse_counts/partially_complete_books", [f"{f}.csv" for f in projects_to_process], True
         )
 
 
