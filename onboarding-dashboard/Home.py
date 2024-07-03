@@ -177,7 +177,9 @@ with resource_tab:
                                 if result.stderr != "":
                                     print(result.stderr)
                                     st.error(f"Something went wrong while adding resource data. Please try again.")
+                                print(f"Starting copying {project}]")
                                 SIL_NLP_ENV.copy_pt_project_to_bucket(project)
+                                print(f"Finished copying {project}]")
                         st.cache_data.clear()
                         st.rerun()
                     else:
