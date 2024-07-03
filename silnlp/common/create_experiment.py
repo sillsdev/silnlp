@@ -1,20 +1,17 @@
 import argparse
 import csv
-import json
+import re
 import subprocess
 import sys
 from pathlib import Path
-import re
 from typing import Dict, List, Set, Tuple, Union
+
 import yaml
 
 from .environment import SIL_NLP_ENV
 from .find_by_iso import NLLB_LANG_CODES, load_language_data
+
 NLLB_ISOS = NLLB_LANG_CODES.keys()
-
-#print(len(NLLB_LANG_CODES), len(NLLB_ISOS))
-#print(set(NLLB_ISOS) == set(NLLB_LANG_CODES.keys()))
-
 
 IsoCode = str
 IsoCodeSet = Set[IsoCode]
@@ -22,6 +19,7 @@ IsoCodeSet = Set[IsoCode]
 LANGUAGE_FAMILY_FILE = SIL_NLP_ENV.assets_dir / "languageFamilies.json"
 LANGUAGE_DATA, COUNTRY_DATA, FAMILY_DATA = load_language_data(LANGUAGE_FAMILY_FILE)
 THREE_TO_TWO_CSV = SIL_NLP_ENV.assets_dir / "three_to_two.csv"
+
 
 def extract_iso_code(scripture: str) -> IsoCode:
     iso = scripture.split("-", maxsplit=1)[0]
@@ -31,15 +29,18 @@ def extract_iso_code(scripture: str) -> IsoCode:
 
 
 def choose_yes_no_cancel(prompt: str) -> bool:
-    prompt += "\nChoose Y, N or Q to quit."
-    choice: str = " "
-    while choice not in ["n", "y", "c", "q"]:
-        choice: str = input(prompt).strip()[0].lower()
+    prompt = "\n" + prompt + "\nChoose Y, N, or Q to quit: "
+    while True:
+        choice = input(prompt).strip().lower()
+        if choice in ["y", "n", "q"]:
+            break
+        print("Invalid choice, please choose Y, N, or Q.")
+    
     if choice == "y":
         return True
     elif choice == "n":
         return False
-    elif choice in ["q","c"]:
+    else:
         sys.exit(0)
 
 
@@ -56,6 +57,7 @@ def read_iso_codes(csv_file: Path) -> Dict[IsoCode, IsoCodeSet]:
 
 ISO_EQUIVALENTS = read_iso_codes(THREE_TO_TWO_CSV)
 
+
 def get_equivalent_isocodes(iso_codes: Union[IsoCode, List[IsoCode], IsoCodeSet]) -> IsoCodeSet:
     if isinstance(iso_codes, str):
         iso_codes = [iso_codes]
@@ -70,9 +72,9 @@ def get_tla_iso(iso_code) -> IsoCode:
         return iso_code
     if len(iso_code) == 2:
         isocodes = ISO_EQUIVALENTS.get(iso_code)
-        #print(f"Iso code is {iso_code}")
-        #print(isocodes, type(isocodes))
-        #exit()
+        # print(f"Iso code is {iso_code}")
+        # print(isocodes, type(isocodes))
+        # exit()
         for isocode in isocodes:
             if len(isocode) == 3:
                 return isocode
@@ -88,18 +90,18 @@ def find_related_languages(iso_codes: Union[IsoCode, List[IsoCode], IsoCodeSet],
             lang_info = LANGUAGE_DATA[iso_code]
             country_language_isos = COUNTRY_DATA.get(lang_info["Country"])
             family_language_isos = FAMILY_DATA.get(lang_info["Family"])
-            
+
             if verbose:
                 print(f"\nFound these {len(country_language_isos)} languages of {lang_info['Country']}")
                 for country_language_iso in country_language_isos:
                     lang_info = LANGUAGE_DATA[country_language_iso]
                     print(f"{country_language_iso} : {lang_info['Name']} : language of {lang_info['Country']}.")
-                    
+
                 print(f"\nFound these {len(family_language_isos)} languages of family {lang_info['Family']}")
                 for family_language_iso in family_language_isos:
                     lang_info = LANGUAGE_DATA[family_language_iso]
                     print(f"{family_language_iso} : {lang_info['Name']} : language of {lang_info['Family']}.")
-                    
+
             related_codes.update(country_language_isos, [])
             related_codes.update(family_language_isos, [])
 
@@ -132,7 +134,7 @@ def select_nllb_languages(isocodes: IsoCodeSet) -> List[IsoCode]:
 
 def confirm_write_config(config, config_file, message):
     if not config_file.is_file():
-        with open(config_file, "w", encoding='utf-8') as f:
+        with open(config_file, "w", encoding="utf-8") as f:
             yaml.dump(config, f, default_flow_style=False)
         print(f"{message} {config_file} was created.")
     else:
@@ -145,13 +147,14 @@ def confirm_write_config(config, config_file, message):
 
 
 def read_corpus_stats(file_path):
-    with open(file_path, 'r', newline='', encoding='utf-8') as csvfile:
+    with open(file_path, "r", newline="", encoding="utf-8") as csvfile:
         reader = csv.DictReader(csvfile)
-        return [row for row in reader if float(row['count']) >= 5000 and float(row['align_score']) >= 0.2]
+        return [row for row in reader if float(row["count"]) >= 5000 and float(row["align_score"]) >= 0.2]
 
 
 def trim_date(project_name):
-    return re.sub(r'_\d{4}_\d{2}_\d{2}$', '', project_name)
+    return re.sub(r"_\d{4}_\d{2}_\d{2}$", "", project_name)
+
 
 def create_experiment_folder(experiment_series_dir, src_project, trg_project):
     src_no_date = trim_date(src_project)
@@ -169,7 +172,9 @@ def create_experiment_series_folder(experiment_name: str) -> Tuple[Path, Path]:
     return experiment_series_dir, align_dir
 
 
-def create_align_config(align_dir: Path, target_file: str, related_scriptures: List[str], source_files: List[str]) -> Path:
+def create_align_config(
+    align_dir: Path, target_file: str, related_scriptures: List[str], source_files: List[str]
+) -> Path:
     config = {
         "data": {
             "aligner": "fast_align",
@@ -208,8 +213,9 @@ def run_training(experiment: str, translate):
         command = f"poetry run python -m silnlp.nmt.experiment --save-checkpoints --memory-growth --clearml-queue jobs_backlog --translate {experiment}"
     else:
         command = f"poetry run python -m silnlp.nmt.experiment --save-checkpoints --memory-growth --clearml-queue jobs_backlog {experiment}"
-    
+
     subprocess.run(command, shell=True, check=True)
+
 
 def filter_verse_counts(experiment_series_dir):
     command = f"poetry run python -m silnlp.common.filter_verse_counts {experiment_series_dir}"
@@ -239,7 +245,7 @@ def create_experiment_config(experiment_dir: Path, target: str, sources: List[st
             "per_device_eval_batch_size": 16,
         },
         "infer": {"infer_batch_size": 16, "num_beams": 2},
-        "model": "facebook/nllb-200-1.3B",
+        "model": "facebook/nllb-200-distilled-1.3B",
         "params": {"label_smoothing_factor": 0.2, "learning_rate": 0.0002, "warmup_steps": 4000},
         "train": {"gradient_accumulation_steps": 4, "per_device_train_batch_size": 16},
     }
@@ -273,8 +279,9 @@ def main():
         help="List of books to translate. Books must be specified if a source is given.",
     )
     parser.add_argument(
-        "-v", "--verbose",
-        action='store_true',
+        "-v",
+        "--verbose",
+        action="store_true",
         help="Print list of related languages.",
     )
     args = parser.parse_args()
@@ -286,7 +293,7 @@ def main():
     target_iso, target_file = find_scripture_file_info(args.target, scripture_dir)
 
     target_isos = get_equivalent_isocodes(target_iso)
-#    target_lang_name = None
+    #    target_lang_name = None
 
     for iso in target_isos:
         if iso in LANGUAGE_DATA:
@@ -323,13 +330,12 @@ def main():
     source_files = [source.split(".")[0] for source in args.sources]  # Remove file extension if present
     source_isos = set(extract_iso_code(source) for source in args.sources)
     source_nllb_isos = select_nllb_languages(source_isos)
-    
+
     if source_nllb_isos:
         print(f"Found {len(source_nllb_isos)} source languages also known to NLLB.")
         for source_nllb_iso in source_nllb_isos:
             lang_info = LANGUAGE_DATA[source_nllb_iso]
             print(f"{source_nllb_iso}: {lang_info['Name']}, {lang_info['Country']}, {lang_info['Family']}")
-
 
     # Create experiment folder and config file
     experiment_name = args.experiment or f"FT-{target_lang_name}"
@@ -343,53 +349,42 @@ def main():
         run_alignments(experiment_series_dir)
         filter_verse_counts(experiment_series_dir)
 
-    # Load data from the alignment file: <experiment_series_dir>/align/corpus-stats.csv 
-    # The columns have headings: src_project,trg_project,project_count,count,align_score,filtered_count,filtered_align_score
-    # Filter the rows so only those where the filtered_count >= 5000, and the filtered_align_score >= 0.2
-    # Each of these rows will become an experiment - ie a folder with a config.yml file and optionally a translate_config.yml file.
-    
-    # Create experiment_dir folder name for each filtered row:
-        # Trim dates from the end of the src_project and trg_project that are of the form '_yyyy_mm_dd'
-        # Use this template for the experiment_dir f"{src_project}_{trg_project}_1"
-        # Create the folder experiment_series_dir/experiment_dir
-        # Create the config.yml file with the complete list of lang_codes, and the full src_project and trg_project as src: and trg:
-    
     corpus_stats_file = experiment_series_dir / "align" / "corpus-stats.csv"
     filtered_rows = read_corpus_stats(corpus_stats_file)
-    
+
     lang_codes = {}
     for row in filtered_rows:
-        src_project = row['src_project']
-        trg_project = row['trg_project']
-        
+        src_project = row["src_project"]
+        trg_project = row["trg_project"]
+
         experiment_dir = create_experiment_folder(experiment_series_dir, src_project, trg_project)
-        
-        # Extract language codes 
+
+        # Extract language codes
         src_lang_iso = extract_iso_code(src_project)
-        trg_lang_iso = extract_iso_code(trg_project)    
-        
+        trg_lang_iso = extract_iso_code(trg_project)
+
         tla_src_lang_iso = get_tla_iso(src_lang_iso)
         tla_trg_lang_iso = get_tla_iso(trg_lang_iso)
 
         if tla_src_lang_iso in NLLB_LANG_CODES:
             lang_codes[src_lang_iso] = NLLB_LANG_CODES[tla_src_lang_iso]
-        else :
+        else:
             lang_codes[src_lang_iso] = f"{src_lang_iso}_Latn   CHECK SCRIPT"
 
         if tla_trg_lang_iso in NLLB_LANG_CODES:
             lang_codes[trg_lang_iso] = NLLB_LANG_CODES[tla_trg_lang_iso]
-        else: 
+        else:
             lang_codes[trg_lang_iso] = f"{trg_lang_iso}_Latn   CHECK SCRIPT"
-        
+
         experiment_config_file = create_experiment_config(experiment_dir, src_project, trg_project, lang_codes)
-        
+
         # if a source_project and books are specified create translate_config.yml in the experiment folder
         if source_project and books:
             translate = True
             create_translate_config(experiment_dir, source_project, books, checkpoint="best")
         else:
             translate = False
-            
+
         # Run preprocessing
         if choose_yes_no_cancel(
             f"The experiment config is {experiment_config_file}. You can edit that file now.\nWould you like to run preprocessing now?"
@@ -397,10 +392,9 @@ def main():
             run_preprocess(experiment_dir)
 
         # Run training
-        if choose_yes_no_cancel(
-            f"Would you like to train the model now?"
-        ):
+        if choose_yes_no_cancel(f"Would you like to train the model now?"):
             run_training(experiment_dir, translate=translate)
+
 
 if __name__ == "__main__":
     main()
