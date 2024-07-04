@@ -375,15 +375,17 @@ def main():
         else:
             translate = False
 
+        two_folders = '/'.join(experiment_dir.parts[-2:])
+        
         # Run preprocessing
         if choose_yes_no_cancel(
             f"The experiment config is {experiment_config_file}. You can edit that file now.\nWould you like to run preprocessing now?"
         ):
-            run_preprocess(experiment_dir)
+            run_preprocess(two_folders)
 
         # Run training
         if choose_yes_no_cancel(f"Would you like to train the model now?"):
-            run_training(experiment_dir, translate=translate)
+            run_training(two_folders, translate=translate)
 
 
 if __name__ == "__main__":
