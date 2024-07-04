@@ -9,10 +9,10 @@ from typing import Dict, List, Set, Tuple, Union
 import yaml
 
 from .environment import SIL_NLP_ENV
-from .iso_info import ALT_ISO
+from .iso_info import NLLB_ISO_SET, ALT_ISO
 from .find_by_iso import NLLB_LANG_CODES, load_language_data
 
-NLLB_ISOS = NLLB_LANG_CODES.keys()
+NLLB_ISOS = NLLB_ISO_SET
 
 IsoCode = str
 IsoCodeSet = Set[IsoCode]

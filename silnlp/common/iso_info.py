@@ -206,43 +206,21 @@ NLLB_TAGS = [
 
 NLLB_ISO_SET = set(tag.split("_")[0] for tag in NLLB_TAGS)
 NLLB_SCRIPT_SET = set(tag.split("_")[1] for tag in NLLB_TAGS)
+NLLB_ISOS_WITH_TWO_SCRIPTS = {
+'kas':  ('Arab'	'Deva'),
+'zho':  ('Hans'	'Hant'),
+'ace':  ('Arab'	'Latn'),
+'bjn':  ('Arab'	'Latn'),
+'knc':  ('Arab'	'Latn'),
+'taq':  ('Latn'	'Tfng'),
+}
 
 # nllb_iso_codes  = ['ace', 'acm', 'acq', 'aeb', 'afr', 'ajp', 'aka', 'als', 'amh', 'apc', 'arb', 'ars', 'ary', 'arz', 'asm', 'ast', 'awa', 'ayr', 'azb', 'azj', 'bak', 'bam', 'ban', 'bel', 'bem', 'ben', 'bho', 'bjn', 'bod', 'bos', 'bug', 'bul', 'cat', 'ceb', 'ces', 'cjk', 'ckb', 'crh', 'cym', 'dan', 'deu', 'dik', 'dyu', 'dzo', 'ell', 'eng', 'epo', 'est', 'eus', 'ewe', 'fao', 'fij', 'fin', 'fon', 'fra', 'fur', 'fuv', 'gaz', 'gla', 'gle', 'glg', 'grn', 'guj', 'hat', 'hau', 'heb', 'hin', 'hne', 'hrv', 'hun', 'hye', 'ibo', 'ilo', 'ind', 'isl', 'ita', 'jav', 'jpn', 'kab', 'kac', 'kam', 'kan', 'kas', 'kat', 'kaz', 'kbp', 'kea', 'khk', 'khm', 'kik', 'kin', 'kir', 'kmb', 'kmr', 'knc', 'kon', 'kor', 'lao', 'lij', 'lim', 'lin', 'lit', 'lmo', 'ltg', 'ltz', 'lua', 'lug', 'luo', 'lus', 'lvs', 'mag', 'mai', 'mal', 'mar', 'min', 'mkd', 'mlt', 'mni', 'mos', 'mri', 'mya', 'nld', 'nno', 'nob', 'npi', 'nso', 'nus', 'nya', 'oci', 'ory', 'pag', 'pan', 'pap', 'pbt', 'pes', 'plt', 'pol', 'por', 'prs', 'quy', 'ron', 'run', 'rus', 'sag', 'san', 'sat', 'scn', 'shn', 'sin', 'slk', 'slv', 'smo', 'sna', 'snd', 'som', 'sot', 'spa', 'srd', 'srp', 'ssw', 'sun', 'swe', 'swh', 'szl', 'tam', 'taq', 'tat', 'tel', 'tgk', 'tgl', 'tha', 'tir', 'tpi', 'tsn', 'tso', 'tuk', 'tum', 'tur', 'twi', 'tzm', 'uig', 'ukr', 'umb', 'urd', 'uzn', 'vec', 'vie', 'war', 'wol', 'xho', 'ydd', 'yor', 'yue', 'zho', 'zsm', 'zul']
 # nllb_scripts = ['Arab', 'Armn', 'Beng', 'Cyrl', 'Deva', 'Ethi', 'Geor', 'Grek', 'Gujr', 'Guru', 'Hang', 'Hans', 'Hant', 'Hebr', 'Jpan', 'Khmr', 'Knda', 'Laoo', 'Latn', 'Mlym', 'Mymr', 'Orya', 'Sinh', 'Taml', 'Telu', 'Tfng', 'Thai', 'Tibt']
 
-# These are a selection of 'default' or likely language codes for a given script.
-NLLB_TAG_FROM_SCRIPT = {
-    "Arab": "arb_Arab",
-    "Armn": "hye_Armn",
-    "Beng": "ben_Beng",
-    "Cyrl": "rus_Cyrl",
-    "Deva": "hin_Deva",
-    "Ethi": "amh_Ethi",
-    "Geor": "kat_Geor",
-    "Grek": "ell_Grek",
-    "Gujr": "guj_Gujr",
-    "Guru": "pan_Guru",
-    "Hang": "kor_Hang",
-    "Hans": "zho_Hans",
-    "Hant": "zho_Hant",
-    "Hebr": "heb_Hebr",
-    "Jpan": "jpn_Jpan",
-    "Khmr": "khm_Khmr",
-    "Knda": "kan_Knda",
-    "Laoo": "lao_Laoo",
-    "Latn": "eng_Latn",
-    "Mlym": "mal_Mlym",
-    "Mymr": "mya_Mymr",
-    "Orya": "ory_Orya",
-    "Sinh": "sin_Sinh",
-    "Taml": "tam_Taml",
-    "Telu": "tel_Telu",
-    "Tfng": "tzm_Tfng",
-    "Thai": "tha_Thai",
-    "Tibt": "bod_Tibt",
-}
 
 # These are the most common scripts for each language in NLLB
+# This is not a complete listing of the ws tags in NLLB, just the most likely tag for a given iso code.
 NLLB_TAG_FROM_ISO = {
     "ace": "ace_Latn",
     "acm": "acm_Arab",
@@ -441,6 +419,39 @@ NLLB_TAG_FROM_ISO = {
     "zho": "zho_Hant",
     "zul": "zul_Latn",
 }
+
+# These are a selection of 'default' or likely language codes for a given script.
+NLLB_TAG_FROM_SCRIPT = {
+    "Arab": "arb_Arab",
+    "Armn": "hye_Armn",
+    "Beng": "ben_Beng",
+    "Cyrl": "rus_Cyrl",
+    "Deva": "hin_Deva",
+    "Ethi": "amh_Ethi",
+    "Geor": "kat_Geor",
+    "Grek": "ell_Grek",
+    "Gujr": "guj_Gujr",
+    "Guru": "pan_Guru",
+    "Hang": "kor_Hang",
+    "Hans": "zho_Hans",
+    "Hant": "zho_Hant",
+    "Hebr": "heb_Hebr",
+    "Jpan": "jpn_Jpan",
+    "Khmr": "khm_Khmr",
+    "Knda": "kan_Knda",
+    "Laoo": "lao_Laoo",
+    "Latn": "eng_Latn",
+    "Mlym": "mal_Mlym",
+    "Mymr": "mya_Mymr",
+    "Orya": "ory_Orya",
+    "Sinh": "sin_Sinh",
+    "Taml": "tam_Taml",
+    "Telu": "tel_Telu",
+    "Tfng": "tzm_Tfng",
+    "Thai": "tha_Thai",
+    "Tibt": "bod_Tibt",
+}
+
 
 # These NLLB Languages use a latin script:
 NLLB_LATIN_SCRIPT_ISOS = [
