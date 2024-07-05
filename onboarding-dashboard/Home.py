@@ -1,3 +1,4 @@
+from time import sleep
 import zipfile
 from io import BytesIO
 
@@ -54,7 +55,13 @@ def copy_resource_to_gdrive(r: BytesIO):
                 if "/" in file.filename:
                     path_parts = file.filename.split("/")
                     for part in path_parts:
-                        subid = functions.ENV._create_gdrive_folder(part, subid)
+                        try:
+                            subid = functions.ENV._create_gdrive_folder(part, subid)
+                        except:
+                            print(f"Failed to copy {part} to gdrive")
+                            sleep(5)
+                            print(f"Retrying to copy {part} to gdrive")
+                            subid = functions.ENV._create_gdrive_folder(part, subid)
                 functions.ENV._write_gdrive_file_in_folder(subid, file.filename.split("/")[-1], f.read(file).decode())
 
 
