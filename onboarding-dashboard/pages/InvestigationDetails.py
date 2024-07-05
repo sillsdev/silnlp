@@ -361,7 +361,7 @@ def render_alignment_section():
                 get_results.clear("tokenization_stats.csv", st.session_state.current_investigation.name, keep_name=True)
                 try:
                     functions.run(st.session_state.current_investigation.name, experiments=["align"], force_rerun=True)
-                    set_success("align", "Alignments have been successfully run!")
+                    set_success("align", "Alignments are successfully running! Check back after 15 minutes.")
                 except Exception as e:
                     import traceback
 
@@ -599,7 +599,7 @@ def render_model_section():
             get_results.clear("scores-best", st.session_state.current_investigation.name, keep_name=True)
             try:
                 functions.run(st.session_state.current_investigation.name, experiments=exps)
-                set_success("models", "Models have been successfully run!")
+                set_success("models", "Models are successfully running. Check back after a few hours.!")
             except Exception as e:
                 import traceback
 
@@ -686,7 +686,7 @@ def render_draft_section():
             with st.spinner("This might take a few minutes..."):
                 try:
                     functions.run(st.session_state.current_investigation.name, experiments=[draft_name])
-                    set_success("drafts", "Drafting jobs have been successfully run!")
+                    set_success("drafts", "Drafting jobs are successfully running! Check back after a few hours.")
                 except Exception as e:
                     import traceback
 
