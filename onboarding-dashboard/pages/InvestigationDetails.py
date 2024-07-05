@@ -414,14 +414,14 @@ def render_model_section():
             )
             if "bt_src" in model:
                 backtranslation_source_display = st.selectbox(
-                    "Back translation training source",
+                    "Secondary training source",
                     resources,
                     key=f"bts_{model['name']}",
                     index=resources.index(model["bt_src"]),
                     disabled=True,
                 )
                 backtranslation_books_display = st.multiselect(
-                    "Books to train on from back translation",
+                    "Books to train on from secondary source",
                     BOOKS_ABBREVS,
                     key=f"btb_{model['name']}",
                     disabled=True,
@@ -497,12 +497,12 @@ def render_model_section():
             else None
         )
         backtranslation_source = models_form.selectbox(
-            "Back translation training source",
+            "Secondary training source",
             resources,
             index=res_index,
         )
         backtranslation_books = models_form.multiselect(
-            "Books to train on from back translation as well", BOOKS_ABBREVS
+            "Books to train on from secondary source", BOOKS_ABBREVS
         )  # TODO smart defaults
 
     check_error("models")

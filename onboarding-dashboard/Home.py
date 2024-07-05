@@ -227,6 +227,7 @@ with settings_tab:
                     if len(functions.list_inv(env=st.session_state.clowder_env)) == 0:
                         functions.track(None, env=st.session_state.clowder_env)
                     if data_folder is not None:
+                        print(f'Using data folder {data_folder}')
                         functions.use_data(data_folder.split("folders/")[1], env=st.session_state.clowder_env)
                     set_success("set_up", "Successfully changed set-up!")
                 except Exception as e:
