@@ -252,7 +252,7 @@ class ClowderEnvironment:
 
         # extract corpora
         for proj in pt_projects:
-            command = f'SIL_NLP_MT_SCRIPTURE_DIR={self.EXPERIMENTS_FOLDER / "data" / folder_id / "scripture" } SIL_NLP_MT_TERMS_DIR={self.EXPERIMENTS_FOLDER / "data" / folder_id / "terms"} SIL_NLP_PT_DIR={self.EXPERIMENTS_FOLDER / "data" / folder_id } python -m silnlp.common.extract_corpora {proj}'
+            command = f'SIL_NLP_MT_SCRIPTURE_DIR={self.EXPERIMENTS_FOLDER / "data" / folder_id / "scripture" } SIL_NLP_MT_TERMS_DIR={self.EXPERIMENTS_FOLDER / "data" / folder_id / "terms"} SIL_NLP_PT_DIR={self.EXPERIMENTS_FOLDER / "data" / folder_id } {os.environ.get("PYTHON","python")} -m silnlp.common.extract_corpora {proj}'
             result = subprocess.run(
                 command,
                 shell=True,
