@@ -171,7 +171,7 @@ class SilNlpEnv:
         if not self.is_bucket:
             return
         name = str(name)
-        pt_projects_path = str(self.pt_dir.relative_to(self.data_dir) / "projects") + "/"
+        pt_projects_path = "Paratext/projects/"
         name = name.split(pt_projects_path)[-1]
         if len(name) == 0:
             raise Exception(
