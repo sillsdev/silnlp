@@ -1,14 +1,15 @@
 import argparse
 import logging
 from statistics import mean
+from typing import List, Tuple
 
 import pandas as pd
-from machine.scripture import is_ot_nt
+from machine.scripture import VerseRef, is_ot_nt
 
 from ..alignment.config import get_aligner_name
 from ..alignment.utils import add_alignment_scores
-from ..common.collect_verse_counts import collect_verse_counts
-from ..common.corpus import exclude_chapters, filter_parallel_corpus, get_scripture_parallel_corpus, include_chapters
+from ..common.collect_verse_counts import DT_CANON, NT_CANON, OT_CANON, collect_verse_counts
+from ..common.corpus import filter_parallel_corpus, get_scripture_parallel_corpus, include_chapters
 from ..common.environment import SIL_NLP_ENV
 from ..common.script_utils import get_script, is_represented
 from ..common.utils import get_git_revision_hash
@@ -18,10 +19,10 @@ from .config import Config, get_data_file_pairs
 LOGGER = logging.getLogger(__package__ + ".analyze_project_pairs")
 
 
-def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = False):
+def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = False) -> None:
     stats_path = config.exp_dir / "corpus-stats.csv"
     if stats_path.is_file() and not force_align:
-        stats_df = pd.read_csv(stats_path, dtype=str, keep_default_na=False).set_index(["src_project", "trg_project"])
+        stats_df = pd.read_csv(stats_path, dtype=str, keep_default_na=False, index_col=["src_project", "trg_project"])
     else:
         stats_df = pd.DataFrame(
             columns=[
@@ -41,38 +42,38 @@ def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = 
             ],
             dtype=str,
         ).set_index(["src_project", "trg_project"])
-    stats_df.sort_index(inplace=True)
 
     for pair in config.corpus_pairs:
         for src_file, trg_file in get_data_file_pairs(pair):
             project_pair = (f"{src_file.iso}-{src_file.project}", f"{trg_file.iso}-{trg_file.project}")
-            corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path, False)
-            corpus = corpus.loc[(corpus["source"].str.len() > 0) | (corpus["target"].str.len() > 0)]
-            align_corpus = corpus.loc[(corpus["source"].str.len() > 0) & (corpus["target"].str.len() > 0)]
 
-            # Align pair
-            pair_stats_path = config.exp_dir / f"{project_pair[0]}_{project_pair[1]}.csv"
-            if pair_stats_path.is_file() and not force_align:
-                LOGGER.info(f"Using pre-existing alignment scores from {pair_stats_path}")
-                pair_stats = pd.read_csv(pair_stats_path)
-                pair_stats["idx"] = align_corpus.index
-                pair_stats.set_index("idx", inplace=True)
-                align_corpus["score"] = pair_stats["score"]
-            else:
-                aligner_id = config.data["aligner"]
-                LOGGER.info(f"Computing alignment scores using {get_aligner_name(aligner_id)}")
-                add_alignment_scores(align_corpus, aligner_id)
-                align_corpus.to_csv(pair_stats_path, index=False)
-
-            if not deutero:
-                corpus = corpus.loc[[is_ot_nt(vref.book_num) for vref in corpus["vref"]]]
-                align_corpus = align_corpus.loc[[is_ot_nt(vref.book_num) for vref in align_corpus["vref"]]]
-            if len(pair.corpus_books) > 0:
-                corpus = include_chapters(corpus, pair.corpus_books)
-                align_corpus = include_chapters(align_corpus, pair.corpus_books)
-
-            # Compute stats
             if project_pair not in stats_df.index or force_align:
+                corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path, False)
+                corpus = corpus.loc[(corpus["source"].str.len() > 0) | (corpus["target"].str.len() > 0)]
+                align_corpus = corpus.loc[(corpus["source"].str.len() > 0) & (corpus["target"].str.len() > 0)]
+
+                # Align pair
+                pair_stats_path = config.exp_dir / f"{project_pair[0]}_{project_pair[1]}.csv"
+                if pair_stats_path.is_file() and not force_align:
+                    LOGGER.info(f"Using pre-existing alignment scores from {pair_stats_path}")
+                    pair_stats = pd.read_csv(pair_stats_path)
+                    pair_stats["idx"] = align_corpus.index
+                    pair_stats.set_index("idx", inplace=True)
+                    align_corpus.insert(3, "score", pair_stats["score"])
+                else:
+                    aligner_id = config.data["aligner"]
+                    LOGGER.info(f"Computing alignment scores using {get_aligner_name(aligner_id)}")
+                    add_alignment_scores(align_corpus, aligner_id)
+                    align_corpus.to_csv(pair_stats_path, index=False)
+
+                # Filter by book/chapter configurations
+                if not deutero:
+                    corpus = corpus.loc[[is_ot_nt(vref.book_num) for vref in corpus["vref"]]]
+                    align_corpus = align_corpus.loc[[is_ot_nt(vref.book_num) for vref in align_corpus["vref"]]]
+                if len(pair.corpus_books) > 0:
+                    corpus = include_chapters(corpus, pair.corpus_books)
+                    align_corpus = include_chapters(align_corpus, pair.corpus_books)
+
                 pair_count = len(corpus.index)
                 parallel_count = len(align_corpus.index)
                 src_only_count = len(corpus.loc[corpus["target"].str.len() == 0].index)
@@ -124,15 +125,127 @@ def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = 
                 f" source script: {row.at['src_script']}, source script in model: {row.at['src_script_in_model']},"
                 f" target script: {row.at['trg_script']}, target script in model: {row.at['trg_script_in_model']}"
             )
-    stats_df.to_csv(stats_path, index=True)
+    stats_df.sort_index().to_csv(stats_path)
 
 
-def aggregate_data(config: Config):
-    pass
+def create_summary_file(config: Config) -> None:
+    corpus_stats_df = pd.read_csv(config.exp_dir / "corpus-stats.csv", index_col=["src_project", "trg_project"])
+    verse_counts_df = pd.read_csv(config.exp_dir / "verse_counts.csv", index_col="file")
+    verse_percentages_df = pd.read_csv(config.exp_dir / "verse_percentages.csv", index_col="file")
+    alignment_scores_df = pd.read_excel(
+        config.exp_dir / f"{config.exp_dir.stem}_alignment_breakdown.xlsx",
+        sheet_name="By Book",
+        index_col=[0, 1],
+    )
+
+    trg_summary_dfs = {}
+    for trg_project in corpus_stats_df.index.levels[1]:
+        summary_df = pd.DataFrame(columns=["file"] + list(verse_counts_df.columns)).set_index("file")
+        summary_df.loc[trg_project] = verse_counts_df.loc[trg_project]
+
+        for src_project in sorted(corpus_stats_df.swaplevel().loc[trg_project].index):
+            summary_df = pd.concat([summary_df, pd.Series({col: "" for col in summary_df.columns}).to_frame().T])
+            summary_df.loc[src_project] = verse_counts_df.loc[src_project]
+            summary_df.loc[f"Alignment with {src_project}"] = alignment_scores_df.loc[src_project, trg_project]
+
+        trg_summary_dfs[trg_project] = summary_df
+
+    # Write to Excel file
+    with pd.ExcelWriter(config.exp_dir / f"{config.exp_dir.stem}_analysis.xlsx") as writer:
+        corpus_stats_df.to_excel(writer, sheet_name="corpus_stats")
+        verse_counts_df.to_excel(writer, sheet_name="verse_counts")
+        verse_percentages_df.to_excel(writer, sheet_name="verse_percentages")
+
+        for trg_project in sorted(trg_summary_dfs.keys()):
+            trg_summary_dfs[trg_project].to_excel(writer, sheet_name=trg_project)
 
 
-def aggregate_alignments(config: Config):
-    pass
+def split_index(vref: str) -> Tuple[str, str, str]:
+    vref = VerseRef.from_string(vref)
+    return (vref.book, int(vref.chapter), vref.verse)
+
+
+# Sort list of verse numbers that may contain ranges, e.g. "15-16"
+def sort_verse_nums(verse_nums: List[str]) -> List[str]:
+    orig_lens = [len(s) for s in verse_nums]
+    verse_nums = [float(n.replace("-", ".")) if "-" in n else int(n) for n in verse_nums]
+    verse_nums, orig_lens = zip(*sorted(zip(verse_nums, orig_lens), key=lambda x: x[0]))
+    verse_nums = [str(n) if n is int else str(n).replace(".", "-") for n in verse_nums]
+    verse_nums = [
+        s if len(s) == l else s + ("0" * (l - len(s))) for s, l in zip(verse_nums, orig_lens)
+    ]  # restore trailing 0s
+    return verse_nums
+
+
+def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
+    books = OT_CANON + NT_CANON + (DT_CANON if deutero else [])
+    corpus_stats_df = pd.read_csv(config.exp_dir / "corpus-stats.csv", index_col=["src_project", "trg_project"])
+
+    aligment_by_book = pd.DataFrame(columns=["src_project", "trg_project"] + books).set_index(
+        ["src_project", "trg_project"]
+    )
+    alignment_by_chapter = {}
+    alignment_by_verse = {}
+    for project_pair in corpus_stats_df.index:
+        src_project, trg_project = project_pair
+
+        # Get verse alignment scores for pair
+        align_scores_df = (
+            pd.read_csv(config.exp_dir / f"{src_project}_{trg_project}.csv")
+            .set_index("vref")
+            .drop(columns=["source", "target"])
+        )
+        align_scores_df.index = pd.MultiIndex.from_tuples(
+            [split_index(vref) for vref in align_scores_df.index], names=["book", "chapter", "verse"]
+        )
+        existing_books = list(filter(lambda x: x in align_scores_df.index.levels[0], books))
+
+        # Make each row the alignment scores for a chapter
+        verse_df = (
+            align_scores_df.reset_index()
+            .pivot(index=["book", "chapter"], columns="verse", values="score")
+            .loc[existing_books]
+        )
+        verse_df = verse_df[sort_verse_nums(verse_df.columns)]
+
+        # Get average alignment scores at the chapter and book level and make df for chapter alignment scores
+        chapter_avgs = verse_df.mean(axis=1)
+        book_avgs = verse_df.unstack(level=1).mean(axis=1)
+        verse_df.insert(0, "average", chapter_avgs)
+        chapter_df = verse_df.reset_index().pivot(index="book", columns="chapter", values="average").loc[existing_books]
+        chapter_df.insert(0, "average", book_avgs)
+
+        aligment_by_book.loc[project_pair, :] = book_avgs
+        alignment_by_chapter[project_pair] = chapter_df
+        alignment_by_verse[project_pair] = verse_df
+
+    # Write to Excel file
+    with pd.ExcelWriter(config.exp_dir / f"{config.exp_dir.stem}_alignment_breakdown.xlsx") as writer:
+        aligment_by_book.reset_index().to_excel(
+            writer,
+            sheet_name="By Book",
+            index=False,
+        )
+
+        # Max # of sheets in an Excel spreadsheet is 255
+        if len(corpus_stats_df.index) > 100:
+            LOGGER.warning(
+                "Too many project pairs (>100); Alignment breakdowns beyond the book level will not be written."
+            )
+            return
+
+        sheet_names = {}
+        for project_pair in corpus_stats_df.index:
+            # Handle duplicates caused by max length of sheet names (31)
+            name = f"{project_pair[0][:10]}_{project_pair[1][:10]}"
+            if name in sheet_names.keys():
+                sheet_names[name] += 1
+                name = f"{name}_{sheet_names[name]}"
+            else:
+                sheet_names[name] = 0
+
+            alignment_by_chapter[project_pair].to_excel(writer, sheet_name=f"{name}_chapters")
+            alignment_by_verse[project_pair].to_excel(writer, sheet_name=f"{name}_verses")
 
 
 def main() -> None:
@@ -166,9 +279,10 @@ def main() -> None:
     config = clearml.config
     config.set_seed()
 
-    # Confirm that input file paths exist
+    # Confirm that input file paths exist and make sure every corpus pair is many to many
     data_files = []
     for pair in config.corpus_pairs:
+        pair.mapping = "many_to_many"
         data_files += [f.path for f in pair.src_files] + [f.path for f in pair.trg_files]
     for file in data_files:
         if not file.is_file():
@@ -181,20 +295,8 @@ def main() -> None:
     get_corpus_stats(config, args.recalculate, args.deutero)
 
     # Create summary outputs
-    """
-    at this point there will be these files:
-    - detailed_percentages.csv for each project w/ incomplete books: verse percentages per chapter for each incomplete book (>0 verses)
-    - verse_counts.csv: verse counts per book
-    - verse_percentages.csv: verse percentages per book
-    - corpus-stats.csv
-    - alignment files for each pair
-    """
-
-    # aggregate info into single excel file
-    aggregate_data(config)
-
-    # create excel file with alignment scores at each level
-    aggregate_alignments(config)
+    create_alignment_breakdown_file(config, args.deutero)
+    create_summary_file(config)
 
     SIL_NLP_ENV.copy_experiment_to_bucket(exp_name, overwrite=args.recalculate)
 
