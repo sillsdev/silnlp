@@ -113,7 +113,11 @@ def main() -> None:
     # parser.print_help()
     args = parser.parse_args()
     project_dir = get_project_dir(args.project)
-    stylesheet_field_update = args.stylesheet_field_update
+
+    stylesheet_field_update = (args.stylesheet_field_update).lower()
+    if not stylesheet_field_update in ['ignore', 'merge', 'replace']:
+        raise RuntimeError(f"Unknown value given for stylesheet_field_update: {stylesheet_field_update}. Valid values are 'ignore', 'merge' or 'replace'.")
+    
     verbose = args.verbose
 
     settings_tree = parse_project_settings(project_dir)
@@ -122,10 +126,6 @@ def main() -> None:
     # TODO use the filenaming information from the Settings.xml file to find the right names.
     # There is probably code in SILNLP that knows how to do that already.
     books = args.books
-
-    invalid_books = [book for book in books if book not in valid_books and book not in valid_canons]
-    if invalid_books:
-        print(f"\nWARNING: These unknown books will not be checked: {invalid_books}")
 
     if not args.books:
         if verbose:
@@ -154,6 +154,12 @@ def main() -> None:
         # Sort books to check in the usual order.
         books_to_check = [book for book in valid_books if book in books_to_check]
 
+
+    extra_books = [book for book in books if book not in books_to_check and book not in valid_canons]
+
+    if extra_books:
+        books_to_check.extend(extra_books)
+
     parsed = []
     failed_to_parse = []
     missing = []
@@ -176,15 +182,23 @@ def main() -> None:
                     if not segment.is_empty:
                         print(segment.ref, segment.text, end='')
                         
-                
+
+    extra_books = [book for book in books if book not in valid_books and book not in valid_canons]
+    if extra_books:
+        books_to_check.extend(extra_books)
 
     parsed_books = ' '.join(book for book in parsed)
     failed_books = ' '.join(book for book in failed_to_parse)
     missing_books = ' '.join(book for book in missing)
 
-    print(f"Couldn't find these books: {missing_books}")
-    print(f"These books parsed OK: {parsed_books}")
-    print(f"These failed to parse: {failed_books}")
+    if missing_books:
+        print(f"\nCouldn't find these books: {missing_books}")
+    if parsed_books:
+        print(f"\nThese books parsed OK: {parsed_books}")
+    else: 
+        print(f"\nNo books parsed OK.")
+    if failed_books:
+        print(f"\nThese failed to parse: {failed_books}")
 
 
 if __name__ == "__main__":

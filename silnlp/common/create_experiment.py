@@ -9,17 +9,14 @@ from typing import Dict, List, Set, Tuple, Union
 import yaml
 
 from .environment import SIL_NLP_ENV
-from .iso_info import NLLB_ISO_SET, ALT_ISO
-from .find_by_iso import NLLB_LANG_CODES, load_language_data
+from .iso_info import NLLB_ISO_SET, NLLB_TAG_FROM_ISO, ALT_ISO
+from .find_by_iso import LANGUAGE_FAMILY_FILE, load_language_data, find_related_isocodes, get_equivalent_isocodes, get_nllb_languages_only, get_iso_codes_3
 
 NLLB_ISOS = NLLB_ISO_SET
+LANGUAGE_DATA, COUNTRY_DATA, FAMILY_DATA = load_language_data(LANGUAGE_FAMILY_FILE)
 
 IsoCode = str
 IsoCodeSet = Set[IsoCode]
-
-LANGUAGE_FAMILY_FILE = SIL_NLP_ENV.assets_dir / "languageFamilies.json"
-LANGUAGE_DATA, COUNTRY_DATA, FAMILY_DATA = load_language_data(LANGUAGE_FAMILY_FILE)
-THREE_TO_TWO_CSV = SIL_NLP_ENV.assets_dir / "three_to_two.csv"
 
 
 def extract_iso_code(scripture: str) -> IsoCode:
@@ -44,57 +41,6 @@ def choose_yes_no_cancel(prompt: str) -> bool:
     else:
         sys.exit(0)
 
-def get_equivalent_isocodes(iso_codes: Union[IsoCode, List[IsoCode], IsoCodeSet]) -> IsoCodeSet:
-    add_iso_codes = set()
-
-    for iso_code in iso_codes:
-        add_iso_codes.update(set(iso_code))
-        add_iso = ALT_ISO.get_alternative(iso_code)
-        if add_iso is not None:
-            add_iso_codes.update(set(add_iso))
-    return add_iso_codes
-
-
-def get_tla_iso(iso_code) -> IsoCode:
-    if len(iso_code) == 3:
-        return iso_code
-    if len(iso_code) == 2:
-        tla_code = ALT_ISO.get_alternative(iso_code)
-        print(f"Iso code is {iso_code} tla_code is {tla_code}")
-        exit()
-    
-    if len(tla_code) == 3:
-        return tla_code
-    else:
-        return None
-
-
-def find_related_languages(iso_codes: Union[IsoCode, List[IsoCode], IsoCodeSet], verbose=False) -> IsoCodeSet:
-    iso_codes = get_equivalent_isocodes(iso_codes)
-    related_codes = set()
-
-    for iso_code in iso_codes:
-        if iso_code in LANGUAGE_DATA:
-            lang_info = LANGUAGE_DATA[iso_code]
-            country_language_isos = COUNTRY_DATA.get(lang_info["Country"])
-            family_language_isos = FAMILY_DATA.get(lang_info["Family"])
-
-            if verbose:
-                print(f"\nFound these {len(country_language_isos)} languages of {lang_info['Country']}")
-                for country_language_iso in country_language_isos:
-                    lang_info = LANGUAGE_DATA[country_language_iso]
-                    print(f"{country_language_iso} : {lang_info['Name']} : language of {lang_info['Country']}.")
-
-                print(f"\nFound these {len(family_language_isos)} languages of family {lang_info['Family']}")
-                for family_language_iso in family_language_isos:
-                    lang_info = LANGUAGE_DATA[family_language_iso]
-                    print(f"{family_language_iso} : {lang_info['Name']} : language of {lang_info['Family']}.")
-
-            related_codes.update(country_language_isos, [])
-            related_codes.update(family_language_isos, [])
-
-    return iso_codes.union(related_codes)
-
 
 def find_scripture_file_info(scripture: str, scripture_dir: Path) -> Tuple[IsoCode, Path]:
     iso = extract_iso_code(scripture)
@@ -114,10 +60,6 @@ def find_scriptures_by_iso(isos: IsoCodeSet, scripture_dir: Path) -> List[str]:
         for filepath in scripture_dir.iterdir()
         if filepath.suffix == ".txt" and filepath.stem.split("-")[0] in isos
     ]
-
-
-def select_nllb_languages(isocodes: IsoCodeSet) -> List[IsoCode]:
-    return sorted(isocodes.intersection(set(NLLB_ISOS)))
 
 
 def confirm_write_config(config, config_file, message):
@@ -268,12 +210,13 @@ def main():
         default=None,
         help="List of books to translate. Books must be specified if a source is given.",
     )
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="store_true",
-        help="Print list of related languages.",
-    )
+    # parser.add_argument(
+    #     "-v",
+    #     "--verbose",
+    #     action="store_true",
+    #     help="Print list of related languages.",
+    # )
+
     args = parser.parse_args()
     # Create the argument parser
     source_project = str(args.source_project)
@@ -283,7 +226,6 @@ def main():
     target_iso, target_file = find_scripture_file_info(args.target, scripture_dir)
 
     target_isos = get_equivalent_isocodes(target_iso)
-    #    target_lang_name = None
 
     for iso in target_isos:
         if iso in LANGUAGE_DATA:
@@ -292,10 +234,10 @@ def main():
             print(f"Found {target_file} in language: {lang_info['Name']} spoken in {lang_info['Country']}.")
             print(f"{iso} is in language family: {lang_info['Family']}")
 
-    related_isos = find_related_languages(target_isos, verbose=args.verbose)
+    related_isos = find_related_isocodes(target_isos)
     print(f"Found {len(related_isos)} languages spoken in the same country or in the same language family.")
-
-    related_nllb_isos = select_nllb_languages(related_isos)
+   
+    related_nllb_isos = get_nllb_languages_only(related_isos)
     if related_nllb_isos:
         print(f"Of these {len(related_nllb_isos)} languages are known to NLLB.")
         for related_nllb_iso in related_nllb_isos:
@@ -319,7 +261,7 @@ def main():
 
     source_files = [source.split(".")[0] for source in args.sources]  # Remove file extension if present
     source_isos = set(extract_iso_code(source) for source in args.sources)
-    source_nllb_isos = select_nllb_languages(source_isos)
+    source_nllb_isos = get_nllb_languages_only(source_isos)
 
     if source_nllb_isos:
         print(f"Found {len(source_nllb_isos)} source languages also known to NLLB.")
@@ -353,16 +295,17 @@ def main():
         src_lang_iso = extract_iso_code(src_project)
         trg_lang_iso = extract_iso_code(trg_project)
 
-        tla_src_lang_iso = get_tla_iso(src_lang_iso)
-        tla_trg_lang_iso = get_tla_iso(trg_lang_iso)
+        #Convert to three letter code if it is a two letter code:
+        src_lang_iso = src_lang_iso if len(src_lang_iso) == 3 else ALT_ISO.get_alternative(src_lang_iso)
+        trg_lang_iso = trg_lang_iso if len(trg_lang_iso) == 3 else ALT_ISO.get_alternative(trg_lang_iso)
 
-        if tla_src_lang_iso in NLLB_LANG_CODES:
-            lang_codes[src_lang_iso] = NLLB_LANG_CODES[tla_src_lang_iso]
+        if src_lang_iso in NLLB_ISO_SET:
+            lang_codes[src_lang_iso] = NLLB_TAG_FROM_ISO[src_lang_iso]
         else:
             lang_codes[src_lang_iso] = f"{src_lang_iso}_Latn"
 
-        if tla_trg_lang_iso in NLLB_LANG_CODES:
-            lang_codes[trg_lang_iso] = NLLB_LANG_CODES[tla_trg_lang_iso]
+        if trg_lang_iso in NLLB_ISO_SET:
+            lang_codes[trg_lang_iso] = NLLB_TAG_FROM_ISO[trg_lang_iso]
         else:
             lang_codes[trg_lang_iso] = f"{trg_lang_iso}_Latn"
         
