@@ -60,7 +60,7 @@ def main() -> None:
         )
 
     print("Extracting corpora...")
-    print(f"Projects={project}")
+    print(f"Projects={projects}")
     print(f"SCRIPTURE_DIR={SIL_NLP_ENV.mt_scripture_dir}; TERMS_DIR={SIL_NLP_ENV.mt_terms_dir}; PT_PROJ_DIR={SIL_NLP_ENV.pt_projects_dir}")
 
     # Which projects have data we can find?
