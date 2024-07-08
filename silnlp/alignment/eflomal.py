@@ -6,20 +6,26 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import IO, Iterable
 
-from eflomal import read_text, write_text
 from machine.corpora import AlignedWordPair
 from machine.translation import SymmetrizationHeuristic, WordAlignmentMatrix
 
 from ..common.corpus import load_corpus
+from ..common.packages_utils import is_eflomal_available
 from .aligner import Aligner
 from .lexicon import Lexicon
 from .tools import execute_atools, execute_eflomal, is_atools_available
+
+if is_eflomal_available():
+    from eflomal import read_text, write_text
 
 LOGGER = logging.getLogger(__name__)
 
 
 class EflomalAligner(Aligner):
     def __init__(self, model_dir: Path) -> None:
+        if not is_eflomal_available():
+            raise RuntimeError("eflomal is not installed.")
+
         super().__init__("eflomal", model_dir)
 
     def train(self, src_file_path: Path, trg_file_path: Path) -> None:

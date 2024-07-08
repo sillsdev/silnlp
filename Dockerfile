@@ -40,6 +40,7 @@ RUN apt-get install --no-install-recommends -y \
     git \
     python$PYTHON_VERSION \
     python3-pip \
+    python3-dev \
     wget \
     build-essential \
     gdb \
@@ -59,12 +60,8 @@ RUN ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python3  & \
 COPY --from=builder /src/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && rm requirements.txt
 
-# Install eflomal
-RUN git clone https://github.com/robertostling/eflomal.git
-RUN make -C eflomal/src
-RUN make -C eflomal/src install
-RUN rm -rf eflomal
-ENV EFLOMAL_PATH=/usr/local/bin
+# Set eflomal path
+ENV EFLOMAL_PATH=/usr/local/lib/python3.8/dist-packages/eflomal/bin
 
 # Install fast_align
 RUN apt-get update && \
