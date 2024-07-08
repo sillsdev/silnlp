@@ -47,10 +47,8 @@ class SilNlpEnv:
         elif hasattr(self, "pt_dir"):
             # it is already initialized
             return
-        elif os.getenv("SIL_NLP_PT_DIR", None) is not None:
-            self.pt_dir = self.data_dir / os.getenv("SIL_NLP_PT_DIR", "")
-            if not os.getenv("SIL_NLP_PT_DIR", "").startswith(str(self.data_dir)):
-                self.pt_dir = Path(str(self.pt_dir))
+        elif os.getenv("SIL_NLP_PT_DIR"):
+            self.pt_dir = Path(os.getenv("SIL_NLP_PT_DIR"))
         else:
             self.pt_dir = self.data_dir / "Paratext"
         self.pt_terms_dir = self.pt_dir / "terms"
@@ -92,11 +90,11 @@ class SilNlpEnv:
             self.mt_dir = self.data_dir / "MT"
         self.mt_corpora_dir = self.mt_dir / "corpora"
         if os.getenv("SIL_NLP_MT_TERMS_DIR"):
-            self.mt_terms_dir = self.data_dir / os.getenv("SIL_NLP_MT_TERMS_DIR")
+            self.mt_terms_dir = Path(os.getenv("SIL_NLP_MT_TERMS_DIR"))
         else:
             self.mt_terms_dir = self.mt_dir / "terms"
         if os.getenv("SIL_NLP_MT_SCRIPTURE_DIR"):
-            self.mt_scripture_dir = self.data_dir / os.getenv("SIL_NLP_MT_SCRIPTURE_DIR")
+            self.mt_scripture_dir = Path(os.getenv("SIL_NLP_MT_SCRIPTURE_DIR"))
         else:
             self.mt_scripture_dir = self.mt_dir / "scripture"
         if self.is_bucket:
