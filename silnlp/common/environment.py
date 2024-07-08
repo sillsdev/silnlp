@@ -208,20 +208,20 @@ class SilNlpEnv:
             raise Exception(
                 f"No Paratext project name is given.  Data still in the temp directory of {self.pt_projects_dir}"
             )
-        projects_path = "Paratext/projects/"
+        pt_projects_path = str(self.pt_projects_dir) + "/"
         s3 = boto3.resource("s3")
         data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
         temp_folder = str(self.pt_projects_dir / name)
         # we don't need to delete all existing files - it will just overwrite them
         len_projects_dir = len(str(self.pt_projects_dir))
         files_already_in_s3 = set()
-        for obj in data_bucket.object_versions.filter(Prefix=projects_path + name):
+        for obj in data_bucket.object_versions.filter(Prefix=pt_projects_path + name):
             files_already_in_s3.add(str(obj.object_key))
 
         if isinstance(patterns, str):
             patterns = [patterns]
         for root, _, files in os.walk(temp_folder, topdown=False):
-            s3_dest_path = str(projects_path + root[len_projects_dir + 1 :].replace("\\", "/"))
+            s3_dest_path = str(pt_projects_path + root[len_projects_dir + 1 :].replace("\\", "/"))
             for file in files:
                 pure_path = PurePath(file)
                 if len(patterns) == 0 or any(pure_path.match(pattern) for pattern in patterns):
