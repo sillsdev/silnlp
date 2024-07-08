@@ -47,7 +47,7 @@ class SilNlpEnv:
         elif hasattr(self, "pt_dir"):
             # it is already initialized
             return
-        elif os.getenv("SIL_NLP_PT_DIR"):
+        elif os.getenv("SIL_NLP_PT_DIR", None) is not None:
             self.pt_dir = self.data_dir / os.getenv("SIL_NLP_PT_DIR", "")
         else:
             self.pt_dir = self.data_dir / "Paratext"
@@ -73,6 +73,9 @@ class SilNlpEnv:
                 self.pt_projects_dir.mkdir()
         else:
             self.pt_projects_dir = self.pt_dir / "projects"
+        print(self.data_dir)
+        print(self.pt_dir)
+        print(self.pt_projects_dir)
 
     def set_machine_translation_dir(self, mt_dir: Optional[Path] = None):
         if mt_dir is not None:
