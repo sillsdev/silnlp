@@ -2,6 +2,8 @@ import argparse
 import logging
 from typing import List, Set
 
+from s3path import S3Path
+
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books
 
 from ..common.corpus import count_lines
@@ -75,8 +77,10 @@ def main() -> None:
     if len(projects_found) > 0:
         expected_verse_count = get_expected_verse_count(args.include, args.exclude)
         print("MT SCRIPTURE DIR:",SIL_NLP_ENV.mt_scripture_dir)
-        SIL_NLP_ENV.mt_scripture_dir.mkdir(exist_ok=True, parents=True)
-        SIL_NLP_ENV.mt_terms_dir.mkdir(exist_ok=True, parents=True)
+        if not isinstance(SIL_NLP_ENV.mt_scripture_dir, S3Path):
+            SIL_NLP_ENV.mt_scripture_dir.mkdir(exist_ok=True, parents=True)
+        if not isinstance(SIL_NLP_ENV.mt_terms_dir, S3Path):
+            SIL_NLP_ENV.mt_terms_dir.mkdir(exist_ok=True, parents=True)
         for project in projects_found:
             LOGGER.info(f"Extracting {project}...")
             project_dir = get_project_dir(project)
