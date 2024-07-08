@@ -173,7 +173,7 @@ class Investigation:
         data_dir_override = ""
         if "data_folder" in ENV.current_meta:
             folder_id = ENV.current_meta["data_folder"]
-            data_dir_override = f"SIL_NLP_MT_SCRIPTURE_DIR=MT/experiments/clowder/data/{folder_id}/scripture/ SIL_NLP_MT_TERMS_DIR=MT/experiments/clowder/data/{folder_id}/terms/ "
+            data_dir_override = f"SIL_NLP_MT_SCRIPTURE_DIR={str(Path(os.environ.get('SIL_NLP_DATA_PATH')))}MT/experiments/clowder/data/{folder_id}/scripture/ SIL_NLP_MT_TERMS_DIR={str(Path(os.environ.get('SIL_NLP_DATA_PATH')))}MT/experiments/clowder/data/{folder_id}/terms/ "
         if "silnlp" not in complete_entrypoint:
             raise ValueError("Entrypoints must be silnlp jobs")  # TODO make more robust against misuse
         python_cmd = os.environ.get('PYTHON', 'python')

@@ -73,10 +73,6 @@ class SilNlpEnv:
                 self.pt_projects_dir.mkdir()
         else:
             self.pt_projects_dir = self.pt_dir / "projects"
-        print(self.data_dir, isinstance(self.data_dir, S3Path))
-        print(self.pt_dir, isinstance(self.pt_dir, S3Path))
-        print(self.pt_projects_dir, isinstance(self.pt_projects_dir, S3Path))
-
 
     def set_machine_translation_dir(self, mt_dir: Optional[Path] = None):
         if mt_dir is not None:

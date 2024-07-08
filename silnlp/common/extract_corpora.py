@@ -61,10 +61,6 @@ def main() -> None:
             project_name="LangTech_ExtractCorpora", task_name=str(args.projects) + "_" + str(datetime.datetime.now())
         )
 
-    print("Extracting corpora...")
-    print(f"Projects={projects}")
-    print(f"SCRIPTURE_DIR={SIL_NLP_ENV.mt_scripture_dir}; TERMS_DIR={SIL_NLP_ENV.mt_terms_dir}; PT_PROJ_DIR={SIL_NLP_ENV.pt_projects_dir}")
-
     # Which projects have data we can find?
     projects_found: Set[str] = set()
     for project in projects:
@@ -76,7 +72,6 @@ def main() -> None:
     # Process the projects that have data and tell the user.
     if len(projects_found) > 0:
         expected_verse_count = get_expected_verse_count(args.include, args.exclude)
-        print("MT SCRIPTURE DIR:",SIL_NLP_ENV.mt_scripture_dir)
         if not isinstance(SIL_NLP_ENV.mt_scripture_dir, S3Path):
             SIL_NLP_ENV.mt_scripture_dir.mkdir(exist_ok=True, parents=True)
         if not isinstance(SIL_NLP_ENV.mt_terms_dir, S3Path):
