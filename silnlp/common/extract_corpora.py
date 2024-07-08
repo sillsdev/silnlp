@@ -74,6 +74,7 @@ def main() -> None:
     # Process the projects that have data and tell the user.
     if len(projects_found) > 0:
         expected_verse_count = get_expected_verse_count(args.include, args.exclude)
+        print("MT SCRIPTURE DIR:",SIL_NLP_ENV.mt_scripture_dir)
         SIL_NLP_ENV.mt_scripture_dir.mkdir(exist_ok=True, parents=True)
         SIL_NLP_ENV.mt_terms_dir.mkdir(exist_ok=True, parents=True)
         for project in projects_found:
