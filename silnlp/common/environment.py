@@ -52,7 +52,7 @@ class SilNlpEnv:
         else:
             self.pt_dir = self.data_dir / "Paratext"
         self.pt_terms_dir = self.pt_dir / "terms"
-        if self.is_bucket:
+        if self.is_bucket and os.environ.get("SIL_NLP_PT_DIR", None) is None:
             sil_nlp_cache_dir = os.getenv("SIL_NLP_CACHE_PROJECT_DIR")
             if sil_nlp_cache_dir is not None:
                 temp_path = Path(sil_nlp_cache_dir)
