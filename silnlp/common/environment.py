@@ -49,6 +49,8 @@ class SilNlpEnv:
             return
         elif os.getenv("SIL_NLP_PT_DIR", None) is not None:
             self.pt_dir = self.data_dir / os.getenv("SIL_NLP_PT_DIR", "")
+            if Path(os.getenv("SIL_NLP_PT_DIR", "")).exists():
+                self.pt_dir = Path(str(self.pt_dir))
         else:
             self.pt_dir = self.data_dir / "Paratext"
         self.pt_terms_dir = self.pt_dir / "terms"
@@ -73,9 +75,6 @@ class SilNlpEnv:
                 self.pt_projects_dir.mkdir()
         else:
             self.pt_projects_dir = self.pt_dir / "projects"
-        print(self.data_dir, isinstance(self.data_dir, S3Path))
-        print(self.pt_dir, isinstance(self.pt_dir, S3Path))
-        print(self.pt_projects_dir, isinstance(self.pt_projects_dir, S3Path))
 
     def set_machine_translation_dir(self, mt_dir: Optional[Path] = None):
         if mt_dir is not None:
