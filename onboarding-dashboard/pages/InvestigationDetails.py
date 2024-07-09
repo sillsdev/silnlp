@@ -30,7 +30,7 @@ st.markdown(
 
 
 @st.cache_data(show_spinner=False)
-def get_resources():
+def get_resources(env):
     with st.spinner("Fetching resources. This might take a few minutes..."):
         try:
             return list(map(lambda fn: fn[:-4], functions.list_resources()))
@@ -106,7 +106,7 @@ def get_results(results_name: str, investigation_name: str = None, keep_name: bo
 
 
 @st.cache_data(show_spinner=False)
-def set_config():
+def set_config(investigation_name:str):
     print(f"Writing config for {st.session_state.current_investigation}")
     config_data = ""
     with open("onboarding-dashboard/config-templates/config.jinja-yml", "r") as f:
@@ -714,8 +714,8 @@ if "current_investigation" in st.session_state:
             st.session_state.synced_dict = {}
         st.session_state.synced_dict[st.session_state.current_investigation.name] = True
     if st.session_state.current_investigation.status == Status.Created:
-        set_config()
-    resources = get_resources()
+        set_config(st.session_state.current_investigation.name)
+    resources = get_resources(st.session_state.clowder_env)
     st.session_state.results_stats = None
     st.session_state.results_align = None
     st.session_state.results_models = None

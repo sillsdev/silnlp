@@ -94,7 +94,7 @@ def get_investigations() -> list:
 
 
 @st.cache_data(show_spinner=False)
-def get_resources():
+def get_resources(env): #Pass in env to make cache per env
     try:
         fn_res = functions.list_resources(env=st.session_state.clowder_env)
         return list(map(lambda fn: fn[:-4], fn_res))
@@ -109,7 +109,10 @@ def get_resources():
 if "investigations" not in st.session_state:
     st.session_state.investigations = get_investigations()
 
-investigation_tab, resource_tab, settings_tab = st.tabs(["Investigations", "Resources", "Settings"])
+if os.environ.get('DEBUG_SFONBOARD',None) == 'true':
+    investigation_tab, resource_tab, settings_tab, debug_tab = st.tabs(["Investigations", "Resources", "Settings", "Debug"])
+else:
+    investigation_tab, resource_tab, settings_tab = st.tabs(["Investigations", "Resources", "Settings"])
 
 with investigation_tab:
     st.header("Investigations")
@@ -143,7 +146,7 @@ with resource_tab:
     st.header("Resources")
     c1, c2 = st.columns([0.5, 0.5])
     with c1:
-        res = get_resources()
+        res = get_resources(st.session_state.clowder_env)
         data = {"Resource": res}
         df = pd.DataFrame(data)
         st.dataframe(df, use_container_width=True, hide_index=True, height=500)
@@ -238,8 +241,12 @@ with settings_tab:
                         functions.track(None, env=st.session_state.clowder_env)
                     if data_folder is not None:
                         print(f'Using data folder {data_folder}')
-                        functions.use_data(data_folder.split("folders/")[1], env=st.session_state.clowder_env)
+                        functions.use_data(data_folder.split("folders/")[1], env=st.session_state.clowder_env, refresh=True)
                     set_success("set_up", "Successfully changed set-up!")
                 except Exception as e:
                     st.error(f"Something went wrong while fetching resource data. Please try again. Error: {e}")
             check_success("set_up")
+
+    if os.environ.get('DEBUG_SFONBOARD',None) == 'true':
+        with debug_tab:
+            st.write(st.session_state.clowder_env, st.session_state.clowder_env.meta.data, st.session_state.clowder_env.data_folder)
