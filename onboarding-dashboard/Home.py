@@ -146,7 +146,7 @@ with resource_tab:
     st.header("Resources")
     c1, c2 = st.columns([0.5, 0.5])
     with c1:
-        res = get_resources(st.session_state.clowder_env)
+        res = get_resources(str(st.session_state.clowder_env))
         data = {"Resource": res}
         df = pd.DataFrame(data)
         st.dataframe(df, use_container_width=True, hide_index=True, height=500)
@@ -243,6 +243,7 @@ with settings_tab:
                         print(f'Using data folder {data_folder}')
                         functions.use_data(data_folder.split("folders/")[1], env=st.session_state.clowder_env, refresh=True)
                     set_success("set_up", "Successfully changed set-up!")
+                    st.cache_data.clear()
                 except Exception as e:
                     st.error(f"Something went wrong while fetching resource data. Please try again. Error: {e}")
             check_success("set_up")
