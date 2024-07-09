@@ -167,12 +167,12 @@ def list_contexts():
 
 
 @app.command("use-data-folder")
-def use_data_folder(folder_id: str):
+def use_data_folder(folder_id: str, refresh: bool = True):
     """Use scripture data from a particular gdrive folder specified by folder-id.
     (Other users will not be able to access this data). Data should be uploaded to
     the gdrive folder as complete Paratext project folders. This data folder will
     be associated only with the current context"""
-    functions.use_data(folder_id)
+    functions.use_data(folder_id, refresh)
 
 
 @app.command("current-data-folder")

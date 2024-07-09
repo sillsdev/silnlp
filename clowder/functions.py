@@ -221,7 +221,7 @@ def list_inv(env = None) -> "list[Investigation]":
         return ENV.investigations
 
 
-def use_data(folder_id: str, env = None):
+def use_data(folder_id: str, refresh: bool = True, env = None):
     """Use scripture data from a particular gdrive folder specified by folder-id.
     (Other users will not be able to access this data). Data should be uploaded to
     the gdrive folder as complete Paratext project folders. This data folder will
@@ -230,7 +230,7 @@ def use_data(folder_id: str, env = None):
         if env is not None:
             global ENV
             ENV = env
-    ENV.use_data(folder_id)
+    ENV.use_data(folder_id, refresh)
 
 
 def current_data(env = None):

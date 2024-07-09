@@ -138,6 +138,7 @@ else:
                         placeholder="https://drive.google.com/drive/u/0/folders/0000000000000000000",
                         value=current_data_folder,
                     )
+                    refresh = st.checkbox('Refresh resources', help="Check this box if new resources have been manually added to your resource gdrive")
             check_error("set_up")
             if st.form_submit_button("Set Up", type="primary"):
                 from clowder import functions
@@ -164,7 +165,7 @@ else:
                     if len(functions.list_inv(env=st.session_state.clowder_env)) == 0:
                         functions.track(None, env=st.session_state.clowder_env)
                     if not bypass_auth and is_external_user:
-                        functions.use_data(data_folder.split("folders/")[1].split("?")[0])
+                        functions.use_data(data_folder.split("folders/")[1].split("?")[0], refresh)
                     else:
                         functions.unlink_data(env=st.session_state.clowder_env)
                     try:

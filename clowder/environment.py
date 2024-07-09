@@ -233,37 +233,38 @@ class ClowderEnvironment:
     def track_all_investigations(self):
         self._track_all_investigations_in_folder(self.root)
 
-    def use_data(self, folder_id: str):
-        files_in_data_folder = self._dict_of_gdrive_files(folder_id)
-        pt_projects = set()
-        for name, file in files_in_data_folder.items():
-            contents = self._dict_of_gdrive_files(file["id"])
-            if "Settings.xml" in contents.keys():
-                pt_projects.add(name)
+    def use_data(self, folder_id: str, refresh: bool = True):
+        if refresh:
+            files_in_data_folder = self._dict_of_gdrive_files(folder_id)
+            pt_projects = set()
+            for name, file in files_in_data_folder.items():
+                contents = self._dict_of_gdrive_files(file["id"])
+                if "Settings.xml" in contents.keys():
+                    pt_projects.add(name)
 
-        storage_files = self.EXPERIMENTS_FOLDER / "data" / folder_id
-        if storage_files.exists() and storage_files.is_dir():
-            self._delete_storage_folder(storage_files)
+            storage_files = self.EXPERIMENTS_FOLDER / "data" / folder_id
+            if storage_files.exists() and storage_files.is_dir():
+                self._delete_storage_folder(storage_files)
 
-        self._copy_gdrive_folder_to_storage(
-            folder_id, storage_files / "projects", where=lambda f: f["title"] in pt_projects
-        )
-
-
-        # extract corpora
-        for proj in pt_projects:
-            command = f'SIL_NLP_MT_SCRIPTURE_DIR={self.EXPERIMENTS_FOLDER / "data" / folder_id / "scripture" } SIL_NLP_MT_TERMS_DIR={self.EXPERIMENTS_FOLDER / "data" / folder_id / "terms"} SIL_NLP_PT_DIR={self.EXPERIMENTS_FOLDER / "data" / folder_id } {os.environ.get("PYTHON","python")} -m silnlp.common.extract_corpora {proj}'
-            result = subprocess.run(
-                command,
-                shell=True,
-                capture_output=True,
-                text=True,
+            self._copy_gdrive_folder_to_storage(
+                folder_id, storage_files / "projects", where=lambda f: f["title"] in pt_projects
             )
-            print(result)
-            if result.stdout != "":
-                print(result.stdout)
-            if result.stderr != "":
-                print(result.stderr)
+
+
+            # extract corpora
+            for proj in pt_projects:
+                command = f'SIL_NLP_MT_SCRIPTURE_DIR={self.EXPERIMENTS_FOLDER / "data" / folder_id / "scripture" } SIL_NLP_MT_TERMS_DIR={self.EXPERIMENTS_FOLDER / "data" / folder_id / "terms"} SIL_NLP_PT_DIR={self.EXPERIMENTS_FOLDER / "data" / folder_id } {os.environ.get("PYTHON","python")} -m silnlp.common.extract_corpora {proj}'
+                result = subprocess.run(
+                    command,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                )
+                print(result)
+                if result.stdout != "":
+                    print(result.stdout)
+                if result.stderr != "":
+                    print(result.stderr)
         with self.meta.lock:
             self.meta.load()
             self.current_meta["data_folder"] = folder_id
