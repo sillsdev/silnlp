@@ -32,7 +32,7 @@ from clowder.investigation import Investigation
 from clowder.status import Status
 from silnlp.common.environment import SIL_NLP_ENV
 
-from time import time
+from time import time, sleep
 
 
 class DuplicateInvestigationException(Exception):
@@ -303,7 +303,12 @@ class ClowderEnvironment:
 
     def _read_gdrive_file_as_bytes(self, file_id: str) -> bytes:
         file = self._google_drive.CreateFile({"id": file_id})
-        buffer: MediaIoReadable = file.GetContentIOBuffer()
+        try:
+            buffer: MediaIoReadable = file.GetContentIOBuffer()
+        except Exception:
+            print(f"Failed to read file {file_id}. Trying again.")
+            sleep(5)
+            buffer: MediaIoReadable = file.GetContentIOBuffer()
         b = buffer.read()
         return b if b is not None else b""  # type: ignore
 
