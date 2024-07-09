@@ -45,8 +45,10 @@ def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = 
 
     for pair in config.corpus_pairs:
         for src_file, trg_file in get_data_file_pairs(pair):
-            project_pair = (f"{src_file.iso}-{src_file.project}", f"{trg_file.iso}-{trg_file.project}")
+            if src_file == trg_file:
+                continue
 
+            project_pair = (f"{src_file.iso}-{src_file.project}", f"{trg_file.iso}-{trg_file.project}")
             if project_pair not in stats_df.index or force_align:
                 corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path, False)
                 corpus = corpus.loc[(corpus["source"].str.len() > 0) | (corpus["target"].str.len() > 0)]
@@ -156,8 +158,17 @@ def create_summary_file(config: Config) -> None:
         verse_counts_df.to_excel(writer, sheet_name="verse_counts")
         verse_percentages_df.to_excel(writer, sheet_name="verse_percentages")
 
+        sheet_names = {}
         for trg_project in sorted(trg_summary_dfs.keys()):
-            trg_summary_dfs[trg_project].to_excel(writer, sheet_name=trg_project)
+            # Handle duplicates caused by max length of sheet names (31)
+            name = trg_project[:29]
+            if name in sheet_names.keys():
+                sheet_names[name] += 1
+                name = f"{name}_{sheet_names[name]}"
+            else:
+                sheet_names[name] = 0
+
+            trg_summary_dfs[trg_project].to_excel(writer, sheet_name=name)
 
 
 def split_index(vref: str) -> Tuple[str, str, str]:
@@ -237,7 +248,7 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
         sheet_names = {}
         for project_pair in corpus_stats_df.index:
             # Handle duplicates caused by max length of sheet names (31)
-            name = f"{project_pair[0][:10]}_{project_pair[1][:10]}"
+            name = f"{project_pair[0][:9]}_{project_pair[1][:9]}"
             if name in sheet_names.keys():
                 sheet_names[name] += 1
                 name = f"{name}_{sheet_names[name]}"

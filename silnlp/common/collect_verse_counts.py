@@ -80,10 +80,10 @@ def collect_verse_counts(
     partial_books_out_path = output_path / "partially_complete_books"
     partial_books_out_path.mkdir(parents=True, exist_ok=True)
 
-    extract_files = []
+    extract_files = set()
     for file_pattern in file_patterns.split(";"):
         file_pattern = file_pattern.strip()
-        extract_files += list(input_path.glob(file_pattern))
+        extract_files.update(input_path.glob(file_pattern))
     project_names = [f.stem for f in extract_files]
     projects_to_process = project_names
 
