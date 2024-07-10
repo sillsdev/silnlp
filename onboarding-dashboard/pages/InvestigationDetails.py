@@ -717,7 +717,7 @@ if "current_investigation" in st.session_state:
             st.session_state.synced_dict = {}
         st.session_state.synced_dict[st.session_state.current_investigation.name] = True
     if st.session_state.current_investigation.status == Status.Created:
-        set_config(st.session_state.current_investigation.name)
+        set_config()
     resources = get_resources(str(st.session_state.clowder_env))
     st.session_state.results_stats = None
     st.session_state.results_align = None
