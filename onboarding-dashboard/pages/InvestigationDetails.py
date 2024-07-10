@@ -104,13 +104,16 @@ def get_results(results_name: str, investigation_name: str = None, keep_name: bo
         df.drop(axis="columns", labels="name", inplace=True)
     return df
 
-
 @st.cache_data(show_spinner=False)
-def set_config(investigation_name:str):
-    print(f"Writing config for {st.session_state.current_investigation}")
+def get_config() -> str:
     config_data = ""
     with open("onboarding-dashboard/config-templates/config.jinja-yml", "r") as f:
         config_data = f.read()
+    return config_data
+
+def set_config():
+    print(f"Writing config for {st.session_state.current_investigation}")
+    config_data = get_config()
     try:
         with functions._lock:
             import clowder.investigation as inv
@@ -287,7 +290,7 @@ def alignments_is_running():
             len(
                 list(
                     filter(
-                        lambda kv: "align" in kv[0] and kv[1]["status"] in ["in_progress", "queued"],
+                        lambda kv: "align" in kv[0] and kv[1].get("status", None) in ["in_progress", "queued"],
                         functions.ENV.get_investigation(
                             st.session_state.current_investigation.name
                         ).experiments.items(),
@@ -546,7 +549,7 @@ def render_model_section():
                     filter(
                         lambda kv: "NLLB" in kv[0]
                         and "draft" not in kv[0]
-                        and kv[1]["status"] in ["in_progress", "queued"],
+                        and kv[1].get("status", None) in ["in_progress", "queued"],
                         functions.ENV.get_investigation(
                             st.session_state.current_investigation.name
                         ).experiments.items(),
@@ -617,7 +620,7 @@ def draft_is_running():
         functions.ENV = st.session_state.clowder_env
         _running_draft_list = list(
             filter(
-                lambda kv: "draft" in kv[0] and kv[1]["status"] in ["in_progress", "queued"],
+                lambda kv: "draft" in kv[0] and kv[1].get("status", None) in ["in_progress", "queued"],
                 functions.ENV.get_investigation(st.session_state.current_investigation.name).experiments.items(),
             )
         )
