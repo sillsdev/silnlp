@@ -156,6 +156,12 @@ with resource_tab:
                 "Resource",
                 type="zip",
                 accept_multiple_files=True,
+                help="A Paratext project backup zip - i.e., a zip file with name <project_name>.zip with the following contents: \
+                \n-- Book.usfm \
+                \n--  AnotherBook.usfm \
+                \n-- ... \
+                \n-- Settings.xml \
+                \nUpon success, a new text will be added to your resources with name <language_code>-<project_name> which can then be used in your investigations"
             )
             check_error("add_resource")
             if st.form_submit_button(
