@@ -177,7 +177,7 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
         if isinstance(trg, str):
             trg = trg.split(",")
         trg_files = [DataFile(get_mt_corpus_path(tp.strip())) for tp in trg]
-        back_translations: Union[str, List[str]] = pair.get("back_translations", [])
+        back_translations: Union[str, List[str]] = pair.get("mixed_src_BTs", [])
         if isinstance(back_translations, str):
             back_translations = back_translations.split(",")
         is_scripture = src_files[0].is_scripture
