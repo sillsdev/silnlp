@@ -102,7 +102,7 @@ class SILClearML:
         if self.task is None:
             with (exp_dir / "config.yml").open("r", encoding="utf-8") as file:
                 config = yaml.safe_load(file)
-            if config is None:
+            if config is None or len(config.keys()) == 0:
                 raise RuntimeError("Config file has no contents.")
             self.config = create_config(exp_dir, config)
             return
@@ -119,7 +119,7 @@ class SILClearML:
                 config = yaml.safe_load(file)
         else:
             config = {}
-        if config is None:
+        if config is None or len(config.keys()) == 0:
             raise RuntimeError("Config file has no contents.")
 
         # connect it with ClearML
