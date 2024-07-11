@@ -308,8 +308,8 @@ def render_alignment_section():
         if len(st.session_state.results_align.index) > 0:
             st.dataframe(
                 st.session_state.results_align.style.highlight_max(
-                    subset=st.session_state.results_align.select_dtypes(include="number").columns, color="green"
-                ).format(precision=3)
+                    subset=st.session_state.results_align.select_dtypes(include="float64").columns, color="green"
+                ).format(lambda s: round(s, 3) if not isinstance(s, str) and s // 1 != s else int(s) if not isinstance(s,str) else s, precision=0)
             )
         else:
             st.write("**No results found**")
@@ -320,12 +320,12 @@ def render_alignment_section():
     with st.form(key=f"{st.session_state.current_investigation.id}-run-alignments"):
         default_sources, target_name = split_target_sources()
         training_sources = st.multiselect(
-            "Training sources",
+            "Alignment sources",
             resources,
             default=default_sources,
         )
         target_index = resources.index(target_name) if target_name is not None else None
-        training_target = st.selectbox("Training target", resources, index=target_index)
+        training_target = st.selectbox("Alignment target", resources, index=target_index)
         default_books = get_default_books(training_sources, training_target)
         books = st.multiselect("Books to align on", BOOKS_ABBREVS, default=default_books)
         alignments_already_running = alignments_is_running()
