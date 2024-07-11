@@ -309,7 +309,7 @@ def render_alignment_section():
             st.dataframe(
                 st.session_state.results_align.style.highlight_max(
                     subset=st.session_state.results_align.select_dtypes(include="float64").columns, color="green"
-                ).format(lambda s: round(s, 3) if not isinstance(s, str) and s // 1 != s else int(s) if not isinstance(s,str) else s, precision=0)
+                ).format(lambda s: round(s, 3) if not isinstance(s, str) and s // 1 != s else int(s) if not isinstance(s,str) else s, precision=3)
             )
         else:
             st.write("**No results found**")
