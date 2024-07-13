@@ -2,7 +2,7 @@ import logging
 import tempfile
 from pathlib import Path, PurePath
 from statistics import mean
-from typing import List, Set, cast
+from typing import List, Optional, Set
 
 import pandas as pd
 
@@ -30,7 +30,7 @@ def get_experiment_name(exp_dir: Path) -> str:
 
 def compute_alignment_score(
     direct_lexicon: Lexicon,
-    inverse_lexicon: Lexicon,
+    inverse_lexicon: Optional[Lexicon],
     src_sentence: str,
     trg_sentence: str,
     alignment: str,
@@ -57,7 +57,7 @@ def compute_alignment_score(
                 src_word = src_words[i]
                 trg_word = trg_words[j]
                 direct_prob = max(direct_lexicon[src_word, trg_word], 1e-9)
-                inverse_prob = max(inverse_lexicon[trg_word, src_word], 1e-9)
+                inverse_prob = max(inverse_lexicon[trg_word, src_word], 1e-9) if inverse_lexicon else 0
                 prob = max(direct_prob, inverse_prob)
                 probs.append(prob)
         else:
@@ -69,7 +69,10 @@ def compute_alignment_score(
         probs.append(max(direct_lexicon["NULL", trg_words[j]], 1e-9))
 
     for i in unaligned_src_indices:
-        probs.append(max(inverse_lexicon["NULL", src_words[i]], 1e-9))
+        if inverse_lexicon:
+            probs.append(max(inverse_lexicon["NULL", src_words[i]], 1e-9))
+        else:
+            probs.append(max(direct_lexicon[src_words[i], "NULL"], 1e-9))
 
     return mean(probs) if len(probs) > 0 else 0
 
@@ -95,14 +98,20 @@ def compute_alignment_scores(
         tokenize_corpus(src_input_path, src_tok_output_path)
         tokenize_corpus(trg_input_path, trg_tok_output_path)
 
-        aligner = cast(MachineAligner, get_aligner(aligner_id, temp_dir))
+        aligner = get_aligner(aligner_id, temp_dir)
         if sym_align_path is None:
             sym_align_path = temp_dir / "sym-align.txt"
         aligner.train(src_tok_output_path, trg_tok_output_path)
-        aligner.align(sym_align_path, export_probabilities=True)
+        if isinstance(aligner, MachineAligner):
+            aligner.align(sym_align_path, export_probabilities=True)
+        else:
+            aligner.align(sym_align_path)
 
         direct_lexicon = aligner.get_direct_lexicon(include_special_tokens=True)
-        inverse_lexicon = aligner.get_inverse_lexicon(include_special_tokens=True)
+        if aligner.has_inverse_model:
+            inverse_lexicon = aligner.get_inverse_lexicon(include_special_tokens=True)
+        else:
+            inverse_lexicon = None
 
         scores: List[float] = []
         with src_tok_output_path.open("r", encoding="utf-8") as src_tok_output_file, trg_tok_output_path.open(

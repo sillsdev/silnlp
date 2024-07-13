@@ -28,6 +28,10 @@ class EflomalAligner(Aligner):
 
         super().__init__("eflomal", model_dir)
 
+    @property
+    def has_inverse_model(self) -> bool:
+        return False
+
     def train(self, src_file_path: Path, trg_file_path: Path) -> None:
         LOGGER.info("Generating alignments")
         self.model_dir.mkdir(exist_ok=True)
