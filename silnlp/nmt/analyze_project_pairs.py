@@ -43,90 +43,103 @@ def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = 
             dtype=str,
         ).set_index(["src_project", "trg_project"])
 
+    pairs_to_process = []
     for pair in config.corpus_pairs:
         for src_file, trg_file in get_data_file_pairs(pair):
             if src_file == trg_file:
                 continue
 
-            project_pair = (f"{src_file.iso}-{src_file.project}", f"{trg_file.iso}-{trg_file.project}")
-            if project_pair not in stats_df.index or force_align:
-                corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path, False)
-                corpus = corpus.loc[(corpus["source"].str.len() > 0) | (corpus["target"].str.len() > 0)]
-                align_corpus = corpus.loc[(corpus["source"].str.len() > 0) & (corpus["target"].str.len() > 0)]
+            src_project, trg_project = f"{src_file.iso}-{src_file.project}", f"{trg_file.iso}-{trg_file.project}"
+            if force_align:
+                (config.exp_dir / f"{src_project}_{trg_project}.csv").unlink(missing_ok=True)
+                (config.exp_dir / f"{trg_project}_{src_project}.csv").unlink(missing_ok=True)
 
-                # Align pair
-                pair_stats_path = config.exp_dir / f"{project_pair[0]}_{project_pair[1]}.csv"
-                if pair_stats_path.is_file() and not force_align:
-                    LOGGER.info(f"Using pre-existing alignment scores from {pair_stats_path}")
-                    pair_stats = pd.read_csv(pair_stats_path)
-                    pair_stats["idx"] = align_corpus.index
-                    pair_stats.set_index("idx", inplace=True)
-                    align_corpus.insert(3, "score", pair_stats["score"])
-                else:
-                    aligner_id = config.data["aligner"]
-                    LOGGER.info(f"Computing alignment scores using {get_aligner_name(aligner_id)}")
-                    add_alignment_scores(align_corpus, aligner_id)
-                    align_corpus.to_csv(pair_stats_path, index=False)
+            pairs_to_process.append((src_file, trg_file))
 
-                # Filter by book/chapter configurations
-                if not deutero:
-                    corpus = corpus.loc[[is_ot_nt(vref.book_num) for vref in corpus["vref"]]]
-                    align_corpus = align_corpus.loc[[is_ot_nt(vref.book_num) for vref in align_corpus["vref"]]]
-                if len(pair.corpus_books) > 0:
-                    corpus = include_chapters(corpus, pair.corpus_books)
-                    align_corpus = include_chapters(align_corpus, pair.corpus_books)
+    for src_file, trg_file in pairs_to_process:
+        project_pair = (f"{src_file.iso}-{src_file.project}", f"{trg_file.iso}-{trg_file.project}")
+        if project_pair not in stats_df.index:
+            corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path, False)
+            corpus = corpus.loc[(corpus["source"].str.len() > 0) | (corpus["target"].str.len() > 0)]
+            align_corpus = corpus.loc[(corpus["source"].str.len() > 0) & (corpus["target"].str.len() > 0)]
 
-                pair_count = len(corpus.index)
-                parallel_count = len(align_corpus.index)
-                src_only_count = len(corpus.loc[corpus["target"].str.len() == 0].index)
-                trg_only_count = len(corpus.loc[corpus["source"].str.len() == 0].index)
+            # Align pair
+            pair_stats_path = config.exp_dir / f"{project_pair[0]}_{project_pair[1]}.csv"
+            alt_pair_stats_path = config.exp_dir / f"{project_pair[1]}_{project_pair[0]}.csv"
+            if not pair_stats_path.is_file() and alt_pair_stats_path.is_file():
+                pair_stats_path = alt_pair_stats_path
 
-                alignment_score = align_corpus["score"].mean()
-                filtered_count = 0
-                filtered_alignment_score = alignment_score
-                if pair.score_threshold > 0:
-                    unfiltered_len = len(align_corpus)
-                    align_corpus = filter_parallel_corpus(align_corpus, pair.score_threshold)
-                    filtered_count = unfiltered_len - len(align_corpus)
-                    filtered_alignment_score = mean(align_corpus["score"])
+            if pair_stats_path.is_file():
+                LOGGER.info(f"Using pre-existing alignment scores from {pair_stats_path}")
+                pair_stats = pd.read_csv(pair_stats_path)
+                pair_stats["idx"] = align_corpus.index
+                pair_stats.set_index("idx", inplace=True)
+                align_corpus.insert(3, "score", pair_stats["score"])
+            else:
+                aligner_id = config.data["aligner"]
+                LOGGER.info(f"Computing alignment scores using {get_aligner_name(aligner_id)}")
+                add_alignment_scores(align_corpus, aligner_id)
+                align_corpus.to_csv(pair_stats_path, index=False)
 
-                src_script = get_script("".join(corpus["source"][: min(len(corpus["source"]), 3000)]))
-                src_script_in_model = (
-                    is_represented(src_script, config.model) if config.model != "SILTransformerBase" else None
-                )
-                trg_script = get_script("".join(corpus["target"][: min(len(corpus["target"]), 3000)]))
-                trg_script_in_model = (
-                    is_represented(trg_script, config.model) if config.model != "SILTransformerBase" else None
-                )
+            # Filter by book/chapter configurations
+            if not deutero:
+                corpus = corpus.loc[[is_ot_nt(vref.book_num) for vref in corpus["vref"]]]
+                align_corpus = align_corpus.loc[[is_ot_nt(vref.book_num) for vref in align_corpus["vref"]]]
+            if len(pair.corpus_books) > 0:
+                corpus = include_chapters(corpus, pair.corpus_books)
+                align_corpus = include_chapters(align_corpus, pair.corpus_books)
 
-                stats_df.loc[project_pair, :] = [
-                    pair_count,
-                    src_only_count,
-                    trg_only_count,
-                    parallel_count,
-                    "{:.4f}".format(alignment_score),
-                    filtered_count,
-                    "{:.4f}".format(filtered_alignment_score),
-                    src_script,
-                    src_script_in_model,
-                    trg_script,
-                    trg_script_in_model,
-                ]
+            pair_count = len(corpus.index)
+            parallel_count = len(align_corpus.index)
+            src_only_count = len(corpus.loc[corpus["target"].str.len() == 0].index)
+            trg_only_count = len(corpus.loc[corpus["source"].str.len() == 0].index)
 
-            # Use values from the df because not all values get recalculated
-            row = stats_df.loc[project_pair]
-            LOGGER.info(
-                f"{src_file.project} -> {trg_file.project} stats -"
-                f" count: {row.at['count']},"
-                f" source only count: {row.at['src_only']}"
-                f" target only count: {row.at['trg_only']}"
-                f" parallel count: {row.at['parallel']}"
-                f" alignment: {row.at['align_score']},"
-                f" filtered count: {row.at['filtered_count']},"
-                f" alignment (filtered): {row.at['filtered_align_score']},"
-                f" source script: {row.at['src_script']}, source script in model: {row.at['src_script_in_model']},"
-                f" target script: {row.at['trg_script']}, target script in model: {row.at['trg_script_in_model']}"
+            alignment_score = align_corpus["score"].mean()
+            filtered_count = 0
+            filtered_alignment_score = alignment_score
+            if pair.score_threshold > 0:
+                unfiltered_len = len(align_corpus)
+                align_corpus = filter_parallel_corpus(align_corpus, pair.score_threshold)
+                filtered_count = unfiltered_len - len(align_corpus)
+                filtered_alignment_score = mean(align_corpus["score"])
+
+            src_script = get_script("".join(corpus["source"][: min(len(corpus["source"]), 3000)]))
+            src_script_in_model = (
+                is_represented(src_script, config.model) if config.model != "SILTransformerBase" else None
             )
+            trg_script = get_script("".join(corpus["target"][: min(len(corpus["target"]), 3000)]))
+            trg_script_in_model = (
+                is_represented(trg_script, config.model) if config.model != "SILTransformerBase" else None
+            )
+
+            stats_df.loc[project_pair, :] = [
+                pair_count,
+                src_only_count,
+                trg_only_count,
+                parallel_count,
+                "{:.4f}".format(alignment_score),
+                filtered_count,
+                "{:.4f}".format(filtered_alignment_score),
+                src_script,
+                src_script_in_model,
+                trg_script,
+                trg_script_in_model,
+            ]
+
+        # Use values from the df because not all values get recalculated
+        row = stats_df.loc[project_pair]
+        LOGGER.info(
+            f"{src_file.project} -> {trg_file.project} stats -"
+            f" count: {row.at['count']},"
+            f" source only count: {row.at['src_only']}"
+            f" target only count: {row.at['trg_only']}"
+            f" parallel count: {row.at['parallel']}"
+            f" alignment: {row.at['align_score']},"
+            f" filtered count: {row.at['filtered_count']},"
+            f" alignment (filtered): {row.at['filtered_align_score']},"
+            f" source script: {row.at['src_script']}, source script in model: {row.at['src_script_in_model']},"
+            f" target script: {row.at['trg_script']}, target script in model: {row.at['trg_script_in_model']}"
+        )
     stats_df.sort_index().to_csv(stats_path)
 
 
@@ -199,13 +212,12 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
     alignment_by_verse = {}
     for project_pair in corpus_stats_df.index:
         src_project, trg_project = project_pair
+        scores_path = config.exp_dir / f"{src_project}_{trg_project}.csv"
+        if not scores_path.is_file():
+            scores_path = config.exp_dir / f"{trg_project}_{src_project}.csv"
 
         # Get verse alignment scores for pair
-        align_scores_df = (
-            pd.read_csv(config.exp_dir / f"{src_project}_{trg_project}.csv")
-            .set_index("vref")
-            .drop(columns=["source", "target"])
-        )
+        align_scores_df = pd.read_csv(scores_path).set_index("vref").drop(columns=["source", "target"])
         align_scores_df.index = pd.MultiIndex.from_tuples(
             [split_index(vref) for vref in align_scores_df.index], names=["book", "chapter", "verse"]
         )
