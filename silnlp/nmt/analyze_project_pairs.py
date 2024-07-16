@@ -6,6 +6,7 @@ from typing import List, Tuple
 
 import pandas as pd
 from machine.scripture import VerseRef, is_ot_nt
+from tqdm import tqdm
 
 from ..alignment.config import get_aligner_name
 from ..alignment.utils import add_alignment_scores
@@ -252,17 +253,22 @@ def create_summary_file(config: Config) -> None:
         index_col=[0, 1],
     )
 
+    LOGGER.info("Creating summary file")
     trg_summary_dfs = {}
-    for trg_project in corpus_stats_df.index.levels[1]:
-        summary_df = pd.DataFrame(columns=["file"] + list(verse_counts_df.columns)).set_index("file")
-        summary_df.loc[trg_project] = verse_counts_df.loc[trg_project]
+    if len(corpus_stats_df.index.levels[1]) > 250:
+        # Max # of sheets in an Excel spreadsheet is 255
+        LOGGER.warning("Too many target projects (>250); Summary sheets for each target project will not be written.")
+    else:
+        for trg_project in tqdm(corpus_stats_df.index.levels[1]):
+            summary_df = pd.DataFrame(columns=["file"] + list(verse_counts_df.columns)).set_index("file")
+            summary_df.loc[trg_project] = verse_counts_df.loc[trg_project]
 
-        for src_project in sorted(corpus_stats_df.swaplevel().loc[trg_project].index):
-            summary_df = pd.concat([summary_df, pd.Series({col: "" for col in summary_df.columns}).to_frame().T])
-            summary_df.loc[src_project] = verse_counts_df.loc[src_project]
-            summary_df.loc[f"Alignment with {src_project}"] = alignment_scores_df.loc[src_project, trg_project]
+            for src_project in sorted(corpus_stats_df.swaplevel().loc[trg_project].index):
+                summary_df = pd.concat([summary_df, pd.Series({col: "" for col in summary_df.columns}).to_frame().T])
+                summary_df.loc[src_project] = verse_counts_df.loc[src_project]
+                summary_df.loc[f"Alignment with {src_project}"] = alignment_scores_df.loc[src_project, trg_project]
 
-        trg_summary_dfs[trg_project] = summary_df
+            trg_summary_dfs[trg_project] = summary_df
 
     # Write to Excel file
     with pd.ExcelWriter(config.exp_dir / f"{config.exp_dir.stem}_analysis.xlsx") as writer:
@@ -304,12 +310,13 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
     books = OT_CANON + NT_CANON + (DT_CANON if deutero else [])
     corpus_stats_df = pd.read_csv(config.exp_dir / "corpus-stats.csv", index_col=["src_project", "trg_project"])
 
+    LOGGER.info("Creating alignment breakdown file")
     aligment_by_book = pd.DataFrame(columns=["src_project", "trg_project"] + books).set_index(
         ["src_project", "trg_project"]
     )
     alignment_by_chapter = {}
     alignment_by_verse = {}
-    for project_pair in corpus_stats_df.index:
+    for project_pair in tqdm(corpus_stats_df.index):
         src_project, trg_project = project_pair
         scores_path = config.exp_dir / f"{src_project}_{trg_project}.csv"
         if not scores_path.is_file():
@@ -341,7 +348,7 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
         alignment_by_chapter[project_pair] = chapter_df
         alignment_by_verse[project_pair] = verse_df
 
-    # Write to Excel file
+    LOGGER.info("Writing alignment breakdown file")
     with pd.ExcelWriter(config.exp_dir / f"{config.exp_dir.stem}_alignment_breakdown.xlsx") as writer:
         aligment_by_book.reset_index().to_excel(
             writer,
@@ -350,14 +357,14 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
         )
 
         # Max # of sheets in an Excel spreadsheet is 255
-        if len(corpus_stats_df.index) > 100:
+        if len(corpus_stats_df.index) > 125:
             LOGGER.warning(
-                "Too many project pairs (>100); Alignment breakdowns beyond the book level will not be written."
+                "Too many project pairs (>125); Alignment breakdowns beyond the book level will not be written."
             )
             return
 
         sheet_names = {}
-        for project_pair in corpus_stats_df.index:
+        for project_pair in tqdm(corpus_stats_df.index):
             # Handle duplicates caused by max length of sheet names (31)
             name = f"{project_pair[0][:9]}_{project_pair[1][:9]}"
             if name in sheet_names.keys():
@@ -396,6 +403,7 @@ def main() -> None:
 
     if args.clearml_queue is not None and "cpu" not in args.clearml_queue:
         LOGGER.warning("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
+        exit()
     clearml = SILClearML(exp_name, args.clearml_queue)
 
     config = clearml.config
@@ -404,11 +412,10 @@ def main() -> None:
     # Confirm that input file paths exist and make sure every corpus pair is many to many
     data_files = []
     for pair in config.corpus_pairs:
-        pair.mapping = "many_to_many"
         data_files += [f.path for f in pair.src_files] + [f.path for f in pair.trg_files]
     for file in data_files:
         if not file.is_file():
-            LOGGER.error(f"The source file {str(file)} does not exist.")
+            LOGGER.error(f"The source file {str(file)} does not exist")
             return
 
     file_patterns = ";".join([f.name for f in data_files])
@@ -420,7 +427,7 @@ def main() -> None:
     extra_projects = get_extra_alignments(config, args.deutero)
     all_projects = set(extra_projects) | set([f.name for f in data_files])
     if len(all_projects) > len(data_files):
-        LOGGER.info("Adding verse counts for projects in extra alignment files.")
+        LOGGER.info("Adding verse counts for projects in extra alignment files")
         collect_verse_counts(SIL_NLP_ENV.mt_scripture_dir, config.exp_dir, ";".join(all_projects), args.deutero)
 
     # Create summary outputs

@@ -223,7 +223,7 @@ def collect_verse_counts(
 
     # Copy over chapter counts for partially complete books
     for project in project_names:
-        cache_path = partial_books_path / f"{project}.csv"  # change var name
+        cache_path = partial_books_path / f"{project}.csv"
         if cache_path.is_file():
             out_path = partial_books_out_path / f"{project}_detailed_percentages.csv"
             df = pd.read_csv(cache_path, index_col="book")
