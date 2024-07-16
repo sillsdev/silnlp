@@ -1,5 +1,6 @@
 import argparse
 import logging
+import re
 from statistics import mean
 from typing import List, Tuple
 
@@ -9,7 +10,7 @@ from machine.scripture import VerseRef, is_ot_nt
 from ..alignment.config import get_aligner_name
 from ..alignment.utils import add_alignment_scores
 from ..common.collect_verse_counts import DT_CANON, NT_CANON, OT_CANON, collect_verse_counts
-from ..common.corpus import filter_parallel_corpus, get_scripture_parallel_corpus, include_chapters
+from ..common.corpus import filter_parallel_corpus, get_mt_corpus_path, get_scripture_parallel_corpus, include_chapters
 from ..common.environment import SIL_NLP_ENV
 from ..common.script_utils import get_script, is_represented
 from ..common.utils import get_git_revision_hash
@@ -17,6 +18,8 @@ from .clearml_connection import SILClearML
 from .config import Config, get_data_file_pairs
 
 LOGGER = logging.getLogger(__package__ + ".analyze_project_pairs")
+
+ALIGNMENT_SCORES_FILE = re.compile(r"([a-z]{2,3}-.+)_([a-z]{2,3}-.+)")
 
 
 def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = False) -> None:
@@ -141,6 +144,102 @@ def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = 
             f" target script: {row.at['trg_script']}, target script in model: {row.at['trg_script_in_model']}"
         )
     stats_df.sort_index().to_csv(stats_path)
+
+
+def get_extra_alignments(config: Config, deutero: bool = False) -> List[str]:
+    stats_path = config.exp_dir / "corpus-stats.csv"
+    if stats_path.is_file():
+        stats_df = pd.read_csv(stats_path, dtype=str, keep_default_na=False, index_col=["src_project", "trg_project"])
+    else:
+        stats_df = pd.DataFrame(
+            columns=[
+                "src_project",
+                "trg_project",
+                "count",
+                "src_only",
+                "trg_only",
+                "parallel",
+                "align_score",
+                "filtered_count",
+                "filtered_align_score",
+                "src_script",
+                "src_script_in_model",
+                "trg_script",
+                "trg_script_in_model",
+            ],
+            dtype=str,
+        ).set_index(["src_project", "trg_project"])
+
+    LOGGER.info("Getting statistics from extra alignment files")
+    skipped = set()
+    extra_projects = []
+    for filepath in config.exp_dir.glob("*.csv"):
+        match = ALIGNMENT_SCORES_FILE.fullmatch(filepath.stem)
+        if match is None:
+            skipped.add(filepath.name)
+            continue
+        project_pair = match.group(1, 2)
+
+        if project_pair not in stats_df.index:
+            LOGGER.info(f"Extra alignment file found: {filepath.name}")
+            src_path = get_mt_corpus_path(project_pair[0])
+            if src_path.is_file():
+                extra_projects.append(src_path.name)
+            trg_path = get_mt_corpus_path(project_pair[1])
+            if trg_path.is_file():
+                extra_projects.append(trg_path.name)
+
+            if src_path.is_file() and trg_path.is_file():
+                corpus = get_scripture_parallel_corpus(src_path, trg_path, False)
+                corpus = corpus.loc[(corpus["source"].str.len() > 0) | (corpus["target"].str.len() > 0)]
+                if not deutero:
+                    corpus = corpus.loc[[is_ot_nt(vref.book_num) for vref in corpus["vref"]]]
+                pair_count = len(corpus.index)
+                src_only_count = len(corpus.loc[corpus["target"].str.len() == 0].index)
+                trg_only_count = len(corpus.loc[corpus["source"].str.len() == 0].index)
+            else:
+                LOGGER.info(
+                    f"Original source or target project for {project_pair} not found. Some statistics will be missing."
+                )
+                pair_count = ""
+                src_only_count = ""
+                trg_only_count = ""
+
+            align_corpus = pd.read_csv(filepath)
+            if not deutero:
+                align_corpus = align_corpus.loc[
+                    [is_ot_nt(VerseRef.from_string(vref).book_num) for vref in align_corpus["vref"]]
+                ]
+            parallel_count = len(align_corpus.index)
+            src_script = get_script("".join(align_corpus["source"][: min(len(align_corpus["source"]), 3000)]))
+            src_script_in_model = (
+                is_represented(src_script, config.model) if config.model != "SILTransformerBase" else None
+            )
+            trg_script = get_script("".join(align_corpus["target"][: min(len(align_corpus["target"]), 3000)]))
+            trg_script_in_model = (
+                is_represented(trg_script, config.model) if config.model != "SILTransformerBase" else None
+            )
+
+            stats_df.loc[project_pair, :] = [
+                pair_count,
+                src_only_count,
+                trg_only_count,
+                parallel_count,
+                "{:.4f}".format(align_corpus["score"].mean()),
+                "",
+                "",
+                src_script,
+                src_script_in_model,
+                trg_script,
+                trg_script_in_model,
+            ]
+    stats_df.to_csv(stats_path)
+
+    expected = {"corpus-stats.csv", "verse_counts.csv", "verse_percentages.csv"}
+    skipped = skipped - expected
+    if len(skipped) > 0:
+        LOGGER.info(f"Files skipped: {skipped}")
+    return extra_projects
 
 
 def create_summary_file(config: Config) -> None:
@@ -316,6 +415,13 @@ def main() -> None:
     collect_verse_counts(SIL_NLP_ENV.mt_scripture_dir, config.exp_dir, file_patterns, args.deutero, args.recalculate)
 
     get_corpus_stats(config, args.recalculate, args.deutero)
+
+    # Add stats about projects in extra alignment files in the experiment folder
+    extra_projects = get_extra_alignments(config, args.deutero)
+    all_projects = set(extra_projects) | set([f.name for f in data_files])
+    if len(all_projects) > len(data_files):
+        LOGGER.info("Adding verse counts for projects in extra alignment files.")
+        collect_verse_counts(SIL_NLP_ENV.mt_scripture_dir, config.exp_dir, ";".join(all_projects), args.deutero)
 
     # Create summary outputs
     create_alignment_breakdown_file(config, args.deutero)
