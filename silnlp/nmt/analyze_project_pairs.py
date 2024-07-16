@@ -266,7 +266,10 @@ def create_summary_file(config: Config) -> None:
             for src_project in sorted(corpus_stats_df.swaplevel().loc[trg_project].index):
                 summary_df = pd.concat([summary_df, pd.Series({col: "" for col in summary_df.columns}).to_frame().T])
                 summary_df.loc[src_project] = verse_counts_df.loc[src_project]
-                summary_df.loc[f"Alignment with {src_project}"] = alignment_scores_df.loc[src_project, trg_project]
+                pair = (src_project, trg_project)
+                if pair not in alignment_scores_df.index:
+                    pair = (trg_project, src_project)
+                summary_df.loc[f"Alignment with {src_project}"] = alignment_scores_df.loc[pair]
 
             trg_summary_dfs[trg_project] = summary_df
 
@@ -316,11 +319,14 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
     )
     alignment_by_chapter = {}
     alignment_by_verse = {}
+    num_pairs = 0
     for project_pair in tqdm(corpus_stats_df.index):
         src_project, trg_project = project_pair
         scores_path = config.exp_dir / f"{src_project}_{trg_project}.csv"
+        # Only add one breakdown per pair
         if not scores_path.is_file():
-            scores_path = config.exp_dir / f"{trg_project}_{src_project}.csv"
+            continue
+        num_pairs += 1
 
         # Get verse alignment scores for pair
         align_scores_df = pd.read_csv(scores_path).set_index("vref").drop(columns=["source", "target"])
@@ -357,7 +363,7 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
         )
 
         # Max # of sheets in an Excel spreadsheet is 255
-        if len(corpus_stats_df.index) > 125:
+        if num_pairs > 125:
             LOGGER.warning(
                 "Too many project pairs (>125); Alignment breakdowns beyond the book level will not be written."
             )
@@ -365,6 +371,10 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
 
         sheet_names = {}
         for project_pair in tqdm(corpus_stats_df.index):
+            # Only add one breakdown per pair
+            if not (config.exp_dir / f"{project_pair[0]}_{project_pair[1]}.csv").is_file():
+                continue
+
             # Handle duplicates caused by max length of sheet names (31)
             name = f"{project_pair[0][:9]}_{project_pair[1][:9]}"
             if name in sheet_names.keys():
