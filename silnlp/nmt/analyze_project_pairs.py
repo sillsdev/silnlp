@@ -26,7 +26,7 @@ ALIGNMENT_SCORES_FILE = re.compile(r"([a-z]{2,3}-.+)_([a-z]{2,3}-.+)")
 def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = False) -> None:
     stats_path = config.exp_dir / "corpus-stats.csv"
     if stats_path.is_file() and not force_align:
-        stats_df = pd.read_csv(stats_path, dtype=str, keep_default_na=False, index_col=["src_project", "trg_project"])
+        stats_df = pd.read_csv(stats_path, keep_default_na=False, index_col=["src_project", "trg_project"])
     else:
         stats_df = pd.DataFrame(
             columns=[
@@ -44,7 +44,6 @@ def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = 
                 "trg_script",
                 "trg_script_in_model",
             ],
-            dtype=str,
         ).set_index(["src_project", "trg_project"])
 
     pairs_to_process = []
@@ -121,9 +120,9 @@ def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = 
                 src_only_count,
                 trg_only_count,
                 parallel_count,
-                "{:.4f}".format(alignment_score),
+                alignment_score,
                 filtered_count,
-                "{:.4f}".format(filtered_alignment_score),
+                filtered_alignment_score,
                 src_script,
                 src_script_in_model,
                 trg_script,
@@ -132,15 +131,17 @@ def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = 
 
         # Use values from the df because not all values get recalculated
         row = stats_df.loc[project_pair]
+        align_score = "{:.4f}".format(row.at["align_score"])
+        filtered_align_score = "{:.4f}".format(row.at["filtered_align_score"])
         LOGGER.info(
             f"{src_file.project} -> {trg_file.project} stats -"
             f" count: {row.at['count']},"
             f" source only count: {row.at['src_only']}"
             f" target only count: {row.at['trg_only']}"
             f" parallel count: {row.at['parallel']}"
-            f" alignment: {row.at['align_score']},"
+            f" alignment: {align_score},"
             f" filtered count: {row.at['filtered_count']},"
-            f" alignment (filtered): {row.at['filtered_align_score']},"
+            f" alignment (filtered): {filtered_align_score},"
             f" source script: {row.at['src_script']}, source script in model: {row.at['src_script_in_model']},"
             f" target script: {row.at['trg_script']}, target script in model: {row.at['trg_script_in_model']}"
         )
@@ -150,7 +151,7 @@ def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = 
 def get_extra_alignments(config: Config, deutero: bool = False) -> List[str]:
     stats_path = config.exp_dir / "corpus-stats.csv"
     if stats_path.is_file():
-        stats_df = pd.read_csv(stats_path, dtype=str, keep_default_na=False, index_col=["src_project", "trg_project"])
+        stats_df = pd.read_csv(stats_path, keep_default_na=False, index_col=["src_project", "trg_project"])
     else:
         stats_df = pd.DataFrame(
             columns=[
@@ -168,7 +169,6 @@ def get_extra_alignments(config: Config, deutero: bool = False) -> List[str]:
                 "trg_script",
                 "trg_script_in_model",
             ],
-            dtype=str,
         ).set_index(["src_project", "trg_project"])
 
     LOGGER.info("Getting statistics from extra alignment files")
@@ -226,7 +226,7 @@ def get_extra_alignments(config: Config, deutero: bool = False) -> List[str]:
                 src_only_count,
                 trg_only_count,
                 parallel_count,
-                "{:.4f}".format(align_corpus["score"].mean()),
+                align_corpus["score"].mean(),
                 "",
                 "",
                 src_script,
@@ -274,11 +274,28 @@ def create_summary_file(config: Config) -> None:
             trg_summary_dfs[trg_project] = summary_df
 
     # Write to Excel file
-    with pd.ExcelWriter(config.exp_dir / f"{config.exp_dir.stem}_analysis.xlsx") as writer:
-        corpus_stats_df.to_excel(writer, sheet_name="corpus_stats")
+    with pd.ExcelWriter(config.exp_dir / f"{config.exp_dir.stem}_analysis.xlsx", engine="xlsxwriter") as writer:
+        corpus_stats_df.to_excel(writer, sheet_name="corpus_stats", merge_cells=False)
         verse_counts_df.to_excel(writer, sheet_name="verse_counts")
         verse_percentages_df.to_excel(writer, sheet_name="verse_percentages")
 
+        # Add Excel formatting
+        workbook = writer.book
+        int_format = workbook.add_format({"num_format": "0"})
+        round4_format = workbook.add_format({"num_format": "0.0000"})
+
+        corpus_stats_sheet = writer.sheets["corpus_stats"]
+        corpus_stats_sheet.set_column(2, 8, None, int_format)
+        corpus_stats_sheet.set_column(6, 6, None, round4_format)
+        corpus_stats_sheet.set_column(8, 8, None, round4_format)
+
+        counts_sheet = writer.sheets["verse_counts"]
+        counts_sheet.set_column(1, len(verse_counts_df.columns), None, int_format)
+
+        percent_sheet = writer.sheets["verse_percentages"]
+        percent_sheet.set_column(1, len(verse_percentages_df.columns), None, int_format)
+
+        # Add comparison sheets for each target project
         sheet_names = {}
         for trg_project in sorted(trg_summary_dfs.keys()):
             # Handle duplicates caused by max length of sheet names (31)
@@ -290,6 +307,10 @@ def create_summary_file(config: Config) -> None:
                 sheet_names[name] = 0
 
             trg_summary_dfs[trg_project].to_excel(writer, sheet_name=name)
+            trg_summary_sheet = writer.sheets[name]
+            trg_summary_sheet.set_column(1, len(verse_counts_df.columns), None, int_format)
+            for i in range(len(corpus_stats_df.swaplevel().loc[trg_project].index)):
+                trg_summary_sheet.set_row(4 + i * 3, None, round4_format)
 
 
 def split_index(vref: str) -> Tuple[str, str, str]:
@@ -356,11 +377,14 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
 
     LOGGER.info("Writing alignment breakdown file")
     with pd.ExcelWriter(config.exp_dir / f"{config.exp_dir.stem}_alignment_breakdown.xlsx") as writer:
-        aligment_by_book.reset_index().to_excel(
-            writer,
-            sheet_name="By Book",
-            index=False,
-        )
+        aligment_by_book.to_excel(writer, sheet_name="By Book", merge_cells=False)
+
+        # Add Excel formatting
+        workbook = writer.book
+        int_format = workbook.add_format({"num_format": "0"})
+        round4_format = workbook.add_format({"num_format": "0.0000"})
+        book_sheet = writer.sheets["By Book"]
+        book_sheet.set_column(2, len(aligment_by_book.columns) + 1, None, round4_format)
 
         # Max # of sheets in an Excel spreadsheet is 255
         if num_pairs > 125:
@@ -369,6 +393,7 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
             )
             return
 
+        # Add chapter-level and verse-level sheets for each pair
         sheet_names = {}
         for project_pair in tqdm(corpus_stats_df.index):
             # Only add one breakdown per pair
@@ -384,7 +409,12 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
                 sheet_names[name] = 0
 
             alignment_by_chapter[project_pair].to_excel(writer, sheet_name=f"{name}_chapters")
+            chapter_sheet = writer.sheets[f"{name}_chapters"]
+            chapter_sheet.set_row(0, None, int_format)
+            chapter_sheet.set_column(1, len(alignment_by_chapter[project_pair].columns), None, round4_format)
             alignment_by_verse[project_pair].to_excel(writer, sheet_name=f"{name}_verses")
+            verse_sheet = writer.sheets[f"{name}_verses"]
+            verse_sheet.set_column(2, len(alignment_by_verse[project_pair].columns) + 1, None, round4_format)
 
 
 def main() -> None:

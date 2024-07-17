@@ -202,7 +202,7 @@ def collect_verse_counts(
                 )
 
     # Save cache files
-    verse_counts_df.sort_index().drop(index="complete").to_csv(verse_counts_path)
+    verse_counts_df.sort_index().drop(index="complete").astype(int).to_csv(verse_counts_path)
     verse_percentages_df.sort_index().to_csv(verse_percentages_path)
 
     # Filter and save to output folder
@@ -218,7 +218,7 @@ def collect_verse_counts(
         verse_percentages_df.loc[project_names, "Total"] = (
             verse_percentages_df.loc[project_names][OT_CANON + NT_CANON].mean(axis=1).round(1)
         )
-    verse_counts_df.loc[["complete"] + sorted(project_names)].to_csv(output_path / "verse_counts.csv")
+    verse_counts_df.loc[["complete"] + sorted(project_names)].astype(int).to_csv(output_path / "verse_counts.csv")
     verse_percentages_df.loc[sorted(project_names)].to_csv(output_path / "verse_percentages.csv")
 
     # Copy over chapter counts for partially complete books
