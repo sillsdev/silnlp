@@ -340,6 +340,7 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
     )
     alignment_by_chapter = {}
     alignment_by_verse = {}
+    book_orders = {}
     num_pairs = 0
     for project_pair in tqdm(corpus_stats_df.index):
         src_project, trg_project = project_pair
@@ -375,6 +376,18 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
         alignment_by_chapter[project_pair] = chapter_df
         alignment_by_verse[project_pair] = verse_df
 
+        # Create book alignment ranking
+        book_order_df = pd.DataFrame(columns=existing_books)
+        book_order_df.index.name = f"{src_project}  {trg_project}"
+        book_order_df.loc["Verses in Common"] = [len(align_scores_df.loc[book].index) for book in existing_books]
+        book_order_df.loc["align"] = book_avgs
+        book_order_df = book_order_df.sort_values("align", axis=1, ascending=False).drop(index="align")
+        book_order_df.loc["Cumulative Verses"] = [
+            sum(book_order_df.loc["Verses in Common"].iloc[: i + 1]) for i in range(len(existing_books))
+        ]
+        book_order_df.loc["corpus_books", book_order_df.columns[0]] = ";".join(book_order_df.columns)
+        book_orders[project_pair] = book_order_df
+
     LOGGER.info("Writing alignment breakdown file")
     with pd.ExcelWriter(config.exp_dir / f"{config.exp_dir.stem}_alignment_breakdown.xlsx") as writer:
         aligment_by_book.to_excel(writer, sheet_name="By Book", merge_cells=False)
@@ -385,6 +398,8 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
         round4_format = workbook.add_format({"num_format": "0.0000"})
         book_sheet = writer.sheets["By Book"]
         book_sheet.set_column(2, len(aligment_by_book.columns) + 1, None, round4_format)
+        book_order_sheet = workbook.add_worksheet("corpus_books")
+        writer.sheets["corpus_books"] = book_order_sheet
 
         # Max # of sheets in an Excel spreadsheet is 255
         if num_pairs > 125:
@@ -395,10 +410,17 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
 
         # Add chapter-level and verse-level sheets for each pair
         sheet_names = {}
+        i = 0
         for project_pair in tqdm(corpus_stats_df.index):
             # Only add one breakdown per pair
             if not (config.exp_dir / f"{project_pair[0]}_{project_pair[1]}.csv").is_file():
                 continue
+
+            # Add book order info to corpus_books sheet
+            book_orders[project_pair].to_excel(writer, sheet_name="corpus_books", startrow=i * 5)
+            book_order_sheet.set_row(i * 5 + 1, None, int_format)
+            book_order_sheet.set_row(i * 5 + 2, None, int_format)
+            i += 1
 
             # Handle duplicates caused by max length of sheet names (31)
             name = f"{project_pair[0][:9]}_{project_pair[1][:9]}"
