@@ -288,11 +288,14 @@ def create_summary_file(config: Config) -> None:
         corpus_stats_sheet.set_column(2, 8, None, int_format)
         corpus_stats_sheet.set_column(6, 6, None, round4_format)
         corpus_stats_sheet.set_column(8, 8, None, round4_format)
+        corpus_stats_sheet.autofit()
 
         counts_sheet = writer.sheets["verse_counts"]
+        counts_sheet.autofit()
         counts_sheet.set_column(1, len(verse_counts_df.columns), None, int_format)
 
         percent_sheet = writer.sheets["verse_percentages"]
+        percent_sheet.autofit()
         percent_sheet.set_column(1, len(verse_percentages_df.columns), None, int_format)
 
         # Add comparison sheets for each target project
@@ -308,6 +311,7 @@ def create_summary_file(config: Config) -> None:
 
             trg_summary_dfs[trg_project].to_excel(writer, sheet_name=name)
             trg_summary_sheet = writer.sheets[name]
+            trg_summary_sheet.autofit()
             trg_summary_sheet.set_column(1, len(verse_counts_df.columns), None, int_format)
             for i in range(len(corpus_stats_df.swaplevel().loc[trg_project].index)):
                 trg_summary_sheet.set_row(4 + i * 3, None, round4_format)
@@ -397,9 +401,11 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
         int_format = workbook.add_format({"num_format": "0"})
         round4_format = workbook.add_format({"num_format": "0.0000"})
         book_sheet = writer.sheets["By Book"]
+        book_sheet.autofit()
         book_sheet.set_column(2, len(aligment_by_book.columns) + 1, None, round4_format)
         book_order_sheet = workbook.add_worksheet("corpus_books")
         writer.sheets["corpus_books"] = book_order_sheet
+        book_order_sheet.set_column(0, 0, max(19, max([3 + len(src) + len(trg) for src, trg in corpus_stats_df.index])))
 
         # Max # of sheets in an Excel spreadsheet is 255
         if num_pairs > 125:

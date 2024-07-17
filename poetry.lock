@@ -5502,13 +5502,13 @@ files = [
 
 [[package]]
 name = "xlsxwriter"
-version = "1.4.5"
+version = "3.2.0"
 description = "A Python module for creating Excel XLSX files."
 optional = false
-python-versions = "*"
+python-versions = ">=3.6"
 files = [
-    {file = "XlsxWriter-1.4.5-py2.py3-none-any.whl", hash = "sha256:f9335f1736e2c4fd80e940fe1b6d92d967bf454a1e5d639b0b7a4459ade790cc"},
-    {file = "XlsxWriter-1.4.5.tar.gz", hash = "sha256:0956747859567ec01907e561a7d8413de18a7aae36860f979f9da52b9d58bc19"},
+    {file = "XlsxWriter-3.2.0-py3-none-any.whl", hash = "sha256:ecfd5405b3e0e228219bcaf24c2ca0915e012ca9464a14048021d21a995d490e"},
+    {file = "XlsxWriter-3.2.0.tar.gz", hash = "sha256:9977d0c661a72866a61f9f7a809e25ebbb0fb7036baa3b9fe74afcfca6b3cb8c"},
 ]
 
 [[package]]
@@ -5692,4 +5692,4 @@ eflomal = ["eflomal"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.8,<3.9"
-content-hash = "b38124c25f1f384b0fc90537ea3cb55964023ec5888272ed25bb0b0f685744c6"
+content-hash = "e34c3be26d06fdfd5a2fba4e1b9e327cd86397abaf6b14154752cdc4319ddcac"
