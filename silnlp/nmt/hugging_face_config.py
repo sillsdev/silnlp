@@ -102,6 +102,7 @@ TRAINING_ARGS_CONFIG_MAPPING = {
     "train": {
         "gradient_accumulation_steps",
         "gradient_checkpointing",
+        "gradient_checkpointing_kwargs",
         "group_by_length",
         "log_level",
         "logging_dir",
@@ -261,6 +262,7 @@ class HuggingFaceConfig(Config):
                     "max_source_length": 200,
                     "max_target_length": 200,
                     "gradient_checkpointing": True,
+                    "gradient_checkpointing_kwargs": {"use_reentrant": True},
                     "save_steps": 1000,
                     "per_device_train_batch_size": 16,
                     "save_strategy": "steps",
