@@ -181,7 +181,7 @@ def get_extra_alignments(config: Config, deutero: bool = False) -> List[str]:
             continue
         project_pair = match.group(1, 2)
 
-        if project_pair not in stats_df.index:
+        if project_pair not in stats_df.index and project_pair not in stats_df.swaplevel().index:
             LOGGER.info(f"Extra alignment file found: {filepath.name}")
             src_path = get_mt_corpus_path(project_pair[0])
             if src_path.is_file():
@@ -478,9 +478,9 @@ def main() -> None:
     config.set_seed()
 
     # Confirm that input file paths exist and make sure every corpus pair is many to many
-    data_files = []
+    data_files = set()
     for pair in config.corpus_pairs:
-        data_files += [f.path for f in pair.src_files] + [f.path for f in pair.trg_files]
+        data_files.update([f.path for f in pair.src_files] + [f.path for f in pair.trg_files])
     for file in data_files:
         if not file.is_file():
             LOGGER.error(f"The source file {str(file)} does not exist")
