@@ -1001,10 +1001,15 @@ class HuggingFaceNMTModel(NMTModel):
             for param in params:
                 if param in section_config:
                     args[param] = section_config[param]
-        merge_dict(args, {"fp16": self._mixed_precision and not self._is_t5, 
-                          "bf16": self._mixed_precision and self._is_t5, 
-                          "tf32": self._mixed_precision})
-        if self._is_t5 and "learning_rate" not in args.keys():
+        merge_dict(
+            args,
+            {
+                "fp16": self._mixed_precision and not self._is_t5,
+                "bf16": self._mixed_precision and self._is_t5,
+                "tf32": self._mixed_precision,
+            },
+        )
+        if self._config.train["use_lora"] and "learning_rate" not in args.keys():
             args["learning_rate"] = 3e-4
         return parser.parse_dict(args)[0]
 

@@ -28,7 +28,7 @@ class SILClearML:
         project = name_parts[0]
         exp_name = name_parts[-1]
         if len(name_parts) > 2:
-            exp_name = '/'.join(name_parts[1:])
+            exp_name = "/".join(name_parts[1:])
         if self.queue_name is None:
             self.task = None
             self._load_config()
@@ -49,8 +49,8 @@ class SILClearML:
 
             self.task.set_base_docker(
                 # docker_image="ghcr.io/sillsdev/silnlp:1.01.4",
-                docker_image="nvidia/cuda:11.2.2-cudnn8-runtime-ubuntu20.04",
-                docker_arguments="-v /home/clearml/.clearml/hf-cache:/root/.cache/huggingface",
+                docker_image="nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu20.04",
+                docker_arguments="--env TOKENIZERS_PARALLELISM=false",
                 docker_setup_bash_script=[
                     "apt install -y python3-venv",
                     "python3 -m pip install --user pipx",
@@ -102,6 +102,8 @@ class SILClearML:
         if self.task is None:
             with (exp_dir / "config.yml").open("r", encoding="utf-8") as file:
                 config = yaml.safe_load(file)
+            if config is None or len(config.keys()) == 0:
+                raise RuntimeError("Config file has no contents.")
             self.config = create_config(exp_dir, config)
             return
         # There is a ClearML task - lets' do more complex importing.
@@ -117,6 +119,8 @@ class SILClearML:
                 config = yaml.safe_load(file)
         else:
             config = {}
+        if config is None or len(config.keys()) == 0:
+            raise RuntimeError("Config file has no contents.")
 
         # connect it with ClearML
         # - if it is run locally, it will set the config parameters in the clearml server

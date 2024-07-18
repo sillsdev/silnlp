@@ -883,19 +883,20 @@ graph = ["objgraph (>=1.7.2)"]
 
 [[package]]
 name = "eflomal"
-version = "0.1"
+version = "2.0.0"
 description = "pip installable eflomal"
 optional = true
 python-versions = "*"
 files = [
-    {file = "eflomal-0.1-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:192115fa23f29790e17d8857a6fb9dd34d98e065357bac0588e3d459dad9f6fc"},
-    {file = "eflomal-0.1-cp38-cp38-manylinux_2_5_x86_64.manylinux1_x86_64.whl", hash = "sha256:886899e3cc67d0620f2f9a63a508069453fd6c8a69dd4a0b5befd3e55f4012dc"},
-    {file = "eflomal-0.1.tar.gz", hash = "sha256:529a5fbbca7539a2534900447717d70cf6cfdeec4528645eb028bb5ae878adcd"},
+    {file = "eflomal-2.0.0.tar.gz", hash = "sha256:b71183dcf85bf4f59f44ef7a59f5268df1c17c0c8d8093f77b220025ffdba100"},
 ]
 
 [package.dependencies]
 Cython = "*"
 numpy = "*"
+
+[package.extras]
+test = ["pytest"]
 
 [[package]]
 name = "entrypoints"
@@ -5652,4 +5653,4 @@ eflomal = ["eflomal"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.8,<3.9"
-content-hash = "8e7845f7981470a7eccf0836d606d2135d5c7aa5583d6c191538db380692a6f2"
+content-hash = "b38124c25f1f384b0fc90537ea3cb55964023ec5888272ed25bb0b0f685744c6"

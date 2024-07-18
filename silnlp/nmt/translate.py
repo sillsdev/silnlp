@@ -64,8 +64,7 @@ class TranslationTask:
 
         src_project_dir = get_project_dir(src_project)
         if not src_project_dir.is_dir():
-            LOGGER.error(f"Source project {src_project} not found in projects folder {src_project_dir}")
-            return
+            raise FileNotFoundError(f"Source project {src_project} not found in projects folder {src_project_dir}")
 
         if any(len(book_nums[book]) > 0 for book in book_nums):
             use_trg_project = True
@@ -80,8 +79,9 @@ class TranslationTask:
 
                 trg_project_dir = get_project_dir(trg_project)
                 if not trg_project_dir.is_dir():
-                    LOGGER.error(f"Target project {trg_project} not found in projects folder {trg_project_dir}")
-                    return
+                    raise FileNotFoundError(
+                        f"Target project {trg_project} not found in projects folder {trg_project_dir}"
+                    )
 
         if trg_iso is None:
             trg_iso = config.default_test_trg_iso
@@ -135,7 +135,7 @@ class TranslationTask:
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM"), overwrite=True)
 
         if len(translation_failed) > 0:
-            raise ValueError(f"Some books failed to translate: {' '.join(translation_failed)}")
+            raise RuntimeError(f"Some books failed to translate: {' '.join(translation_failed)}")
 
     def translate_text_files(
         self,

@@ -36,7 +36,10 @@ The SILNLP repo itself is hosted on Github, mainly written in Python and calls S
 
 2. Download and install [Docker Desktop](https://www.docker.com/get-started/).
    * Reboot after installing, confirm that all installation steps are complete before the next step.
-4. Pull Docker image
+   
+   If using a local GPU, you'll also need to install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#installation) and configure Docker so that it can use the [NVIDIA Container Runtime](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#configuring-docker).
+
+3. Pull Docker image
    
    In a terminal, run:
    ```
@@ -96,40 +99,31 @@ __Download and install__ the following before creating any projects or starting 
 1. If using a local GPU: [NVIDIA driver](https://www.nvidia.com/download/index.aspx)
    * On Ubuntu, the driver can alternatively be installed through the GUI by opening Software & Updates, navigating to Additional Drivers in the top menu, and selecting the newest NVIDIA driver with the labels proprietary and tested.
    * After installing the driver, reboot your system.
-2. [Git](https://git-scm.com/downloads)
-3. [Python 3.7](https://www.python.org/downloads/) (latest minor version, ie 3.7.9)
-   * Will also work with Python 3.8, but not Python 3.9 because of a [llvmlite incompatability](https://stackoverflow.com/questions/65798319/llvmlite-failed-to-install-error-building-llvmlite)
-   * Can alternatively install Python using [miniconda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/windows.html) if you're planning to use more than one version of Python. If following this method, activate your conda environment before installing Poetry.
-4. [Poetry](https://python-poetry.org/docs/#installation)
-   * Note that whether the command should call python or python3 depends on which is required on your machine.
-   * It may (or may not) be possible to run the curl command within a VSCode terminal. If that causes permission errors close VS Code and try it in an elevated CMD prompt.
 
+2. Download and install [Docker Desktop](https://www.docker.com/get-started/).
+   * Reboot after installing and completing the relevant steps below, confirm that all installation steps are complete before the next step.
 
-   Windows:
-
-   At an administrator CMD prompt or a terminal within VSCode run:
-      ```
-      curl -sSL https://install.python-poetry.org | python - --version 1.2.2 
-      ```
-      
-    
-      
-      In Powershell, run:
-      ```
-      (Invoke-WebRequest -Uri https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py -UseBasicParsing).Content | python
-      ```
-
+   Windows (non-WSL) and macOS:
+   * Open Settings in Docker Desktop and under the Resources tab, update File Sharing with any locations your source code is kept.
+   
+   WSL:
+   * Enable WSL 2 backend:
+      * Open Settings in Docker Desktop and check "Use WSL 2 based engine" under the General tab. It may already be checked.
+      * To verify, check under the Resources tab in Settings for a message saying that you are using the WSL 2 backend.
 
    Linux:
    * Add your user to the docker group by using a terminal to run: `sudo usermod -aG docker $USER`
    * Sign out and back in again so your changes take effect
+
+
+   If using a local GPU, you'll also need to install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#installation) and configure Docker so that it can use the [NVIDIA Container Runtime](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#configuring-docker).
 
 3. Set up [ClearML](clear_ml_setup.md).
 
 4. Define environment variables.
 
    Set the following environment variables with your respective credentials: CLEARML_API_ACCESS_KEY, CLEARML_API_SECRET_KEY, AWS_ACCESS_KEY_ID, and AWS_SECRET_ACCESS_KEY. Additionally, set AWS_REGION. The typical value is "us-east-1".
-   * Linux: To set environment variables permanently, add each variable as a new line to the `.bashrc` file in your home directory with the format 
+   * Linux / macOS users: To set environment variables permanently, add each variable as a new line to the `.bashrc` file (Linux) or `.profile` file (macOS) in your home directory with the format 
       ```
       export VAR="VAL"
       ```
@@ -177,3 +171,4 @@ If you need to use a tool that is supported by SILNLP but is not installable as 
 If you need to run the .NET versions of the Machine alignment models, you will need to install .NET Core SDK 8.0. After installing, run `dotnet tool restore`.
    * Windows: [.NET Core SDK](https://dotnet.microsoft.com/download)
    * Linux: Installation instructions can be found [here](https://learn.microsoft.com/en-us/dotnet/core/install/linux-ubuntu-2004).
+   * macOS: Installation instructions can be found [here](https://learn.microsoft.com/en-us/dotnet/core/install/macos).
