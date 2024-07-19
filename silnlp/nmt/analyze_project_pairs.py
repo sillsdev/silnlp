@@ -57,9 +57,9 @@ def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = 
                 (config.exp_dir / f"{src_project}_{trg_project}.csv").unlink(missing_ok=True)
                 (config.exp_dir / f"{trg_project}_{src_project}.csv").unlink(missing_ok=True)
 
-            pairs_to_process.append((src_file, trg_file))
+            pairs_to_process.append((src_file, trg_file, pair.corpus_books, pair.score_threshold))
 
-    for src_file, trg_file in pairs_to_process:
+    for src_file, trg_file, corpus_books, score_threshold in pairs_to_process:
         project_pair = (f"{src_file.iso}-{src_file.project}", f"{trg_file.iso}-{trg_file.project}")
         if project_pair not in stats_df.index:
             corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path, False)
@@ -88,9 +88,9 @@ def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = 
             if not deutero:
                 corpus = corpus.loc[[is_ot_nt(vref.book_num) for vref in corpus["vref"]]]
                 align_corpus = align_corpus.loc[[is_ot_nt(vref.book_num) for vref in align_corpus["vref"]]]
-            if len(pair.corpus_books) > 0:
-                corpus = include_chapters(corpus, pair.corpus_books)
-                align_corpus = include_chapters(align_corpus, pair.corpus_books)
+            if len(corpus_books) > 0:
+                corpus = include_chapters(corpus, corpus_books)
+                align_corpus = include_chapters(align_corpus, corpus_books)
 
             pair_count = len(corpus.index)
             parallel_count = len(align_corpus.index)
@@ -100,9 +100,9 @@ def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = 
             alignment_score = align_corpus["score"].mean()
             filtered_count = 0
             filtered_alignment_score = alignment_score
-            if pair.score_threshold > 0:
+            if score_threshold > 0:
                 unfiltered_len = len(align_corpus)
-                align_corpus = filter_parallel_corpus(align_corpus, pair.score_threshold)
+                align_corpus = filter_parallel_corpus(align_corpus, score_threshold)
                 filtered_count = unfiltered_len - len(align_corpus)
                 filtered_alignment_score = mean(align_corpus["score"])
 
@@ -339,20 +339,20 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
     corpus_stats_df = pd.read_csv(config.exp_dir / "corpus-stats.csv", index_col=["src_project", "trg_project"])
 
     LOGGER.info("Creating alignment breakdown file")
-    aligment_by_book = pd.DataFrame(columns=["src_project", "trg_project"] + books).set_index(
+    alignment_by_book = pd.DataFrame(columns=["src_project", "trg_project"] + books).set_index(
         ["src_project", "trg_project"]
     )
     alignment_by_chapter = {}
     alignment_by_verse = {}
     book_orders = {}
-    num_pairs = 0
     for project_pair in tqdm(corpus_stats_df.index):
         src_project, trg_project = project_pair
         scores_path = config.exp_dir / f"{src_project}_{trg_project}.csv"
         # Only add one breakdown per pair
-        if not scores_path.is_file():
+        if project_pair in alignment_by_book.index or project_pair in alignment_by_book.swaplevel().index:
             continue
-        num_pairs += 1
+        if not scores_path.is_file():
+            scores_path = config.exp_dir / f"{trg_project}_{src_project}.csv"
 
         # Get verse alignment scores for pair
         align_scores_df = pd.read_csv(scores_path).set_index("vref").drop(columns=["source", "target"])
@@ -376,7 +376,7 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
         chapter_df = verse_df.reset_index().pivot(index="book", columns="chapter", values="average").loc[existing_books]
         chapter_df.insert(0, "average", book_avgs)
 
-        aligment_by_book.loc[project_pair, :] = book_avgs
+        alignment_by_book.loc[project_pair, :] = book_avgs
         alignment_by_chapter[project_pair] = chapter_df
         alignment_by_verse[project_pair] = verse_df
 
@@ -394,7 +394,7 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
 
     LOGGER.info("Writing alignment breakdown file")
     with pd.ExcelWriter(config.exp_dir / f"{config.exp_dir.stem}_alignment_breakdown.xlsx") as writer:
-        aligment_by_book.to_excel(writer, sheet_name="By Book", merge_cells=False)
+        alignment_by_book.to_excel(writer, sheet_name="By Book", merge_cells=False)
 
         # Add Excel formatting
         workbook = writer.book
@@ -402,13 +402,13 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
         round4_format = workbook.add_format({"num_format": "0.0000"})
         book_sheet = writer.sheets["By Book"]
         book_sheet.autofit()
-        book_sheet.set_column(2, len(aligment_by_book.columns) + 1, None, round4_format)
+        book_sheet.set_column(2, len(alignment_by_book.columns) + 1, None, round4_format)
         book_order_sheet = workbook.add_worksheet("corpus_books")
         writer.sheets["corpus_books"] = book_order_sheet
         book_order_sheet.set_column(0, 0, max(19, max([3 + len(src) + len(trg) for src, trg in corpus_stats_df.index])))
 
         # Max # of sheets in an Excel spreadsheet is 255
-        if num_pairs > 125:
+        if len(alignment_by_book.index) > 125:
             LOGGER.warning(
                 "Too many project pairs (>125); Alignment breakdowns beyond the book level will not be written."
             )
@@ -416,17 +416,11 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
 
         # Add chapter-level and verse-level sheets for each pair
         sheet_names = {}
-        i = 0
-        for project_pair in tqdm(corpus_stats_df.index):
-            # Only add one breakdown per pair
-            if not (config.exp_dir / f"{project_pair[0]}_{project_pair[1]}.csv").is_file():
-                continue
-
+        for i, project_pair in enumerate(tqdm(alignment_by_book.index)):
             # Add book order info to corpus_books sheet
             book_orders[project_pair].to_excel(writer, sheet_name="corpus_books", startrow=i * 5)
             book_order_sheet.set_row(i * 5 + 1, None, int_format)
             book_order_sheet.set_row(i * 5 + 2, None, int_format)
-            i += 1
 
             # Handle duplicates caused by max length of sheet names (31)
             name = f"{project_pair[0][:9]}_{project_pair[1][:9]}"
