@@ -48,8 +48,6 @@ def copy_resource_to_gdrive(r: BytesIO):
     if not zipfile.is_zipfile(r):
         return
     data_folder = functions.current_data(env=st.session_state.clowder_env)
-    print(st.session_state.clowder_env)
-    print(data_folder)
     with functions._lock:
         functions.ENV = st.session_state.clowder_env
         id = functions.ENV._create_gdrive_folder(r.name[:-4], data_folder)
@@ -88,8 +86,16 @@ def copy_resource_to_s3(r: BytesIO):
             path.write_text(f.read(file).decode())
 
 
-def walk_traversable(t: Traversable, on_dir: Callable, on_file: Callable, ctx: dict):
-    """Initial argument must be a directory"""
+def walk_traversable(
+    t: Traversable,
+    on_dir: Callable[[Traversable, dict], bool],
+    on_file: Callable[[Traversable, dict], bool],
+    ctx: dict = {},
+):
+    """Walk through a traversable. Somewhat similar to the os.walk method, but uses callbacks for dirs and files.
+    Initial argument must be a directory. The traversable item (dir or file) that corresponds to each callback as
+    well as a copy of the ctx dict are provided to the callbacks. If callback returns False, children are not explored.
+    """
     for x in t.iterdir():
         if x.is_dir():
             ctx_c = {k: v for k, v in ctx.items()}
@@ -100,11 +106,13 @@ def walk_traversable(t: Traversable, on_dir: Callable, on_file: Callable, ctx: d
 
 
 def copy_resource_trav_to_gdrive(r: zipfile.Path):
+    '''Copy a zipfile.Path resource to Google Drive. Path must be a "directory."'''
     if not r.is_dir():
         return
     data_folder = functions.current_data(env=st.session_state.clowder_env)
 
     def process_dir(t: Traversable, ctx: dict):
+        """Process dir callback. Creates the corresponding google drive folder inside of the folder pointed to with ctx['subid']"""
         if "Notes" in t.name or "Print" in t.name:
             return False
         try:
@@ -117,6 +125,7 @@ def copy_resource_trav_to_gdrive(r: zipfile.Path):
         return True
 
     def process_file(t: Traversable, ctx: dict):
+        """Process file callback. Writes the corresponding file inside of the folder pointed to with ctx['subid']"""
         if "Notes" in t.name or "Print" in t.name:
             return False
         functions.ENV._write_gdrive_file_in_folder(ctx["subid"], t.name, t.read_bytes().decode("utf-8", "ignore"))
@@ -129,6 +138,7 @@ def copy_resource_trav_to_gdrive(r: zipfile.Path):
 
 
 def copy_resource_trav_to_s3(r: zipfile.Path):
+    '''Copy a zipfile.Path resource to S3 bucket. Path must be a "directory."'''
     if not r.is_dir():
         return
 
@@ -137,6 +147,7 @@ def copy_resource_trav_to_s3(r: zipfile.Path):
     parent_path.mkdir(parents=True, exist_ok=True)
 
     def process_dir(t: Traversable, ctx: dict):
+        """Process dir callback. Creates the corresponding S3 "folder" inside of the "folder" pointed to with ctx['parent_path']"""
         if "Notes" in t.name or "Print" in t.name:
             return False
         ctx["parent_path"] = ctx["parent_path"] / t.name
@@ -144,6 +155,7 @@ def copy_resource_trav_to_s3(r: zipfile.Path):
         return True
 
     def process_file(t: Traversable, ctx: dict):
+        """Process file callback. Writes the corresponding file inside of the "folder" pointed to with ctx['parent_path']"""
         if "Notes" in t.name or "Print" in t.name:
             return False
         path = ctx["parent_path"] / t.name
@@ -216,6 +228,15 @@ with investigation_tab:
 
 
 def glean_resources(z: zipfile.ZipFile):
+    """Find nested resources inside of zipfile. Looks for Settings.xml files to
+    determine whether a subfolder contains resources (but it doesn't
+    support resources nested at different levels).
+
+    Supported:
+    - Resources directly in top level
+    - Resources in folder in top level
+    - Resources in folders in top level
+    - Resources in folders contained in a single folder within a zip"""
     path = zipfile.Path(z)
     children = list(path.iterdir())
     if len(children) == 1 and children[0].is_dir():
@@ -236,6 +257,7 @@ def glean_resources(z: zipfile.ZipFile):
 
 
 def add_resource_internal(resource: zipfile.Path):
+    """Do the processing required for adding resource to internal S3 bucket"""
     copy_resource_trav_to_s3(resource)
     project = str(resource).split(".", maxsplit=1)[0] if resource.name == "" else resource.name
     command = f'{os.environ.get("PYTHON", "python")} -m silnlp.common.extract_corpora {project}'
