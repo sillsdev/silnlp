@@ -34,7 +34,6 @@ from clowder.consts import (
 from clowder.status import Status
 from silnlp.common.environment import SIL_NLP_ENV
 
-
 ENV = None
 
 
@@ -136,7 +135,9 @@ class Investigation:
                     == Task.TaskStatusEnum.completed
                 ):
                     continue
-                elif ENV.current_meta["investigations"][self.name]["experiments"][row[NAME_ATTRIBUTE]].get("status") in [
+                elif ENV.current_meta["investigations"][self.name]["experiments"][row[NAME_ATTRIBUTE]].get(
+                    "status"
+                ) in [
                     Task.TaskStatusEnum.in_progress,
                     Task.TaskStatusEnum.queued,
                 ]:
@@ -166,7 +167,7 @@ class Investigation:
         complete_entrypoint = (
             experiment_row["entrypoint"]
             .replace("$EXP", "clowder" + str(experiment_path.absolute()).split("clowder")[1])
-            .replace("$ON_CLEARML_CPU", f"--clearml-queue {CLEARML_QUEUE_CPU}")            
+            .replace("$ON_CLEARML_CPU", f"--clearml-queue {CLEARML_QUEUE_CPU}")
             .replace("$ON_CLEARML", f"--clearml-queue {CLEARML_QUEUE}")
             .replace("$LOCAL_EXP_DIR", str(Path(os.environ.get("SIL_NLP_DATA_PATH")) / "MT/experiments"))
         )
@@ -176,7 +177,7 @@ class Investigation:
             data_dir_override = f"SIL_NLP_MT_SCRIPTURE_DIR={SIL_NLP_ENV.mt_experiments_dir}/clowder/data/{folder_id}/scripture/ SIL_NLP_MT_TERMS_DIR={SIL_NLP_ENV.mt_experiments_dir}/clowder/data/{folder_id}/terms/ "
         if "silnlp" not in complete_entrypoint:
             raise ValueError("Entrypoints must be silnlp jobs")  # TODO make more robust against misuse
-        python_cmd = os.environ.get('PYTHON', 'python')
+        python_cmd = os.environ.get("PYTHON", "python")
         command = f"{data_dir_override} {python_cmd} -m {complete_entrypoint}"
         print("[green]Running command: [/green]", command)
         result = subprocess.run(
@@ -240,18 +241,18 @@ class Investigation:
                     "clearml_id" in ENV.current_meta["investigations"][self.name]["experiments"][exp]
                     and "clearml_id" in remote_meta_content["experiments"][exp]
                 ):
-                    ENV.current_meta["investigations"][self.name]["experiments"][exp]["clearml_id"] = remote_meta_content[
-                        "experiments"
-                    ][exp]["clearml_id"]
-                    ENV.current_meta["investigations"][self.name]["experiments"][exp][
-                        "clearml_task_url"
-                    ] = remote_meta_content["experiments"][exp]["clearml_task_url"]
+                    ENV.current_meta["investigations"][self.name]["experiments"][exp]["clearml_id"] = (
+                        remote_meta_content["experiments"][exp]["clearml_id"]
+                    )
+                    ENV.current_meta["investigations"][self.name]["experiments"][exp]["clearml_task_url"] = (
+                        remote_meta_content["experiments"][exp]["clearml_task_url"]
+                    )
                 ENV.current_meta["investigations"][self.name]["experiments"][exp]["status"] = remote_meta_content[
                     "experiments"
                 ][exp]["status"]
-                ENV.current_meta["investigations"][self.name]["experiments"][exp][
-                    "results_already_gathered"
-                ] = remote_meta_content["experiments"][exp].get("results_already_gathered", False)
+                ENV.current_meta["investigations"][self.name]["experiments"][exp]["results_already_gathered"] = (
+                    remote_meta_content["experiments"][exp].get("results_already_gathered", False)
+                )
                 statuses.append(remote_meta_content["experiments"][exp]["status"])
                 if SIL_NLP_ENV.is_bucket:
                     print("Copying from bucket...")
@@ -309,13 +310,13 @@ class Investigation:
                         model_drafts_folder_id = ENV._create_gdrive_folder(exp_name, draft_folder_id)
                         try:
                             ENV._copy_storage_folder_to_gdrive(
-                                list(list((self.investigation_storage_path / exp_name / "infer").glob("*"))[0].glob("*"))[
-                                    0
-                                ],
+                                list(
+                                    list((self.investigation_storage_path / exp_name / "infer").glob("*"))[0].glob("*")
+                                )[0],
                                 model_drafts_folder_id,
                             )
                         except IndexError:
-                            print((self.investigation_storage_path / exp_name).iterdir())
+                            print(list(self.investigation_storage_path / exp_name).iterdir())
                             raise FileNotFoundError(f"No draft found for {exp_name}")
                         continue
                     try:

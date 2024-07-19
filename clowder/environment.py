@@ -6,7 +6,9 @@ warnings.filterwarnings("ignore", r"Blowfish")
 
 import os
 import subprocess
+from datetime import datetime
 from pathlib import Path
+from time import sleep, time
 from typing import Any, Callable, Optional, Union
 
 import gspread
@@ -32,8 +34,6 @@ from clowder.investigation import Investigation
 from clowder.status import Status
 from silnlp.common.environment import SIL_NLP_ENV
 
-from time import time, sleep
-
 
 class DuplicateInvestigationException(Exception):
     """There is already an investigation in the current context with that name"""
@@ -57,13 +57,14 @@ class ClowderMeta:
         with open(self.filepath, "r") as f:
             self.data: Any = yaml.safe_load(f)
         self.lock = FileLock("meta.lock")
+
     def load(self):
         with open(self.filepath, "r") as f:
             self.data: Any = yaml.safe_load(f)
+
     def flush(self):
         with open(self.filepath, "w") as f:
             yaml.safe_dump(self.data, f)
-
 
 
 class ClowderEnvironment:
@@ -114,11 +115,15 @@ class ClowderEnvironment:
 
     @property
     def current_meta(self):
+
         return self.meta.data[self.root]
 
     @property
     def investigations(self) -> "list[Investigation]":
-        return [self.get_investigation(inv_name) for inv_name in self.current_meta["investigations"].keys()]
+        return [
+            self.get_investigation(inv_name, sync_from_remote=True)
+            for inv_name in self.current_meta["investigations"].keys()
+        ]
 
     @property
     def data_folder(self) -> str:
@@ -126,12 +131,29 @@ class ClowderEnvironment:
             return self.current_meta["data_folder"]
         return None
 
-    def get_investigation(self, investigation_name: str) -> Investigation:
+    def get_investigation(self, investigation_name: str, sync_from_remote=False) -> Investigation:
         inv_data = self.current_meta["investigations"].get(investigation_name, None)
         if inv_data is None:
             raise InvestigationNotFoundError(
                 f"Investigation {investigation_name} does not exist in the current context"
             )
+        if sync_from_remote:
+            remote_meta_id = inv_data["clowder_meta_yml_id"]
+            remote_file = self._google_drive.CreateFile({"id": remote_meta_id})
+            md_str = remote_file["modifiedDate"]
+            md_str = md_str if md_str[-1] != "Z" else md_str[:-1]
+            remote_dt = datetime.fromisoformat(md_str)
+            local_dt = datetime.fromisoformat(inv_data.get("updated_timestamp", datetime.min.isoformat()))
+            if local_dt < remote_dt:
+                print(f"Updating investigation {investigation_name}")
+                remote_meta = self.get_remote_meta(investigation_name)
+                inv_data.update(
+                    {
+                        "experiments": remote_meta.get("experiments", {}),
+                        "updated_timestamp": datetime.now().isoformat(),
+                    }
+                )
+                self.add_investigation(investigation_name, inv_data)
         return Investigation.from_meta({investigation_name: inv_data})
 
     def investigation_exists(self, investigation_name: str):
@@ -167,7 +189,7 @@ class ClowderEnvironment:
             "clowder_log_id": clowder_log_id,
             "clowder_config_yml_id": clowder_config_yml_id,
             "sheet_id": sheet_id,
-            "experiments":{}
+            "experiments": {},
         }
         clowder_meta_yml_id = self._write_gdrive_file_in_folder(
             folder_id, "clowder.meta.yml", yaml.safe_dump(remote_meta_content), "application/x-yaml"
@@ -181,7 +203,8 @@ class ClowderEnvironment:
             "clowder_log_id": clowder_log_id,
             "clowder_config_yml_id": clowder_config_yml_id,
             "sheet_id": sheet_id,
-            "experiments":{}
+            "experiments": {},
+            "updated_timestamp": datetime.now().isoformat(),
         }
         self.add_investigation(investigation_name, investigation_data)
         return self.get_investigation(investigation_name)
@@ -250,7 +273,6 @@ class ClowderEnvironment:
                 folder_id, storage_files / "projects", where=lambda f: f["title"] in pt_projects
             )
 
-
             # extract corpora
             for proj in pt_projects:
                 command = f'SIL_NLP_MT_SCRIPTURE_DIR={self.EXPERIMENTS_FOLDER / "data" / folder_id / "scripture" } SIL_NLP_MT_TERMS_DIR={self.EXPERIMENTS_FOLDER / "data" / folder_id / "terms"} SIL_NLP_PT_DIR={self.EXPERIMENTS_FOLDER / "data" / folder_id } {os.environ.get("PYTHON","python")} -m silnlp.common.extract_corpora {proj}'
@@ -269,12 +291,12 @@ class ClowderEnvironment:
             self.meta.load()
             self.current_meta["data_folder"] = folder_id
             self.meta.flush()
-    
+
     def unlink_data(self):
         with self.meta.lock:
             self.meta.load()
-            if 'data_folder' in self.current_meta:
-                del self.current_meta['data_folder']
+            if "data_folder" in self.current_meta:
+                del self.current_meta["data_folder"]
                 self.meta.flush()
 
     def list_resources(self):
@@ -413,6 +435,7 @@ class ClowderEnvironment:
                 "clowder_config_yml_id": clowder_config_yml_id,
                 "sheet_id": sheet_id,
                 "experiments": remote_meta.get("experiments", {}),
+                "updated_timestamp": datetime.now().isoformat(),
             },
         )
 
