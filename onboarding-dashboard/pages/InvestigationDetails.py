@@ -688,7 +688,7 @@ def render_draft_section():
             add_experiment(draft_setup)
             with st.spinner("This might take a few minutes..."):
                 try:
-                    functions.run(st.session_state.current_investigation.name, experiments=[draft_name])
+                    functions.run(st.session_state.current_investigation.name, experiments=[draft_name], force_rerun=True)
                     set_success("drafts", "Drafting jobs are successfully running! Check back after a few hours.")
                 except Exception as e:
                     import traceback
