@@ -455,7 +455,7 @@ class HuggingFaceConfig(Config):
         missing_characters = sorted(list(charset - vocab))
         return missing_characters
 
-    def _build_vocabs(self, stats: bool = False) -> None:
+    def _build_vocabs(self) -> None:
         tok_dict = self.data.get("tokenizer")
         self._tokenizer = self.get_or_create_tokenizer()
         trained_tokenizers = []
