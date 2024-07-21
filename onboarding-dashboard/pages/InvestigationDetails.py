@@ -601,7 +601,7 @@ def render_model_section():
         with st.spinner("This might take a few minutes..."):
             get_results.clear("scores-best", st.session_state.current_investigation.name, keep_name=True)
             try:
-                functions.run(st.session_state.current_investigation.name, experiments=exps)
+                functions.run(st.session_state.current_investigation.name, experiments=exps, force_rerun=True)
                 set_success("models", "Models are successfully running. Check back after a few hours.!")
             except Exception as e:
                 import traceback
@@ -682,7 +682,9 @@ def render_draft_section():
             draft_setup["name"] = draft_name
             draft_setup["entrypoint"] = (
                 draft_setup["entrypoint"]
+                .replace("$SRC_ISO", get_lang_tag_mapping(model.split("-")[0].split("NLLB.1.3B.")[1]))
                 .replace("$SRC", "".join(drafting_source.split("-")[1:]))
+                .replace("$TRG_ISO", get_lang_tag_mapping(model.split("-")[2]))
                 .replace("$BOOKS", books_string)
             )
             add_experiment(draft_setup)
