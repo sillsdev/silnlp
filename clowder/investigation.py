@@ -209,6 +209,7 @@ class Investigation:
         clearml_tasks_dict: dict[str, Union[Task, None]] = self._get_clearml_tasks()
         # Update gdrive, fetch
         remote_meta_content = ENV.get_remote_meta(self.name)
+        ENV.get_investigation(self.name, sync_from_remote=True)
         if len(clearml_tasks_dict) > 0:
             if "experiments" not in remote_meta_content:
                 remote_meta_content["experiments"] = {}

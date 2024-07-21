@@ -139,13 +139,12 @@ class ClowderEnvironment:
             )
         if sync_from_remote:
             remote_meta_id = inv_data["clowder_meta_yml_id"]
-            remote_file = self._google_drive.CreateFile({"id": remote_meta_id})
-            md_str = remote_file["modifiedDate"]
-            md_str = md_str if md_str[-1] != "Z" else md_str[:-1]
-            remote_dt = datetime.fromisoformat(md_str)
+            remote_dt = self._get_gdrive_modified_time(remote_meta_id)
             local_dt = datetime.fromisoformat(inv_data.get("updated_timestamp", datetime.min.isoformat()))
             if local_dt < remote_dt:
-                print(f"Updating investigation {investigation_name}")
+                print(
+                    f"Updating investigation {investigation_name} based on local time stamp of {local_dt.isoformat()} vs remote {remote}"
+                )
                 remote_meta = self.get_remote_meta(investigation_name)
                 inv_data.update(
                     {
@@ -316,6 +315,12 @@ class ClowderEnvironment:
         else:
             gauth = auth
         self._google_drive = GoogleDrive(gauth)
+
+    def _get_gdrive_modified_time(self, folder_id: str) -> datetime:
+        remote_file = self._google_drive.CreateFile({"id": folder_id})
+        md_str = remote_file["modifiedDate"]
+        md_str = md_str if md_str[-1] != "Z" else md_str[:-1]
+        return datetime.fromisoformat(md_str)
 
     def _dict_of_gdrive_files(self, folder_id: str) -> "dict[str, GoogleDriveFile]":
         files = self._google_drive.ListFile({"q": f"trashed=false and '{folder_id}' in parents"}).GetList()
