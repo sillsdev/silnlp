@@ -26,7 +26,7 @@ ALIGNMENT_SCORES_FILE = re.compile(r"([a-z]{2,3}-.+)_([a-z]{2,3}-.+)")
 def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = False) -> None:
     stats_path = config.exp_dir / "corpus-stats.csv"
     if stats_path.is_file() and not force_align:
-        stats_df = pd.read_csv(stats_path, keep_default_na=False, index_col=["src_project", "trg_project"])
+        stats_df = pd.read_csv(stats_path, dtype=str, keep_default_na=False, index_col=["src_project", "trg_project"])
     else:
         stats_df = pd.DataFrame(
             columns=[
@@ -44,6 +44,7 @@ def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = 
                 "trg_script",
                 "trg_script_in_model",
             ],
+            dtype=str,
         ).set_index(["src_project", "trg_project"])
 
     pairs_to_process = []
@@ -120,9 +121,9 @@ def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = 
                 src_only_count,
                 trg_only_count,
                 parallel_count,
-                alignment_score,
+                "{:.4f}".format(alignment_score),
                 filtered_count,
-                filtered_alignment_score,
+                "{:.4f}".format(filtered_alignment_score),
                 src_script,
                 src_script_in_model,
                 trg_script,
@@ -131,17 +132,15 @@ def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = 
 
         # Use values from the df because not all values get recalculated
         row = stats_df.loc[project_pair]
-        align_score = "{:.4f}".format(row.at["align_score"])
-        filtered_align_score = "{:.4f}".format(row.at["filtered_align_score"])
         LOGGER.info(
             f"{src_file.project} -> {trg_file.project} stats -"
             f" count: {row.at['count']},"
             f" source only count: {row.at['src_only']}"
             f" target only count: {row.at['trg_only']}"
             f" parallel count: {row.at['parallel']}"
-            f" alignment: {align_score},"
+            f" alignment: {row.at['align_score']},"
             f" filtered count: {row.at['filtered_count']},"
-            f" alignment (filtered): {filtered_align_score},"
+            f" alignment (filtered): {row.at['filtered_align_score']},"
             f" source script: {row.at['src_script']}, source script in model: {row.at['src_script_in_model']},"
             f" target script: {row.at['trg_script']}, target script in model: {row.at['trg_script_in_model']}"
         )
@@ -151,7 +150,7 @@ def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = 
 def get_extra_alignments(config: Config, deutero: bool = False) -> List[str]:
     stats_path = config.exp_dir / "corpus-stats.csv"
     if stats_path.is_file():
-        stats_df = pd.read_csv(stats_path, keep_default_na=False, index_col=["src_project", "trg_project"])
+        stats_df = pd.read_csv(stats_path, dtype=str, keep_default_na=False, index_col=["src_project", "trg_project"])
     else:
         stats_df = pd.DataFrame(
             columns=[
@@ -169,6 +168,7 @@ def get_extra_alignments(config: Config, deutero: bool = False) -> List[str]:
                 "trg_script",
                 "trg_script_in_model",
             ],
+            dtype=str,
         ).set_index(["src_project", "trg_project"])
 
     LOGGER.info("Getting statistics from extra alignment files")
@@ -226,7 +226,7 @@ def get_extra_alignments(config: Config, deutero: bool = False) -> List[str]:
                 src_only_count,
                 trg_only_count,
                 parallel_count,
-                align_corpus["score"].mean(),
+                "{:.4f}".format(align_corpus["score"].mean()),
                 "",
                 "",
                 src_script,
