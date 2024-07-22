@@ -47,6 +47,7 @@ class Investigation:
         sheet_id: str,
         log_id: str,
         status: str,
+        with_err: Union[bool, Exception] = False,
     ):
         global ENV
         if ENV is None:
@@ -59,6 +60,7 @@ class Investigation:
         self.log_id = log_id
         self._status: Status = Status(status)
         self.investigation_storage_path = ENV.EXPERIMENTS_FOLDER / (self.name + "_" + self.id)
+        self.with_err = with_err
 
     @property
     def status(self):
@@ -209,7 +211,7 @@ class Investigation:
         clearml_tasks_dict: dict[str, Union[Task, None]] = self._get_clearml_tasks()
         # Update gdrive, fetch
         remote_meta_content = ENV.get_remote_meta(self.name)
-        ENV.get_investigation(self.name, sync_from_remote=True)
+        ENV.get_investigation(self.name, sync_from_remote=True)  # sync investigation from remote before updating tasks
         if len(clearml_tasks_dict) > 0:
             if "experiments" not in remote_meta_content:
                 remote_meta_content["experiments"] = {}
