@@ -316,11 +316,6 @@ class HuggingFaceConfig(Config):
 
         super().__init__(exp_dir, config)
 
-        # Map back translation language codes to their base language
-        for src_iso in self.src_isos:
-            if src_iso.endswith("_BT"):
-                self.data["lang_codes"][src_iso] = self.data["lang_codes"].get(src_iso[:-3], src_iso[:-3])
-
         if self.model_prefix == "google/madlad400":
             self.train["max_source_length"] = 256
             self.train["max_target_length"] = 256

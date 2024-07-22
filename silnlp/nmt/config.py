@@ -350,8 +350,6 @@ class Config(ABC):
         self.src_projects: Set[str] = set()
         self.trg_projects: Set[str] = set()
         for corpus_pair in self.corpus_pairs:
-            for sf in corpus_pair.src_files:
-                sf.iso += "_BT" if sf.path.stem in corpus_pair.back_translations else ""
             pair_src_isos = {sf.iso for sf in corpus_pair.src_files}
             pair_trg_isos = {tf.iso for tf in corpus_pair.trg_files}
             self.src_isos.update(pair_src_isos)
@@ -777,7 +775,9 @@ class Config(ABC):
 
             corpus_count = len(cur_train)
             if pair.is_train and (stats or pair.score_threshold > 0):
-                pair_stats_path = self.exp_dir / f"{src_file.path.stem}_{trg_file.path.stem}.csv"
+                pair_stats_path = (
+                    self.exp_dir / f"{src_file.iso}-{src_file.project}_{trg_file.iso}-{trg_file.project}.csv"
+                )
                 if pair_stats_path.is_file() and not force_align:
                     LOGGER.info(f"Using pre-existing alignment scores from {pair_stats_path}")
                     pair_stats = pd.read_csv(pair_stats_path)
@@ -819,18 +819,19 @@ class Config(ABC):
                     )
 
                 cur_test.drop("score", axis=1, inplace=True, errors="ignore")
-                self._add_to_eval_data_set(
-                    src_file.iso,
-                    trg_file.iso,
-                    trg_file.project,
-                    tags_str,
-                    test,
-                    pair_test_indices,
-                    cur_test,
-                )
+                if f"{src_file.iso}-{src_file.project}" not in pair.back_translations:
+                    self._add_to_eval_data_set(
+                        src_file.iso,
+                        trg_file.iso,
+                        trg_file.project,
+                        tags_str,
+                        test,
+                        pair_test_indices,
+                        cur_test,
+                    )
 
             if pair.is_train:
-                project_pair = (src_file.path.stem, trg_file.path.stem)
+                project_pair = (f"{src_file.iso}-{src_file.project}", f"{trg_file.iso}-{trg_file.project}")
                 calculate_stats = stats and (project_pair not in stats_df.index or force_align)
                 alignment_score = cur_train["score"].mean() if calculate_stats else 0
 
