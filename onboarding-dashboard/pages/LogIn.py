@@ -96,6 +96,7 @@ if "google_auth" not in st.session_state:
 else:
     if bypass_auth:
         is_allowed_user = True
+        st.session_state.is_internal_user = True
     else:
         internal_emails = os.environ.get("ONBOARDING_INTERNAL_USER_EMAILS", None)
         if internal_emails is None:
@@ -138,7 +139,10 @@ else:
                         placeholder="https://drive.google.com/drive/u/0/folders/0000000000000000000",
                         value=current_data_folder,
                     )
-                    refresh = st.checkbox('Refresh resources', help="Check this box if new resources have been manually added to your resource gdrive")
+                    refresh = st.checkbox(
+                        "Refresh resources",
+                        help="Check this box if new resources have been manually added to your resource gdrive",
+                    )
             check_error("set_up")
             if st.form_submit_button("Set Up", type="primary"):
                 from clowder import functions

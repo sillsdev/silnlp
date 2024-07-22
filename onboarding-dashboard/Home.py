@@ -1,8 +1,10 @@
-from time import sleep
 import zipfile
 from io import BytesIO
+from time import sleep
+from typing import Callable
 
 import streamlit as st
+from importlib_resources.abc import Traversable
 from s3path import S3Path
 
 st.markdown(
@@ -65,7 +67,9 @@ def copy_resource_to_gdrive(r: BytesIO):
                             sleep(5)
                             print(f"Retrying to copy {part} to gdrive")
                             subid = functions.ENV._create_gdrive_folder(part, subid)
-                functions.ENV._write_gdrive_file_in_folder(subid, file.filename.split("/")[-1], f.read(file).decode('utf-8', 'ignore'))
+                functions.ENV._write_gdrive_file_in_folder(
+                    subid, file.filename.split("/")[-1], f.read(file).decode("utf-8", "ignore")
+                )
 
 
 def copy_resource_to_s3(r: BytesIO):
@@ -82,6 +86,84 @@ def copy_resource_to_s3(r: BytesIO):
             path.write_text(f.read(file).decode())
 
 
+def walk_traversable(
+    t: Traversable,
+    on_dir: Callable[[Traversable, dict], bool],
+    on_file: Callable[[Traversable, dict], bool],
+    ctx: dict = {},
+):
+    """Walk through a traversable. Somewhat similar to the os.walk method, but uses callbacks for dirs and files.
+    Initial argument must be a directory. The traversable item (dir or file) that corresponds to each callback as
+    well as a copy of the ctx dict are provided to the callbacks. If callback returns False, children are not explored.
+    """
+    for x in t.iterdir():
+        if x.is_dir():
+            ctx_c = {k: v for k, v in ctx.items()}
+            if on_dir(x, ctx_c):
+                walk_traversable(x, on_dir, on_file, ctx_c)
+        elif x.is_file():
+            on_file(x, ctx)
+
+
+def copy_resource_trav_to_gdrive(r: zipfile.Path):
+    '''Copy a zipfile.Path resource to Google Drive. Path must be a "directory."'''
+    if not r.is_dir():
+        return
+    data_folder = functions.current_data(env=st.session_state.clowder_env)
+
+    def process_dir(t: Traversable, ctx: dict):
+        """Process dir callback. Creates the corresponding google drive folder inside of the folder pointed to with ctx['subid']"""
+        if "Notes" in t.name or "Print" in t.name:
+            return False
+        try:
+            ctx["subid"] = functions.ENV._create_gdrive_folder(t.name, ctx["subid"])
+        except:
+            print(f"Failed to copy {t.name} to gdrive")
+            sleep(5)
+            print(f"Retrying to copy {t.name} to gdrive")
+            ctx["subid"] = functions.ENV._create_gdrive_folder(t.name, ctx["subid"])
+        return True
+
+    def process_file(t: Traversable, ctx: dict):
+        """Process file callback. Writes the corresponding file inside of the folder pointed to with ctx['subid']"""
+        if "Notes" in t.name or "Print" in t.name:
+            return False
+        functions.ENV._write_gdrive_file_in_folder(ctx["subid"], t.name, t.read_bytes().decode("utf-8", "ignore"))
+
+    with functions._lock:
+        functions.ENV = st.session_state.clowder_env
+        stem: str = str(r).split(".", maxsplit=1)[0] if r.name == "" else r.name
+        id = functions.ENV._create_gdrive_folder(stem, data_folder)
+        walk_traversable(r, process_dir, process_file, {"subid": id})
+
+
+def copy_resource_trav_to_s3(r: zipfile.Path):
+    '''Copy a zipfile.Path resource to S3 bucket. Path must be a "directory."'''
+    if not r.is_dir():
+        return
+
+    stem: str = str(r).split(".", maxsplit=1)[0] if r.name == "" else r.name
+    parent_path = SIL_NLP_ENV.pt_projects_dir / stem
+    parent_path.mkdir(parents=True, exist_ok=True)
+
+    def process_dir(t: Traversable, ctx: dict):
+        """Process dir callback. Creates the corresponding S3 "folder" inside of the "folder" pointed to with ctx['parent_path']"""
+        if "Notes" in t.name or "Print" in t.name:
+            return False
+        ctx["parent_path"] = ctx["parent_path"] / t.name
+        ctx["parent_path"].mkdir(parents=True, exist_ok=True)
+        return True
+
+    def process_file(t: Traversable, ctx: dict):
+        """Process file callback. Writes the corresponding file inside of the "folder" pointed to with ctx['parent_path']"""
+        if "Notes" in t.name or "Print" in t.name:
+            return False
+        path = ctx["parent_path"] / t.name
+        path.write_text(t.read_bytes().decode())
+
+    walk_traversable(r, process_dir, process_file, {"parent_path": parent_path})
+
+
 def get_investigations() -> list:
     try:
         return list(map(lambda i: Investigation.from_clowder(i), functions.list_inv(env=st.session_state.clowder_env)))
@@ -94,7 +176,7 @@ def get_investigations() -> list:
 
 
 @st.cache_data(show_spinner=False)
-def get_resources(env): #Pass in env to make cache per env
+def get_resources(env):  # Pass in env to make cache per env
     try:
         fn_res = functions.list_resources(env=st.session_state.clowder_env)
         return list(map(lambda fn: fn[:-4], fn_res))
@@ -109,8 +191,10 @@ def get_resources(env): #Pass in env to make cache per env
 if "investigations" not in st.session_state:
     st.session_state.investigations = get_investigations()
 
-if os.environ.get('DEBUG_SFONBOARD',None) == 'true':
-    investigation_tab, resource_tab, settings_tab, debug_tab = st.tabs(["Investigations", "Resources", "Settings", "Debug"])
+if os.environ.get("DEBUG_SFONBOARD", None) == "true":
+    investigation_tab, resource_tab, settings_tab, debug_tab = st.tabs(
+        ["Investigations", "Resources", "Settings", "Debug"]
+    )
 else:
     investigation_tab, resource_tab, settings_tab = st.tabs(["Investigations", "Resources", "Settings"])
 
@@ -142,6 +226,59 @@ with investigation_tab:
             st.rerun()
         check_success("create_investigation")
 
+
+def glean_resources(z: zipfile.ZipFile):
+    """Find nested resources inside of zipfile. Looks for Settings.xml files to
+    determine whether a subfolder contains resources (but it doesn't
+    support resources nested at different levels).
+
+    Supported:
+    - Resources directly in top level
+    - Resources in folder in top level
+    - Resources in folders in top level
+    - Resources in folders contained in a single folder within a zip"""
+    path = zipfile.Path(z)
+    children = list(path.iterdir())
+    if len(children) == 1 and children[0].is_dir():
+        path = children[0]
+        children = path.iterdir()
+    child_dirs: list[zipfile.Path] = []
+    for child in children:
+        if child.is_dir():
+            child_dirs.append(child)
+        if child.name == "Settings.xml":
+            return [path]
+    result = []
+    for path in child_dirs:
+        for child in path.iterdir():
+            if child.name == "Settings.xml":
+                result.append(path)
+    return result
+
+
+def add_resource_internal(resource: zipfile.Path):
+    """Do the processing required for adding resource to internal S3 bucket"""
+    copy_resource_trav_to_s3(resource)
+    project = str(resource).split(".", maxsplit=1)[0] if resource.name == "" else resource.name
+    command = f'{os.environ.get("PYTHON", "python")} -m silnlp.common.extract_corpora {project}'
+    print(f"Running {command}")
+    result = subprocess.run(
+        command,
+        shell=True,
+        capture_output=True,
+        text=True,
+    )
+    print("Result", result)
+    if result.stdout != "":
+        print(result.stdout)
+    if result.returncode != 0:
+        print(result.stderr)
+        st.error(f"Something went wrong while adding resource data. Please try again.")
+    else:
+        set_success("add_resource", "Resource(s) successfully uploaded!")
+    SIL_NLP_ENV.copy_pt_project_to_bucket(project)
+
+
 with resource_tab:
     st.header("Resources")
     c1, c2 = st.columns([0.5, 0.5])
@@ -161,7 +298,7 @@ with resource_tab:
                 \n--  AnotherBook.usfm \
                 \n-- ... \
                 \n-- Settings.xml \
-                \nUpon success, a new text will be added to your resources with name <language_code>-<project_name> which can then be used in your investigations"
+                \nUpon success, a new text will be added to your resources with name <language_code>-<project_name> which can then be used in your investigations",
             )
             check_error("add_resource")
             if st.form_submit_button(
@@ -170,36 +307,18 @@ with resource_tab:
             ):
                 check_required("add_resource", resources)
                 with st.spinner("This might take a few minutes..."):
-                    if st.session_state.is_internal_user:
-                        for resource in resources:
-                            with zipfile.ZipFile(resource) as f:
-                                copy_resource_to_s3(resource)
-                                project = f.filename[:-4]
-                                command = (
-                                    f'{os.environ.get("PYTHON", "python")} -m silnlp.common.extract_corpora {project}'
-                                )
-                                print(f"Running {command}")
-                                result = subprocess.run(
-                                    command,
-                                    shell=True,
-                                    capture_output=True,
-                                    text=True,
-                                )
-                                print("Result", result)
-                                if result.stdout != "":
-                                    print(result.stdout)
-                                if result.returncode != 0:
-                                    print(result.stderr)
-                                    st.error(f"Something went wrong while adding resource data. Please try again.")
-                                else:
-                                    set_success("add_resource", "Resource(s) successfully uploaded!")
-                                SIL_NLP_ENV.copy_pt_project_to_bucket(project)
+                    if "is_internal_user" in st.session_state and st.session_state.is_internal_user:
+                        for zp in resources:
+                            with zipfile.ZipFile(zp) as f:
+                                for resource in glean_resources(f):
+                                    add_resource_internal(resource)
                         st.cache_data.clear()
                         st.rerun()
                     else:
-                        for resource in resources:
-                            with zipfile.ZipFile(resource) as f:
-                                copy_resource_to_gdrive(resource)
+                        for zp in resources:
+                            with zipfile.ZipFile(zp) as f:
+                                for resource in glean_resources(f):
+                                    copy_resource_trav_to_gdrive(resource)
                         try:
                             functions.use_data(functions.current_data(env=st.session_state.clowder_env))
                             set_success("add_resource", "Resource(s) successfully uploaded!")
@@ -246,14 +365,20 @@ with settings_tab:
                     if len(functions.list_inv(env=st.session_state.clowder_env)) == 0:
                         functions.track(None, env=st.session_state.clowder_env)
                     if data_folder is not None:
-                        print(f'Using data folder {data_folder}')
-                        functions.use_data(data_folder.split("folders/")[1], env=st.session_state.clowder_env, refresh=True)
+                        print(f"Using data folder {data_folder}")
+                        functions.use_data(
+                            data_folder.split("folders/")[1], env=st.session_state.clowder_env, refresh=True
+                        )
                     set_success("set_up", "Successfully changed set-up!")
                     st.cache_data.clear()
                 except Exception as e:
                     st.error(f"Something went wrong while fetching resource data. Please try again. Error: {e}")
             check_success("set_up")
 
-    if os.environ.get('DEBUG_SFONBOARD',None) == 'true':
+    if os.environ.get("DEBUG_SFONBOARD", None) == "true":
         with debug_tab:
-            st.write(st.session_state.clowder_env, st.session_state.clowder_env.meta.data, st.session_state.clowder_env.data_folder)
+            st.write(
+                st.session_state.clowder_env,
+                st.session_state.clowder_env.meta.data,
+                st.session_state.clowder_env.data_folder,
+            )
