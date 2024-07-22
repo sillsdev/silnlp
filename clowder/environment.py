@@ -19,7 +19,7 @@ from clearml import Task
 from oauth2client.service_account import ServiceAccountCredentials
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive, GoogleDriveFile
-from pydrive2.files import MediaIoReadable
+from pydrive2.files import ApiRequestError, MediaIoReadable
 from s3path import S3Path
 
 from clowder.configuration_exception import MissingConfigurationFileError
@@ -120,10 +120,15 @@ class ClowderEnvironment:
 
     @property
     def investigations(self) -> "list[Investigation]":
-        return [
-            self.get_investigation(inv_name, sync_from_remote=True)
-            for inv_name in self.current_meta["investigations"].keys()
-        ]
+        result_list = []
+        for inv_name in self.current_meta["investigations"].keys():
+            try:
+                result_list.append(self.get_investigation(inv_name, sync_from_remote=True))
+            except InvestigationNotFoundError as exc:
+                inv = self.get_investigation(inv_name)
+                inv.with_err = exc
+                result_list.append(inv)
+        return result_list
 
     @property
     def data_folder(self) -> str:
@@ -139,11 +144,18 @@ class ClowderEnvironment:
             )
         if sync_from_remote:
             remote_meta_id = inv_data["clowder_meta_yml_id"]
-            remote_dt = self._get_gdrive_modified_time(remote_meta_id)
+            remote_dt = None
+            try:
+                remote_dt = self._get_gdrive_modified_time(remote_meta_id)
+            except ApiRequestError as exc:
+                raise InvestigationNotFoundError(f"Could not access remote meta for {investigation_name}") from exc
+            if remote_dt is None:
+                raise InvestigationNotFoundError(f"Could not access remote meta for {investigation_name}")
             local_dt = datetime.fromisoformat(inv_data.get("updated_timestamp", datetime.min.isoformat()))
             if local_dt < remote_dt:
                 print(
-                    f"Updating investigation {investigation_name} based on local time stamp of {local_dt.isoformat()} vs remote {remote}"
+                    f"Updating investigation {investigation_name} based on local time stamp of {local_dt.isoformat()} \
+( remote {remote_dt.isoformat()})"
                 )
                 remote_meta = self.get_remote_meta(investigation_name)
                 inv_data.update(
