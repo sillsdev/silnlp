@@ -38,3 +38,4 @@ tests/**/temp*
 *.clowder
 *secret*
 *.lock
+.eth_data
