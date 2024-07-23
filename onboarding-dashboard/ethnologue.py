@@ -22,7 +22,6 @@ with functions._lock:
     if not Path.exists(Path(DATA_FOLDER_PATH)):
         os.mkdir(DATA_FOLDER_PATH)
         env = functions.get_env()
-        print("Files in folder are", env._dict_of_gdrive_files(GDRIVE_DATA_FOLDER_ID))
         env._copy_gdrive_folder_to_storage(GDRIVE_DATA_FOLDER_ID, Path(DATA_FOLDER_PATH))
 
 _files = {x.name: x for x in Path(DATA_FOLDER_PATH).iterdir() if x.is_file()}
@@ -92,8 +91,6 @@ def find_class_langs(classfication: str):
 def lang_country_dicts(lang_code: str):
     l_c_df = language_in_country_df()
     row = l_c_df.loc[l_c_df["UnitCode"] == lang_code]
-    print("LANG COUNTRY DF", l_c_df)
-    print("Lang Country Row", row)
     return row.to_dict("records")
 
 
