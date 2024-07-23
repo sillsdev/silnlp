@@ -39,6 +39,7 @@ from models import Investigation
 parent_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(parent_dir)
 
+import ethnologue as eg
 import pandas as pd
 from utils import check_error, check_required, check_success, set_success
 
@@ -196,11 +197,13 @@ if "investigations" not in st.session_state:
     st.session_state.investigations = get_investigations()
 
 if os.environ.get("DEBUG_SFONBOARD", None) == "true":
-    investigation_tab, resource_tab, settings_tab, debug_tab = st.tabs(
-        ["Investigations", "Resources", "Settings", "Debug"]
+    investigation_tab, resource_tab, explore_tab, settings_tab, debug_tab = st.tabs(
+        ["Investigations", "Resources", "Explore Language", "Settings", "Debug"]
     )
 else:
-    investigation_tab, resource_tab, settings_tab = st.tabs(["Investigations", "Resources", "Settings"])
+    investigation_tab, resource_tab, explore_tab, settings_tab = st.tabs(
+        ["Investigations", "Resources", "Explore Language", "Settings"]
+    )
 
 with investigation_tab:
     st.header("Investigations")
@@ -346,6 +349,91 @@ with resource_tab:
                         except Exception as e:
                             st.error(f"Something went wrong while adding resource data. Please try again. Error: {e}")
             check_success("add_resource")
+
+
+def write_dict_columns(d: dict):
+    c1, c2 = st.columns([0.5, 1])
+    with c1:
+        for key in d.keys():
+            st.write(f"**{key}**")
+    with c2:
+        for val in d.values():
+            st.write(val)
+
+
+if "lang_code_btn_counter" not in st.session_state:
+    st.session_state.lang_code_btn_counter = 0
+
+
+def write_lang_codes(l: list, num_columns=5):
+    columns = st.columns(num_columns)
+    i = 0
+
+    def callback(my_code):
+        def _():
+            st.session_state.language_code = my_code
+
+        return _
+
+    lang_code_button_counter = st.session_state.lang_code_btn_counter
+
+    for column in columns:
+        with column:
+            for el in range(i, len(l), num_columns):
+                st.button(f"`{l[el]}`", on_click=callback(l[el]), key=f"{i*7}{el*5}{lang_code_button_counter}{l[el]}")
+        i += 1
+        lang_code_button_counter += 1
+        lang_code_button_counter %= 1000
+
+    st.session_state.lang_code_btn_counter = lang_code_button_counter
+
+
+with explore_tab:
+    if "language_code" not in st.session_state:
+        st.session_state.language_code = None
+    with st.container(border=True):
+        st.text_input("Language Code to Explore", key="language_code")
+    if st.session_state.language_code:
+        language_code = st.session_state.language_code
+        with st.container(border=True):
+            st.header(f"Language `{language_code}`")
+            st.write(f"**Language Info (`{language_code}`):**")
+            with st.container(border=True):
+                write_dict_columns(eg.lang_info_dict(language_code))
+            st.subheader(f"Explore `{language_code}` Classifications:")
+            clasfs = eg.lang_classifications(language_code)
+            clas = st.selectbox("Choose classification", clasfs)
+            with st.expander(f"**Other languages with classification *{clas}***"):
+                write_lang_codes(eg.find_class_langs(clas), 8)
+            fam_c = eg.lang_country_family(language_code)
+            st.subheader(f"`{language_code}` Language Family")
+            st.write(fam_c)
+            with st.expander(f"**Languages in Same Family (*{fam_c}*)**"):
+                write_lang_codes(eg.find_country_family_langs(fam_c))
+            st.subheader(f"Explore `{language_code}` Countries:")
+            countries = {x["CountryCode"]: x for x in eg.lang_country_dicts(language_code)}
+            country = st.selectbox("Choose country", countries.keys())
+            st.write(f"**Language Country Info (`{language_code}`-`{country}`):**")
+            with st.container(border=True):
+                write_dict_columns(countries[country])
+
+    with st.expander("DataFrames"):
+        if st.button("Load Ethnolog DFs"):
+            l_df = eg.language_df()
+            lic_df = eg.language_in_country_df()
+            licad_df = eg.language_in_country_add_data_df()
+            lad_df = eg.language_add_data_df()
+            lan_df = eg.language_alt_name_df()
+            with st.popover("Language"):
+                st.dataframe(l_df)
+            with st.popover("In Country"):
+                st.dataframe(lic_df)
+            with st.popover("In Country AD"):
+                st.dataframe(licad_df)
+            with st.popover("AD"):
+                st.dataframe(lad_df)
+            with st.popover("Alternate Name"):
+                st.dataframe(lan_df)
 
 with settings_tab:
     st.header("Change Set Up")
