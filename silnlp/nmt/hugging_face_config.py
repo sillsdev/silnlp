@@ -1102,8 +1102,8 @@ class HuggingFaceNMTModel(NMTModel):
         )
 
         if self._config.model_prefix == "facebook/nllb-200":
-            model.base_model.encoder.embed_tokens = encoder_embeddings
-            model.base_model.decoder.embed_tokens = decoder_embeddings
+            model.model.encoder.embed_tokens = encoder_embeddings
+            model.model.decoder.embed_tokens = decoder_embeddings
             model.tie_weights()
         elif self._config.model_prefix == "google/madlad400":
             model.encoder.embed_tokens = encoder_embeddings
@@ -1252,7 +1252,7 @@ class HuggingFaceNMTModel(NMTModel):
         dtype = torch.bfloat16 if self._is_t5 else torch.float16
         if (
             self._config.train["use_lora"]
-            and self._config.model_prefix == "google/madlad400"
+            and self._config.model_prefix != "facebook/nllb-200"
             and model_name != self._config.model
         ):
             base_model = AutoModelForSeq2SeqLM.from_pretrained(
