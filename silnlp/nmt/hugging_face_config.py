@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import shutil
 from contextlib import ExitStack
 from copy import deepcopy
 from enum import Enum
@@ -917,13 +918,16 @@ class HuggingFaceNMTModel(NMTModel):
 
         delete_checkpoint_optimizer_state = self._config.train["delete_checkpoint_optimizer_state"]
         delete_checkpoint_tokenizer = self._config.train["delete_checkpoint_tokenizer"]
-        if delete_checkpoint_optimizer_state or delete_checkpoint_tokenizer:
+        delete_checkpoint_adapter = self._config.train["use_lora"] and self._config.model_prefix == "facebook/nllb-200"
+        if delete_checkpoint_optimizer_state or delete_checkpoint_tokenizer or delete_checkpoint_adapter:
             for child in Path(training_args.output_dir).iterdir():
                 if child.is_dir() and child.name.startswith("checkpoint-"):
                     if delete_checkpoint_optimizer_state:
                         delete_optimizer_state(child)
                     if delete_checkpoint_tokenizer:
                         delete_tokenizer(child)
+                    if delete_checkpoint_adapter:
+                        self._merge_and_delete_adapter(child, len(tokenizer), training_args.save_safetensors)
 
     def save_effective_config(self, path: Path) -> None:
         training_args = self._create_training_arguments()
@@ -1090,7 +1094,7 @@ class HuggingFaceNMTModel(NMTModel):
 
         return self._dictionary
 
-    # Tie embedding weights to "shared" module weights and untie the embeddings modules if necessary
+    # Untie full embedding modules and instead tie embedding weights
     def _create_tied_embedding_weights(self, model: PreTrainedModel) -> PreTrainedModel:
         encoder_embeddings = torch.nn.Embedding(
             model.config.vocab_size, model.config.d_model, model.config.pad_token_id
@@ -1100,8 +1104,8 @@ class HuggingFaceNMTModel(NMTModel):
         )
 
         if self._config.model_prefix == "facebook/nllb-200":
-            model.base_model.encoder.embed_tokens = encoder_embeddings
-            model.base_model.decoder.embed_tokens = decoder_embeddings
+            model.model.encoder.embed_tokens = encoder_embeddings
+            model.model.decoder.embed_tokens = decoder_embeddings
             model.tie_weights()
         elif self._config.model_prefix == "google/madlad400":
             model.encoder.embed_tokens = encoder_embeddings
@@ -1112,9 +1116,6 @@ class HuggingFaceNMTModel(NMTModel):
         return model
 
     def _convert_to_lora_model(self, model: PreTrainedModel) -> PreTrainedModel:
-        # Only tie embedding weights together rather than the entire modules so that peft recognizes each one
-        model = self._create_tied_embedding_weights(model)
-
         lora_config = self._config.train["lora_config"]
         target_modules = lora_config.get(
             "target_modules", LORA_DEFAULT_CONFIGS[self._config.model_prefix]["target_modules"]
@@ -1126,6 +1127,11 @@ class HuggingFaceNMTModel(NMTModel):
             target_modules = target_modules.split(",")
         if isinstance(modules_to_save, str):
             modules_to_save = modules_to_save.split(",")
+
+        # Only tie embedding weights together rather than the entire modules so that peft recognizes each one
+        if "embed_tokens" in modules_to_save or "embed_tokens" in target_modules:
+            model = self._create_tied_embedding_weights(model)
+
         peft_config = LoraConfig(
             task_type=TaskType.SEQ_2_SEQ_LM,
             r=lora_config.get("r", 4),
@@ -1172,6 +1178,29 @@ class HuggingFaceNMTModel(NMTModel):
             model.enable_input_require_grads()
 
         return model
+
+    def _merge_and_delete_adapter(self, checkpoint_path: Path, vocab_size: int, save_safetensors: bool) -> None:
+        adapter_path = checkpoint_path / "adapter"
+
+        base = AutoModelForSeq2SeqLM.from_pretrained(self._config.model)
+        base.resize_token_embeddings(vocab_size, pad_to_multiple_of=8 if self._mixed_precision else None)
+        base = self._create_tied_embedding_weights(base)
+
+        model_to_merge = PeftModel.from_pretrained(base, adapter_path)
+        merged_model = model_to_merge.merge_and_unload()
+
+        if self._config.model_prefix == "facebook/nllb-200":
+            embedding_weights = merged_model.model.encoder.embed_tokens.weight
+            merged_model.model.shared.weight = embedding_weights
+            merged_model.model.decoder.embed_tokens.weight = embedding_weights
+            merged_model.lm_head.weight = embedding_weights
+
+        merged_model.save_pretrained(
+            checkpoint_path,
+            safe_serialization=save_safetensors,
+        )
+
+        shutil.rmtree(adapter_path)
 
     def _translate_sentences(
         self,
@@ -1223,7 +1252,11 @@ class HuggingFaceNMTModel(NMTModel):
             model_name = self._config.model
 
         dtype = torch.bfloat16 if self._is_t5 else torch.float16
-        if self._config.train["use_lora"] and model_name != self._config.model:
+        if (
+            self._config.train["use_lora"]
+            and self._config.model_prefix != "facebook/nllb-200"
+            and model_name != self._config.model
+        ):
             base_model = AutoModelForSeq2SeqLM.from_pretrained(
                 self._config.model, torch_dtype=dtype if self._mixed_precision else "auto"
             )
@@ -1471,23 +1504,28 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
                     safetensors.torch.save_file(state_dict, os.path.join(output_dir, SAFE_WEIGHTS_NAME))
                 else:
                     torch.save(state_dict, os.path.join(output_dir, WEIGHTS_NAME))
+        elif isinstance(self.model, PeftModel):
+            if self._better_transformer:
+                self.model = self.model.reverse_bettertransformer()
+            output_dir += "/adapter" if self.model.name_or_path.startswith("facebook/nllb-200") else ""
+            self.model.save_pretrained(
+                output_dir,
+                state_dict=state_dict,
+                safe_serialization=self.args.save_safetensors,
+                save_embedding_layers=False,
+            )
+            if self._better_transformer:
+                self.model = self.model.to_bettertransformer()
         else:
             if self._better_transformer:
                 self.model = self.model.reverse_bettertransformer()
-                self.model.save_pretrained(
-                    output_dir,
-                    state_dict=state_dict,
-                    safe_serialization=self.args.save_safetensors,
-                    save_embedding_layers=True,
-                )
+            self.model.save_pretrained(
+                output_dir,
+                state_dict=state_dict,
+                safe_serialization=self.args.save_safetensors,
+            )
+            if self._better_transformer:
                 self.model = self.model.to_bettertransformer()
-            else:
-                self.model.save_pretrained(
-                    output_dir,
-                    state_dict=state_dict,
-                    safe_serialization=self.args.save_safetensors,
-                    save_embedding_layers=True,
-                )
         if self.tokenizer is not None:
             self.tokenizer.save_pretrained(output_dir)
 
