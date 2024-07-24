@@ -1,6 +1,6 @@
-from time import sleep
 import zipfile
 from io import BytesIO
+from time import sleep
 
 import streamlit as st
 from s3path import S3Path
@@ -65,7 +65,9 @@ def copy_resource_to_gdrive(r: BytesIO):
                             sleep(5)
                             print(f"Retrying to copy {part} to gdrive")
                             subid = functions.ENV._create_gdrive_folder(part, subid)
-                functions.ENV._write_gdrive_file_in_folder(subid, file.filename.split("/")[-1], f.read(file).decode('utf-8', 'ignore'))
+                functions.ENV._write_gdrive_file_in_folder(
+                    subid, file.filename.split("/")[-1], f.read(file).decode("utf-8", "ignore")
+                )
 
 
 def copy_resource_to_s3(r: BytesIO):
@@ -84,6 +86,7 @@ def copy_resource_to_s3(r: BytesIO):
 
 def get_investigations() -> list:
     try:
+        functions.sync(env=st.session_state.clowder_env)
         return list(map(lambda i: Investigation.from_clowder(i), functions.list_inv(env=st.session_state.clowder_env)))
     except Exception as e:
         import traceback
@@ -94,7 +97,7 @@ def get_investigations() -> list:
 
 
 @st.cache_data(show_spinner=False)
-def get_resources(env): #Pass in env to make cache per env
+def get_resources(env):  # Pass in env to make cache per env
     try:
         fn_res = functions.list_resources(env=st.session_state.clowder_env)
         return list(map(lambda fn: fn[:-4], fn_res))
@@ -109,8 +112,10 @@ def get_resources(env): #Pass in env to make cache per env
 if "investigations" not in st.session_state:
     st.session_state.investigations = get_investigations()
 
-if os.environ.get('DEBUG_SFONBOARD',None) == 'true':
-    investigation_tab, resource_tab, settings_tab, debug_tab = st.tabs(["Investigations", "Resources", "Settings", "Debug"])
+if os.environ.get("DEBUG_SFONBOARD", None) == "true":
+    investigation_tab, resource_tab, settings_tab, debug_tab = st.tabs(
+        ["Investigations", "Resources", "Settings", "Debug"]
+    )
 else:
     investigation_tab, resource_tab, settings_tab = st.tabs(["Investigations", "Resources", "Settings"])
 
@@ -161,7 +166,7 @@ with resource_tab:
                 \n--  AnotherBook.usfm \
                 \n-- ... \
                 \n-- Settings.xml \
-                \nUpon success, a new text will be added to your resources with name <language_code>-<project_name> which can then be used in your investigations"
+                \nUpon success, a new text will be added to your resources with name <language_code>-<project_name> which can then be used in your investigations",
             )
             check_error("add_resource")
             if st.form_submit_button(
@@ -246,14 +251,20 @@ with settings_tab:
                     if len(functions.list_inv(env=st.session_state.clowder_env)) == 0:
                         functions.track(None, env=st.session_state.clowder_env)
                     if data_folder is not None:
-                        print(f'Using data folder {data_folder}')
-                        functions.use_data(data_folder.split("folders/")[1], env=st.session_state.clowder_env, refresh=True)
+                        print(f"Using data folder {data_folder}")
+                        functions.use_data(
+                            data_folder.split("folders/")[1], env=st.session_state.clowder_env, refresh=True
+                        )
                     set_success("set_up", "Successfully changed set-up!")
                     st.cache_data.clear()
                 except Exception as e:
                     st.error(f"Something went wrong while fetching resource data. Please try again. Error: {e}")
             check_success("set_up")
 
-    if os.environ.get('DEBUG_SFONBOARD',None) == 'true':
+    if os.environ.get("DEBUG_SFONBOARD", None) == "true":
         with debug_tab:
-            st.write(st.session_state.clowder_env, st.session_state.clowder_env.meta.data, st.session_state.clowder_env.data_folder)
+            st.write(
+                st.session_state.clowder_env,
+                st.session_state.clowder_env.meta.data,
+                st.session_state.clowder_env.data_folder,
+            )
