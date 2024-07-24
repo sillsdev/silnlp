@@ -643,6 +643,7 @@ def render_draft_section():
                         with c1:
                             st.write(draft_name)
                         with c2:
+                            print(f"Key = ",f"{model_name}_{draft_name}_{i}")
                             st.download_button("Download", data=draft_content, file_name=draft_name, key=f"{model_name}_{draft_name}_{i}")
     with st.form(key=f"{st.session_state.current_investigation.id}-draft-books"):
         drafting_source = st.selectbox("Drafting source", resources, index=None)
