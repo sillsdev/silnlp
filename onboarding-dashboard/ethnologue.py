@@ -83,6 +83,27 @@ def lang_classifications(lang_code: str):
     return [_.strip() for _ in d["Classification"].split(",")] if isinstance(d["Classification"], str) else []
 
 
+def search_langs(query: str):
+    l_df = language_df()
+    return list(
+        set(
+            l_df[
+                (l_df["UnitName"].astype(str).str.contains(query))
+                | (l_df["UnitFullName"].astype(str).str.contains(query))
+                | (l_df["EthnologueName"].astype(str).str.contains(query))
+                | (l_df["PrimaryCountryName"].astype(str).str.contains(query))
+                | (l_df["PrimaryCountryCode"].astype(str).str.strip() == query)
+                | (l_df["Classification"].astype(str).str.contains(query))
+            ]["UnitCode"].to_list()
+        )
+    )
+
+
+def rank_related_languages(lang_code: str):
+    info_dict = lang_info_dict(lang_code)
+    country_dicts = lang_country_dicts(lang_code)
+
+
 def find_class_langs(classfication: str):
     l_df = language_df()
     return list(set(l_df[l_df["Classification"].astype(str).str.contains(classfication)]["UnitCode"].to_list()))
