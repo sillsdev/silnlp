@@ -372,6 +372,12 @@ def write_lang_codes(l: list, num_columns=5):
 with explore_tab:
     if "language_code" not in st.session_state:
         st.session_state.language_code = None
+    with st.popover("Search Languages"):
+        search_query = st.text_input("Search Query")
+        if search_query:
+            langs = eg.search_langs(search_query)
+            with st.container(border=True):
+                write_lang_codes(langs)
     with st.container(border=True):
         st.text_input("Language Code to Explore", key="language_code")
     if st.session_state.language_code:
