@@ -120,15 +120,7 @@ class ClowderEnvironment:
 
     @property
     def investigations(self) -> "list[Investigation]":
-        result_list = []
-        for inv_name in self.current_meta["investigations"].keys():
-            try:
-                result_list.append(self.get_investigation(inv_name, sync_from_remote=True))
-            except InvestigationNotFoundError as exc:
-                inv = self.get_investigation(inv_name)
-                inv.with_err = exc
-                result_list.append(inv)
-        return result_list
+        return [self.get_investigation(inv_name) for inv_name in self.current_meta["investigations"].keys()]
 
     @property
     def data_folder(self) -> str:
