@@ -632,7 +632,9 @@ def render_draft_section():
     if st.session_state.current_investigation.status.value >= Status.Drafted.value:
         drafts = get_drafts(st.session_state.current_investigation.name)
         st.write("*Available Drafts*")
+        i = 0
         for model_name, model_drafts in drafts.items():
+            i += 1
             with st.container(border=True):
                 st.write(f"**{model_name}**")
                 with st.container(border=True):
@@ -641,7 +643,7 @@ def render_draft_section():
                         with c1:
                             st.write(draft_name)
                         with c2:
-                            st.download_button("Download", data=draft_content, file_name=draft_name, key=f"{model_name}_{draft_name}")
+                            st.download_button("Download", data=draft_content, file_name=draft_name, key=f"{model_name}_{draft_name}_{i}")
     with st.form(key=f"{st.session_state.current_investigation.id}-draft-books"):
         drafting_source = st.selectbox("Drafting source", resources, index=None)
         model_options = []
