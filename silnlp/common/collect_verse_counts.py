@@ -179,19 +179,19 @@ def collect_verse_counts(
     verse_counts_df.loc[to_sum, "DT"] = verse_counts_df.loc[to_sum][DT_CANON].sum(axis=1)
     verse_counts_df.fillna(0, inplace=True)
 
-    verse_percentages_df.loc[projects_to_process, "Total"] = (
-        verse_percentages_df.loc[projects_to_process][OT_CANON + NT_CANON + DT_CANON].mean(axis=1).round(1)
+    verse_percentages_df.loc[projects_to_process, "Total"] = 100 * round(
+        verse_counts_df.loc[projects_to_process, "Total"] / verse_counts_df.loc["complete", "Total"], 3
     )
-    verse_percentages_df.fillna(0.0, inplace=True)  # Replace with 0's before averaging
-    verse_percentages_df.loc[projects_to_process, "OT"] = (
-        verse_percentages_df.loc[projects_to_process][OT_CANON].mean(axis=1).round(1)
+    verse_percentages_df.loc[projects_to_process, "OT"] = 100 * round(
+        verse_counts_df.loc[projects_to_process, "OT"] / verse_counts_df.loc["complete", "OT"], 3
     )
-    verse_percentages_df.loc[projects_to_process, "NT"] = (
-        verse_percentages_df.loc[projects_to_process][NT_CANON].mean(axis=1).round(1)
+    verse_percentages_df.loc[projects_to_process, "NT"] = 100 * round(
+        verse_counts_df.loc[projects_to_process, "NT"] / verse_counts_df.loc["complete", "NT"], 3
     )
-    verse_percentages_df.loc[projects_to_process, "DT"] = (
-        verse_percentages_df.loc[projects_to_process][DT_CANON].mean(axis=1).round(1)
+    verse_percentages_df.loc[projects_to_process, "DT"] = 100 * round(
+        verse_counts_df.loc[projects_to_process, "DT"] / verse_counts_df.loc["complete", "DT"], 3
     )
+    verse_percentages_df.fillna(0, inplace=True)
 
     if not deutero:
         for project in project_names:
@@ -215,8 +215,8 @@ def collect_verse_counts(
             lambda row: sum([(1 if ele > 0 else 0) for ele in row]), axis=1
         )
         verse_counts_df.loc[to_update, "Total"] = verse_counts_df.loc[to_update][OT_CANON + NT_CANON].sum(axis=1)
-        verse_percentages_df.loc[project_names, "Total"] = (
-            verse_percentages_df.loc[project_names][OT_CANON + NT_CANON].mean(axis=1).round(1)
+        verse_percentages_df.loc[project_names, "Total"] = 100 * round(
+            verse_counts_df.loc[project_names, "Total"] / verse_counts_df.loc["complete", "Total"], 3
         )
     verse_counts_df.loc[["complete"] + sorted(project_names)].astype(int).to_csv(output_path / "verse_counts.csv")
     verse_percentages_df.loc[sorted(project_names)].to_csv(output_path / "verse_percentages.csv")
