@@ -183,10 +183,10 @@ def main() -> None:
     if args.memory_growth:
         enable_memory_growth()
 
-    # if not (args.preprocess or args.train or args.test):
-    #    args.preprocess = True
-    #    args.train = True
-    #    args.test = True
+    if not (args.preprocess or args.train or args.test):
+        args.preprocess = True
+        args.train = True
+        args.test = True
 
     exp = SILExperiment(
         name=args.experiment,
