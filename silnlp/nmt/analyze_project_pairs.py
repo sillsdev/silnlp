@@ -296,14 +296,17 @@ def create_summary_file(config: Config) -> None:
         corpus_stats_sheet.set_column(6, 6, None, round4_format)
         corpus_stats_sheet.set_column(8, 8, None, round4_format)
         corpus_stats_sheet.autofit()
+        corpus_stats_sheet.freeze_panes(1, 0)
 
         counts_sheet = writer.sheets["verse_counts"]
         counts_sheet.autofit()
         counts_sheet.set_column(1, len(verse_counts_df.columns), None, int_format)
+        counts_sheet.freeze_panes(1, 1)
 
         percent_sheet = writer.sheets["verse_percentages"]
         percent_sheet.autofit()
         percent_sheet.set_column(1, len(verse_percentages_df.columns), None, int_format)
+        percent_sheet.freeze_panes(1, 1)
 
         # Add comparison sheets for each target project
         sheet_names = {}
@@ -322,6 +325,7 @@ def create_summary_file(config: Config) -> None:
             trg_summary_sheet.set_column(1, len(verse_counts_df.columns), None, int_format)
             for i in range(len(corpus_stats_df.swaplevel().loc[trg_project].index)):
                 trg_summary_sheet.set_row(4 + i * 3, None, round4_format)
+            trg_summary_sheet.freeze_panes(1, 1)
 
 
 def split_index(vref: str) -> Tuple[str, str, str]:
@@ -418,9 +422,11 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
         book_sheet = writer.sheets["By Book"]
         book_sheet.autofit()
         book_sheet.set_column(2, len(alignment_by_book.columns) + 1, None, round4_format)
+        book_sheet.freeze_panes(1, 2)
         book_order_sheet = workbook.add_worksheet("corpus_books")
         writer.sheets["corpus_books"] = book_order_sheet
         book_order_sheet.set_column(0, 0, max(19, max([3 + len(src) + len(trg) for src, trg in corpus_stats_df.index])))
+        book_order_sheet.freeze_panes(0, 1)
 
         # Max # of sheets in an Excel spreadsheet is 255
         if len(alignment_by_book.index) > 250:
@@ -449,6 +455,7 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
             alignment_by_verse[project_pair].to_excel(writer, sheet_name=name)
             verse_sheet = writer.sheets[name]
             verse_sheet.set_column(2, len(alignment_by_verse[project_pair].columns) + 1, None, round4_format)
+            verse_sheet.freeze_panes(1, 2)
 
 
 def main() -> None:
