@@ -63,9 +63,19 @@ def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = 
     for src_file, trg_file, corpus_books, score_threshold in pairs_to_process:
         project_pair = (f"{src_file.iso}-{src_file.project}", f"{trg_file.iso}-{trg_file.project}")
         if project_pair not in stats_df.index:
+            # Get corpus and filter by book/chapter configurations
             corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path, False)
-            corpus = corpus.loc[(corpus["source"].str.len() > 0) | (corpus["target"].str.len() > 0)]
-            align_corpus = corpus.loc[(corpus["source"].str.len() > 0) & (corpus["target"].str.len() > 0)]
+            if not deutero:
+                corpus = corpus.loc[[is_ot_nt(vref.book_num) for vref in corpus["vref"]]]
+            if len(corpus_books) > 0:
+                corpus = include_chapters(corpus, corpus_books)
+
+            pair_count = len(corpus.index)
+            src_only_count = len(corpus.loc[corpus["target"].str.len() == 0].index)
+            trg_only_count = len(corpus.loc[corpus["source"].str.len() == 0].index)
+
+            corpus = corpus.loc[(corpus["source"].str.len() > 0) & (corpus["target"].str.len() > 0)]
+            parallel_count = len(corpus.index)
 
             # Align pair
             pair_stats_path = config.exp_dir / f"{project_pair[0]}_{project_pair[1]}.csv"
@@ -76,36 +86,22 @@ def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = 
             if pair_stats_path.is_file():
                 LOGGER.info(f"Using pre-existing alignment scores from {pair_stats_path}")
                 pair_stats = pd.read_csv(pair_stats_path)
-                pair_stats["idx"] = align_corpus.index
+                pair_stats["idx"] = corpus.index
                 pair_stats.set_index("idx", inplace=True)
-                align_corpus.insert(3, "score", pair_stats["score"])
+                corpus.insert(3, "score", pair_stats["score"])
             else:
                 aligner_id = config.data["aligner"]
                 LOGGER.info(f"Computing alignment scores using {get_aligner_name(aligner_id)}")
-                add_alignment_scores(align_corpus, aligner_id)
-                align_corpus.to_csv(pair_stats_path, index=False)
+                add_alignment_scores(corpus, aligner_id)
+                corpus.to_csv(pair_stats_path, index=False)
 
-            # Filter by book/chapter configurations
-            if not deutero:
-                corpus = corpus.loc[[is_ot_nt(vref.book_num) for vref in corpus["vref"]]]
-                align_corpus = align_corpus.loc[[is_ot_nt(vref.book_num) for vref in align_corpus["vref"]]]
-            if len(corpus_books) > 0:
-                corpus = include_chapters(corpus, corpus_books)
-                align_corpus = include_chapters(align_corpus, corpus_books)
-
-            pair_count = len(corpus.index)
-            parallel_count = len(align_corpus.index)
-            src_only_count = len(corpus.loc[corpus["target"].str.len() == 0].index)
-            trg_only_count = len(corpus.loc[corpus["source"].str.len() == 0].index)
-
-            alignment_score = align_corpus["score"].mean()
+            alignment_score = corpus["score"].mean()
             filtered_count = 0
             filtered_alignment_score = alignment_score
             if score_threshold > 0:
-                unfiltered_len = len(align_corpus)
-                align_corpus = filter_parallel_corpus(align_corpus, score_threshold)
-                filtered_count = unfiltered_len - len(align_corpus)
-                filtered_alignment_score = mean(align_corpus["score"])
+                corpus = filter_parallel_corpus(corpus, score_threshold)
+                filtered_count = parallel_count - len(corpus)
+                filtered_alignment_score = mean(corpus["score"])
 
             src_script = get_script("".join(corpus["source"][: min(len(corpus["source"]), 3000)]))
             src_script_in_model = (
@@ -192,7 +188,6 @@ def get_extra_alignments(config: Config, deutero: bool = False) -> List[str]:
 
             if src_path.is_file() and trg_path.is_file():
                 corpus = get_scripture_parallel_corpus(src_path, trg_path, False)
-                corpus = corpus.loc[(corpus["source"].str.len() > 0) | (corpus["target"].str.len() > 0)]
                 if not deutero:
                     corpus = corpus.loc[[is_ot_nt(vref.book_num) for vref in corpus["vref"]]]
                 pair_count = len(corpus.index)
