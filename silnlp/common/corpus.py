@@ -98,8 +98,16 @@ def get_scripture_parallel_corpus(
                 trg_sentences.pop(i)
                 indices.pop(i)
     else:
-        src_sentences = ["" if sent == "..." else sent for sent in src_sentences]
-        trg_sentences = ["" if sent == "..." else sent for sent in trg_sentences]
+        for i in range(len(vrefs) - 1, -1, -1):
+            if src_sentences[i] == "...":
+                src_sentences[i] = ""
+            if trg_sentences[i] == "...":
+                trg_sentences[i] == ""
+            if len(src_sentences[i]) == 0 and len(trg_sentences[i]) == 0:
+                vrefs.pop(i)
+                src_sentences.pop(i)
+                trg_sentences.pop(i)
+                indices.pop(i)
 
     data = {"vref": vrefs, "source": src_sentences, "target": trg_sentences}
     return pd.DataFrame(data, index=indices)
