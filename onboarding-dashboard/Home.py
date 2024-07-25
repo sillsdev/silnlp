@@ -383,6 +383,12 @@ with explore_tab:
     if st.session_state.language_code:
         language_code = st.session_state.language_code
         with st.container(border=True):
+            st.write("**Related Languages**")
+            d: dict = eg.rank_related_languages(language_code)
+            s = pd.Series(d, name="Score")
+            s.index.name = "Language Code"
+            st.dataframe(s.sort_values(ascending=False))
+        with st.container(border=True):
             st.header(f"Language `{language_code}`")
             st.write(f"**Language Info (`{language_code}`):**")
             with st.container(border=True):

@@ -99,11 +99,6 @@ def search_langs(query: str):
     )
 
 
-def rank_related_languages(lang_code: str):
-    info_dict = lang_info_dict(lang_code)
-    country_dicts = lang_country_dicts(lang_code)
-
-
 def find_class_langs(classfication: str):
     l_df = language_df()
     return list(set(l_df[l_df["Classification"].astype(str).str.contains(classfication)]["UnitCode"].to_list()))
@@ -131,7 +126,7 @@ def find_country_country_langs(country_code: str):
 
 def find_country_region_langs(region_code: str):
     l_c_df = language_in_country_df()
-    return l_c_df[l_c_df["RegionCode"] == region_code]["UnitCode"].to_list()
+    return list(set(l_c_df[l_c_df["RegionCode"] == region_code]["UnitCode"].to_list()))
 
 
 def lang_ad_dict(lang_code: str):
@@ -146,4 +141,56 @@ def lang_ad_family(lang_code: str):
 
 def find_ad_family_langs(family: str):
     l_ad_df = language_add_data_df()
-    return list(set(l_ad_df[l_ad_df["LanguageFamily"] == family]["UnitCode"].to_list()))
+    return list(set(l_ad_df[l_ad_df["LanguageFamily"] == family]["LanguageCode"].to_list()))
+
+
+def rank_related_languages(lang_code: str):
+    info_dict = lang_info_dict(lang_code)
+    country_dicts = lang_country_dicts(lang_code)
+
+    # Class Rank
+    classifications = lang_classifications(lang_code)
+    scored_family = {}
+    class_weight = 1
+    for classific in classifications:
+        ls = find_class_langs(classific)
+        weight = class_weight / len(ls)
+        for lang in ls:
+            scored_family[lang] = scored_family.get(lang, 0) + weight
+
+    # Country Family Rank
+    c_family = lang_country_family(lang_code)
+    country_family_weight = 0.5
+    ls = find_country_family_langs(c_family)
+    weight = country_family_weight / len(ls)
+    for lang in ls:
+        scored_family[lang] = scored_family.get(lang, 0) + weight
+
+    # Additional Data Family Rank
+    ad_family = lang_ad_family(lang_code)
+    ad_family_weight = 0.01
+    ls = find_ad_family_langs(ad_family)
+    weight = ad_family_weight / len(ls)
+    for lang in ls:
+        scored_family[lang] = scored_family.get(lang, 0) + weight
+
+    # Country + Region Rank
+    country_weight = 0.1
+    region_codes = set()
+    for country in country_dicts:
+        code = country["CountryCode"]
+        ls = find_country_country_langs(code)
+        weight = country_weight / len(ls)
+        for lang in ls:
+            scored_family[lang] = scored_family.get(lang, 0) + weight
+        region_codes.add(country["RegionCode"])
+
+    region_weight = 0.05
+    for code in region_codes:
+        ls = find_country_region_langs(code)
+        weight = region_weight / len(ls)
+        for lang in ls:
+            scored_family[lang] = scored_family.get(lang, 0) + weight
+
+    del scored_family[lang_code]
+    return scored_family
