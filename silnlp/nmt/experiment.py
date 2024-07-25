@@ -88,7 +88,7 @@ class SILExperiment:
         )
 
     def translate(self):
-        SIL_NLP_ENV.copy_experiment_from_bucket(self.name)
+        SIL_NLP_ENV.copy_experiment_from_bucket(self.name, patterns="*.yml")
         with (self.config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as file:
             translate_configs = yaml.safe_load(file)
 
@@ -183,10 +183,10 @@ def main() -> None:
     if args.memory_growth:
         enable_memory_growth()
 
-    if not (args.preprocess or args.train or args.test):
-        args.preprocess = True
-        args.train = True
-        args.test = True
+    # if not (args.preprocess or args.train or args.test):
+    #    args.preprocess = True
+    #    args.train = True
+    #    args.test = True
 
     exp = SILExperiment(
         name=args.experiment,
