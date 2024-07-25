@@ -77,8 +77,6 @@ def collect_verse_counts(
 ) -> None:
     input_path = input_folder if isinstance(input_folder, Path) else Path(input_folder)
     output_path = output_folder if isinstance(output_folder, Path) else Path(output_folder)
-    partial_books_out_path = output_path / "partially_complete_books"
-    partial_books_out_path.mkdir(parents=True, exist_ok=True)
 
     extract_files = set()
     for file_pattern in file_patterns.split(";"):
@@ -225,7 +223,7 @@ def collect_verse_counts(
     for project in project_names:
         cache_path = partial_books_path / f"{project}.csv"
         if cache_path.is_file():
-            out_path = partial_books_out_path / f"{project}_detailed_percentages.csv"
+            partial_books_out_path = output_path / f"{project}_detailed_percentages.csv"
             df = pd.read_csv(cache_path, index_col="book")
 
             if project in projects_to_process and project not in partially_complete_projects:
@@ -236,11 +234,9 @@ def collect_verse_counts(
                 df = df.dropna(axis=1, how="all")
 
             if len(df.index) == 0:
-                out_path.unlink(missing_ok=True)
+                partial_books_out_path.unlink(missing_ok=True)
             else:
-                df.to_csv(out_path)
-    if len(list(partial_books_out_path.iterdir())) == 0:
-        partial_books_out_path.rmdir()
+                df.to_csv(partial_books_out_path)
 
     # Copy new and updated files to the S3 bucket
     if len(projects_to_process) > 0:
