@@ -266,9 +266,7 @@ class TranslationTask:
         translator = NMTTranslator(model, self.checkpoint)
         if clearml.config.model_dir.exists():
             checkpoint_path, step = model.get_checkpoint_path(self.checkpoint)
-            SIL_NLP_ENV.copy_experiment_from_bucket(
-                self.name, patterns=SIL_NLP_ENV.get_source_experiment_path(checkpoint_path) + "/*.*"
-            )
+            SIL_NLP_ENV.copy_experiment_from_bucket(self.name, patterns=checkpoint_path.name + "/*.*")
             step_str = "avg" if step == -1 else str(step)
         else:
             step_str = "last"
