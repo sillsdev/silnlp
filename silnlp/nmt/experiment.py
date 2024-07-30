@@ -12,7 +12,7 @@ from .clearml_connection import SILClearML
 from .config import Config, get_mt_exp_dir
 from .test import test
 from .translate import TranslationTask
-
+from s3path import S3Path
 
 @dataclass
 class SILExperiment:
@@ -148,6 +148,8 @@ def main() -> None:
     parser.add_argument("--translate", default=False, action="store_true", help="Create drafts.")
     parser.add_argument("--score-by-book", default=False, action="store_true", help="Score individual books")
     parser.add_argument("--mt-dir", default=None, type=str, help="The machine translation directory.")
+    parser.add_argument("--mt-scripture-dir", default=None, type=str, help="The machine translation scripture directory.")
+    parser.add_argument("--mt-terms-dir", default=None, type=str, help="The machine translation terms directory.")
     parser.add_argument(
         "--debug",
         default=False,
@@ -162,6 +164,16 @@ def main() -> None:
 
     if args.mt_dir is not None:
         SIL_NLP_ENV.set_machine_translation_dir(SIL_NLP_ENV.data_dir / args.mt_dir)
+
+    if args.mt_scripture_dir is not None:
+        SIL_NLP_ENV.mt_scripture_dir = Path(args.mt_scripture_dir)
+        if not SIL_NLP_ENV.mt_scripture_dir.exists():
+            SIL_NLP_ENV.mt_scripture_dir = S3Path(args.mt_scripture_dir)
+
+    if args.mt_terms_dir is not None:
+        SIL_NLP_ENV.mt_terms_dir = Path(args.mt_terms_dir)
+        if not SIL_NLP_ENV.mt_terms_dir.exists():
+            SIL_NLP_ENV.mt_terms_dir = S3Path(args.mt_scripture_dir)
 
     if args.debug:
         show_attrs(cli_args=args)
