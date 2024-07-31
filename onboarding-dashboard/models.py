@@ -53,6 +53,27 @@ class Status(Enum):
         return Status.Created
 
 
+@st.experimental_dialog("Delete Investigation?")
+def delete_investigation(investigation_to_delete):
+    st.write(
+        f'<div style="text-align: center"> Are you sure you want to delete {investigation_to_delete.name}? </div>',
+        unsafe_allow_html=True,
+    )
+    _, c1, c2, _ = st.columns(4)
+    with c1:
+        if st.button("Yes"):
+            try:
+                functions.delete(investigation_to_delete.name)
+                st.session_state.investigations.remove(investigation_to_delete)
+                st.rerun()
+            except Exception as e:
+                st.error(f"Something went wrong while fetching resource data. Please try again. Error: {e}")
+
+    with c2:
+        if st.button("Cancel"):
+            st.rerun()
+
+
 class Investigation:
     def __init__(self, id: str, status: Status, name: str, with_err: Union[bool, Exception] = False) -> None:
         self.id = id
@@ -82,8 +103,9 @@ class Investigation:
                         st.switch_page("pages/InvestigationDetails.py")
                 with c4:
                     if st.button("Delete", key=f"{self.id}_delete_button"):
-                        st.session_state.investigation_to_delete = self
-                        st.switch_page("pages/DeleteInvestigation.py")
+                        # st.session_state.investigation_to_delete = self
+                        # st.switch_page("pages/DeleteInvestigation.py")
+                        delete_investigation(self)
 
     @staticmethod
     def from_clowder(clowder_investigation):

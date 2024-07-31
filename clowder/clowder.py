@@ -180,10 +180,12 @@ def current_data_folder():
     """Print the data folder id associated with this context if any"""
     print(f"[green]{functions.current_data()}[/green]")
 
-@app.command('unlink-data-folder')
+
+@app.command("unlink-data-folder")
 def unlink_data():
     """Remove the current context's association with its current private data folder"""
     functions.unlink_data()
+
 
 @app.command("list-resources")
 def list_resources():

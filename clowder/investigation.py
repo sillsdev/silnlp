@@ -177,13 +177,18 @@ class Investigation:
             .replace("$LOCAL_EXP_DIR", str(Path(os.environ.get("SIL_NLP_DATA_PATH")) / "MT/experiments"))
         )
         data_dir_override = ""
+        clearml_data_dir_override = ""
         if "data_folder" in ENV.current_meta:
+            print("Using data folder")
             folder_id = ENV.current_meta["data_folder"]
             data_dir_override = f"SIL_NLP_MT_SCRIPTURE_DIR={SIL_NLP_ENV.mt_experiments_dir}/clowder/data/{folder_id}/scripture/ SIL_NLP_MT_TERMS_DIR={SIL_NLP_ENV.mt_experiments_dir}/clowder/data/{folder_id}/terms/ "
+            if "silnlp.nmt.experiment" in complete_entrypoint:
+                print("Using data dir override")
+                clearml_data_dir_override = f' --mt-scripture-dir="/aqua-ml-data/MT/experiments/clowder/data/{folder_id}/scripture/" --mt-terms-dir="/aqua-ml-data/MT/experiments/clowder/data/{folder_id}/terms/"'
         if "silnlp" not in complete_entrypoint:
             raise ValueError("Entrypoints must be silnlp jobs")  # TODO make more robust against misuse
         python_cmd = os.environ.get("PYTHON", "python")
-        command = f"{data_dir_override} {python_cmd} -m {complete_entrypoint}"
+        command = f"{data_dir_override} {python_cmd} -m {complete_entrypoint}{clearml_data_dir_override}"
         print("[green]Running command: [/green]", command)
         result = subprocess.run(
             command,

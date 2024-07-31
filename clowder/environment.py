@@ -290,6 +290,8 @@ class ClowderEnvironment:
                     print(result.stdout)
                 if result.stderr != "":
                     print(result.stderr)
+                SIL_NLP_ENV.copy_experiment_to_bucket(str(self.EXPERIMENTS_FOLDER / "data" / folder_id / "scripture"))
+                SIL_NLP_ENV.copy_experiment_to_bucket(str(self.EXPERIMENTS_FOLDER / "data" / folder_id / "terms"))
         with self.meta.lock:
             self.meta.load()
             self.current_meta["data_folder"] = folder_id

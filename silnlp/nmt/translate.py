@@ -250,7 +250,7 @@ class TranslationTask:
         self.name = clearml.name
 
         SIL_NLP_ENV.copy_experiment_from_bucket(
-            self.name, patterns=("*.vocab", "*.model", "*.yml", "dict.*.txt", "*.json", "checkpoint", "ckpt*.index")
+            self.name, patterns=("*.vocab", "*.model", "*.yml", "dict.*.txt", "*.json", "checkpoint", "ckpt*.index", "*.safetensors")
         )
 
         clearml.config.set_seed()

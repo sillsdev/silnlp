@@ -96,21 +96,22 @@ if "google_auth" not in st.session_state:
 else:
     if bypass_auth:
         is_allowed_user = True
+        st.session_state.is_internal_user = True
     else:
         internal_emails = os.environ.get("ONBOARDING_INTERNAL_USER_EMAILS", None)
         if internal_emails is None:
             internal_emails = []
         else:
-            internal_emails = internal_emails.split(";")
+            internal_emails = internal_emails.upper().split(";")
 
         external_emails = os.environ.get("ONBOARDING_EXTERNAL_USER_EMAILS", None)
         if external_emails is None:
             external_emails = []
         else:
-            external_emails = external_emails.split(";")
+            external_emails = external_emails.upper().split(";")
 
-        is_internal_user = st.session_state.user_info["email"] in internal_emails
-        is_external_user = st.session_state.user_info["email"] in external_emails
+        is_internal_user = st.session_state.user_info.get("email", "X" * 100).upper() in internal_emails
+        is_external_user = st.session_state.user_info.get("email", "X" * 100).upper() in external_emails
         st.session_state.is_internal_user = is_internal_user
         is_allowed_user = is_internal_user or is_external_user
     if is_allowed_user:
