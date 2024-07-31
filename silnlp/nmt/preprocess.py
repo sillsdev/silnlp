@@ -12,9 +12,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Preprocesses the parallel corpus for an NMT model")
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument("--stats", default=False, action="store_true", help="Compute tokenization statistics")
-    parser.add_argument(
-        "--force-align", default=False, action="store_true", help="Force recalculation of all alignment scores"
-    )
+    parser.add_argument("--force-align", default=False, action="store_true", help="Force recalculation of all alignment scores")
     args = parser.parse_args()
 
     get_git_revision_hash()
