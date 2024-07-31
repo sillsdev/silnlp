@@ -2,6 +2,7 @@ import os
 import sys
 from enum import Enum
 from pathlib import Path
+from typing import Union
 
 import streamlit as st
 
@@ -74,10 +75,11 @@ def delete_investigation(investigation_to_delete):
 
 
 class Investigation:
-    def __init__(self, id: str, status: Status, name: str) -> None:
+    def __init__(self, id: str, status: Status, name: str, with_err: Union[bool, Exception] = False) -> None:
         self.id = id
         self.status = status
         self.name = name
+        self.with_err = with_err
 
     def __str__(self):
         return f"{self.name} {self.status} {self.id}"
@@ -93,6 +95,8 @@ class Investigation:
                     st.write(f"**{self.name}**")
                 with c2:
                     st.write(self.status.name)
+                    if self.with_err:
+                        st.write(f"*{' '.join(self.with_err.args)}*")
                 with c3:
                     if st.button("Details", key=f"{self.id}_details_button", type="primary"):
                         st.session_state.current_investigation = self
@@ -109,4 +113,5 @@ class Investigation:
             id=clowder_investigation.id,
             name=clowder_investigation.name,
             status=Status.from_clowder_investigation(clowder_investigation),
+            with_err=clowder_investigation.with_err,
         )  # clowder_investigation.status)

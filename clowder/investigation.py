@@ -47,10 +47,14 @@ class Investigation:
         sheet_id: str,
         log_id: str,
         status: str,
+        env_override=None,
+        with_err: Union[bool, Exception] = False,
     ):
         global ENV
         if ENV is None:
             ENV = get_env()
+        if env_override is not None:
+            ENV = env_override
         self.id = id
         self.name = name
         self.experiments_folder_id = experiments_folder_id
@@ -59,6 +63,7 @@ class Investigation:
         self.log_id = log_id
         self._status: Status = Status(status)
         self.investigation_storage_path = ENV.EXPERIMENTS_FOLDER / (self.name + "_" + self.id)
+        self.with_err = with_err
 
     @property
     def status(self):
@@ -206,6 +211,9 @@ class Investigation:
         temp_meta["results_already_gathered"] = False
         return True, temp_meta
 
+    def sync_remote_meta(self):
+        ENV.get_investigation(self.name, sync_from_remote=True)  # sync investigation from remote in env
+
     def sync(self, gather_results=True, copy_all_results_to_gdrive: bool = True):
         self.log(
             f"Attempting to sync investigation (gather-results={gather_results}, copy-all-results-to-gdrive={copy_all_results_to_gdrive})"
@@ -214,6 +222,7 @@ class Investigation:
         clearml_tasks_dict: dict[str, Union[Task, None]] = self._get_clearml_tasks()
         # Update gdrive, fetch
         remote_meta_content = ENV.get_remote_meta(self.name)
+        ENV.get_investigation(self.name, sync_from_remote=True)  # sync investigation from remote before updating tasks
         if len(clearml_tasks_dict) > 0:
             if "experiments" not in remote_meta_content:
                 remote_meta_content["experiments"] = {}
@@ -246,18 +255,18 @@ class Investigation:
                     "clearml_id" in ENV.current_meta["investigations"][self.name]["experiments"][exp]
                     and "clearml_id" in remote_meta_content["experiments"][exp]
                 ):
-                    ENV.current_meta["investigations"][self.name]["experiments"][exp][
-                        "clearml_id"
-                    ] = remote_meta_content["experiments"][exp]["clearml_id"]
-                    ENV.current_meta["investigations"][self.name]["experiments"][exp][
-                        "clearml_task_url"
-                    ] = remote_meta_content["experiments"][exp]["clearml_task_url"]
+                    ENV.current_meta["investigations"][self.name]["experiments"][exp]["clearml_id"] = (
+                        remote_meta_content["experiments"][exp]["clearml_id"]
+                    )
+                    ENV.current_meta["investigations"][self.name]["experiments"][exp]["clearml_task_url"] = (
+                        remote_meta_content["experiments"][exp]["clearml_task_url"]
+                    )
                 ENV.current_meta["investigations"][self.name]["experiments"][exp]["status"] = remote_meta_content[
                     "experiments"
                 ][exp]["status"]
-                ENV.current_meta["investigations"][self.name]["experiments"][exp][
-                    "results_already_gathered"
-                ] = remote_meta_content["experiments"][exp].get("results_already_gathered", False)
+                ENV.current_meta["investigations"][self.name]["experiments"][exp]["results_already_gathered"] = (
+                    remote_meta_content["experiments"][exp].get("results_already_gathered", False)
+                )
                 statuses.append(remote_meta_content["experiments"][exp]["status"])
                 if SIL_NLP_ENV.is_bucket:
                     print("Copying from bucket...")
@@ -287,6 +296,7 @@ class Investigation:
                     ENV.current_meta["investigations"][self.name]["experiments"][exp]["results_already_gathered"] = True
                 ENV.set_remote_meta(self.name, remote_meta_content)
                 ENV.meta.flush()
+        ENV.get_investigation(self.name, sync_from_remote=True)  # sync investigation from remote after updating remote
         self.log(
             f"Synced investigation: status={self.status.value} (gather-results={gather_results}, copy-all-results-to-gdrive={copy_all_results_to_gdrive})"
         )
@@ -321,7 +331,7 @@ class Investigation:
                                 model_drafts_folder_id,
                             )
                         except IndexError:
-                            print((self.investigation_storage_path / exp_name).iterdir())
+                            print(list(self.investigation_storage_path / exp_name).iterdir())
                             raise FileNotFoundError(f"No draft found for {exp_name}")
                         continue
                     try:
@@ -579,11 +589,14 @@ class Investigation:
         self.log_id = id
         with ENV.meta.lock:
             ENV.meta.load()
-            ENV.current_meta["investigations"][self.name]["clowder_log_id"] = id
+            try:
+                ENV.current_meta["investigations"][self.name]["clowder_log_id"] = id
+            except KeyError:
+                raise Exception(f"Investigation {self.name} does not exist in the current context")
             ENV.meta.flush()
 
     @staticmethod
-    def from_meta(data: dict):
+    def from_meta(data: dict, env_override=None):
         name = list(data.keys())[0]
         data = data[name]
         return Investigation(
@@ -594,4 +607,5 @@ class Investigation:
             sheet_id=data["sheet_id"],
             meta_id=data["clowder_meta_yml_id"],
             status=data["status"],
+            env_override=env_override,
         )

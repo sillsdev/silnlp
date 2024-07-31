@@ -6,6 +6,7 @@ warnings.filterwarnings("ignore", r"Blowfish")
 
 import os
 import subprocess
+from datetime import datetime
 from pathlib import Path
 from time import sleep, time
 from typing import Any, Callable, Optional, Union
@@ -18,7 +19,7 @@ from clearml import Task
 from oauth2client.service_account import ServiceAccountCredentials
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive, GoogleDriveFile
-from pydrive2.files import MediaIoReadable
+from pydrive2.files import ApiRequestError, MediaIoReadable
 from s3path import S3Path
 
 from clowder.configuration_exception import MissingConfigurationFileError
@@ -114,6 +115,7 @@ class ClowderEnvironment:
 
     @property
     def current_meta(self):
+
         return self.meta.data[self.root]
 
     @property
@@ -126,13 +128,36 @@ class ClowderEnvironment:
             return self.current_meta["data_folder"]
         return None
 
-    def get_investigation(self, investigation_name: str) -> Investigation:
+    def get_investigation(self, investigation_name: str, sync_from_remote=False) -> Investigation:
         inv_data = self.current_meta["investigations"].get(investigation_name, None)
         if inv_data is None:
             raise InvestigationNotFoundError(
                 f"Investigation {investigation_name} does not exist in the current context"
             )
-        return Investigation.from_meta({investigation_name: inv_data})
+        if sync_from_remote:
+            remote_meta_id = inv_data["clowder_meta_yml_id"]
+            remote_dt = None
+            try:
+                remote_dt = self._get_gdrive_modified_time(remote_meta_id)
+            except ApiRequestError as exc:
+                raise InvestigationNotFoundError(f"Could not access remote meta for {investigation_name}") from exc
+            if remote_dt is None:
+                raise InvestigationNotFoundError(f"Could not access remote meta for {investigation_name}")
+            local_dt = datetime.fromisoformat(inv_data.get("updated_timestamp", datetime.min.isoformat()))
+            if local_dt < remote_dt:
+                print(
+                    f"Updating investigation {investigation_name} based on local time stamp of {local_dt.isoformat()} \
+( remote {remote_dt.isoformat()})"
+                )
+                remote_meta = self.get_remote_meta(investigation_name)
+                inv_data.update(
+                    {
+                        "experiments": remote_meta.get("experiments", {}),
+                        "updated_timestamp": datetime.now().isoformat(),
+                    }
+                )
+                self.add_investigation(investigation_name, inv_data)
+        return Investigation.from_meta({investigation_name: inv_data}, env_override=self)
 
     def investigation_exists(self, investigation_name: str):
         return investigation_name in self.current_meta["investigations"]
@@ -182,6 +207,7 @@ class ClowderEnvironment:
             "clowder_config_yml_id": clowder_config_yml_id,
             "sheet_id": sheet_id,
             "experiments": {},
+            "updated_timestamp": datetime.now().isoformat(),
         }
         self.add_investigation(investigation_name, investigation_data)
         return self.get_investigation(investigation_name)
@@ -295,6 +321,12 @@ class ClowderEnvironment:
         else:
             gauth = auth
         self._google_drive = GoogleDrive(gauth)
+
+    def _get_gdrive_modified_time(self, folder_id: str) -> datetime:
+        remote_file = self._google_drive.CreateFile({"id": folder_id})
+        md_str = remote_file["modifiedDate"]
+        md_str = md_str if md_str[-1] != "Z" else md_str[:-1]
+        return datetime.fromisoformat(md_str)
 
     def _dict_of_gdrive_files(self, folder_id: str) -> "dict[str, GoogleDriveFile]":
         files = self._google_drive.ListFile({"q": f"trashed=false and '{folder_id}' in parents"}).GetList()
@@ -414,6 +446,7 @@ class ClowderEnvironment:
                 "clowder_config_yml_id": clowder_config_yml_id,
                 "sheet_id": sheet_id,
                 "experiments": remote_meta.get("experiments", {}),
+                "updated_timestamp": datetime.now().isoformat(),
             },
         )
 

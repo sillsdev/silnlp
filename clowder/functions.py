@@ -148,6 +148,22 @@ def status(investigation_name: Optional[str], _sync: bool = True, env=None) -> d
         }
 
 
+def sync_investigation_meta(investigation_name: Optional[str], env=None):
+    with _lock:
+        if env is not None:
+            global ENV
+            ENV = env
+        if investigation_name is not None:
+            ENV.get_investigation(investigation_name).sync_remote_meta()
+        else:
+            for investigation in ENV.investigations:
+                try:
+                    investigation.sync_remote_meta()
+                except Exception as e:
+                    print(f"Failed to sync remote meta for {investigation.name}: {e}")
+                    investigation.with_err = e
+
+
 def sync(
     investigation_name: Optional[str], gather_results: bool = True, copy_all_results_to_gdrive: bool = False, env=None
 ):
