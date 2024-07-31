@@ -312,11 +312,11 @@ def render_alignment_section():
                 st.session_state.results_align.style.highlight_max(
                     subset=st.session_state.results_align.select_dtypes(include="float64").columns, color="green"
                 ).format(
-                    lambda s: round(s, 3)
-                    if not isinstance(s, str) and s // 1 != s
-                    else int(s)
-                    if not isinstance(s, str)
-                    else s,
+                    lambda s: (
+                        round(s, 3)
+                        if not isinstance(s, str) and s // 1 != s
+                        else int(s) if not isinstance(s, str) else s
+                    ),
                     precision=3,
                 )
             )
@@ -539,9 +539,9 @@ def render_model_section():
             model["books"] = simplify_books(list(set(expand_books(books)) - set(expand_books(backtranslation_books))))
             model["bt_src"] = backtranslation_source
             model["bt_books"] = backtranslation_books
-            model[
-                "name"
-            ] = f"NLLB.1.3B.{training_source}+{backtranslation_source}-{training_target}.[{','.join(books)}]"
+            model["name"] = (
+                f"NLLB.1.3B.{training_source}+{backtranslation_source}-{training_target}.[{','.join(books)}]"
+            )
         if len(list(filter(lambda m: m["name"] == model["name"], st.session_state.models))) > 0:
             st.session_state.errors["models"] = "A model with this configuration has already been added"
             st.rerun()
@@ -706,6 +706,7 @@ def render_draft_section():
             )
             add_experiment(draft_setup)
             with st.spinner("This might take a few minutes..."):
+                get_drafts.clear(st.session_state.current_investigation.name)
                 try:
                     functions.run(
                         st.session_state.current_investigation.name, experiments=[draft_name], force_rerun=True
