@@ -119,11 +119,11 @@ class SILExperiment:
                     config.get("trg_iso")
                 )
             elif config.get("src"):
-                translator.translate_files(config.get("src"),
-                                        config.get("trg"),
-                                        config.get("src_iso"),
-                                        config.get("trg_iso"),
-                                        config.get("include_inline_elements", False),)
+                translator.translate_files(config.get("src"), 
+                                        config.get("trg"), 
+                                        config.get("src_iso"), 
+                                        config.get("trg_iso"), 
+                                        config.get("include_inline_elements", False))
             else:
                 raise RuntimeError("A Scripture book, file, or file prefix must be specified for translation.")
 
