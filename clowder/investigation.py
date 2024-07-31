@@ -47,11 +47,14 @@ class Investigation:
         sheet_id: str,
         log_id: str,
         status: str,
+        env_override=None,
         with_err: Union[bool, Exception] = False,
     ):
         global ENV
         if ENV is None:
             ENV = get_env()
+        if env_override is not None:
+            ENV = env_override
         self.id = id
         self.name = name
         self.experiments_folder_id = experiments_folder_id
@@ -203,6 +206,9 @@ class Investigation:
         temp_meta["results_already_gathered"] = False
         return True, temp_meta
 
+    def sync_remote_meta(self):
+        ENV.get_investigation(self.name, sync_from_remote=True)  # sync investigation from remote in env
+
     def sync(self, gather_results=True, copy_all_results_to_gdrive: bool = True):
         self.log(
             f"Attempting to sync investigation (gather-results={gather_results}, copy-all-results-to-gdrive={copy_all_results_to_gdrive})"
@@ -285,6 +291,7 @@ class Investigation:
                     ENV.current_meta["investigations"][self.name]["experiments"][exp]["results_already_gathered"] = True
                 ENV.set_remote_meta(self.name, remote_meta_content)
                 ENV.meta.flush()
+        ENV.get_investigation(self.name, sync_from_remote=True)  # sync investigation from remote after updating remote
         self.log(
             f"Synced investigation: status={self.status.value} (gather-results={gather_results}, copy-all-results-to-gdrive={copy_all_results_to_gdrive})"
         )
@@ -577,11 +584,14 @@ class Investigation:
         self.log_id = id
         with ENV.meta.lock:
             ENV.meta.load()
-            ENV.current_meta["investigations"][self.name]["clowder_log_id"] = id
+            try:
+                ENV.current_meta["investigations"][self.name]["clowder_log_id"] = id
+            except KeyError:
+                raise Exception(f"Investigation {self.name} does not exist in the current context")
             ENV.meta.flush()
 
     @staticmethod
-    def from_meta(data: dict):
+    def from_meta(data: dict, env_override=None):
         name = list(data.keys())[0]
         data = data[name]
         return Investigation(
@@ -592,4 +602,5 @@ class Investigation:
             sheet_id=data["sheet_id"],
             meta_id=data["clowder_meta_yml_id"],
             status=data["status"],
+            env_override=env_override,
         )

@@ -157,7 +157,7 @@ class ClowderEnvironment:
                     }
                 )
                 self.add_investigation(investigation_name, inv_data)
-        return Investigation.from_meta({investigation_name: inv_data})
+        return Investigation.from_meta({investigation_name: inv_data}, env_override=self)
 
     def investigation_exists(self, investigation_name: str):
         return investigation_name in self.current_meta["investigations"]
