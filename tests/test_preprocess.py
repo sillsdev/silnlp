@@ -31,6 +31,6 @@ def test_preprocess(exp_folder):
     sp.set_random_generator_seed(111)  # this is to make the vocab generation consistent
     config = load_config(experiment_path)
     config.set_seed()
-    config.preprocess()
+    config.preprocess(stats=False)
 
     helper.compare_folders(truth_folder=exp_truth_path, computed_folder=experiment_path)

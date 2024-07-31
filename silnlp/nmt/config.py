@@ -469,16 +469,16 @@ class Config(ABC):
         seed = self.data["seed"]
         set_seed(seed)
 
-    def preprocess(self, force_align: bool = False) -> None:
+    def preprocess(self, stats: bool, force_align: bool = False) -> None:
         # confirm that input file paths exist
         for file in self.src_file_paths | self.trg_file_paths:
             if not file.is_file():
                 LOGGER.error(f"The source file {str(file)} does not exist.")
                 return
 
-        self._build_vocabs()
+        self._build_vocabs(stats)
         tokenizer = self.create_tokenizer()
-        self._build_corpora(tokenizer, force_align)
+        self._build_corpora(tokenizer, stats, force_align)
         LOGGER.info("Preprocessing completed")
 
     @abstractmethod
@@ -507,7 +507,7 @@ class Config(ABC):
             return self.default_test_trg_iso, parts[3]
         return parts[2], parts[5]
 
-    def _build_corpora(self, tokenizer: Tokenizer, force_align: bool) -> int:
+    def _build_corpora(self, tokenizer: Tokenizer, stats: bool, force_align: bool) -> int:
         self._delete_files("train.*.txt")
         self._delete_files("val.*.txt")
         self._delete_files("test.*.txt")
@@ -520,7 +520,8 @@ class Config(ABC):
             else:
                 train_count += self._write_basic_data_sets(tokenizer, pair)
 
-        self._calculate_tokenization_stats()
+        if stats:
+            self._calculate_tokenization_stats()
 
         return train_count
 
@@ -665,22 +666,6 @@ class Config(ABC):
             if len(pair.src_noise) > 0:
                 corpus["source"] = [self._noise(pair.src_noise, x) for x in corpus["source"]]
 
-            if pair.is_train and pair.score_threshold > 0:
-                pair_align_path = (
-                    self.exp_dir / f"{src_file.iso}-{src_file.project}_{trg_file.iso}-{trg_file.project}.csv"
-                )
-                if pair_align_path.is_file() and not force_align:
-                    LOGGER.info(f"Using pre-existing alignment scores from {pair_align_path}")
-                    pair_scores = pd.read_csv(pair_align_path)
-                    pair_scores["idx"] = corpus.index
-                    pair_scores.set_index("idx", inplace=True)
-                    corpus["score"] = pair_scores["score"]
-                else:
-                    aligner_id = self.data["aligner"]
-                    LOGGER.info(f"Computing alignment scores using {get_aligner_name(aligner_id)}")
-                    add_alignment_scores(corpus, aligner_id)
-                    corpus.to_csv(pair_align_path, index=False)
-
             if len(pair.corpus_books) > 0:
                 cur_train = include_chapters(corpus, pair.corpus_books)
                 if len(pair.test_books) > 0:
@@ -690,6 +675,22 @@ class Config(ABC):
             else:
                 cur_train = corpus
             corpus_count = len(cur_train)
+
+            if pair.is_train and pair.score_threshold > 0:
+                pair_align_path = (
+                    self.exp_dir / f"{src_file.iso}-{src_file.project}_{trg_file.iso}-{trg_file.project}.csv"
+                )
+                if pair_align_path.is_file() and not force_align:
+                    LOGGER.info(f"Using pre-existing alignment scores from {pair_align_path}")
+                    pair_scores = pd.read_csv(pair_align_path)
+                    pair_scores["idx"] = cur_train.index
+                    pair_scores.set_index("idx", inplace=True)
+                    cur_train["score"] = pair_scores["score"]
+                else:
+                    aligner_id = self.data["aligner"]
+                    LOGGER.info(f"Computing alignment scores using {get_aligner_name(aligner_id)}")
+                    add_alignment_scores(cur_train, aligner_id)
+                    cur_train.to_csv(pair_align_path, index=False)
 
             if pair.is_test:
                 if len(pair.test_books) > 0:
@@ -1409,7 +1410,7 @@ class Config(ABC):
         return self._iso_pairs[(src_iso, trg_iso)].has_multiple_test_projects
 
     @abstractmethod
-    def _build_vocabs(self) -> None: ...
+    def _build_vocabs(self, stats: bool = False) -> None: ...
 
     @abstractmethod
     def _write_dictionary(self, tokenizer: Tokenizer, pair: CorpusPair) -> int: ...

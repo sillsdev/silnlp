@@ -18,6 +18,7 @@ from .translate import TranslationTask
 @dataclass
 class SILExperiment:
     name: str
+    make_stats: bool = False
     force_align: bool = False
     mixed_precision: bool = True
     num_devices: int = 1
@@ -57,7 +58,7 @@ class SILExperiment:
         if not config_file.exists():
             raise RuntimeError(f"ERROR: Config file does not exist in experiment folder {exp_dir}.")
         SIL_NLP_ENV.copy_experiment_from_bucket(self.name)
-        self.config.preprocess(self.force_align)
+        self.config.preprocess(self.make_stats, self.force_align)
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
 
     def train(self):
@@ -131,6 +132,7 @@ class SILExperiment:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run experiment - preprocess, train, and test")
     parser.add_argument("experiment", help="Experiment name")
+    parser.add_argument("--stats", default=False, action="store_true", help="Compute tokenization statistics")
     parser.add_argument(
         "--force-align", default=False, action="store_true", help="Force recalculation of all alignment scores"
     )
@@ -188,6 +190,7 @@ def main() -> None:
 
     exp = SILExperiment(
         name=args.experiment,
+        make_stats=args.stats,
         force_align=args.force_align,
         mixed_precision=not args.disable_mixed_precision,
         num_devices=args.num_devices,

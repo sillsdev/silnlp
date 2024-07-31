@@ -464,7 +464,7 @@ class OpenNMTConfig(Config):
 
         return OpenNMTTokenizer(src_spp, trg_spp, self.write_trg_tag)
 
-    def _build_vocabs(self) -> None:
+    def _build_vocabs(self, stats: bool = False) -> None:
         if not self.data["tokenize"]:
             return
 
@@ -561,7 +561,9 @@ class OpenNMTConfig(Config):
         parent_model_to_use = (
             CheckpointType.BEST
             if self.data["parent_use_best"]
-            else CheckpointType.AVERAGE if self.data["parent_use_average"] else CheckpointType.LAST
+            else CheckpointType.AVERAGE
+            if self.data["parent_use_average"]
+            else CheckpointType.LAST
         )
         checkpoint_path, step = _get_checkpoint_path(self.parent_config.model_dir, parent_model_to_use)
         parent_config = cast(OpenNMTConfig, self.parent_config)
@@ -644,8 +646,8 @@ class OpenNMTConfig(Config):
             max_train_size,
         )
 
-    def _build_corpora(self, tokenizer: Tokenizer, force_align: bool) -> int:
-        train_count = super()._build_corpora(tokenizer, force_align)
+    def _build_corpora(self, tokenizer: Tokenizer, stats: bool, force_align: bool) -> int:
+        train_count = super()._build_corpora(tokenizer, stats, force_align)
         if self.data["guided_alignment"]:
             self._create_train_alignments(train_count)
         return train_count

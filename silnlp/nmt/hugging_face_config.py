@@ -455,7 +455,7 @@ class HuggingFaceConfig(Config):
         missing_characters = sorted(list(charset - vocab))
         return missing_characters
 
-    def _build_vocabs(self) -> None:
+    def _build_vocabs(self, stats: bool = False) -> None:
         tok_dict = self.data.get("tokenizer")
         self._tokenizer = self.get_or_create_tokenizer()
         trained_tokenizers = []
@@ -523,15 +523,16 @@ class HuggingFaceConfig(Config):
                 ["Target", 0],
             ]
 
-        stats_columns = pd.MultiIndex.from_tuples(
-            [
-                (" ", "Translation Side"),
-                (" ", "Num Tokens Added to Vocab"),
-            ]
-        )
-        stats_df = pd.DataFrame(stats_data, columns=stats_columns)
-        stats_df.to_csv(self.exp_dir / "tokenization_stats.csv", index=False)
-        stats_df.to_excel(self.exp_dir / "tokenization_stats.xlsx")
+        if stats:
+            stats_columns = pd.MultiIndex.from_tuples(
+                [
+                    (" ", "Translation Side"),
+                    (" ", "Num Tokens Added to Vocab"),
+                ]
+            )
+            stats_df = pd.DataFrame(stats_data, columns=stats_columns)
+            stats_df.to_csv(self.exp_dir / "tokenization_stats.csv", index=False)
+            stats_df.to_excel(self.exp_dir / "tokenization_stats.xlsx")
 
         if self.data["add_new_lang_code"]:
             lang_codes: Dict[str, str] = self.data["lang_codes"]
