@@ -278,8 +278,21 @@ def add_resource_internal(resource: zipfile.Path):
         set_success("add_resource", "Resource(s) successfully uploaded!")
     SIL_NLP_ENV.copy_pt_project_to_bucket(project)
     if st.session_state.clowder_env.data_folder:
-        SIL_NLP_ENV.copy_experiment_to_bucket(str(SIL_NLP_ENV.mt_experiments_dir / "clowder" / "data" / st.session_state.clowder_env.data_folder / "scripture"))
-        SIL_NLP_ENV.copy_experiment_to_bucket(str(SIL_NLP_ENV.mt_experiments_dir / "clowder" / "data" / st.session_state.clowder_env.data_folder / "terms"))
+        SIL_NLP_ENV.copy_experiment_to_bucket(
+            str(
+                SIL_NLP_ENV.mt_experiments_dir
+                / "clowder"
+                / "data"
+                / st.session_state.clowder_env.data_folder
+                / "scripture"
+            )
+        )
+        SIL_NLP_ENV.copy_experiment_to_bucket(
+            str(
+                SIL_NLP_ENV.mt_experiments_dir / "clowder" / "data" / st.session_state.clowder_env.data_folder / "terms"
+            )
+        )
+
 
 with resource_tab:
     st.header("Resources")

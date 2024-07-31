@@ -7,6 +7,7 @@ warnings.filterwarnings("ignore", r"Blowfish")
 import os
 import subprocess
 from pathlib import Path
+from time import sleep, time
 from typing import Any, Callable, Optional, Union
 
 import gspread
@@ -32,8 +33,6 @@ from clowder.investigation import Investigation
 from clowder.status import Status
 from silnlp.common.environment import SIL_NLP_ENV
 
-from time import time, sleep
-
 
 class DuplicateInvestigationException(Exception):
     """There is already an investigation in the current context with that name"""
@@ -57,13 +56,14 @@ class ClowderMeta:
         with open(self.filepath, "r") as f:
             self.data: Any = yaml.safe_load(f)
         self.lock = FileLock("meta.lock")
+
     def load(self):
         with open(self.filepath, "r") as f:
             self.data: Any = yaml.safe_load(f)
+
     def flush(self):
         with open(self.filepath, "w") as f:
             yaml.safe_dump(self.data, f)
-
 
 
 class ClowderEnvironment:
@@ -167,7 +167,7 @@ class ClowderEnvironment:
             "clowder_log_id": clowder_log_id,
             "clowder_config_yml_id": clowder_config_yml_id,
             "sheet_id": sheet_id,
-            "experiments":{}
+            "experiments": {},
         }
         clowder_meta_yml_id = self._write_gdrive_file_in_folder(
             folder_id, "clowder.meta.yml", yaml.safe_dump(remote_meta_content), "application/x-yaml"
@@ -181,7 +181,7 @@ class ClowderEnvironment:
             "clowder_log_id": clowder_log_id,
             "clowder_config_yml_id": clowder_config_yml_id,
             "sheet_id": sheet_id,
-            "experiments":{}
+            "experiments": {},
         }
         self.add_investigation(investigation_name, investigation_data)
         return self.get_investigation(investigation_name)
@@ -250,7 +250,6 @@ class ClowderEnvironment:
                 folder_id, storage_files / "projects", where=lambda f: f["title"] in pt_projects
             )
 
-
             # extract corpora
             for proj in pt_projects:
                 command = f'SIL_NLP_MT_SCRIPTURE_DIR={self.EXPERIMENTS_FOLDER / "data" / folder_id / "scripture" } SIL_NLP_MT_TERMS_DIR={self.EXPERIMENTS_FOLDER / "data" / folder_id / "terms"} SIL_NLP_PT_DIR={self.EXPERIMENTS_FOLDER / "data" / folder_id } {os.environ.get("PYTHON","python")} -m silnlp.common.extract_corpora {proj}'
@@ -271,12 +270,12 @@ class ClowderEnvironment:
             self.meta.load()
             self.current_meta["data_folder"] = folder_id
             self.meta.flush()
-    
+
     def unlink_data(self):
         with self.meta.lock:
             self.meta.load()
-            if 'data_folder' in self.current_meta:
-                del self.current_meta['data_folder']
+            if "data_folder" in self.current_meta:
+                del self.current_meta["data_folder"]
                 self.meta.flush()
 
     def list_resources(self):

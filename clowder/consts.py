@@ -9,17 +9,20 @@ ENTRYPOINT_ATTRIBUTE = "entrypoint"
 NAME_ATTRIBUTE = "name"
 
 import os
+
+
 def set_up_creds():
-    if not os.path.exists('./.clowder'):
-        os.mkdir('./.clowder')
-        with open('./.clowder/clowder-000.json', 'w') as f:
-            f.write(os.environ.get('CLOWDER_CREDENTIALS','{}'))
-            os.environ['GOOGLE_CREDENTIALS_FILE'] = os.path.abspath('./.clowder/clowder-000.json')
+    if not os.path.exists("./.clowder"):
+        os.mkdir("./.clowder")
+        with open("./.clowder/clowder-000.json", "w") as f:
+            f.write(os.environ.get("CLOWDER_CREDENTIALS", "{}"))
+            os.environ["GOOGLE_CREDENTIALS_FILE"] = os.path.abspath("./.clowder/clowder-000.json")
 
 
 def get_env():
     global ENV
     if ENV is None:
         from clowder.environment import ClowderEnvironment
+
         ENV = ClowderEnvironment()
     return ENV

@@ -13,7 +13,7 @@ import pandas as pd
 import streamlit as st
 from consts import BOOKS_ABBREVS
 from models import Investigation, Status
-from utils import check_error, check_required, check_success, set_success, expand_books, simplify_books
+from utils import check_error, check_required, check_success, expand_books, set_success, simplify_books
 
 from clowder import functions
 
@@ -104,12 +104,14 @@ def get_results(results_name: str, investigation_name: str = None, keep_name: bo
         df.drop(axis="columns", labels="name", inplace=True)
     return df
 
+
 @st.cache_data(show_spinner=False)
 def get_config() -> str:
     config_data = ""
     with open("onboarding-dashboard/config-templates/config.jinja-yml", "r") as f:
         config_data = f.read()
     return config_data
+
 
 def set_config():
     print(f"Writing config for {st.session_state.current_investigation}")
@@ -309,7 +311,14 @@ def render_alignment_section():
             st.dataframe(
                 st.session_state.results_align.style.highlight_max(
                     subset=st.session_state.results_align.select_dtypes(include="float64").columns, color="green"
-                ).format(lambda s: round(s, 3) if not isinstance(s, str) and s // 1 != s else int(s) if not isinstance(s,str) else s, precision=3)
+                ).format(
+                    lambda s: round(s, 3)
+                    if not isinstance(s, str) and s // 1 != s
+                    else int(s)
+                    if not isinstance(s, str)
+                    else s,
+                    precision=3,
+                )
             )
         else:
             st.write("**No results found**")
@@ -643,8 +652,13 @@ def render_draft_section():
                         with c1:
                             st.write(draft_name)
                         with c2:
-                            print(f"Key = ",f"{model_name}_{draft_name}_{i}")
-                            st.download_button("Download", data=draft_content, file_name=draft_name, key=f"{model_name}_{draft_name}_{i}")
+                            print(f"Key = ", f"{model_name}_{draft_name}_{i}")
+                            st.download_button(
+                                "Download",
+                                data=draft_content,
+                                file_name=draft_name,
+                                key=f"{model_name}_{draft_name}_{i}",
+                            )
     with st.form(key=f"{st.session_state.current_investigation.id}-draft-books"):
         drafting_source = st.selectbox("Drafting source", resources, index=None)
         model_options = []
@@ -693,7 +707,9 @@ def render_draft_section():
             add_experiment(draft_setup)
             with st.spinner("This might take a few minutes..."):
                 try:
-                    functions.run(st.session_state.current_investigation.name, experiments=[draft_name], force_rerun=True)
+                    functions.run(
+                        st.session_state.current_investigation.name, experiments=[draft_name], force_rerun=True
+                    )
                     set_success("drafts", "Drafting jobs are successfully running! Check back after a few hours.")
                 except Exception as e:
                     import traceback
