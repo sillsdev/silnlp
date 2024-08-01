@@ -132,7 +132,7 @@ class SILExperiment:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run experiment - preprocess, train, and test")
     parser.add_argument("experiment", help="Experiment name")
-    parser.add_argument("--stats", default=False, action="store_true", help="Output corpus statistics")
+    parser.add_argument("--stats", default=False, action="store_true", help="Compute tokenization statistics")
     parser.add_argument(
         "--force-align", default=False, action="store_true", help="Force recalculation of all alignment scores"
     )
