@@ -1,4 +1,5 @@
 import csv
+import gc
 import json
 import logging
 import os
@@ -18,6 +19,7 @@ import pandas as pd
 import torch
 import transformers.utils.logging as transformers_logging
 import yaml
+from accelerate.utils.memory import should_reduce_batch_size
 from datasets import Dataset
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
 from sacremoses import MosesPunctNormalizer
@@ -280,6 +282,7 @@ class HuggingFaceConfig(Config):
                     "save_strategy": "steps",
                     "save_total_limit": 2,
                     "gradient_accumulation_steps": 4,
+                    "auto_grad_acc": False,
                     "max_steps": 100000,
                     "group_by_length": True,
                     "output_dir": str(exp_dir / "run"),
@@ -327,6 +330,10 @@ class HuggingFaceConfig(Config):
             config["eval"]["load_best_model_at_end"] = False
             config["eval"]["early_stopping"] = None
             config["eval"]["metric_for_best_model"] = None
+
+        if config["train"]["auto_grad_acc"]:
+            config["train"]["per_device_train_batch_size"] = 64
+            config["train"]["gradient_accumulation_steps"] = 1
 
     @property
     def model_dir(self) -> Path:
@@ -897,6 +904,7 @@ class HuggingFaceNMTModel(NMTModel):
             compute_metrics=compute_metrics,
             sequential_sampling=self._config.train.get("sequential_sampling", False),
             better_transformer=self._config.train.get("better_transformer", False),
+            auto_grad_acc=self._config.train.get("auto_grad_acc", False),
         )
         early_stopping: Optional[dict] = self._config.eval["early_stopping"]
         if early_stopping:
@@ -1459,6 +1467,7 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         preprocess_logits_for_metrics: Optional[Callable[[Tensor, Tensor], Tensor]] = None,
         sequential_sampling: bool = False,
         better_transformer: bool = False,
+        auto_grad_acc: bool = False,
     ):
         super().__init__(
             model,
@@ -1475,11 +1484,32 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         )
         self._sequential_sampling = sequential_sampling
         self._better_transformer = better_transformer
+        self._auto_grac_acc = auto_grad_acc
 
     def _get_train_sampler(self) -> Optional[Sampler]:
         if self._sequential_sampling:
             return None
         return super()._get_train_sampler()
+
+    def _inner_training_loop(
+        self, batch_size=None, args=None, resume_from_checkpoint=None, trial=None, ignore_keys_for_eval=None
+    ):
+        if self._auto_grac_acc:
+            inner_training_loop = find_executable_batch_size(super()._inner_training_loop, batch_size, self.accelerator)
+            return inner_training_loop(
+                args=args,
+                resume_from_checkpoint=resume_from_checkpoint,
+                trial=trial,
+                ignore_keys_for_eval=ignore_keys_for_eval,
+            )
+        else:
+            return super()._inner_training_loop(
+                batch_size=batch_size,
+                args=args,
+                resume_from_checkpoint=resume_from_checkpoint,
+                trial=trial,
+                ignore_keys_for_eval=ignore_keys_for_eval,
+            )
 
     def _save(self, output_dir: Optional[str] = None, state_dict=None):
         # If we are executing this function, we are the process zero, so we don't check for that.
@@ -1531,3 +1561,29 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
 
         # Good practice: save your training arguments together with the trained model
         torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
+
+
+def find_executable_batch_size(function: callable = None, starting_batch_size: int = 64, accelerator=None):
+    batch_size = starting_batch_size
+
+    def decorator(*args, **kwargs):
+        nonlocal batch_size
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        while True:
+            if batch_size == 0:
+                raise RuntimeError("No executable batch size found, reached zero.")
+            try:
+                return function(batch_size, *args, **kwargs)
+            except Exception as e:
+                if should_reduce_batch_size(e):
+                    gc.collect()
+                    torch.cuda.empty_cache()
+                    batch_size //= 2
+                    accelerator.gradient_accumulation_steps = accelerator.gradient_accumulation_steps * 2
+                    kwargs["args"].gradient_accumulation_steps = accelerator.gradient_accumulation_steps
+                else:
+                    raise
+
+    return decorator
