@@ -74,6 +74,7 @@ class DataFile:
     path: Path
     iso: str = field(init=False)
     project: str = field(init=False)
+    include_test: bool = True
 
     def __post_init__(self):
         file_name = self.path.stem
@@ -168,14 +169,28 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
             elif type_str == "dict" or type_str == "dictionary":
                 type |= DataFileType.DICT
 
-        src: Union[str, List[str]] = pair["src"]
+        src: Union[str, List[Union[dict, str]]] = pair["src"]
+        src_files = []
         if isinstance(src, str):
             src = src.split(",")
-        src_files = [DataFile(get_mt_corpus_path(sp.strip())) for sp in src]
-        trg: Union[str, List[str]] = pair["trg"]
+        for file in src:
+            if isinstance(file, str):
+                src_files.append(DataFile(get_mt_corpus_path(file.strip())))
+            else:
+                src_files.append(DataFile(get_mt_corpus_path(file.pop("name"))))
+                for k, v in file.items():
+                    setattr(src_files[-1], k, v)
+        trg: Union[str, List[Union[dict, str]]] = pair["trg"]
+        trg_files = []
         if isinstance(trg, str):
             trg = trg.split(",")
-        trg_files = [DataFile(get_mt_corpus_path(tp.strip())) for tp in trg]
+        for file in trg:
+            if isinstance(file, str):
+                trg_files.append(DataFile(get_mt_corpus_path(file.strip())))
+            else:
+                trg_files.append(DataFile(get_mt_corpus_path(file.pop("name"))))
+                for k, v in file.items():
+                    setattr(trg_files[-1], k, v)
         is_scripture = src_files[0].is_scripture
         if not all(df.is_scripture == is_scripture for df in (src_files + trg_files)):
             raise RuntimeError("All corpora in a corpus pair must contain the same type of data.")
@@ -814,15 +829,16 @@ class Config(ABC):
                     )
 
                 cur_test.drop("score", axis=1, inplace=True, errors="ignore")
-                self._add_to_eval_data_set(
-                    src_file.iso,
-                    trg_file.iso,
-                    trg_file.project,
-                    tags_str,
-                    test,
-                    pair_test_indices,
-                    cur_test,
-                )
+                if src_file.include_test:
+                    self._add_to_eval_data_set(
+                        src_file.iso,
+                        trg_file.iso,
+                        trg_file.project,
+                        tags_str,
+                        test,
+                        pair_test_indices,
+                        cur_test,
+                    )
 
             if pair.is_train:
                 project_pair = (f"{src_file.iso}-{src_file.project}", f"{trg_file.iso}-{trg_file.project}")
