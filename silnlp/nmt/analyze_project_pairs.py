@@ -456,6 +456,7 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Collect verse counts and compute alignment scores")
     parser.add_argument("experiment", help="Experiment name")
+    parser.add_argument("--create-summaries", default=False, action="store_true", help="Create summary Excel files")
     parser.add_argument(
         "--recalculate",
         default=False,
@@ -507,8 +508,9 @@ def main() -> None:
         collect_verse_counts(SIL_NLP_ENV.mt_scripture_dir, config.exp_dir, ";".join(all_projects), args.deutero)
 
     # Create summary outputs
-    create_alignment_breakdown_file(config, args.deutero)
-    create_summary_file(config)
+    if args.create_summaries:
+        create_alignment_breakdown_file(config, args.deutero)
+        create_summary_file(config)
 
     SIL_NLP_ENV.copy_experiment_to_bucket(exp_name, overwrite=args.recalculate)
 
