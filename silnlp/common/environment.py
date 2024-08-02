@@ -156,7 +156,7 @@ class SilNlpEnv:
             )
             return gutenberg_path
 
-        s3root = S3Path("/aqua-ml-data")
+        s3root = S3Path("/silnlp")
         if s3root.is_dir():
             LOGGER.info(
                 f"Using s3 workspace workspace: {s3root}.  To change the workspace, set the environment variable "
@@ -179,7 +179,7 @@ class SilNlpEnv:
             )
         s3 = boto3.resource("s3")
         data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
-        len_aqua_path = len(pt_projects_path)
+        len_silnlp_path = len(pt_projects_path)
         pt_projects_path = pt_projects_path + name
         objs = list(data_bucket.object_versions.filter(Prefix=pt_projects_path + "/"))
         if len(objs) == 0:
@@ -188,7 +188,7 @@ class SilNlpEnv:
         if isinstance(patterns, str):
             patterns = [patterns]
         for obj in objs:
-            rel_path = str(obj.object_key)[len_aqua_path:]
+            rel_path = str(obj.object_key)[len_silnlp_path:]
             pure_path = PurePath(rel_path)
             if len(patterns) == 0 or any(pure_path.match(pattern) for pattern in patterns):
                 # copy over project files and experiment files
@@ -245,7 +245,7 @@ class SilNlpEnv:
             )
         s3 = boto3.resource("s3")
         data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
-        len_aqua_path = len(experiments_path)
+        len_silnlp_path = len(experiments_path)
         experiment_path = experiments_path + name
         objs = list(data_bucket.object_versions.filter(Prefix=experiment_path + "/"))
         if len(objs) == 0:
@@ -254,7 +254,7 @@ class SilNlpEnv:
         if isinstance(patterns, str):
             patterns = [patterns]
         for obj in objs:
-            rel_path = str(obj.object_key)[len_aqua_path:]
+            rel_path = str(obj.object_key)[len_silnlp_path:]
             pure_path = PurePath(rel_path)
             if len(patterns) == 0 or any(pure_path.match(pattern) for pattern in patterns):
                 # copy over project files and experiment files

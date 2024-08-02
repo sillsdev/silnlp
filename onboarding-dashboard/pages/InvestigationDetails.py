@@ -322,10 +322,6 @@ def render_alignment_section():
             )
         else:
             st.write("**No results found**")
-        results_tokenization = get_results(
-            "tokenization_stats.csv", st.session_state.current_investigation.name, keep_name=True
-        )
-        st.dataframe(results_tokenization)
     with st.form(key=f"{st.session_state.current_investigation.id}-run-alignments"):
         default_sources, target_name = split_target_sources()
         training_sources = st.multiselect(

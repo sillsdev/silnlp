@@ -103,7 +103,7 @@ RUN rm -rf meteor-1.5
 ENV METEOR_PATH=/usr/local/bin
 
 # Other environment variables
-ENV SIL_NLP_DATA_PATH=/aqua-ml-data
+ENV SIL_NLP_DATA_PATH=/silnlp
 RUN mkdir -p .cache/silnlp
 ENV SIL_NLP_CACHE_EXPERIMENT_DIR=/root/.cache/silnlp
 ENV CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"

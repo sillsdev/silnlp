@@ -1,58 +1,22 @@
 import argparse
-import os
-from collections import Counter
+import logging
+from collections import Counter, defaultdict
 from pathlib import Path
-from s3path import S3Path
+from typing import Dict, Union
 
 import pandas as pd
+from machine.scripture import ALL_BOOK_IDS, book_id_to_number, is_nt, is_ot
 from tqdm import tqdm
 
 from typing import Union
 
 from ..common.environment import SIL_NLP_ENV
 
-OT_canon = [
-    "GEN",
-    "EXO",
-    "LEV",
-    "NUM",
-    "DEU",
-    "JOS",
-    "JDG",
-    "RUT",
-    "1SA",
-    "2SA",
-    "1KI",
-    "2KI",
-    "1CH",
-    "2CH",
-    "EZR",
-    "NEH",
-    "EST",
-    "JOB",
-    "PSA",
-    "PRO",
-    "ECC",
-    "SNG",
-    "ISA",
-    "JER",
-    "LAM",
-    "EZK",
-    "DAN",
-    "HOS",
-    "JOL",
-    "AMO",
-    "OBA",
-    "JON",
-    "MIC",
-    "NAM",
-    "HAB",
-    "ZEP",
-    "HAG",
-    "ZEC",
-    "MAL",
-]
-DT_canon = [
+LOGGER = logging.getLogger(__package__ + ".collect_verse_counts")
+
+OT_CANON = [book for book in ALL_BOOK_IDS if is_ot(book_id_to_number(book))]
+NT_CANON = [book for book in ALL_BOOK_IDS if is_nt(book_id_to_number(book))]
+DT_CANON = [
     "TOB",
     "JDT",
     "ESG",
@@ -77,44 +41,212 @@ DT_canon = [
     "JUB",
     "ENO",
 ]
-NT_canon = [
-    "MAT",
-    "MRK",
-    "LUK",
-    "JHN",
-    "ACT",
-    "ROM",
-    "1CO",
-    "2CO",
-    "GAL",
-    "EPH",
-    "PHP",
-    "COL",
-    "1TH",
-    "2TH",
-    "1TI",
-    "2TI",
-    "TIT",
-    "PHM",
-    "HEB",
-    "JAS",
-    "1PE",
-    "2PE",
-    "1JN",
-    "2JN",
-    "3JN",
-    "JUD",
-    "REV",
-]
 
-def format_path(path: Union[str, Path]):
-    output_path = Path(path)
-    if not output_path.parent.exists():
-        output_path = S3Path(output_path)
-        if output_path.parent.exists():
-            output_path = f's3:/{output_path}'
-    print(f"Writing to {output_path}")
-    return output_path
+
+def get_complete_verse_counts() -> Dict[str, Counter]:
+    complete_counts_path = SIL_NLP_ENV.mt_experiments_dir / "verse_counts" / "complete_counts.csv"
+    if complete_counts_path.is_file():
+        df = pd.read_csv(complete_counts_path, index_col="book").rename(columns=lambda x: int(x))
+        return {book: Counter(dict(counts.dropna())) for book, counts in df.iterrows()}
+
+    verse_counts = defaultdict(list)
+    with open(SIL_NLP_ENV.assets_dir / "vref.txt", "r", encoding="utf-8") as vref_file:
+        for vref in vref_file:
+            cur_book = vref.split(" ")[0]
+            cur_chapter = int(vref.split(" ")[1].split(":")[0].strip())
+            verse_counts[cur_book].append(cur_chapter)
+        verse_counts = {k: Counter(v) for k, v in verse_counts.items()}
+
+    # Write to .csv
+    max_chapters = max([len(verse_counts[book].keys()) for book in verse_counts.keys()])
+    df = pd.DataFrame(columns=[i for i in range(1, max_chapters + 1)])
+    df["book"] = verse_counts.keys()
+    df = df.set_index("book")
+    for book, counts in verse_counts.items():
+        for chapter, count in counts.items():
+            df.loc[book][chapter] = count
+    df.to_csv(complete_counts_path)
+
+    return verse_counts
+
+
+def collect_verse_counts(
+    input_folder: Union[str, Path],
+    output_folder: Union[str, Path],
+    file_patterns: str,
+    deutero: bool = False,
+    recount: bool = False,
+) -> None:
+    input_path = input_folder if isinstance(input_folder, Path) else Path(input_folder)
+    output_path = output_folder if isinstance(output_folder, Path) else Path(output_folder)
+
+    extract_files = set()
+    for file_pattern in file_patterns.split(";"):
+        file_pattern = file_pattern.strip()
+        extract_files.update(input_path.glob(file_pattern))
+    project_names = [f.stem for f in extract_files]
+    projects_to_process = project_names
+
+    bucket_files = ["verse_counts.csv", "verse_percentages.csv", "complete_counts.csv"]
+    SIL_NLP_ENV.copy_experiment_from_bucket("verse_counts", bucket_files)
+    SIL_NLP_ENV.copy_experiment_from_bucket(
+        "verse_counts/partially_complete_books", [f"{f}.csv" for f in project_names]
+    )
+    partial_books_path = SIL_NLP_ENV.mt_experiments_dir / "verse_counts" / "partially_complete_books"
+    partial_books_path.mkdir(exist_ok=True, parents=True)
+
+    # Initialize the data frames and determine which files need to be processed
+    verse_counts_path = SIL_NLP_ENV.mt_experiments_dir / "verse_counts" / "verse_counts.csv"
+    if verse_counts_path.is_file():
+        verse_counts_df = pd.read_csv(verse_counts_path, index_col="file")
+        if recount:
+            verse_counts_df = verse_counts_df.drop(index=project_names, errors="ignore")
+        projects_to_process = list(set(project_names) - set(verse_counts_df.index))
+        verse_counts_df = verse_counts_df.reindex(set(verse_counts_df.index) | set(project_names))
+    else:
+        verse_counts_df = pd.DataFrame(columns=["Books", "Total", "OT", "NT", "DT"] + OT_CANON + NT_CANON + DT_CANON)
+        verse_counts_df["file"] = project_names
+        verse_counts_df = verse_counts_df.set_index("file")
+
+    verse_percentages_path = SIL_NLP_ENV.mt_experiments_dir / "verse_counts" / "verse_percentages.csv"
+    if verse_percentages_path.is_file():
+        verse_percentages_df = pd.read_csv(verse_percentages_path, index_col="file")
+        if recount:
+            verse_percentages_df = verse_percentages_df.drop(index=project_names, errors="ignore")
+        verse_percentages_df = verse_percentages_df.reindex(set(verse_percentages_df.index) | set(project_names))
+    else:
+        verse_percentages_df = pd.DataFrame(columns=["Total", "OT", "NT", "DT"] + OT_CANON + NT_CANON + DT_CANON)
+        verse_percentages_df["file"] = project_names
+        verse_percentages_df = verse_percentages_df.set_index("file")
+
+    # Get counts for unprocessed files
+    complete_verse_counts = get_complete_verse_counts()
+    partially_complete_projects = []
+    for extract_file_name in tqdm(extract_files):
+        project_name = extract_file_name.stem
+        if project_name not in projects_to_process:
+            LOGGER.info(f"Found verse counts for {project_name}")
+            continue
+        LOGGER.info(f"Processing {project_name}")
+
+        verse_counts = defaultdict(list)
+        with open(SIL_NLP_ENV.assets_dir / "vref.txt", "r", encoding="utf-8") as vref_file, extract_file_name.open(
+            "r", encoding="utf-8"
+        ) as extract_file:
+            cur_book = None
+            for vref, verse in zip(vref_file, extract_file):
+                if verse != "\n":
+                    cur_book = vref.split(" ")[0]
+                    cur_chapter = int(vref.split(" ")[1].split(":")[0].strip())
+                    verse_counts[cur_book].append(cur_chapter)
+            verse_counts = {k: Counter(v) for k, v in verse_counts.items()}
+
+        # Copy the counts to the data frames
+        partially_complete_books = []
+        for book, chapter_counts in verse_counts.items():
+            book_count = sum(chapter_counts.values())
+            complete_book_count = sum(complete_verse_counts[book].values())
+            verse_counts_df.loc[project_name][book] = book_count
+            verse_percentages_df.loc[project_name][book] = 100 * round(book_count / complete_book_count, 3)
+            if book_count < complete_book_count and book_count > 0:
+                partially_complete_books.append(book)
+
+        if len(partially_complete_books) > 0:
+            partially_complete_projects.append(project_name)
+            df = pd.DataFrame(
+                columns=list(
+                    range(1, max([len(complete_verse_counts[book].keys()) for book in partially_complete_books]) + 1)
+                )
+            )
+            df["book"] = partially_complete_books
+            df = df.set_index("book")
+            for book in partially_complete_books:
+                for chapter, complete_count in complete_verse_counts[book].items():
+                    df.loc[book][chapter] = 100 * round(verse_counts[book][chapter] / complete_count, 3)
+            df.to_csv(partial_books_path / f"{project_name}.csv")
+
+    # Add overall counts
+    for book, chapter_counts in complete_verse_counts.items():
+        verse_counts_df.loc["complete", book] = sum(chapter_counts.values())
+
+    to_sum = projects_to_process + ["complete"]
+    verse_counts_df.loc[to_sum, "Books"] = verse_counts_df.loc[to_sum].apply(
+        lambda row: sum([(1 if ele > 0 else 0) for ele in row]), axis=1
+    )
+    verse_counts_df.loc[to_sum, "Total"] = verse_counts_df.loc[to_sum][OT_CANON + NT_CANON + DT_CANON].sum(axis=1)
+    verse_counts_df.loc[to_sum, "OT"] = verse_counts_df.loc[to_sum][OT_CANON].sum(axis=1)
+    verse_counts_df.loc[to_sum, "NT"] = verse_counts_df.loc[to_sum][NT_CANON].sum(axis=1)
+    verse_counts_df.loc[to_sum, "DT"] = verse_counts_df.loc[to_sum][DT_CANON].sum(axis=1)
+    verse_counts_df.fillna(0, inplace=True)
+
+    verse_percentages_df.loc[projects_to_process, "Total"] = 100 * round(
+        verse_counts_df.loc[projects_to_process, "Total"] / verse_counts_df.loc["complete", "Total"], 3
+    )
+    verse_percentages_df.loc[projects_to_process, "OT"] = 100 * round(
+        verse_counts_df.loc[projects_to_process, "OT"] / verse_counts_df.loc["complete", "OT"], 3
+    )
+    verse_percentages_df.loc[projects_to_process, "NT"] = 100 * round(
+        verse_counts_df.loc[projects_to_process, "NT"] / verse_counts_df.loc["complete", "NT"], 3
+    )
+    verse_percentages_df.loc[projects_to_process, "DT"] = 100 * round(
+        verse_counts_df.loc[projects_to_process, "DT"] / verse_counts_df.loc["complete", "DT"], 3
+    )
+    verse_percentages_df.fillna(0, inplace=True)
+
+    if not deutero:
+        for project in project_names:
+            if verse_counts_df.loc[project]["DT"] > 0:
+                dt_books = [col for col in DT_CANON if verse_counts_df.loc[project][col] > 0]
+                LOGGER.warning(
+                    f"{project} contains text in books {dt_books}. Use --deutero to include counts for these books."
+                )
+
+    # Save cache files
+    verse_counts_df.sort_index().drop(index="complete").astype(int).to_csv(verse_counts_path)
+    verse_percentages_df.sort_index().to_csv(verse_percentages_path)
+
+    # Filter and save to output folder
+    if not deutero:
+        verse_counts_df = verse_counts_df.drop(columns=DT_CANON + ["DT"])
+        verse_percentages_df = verse_percentages_df.drop(columns=DT_CANON + ["DT"])
+
+        to_update = project_names + ["complete"]
+        verse_counts_df.loc[to_update, "Books"] = verse_counts_df.loc[to_update][OT_CANON + NT_CANON].apply(
+            lambda row: sum([(1 if ele > 0 else 0) for ele in row]), axis=1
+        )
+        verse_counts_df.loc[to_update, "Total"] = verse_counts_df.loc[to_update][OT_CANON + NT_CANON].sum(axis=1)
+        verse_percentages_df.loc[project_names, "Total"] = 100 * round(
+            verse_counts_df.loc[project_names, "Total"] / verse_counts_df.loc["complete", "Total"], 3
+        )
+    verse_counts_df.loc[["complete"] + sorted(project_names)].astype(int).to_csv(output_path / "verse_counts.csv")
+    verse_percentages_df.loc[sorted(project_names)].to_csv(output_path / "verse_percentages.csv")
+
+    # Copy over chapter counts for partially complete books
+    for project in project_names:
+        cache_path = partial_books_path / f"{project}.csv"
+        if cache_path.is_file():
+            partial_books_out_path = output_path / f"{project}_detailed_percentages.csv"
+            df = pd.read_csv(cache_path, index_col="book")
+
+            if project in projects_to_process and project not in partially_complete_projects:
+                df = df.drop(df.index)
+                df.to_csv(cache_path)
+            elif not deutero:
+                df = df.drop(index=DT_CANON, errors="ignore")
+                df = df.dropna(axis=1, how="all")
+
+            if len(df.index) == 0:
+                partial_books_out_path.unlink(missing_ok=True)
+            else:
+                df.to_csv(partial_books_out_path)
+
+    # Copy new and updated files to the S3 bucket
+    if len(projects_to_process) > 0:
+        SIL_NLP_ENV.copy_experiment_to_bucket("verse_counts", bucket_files, True)
+        SIL_NLP_ENV.copy_experiment_to_bucket(
+            "verse_counts/partially_complete_books", [f"{f}.csv" for f in projects_to_process], True
+        )
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Collect various counts from a corpus of Bible extracts")
@@ -125,123 +257,20 @@ def main() -> None:
     parser.add_argument("--output-exp", help="Experiment folder in which to save results (e.g., FT-Language/Model)", default="", required=False)
     parser.add_argument(
         "--files",
-        help="Comma-delimited list of patterns of extract file names to count (e.g. 'arb-*.txt;de-NT.txt)",
+        help="Semicolon-delimited list of patterns of extract file names to count (e.g. 'arb-*.txt;de-NT.txt)",
         required=True,
     )
+    parser.add_argument(
+        "--deutero",
+        default=False,
+        action="store_true",
+        help="Include counts for Deuterocanon books",
+    )
+    parser.add_argument("--recount", default=False, action="store_true", help="Force recount of verse counts")
     args = parser.parse_args()
 
-    if len(args.output_folder) > 0:
-        output_folder = Path(args.output_folder)
-    elif len(args.output_exp) > 0:
-        output_folder = SIL_NLP_ENV.mt_experiments_dir / args.output_exp
-    else:
-        raise ValueError("One of --output-exp or --output-folder must be set")
+    collect_verse_counts(args.input_folder, args.output_folder, args.files, args.deutero, args.recount)
 
-    verse_counts = []
-    complete_book_counts = {}
-    complete_book_counts_already_collected = False
-    extract_files = set()
-    for file in args.files.split(";"):
-        file = file.strip()
-        extract_files_parent_path = Path(args.input_folder)
-        if not extract_files_parent_path.exists():
-            extract_files_parent_path = S3Path(args.input_folder)
-        extract_files_list = list(extract_files_parent_path.glob(file))
-        extract_files = extract_files.union(set(extract_files_list))
-        print(f"Processing files with pattern {file}")
-        for extract_file_name in tqdm(extract_files_list):
-            with open(SIL_NLP_ENV.assets_dir / "vref.txt", "r", encoding="utf-8") as vref_file, extract_file_name.open("r", encoding="utf-8") as extract_file:
-                book_list = []
-                chapter_counts = {}
-                cur_book = None
-                first_line = True
-                for vref, verse in zip(vref_file, extract_file):
-                    cur_book = vref.split(" ")[0]
-                    if first_line:
-                        print("FIRST VERSE:",verse)
-                        first_line = False
-                    cur_chapter = int(vref.split(" ")[1].split(":")[0].strip())
-                    if cur_book not in complete_book_counts:
-                        complete_book_counts[cur_book] = []
-                    if not complete_book_counts_already_collected:
-                        complete_book_counts[cur_book].append(cur_chapter)
-                    if verse == "\n":
-                        continue
-                    if cur_book not in chapter_counts:
-                        chapter_counts[cur_book] = []
-                    chapter_counts[cur_book].append(cur_chapter)
-                    book_list.append(cur_book)
-                chapter_counts = {k: Counter(v) for k, v in chapter_counts.items()}
-                if not complete_book_counts_already_collected:
-                    complete_book_counts = {k: Counter(v) for k, v in complete_book_counts.items()}
-                complete_book_counts_already_collected = True
-                verse_counts.append(
-                    {
-                        "file": os.path.basename(extract_file_name),
-                        "per_book_counts": Counter(book_list),
-                        "per_chapter_counts": chapter_counts,
-                    }
-                )
-
-    # Initialize the data frames
-    verse_count_df = pd.DataFrame(columns=OT_canon + NT_canon + DT_canon)
-    verse_count_df["file"] = [os.path.basename(extract_file_name) for extract_file_name in extract_files]
-    verse_count_df = verse_count_df.set_index("file")
-
-    verse_percentage_df = pd.DataFrame(columns=OT_canon + NT_canon + DT_canon)
-    verse_percentage_df["file"] = [os.path.basename(extract_file_name) for extract_file_name in extract_files]
-    verse_percentage_df = verse_percentage_df.set_index("file")
-
-    partially_complete_books = {}
-
-    # Copy the counts to the data frame
-    for totals in verse_counts:
-        f = totals["file"]
-        counts = totals["per_book_counts"]
-        for ele in counts:
-            verse_count_df.loc[f][ele] = counts[ele]
-            verse_percentage_df.loc[f][ele] = 100 * round(counts[ele] / sum(complete_book_counts[ele].values()), 3)
-            if verse_percentage_df.loc[f][ele] < 100 and verse_percentage_df.loc[f][ele] > 0:
-                if f not in partially_complete_books:
-                    partially_complete_books[f] = []
-                partially_complete_books[f].append(ele)
-
-    for filename, books in partially_complete_books.items():
-        df = pd.DataFrame(
-            columns=[i for i in range(1, max([len(complete_book_counts[book].keys()) for book in books]))]
-        )
-        chapter_counts = list(filter(lambda x: x["file"] == filename, verse_counts))[0]["per_chapter_counts"]
-        df["book"] = books
-        df = df.set_index("book")
-        for book in books:
-            for col in df.columns:
-                if int(col) <= len(complete_book_counts[book].keys()):
-                    df.loc[book][col] = 100 * round(chapter_counts[book][col] / complete_book_counts[book][col], 3)
-
-        df.to_csv(format_path(output_folder / f"{filename[:-4]}_detailed_percentages.csv"))
-
-    verse_count_df.insert(loc=0, column="Books", value=verse_count_df.astype(bool).sum(axis=1))
-    verse_count_df.insert(loc=1, column="Total", value=verse_count_df[OT_canon + NT_canon + DT_canon].sum(axis=1))
-    verse_count_df.insert(loc=2, column="OT", value=verse_count_df[OT_canon].sum(axis=1))
-    verse_count_df.insert(loc=3, column="NT", value=verse_count_df[NT_canon].sum(axis=1))
-    verse_count_df.insert(loc=4, column="DT", value=verse_count_df[DT_canon].sum(axis=1))
-    verse_count_df.fillna(0, inplace=True)
-
-    verse_percentage_df.insert(
-        loc=0, column="Total", value=verse_percentage_df[OT_canon + NT_canon + DT_canon].mean(axis=1).round(1)
-    )
-    verse_percentage_df.fillna(0.0, inplace=True)  # Replace with 0's before averaging
-    verse_percentage_df.insert(loc=1, column="OT", value=verse_percentage_df[OT_canon].mean(axis=1).round(1))
-    verse_percentage_df.insert(loc=2, column="NT", value=verse_percentage_df[NT_canon].mean(axis=1).round(1))
-    verse_percentage_df.insert(loc=3, column="DT", value=verse_percentage_df[DT_canon].mean(axis=1).round(1))
-
-    verse_count_df.to_csv(format_path(output_folder / "verse_counts.csv"))
-    print(verse_count_df)
-    verse_percentage_df.to_csv(format_path(output_folder / "verse_percentages.csv"))
-    print(verse_percentage_df)
-    if len(args.output_exp) > 0:
-        print("Copying to bucket...")
-        SIL_NLP_ENV.copy_experiment_to_bucket(args.output_exp)
 
 if __name__ == "__main__":
     main()
