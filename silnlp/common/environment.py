@@ -152,7 +152,7 @@ class SilNlpEnv:
             )
             return gutenberg_path
 
-        s3root = S3Path("/aqua-ml-data")
+        s3root = S3Path("/silnlp")
         if s3root.is_dir():
             LOGGER.info(
                 f"Using s3 workspace workspace: {s3root}.  To change the workspace, set the environment variable "
