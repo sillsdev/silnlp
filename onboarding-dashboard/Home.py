@@ -169,6 +169,7 @@ def copy_resource_trav_to_s3(r: zipfile.Path):
 
 def get_investigations() -> list:
     try:
+        functions.sync_investigation_meta(investigation_name=None, env=st.session_state.clowder_env)
         return list(map(lambda i: Investigation.from_clowder(i), functions.list_inv(env=st.session_state.clowder_env)))
     except Exception as e:
         import traceback
