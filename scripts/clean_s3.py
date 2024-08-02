@@ -17,7 +17,7 @@ def clean_s3(dry_run: bool) -> None:
     paginator = s3.get_paginator("list_objects_v2")
     total_deleted = 0
     storage_space_freed = 0
-    for page in paginator.paginate(Bucket="aqua-ml-data"):
+    for page in paginator.paginate(Bucket="silnlp"):
         for obj in page["Contents"]:
             if regex_to_delete.search(obj["Key"]) is None:
                 continue
@@ -28,7 +28,7 @@ def clean_s3(dry_run: bool) -> None:
             print(obj["Key"])
             print(f"{(now - last_modified) / MONTH_IN_SECONDS} months old")
             if not dry_run:
-                s3.delete_object(Bucket="aqua-ml-data", Key=obj["Key"])
+                s3.delete_object(Bucket="silnlp", Key=obj["Key"])
                 print("Deleted")
             total_deleted += 1
             storage_space_freed += obj["Size"]
