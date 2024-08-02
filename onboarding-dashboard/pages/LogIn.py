@@ -52,8 +52,10 @@ def auth_flow():
     else:
         gauth = GoogleAuth()
         gauth.settings["get_refresh_token"] = True
+        # print(st.query_params)
         auth_code = st.query_params.get("code")
         redirect_uri = os.environ.get("REDIRECT_URL", "http://localhost:8501/LogIn")
+        # print("Flowing Auth: ", redirect_uri)
         flow = google_auth_oauthlib.flow.Flow.from_client_secrets_file(
             "client_secrets.json",
             scopes=[
@@ -78,6 +80,7 @@ def auth_flow():
                 version="v2",
                 credentials=gauth.credentials,
             )
+            print("Refresh Token is...", (gauth.credentials.refresh_token))  # TODO remove,  debugging purposes
             user_info = user_info_service.userinfo().get().execute()
             st.session_state.google_auth = gauth
             st.session_state.user_info = user_info
@@ -85,8 +88,7 @@ def auth_flow():
         else:
             st.title("Welcome")
             authorization_url, _ = flow.authorization_url(
-                access_type="offline",
-                include_granted_scopes="true",
+                access_type="offline", include_granted_scopes="true", prompt="consent"
             )
             st.page_link(page=authorization_url, label="Sign in with Google")
 
@@ -103,13 +105,14 @@ else:
             internal_emails = []
         else:
             internal_emails = internal_emails.upper().split(";")
+        print("Internal emails:", internal_emails)
 
         external_emails = os.environ.get("ONBOARDING_EXTERNAL_USER_EMAILS", None)
         if external_emails is None:
             external_emails = []
         else:
             external_emails = external_emails.upper().split(";")
-
+        print("External emails:", external_emails)
         is_internal_user = st.session_state.user_info.get("email", "X" * 100).upper() in internal_emails
         is_external_user = st.session_state.user_info.get("email", "X" * 100).upper() in external_emails
         st.session_state.is_internal_user = is_internal_user
