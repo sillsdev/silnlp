@@ -607,7 +607,7 @@ def render_model_section():
             get_results.clear("scores-best", st.session_state.current_investigation.name, keep_name=True)
             try:
                 functions.run(st.session_state.current_investigation.name, experiments=exps, force_rerun=True)
-                set_success("models", "Models are successfully running. Check back after a few hours.!")
+                set_success("models", "Models are successfully running. Check back after a few hours!")
             except Exception as e:
                 import traceback
 
