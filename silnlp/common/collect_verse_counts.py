@@ -269,7 +269,11 @@ def main() -> None:
     parser.add_argument("--recount", default=False, action="store_true", help="Force recount of verse counts")
     args = parser.parse_args()
 
-    collect_verse_counts(args.input_folder, args.output_folder, args.files, args.deutero, args.recount)
+    output_folder = args.output_folder
+    if not args.output_folder and args.output_exp:
+        output_folder = SIL_NLP_ENV.mt_experiments_dir / args.output_exp
+
+    collect_verse_counts(args.input_folder, output_folder, args.files, args.deutero, args.recount)
 
 
 if __name__ == "__main__":
