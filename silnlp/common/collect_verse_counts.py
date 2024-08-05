@@ -246,6 +246,8 @@ def collect_verse_counts(
         SIL_NLP_ENV.copy_experiment_to_bucket(
             "verse_counts/partially_complete_books", [f"{f}.csv" for f in projects_to_process], True
         )
+    
+    SIL_NLP_ENV.copy_experiment_to_bucket(output_folder)
 
 
 def main() -> None:
