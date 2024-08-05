@@ -255,8 +255,8 @@ def split_target_sources():
     else:
         targ_index = st.session_state.results_stats["NT"].idxmin()
     return (
-        [f[:-4] for f in st.session_state.results_stats.drop(targ_index)["file"]],
-        st.session_state.results_stats.iloc[targ_index]["file"][:-4],
+        [f for f in st.session_state.results_stats.drop(targ_index)["file"]],
+        st.session_state.results_stats.iloc[targ_index]["file"],
     )
 
 
