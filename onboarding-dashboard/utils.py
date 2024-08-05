@@ -53,7 +53,7 @@ def simplify_books(books: "list[str]"):
         for b in BOOKS_ABBREVS[BOOKS_ABBREVS.index("REV") + 1 :]:
             books.remove(b)
         books.append("DT")
-    return books
+    return set(books)
 
 
 def expand_books(books: "list[str]"):
@@ -69,4 +69,4 @@ def expand_books(books: "list[str]"):
         books.remove("DT")
         for b in BOOKS_ABBREVS[BOOKS_ABBREVS.index("REV") + 1 :]:
             books.append(b)
-    return books
+    return set(books)
