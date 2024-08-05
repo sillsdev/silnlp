@@ -353,7 +353,7 @@ class Investigation:
                             ]  # TODO - use result that's already been copied over to gdrive?
                     except IndexError:
                         raise FileNotFoundError(
-                            f"No such results file {name if len(name.split("?")) <= 1 else name.split("?")[0]} found in {self.investigation_storage_path / row[NAME_ATTRIBUTE]}"
+                            f"No such results file {name if len(name.split('?')) <= 1 else name.split('?')[0]} found in {self.investigation_storage_path / row[NAME_ATTRIBUTE]}"
                         )
                     with storage_filepath.open() as f:
                         df = None
