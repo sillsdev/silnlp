@@ -10,7 +10,7 @@ import yaml
 
 from .environment import SIL_NLP_ENV
 from .iso_info import NLLB_ISO_SET, NLLB_TAG_FROM_ISO, ALT_ISO
-from .find_by_iso import LANGUAGE_FAMILY_FILE, load_language_data, find_related_isocodes, get_equivalent_isocodes, get_nllb_languages_only, get_iso_codes_3
+from .find_by_iso3 import LANGUAGE_FAMILY_FILE, load_language_data, find_related_isocodes, get_equivalent_isocodes
 
 NLLB_ISOS = NLLB_ISO_SET
 LANGUAGE_DATA, COUNTRY_DATA, FAMILY_DATA = load_language_data(LANGUAGE_FAMILY_FILE)
@@ -76,10 +76,10 @@ def confirm_write_config(config, config_file, message):
             print(f"{message} {config_file} was not overwritten.")
 
 
-def read_corpus_stats(file_path):
+def read_corpus_stats(file_path,alignment_threshold,verse_count_threshold ):
     with open(file_path, "r", newline="", encoding="utf-8") as csvfile:
         reader = csv.DictReader(csvfile)
-        return [row for row in reader if float(row["count"]) >= 5000 and float(row["align_score"]) >= 0.2]
+        return [row for row in reader if float(row["count"]) >= verse_count_threshold and float(row["align_score"]) >= alignment_threshold]
 
 
 def trim_date(project_name):
@@ -233,11 +233,14 @@ def main():
             target_lang_name = lang_info["Name"]
             print(f"Found {target_file} in language: {lang_info['Name']} spoken in {lang_info['Country']}.")
             print(f"{iso} is in language family: {lang_info['Family']}")
+    
+    language_data, country_data, family_data = load_language_data(LANGUAGE_FAMILY_FILE)
+    
+    related_isos = find_related_isocodes(target_isos, language_data, country_data, family_data)
 
-    related_isos = find_related_isocodes(target_isos)
     print(f"Found {len(related_isos)} languages spoken in the same country or in the same language family.")
-   
-    related_nllb_isos = get_nllb_languages_only(related_isos)
+    related_nllb_isos = [iso for iso in related_isos if iso in NLLB_ISO_SET]
+    #related_nllb_isos = get_nllb_languages_only(related_isos)
     if related_nllb_isos:
         print(f"Of these {len(related_nllb_isos)} languages are known to NLLB.")
         for related_nllb_iso in related_nllb_isos:
@@ -261,8 +264,9 @@ def main():
 
     source_files = [source.split(".")[0] for source in args.sources]  # Remove file extension if present
     source_isos = set(extract_iso_code(source) for source in args.sources)
-    source_nllb_isos = get_nllb_languages_only(source_isos)
-
+    source_isos = get_equivalent_isocodes(source_isos)
+    source_nllb_isos = [iso for iso in source_isos if iso in NLLB_ISO_SET]
+    
     if source_nllb_isos:
         print(f"Found {len(source_nllb_isos)} source languages also known to NLLB.")
         for source_nllb_iso in source_nllb_isos:
@@ -282,7 +286,7 @@ def main():
         filter_verse_counts(experiment_series_dir)
 
     corpus_stats_file = experiment_series_dir / "align" / "corpus-stats.csv"
-    filtered_rows = read_corpus_stats(corpus_stats_file)
+    filtered_rows = read_corpus_stats(corpus_stats_file,alignment_threshold=0.4, verse_count_threshold = 3000)
 
     lang_codes = {}
     for row in filtered_rows:

@@ -90,37 +90,48 @@ def main():
     parser.add_argument("--scripture-dir", type=Path, default=Path(SIL_NLP_ENV.mt_scripture_dir), help="Directory containing scripture files")
     parser.add_argument("--all-related", action='store_true', help="List all related scriptures without filtering to those that are part of NLLB")
     parser.add_argument("--no-related", action='store_true', help="Only list scriptures in the specified languages and not in related languages")
+    parser.add_argument("--country-related", action='store_true', help="Only list scriptures from the same country.")
+    
+    logging.basicConfig()
+    logging.getLogger().setLevel(logging.INFO)
 
     args = parser.parse_args()
 
     language_data, country_data, family_data = load_language_data(LANGUAGE_FAMILY_FILE)
     projects_dir = SIL_NLP_ENV.pt_projects_dir
     scripture_dir = Path(args.scripture_dir)
-
+    country_only = args.country_related
+    
     if not language_data:
         logging.error("Failed to load language data.")
         return
-
+    
     # Get equivalent ISO codes for input
     iso_codes = get_equivalent_isocodes(args.iso_codes)
 
     if args.no_related:
+        
         # Option 2: No files in related languages, only equivalent ISO codes
         related_isocodes = list(iso_codes)
+        logging.info(f"\nConsidering only the {len(related_isocodes)} specified.")
+        
     else:
+        
         # Find related ISO codes
         related_isocodes = find_related_isocodes(list(iso_codes), language_data, country_data, family_data)
-        
+        logging.info(f"\nFound {len(related_isocodes)} related languages.")
         if not args.all_related:
+            
             # Option 3 (default): Filter to NLLB languages
             related_isocodes = [iso for iso in related_isocodes if iso in NLLB_ISO_SET]
+            logging.info(f"\nFound {len(related_isocodes)} related or specified languages in NLLB.")
         # Option 1: All related files (no filtering) is handled by not applying the NLLB filter
-
-    logging.info(f"\nFound {len(related_isocodes)} related or specified languages.")
+        else:
+            logging.info(f"\nFound {len(related_isocodes)} related or specified languages.")
 
     # Get all possible 2 and 3 letter codes for the related languages
     all_possible_codes = get_equivalent_isocodes(related_isocodes)
-
+    
     # Find files matching the codes
     files = get_files_by_iso(all_possible_codes, scripture_dir)
     existing_projects, missing_projects = split_files_by_projects(files, projects_dir)
@@ -128,15 +139,16 @@ def main():
     # Display results
     if existing_projects:
         print(f"\nThese {len(existing_projects)} files have a corresponding project folder:")
-        for file, _ in existing_projects.items():
-            print(f"    - {file.stem}")
-        for _, project in existing_projects.items():
-            print(project)
+        for file, project in existing_projects.items():
+            print(file.stem, project)
     
     if missing_projects:
         print(f"\nThese {len(missing_projects)} files don't have a corresponding project folder:")
         for file, _ in missing_projects.items():
-            print(f"    - {file.stem}")
+            print(f"{file.stem}")
+    print(f"All the files:")
+    for file in files:
+        print(f"    - {file.stem}")
 
     if not files:
         logging.info("\nCouldn't find any Scripture files in these languages.")
