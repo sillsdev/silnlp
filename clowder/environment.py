@@ -6,7 +6,7 @@ warnings.filterwarnings("ignore", r"Blowfish")
 
 import os
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from time import sleep, time
 from typing import Any, Callable, Optional, Union
@@ -153,7 +153,7 @@ class ClowderEnvironment:
                 inv_data.update(
                     {
                         "experiments": remote_meta.get("experiments", {}),
-                        "updated_timestamp": datetime.now().isoformat(),
+                        "updated_timestamp": datetime.now(tz=timezone.utc).isoformat(),
                     }
                 )
                 self.add_investigation(investigation_name, inv_data)
@@ -207,7 +207,7 @@ class ClowderEnvironment:
             "clowder_config_yml_id": clowder_config_yml_id,
             "sheet_id": sheet_id,
             "experiments": {},
-            "updated_timestamp": datetime.now().isoformat(),
+            "updated_timestamp": datetime.now(tz=timezone.utc).isoformat(),
         }
         self.add_investigation(investigation_name, investigation_data)
         return self.get_investigation(investigation_name)
@@ -446,7 +446,7 @@ class ClowderEnvironment:
                 "clowder_config_yml_id": clowder_config_yml_id,
                 "sheet_id": sheet_id,
                 "experiments": remote_meta.get("experiments", {}),
-                "updated_timestamp": datetime.now().isoformat(),
+                "updated_timestamp": datetime.now(tz=timezone.utc).isoformat(),
             },
         )
 
