@@ -150,9 +150,12 @@ class ClowderEnvironment:
 ( remote {remote_dt.isoformat()})"
                 )
                 remote_meta = self.get_remote_meta(investigation_name)
+                remote_experiments = remote_meta.get("experiments", {})
+                experiments: dict = inv_data.get("experiments", {})
+                experiments.update(remote_experiments)
                 inv_data.update(
                     {
-                        "experiments": remote_meta.get("experiments", {}),
+                        "experiments": experiments,
                         "updated_timestamp": datetime.now(tz=timezone.utc).isoformat(),
                     }
                 )
@@ -326,7 +329,7 @@ class ClowderEnvironment:
         remote_file = self._google_drive.CreateFile({"id": folder_id})
         md_str = remote_file["modifiedDate"]
         md_str = md_str if md_str[-1] != "Z" else md_str[:-1]
-        return datetime.fromisoformat(md_str)
+        return datetime.fromisoformat(md_str).replace(tzinfo=timezone.utc)
 
     def _dict_of_gdrive_files(self, folder_id: str) -> "dict[str, GoogleDriveFile]":
         files = self._google_drive.ListFile({"q": f"trashed=false and '{folder_id}' in parents"}).GetList()
