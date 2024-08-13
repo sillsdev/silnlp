@@ -174,7 +174,7 @@ class Investigation:
             .replace("$EXP", "clowder" + str(experiment_path.absolute()).split("clowder")[1])
             .replace("$ON_CLEARML_CPU", f"--clearml-queue {CLEARML_QUEUE_CPU}")
             .replace("$ON_CLEARML", f"--clearml-queue {CLEARML_QUEUE}")
-            .replace("$LOCAL_EXP_DIR", str(Path(os.environ.get("SIL_NLP_DATA_PATH")) / "MT/experiments"))
+            .replace("$LOCAL_EXP_DIR", str(SIL_NLP_ENV.resolve_data_dir() / "MT/experiments"))
         )
         data_dir_override = ""
         clearml_data_dir_override = ""
