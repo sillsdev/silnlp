@@ -70,6 +70,7 @@ The SILNLP repo itself is hosted on Github, mainly written in Python and calls S
    CLEARML_API_SECRET_KEY=xxxxx
    AWS_ACCESS_KEY_ID=xxxxx
    AWS_SECRET_ACCESS_KEY=xxxxx
+   SIL_NLP_DATA_PATH="/silnlp"
    ```
    * Note that this does not give you direct access to an AWS S3 bucket from within the Docker container, it only allows you to run scripts referencing files in the bucket.
 

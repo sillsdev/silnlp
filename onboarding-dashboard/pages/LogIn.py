@@ -14,6 +14,9 @@ parent_dir = os.path.dirname(parent_dir)
 sys.path.append(parent_dir)
 from utils import check_error, check_required
 
+if os.environ.get('DOWN_FOR_MAINTENANCE'):
+    st.switch_page('pages/Down.py')
+
 bypass_auth = False
 if os.environ.get("BYPASS_AUTH", "").lower() == "true":
     bypass_auth = True

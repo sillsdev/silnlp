@@ -89,7 +89,7 @@ See [ClearML setup](clear_ml_setup.md).
 
 ### Additional Environment Variables
 * Set the following environment variables with your respective credentials: CLEARML_API_ACCESS_KEY, CLEARML_API_SECRET_KEY, AWS_ACCESS_KEY_ID, and AWS_SECRET_ACCESS_KEY.
-* Set SIL_NLP_DATA_PATH to "/aqua-ml-data" and CLEARML_API_HOST to "https://api.sil.hosted.allegro.ai".
+* Set SIL_NLP_DATA_PATH to "/silnlp" and CLEARML_API_HOST to "https://api.sil.hosted.allegro.ai".
 
 ### Setting Up and Running Experiments
 

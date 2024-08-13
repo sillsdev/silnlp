@@ -174,7 +174,7 @@ class Investigation:
             .replace("$EXP", "clowder" + str(experiment_path.absolute()).split("clowder")[1])
             .replace("$ON_CLEARML_CPU", f"--clearml-queue {CLEARML_QUEUE_CPU}")
             .replace("$ON_CLEARML", f"--clearml-queue {CLEARML_QUEUE}")
-            .replace("$LOCAL_EXP_DIR", str(Path(os.environ.get("SIL_NLP_DATA_PATH")) / "MT/experiments"))
+            .replace("$LOCAL_EXP_DIR", str(SIL_NLP_ENV.resolve_data_dir() / "MT/experiments"))
         )
         data_dir_override = ""
         clearml_data_dir_override = ""
@@ -184,7 +184,7 @@ class Investigation:
             data_dir_override = f"SIL_NLP_MT_SCRIPTURE_DIR={SIL_NLP_ENV.mt_experiments_dir}/clowder/data/{folder_id}/scripture/ SIL_NLP_MT_TERMS_DIR={SIL_NLP_ENV.mt_experiments_dir}/clowder/data/{folder_id}/terms/ "
             if "silnlp.nmt.experiment" in complete_entrypoint:
                 print("Using data dir override")
-                clearml_data_dir_override = f' --mt-scripture-dir="/aqua-ml-data/MT/experiments/clowder/data/{folder_id}/scripture/" --mt-terms-dir="/aqua-ml-data/MT/experiments/clowder/data/{folder_id}/terms/"'
+                clearml_data_dir_override = f' --mt-scripture-dir="/silnlp/MT/experiments/clowder/data/{folder_id}/scripture/" --mt-terms-dir="/silnlp/MT/experiments/clowder/data/{folder_id}/terms/"'
         if "silnlp" not in complete_entrypoint:
             raise ValueError("Entrypoints must be silnlp jobs")  # TODO make more robust against misuse
         python_cmd = os.environ.get("PYTHON", "python")
@@ -353,7 +353,7 @@ class Investigation:
                             ]  # TODO - use result that's already been copied over to gdrive?
                     except IndexError:
                         raise FileNotFoundError(
-                            f"No such results file {name} found in {self.investigation_storage_path / row[NAME_ATTRIBUTE]}"
+                            f"No such results file {name if len(name.split('?')) <= 1 else name.split('?')[0]} found in {self.investigation_storage_path / row[NAME_ATTRIBUTE]}"
                         )
                     with storage_filepath.open() as f:
                         df = None

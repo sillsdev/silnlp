@@ -255,8 +255,8 @@ def split_target_sources():
     else:
         targ_index = st.session_state.results_stats["NT"].idxmin()
     return (
-        [f[:-4] for f in st.session_state.results_stats.drop(targ_index)["file"]],
-        st.session_state.results_stats.iloc[targ_index]["file"][:-4],
+        [f for f in st.session_state.results_stats.drop(targ_index)["file"]],
+        st.session_state.results_stats.iloc[targ_index]["file"],
     )
 
 
@@ -312,20 +312,16 @@ def render_alignment_section():
                 st.session_state.results_align.style.highlight_max(
                     subset=st.session_state.results_align.select_dtypes(include="float64").columns, color="green"
                 ).format(
-                    lambda s: round(s, 3)
-                    if not isinstance(s, str) and s // 1 != s
-                    else int(s)
-                    if not isinstance(s, str)
-                    else s,
+                    lambda s: (
+                        round(s, 3)
+                        if not isinstance(s, str) and s // 1 != s
+                        else int(s) if not isinstance(s, str) else s
+                    ),
                     precision=3,
                 )
             )
         else:
             st.write("**No results found**")
-        results_tokenization = get_results(
-            "tokenization_stats.csv", st.session_state.current_investigation.name, keep_name=True
-        )
-        st.dataframe(results_tokenization)
     with st.form(key=f"{st.session_state.current_investigation.id}-run-alignments"):
         default_sources, target_name = split_target_sources()
         training_sources = st.multiselect(
@@ -539,9 +535,9 @@ def render_model_section():
             model["books"] = simplify_books(list(set(expand_books(books)) - set(expand_books(backtranslation_books))))
             model["bt_src"] = backtranslation_source
             model["bt_books"] = backtranslation_books
-            model[
-                "name"
-            ] = f"NLLB.1.3B.{training_source}+{backtranslation_source}-{training_target}.[{','.join(books)}]"
+            model["name"] = (
+                f"NLLB.1.3B.{training_source}+{backtranslation_source}-{training_target}.[{','.join(books)}]"
+            )
         if len(list(filter(lambda m: m["name"] == model["name"], st.session_state.models))) > 0:
             st.session_state.errors["models"] = "A model with this configuration has already been added"
             st.rerun()
@@ -611,7 +607,7 @@ def render_model_section():
             get_results.clear("scores-best", st.session_state.current_investigation.name, keep_name=True)
             try:
                 functions.run(st.session_state.current_investigation.name, experiments=exps, force_rerun=True)
-                set_success("models", "Models are successfully running. Check back after a few hours.!")
+                set_success("models", "Models are successfully running. Check back after a few hours!")
             except Exception as e:
                 import traceback
 
