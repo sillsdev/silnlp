@@ -13,6 +13,7 @@ import pandas as pd
 import streamlit as st
 from consts import BOOKS_ABBREVS
 from models import Investigation, Status
+from pydrive2.auth import RefreshError
 from utils import check_error, check_required, check_success, expand_books, set_success, simplify_books
 
 from clowder import functions
@@ -720,10 +721,12 @@ def render_draft_section():
 if "current_investigation" in st.session_state:
     if st.session_state.google_auth is not None and st.session_state.google_auth.access_token_expired:
         print("Refreshing GAuth Token....")
-        st.session_state.google_auth.Refresh()
-        # st.session_state.set_up = False
-        # del st.session_state.google_auth
-        # st.switch_page("pages/LogIn.py")
+        try:
+            st.session_state.google_auth.Refresh()
+        except RefreshError:
+            st.session_state.set_up = False
+            del st.session_state.google_auth
+            st.switch_page("pages/LogIn.py")
     if st.session_state.google_auth is not None:
         print(
             f"Credentials for {st.session_state.user_info.get('email', 'NO EMAIL FOUND')} expire in {st.session_state.google_auth.credentials._expires_in()} seconds"
