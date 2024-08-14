@@ -34,6 +34,10 @@ from clowder.investigation import Investigation
 from clowder.status import Status
 from silnlp.common.environment import SIL_NLP_ENV
 
+# Copy PT Project Dir and Experiment Directory into environment for subprocesses
+os.environ["SIL_NLP_CACHE_PROJECT_DIR"] = str(SIL_NLP_ENV.pt_projects_dir)
+os.environ["SIL_NLP_CACHE_EXPERIMENT_DIR"] = str(SIL_NLP_ENV.mt_experiments_dir)
+
 
 class DuplicateInvestigationException(Exception):
     """There is already an investigation in the current context with that name"""
