@@ -724,6 +724,10 @@ if "current_investigation" in st.session_state:
         # st.session_state.set_up = False
         # del st.session_state.google_auth
         # st.switch_page("pages/LogIn.py")
+    if st.session_state.google_auth is not None:
+        print(
+            f"Credentials for {st.session_state.user_info.get('email', 'NO EMAIL FOUND')} expire in {st.session_state.google_auth.credentials._expires_in()} seconds"
+        )
     if (
         "synced_dict" not in st.session_state
         or st.session_state.current_investigation.name not in st.session_state.synced_dict
