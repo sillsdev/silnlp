@@ -1,5 +1,6 @@
 import os
 import sys
+from threading import Lock
 
 import boto3
 import google_auth_oauthlib.flow
@@ -14,8 +15,8 @@ parent_dir = os.path.dirname(parent_dir)
 sys.path.append(parent_dir)
 from utils import check_error, check_required
 
-if os.environ.get('DOWN_FOR_MAINTENANCE'):
-    st.switch_page('pages/Down.py')
+if os.environ.get("DOWN_FOR_MAINTENANCE"):
+    st.switch_page("pages/Down.py")
 
 bypass_auth = False
 if os.environ.get("BYPASS_AUTH", "").lower() == "true":
@@ -41,7 +42,11 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-cookie_controller = CookieController()
+if "cookie_controller" not in st.session_state:
+    st.session_state.cookie_controller = CookieController()
+
+if "auth_lock" not in st.session_state:
+    st.session_state.auth_lock = Lock()
 
 if not bypass_auth:
     if not os.path.exists("client_secrets.json"):
@@ -57,6 +62,7 @@ def auth_flow():
         gauth.settings["get_refresh_token"] = True
         # print(st.query_params)
         auth_code = st.query_params.get("code")
+        st.query_params.clear()
         redirect_uri = os.environ.get("REDIRECT_URL", "http://localhost:8501/LogIn")
         # print("Flowing Auth: ", redirect_uri)
         flow = google_auth_oauthlib.flow.Flow.from_client_secrets_file(
@@ -74,6 +80,7 @@ def auth_flow():
             try:
                 gauth.Authenticate(auth_code)
             except Exception as e:
+                print("Caught exception in gauth.Authenticate", flush=True)
                 st.error(f"Something went wrong while authenticating. Please try again. Error: {e}")
                 st.query_params.clear()
                 st.page_link("pages/LogIn.py", label="Try again")
@@ -83,7 +90,6 @@ def auth_flow():
                 version="v2",
                 credentials=gauth.credentials,
             )
-            print("Refresh Token is...", (gauth.credentials.refresh_token))  # TODO remove,  debugging purposes
             user_info = user_info_service.userinfo().get().execute()
             st.session_state.google_auth = gauth
             st.session_state.user_info = user_info
@@ -96,96 +102,95 @@ def auth_flow():
             st.page_link(page=authorization_url, label="Sign in with Google")
 
 
-if "google_auth" not in st.session_state:
-    auth_flow()
-else:
-    if bypass_auth:
-        is_allowed_user = True
-        st.session_state.is_internal_user = True
+with st.session_state.auth_lock:
+    if "google_auth" not in st.session_state:
+        auth_flow()
     else:
-        internal_emails = os.environ.get("ONBOARDING_INTERNAL_USER_EMAILS", None)
-        if internal_emails is None:
-            internal_emails = []
+        if bypass_auth:
+            is_allowed_user = True
+            st.session_state.is_internal_user = True
         else:
-            internal_emails = internal_emails.upper().split(";")
-        print("Internal emails:", internal_emails)
+            internal_emails = os.environ.get("ONBOARDING_INTERNAL_USER_EMAILS", None)
+            if internal_emails is None:
+                internal_emails = []
+            else:
+                internal_emails = internal_emails.upper().split(";")
 
-        external_emails = os.environ.get("ONBOARDING_EXTERNAL_USER_EMAILS", None)
-        if external_emails is None:
-            external_emails = []
-        else:
-            external_emails = external_emails.upper().split(";")
-        print("External emails:", external_emails)
-        is_internal_user = st.session_state.user_info.get("email", "X" * 100).upper() in internal_emails
-        is_external_user = st.session_state.user_info.get("email", "X" * 100).upper() in external_emails
-        st.session_state.is_internal_user = is_internal_user
-        is_allowed_user = is_internal_user or is_external_user
-    if is_allowed_user:
-        st.header("Set Up")
-        with st.form(key="set_up_form") as f:
-            current_root = None
-            try:
-                current_root = cookie_controller.get("root")
-            except:
-                pass
-            current_data_folder = None
-            try:
-                current_data_folder = cookie_controller.get("data_folder")
-            except:
-                pass
-            root = st.text_input(
-                "Link to investigations root folder",
-                placeholder="https://drive.google.com/drive/u/0/folders/0000000000000000000",
-                value=current_root,
-            )
-            if not bypass_auth:
-                if is_external_user:
-                    data_folder = st.text_input(
-                        "Link to data folder",
-                        placeholder="https://drive.google.com/drive/u/0/folders/0000000000000000000",
-                        value=current_data_folder,
-                    )
-                    refresh = st.checkbox(
-                        "Refresh resources",
-                        help="Check this box if new resources have been manually added to your resource gdrive",
-                    )
-            check_error("set_up")
-            if st.form_submit_button("Set Up", type="primary"):
-                from clowder import functions
-
-                if not bypass_auth and is_external_user:
-                    check_required(
-                        "set_up", root, data_folder, func=(lambda p: p is not None and p != "" and "folders/" in p)
-                    )
-                else:
-                    check_required("set_up", root, func=(lambda p: p is not None and p != "" and "folders/" in p))
-                with st.spinner("This might take a few minutes..."):
-                    from clowder.environment import ClowderEnvironment
-
-                    if bypass_auth:
-                        st.session_state.clowder_env = ClowderEnvironment(
-                            context=root.split("folders/")[1].split("?")[0]
+            external_emails = os.environ.get("ONBOARDING_EXTERNAL_USER_EMAILS", None)
+            if external_emails is None:
+                external_emails = []
+            else:
+                external_emails = external_emails.upper().split(";")
+            is_internal_user = st.session_state.user_info.get("email", "X" * 100).upper() in internal_emails
+            is_external_user = st.session_state.user_info.get("email", "X" * 100).upper() in external_emails
+            st.session_state.is_internal_user = is_internal_user
+            is_allowed_user = is_internal_user or is_external_user
+        if is_allowed_user:
+            st.header("Set Up")
+            with st.form(key="set_up_form") as f:
+                current_root = None
+                try:
+                    current_root = st.session_state.cookie_controller.get("root")
+                except:
+                    pass
+                current_data_folder = None
+                try:
+                    current_data_folder = st.session_state.cookie_controller.get("data_folder")
+                except:
+                    pass
+                root = st.text_input(
+                    "Link to investigations root folder",
+                    placeholder="https://drive.google.com/drive/u/0/folders/0000000000000000000",
+                    value=current_root,
+                )
+                if not bypass_auth:
+                    if is_external_user:
+                        data_folder = st.text_input(
+                            "Link to data folder",
+                            placeholder="https://drive.google.com/drive/u/0/folders/0000000000000000000",
+                            value=current_data_folder,
                         )
-                    else:
-                        st.session_state.clowder_env = ClowderEnvironment(
-                            auth=st.session_state.google_auth, context=root.split("folders/")[1].split("?")[0]
+                        refresh = st.checkbox(
+                            "Refresh resources",
+                            help="Check this box if new resources have been manually added to your resource gdrive",
                         )
-                    functions.ENV = st.session_state.clowder_env
-                    boto3.resource("s3")  # start s3 connection during setup
-                    if len(functions.list_inv(env=st.session_state.clowder_env)) == 0:
-                        functions.track(None, env=st.session_state.clowder_env)
+                check_error("set_up")
+                if st.form_submit_button("Set Up", type="primary"):
+                    from clowder import functions
+
                     if not bypass_auth and is_external_user:
-                        functions.use_data(data_folder.split("folders/")[1].split("?")[0], refresh)
+                        check_required(
+                            "set_up", root, data_folder, func=(lambda p: p is not None and p != "" and "folders/" in p)
+                        )
                     else:
-                        functions.unlink_data(env=st.session_state.clowder_env)
-                    try:
-                        cookie_controller.set("root", root)
-                        if not bypass_auth:
-                            cookie_controller.set("data_folder", data_folder)
-                    except:
-                        pass
-                    st.session_state.set_up = True
-                    st.switch_page("Home.py")
+                        check_required("set_up", root, func=(lambda p: p is not None and p != "" and "folders/" in p))
+                    with st.spinner("This might take a few minutes..."):
+                        from clowder.environment import ClowderEnvironment
 
-    else:
-        st.title("You do not have access to this application.")
+                        if bypass_auth:
+                            st.session_state.clowder_env = ClowderEnvironment(
+                                context=root.split("folders/")[1].split("?")[0]
+                            )
+                        else:
+                            st.session_state.clowder_env = ClowderEnvironment(
+                                auth=st.session_state.google_auth, context=root.split("folders/")[1].split("?")[0]
+                            )
+                        functions.ENV = st.session_state.clowder_env
+                        boto3.resource("s3")  # start s3 connection during setup
+                        if len(functions.list_inv(env=st.session_state.clowder_env)) == 0:
+                            functions.track(None, env=st.session_state.clowder_env)
+                        if not bypass_auth and is_external_user:
+                            functions.use_data(data_folder.split("folders/")[1].split("?")[0], refresh)
+                        else:
+                            functions.unlink_data(env=st.session_state.clowder_env)
+                        try:
+                            st.session_state.cookie_controller.set("root", root)
+                            if not bypass_auth:
+                                st.session_state.cookie_controller.set("data_folder", data_folder)
+                        except:
+                            pass
+                        st.session_state.set_up = True
+                        st.switch_page("Home.py")
+
+        else:
+            st.title("You do not have access to this application.")
