@@ -80,7 +80,6 @@ def auth_flow():
             try:
                 gauth.Authenticate(auth_code)
             except Exception as e:
-                print("Caught exception in gauth.Authenticate", flush=True)
                 st.error(f"Something went wrong while authenticating. Please try again. Error: {e}")
                 st.query_params.clear()
                 st.page_link("pages/LogIn.py", label="Try again")
