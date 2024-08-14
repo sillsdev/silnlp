@@ -19,7 +19,7 @@ from ..common.environment import SIL_NLP_ENV
 from ..common.utils import get_git_revision_hash, get_mt_exp_dir, set_seed
 from .config import load_config
 
-LOGGER = logging.getLogger(__package__ + ".train")
+LOGGER = logging.getLogger(__package__ + ".preprocess")
 
 
 def parse_lang(lang: str) -> Tuple[str, str]:
