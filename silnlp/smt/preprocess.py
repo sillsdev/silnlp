@@ -35,7 +35,7 @@ def get_test_indices(config: dict) -> Optional[Set[int]]:
     exp_dir = get_mt_exp_dir(exp_name)
     vref_path = exp_dir / "test.vref.txt"
     if not vref_path.is_file():
-        LOGGER.warning(f"Cannot find test set. The file {vref_path} does not exist.")
+        LOGGER.warning(f'The experiment specified in "use_test_set_from" does not contain test.vref.txt.')
         return None
 
     vrefs: Dict[str, int] = {}
