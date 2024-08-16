@@ -1,6 +1,7 @@
 import os
 import sys
 from threading import Lock
+from time import sleep
 
 import boto3
 import google_auth_oauthlib.flow
@@ -60,6 +61,7 @@ def auth_flow():
     else:
         gauth = GoogleAuth()
         gauth.settings["get_refresh_token"] = True
+        gauth.settings["oauth_scope"] = ["https://www.googleapis.com/auth/drive.file"]
         # print(st.query_params)
         auth_code = st.query_params.get("code")
         st.query_params.clear()
@@ -70,7 +72,7 @@ def auth_flow():
             scopes=[
                 "https://www.googleapis.com/auth/userinfo.email",
                 "openid",
-                "https://www.googleapis.com/auth/drive",
+                "https://www.googleapis.com/auth/drive.file",
             ],
             redirect_uri=redirect_uri,
         )
@@ -94,7 +96,7 @@ def auth_flow():
             st.session_state.user_info = user_info
             st.rerun()
         else:
-            st.title("Welcome")
+            st.title("Welcome to the Onboarding Dashboard")
             authorization_url, _ = flow.authorization_url(
                 access_type="offline", include_granted_scopes="true", prompt="consent"
             )
@@ -102,6 +104,7 @@ def auth_flow():
 
 
 with st.session_state.auth_lock:
+    sleep(2)
     if "google_auth" not in st.session_state:
         auth_flow()
     else:
