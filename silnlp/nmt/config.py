@@ -749,7 +749,7 @@ class Config(ABC):
             if pair.is_train and pair.score_threshold > 0:
                 unfiltered_count = len(cur_train)
                 cur_train = filter_parallel_corpus(cur_train, pair.score_threshold)
-                cur_train.drop("score", axis=1, inplace=True, errors="ignore")
+                cur_train = cur_train.drop("score", axis=1, errors="ignore")
                 LOGGER.info(
                     f"Filtered out {unfiltered_count - len(cur_train)} verses pairs with alignment below {pair.score_threshold}."
                 )
