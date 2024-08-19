@@ -2,6 +2,7 @@ from typing import Hashable
 
 import streamlit as st
 from consts import BOOKS_ABBREVS
+from cryptography.fernet import Fernet
 
 
 def check_required(f: Hashable, *args, func=None):
@@ -70,3 +71,14 @@ def expand_books(books: "list[str]"):
         for b in BOOKS_ABBREVS[BOOKS_ABBREVS.index("REV") + 1 :]:
             books.append(b)
     return set(books)
+
+
+_MY_KEY = Fernet.generate_key()
+
+
+def encrypt(to_encrypt: bytes) -> bytes:
+    return Fernet(key=_MY_KEY).encrypt(to_encrypt)
+
+
+def decrypt(to_decrypt: bytes) -> bytes:
+    return Fernet(key=_MY_KEY).decrypt(to_decrypt)
