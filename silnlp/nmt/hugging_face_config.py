@@ -832,11 +832,12 @@ class HuggingFaceNMTModel(NMTModel):
             src_noise=src_noise,
         )
 
-        metric_name = self._config.eval["metric_for_best_model"].lower()
-        metric_module = EVAL_METRICS_MODULES.get(metric_name)
-        if metric_module is None:
-            raise ValueError(f"{metric_name} is not a supported metric.")
-        metric = evaluate.load(metric_module)
+        if self._config.eval["metric_for_best_model"] is not None:
+            metric_name = self._config.eval["metric_for_best_model"].lower()
+            metric_module = EVAL_METRICS_MODULES.get(metric_name)
+            if metric_module is None:
+                raise ValueError(f"{metric_name} is not a supported metric.")
+            metric = evaluate.load(metric_module)
         all_special_ids = set(tokenizer.all_special_ids)
 
         def compute_metrics(eval_preds):
