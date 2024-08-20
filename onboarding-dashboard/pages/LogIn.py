@@ -121,7 +121,7 @@ def auth_flow_restricted(state):
     else:
         st.write("SIL uses your Google account to manage authorization for the onboarding dashboard.")
         st.write(
-            "At this authorization level, the onboarding dashboard will have access to modify or view the files within the folders that you give us in the pages following. If you choose this permission level, the onboarding dashboard will have the ability to access only the files owned by you in these folders. If you are the sole user of this tool in your organization, or you are an internal user, this permission level should work for you. If you would like to modify the permission level, toggle **Modify Google Drive Access** above to the on position, then move the slider below."
+            "At this authorization level, the onboarding dashboard will have access to modify or view the files within the folders that you give us in the pages following. If you choose this permission level, the onboarding dashboard will have the ability to access only the files **owned** by you in these folders. If you are the sole user of this tool in your organization, or you are an internal user, this permission level should work for you. If you would like to modify the permission level, toggle **Modify Google Drive Access** above to the on position, then move the slider below."
         )
         st.write("Otherwise ...")
         authorization_url, _ = flow.authorization_url(
