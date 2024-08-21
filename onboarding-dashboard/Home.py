@@ -365,6 +365,20 @@ if "lang_code_btn_counter" not in st.session_state:
     st.session_state.lang_code_btn_counter = 0
 
 
+def set_session_state_callback(my_code):
+    def _():
+            st.session_state.language_code = my_code
+    return _
+
+def language_card(lang_code: str):
+    info = eg.lang_info_dict(lang_code)
+    x = st.container(border=True)
+    with x:
+        st.header(info['UnitName'])
+        st.write(f'*Language Code:* `{lang_code}`')
+        st.button(f"Explore `{lang_code}`", on_click=set_session_state_callback(lang_code))
+    return x
+
 def write_lang_codes(l: list, num_columns=5):
     columns = st.columns(num_columns)
     i = 0
@@ -380,7 +394,8 @@ def write_lang_codes(l: list, num_columns=5):
     for column in columns:
         with column:
             for el in range(i, len(l), num_columns):
-                st.button(f"`{l[el]}`", on_click=callback(l[el]), key=f"{i*7}{el*5}{lang_code_button_counter}{l[el]}")
+                st.write(f'`{l[el]}`')
+                # st.button(f"`{l[el]}`", on_click=callback(l[el]), key=f"{i*7}{el*5}{lang_code_button_counter}{l[el]}")
         i += 1
         lang_code_button_counter += 1
         lang_code_button_counter %= 1000
@@ -391,22 +406,39 @@ def write_lang_codes(l: list, num_columns=5):
 with explore_tab:
     if "language_code" not in st.session_state:
         st.session_state.language_code = None
-    with st.popover("Search Languages"):
-        search_query = st.text_input("Search Query")
-        if search_query:
-            langs = eg.search_langs(search_query)
-            with st.container(border=True):
-                write_lang_codes(langs)
-    with st.container(border=True):
-        st.text_input("Language Code to Explore", key="language_code")
+    c1, c2, c3 = st.columns([5,2,1])
+    search_query = None
+    with c1:
+        search_query = st.text_input("Search Query", )
+    with c2:
+        st.button("Search", type="primary", use_container_width=True)
+    with c3:
+        if st.button("Clear", type="secondary", use_container_width=True):
+            st.session_state.language_code - None
+    if search_query:
+        langs = eg.search_langs(search_query)
+        cos = st.columns(3)
+        for i in range(len(langs)):
+            with cos[i % 3]:
+                language_card(langs[i])
+    # with st.popover("Search Languages"):
+    #     search_query = st.text_input("Search Query")
+    #     if search_query:
+    #         langs = eg.search_langs(search_query)
+    #         with st.container(border=True):
+    #             write_lang_codes(langs)
+    # with st.container(border=True):
+    #     st.text_input("Language Code to Explore", key="language_code")
     if st.session_state.language_code:
+        st.rerun()
         language_code = st.session_state.language_code
         with st.container(border=True):
             st.write("**Related Languages**")
-            d: dict = eg.rank_related_languages(language_code)
-            s = pd.Series(d, name="Score")
-            s.index.name = "Language Code"
-            st.dataframe(s.sort_values(ascending=False))
+            if(st.button("Load Related Languages")):
+                d: dict = eg.rank_related_languages(language_code)
+                s = pd.Series(d, name="Score")
+                s.index.name = "Language Code"
+                st.dataframe(s.sort_values(ascending=False))
         with st.container(border=True):
             st.header(f"Language `{language_code}`")
             st.write(f"**Language Info (`{language_code}`):**")
@@ -416,12 +448,14 @@ with explore_tab:
             clasfs = eg.lang_classifications(language_code)
             clas = st.selectbox("Choose classification", clasfs)
             with st.expander(f"**Other languages with classification *{clas}***"):
-                write_lang_codes(eg.find_class_langs(clas), 8)
+                if  st.button("Load Class Langs"):
+                    write_lang_codes(eg.find_class_langs(clas), 8)
             fam_c = eg.lang_country_family(language_code)
             st.subheader(f"`{language_code}` Language Family")
             st.write(fam_c)
             with st.expander(f"**Languages in Same Family (*{fam_c}*)**"):
-                write_lang_codes(eg.find_country_family_langs(fam_c))
+                if st.button("Load Fam Langs"):
+                    write_lang_codes(eg.find_country_family_langs(fam_c))
             st.subheader(f"Explore `{language_code}` Countries:")
             countries = {x["CountryCode"]: x for x in eg.lang_country_dicts(language_code)}
             country = st.selectbox("Choose country", countries.keys())

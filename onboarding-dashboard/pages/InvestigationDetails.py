@@ -9,6 +9,7 @@ from time import sleep
 from urllib import request
 
 import gspread_dataframe as gd
+import investigation_utils as iu
 import pandas as pd
 import streamlit as st
 from consts import BOOKS_ABBREVS
@@ -50,31 +51,7 @@ template_df = get_template()
 
 
 def add_experiment(values: dict) -> None:
-    try:
-        with functions._lock:
-            import clowder.investigation as inv
-
-            inv.ENV = st.session_state.clowder_env
-            functions.ENV = st.session_state.clowder_env
-            sheet = functions.ENV.gc.open_by_key(
-                functions.ENV.get_investigation(st.session_state.current_investigation.name).sheet_id
-            )
-            df: pd.DataFrame = gd.get_as_dataframe(sheet.sheet1)
-    except Exception as e:
-        st.error(f"Something went wrong while adding experiment. Please try again. Error: {e}")
-        return
-    df = df.dropna(how="all")
-    df = df.dropna(how="all", axis="columns")
-    if len(df) == 0:
-        df = pd.DataFrame(columns=template_df.columns)
-    df = df[df["name"] != values["name"]]
-    if "draft" in values["name"]:
-        df = df[df["type"] != "draft"]
-    temp_df = pd.DataFrame(columns=template_df.columns)
-    for name, val in values.items():
-        temp_df.loc[0, name] = val
-    df = pd.concat([df, temp_df], ignore_index=True)
-    gd.set_with_dataframe(sheet.sheet1, df)
+    iu.add_experiment_ext(values, st.session_state.clowder_env, st.session_state.current_investigation, template_df)
 
 
 @st.cache_data(show_spinner=False)
@@ -84,49 +61,19 @@ def get_results(results_name: str, investigation_name: str = None, keep_name: bo
             st.session_state.current_investigation.name
         )  # Don't use defaults to avoid uninitialized current_investigation
     try:
-        with functions._lock:
-            import clowder.investigation as inv
-
-            inv.ENV = st.session_state.clowder_env
-            functions.ENV = st.session_state.clowder_env
-            sheet = functions.ENV.gc.open_by_key(functions.ENV.get_investigation(investigation_name).sheet_id)
-            result_sheet = list(filter(lambda w: w.title == results_name, sheet.worksheets()))[0]
-            df: pd.DataFrame = gd.get_as_dataframe(result_sheet)
+        return iu.get_results_ext(results_name, investigation_name, keep_name, st.session_state.clowder_env)
     except Exception as e:
         import traceback
 
         traceback.print_exc()
         st.error(f"Something went wrong while fetching results data. Please try again. Error: {e}")
         return pd.DataFrame()
-    df = df.dropna(how="all")
-    df = df.dropna(how="any", axis="columns")
-    if not keep_name:
-        df.drop(axis="columns", labels="name", inplace=True)
-    return df
-
-
-@st.cache_data(show_spinner=False)
-def get_config() -> str:
-    config_data = ""
-    with open("onboarding-dashboard/config-templates/config.jinja-yml", "r") as f:
-        config_data = f.read()
-    return config_data
 
 
 def set_config():
     print(f"Writing config for {st.session_state.current_investigation}")
-    config_data = get_config()
     try:
-        with functions._lock:
-            import clowder.investigation as inv
-
-            inv.ENV = st.session_state.clowder_env
-            functions.ENV = st.session_state.clowder_env
-            functions.ENV._write_gdrive_file_in_folder(
-                functions.ENV.get_investigation(st.session_state.current_investigation.name).id,
-                "config.yml",
-                config_data,
-            )
+        iu.set_config_ext(st.session_state.clowder_env, st.session_state.current_investigation)
     except Exception as e:
         import traceback
 
@@ -165,14 +112,9 @@ def sync(rerun: bool = True, container=None):
         functions.sync(st.session_state.current_investigation.name, env=st.session_state.clowder_env)
         if st.session_state.current_investigation in st.session_state.investigations:
             st.session_state.investigations.remove(st.session_state.current_investigation)
-            with functions._lock:
-                import clowder.investigation as inv
-
-                inv.ENV = st.session_state.clowder_env
-                functions.ENV = st.session_state.clowder_env
-                st.session_state.current_investigation = Investigation.from_clowder(
-                    functions.ENV.get_investigation(st.session_state.current_investigation.name)
-                )
+            st.session_state.current_investigation = Investigation.from_clowder(
+                iu.sync_ext(st.session_state.clowder_env, st.session_state.current_investigation)
+            )
             st.session_state.investigations.append(st.session_state.current_investigation)
             if rerun:
                 st.rerun()
@@ -189,19 +131,7 @@ def sync(rerun: bool = True, container=None):
 @st.cache_data(show_spinner=False)
 def get_drafts(investigation_name: str):
     try:
-        with functions._lock:
-            import clowder.investigation as inv
-
-            inv.ENV = st.session_state.clowder_env
-            functions.ENV = st.session_state.clowder_env
-            investigation = functions.ENV.get_investigation(investigation_name)
-            drafts_folder_id = functions.ENV._dict_of_gdrive_files(investigation.experiments_folder_id)["drafts"]["id"]
-            drafts = dict()
-            for name, folder in functions.ENV._dict_of_gdrive_files(drafts_folder_id).items():
-                drafts[name] = {}
-                for filename, file in functions.ENV._dict_of_gdrive_files(folder["id"]).items():
-                    drafts[name][filename] = functions.ENV._read_gdrive_file_as_string(file["id"])
-        return drafts
+        return iu.get_drafts_ext(st.session_state.clowder_env, investigation_name)
     except Exception as e:
         import traceback
 
@@ -225,12 +155,7 @@ def render_stats_section():
         if st.form_submit_button("Run", type="primary"):
             get_results.clear("verse_percentages.csv", st.session_state.current_investigation.name)
             check_required("stats", texts)
-            stats_row = template_df[template_df["name"] == "stats"]
-            stats_setup = stats_row.to_dict(orient="records")[0]
-            stats_setup["entrypoint"] = stats_setup["entrypoint"].replace(
-                "$FILES", ";".join(list(map(lambda t: f"{t}.txt", texts)))
-            )
-            add_experiment(stats_setup)
+            iu.create_stats_experiment(texts, st.session_state.clowder_env, st.session_state.current_investigation)
             with st.spinner("This might take a few minutes..."):
                 try:
                     functions.run(st.session_state.current_investigation.name, experiments=["stats"], force_rerun=True)
@@ -242,65 +167,6 @@ def render_stats_section():
                     st.error(f"Something went wrong while attempting to run experiment. Please try again. Error: {e}")
                 sync()
         check_success("stats")
-
-
-def split_target_sources():
-    if st.session_state.results_stats is None or "file" not in st.session_state.results_stats.columns:
-        return None, None
-    OT_score = st.session_state.results_stats["OT"].mean()
-    NT_score = st.session_state.results_stats["NT"].mean()
-    targ_index = None
-    if NT_score == 100 or (OT_score > NT_score and OT_score != 100):
-        targ_index = st.session_state.results_stats["OT"].idxmin()
-    else:
-        targ_index = st.session_state.results_stats["NT"].idxmin()
-    return (
-        [f for f in st.session_state.results_stats.drop(targ_index)["file"]],
-        st.session_state.results_stats.iloc[targ_index]["file"],
-    )
-
-
-def get_default_books(training_sources, training_target):
-    default_books = None
-    if st.session_state.results_stats is not None and "file" in st.session_state.results_stats.columns:
-        texts_series = pd.DataFrame(list(set(training_sources) | set([training_target])), columns=["file"])
-        results_stats_df_copy = st.session_state.results_stats.copy()
-        results_stats_df_copy["file"] = results_stats_df_copy["file"].apply(lambda f: f[:-4])
-        rel_stats = pd.merge(texts_series, results_stats_df_copy, how="inner")
-        default_books = BOOKS_ABBREVS.copy()
-        for _, row in rel_stats.iterrows():
-            to_remove = set(["OT", "NT", "DT"])
-            for book in default_books:
-                if row[book] < 93:  # TODO more robust
-                    to_remove.add(book)
-            for book in to_remove:
-                if book in default_books:
-                    default_books.remove(book)
-        default_books = simplify_books(default_books)
-        if len(default_books) == 0:
-            default_books = None
-    return default_books
-
-
-def alignments_is_running():
-    with functions._lock:
-        import clowder.investigation as inv
-
-        inv.ENV = st.session_state.clowder_env
-        functions.ENV = st.session_state.clowder_env
-        return (
-            len(
-                list(
-                    filter(
-                        lambda kv: "align" in kv[0] and kv[1].get("status", None) in ["in_progress", "queued"],
-                        functions.ENV.get_investigation(
-                            st.session_state.current_investigation.name
-                        ).experiments.items(),
-                    )
-                )
-            )
-            > 0
-        )
 
 
 @st.experimental_fragment
@@ -323,7 +189,7 @@ def render_alignment_section():
         else:
             st.write("**No results found**")
     with st.form(key=f"{st.session_state.current_investigation.id}-run-alignments"):
-        default_sources, target_name = split_target_sources()
+        default_sources, target_name = iu.split_target_sources(st.session_state.results_stats)
         training_sources = st.multiselect(
             "Alignment sources",
             resources,
@@ -331,9 +197,11 @@ def render_alignment_section():
         )
         target_index = resources.index(target_name) if target_name is not None else None
         training_target = st.selectbox("Alignment target", resources, index=target_index)
-        default_books = get_default_books(training_sources, training_target)
+        default_books = iu.get_default_books(training_sources, training_target, st.session_state.results_stats)
         books = st.multiselect("Books to align on", BOOKS_ABBREVS, default=default_books)
-        alignments_already_running = alignments_is_running()
+        alignments_already_running = iu.alignments_is_running_ext(
+            st.session_state.clowder_env, st.sesion_state.current_investigation
+        )
         if alignments_already_running:
             st.write("Your alignments are running. Check back in 15 minutes.")
         check_error("align")
@@ -357,13 +225,13 @@ def render_alignment_section():
                         )
                     sync()
             check_required("align", training_sources, training_target, books)
-            align_row = template_df[template_df["name"] == "align"]
-            align_setup = align_row.to_dict(orient="records")[0]
-            align_setup["src_texts"] = ";".join(training_sources)
-            align_setup["trg_texts"] = training_target
-            if len(books) > 0:
-                align_setup["align_set"] = ",".join(books)
-            add_experiment(align_setup)
+            iu.create_alignment_experiment(
+                training_sources,
+                training_target,
+                books,
+                st.session_state.clowder_env,
+                st.session_state.current_investigation,
+            )
             with st.spinner("This might take a few minutes..."):
                 get_results.clear("corpus-stats.csv", st.session_state.current_investigation.name)
                 get_results.clear("tokenization_stats.csv", st.session_state.current_investigation.name, keep_name=True)
@@ -543,26 +411,9 @@ def render_model_section():
             st.rerun()
         st.session_state.models.append(model)
         st.rerun()
-    with functions._lock:
-        import clowder.investigation as inv
-
-        inv.ENV = st.session_state.clowder_env
-        functions.ENV = st.session_state.clowder_env
-        models_already_running = (
-            len(
-                list(
-                    filter(
-                        lambda kv: "NLLB" in kv[0]
-                        and "draft" not in kv[0]
-                        and kv[1].get("status", None) in ["in_progress", "queued"],
-                        functions.ENV.get_investigation(
-                            st.session_state.current_investigation.name
-                        ).experiments.items(),
-                    )
-                )
-            )
-            > 0
-        )
+    models_already_running = iu.model_is_running_ext(
+        st.session_state.current_investigation, st.session_state.clowder_env
+    )
     if models_already_running:
         st.toast("Your models are training. Check back after a few hours.")
         st.write("Your models are training. Check back after a few hours.")
@@ -584,25 +435,9 @@ def render_model_section():
                         f"Something went wrong while attempting to cancel experiment. Please try again. Error: {e}"
                     )
                 sync()
-        exps = []
-        model_row = template_df[template_df["name"] == "model"]
-        for model in models:
-            model_setup = model_row.to_dict(orient="records")[0]
-            exps.append(model["name"])
-            model_setup["name"] = model["name"]
-            model_setup["src"] = model["training_source"]
-            model_setup["trg"] = model["training_target"]
-            src_lang = model["training_source"].split("-")[0]
-            trg_lang = training_target.split("-")[0]
-            src_lang_tag_mapping = get_lang_tag_mapping(src_lang)
-            trg_lang_tag_mapping = get_lang_tag_mapping(trg_lang)
-            model_setup["src_lang"] = f"{src_lang}: {src_lang_tag_mapping}"
-            model_setup["trg_lang"] = f"{trg_lang}: {trg_lang_tag_mapping}"
-            model_setup["train_set"] = ",".join(model["books"])
-            if "bt_books" in model:
-                model_setup["bt_books"] = ",".join(model["bt_books"])
-                model_setup["bt_src"] = model["bt_src"]
-            add_experiment(model_setup)
+        exps = iu.create_model_experiments(
+            models, training_target, st.session_state.clowder_env, st.session_state.current_investigation
+        )
         with st.spinner("This might take a few minutes..."):
             get_results.clear("scores-best", st.session_state.current_investigation.name, keep_name=True)
             try:
@@ -615,21 +450,6 @@ def render_model_section():
                 st.error(f"Something went wrong while attempting to run experiment. Please try again. Error: {e}")
             sync()
     check_success("models")
-
-
-def draft_is_running():
-    with functions._lock:
-        import clowder.investigation as inv
-
-        inv.ENV = st.session_state.clowder_env
-        functions.ENV = st.session_state.clowder_env
-        _running_draft_list = list(
-            filter(
-                lambda kv: "draft" in kv[0] and kv[1].get("status", None) in ["in_progress", "queued"],
-                functions.ENV.get_investigation(st.session_state.current_investigation.name).experiments.items(),
-            )
-        )
-        return len(_running_draft_list) > 0
 
 
 @st.experimental_fragment
@@ -664,7 +484,9 @@ def render_draft_section():
             idx_of_best_model = int(st.session_state.results_models["CHRF3"].idxmax())
         model = st.selectbox("Model", model_options, index=idx_of_best_model)
         books = st.multiselect("Books to draft", BOOKS_ABBREVS)
-        draft_already_running = draft_is_running()
+        draft_already_running = iu.draft_is_running(
+            st.session_state.clowder_env, st.session_state.current_investigation
+        )
         if draft_already_running:
             st.write("Your drafting job is running. Check back after a few hours.")
         check_error("drafts")
@@ -688,19 +510,9 @@ def render_draft_section():
                         )
                     sync()
             check_required("draft", drafting_source, model, books)
-            books_string = ";".join(books)
-            draft_row = template_df[template_df["name"] == "draft"]
-            draft_setup = draft_row.to_dict(orient="records")[0]
-            draft_name = f"{model}_draft_{books_string}_{drafting_source}"
-            draft_setup["name"] = draft_name
-            draft_setup["entrypoint"] = (
-                draft_setup["entrypoint"]
-                .replace("$SRC_ISO", get_lang_tag_mapping(model.split("-")[0].split("NLLB.1.3B.")[1]))
-                .replace("$SRC", "".join(drafting_source.split("-")[1:]))
-                .replace("$TRG_ISO", get_lang_tag_mapping(model.split("-")[2]))
-                .replace("$BOOKS", books_string)
+            draft_name = iu.create_draft_experiment(
+                books, model, drafting_source, st.session_state.clowder_env, st.session_state.current_investigation
             )
-            add_experiment(draft_setup)
             with st.spinner("This might take a few minutes..."):
                 try:
                     functions.run(
