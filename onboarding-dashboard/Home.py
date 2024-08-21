@@ -5,6 +5,7 @@ from typing import Callable
 
 import streamlit as st
 from importlib_resources.abc import Traversable
+from pydrive2.auth import RefreshError
 from s3path import S3Path
 
 st.markdown(
@@ -19,17 +20,25 @@ st.markdown(
 )
 import os
 
-if os.environ.get('DOWN_FOR_MAINTENANCE'):
-    st.switch_page('pages/Down.py')
+if os.environ.get("DOWN_FOR_MAINTENANCE"):
+    st.switch_page("pages/Down.py")
 
 if "set_up" not in st.session_state or not st.session_state.set_up:
     st.switch_page("pages/LogIn.py")
 
 if st.session_state.google_auth is not None and st.session_state.google_auth.access_token_expired:
-    # st.session_state.google_auth.Refresh() TODO
-    st.session_state.set_up = False
-    del st.session_state.google_auth
-    st.switch_page("pages/LogIn.py")
+    print("Refreshing GAuth Token...")
+    try:
+        st.session_state.google_auth.Refresh()
+    except RefreshError:
+        st.session_state.set_up = False
+        del st.session_state.google_auth
+        st.switch_page("pages/LogIn.py")
+
+if st.session_state.google_auth is not None:
+    print(
+        f"Credentials for {st.session_state.user_info.get('email', 'NO EMAIL FOUND')} expire in {st.session_state.google_auth.credentials._expires_in()} seconds"
+    )
 
 import subprocess
 import sys
