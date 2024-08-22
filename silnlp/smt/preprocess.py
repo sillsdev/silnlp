@@ -1,4 +1,5 @@
 import argparse
+import logging
 from statistics import mean
 from typing import Dict, Optional, Set, Tuple
 
@@ -18,6 +19,8 @@ from ..common.environment import SIL_NLP_ENV
 from ..common.utils import get_git_revision_hash, get_mt_exp_dir, set_seed
 from .config import load_config
 
+LOGGER = logging.getLogger(__package__ + ".preprocess")
+
 
 def parse_lang(lang: str) -> Tuple[str, str]:
     index = lang.find("-")
@@ -32,6 +35,7 @@ def get_test_indices(config: dict) -> Optional[Set[int]]:
     exp_dir = get_mt_exp_dir(exp_name)
     vref_path = exp_dir / "test.vref.txt"
     if not vref_path.is_file():
+        LOGGER.warning(f'The experiment specified in "use_test_set_from" does not contain test.vref.txt.')
         return None
 
     vrefs: Dict[str, int] = {}

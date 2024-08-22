@@ -876,7 +876,16 @@ class Config(ABC):
 
         SIL_NLP_ENV.copy_experiment_from_bucket(exp_name, patterns="test*.vref.txt")
         exp_dir = get_mt_exp_dir(exp_name)
-        for vref_path in exp_dir.glob("test*.vref.txt"):
+        vref_paths: List[Path] = list(exp_dir.glob("test*.vref.txt"))
+        if len(vref_paths) == 0:
+            if Path.samefile(exp_dir, self.exp_dir):
+                # Having the same experiment and "use_test_set_from" directory will also result in no test vrefs, but more cryptically.
+                LOGGER.warning('The experiment specified in "use_test_set_from" is the same as the current experiment.')
+            else:
+                LOGGER.warning(
+                    f'The experiment specified in "use_test_set_from" does not contain any files matching "test*.vref.txt".'
+                )
+        for vref_path in vref_paths:
             stem = vref_path.stem
             test_indices: Set[int] = set()
             if stem == "test.vref":
