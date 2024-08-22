@@ -12,7 +12,7 @@ import gspread_dataframe as gd
 import pandas as pd
 import streamlit as st
 from consts import BOOKS_ABBREVS
-from models import Investigation, Status
+from models import Investigation, Status, delete_investigation
 from pydrive2.auth import RefreshError
 from utils import check_error, check_required, check_success, expand_books, set_success, simplify_books
 
@@ -781,7 +781,7 @@ if "current_investigation" in st.session_state:
         with c2:
             if st.button("🗑️", type="primary", key=f"{st.session_state.current_investigation.id}_delete_button"):
                 st.session_state.investigation_to_delete = st.session_state.current_investigation
-                st.switch_page("pages/DeleteInvestigation.py")
+                delete_investigation(st.investigation_to_delete)
         st.write(f"More detailed information at <{functions.urlfor(st.session_state.current_investigation.name)}>")
 else:
     st.switch_page("Home.py")
