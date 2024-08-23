@@ -1,8 +1,6 @@
 """
 Transforms tsv files in the XRI format to extract files suitable for training SIL machine translation models.
 
-Each execution of this script creates a unique directory within the output directory containing the output files.
-
 Example:
 
     $ python xri_etl.py   data.tsv   swa     ngq     XRI-2024-08-14
@@ -10,12 +8,18 @@ Example:
                            input   source    target     dataset
                            file    iso code  iso code   descriptor
 
-This creates a unique directory in `out` based on the script inputs and current time, and puts the files in there:
+Each execution puts the extract files into a unique directory in `out` with name generated from script inputs and the current time:
 
     out
     └── swa-ngq-XRI-2024-08-14-20240822-180428
-        ├── swa-XRI-2024-08-14.all.txt     <--- complete source extract file
-        └── ngq-XRI-2024-08-14.all.txt     <--- complete target extract file
+        ├── swa-XRI-2024-08-14.all.txt     ┓ complete extract files (no filtering)
+        ├── ngq-XRI-2024-08-14.all.txt     ┛
+        ├── swa-XRI-2024-08-14.train.txt   ┓ extract files filtered to training data
+        ├── ngq-XRI-2024-08-14.train.txt   ┛
+        ├── swa-XRI-2024-08-14.dev.txt     ┓ extract files filtered to dev/validation data
+        ├── ngq-XRI-2024-08-14.dev.txt     ┛
+        ├── swa-XRI-2024-08-14.test.txt    ┓ extract files filtered to test data
+        └── ngq-XRI-2024-08-14.test.txt    ┛
 
 Run with --help for more details.
 
@@ -89,10 +93,6 @@ def load_sentence_pairs(input_file_path: str) -> List[SentencePair]:
     ]
 
 
-def build_output_path(unique_output_dir: str, iso: str, dataset_descriptor: str, suffix: str) -> str:
-    return os.path.join("out", unique_output_dir, f"{iso}-{dataset_descriptor}.{suffix}.txt")
-
-
 def write_output_file(filename: str, sentences: List[str]) -> None:
     with open(filename, "w", encoding="utf-8") as f:
         for sentence in sentences:
@@ -105,16 +105,33 @@ def create_extract_files(cli_input: CliInput, sentence_pairs: List[SentencePair]
     )
     Path(os.path.join("out", unique_output_dir)).mkdir(parents=True, exist_ok=True)
 
-    # *.all.txt files
-    source_filename = build_output_path(unique_output_dir, cli_input.source_iso, cli_input.dataset_descriptor, "all")
-    source_sentences = [sentence_pair.source for sentence_pair in sentence_pairs]
-    write_output_file(source_filename, source_sentences)
+    def create_source_target_files(sub_sentence_pairs: List[SentencePair], suffix: str) -> None:
+        def build_output_path(iso: str) -> str:
+            return os.path.join("out", unique_output_dir, f"{iso}-{cli_input.dataset_descriptor}.{suffix}.txt")
 
-    target_filename = build_output_path(unique_output_dir, cli_input.target_iso, cli_input.dataset_descriptor, "all")
-    target_sentences = [sentence_pair.target for sentence_pair in sentence_pairs]
-    write_output_file(target_filename, target_sentences)
+        source_filename = build_output_path(iso=cli_input.source_iso)
+        source_sentences = [sentence.source for sentence in sub_sentence_pairs]
+        write_output_file(source_filename, source_sentences)
 
-    # TODO add *.(train/dev/test).txt files in later PR
+        target_filename = build_output_path(iso=cli_input.target_iso)
+        target_sentences = [sentence.target for sentence in sub_sentence_pairs]
+        write_output_file(target_filename, target_sentences)
+
+    # *.all.txt
+    create_source_target_files(sentence_pairs, "all")
+
+    # *.train.txt
+    train_sentences = [sentence_pair for sentence_pair in sentence_pairs if sentence_pair.split == Split.train]
+    create_source_target_files(train_sentences, "train")
+
+    # *.val.txt
+    # NOTE that input data uses "dev" but it's converted to "val" here to make working with downstream SIL tools easier
+    dev_sentences = [sentence_pair for sentence_pair in sentence_pairs if sentence_pair.split == Split.dev]
+    create_source_target_files(dev_sentences, "val")
+
+    # *.test.txt
+    test_sentences = [sentence_pair for sentence_pair in sentence_pairs if sentence_pair.split == Split.test]
+    create_source_target_files(test_sentences, "test")
 
 
 def run(cli_input: CliInput) -> None:
