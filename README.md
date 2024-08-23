@@ -67,7 +67,7 @@ These are the main requirements for the SILNLP code to run on a local machine. S
    AWS_REGION="us-east-1"
    AWS_ACCESS_KEY_ID=xxxxx
    AWS_SECRET_ACCESS_KEY=xxxxx
-   SIL_NLP_DATA_PATH="/aqua-ml-data"
+   SIL_NLP_DATA_PATH="/silnlp"
    ```
    * If you do not intend to use SILNLP with ClearML and/or AWS, you can leave out the respective variables. If you need to generate ClearML credentials, see [ClearML setup](clear_ml_setup.md).
    * Note that this does not give you direct access to an AWS S3 bucket from within the Docker container, it only allows you to run scripts referencing files in the bucket.

@@ -808,19 +808,20 @@ graph = ["objgraph (>=1.7.2)"]
 
 [[package]]
 name = "eflomal"
-version = "0.1"
+version = "2.0.0"
 description = "pip installable eflomal"
 optional = true
 python-versions = "*"
 files = [
-    {file = "eflomal-0.1-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:192115fa23f29790e17d8857a6fb9dd34d98e065357bac0588e3d459dad9f6fc"},
-    {file = "eflomal-0.1-cp38-cp38-manylinux_2_5_x86_64.manylinux1_x86_64.whl", hash = "sha256:886899e3cc67d0620f2f9a63a508069453fd6c8a69dd4a0b5befd3e55f4012dc"},
-    {file = "eflomal-0.1.tar.gz", hash = "sha256:529a5fbbca7539a2534900447717d70cf6cfdeec4528645eb028bb5ae878adcd"},
+    {file = "eflomal-2.0.0.tar.gz", hash = "sha256:b71183dcf85bf4f59f44ef7a59f5268df1c17c0c8d8093f77b220025ffdba100"},
 ]
 
 [package.dependencies]
 Cython = "*"
 numpy = "*"
+
+[package.extras]
+test = ["pytest"]
 
 [[package]]
 name = "entrypoints"
@@ -5501,13 +5502,13 @@ files = [
 
 [[package]]
 name = "xlsxwriter"
-version = "1.4.5"
+version = "3.2.0"
 description = "A Python module for creating Excel XLSX files."
 optional = false
-python-versions = "*"
+python-versions = ">=3.6"
 files = [
-    {file = "XlsxWriter-1.4.5-py2.py3-none-any.whl", hash = "sha256:f9335f1736e2c4fd80e940fe1b6d92d967bf454a1e5d639b0b7a4459ade790cc"},
-    {file = "XlsxWriter-1.4.5.tar.gz", hash = "sha256:0956747859567ec01907e561a7d8413de18a7aae36860f979f9da52b9d58bc19"},
+    {file = "XlsxWriter-3.2.0-py3-none-any.whl", hash = "sha256:ecfd5405b3e0e228219bcaf24c2ca0915e012ca9464a14048021d21a995d490e"},
+    {file = "XlsxWriter-3.2.0.tar.gz", hash = "sha256:9977d0c661a72866a61f9f7a809e25ebbb0fb7036baa3b9fe74afcfca6b3cb8c"},
 ]
 
 [[package]]
@@ -5691,4 +5692,4 @@ eflomal = ["eflomal"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.8,<3.9"
-content-hash = "5422d3afdbe96d87dc4d601ca1e0f17aef09e0d8b00ab1f7a182b8576f7f6a5b"
+content-hash = "e34c3be26d06fdfd5a2fba4e1b9e327cd86397abaf6b14154752cdc4319ddcac"

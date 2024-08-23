@@ -74,6 +74,7 @@ class DataFile:
     path: Path
     iso: str = field(init=False)
     project: str = field(init=False)
+    include_test: bool = True
 
     def __post_init__(self):
         file_name = self.path.stem
@@ -168,14 +169,28 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
             elif type_str == "dict" or type_str == "dictionary":
                 type |= DataFileType.DICT
 
-        src: Union[str, List[str]] = pair["src"]
+        src: Union[str, List[Union[dict, str]]] = pair["src"]
+        src_files = []
         if isinstance(src, str):
             src = src.split(",")
-        src_files = [DataFile(get_mt_corpus_path(sp.strip())) for sp in src]
-        trg: Union[str, List[str]] = pair["trg"]
+        for file in src:
+            if isinstance(file, str):
+                src_files.append(DataFile(get_mt_corpus_path(file.strip())))
+            else:
+                src_files.append(DataFile(get_mt_corpus_path(file.pop("name"))))
+                for k, v in file.items():
+                    setattr(src_files[-1], k, v)
+        trg: Union[str, List[Union[dict, str]]] = pair["trg"]
+        trg_files = []
         if isinstance(trg, str):
             trg = trg.split(",")
-        trg_files = [DataFile(get_mt_corpus_path(tp.strip())) for tp in trg]
+        for file in trg:
+            if isinstance(file, str):
+                trg_files.append(DataFile(get_mt_corpus_path(file.strip())))
+            else:
+                trg_files.append(DataFile(get_mt_corpus_path(file.pop("name"))))
+                for k, v in file.items():
+                    setattr(trg_files[-1], k, v)
         is_scripture = src_files[0].is_scripture
         if not all(df.is_scripture == is_scripture for df in (src_files + trg_files)):
             raise RuntimeError("All corpora in a corpus pair must contain the same type of data.")
@@ -516,13 +531,12 @@ class Config(ABC):
         train_count = 0
         for pair in self.corpus_pairs:
             if pair.is_scripture:
-                train_count += self._write_scripture_data_sets(tokenizer, pair, stats, force_align)
+                train_count += self._write_scripture_data_sets(tokenizer, pair, force_align)
             else:
                 train_count += self._write_basic_data_sets(tokenizer, pair)
 
         if stats:
-            self._report_extra_stats()
-        self._calculate_tokenization_stats()
+            self._calculate_tokenization_stats()
 
         return train_count
 
@@ -627,74 +641,10 @@ class Config(ABC):
         for old_file_path in self.exp_dir.glob(pattern):
             old_file_path.unlink()
 
-    def _report_extra_stats(self) -> None:
-        stats_path = self.exp_dir / "corpus-stats.csv"
-        if stats_path.is_file():
-            stats_df = pd.read_csv(stats_path, dtype=str, keep_default_na=False).set_index(
-                ["src_project", "trg_project"]
-            )
-        else:
-            stats_df = pd.DataFrame(
-                columns=[
-                    "src_project",
-                    "trg_project",
-                    "project_count",
-                    "count",
-                    "align_score",
-                    "filtered_count",
-                    "filtered_align_score",
-                    "src_script",
-                    "src_script_in_model",
-                    "trg_script",
-                    "trg_script_in_model",
-                ],
-                dtype=str,
-            ).set_index(["src_project", "trg_project"])
-
-        for filepath in self.exp_dir.glob("*.csv"):
-            match = ALIGNMENT_SCORES_FILE.fullmatch(filepath.stem)
-            project_pair = match.group(1, 2) if match is not None else (filepath.stem, "")
-
-            if project_pair not in stats_df.index and filepath.stem not in ["corpus-stats", "tokenization_stats"]:
-                project_count = ""
-                if project_pair[1] == "":
-                    LOGGER.info(f"Project pair for {filepath} unclear. Some statistics may be missing.")
-                else:
-                    src_path = get_mt_corpus_path(project_pair[0])
-                    trg_path = get_mt_corpus_path(project_pair[1])
-                    try:
-                        corpus = get_scripture_parallel_corpus(src_path, trg_path)
-                        project_count = len(corpus.index)
-                    except:
-                        LOGGER.info(
-                            f"Original source or target project for {project_pair} not found. Some statistics may be missing."
-                        )
-
-                pair_stats = pd.read_csv(filepath)
-                src_script = get_script("".join(pair_stats["source"]))
-                src_script_in_model = is_represented(src_script, self.model)
-                trg_script = get_script("".join(pair_stats["target"]))
-                trg_script_in_model = is_represented(trg_script, self.model)
-
-                stats_df.loc[project_pair, :] = [
-                    project_count,
-                    len(pair_stats["score"]),
-                    "{:.4f}".format(mean(pair_stats["score"])),
-                    "",
-                    "",
-                    src_script,
-                    src_script_in_model,
-                    trg_script,
-                    trg_script_in_model,
-                ]
-
-        stats_df.to_csv(stats_path, index=True)
-
     def _write_scripture_data_sets(
         self,
         tokenizer: Tokenizer,
         pair: CorpusPair,
-        stats: bool,
         force_align: bool,
     ) -> int:
         src_corpora_str = ", ".join(sf.path.stem for sf in pair.src_files)
@@ -724,38 +674,10 @@ class Config(ABC):
         if pair.use_test_set_from != "":
             self._populate_pair_test_indices(pair.use_test_set_from, pair_test_indices)
 
-        if stats and pair.size < self.stats_max_size:
-            stats_path = self.exp_dir / "corpus-stats.csv"
-            if stats_path.is_file():
-                stats_df = pd.read_csv(stats_path, dtype=str, keep_default_na=False).set_index(
-                    ["src_project", "trg_project"]
-                )
-            else:
-                stats_df = pd.DataFrame(
-                    columns=[
-                        "src_project",
-                        "trg_project",
-                        "project_count",
-                        "count",
-                        "align_score",
-                        "filtered_count",
-                        "filtered_align_score",
-                        "src_script",
-                        "src_script_in_model",
-                        "trg_script",
-                        "trg_script_in_model",
-                    ],
-                    dtype=str,
-                ).set_index(["src_project", "trg_project"])
-            stats_df.sort_index(inplace=True)
-        else:
-            stats = False
-
         for src_file, trg_file in get_data_file_pairs(pair):
             project_isos[src_file.project] = src_file.iso
             project_isos[trg_file.project] = trg_file.iso
             corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path)
-            project_count = len(corpus.index)
             if len(pair.src_noise) > 0:
                 corpus["source"] = [self._noise(pair.src_noise, x) for x in corpus["source"]]
 
@@ -767,24 +689,23 @@ class Config(ABC):
                 cur_train = exclude_chapters(corpus, pair.test_books)
             else:
                 cur_train = corpus
-
             corpus_count = len(cur_train)
-            if pair.is_train and (stats or pair.score_threshold > 0):
-                pair_stats_path = (
+
+            if pair.is_train and pair.score_threshold > 0:
+                pair_align_path = (
                     self.exp_dir / f"{src_file.iso}-{src_file.project}_{trg_file.iso}-{trg_file.project}.csv"
                 )
-                if pair_stats_path.is_file() and not force_align:
-                    LOGGER.info(f"Using pre-existing alignment scores from {pair_stats_path}")
-                    pair_stats = pd.read_csv(pair_stats_path)
-                    pair_stats["idx"] = cur_train.index
-                    pair_stats.set_index("idx", inplace=True)
-                    cur_train["score"] = pair_stats["score"]
+                if pair_align_path.is_file() and not force_align:
+                    LOGGER.info(f"Using pre-existing alignment scores from {pair_align_path}")
+                    pair_scores = pd.read_csv(pair_align_path)
+                    pair_scores["idx"] = cur_train.index
+                    pair_scores.set_index("idx", inplace=True)
+                    cur_train["score"] = pair_scores["score"]
                 else:
                     aligner_id = self.data["aligner"]
                     LOGGER.info(f"Computing alignment scores using {get_aligner_name(aligner_id)}")
                     add_alignment_scores(cur_train, aligner_id)
-                    if stats:
-                        cur_train.to_csv(pair_stats_path, index=False)
+                    cur_train.to_csv(pair_align_path, index=False)
 
             if pair.is_test:
                 if len(pair.test_books) > 0:
@@ -814,66 +735,24 @@ class Config(ABC):
                     )
 
                 cur_test.drop("score", axis=1, inplace=True, errors="ignore")
-                self._add_to_eval_data_set(
-                    src_file.iso,
-                    trg_file.iso,
-                    trg_file.project,
-                    tags_str,
-                    test,
-                    pair_test_indices,
-                    cur_test,
+                if src_file.include_test:
+                    self._add_to_eval_data_set(
+                        src_file.iso,
+                        trg_file.iso,
+                        trg_file.project,
+                        tags_str,
+                        test,
+                        pair_test_indices,
+                        cur_test,
+                    )
+
+            if pair.is_train and pair.score_threshold > 0:
+                unfiltered_count = len(cur_train)
+                cur_train = filter_parallel_corpus(cur_train, pair.score_threshold)
+                cur_train = cur_train.drop("score", axis=1, errors="ignore")
+                LOGGER.info(
+                    f"Filtered out {unfiltered_count - len(cur_train)} verses pairs with alignment below {pair.score_threshold}."
                 )
-
-            if pair.is_train:
-                project_pair = (f"{src_file.iso}-{src_file.project}", f"{trg_file.iso}-{trg_file.project}")
-                calculate_stats = stats and (project_pair not in stats_df.index or force_align)
-                alignment_score = cur_train["score"].mean() if calculate_stats else 0
-
-                filtered_count = 0
-                filtered_alignment_score = alignment_score
-                if pair.score_threshold > 0:
-                    unfiltered_len = len(cur_train)
-                    cur_train = filter_parallel_corpus(cur_train, pair.score_threshold)
-                    filtered_count = unfiltered_len - len(cur_train)
-                    filtered_alignment_score = mean(cur_train["score"]) if calculate_stats else 0
-
-                if calculate_stats:
-                    src_script = get_script("".join(cur_train["source"][: min(len(cur_train["source"]), 3000)]))
-                    src_script_in_model = (
-                        is_represented(src_script, self.model) if self.model != "SILTransformerBase" else None
-                    )
-                    trg_script = get_script("".join(cur_train["target"][: min(len(cur_train["target"]), 3000)]))
-                    trg_script_in_model = (
-                        is_represented(trg_script, self.model) if self.model != "SILTransformerBase" else None
-                    )
-
-                    stats_df.loc[project_pair, :] = [
-                        project_count,
-                        corpus_count,
-                        "{:.4f}".format(alignment_score),
-                        filtered_count,
-                        "{:.4f}".format(filtered_alignment_score),
-                        src_script,
-                        src_script_in_model,
-                        trg_script,
-                        trg_script_in_model,
-                    ]
-
-                if stats:
-                    # Use values from the df because not all values get recalculated
-                    row = stats_df.loc[project_pair]
-                    LOGGER.info(
-                        f"{src_file.project} -> {trg_file.project} stats -"
-                        f" project count: {project_count},"
-                        f" count: {row.at['count']},"
-                        f" alignment: {row.at['align_score']},"
-                        f" filtered count: {row.at['filtered_count']},"
-                        f" alignment (filtered): {row.at['filtered_align_score']},"
-                        f" source script: {row.at['src_script']}, source script in model: {row.at['src_script_in_model']},"
-                        f" target script: {row.at['trg_script']}, target script in model: {row.at['trg_script_in_model']}"
-                    )
-
-                cur_train.drop("score", axis=1, inplace=True, errors="ignore")
 
             if pair.is_val:
                 if pair.disjoint_val and val_indices is None:
@@ -926,8 +805,6 @@ class Config(ABC):
                     train,
                     cur_train,
                 )
-        if stats:
-            stats_df.to_csv(stats_path, index=True)
 
         train_count = 0
         if train is not None and len(train) > 0:
@@ -999,7 +876,16 @@ class Config(ABC):
 
         SIL_NLP_ENV.copy_experiment_from_bucket(exp_name, patterns="test*.vref.txt")
         exp_dir = get_mt_exp_dir(exp_name)
-        for vref_path in exp_dir.glob("test*.vref.txt"):
+        vref_paths: List[Path] = list(exp_dir.glob("test*.vref.txt"))
+        if len(vref_paths) == 0:
+            if Path.samefile(exp_dir, self.exp_dir):
+                # Having the same experiment and "use_test_set_from" directory will also result in no test vrefs, but more cryptically.
+                LOGGER.warning('The experiment specified in "use_test_set_from" is the same as the current experiment.')
+            else:
+                LOGGER.warning(
+                    f'The experiment specified in "use_test_set_from" does not contain any files matching "test*.vref.txt".'
+                )
+        for vref_path in vref_paths:
             stem = vref_path.stem
             test_indices: Set[int] = set()
             if stem == "test.vref":

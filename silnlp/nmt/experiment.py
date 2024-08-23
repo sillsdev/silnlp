@@ -3,6 +3,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Set
+
 import yaml
 
 from ..common.environment import SIL_NLP_ENV
@@ -10,7 +11,7 @@ from ..common.tf_utils import enable_memory_growth
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import SILClearML
 from .config import Config, get_mt_exp_dir
-from .test import test, _SUPPORTED_SCORERS
+from .test import _SUPPORTED_SCORERS, test
 from .translate import TranslationTask
 
 
@@ -58,7 +59,7 @@ class SILExperiment:
             raise RuntimeError(f"ERROR: Config file does not exist in experiment folder {exp_dir}.")
         SIL_NLP_ENV.copy_experiment_from_bucket(self.name)
         self.config.preprocess(self.make_stats, self.force_align)
-        SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
+        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, overwrite=self.force_align)
 
     def train(self):
         os.system("nvidia-smi")
@@ -87,15 +88,13 @@ class SILExperiment:
         )
 
     def translate(self):
-        SIL_NLP_ENV.copy_experiment_from_bucket(self.name)
+        SIL_NLP_ENV.copy_experiment_from_bucket(self.name, patterns="*.yml")
         with (self.config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as file:
-                translate_configs = yaml.safe_load(file)
+            translate_configs = yaml.safe_load(file)
 
         for config in translate_configs.get("translate", []):
             translator = TranslationTask(
-            name=self.name,
-            checkpoint=config.get("checkpoint", "last"),
-            commit=self.commit
+                name=self.name, checkpoint=config.get("checkpoint", "last"), commit=self.commit
             )
 
             if len(config.get("books", [])) > 0:
@@ -111,19 +110,21 @@ class SILExperiment:
                 )
             elif config.get("src_prefix"):
                 translator.translate_text_files(
-                    config.get("src_prefix"), 
-                    config.get("trg_prefix"), 
-                    config.get("start_seq"), 
-                    config.get("end_seq"), 
-                    config.get("src_iso"), 
-                    config.get("trg_iso")
+                    config.get("src_prefix"),
+                    config.get("trg_prefix"),
+                    config.get("start_seq"),
+                    config.get("end_seq"),
+                    config.get("src_iso"),
+                    config.get("trg_iso"),
                 )
             elif config.get("src"):
-                translator.translate_files(config.get("src"), 
-                                        config.get("trg"), 
-                                        config.get("src_iso"), 
-                                        config.get("trg_iso"), 
-                                        config.get("include_inline_elements", False))
+                translator.translate_files(
+                    config.get("src"),
+                    config.get("trg"),
+                    config.get("src_iso"),
+                    config.get("trg_iso"),
+                    config.get("include_inline_elements", False),
+                )
             else:
                 raise RuntimeError("A Scripture book, file, or file prefix must be specified for translation.")
 
@@ -131,8 +132,10 @@ class SILExperiment:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run experiment - preprocess, train, and test")
     parser.add_argument("experiment", help="Experiment name")
-    parser.add_argument("--stats", default=False, action="store_true", help="Output corpus statistics")
-    parser.add_argument("--force-align", default=False, action="store_true", help="Force recalculation of all alignment scores")
+    parser.add_argument("--stats", default=False, action="store_true", help="Compute tokenization statistics")
+    parser.add_argument(
+        "--force-align", default=False, action="store_true", help="Force recalculation of all alignment scores"
+    )
     parser.add_argument("--disable-mixed-precision", default=False, action="store_true", help="Disable mixed precision")
     parser.add_argument("--memory-growth", default=False, action="store_true", help="Enable memory growth")
     parser.add_argument("--num-devices", type=int, default=1, help="Number of devices to train on")

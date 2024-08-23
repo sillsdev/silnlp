@@ -18,6 +18,7 @@ RUN apt-get install --no-install-recommends -y \
     git \
     python$PYTHON_VERSION \
     python3-pip \
+    python3-dev \
     python$PYTHON_VERSION-venv \
     build-essential \
     gdb \
@@ -43,5 +44,6 @@ ENV SIL_NLP_CACHE_EXPERIMENT_DIR=/root/.cache/silnlp/experiments
 ENV SIL_NLP_CACHE_PROJECT_DIR=/root/.cache/silnlp/projects
 # Set environment variables
 ENV CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
-ENV SIL_NLP_DATA_PATH=/aqua-ml-data
+ENV SIL_NLP_DATA_PATH=/silnlp
+ENV EFLOMAL_PATH=/workspaces/silnlp/.venv/lib/python3.8/site-packages/eflomal/bin
 CMD ["bash"]
