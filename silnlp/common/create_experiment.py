@@ -10,7 +10,9 @@ import yaml
 
 from .environment import SIL_NLP_ENV
 from .iso_info import NLLB_ISO_SET, NLLB_TAG_FROM_ISO, ALT_ISO
-from .find_by_iso3 import LANGUAGE_FAMILY_FILE, load_language_data, find_related_isocodes, get_equivalent_isocodes
+from .find_by_iso import load_language_data, find_related_isocodes
+
+LANGUAGE_FAMILY_FILE = SIL_NLP_ENV.assets_dir / "languageFamilies.json"
 
 NLLB_ISOS = NLLB_ISO_SET
 LANGUAGE_DATA, COUNTRY_DATA, FAMILY_DATA = load_language_data(LANGUAGE_FAMILY_FILE)
@@ -207,7 +209,7 @@ def main():
     parser.add_argument(
         "--books",
         type=str,
-        default=None,
+        nargs="*",
         help="List of books to translate. Books must be specified if a source is given.",
     )
     # parser.add_argument(
@@ -224,8 +226,8 @@ def main():
 
     scripture_dir = SIL_NLP_ENV.mt_scripture_dir
     target_iso, target_file = find_scripture_file_info(args.target, scripture_dir)
-
-    target_isos = get_equivalent_isocodes(target_iso)
+                    
+    target_isos = {code for iso_code in target_iso for code in (iso_code, ALT_ISO.get_alternative(iso_code)) if code}
 
     for iso in target_isos:
         if iso in LANGUAGE_DATA:
@@ -264,7 +266,7 @@ def main():
 
     source_files = [source.split(".")[0] for source in args.sources]  # Remove file extension if present
     source_isos = set(extract_iso_code(source) for source in args.sources)
-    source_isos = get_equivalent_isocodes(source_isos)
+    source_isos = {code for iso_code in source_isos for code in (iso_code, ALT_ISO.get_alternative(iso_code)) if code}
     source_nllb_isos = [iso for iso in source_isos if iso in NLLB_ISO_SET]
     
     if source_nllb_isos:
@@ -286,7 +288,7 @@ def main():
         filter_verse_counts(experiment_series_dir)
 
     corpus_stats_file = experiment_series_dir / "align" / "corpus-stats.csv"
-    filtered_rows = read_corpus_stats(corpus_stats_file,alignment_threshold=0.4, verse_count_threshold = 3000)
+    filtered_rows = read_corpus_stats(corpus_stats_file,alignment_threshold=0.2, verse_count_threshold = 3000)
 
     lang_codes = {}
     for row in filtered_rows:
