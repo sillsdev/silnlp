@@ -102,7 +102,7 @@ def get_scripture_parallel_corpus(
             if src_sentences[i] == "...":
                 src_sentences[i] = ""
             if trg_sentences[i] == "...":
-                trg_sentences[i] == ""
+                trg_sentences[i] = ""
             if len(src_sentences[i]) == 0 and len(trg_sentences[i]) == 0:
                 vrefs.pop(i)
                 src_sentences.pop(i)
