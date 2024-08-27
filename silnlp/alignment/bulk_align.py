@@ -28,8 +28,7 @@ def align_set(src_input_path: Path, trg_input_path: Path, output_dir: Path, alig
 
     src_synced_path = output_dir / src_input_path.name
     trg_synced_path = output_dir / trg_input_path.name
-    pcorp_df = get_scripture_parallel_corpus(src_input_path, trg_input_path, remove_empty_sentences=False)
-    pcorp_df = pcorp_df.loc[(pcorp_df["source"].str.len() > 0) & (pcorp_df["target"].str.len() > 0)]
+    pcorp_df = get_scripture_parallel_corpus(src_input_path, trg_input_path)
     with src_synced_path.open("w+", encoding="utf-8") as source_file:
         source_file.write("\n".join(sentence for sentence in pcorp_df["source"]))
     with trg_synced_path.open("w+", encoding="utf-8") as target_file:
