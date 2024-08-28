@@ -50,9 +50,9 @@ class SILClearML:
             self.task.set_base_docker(
                 # docker_image="ghcr.io/sillsdev/silnlp:1.01.4",
                 docker_image="nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu20.04",
-                docker_arguments="--env TOKENIZERS_PARALLELISM=false",
+                docker_arguments="--env TOKENIZERS_PARALLELISM=false --env EFLOMAL_PATH=/root/.clearml/venvs-builds/3.8/task_repository/silnlp.git/.venv/lib/python3.8/site-packages/eflomal/bin",
                 docker_setup_bash_script=[
-                    "apt install -y python3-venv",
+                    "apt install -y python3-venv python3-dev",
                     "python3 -m pip install --user pipx",
                     "PATH=$PATH:/root/.local/bin",
                     "pipx install poetry==1.7.1",

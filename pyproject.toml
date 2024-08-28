@@ -81,7 +81,8 @@ sacremoses = "^0.0.53"
 evaluate = "^0.3.0"
 python-docx = "^0.8.11"
 iso639-lang = "^2.1.0"
-eflomal = { version = "^2.0.0", optional = true }
+eflomal = "^2.0.0"
+cython = "0.29.35"
 accelerate = "^0.23.0"
 transformers = "^4.36.2"
 optimum = "^1.16.0"
@@ -114,9 +115,6 @@ pandas-stubs = "^1.0.4"
 types-regex = "^2023.10.3.0"
 lxml-stubs = "^0.4.0"
 mypy = "^1.7.1"
-
-[tool.poetry.extras]
-eflomal = ["eflomal"]
 
 [[tool.poetry.source]]
 name = "torch"
