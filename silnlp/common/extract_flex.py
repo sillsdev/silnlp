@@ -1,6 +1,6 @@
 import xml.etree.ElementTree as ET
 from argparse import ArgumentParser
-from typing import Optional
+from typing import Optional, Set
 
 from pathlib2 import Path
 from tqdm import tqdm
@@ -10,8 +10,8 @@ def extract_flex(
     xml: ET.ElementTree,
     name: str,
     output_folder: Path,
-    only_languages: "Optional[set[str]]" = None,
-    only_textids: "Optional[set[str]]" = None,
+    only_languages: Optional[Set[str]] = None,
+    only_textids: Optional[Set[str]] = None,
 ):
     print("Extracting text corpora from FLEx data...")
     lines = 0
@@ -20,7 +20,11 @@ def extract_flex(
     text_elements = xml.findall("interlinear-text")
     for text_element in tqdm(text_elements):
         text_id_elements = list(filter(lambda i: i.attrib["type"] == "title", text_element.findall("item")))
-        if only_textids is not None and len(only_textids) > 0 and (len(text_id_elements) == 0 or not any(t.text in only_textids for t in text_id_elements)):
+        if (
+            only_textids is not None
+            and len(only_textids) > 0
+            and (len(text_id_elements) == 0 or not any(t.text in only_textids for t in text_id_elements))
+        ):
             continue
         if only_textids is not None and len(only_textids) > 0 and len(text_id_elements) > 0:
             text_ids_found.add(text_id_elements[0].text)
