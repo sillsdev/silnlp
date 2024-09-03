@@ -69,10 +69,10 @@ from transformers.utils import (
 )
 from transformers.utils.logging import tqdm
 
-from ..common.corpus import count_lines, get_terms
+from ..common.corpus import Term, count_lines, get_terms
 from ..common.environment import SIL_NLP_ENV, download_if_s3_paths
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
-from .config import CheckpointType, Config, CorpusPair, NMTModel
+from .config import CheckpointType, Config, DataFile, NMTModel
 from .tokenizer import NullTokenizer, Tokenizer
 
 if is_safetensors_available():
@@ -604,7 +604,7 @@ class HuggingFaceConfig(Config):
             self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
         return self._tokenizer
 
-    def _write_dictionary(self, tokenizer: Tokenizer, pair: CorpusPair) -> int:
+    def _write_dictionary(self, tokenizer: Tokenizer, src_terms_files: Dict[DataFile, str], trg_terms_files: Dict[DataFile, str]) -> int:
         terms_config = self.data["terms"]
         dict_count = 0
         with ExitStack() as stack:
@@ -618,10 +618,10 @@ class HuggingFaceConfig(Config):
                 return 0
             categories_set: Optional[Set[str]] = None if categories is None else set(categories)
 
-            all_trg_terms = [
-                (trg_terms_file, get_terms(trg_terms_file.path)) for trg_terms_file in pair.trg_terms_files
-            ]
-            for trg_terms_file, trg_terms in all_trg_terms:
+            all_trg_terms: List[Tuple[DataFile, Dict[str, Term], str]] = []
+            for trg_terms_file, tags_str in trg_terms_files.items():
+                all_trg_terms.append((trg_terms_file, get_terms(trg_terms_file.path), tags_str))
+            for trg_terms_file, trg_terms, tags_str in all_trg_terms:
                 tokenizer.set_trg_lang(trg_terms_file.iso)
                 for trg_term in trg_terms.values():
                     if categories_set is not None and trg_term.cat not in categories_set:
@@ -642,9 +642,11 @@ class HuggingFaceConfig(Config):
                     dict_count += 1
 
             if terms_config["include_glosses"] and "en" in self.trg_isos:
-                all_src_terms = [get_terms(src_terms_file.path) for src_terms_file in pair.src_terms_files]
+                all_src_terms: List[Tuple[DataFile, Dict[str, Term], str]] = []
+                for src_terms_file, tags_str in src_terms_files.items():
+                    all_src_terms.append((src_terms_file, get_terms(src_terms_file.path), tags_str))
                 tokenizer.set_trg_lang("en")
-                for src_terms in all_src_terms:
+                for src_term_file, src_terms, tags_str in all_src_terms:
                     for src_term in src_terms.values():
                         if categories_set is not None and src_term.cat not in categories_set:
                             continue
