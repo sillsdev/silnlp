@@ -691,7 +691,7 @@ class OpenNMTConfig(Config):
             aligner.train(src_train_path, trg_train_path)
             aligner.force_align(src_align_path, trg_align_path, self.exp_dir / "train.alignments.txt")
 
-    def _write_dictionary(self, tokenizer: Tokenizer, src_terms_files: Dict[DataFile, str], trg_terms_files: Dict[DataFile, str]) -> int:
+    def _write_dictionary(self, tokenizer: Tokenizer, src_terms_files: List[Tuple[DataFile, str]], trg_terms_files: List[Tuple[DataFile, str]]) -> int:
         terms_config = self.data["terms"]
         dict_books = get_books(terms_config["dictionary_books"]) if "dictionary_books" in terms_config else None
         terms = self._collect_terms(src_terms_files, trg_terms_files, filter_books=dict_books)

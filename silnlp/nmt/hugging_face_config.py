@@ -604,7 +604,12 @@ class HuggingFaceConfig(Config):
             self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
         return self._tokenizer
 
-    def _write_dictionary(self, tokenizer: Tokenizer, src_terms_files: Dict[DataFile, str], trg_terms_files: Dict[DataFile, str]) -> int:
+    def _write_dictionary(
+        self,
+        tokenizer: Tokenizer,
+        src_terms_files: List[Tuple[DataFile, str]],
+        trg_terms_files: List[Tuple[DataFile, str]],
+    ) -> int:
         terms_config = self.data["terms"]
         dict_count = 0
         with ExitStack() as stack:
@@ -619,8 +624,8 @@ class HuggingFaceConfig(Config):
             categories_set: Optional[Set[str]] = None if categories is None else set(categories)
 
             all_trg_terms: List[Tuple[DataFile, Dict[str, Term], str]] = []
-            for trg_terms_file, tags_str in trg_terms_files.items():
-                all_trg_terms.append((trg_terms_file, get_terms(trg_terms_file.path), tags_str))
+            for trg_terms_file in trg_terms_files:
+                all_trg_terms.append((trg_terms_file[0], get_terms(trg_terms_file[0].path), trg_terms_file[1]))
             for trg_terms_file, trg_terms, tags_str in all_trg_terms:
                 tokenizer.set_trg_lang(trg_terms_file.iso)
                 for trg_term in trg_terms.values():
@@ -643,8 +648,8 @@ class HuggingFaceConfig(Config):
 
             if terms_config["include_glosses"] and "en" in self.trg_isos:
                 all_src_terms: List[Tuple[DataFile, Dict[str, Term], str]] = []
-                for src_terms_file, tags_str in src_terms_files.items():
-                    all_src_terms.append((src_terms_file, get_terms(src_terms_file.path), tags_str))
+                for src_terms_file in src_terms_files:
+                    all_src_terms.append((src_terms_file[0], get_terms(src_terms_file[0].path), src_terms_file[1]))
                 tokenizer.set_trg_lang("en")
                 for src_term_file, src_terms, tags_str in all_src_terms:
                     for src_term in src_terms.values():

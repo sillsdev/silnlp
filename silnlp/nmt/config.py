@@ -86,9 +86,6 @@ class DataFile:
         self.project = (
             parts[1] if str(self.path.parent).startswith(str(SIL_NLP_ENV.mt_scripture_dir)) else BASIC_DATA_PROJECT
         )
-    
-    def __hash__(self) -> int:
-        return hash(self.path)
 
     @property
     def is_scripture(self) -> bool:
@@ -534,20 +531,20 @@ class Config(ABC):
 
         train_count = 0
         terms_config = self.data["terms"]
-        src_terms_files: Dict[DataFile, str] = {}
-        trg_terms_files: Dict[DataFile, str] = {}
+        src_terms_files: List[Tuple[DataFile, str]] = []
+        trg_terms_files: List[Tuple[DataFile, str]] = []
         for pair in self.corpus_pairs:
             if pair.is_scripture:
                 train_count += self._write_scripture_data_sets(tokenizer, pair, force_align)
             else:
                 train_count += self._write_basic_data_sets(tokenizer, pair)
-            
+
             if terms_config["dictionary"] or terms_config["train"]:
                 for file in pair.src_terms_files:
-                    src_terms_files[file] = self._get_tags_str(pair.tags)
+                    src_terms_files.append((file, self._get_tags_str(pair.tags)))
                 for file in pair.trg_terms_files:
-                    trg_terms_files[file] = self._get_tags_str(pair.tags)
-        
+                    trg_terms_files.append((file, self._get_tags_str(pair.tags)))
+
         terms_train_count = 0
         if terms_config["train"]:
             terms_train_count = self._write_terms(tokenizer, src_terms_files, trg_terms_files)
@@ -558,7 +555,7 @@ class Config(ABC):
         if terms_config["dictionary"]:
             dict_count = self._write_dictionary(tokenizer, src_terms_files, trg_terms_files)
             LOGGER.info(f"dictionary size: {dict_count}")
-        
+
         if stats:
             self._calculate_tokenization_stats()
 
@@ -873,11 +870,7 @@ class Config(ABC):
             if self._has_multiple_test_projects(src_iso, trg_iso):
                 for project in test_projects:
                     self._fill_corpus(self.test_trg_filename(src_iso, trg_iso, project), len(pair_test))
-        LOGGER.info(
-            f"train size: {train_count},"
-            f" val size: {val_count},"
-            f" test size: {test_count},"
-        )
+        LOGGER.info(f"train size: {train_count}," f" val size: {val_count}," f" test size: {test_count},")
         return train_count
 
     def _populate_pair_test_indices(self, exp_name: str, pair_test_indices: Dict[Tuple[str, str], Set[int]]) -> None:
@@ -1036,11 +1029,15 @@ class Config(ABC):
                     train_count += 1
         return train_count
 
-    def _write_terms(self, tokenizer: Tokenizer, src_terms_files: Dict[DataFile, str], trg_terms_files: Dict[DataFile, str]) -> int:
+    def _write_terms(
+        self,
+        tokenizer: Tokenizer,
+        src_terms_files: List[Tuple[DataFile, str]],
+        trg_terms_files: List[Tuple[DataFile, str]],
+    ) -> int:
         terms = self._collect_terms(src_terms_files, trg_terms_files)
-        terms = terms.drop_duplicates(subset=["source"])
-        terms = terms.drop_duplicates(subset=["target"])
-        
+        terms = terms.drop_duplicates(subset=["source", "target"])
+
         if terms is None:
             return 0
 
@@ -1077,7 +1074,10 @@ class Config(ABC):
         return train_count
 
     def _collect_terms(
-        self, src_terms_files: Dict[DataFile, str], trg_terms_files: Dict[DataFile, str],  filter_books: Optional[Set[int]] = None
+        self,
+        src_terms_files: List[Tuple[DataFile, str]],
+        trg_terms_files: List[Tuple[DataFile, str]],
+        filter_books: Optional[Set[int]] = None,
     ) -> Optional[pd.DataFrame]:
         terms_config = self.data["terms"]
         terms: Optional[pd.DataFrame] = None
@@ -1087,15 +1087,15 @@ class Config(ABC):
         if categories is not None and len(categories) == 0:
             return None
         categories_set: Optional[Set[str]] = None if categories is None else set(categories)
-        
+
         all_src_terms: List[Tuple[DataFile, Dict[str, Term], str]] = []
-        for src_terms_file, tags_str in src_terms_files.items():
-            all_src_terms.append((src_terms_file, get_terms(src_terms_file.path), tags_str))
-            
+        for src_terms_file in src_terms_files:
+            all_src_terms.append((src_terms_file[0], get_terms(src_terms_file[0].path), src_terms_file[1]))
+
         all_trg_terms: List[Tuple[DataFile, Dict[str, Term], str]] = []
-        for trg_terms_file, tags_str in trg_terms_files.items():
-            all_trg_terms.append((trg_terms_file, get_terms(trg_terms_file.path), tags_str))
-        
+        for trg_terms_file in trg_terms_files:
+            all_trg_terms.append((trg_terms_file[0], get_terms(trg_terms_file[0].path), trg_terms_file[1]))
+
         for src_terms_file, src_terms, tags_str in all_src_terms:
             for trg_terms_file, trg_terms in all_trg_terms:
                 if src_terms_file.iso == trg_terms_file.iso:
@@ -1460,4 +1460,9 @@ class Config(ABC):
     def _build_vocabs(self, stats: bool = False) -> None: ...
 
     @abstractmethod
-    def _write_dictionary(self, tokenizer: Tokenizer, src_terms_files: Dict[DataFile, str], trg_terms_files: Dict[DataFile, str]) -> int: ...
+    def _write_dictionary(
+        self,
+        tokenizer: Tokenizer,
+        src_terms_files: List[Tuple[DataFile, str]],
+        trg_terms_files: List[Tuple[DataFile, str]],
+    ) -> int: ...
