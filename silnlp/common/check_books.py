@@ -86,7 +86,7 @@ def parse_book(project_dir: str, book: str):
                 #            sentences = [s.text.strip() for s in segments]
                 vrefs = [s.ref for s in segments]
 
-                LOGGER.info(f"{book} in project {project_dir} parsed correctly and contains {len(vrefs)} verses.")
+                #LOGGER.info(f"{book} in project {project_dir} parsed correctly and contains {len(vrefs)} verses.")
             else:
                 LOGGER.info(f"The following error occured while parsing {book} in project {project_dir}")
                 for error in errors:
