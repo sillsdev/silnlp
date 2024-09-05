@@ -3,10 +3,10 @@ Transforms tsv files in the XRI format to extract files suitable for training SI
 
 Example:
 
-    $ python xri_etl.py   data.tsv   swa     ngq     XRI-2024-08-14
-                             ^        ^       ^           ^
-                           input   source    target     dataset
-                           file    iso code  iso code   descriptor
+    $ python -m silnlp.common.extract_xri   data.tsv   swa     ngq     XRI-2024-08-14
+                                               ^        ^       ^           ^
+                                             input   source    target     dataset
+                                             file    iso code  iso code   descriptor
 
 Each execution puts the extract files into a unique directory in `out` with name generated from script inputs and the current time:
 
@@ -20,6 +20,7 @@ Each execution puts the extract files into a unique directory in `out` with name
         ├── ngq-XRI-2024-08-14.dev.txt     ┛
         ├── swa-XRI-2024-08-14.test.txt    ┓ extract files filtered to test data
         └── ngq-XRI-2024-08-14.test.txt    ┛
+    (Note that a subsequent PR is going to rework the output location to follow SIL team conventions)
 
 Run with --help for more details.
 
