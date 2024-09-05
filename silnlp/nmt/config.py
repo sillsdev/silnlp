@@ -19,6 +19,7 @@ from tqdm import tqdm
 from ..alignment.config import get_aligner_name
 from ..alignment.utils import add_alignment_scores
 from ..common.corpus import (
+    Term,
     exclude_chapters,
     filter_parallel_corpus,
     get_mt_corpus_path,
@@ -529,11 +530,31 @@ class Config(ABC):
         self._delete_files("dict.*.txt")
 
         train_count = 0
+        terms_config = self.data["terms"]
+        src_terms_files: List[Tuple[DataFile, str]] = []
+        trg_terms_files: List[Tuple[DataFile, str]] = []
         for pair in self.corpus_pairs:
             if pair.is_scripture:
                 train_count += self._write_scripture_data_sets(tokenizer, pair, force_align)
             else:
                 train_count += self._write_basic_data_sets(tokenizer, pair)
+
+            if terms_config["dictionary"] or terms_config["train"]:
+                for file in pair.src_terms_files:
+                    src_terms_files.append((file, self._get_tags_str(pair.tags)))
+                for file in pair.trg_terms_files:
+                    trg_terms_files.append((file, self._get_tags_str(pair.tags)))
+
+        terms_train_count = 0
+        if terms_config["train"]:
+            terms_train_count = self._write_terms(tokenizer, src_terms_files, trg_terms_files)
+            LOGGER.info(f"terms train size: {terms_train_count}")
+        train_count += terms_train_count
+
+        dict_count = 0
+        if terms_config["dictionary"]:
+            dict_count = self._write_dictionary(tokenizer, src_terms_files, trg_terms_files)
+            LOGGER.info(f"dictionary size: {dict_count}")
 
         if stats:
             self._calculate_tokenization_stats()
@@ -812,16 +833,6 @@ class Config(ABC):
                 tokenizer, train, pair.mapping == DataFileMapping.MIXED_SRC, project_isos, pair.augmentations
             )
 
-        terms_config = self.data["terms"]
-        terms_train_count = 0
-        if terms_config["train"]:
-            terms_train_count = self._write_terms(tokenizer, pair, tags_str)
-        train_count += terms_train_count
-
-        dict_count = 0
-        if terms_config["dictionary"]:
-            dict_count = self._write_dictionary(tokenizer, pair)
-
         val_count = 0
         if len(val) > 0:
             for (src_iso, trg_iso), pair_val in val.items():
@@ -859,13 +870,7 @@ class Config(ABC):
             if self._has_multiple_test_projects(src_iso, trg_iso):
                 for project in test_projects:
                     self._fill_corpus(self.test_trg_filename(src_iso, trg_iso, project), len(pair_test))
-        LOGGER.info(
-            f"train size: {train_count},"
-            f" val size: {val_count},"
-            f" test size: {test_count},"
-            f" dict size: {dict_count},"
-            f" terms train size: {terms_train_count}"
-        )
+        LOGGER.info(f"train size: {train_count}," f" val size: {val_count}," f" test size: {test_count},")
         return train_count
 
     def _populate_pair_test_indices(self, exp_name: str, pair_test_indices: Dict[Tuple[str, str], Set[int]]) -> None:
@@ -1024,10 +1029,17 @@ class Config(ABC):
                     train_count += 1
         return train_count
 
-    def _write_terms(self, tokenizer: Tokenizer, pair: CorpusPair, tags_str: str) -> int:
-        terms = self._collect_terms(pair, tags_str)
+    def _write_terms(
+        self,
+        tokenizer: Tokenizer,
+        src_terms_files: List[Tuple[DataFile, str]],
+        trg_terms_files: List[Tuple[DataFile, str]],
+    ) -> int:
+        terms = self._collect_terms(src_terms_files, trg_terms_files)
+
         if terms is None:
             return 0
+        terms = terms.drop_duplicates(subset=["source", "target"])
 
         train_count = 0
         with ExitStack() as stack:
@@ -1062,7 +1074,10 @@ class Config(ABC):
         return train_count
 
     def _collect_terms(
-        self, pair: CorpusPair, tags_str: str = "", filter_books: Optional[Set[int]] = None
+        self,
+        src_terms_files: List[Tuple[DataFile, str]],
+        trg_terms_files: List[Tuple[DataFile, str]],
+        filter_books: Optional[Set[int]] = None,
     ) -> Optional[pd.DataFrame]:
         terms_config = self.data["terms"]
         terms: Optional[pd.DataFrame] = None
@@ -1072,9 +1087,16 @@ class Config(ABC):
         if categories is not None and len(categories) == 0:
             return None
         categories_set: Optional[Set[str]] = None if categories is None else set(categories)
-        all_src_terms = [(src_terms_file, get_terms(src_terms_file.path)) for src_terms_file in pair.src_terms_files]
-        all_trg_terms = [(trg_terms_file, get_terms(trg_terms_file.path)) for trg_terms_file in pair.trg_terms_files]
-        for src_terms_file, src_terms in all_src_terms:
+
+        all_src_terms: List[Tuple[DataFile, Dict[str, Term], str]] = []
+        for src_terms_file, tags_str in src_terms_files:
+            all_src_terms.append((src_terms_file, get_terms(src_terms_file.path), tags_str))
+
+        all_trg_terms: List[Tuple[DataFile, Dict[str, Term], str]] = []
+        for trg_terms_file, tags_str in trg_terms_files:
+            all_trg_terms.append((trg_terms_file, get_terms(trg_terms_file.path), tags_str))
+
+        for src_terms_file, src_terms, tags_str in all_src_terms:
             for trg_terms_file, trg_terms in all_trg_terms:
                 if src_terms_file.iso == trg_terms_file.iso:
                     continue
@@ -1085,14 +1107,14 @@ class Config(ABC):
         if terms_config["include_glosses"]:
             for gloss_iso in ["en", "fr", "id"]:
                 if gloss_iso in self.trg_isos:
-                    for src_terms_file, src_terms in all_src_terms:
+                    for src_terms_file, src_terms, tags_str in all_src_terms:
                         cur_terms = get_terms_data_frame(src_terms, categories_set, filter_books)
                         cur_terms = cur_terms.rename(columns={"rendering": "source", "gloss": "target"})
                         cur_terms["source_lang"] = src_terms_file.iso
                         cur_terms["target_lang"] = gloss_iso
                         terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
                 if gloss_iso in self.src_isos:
-                    for trg_terms_file, trg_terms in all_trg_terms:
+                    for trg_terms_file, trg_terms, tags_str in all_trg_terms:
                         cur_terms = get_terms_data_frame(trg_terms, categories_set, filter_books)
                         cur_terms = cur_terms.rename(columns={"rendering": "target", "gloss": "source"})
                         cur_terms["source_lang"] = gloss_iso
@@ -1438,4 +1460,9 @@ class Config(ABC):
     def _build_vocabs(self, stats: bool = False) -> None: ...
 
     @abstractmethod
-    def _write_dictionary(self, tokenizer: Tokenizer, pair: CorpusPair) -> int: ...
+    def _write_dictionary(
+        self,
+        tokenizer: Tokenizer,
+        src_terms_files: List[Tuple[DataFile, str]],
+        trg_terms_files: List[Tuple[DataFile, str]],
+    ) -> int: ...
