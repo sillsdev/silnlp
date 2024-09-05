@@ -8,19 +8,27 @@ Example:
                                              input   source    target     dataset
                                              file    iso code  iso code   descriptor
 
-Each execution puts the extract files into a unique directory in `out` with name generated from script inputs and the current time:
+The output directory can be explicitly set using the `-output` arg, e.g.
 
-    out
-    └── swa-ngq-XRI-2024-08-14-20240822-180428
+    $ python -m silnlp.common.extract_xri data.tsv swa ngq XRI-2024-08-14 -output /tmp/test
+
+Note that the script will write over any existing extract files in that directory.
+
+If the output directory isn't set, a unique directory is created within the SIL_NLP_ENV.mt_corpora_dir (see common/environment.py).
+The unique directory is constructed using the input arguments and current date time,
+e.g. `swa-ngq-XRI-2024-08-14-20240822-180428` in the example above.
+
+Files of the form `*.all.txt` and `*.(train/dev/test).txt` are created in the output directory for source and target languages.
+The prefix of the filename is built from the cli inputs. For the example above these files would be created:
+
         ├── swa-XRI-2024-08-14.all.txt     ┓ complete extract files (no filtering)
         ├── ngq-XRI-2024-08-14.all.txt     ┛
         ├── swa-XRI-2024-08-14.train.txt   ┓ extract files filtered to training data
         ├── ngq-XRI-2024-08-14.train.txt   ┛
-        ├── swa-XRI-2024-08-14.dev.txt     ┓ extract files filtered to dev/validation data
-        ├── ngq-XRI-2024-08-14.dev.txt     ┛
+        ├── swa-XRI-2024-08-14.val.txt     ┓ extract files filtered to dev/validation data
+        ├── ngq-XRI-2024-08-14.val.txt     ┛
         ├── swa-XRI-2024-08-14.test.txt    ┓ extract files filtered to test data
         └── ngq-XRI-2024-08-14.test.txt    ┛
-    (Note that a subsequent PR is going to rework the output location to follow SIL team conventions)
 
 Run with --help for more details.
 
@@ -32,10 +40,11 @@ import csv
 import os
 import time
 
+from ..common.environment import SIL_NLP_ENV
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 
 class Split(Enum):
@@ -58,6 +67,7 @@ class CliInput:
     source_iso: str
     target_iso: str
     dataset_descriptor: str
+    output: Optional[str]
 
 
 def load_sentence_pairs(input_file_path: str) -> List[SentencePair]:
@@ -101,14 +111,18 @@ def write_output_file(filename: str, sentences: List[str]) -> None:
 
 
 def create_extract_files(cli_input: CliInput, sentence_pairs: List[SentencePair]) -> None:
-    unique_output_dir = (
-        f"{cli_input.source_iso}-{cli_input.target_iso}-{cli_input.dataset_descriptor}-{time.strftime('%Y%m%d-%H%M%S')}"
-    )
-    Path(os.path.join("out", unique_output_dir)).mkdir(parents=True, exist_ok=True)
+    if cli_input.output is None:
+        unique_dir = f"{cli_input.source_iso}-{cli_input.target_iso}-{cli_input.dataset_descriptor}-{time.strftime('%Y%m%d-%H%M%S')}"
+        output_dir = Path(os.path.join(SIL_NLP_ENV.mt_corpora_dir, unique_dir))
+    else:
+        output_dir = Path(cli_input.output)
+
+    print(f"Outputting to directory: {output_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     def create_source_target_files(sub_sentence_pairs: List[SentencePair], suffix: str) -> None:
         def build_output_path(iso: str) -> str:
-            return os.path.join("out", unique_output_dir, f"{iso}-{cli_input.dataset_descriptor}.{suffix}.txt")
+            return os.path.join(output_dir, f"{iso}-{cli_input.dataset_descriptor}.{suffix}.txt")
 
         source_filename = build_output_path(iso=cli_input.source_iso)
         source_sentences = [sentence.source for sentence in sub_sentence_pairs]
@@ -147,6 +161,7 @@ def main() -> None:
     parser.add_argument("source_iso", help="The ISO 693-3 code for the source/LWC language", type=str)
     parser.add_argument("target_iso", help="The ISO 693-3 code for the target/vernacular language", type=str)
     parser.add_argument("dataset", help="A descriptor of the dataset to be used in the output filename", type=str)
+    parser.add_argument("-output", help="Optional path to the output directory where extract files are generated", type=str)
     args = parser.parse_args()
 
     cli_input = CliInput(
@@ -154,6 +169,7 @@ def main() -> None:
         source_iso=args.source_iso,
         target_iso=args.target_iso,
         dataset_descriptor=args.dataset,
+        output=args.output,
     )
     run(cli_input)
 
