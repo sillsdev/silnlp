@@ -1036,10 +1036,10 @@ class Config(ABC):
         trg_terms_files: List[Tuple[DataFile, str]],
     ) -> int:
         terms = self._collect_terms(src_terms_files, trg_terms_files)
-        terms = terms.drop_duplicates(subset=["source", "target"])
 
         if terms is None:
             return 0
+        terms = terms.drop_duplicates(subset=["source", "target"])
 
         train_count = 0
         with ExitStack() as stack:
