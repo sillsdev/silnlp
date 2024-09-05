@@ -1089,12 +1089,12 @@ class Config(ABC):
         categories_set: Optional[Set[str]] = None if categories is None else set(categories)
 
         all_src_terms: List[Tuple[DataFile, Dict[str, Term], str]] = []
-        for src_terms_file in src_terms_files:
-            all_src_terms.append((src_terms_file[0], get_terms(src_terms_file[0].path), src_terms_file[1]))
+        for src_terms_file, tags_str in src_terms_files:
+            all_src_terms.append((src_terms_file, get_terms(src_terms_file.path), tags_str))
 
         all_trg_terms: List[Tuple[DataFile, Dict[str, Term], str]] = []
-        for trg_terms_file in trg_terms_files:
-            all_trg_terms.append((trg_terms_file[0], get_terms(trg_terms_file[0].path), trg_terms_file[1]))
+        for trg_terms_file, tags_str in trg_terms_files:
+            all_trg_terms.append((trg_terms_file, get_terms(trg_terms_file.path), tags_str))
 
         for src_terms_file, src_terms, tags_str in all_src_terms:
             for trg_terms_file, trg_terms in all_trg_terms:
