@@ -1097,7 +1097,7 @@ class Config(ABC):
             all_trg_terms.append((trg_terms_file, get_terms(trg_terms_file.path), tags_str))
 
         for src_terms_file, src_terms, tags_str in all_src_terms:
-            for trg_terms_file, trg_terms in all_trg_terms:
+            for trg_terms_file, trg_terms, trg_tags_str in all_trg_terms:
                 if src_terms_file.iso == trg_terms_file.iso:
                     continue
                 cur_terms = get_terms_corpus(src_terms, trg_terms, categories_set, filter_books)
