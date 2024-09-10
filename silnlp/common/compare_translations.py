@@ -11,10 +11,10 @@ from silnlp.common.metrics import compute_wer_score
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compare translations")
     parser.add_argument(
-        "--dir-paths", nargs=2, type=Path, required=True, help="Paths to the Paratext project directories"
+        "--projects", nargs=2, type=Path, required=True, help="Paths to the Paratext project directories"
     )
     parser.add_argument(
-        "--output-path", type=Path, required=True, help="Path to the directory to save the comparison scores"
+        "--output-file", type=Path, required=False, help="Path to the file to save the comparison scores"
     )
     parser.add_argument(
         "--scorers",
@@ -24,12 +24,18 @@ def main() -> None:
         help="Set of scorers",
     )
     args = parser.parse_args()
-    scores = compare_translations(args.dir_paths[0], args.dir_paths[1], args.scorers)
+    scores = compare_translations(args.projects[0], args.projects[1], args.scorers)
 
-    with open(f"{args.output_path}/comparison_scores.txt", "w") as f:
-        f.write(f"Comparison of Translations in Paratext Projects: {args.dir_paths[0]} and {args.dir_paths[1]}\n")
+    print(f"{args.projects[0]},{args.projects[1]}")
+    if args.output_file is not None:
+        with open(args.output_file, "w") as f:
+            f.write(f"{args.projects[0]},{args.projects[1]}\n")
+            for key, value in scores.items():
+                f.write(f"{key},{value}\n")
+                print(f"{key},{value}")
+    else:
         for key, value in scores.items():
-            f.write(f"{key}: {value}\n")
+            print(f"{key},{value}")
 
 
 def compare_translations(project1: Path, project2: Path, scorers: Set[str]) -> Dict[str, float]:
