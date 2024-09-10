@@ -715,7 +715,6 @@ data = [
     ("fij", "fj"),
     ("fin", "fi"),
     ("fra", "fr"),
-    ("fre", "fr"),
     ("fry", "fy"),
     ("ful", "ff"),
     ("geo", "ka"),
