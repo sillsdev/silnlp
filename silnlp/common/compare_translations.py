@@ -1,17 +1,21 @@
 import argparse
-import re
 from pathlib import Path
 from typing import Dict, List, Set
 
 import sacrebleu
+from machine.corpora import ParatextTextCorpus
 
 from silnlp.common.metrics import compute_wer_score
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compare translations")
-    parser.add_argument("--dir-path", type=Path, required=True, help="Path to the directory")
-    parser.add_argument("--file-paths", nargs=2, required=True, type=Path, help="Paths to the files from the directory")
+    parser.add_argument(
+        "--dir-paths", nargs=2, type=Path, required=True, help="Paths to the Paratext project directories"
+    )
+    parser.add_argument(
+        "--output-path", type=Path, required=True, help="Path to the directory to save the comparison scores"
+    )
     parser.add_argument(
         "--scorers",
         nargs="*",
@@ -20,39 +24,26 @@ def main() -> None:
         help="Set of scorers",
     )
     args = parser.parse_args()
+    scores = compare_translations(args.dir_paths[0], args.dir_paths[1], args.scorers)
 
-    file_a = args.dir_path.joinpath(args.file_paths[0])
-    file_b = args.dir_path.joinpath(args.file_paths[1])
-    scores = compare_translations(file_a, file_b, args.scorers)
-
-    with open(f"{args.dir_path}/comparison_scores.txt", "w") as f:
-        f.write(f"Comparison of Translations in Files: {args.file_paths[0]} and {args.file_paths[1]}\n")
+    with open(f"{args.output_path}/comparison_scores.txt", "w") as f:
+        f.write(f"Comparison of Translations in Paratext Projects: {args.dir_paths[0]} and {args.dir_paths[1]}\n")
         for key, value in scores.items():
             f.write(f"{key}: {value}\n")
 
 
-def compare_translations(file_a: Path, file_b: Path, scorers: Set[str]) -> Dict[str, float]:
-    try:
-        with open(file_a, "r") as f:
-            a_lines = f.readlines()
-            # Remove usfm markers
-            if file_a.name.lower().endswith(".usfm") or file_a.name.lower().endswith(".sfm"):
-                print("Removing USFM markers")
-                a_lines = a_lines[8:]
-                a_lines = [re.sub(r"^\\\S+(\s[0-9]+)?", "", line) for line in a_lines]
-        with open(file_b, "r") as f:
-            b_lines = f.readlines()
-            # Remove usfm markers
-            if file_b.name.lower().endswith(".usfm") or file_b.name.lower().endswith(".sfm"):
-                print("Removing USFM markers")
-                b_lines = b_lines[8:]
-                b_lines = [re.sub(r"^\\\S+(\s[0-9]+)?", "", line) for line in b_lines]
+def compare_translations(project1: Path, project2: Path, scorers: Set[str]) -> Dict[str, float]:
+    corpus_a = ParatextTextCorpus(project1)
+    corpus_b = ParatextTextCorpus(project2)
+    parallel_corpus = corpus_a.align_rows(corpus_b)
+    a_lines = []
+    b_lines = []
+    with parallel_corpus.get_rows() as rows:
+        for row in rows:
+            a_lines.append(row.source_text)
+            b_lines.append(row.target_text)
 
-        return score_pair(a_lines, [b_lines], scorers)
-
-    except FileNotFoundError as e:
-        print(f"Error: {e}")
-        return
+    return score_pair(a_lines, [b_lines], scorers)
 
 
 def score_pair(pair_sys: List[str], pair_refs: List[List[str]], scorers: Set[str]) -> Dict[str, float]:
