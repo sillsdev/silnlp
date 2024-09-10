@@ -11,8 +11,7 @@ from silnlp.common.metrics import compute_wer_score
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compare translations")
     parser.add_argument("--dir-path", type=Path, required=True, help="Path to the directory")
-    parser.add_argument("--file-path-a", type=Path, required=True, help="Path to the first file from the directory")
-    parser.add_argument("--file-path-b", type=Path, required=True, help="Path to the second file from the directory")
+    parser.add_argument("--file-paths", nargs=2, required=True, type=Path, help="Paths to the files from the directory")
     parser.add_argument(
         "--scorers",
         nargs="*",
@@ -22,12 +21,12 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    file_a = args.dir_path.joinpath(args.file_path_a)
-    file_b = args.dir_path.joinpath(args.file_path_b)
+    file_a = args.dir_path.joinpath(args.file_paths[0])
+    file_b = args.dir_path.joinpath(args.file_paths[1])
     scores = compare_translations(file_a, file_b, args.scorers)
 
     with open(f"{args.dir_path}/comparison_scores.txt", "w") as f:
-        f.write(f"Comparison of Translations in Files: {args.file_path_a} and {args.file_path_b}\n")
+        f.write(f"Comparison of Translations in Files: {args.file_paths[0]} and {args.file_paths[1]}\n")
         for key, value in scores.items():
             f.write(f"{key}: {value}\n")
 
