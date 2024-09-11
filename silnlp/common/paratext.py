@@ -2,13 +2,14 @@ import logging
 import os
 from contextlib import ExitStack
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, TextIO, Tuple
+from typing import Dict, List, Optional, Set, TextIO, Tuple
 from xml.sax.saxutils import escape
 
 import regex as re
 from lxml import etree
 from machine.corpora import (
     DictionaryTextCorpus,
+    FileParatextProjectSettingsParser,
     MemoryText,
     ParatextTextCorpus,
     Text,
@@ -40,15 +41,17 @@ _NON_LETTER_PATTERN = re.compile(r"([^\p{L}\p{M}]*)[\p{L}\p{M}]+([^\p{L}\p{M}]*)
 LOGGER = logging.getLogger(__name__)
 
 
+# TODO: it seems like everything that uses this immediately calls one of the other functions below,
+# should all the other functions just ask for a project name instead and get the projects themselves?
 def get_project_dir(project: str) -> Path:
     return SIL_NLP_ENV.pt_projects_dir / project
 
 
-def get_iso(settings_tree: etree._ElementTree) -> str:
-    iso = settings_tree.getroot().findtext("LanguageIsoCode")
-    assert iso is not None
-    index = iso.index(":")
-    return iso[:index]
+# TODO: replace
+def get_iso(project: str) -> str:
+    project_dir = get_project_dir(project)
+    settings = FileParatextProjectSettingsParser(project_dir).parse()
+    return settings.language_code
 
 
 def extract_project(
@@ -60,8 +63,7 @@ def extract_project(
     extract_lemmas: bool = False,
     output_project_vrefs: bool = False,
 ) -> Tuple[Path, int]:
-    settings_tree = parse_project_settings(project_dir)
-    iso = get_iso(settings_tree)
+    iso = get_iso(project_dir.name)
 
     ref_corpus: TextCorpus = create_versification_ref_corpus()
 
@@ -329,16 +331,15 @@ def extract_term_renderings(project_dir: Path, corpus_filename: Path, output_dir
         id = escape_id(id)
         rendering_elems[id] = elem
 
-    settings_tree = parse_project_settings(project_dir)
-    iso = get_iso(settings_tree)
-    project_name = settings_tree.getroot().findtext("Name", project_dir.name)
-    terms_setting = settings_tree.getroot().findtext("BiblicalTermsListSetting", "Major::BiblicalTerms.xml")
+    settings = FileParatextProjectSettingsParser(project_dir).parse()
+    iso = settings.language_code
+    project_name = settings.name
 
-    list_type, terms_project, _ = terms_setting.split(":", maxsplit=3)
+    list_type = settings.biblical_terms_list_type
     list_name = list_type
     references: Dict[str, List[VerseRef]] = {}
     if list_type == "Project":
-        if terms_project == project_name:
+        if settings.biblical_terms_project_name == project_name:
             references = extract_terms_list(list_type, output_dir, project_dir)
         else:
             extract_terms_list_from_renderings(project_dir.name, renderings_tree, output_dir)
@@ -411,38 +412,10 @@ def book_file_name_digits(book_num: int) -> str:
 
 def get_book_path(project: str, book: str) -> Path:
     project_dir = get_project_dir(project)
-    settings_tree = parse_project_settings(project_dir)
-    naming_elem = settings_tree.find("Naming")
-    assert naming_elem is not None
-
-    pre_part = naming_elem.get("PrePart", "")
-    post_part = naming_elem.get("PostPart", "")
-    book_name_form = naming_elem.get("BookNameForm")
-    assert book_name_form is not None
-
-    book_num = book_id_to_number(book)
-    if book_name_form == "MAT":
-        book_name = book
-    elif book_name_form == "40" or book_name_form == "41":
-        book_name = book_file_name_digits(book_num)
-    else:
-        book_name = f"{book_file_name_digits(book_num)}{book}"
-
-    book_file_name = f"{pre_part}{book_name}{post_part}"
+    settings = FileParatextProjectSettingsParser(project_dir).parse()
+    book_file_name = settings.get_book_file_name(book)
 
     return SIL_NLP_ENV.pt_projects_dir / project / book_file_name
-
-
-def parse_project_settings(project_dir: Path) -> Any:
-    settings_filename = project_dir / "Settings.xml"
-    if not settings_filename.is_file():
-        settings_filename = next(project_dir.glob("*.ssf"), Path())
-    if not settings_filename.is_file():
-        raise RuntimeError("The project directory does not contain a settings file.")
-
-    with settings_filename.open("rb") as settings_file:
-        settings_tree = etree.parse(settings_file)
-    return settings_tree
 
 
 def get_last_verse(project_dir: str, book: str, chapter: int) -> int:
@@ -533,8 +506,8 @@ def detect_NT_versification(project_dir: str) -> Tuple[List[VersificationType], 
 
 
 def check_versification(project_dir: str) -> Tuple[bool, List[VersificationType]]:
-    project_versification: str = parse_project_settings(project_dir).getroot().findtext("Versification", "4")
-    project_versification: VersificationType = VersificationType(int(project_versification))
+    settings = FileParatextProjectSettingsParser(project_dir).parse()
+    project_versification: VersificationType = VersificationType(int(settings.versification))
 
     check_ot, check_nt, matching = False, False, False
 
