@@ -40,7 +40,6 @@ import csv
 import os
 import time
 
-from ..common.environment import SIL_NLP_ENV
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -113,6 +112,7 @@ def write_output_file(filepath: Path, sentences: List[str]) -> None:
 def create_extract_files(cli_input: CliInput, sentence_pairs: List[SentencePair]) -> None:
     if cli_input.output is None:
         unique_dir = f"{cli_input.source_iso}-{cli_input.target_iso}-{cli_input.dataset_descriptor}-{time.strftime('%Y%m%d-%H%M%S')}"
+        from ..common.environment import SIL_NLP_ENV
         output_dir = SIL_NLP_ENV.mt_corpora_dir / unique_dir
     else:
         output_dir = Path(cli_input.output)
