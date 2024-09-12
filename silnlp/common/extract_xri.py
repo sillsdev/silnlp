@@ -32,11 +32,14 @@ The prefix of the filename is built from the cli inputs. For the example above t
 
 Run with --help for more details.
 
+Logging can be enabled by adding an additional `-log [PATH]` flag pointing to the directory you want the logs written to.
+
 See https://github.com/sillsdev/silnlp/issues/472 for original context.
 """
 
 import argparse
 import csv
+import logging
 import os
 import time
 
@@ -44,6 +47,9 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import List, Optional
+
+
+logger = logging.getLogger(__name__)
 
 
 class Split(Enum):
@@ -67,9 +73,12 @@ class CliInput:
     target_iso: str
     dataset_descriptor: str
     output: Optional[str]
+    log: Optional[str]
 
 
 def load_sentence_pairs(input_file_path: str) -> List[SentencePair]:
+    logger.info("Loading sentence pairs")
+    logger.debug("Opening file")
     with open(input_file_path, "r", encoding="utf-8") as f:
         reader = csv.reader(f, delimiter="\t", quotechar='"')
         rows = list(reader)
@@ -77,12 +86,14 @@ def load_sentence_pairs(input_file_path: str) -> List[SentencePair]:
     def clean(s: str) -> str:
         return s.lower().strip()
 
+    logger.debug("Determining column indexes")
     header_row = [clean(column) for column in rows[0]]
     data_rows = rows[1:]
 
     def get_column_index(column_name: str) -> int:
         index = header_row.index(clean(column_name))
         if index >= 0:
+            logger.debug(f"Column {column_name} found at index {index}")
             return index
         else:
             raise Exception(f"Unable to find expected column '{column_name}' in input file")
@@ -92,9 +103,14 @@ def load_sentence_pairs(input_file_path: str) -> List[SentencePair]:
     target_column_index = get_column_index("target")
     split_column_index = get_column_index("split")
 
+    def parse_and_log_id(row: List[str]) -> int:
+        id = int(row[id_column_index])
+        logger.debug(f"Processing row with id: {id}")
+        return id
+
     return [
         SentencePair(
-            id=int(row[id_column_index]),
+            id=parse_and_log_id(row),
             source=row[source_column_index],
             target=row[target_column_index],
             split=Split[row[split_column_index]],
@@ -104,23 +120,29 @@ def load_sentence_pairs(input_file_path: str) -> List[SentencePair]:
 
 
 def write_output_file(filepath: Path, sentences: List[str]) -> None:
+    logger.debug(f"Writing {len(sentences)} sentences to file: {filepath}")
     with open(filepath, "w", encoding="utf-8") as f:
         for sentence in sentences:
             f.write(f"{sentence}{os.linesep}")
 
 
 def create_extract_files(cli_input: CliInput, sentence_pairs: List[SentencePair]) -> None:
+    logger.info("Creating extract files")
     if cli_input.output is None:
+        logger.info("No output directory specified, defaulting to SIL_NLP_ENV.mt_corpora_dir")
         unique_dir = f"{cli_input.source_iso}-{cli_input.target_iso}-{cli_input.dataset_descriptor}-{time.strftime('%Y%m%d-%H%M%S')}"
         from ..common.environment import SIL_NLP_ENV
         output_dir = SIL_NLP_ENV.mt_corpora_dir / unique_dir
     else:
+        logger.info("Using specified output directory")
         output_dir = Path(cli_input.output)
 
-    print(f"Outputting to directory: {output_dir}")
+    logger.info(f"Outputting to directory: {output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     def create_source_target_files(sub_sentence_pairs: List[SentencePair], suffix: str) -> None:
+        logger.debug(f"Creating source and target files for suffix: '{suffix}'")
+
         def build_output_path(iso: str) -> Path:
             return output_dir / f"{iso}-{cli_input.dataset_descriptor}.{suffix}.txt"
 
@@ -150,8 +172,16 @@ def create_extract_files(cli_input: CliInput, sentence_pairs: List[SentencePair]
 
 
 def run(cli_input: CliInput) -> None:
+    if cli_input.log is not None:
+        logging.basicConfig(
+            filename=cli_input.log,
+            level=logging.DEBUG,
+            format="%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s",
+        )
+    logger.info("Starting script")
     sentence_pairs = load_sentence_pairs(cli_input.input_file_path)
     create_extract_files(cli_input, sentence_pairs)
+    logger.info("Completed script")
 
 
 def main() -> None:
@@ -164,6 +194,7 @@ def main() -> None:
     parser.add_argument(
         "-output", help="Optional path to the output directory where extract files are generated", type=str
     )
+    parser.add_argument("-log", help="Optional path to enable logging. Logs are sent to the file passed", type=str)
     args = parser.parse_args()
 
     cli_input = CliInput(
@@ -172,6 +203,7 @@ def main() -> None:
         target_iso=args.target_iso,
         dataset_descriptor=args.dataset,
         output=args.output,
+        log=args.log,
     )
     run(cli_input)
 
