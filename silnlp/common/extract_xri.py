@@ -104,8 +104,8 @@ def load_sentence_pairs(input_file_path: str) -> List[SentencePair]:
     ]
 
 
-def write_output_file(filename: str, sentences: List[str]) -> None:
-    with open(filename, "w", encoding="utf-8") as f:
+def write_output_file(filepath: Path, sentences: List[str]) -> None:
+    with open(filepath, "w", encoding="utf-8") as f:
         for sentence in sentences:
             f.write(f"{sentence}{os.linesep}")
 
@@ -113,7 +113,7 @@ def write_output_file(filename: str, sentences: List[str]) -> None:
 def create_extract_files(cli_input: CliInput, sentence_pairs: List[SentencePair]) -> None:
     if cli_input.output is None:
         unique_dir = f"{cli_input.source_iso}-{cli_input.target_iso}-{cli_input.dataset_descriptor}-{time.strftime('%Y%m%d-%H%M%S')}"
-        output_dir = Path(os.path.join(SIL_NLP_ENV.mt_corpora_dir, unique_dir))
+        output_dir = SIL_NLP_ENV.mt_corpora_dir / unique_dir
     else:
         output_dir = Path(cli_input.output)
 
@@ -121,8 +121,8 @@ def create_extract_files(cli_input: CliInput, sentence_pairs: List[SentencePair]
     output_dir.mkdir(parents=True, exist_ok=True)
 
     def create_source_target_files(sub_sentence_pairs: List[SentencePair], suffix: str) -> None:
-        def build_output_path(iso: str) -> str:
-            return os.path.join(output_dir, f"{iso}-{cli_input.dataset_descriptor}.{suffix}.txt")
+        def build_output_path(iso: str) -> Path:
+            return output_dir / f"{iso}-{cli_input.dataset_descriptor}.{suffix}.txt"
 
         source_filename = build_output_path(iso=cli_input.source_iso)
         source_sentences = [sentence.source for sentence in sub_sentence_pairs]
