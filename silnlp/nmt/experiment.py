@@ -50,13 +50,8 @@ class SILExperiment:
             self.translate()
 
     def preprocess(self):
-        # Do some basic checks before starting the experiment
         exp_dir = Path(get_mt_exp_dir(self.name))
-        if not exp_dir.exists():
-            raise RuntimeError(f"ERROR: Experiment folder {exp_dir} does not exist.")
         config_file = Path(exp_dir, "config.yml")
-        if not config_file.exists():
-            raise RuntimeError(f"ERROR: Config file does not exist in experiment folder {exp_dir}.")
         SIL_NLP_ENV.copy_experiment_from_bucket(self.name)
         self.config.preprocess(self.make_stats, self.force_align)
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name, overwrite=self.force_align)
@@ -175,7 +170,17 @@ def main() -> None:
 
     if args.mt_dir is not None:
         SIL_NLP_ENV.set_machine_translation_dir(SIL_NLP_ENV.data_dir / args.mt_dir)
+        if not SIL_NLP_ENV.mt_experiments_dir.is_dir():
+            raise FileNotFoundError(f"The machine translation folder {SIL_NLP_ENV.mt_experiments_dir} could not be found.")
 
+    # Do some basic checks as early as possible.
+    experiment_dir = SIL_NLP_ENV.mt_experiments_dir / args.experiment
+    if not experiment_dir.is_dir():
+        raise FileNotFoundError(f"The experiment folder: {experiment_dir} could not be found.")
+    config_file = experiment_dir / "config.yml"
+    if not config_file.is_file():
+        raise RuntimeError(f"The experiment's config file: {config_file} could not be found.")
+    
     if args.debug:
         show_attrs(cli_args=args)
         exit()
