@@ -161,7 +161,9 @@ def main() -> None:
     parser.add_argument("source_iso", help="The ISO 693-3 code for the source/LWC language", type=str)
     parser.add_argument("target_iso", help="The ISO 693-3 code for the target/vernacular language", type=str)
     parser.add_argument("dataset", help="A descriptor of the dataset to be used in the output filename", type=str)
-    parser.add_argument("-output", help="Optional path to the output directory where extract files are generated", type=str)
+    parser.add_argument(
+        "-output", help="Optional path to the output directory where extract files are generated", type=str
+    )
     args = parser.parse_args()
 
     cli_input = CliInput(
