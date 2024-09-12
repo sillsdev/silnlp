@@ -102,21 +102,108 @@ def load_sentence_pairs(input_file_path: str) -> List[SentencePair]:
     source_column_index = get_column_index("source")
     target_column_index = get_column_index("target")
     split_column_index = get_column_index("split")
+    logger.debug(
+        f"Column indexes: id={id_column_index} source={source_column_index} target={target_column_index} split={split_column_index}"
+    )
 
-    def parse_and_log_id(row: List[str]) -> int:
-        id = int(row[id_column_index])
-        logger.debug(f"Processing row with id: {id}")
-        return id
+    logger.debug("Checking all rows contain 4 cells")
+    all_rows_contain_four_cells = all(len(row) == 4 for row in data_rows)
+    if not all_rows_contain_four_cells:
+        # Potential causes:
+        # - missing entries
+        # - newlines embedded in source or target sentences that are splitting them
+        # - trailing tab characters added causing extra rows
+        logger.warning("Not all rows contain 4 cells")
+
+    repaired = repair_if_necessary(id_column_index, data_rows)
+
+    def parse_and_log_id(row_index: int, row: List[str]) -> int:
+        logger.debug(f"Loading row {row_index} into sentence pair structure: {row}")
+        return int(row[id_column_index])
 
     return [
         SentencePair(
-            id=parse_and_log_id(row),
+            id=parse_and_log_id(row_index, row),
             source=row[source_column_index],
             target=row[target_column_index],
             split=Split[row[split_column_index]],
         )
-        for row in data_rows
+        for row_index, row in enumerate(repaired)
     ]
+
+
+def repair_if_necessary(id_column_index: int, rows: List[List[str]]) -> List[List[str]]:
+    """
+    Searches for rows that have been broken over 2 lines, and repairs them into a single line.
+    This can happen sometimes due to newlines being inserted into the source or target sentences.
+    """
+    repair_logger = logging.getLogger("repair")
+    repair_logger.info("Repair starting")
+    # If newlines were in the original tsv, then the row structure would be split up, e.g.
+    #     [ID0, source0, target0, split0]
+    #     [ID1, source1, tar]        | target1 broken over 2 lines
+    #     [get1, split1]             |
+    #     [ID2, source2, target2, split2]
+    #     [ID3, so        |
+    #     [urc]           | source3 broken over 3 lines
+    #     [e3, targ]      |      | target3 broken over 2 lines
+    #     [et3, split3]          |
+    # It would repair to:
+    #     [ID0, source0, target0, split0]
+    #     [ID1, source1, target1, split1]
+    #     [ID2, source2, target2, split2]
+    #     [ID3, source3, target3, split3]
+    #
+    # The mechanism for detecting splits is to look for lines that don't have a numerical id in the position expected.
+    # It's assumed that those lines should be joined up onto the lines prior.
+    # NOTE: If a source/target string happened to end with a newline followed by a number,
+    # then the number would split to the next line and be mistaken for an id.
+    # This is very unlikely and solving it increases complexity so we don't repair that case.
+
+    def try_extract_id(row: List[str]) -> Optional[int]:
+        """Tries to find a numerical id in the row passed at the expected position"""
+        if id_column_index >= len(row):
+            repair_logger.debug("Short row")
+            return None
+        else:
+            id_str = row[id_column_index]
+            if id_str.isdigit():
+                return int(id_str)
+            else:
+                repair_logger.debug(f"Can't parse id cell: '{id_str}' - assuming row is broken")
+                return None
+
+    repaired: List[List[str]] = []
+    # Represents the accumulated row data that is gradually populated when a sentence pair is split across many lines
+    current_row: List[str] = []
+    for row_index, next_row in enumerate(rows):
+        # Ignore empty lines
+        if not next_row:
+            repair_logger.debug(f"Empty line detected at row index={row_index}")
+            continue
+        id_opt = try_extract_id(next_row)
+        repair_logger.debug(f"Examining row index={row_index} id={id_opt}: {next_row}")
+        if id_opt is not None:
+            # We are starting a new row
+            # Commit the previously accumulated row (except in the special case of the first row)
+            if len(current_row) > 0:
+                repair_logger.debug(f"New row starting at index={row_index}, committing previous row {current_row}")
+                repaired.append(current_row)
+            current_row = next_row
+        else:
+            # Merge the current row with the next row
+            # The last cell of the previous row combines with the first cell of this row
+            repair_logger.debug(f"Merging row {row_index} with data from previous row(s)")
+            last_cell = current_row[-1]
+            first_cell = next_row[0]
+            current_row[-1] = last_cell + first_cell
+            current_row.extend(next_row[1:])
+
+    # The very last row needs to be committed as it doesn't have a following row
+    repaired.append(current_row)
+
+    repair_logger.info("Repair complete")
+    return repaired
 
 
 def write_output_file(filepath: Path, sentences: List[str]) -> None:
@@ -132,6 +219,7 @@ def create_extract_files(cli_input: CliInput, sentence_pairs: List[SentencePair]
         logger.info("No output directory specified, defaulting to SIL_NLP_ENV.mt_corpora_dir")
         unique_dir = f"{cli_input.source_iso}-{cli_input.target_iso}-{cli_input.dataset_descriptor}-{time.strftime('%Y%m%d-%H%M%S')}"
         from ..common.environment import SIL_NLP_ENV
+
         output_dir = SIL_NLP_ENV.mt_corpora_dir / unique_dir
     else:
         logger.info("Using specified output directory")
