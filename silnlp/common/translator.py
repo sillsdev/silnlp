@@ -13,6 +13,8 @@ from machine.corpora import (
     FileParatextProjectTextUpdater,
     UpdateUsfmParserHandler,
     UsfmFileText,
+    UsfmStylesheet,
+    UsfmTextType,
     parse_usfm,
 )
 from machine.scripture import VerseRef
@@ -22,6 +24,8 @@ from .paratext import get_book_path, get_iso, get_project_dir
 
 LOGGER = logging.getLogger(__package__ + ".translate")
 nltk.download("punkt")
+
+NON_NOTE_INLINE_ELEMENTS = ["fm", "rq", "xtSeeAlso"]
 
 
 def insert_draft_remark(
@@ -33,7 +37,12 @@ def insert_draft_remark(
     remark = f"\\rem This draft of {book} was machine translated on {date.today()} from {description} using model {experiment_ckpt_str}. It should be reviewed and edited carefully.\n"
 
     lines = usfm.split("\n")
-    lines.insert(2, remark)
+    insert_idx = (
+        1
+        + (len(lines) > 1 and (lines[1].startswith("\\ide") or lines[1].startswith("\\usfm")))
+        + (len(lines) > 2 and (lines[2].startswith("\\ide") or lines[2].startswith("\\usfm")))
+    )
+    lines.insert(insert_idx, remark)
     return "\n".join(lines)
 
 
@@ -88,7 +97,7 @@ class Translator(ABC):
     ) -> None:
         # Create UsfmFileText object for source
         src_from_project = False
-        if str(src_file_path.absolute()).startswith(str(get_project_dir("").absolute())):
+        if str(src_file_path).startswith(str(get_project_dir(""))):
             src_from_project = True
             src_settings = FileParatextProjectSettingsParser(src_file_path.parent).parse()
             src_file_text = UsfmFileText(
@@ -97,22 +106,25 @@ class Translator(ABC):
                 src_settings.get_book_id(src_file_path.name),
                 src_file_path,
                 src_settings.versification,
-                include_markers=include_inline_elements,
+                include_all_text=True,
                 project=src_settings.name,
             )
         else:
-            src_file_text = UsfmFileText(
-                "usfm.sty", "utf-8", "", src_file_path, include_markers=include_inline_elements
-            )
+            src_file_text = UsfmFileText("usfm.sty", "utf-8", "", src_file_path, include_all_text=True)
 
         sentences = [s.text.strip() for s in src_file_text]
         vrefs = [s.ref for s in src_file_text]
         LOGGER.info(f"File {src_file_path} parsed correctly.")
 
-        # Filter by chapters
-        if len(chapters) > 0:
-            for i in range(len(sentences) - 1, -1, -1):
-                if vrefs[i].chapter_num not in chapters:
+        # Filter out unwanted chapters and/or inline elements
+        stylesheet = src_settings.stylesheet if src_from_project else UsfmStylesheet("usfm.sty")
+        for i in reversed(range(len(sentences))):
+            if len(chapters) > 0 and vrefs[i].chapter_num not in chapters:
+                sentences.pop(i)
+                vrefs.pop(i)
+            elif not include_inline_elements:
+                marker = vrefs[i].path[-1].name if len(vrefs[i].path) > 0 else ""
+                if stylesheet.get_tag(marker).text_type == UsfmTextType.NOTE_TEXT or marker in NON_NOTE_INLINE_ELEMENTS:
                     sentences.pop(i)
                     vrefs.pop(i)
 

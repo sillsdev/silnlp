@@ -66,14 +66,7 @@ class TranslationTask:
             raise FileNotFoundError(f"Source project {src_project} not found in projects folder {src_project_dir}")
 
         if any(len(book_nums[book]) > 0 for book in book_nums):
-            use_trg_project = True
-            if trg_project is None:
-                if len(config.trg_projects) != 1:
-                    use_trg_project = False
-                else:
-                    trg_project = next(iter(config.trg_projects))
-
-            if use_trg_project:
+            if trg_project is not None:
                 SIL_NLP_ENV.copy_pt_project_from_bucket(trg_project)
 
                 trg_project_dir = get_project_dir(trg_project)
