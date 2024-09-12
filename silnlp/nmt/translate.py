@@ -12,7 +12,7 @@ from ..common.environment import SIL_NLP_ENV
 from ..common.paratext import book_file_name_digits, get_project_dir
 from ..common.tf_utils import enable_eager_execution, enable_memory_growth
 from ..common.translator import Translator
-from ..common.utils import get_git_revision_hash, show_attrs
+from ..common.utils import get_git_revision_hash, get_mt_exp_dir, show_attrs
 from .clearml_connection import SILClearML
 from .config import CheckpointType, Config, NMTModel
 
@@ -336,6 +336,14 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+
+    experiment_dir = get_mt_exp_dir(args.experiment)
+    if not experiment_dir.is_dir():
+        raise FileNotFoundError(f"The experiment folder {experiment_dir} could not be found.")
+
+    src_project_dir = get_project_dir(args.src_project)
+    if not src_project_dir.is_dir():
+        raise FileNotFoundError(f"The source project folder {src_project_dir} cound not be found.")
 
     get_git_revision_hash()
 
