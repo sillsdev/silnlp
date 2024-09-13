@@ -65,15 +65,14 @@ class TranslationTask:
         if not src_project_dir.is_dir():
             raise FileNotFoundError(f"Source project {src_project} not found in projects folder {src_project_dir}")
 
-        if any(len(book_nums[book]) > 0 for book in book_nums):
-            if trg_project is not None:
-                SIL_NLP_ENV.copy_pt_project_from_bucket(trg_project)
+        if any(len(book_nums[book]) > 0 for book in book_nums) and trg_project is not None:
+            SIL_NLP_ENV.copy_pt_project_from_bucket(trg_project)
 
-                trg_project_dir = get_project_dir(trg_project)
-                if not trg_project_dir.is_dir():
-                    raise FileNotFoundError(
-                        f"Target project {trg_project} not found in projects folder {trg_project_dir}"
-                    )
+            trg_project_dir = get_project_dir(trg_project)
+            if not trg_project_dir.is_dir():
+                raise FileNotFoundError(f"Target project {trg_project} not found in projects folder {trg_project_dir}")
+        else:
+            trg_project = None
 
         if trg_iso is None:
             trg_iso = config.default_test_trg_iso
@@ -81,10 +80,9 @@ class TranslationTask:
         output_dir = config.exp_dir / "infer" / step_str / src_project
         if not config.model_dir.exists():
             output_dir = config.exp_dir / "infer" / "base" / src_project
-        output_dir.mkdir(exist_ok=True, parents=True)
         if trg_project is not None:
-            output_dir_trg_project = output_dir / trg_project
-            output_dir_trg_project.mkdir(exist_ok=True)
+            output_dir = output_dir / trg_project
+        output_dir.mkdir(exist_ok=True, parents=True)
 
         experiment_ckpt_str = f"{self.name}:{self.checkpoint}"
         if not config.model_dir.exists():
@@ -95,31 +93,17 @@ class TranslationTask:
             book = book_number_to_id(book_num)
             try:
                 LOGGER.info(f"Translating {book} ...")
-                if (
-                    trg_project is not None and len(chapters) > 0
-                ):  # Pass target project to fill in missing chapters if only some are being translated
-                    output_path = output_dir_trg_project / f"{book_file_name_digits(book_num)}{book}.SFM"
-                    translator.translate_book(
-                        src_project,
-                        book,
-                        output_path,
-                        trg_iso,
-                        chapters,
-                        trg_project,
-                        include_inline_elements,
-                        experiment_ckpt_str,
-                    )
-                else:
-                    output_path = output_dir / f"{book_file_name_digits(book_num)}{book}.SFM"
-                    translator.translate_book(
-                        src_project,
-                        book,
-                        output_path,
-                        trg_iso,
-                        chapters,
-                        include_inline_elements=include_inline_elements,
-                        experiment_ckpt_str=experiment_ckpt_str,
-                    )
+                output_path = output_dir / f"{book_file_name_digits(book_num)}{book}.SFM"
+                translator.translate_book(
+                    src_project,
+                    book,
+                    output_path,
+                    trg_iso,
+                    chapters,
+                    trg_project,
+                    include_inline_elements,
+                    experiment_ckpt_str,
+                )
             except Exception as e:
                 translation_failed.append(book)
                 LOGGER.exception(f"Was not able to translate {book}.")

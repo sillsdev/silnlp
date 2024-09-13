@@ -63,7 +63,7 @@ class Translator(ABC):
         output_path: Path,
         trg_iso: str,
         chapters: List[int] = [],
-        trg_project: str = "",
+        trg_project: Optional[str] = None,
         include_inline_elements: bool = False,
         experiment_ckpt_str: str = "",
     ) -> None:
@@ -91,7 +91,7 @@ class Translator(ABC):
         src_iso: str,
         trg_iso: str,
         chapters: List[int] = [],
-        trg_project: str = "",
+        trg_project: Optional[str] = None,
         include_inline_elements: bool = False,
         experiment_ckpt_str: str = "",
     ) -> None:
@@ -116,7 +116,7 @@ class Translator(ABC):
         vrefs = [s.ref for s in src_file_text]
         LOGGER.info(f"File {src_file_path} parsed correctly.")
 
-        # Filter out unwanted chapters and/or inline elements
+        # Filter sentences
         stylesheet = src_settings.stylesheet if src_from_project else UsfmStylesheet("usfm.sty")
         for i in reversed(range(len(sentences))):
             if len(chapters) > 0 and vrefs[i].chapter_num not in chapters:
@@ -127,16 +127,27 @@ class Translator(ABC):
                 if stylesheet.get_tag(marker).text_type == UsfmTextType.NOTE_TEXT or marker in NON_NOTE_INLINE_ELEMENTS:
                     sentences.pop(i)
                     vrefs.pop(i)
+        # Set aside empty sentences
+        empty_sents = []
+        for i in reversed(range(len(sentences))):
+            if len(sentences[i]) == 0:
+                empty_sents.append((i, sentences.pop(i), vrefs.pop(i)))
 
         translations = list(self.translate(sentences, src_iso, trg_iso, vrefs))
+
+        # Add empty sentences back in
+        for idx, sent, vref in reversed(empty_sents):
+            translations.insert(idx, sent)
+            vrefs.insert(idx, vref)
+
         rows = [([ref], translation) for ref, translation in zip(vrefs, translations)]
 
         # Insert translation into the USFM structure of an existing project
         # If the target project is not the same as the translated file's original project,
         # no verses outside of the ones translated will be overwritten
-        use_src_project = trg_project == "" and src_from_project
+        use_src_project = trg_project is None and src_from_project
         trg_format_project = src_file_path.parent.name if use_src_project else trg_project
-        if trg_format_project != "":
+        if trg_format_project is not None:
             dest_project_path = get_project_dir(trg_format_project)
             dest_updater = FileParatextProjectTextUpdater(dest_project_path)
             usfm_out = dest_updater.update_usfm(
