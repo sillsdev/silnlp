@@ -58,7 +58,7 @@ def parse_book(project_dir: str, book: str):
         file_text = UsfmFileText(
             settings.stylesheet,
             settings.encoding,
-            settings.get_book_id(book_path),
+            settings.get_book_id(book_path.name),
             book_path,
             settings.versification,
             include_markers=True,

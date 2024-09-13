@@ -156,7 +156,8 @@ class Translator(ABC):
         # Insert draft remark and write to output path
         description = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
         usfm_out = insert_draft_remark(usfm_out, vrefs[0].book, description, experiment_ckpt_str)
-        with out_path.open("w", encoding="utf-8") as f:
+        encoding = src_settings.encoding if src_from_project else "utf-8"
+        with out_path.open("w", encoding=encoding) as f:
             f.write(usfm_out)
 
     def translate_docx(self, src_file_path: Path, trg_file_path: Path, src_iso: str, trg_iso: str) -> None:
