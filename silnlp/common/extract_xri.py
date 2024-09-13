@@ -32,7 +32,10 @@ The prefix of the filename is built from the cli inputs. For the example above t
 
 Run with --help for more details.
 
-Logging can be enabled by adding an additional `-log [PATH]` flag pointing to the directory you want the logs written to.
+By default the script uses the logging configuration inherited from the parent packages (which should log at INFO level).
+There is detailed DEBUG level logging that can assist with troubleshooting.
+You can enable DEBUG level logging by passing `-log_level DEBUG`.
+Other accepted values are "INFO", "WARNING/WARN", "ERROR" and "CRITICAL".
 
 See https://github.com/sillsdev/silnlp/issues/472 for original context.
 """
@@ -49,7 +52,7 @@ from pathlib import Path
 from typing import List, Optional
 
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__package__ + ".extract_xri")
 
 
 class Split(Enum):
@@ -73,7 +76,7 @@ class CliInput:
     target_iso: str
     dataset_descriptor: str
     output: Optional[str]
-    log: Optional[str]
+    log_level: Optional[str]
 
 
 def load_sentence_pairs(input_file_path: str) -> List[SentencePair]:
@@ -172,12 +175,9 @@ def create_extract_files(cli_input: CliInput, sentence_pairs: List[SentencePair]
 
 
 def run(cli_input: CliInput) -> None:
-    if cli_input.log is not None:
-        logging.basicConfig(
-            filename=cli_input.log,
-            level=logging.DEBUG,
-            format="%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s",
-        )
+    if cli_input.log_level is not None:
+        log_level = getattr(logging, cli_input.log_level.upper())
+        logger.setLevel(log_level)
     logger.info("Starting script")
     sentence_pairs = load_sentence_pairs(cli_input.input_file_path)
     create_extract_files(cli_input, sentence_pairs)
@@ -194,7 +194,7 @@ def main() -> None:
     parser.add_argument(
         "-output", help="Optional path to the output directory where extract files are generated", type=str
     )
-    parser.add_argument("-log", help="Optional path to enable logging. Logs are sent to the file passed", type=str)
+    parser.add_argument("-log_level", help="Optional parameter to override the default logging level for this script", type=str)
     args = parser.parse_args()
 
     cli_input = CliInput(
@@ -203,7 +203,7 @@ def main() -> None:
         target_iso=args.target_iso,
         dataset_descriptor=args.dataset,
         output=args.output,
-        log=args.log,
+        log_level=args.log_level,
     )
     run(cli_input)
 
