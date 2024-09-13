@@ -41,13 +41,10 @@ _NON_LETTER_PATTERN = re.compile(r"([^\p{L}\p{M}]*)[\p{L}\p{M}]+([^\p{L}\p{M}]*)
 LOGGER = logging.getLogger(__name__)
 
 
-# TODO: it seems like everything that uses this immediately calls one of the other functions below,
-# should all the other functions just ask for a project name instead and get the projects themselves?
 def get_project_dir(project: str) -> Path:
     return SIL_NLP_ENV.pt_projects_dir / project
 
 
-# TODO: replace
 def get_iso(project: str) -> str:
     project_dir = get_project_dir(project)
     settings = FileParatextProjectSettingsParser(project_dir).parse()
@@ -332,14 +329,11 @@ def extract_term_renderings(project_dir: Path, corpus_filename: Path, output_dir
         rendering_elems[id] = elem
 
     settings = FileParatextProjectSettingsParser(project_dir).parse()
-    iso = settings.language_code
-    project_name = settings.name
-
     list_type = settings.biblical_terms_list_type
     list_name = list_type
     references: Dict[str, List[VerseRef]] = {}
     if list_type == "Project":
-        if settings.biblical_terms_project_name == project_name:
+        if settings.biblical_terms_project_name == settings.name:
             references = extract_terms_list(list_type, output_dir, project_dir)
         else:
             extract_terms_list_from_renderings(project_dir.name, renderings_tree, output_dir)
@@ -355,7 +349,7 @@ def extract_term_renderings(project_dir: Path, corpus_filename: Path, output_dir
             prev_verse_str = verse_str
 
     terms_metadata_path = get_terms_metadata_path(list_name, mt_terms_dir=output_dir)
-    terms_renderings_path = output_dir / f"{iso}-{project_dir.name}-{list_type}-renderings.txt"
+    terms_renderings_path = output_dir / f"{settings.language_code}-{project_dir.name}-{list_type}-renderings.txt"
     count = 0
     with terms_renderings_path.open("w", encoding="utf-8", newline="\n") as terms_renderings_file:
         for line in load_corpus(terms_metadata_path):
