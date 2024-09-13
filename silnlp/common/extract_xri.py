@@ -53,6 +53,7 @@ from typing import List, Optional
 
 
 logger = logging.getLogger(__package__ + ".extract_xri")
+repair_logger = logging.getLogger(logger.name + ".repair")
 
 
 class Split(Enum):
@@ -140,7 +141,6 @@ def repair_if_necessary(id_column_index: int, rows: List[List[str]]) -> List[Lis
     Searches for rows that have been broken over 2 lines, and repairs them into a single line.
     This can happen sometimes due to newlines being inserted into the source or target sentences.
     """
-    repair_logger = logging.getLogger("repair")
     repair_logger.info("Repair starting")
     # If newlines were in the original tsv, then the row structure would be split up, e.g.
     #     [ID0, source0, target0, split0]
@@ -266,6 +266,7 @@ def run(cli_input: CliInput) -> None:
     if cli_input.log_level is not None:
         log_level = getattr(logging, cli_input.log_level.upper())
         logger.setLevel(log_level)
+        repair_logger.setLevel(log_level)
     logger.info("Starting script")
     sentence_pairs = load_sentence_pairs(cli_input.input_file_path)
     create_extract_files(cli_input, sentence_pairs)
