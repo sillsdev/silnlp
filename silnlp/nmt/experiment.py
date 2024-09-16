@@ -106,7 +106,6 @@ class SILExperiment:
                     config.get("trg_project"),
                     config.get("trg_iso"),
                     config.get("include_inline_elements", False),
-                    config.get("stylesheet_field_update", "merge"),
                 )
             elif config.get("src_prefix"):
                 translator.translate_text_files(

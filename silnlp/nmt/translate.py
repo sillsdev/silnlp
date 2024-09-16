@@ -48,7 +48,6 @@ class TranslationTask:
         trg_project: Optional[str],
         trg_iso: Optional[str],
         include_inline_elements: bool = False,
-        stylesheet_field_update: str = "merge",
     ):
         book_nums = get_chapters(books)
         translator, config, step_str = self._init_translation_task(
@@ -66,22 +65,14 @@ class TranslationTask:
         if not src_project_dir.is_dir():
             raise FileNotFoundError(f"Source project {src_project} not found in projects folder {src_project_dir}")
 
-        if any(len(book_nums[book]) > 0 for book in book_nums):
-            use_trg_project = True
-            if trg_project is None:
-                if len(config.trg_projects) != 1:
-                    use_trg_project = False
-                else:
-                    trg_project = next(iter(config.trg_projects))
+        if any(len(book_nums[book]) > 0 for book in book_nums) and trg_project is not None:
+            SIL_NLP_ENV.copy_pt_project_from_bucket(trg_project)
 
-            if use_trg_project:
-                SIL_NLP_ENV.copy_pt_project_from_bucket(trg_project)
-
-                trg_project_dir = get_project_dir(trg_project)
-                if not trg_project_dir.is_dir():
-                    raise FileNotFoundError(
-                        f"Target project {trg_project} not found in projects folder {trg_project_dir}"
-                    )
+            trg_project_dir = get_project_dir(trg_project)
+            if not trg_project_dir.is_dir():
+                raise FileNotFoundError(f"Target project {trg_project} not found in projects folder {trg_project_dir}")
+        else:
+            trg_project = None
 
         if trg_iso is None:
             trg_iso = config.default_test_trg_iso
@@ -89,10 +80,9 @@ class TranslationTask:
         output_dir = config.exp_dir / "infer" / step_str / src_project
         if not config.model_dir.exists():
             output_dir = config.exp_dir / "infer" / "base" / src_project
-        output_dir.mkdir(exist_ok=True, parents=True)
         if trg_project is not None:
-            output_dir_trg_project = output_dir / trg_project
-            output_dir_trg_project.mkdir(exist_ok=True)
+            output_dir = output_dir / trg_project
+        output_dir.mkdir(exist_ok=True, parents=True)
 
         experiment_ckpt_str = f"{self.name}:{self.checkpoint}"
         if not config.model_dir.exists():
@@ -103,33 +93,17 @@ class TranslationTask:
             book = book_number_to_id(book_num)
             try:
                 LOGGER.info(f"Translating {book} ...")
-                if (
-                    trg_project is not None and len(chapters) > 0
-                ):  # Pass target project to fill in missing chapters if only some are being translated
-                    output_path = output_dir_trg_project / f"{book_file_name_digits(book_num)}{book}.SFM"
-                    translator.translate_book(
-                        src_project,
-                        book,
-                        output_path,
-                        trg_iso,
-                        chapters,
-                        trg_project,
-                        include_inline_elements,
-                        stylesheet_field_update,
-                        experiment_ckpt_str,
-                    )
-                else:
-                    output_path = output_dir / f"{book_file_name_digits(book_num)}{book}.SFM"
-                    translator.translate_book(
-                        src_project,
-                        book,
-                        output_path,
-                        trg_iso,
-                        chapters,
-                        include_inline_elements=include_inline_elements,
-                        stylesheet_field_update=stylesheet_field_update,
-                        experiment_ckpt_str=experiment_ckpt_str,
-                    )
+                output_path = output_dir / f"{book_file_name_digits(book_num)}{book}.SFM"
+                translator.translate_book(
+                    src_project,
+                    book,
+                    output_path,
+                    trg_iso,
+                    chapters,
+                    trg_project,
+                    include_inline_elements,
+                    experiment_ckpt_str,
+                )
             except Exception as e:
                 translation_failed.append(book)
                 LOGGER.exception(f"Was not able to translate {book}.")
@@ -307,12 +281,6 @@ def main() -> None:
         help="Include inline elements for projects in USFM format",
     )
     parser.add_argument(
-        "--stylesheet-field-update",
-        default="merge",
-        type=str,
-        help="What to do with the OccursUnder and TextProperties fields of a project's custom stylesheet. Possible values are 'replace', 'merge', and 'ignore'.",
-    )
-    parser.add_argument(
         "--eager-execution",
         default=False,
         action="store_true",
@@ -359,7 +327,6 @@ def main() -> None:
             args.trg_project,
             args.trg_iso,
             args.include_inline_elements,
-            args.stylesheet_field_update,
         )
     elif args.src_prefix is not None:
         if args.debug:

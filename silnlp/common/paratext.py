@@ -2,13 +2,14 @@ import logging
 import os
 from contextlib import ExitStack
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, TextIO, Tuple
+from typing import Dict, List, Optional, Set, TextIO, Tuple
 from xml.sax.saxutils import escape
 
 import regex as re
 from lxml import etree
 from machine.corpora import (
     DictionaryTextCorpus,
+    FileParatextProjectSettingsParser,
     MemoryText,
     ParatextTextCorpus,
     Text,
@@ -44,11 +45,10 @@ def get_project_dir(project: str) -> Path:
     return SIL_NLP_ENV.pt_projects_dir / project
 
 
-def get_iso(settings_tree: etree._ElementTree) -> str:
-    iso = settings_tree.getroot().findtext("LanguageIsoCode")
-    assert iso is not None
-    index = iso.index(":")
-    return iso[:index]
+def get_iso(project: str) -> str:
+    project_dir = get_project_dir(project)
+    settings = FileParatextProjectSettingsParser(project_dir).parse()
+    return settings.language_code
 
 
 def extract_project(
@@ -60,8 +60,7 @@ def extract_project(
     extract_lemmas: bool = False,
     output_project_vrefs: bool = False,
 ) -> Tuple[Path, int]:
-    settings_tree = parse_project_settings(project_dir)
-    iso = get_iso(settings_tree)
+    iso = get_iso(project_dir.name)
 
     ref_corpus: TextCorpus = create_versification_ref_corpus()
 
@@ -329,16 +328,12 @@ def extract_term_renderings(project_dir: Path, corpus_filename: Path, output_dir
         id = escape_id(id)
         rendering_elems[id] = elem
 
-    settings_tree = parse_project_settings(project_dir)
-    iso = get_iso(settings_tree)
-    project_name = settings_tree.getroot().findtext("Name", project_dir.name)
-    terms_setting = settings_tree.getroot().findtext("BiblicalTermsListSetting", "Major::BiblicalTerms.xml")
-
-    list_type, terms_project, _ = terms_setting.split(":", maxsplit=3)
+    settings = FileParatextProjectSettingsParser(project_dir).parse()
+    list_type = settings.biblical_terms_list_type
     list_name = list_type
     references: Dict[str, List[VerseRef]] = {}
     if list_type == "Project":
-        if terms_project == project_name:
+        if settings.biblical_terms_project_name == settings.name:
             references = extract_terms_list(list_type, output_dir, project_dir)
         else:
             extract_terms_list_from_renderings(project_dir.name, renderings_tree, output_dir)
@@ -354,7 +349,7 @@ def extract_term_renderings(project_dir: Path, corpus_filename: Path, output_dir
             prev_verse_str = verse_str
 
     terms_metadata_path = get_terms_metadata_path(list_name, mt_terms_dir=output_dir)
-    terms_renderings_path = output_dir / f"{iso}-{project_dir.name}-{list_type}-renderings.txt"
+    terms_renderings_path = output_dir / f"{settings.language_code}-{project_dir.name}-{list_type}-renderings.txt"
     count = 0
     with terms_renderings_path.open("w", encoding="utf-8", newline="\n") as terms_renderings_file:
         for line in load_corpus(terms_metadata_path):
@@ -411,38 +406,10 @@ def book_file_name_digits(book_num: int) -> str:
 
 def get_book_path(project: str, book: str) -> Path:
     project_dir = get_project_dir(project)
-    settings_tree = parse_project_settings(project_dir)
-    naming_elem = settings_tree.find("Naming")
-    assert naming_elem is not None
-
-    pre_part = naming_elem.get("PrePart", "")
-    post_part = naming_elem.get("PostPart", "")
-    book_name_form = naming_elem.get("BookNameForm")
-    assert book_name_form is not None
-
-    book_num = book_id_to_number(book)
-    if book_name_form == "MAT":
-        book_name = book
-    elif book_name_form == "40" or book_name_form == "41":
-        book_name = book_file_name_digits(book_num)
-    else:
-        book_name = f"{book_file_name_digits(book_num)}{book}"
-
-    book_file_name = f"{pre_part}{book_name}{post_part}"
+    settings = FileParatextProjectSettingsParser(project_dir).parse()
+    book_file_name = settings.get_book_file_name(book)
 
     return SIL_NLP_ENV.pt_projects_dir / project / book_file_name
-
-
-def parse_project_settings(project_dir: Path) -> Any:
-    settings_filename = project_dir / "Settings.xml"
-    if not settings_filename.is_file():
-        settings_filename = next(project_dir.glob("*.ssf"), Path())
-    if not settings_filename.is_file():
-        raise RuntimeError("The project directory does not contain a settings file.")
-
-    with settings_filename.open("rb") as settings_file:
-        settings_tree = etree.parse(settings_file)
-    return settings_tree
 
 
 def get_last_verse(project_dir: str, book: str, chapter: int) -> int:
@@ -533,8 +500,7 @@ def detect_NT_versification(project_dir: str) -> Tuple[List[VersificationType], 
 
 
 def check_versification(project_dir: str) -> Tuple[bool, List[VersificationType]]:
-    project_versification: str = parse_project_settings(project_dir).getroot().findtext("Versification", "4")
-    project_versification: VersificationType = VersificationType(int(project_versification))
+    settings = FileParatextProjectSettingsParser(project_dir).parse()
 
     check_ot, check_nt, matching = False, False, False
 
@@ -585,9 +551,9 @@ def check_versification(project_dir: str) -> Tuple[bool, List[VersificationType]
         )
         return (matching, detected_versification)
 
-    if project_versification not in detected_versification:
+    if settings.versification.type not in detected_versification:
         LOGGER.warning(
-            f"Project versification setting {project_versification} does not match detected versification(s) "
+            f"Project versification setting {settings.versification.type} does not match detected versification(s) "
             f"{', '.join([str(int(versification)) for versification in detected_versification])}. "
             f"The detected versification(s) were based on {', '.join(key_verses)} "
             f"being the last verse of {'their' if len(key_verses)>=2 else 'its'} "

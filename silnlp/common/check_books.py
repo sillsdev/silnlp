@@ -1,14 +1,12 @@
 import argparse
 import logging
 import textwrap
-from typing import List
+from pathlib import Path
 
+from machine.corpora import FileParatextProjectSettingsParser, UsfmFileText
 from machine.scripture import book_number_to_id, get_chapters
 
-from .. import sfm
-from ..common.paratext import get_book_path, get_project_dir
-from ..common.translator import collect_segments, get_stylesheet
-from ..sfm import usfm
+from ..common.paratext import get_project_dir
 from .collect_verse_counts import DT_CANON, NT_CANON, OT_CANON
 
 LOGGER = logging.getLogger(__package__ + ".check_books")
@@ -48,50 +46,35 @@ def group_bible_books(books_found):
 
 
 def parse_book(project_dir: str, book: str):
-
     errors = []
 
-    # LOGGER.info(project_dir)
-
-    #    with (project_dir / "Settings.xml").open("rb") as settings_file:
-    #        settings_tree = etree.parse(settings_file)
-
-    # src_iso = get_iso(settings_tree)
-    book_path = get_book_path(project_dir, book)
-    stylesheet = get_stylesheet(project_dir)
+    settings = FileParatextProjectSettingsParser(project_dir).parse()
+    book_path = Path(project_dir) / settings.get_book_file_name(book)
 
     if not book_path.is_file():
         raise RuntimeError(f"Can't find file {book_path} for book {book}")
+
+    try:
+        file_text = UsfmFileText(
+            settings.stylesheet,
+            settings.encoding,
+            settings.get_book_id(book_path.name),
+            book_path,
+            settings.versification,
+            include_markers=True,
+            include_all_text=True,
+            project=settings.name,
+        )
+    except Exception as e:
+        errors.append(e)
+
+    if not errors:
+        LOGGER.info(f"{book} in project {project_dir} parsed correctly and contains {file_text.count()} verses.")
     else:
-        # LOGGER.info(f"Found the file {book_path} for book {book}")
-
-        with book_path.open(mode="r", encoding="utf-8-sig") as book_file:
-            try:
-                doc: List[sfm.Element] = list(
-                    usfm.parser(book_file, stylesheet=stylesheet, canonicalise_footnotes=False)
-                )
-            except Exception as e:
-                errors.append(e)
-
-            if not errors:
-                book = ""
-                for elem in doc:
-                    if elem.name == "id":
-                        book = str(elem[0]).strip()[:3]
-                        break
-                if book == "":
-                    raise RuntimeError(f"The USFM file {book_path} doesn't contain an id marker.")
-
-                segments = collect_segments(book, doc)
-                #            sentences = [s.text.strip() for s in segments]
-                vrefs = [s.ref for s in segments]
-
-                LOGGER.info(f"{book} in project {project_dir} parsed correctly and contains {len(vrefs)} verses.")
-            else:
-                LOGGER.info(f"The following error occured while parsing {book} in project {project_dir}")
-                for error in errors:
-                    error_str = " ".join([str(s) for s in error.args])
-                    LOGGER.info(error_str)
+        LOGGER.info(f"The following error occured while parsing {book} in project {project_dir}")
+        for error in errors:
+            error_str = " ".join([str(s) for s in error.args])
+            LOGGER.info(error_str)
 
 
 def main() -> None:
