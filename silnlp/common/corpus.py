@@ -59,11 +59,11 @@ def get_scripture_parallel_corpus(
             trg_line = trg_line.strip()
             vref = VerseRef.from_string(vref_line, ORIGINAL_VERSIFICATION)
             if src_line == "<range>" and trg_line == "<range>":
-                if vref.chapter_num == vrefs[-1].chapter_num:
+                if vref.book_num == vrefs[-1].book_num and vref.chapter_num == vrefs[-1].chapter_num:
                     vrefs[-1].simplify()
                     vrefs[-1] = VerseRef.from_range(vrefs[-1], vref)
             elif src_line == "<range>":
-                if vref.chapter_num == vrefs[-1].chapter_num:
+                if vref.book_num == vrefs[-1].book_num and vref.chapter_num == vrefs[-1].chapter_num:
                     vrefs[-1].simplify()
                     vrefs[-1] = VerseRef.from_range(vrefs[-1], vref)
                 if len(trg_line) > 0:
@@ -71,7 +71,7 @@ def get_scripture_parallel_corpus(
                         trg_sentences[-1] += " "
                     trg_sentences[-1] += trg_line
             elif trg_line == "<range>":
-                if vref.chapter_num == vrefs[-1].chapter_num:
+                if vref.book_num == vrefs[-1].book_num and vref.chapter_num == vrefs[-1].chapter_num:
                     vrefs[-1].simplify()
                     vrefs[-1] = VerseRef.from_range(vrefs[-1], vref)
                 if len(src_line) > 0:
