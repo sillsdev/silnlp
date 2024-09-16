@@ -492,6 +492,7 @@ class Config(ABC):
                 LOGGER.error(f"The source file {str(file)} does not exist.")
                 return
 
+        self._trim_model()
         self._build_vocabs(stats)
         tokenizer = self.create_tokenizer()
         self._build_corpora(tokenizer, stats, force_align)

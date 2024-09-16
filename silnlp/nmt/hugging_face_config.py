@@ -73,6 +73,8 @@ from ..common.corpus import Term, count_lines, get_terms
 from ..common.environment import SIL_NLP_ENV, download_if_s3_paths
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
 from .config import CheckpointType, Config, DataFile, NMTModel
+from .hftrim.TokenizerTrimmer import TokenizerTrimmer
+from .hftrim.M2M100Trimmer import M2M100Trimmer
 from .tokenizer import NullTokenizer, Tokenizer
 
 if is_safetensors_available():
@@ -593,7 +595,12 @@ class HuggingFaceConfig(Config):
                     model_name_or_path = str(SIL_NLP_ENV.assets_dir / "tokenizers" / self.model_prefix)
                 else:
                     model_name_or_path = self.model
-                self._tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True)
+                tok_path = self.exp_dir / "trimmed" / "nllb_tok_trimmed"
+                # self._tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=False)
+                self._tokenizer = NllbTokenizer.from_pretrained(tok_path)
+                self._tokenizer = convert_slow_tokenizer(self._tokenizer)
+                self._tokenizer = NllbTokenizerFast(tokenizer_object=self._tokenizer)
+                self._tokenizer.save_pretrained(str(self.exp_dir))
             self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
         return self._tokenizer
 
@@ -603,6 +610,44 @@ class HuggingFaceConfig(Config):
             self._tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True)
             self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
         return self._tokenizer
+    
+    def _trim_model(self):
+        # Trim model
+        # collect data
+        data_fnames = [self.train_src_detok_filename(), self.train_trg_detok_filename(), 
+                       self.val_src_detok_filename(), self.val_trg_detok_filename(), 
+                       self.test_src_detok_filename("", ""), self.test_trg_filename(self.default_test_src_iso, self.default_test_trg_iso)]
+        data = []
+        for fname in data_fnames:
+            with open(self.exp_dir / "data" / fname, "r", encoding="utf-8-sig") as f:
+                data += [line.strip() for line in f.readlines()]
+
+        model_config = AutoConfig.from_pretrained(
+            self.model,
+            use_cache=False,
+            dropout=self.params["dropout"],
+            attention_dropout=self.params["attention_dropout"],
+            activation_dropout=self.params["activation_dropout"],
+            label2id={},
+            id2label={},
+            num_labels=0,
+        )
+        model = AutoModelForSeq2SeqLM.from_pretrained(self.model, config=model_config)
+        tokenizer = AutoTokenizer.from_pretrained(self.model, use_fast=False)
+
+        # trim
+        tt = TokenizerTrimmer(tokenizer)
+        tt.make_vocab(data)
+        tt.make_tokenizer()
+        mt = M2M100Trimmer(model, model_config, tt.trimmed_tokenizer)
+        mt.make_weights(tt.trimmed_vocab_ids)
+        mt.make_model()
+
+        # save and reload
+        tmp_dir = self.exp_dir / "trimmed"
+        tmp_dir.mkdir(exist_ok=True)
+        mt.trimmed_model.save_pretrained(tmp_dir / "nllb_trimmed")
+        tt.trimmed_tokenizer.save_pretrained(tmp_dir / "nllb_tok_trimmed")
 
     def _write_dictionary(
         self,
@@ -750,7 +795,8 @@ class HuggingFaceNMTModel(NMTModel):
             id2label={},
             num_labels=0,
         )
-        model = cast(PreTrainedModel, AutoModelForSeq2SeqLM.from_pretrained(self._config.model, config=model_config))
+        model_path = self._config.exp_dir / "trimmed" / "nllb_trimmed"
+        model = cast(PreTrainedModel, AutoModelForSeq2SeqLM.from_pretrained(model_path))
         if self._config.train.get("better_transformer"):
             model = model.to_bettertransformer()
         tokenizer = self._config.get_tokenizer()
