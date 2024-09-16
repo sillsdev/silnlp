@@ -33,28 +33,105 @@ def insert_draft_remark(
     book: str,
     description: str,
     experiment_ckpt_str: str,
-) -> str:
-    remark = f"\\rem This draft of {book} was machine translated on {date.today()} from {description} using model {experiment_ckpt_str}. It should be reviewed and edited carefully.\n"
-
-    lines = usfm.split("\n")
-    insert_idx = (
-        1
-        + (len(lines) > 1 and (lines[1].startswith("\\ide") or lines[1].startswith("\\usfm")))
-        + (len(lines) > 2 and (lines[2].startswith("\\ide") or lines[2].startswith("\\usfm")))
+) -> List[sfm.Element]:
+    remark = f"This draft of {book} was machine translated on {date.today()} from the {description} using model {experiment_ckpt_str}. It should be reviewed and edited carefully.\n"
+    rmk_elem = sfm.Element(
+        "rem",
+        parent=doc[0][0].parent,
+        meta={
+            "Endmarker": None,
+            "StyleType": "Paragraph",
+        },
+        content=[sfm.Text(remark)],
     )
-    lines.insert(insert_idx, remark)
-    return "\n".join(lines)
+
+    doc[0].insert(1, rmk_elem)
+    return doc
+
+
+# A set of multiple translations of a single sentence
+class TranslationSet:
+    def __init__(self, translations: List[str]):
+        self.translations = translations
+
+    def num_translations(self) -> int:
+        return len(self.translations)
+
+
+# An iterable representing a single draft (one translation of each input sentence)
+class TranslatedDraft:
+    def __init__(self, sentences: Iterable[str]):
+        self.sentences = sentences
+
+
+# A wrapper around Iterable[TranslationSet] that allows upstream consumers to view a
+# list of translation sets as a collection of discrete drafts
+class DraftSet:
+    def __init__(self, translation_sets: Iterable[TranslationSet]):
+        self.translation_sets = translation_sets
+        self._calculate_num_drafts()
+
+    def _calculate_num_drafts(self):
+        # fetch one item first to determine the number of translations
+        self.initial_translation_set: TranslationSet = next(self.translation_sets)
+        self.num_drafts: int = self.initial_translation_set.num_translations()
+
+    def get_drafts(self) -> list[TranslatedDraft]:
+        # for a single draft, don't consume the generator
+        if self.num_drafts == 1:
+            return [TranslationSet(self.create_draft_sentence_generator(0))]
+        else:
+            return self.create_draft_sentence_lists()
+
+    def create_draft_sentence_generator(self, draft_index) -> Iterable[str]:
+        yield self.initial_translation_set.translations[draft_index]
+        yield from [ts.translations[draft_index] for ts in self.translation_sets]
+
+    def create_draft_sentence_lists(self) -> list[TranslatedDraft]:
+        translated_draft_sentences = [
+            [self.initial_translation_set.translations[draft_index]] for draft_index in range(self.num_drafts)
+        ]
+
+        for translation_set in self.translation_sets:
+            for draft_index in range(self.num_drafts):
+                translated_draft_sentences[draft_index].append(translation_set.translations[draft_index])
+
+        return [TranslationSet(sentence_list) for sentence_list in translated_draft_sentences]
+
+    def get_drafts_with_indices(self):
+        return zip(self.get_drafts(), range(1, self.num_drafts + 1))
 
 
 class Translator(ABC):
     @abstractmethod
     def translate(
-        self, sentences: Iterable[str], src_iso: str, trg_iso: str, vrefs: Optional[Iterable[VerseRef]] = None
-    ) -> Iterable[str]:
+        self,
+        sentences: Iterable[str],
+        src_iso: str,
+        trg_iso: str,
+        produce_multiple_translations: bool = False,
+        vrefs: Optional[Iterable[VerseRef]] = None,
+    ) -> Iterable[TranslationSet]:
         pass
 
-    def translate_text(self, src_file_path: Path, trg_file_path: Path, src_iso: str, trg_iso: str) -> None:
-        write_corpus(trg_file_path, self.translate(load_corpus(src_file_path), src_iso, trg_iso))
+    def translate_text(
+        self,
+        src_file_path: Path,
+        trg_file_path: Path,
+        src_iso: str,
+        trg_iso: str,
+        produce_multiple_translations: bool = False,
+    ) -> None:
+
+        draft_set: DraftSet = DraftSet(
+            self.translate(load_corpus(src_file_path), src_iso, trg_iso, produce_multiple_translations)
+        )
+        for translated_draft, draft_index in draft_set.get_drafts_with_indices():
+            if produce_multiple_translations:
+                trg_draft_file_path = trg_file_path.with_suffix(f"{trg_file_path.suffix}.{draft_index}")
+            else:
+                trg_draft_file_path = trg_file_path
+            write_corpus(trg_draft_file_path, translated_draft.sentences)
 
     def translate_book(
         self,
@@ -62,6 +139,7 @@ class Translator(ABC):
         book: str,
         output_path: Path,
         trg_iso: str,
+        produce_multiple_translations: bool = False,
         chapters: List[int] = [],
         trg_project: Optional[str] = None,
         include_inline_elements: bool = False,
@@ -78,6 +156,7 @@ class Translator(ABC):
             output_path,
             get_iso(src_project),
             trg_iso,
+            produce_multiple_translations,
             chapters,
             trg_project,
             include_inline_elements,
@@ -90,6 +169,7 @@ class Translator(ABC):
         out_path: Path,
         src_iso: str,
         trg_iso: str,
+        produce_multiple_translations: bool = False,
         chapters: List[int] = [],
         trg_project: Optional[str] = None,
         include_inline_elements: bool = False,
@@ -171,7 +251,14 @@ class Translator(ABC):
         with out_path.open("w", encoding=encoding) as f:
             f.write(usfm_out)
 
-    def translate_docx(self, src_file_path: Path, trg_file_path: Path, src_iso: str, trg_iso: str) -> None:
+    def translate_docx(
+        self,
+        src_file_path: Path,
+        trg_file_path: Path,
+        src_iso: str,
+        trg_iso: str,
+        produce_multiple_translations: bool = False,
+    ) -> None:
         tokenizer: nltk.tokenize.PunktSentenceTokenizer
         try:
             src_lang = Lang(src_iso)
@@ -190,9 +277,17 @@ class Translator(ABC):
                 sentences.append(sentence)
                 paras.append(i)
 
-        for para, group in groupby(zip(self.translate(sentences, src_iso, trg_iso), paras), key=lambda t: t[1]):
-            text = " ".join(s[0] for s in group)
-            doc.paragraphs[para].text = text
+        draft_set: DraftSet = DraftSet(self.translate(sentences, src_iso, trg_iso, produce_multiple_translations))
 
-        with trg_file_path.open("wb") as file:
-            doc.save(file)
+        for translated_draft, draft_index in draft_set.get_drafts_with_indices():
+            for para, group in groupby(zip(translated_draft.sentences, paras), key=lambda t: t[1]):
+                text = " ".join(s[0] for s in group)
+                doc.paragraphs[para].text = text
+
+            if produce_multiple_translations:
+                trg_draft_file_path = trg_file_path.with_suffix(f"{trg_file_path.suffix}.{draft_index}")
+            else:
+                trg_draft_file_path = trg_file_path
+
+            with trg_draft_file_path.open("wb") as file:
+                doc.save(file)

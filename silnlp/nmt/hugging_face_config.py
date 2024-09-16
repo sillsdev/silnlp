@@ -71,6 +71,7 @@ from transformers.utils.logging import tqdm
 
 from ..common.corpus import Term, count_lines, get_terms
 from ..common.environment import SIL_NLP_ENV, download_if_s3_paths
+from ..common.translator import TranslationSet
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
 from .config import CheckpointType, Config, DataFile, NMTModel
 from .tokenizer import NullTokenizer, Tokenizer
@@ -303,7 +304,13 @@ class HuggingFaceConfig(Config):
                     "predict_with_generate": True,
                     "detokenize": True,
                 },
-                "infer": {"infer_batch_size": 16, "num_beams": 2},
+                "infer": {
+                    "infer_batch_size": 16,
+                    "num_beams": 5,
+                    "num_drafts": 3,
+                    "multiple_translations_method": "hybrid",
+                    "temperature": 0.5,
+                },
                 "params": {
                     "optim": "adamw_torch",
                     "label_smoothing_factor": 0.2,
@@ -782,9 +789,10 @@ class HuggingFaceNMTModel(NMTModel):
             if not src_path.is_file() or not trg_path.is_file():
                 return None
             data = []
-            with open(src_path, "r", encoding="utf-8-sig") as src_file, open(
-                trg_path, "r", encoding="utf-8-sig"
-            ) as trg_file:
+            with (
+                open(src_path, "r", encoding="utf-8-sig") as src_file,
+                open(trg_path, "r", encoding="utf-8-sig") as trg_file,
+            ):
                 for src_line, trg_line in zip(src_file, trg_file):
                     data.append({"src": src_line.strip(), "trg": trg_line.strip()})
             return Dataset.from_dict({"translation": data})
@@ -966,6 +974,7 @@ class HuggingFaceNMTModel(NMTModel):
         self,
         input_paths: List[Path],
         translation_paths: List[Path],
+        produce_multiple_translations: bool = False,
         vref_paths: Optional[List[Path]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
@@ -995,7 +1004,9 @@ class HuggingFaceNMTModel(NMTModel):
                     vrefs = (VerseRef.from_string(line.strip(), ORIGINAL_VERSIFICATION) for line in vref_file)
 
                 for prediction in tqdm(
-                    self._translate_sentences(tokenizer, pipeline, sentences, vrefs, return_tensors=True),
+                    self._translate_sentences(
+                        tokenizer, pipeline, sentences, vrefs, produce_multiple_translations, return_tensors=True
+                    ),
                     total=length,
                     unit="ex",
                 ):
@@ -1009,9 +1020,10 @@ class HuggingFaceNMTModel(NMTModel):
         sentences: Iterable[str],
         src_iso: str,
         trg_iso: str,
+        produce_multiple_translations: bool = False,
         vrefs: Optional[Iterable[VerseRef]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
-    ) -> Iterable[str]:
+    ) -> Iterable[TranslationSet]:
         tokenizer = self._config.get_tokenizer()
         model = self._create_inference_model(ckpt, tokenizer)
         if model.config.max_length < 512:
@@ -1028,13 +1040,13 @@ class HuggingFaceNMTModel(NMTModel):
         if not isinstance(sentences, list):
             sentences = list(sentences)
         for outputs in tqdm(
-            self._translate_sentences(tokenizer, pipeline, sentences, vrefs),
+            self._translate_sentences(tokenizer, pipeline, sentences, vrefs, produce_multiple_translations),
             total=len(sentences),
             unit="ex",
         ):
             if isinstance(outputs, dict):
                 outputs = [outputs]
-            yield from (p["translation_text"] for p in outputs)
+            yield from (TranslationSet([p["translation_text"]]) for p in outputs)
 
     def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
         step: Optional[int] = None
@@ -1093,9 +1105,10 @@ class HuggingFaceNMTModel(NMTModel):
         if not dict_trg_path.is_file() or not dict_vref_path.is_file():
             return self._dictionary
 
-        with dict_trg_path.open("r", encoding="utf-8-sig") as trg_file, dict_vref_path.open(
-            "r", encoding="utf-8-sig"
-        ) as dict_file:
+        with (
+            dict_trg_path.open("r", encoding="utf-8-sig") as trg_file,
+            dict_vref_path.open("r", encoding="utf-8-sig") as dict_file,
+        ):
             for trg_line, vref_line in zip(trg_file, dict_file):
                 vref_line = vref_line.strip()
                 if vref_line == "":
@@ -1225,6 +1238,7 @@ class HuggingFaceNMTModel(NMTModel):
         pipeline: TranslationPipeline,
         sentences: Iterable[TSent],
         vrefs: Optional[Iterable[VerseRef]],
+        produce_multiple_translations: bool = False,
         return_tensors: bool = False,
     ) -> Iterable[dict]:
         batch_size: int = self._config.infer["infer_batch_size"]

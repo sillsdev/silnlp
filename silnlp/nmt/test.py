@@ -413,6 +413,7 @@ def test_checkpoint(
         model.translate_test_files(
             source_paths,
             translation_paths,
+            False,
             vref_paths,
             step if checkpoint_type is CheckpointType.OTHER else checkpoint_type,
         )

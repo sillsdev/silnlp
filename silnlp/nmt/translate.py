@@ -11,7 +11,7 @@ from machine.scripture import VerseRef, book_number_to_id, get_chapters
 from ..common.environment import SIL_NLP_ENV
 from ..common.paratext import book_file_name_digits, get_project_dir
 from ..common.tf_utils import enable_eager_execution, enable_memory_growth
-from ..common.translator import Translator
+from ..common.translator import TranslationSet, Translator
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import SILClearML
 from .config import CheckpointType, Config, NMTModel
@@ -25,9 +25,16 @@ class NMTTranslator(Translator):
         self._checkpoint = checkpoint
 
     def translate(
-        self, sentences: Iterable[str], src_iso: str, trg_iso: str, vrefs: Optional[Iterable[VerseRef]] = None
-    ) -> Iterable[str]:
-        return self._model.translate(sentences, src_iso, trg_iso, vrefs, self._checkpoint)
+        self,
+        sentences: Iterable[str],
+        src_iso: str,
+        trg_iso: str,
+        produce_multiple_translations: bool = False,
+        vrefs: Optional[Iterable[VerseRef]] = None,
+    ) -> Iterable[TranslationSet]:
+        return self._model.translate(
+            sentences, src_iso, trg_iso, vrefs, produce_multiple_translations, self._checkpoint
+        )
 
 
 @dataclass
@@ -47,6 +54,7 @@ class TranslationTask:
         src_project: Optional[str],
         trg_project: Optional[str],
         trg_iso: Optional[str],
+        produce_multiple_translations: bool = False,
         include_inline_elements: bool = False,
     ):
         book_nums = get_chapters(books)
@@ -121,8 +129,10 @@ class TranslationTask:
         end_seq: int,
         src_iso: Optional[str],
         trg_iso: Optional[str],
+        produce_multiple_translations: bool = False,
     ) -> None:
         translator, config, _ = self._init_translation_task(experiment_suffix=f"_{self.checkpoint}_{src_prefix}")
+
         if trg_prefix is None:
             raise RuntimeError("A target file prefix must be specified.")
         if start_seq is None or end_seq is None:
@@ -140,7 +150,7 @@ class TranslationTask:
             trg_file_path = cwd / f"{trg_prefix}{file_num}.txt"
             if src_file_path.is_file() and not trg_file_path.is_file():
                 start = time.time()
-                translator.translate_text(src_file_path, trg_file_path, src_iso, trg_iso)
+                translator.translate_text(src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations)
                 end = time.time()
                 print(f"Translated {src_file_path.name} to {trg_file_path.name} in {((end-start)/60):.2f} minutes")
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM"), overwrite=True)
@@ -151,6 +161,7 @@ class TranslationTask:
         trg: Optional[str],
         src_iso: Optional[str],
         trg_iso: Optional[str],
+        produce_multiple_translations: bool = False,
         include_inline_elements: bool = False,
     ) -> None:
         translator, config, step_str = self._init_translation_task(
@@ -203,9 +214,9 @@ class TranslationTask:
             ext = src_file_path.suffix.lower()
             LOGGER.info(f"Translating {src_name}")
             if ext == ".txt":
-                translator.translate_text(src_file_path, trg_file_path, src_iso, trg_iso)
+                translator.translate_text(src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations)
             elif ext == ".docx":
-                translator.translate_docx(src_file_path, trg_file_path, src_iso, trg_iso)
+                translator.translate_docx(src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations)
             elif ext == ".usfm" or ext == ".sfm":
                 experiment_ckpt_str = f"{self.name}:{self.checkpoint}"
                 if not config.model_dir.exists():
@@ -215,6 +226,7 @@ class TranslationTask:
                     trg_file_path,
                     src_iso,
                     trg_iso,
+                    produce_multiple_translations,
                     include_inline_elements=include_inline_elements,
                     experiment_ckpt_str=experiment_ckpt_str,
                 )
@@ -275,6 +287,12 @@ def main() -> None:
     parser.add_argument("--src-iso", default=None, type=str, help="The source language (iso code) to translate from")
     parser.add_argument("--trg-iso", default=None, type=str, help="The target language (iso code) to translate to")
     parser.add_argument(
+        "--multiple-translations",
+        default=False,
+        action="store_true",
+        help='Produce multiple translations of each verse. These will be saved in separate files with suffixes like ".1", ".2", etc.',
+    )
+    parser.add_argument(
         "--include-inline-elements",
         default=False,
         action="store_true",
@@ -326,6 +344,7 @@ def main() -> None:
             args.src_project,
             args.trg_project,
             args.trg_iso,
+            args.multiple_translations,
             args.include_inline_elements,
         )
     elif args.src_prefix is not None:
@@ -336,7 +355,13 @@ def main() -> None:
             )
             exit()
         translator.translate_text_files(
-            args.src_prefix, args.trg_prefix, args.start_seq, args.end_seq, args.src_iso, args.trg_iso
+            args.src_prefix,
+            args.trg_prefix,
+            args.start_seq,
+            args.end_seq,
+            args.src_iso,
+            args.trg_iso,
+            args.multiple_translations,
         )
     elif args.src is not None:
         if args.debug:
@@ -345,7 +370,9 @@ def main() -> None:
                 actions=[f"Will attempt to translate {args.src} from {args.src_iso} into {args.trg_iso}."],
             )
             exit()
-        translator.translate_files(args.src, args.trg, args.src_iso, args.trg_iso, args.include_inline_elements)
+        translator.translate_files(
+            args.src, args.trg, args.src_iso, args.trg_iso, args.multiple_translations, args.include_inline_elements
+        )
     else:
         raise RuntimeError("A Scripture book, file, or file prefix must be specified.")
 
