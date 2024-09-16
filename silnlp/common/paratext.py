@@ -501,7 +501,6 @@ def detect_NT_versification(project_dir: str) -> Tuple[List[VersificationType], 
 
 def check_versification(project_dir: str) -> Tuple[bool, List[VersificationType]]:
     settings = FileParatextProjectSettingsParser(project_dir).parse()
-    project_versification: VersificationType = VersificationType(int(settings.versification))
 
     check_ot, check_nt, matching = False, False, False
 
@@ -552,9 +551,9 @@ def check_versification(project_dir: str) -> Tuple[bool, List[VersificationType]
         )
         return (matching, detected_versification)
 
-    if project_versification not in detected_versification:
+    if settings.versification.type not in detected_versification:
         LOGGER.warning(
-            f"Project versification setting {project_versification} does not match detected versification(s) "
+            f"Project versification setting {settings.versification.type} does not match detected versification(s) "
             f"{', '.join([str(int(versification)) for versification in detected_versification])}. "
             f"The detected versification(s) were based on {', '.join(key_verses)} "
             f"being the last verse of {'their' if len(key_verses)>=2 else 'its'} "
