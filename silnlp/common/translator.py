@@ -110,7 +110,7 @@ class Translator(ABC):
                 project=src_settings.name,
             )
         else:
-            src_file_text = UsfmFileText("usfm.sty", "utf-8", "", src_file_path, include_all_text=True)
+            src_file_text = UsfmFileText("usfm.sty", "utf-8-sig", "", src_file_path, include_all_text=True)
 
         sentences = [s.text.strip() for s in src_file_text]
         vrefs = [s.ref for s in src_file_text]
@@ -158,7 +158,7 @@ class Translator(ABC):
                 raise FileNotFoundError(f"Book {src_file_text.id} does not exist in target project {trg_project}")
         # Insert translation into the USFM structure of an individual file
         else:
-            with open(src_file_path, encoding="utf-8") as f:
+            with open(src_file_path, encoding="utf-8-sig") as f:
                 usfm = f.read()
             handler = UpdateUsfmParserHandler(rows, vrefs[0].book, strip_all_text=True)
             parse_usfm(usfm, handler)
