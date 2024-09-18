@@ -1,287 +1,49 @@
 import logging
-import string
-import tempfile
 from abc import ABC, abstractmethod
 from datetime import date
 from itertools import groupby
 from pathlib import Path
-from typing import Iterable, List, Optional, Union
+from typing import Iterable, List, Optional
 
 import docx
 import nltk
 from iso639 import Lang
-from lxml import etree
-from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
+from machine.corpora import (
+    FileParatextProjectSettingsParser,
+    FileParatextProjectTextUpdater,
+    UpdateUsfmParserHandler,
+    UsfmFileText,
+    UsfmStylesheet,
+    UsfmTextType,
+    parse_usfm,
+)
+from machine.scripture import VerseRef
 
-from .. import sfm
-from ..sfm import style, usfm
 from .corpus import load_corpus, write_corpus
 from .paratext import get_book_path, get_iso, get_project_dir
 
 LOGGER = logging.getLogger(__package__ + ".translate")
 nltk.download("punkt")
 
-
-class Paragraph:
-    def __init__(self, elem: sfm.Element, child_indices: Iterable[int] = [], text: str = ""):
-        self.elem = elem
-        self.child_indices = list(child_indices)
-        self.text = text
-
-    def add_text(self, index: int, text: str) -> None:
-        self.child_indices.append(index)
-        self.text += text
-
-    def copy(self) -> "Paragraph":
-        return Paragraph(self.elem, self.child_indices, self.text)
-
-
-class Segment:
-    def __init__(self, ref: VerseRef, paras: Iterable[Paragraph] = []):
-        self.ref = ref
-        self.paras = list(paras)
-
-    @property
-    def is_empty(self) -> bool:
-        return self.text == ""
-
-    @property
-    def text(self) -> str:
-        return "".join(p.text for p in self.paras)
-
-    def add_text(self, index: int, text: str) -> None:
-        if len(text) == 0:
-            return
-        self.paras[-1].add_text(index, text)
-
-    def reset(self) -> None:
-        self.paras.clear()
-
-    def copy(self) -> "Segment":
-        return Segment(self.ref.copy(), (p.copy() for p in self.paras if len(p.child_indices) > 0))
-
-
-def get_char_style_text(elem: sfm.Element) -> str:
-    text: str = ""
-    for child in elem:
-        if isinstance(child, sfm.Element):
-            text += get_char_style_text(child)
-        elif isinstance(child, sfm.Text):
-            text += str(child)
-    return text
-
-
-def get_style(elem: sfm.Element) -> str:
-    return elem.name.rstrip(string.digits)
-
-
-def collect_segments_from_paragraph(segments: List[Segment], cur_elem: sfm.Element, cur_segment: Segment) -> None:
-    style = get_style(cur_elem)
-    if style != "q" and style != "b":
-        if not cur_segment.is_empty:
-            segments.append(cur_segment.copy())
-        cur_segment.reset()
-
-    cur_segment.paras.append(Paragraph(cur_elem, text="\n" if style == "b" else ""))
-    for i, child in enumerate(cur_elem):
-        if isinstance(child, sfm.Element):
-            if child.name == "v":
-                if not cur_segment.is_empty:
-                    segments.append(cur_segment.copy())
-                cur_segment.reset()
-                cur_segment.ref.verse = child.args[0]
-                cur_segment.paras.append(Paragraph(cur_elem))
-            elif child.meta["StyleType"] == "Character" and child.name != "fig":
-                cur_segment.add_text(i, get_char_style_text(child))
-        elif isinstance(child, sfm.Text) and cur_elem.name != "id":
-            if i > 0 or child != "\n":
-                cur_segment.add_text(i, str(child))
-
-    cur_child_segment = Segment(cur_segment.ref.copy())
-    cur_child_segment.ref.verse_num = 0
-    for child in cur_elem:
-        if isinstance(child, sfm.Element) and child.meta["StyleType"] == "Paragraph":
-            if child.name == "c":
-                cur_child_segment.ref.chapter = child.args[0]
-            collect_segments_from_paragraph(segments, child, cur_child_segment)
-    if not cur_child_segment.is_empty:
-        segments.append(cur_child_segment)
-
-
-def collect_segments(book: str, doc: List[sfm.Element]) -> List[Segment]:
-    segments: List[Segment] = []
-    for root in doc:
-        cur_segment = Segment(VerseRef(book, 0, 0, ORIGINAL_VERSIFICATION))
-        collect_segments_from_paragraph(segments, root, cur_segment)
-        if not cur_segment.is_empty:
-            segments.append(cur_segment)
-    return segments
-
-
-def update_segments(segments: List[Segment], translations: List[str]) -> None:
-    for segment, translation in zip(reversed(segments), reversed(translations)):
-        if segment.text.endswith(" "):
-            translation += " "
-
-        lines = translation.splitlines()
-        if len(lines) == len(segment.paras):
-            for para, line in zip(reversed(segment.paras), reversed(lines)):
-                if len(para.child_indices) == 0:
-                    continue
-                for child_index in reversed(para.child_indices):
-                    para.elem.pop(child_index)
-                if para.text.endswith("\n"):
-                    insert_nl_index = para.child_indices[0]
-                    for i in range(len(para.child_indices) - 1):
-                        if para.child_indices[i] != para.child_indices[i + 1] - 1:
-                            insert_nl_index += 1
-                    para.elem.insert(insert_nl_index, sfm.Text("\n", parent=para.elem))
-                para.elem.insert(para.child_indices[0], sfm.Text(line, parent=para.elem))
-        else:
-            first_para = next(p for p in segment.paras if len(p.child_indices) > 0)
-            for child_index in reversed(first_para.child_indices):
-                first_para.elem.pop(child_index)
-
-            insert_nl_index = first_para.child_indices[0]
-            for para in reversed(segment.paras[1:]):
-                for child_index in reversed(para.child_indices):
-                    para.elem.pop(child_index)
-
-                child: Union[sfm.Element, sfm.Text]
-                for child in para.elem:
-                    child.parent = first_para.elem
-                    first_para.elem.insert(first_para.child_indices[0], child)
-                    insert_nl_index += 1
-
-                parent: sfm.Element = para.elem.parent
-                parent.remove(para.elem)
-
-            if segment.text.endswith("\n"):
-                for i in range(len(first_para.child_indices) - 1):
-                    if first_para.child_indices[i] != first_para.child_indices[i + 1] - 1:
-                        insert_nl_index += 1
-                first_para.elem.insert(insert_nl_index, sfm.Text("\n", parent=first_para.elem))
-
-            first_para.elem.insert(first_para.child_indices[0], sfm.Text(translation, parent=first_para.elem))
-
-
-def get_stylesheet(project_path: Path, field_update: str = "merge") -> dict:
-    try:
-        field_update: style.FieldUpdate = style.FieldUpdate[field_update.upper()]
-    except Exception:
-        raise ValueError(
-            f"{field_update} is not a valid value for field_update. Must be one of 'replace', 'merge', or 'ignore'."
-        )
-
-    custom_stylesheet_path = project_path / "custom.sty"
-    if custom_stylesheet_path.exists():
-        with custom_stylesheet_path.open("r", encoding="utf-8-sig") as file:
-            custom_stylesheet = style.parse(file)
-        return style.update_sheet(usfm.relaxed_stylesheet, custom_stylesheet, field_update=field_update)
-    return usfm.relaxed_stylesheet
-
-
-def remove_inline_elements_from_element(cur_elem: sfm.Element) -> None:
-    inline_idxs = []
-    for i, child in enumerate(cur_elem):
-        if isinstance(child, sfm.Element):
-            if child.meta.get("TextType") == "NoteText" or child.name in ["fm", "rq", "xtSeeAlso"]:
-                inline_idxs.append(i)
-            else:
-                remove_inline_elements_from_element(child)
-
-    for idx in reversed(inline_idxs):
-        del cur_elem[idx]
-
-
-def remove_inline_elements(doc: List[sfm.Element]) -> None:
-    for root in doc:
-        remove_inline_elements_from_element(root)
-
-
-def insert_blank_verses_into_target_element(cur_elem: sfm.Element, chapters: List[int]) -> None:
-    insert_idxs = []
-    for i, child in enumerate(cur_elem):
-        if isinstance(child, sfm.Element):
-            if child.name == "c" and int(child.args[0]) not in chapters:
-                continue
-            if child.name == "v" and (i == len(cur_elem) - 1 or (isinstance(cur_elem[i + 1], sfm.Element) and cur_elem[i + 1].name == "v")):
-                insert_idxs.append(i + 1)
-            else:
-                insert_blank_verses_into_target_element(child, chapters)
-
-    for idx in reversed(insert_idxs):
-        cur_elem.insert(idx, sfm.Text("\n", parent=cur_elem))
-
-
-def insert_blank_verses_into_target(doc: List[sfm.Element], chapters: List[int]) -> None:
-    for root in doc:
-        insert_blank_verses_into_target_element(root, chapters)
-
-
-def insert_translation_into_trg_sentences(
-    sentences: List[str],
-    vrefs: List[VerseRef],
-    trg_sentences: List[str],
-    trg_vrefs: List[VerseRef],
-    chapters: List[int],
-) -> List[str]:
-    ret = [""] * len(trg_sentences)
-    translation_idx = 0
-    for i in range(len(trg_sentences)):
-        if trg_vrefs[i].chapter_num not in chapters:
-            ret[i] = trg_sentences[i]
-            continue
-        # Skip over rest of verse since the whole verse is put into the first entry
-        if (
-            i > 0
-            and trg_vrefs[i].chapter_num == trg_vrefs[i - 1].chapter_num
-            and trg_vrefs[i].verse_num == trg_vrefs[i - 1].verse_num
-        ):
-            continue
-        # If translation_idx gets behind, catch up
-        while translation_idx < len(sentences) and (
-            trg_vrefs[i].chapter_num > vrefs[translation_idx].chapter_num
-            or (
-                trg_vrefs[i].chapter_num == vrefs[translation_idx].chapter_num
-                and trg_vrefs[i].verse_num > vrefs[translation_idx].verse_num
-            )
-        ):
-            translation_idx += 1
-
-        # Put all parts of the translated verse into the first entry for that verse
-        while (
-            translation_idx < len(sentences)
-            and vrefs[translation_idx].chapter_num == trg_vrefs[i].chapter_num
-            and vrefs[translation_idx].verse_num == trg_vrefs[i].verse_num
-        ):
-            if ret[i] != "":
-                ret[i] += " "
-            ret[i] += sentences[translation_idx]
-            translation_idx += 1
-
-    return ret
+NON_NOTE_INLINE_ELEMENTS = ["fm", "rq", "xtSeeAlso"]
 
 
 def insert_draft_remark(
-    doc: List[sfm.Element],
+    usfm: str,
     book: str,
     description: str,
     experiment_ckpt_str: str,
-) -> List[sfm.Element]:
-    remark = f"This draft of {book} was machine translated on {date.today()} from the {description} using model {experiment_ckpt_str}. It should be reviewed and edited carefully.\n"
-    rmk_elem = sfm.Element(
-        "rem",
-        parent=doc[0][0].parent,
-        meta={
-            "Endmarker": None,
-            "StyleType": "Paragraph",
-        },
-        content=[sfm.Text(remark)],
-    )
+) -> str:
+    remark = f"\\rem This draft of {book} was machine translated on {date.today()} from {description} using model {experiment_ckpt_str}. It should be reviewed and edited carefully.\n"
 
-    doc[0].insert(1, rmk_elem)
-    return doc
+    lines = usfm.split("\n")
+    insert_idx = (
+        1
+        + (len(lines) > 1 and (lines[1].startswith("\\ide") or lines[1].startswith("\\usfm")))
+        + (len(lines) > 2 and (lines[2].startswith("\\ide") or lines[2].startswith("\\usfm")))
+    )
+    lines.insert(insert_idx, remark)
+    return "\n".join(lines)
 
 
 class Translator(ABC):
@@ -301,18 +63,11 @@ class Translator(ABC):
         output_path: Path,
         trg_iso: str,
         chapters: List[int] = [],
-        trg_project: str = "",
+        trg_project: Optional[str] = None,
         include_inline_elements: bool = False,
-        stylesheet_field_update: str = "merge",
         experiment_ckpt_str: str = "",
     ) -> None:
-        src_project_dir = get_project_dir(src_project)
-        with (src_project_dir / "Settings.xml").open("rb") as settings_file:
-            settings_tree = etree.parse(settings_file)
-        src_iso = get_iso(settings_tree)
         book_path = get_book_path(src_project, book)
-        stylesheet = get_stylesheet(src_project_dir, stylesheet_field_update)
-
         if not book_path.is_file():
             raise RuntimeError(f"Can't find file {book_path} for book {book}")
         else:
@@ -321,11 +76,10 @@ class Translator(ABC):
         self.translate_usfm(
             book_path,
             output_path,
-            src_iso,
+            get_iso(src_project),
             trg_iso,
             chapters,
             trg_project,
-            stylesheet,
             include_inline_elements,
             experiment_ckpt_str,
         )
@@ -333,95 +87,89 @@ class Translator(ABC):
     def translate_usfm(
         self,
         src_file_path: Path,
-        trg_file_path: Path,
+        out_path: Path,
         src_iso: str,
         trg_iso: str,
         chapters: List[int] = [],
-        trg_project_path: str = "",
-        stylesheet: dict = usfm.relaxed_stylesheet,
+        trg_project: Optional[str] = None,
         include_inline_elements: bool = False,
         experiment_ckpt_str: str = "",
     ) -> None:
-        with src_file_path.open(mode="r", encoding="utf-8-sig") as book_file:
-            doc: List[sfm.Element] = list(usfm.parser(book_file, stylesheet=stylesheet, canonicalise_footnotes=False))
+        # Create UsfmFileText object for source
+        src_from_project = False
+        if str(src_file_path).startswith(str(get_project_dir(""))):
+            src_from_project = True
+            src_settings = FileParatextProjectSettingsParser(src_file_path.parent).parse()
+            src_file_text = UsfmFileText(
+                src_settings.stylesheet,
+                src_settings.encoding,
+                src_settings.get_book_id(src_file_path.name),
+                src_file_path,
+                src_settings.versification,
+                include_all_text=True,
+                project=src_settings.name,
+            )
+        else:
+            src_file_text = UsfmFileText("usfm.sty", "utf-8-sig", "", src_file_path, include_all_text=True)
 
-        book = ""
-        description = ""
-        for elem in doc:
-            if elem.name == "id":
-                doc_str = str(elem[0]).strip()
-                book = doc_str[:3]
-                if len(doc_str) > 3:
-                    description = doc_str[3:].strip(" -")
-                break
-        if book == "":
-            raise RuntimeError(f"The USFM file {src_file_path} doesn't contain an id marker.")
-
-        if not include_inline_elements:
-            remove_inline_elements(doc)
-
-        segments = collect_segments(book, doc)
-
-        sentences = [s.text.strip() for s in segments]
-        vrefs = [s.ref for s in segments]
+        sentences = [s.text.strip() for s in src_file_text]
+        vrefs = [s.ref for s in src_file_text]
         LOGGER.info(f"File {src_file_path} parsed correctly.")
 
-        # Translate select chapters
-        if len(chapters) > 0:
-            idxs_to_translate = []
-            sentences_to_translate = []
-            vrefs_to_translate = []
-            for i in range(len(sentences)):
-                if vrefs[i].chapter_num in chapters:
-                    idxs_to_translate.append(i)
-                    sentences_to_translate.append(sentences[i])
-                    vrefs_to_translate.append(vrefs[i])
+        # Filter sentences
+        stylesheet = src_settings.stylesheet if src_from_project else UsfmStylesheet("usfm.sty")
+        for i in reversed(range(len(sentences))):
+            if len(chapters) > 0 and vrefs[i].chapter_num not in chapters:
+                sentences.pop(i)
+                vrefs.pop(i)
+            elif not include_inline_elements:
+                marker = vrefs[i].path[-1].name if len(vrefs[i].path) > 0 else ""
+                if stylesheet.get_tag(marker).text_type == UsfmTextType.NOTE_TEXT or marker in NON_NOTE_INLINE_ELEMENTS:
+                    sentences.pop(i)
+                    vrefs.pop(i)
+        # Set aside empty sentences
+        empty_sents = []
+        for i in reversed(range(len(sentences))):
+            if len(sentences[i]) == 0:
+                empty_sents.append((i, sentences.pop(i), vrefs.pop(i)))
 
-            partial_translation = list(self.translate(sentences_to_translate, src_iso, trg_iso, vrefs_to_translate))
+        translations = list(self.translate(sentences, src_iso, trg_iso, vrefs))
 
-            # Get translation from pre-existing target project to fill in translation
-            if trg_project_path != "":
-                trg_project_book_path = get_book_path(trg_project_path, book)
-                if trg_project_book_path.exists():
-                    with trg_project_book_path.open(mode="r", encoding="utf-8-sig") as book_file:
-                        trg_doc: List[sfm.Element] = list(
-                            usfm.parser(book_file, stylesheet=stylesheet, canonicalise_footnotes=False)
-                        )
-                    # Unstack empty verses grouped on the same line
-                    with tempfile.TemporaryDirectory() as td:
-                        tmp_path = Path(td) / "tmp.SFM"
-                        with tmp_path.open(mode="w", encoding="utf-8", newline="\n") as tmp_file:
-                            tmp_file.write(sfm.generate(trg_doc))
-                        with tmp_path.open(mode="r", encoding="utf-8-sig") as tmp_file:
-                            trg_doc = list(usfm.parser(tmp_file, canonicalise_footnotes=False))
-                    # Create place for translations to be inserted
-                    insert_blank_verses_into_target(trg_doc, chapters)
-                    trg_segments = collect_segments(book, trg_doc)
-                    trg_sentences = [s.text.strip() for s in trg_segments]
-                    trg_vrefs = [s.ref for s in trg_segments]
+        # Add empty sentences back in
+        for idx, sent, vref in reversed(empty_sents):
+            translations.insert(idx, sent)
+            vrefs.insert(idx, vref)
 
-                    translations = insert_translation_into_trg_sentences(
-                        partial_translation, vrefs_to_translate, trg_sentences, trg_vrefs, chapters
-                    )
-                    update_segments(trg_segments, translations)
-                    trg_doc = insert_draft_remark(trg_doc, book, description, experiment_ckpt_str)
+        rows = [([ref], translation) for ref, translation in zip(vrefs, translations)]
 
-                    with trg_file_path.open(mode="w", encoding="utf-8", newline="\n") as output_file:
-                        output_file.write(sfm.generate(trg_doc))
+        # Insert translation into the USFM structure of an existing project
+        # If the target project is not the same as the translated file's original project,
+        # no verses outside of the ones translated will be overwritten
+        use_src_project = trg_project is None and src_from_project
+        trg_format_project = src_file_path.parent.name if use_src_project else trg_project
+        if trg_format_project is not None:
+            dest_project_path = get_project_dir(trg_format_project)
+            dest_updater = FileParatextProjectTextUpdater(dest_project_path)
+            usfm_out = dest_updater.update_usfm(
+                src_file_text.id, rows, strip_all_text=use_src_project, prefer_existing_text=False
+            )
 
-                    return
-
-            translations = [""] * len(sentences)
-            for i, idx in enumerate(idxs_to_translate):
-                translations[idx] = partial_translation[i]
+            if usfm_out is None:
+                raise FileNotFoundError(f"Book {src_file_text.id} does not exist in target project {trg_project}")
+        # Insert translation into the USFM structure of an individual file
         else:
-            translations = list(self.translate(sentences, src_iso, trg_iso, vrefs))
+            with open(src_file_path, encoding="utf-8-sig") as f:
+                usfm = f.read()
+            handler = UpdateUsfmParserHandler(rows, vrefs[0].book, strip_all_text=True)
+            parse_usfm(usfm, handler)
+            usfm_out = handler.get_usfm()
 
-        update_segments(segments, translations)
-        doc = insert_draft_remark(doc, book, description, experiment_ckpt_str)
-
-        with trg_file_path.open(mode="w", encoding="utf-8", newline="\n") as output_file:
-            output_file.write(sfm.generate(doc))
+        # Insert draft remark and write to output path
+        description = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
+        usfm_out = insert_draft_remark(usfm_out, vrefs[0].book, description, experiment_ckpt_str)
+        encoding = src_settings.encoding if src_from_project else "utf-8"
+        with out_path.open("w", encoding=encoding) as f:
+            f.write(usfm_out)
 
     def translate_docx(self, src_file_path: Path, trg_file_path: Path, src_iso: str, trg_iso: str) -> None:
         tokenizer: nltk.tokenize.PunktSentenceTokenizer

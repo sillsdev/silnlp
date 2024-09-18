@@ -1882,7 +1882,7 @@ def main() -> None:
     parser.add_argument("input", help="The text file you want to determine the script of")
     args = parser.parse_args()
 
-    with open(args.input, encoding="utf-8") as f:
+    with open(args.input, encoding="utf-8-sig") as f:
         text = f.read()
 
     file_script = get_script(text)

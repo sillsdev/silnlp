@@ -4,7 +4,7 @@ import shutil
 import tempfile
 from contextlib import ExitStack
 from pathlib import Path
-from typing import IO, Iterable, List, Optional, Sequence, Set, Tuple, Union, cast
+from typing import IO, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union, cast
 
 import numpy as np
 import sacrebleu
@@ -23,7 +23,7 @@ from ..common.corpus import load_corpus, split_corpus
 from ..common.environment import SIL_NLP_ENV, download_if_s3_paths
 from ..common.tf_utils import set_tf_log_level
 from ..common.utils import Side, get_mt_exp_dir, merge_dict
-from .config import CheckpointType, Config, CorpusPair, NMTModel
+from .config import CheckpointType, Config, DataFile, NMTModel
 from .opennmt.runner import create_runner
 from .sp_utils import decode_sp, decode_sp_lines
 from .tokenizer import NullTokenizer, Tokenizer
@@ -691,10 +691,10 @@ class OpenNMTConfig(Config):
             aligner.train(src_train_path, trg_train_path)
             aligner.force_align(src_align_path, trg_align_path, self.exp_dir / "train.alignments.txt")
 
-    def _write_dictionary(self, tokenizer: Tokenizer, pair: CorpusPair) -> int:
+    def _write_dictionary(self, tokenizer: Tokenizer, src_terms_files: List[Tuple[DataFile, str]], trg_terms_files: List[Tuple[DataFile, str]]) -> int:
         terms_config = self.data["terms"]
         dict_books = get_books(terms_config["dictionary_books"]) if "dictionary_books" in terms_config else None
-        terms = self._collect_terms(pair, filter_books=dict_books)
+        terms = self._collect_terms(src_terms_files, trg_terms_files, filter_books=dict_books)
 
         dict_count = 0
         with ExitStack() as stack:
