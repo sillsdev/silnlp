@@ -130,7 +130,7 @@ def main() -> None:
         books = args.books
         canons_to_add = [canon for canon in books if canon in valid_canons]
 
-        books_to_check = [book for book in books]
+        books_to_check = [book for book in books if book in books_found]
 
         OT_books_found = [book for book in OT_CANON if book in books_found]
         NT_books_found = [book for book in NT_CANON if book in books_found]
