@@ -136,7 +136,7 @@ These are the main requirements for the SILNLP code to run on a local machine. S
    * For instructions on how to permanently set up environment variables for your operating system, see the corresponding section under the Development Environment Setup header below.
 
 10. If using AWS, create caches and cache environment variables
-   * Follow the corresponding instructions in [manual_setup.md](https://github.com/sillsdev/silnlp/blob/master/manual_setup.md#create-silnlp-cache) to set up the caches.
+   * Follow the corresponding instructions under [Create SILNLP cache](https://github.com/sillsdev/silnlp/blob/master/manual_setup.md#create-silnlp-cache) in manual_setup.md to set up the caches.
 
 ## Development Environment Setup
 
