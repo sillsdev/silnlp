@@ -73,8 +73,8 @@ from ..common.corpus import Term, count_lines, get_terms
 from ..common.environment import SIL_NLP_ENV, download_if_s3_paths
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
 from .config import CheckpointType, Config, DataFile, NMTModel
-from .hftrim.TokenizerTrimmer import TokenizerTrimmer
 from .hftrim.M2M100Trimmer import M2M100Trimmer
+from .hftrim.TokenizerTrimmer import TokenizerTrimmer
 from .tokenizer import NullTokenizer, Tokenizer
 
 if is_safetensors_available():
@@ -595,8 +595,11 @@ class HuggingFaceConfig(Config):
                     model_name_or_path = str(SIL_NLP_ENV.assets_dir / "tokenizers" / self.model_prefix)
                 else:
                     model_name_or_path = self.model
+            fast_tok_path = self.exp_dir / "tokenizer_config.json"
+            if fast_tok_path.is_file():
+                self._tokenizer = AutoTokenizer.from_pretrained(fast_tok_path, use_fast=True)
+            else:
                 tok_path = self.exp_dir / "trimmed" / "nllb_tok_trimmed"
-                # self._tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=False)
                 self._tokenizer = NllbTokenizer.from_pretrained(tok_path)
                 self._tokenizer = convert_slow_tokenizer(self._tokenizer)
                 self._tokenizer = NllbTokenizerFast(tokenizer_object=self._tokenizer)
@@ -610,17 +613,39 @@ class HuggingFaceConfig(Config):
             self._tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True)
             self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
         return self._tokenizer
-    
+
+    def get_script_ids(self, toks: List[str], scripts: List[str]) -> List[int]:
+        from collections import Counter
+
+        from ..common.script_utils import script
+
+        ids = []
+
+        for i, tok in enumerate(toks):
+            counts = Counter([script(char) for char in tok if script(char) != "Common"])
+            mc = counts.most_common()
+
+            if len(mc) == 0:
+                continue
+
+            s = mc[0][0]
+            if len(mc) > 1 and len(set(counts.keys()).intersection({"Han", "Hiragana", "Katakana"})) > 1:
+                s = "Japanese"
+
+            if s in scripts:
+                ids.append(i)
+
+        return ids
+
     def _trim_model(self):
-        # Trim model
         # collect data
-        data_fnames = [self.train_src_detok_filename(), self.train_trg_detok_filename(), 
-                       self.val_src_detok_filename(), self.val_trg_detok_filename(), 
-                       self.test_src_detok_filename("", ""), self.test_trg_filename(self.default_test_src_iso, self.default_test_trg_iso)]
-        data = []
-        for fname in data_fnames:
-            with open(self.exp_dir / "data" / fname, "r", encoding="utf-8-sig") as f:
-                data += [line.strip() for line in f.readlines()]
+        # data_fnames = [self.train_src_detok_filename(), self.train_trg_detok_filename(),
+        #                self.val_src_detok_filename(), self.val_trg_detok_filename(),
+        #                self.test_src_detok_filename("", "")]
+        # data = []
+        # for fname in data_fnames:
+        #     with open(self.exp_dir / "data" / fname, "r", encoding="utf-8-sig") as f:
+        #         data += [line.strip() for line in f.readlines()]
 
         model_config = AutoConfig.from_pretrained(
             self.model,
@@ -635,19 +660,24 @@ class HuggingFaceConfig(Config):
         model = AutoModelForSeq2SeqLM.from_pretrained(self.model, config=model_config)
         tokenizer = AutoTokenizer.from_pretrained(self.model, use_fast=False)
 
+        scripts = ["Arabic"]
+        toks = tokenizer.convert_ids_to_tokens(list(range(len(tokenizer))), skip_special_tokens=True)
+        ids = self.get_script_ids(toks, scripts)
+
         # trim
         tt = TokenizerTrimmer(tokenizer)
-        tt.make_vocab(data)
+        tt.make_vocab([ids], tokenized=True)
         tt.make_tokenizer()
+
         mt = M2M100Trimmer(model, model_config, tt.trimmed_tokenizer)
         mt.make_weights(tt.trimmed_vocab_ids)
         mt.make_model()
 
-        # save and reload
+        # save
         tmp_dir = self.exp_dir / "trimmed"
         tmp_dir.mkdir(exist_ok=True)
-        mt.trimmed_model.save_pretrained(tmp_dir / "nllb_trimmed")
         tt.trimmed_tokenizer.save_pretrained(tmp_dir / "nllb_tok_trimmed")
+        mt.trimmed_model.save_pretrained(tmp_dir / "nllb_trimmed")
 
     def _write_dictionary(
         self,
