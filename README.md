@@ -23,14 +23,14 @@ These are the main requirements for the SILNLP code to run on a local machine. S
 | Environment variables | To tell SILNLP where to find the data, etc.                       |
 
 ## Environment Setup
-
-1. If using a local GPU, install the corresponding [NVIDIA driver](https://www.nvidia.com/download/index.aspx).
+### Option 1: Docker
+1. If using a local GPU, install the corresponding [NVIDIA driver](https://www.nvidia.com/download/index.aspx)
    
    On Ubuntu, the driver can alternatively be installed through the GUI by opening Software & Updates, navigating to Additional Drivers in the top menu, and selecting the newest NVIDIA driver with the labels proprietary and tested.
 
    After installing the driver, reboot your system.
 
-2. Download and install [Docker Desktop](https://www.docker.com/get-started/).
+2. Download and install [Docker Desktop](https://www.docker.com/get-started/)
    * If using Linux (not WSL), add your user to the docker group by using a terminal to run: `sudo usermod -aG docker $USER`
    * Reboot after installing, confirm that all installation steps are complete before the next step.
    
@@ -82,6 +82,61 @@ These are the main requirements for the SILNLP code to run on a local machine. S
 
    * After this step, the terminal should change to say `root@xxxxx:~/silnlp#`, where `xxxxx` is a string of letters and numbers, instead of your current working directory. This is the command line for the docker container, and you're able to run SILNLP scripts from here.
    * To leave the container, run `exit`, and to stop it, run `docker stop silnlp`. It can be started again by repeating step 6. Stopping the container will not erase any changes made in the container environment, but removing  it will.
+
+### Option 2: Conda
+1. If using a local GPU, install the corresponding [NVIDIA driver](https://www.nvidia.com/download/index.aspx)
+   
+   On Ubuntu, the driver can alternatively be installed through the GUI by opening Software & Updates, navigating to Additional Drivers in the top menu, and selecting the newest NVIDIA driver with the labels proprietary and tested.
+
+   After installing the driver, reboot your system.
+
+2. Clone the silnlp repo
+  
+3. Install and initialize [Miniconda](https://docs.anaconda.com/miniconda/#quick-command-line-install)
+   * If using Windows, run the next steps in the Anaconda Prompt (miniconda3) program rather than the command prompt.
+
+4. Create the silnlp conda environment
+   * In a terminal, navigate to the silnlp repo. Then inside the repo, run:
+   ```
+   conda env create --file "environment.yml"
+   ```
+
+5. Activate the silnlp conda environment
+   * In a terminal, run:
+   ```
+   conda activate silnlp
+   ```
+
+6. Install [Poetry](https://python-poetry.org/docs/#installing-with-the-official-installer) with the official installer
+
+7. Configure Poetry to use the active Python
+   * In a terminal, run:
+   ```
+   poetry config virtualenvs.prefer-active-python true
+   ```
+
+8. Install the Python packages for the silnlp repo
+   * In a terminal, run:
+   ```
+   poetry install
+   ```
+
+9. If using ClearML and/or AWS, set the following environment variables:
+   ```
+   CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
+   CLEARML_API_ACCESS_KEY=xxxxx
+   CLEARML_API_SECRET_KEY=xxxxx
+   AWS_REGION="us-east-1"
+   AWS_ACCESS_KEY_ID=xxxxx
+   AWS_SECRET_ACCESS_KEY=xxxxx
+   SIL_NLP_DATA_PATH="/silnlp"
+   ```
+   * If you need to generate ClearML credentials, see [ClearML setup](clear_ml_setup.md).
+   * Note that this does not give you direct access to an AWS S3 bucket from within the Docker container, it only allows you to run scripts referencing files in the bucket.
+   * For instructions on how to permanently set up environment variables for your operating system, see the corresponding section under the Development Environment Setup header below.
+
+10. If using AWS, create caches and cache environment variables
+   * Follow the corresponding instructions in [manual_setup.md](https://github.com/sillsdev/silnlp/blob/master/manual_setup.md#create-silnlp-cache) to set up the caches.
 
 ## Development Environment Setup
 
