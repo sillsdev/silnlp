@@ -8,9 +8,9 @@ Example:
                                              input   source    target     dataset
                                              file    iso code  iso code   descriptor
 
-The output directory can be explicitly set using the `-output` arg, e.g.
+The output directory can be explicitly set using the `--output` arg, e.g.
 
-    $ python -m silnlp.common.extract_xri data.tsv swa ngq XRI-2024-08-14 -output /tmp/test
+    $ python -m silnlp.common.extract_xri data.tsv swa ngq XRI-2024-08-14 --output /tmp/test
 
 Note that the script will write over any existing extract files in that directory.
 
@@ -34,7 +34,7 @@ Run with --help for more details.
 
 By default the script uses the logging configuration inherited from the parent packages (which should log at INFO level).
 There is detailed DEBUG level logging that can assist with troubleshooting.
-You can enable DEBUG level logging by passing `-log_level DEBUG`.
+You can enable DEBUG level logging by passing `--log_level DEBUG`.
 Other accepted values are "INFO", "WARNING/WARN", "ERROR" and "CRITICAL".
 
 See https://github.com/sillsdev/silnlp/issues/472 for original context.
@@ -444,10 +444,10 @@ def main() -> None:
     parser.add_argument("target_iso", help="The ISO 693-3 code for the target/vernacular language", type=str)
     parser.add_argument("dataset", help="A descriptor of the dataset to be used in the output filename", type=str)
     parser.add_argument(
-        "-output", help="Optional path to the output directory where extract files are generated", type=str
+        "--output", help="Optional path to the output directory where extract files are generated", type=str
     )
     parser.add_argument(
-        "-log_level", help="Optional parameter to override the default logging level for this script", type=str
+        "--log-level", help="Optional parameter to override the default logging level for this script", type=str
     )
     args = parser.parse_args()
 
