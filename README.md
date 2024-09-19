@@ -93,7 +93,7 @@ These are the main requirements for the SILNLP code to run on a local machine. S
 2. Clone the silnlp repo
   
 3. Install and initialize [Miniconda](https://docs.anaconda.com/miniconda/#quick-command-line-install)
-   * If using Windows, run the next steps in the Anaconda Prompt (miniconda3) program rather than the command prompt.
+   * If using Windows, run the next steps in the Anaconda Prompt (miniconda3) program rather than the command prompt unless stated otherwise.
 
 4. Create the silnlp conda environment
    * In a terminal, navigate to the silnlp repo. Then inside the repo, run:
@@ -108,20 +108,28 @@ These are the main requirements for the SILNLP code to run on a local machine. S
    ```
 
 6. Install [Poetry](https://python-poetry.org/docs/#installing-with-the-official-installer) with the official installer
+    * For Linux/macOS/WSL users, run:
+    ```
+    curl -sSL https://install.python-poetry.org | python3 - --version 1.7.1
+    ```
+   * For Windows users, in Powershell run:
+    ```
+    (Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing).Content | py - --version 1.7.1
+    ```
 
-7. Configure Poetry to use the active Python
+8. Configure Poetry to use the active Python
    * In a terminal, run:
    ```
    poetry config virtualenvs.prefer-active-python true
    ```
 
-8. Install the Python packages for the silnlp repo
+9. Install the Python packages for the silnlp repo
    * In a terminal, run:
    ```
    poetry install
    ```
 
-9. If using ClearML and/or AWS, set the following environment variables:
+10. If using ClearML and/or AWS, set the following environment variables:
    ```
    CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
    CLEARML_API_ACCESS_KEY=xxxxx
@@ -135,7 +143,7 @@ These are the main requirements for the SILNLP code to run on a local machine. S
    * Note that this does not give you direct access to an AWS S3 bucket from within the Docker container, it only allows you to run scripts referencing files in the bucket.
    * For instructions on how to permanently set up environment variables for your operating system, see the corresponding section under the Development Environment Setup header below.
 
-10. If using AWS, create caches and cache environment variables
+11. If using AWS, create caches and cache environment variables
    * Follow the corresponding instructions under [Create SILNLP cache](https://github.com/sillsdev/silnlp/blob/master/manual_setup.md#create-silnlp-cache) in manual_setup.md to set up the caches.
 
 ## Development Environment Setup
