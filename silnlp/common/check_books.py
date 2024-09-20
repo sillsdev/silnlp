@@ -114,39 +114,30 @@ def main() -> None:
     sfm_files = [
         file for file in project_dir.glob("*") if file.is_file() and file.suffix[1:].lower() in ["sfm", "usfm"]
     ]
+    # Explicitly deal with XXG 
+    books_found = ["XXG" if sfm_file.name.startswith("100XXG") else sfm_file.name[2:5] for sfm_file in sfm_files]
 
-    books_found = [sfm_file.name[2:5] for sfm_file in sfm_files]
     grouped_result = group_bible_books(books_found)
     LOGGER.info(f"Found these books in the project_directory: {' '.join(grouped_result)}")
-    # LOGGER.info(f"Project directory: {project_dir}")
 
     if not sfm_files:
         LOGGER.info(f"No sfm or SFM files found in project folder: {project_dir}")
     else:
         books = args.books
         canons_to_add = [canon for canon in books if canon in valid_canons]
-        # LOGGER.info(f"Canons specified are: {canons_to_add}")
 
-        books_to_check = [book for book in books if book in valid_books]
-        # LOGGER.info(f"Individual books specified are: {books_to_check}\n")
+        books_to_check = [book for book in books if book in books_found]
 
         OT_books_found = [book for book in OT_CANON if book in books_found]
         NT_books_found = [book for book in NT_CANON if book in books_found]
         DT_books_found = [book for book in DT_CANON if book in books_found]
 
-        # LOGGER.info(f"OT_books_found are {OT_books_found}")
-        # LOGGER.info(f"OT_CANON is {OT_CANON}")
-
         for canon_to_add in canons_to_add:
             if canon_to_add == "OT":
-                # LOGGER.info("Adding OT books")
                 books_to_check.extend(OT_books_found)
-                # LOGGER.info(f"Books_to_check are {books_to_check}.")
             if canon_to_add == "NT":
-                # LOGGER.info("Adding NT books")
                 books_to_check.extend(NT_books_found)
             if canon_to_add == "DT":
-                # LOGGER.info("Adding DT books")
                 books_to_check.extend(DT_books_found)
 
         LOGGER.info(f"All books to check are: {books_to_check}\n")
@@ -155,9 +146,6 @@ def main() -> None:
             LOGGER.info("No books were specified, will check all books.")
             books_to_check = books_found
         else:
-            # Get list of books to check in usual Biblical order.
-            books_to_check = [book for book in valid_books if book in books_to_check]
-
             LOGGER.info(f"Of the books specified these were found: {books_to_check}")
 
         book_nums = get_chapters(books_to_check)
@@ -165,11 +153,6 @@ def main() -> None:
 
         for book_num_to_check in book_nums_to_check:
             parse_book(project_dir, book_num_to_check)
-
-        invalid_books = [book for book in books if book not in valid_books and book not in valid_canons]
-
-        if invalid_books:
-            LOGGER.info(f"WARNING: These unknown books were not checked: {invalid_books}")
 
 
 if __name__ == "__main__":
