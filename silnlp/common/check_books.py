@@ -114,12 +114,8 @@ def main() -> None:
     sfm_files = [
         file for file in project_dir.glob("*") if file.is_file() and file.suffix[1:].lower() in ["sfm", "usfm"]
     ]
-
-    books_found = [sfm_file.name[2:5] for sfm_file in sfm_files]
-
-    # Explicitly remove OXX from the list of books to check until it can be dealt with better
-    ignore_books = ["0XX"]
-    books_found = [book for book in books_found if book not in ignore_books]
+    # Explicitly deal with XXG 
+    books_found = ["XXG" if sfm_file.name.startswith("100XXG") else sfm_file.name[2:5] for sfm_file in sfm_files]
 
     grouped_result = group_bible_books(books_found)
     LOGGER.info(f"Found these books in the project_directory: {' '.join(grouped_result)}")
