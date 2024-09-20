@@ -625,6 +625,11 @@ class HuggingFaceConfig(Config):
             counts = Counter([script(char) for char in tok if script(char) != "Common"])
             mc = counts.most_common()
 
+            # if len(mc) == 1 and mc[0][0] == "Common":
+            #     ids.append(i)
+            #     continue
+            # counts.pop("Common", None)
+
             if len(mc) == 0:
                 continue
 
@@ -639,13 +644,17 @@ class HuggingFaceConfig(Config):
 
     def _trim_model(self):
         # collect data
-        # data_fnames = [self.train_src_detok_filename(), self.train_trg_detok_filename(),
-        #                self.val_src_detok_filename(), self.val_trg_detok_filename(),
-        #                self.test_src_detok_filename("", "")]
-        # data = []
-        # for fname in data_fnames:
-        #     with open(self.exp_dir / "data" / fname, "r", encoding="utf-8-sig") as f:
-        #         data += [line.strip() for line in f.readlines()]
+        data_fnames = [
+            self.train_src_detok_filename(),
+            self.train_trg_detok_filename(),
+            self.val_src_detok_filename(),
+            self.val_trg_detok_filename(),
+            self.test_src_detok_filename("", ""),
+        ]
+        data = []
+        for fname in data_fnames:
+            with open(self.exp_dir / "data" / fname, "r", encoding="utf-8-sig") as f:
+                data += [line.strip() for line in f.readlines()]
 
         model_config = AutoConfig.from_pretrained(
             self.model,
@@ -667,6 +676,7 @@ class HuggingFaceConfig(Config):
         # trim
         tt = TokenizerTrimmer(tokenizer)
         tt.make_vocab([ids], tokenized=True)
+        tt.make_vocab(data)
         tt.make_tokenizer()
 
         mt = M2M100Trimmer(model, model_config, tt.trimmed_tokenizer)
