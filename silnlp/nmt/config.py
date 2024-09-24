@@ -1035,7 +1035,13 @@ class Config(ABC):
         src_terms_files: List[Tuple[DataFile, str]],
         trg_terms_files: List[Tuple[DataFile, str]],
     ) -> int:
-        terms = self._collect_terms(src_terms_files, trg_terms_files)
+
+        try:
+            filter_books = get_chapters(self.data["terms"]["filter_books"]).keys()
+        except KeyError:
+            filter_books = None
+
+        terms = self._collect_terms(src_terms_files, trg_terms_files, filter_books)
 
         if terms is None:
             return 0
