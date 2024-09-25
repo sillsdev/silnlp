@@ -33,7 +33,7 @@ class NMTTranslator(Translator):
         vrefs: Optional[Iterable[VerseRef]] = None,
     ) -> Iterable[TranslationSet]:
         return self._model.translate(
-            sentences, src_iso, trg_iso, vrefs, produce_multiple_translations, self._checkpoint
+            sentences, src_iso, trg_iso, produce_multiple_translations, vrefs, self._checkpoint
         )
 
 

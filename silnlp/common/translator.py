@@ -76,10 +76,10 @@ class DraftSet:
         self.initial_translation_set: TranslationSet = next(self.translation_sets)
         self.num_drafts: int = self.initial_translation_set.num_translations()
 
-    def get_drafts(self) -> list[TranslatedDraft]:
+    def get_drafts(self) -> List[TranslatedDraft]:
         # for a single draft, don't consume the generator
         if self.num_drafts == 1:
-            return [TranslationSet(self.create_draft_sentence_generator(0))]
+            return [TranslatedDraft(self.create_draft_sentence_generator(0))]
         else:
             return self.create_draft_sentence_lists()
 
@@ -87,7 +87,7 @@ class DraftSet:
         yield self.initial_translation_set.translations[draft_index]
         yield from [ts.translations[draft_index] for ts in self.translation_sets]
 
-    def create_draft_sentence_lists(self) -> list[TranslatedDraft]:
+    def create_draft_sentence_lists(self) -> List[TranslatedDraft]:
         translated_draft_sentences = [
             [self.initial_translation_set.translations[draft_index]] for draft_index in range(self.num_drafts)
         ]
@@ -96,7 +96,7 @@ class DraftSet:
             for draft_index in range(self.num_drafts):
                 translated_draft_sentences[draft_index].append(translation_set.translations[draft_index])
 
-        return [TranslationSet(sentence_list) for sentence_list in translated_draft_sentences]
+        return [TranslatedDraft(sentence_list) for sentence_list in translated_draft_sentences]
 
     def get_drafts_with_indices(self):
         return zip(self.get_drafts(), range(1, self.num_drafts + 1))
@@ -122,7 +122,6 @@ class Translator(ABC):
         trg_iso: str,
         produce_multiple_translations: bool = False,
     ) -> None:
-
         draft_set: DraftSet = DraftSet(
             self.translate(load_corpus(src_file_path), src_iso, trg_iso, produce_multiple_translations)
         )
