@@ -12,7 +12,7 @@ from statistics import mean, median, stdev
 from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, Union, cast
 
 import pandas as pd
-from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_chapters
+from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books, get_chapters
 from machine.tokenization import LatinWordTokenizer
 from tqdm import tqdm
 
@@ -1037,7 +1037,7 @@ class Config(ABC):
     ) -> int:
 
         try:
-            filter_books = get_chapters(self.data["terms"]["filter_books"]).keys()
+            filter_books = get_books(self.data["terms"]["filter_books"])
         except KeyError:
             filter_books = None
 
