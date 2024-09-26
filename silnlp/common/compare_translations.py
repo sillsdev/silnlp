@@ -5,8 +5,6 @@ from typing import Dict, List, Set
 import sacrebleu
 from machine.corpora import ParatextTextCorpus
 
-from silnlp.common.metrics import compute_wer_score
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compare translations")
@@ -20,7 +18,7 @@ def main() -> None:
         "--scorers",
         nargs="*",
         metavar="scorer",
-        default={"bleu", "chrf3", "chrf3+", "chrf3++", "spbleu", "wer", "ter"},
+        default={"bleu", "chrf3", "chrf3+", "chrf3++", "spbleu", "ter"},
         help="Set of scorers",
     )
     args = parser.parse_args()
@@ -87,11 +85,6 @@ def score_pair(pair_sys: List[str], pair_refs: List[List[str]], scorers: Set[str
             tokenize="flores200",
         )
         scores["spBLEU"] = spbleu_score.score
-
-    if "wer" in scorers:
-        wer_score = compute_wer_score(pair_sys, pair_refs)
-        if wer_score >= 0:
-            scores["WER"] = wer_score
 
     if "ter" in scorers:
         ter_score = sacrebleu.corpus_ter(pair_sys, pair_refs)
