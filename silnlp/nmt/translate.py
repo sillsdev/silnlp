@@ -11,7 +11,7 @@ from machine.scripture import VerseRef, book_number_to_id, get_chapters
 from ..common.environment import SIL_NLP_ENV
 from ..common.paratext import book_file_name_digits, get_project_dir
 from ..common.tf_utils import enable_eager_execution, enable_memory_growth
-from ..common.translator import TranslationSet, Translator
+from ..common.translator import TranslationGroup, Translator
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import SILClearML
 from .config import CheckpointType, Config, NMTModel
@@ -31,7 +31,7 @@ class NMTTranslator(Translator):
         trg_iso: str,
         produce_multiple_translations: bool = False,
         vrefs: Optional[Iterable[VerseRef]] = None,
-    ) -> Iterable[TranslationSet]:
+    ) -> Iterable[TranslationGroup]:
         return self._model.translate(
             sentences, src_iso, trg_iso, produce_multiple_translations, vrefs, self._checkpoint
         )
@@ -107,6 +107,7 @@ class TranslationTask:
                     book,
                     output_path,
                     trg_iso,
+                    produce_multiple_translations,
                     chapters,
                     trg_project,
                     include_inline_elements,
@@ -132,7 +133,6 @@ class TranslationTask:
         produce_multiple_translations: bool = False,
     ) -> None:
         translator, config, _ = self._init_translation_task(experiment_suffix=f"_{self.checkpoint}_{src_prefix}")
-
         if trg_prefix is None:
             raise RuntimeError("A target file prefix must be specified.")
         if start_seq is None or end_seq is None:
@@ -290,7 +290,7 @@ def main() -> None:
         "--multiple-translations",
         default=False,
         action="store_true",
-        help='Produce multiple translations of each verse. These will be saved in separate files with suffixes like ".1", ".2", etc.',
+        help='Produce multiple translations of each verse. These will be saved in separate files with suffixes like ".1.txt", ".2.txt", etc.',
     )
     parser.add_argument(
         "--include-inline-elements",

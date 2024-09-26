@@ -71,7 +71,7 @@ from transformers.utils.logging import tqdm
 
 from ..common.corpus import Term, count_lines, get_terms
 from ..common.environment import SIL_NLP_ENV, download_if_s3_paths
-from ..common.translator import TranslationSet
+from ..common.translator import TranslationGroup
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
 from .config import CheckpointType, Config, DataFile, NMTModel
 from .tokenizer import NullTokenizer, Tokenizer
@@ -309,7 +309,7 @@ class HuggingFaceConfig(Config):
                     "num_beams": 5,
                     "num_drafts": 3,
                     "multiple_translations_method": "hybrid",
-                    "temperature": 0.5,
+                    "temperature": 0.75,
                     "diversity_penalty": 1.0,
                 },
                 "params": {
@@ -1035,7 +1035,7 @@ class HuggingFaceNMTModel(NMTModel):
         produce_multiple_translations: bool = False,
         vrefs: Optional[Iterable[VerseRef]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
-    ) -> Iterable[TranslationSet]:
+    ) -> Iterable[TranslationGroup]:
         tokenizer = self._config.get_tokenizer()
         model = self._create_inference_model(ckpt, tokenizer)
         if model.config.max_length < 512:
@@ -1052,6 +1052,10 @@ class HuggingFaceNMTModel(NMTModel):
         num_drafts = self._config.infer.get("num_drafts")
         if produce_multiple_translations and num_drafts > 1:
             LOGGER.info("Producing %i translated drafts", num_drafts)
+        elif produce_multiple_translations and num_drafts <= 1:
+            LOGGER.warning(
+                "num_drafts must be greater than 1 when using --multiple-translations. Falling back to a single translation."
+            )
 
         pipeline.model = torch.compile(pipeline.model)
         if not isinstance(sentences, list):
@@ -1063,7 +1067,7 @@ class HuggingFaceNMTModel(NMTModel):
         ):
             if isinstance(outputs, OutputGroup):
                 outputs = [outputs]
-            yield from [TranslationSet(output_group.get_translated_text()) for output_group in outputs]
+            yield from [TranslationGroup(output_group.get_translated_text()) for output_group in outputs]
 
     def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
         step: Optional[int] = None
@@ -1318,7 +1322,7 @@ class HuggingFaceNMTModel(NMTModel):
                     force_words_ids=force_words_ids,
                 )
 
-                # interleave the beam search results with the sampling results
+                # concatenate the beam search results with the sampling results
                 yield from [
                     OutputGroup([beam_search_results[i]] + sampling_results[i]) for i in range(len(beam_search_results))
                 ]
@@ -1361,6 +1365,8 @@ class HuggingFaceNMTModel(NMTModel):
                         force_words_ids=force_words_ids,
                     )
                 ]
+            else:
+                LOGGER.error('Unrecognized value for multiple_translations_method: "%s"', multiple_translations_method)
 
         else:
             yield from [

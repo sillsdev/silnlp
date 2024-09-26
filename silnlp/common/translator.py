@@ -33,24 +33,21 @@ def insert_draft_remark(
     book: str,
     description: str,
     experiment_ckpt_str: str,
-) -> List[sfm.Element]:
-    remark = f"This draft of {book} was machine translated on {date.today()} from the {description} using model {experiment_ckpt_str}. It should be reviewed and edited carefully.\n"
-    rmk_elem = sfm.Element(
-        "rem",
-        parent=doc[0][0].parent,
-        meta={
-            "Endmarker": None,
-            "StyleType": "Paragraph",
-        },
-        content=[sfm.Text(remark)],
+) -> str:
+    remark = f"\\rem This draft of {book} was machine translated on {date.today()} from {description} using model {experiment_ckpt_str}. It should be reviewed and edited carefully.\n"
+
+    lines = usfm.split("\n")
+    insert_idx = (
+        1
+        + (len(lines) > 1 and (lines[1].startswith("\\ide") or lines[1].startswith("\\usfm")))
+        + (len(lines) > 2 and (lines[2].startswith("\\ide") or lines[2].startswith("\\usfm")))
     )
+    lines.insert(insert_idx, remark)
+    return "\n".join(lines)
 
-    doc[0].insert(1, rmk_elem)
-    return doc
 
-
-# A set of multiple translations of a single sentence
-class TranslationSet:
+# A group of multiple translations of a single sentence
+class TranslationGroup:
     def __init__(self, translations: List[str]):
         self.translations = translations
 
@@ -64,42 +61,39 @@ class TranslatedDraft:
         self.sentences = sentences
 
 
-# A wrapper around Iterable[TranslationSet] that allows upstream consumers to view a
-# list of translation sets as a collection of discrete drafts
-class DraftSet:
-    def __init__(self, translation_sets: Iterable[TranslationSet]):
-        self.translation_sets = translation_sets
+# A wrapper around Iterable[TranslationGroup] that allows upstream consumers to view a
+# list of translation groups as a collection of discrete drafts
+class DraftGroup:
+    def __init__(self, translation_groups: Iterable[TranslationGroup]):
+        self.translation_groups = translation_groups
         self._calculate_num_drafts()
 
     def _calculate_num_drafts(self):
         # fetch one item first to determine the number of translations
-        self.initial_translation_set: TranslationSet = next(self.translation_sets)
-        self.num_drafts: int = self.initial_translation_set.num_translations()
+        self.initial_translation_group: TranslationGroup = next(self.translation_groups)
+        self.num_drafts: int = self.initial_translation_group.num_translations()
 
     def get_drafts(self) -> List[TranslatedDraft]:
         # for a single draft, don't consume the generator
         if self.num_drafts == 1:
-            return [TranslatedDraft(self.create_draft_sentence_generator(0))]
+            return [TranslatedDraft(self._create_draft_sentence_generator(0))]
         else:
-            return self.create_draft_sentence_lists()
+            return self._create_draft_sentence_lists()
 
-    def create_draft_sentence_generator(self, draft_index) -> Iterable[str]:
-        yield self.initial_translation_set.translations[draft_index]
-        yield from [ts.translations[draft_index] for ts in self.translation_sets]
+    def _create_draft_sentence_generator(self, draft_index) -> Iterable[str]:
+        yield self.initial_translation_group.translations[draft_index]
+        yield from [translation_group.translations[draft_index] for translation_group in self.translation_groups]
 
-    def create_draft_sentence_lists(self) -> List[TranslatedDraft]:
+    def _create_draft_sentence_lists(self) -> List[TranslatedDraft]:
         translated_draft_sentences = [
-            [self.initial_translation_set.translations[draft_index]] for draft_index in range(self.num_drafts)
+            [self.initial_translation_group.translations[draft_index]] for draft_index in range(self.num_drafts)
         ]
 
-        for translation_set in self.translation_sets:
+        for translation_set in self.translation_groups:
             for draft_index in range(self.num_drafts):
                 translated_draft_sentences[draft_index].append(translation_set.translations[draft_index])
 
         return [TranslatedDraft(sentence_list) for sentence_list in translated_draft_sentences]
-
-    def get_drafts_with_indices(self):
-        return zip(self.get_drafts(), range(1, self.num_drafts + 1))
 
 
 class Translator(ABC):
@@ -111,7 +105,7 @@ class Translator(ABC):
         trg_iso: str,
         produce_multiple_translations: bool = False,
         vrefs: Optional[Iterable[VerseRef]] = None,
-    ) -> Iterable[TranslationSet]:
+    ) -> Iterable[TranslationGroup]:
         pass
 
     def translate_text(
@@ -122,12 +116,12 @@ class Translator(ABC):
         trg_iso: str,
         produce_multiple_translations: bool = False,
     ) -> None:
-        draft_set: DraftSet = DraftSet(
+        draft_set: DraftGroup = DraftGroup(
             self.translate(load_corpus(src_file_path), src_iso, trg_iso, produce_multiple_translations)
         )
-        for translated_draft, draft_index in draft_set.get_drafts_with_indices():
+        for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
             if produce_multiple_translations:
-                trg_draft_file_path = trg_file_path.with_suffix(f"{trg_file_path.suffix}.{draft_index}")
+                trg_draft_file_path = trg_file_path.with_suffix(f".{draft_index}{trg_file_path.suffix}")
             else:
                 trg_draft_file_path = trg_file_path
             write_corpus(trg_draft_file_path, translated_draft.sentences)
@@ -165,7 +159,7 @@ class Translator(ABC):
     def translate_usfm(
         self,
         src_file_path: Path,
-        out_path: Path,
+        trg_file_path: Path,
         src_iso: str,
         trg_iso: str,
         produce_multiple_translations: bool = False,
@@ -210,45 +204,54 @@ class Translator(ABC):
         empty_sents = []
         for i in reversed(range(len(sentences))):
             if len(sentences[i]) == 0:
-                empty_sents.append((i, sentences.pop(i), vrefs.pop(i)))
+                sentences.pop(i)
+                empty_sents.append((i, vrefs.pop(i)))
 
-        translations = list(self.translate(sentences, src_iso, trg_iso, vrefs))
+        translations = list(self.translate(sentences, src_iso, trg_iso, produce_multiple_translations, vrefs))
 
         # Add empty sentences back in
-        for idx, sent, vref in reversed(empty_sents):
-            translations.insert(idx, sent)
+        for idx, vref in reversed(empty_sents):
+            translations.insert(idx, TranslationGroup([]))
             vrefs.insert(idx, vref)
 
-        rows = [([ref], translation) for ref, translation in zip(vrefs, translations)]
+        draft_set: DraftGroup = DraftGroup(iter(translations))
+        for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
+            rows = [([ref], translation) for ref, translation in zip(vrefs, translated_draft.sentences)]
 
-        # Insert translation into the USFM structure of an existing project
-        # If the target project is not the same as the translated file's original project,
-        # no verses outside of the ones translated will be overwritten
-        use_src_project = trg_project is None and src_from_project
-        trg_format_project = src_file_path.parent.name if use_src_project else trg_project
-        if trg_format_project is not None:
-            dest_project_path = get_project_dir(trg_format_project)
-            dest_updater = FileParatextProjectTextUpdater(dest_project_path)
-            usfm_out = dest_updater.update_usfm(
-                src_file_text.id, rows, strip_all_text=use_src_project, prefer_existing_text=False
-            )
+            # Insert translation into the USFM structure of an existing project
+            # If the target project is not the same as the translated file's original project,
+            # no verses outside of the ones translated will be overwritten
+            use_src_project = trg_project is None and src_from_project
+            trg_format_project = src_file_path.parent.name if use_src_project else trg_project
+            if trg_format_project is not None:
+                dest_project_path = get_project_dir(trg_format_project)
+                dest_updater = FileParatextProjectTextUpdater(dest_project_path)
+                usfm_out = dest_updater.update_usfm(
+                    src_file_text.id, rows, strip_all_text=use_src_project, prefer_existing_text=False
+                )
 
-            if usfm_out is None:
-                raise FileNotFoundError(f"Book {src_file_text.id} does not exist in target project {trg_project}")
-        # Insert translation into the USFM structure of an individual file
-        else:
-            with open(src_file_path, encoding="utf-8-sig") as f:
-                usfm = f.read()
-            handler = UpdateUsfmParserHandler(rows, vrefs[0].book, strip_all_text=True)
-            parse_usfm(usfm, handler)
-            usfm_out = handler.get_usfm()
+                if usfm_out is None:
+                    raise FileNotFoundError(f"Book {src_file_text.id} does not exist in target project {trg_project}")
+            # Insert translation into the USFM structure of an individual file
+            else:
+                with open(src_file_path, encoding="utf-8-sig") as f:
+                    usfm = f.read()
+                handler = UpdateUsfmParserHandler(rows, vrefs[0].book, strip_all_text=True)
+                parse_usfm(usfm, handler)
+                usfm_out = handler.get_usfm()
 
-        # Insert draft remark and write to output path
-        description = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
-        usfm_out = insert_draft_remark(usfm_out, vrefs[0].book, description, experiment_ckpt_str)
-        encoding = src_settings.encoding if src_from_project else "utf-8"
-        with out_path.open("w", encoding=encoding) as f:
-            f.write(usfm_out)
+            # Insert draft remark and write to output path
+            description = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
+            usfm_out = insert_draft_remark(usfm_out, vrefs[0].book, description, experiment_ckpt_str)
+            encoding = src_settings.encoding if src_from_project else "utf-8"
+
+            if produce_multiple_translations:
+                trg_draft_file_path = trg_file_path.with_suffix(f".{draft_index}{trg_file_path.suffix}")
+            else:
+                trg_draft_file_path = trg_file_path
+
+            with trg_draft_file_path.open("w", encoding=encoding) as f:
+                f.write(usfm_out)
 
     def translate_docx(
         self,
@@ -276,15 +279,15 @@ class Translator(ABC):
                 sentences.append(sentence)
                 paras.append(i)
 
-        draft_set: DraftSet = DraftSet(self.translate(sentences, src_iso, trg_iso, produce_multiple_translations))
+        draft_set: DraftGroup = DraftGroup(self.translate(sentences, src_iso, trg_iso, produce_multiple_translations))
 
-        for translated_draft, draft_index in draft_set.get_drafts_with_indices():
+        for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
             for para, group in groupby(zip(translated_draft.sentences, paras), key=lambda t: t[1]):
                 text = " ".join(s[0] for s in group)
                 doc.paragraphs[para].text = text
 
             if produce_multiple_translations:
-                trg_draft_file_path = trg_file_path.with_suffix(f"{trg_file_path.suffix}.{draft_index}")
+                trg_draft_file_path = trg_file_path.with_suffix(f".{draft_index}{trg_file_path.suffix}")
             else:
                 trg_draft_file_path = trg_file_path
 

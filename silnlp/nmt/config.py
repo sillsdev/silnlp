@@ -38,7 +38,7 @@ from ..common.corpus import (
 )
 from ..common.environment import SIL_NLP_ENV
 from ..common.script_utils import get_script, is_represented
-from ..common.translator import TranslationSet
+from ..common.translator import TranslationGroup
 from ..common.utils import NoiseMethod, Side, create_noise_methods, get_mt_exp_dir, is_set, set_seed
 from .augment import AugmentMethod, create_augment_methods
 from .tokenizer import Tokenizer
@@ -334,7 +334,7 @@ class NMTModel(ABC):
         trg_iso: str,
         vrefs: Optional[Iterable[VerseRef]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
-    ) -> Iterable[TranslationSet]: ...
+    ) -> Iterable[TranslationGroup]: ...
 
     @abstractmethod
     def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]: ...
