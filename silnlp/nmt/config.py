@@ -12,7 +12,7 @@ from statistics import mean, median, stdev
 from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, Union, cast
 
 import pandas as pd
-from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_chapters
+from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books, get_chapters
 from machine.tokenization import LatinWordTokenizer
 from tqdm import tqdm
 
@@ -1035,7 +1035,13 @@ class Config(ABC):
         src_terms_files: List[Tuple[DataFile, str]],
         trg_terms_files: List[Tuple[DataFile, str]],
     ) -> int:
-        terms = self._collect_terms(src_terms_files, trg_terms_files)
+
+        try:
+            filter_books = get_books(self.data["terms"]["filter_books"])
+        except KeyError:
+            filter_books = None
+
+        terms = self._collect_terms(src_terms_files, trg_terms_files, filter_books)
 
         if terms is None:
             return 0
