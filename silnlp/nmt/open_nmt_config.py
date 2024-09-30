@@ -669,12 +669,13 @@ class OpenNMTConfig(Config):
                 src_train_path = temp_dir / "train.src.align.txt"
                 trg_train_path = temp_dir / "train.trg.align.txt"
 
-                with (
-                    src_align_path.open("r", encoding="utf-8-sig") as src_in_file,
-                    trg_align_path.open("r", encoding="utf-8-sig") as trg_in_file,
-                    src_train_path.open("w", encoding="utf-8", newline="\n") as src_out_file,
-                    trg_train_path.open("w", encoding="utf-8", newline="\n") as trg_out_file,
-                ):
+                with src_align_path.open("r", encoding="utf-8-sig") as src_in_file, trg_align_path.open(
+                    "r", encoding="utf-8-sig"
+                ) as trg_in_file, src_train_path.open(
+                    "w", encoding="utf-8", newline="\n"
+                ) as src_out_file, trg_train_path.open(
+                    "w", encoding="utf-8", newline="\n"
+                ) as trg_out_file:
                     i = 0
                     for src_sentence, trg_sentence in zip(src_in_file, trg_in_file):
                         if i in split_indices:

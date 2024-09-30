@@ -1,4 +1,3 @@
-import csv
 import gc
 import json
 import logging
@@ -10,7 +9,7 @@ from copy import deepcopy
 from enum import Enum
 from itertools import repeat
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, TextIO, Tuple, TypeVar, Union, cast
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
 
 import datasets.utils.logging as datasets_logging
 import evaluate
@@ -23,10 +22,10 @@ from accelerate.utils.memory import should_reduce_batch_size
 from datasets import Dataset
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
 from sacremoses import MosesPunctNormalizer
-from tokenizers import AddedToken, NormalizedString, Regex, SentencePieceBPETokenizer, SentencePieceUnigramTokenizer
+from tokenizers import AddedToken, NormalizedString, Regex
+from tokenizers.implementations import SentencePieceBPETokenizer, SentencePieceUnigramTokenizer
 from tokenizers.normalizers import Normalizer
 from torch import Tensor, TensorType, nn, optim
-from torch.utils.checkpoint import checkpoint  # noqa: 401
 from torch.utils.data import Sampler
 from transformers import (
     AutoConfig,
@@ -436,6 +435,7 @@ class HuggingFaceConfig(Config):
         if sp_tok_config["type"] == "BPE":
             sp_tok.train(files, vocab_size=vocab_size, min_frequency=2, special_tokens=sp_tok_config["special_tokens"])
         elif sp_tok_config["type"] == "Unigram":
+            sp_tok: SentencePieceUnigramTokenizer
             sp_tok.train(
                 files,
                 vocab_size=vocab_size,
@@ -801,10 +801,9 @@ class HuggingFaceNMTModel(NMTModel):
             if not src_path.is_file() or not trg_path.is_file():
                 return None
             data = []
-            with (
-                open(src_path, "r", encoding="utf-8-sig") as src_file,
-                open(trg_path, "r", encoding="utf-8-sig") as trg_file,
-            ):
+            with open(src_path, "r", encoding="utf-8-sig") as src_file, open(
+                trg_path, "r", encoding="utf-8-sig"
+            ) as trg_file:
                 for src_line, trg_line in zip(src_file, trg_file):
                     data.append({"src": src_line.strip(), "trg": trg_line.strip()})
             return Dataset.from_dict({"translation": data})
@@ -1054,7 +1053,8 @@ class HuggingFaceNMTModel(NMTModel):
             LOGGER.info("Producing %i translated drafts", num_drafts)
         elif produce_multiple_translations and num_drafts <= 1:
             LOGGER.warning(
-                "num_drafts must be greater than 1 when using --multiple-translations. Falling back to a single translation."
+                "num_drafts must be greater than 1 when using --multiple-translations. "
+                "Falling back to a single translation."
             )
 
         pipeline.model = torch.compile(pipeline.model)
@@ -1126,10 +1126,9 @@ class HuggingFaceNMTModel(NMTModel):
         if not dict_trg_path.is_file() or not dict_vref_path.is_file():
             return self._dictionary
 
-        with (
-            dict_trg_path.open("r", encoding="utf-8-sig") as trg_file,
-            dict_vref_path.open("r", encoding="utf-8-sig") as dict_file,
-        ):
+        with dict_trg_path.open("r", encoding="utf-8-sig") as trg_file, dict_vref_path.open(
+            "r", encoding="utf-8-sig"
+        ) as dict_file:
             for trg_line, vref_line in zip(trg_file, dict_file):
                 vref_line = vref_line.strip()
                 if vref_line == "":
@@ -1198,7 +1197,8 @@ class HuggingFaceNMTModel(NMTModel):
             or ("lm_head" in modules_to_save and "embed_tokens" not in modules_to_save)
         ):
             LOGGER.warning(
-                "NLLB is typically trained with the embeddings tied. Add both embed_tokens and lm_head to modules_to_save to do this while using LoRA."
+                "NLLB is typically trained with the embeddings tied. "
+                "Add both embed_tokens and lm_head to modules_to_save to do this while using LoRA."
             )
 
         # Tie LoRA copies of the embedding weights together
@@ -1224,7 +1224,8 @@ class HuggingFaceNMTModel(NMTModel):
                 model.base_model.model.decoder.embed_tokens.lora_embedding_A.default = embedding_A
                 model.base_model.model.decoder.embed_tokens.lora_embedding_B.default = embedding_B
 
-        # Necessary to allow gradients to propogate through frozen layers when using PEFT + gradient checkpointing + Trainer
+        # Necessary to allow gradients to propogate through frozen layers
+        # when using PEFT + gradient checkpointing + Trainer
         if self._config.train["gradient_checkpointing"]:
             model.enable_input_require_grads()
 
