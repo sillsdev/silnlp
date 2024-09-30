@@ -306,7 +306,7 @@ class HuggingFaceConfig(Config):
                 },
                 "infer": {
                     "infer_batch_size": 16,
-                    "num_beams": 5,
+                    "num_beams": 2,
                     "num_drafts": 3,
                     "multiple_translations_method": "hybrid",
                     "temperature": 0.75,
@@ -1067,7 +1067,7 @@ class HuggingFaceNMTModel(NMTModel):
         ):
             if isinstance(outputs, OutputGroup):
                 outputs = [outputs]
-            yield from [TranslationGroup(output_group.get_translated_text()) for output_group in outputs]
+            yield from [output_group.get_translated_text() for output_group in outputs]
 
     def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
         step: Optional[int] = None

@@ -36,7 +36,7 @@ class GoogleTranslator(Translator):
                     sentence, source_language=src_iso, target_language=trg_iso, format_="text"
                 )
                 translation = results["translatedText"]
-                yield TranslationGroup([translation])
+                yield [translation]
 
 
 def main() -> None:

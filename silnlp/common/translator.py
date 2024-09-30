@@ -47,53 +47,27 @@ def insert_draft_remark(
 
 
 # A group of multiple translations of a single sentence
-class TranslationGroup:
-    def __init__(self, translations: List[str]):
-        self.translations = translations
+TranslationGroup = List[str]
 
-    def num_translations(self) -> int:
-        return len(self.translations)
+# A list representing a single draft (one translation of each input sentence)
+TranslatedDraft = List[str]
 
 
-# An iterable representing a single draft (one translation of each input sentence)
-class TranslatedDraft:
-    def __init__(self, sentences: Iterable[str]):
-        self.sentences = sentences
-
-
-# A wrapper around Iterable[TranslationGroup] that allows upstream consumers to view a
+# A wrapper around List[TranslationGroup] that allows upstream consumers to view a
 # list of translation groups as a collection of discrete drafts
 class DraftGroup:
-    def __init__(self, translation_groups: Iterable[TranslationGroup]):
+    def __init__(self, translation_groups: List[TranslationGroup]):
         self.translation_groups = translation_groups
-        self._calculate_num_drafts()
-
-    def _calculate_num_drafts(self):
-        # fetch one item first to determine the number of translations
-        self.initial_translation_group: TranslationGroup = next(self.translation_groups)
-        self.num_drafts: int = self.initial_translation_group.num_translations()
+        self.num_drafts: int = len(self.translation_groups[0])
 
     def get_drafts(self) -> List[TranslatedDraft]:
-        # for a single draft, don't consume the generator
-        if self.num_drafts == 1:
-            return [TranslatedDraft(self._create_draft_sentence_generator(0))]
-        else:
-            return self._create_draft_sentence_lists()
+        translated_draft_sentences = [[] for _ in range(self.num_drafts)]
 
-    def _create_draft_sentence_generator(self, draft_index) -> Iterable[str]:
-        yield self.initial_translation_group.translations[draft_index]
-        yield from [translation_group.translations[draft_index] for translation_group in self.translation_groups]
-
-    def _create_draft_sentence_lists(self) -> List[TranslatedDraft]:
-        translated_draft_sentences = [
-            [self.initial_translation_group.translations[draft_index]] for draft_index in range(self.num_drafts)
-        ]
-
-        for translation_set in self.translation_groups:
+        for translation_group in self.translation_groups:
             for draft_index in range(self.num_drafts):
-                translated_draft_sentences[draft_index].append(translation_set.translations[draft_index])
+                translated_draft_sentences[draft_index].append(translation_group[draft_index])
 
-        return [TranslatedDraft(sentence_list) for sentence_list in translated_draft_sentences]
+        return translated_draft_sentences
 
 
 class Translator(ABC):
@@ -117,14 +91,14 @@ class Translator(ABC):
         produce_multiple_translations: bool = False,
     ) -> None:
         draft_set: DraftGroup = DraftGroup(
-            self.translate(load_corpus(src_file_path), src_iso, trg_iso, produce_multiple_translations)
+            list(self.translate(load_corpus(src_file_path), src_iso, trg_iso, produce_multiple_translations))
         )
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
             if produce_multiple_translations:
                 trg_draft_file_path = trg_file_path.with_suffix(f".{draft_index}{trg_file_path.suffix}")
             else:
                 trg_draft_file_path = trg_file_path
-            write_corpus(trg_draft_file_path, translated_draft.sentences)
+            write_corpus(trg_draft_file_path, translated_draft)
 
     def translate_book(
         self,
@@ -211,12 +185,12 @@ class Translator(ABC):
 
         # Add empty sentences back in
         for idx, vref in reversed(empty_sents):
-            translations.insert(idx, TranslationGroup([]))
+            translations.insert(idx, [])
             vrefs.insert(idx, vref)
 
-        draft_set: DraftGroup = DraftGroup(iter(translations))
+        draft_set: DraftGroup = DraftGroup(translations)
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
-            rows = [([ref], translation) for ref, translation in zip(vrefs, translated_draft.sentences)]
+            rows = [([ref], translation) for ref, translation in zip(vrefs, translated_draft)]
 
             # Insert translation into the USFM structure of an existing project
             # If the target project is not the same as the translated file's original project,
@@ -279,10 +253,12 @@ class Translator(ABC):
                 sentences.append(sentence)
                 paras.append(i)
 
-        draft_set: DraftGroup = DraftGroup(self.translate(sentences, src_iso, trg_iso, produce_multiple_translations))
+        draft_set: DraftGroup = DraftGroup(
+            list(self.translate(sentences, src_iso, trg_iso, produce_multiple_translations))
+        )
 
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
-            for para, group in groupby(zip(translated_draft.sentences, paras), key=lambda t: t[1]):
+            for para, group in groupby(zip(translated_draft, paras), key=lambda t: t[1]):
                 text = " ".join(s[0] for s in group)
                 doc.paragraphs[para].text = text
 
