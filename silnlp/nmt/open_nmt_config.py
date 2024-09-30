@@ -561,9 +561,7 @@ class OpenNMTConfig(Config):
         parent_model_to_use = (
             CheckpointType.BEST
             if self.data["parent_use_best"]
-            else CheckpointType.AVERAGE
-            if self.data["parent_use_average"]
-            else CheckpointType.LAST
+            else CheckpointType.AVERAGE if self.data["parent_use_average"] else CheckpointType.LAST
         )
         checkpoint_path, step = _get_checkpoint_path(self.parent_config.model_dir, parent_model_to_use)
         parent_config = cast(OpenNMTConfig, self.parent_config)
@@ -671,13 +669,12 @@ class OpenNMTConfig(Config):
                 src_train_path = temp_dir / "train.src.align.txt"
                 trg_train_path = temp_dir / "train.trg.align.txt"
 
-                with src_align_path.open("r", encoding="utf-8-sig") as src_in_file, trg_align_path.open(
-                    "r", encoding="utf-8-sig"
-                ) as trg_in_file, src_train_path.open(
-                    "w", encoding="utf-8", newline="\n"
-                ) as src_out_file, trg_train_path.open(
-                    "w", encoding="utf-8", newline="\n"
-                ) as trg_out_file:
+                with (
+                    src_align_path.open("r", encoding="utf-8-sig") as src_in_file,
+                    trg_align_path.open("r", encoding="utf-8-sig") as trg_in_file,
+                    src_train_path.open("w", encoding="utf-8", newline="\n") as src_out_file,
+                    trg_train_path.open("w", encoding="utf-8", newline="\n") as trg_out_file,
+                ):
                     i = 0
                     for src_sentence, trg_sentence in zip(src_in_file, trg_in_file):
                         if i in split_indices:
@@ -691,7 +688,12 @@ class OpenNMTConfig(Config):
             aligner.train(src_train_path, trg_train_path)
             aligner.force_align(src_align_path, trg_align_path, self.exp_dir / "train.alignments.txt")
 
-    def _write_dictionary(self, tokenizer: Tokenizer, src_terms_files: List[Tuple[DataFile, str]], trg_terms_files: List[Tuple[DataFile, str]]) -> int:
+    def _write_dictionary(
+        self,
+        tokenizer: Tokenizer,
+        src_terms_files: List[Tuple[DataFile, str]],
+        trg_terms_files: List[Tuple[DataFile, str]],
+    ) -> int:
         terms_config = self.data["terms"]
         dict_books = get_books(terms_config["dictionary_books"]) if "dictionary_books" in terms_config else None
         terms = self._collect_terms(src_terms_files, trg_terms_files, filter_books=dict_books)
@@ -746,6 +748,7 @@ class OpenNMTModel(NMTModel):
         self,
         input_paths: List[Path],
         translation_paths: List[Path],
+        produce_multiple_translations: bool = False,
         vref_paths: Optional[List[Path]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
@@ -763,6 +766,7 @@ class OpenNMTModel(NMTModel):
         sentences: Iterable[str],
         src_iso: str,
         trg_iso: str,
+        produce_multiple_translations: bool = False,
         vrefs: Optional[Iterable[VerseRef]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Iterable[str]:

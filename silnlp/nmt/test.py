@@ -413,8 +413,9 @@ def test_checkpoint(
         model.translate_test_files(
             source_paths,
             translation_paths,
-            vref_paths,
-            step if checkpoint_type is CheckpointType.OTHER else checkpoint_type,
+            produce_multiple_translations=False,
+            vref_paths=vref_paths,
+            ckpt=step if checkpoint_type is CheckpointType.OTHER else checkpoint_type,
         )
 
     LOGGER.info(f"Scoring {checkpoint_name}")

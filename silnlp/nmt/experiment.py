@@ -28,6 +28,7 @@ class SILExperiment:
     run_train: bool = False
     run_test: bool = False
     run_translate: bool = False
+    produce_multiple_translations: bool = False
     scorers: Set[str] = field(default_factory=set)
     score_by_book: bool = False
     commit: Optional[str] = None
@@ -105,6 +106,7 @@ class SILExperiment:
                     config.get("src_project"),
                     config.get("trg_project"),
                     config.get("trg_iso"),
+                    self.produce_multiple_translations,
                     config.get("include_inline_elements", False),
                 )
             elif config.get("src_prefix"):
@@ -115,6 +117,7 @@ class SILExperiment:
                     config.get("end_seq"),
                     config.get("src_iso"),
                     config.get("trg_iso"),
+                    self.produce_multiple_translations,
                 )
             elif config.get("src"):
                 translator.translate_files(
@@ -122,6 +125,7 @@ class SILExperiment:
                     config.get("trg"),
                     config.get("src_iso"),
                     config.get("trg_iso"),
+                    self.produce_multiple_translations,
                     config.get("include_inline_elements", False),
                 )
             else:
@@ -150,6 +154,12 @@ def main() -> None:
     parser.add_argument("--train", default=False, action="store_true", help="Run the train step.")
     parser.add_argument("--test", default=False, action="store_true", help="Run the test step.")
     parser.add_argument("--translate", default=False, action="store_true", help="Create drafts.")
+    parser.add_argument(
+        "--multiple-translations",
+        default=False,
+        action="store_true",
+        help='Produce multiple translations of each verse. These will be saved in separate files with suffixes like ".1.txt", ".2.txt", etc.',
+    )
     parser.add_argument("--score-by-book", default=False, action="store_true", help="Score individual books")
     parser.add_argument("--mt-dir", default=None, type=str, help="The machine translation directory.")
     parser.add_argument(
@@ -199,6 +209,7 @@ def main() -> None:
         run_train=args.train,
         run_test=args.test,
         run_translate=args.translate,
+        produce_multiple_translations=args.multiple_translations,
         scorers=set(s.lower() for s in args.scorers),
         score_by_book=args.score_by_book,
         commit=args.commit,

@@ -1,4 +1,5 @@
 import argparse
+import logging
 from typing import Iterable, Optional
 
 from google.cloud import translate_v2 as translate
@@ -6,8 +7,10 @@ from machine.scripture import VerseRef, book_id_to_number
 
 from ..common.environment import SIL_NLP_ENV
 from .paratext import book_file_name_digits
-from .translator import Translator
+from .translator import TranslationGroup, Translator
 from .utils import get_git_revision_hash, get_mt_exp_dir
+
+LOGGER = logging.getLogger(__package__ + ".translate")
 
 
 class GoogleTranslator(Translator):
@@ -15,8 +18,16 @@ class GoogleTranslator(Translator):
         self._translate_client = translate.Client()
 
     def translate(
-        self, sentences: Iterable[str], src_iso: str, trg_iso: str, vrefs: Optional[Iterable[VerseRef]] = None
-    ) -> Iterable[str]:
+        self,
+        sentences: Iterable[str],
+        src_iso: str,
+        trg_iso: str,
+        produce_multiple_translations: bool = False,
+        vrefs: Optional[Iterable[VerseRef]] = None,
+    ) -> Iterable[TranslationGroup]:
+        if produce_multiple_translations:
+            LOGGER.warning("Google Translator does not support --multiple-translations")
+
         for sentence in sentences:
             if len(sentence) == 0:
                 yield ""
@@ -25,7 +36,7 @@ class GoogleTranslator(Translator):
                     sentence, source_language=src_iso, target_language=trg_iso, format_="text"
                 )
                 translation = results["translatedText"]
-                yield translation
+                yield [translation]
 
 
 def main() -> None:

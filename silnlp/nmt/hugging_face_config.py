@@ -71,6 +71,7 @@ from transformers.utils.logging import tqdm
 
 from ..common.corpus import Term, count_lines, get_terms
 from ..common.environment import SIL_NLP_ENV, download_if_s3_paths
+from ..common.translator import TranslationGroup
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
 from .config import CheckpointType, Config, DataFile, NMTModel
 from .tokenizer import NullTokenizer, Tokenizer
@@ -303,7 +304,14 @@ class HuggingFaceConfig(Config):
                     "predict_with_generate": True,
                     "detokenize": True,
                 },
-                "infer": {"infer_batch_size": 16, "num_beams": 2},
+                "infer": {
+                    "infer_batch_size": 16,
+                    "num_beams": 2,
+                    "num_drafts": 3,
+                    "multiple_translations_method": "hybrid",
+                    "temperature": 0.75,
+                    "diversity_penalty": 1.0,
+                },
                 "params": {
                     "optim": "adamw_torch",
                     "label_smoothing_factor": 0.2,
@@ -719,6 +727,17 @@ def batch_sentences(
         yield batch, None
 
 
+class OutputGroup:
+    def __init__(self, outputs: List[dict]):
+        self.outputs = outputs
+
+    def get_translated_text(self) -> List[str]:
+        return [output["translation_text"] for output in self.outputs]
+
+    def get_token_ids(self) -> List[List[int]]:
+        return [output["translation_token_ids"] for output in self.outputs]
+
+
 class HuggingFaceNMTModel(NMTModel):
     def __init__(self, config: HuggingFaceConfig, mixed_precision: bool, num_devices: int) -> None:
         self._config = config
@@ -782,9 +801,10 @@ class HuggingFaceNMTModel(NMTModel):
             if not src_path.is_file() or not trg_path.is_file():
                 return None
             data = []
-            with open(src_path, "r", encoding="utf-8-sig") as src_file, open(
-                trg_path, "r", encoding="utf-8-sig"
-            ) as trg_file:
+            with (
+                open(src_path, "r", encoding="utf-8-sig") as src_file,
+                open(trg_path, "r", encoding="utf-8-sig") as trg_file,
+            ):
                 for src_line, trg_line in zip(src_file, trg_file):
                     data.append({"src": src_line.strip(), "trg": trg_line.strip()})
             return Dataset.from_dict({"translation": data})
@@ -966,6 +986,7 @@ class HuggingFaceNMTModel(NMTModel):
         self,
         input_paths: List[Path],
         translation_paths: List[Path],
+        produce_multiple_translations: bool = False,
         vref_paths: Optional[List[Path]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
@@ -994,12 +1015,14 @@ class HuggingFaceNMTModel(NMTModel):
                     vref_file = stack.enter_context(vref_path.open("r", encoding="utf-8-sig"))
                     vrefs = (VerseRef.from_string(line.strip(), ORIGINAL_VERSIFICATION) for line in vref_file)
 
-                for prediction in tqdm(
-                    self._translate_sentences(tokenizer, pipeline, sentences, vrefs, return_tensors=True),
+                for output_group in tqdm(
+                    self._translate_sentences(
+                        tokenizer, pipeline, sentences, vrefs, produce_multiple_translations, return_tensors=True
+                    ),
                     total=length,
                     unit="ex",
                 ):
-                    ids = to_py_obj(prediction[0]["translation_token_ids"])
+                    ids = to_py_obj(output_group.get_token_ids()[0])
                     ids = [id for id in ids[1:] if id != tokenizer.pad_token_id]
                     tokens = tokenizer.convert_ids_to_tokens(ids)
                     out_file.write(" ".join(tokens) + "\n")
@@ -1009,9 +1032,10 @@ class HuggingFaceNMTModel(NMTModel):
         sentences: Iterable[str],
         src_iso: str,
         trg_iso: str,
+        produce_multiple_translations: bool = False,
         vrefs: Optional[Iterable[VerseRef]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
-    ) -> Iterable[str]:
+    ) -> Iterable[TranslationGroup]:
         tokenizer = self._config.get_tokenizer()
         model = self._create_inference_model(ckpt, tokenizer)
         if model.config.max_length < 512:
@@ -1024,17 +1048,26 @@ class HuggingFaceNMTModel(NMTModel):
             tgt_lang=lang_codes.get(trg_iso, trg_iso),
             device=0,
         )
+
+        num_drafts = self._config.infer.get("num_drafts")
+        if produce_multiple_translations and num_drafts > 1:
+            LOGGER.info("Producing %i translated drafts", num_drafts)
+        elif produce_multiple_translations and num_drafts <= 1:
+            LOGGER.warning(
+                "num_drafts must be greater than 1 when using --multiple-translations. Falling back to a single translation."
+            )
+
         pipeline.model = torch.compile(pipeline.model)
         if not isinstance(sentences, list):
             sentences = list(sentences)
         for outputs in tqdm(
-            self._translate_sentences(tokenizer, pipeline, sentences, vrefs),
+            self._translate_sentences(tokenizer, pipeline, sentences, vrefs, produce_multiple_translations),
             total=len(sentences),
             unit="ex",
         ):
-            if isinstance(outputs, dict):
+            if isinstance(outputs, OutputGroup):
                 outputs = [outputs]
-            yield from (p["translation_text"] for p in outputs)
+            yield from [output_group.get_translated_text() for output_group in outputs]
 
     def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
         step: Optional[int] = None
@@ -1093,9 +1126,10 @@ class HuggingFaceNMTModel(NMTModel):
         if not dict_trg_path.is_file() or not dict_vref_path.is_file():
             return self._dictionary
 
-        with dict_trg_path.open("r", encoding="utf-8-sig") as trg_file, dict_vref_path.open(
-            "r", encoding="utf-8-sig"
-        ) as dict_file:
+        with (
+            dict_trg_path.open("r", encoding="utf-8-sig") as trg_file,
+            dict_vref_path.open("r", encoding="utf-8-sig") as dict_file,
+        ):
             for trg_line, vref_line in zip(trg_file, dict_file):
                 vref_line = vref_line.strip()
                 if vref_line == "":
@@ -1225,21 +1259,19 @@ class HuggingFaceNMTModel(NMTModel):
         pipeline: TranslationPipeline,
         sentences: Iterable[TSent],
         vrefs: Optional[Iterable[VerseRef]],
+        produce_multiple_translations: bool = False,
         return_tensors: bool = False,
-    ) -> Iterable[dict]:
+    ) -> Iterable[OutputGroup]:
         batch_size: int = self._config.infer["infer_batch_size"]
-        num_beams: Optional[int] = self._config.infer.get("num_beams")
-        if num_beams is None:
-            num_beams = self._config.params.get("generation_num_beams")
 
         dictionary = self._get_dictionary()
         if vrefs is None or len(dictionary) == 0:
-            yield from pipeline(
+            yield from self._translate_sentence_helper(
+                pipeline,
                 sentences,
-                num_beams=num_beams,
-                batch_size=batch_size,
-                return_text=not return_tensors,
-                return_tensors=return_tensors,
+                batch_size,
+                return_tensors,
+                produce_multiple_translations=produce_multiple_translations,
             )
         else:
             for batch, force_words in batch_sentences(sentences, vrefs, batch_size, dictionary):
@@ -1249,14 +1281,177 @@ class HuggingFaceNMTModel(NMTModel):
                     force_words_ids = [[tokenizer.convert_tokens_to_ids(v) for v in vs] for vs in force_words]
                     force_words_ids = prune_sublists(force_words_ids)
 
-                yield from pipeline(
+                yield from self._translate_sentence_helper(
+                    pipeline,
                     batch,
-                    num_beams=num_beams,
-                    force_words_ids=force_words_ids,
-                    batch_size=batch_size,
-                    return_text=not return_tensors,
-                    return_tensors=return_tensors,
+                    batch_size,
+                    return_tensors,
+                    force_words_ids,
+                    produce_multiple_translations=produce_multiple_translations,
                 )
+
+    def _translate_sentence_helper(
+        self,
+        pipeline: TranslationPipeline,
+        sentences: Iterable[TSent],
+        batch_size: int,
+        return_tensors: bool,
+        force_words_ids: List[List[List[int]]] = None,
+        produce_multiple_translations: bool = False,
+    ) -> Iterable[OutputGroup]:
+        num_drafts = self._config.infer.get("num_drafts")
+        if produce_multiple_translations and num_drafts > 1:
+            multiple_translations_method: str = self._config.infer.get("multiple_translations_method")
+
+            if multiple_translations_method == "hybrid":
+                beam_search_results: List[dict] = self._translate_with_beam_search(
+                    pipeline,
+                    sentences,
+                    batch_size,
+                    return_tensors,
+                    num_return_sequences=1,
+                    force_words_ids=force_words_ids,
+                )
+
+                sampling_results: List[dict] = self._translate_with_sampling(
+                    pipeline,
+                    sentences,
+                    batch_size,
+                    return_tensors,
+                    num_return_sequences=num_drafts - 1,
+                    force_words_ids=force_words_ids,
+                )
+
+                # concatenate the beam search results with the sampling results
+                yield from [
+                    OutputGroup([beam_search_results[i]] + sampling_results[i]) for i in range(len(beam_search_results))
+                ]
+
+            elif multiple_translations_method == "sampling":
+                yield from [
+                    OutputGroup(result)
+                    for result in self._translate_with_sampling(
+                        pipeline,
+                        sentences,
+                        batch_size,
+                        return_tensors,
+                        num_return_sequences=num_drafts,
+                        force_words_ids=force_words_ids,
+                    )
+                ]
+
+            elif multiple_translations_method == "beam_search":
+                yield from [
+                    OutputGroup(result)
+                    for result in self._translate_with_beam_search(
+                        pipeline,
+                        sentences,
+                        batch_size,
+                        return_tensors,
+                        num_return_sequences=num_drafts,
+                        force_words_ids=force_words_ids,
+                    )
+                ]
+
+            elif multiple_translations_method == "diverse_beam_search":
+                yield from [
+                    OutputGroup(result)
+                    for result in self._translate_with_diverse_beam_search(
+                        pipeline,
+                        sentences,
+                        batch_size,
+                        return_tensors,
+                        num_return_sequences=num_drafts,
+                        force_words_ids=force_words_ids,
+                    )
+                ]
+            else:
+                LOGGER.error('Unrecognized value for multiple_translations_method: "%s"', multiple_translations_method)
+
+        else:
+            yield from [
+                OutputGroup([translated_sentence])
+                for translated_sentence in self._translate_with_beam_search(
+                    pipeline,
+                    sentences,
+                    batch_size,
+                    return_tensors,
+                    num_return_sequences=1,
+                    force_words_ids=force_words_ids,
+                )
+            ]
+
+    def _translate_with_beam_search(
+        self,
+        pipeline: TranslationPipeline,
+        sentences: Iterable[TSent],
+        batch_size: int,
+        return_tensors: bool,
+        num_return_sequences: int = 1,
+        force_words_ids: List[List[List[int]]] = None,
+    ) -> List[dict]:
+        num_beams: Optional[int] = self._config.infer.get("num_beams")
+        if num_beams is None:
+            num_beams = self._config.params.get("generation_num_beams")
+
+        return pipeline(
+            sentences,
+            num_beams=num_beams,
+            num_return_sequences=num_return_sequences,
+            force_words_ids=force_words_ids,
+            batch_size=batch_size,
+            return_text=not return_tensors,
+            return_tensors=return_tensors,
+        )
+
+    def _translate_with_sampling(
+        self,
+        pipeline: TranslationPipeline,
+        sentences: Iterable[TSent],
+        batch_size: int,
+        return_tensors: bool,
+        num_return_sequences: int = 1,
+        force_words_ids: List[List[List[int]]] = None,
+    ) -> List[dict]:
+
+        temperature: Optional[int] = self._config.infer.get("temperature")
+
+        return pipeline(
+            sentences,
+            do_sample=True,
+            temperature=temperature,
+            num_return_sequences=num_return_sequences,
+            force_words_ids=force_words_ids,
+            batch_size=batch_size,
+            return_text=not return_tensors,
+            return_tensors=return_tensors,
+        )
+
+    def _translate_with_diverse_beam_search(
+        self,
+        pipeline: TranslationPipeline,
+        sentences: Iterable[TSent],
+        batch_size: int,
+        return_tensors: bool,
+        num_return_sequences: int = 1,
+        force_words_ids: List[List[List[int]]] = None,
+    ) -> List[dict]:
+        num_beams: Optional[int] = self._config.infer.get("num_beams")
+        if num_beams is None:
+            num_beams = self._config.params.get("generation_num_beams")
+        diversity_penalty: Optional[float] = self._config.infer.get("diversity_penalty")
+
+        return pipeline(
+            sentences,
+            num_beams=num_beams,
+            num_beam_groups=num_beams,
+            num_return_sequences=num_return_sequences,
+            diversity_penalty=diversity_penalty,
+            force_words_ids=force_words_ids,
+            batch_size=batch_size,
+            return_text=not return_tensors,
+            return_tensors=return_tensors,
+        )
 
     def _create_inference_model(
         self, ckpt: Union[CheckpointType, str, int], tokenizer: PreTrainedTokenizer
