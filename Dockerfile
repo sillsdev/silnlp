@@ -1,4 +1,3 @@
-ARG CUDA_VERSION=12.1.1-cudnn8-runtime-ubuntu20.04
 ARG PYTHON_VERSION=3.8
 ARG POETRY_VERSION=1.7.1
 
@@ -23,7 +22,7 @@ RUN poetry export -E eflomal --without-hashes -f requirements.txt > requirements
 COPY . /src
 RUN poetry build
 
-FROM nvidia/cuda:$CUDA_VERSION
+FROM ubuntu:20.04
 
 ARG PYTHON_VERSION=3.8
 
@@ -58,7 +57,7 @@ RUN ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python3  & \
 
 # Install dependencies from poetry
 COPY --from=builder /src/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt && rm requirements.txt
+RUN pip install -r requirements.txt && rm requirements.txt
 
 # Set eflomal path
 ENV EFLOMAL_PATH=/usr/local/lib/python3.8/dist-packages/eflomal/bin
