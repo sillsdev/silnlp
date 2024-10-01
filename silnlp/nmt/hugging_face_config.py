@@ -1371,7 +1371,7 @@ class HuggingFaceNMTModel(NMTModel):
 
         else:
             yield from [
-                OutputGroup([translated_sentence])
+                OutputGroup(translated_sentence)
                 for translated_sentence in self._translate_with_beam_search(
                     pipeline,
                     sentences,
