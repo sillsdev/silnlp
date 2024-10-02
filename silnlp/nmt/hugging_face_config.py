@@ -1064,7 +1064,7 @@ class HuggingFaceNMTModel(NMTModel):
             yield [" ".join(token_group) for token_group in tokens]
 
     def get_num_drafts(self) -> int:
-        num_drafts = self._config.infer.get("num_drafts")
+        num_drafts = self._config.infer.get("num_drafts", 1)
         return num_drafts
 
     def translate(
