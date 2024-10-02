@@ -1409,6 +1409,20 @@ files = [
 numpy = ">=1.14.5"
 
 [[package]]
+name = "hanzidentifier"
+version = "1.2.0"
+description = "Python module that identifies Chinese text as Simplified or Traditional."
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "hanzidentifier-1.2.0-py3-none-any.whl", hash = "sha256:022cbb3aa01ff87b41caa7dbb6e917463a09f399d6d2b9d5499f34d6f6cc1218"},
+    {file = "hanzidentifier-1.2.0.tar.gz", hash = "sha256:8e4198ae87c1da80d77cde46d7e90cb50d1a7561ee8b33e725058a2b0d70e83d"},
+]
+
+[package.dependencies]
+zhon = ">=2.0,<3.0"
+
+[[package]]
 name = "httplib2"
 version = "0.22.0"
 description = "A comprehensive HTTP client library."
@@ -5679,6 +5693,17 @@ idna = ">=2.0"
 multidict = ">=4.0"
 
 [[package]]
+name = "zhon"
+version = "2.0.2"
+description = "Zhon provides constants used in Chinese text processing."
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "zhon-2.0.2-py3-none-any.whl", hash = "sha256:e868e8308766e04866eacf37e8cf054a089d4b07cac62179b03f90a80757afe6"},
+    {file = "zhon-2.0.2.tar.gz", hash = "sha256:c834df6b1b182f7e973e796ded80ed1f61f271fd25f6b0dc0c44f7c4ea467184"},
+]
+
+[[package]]
 name = "zipp"
 version = "3.8.1"
 description = "Backport of pathlib-compatible object wrapper for zip files"
@@ -5699,4 +5724,4 @@ eflomal = ["eflomal"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.8.1,<3.9"
-content-hash = "a6db0be62da76ae8d3985b78c69115794641592cf988ef8dcb02d7a8b42ed597"
+content-hash = "1976062013fdf0d2f55dda08faf6abdde31ed00767b1e80a7cc6e100d64f1d9d"
