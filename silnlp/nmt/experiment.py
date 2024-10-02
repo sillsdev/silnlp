@@ -83,6 +83,7 @@ class SILExperiment:
             best=self.config.model_dir.exists(),
             by_book=self.score_by_book,
             scorers=self.scorers,
+            produce_multiple_translations=self.produce_multiple_translations,
         )
         SIL_NLP_ENV.copy_experiment_to_bucket(
             self.name, patterns=("scores-*.csv", "test.*trg-predictions.*"), overwrite=True

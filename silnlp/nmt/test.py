@@ -35,6 +35,7 @@ class PairScore:
         sent_len: int,
         projects: Set[str],
         other_scores: Dict[str, float] = {},
+        draft_index: int = 1,
     ) -> None:
         self.src_iso = src_iso
         self.trg_iso = trg_iso
@@ -44,10 +45,11 @@ class PairScore:
         self.refs = "_".join(sorted(projects))
         self.other_scores = other_scores
         self.book = book
+        self.draft_index = draft_index
 
     def writeHeader(self, file: IO) -> None:
         header = (
-            "book,src_iso,trg_iso,num_refs,references,sent_len"
+            "book,draft_index,src_iso,trg_iso,num_refs,references,sent_len"
             + (
                 ",BLEU,BLEU_1gram_prec,BLEU_2gram_prec,BLEU_3gram_prec,BLEU_4gram_prec,BLEU_brevity_penalty,BLEU_total_sys_len,BLEU_total_ref_len"
                 if self.bleu is not None
@@ -60,7 +62,10 @@ class PairScore:
         file.write(header)
 
     def write(self, file: IO) -> None:
-        file.write(f"{self.book},{self.src_iso},{self.trg_iso}," f"{self.num_refs},{self.refs},{self.sent_len:d}")
+        file.write(
+            f"{self.book},{self.draft_index},{self.src_iso},{self.trg_iso},"
+            f"{self.num_refs},{self.refs},{self.sent_len:d}"
+        )
         if self.bleu is not None:
             file.write(
                 f",{self.bleu.score:.2f},{self.bleu.precisions[0]:.2f},{self.bleu.precisions[1]:.2f}"
@@ -82,6 +87,7 @@ def score_pair(
     scorers: Set[str],
     config: Config,
     ref_projects: Set[str],
+    draft_index: int = 1,
 ) -> PairScore:
     bleu_score = None
     if "bleu" in scorers:
@@ -142,7 +148,7 @@ def score_pair(
         if ter_score.score >= 0:
             other_scores["TER"] = ter_score.score
 
-    return PairScore(book, src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores)
+    return PairScore(book, src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores, draft_index)
 
 
 def score_individual_books(
@@ -361,6 +367,7 @@ def test_checkpoint(
     step: int,
     scorers: Set[str],
     books: Dict[int, List[int]],
+    produce_multiple_translations: bool = False,
 ) -> List[PairScore]:
     config.set_seed()
     vref_file_names: List[str] = []
@@ -413,17 +420,48 @@ def test_checkpoint(
         model.translate_test_files(
             source_paths,
             translation_paths,
-            produce_multiple_translations=False,
-            vref_paths=vref_paths,
-            ckpt=step if checkpoint_type is CheckpointType.OTHER else checkpoint_type,
+            produce_multiple_translations,
+            vref_paths,
+            step if checkpoint_type is CheckpointType.OTHER else checkpoint_type,
         )
+
+    if produce_multiple_translations:
+        num_drafts = model.get_num_drafts()
+        vref_file_names = num_drafts * vref_file_names
+        source_file_names = num_drafts * source_file_names
+        translation_file_names = [
+            str(Path(file_name).with_suffix(f".{draft_index}{Path(file_name).suffix}"))
+            for draft_index in range(1, num_drafts + 1)
+            for file_name in translation_file_names
+        ]
+        refs_patterns = num_drafts * refs_patterns
+        translation_detok_file_names = [
+            str(Path(file_name).with_suffix(f".{draft_index}{Path(file_name).suffix}"))
+            for draft_index in range(1, num_drafts + 1)
+            for file_name in translation_detok_file_names
+        ]
+        draft_indices = num_drafts * list(range(1, num_drafts + 1))
+    else:
+        draft_indices = len(source_file_names) * [1]
 
     LOGGER.info(f"Scoring {checkpoint_name}")
     scores: List[PairScore] = []
     overall_sys: List[str] = []
     overall_refs: List[List[str]] = []
-    for vref_file_name, features_file_name, predictions_file_name, refs_pattern, predictions_detok_file_name in zip(
-        vref_file_names, source_file_names, translation_file_names, refs_patterns, translation_detok_file_names
+    for (
+        vref_file_name,
+        features_file_name,
+        predictions_file_name,
+        refs_pattern,
+        predictions_detok_file_name,
+        draft_index,
+    ) in zip(
+        vref_file_names,
+        source_file_names,
+        translation_file_names,
+        refs_patterns,
+        translation_detok_file_names,
+        draft_indices,
     ):
         src_iso = config.default_test_src_iso
         trg_iso = config.default_test_trg_iso
@@ -456,7 +494,16 @@ def test_checkpoint(
 
         scores.append(
             score_pair(
-                pair_sys, pair_refs, "ALL", src_iso, trg_iso, predictions_detok_file_name, scorers, config, ref_projects
+                pair_sys,
+                pair_refs,
+                "ALL",
+                src_iso,
+                trg_iso,
+                predictions_detok_file_name,
+                scorers,
+                config,
+                ref_projects,
+                draft_index,
             )
         )
 
@@ -495,6 +542,7 @@ def test(
     ref_projects: Set[str] = set(),
     books: List[str] = [],
     by_book: bool = False,
+    produce_multiple_translations: bool = False,
 ):
     exp_name = experiment
     SIL_NLP_ENV.copy_experiment_from_bucket(exp_name)
@@ -527,6 +575,7 @@ def test(
             step,
             scorers,
             books_nums,
+            produce_multiple_translations,
         )
 
     if avg:
@@ -543,6 +592,7 @@ def test(
                 step,
                 scorers,
                 books_nums,
+                produce_multiple_translations,
             )
         except ValueError:
             LOGGER.warn("No average checkpoint available.")
@@ -563,6 +613,7 @@ def test(
                 step,
                 scorers,
                 books_nums,
+                produce_multiple_translations,
             )
 
     if last or (not best and checkpoint is None and not avg and config.model_dir.exists()):
@@ -579,6 +630,7 @@ def test(
                 step,
                 scorers,
                 books_nums,
+                produce_multiple_translations,
             )
 
     if not config.model_dir.exists():
@@ -593,6 +645,7 @@ def test(
             0,
             scorers,
             books_nums,
+            produce_multiple_translations,
         )
 
     SIL_NLP_ENV.copy_experiment_to_bucket(
@@ -611,7 +664,7 @@ def test(
             checkpoint_name = f"checkpoint {step}"
         books_str = "ALL" if len(books_nums) == 0 else ", ".join(sorted(str(num) for num in books_nums.keys()))
         LOGGER.info(f"Test results for {checkpoint_name} ({num_refs} reference(s), books: {books_str})")
-        header = "book,src_iso,trg_iso,num_refs,references,sent_len"
+        header = "book,draft_index,src_iso,trg_iso,num_refs,references,sent_len"
         if len(results[step]) > 0:
             pair_score = results[step][0]
             header += (
