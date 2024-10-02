@@ -1468,7 +1468,7 @@ class HuggingFaceNMTModel(NMTModel):
         return_tensors: bool,
         num_return_sequences: int = 1,
         force_words_ids: List[List[List[int]]] = None,
-    ) -> List[dict]:
+    ) -> List[List[dict]]:
 
         temperature: Optional[int] = self._config.infer.get("temperature")
 
@@ -1496,7 +1496,7 @@ class HuggingFaceNMTModel(NMTModel):
         return_tensors: bool,
         num_return_sequences: int = 1,
         force_words_ids: List[List[List[int]]] = None,
-    ) -> List[dict]:
+    ) -> List[List[dict]]:
         num_beams: Optional[int] = self._config.infer.get("num_beams")
         if num_beams is None:
             num_beams = self._config.params.get("generation_num_beams")
