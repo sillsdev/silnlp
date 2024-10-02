@@ -57,6 +57,7 @@ class SILClearML:
                     "python3 -m pip install --user pipx",
                     "PATH=$PATH:/root/.local/bin",
                     "pipx install poetry==1.7.1",
+                    # update config.toml and pyvenv.cfg to give poetry environment access to system site packages
                     "poetry config virtualenvs.options.system-site-packages true",
                     (
                         "sed -i 's/include-system-site-packages = .*/include-system-site-packages = true/' "
