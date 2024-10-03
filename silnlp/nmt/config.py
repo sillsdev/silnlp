@@ -37,7 +37,6 @@ from ..common.corpus import (
     write_corpus,
 )
 from ..common.environment import SIL_NLP_ENV
-from ..common.script_utils import get_script, is_represented
 from ..common.translator import TranslationGroup
 from ..common.utils import NoiseMethod, Side, create_noise_methods, get_mt_exp_dir, is_set, set_seed
 from .augment import AugmentMethod, create_augment_methods

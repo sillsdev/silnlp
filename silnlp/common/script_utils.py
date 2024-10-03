@@ -2,6 +2,8 @@ import argparse
 import logging
 from collections import Counter
 
+from hanzidentifier import SIMPLIFIED, TRADITIONAL, identify
+
 LOGGER = logging.getLogger(__package__ + ".script_utils")
 
 SCRIPT_DATA = {
@@ -1777,68 +1779,239 @@ SCRIPT_DATA = {
     ],
 }
 
+SCRIPT_CODES = {
+    "Adlam": "Adlm",
+    "Caucasian_Albanian": "Aghb",
+    "Ahom": "Ahom",
+    "Arabic": "Arab",
+    "Imperial_Aramaic": "Armi",
+    "Armenian": "Armn",
+    "Avestan": "Avst",
+    "Balinese": "Bali",
+    "Bamum": "Bamu",
+    "Bassa_Vah": "Bass",
+    "Batak": "Batk",
+    "Bengali": "Beng",
+    "Bhaiksuki": "Bhks",
+    "Bopomofo": "Bopo",
+    "Brahmi": "Brah",
+    "Braille": "Brai",
+    "Buginese": "Bugi",
+    "Buhid": "Buhd",
+    "Chakma": "Cakm",
+    "Canadian_Aboriginal": "Cans",
+    "Carian": "Cari",
+    "Cham": "Cham",
+    "Cherokee": "Cher",
+    "Chorasmian": "Chrs",
+    "Coptic": "Copt",
+    "Cypro_Minoan": "Cpmn",
+    "Cypriot": "Cprt",
+    "Cyrillic": "Cyrl",
+    "Devanagari": "Deva",
+    "Dives_Akuru": "Diak",
+    "Dogra": "Dogr",
+    "Deseret": "Dsrt",
+    "Duployan": "Dupl",
+    "Egyptian_Hieroglyphs": "Egyp",
+    "Elbasan": "Elba",
+    "Elymaic": "Elym",
+    "Ethiopic": "Ethi",
+    "Georgian": "Geor",
+    "Glagolitic": "Glag",
+    "Gunjala_Gondi": "Gong",
+    "Masaram_Gondi": "Gonm",
+    "Gothic": "Goth",
+    "Grantha": "Gran",
+    "Greek": "Grek",
+    "Gujarati": "Gujr",
+    "Gurmukhi": "Guru",
+    "Hangul": "Hang",
+    "Han": "Hani",
+    "Hanunoo": "Hano",
+    "Hatran": "Hatr",
+    "Hebrew": "Hebr",
+    "Hiragana": "Hira",
+    "Anatolian_Hieroglyphs": "Hluw",
+    "Pahawh_Hmong": "Hmng",
+    "Nyiakeng_Puachue_Hmong": "Hmnp",
+    "Katakana_Or_Hiragana": "Hrkt",
+    "Old_Hungarian": "Hung",
+    "Old_Italic": "Ital",
+    "Javanese": "Java",
+    "Kayah_Li": "Kali",
+    "Katakana": "Kana",
+    "Kawi": "Kawi",
+    "Kharoshthi": "Khar",
+    "Khmer": "Khmr",
+    "Khojki": "Khoj",
+    "Khitan_Small_Script": "Kits",
+    "Kannada": "Knda",
+    "Kaithi": "Kthi",
+    "Tai_Tham": "Lana",
+    "Lao": "Laoo",
+    "Latin": "Latn",
+    "Lepcha": "Lepc",
+    "Limbu": "Limb",
+    "Linear_A": "Lina",
+    "Linear_B": "Linb",
+    "Lisu": "Lisu",
+    "Lycian": "Lyci",
+    "Lydian": "Lydi",
+    "Mahajani": "Mahj",
+    "Makasar": "Maka",
+    "Mandaic": "Mand",
+    "Manichaean": "Mani",
+    "Marchen": "Marc",
+    "Medefaidrin": "Medf",
+    "Mende_Kikakui": "Mend",
+    "Meroitic_Cursive": "Merc",
+    "Meroitic_Hieroglyphs": "Mero",
+    "Malayalam": "Mlym",
+    "Modi": "Modi",
+    "Mongolian": "Mong",
+    "Mro": "Mroo",
+    "Meetei_Mayek": "Mtei",
+    "Multani": "Mult",
+    "Myanmar": "Mymr",
+    "Nag_Mundari": "Nagm",
+    "Nandinagari": "Nand",
+    "Old_North_Arabian": "Narb",
+    "Nabataean": "Nbat",
+    "Newa": "Newa",
+    "Nko": "Nkoo",
+    "Nushu": "Nshu",
+    "Ogham": "Ogam",
+    "Ol_Chiki": "Olck",
+    "Old_Turkic": "Orkh",
+    "Oriya": "Orya",
+    "Osage": "Osge",
+    "Osmanya": "Osma",
+    "Old_Uyghur": "Ougr",
+    "Palmyrene": "Palm",
+    "Pau_Cin_Hau": "Pauc",
+    "Old_Permic": "Perm",
+    "Phags_Pa": "Phag",
+    "Inscriptional_Pahlavi": "Phli",
+    "Psalter_Pahlavi": "Phlp",
+    "Phoenician": "Phnx",
+    "Miao": "Plrd",
+    "Inscriptional_Parthian": "Prti",
+    "Rejang": "Rjng",
+    "Hanifi_Rohingya": "Rohg",
+    "Runic": "Runr",
+    "Samaritan": "Samr",
+    "Old_South_Arabian": "Sarb",
+    "Saurashtra": "Saur",
+    "SignWriting": "Sgnw",
+    "Shavian": "Shaw",
+    "Sharada": "Shrd",
+    "Siddham": "Sidd",
+    "Khudawadi": "Sind",
+    "Sinhala": "Sinh",
+    "Sogdian": "Sogd",
+    "Old_Sogdian": "Sogo",
+    "Sora_Sompeng": "Sora",
+    "Soyombo": "Soyo",
+    "Sundanese": "Sund",
+    "Syloti_Nagri": "Sylo",
+    "Syriac": "Syrc",
+    "Tagbanwa": "Tagb",
+    "Takri": "Takr",
+    "Tai_Le": "Tale",
+    "New_Tai_Lue": "Talu",
+    "Tamil": "Taml",
+    "Tangut": "Tang",
+    "Tai_Viet": "Tavt",
+    "Telugu": "Telu",
+    "Tifinagh": "Tfng",
+    "Tagalog": "Tglg",
+    "Thaana": "Thaa",
+    "Thai": "Thai",
+    "Tibetan": "Tibt",
+    "Tirhuta": "Tirh",
+    "Tangsa": "Tnsa",
+    "Toto": "Toto",
+    "Ugaritic": "Ugar",
+    "Vai": "Vaii",
+    "Vithkuqi": "Vith",
+    "Warang_Citi": "Wara",
+    "Wancho": "Wcho",
+    "Old_Persian": "Xpeo",
+    "Cuneiform": "Xsux",
+    "Yezidi": "Yezi",
+    "Yi": "Yiii",
+    "Zanabazar_Square": "Zanb",
+    "Inherited": "Zinh",
+    "Common": "Zyyy",
+    "Unknown": "Zzzz",
+}
+
 REPRESENTED_SCRIPTS = {
     "facebook/nllb-200": [
-        "Arabic",
-        "Latin",
-        "Ethiopic",
-        "Bengali",
-        "Devanagari",
-        "Cyrillic",
-        "Tibetan",
-        "Greek",
-        "Gujarati",
-        "Hebrew",
-        "Armenian",
-        "Japanese",
-        "Kannada",
-        "Georgian",
-        "Khmer",
-        "Hangul",
-        "Lao",
-        "Malayalam",
-        "Myanmar",
-        "Oriya",
-        "Gurmukhi",
-        "Sinhala",
-        "Telugu",
+        "Arab",
+        "Latn",
+        "Ethi",
+        "Beng",
+        "Deva",
+        "Cyrl",
+        "Tibt",
+        "Grek",
+        "Gujr",
+        "Hebr",
+        "Armn",
+        "Jpan",
+        "Knda",
+        "Geor",
+        "Khmr",
+        "Hang",
+        "Laoo",
+        "Mlym",
+        "Mymr",
+        "Orya",
+        "Guru",
+        "Sinh",
+        "Telu",
         "Thai",
-        "Tamil",
-        "Tifinagh",
-        "Han",
+        "Taml",
+        "Tfng",
+        "Hant",
+        "Hans",
     ],
     "google/madlad400": [
-        "Latin",
-        "Cyrillic",
-        "Han",
-        "Japanese",
+        "Latn",
+        "Cyrl",
+        "Hans",
+        "Hant",
+        "Jpan",
         "Thai",
-        "Arabic",
-        "Greek",
-        "Hangul",
-        "Hebrew",
-        "Devanagari",
-        "Tamil",
-        "Malayalam",
-        "Telugu",
-        "Bengali",
-        "Georgian",
-        "Kannada",
-        "Gujarati",
-        "Sinhala",
-        "Armenian",
-        "Myanmar",
-        "Khmer",
-        "Lao",
-        "Ethiopic",
-        "Oriya",
-        "Tibetan",
-        "Syriac",
-        "Cherokee",
-        "Tifinagh",
-        "Thaana",
-        "Gurmukhi",
-        "Canadian_Aboriginal",
+        "Arab",
+        "Grek",
+        "Hang",
+        "Kore",
+        "Hebr",
+        "Deva",
+        "Taml",
+        "Mlym",
+        "Telu",
+        "Beng",
+        "Geor",
+        "Knda",
+        "Gujr",
+        "Sinh",
+        "Armn",
+        "Mymr",
+        "Khmr",
+        "Laoo",
+        "Ethi",
+        "Orya",
+        "Tibt",
+        "Syrc",
+        "Cher",
+        "Tfng",
+        "Thaa",
+        "Guru",
+        "Cans",
     ],
 }
 
@@ -1859,21 +2032,38 @@ def script(char):
     return "Unknown"
 
 
-def get_script(text: str) -> str:
+def predict_han_variant(text: str) -> str:
+    num_trad = 0
+    num_simp = 0
+    for c in text:
+        char_type = identify(c)
+        num_trad += char_type == TRADITIONAL
+        num_simp += char_type == SIMPLIFIED
+
+    return "Hant" if num_trad > num_simp else "Hans"
+
+
+def predict_script_code(text: str) -> str:
     if len(text) == 0:
         return "None"
 
     counts = Counter([script(char) for char in text])
-    return counts.most_common()[0][0]
+    pred_script = counts.most_common()[0][0]
+
+    if pred_script in ["Hiragana", "Katakana"] or (
+        pred_script == "Han" and ("Hiragana" in counts.keys() or "Katakana" in counts.keys())
+    ):
+        return "Jpan"
+    if pred_script == "Han":
+        return predict_han_variant(text)
+
+    return SCRIPT_CODES[pred_script]
 
 
-def is_represented(script: str, model: str) -> bool:
+def is_represented(script_code: str, model: str) -> bool:
     for model_prefix in REPRESENTED_SCRIPTS:
-        if model.startswith(model_prefix):
-            if script in REPRESENTED_SCRIPTS[model_prefix]:
-                return True
-            elif script in ["Hiragana", "Katakana"] and "Japanese" in REPRESENTED_SCRIPTS[model_prefix]:
-                return True
+        if model.startswith(model_prefix) and script_code in REPRESENTED_SCRIPTS[model_prefix]:
+            return True
     return False
 
 
@@ -1885,7 +2075,7 @@ def main() -> None:
     with open(args.input, encoding="utf-8-sig") as f:
         text = f.read()
 
-    file_script = get_script(text)
+    file_script = predict_script_code(text)
     LOGGER.info(f"Script: {file_script}")
 
 

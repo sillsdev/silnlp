@@ -13,7 +13,7 @@ from ..alignment.utils import add_alignment_scores
 from ..common.collect_verse_counts import DT_CANON, NT_CANON, OT_CANON, collect_verse_counts
 from ..common.corpus import filter_parallel_corpus, get_mt_corpus_path, get_scripture_parallel_corpus, include_chapters
 from ..common.environment import SIL_NLP_ENV
-from ..common.script_utils import get_script, is_represented
+from ..common.script_utils import is_represented, predict_script_code
 from ..common.utils import get_git_revision_hash
 from .clearml_connection import SILClearML
 from .config import Config, get_data_file_pairs
@@ -103,11 +103,11 @@ def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = 
                 filtered_count = parallel_count - len(corpus)
                 filtered_alignment_score = mean(corpus["score"])
 
-            src_script = get_script("".join(corpus["source"][: min(len(corpus["source"]), 3000)]))
+            src_script = predict_script_code("".join(corpus["source"][: min(len(corpus["source"]), 3000)]))
             src_script_in_model = (
                 is_represented(src_script, config.model) if config.model != "SILTransformerBase" else None
             )
-            trg_script = get_script("".join(corpus["target"][: min(len(corpus["target"]), 3000)]))
+            trg_script = predict_script_code("".join(corpus["target"][: min(len(corpus["target"]), 3000)]))
             trg_script_in_model = (
                 is_represented(trg_script, config.model) if config.model != "SILTransformerBase" else None
             )
@@ -207,11 +207,11 @@ def get_extra_alignments(config: Config, deutero: bool = False) -> List[str]:
                     [is_ot_nt(VerseRef.from_string(vref).book_num) for vref in align_corpus["vref"]]
                 ]
             parallel_count = len(align_corpus.index)
-            src_script = get_script("".join(align_corpus["source"][: min(len(align_corpus["source"]), 3000)]))
+            src_script = predict_script_code("".join(align_corpus["source"][: min(len(align_corpus["source"]), 3000)]))
             src_script_in_model = (
                 is_represented(src_script, config.model) if config.model != "SILTransformerBase" else None
             )
-            trg_script = get_script("".join(align_corpus["target"][: min(len(align_corpus["target"]), 3000)]))
+            trg_script = predict_script_code("".join(align_corpus["target"][: min(len(align_corpus["target"]), 3000)]))
             trg_script_in_model = (
                 is_represented(trg_script, config.model) if config.model != "SILTransformerBase" else None
             )
