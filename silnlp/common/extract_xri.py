@@ -282,8 +282,11 @@ def filter_and_clean(
         source = trim(row[column_schema.source_column_index], "source")
         target = trim(row[column_schema.target_column_index], "target")
 
-        if target == "!":
-            clean_logger.debug("Target sentence is '!' indicating it is not translated. Ignoring.")
+        # See discussion: https://github.com/sillsdev/silnlp/issues/546#issuecomment-2391335853
+        if len(source) <= 1 or len(target) <= 1:
+            clean_logger.debug("Ignoring sentence pair as it has only one non-whitespace character in either source or target")
+            if target == "!":
+                clean_logger.debug("Target sentence is '!' indicating it is not translated.")
             continue
 
         split_text = trim(row[column_schema.split_column_index], "split").lower()
