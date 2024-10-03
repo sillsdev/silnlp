@@ -379,7 +379,8 @@ def write_output_file(filepath: Path, sentences: List[str]) -> None:
     logger.debug(f"Writing {len(sentences)} sentences to file: {filepath}")
     with open(filepath, "w", encoding="utf-8") as f:
         for sentence in sentences:
-            f.write(f"{sentence}{os.linesep}")
+            # For choice of line ending, see discussion: https://github.com/sillsdev/silnlp/issues/546#issuecomment-2391314524
+            f.write(f"{sentence}\n")
 
 
 def create_extract_files(cli_input: CliInput, sentence_pairs: List[SentencePair]) -> None:
