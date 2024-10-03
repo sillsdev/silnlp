@@ -2,7 +2,7 @@ import argparse
 import logging
 from collections import Counter
 
-import hanzidentifier
+from hanzidentifier import SIMPLIFIED, TRADITIONAL, identify
 
 LOGGER = logging.getLogger(__package__ + ".script_utils")
 
@@ -2032,21 +2032,38 @@ def script(char):
     return "Unknown"
 
 
-def get_script(text: str) -> str:
+def predict_han_variant(text: str) -> str:
+    num_trad = 0
+    num_simp = 0
+    for c in text:
+        char_type = identify(c)
+        num_trad += char_type == TRADITIONAL
+        num_simp += char_type == SIMPLIFIED
+
+    return "Hant" if num_trad > num_simp else "Hans"
+
+
+def predict_script_code(text: str) -> str:
     if len(text) == 0:
         return "None"
 
     counts = Counter([script(char) for char in text])
-    return counts.most_common()[0][0]
+    pred_script = counts.most_common()[0][0]
+
+    if pred_script in ["Hiragana", "Katakana"] or (
+        pred_script == "Han" and ("Hiragana" in counts.keys() or "Katakana" in counts.keys())
+    ):
+        return "Jpan"
+    if pred_script == "Han":
+        return predict_han_variant(text)
+
+    return SCRIPT_CODES[pred_script]
 
 
-def is_represented(script: str, model: str) -> bool:
+def is_represented(script_code: str, model: str) -> bool:
     for model_prefix in REPRESENTED_SCRIPTS:
-        if model.startswith(model_prefix):
-            if script in REPRESENTED_SCRIPTS[model_prefix]:
-                return True
-            elif script in ["Hiragana", "Katakana"] and "Japanese" in REPRESENTED_SCRIPTS[model_prefix]:
-                return True
+        if model.startswith(model_prefix) and script_code in REPRESENTED_SCRIPTS[model_prefix]:
+            return True
     return False
 
 
@@ -2058,7 +2075,7 @@ def main() -> None:
     with open(args.input, encoding="utf-8-sig") as f:
         text = f.read()
 
-    file_script = get_script(text)
+    file_script = predict_script_code(text)
     LOGGER.info(f"Script: {file_script}")
 
 
