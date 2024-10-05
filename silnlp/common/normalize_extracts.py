@@ -138,6 +138,7 @@ def run(cli_input: CliInput) -> None:
                 f"Outpath '{output_path}' already exists. Skipping input {input_path}. "
                 + "You can use the --overwrite flag to write over existing files."
             )
+            continue
 
         input_lines: List[str] = load_extract_file(input_path)
         logger.debug(f"Found {len(input_lines)} lines in file")
