@@ -81,8 +81,12 @@ def normalized_path(output_dir: Path, input_path: Path) -> Path:
     Uses the input path to generate corresponding output path with "norm" in the name.
     e.g. extract.all.txt -> extract.all.norm.txt
     """
-    # TODO
-    return Path("TODO")
+    input_filename = input_path.parts[-1]
+    output_filename_parts = input_filename.split(".")[0:-1]
+    output_filename_parts.append("norm")
+    output_filename_parts.append("txt")
+    output_filename = ".".join(output_filename_parts)
+    return output_dir / output_filename
 
 
 def normalize(extract_sentence: str) -> str:
@@ -94,13 +98,15 @@ def normalize(extract_sentence: str) -> str:
 
 
 def load_extract_file(path: Path) -> List[str]:
-    # TODO
-    return []
+    with open(path, "r", encoding="UTF-8") as file:
+        return [line.rstrip() for line in file]
 
 
-def write_extract_file(path: Path, lines: List[str]) -> None:
-    # TODO
-    return
+def write_extract_file(path: Path, sentences: List[str]) -> None:
+    logger.debug(f"Writing {len(sentences)} sentences to file: {path}")
+    with open(path, "w", encoding="utf-8") as f:
+        for sentence in sentences:
+            f.write(f"{sentence}\n")
 
 
 def run(cli_input: CliInput) -> None:
@@ -134,6 +140,7 @@ def run(cli_input: CliInput) -> None:
             )
 
         input_lines: List[str] = load_extract_file(input_path)
+        logger.debug(f"Found {len(input_lines)} lines in file")
         normalized_lines: List[str] = [normalize(extract_sentence) for extract_sentence in input_lines]
         write_extract_file(output_path, normalized_lines)
         logger.debug(f"Finished processing {input_path}")
