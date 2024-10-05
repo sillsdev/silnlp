@@ -32,15 +32,17 @@ If an output file already exists in the output directory, it won't be written ov
 The optional `--overwrite` flag will bypass this.
 
 By default the script uses the logging configuration inherited from the parent packages (which should log at INFO level).
-You can change the logging level with the optional `--log_level LOG_LEVEL` which accepts values like:
+You can change the logging level with the optional `--log-level LOG_LEVEL` which accepts values like:
 "DEBUG", "INFO", "WARNING/WARN", "ERROR" and "CRITICAL".
 """
 
 import argparse
 import logging
+import os
 
 from dataclasses import dataclass
 
+from glob import glob
 from pathlib import Path
 from typing import List, Optional
 
@@ -63,8 +65,15 @@ def get_files_to_normalize(input_dir: Path, filter: Optional[str]) -> List[Path]
     that aren't normalized.
     If the filter is defined, then further filtering of those candidates is performed.
     """
-    # TODO
-    return []
+    if filter is None:
+        logger.debug(f"Searching files in input dir: '{input_dir}'")
+        matching_filenames = [os.path.join(input_dir, f) for f in os.listdir(input_dir)]
+    else:
+        logger.debug(f"Searching files in input dir: '{input_dir}' that satisfy glob '{filter}'")
+        matching_filenames = glob(os.path.join(input_dir, filter), recursive=False)
+
+    matching_paths: List[Path] = [Path(f) for f in matching_filenames]
+    return [path for path in matching_paths if path.is_file() and path.suffix == ".txt" and not str(path).endswith("norm.txt")]
 
 
 def normalized_path(output_dir: Path, input_path: Path) -> Path:
