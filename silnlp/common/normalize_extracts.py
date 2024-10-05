@@ -39,6 +39,7 @@ You can change the logging level with the optional `--log-level LOG_LEVEL` which
 import argparse
 import logging
 import os
+import re
 
 from dataclasses import dataclass
 
@@ -89,12 +90,12 @@ def normalized_path(output_dir: Path, input_path: Path) -> Path:
     return output_dir / output_filename
 
 
+consecutive_spaces = re.compile("\\s+")
 def normalize(extract_sentence: str) -> str:
     """
     Returns a normalized version of the input string.
     """
-    # TODO
-    return extract_sentence
+    return re.sub(consecutive_spaces, " ", extract_sentence)
 
 
 def load_extract_file(path: Path) -> List[str]:
