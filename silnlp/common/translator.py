@@ -1,5 +1,7 @@
 import logging
+import shutil
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from datetime import date
 from itertools import groupby
 from pathlib import Path
@@ -70,6 +72,66 @@ class DraftGroup:
         return translated_draft_sentences
 
 
+# Manually put entries from a glossary book in order according to their entry (verse) number
+def sort_glossary_entries(glossary_path: Path) -> List[int]:
+    # Back up the original glossary file since it has to be overwritten by the sorted file
+    shutil.copy(glossary_path, glossary_path.parent / f"copy_{glossary_path.name}")
+
+    settings = FileParatextProjectSettingsParser(glossary_path.parent).parse()
+    with open(glossary_path, encoding=settings.encoding) as f:
+        lines = [line.strip() for line in f.readlines()]
+
+    sorted_lines = []
+    verse_order = []
+    verses_dict = defaultdict(list)
+    curr_verse = -1
+    for line in lines:
+        if line.startswith("\\v"):
+            curr_verse = int(line.split()[1])
+            verse_order.append(curr_verse)
+
+        if curr_verse == -1:
+            sorted_lines.append(line)
+        else:
+            verses_dict[curr_verse].append(line)
+
+    for verse in sorted(verses_dict.keys()):
+        sorted_lines += verses_dict[verse]
+    with open(glossary_path, "w", encoding=settings.encoding) as f:
+        for line in sorted_lines:
+            f.write(line + "\n")
+
+    return verse_order
+
+
+# Return to the original entry ordering of a glossary after translation
+def unsort_glossary_entries(glossary_path: Path, out_path: Path, verse_order: List[int]) -> None:
+    settings = FileParatextProjectSettingsParser(glossary_path.parent).parse()
+    with open(out_path, encoding=settings.encoding) as f:
+        sorted_lines = [line.strip() for line in f.readlines()]
+
+    unsorted_lines = []
+    verses_dict = defaultdict(list)
+    curr_verse = -1
+    for line in sorted_lines:
+        if line.startswith("\\v"):
+            curr_verse = int(line.split()[1])
+
+        if curr_verse == -1:
+            unsorted_lines.append(line)
+        else:
+            verses_dict[curr_verse].append(line)
+
+    for verse in verse_order:
+        unsorted_lines += verses_dict[verse]
+    with open(out_path, "w", encoding=settings.encoding) as f:
+        for line in unsorted_lines:
+            f.write(line + "\n")
+
+    # Restore the original glossary file
+    shutil.move(glossary_path.parent / f"copy_{glossary_path.name}", glossary_path)
+
+
 class Translator(ABC):
     @abstractmethod
     def translate(
@@ -118,6 +180,9 @@ class Translator(ABC):
         else:
             LOGGER.info(f"Found the file {book_path} for book {book}")
 
+        if book == "GLO":
+            verse_order = sort_glossary_entries(book_path)
+
         self.translate_usfm(
             book_path,
             output_path,
@@ -129,6 +194,9 @@ class Translator(ABC):
             include_inline_elements,
             experiment_ckpt_str,
         )
+
+        if book == "GLO":
+            unsort_glossary_entries(book_path, output_path, verse_order)
 
     def translate_usfm(
         self,
