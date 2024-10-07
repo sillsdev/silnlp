@@ -5,30 +5,10 @@ from pathlib import Path
 from typing import List, Optional
 
 import psutil
-from opennmt.utils.wer import sentence_wer
 
 from ..common.corpus import write_corpus
 
 METEOR_FULLY_SUPPORTED_LANGS = {"en", "cz", "de", "es", "fr", "ar"}
-
-
-def compute_wer_score(hyps: List[str], refs: List[List[str]]) -> float:
-    if len(hyps) == 0:
-        return 100.0
-
-    try:
-        wer_score = 0.0
-        for hyp, ref in zip(hyps, refs[0]):
-            wer_score += sentence_wer(ref.lower(), hyp.lower())
-        result = wer_score / len(hyps)
-    except UnicodeDecodeError:
-        print("Unable to compute WER score")
-        result = -1
-    except ZeroDivisionError:
-        print("Cannot divide by zero. Check for empty lines.")
-        result = -1
-
-    return result * 100
 
 
 def compute_meteor_score(lang: str, hyps: List[str], refs: List[List[str]]) -> Optional[float]:
