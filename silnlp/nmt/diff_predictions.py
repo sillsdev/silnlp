@@ -16,7 +16,6 @@ from sacrebleu.metrics.bleu import BLEU, BLEUScore
 from tqdm import tqdm
 
 from ..common.corpus import load_corpus
-from ..common.metrics import compute_wer_score
 from ..common.utils import get_git_revision_hash
 from .config import get_mt_exp_dir
 from .sp_utils import decode_sp, decode_sp_lines
@@ -47,12 +46,11 @@ SPBLEU_SCORE = "spBLEU"
 CHRF3_SCORE = "chrF3"
 CHRF3P_SCORE = "chrF3+"
 CHRF3PP_SCORE = "chrF3++"
-WER_SCORE = "WER"
 TER_SCORE = "TER"
 DICT_SRC = "Source"
 DICT_TRG = "Target"
 
-_SUPPORTED_SCORERS = {BLEU_SCORE, SPBLEU_SCORE, CHRF3_SCORE, CHRF3P_SCORE, CHRF3PP_SCORE, WER_SCORE, TER_SCORE}
+_SUPPORTED_SCORERS = {BLEU_SCORE, SPBLEU_SCORE, CHRF3_SCORE, CHRF3P_SCORE, CHRF3PP_SCORE, TER_SCORE}
 
 
 def sentence_bleu(
@@ -441,22 +439,29 @@ def add_scores(df: pd.DataFrame, scorers: List[str], preserve_case: bool, tokeni
         elif scorer == CHRF3P_SCORE.lower():
             for index, row in tqdm(df.iterrows(), desc="Calculating chrF3+ scores ..."):
                 chrf3p_score = sacrebleu.corpus_chrf(
-                    [row[PREDICTION]], [[row[TRG_SENTENCE]]], char_order=6, beta=3, word_order=1, remove_whitespace=True, eps_smoothing=True
+                    [row[PREDICTION]],
+                    [[row[TRG_SENTENCE]]],
+                    char_order=6,
+                    beta=3,
+                    word_order=1,
+                    remove_whitespace=True,
+                    eps_smoothing=True,
                 )
                 scores.append(chrf3p_score.score)
             df[CHRF3P_SCORE] = scores
         elif scorer == CHRF3PP_SCORE.lower():
             for index, row in tqdm(df.iterrows(), desc="Calculating chrF3++ scores ..."):
                 chrf3pp_score = sacrebleu.corpus_chrf(
-                    [row[PREDICTION]], [[row[TRG_SENTENCE]]], char_order=6, beta=3, word_order=2, remove_whitespace=True, eps_smoothing=True
+                    [row[PREDICTION]],
+                    [[row[TRG_SENTENCE]]],
+                    char_order=6,
+                    beta=3,
+                    word_order=2,
+                    remove_whitespace=True,
+                    eps_smoothing=True,
                 )
                 scores.append(chrf3pp_score.score)
             df[CHRF3PP_SCORE] = scores
-        elif scorer == WER_SCORE.lower():
-            for index, row in tqdm(df.iterrows(), desc="Calculating WER scores ..."):
-                wer_score = compute_wer_score([row[PREDICTION]], [[row[TRG_SENTENCE]]])
-                scores.append(wer_score if wer_score >= 0 else 0)
-            df[WER_SCORE] = scores
         elif scorer == TER_SCORE.lower():
             for index, row in tqdm(df.iterrows(), desc="Calculating TER scores ..."):
                 ter_score = sacrebleu.corpus_ter([row[PREDICTION]], [[row[TRG_SENTENCE]]])
@@ -526,9 +531,7 @@ def main() -> None:
     exp1_step = (
         0
         if exp1_type == "SMT"
-        else get_last_checkpoint(str(exp1_dir))
-        if args.last
-        else get_best_checkpoint(str(exp1_dir))
+        else get_last_checkpoint(str(exp1_dir)) if args.last else get_best_checkpoint(str(exp1_dir))
     )
     output_path = os.path.join(exp1_dir, f"diff_predictions.{exp1_step}.xlsx")
 

@@ -7,7 +7,6 @@ from typing import Optional, Set
 import yaml
 
 from ..common.environment import SIL_NLP_ENV
-from ..common.tf_utils import enable_memory_growth
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import SILClearML
 from .config import Config, get_mt_exp_dir
@@ -141,7 +140,6 @@ def main() -> None:
         "--force-align", default=False, action="store_true", help="Force recalculation of all alignment scores"
     )
     parser.add_argument("--disable-mixed-precision", default=False, action="store_true", help="Disable mixed precision")
-    parser.add_argument("--memory-growth", default=False, action="store_true", help="Enable memory growth")
     parser.add_argument("--num-devices", type=int, default=1, help="Number of devices to train on")
     parser.add_argument(
         "--clearml-queue",
@@ -189,9 +187,6 @@ def main() -> None:
     if args.debug:
         show_attrs(cli_args=args)
         exit()
-
-    if args.memory_growth:
-        enable_memory_growth()
 
     if not (args.preprocess or args.train or args.test):
         args.preprocess = True

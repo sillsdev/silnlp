@@ -1,8 +1,5 @@
-from silnlp.common.tf_utils import enable_memory_growth
 from silnlp.nmt.experiment import SILExperiment
 from silnlp.nmt.translate import TranslationTask
-
-enable_memory_growth()
 
 exp = SILExperiment(
     name="BT-Swahili/en-swh-1",
