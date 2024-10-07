@@ -11,8 +11,7 @@ from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_number_to_i
 from sacrebleu.metrics import BLEU, BLEUScore
 
 from ..common.environment import SIL_NLP_ENV
-from ..common.metrics import compute_meteor_score, compute_wer_score
-from ..common.tf_utils import enable_eager_execution, enable_memory_growth
+from ..common.metrics import compute_meteor_score
 from ..common.utils import get_git_revision_hash
 from .config import CheckpointType, Config, NMTModel
 from .config_utils import load_config
@@ -22,7 +21,7 @@ LOGGER = logging.getLogger(__package__ + ".test")
 
 logging.getLogger("sacrebleu").setLevel(logging.ERROR)
 
-_SUPPORTED_SCORERS = ["bleu", "sentencebleu", "chrf3", "chrf3+", "chrf3++", "spbleu", "meteor", "wer", "ter"]
+_SUPPORTED_SCORERS = ["bleu", "sentencebleu", "chrf3", "chrf3+", "chrf3++", "spbleu", "meteor", "ter"]
 
 
 class PairScore:
@@ -137,11 +136,6 @@ def score_pair(
         meteor_score = compute_meteor_score(trg_iso, pair_sys, pair_refs)
         if meteor_score is not None:
             other_scores["METEOR"] = meteor_score
-
-    if "wer" in scorers:
-        wer_score = compute_wer_score(pair_sys, pair_refs)
-        if wer_score >= 0:
-            other_scores["WER"] = wer_score
 
     if "ter" in scorers:
         ter_score = sacrebleu.corpus_ter(pair_sys, pair_refs)
@@ -688,7 +682,6 @@ def test(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Tests an NMT model")
     parser.add_argument("experiment", help="Experiment name")
-    parser.add_argument("--memory-growth", default=False, action="store_true", help="Enable memory growth")
     parser.add_argument("--checkpoint", type=str, help="Test checkpoint")
     parser.add_argument("--last", default=False, action="store_true", help="Test last checkpoint")
     parser.add_argument("--best", default=False, action="store_true", help="Test best evaluated checkpoint")
@@ -711,21 +704,9 @@ def main() -> None:
         action="store_true",
         help="Produce multiple translations of each verse.",
     )
-    parser.add_argument(
-        "--eager-execution",
-        default=False,
-        action="store_true",
-        help="Enable TensorFlow eager execution.",
-    )
     args = parser.parse_args()
 
     get_git_revision_hash()
-
-    if args.eager_execution:
-        enable_eager_execution()
-
-    if args.memory_growth:
-        enable_memory_growth()
 
     if len(args.books) == 1:
         books = args.books[0].split(";")
