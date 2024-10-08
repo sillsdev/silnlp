@@ -706,6 +706,12 @@ def main() -> None:
     parser.add_argument("--books", nargs="*", metavar="book", default=[], help="Books")
     parser.add_argument("--by-book", default=False, action="store_true", help="Score individual books")
     parser.add_argument(
+        "--multiple-translations",
+        default=False,
+        action="store_true",
+        help="Produce multiple translations of each verse.",
+    )
+    parser.add_argument(
         "--eager-execution",
         default=False,
         action="store_true",
@@ -737,6 +743,7 @@ def main() -> None:
         scorers=set(s.lower() for s in args.scorers),
         books=books,
         by_book=args.by_book,
+        produce_multiple_translations=args.multiple_translations,
     )
 
 

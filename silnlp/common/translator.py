@@ -64,10 +64,16 @@ class DraftGroup:
         translated_draft_sentences = [[] for _ in range(self.num_drafts)]
 
         for translation_group in self.translation_groups:
+            if len(translation_group) == 0:
+                translation_group = self._createEmptyTranslationGroup()
+
             for draft_index in range(self.num_drafts):
                 translated_draft_sentences[draft_index].append(translation_group[draft_index])
 
         return translated_draft_sentences
+
+    def _createEmptyTranslationGroup(self):
+        return ["" for _ in range(self.num_drafts)]
 
 
 class Translator(ABC):
