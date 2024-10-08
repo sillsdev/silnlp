@@ -37,8 +37,8 @@ def clean_s3(max_months: int, dry_run: bool) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Remove old model files from S3 bucket")
-    parser.add_argument("--max-months", type=int, default=1, help="Maximum age of files to keep in months")
+    parser = argparse.ArgumentParser(description="Remove old model checkpoints from S3 bucket")
+    parser.add_argument("--max-months", type=int, default=1, help="Maximum age of checkpoints to keep in months")
     parser.add_argument(
         "--dry-run",
         default=False,
