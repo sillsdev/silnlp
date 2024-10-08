@@ -7,8 +7,8 @@ import boto3
 MONTH_IN_SECONDS = 2628288
 
 
-def clean_s3(dry_run: bool) -> None:
-    max_age = 3 * MONTH_IN_SECONDS
+def clean_s3(max_months: int, dry_run: bool) -> None:
+    max_age = max_months * MONTH_IN_SECONDS
     regex_to_delete = re.compile(
         r"^MT/experiments/.+/run/(checkpoint.*(pytorch_model\.bin|\.safetensors)$|ckpt.+\.(data-00000-of-00001|index)$)"
     )
@@ -38,6 +38,7 @@ def clean_s3(dry_run: bool) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Remove old model files from S3 bucket")
+    parser.add_argument("--max-months", type=int, default=1, help="Maximum age of files to keep in months")
     parser.add_argument(
         "--dry-run",
         default=False,
@@ -46,7 +47,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    clean_s3(args.dry_run)
+    clean_s3(args.max_months, args.dry_run)
 
 
 if __name__ == "__main__":
