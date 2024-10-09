@@ -155,6 +155,7 @@ Follow the instructions below to set up a Dev Container in VS Code. This is the 
    * After installing the driver, reboot your system.
 
 2. Download and install [Docker Desktop](https://www.docker.com/get-started/).
+   * Linux users (not including WSL) who want to use a local GPU should install Docker Engine rather than Docker Desktop.
    * Reboot after installing and completing the relevant steps below, confirm that all installation steps are complete before the next step.
 
    Windows (non-WSL) and macOS:
@@ -164,13 +165,12 @@ Follow the instructions below to set up a Dev Container in VS Code. This is the 
    * Enable WSL 2 backend:
       * Open Settings in Docker Desktop and check "Use WSL 2 based engine" under the General tab. It may already be checked.
       * To verify, check under the Resources tab in Settings for a message saying that you are using the WSL 2 backend.
+   * If using a local GPU, double check that GPU support is enabled by following [these instructions](https://docs.docker.com/desktop/gpu/) from Docker.
 
    Linux:
    * Add your user to the docker group by using a terminal to run: `sudo usermod -aG docker $USER`
    * Sign out and back in again so your changes take effect
-
-
-   If using a local GPU, you'll also need to install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#installation) and configure Docker so that it can use the [NVIDIA Container Runtime](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#configuring-docker).
+   * If using a local GPU, you'll also need to install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#installation) and configure Docker so that it can use the [NVIDIA Container Runtime](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#configuring-docker).
 
 3. Set up [ClearML](clear_ml_setup.md).
 
