@@ -604,6 +604,7 @@ class HuggingFaceConfig(Config):
                 self._tokenizer = convert_slow_tokenizer(self._tokenizer)
                 self._tokenizer = NllbTokenizerFast(tokenizer_object=self._tokenizer)
                 self._tokenizer.save_pretrained(str(self.exp_dir))
+            # self._tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True)
             self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
         return self._tokenizer
 
@@ -624,11 +625,6 @@ class HuggingFaceConfig(Config):
         for i, tok in enumerate(toks):
             counts = Counter([script(char) for char in tok if script(char) != "Common"])
             mc = counts.most_common()
-
-            # if len(mc) == 1 and mc[0][0] == "Common":
-            #     ids.append(i)
-            #     continue
-            # counts.pop("Common", None)
 
             if len(mc) == 0:
                 continue
@@ -673,10 +669,14 @@ class HuggingFaceConfig(Config):
         toks = tokenizer.convert_ids_to_tokens(list(range(len(tokenizer))), skip_special_tokens=True)
         ids = self.get_script_ids(toks, scripts)
 
+        # extra toks for key terms
+        dummy_ids = tokenizer.convert_tokens_to_ids(["_", "\ufffc"])
+
         # trim
         tt = TokenizerTrimmer(tokenizer)
         tt.make_vocab([ids], tokenized=True)
         tt.make_vocab(data)
+        tt.make_vocab([dummy_ids], tokenized=True)
         tt.make_tokenizer()
 
         mt = M2M100Trimmer(model, model_config, tt.trimmed_tokenizer)
