@@ -6,7 +6,7 @@ import logging
 import regex
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import Enum, IntEnum
 from typing import List, Optional, Tuple
 
 
@@ -82,8 +82,8 @@ class SentenceTransformation:
     description: str
 
 
-class WarningCode(Enum):
-    multiple_punctuation = 0
+class WarningCode(IntEnum):
+    MULTIPLE_PUNCTUATION = 0
 
 
 @dataclass(frozen=True)
@@ -94,9 +94,7 @@ class NormalizationWarning:
     but it's not included in the list of punctuation characters specified by the user
     """
 
-    # TODO - use a slice
-    start_index: int
-    end_index: int
+    slice: StringSlice
     warning_code: WarningCode
     description: str
 
@@ -173,13 +171,18 @@ class Normalizer:
                 # Generate a warning that spans just the punctuation characters in the slice,
                 # and not boundary whitespace
                 left_trimmed = slice.slice.lstrip()
-                offset = len(slice.slice) - len(left_trimmed)
+                slice_trim_offset = len(slice.slice) - len(left_trimmed)
                 all_punctuation_trimmed = left_trimmed.rstrip()
+                print(f"trim offset: {trim_offset}, slice trim offset: {slice_trim_offset}")
+                warning_start_index = slice.start_index + trim_offset + slice_trim_offset
                 multiple_punctuation_warnings.append(
                     NormalizationWarning(
-                        start_index=slice.start_index + offset,
-                        end_index=slice.start_index + offset + len(all_punctuation_trimmed),
-                        warning_code=WarningCode.multiple_punctuation,
+                        slice=build_slice(
+                            start_index=warning_start_index,
+                            end_index=warning_start_index + len(all_punctuation_trimmed),
+                            outer=sentence,
+                        ),
+                        warning_code=WarningCode.MULTIPLE_PUNCTUATION,
                         description="Multiple consecutive punctuation characters (ignoring whitespace) - currently this is not normalized",
                     )
                 )
