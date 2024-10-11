@@ -6,8 +6,8 @@ import logging
 import regex
 
 from dataclasses import dataclass
-from enum import Enum
-from typing import List, Optional, Tuple
+from enum import Enum, IntEnum
+from typing import Dict, List, Optional, Set, Tuple
 
 
 class PunctuationCategory(Enum):
@@ -62,6 +62,14 @@ def build_slice(start_index: int, end_index: int, outer: str) -> StringSlice:
     return StringSlice(start_index=start_index, end_index=end_index, slice=outer[start_index:end_index], outer=outer)
 
 
+def slice_contains(outer: StringSlice, inner: StringSlice) -> bool:
+    """
+    Returns whether the alleged outer slice contains the inner.
+    It's implicitly assumed the slices correspond to the same string
+    """
+    return (outer.start_index <= inner.start_index) and (outer.end_index >= inner.end_index)
+
+
 # TODO - delete when you're confident it's not going to be used
 def pretty_print_slice(slice: StringSlice) -> None:
     logger.debug(slice.outer)
@@ -82,8 +90,9 @@ class SentenceTransformation:
     description: str
 
 
-class WarningCode(Enum):
-    multiple_punctuation = 0
+class WarningCode(IntEnum):
+    MULTIPLE_PUNCTUATION = 0
+    FALSE_NEGATIVE_CANDIDATE = 1
 
 
 @dataclass(frozen=True)
@@ -94,9 +103,7 @@ class NormalizationWarning:
     but it's not included in the list of punctuation characters specified by the user
     """
 
-    # TODO - use a slice
-    start_index: int
-    end_index: int
+    slice: StringSlice
     warning_code: WarningCode
     description: str
 
@@ -114,6 +121,16 @@ class SentenceNormalizationSummary:
     warnings: List[NormalizationWarning]
 
 
+def unicode_hex(character: str) -> str:
+    """
+    Returns a unicode representation of the character passed, e.g. U+04FA
+    """
+    code = hex(ord(character))[2:]
+    # Left pad with 0
+    code = code.zfill(4)
+    return "U+" + code.upper()
+
+
 class Normalizer:
     """
     Encapsulates the state required to normalize sentences
@@ -127,11 +144,27 @@ class Normalizer:
         # TODO - ensure strings are length 1
         # TODO - ensure no whitespace
 
+        self.punctuation_char_2_normalization_rule: Dict[str, PunctuationNormalizationRule] = {
+            rule.character: rule for rule in punctuation_normalization_rules
+        }
+        self.supported_punctuation: Set[str] = set(self.punctuation_char_2_normalization_rule.keys())
+
         self.consecutive_spaces = regex.compile("\\s+")
         self.single_whitespace = regex.compile("\\s")
 
+        # Regex escape all the punctuation characters defined in the rules so that they be shoved into a regex
         escaped_punctuation_chars = "".join(regex.escape(rule.character) for rule in punctuation_normalization_rules)
-        self.punctuation_regex = regex.compile(f"[{escaped_punctuation_chars}\s]+")
+        # Matches a single punctuation character with optional whitespace before and after
+        # Negative look behind and ahead is used to stop it matching punctuation that's part of a multiple punctuation group
+        self.single_punctuation_with_optional_whitespace_regex = regex.compile(
+            f"(?<![{escaped_punctuation_chars}\s])\s*[{escaped_punctuation_chars}]\s*(?![{escaped_punctuation_chars}\s])"
+        )
+        # Matches a starting punctuation char, then any number of punctuation/whitespace, then a closing punctuation character
+        self.multiple_punctuation_regex = regex.compile(
+            f"[{escaped_punctuation_chars}][{escaped_punctuation_chars}\s]*[{escaped_punctuation_chars}]"
+        )
+
+        self.not_letters_or_numbers_or_whitespace_regex = regex.compile("""[^\p{N}\p{L}\s]""")
 
     def normalize(self, sentence: str) -> SentenceNormalizationSummary:
         """
@@ -139,91 +172,24 @@ class Normalizer:
         """
         logger.debug(f"Normalizing '{sentence}'")
 
-        # Boundary whitespace is dealt with specially first and later logic analyses the trimmed input
-        boundary_trim_transformations, sentence_trimmed, trim_offset = self.compute_boundary_transformations(sentence)
+        all_transformations: List[SentenceTransformation] = self.find_transformations_sorted(sentence)
 
-        # Find groups of punctuation within the trimmed string
-        # Any results have to be shifted back to the coordinate system of the original sentence
-        punctuation_slices = find_slices(self.punctuation_regex, sentence_trimmed)
-
-        # Categorize each slice found
-        consecutive_spaces_slices: List[StringSlice] = []
-        single_punctuation_slices: List[StringSlice] = []
-        multiple_punctuation_warnings: List[NormalizationWarning] = []
-        for slice in punctuation_slices:
-            whitespace_removed = regex.sub(self.consecutive_spaces, "", slice.slice)
-            # match is completely whitespace
-            if len(whitespace_removed) == 0:
-                consecutive_spaces_slices.append(slice)
-            # match has one punctuation character
-            elif len(whitespace_removed) == 1:
-                single_punctuation_slices.append(slice)
-            # match has 2+ punctuation character
-            else:
-                # For this case, we don't transform the punctuation, but there's still potentially
-                # consecutive spaces that can be shrunk down to a single space
-                # We search within the current slice for consecutive spaces - the coordinate systems
-                # within those slices need to be shifted back to the main slice
-                consecutive_spaces_sub_slices = [
-                    shift_slice(spaces_slice, slice.start_index, slice.outer)
-                    for spaces_slice in find_slices(self.consecutive_spaces, slice.slice)
-                ]
-                consecutive_spaces_slices.extend(consecutive_spaces_sub_slices)
-
-                # Generate a warning that spans just the punctuation characters in the slice,
-                # and not boundary whitespace
-                left_trimmed = slice.slice.lstrip()
-                offset = len(slice.slice) - len(left_trimmed)
-                all_punctuation_trimmed = left_trimmed.rstrip()
-                multiple_punctuation_warnings.append(
-                    NormalizationWarning(
-                        start_index=slice.start_index + offset,
-                        end_index=slice.start_index + offset + len(all_punctuation_trimmed),
-                        warning_code=WarningCode.multiple_punctuation,
-                        description="Multiple consecutive punctuation characters (ignoring whitespace) - currently this is not normalized",
-                    )
-                )
-        logger.debug(f"   #consecutive space slices={len(consecutive_spaces_slices)}")
-        logger.debug(f"  #single punctuation slices={len(single_punctuation_slices)}")
-        logger.debug(f"#multiple punctuation slices={len(multiple_punctuation_warnings)}")
-
-        # Convert consecutive space slices into transformations
-        consecutive_spaces_transformations = [
-            SentenceTransformation(
-                slice=shift_slice(slice, trim_offset, sentence),
-                replacement=" ",
-                description="Consecutive whitespace found",
+        multiple_punctuation_warnings: List[NormalizationWarning] = [
+            NormalizationWarning(
+                slice=slice,
+                warning_code=WarningCode.MULTIPLE_PUNCTUATION,
+                description="Multiple consecutive punctuation characters (ignoring whitespace) - currently this is not normalized",
             )
-            for slice in consecutive_spaces_slices
-            # Don't generate transformations for single spaces
-            if slice.slice != " "
+            for slice in find_slices(self.multiple_punctuation_regex, sentence)
         ]
 
-        # Convert single punctuation slices into transformations
-        single_punctuation_transformations: List[SentenceTransformation] = []
-        for slice in single_punctuation_slices:
-
-            # Figure out the punctuation character that was found in the slice and find the associated normalization rule for it
-            punctuation_char = regex.sub(self.consecutive_spaces, "", slice.slice)
-            rule = next(filter(lambda rule: rule.character == punctuation_char, self.punctuation_normalization_rules))
-            normalized = self.normalize_single_punctuation_slice(rule, slice)
-            # Some normalizations couldn't be applied or don't actually transform the text
-            if normalized is not None and normalized != slice.slice:
-                single_punctuation_transformations.append(
-                    SentenceTransformation(
-                        slice=shift_slice(slice, trim_offset, sentence),
-                        replacement=normalized,
-                        description=f"Punctuation ({punctuation_char}) normalized by rule {rule.category}",
-                    )
-                )
+        false_negative_warnings: List[NormalizationWarning] = self.search_false_negatives(sentence)
 
         # TODO - add other kinds of warnings
-        all_warnings = multiple_punctuation_warnings
+        all_warnings = multiple_punctuation_warnings + false_negative_warnings
 
-        all_transformations = sorted(
-            consecutive_spaces_transformations + single_punctuation_transformations + boundary_trim_transformations,
-            key=lambda transformation: transformation.slice.start_index,
-        )
+        logger.debug(f"#transformations={len(all_transformations)}")
+        logger.debug(f"#warnings={len(all_warnings)}")
 
         # Pretty print out all the transformation relative to the original string
         # TODO This is just for debugging and will be replaced by better reporting
@@ -244,8 +210,6 @@ class Normalizer:
                 + " "
                 + transformation.description
             )
-
-        # TODO - check the transformations aren't overlapping
 
         # Rebuild the string by applying all the transformations
         # We extract the parts unaffected by normalization, then rebuild by interleaving them with the normalized parts
@@ -275,6 +239,57 @@ class Normalizer:
             normalized_sentence=normalized,
             transformations=all_transformations,
             warnings=all_warnings,
+        )
+
+    def find_transformations_sorted(self, sentence: str) -> List[SentenceTransformation]:
+        # Boundary whitespace is dealt with specially first and later logic analyses the trimmed input
+        boundary_trim_transformations, sentence_trimmed, trim_offset = self.compute_boundary_transformations(sentence)
+
+        single_punctuation_transformations: List[SentenceTransformation] = []
+        for slice in find_slices(self.single_punctuation_with_optional_whitespace_regex, sentence_trimmed):
+            # Figure out the punctuation character that was found in the slice and find the associated normalization rule for it
+            punctuation_char = regex.sub(self.consecutive_spaces, "", slice.slice)
+            rule = self.punctuation_char_2_normalization_rule[punctuation_char]
+            normalized = self.normalize_single_punctuation_slice(rule, slice)
+            # Some normalizations couldn't be applied or don't actually transform the text
+            if normalized is not None and normalized != slice.slice:
+                single_punctuation_transformations.append(
+                    SentenceTransformation(
+                        slice=shift_slice(slice, trim_offset, sentence),
+                        replacement=normalized,
+                        description=f"Punctuation ({punctuation_char}) normalized by rule {rule.category}",
+                    )
+                )
+
+        consecutive_spaces_transformations = [
+            SentenceTransformation(
+                slice=shift_slice(slice, trim_offset, sentence),
+                replacement=" ",
+                description="Whitespace normalized to a single space",
+            )
+            for slice in find_slices(self.consecutive_spaces, sentence_trimmed)
+            # Don't create transformations for a single space as the before and after are identical
+            if slice.slice != " "
+        ]
+        # Some of these will overlap with the single punctuation transformations which are already going to normalize whitespace
+        # so those need to be knocked out
+        # Note this needs to be done _after_ shifting the slice
+        consecutive_spaces_transformations = list(
+            filter(
+                lambda consecutive_space_transformation: not any(
+                    slice_contains(
+                        outer=single_punctuation_transformation.slice, inner=consecutive_space_transformation.slice
+                    )
+                    for single_punctuation_transformation in single_punctuation_transformations
+                ),
+                consecutive_spaces_transformations,
+            )
+        )
+
+        # TODO - put in a general check that the transformations aren't overlapping
+        return sorted(
+            boundary_trim_transformations + consecutive_spaces_transformations + single_punctuation_transformations,
+            key=lambda transformation: transformation.slice.start_index,
         )
 
     def normalize_single_punctuation_slice(
@@ -359,6 +374,22 @@ class Normalizer:
             )
 
         return (boundary_trim_transformations, sentence.strip(), len(sentence) - len(left_trimmed))
+
+    def search_false_negatives(self, sentence: str) -> List[NormalizationWarning]:
+        """
+        Searches the sentence passed for characters that look like punctuation but aren't being normalized by the script
+        These characters are defined as non-letter, non-numbers according the broad unicode categories for Letter and Number respectively.
+        """
+        potential_false_negatives = find_slices(self.not_letters_or_numbers_or_whitespace_regex, sentence)
+        return [
+            NormalizationWarning(
+                slice,
+                WarningCode.FALSE_NEGATIVE_CANDIDATE,
+                f"Character '{slice.slice}' ({unicode_hex(slice.slice)}) is not a letter or digit or whitespace and is not listed as punctuation. Potential false negative.",
+            )
+            for slice in potential_false_negatives
+            if slice.slice not in self.supported_punctuation
+        ]
 
 
 # Used for testing, examples etc...
