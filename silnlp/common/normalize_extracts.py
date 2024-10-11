@@ -43,13 +43,12 @@ import os
 from dataclasses import dataclass
 from glob import glob
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from .normalizer import (
     logger as normalizer_logger,
-    Normalizer,
-    PunctuationCategory,
-    PunctuationNormalizationRule,
+    NormalizationWarning,
+    SentenceNormalizationSummary,
     standard_normalizer,
 )
 
@@ -145,16 +144,49 @@ def run(cli_input: CliInput) -> None:
 
         input_lines: List[str] = load_extract_file(input_path)
         logger.debug(f"Found {len(input_lines)} lines in file")
-        normalized_lines: List[str] = [
+        normalized_summaries_with_line_numbers: List[Tuple[SentenceNormalizationSummary, int]] = [
             # TODO - process the summaries
-            # TODO - replace with cli input
-            standard_normalizer.normalize(extract_sentence).normalized_sentence
-            for extract_sentence in input_lines
+            # TODO - replace normalizer with one defined by cli input
+            (standard_normalizer.normalize(extract_sentence), index + 1)
+            for index, extract_sentence in enumerate(input_lines)
         ]
+        display_warnings(normalized_summaries_with_line_numbers)
+        normalized_lines = [summary.normalized_sentence for summary, _ in normalized_summaries_with_line_numbers]
         write_extract_file(output_path, normalized_lines)
         logger.debug(f"Finished processing {input_path}")
 
     logger.info("Completed script")
+
+
+def display_warnings(normalized_summaries_with_line_numbers: List[Tuple[SentenceNormalizationSummary, int]]) -> None:
+    warnings_with_line_number: List[Tuple[NormalizationWarning, int]] = [
+        (warning, line_number)
+        for summary, line_number in normalized_summaries_with_line_numbers
+        for warning in summary.warnings
+    ]
+
+    if len(warnings_with_line_number) > 0:
+        logger.warning(f"{len(warnings_with_line_number)} warnings found")
+        for warning, line_number in warnings_with_line_number:
+            # Pretty print out all the transformation relative to the original string
+            # TODO This is just for debugging and will be replaced by better reporting
+            logger.warning(100 * "=")
+            sentence = warning.slice.outer
+            indent = 12 * " "
+            logger.warning(f"line: {line_number}")
+            num_blocks_of_10 = len(sentence) // 10 + 1
+            tens_row = (" " * 9).join([str(i) for i in range(0, num_blocks_of_10)])
+            # analysis_indent = 12 * " "
+            logger.warning(indent + tens_row)
+            logger.warning(indent + "0123456789" * num_blocks_of_10)
+            logger.warning(indent[0:-1] + f"'{sentence}'")
+            slice = warning.slice
+            logger.warning(indent + slice.start_index * " " + len(slice.slice) * "^")
+            logger.warning(indent + slice.start_index * " " + f"({slice.start_index},{slice.end_index})")
+            logger.warning(f">>> WARNING_CODE: {warning.warning_code}")
+            logger.warning(f">>> DESCRIPTION: {warning.description}")
+    else:
+        logger.info("No warnings found")
 
 
 def main() -> None:
