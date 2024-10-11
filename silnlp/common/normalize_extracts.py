@@ -52,10 +52,10 @@ all_loggers = [logger]  # More to be added
 
 
 class PunctuationCategory(Enum):
-    left_clinging = "left_clinging"
-    right_clinging = "right_clinging"
-    left_right_clinging = "left_right_clinging"
-    unclinging = "unclinging"
+    LEFT_CLINGING = "LEFT_CLINGING"
+    RIGHT_CLINGING = "RIGHT_CLINGING"
+    LEFT_RIGHT_CLINGING = "LEFT_RIGHT_CLINGING"
+    UNCLINGING = "UNCLINGING"
 
 
 @dataclass(frozen=True)
@@ -223,11 +223,11 @@ class Normalizer:
                 filter(lambda rule: rule.character == punctuation_char, self.punctuation_normalization_rules)
             )
             # TODO - add checking around the boundary
-            if punctuation_rule.category == PunctuationCategory.left_clinging:
+            if punctuation_rule.category == PunctuationCategory.LEFT_CLINGING:
                 return " " + punctuation_char
-            elif punctuation_rule.category == PunctuationCategory.right_clinging:
+            elif punctuation_rule.category == PunctuationCategory.RIGHT_CLINGING:
                 return punctuation_char + " "
-            elif punctuation_rule.category == PunctuationCategory.left_right_clinging:
+            elif punctuation_rule.category == PunctuationCategory.LEFT_RIGHT_CLINGING:
                 # Figure out if it's left or right clinging
                 # TODO think about edge cases around the boundary
                 # TODO in the case of no surrounding punctuation this implementation is left biased
@@ -242,7 +242,7 @@ class Normalizer:
                     # When those 3 lists are built, you could add more context
                     # Or you could do a dirty side effect
                     return None
-            elif punctuation_rule.category == PunctuationCategory.unclinging:
+            elif punctuation_rule.category == PunctuationCategory.UNCLINGING:
                 return " " + punctuation_char + " "
             else:
                 return None
@@ -340,10 +340,10 @@ def run(cli_input: CliInput) -> None:
     # TODO - replace with cli input
     normalizer = Normalizer(
         [
-            PunctuationNormalizationRule(".", PunctuationCategory.right_clinging),
-            PunctuationNormalizationRule(",", PunctuationCategory.right_clinging),
-            PunctuationNormalizationRule("?", PunctuationCategory.right_clinging),
-            PunctuationNormalizationRule("!", PunctuationCategory.right_clinging),
+            PunctuationNormalizationRule(".", PunctuationCategory.RIGHT_CLINGING),
+            PunctuationNormalizationRule(",", PunctuationCategory.RIGHT_CLINGING),
+            PunctuationNormalizationRule("?", PunctuationCategory.RIGHT_CLINGING),
+            PunctuationNormalizationRule("!", PunctuationCategory.RIGHT_CLINGING),
         ]
     )
     # TODO - test with left clinging
