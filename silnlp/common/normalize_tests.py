@@ -130,6 +130,19 @@ class TestNormalize(unittest.TestCase):
             expected_normalized="Hello, . there! How are things !?",
         )
 
+    def test_warnings_generated_for_multiple_consecutive_punctuation(self):
+        sentence = "Hello, . there ! How , are  things !?"
+        summary = standard_normalizer.normalize(sentence)
+        consecutive_punctuation_warnings = sorted(
+            filter(lambda warning: warning.warning_code == WarningCode.MULTIPLE_PUNCTUATION, summary.warnings),
+            key=lambda warning: warning.slice.start_index,
+        )
+        self.assertEqual(len(consecutive_punctuation_warnings), 2)
+        self.assertEqual(consecutive_punctuation_warnings[0].slice.start_index, 5)
+        self.assertEqual(consecutive_punctuation_warnings[0].slice.end_index, 8)
+        self.assertEqual(consecutive_punctuation_warnings[1].slice.start_index, 35)
+        self.assertEqual(consecutive_punctuation_warnings[1].slice.end_index, 37)
+
     def test_consecutive_punctuation_doesnt_prevent_shrinking_of_consecutive_whitespace_around_it(self):
         self.run_test(unnormalized="Hello  ,. \t  there", expected_normalized="Hello ,. there")
 
