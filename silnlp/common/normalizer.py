@@ -7,7 +7,7 @@ import regex
 
 from dataclasses import dataclass
 from enum import Enum, IntEnum
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 
 class PunctuationCategory(Enum):
@@ -84,6 +84,7 @@ class SentenceTransformation:
 
 class WarningCode(IntEnum):
     MULTIPLE_PUNCTUATION = 0
+    FALSE_NEGATIVE_CANDIDATE = 1
 
 
 @dataclass(frozen=True)
@@ -112,6 +113,17 @@ class SentenceNormalizationSummary:
     warnings: List[NormalizationWarning]
 
 
+def unicode_hex(character: str) -> str:
+    """
+    Returns a unicode representation of the character passed, e.g. U+04FA
+    """
+    code = hex(ord(character))[2:]
+    # Left pad with 0
+    code = code.zfill(4)
+    return "U+" + code.upper()
+
+
+
 class Normalizer:
     """
     Encapsulates the state required to normalize sentences
@@ -125,11 +137,19 @@ class Normalizer:
         # TODO - ensure strings are length 1
         # TODO - ensure no whitespace
 
+        self.punctuation_char_2_normalization_rule: Dict[str, PunctuationNormalizationRule] = {
+            rule.character: rule
+            for rule in punctuation_normalization_rules
+        }
+        self.supported_punctuation: Set[str] = set(self.punctuation_char_2_normalization_rule.keys())
+
         self.consecutive_spaces = regex.compile("\\s+")
         self.single_whitespace = regex.compile("\\s")
 
         escaped_punctuation_chars = "".join(regex.escape(rule.character) for rule in punctuation_normalization_rules)
         self.punctuation_regex = regex.compile(f"[{escaped_punctuation_chars}\s]+")
+
+        self.not_letters_or_numbers_or_whitespace_regex = regex.compile("""[^\p{N}\p{L}\s]""")
 
     def normalize(self, sentence: str) -> SentenceNormalizationSummary:
         """
@@ -173,7 +193,6 @@ class Normalizer:
                 left_trimmed = slice.slice.lstrip()
                 slice_trim_offset = len(slice.slice) - len(left_trimmed)
                 all_punctuation_trimmed = left_trimmed.rstrip()
-                print(f"trim offset: {trim_offset}, slice trim offset: {slice_trim_offset}")
                 warning_start_index = slice.start_index + trim_offset + slice_trim_offset
                 multiple_punctuation_warnings.append(
                     NormalizationWarning(
@@ -208,7 +227,7 @@ class Normalizer:
 
             # Figure out the punctuation character that was found in the slice and find the associated normalization rule for it
             punctuation_char = regex.sub(self.consecutive_spaces, "", slice.slice)
-            rule = next(filter(lambda rule: rule.character == punctuation_char, self.punctuation_normalization_rules))
+            rule = self.punctuation_char_2_normalization_rule[punctuation_char]
             normalized = self.normalize_single_punctuation_slice(rule, slice)
             # Some normalizations couldn't be applied or don't actually transform the text
             if normalized is not None and normalized != slice.slice:
@@ -220,8 +239,10 @@ class Normalizer:
                     )
                 )
 
+        false_negative_warnings: List[NormalizationWarning] = self.search_false_negatives(sentence)
+
         # TODO - add other kinds of warnings
-        all_warnings = multiple_punctuation_warnings
+        all_warnings = multiple_punctuation_warnings + false_negative_warnings
 
         all_transformations = sorted(
             consecutive_spaces_transformations + single_punctuation_transformations + boundary_trim_transformations,
@@ -362,6 +383,18 @@ class Normalizer:
             )
 
         return (boundary_trim_transformations, sentence.strip(), len(sentence) - len(left_trimmed))
+
+    def search_false_negatives(self, sentence: str) -> List[NormalizationWarning]:
+        """
+        Searches the sentence passed for characters that look like punctuation but aren't being normalized by the script
+        These characters are defined as non-letter, non-numbers according the broad unicode categories for Letter and Number respectively.
+        """
+        potential_false_negatives = find_slices(self.not_letters_or_numbers_or_whitespace_regex, sentence)
+        return [
+            NormalizationWarning(slice, WarningCode.FALSE_NEGATIVE_CANDIDATE, f"Character '{slice.slice}' ({unicode_hex(slice.slice)}) is not a letter or digit or whitespace and is not listed as punctuation. Potential false negative.")
+            for slice in potential_false_negatives
+            if slice.slice not in self.supported_punctuation
+        ]
 
 
 # Used for testing, examples etc...
