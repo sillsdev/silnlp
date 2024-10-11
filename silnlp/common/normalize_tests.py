@@ -5,7 +5,7 @@ in particular comment: https://github.com/sillsdev/silnlp/issues/494#issuecommen
 """
 import unittest
 
-from .normalizer import standard_normalizer
+from .normalizer import standard_normalizer, WarningCode
 
 
 class TestNormalize(unittest.TestCase):
@@ -165,6 +165,20 @@ class TestNormalize(unittest.TestCase):
             unnormalized=" \r  Hi there , you! (my -    friend )  How's   it\tgoing ?  \t",
             expected_normalized="Hi there, you! (my - friend) How's it going?",
         )
+
+    ### False negative warnings
+    def test_false_negative_found(self):
+        sentence = "An arabic 3 ٣. Some angle brackets « and »."
+        summary = standard_normalizer.normalize(sentence)
+        false_negative_warnings = sorted(
+            filter(lambda warning: warning.warning_code == WarningCode.FALSE_NEGATIVE_CANDIDATE, summary.warnings),
+            key=lambda warning: warning.slice.start_index,
+        )
+        self.assertEqual(len(false_negative_warnings), 2)
+        self.assertEqual(false_negative_warnings[0].slice.start_index, 35)
+        self.assertEqual(false_negative_warnings[0].slice.end_index, 36)
+        self.assertEqual(false_negative_warnings[1].slice.start_index, 41)
+        self.assertEqual(false_negative_warnings[1].slice.end_index, 42)
 
 
 if __name__ == "__main__":
