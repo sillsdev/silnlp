@@ -48,7 +48,7 @@ class SILClearML:
             self._load_config()
 
             self.task.set_base_docker(
-                docker_image="ghcr.io/sillsdev/silnlp:0.1.14",
+                docker_image="ghcr.io/sillsdev/silnlp:latest",
                 docker_arguments=[
                     "--env TOKENIZERS_PARALLELISM='false'",
                 ],
