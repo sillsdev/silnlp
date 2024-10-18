@@ -9,6 +9,7 @@ from platform import system, uname
 from typing import Callable, Iterable, List, Optional, Sequence, Union
 
 import boto3
+from botocore.config import Config
 from dotenv import load_dotenv
 from s3path import S3Path
 
@@ -173,7 +174,8 @@ class SilNlpEnv:
             raise Exception(
                 f"No paratext project name is given.  Data still in the cache directory of {self.pt_projects_dir}"
             )
-        s3 = boto3.resource("s3")
+        config = Config(read_timeout=600)
+        s3 = boto3.resource("s3", config=config)
         data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
         len_silnlp_path = len(pt_projects_path)
         pt_projects_path = pt_projects_path + name
@@ -206,7 +208,8 @@ class SilNlpEnv:
             raise Exception(
                 f"No experiment name is given.  Data still in the cache directory of {self.mt_experiments_dir}"
             )
-        s3 = boto3.resource("s3")
+        config = Config(read_timeout=600)
+        s3 = boto3.resource("s3", config=config)
         data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
         len_silnlp_path = len(experiments_path)
         experiment_path = experiments_path + name
@@ -238,7 +241,8 @@ class SilNlpEnv:
                 f"No experiment name is given.  Data still in the temp directory of {self.mt_experiments_dir}"
             )
         experiment_path = str(self.mt_dir.relative_to(self.data_dir) / "experiments") + "/"
-        s3 = boto3.resource("s3")
+        config = Config(read_timeout=600)
+        s3 = boto3.resource("s3", config=config)
         data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
         temp_folder = str(self.mt_experiments_dir / name)
         # we don't need to delete all existing files - it will just overwrite them
@@ -281,7 +285,8 @@ def download_if_s3_paths(paths: Iterable[S3Path]) -> List[Path]:
             if not s3_setup:
                 temp_root = Path(tempfile.TemporaryDirectory().name)
                 temp_root.mkdir()
-                s3 = boto3.resource("s3")
+                config = Config(read_timeout=600)
+                s3 = boto3.resource("s3", config=config)
                 data_bucket = s3.Bucket(str(SIL_NLP_ENV.data_dir).strip("\\/"))
                 s3_setup = True
             temp_path = temp_root / path.name
@@ -298,7 +303,7 @@ def try_n_times(func: Callable, n=10):
         except Exception as e:
             if i < n - 1:
                 LOGGER.exception(f"Failed {i+1} of {n} times.  Retrying.")
-                time.sleep(5)
+                time.sleep(2**i)
             else:
                 raise e
 
