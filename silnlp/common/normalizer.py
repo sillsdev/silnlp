@@ -91,8 +91,12 @@ class SentenceTransformation:
 
 
 class WarningCode(IntEnum):
-    MULTIPLE_PUNCTUATION = 0
-    FALSE_NEGATIVE_CANDIDATE = 1
+    CONSECUTIVE_PUNCTUATION = 0
+    POTENTIAL_UNDEFINED_PUNCTUATION = 1
+    BORDERED = 2
+    RIGHT_CLINGING_CHARACTER_STARTING_SENTENCE = 3
+    LEFT_CLINGING_CHARACTER_ENDING_SENTENCE = 4
+    LEFT_RIGHT_CLINGING_NOT_TOUCHING_EXACTLY_ONE_NONWHITESPACE = 5
 
 
 @dataclass(frozen=True)
@@ -144,6 +148,9 @@ class Normalizer:
         # TODO - ensure strings are length 1
         # TODO - ensure no whitespace
 
+        # The constructor defines many complex regexes which are compiled once and stored
+        # inside the class to prevent recompilation on every sentence normalized
+
         self.punctuation_char_2_normalization_rule: Dict[str, PunctuationNormalizationRule] = {
             rule.character: rule for rule in punctuation_normalization_rules
         }
@@ -166,6 +173,46 @@ class Normalizer:
 
         self.not_letters_or_numbers_or_whitespace_regex = regex.compile("""[^\p{N}\p{L}\s]""")
 
+        self.single_punctuation_surrounded_by_nonwhitepace_nonpunctuation_regex = regex.compile(
+            f"(?<=[^\s{escaped_punctuation_chars}])[{escaped_punctuation_chars}](?=[^\s{escaped_punctuation_chars}])"
+        )
+
+        right_clinging_punctuation: Set[str] = set(
+            rule.character
+            for rule in self.punctuation_normalization_rules
+            if rule.category == PunctuationCategory.RIGHT_CLINGING
+        )
+        escaped_right_clinging_punctuation_chars = "".join(
+            regex.escape(character) for character in right_clinging_punctuation
+        )
+        self.right_clinging_character_starting_sentence_regex = regex.compile(
+            f"(?<=^\s*)[{escaped_right_clinging_punctuation_chars}]"
+        )
+
+        left_clinging_punctuation: Set[str] = set(
+            rule.character
+            for rule in self.punctuation_normalization_rules
+            if rule.category == PunctuationCategory.LEFT_CLINGING
+        )
+        escaped_left_clinging_punctuation_chars = "".join(
+            regex.escape(character) for character in left_clinging_punctuation
+        )
+        self.left_clinging_character_ending_sentence_regex = regex.compile(
+            f"[{escaped_left_clinging_punctuation_chars}](?=\s*$)"
+        )
+
+        left_right_clinging_punctuation: Set[str] = set(
+            rule.character
+            for rule in self.punctuation_normalization_rules
+            if rule.category == PunctuationCategory.LEFT_RIGHT_CLINGING
+        )
+        escaped_left_right_clinging_punctuation_chars = "".join(
+            regex.escape(character) for character in left_right_clinging_punctuation
+        )
+        self.left_right_clinging_character_not_touching_anything_regex = regex.compile(
+            f"(?<=\S\s+)[{escaped_left_right_clinging_punctuation_chars}](?=\s+\S)"
+        )
+
     def normalize(self, sentence: str) -> SentenceNormalizationSummary:
         """
         Generates a series of transformations and warnings for normalizing the string passed.
@@ -177,16 +224,17 @@ class Normalizer:
         multiple_punctuation_warnings: List[NormalizationWarning] = [
             NormalizationWarning(
                 slice=slice,
-                warning_code=WarningCode.MULTIPLE_PUNCTUATION,
+                warning_code=WarningCode.CONSECUTIVE_PUNCTUATION,
                 description="Multiple consecutive punctuation characters (ignoring whitespace) - currently this is not normalized",
             )
             for slice in find_slices(self.multiple_punctuation_regex, sentence)
         ]
 
-        false_negative_warnings: List[NormalizationWarning] = self.search_false_negatives(sentence)
-
-        # TODO - add other kinds of warnings
-        all_warnings = multiple_punctuation_warnings + false_negative_warnings
+        all_warnings = (
+            multiple_punctuation_warnings
+            + self.search_false_negatives(sentence)
+            + self.search_false_positives(sentence)
+        )
 
         logger.debug(f"#transformations={len(all_transformations)}")
         logger.debug(f"#warnings={len(all_warnings)}")
@@ -384,12 +432,94 @@ class Normalizer:
         return [
             NormalizationWarning(
                 slice,
-                WarningCode.FALSE_NEGATIVE_CANDIDATE,
+                WarningCode.POTENTIAL_UNDEFINED_PUNCTUATION,
                 f"Character '{slice.slice}' ({unicode_hex(slice.slice)}) is not a letter or digit or whitespace and is not listed as punctuation. Potential false negative.",
             )
             for slice in potential_false_negatives
             if slice.slice not in self.supported_punctuation
         ]
+
+    def search_false_positives(self, sentence: str) -> List[NormalizationWarning]:
+        """
+        Searches the sentence passed for punctuation characters defined in the normaliztion rules that are potentially
+        not acting in the way intended by the normalization rules.
+
+        e.g.
+            It's Sam-the-man
+              ^     ^   ^
+
+        In the above example,
+        - a single quote is being used for contraction, but it was intended for quoting,
+          e.g. He said 'hi'
+        - the hyphen is being used to join words which is different to the intended usage of acting like a semi-colon,
+          e.g. That person over there - the one wearing the hat
+
+        The worry is that the normalization process will misunderstand the role of these characters and normalize them
+        when they are correct as is.
+        With standard English normalization rules, the above could be incorrectly changed to something like:
+
+           It 's Sam - the - man
+        """
+
+        # For all 4 punctuation categories, any punctuation character bordered by non-whitespace characters on both sides is suspicious
+        bordered_warnings = [
+            NormalizationWarning(
+                slice,
+                WarningCode.BORDERED,
+                "Punctuation character is surrounded by non-whitespace on both sides. "
+                + "Potentially it is being used in a different way to the punctuation character defined in the normalization rules.",
+            )
+            for slice in find_slices(self.single_punctuation_surrounded_by_nonwhitepace_nonpunctuation_regex, sentence)
+        ]
+
+        # Right clinging characters shouldn't be the first non-whitespace character in a sentence
+        # e.g. ") hi there"
+        right_clinging_sentence_start_warnings = [
+            NormalizationWarning(
+                slice,
+                WarningCode.RIGHT_CLINGING_CHARACTER_STARTING_SENTENCE,
+                f"Punctuation character '{slice.slice}' is right clinging, but is starting a sentence. "
+                + "Usually it is expected to have text preceeding it. This could indicate it is playing a different role to what is expected.",
+            )
+            for slice in find_slices(self.right_clinging_character_starting_sentence_regex, sentence)
+        ]
+
+        # Left clinging characters shouldn't be the last non-whitespace character in a sentence
+        # e.g. "hi there ("
+        left_clinging_sentence_end_warnings = [
+            NormalizationWarning(
+                slice,
+                WarningCode.LEFT_CLINGING_CHARACTER_ENDING_SENTENCE,
+                f"Punctuation character '{slice.slice}' is left clinging, but is ending a sentence. "
+                + "Usually it is expected to have text following it. This could indicate it is playing a different role to what is expected.",
+            )
+            for slice in find_slices(self.left_clinging_character_ending_sentence_regex, sentence)
+        ]
+
+        # Left-right clinging characters should always be touching exactly one non-whitespace character,
+        # otherwise it's not possible to determine whether it's acting as left or right clinging
+        # In some cases this could just be the user accidentally adding in an extra whitespace character, e.g. She said ' hi'
+        # which is different to a "false positive" (ie. in the sense of us attributing it a function it's not performing), e.g. it's
+        # NOTE - this overlaps with the bordered_warnings above.
+        # This block only checks for characters with whitespace on both sides to prevent duplicate warnings.
+        left_right_clinging_not_touching_exactly_one_warnings = [
+            NormalizationWarning(
+                slice,
+                WarningCode.LEFT_RIGHT_CLINGING_NOT_TOUCHING_EXACTLY_ONE_NONWHITESPACE,
+                "Punctuation character is not touching exactly one non-whitespace character. "
+                + "This could indicate it's playing a different role to what is expected (false positive), "
+                + "or it could indicate user error. "
+                + "In either case normalization is unable to determine whether the character is acting in a left or right clinging role.",
+            )
+            for slice in find_slices(self.left_right_clinging_character_not_touching_anything_regex, sentence)
+        ]
+
+        return (
+            bordered_warnings
+            + right_clinging_sentence_start_warnings
+            + left_clinging_sentence_end_warnings
+            + left_right_clinging_not_touching_exactly_one_warnings
+        )
 
 
 # Used for testing, examples etc...
