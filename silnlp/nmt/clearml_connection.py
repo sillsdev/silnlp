@@ -48,14 +48,21 @@ class SILClearML:
             self._load_config()
 
             self.task.set_base_docker(
-                # docker_image="ghcr.io/sillsdev/silnlp:1.01.4",
-                docker_image="nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu20.04",
-                docker_arguments="--env TOKENIZERS_PARALLELISM=false",
+                docker_image="ghcr.io/sillsdev/silnlp:latest",
+                docker_arguments=[
+                    "--env TOKENIZERS_PARALLELISM='false'",
+                ],
                 docker_setup_bash_script=[
                     "apt install -y python3-venv",
                     "python3 -m pip install --user pipx",
                     "PATH=$PATH:/root/.local/bin",
                     "pipx install poetry==1.7.1",
+                    # update config.toml and pyvenv.cfg to give poetry environment access to system site packages
+                    "poetry config virtualenvs.options.system-site-packages true",
+                    (
+                        "sed -i 's/include-system-site-packages = .*/include-system-site-packages = true/' "
+                        "/root/.local/share/pipx/venvs/poetry/pyvenv.cfg"
+                    ),
                 ],
             )
             if self.commit:
