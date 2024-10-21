@@ -110,12 +110,12 @@ def main() -> None:
     args = parser.parse_args()
 
     project_dir = get_project_dir(args.project)
+    settings = FileParatextProjectSettingsParser(project_dir).parse()
 
     sfm_files = [
         file for file in project_dir.glob("*") if file.is_file() and file.suffix[1:].lower() in ["sfm", "usfm"]
     ]
-    # Explicitly deal with XXG 
-    books_found = ["XXG" if sfm_file.name.startswith("100XXG") else sfm_file.name[2:5] for sfm_file in sfm_files]
+    books_found = [settings.get_book_id(sfm_file.name) for sfm_file in sfm_files]
 
     grouped_result = group_bible_books(books_found)
     LOGGER.info(f"Found these books in the project_directory: {' '.join(grouped_result)}")
