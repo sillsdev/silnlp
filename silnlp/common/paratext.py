@@ -552,14 +552,18 @@ def check_versification(project_dir: str) -> Tuple[bool, List[VersificationType]
         return (matching, detected_versification)
 
     if settings.versification.type not in detected_versification:
-        LOGGER.warning(
-            f"Project versification setting {settings.versification.type} does not match detected versification(s) "
-            f"{', '.join([str(int(versification)) for versification in detected_versification])}. "
-            f"The detected versification(s) were based on {', '.join(key_verses)} "
-            f"being the last verse of {'their' if len(key_verses)>=2 else 'its'} "
-            f"respective chapter{'s' if len(key_verses)>=2 else ''}."
-        )
-        return (matching, detected_versification)
+        if not (
+            settings.versification.type == VersificationType.UNKNOWN
+            and settings.versification.base_versification.type in detected_versification
+        ):
+            LOGGER.warning(
+                f"Project versification setting {settings.versification.type} does not match detected versification(s) "
+                f"{', '.join([str(int(versification)) for versification in detected_versification])}. "
+                f"The detected versification(s) were based on {', '.join(key_verses)} "
+                f"being the last verse of {'their' if len(key_verses)>=2 else 'its'} "
+                f"respective chapter{'s' if len(key_verses)>=2 else ''}."
+            )
+            return (matching, detected_versification)
 
     matching = True
     return (matching, detected_versification)
