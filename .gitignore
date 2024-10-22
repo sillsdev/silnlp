@@ -36,3 +36,6 @@ tests/**/temp*
 
 # omit clowder config files
 *.clowder
+
+# omit any clean_projects reports.
+/**/clean_projects*.csv
