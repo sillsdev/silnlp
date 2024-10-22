@@ -69,9 +69,9 @@ def parse_book(project_dir: str, book: str):
         errors.append(e)
 
     if not errors:
-        LOGGER.info(f"{book} in project {project_dir} parsed correctly and contains {file_text.count()} verses.")
+        LOGGER.info(f"{book} in file {book_path} parsed correctly and contains {file_text.count()} verses.")
     else:
-        LOGGER.info(f"The following error occured while parsing {book} in project {project_dir}")
+        LOGGER.info(f"The following error occured while parsing {book} from file {book_path}.")
         for error in errors:
             error_str = " ".join([str(s) for s in error.args])
             LOGGER.info(error_str)
@@ -110,18 +110,18 @@ def main() -> None:
     args = parser.parse_args()
 
     project_dir = get_project_dir(args.project)
+    settings = FileParatextProjectSettingsParser(project_dir).parse()
 
     sfm_files = [
         file for file in project_dir.glob("*") if file.is_file() and file.suffix[1:].lower() in ["sfm", "usfm"]
     ]
-    # Explicitly deal with XXG 
-    books_found = ["XXG" if sfm_file.name.startswith("100XXG") else sfm_file.name[2:5] for sfm_file in sfm_files]
+    books_found = [settings.get_book_id(sfm_file.name) for sfm_file in sfm_files]
 
     grouped_result = group_bible_books(books_found)
     LOGGER.info(f"Found these books in the project_directory: {' '.join(grouped_result)}")
 
     if not sfm_files:
-        LOGGER.info(f"No sfm or SFM files found in project folder: {project_dir}")
+        LOGGER.info(f"No sfm files found in project folder: {project_dir}")
     else:
         books = args.books
         canons_to_add = [canon for canon in books if canon in valid_canons]
