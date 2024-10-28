@@ -94,6 +94,7 @@ def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = 
                 LOGGER.info(f"Computing alignment scores using {get_aligner_name(aligner_id)}")
                 add_alignment_scores(corpus, aligner_id)
                 corpus.to_csv(pair_stats_path, index=False)
+                SIL_NLP_ENV.copy_experiment_to_bucket(config.exp_dir, pair_stats_path.name, overwrite=True)
 
             alignment_score = corpus["score"].mean()
             filtered_count = 0
@@ -476,12 +477,13 @@ def main() -> None:
     get_git_revision_hash()
 
     exp_name = args.experiment
-    SIL_NLP_ENV.copy_experiment_from_bucket(exp_name)
 
     if args.clearml_queue is not None and "cpu" not in args.clearml_queue:
         LOGGER.warning("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
         exit()
     clearml = SILClearML(exp_name, args.clearml_queue)
+
+    SIL_NLP_ENV.copy_experiment_from_bucket(exp_name)
 
     config = clearml.config
     config.set_seed()
@@ -497,6 +499,7 @@ def main() -> None:
 
     file_patterns = ";".join([f.name for f in data_files])
     collect_verse_counts(SIL_NLP_ENV.mt_scripture_dir, config.exp_dir, file_patterns, args.deutero, args.recalculate)
+    SIL_NLP_ENV.copy_experiment_to_bucket(exp_name, "*_detailed_percentages.csv", overwrite=args.recalculate)
 
     get_corpus_stats(config, args.recalculate, args.deutero)
 
@@ -506,13 +509,21 @@ def main() -> None:
     if len(all_projects) > len(data_files):
         LOGGER.info("Adding verse counts for projects in extra alignment files")
         collect_verse_counts(SIL_NLP_ENV.mt_scripture_dir, config.exp_dir, ";".join(all_projects), args.deutero)
+        SIL_NLP_ENV.copy_experiment_to_bucket(exp_name, "*_detailed_percentages.csv", overwrite=args.recalculate)
 
     # Create summary outputs
     if args.create_summaries:
         create_alignment_breakdown_file(config, args.deutero)
         create_summary_file(config)
 
-    SIL_NLP_ENV.copy_experiment_to_bucket(exp_name, overwrite=args.recalculate)
+    patterns = [
+        "verse_counts.csv",
+        "verse_percentages.csv",
+        "corpus-stats.csv",
+        "*_alignment_breakdown.xlsx",
+        "*_analysis.xlsx",
+    ]
+    SIL_NLP_ENV.copy_experiment_to_bucket(exp_name, patterns, overwrite=args.recalculate)
 
 
 if __name__ == "__main__":
