@@ -40,7 +40,7 @@ class NMTTranslator(Translator):
 @dataclass
 class TranslationTask:
     name: str
-    checkpoint: str = "last"
+    checkpoint: Union[str, int] = "last"
     clearml_queue: Optional[str] = None
     commit: Optional[str] = None
 
