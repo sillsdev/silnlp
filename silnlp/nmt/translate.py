@@ -84,6 +84,10 @@ class TranslationTask:
 
         if trg_iso is None:
             trg_iso = config.default_test_trg_iso
+            if trg_iso == "" and len(config.trg_isos) > 0:
+                trg_iso = next(iter(config.trg_isos))
+        if trg_iso == "":
+            LOGGER.warning("No language code was set for the target language")
 
         output_dir = config.exp_dir / "infer" / step_str / src_project
         if not config.model_dir.exists():
@@ -140,8 +144,16 @@ class TranslationTask:
 
         if src_iso is None:
             src_iso = config.default_test_src_iso
+            if src_iso == "" and len(config.src_iso) > 0:
+                src_iso = next(iter(config.src_iso))
+        if src_iso == "":
+            LOGGER.warning("No language code was set for the source language")
         if trg_iso is None:
             trg_iso = config.default_test_trg_iso
+            if trg_iso == "" and len(config.trg_isos) > 0:
+                trg_iso = next(iter(config.trg_isos))
+        if trg_iso == "":
+            LOGGER.warning("No language code was set for the target language")
 
         cwd = Path.cwd()
         for i in range(start_seq, end_seq + 1):
@@ -170,8 +182,16 @@ class TranslationTask:
 
         if src_iso is None:
             src_iso = config.default_test_src_iso
+            if src_iso == "" and len(config.src_iso) > 0:
+                src_iso = next(iter(config.src_iso))
+        if src_iso == "":
+            LOGGER.warning("No language code was set for the source language")
         if trg_iso is None:
             trg_iso = config.default_test_trg_iso
+            if trg_iso == "" and len(config.trg_isos) > 0:
+                trg_iso = next(iter(config.trg_isos))
+        if trg_iso == "":
+            LOGGER.warning("No language code was set for the target language")
 
         src_path = Path(src)
         if not src_path.exists() and not src_path.is_absolute():
