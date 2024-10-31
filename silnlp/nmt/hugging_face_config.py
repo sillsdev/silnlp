@@ -1125,6 +1125,10 @@ class HuggingFaceNMTModel(NMTModel):
             else:
                 step = int(ckpt)
                 ckpt = CheckpointType.OTHER
+        elif isinstance(ckpt, int):
+            step = ckpt
+            ckpt = CheckpointType.OTHER
+
         if ckpt is CheckpointType.BEST:
             ckpt_path = get_best_checkpoint(self._config.model_dir)
             step = int(ckpt_path.name[11:])
