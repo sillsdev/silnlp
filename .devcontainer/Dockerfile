@@ -1,6 +1,6 @@
-ARG PYTHON_VERSION=3.8
+ARG PYTHON_VERSION=3.10
 ARG POETRY_VERSION=1.7.1
-FROM ubuntu:20.04
+FROM ubuntu:22.04
 ARG PYTHON_VERSION
 ARG POETRY_VERSION
 WORKDIR /app
@@ -44,5 +44,5 @@ ENV SIL_NLP_CACHE_PROJECT_DIR=/root/.cache/silnlp/projects
 # Set environment variables
 ENV CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
 ENV SIL_NLP_DATA_PATH=/silnlp
-ENV EFLOMAL_PATH=/workspaces/silnlp/.venv/lib/python3.8/site-packages/eflomal/bin
+ENV EFLOMAL_PATH=/workspaces/silnlp/.venv/lib/python3.12/site-packages/eflomal/bin
 CMD ["bash"]

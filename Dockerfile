@@ -1,7 +1,7 @@
-ARG PYTHON_VERSION=3.8
+ARG PYTHON_VERSION=3.10
 ARG POETRY_VERSION=1.7.1
 
-FROM python:$PYTHON_VERSION-slim as builder
+FROM python:$PYTHON_VERSION-slim AS builder
 ARG POETRY_VERSION
 
 ENV POETRY_HOME=/opt/poetry
@@ -22,9 +22,9 @@ RUN poetry export -E eflomal --without-hashes -f requirements.txt > requirements
 COPY . /src
 RUN poetry build
 
-FROM ubuntu:20.04
+FROM ubuntu:22.04
 
-ARG PYTHON_VERSION=3.8
+ARG PYTHON_VERSION=3.10
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=on
 ENV TZ=America/New_York
