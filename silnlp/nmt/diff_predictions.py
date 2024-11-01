@@ -163,7 +163,7 @@ def add_stats(df: pd.DataFrame, sheet):
     sheet.write_string("A4", "STD")
     column_list = ["B", "C", "D", "E", "F"]
     column_idx = 0
-    for column_name in [BLEU_SCORE, SPBLEU_SCORE, CHRF3_SCORE, CHRF3P_SCORE, CHRF3PP_SCORE, WER_SCORE, TER_SCORE]:
+    for column_name in [BLEU_SCORE, SPBLEU_SCORE, CHRF3_SCORE, CHRF3P_SCORE, CHRF3PP_SCORE, TER_SCORE]:
         if column_name in df:
             column_id = column_list[column_idx]
             sheet.write_string(f"{column_id}1", f"{column_name}")

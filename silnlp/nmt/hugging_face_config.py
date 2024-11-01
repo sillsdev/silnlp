@@ -215,9 +215,7 @@ def delete_tokenizer(checkpoint_path: Path) -> None:
 def add_lang_code_to_tokenizer(tokenizer: PreTrainedTokenizer, lang_code: str) -> None:
     tokenizer.add_special_tokens({"additional_special_tokens": [lang_code]}, replace_additional_special_tokens=False)
     lang_id = tokenizer.convert_tokens_to_ids(lang_code)
-    if not isinstance(tokenizer, (T5Tokenizer, T5TokenizerFast)):
-        tokenizer.lang_code_to_id[lang_code] = lang_id
-    if isinstance(tokenizer, (NllbTokenizer, MBart50Tokenizer, MBartTokenizer)):
+    if isinstance(tokenizer, (MBart50Tokenizer, MBartTokenizer)):
         tokenizer.id_to_lang_code[lang_id] = lang_code
         tokenizer.fairseq_tokens_to_ids[lang_code] = lang_id
         tokenizer.fairseq_ids_to_tokens[lang_id] = lang_code
@@ -560,6 +558,13 @@ class HuggingFaceConfig(Config):
                     if lang_code not in self._tokenizer.all_special_tokens and iso in self.trg_isos:
                         add_lang_code_to_tokenizer(self._tokenizer, lang_code)
                         updated = True
+                elif isinstance(self._tokenizer, (MBartTokenizer, MBartTokenizerFast)):
+                    if lang_code not in self._tokenizer.lang_code_to_id:
+                        add_lang_code_to_tokenizer(self._tokenizer, lang_code)
+                        updated = True
+                elif isinstance(self._tokenizer, (NllbTokenizer, NllbTokenizerFast)):
+                    add_lang_code_to_tokenizer(self._tokenizer, lang_code)
+                    updated = True
                 elif lang_code not in self._tokenizer.lang_code_to_id:
                     add_lang_code_to_tokenizer(self._tokenizer, lang_code)
                     updated = True
@@ -802,9 +807,10 @@ class HuggingFaceNMTModel(NMTModel):
             if not src_path.is_file() or not trg_path.is_file():
                 return None
             data = []
-            with open(src_path, "r", encoding="utf-8-sig") as src_file, open(
-                trg_path, "r", encoding="utf-8-sig"
-            ) as trg_file:
+            with (
+                open(src_path, "r", encoding="utf-8-sig") as src_file,
+                open(trg_path, "r", encoding="utf-8-sig") as trg_file,
+            ):
                 for src_line, trg_line in zip(src_file, trg_file):
                     data.append({"src": src_line.strip(), "trg": trg_line.strip()})
             return Dataset.from_dict({"translation": data})
@@ -1172,9 +1178,10 @@ class HuggingFaceNMTModel(NMTModel):
         if not dict_trg_path.is_file() or not dict_vref_path.is_file():
             return self._dictionary
 
-        with dict_trg_path.open("r", encoding="utf-8-sig") as trg_file, dict_vref_path.open(
-            "r", encoding="utf-8-sig"
-        ) as dict_file:
+        with (
+            dict_trg_path.open("r", encoding="utf-8-sig") as trg_file,
+            dict_vref_path.open("r", encoding="utf-8-sig") as dict_file,
+        ):
             for trg_line, vref_line in zip(trg_file, dict_file):
                 vref_line = vref_line.strip()
                 if vref_line == "":
