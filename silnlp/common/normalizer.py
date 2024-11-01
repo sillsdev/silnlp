@@ -2,12 +2,13 @@
 Normalization tooling for cleaning up whitespace and punctuation in extract sentences
 See normalize_extracts.py for context
 """
-import logging
-import regex
 
+import logging
 from dataclasses import dataclass
 from enum import Enum, IntEnum
 from typing import Dict, List, Optional, Set, Tuple
+
+import regex
 
 
 class PunctuationCategory(Enum):
@@ -46,7 +47,7 @@ def shift_slice(slice: StringSlice, offset: int, new_outer: str) -> StringSlice:
     )
 
 
-def find_slices(reg: regex.Regex, text: str) -> List[StringSlice]:
+def find_slices(reg: regex.Pattern, text: str) -> List[StringSlice]:
     return [
         StringSlice(start_index=match.span()[0], end_index=match.span()[1], slice=match.group(), outer=text)
         for match in regex.finditer(reg, text)
