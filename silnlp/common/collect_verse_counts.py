@@ -2,13 +2,16 @@ import argparse
 import logging
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Dict, Union
+from typing import Dict, Set, Union
 
 import pandas as pd
+import yaml
 from machine.scripture import ALL_BOOK_IDS, book_id_to_number, is_nt, is_ot
 from tqdm import tqdm
 
-from ..common.environment import SIL_NLP_ENV
+from ..nmt.hugging_face_config import HuggingFaceConfig
+from .environment import SIL_NLP_ENV
+from .utils import get_mt_exp_dir
 
 LOGGER = logging.getLogger(__package__ + ".collect_verse_counts")
 
@@ -254,8 +257,8 @@ def main() -> None:
     parser.add_argument("--output-folder", help="Folder in which to save results", required=True)
     parser.add_argument(
         "--files",
+        default="",
         help="Semicolon-delimited list of patterns of extract file names to count (e.g. 'arb-*.txt;de-NT.txt)",
-        required=True,
     )
     parser.add_argument(
         "--deutero",
@@ -266,7 +269,42 @@ def main() -> None:
     parser.add_argument("--recount", default=False, action="store_true", help="Force recount of verse counts")
     args = parser.parse_args()
 
-    collect_verse_counts(args.input_folder, args.output_folder, args.files, args.deutero, args.recount)
+    # If the output folder doesn't exist locally, assume it's an experiment folder
+    output_folder = args.output_folder.replace("\\", "/")
+    if Path(output_folder).exists():
+        exp_name = None
+        output_folder = Path(output_folder)
+    else:
+        exp_name = output_folder
+        output_folder = get_mt_exp_dir(output_folder)
+        SIL_NLP_ENV.copy_experiment_from_bucket(exp_name, patterns="config.yml")
+
+    # If no files are listed and output_folder is an experiment, use the files listed in the config file
+    file_patterns = args.files
+    if file_patterns == "":
+        if not output_folder.exists():
+            LOGGER.error(
+                "No files found. Please provide a list of files with --files or an experiment folder for --output-folder."
+            )
+            return
+        else:
+            LOGGER.info("No files provided with --files. Using files from experiment config.yml.")
+
+        with (output_folder / "config.yml").open("r", encoding="utf-8") as file:
+            config = yaml.safe_load(file)
+        if config is None or len(config.keys()) == 0:
+            LOGGER.error("Config file has no contents.")
+            return
+        config = HuggingFaceConfig(output_folder, config)
+        files: Set[Path] = set()
+        for pair in config.corpus_pairs:
+            files.update([f.path for f in pair.src_files] + [f.path for f in pair.trg_files])
+        file_patterns = ";".join([f.name for f in files])
+
+    collect_verse_counts(args.input_folder, output_folder, file_patterns, args.deutero, args.recount)
+
+    if exp_name:
+        SIL_NLP_ENV.copy_experiment_to_bucket(exp_name, overwrite=args.recount)
 
 
 if __name__ == "__main__":
