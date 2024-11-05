@@ -45,5 +45,4 @@ ENV SIL_NLP_CACHE_PROJECT_DIR=/root/.cache/silnlp/projects
 ENV CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
 ENV SIL_NLP_DATA_PATH=/silnlp
 ENV EFLOMAL_PATH=/workspaces/silnlp/.venv/lib/python3.12/site-packages/eflomal/bin
-RUN echo "export DEBUGPY_PROCESS_SPAWN_TIMEOUT=1200" >> ~/.profile
 CMD ["bash"]
