@@ -135,7 +135,6 @@ TRAINING_ARGS_CONFIG_MAPPING = {
         "predict_with_generate",
     },
     "params": {
-        "adafactor",
         "adam_beta1",
         "adam_beta2",
         "adam_epsilon",
