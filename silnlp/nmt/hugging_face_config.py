@@ -774,11 +774,10 @@ class HuggingFaceNMTModel(NMTModel):
             label2id={},
             id2label={},
             num_labels=0,
-            attn_implementation="eager",
         )
         model = cast(
             PreTrainedModel,
-            AutoModelForSeq2SeqLM.from_pretrained(self._config.model, config=model_config),
+            AutoModelForSeq2SeqLM.from_pretrained(self._config.model, config=model_config, attn_implementation="eager"),
         )
         if self._config.train.get("better_transformer"):
             model = model.to_bettertransformer()
