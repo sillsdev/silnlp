@@ -1003,7 +1003,7 @@ class HuggingFaceNMTModel(NMTModel):
         model = self._create_inference_model(ckpt, tokenizer)
         pipeline = PretokenizedTranslationPipeline(
             model=model,
-            processing_class=tokenizer,
+            tokenizer=tokenizer,
             src_lang=self._config.test_src_lang,
             tgt_lang=self._config.test_trg_lang,
             device=0,
@@ -1093,7 +1093,7 @@ class HuggingFaceNMTModel(NMTModel):
         lang_codes: Dict[str, str] = self._config.data["lang_codes"]
         pipeline = TranslationPipeline(
             model=model,
-            processing_class=tokenizer,
+            tokenizer=tokenizer,
             src_lang=lang_codes.get(src_iso, src_iso),
             tgt_lang=lang_codes.get(trg_iso, trg_iso),
             device=0,
