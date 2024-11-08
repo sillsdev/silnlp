@@ -493,9 +493,7 @@ class Config(ABC):
                 LOGGER.error(f"The source file {str(file)} does not exist.")
                 return
 
-        if self.data["tokenize"]:
-            self._build_vocabs(stats)
-
+        self._build_vocabs(stats)
         tokenizer = self.create_tokenizer()
         self._build_corpora(tokenizer, stats, force_align)
         LOGGER.info("Preprocessing completed")
@@ -559,7 +557,7 @@ class Config(ABC):
             dict_count = self._write_dictionary(tokenizer, src_terms_files, trg_terms_files)
             LOGGER.info(f"dictionary size: {dict_count}")
 
-        if stats and self.data["tokenize"]:
+        if stats:
             self._calculate_tokenization_stats()
 
         return train_count
