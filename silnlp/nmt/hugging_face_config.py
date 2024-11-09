@@ -540,7 +540,7 @@ class HuggingFaceConfig(Config):
                 ["Target", 0],
             ]
 
-        if stats:
+        if stats and self.data["tokenize"]:
             stats_columns = pd.MultiIndex.from_tuples(
                 [
                     (" ", "Translation Side"),
