@@ -10,7 +10,6 @@ from machine.scripture import VerseRef, book_number_to_id, get_chapters
 
 from ..common.environment import SIL_NLP_ENV
 from ..common.paratext import book_file_name_digits, get_project_dir
-from ..common.tf_utils import enable_eager_execution, enable_memory_growth
 from ..common.translator import TranslationGroup, Translator
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import SILClearML
@@ -282,7 +281,6 @@ class TranslationTask:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Translates text using an NMT model")
     parser.add_argument("experiment", help="Experiment name")
-    parser.add_argument("--memory-growth", default=False, action="store_true", help="Enable TensorFlow memory growth")
     parser.add_argument("--checkpoint", type=str, help="Checkpoint to use (last, best, avg, or checkpoint #)")
     parser.add_argument("--src", default=None, type=str, help="Source file")
     parser.add_argument("--trg", default=None, type=str, help="Target file")
@@ -319,12 +317,6 @@ def main() -> None:
         help="Include inline elements for projects in USFM format",
     )
     parser.add_argument(
-        "--eager-execution",
-        default=False,
-        action="store_true",
-        help="Enable TensorFlow eager execution.",
-    )
-    parser.add_argument(
         "--clearml-queue",
         default=None,
         type=str,
@@ -344,12 +336,6 @@ def main() -> None:
     args = parser.parse_args()
 
     get_git_revision_hash()
-
-    if args.eager_execution:
-        enable_eager_execution()
-
-    if args.memory_growth:
-        enable_memory_growth()
 
     translator = TranslationTask(
         name=args.experiment, checkpoint=args.checkpoint, clearml_queue=args.clearml_queue, commit=args.commit

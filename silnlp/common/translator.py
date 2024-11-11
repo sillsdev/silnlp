@@ -11,6 +11,7 @@ from iso639 import Lang
 from machine.corpora import (
     FileParatextProjectSettingsParser,
     FileParatextProjectTextUpdater,
+    UpdateUsfmBehavior,
     UpdateUsfmParserHandler,
     UsfmFileText,
     UsfmStylesheet,
@@ -207,7 +208,9 @@ class Translator(ABC):
                 dest_project_path = get_project_dir(trg_format_project)
                 dest_updater = FileParatextProjectTextUpdater(dest_project_path)
                 usfm_out = dest_updater.update_usfm(
-                    src_file_text.id, rows, strip_all_text=use_src_project, prefer_existing_text=False
+                    src_file_text.id,
+                    rows,
+                    UpdateUsfmBehavior.STRIP_EXISTING if use_src_project else UpdateUsfmBehavior.PREFER_NEW,
                 )
 
                 if usfm_out is None:
@@ -216,7 +219,7 @@ class Translator(ABC):
             else:
                 with open(src_file_path, encoding="utf-8-sig") as f:
                     usfm = f.read()
-                handler = UpdateUsfmParserHandler(rows, vrefs[0].book, strip_all_text=True)
+                handler = UpdateUsfmParserHandler(rows, vrefs[0].book, UpdateUsfmBehavior.STRIP_EXISTING)
                 parse_usfm(usfm, handler)
                 usfm_out = handler.get_usfm()
 

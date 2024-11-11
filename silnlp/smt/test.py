@@ -10,11 +10,11 @@ from tqdm import tqdm
 
 from ..common.corpus import load_corpus
 from ..common.environment import SIL_NLP_ENV
-from ..common.metrics import compute_meteor_score, compute_wer_score
+from ..common.metrics import compute_meteor_score
 from ..common.utils import get_git_revision_hash, get_mt_exp_dir
 from .config import create_word_detokenizer, create_word_tokenizer, get_thot_word_alignment_type, load_config
 
-SUPPORTED_SCORERS = {"bleu", "spbleu", "chrf3", "meteor", "wer", "ter"}
+SUPPORTED_SCORERS = {"bleu", "spbleu", "chrf3", "meteor", "ter"}
 
 
 def get_iso(lang: str) -> str:
@@ -117,12 +117,6 @@ def main() -> None:
                     continue
                 scorer_name = "METEOR"
                 score_str = f"{meteor_score:.2f}"
-            elif scorer == "wer":
-                wer_score = compute_wer_score(sys, [ref])
-                if wer_score == 0:
-                    continue
-                scorer_name = "WER"
-                score_str = f"{wer_score/100:.2f}"
             elif scorer == "ter":
                 ter_score = sacrebleu.corpus_ter(sys, [ref])
                 if ter_score.score >= 0:
