@@ -208,9 +208,9 @@ class Translator(ABC):
                 dest_project_path = get_project_dir(trg_format_project)
                 dest_updater = FileParatextProjectTextUpdater(dest_project_path)
                 usfm_out = dest_updater.update_usfm(
-                    src_file_text.id,
-                    rows,
-                    UpdateUsfmBehavior.STRIP_EXISTING if use_src_project else UpdateUsfmBehavior.PREFER_NEW,
+                    book_id=src_file_text.id,
+                    rows=rows,
+                    behavior=UpdateUsfmBehavior.STRIP_EXISTING if use_src_project else UpdateUsfmBehavior.PREFER_NEW,
                 )
 
                 if usfm_out is None:
@@ -219,7 +219,9 @@ class Translator(ABC):
             else:
                 with open(src_file_path, encoding="utf-8-sig") as f:
                     usfm = f.read()
-                handler = UpdateUsfmParserHandler(rows, vrefs[0].book, UpdateUsfmBehavior.STRIP_EXISTING)
+                handler = UpdateUsfmParserHandler(
+                    rows=rows, id_text=vrefs[0].book, behavior=UpdateUsfmBehavior.STRIP_EXISTING
+                )
                 parse_usfm(usfm, handler)
                 usfm_out = handler.get_usfm()
 
