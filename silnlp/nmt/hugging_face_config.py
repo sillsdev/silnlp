@@ -317,6 +317,7 @@ class HuggingFaceConfig(Config):
                     "activation_dropout": 0.0,
                     "learning_rate": 0.0002,
                     "lr_scheduler_type": "cosine",
+                    "attention_implementation": "eager",
                 },
             },
             config,
@@ -774,10 +775,11 @@ class HuggingFaceNMTModel(NMTModel):
             label2id={},
             id2label={},
             num_labels=0,
+            attn_implementation=self._config.params.get("attn_implementation", "eager"),
         )
         model = cast(
             PreTrainedModel,
-            AutoModelForSeq2SeqLM.from_pretrained(self._config.model, config=model_config, attn_implementation="eager"),
+            AutoModelForSeq2SeqLM.from_pretrained(self._config.model, config=model_config),
         )
         if self._config.train.get("better_transformer"):
             model = model.to_bettertransformer()
@@ -1551,7 +1553,9 @@ class HuggingFaceNMTModel(NMTModel):
             and model_name != self._config.model
         ):
             base_model = AutoModelForSeq2SeqLM.from_pretrained(
-                self._config.model, torch_dtype=dtype if self._mixed_precision else "auto", attn_implementation="eager"
+                self._config.model,
+                torch_dtype=dtype if self._mixed_precision else "auto",
+                attn_implementation=self._config.params.get("attn_implementation", "eager"),
             )
             if len(tokenizer) != base_model.get_input_embeddings().weight.size(dim=0):
                 base_model.resize_token_embeddings(
@@ -1561,7 +1565,9 @@ class HuggingFaceNMTModel(NMTModel):
             model = PeftModel.from_pretrained(base_model, model_name)
         else:
             model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(
-                model_name, torch_dtype=dtype if self._mixed_precision else "auto", attn_implementation="eager"
+                model_name,
+                torch_dtype=dtype if self._mixed_precision else "auto",
+                attn_implementation=self._config.params.get("attn_implementation", "eager"),
             )
         if self._config.infer.get("better_transformer"):
             model = model.to_bettertransformer()
