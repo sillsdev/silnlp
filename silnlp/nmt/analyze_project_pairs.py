@@ -106,12 +106,8 @@ def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = 
 
             src_script = predict_script_code("".join(corpus["source"][: min(len(corpus["source"]), 3000)]))
             trg_script = predict_script_code("".join(corpus["target"][: min(len(corpus["target"]), 3000)]))
-            try:
-                src_script_in_model = is_represented(src_script, config.model)
-                trg_script_in_model = is_represented(trg_script, config.model)
-            except:
-                src_script_in_model = None
-                trg_script_in_model = None
+            src_script_in_model = is_represented(src_script, config.model) if config.model is not None else None
+            trg_script_in_model = is_represented(trg_script, config.model) if config.model is not None else None
 
             stats_df.loc[project_pair, :] = [
                 pair_count,
@@ -210,12 +206,8 @@ def get_extra_alignments(config: Config, deutero: bool = False) -> List[str]:
             parallel_count = len(align_corpus.index)
             src_script = predict_script_code("".join(align_corpus["source"][: min(len(align_corpus["source"]), 3000)]))
             trg_script = predict_script_code("".join(align_corpus["target"][: min(len(align_corpus["target"]), 3000)]))
-            try:
-                src_script_in_model = is_represented(src_script, config.model)
-                trg_script_in_model = is_represented(trg_script, config.model)
-            except:
-                src_script_in_model = None
-                trg_script_in_model = None
+            src_script_in_model = is_represented(src_script, config.model) if config.model is not None else None
+            trg_script_in_model = is_represented(trg_script, config.model) if config.model is not None else None
 
             stats_df.loc[project_pair, :] = [
                 pair_count,

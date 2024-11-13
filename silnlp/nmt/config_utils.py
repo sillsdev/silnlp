@@ -18,5 +18,4 @@ def load_config(exp_name: str) -> Config:
 
 
 def create_config(exp_dir: Path, config: dict) -> Config:
-    model_name: Optional[str] = config.get("model")
     return HuggingFaceConfig(exp_dir, config)
