@@ -1553,7 +1553,9 @@ class HuggingFaceNMTModel(NMTModel):
             and model_name != self._config.model
         ):
             base_model = AutoModelForSeq2SeqLM.from_pretrained(
-                self._config.model, torch_dtype=dtype if self._mixed_precision else "auto"
+                self._config.model,
+                torch_dtype=dtype if self._mixed_precision else "auto",
+                attn_implementation=self._config.params.get("attn_implementation", "eager"),
             )
             if len(tokenizer) != base_model.get_input_embeddings().weight.size(dim=0):
                 base_model.resize_token_embeddings(
@@ -1563,7 +1565,9 @@ class HuggingFaceNMTModel(NMTModel):
             model = PeftModel.from_pretrained(base_model, model_name)
         else:
             model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(
-                model_name, torch_dtype=dtype if self._mixed_precision else "auto"
+                model_name,
+                torch_dtype=dtype if self._mixed_precision else "auto",
+                attn_implementation=self._config.params.get("attn_implementation", "eager"),
             )
         if self._config.infer.get("better_transformer"):
             model = model.to_bettertransformer()
