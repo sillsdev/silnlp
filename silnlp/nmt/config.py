@@ -430,7 +430,7 @@ class Config(ABC):
 
     @property
     def model(self) -> str:
-        return self.root.get("model")
+        return self.root["model"]
 
     @property
     @abstractmethod

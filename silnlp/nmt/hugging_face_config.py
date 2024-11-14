@@ -318,6 +318,7 @@ class HuggingFaceConfig(Config):
                     "learning_rate": 0.0002,
                     "lr_scheduler_type": "cosine",
                 },
+                "model": "facebook/nllb-200-distilled-1.3B",
             },
             config,
         )

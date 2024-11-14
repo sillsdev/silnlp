@@ -1,5 +1,4 @@
 import argparse
-import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,8 +12,6 @@ from .clearml_connection import SILClearML
 from .config import Config, get_mt_exp_dir
 from .test import _SUPPORTED_SCORERS, test
 from .translate import TranslationTask
-
-LOGGER = logging.getLogger(__package__ + ".experiment")
 
 
 @dataclass
@@ -41,9 +38,6 @@ class SILExperiment:
         self.config: Config = self.clearml.config
         self.rev_hash = get_git_revision_hash()
         self.config.set_seed()
-
-        if self.config.model is None:
-            LOGGER.warning("Config file does not define a model to use.")
 
     def run(self):
         if self.run_prep:
