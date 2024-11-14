@@ -49,7 +49,7 @@ clowder = "clowder.clowder:main"
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.11"
-pandas = "^1.0.4"
+pandas = "^2.2"
 sentencepiece = "^0.1.97"
 nltk = "^3.5"
 python-dotenv = "0.20.0"
