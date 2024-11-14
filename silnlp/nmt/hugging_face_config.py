@@ -319,6 +319,7 @@ class HuggingFaceConfig(Config):
                     "lr_scheduler_type": "cosine",
                     "attention_implementation": "eager",
                 },
+                "model": "facebook/nllb-200-distilled-1.3B",
             },
             config,
         )
