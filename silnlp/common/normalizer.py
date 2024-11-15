@@ -338,9 +338,41 @@ class Normalizer:
         )
 
     def find_transformations_sorted(self, sentence: str) -> List[SentenceTransformation]:
+        """
+        Searches the sentence passed for slices of text that need normalization.
+        Example:
+          My friend(John) said  to me...
+                   ^          ^^
+
+        In the example a left clinging character '(' is found which needs space added before it,
+        and a double space is between two words.
+
+        For each case found, a SentenceTransformation is generated which describes the change, i
+        - the area of the string to be changed represented as a slice
+        - what to change it to
+        - why it's being changed to
+
+        Note the changes are applied elsewhere - this method only generates a description of the changes.
+        """
         # Boundary whitespace is dealt with specially first and later logic analyses the trimmed input
+        # Later searching uses sentence_trimmed hence won't refind the boundary cases
+        # It will right shift the slices found by the amount left trimmed
         boundary_trim_transformations, sentence_trimmed, trim_offset = self.compute_boundary_transformations(sentence)
 
+        # NOTE: This method only handles single consecutive punctuation.
+        # In this context "consecutive" means two punctuations next to each other ignoring whitespace.
+        # Example:
+        #       Hi there, . How are you ?
+        #               ^^^^           ^^
+        #               multiple       single
+        # Multiple punctuation groups aren't transformed, but are instead captured as warnings (see related warning code).
+        #
+        # In this context "punctuation" refers only to the characters defined in the normalization rules.
+        # The search regex is built by regex escaping the punctuation characters and combining them.
+        #
+        # Note the regex captures surrounding whitespace to analyze whether it is consistent with the normalization rules
+        # for the punctuation.
+        # For example in the example above, if '?' is right clinging, then the whitespace before it needs to be removed.
         single_punctuation_transformations: List[SentenceTransformation] = []
         for slice in find_slices(self.single_punctuation_with_optional_whitespace_regex, sentence_trimmed):
             # Figure out the punctuation character that was found in the slice and find the associated normalization rule for it
@@ -357,6 +389,7 @@ class Normalizer:
                     )
                 )
 
+        # Search for blocks of consecutive whitespace that should be shrunk to a single space character
         consecutive_spaces_transformations = [
             SentenceTransformation(
                 slice=shift_slice(slice, trim_offset, sentence),
@@ -382,11 +415,22 @@ class Normalizer:
             )
         )
 
-        # TODO - put in a general check that the transformations aren't overlapping
-        return sorted(
+        transformations_sorted = sorted(
             boundary_trim_transformations + consecutive_spaces_transformations + single_punctuation_transformations,
             key=lambda transformation: transformation.slice.start_index,
         )
+
+        # Assert that none of the transformations are overlapping (they _shouldn't_ if everything is programmed correctly).
+        # Ensuring non-overlapping transformations guarantees that no matter what order you apply them,
+        # the normalized sentence is the same.
+        # This gives more flexibility to the consumer to what order they apply the transformations
+        # (in reality it will probably always be first to last though)
+        for index in range(0, len(transformations_sorted) - 1):
+            current = transformations_sorted[index]
+            next = transformations_sorted[index + 1]
+            assert current.slice.end_index <= next.slice.start_index, f"Transformation at index {index} overlaps following transformation"
+
+        return transformations_sorted
 
     def normalize_single_punctuation_slice(
         self, punctuation_rule: PunctuationNormalizationRule, slice: StringSlice
@@ -415,15 +459,15 @@ class Normalizer:
                 # The punctuation char has no surrounding whitespace
                 # That means it's either boxed in, e.g. abc"def or it's at the boundary, e.g. abc"
                 # In the first case we don't know which way it should cling and can't do anything
+                # (separate warning code picks this up)
                 # In the second case there's nothing to do
                 # So in both cases there's nothing to do, just return the original punctuation
-                # TODO - warn on the first case
                 return None
             elif slice.slice[0] != punctuation_char and slice.slice[-1] != punctuation_char:
                 # The punctuation char has whitespace on both sides
                 # In this case we don't know which way it should cling so all we can do is shrink
                 # the punctuation on both sides to a single space
-                # TODO - warn on this case
+                # (separate warning code picks this up)
                 return " " + punctuation_char + " "
             elif slice.slice[0] == punctuation_char:
                 # The punctuation char has space to the right, e.g. `abc" def`
@@ -441,7 +485,8 @@ class Normalizer:
             else:
                 return " " + punctuation_char + " "
         else:
-            # TODO warn for this case - we don't recognize the rule category
+            logger.warn(f"Punctuation '{punctuation_char}' detected with unhandled punctuation category: '{punctuation_rule.category}'")
+            logger.warn("Ignoring punctuation, however a handler should always be defined")
             return None
 
     def compute_boundary_transformations(self, sentence: str) -> Tuple[List[SentenceTransformation], str, int]:
