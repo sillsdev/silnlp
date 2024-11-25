@@ -803,6 +803,12 @@ class HuggingFaceNMTModel(NMTModel):
                 len(tokenizer), pad_to_multiple_of=8 if training_args.fp16 or training_args.bf16 else None
             )
 
+        out_embeddings = model.get_output_embeddings()
+        for key, value in out_embeddings.weight.data.items():
+            out_embeddings[key] = 0
+
+        model.init_weights(out_embeddings)
+
         if self._config.train["use_lora"]:
             model = self._convert_to_lora_model(model)
 
