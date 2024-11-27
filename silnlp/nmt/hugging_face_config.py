@@ -8,8 +8,9 @@ from contextlib import ExitStack
 from copy import deepcopy
 from enum import Enum
 from itertools import repeat
+from math import exp
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple, TypeVar, Union, cast
 
 import datasets.utils.logging as datasets_logging
 import evaluate
@@ -20,9 +21,10 @@ import transformers.utils.logging as transformers_logging
 import yaml
 from accelerate.utils.memory import should_reduce_batch_size
 from datasets import Dataset
+from machine.annotations import Range
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
-from machine.translation import TranslationResult
-from machine.translation.huggingface import HuggingFaceNmtEngine
+from machine.translation import TranslationResult, TranslationResultBuilder, TranslationSources, WordAlignmentMatrix
+from machine.translation.huggingface.hugging_face_nmt_engine import _TranslationPipeline
 from sacremoses import MosesPunctNormalizer
 from tokenizers import AddedToken, NormalizedString, Regex
 from tokenizers.implementations import SentencePieceBPETokenizer, SentencePieceUnigramTokenizer
@@ -745,6 +747,22 @@ class OutputGroup:
     def get_token_ids(self) -> List[List[int]]:
         return [output["translation_token_ids"] for output in self.outputs]
 
+    def construct_translation_results(self) -> List[TranslationResult]:
+        translation_results: List[TranslationResult] = []
+        for output in self.outputs:
+            input_tokens: Sequence[str] = output["input_tokens"]
+            output_length = len(output["translation_tokens"])
+            builder = TranslationResultBuilder(input_tokens)
+            for token, score in zip(output["translation_tokens"], output["token_scores"]):
+                builder.append_token(token, TranslationSources.NMT, exp(score))
+            src_indices = torch.argmax(output["token_attentions"], dim=1).tolist()
+            wa_matrix = WordAlignmentMatrix.from_word_pairs(
+                len(input_tokens), output_length, set(zip(src_indices, range(output_length)))
+            )
+            builder.mark_phrase(Range.create(0, len(input_tokens)), wa_matrix)
+            translation_results.append(builder.to_result(output["translation_text"]))
+        return translation_results
+
 
 class HuggingFaceNMTModel(NMTModel):
     def __init__(self, config: HuggingFaceConfig, mixed_precision: bool, num_devices: int) -> None:
@@ -1093,7 +1111,7 @@ class HuggingFaceNMTModel(NMTModel):
         if model.config.max_length is not None and model.config.max_length < 512:
             model.config.max_length = 512
         lang_codes: Dict[str, str] = self._config.data["lang_codes"]
-        pipeline = TranslationPipeline(
+        pipeline = _TranslationPipeline(
             model=model,
             tokenizer=tokenizer,
             src_lang=lang_codes.get(src_iso, src_iso),
@@ -1120,38 +1138,47 @@ class HuggingFaceNMTModel(NMTModel):
         ):
             if isinstance(outputs, OutputGroup):
                 outputs = [outputs]
-            yield from [output_group.get_translated_text() for output_group in outputs]
+            yield from [output_group.construct_translation_results() for output_group in outputs]
 
-    def translate_aligned(
-        self,
-        sentences: Iterable[str],
-        src_iso: str,
-        trg_iso: str,
-        vrefs: Optional[Iterable[VerseRef]] = None,
-        ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
-    ) -> Iterable[TranslationResult]:
-        tokenizer = self._config.get_tokenizer()
-        model = self._create_inference_model(ckpt, tokenizer)
-        if model.config.max_length is not None and model.config.max_length < 512:
-            model.config.max_length = 512
-        lang_codes: Dict[str, str] = self._config.data["lang_codes"]
-        if not isinstance(sentences, list):
-            sentences = list(sentences)
+    """Alternative: let nmt_engine do all the work.
+    I'm not sure this would allow us to use a customized tokenizer, or that we could easily integrate with the multiple drafts functionality this way
+    """
+    # def translate_aligned(
+    #     self,
+    #     sentences: Iterable[str],
+    #     src_iso: str,
+    #     trg_iso: str,
+    #     vrefs: Optional[Iterable[VerseRef]] = None,
+    #     ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
+    # ) -> Iterable[TranslationResult]:
+    #     # check if it creates the tokenizer here or if it already exists
+    #     # if there's a tokenizer in the experiment dir, does it matter if I use it?
+    #     # I think the main thing would be if new tokens were added, ans we would want to use those
+    #     tokenizer = self._config.get_tokenizer()
+    #     model = self._create_inference_model(ckpt, tokenizer)
+    #     if model.config.max_length is not None and model.config.max_length < 512:
+    #         model.config.max_length = 512
+    #     lang_codes: Dict[str, str] = self._config.data["lang_codes"]
+    #     if not isinstance(sentences, list):
+    #         sentences = list(sentences)
 
-        """Create machine HuggingFaceNMTEngine here instead?"""
-        # can I also set the tokenizer? do I need to?
-        # are there other things I need to customize? how do the kwargs work?
-        nmt_engine = HuggingFaceNmtEngine(
-            model, src_lang=lang_codes.get(src_iso, src_iso), trg_lang=lang_codes.get(trg_iso, trg_iso)
-        )
+    #     # can I also set the tokenizer? do I need to? tokenizer could be custom one with added tokens, so we would want to use it
+    #     # are there other things I need to customize?
+    #     nmt_engine = HuggingFaceNmtEngine(
+    #         model,
+    #         src_lang=lang_codes.get(src_iso, src_iso),
+    #         trg_lang=lang_codes.get(trg_iso, trg_iso),
+    #         batch_size=self._config.eval["per_device_eval_batch_size"],
+    #         device=0,
+    #     )
 
-        trans_res: TranslationResult
-        for trans_res in tqdm(
-            nmt_engine.translate_batch(sentences),
-            total=len(sentences),
-            unit="ex",
-        ):
-            yield trans_res
+    #     trans_res: TranslationResult
+    #     for trans_res in tqdm(
+    #         nmt_engine.translate_batch(sentences),
+    #         total=len(sentences),
+    #         unit="ex",
+    #     ):
+    #         yield trans_res
 
     def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
         step: Optional[int] = None

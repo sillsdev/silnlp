@@ -35,16 +35,6 @@ class NMTTranslator(Translator):
             sentences, src_iso, trg_iso, produce_multiple_translations, vrefs, self._checkpoint
         )
 
-    def translate_aligned(
-        self,
-        sentences: Iterable[str],
-        src_iso: str,
-        trg_iso: str,
-        produce_multiple_translations: bool = False,
-        vrefs: Optional[Iterable[VerseRef]] = None,
-    ) -> Iterable[TranslationGroup]:
-        return self._model.translate_aligned(sentences, src_iso, trg_iso, vrefs, self._checkpoint)
-
 
 @dataclass
 class TranslationTask:

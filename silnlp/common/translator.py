@@ -19,6 +19,7 @@ from machine.corpora import (
     parse_usfm,
 )
 from machine.scripture import VerseRef
+from machine.translation import TranslationResult
 
 from .corpus import load_corpus, write_corpus
 from .paratext import get_book_path, get_iso, get_project_dir
@@ -48,7 +49,7 @@ def insert_draft_remark(
 
 
 # A group of multiple translations of a single sentence
-TranslationGroup = List[str]
+TranslationGroup = List[TranslationResult]
 
 # A list representing a single draft (one translation of each input sentence)
 TranslatedDraft = List[str]
@@ -80,17 +81,6 @@ class DraftGroup:
 class Translator(ABC):
     @abstractmethod
     def translate(
-        self,
-        sentences: Iterable[str],
-        src_iso: str,
-        trg_iso: str,
-        produce_multiple_translations: bool = False,
-        vrefs: Optional[Iterable[VerseRef]] = None,
-    ) -> Iterable[TranslationGroup]:
-        pass
-
-    @abstractmethod
-    def translate_aligned(
         self,
         sentences: Iterable[str],
         src_iso: str,
@@ -199,7 +189,9 @@ class Translator(ABC):
                 sentences.pop(i)
                 empty_sents.append((i, vrefs.pop(i)))
 
-        translations = list(self.translate(sentences, src_iso, trg_iso, produce_multiple_translations, vrefs))
+        # TranslationResult properties: translation, source/target tokens, confidences, sources, alignment, phrases
+        translation_results = list(self.translate(sentences, src_iso, trg_iso, produce_multiple_translations, vrefs))
+        translations = [[tr.translation for tr in tg] for tg in translation_results]
 
         # Add empty sentences back in
         for idx, vref in reversed(empty_sents):

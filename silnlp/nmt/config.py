@@ -14,7 +14,6 @@ from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, Unio
 import pandas as pd
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books, get_chapters
 from machine.tokenization import LatinWordTokenizer
-from machine.translation import TranslationResult
 from tqdm import tqdm
 
 from ..alignment.config import get_aligner_name
@@ -335,16 +334,6 @@ class NMTModel(ABC):
         vrefs: Optional[Iterable[VerseRef]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Iterable[TranslationGroup]: ...
-
-    @abstractmethod
-    def translate_aligned(
-        self,
-        sentences: Iterable[str],
-        src_iso: str,
-        trg_iso: str,
-        vrefs: Optional[Iterable[VerseRef]] = None,
-        ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
-    ) -> Iterable[TranslationResult]: ...
 
     @abstractmethod
     def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]: ...
@@ -901,7 +890,7 @@ class Config(ABC):
                 LOGGER.warning('The experiment specified in "use_test_set_from" is the same as the current experiment.')
             else:
                 LOGGER.warning(
-                    'The experiment specified in "use_test_set_from" does not contain any files matching "test*.vref.txt".'
+                    f'The experiment specified in "use_test_set_from" does not contain any files matching "test*.vref.txt".'
                 )
         for vref_path in vref_paths:
             stem = vref_path.stem
