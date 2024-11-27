@@ -89,6 +89,17 @@ class Translator(ABC):
     ) -> Iterable[TranslationGroup]:
         pass
 
+    @abstractmethod
+    def translate_aligned(
+        self,
+        sentences: Iterable[str],
+        src_iso: str,
+        trg_iso: str,
+        produce_multiple_translations: bool = False,
+        vrefs: Optional[Iterable[VerseRef]] = None,
+    ) -> Iterable[TranslationGroup]:
+        pass
+
     def translate_text(
         self,
         src_file_path: Path,
