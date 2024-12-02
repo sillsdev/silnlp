@@ -65,7 +65,7 @@ def get_complete_verse_counts() -> Dict[str, Counter]:
     df = df.set_index("book")
     for book, counts in verse_counts.items():
         for chapter, count in counts.items():
-            df.loc[book][chapter] = count
+            df.loc[book, chapter] = count
     df.to_csv(complete_counts_path)
 
     return verse_counts
@@ -131,9 +131,10 @@ def collect_verse_counts(
         LOGGER.info(f"Processing {project_name}")
 
         verse_counts = defaultdict(list)
-        with open(SIL_NLP_ENV.assets_dir / "vref.txt", "r", encoding="utf-8") as vref_file, extract_file_name.open(
-            "r", encoding="utf-8"
-        ) as extract_file:
+        with (
+            open(SIL_NLP_ENV.assets_dir / "vref.txt", "r", encoding="utf-8") as vref_file,
+            extract_file_name.open("r", encoding="utf-8") as extract_file,
+        ):
             cur_book = None
             for vref, verse in zip(vref_file, extract_file):
                 if verse != "\n":
@@ -147,8 +148,8 @@ def collect_verse_counts(
         for book, chapter_counts in verse_counts.items():
             book_count = sum(chapter_counts.values())
             complete_book_count = sum(complete_verse_counts[book].values())
-            verse_counts_df.loc[project_name][book] = book_count
-            verse_percentages_df.loc[project_name][book] = 100 * round(book_count / complete_book_count, 3)
+            verse_counts_df.loc[project_name, book] = book_count
+            verse_percentages_df.loc[project_name, book] = 100 * round(book_count / complete_book_count, 3)
             if book_count < complete_book_count and book_count > 0:
                 partially_complete_books.append(book)
 
@@ -163,7 +164,7 @@ def collect_verse_counts(
             df = df.set_index("book")
             for book in partially_complete_books:
                 for chapter, complete_count in complete_verse_counts[book].items():
-                    df.loc[book][chapter] = 100 * round(verse_counts[book][chapter] / complete_count, 3)
+                    df.loc[book, chapter] = 100 * round(verse_counts[book][chapter] / complete_count, 3)
             df.to_csv(partial_books_path / f"{project_name}.csv")
 
     # Add overall counts

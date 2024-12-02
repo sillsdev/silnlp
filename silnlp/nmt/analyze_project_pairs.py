@@ -396,6 +396,7 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
         book_order_df.loc["Cumulative Verses"] = [
             sum(book_order_df.loc["Verses in Common"].iloc[: i + 1]) for i in range(len(existing_books))
         ]
+        book_order_df = book_order_df.astype(object)  # to allow a mix of float and string values
         book_order_df.loc["corpus_books", book_order_df.columns[0]] = ";".join(book_order_df.columns)
         book_orders[project_pair] = book_order_df
 
