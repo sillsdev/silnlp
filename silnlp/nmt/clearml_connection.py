@@ -31,7 +31,7 @@ class SILClearML:
             exp_name = "/".join(name_parts[1:])
         if self.queue_name is None:
             self.task = None
-            self._load_config()
+            # self._load_config()
             LOGGER.info("No ClearML task initiated.")
             return
 
@@ -45,15 +45,16 @@ class SILClearML:
             )
 
             self._determine_clearml_project_name()
-            self._load_config()
+            # self._load_config()
 
             self.task.set_base_docker(
                 docker_image="ghcr.io/sillsdev/silnlp:latest",
                 docker_arguments=[
                     "--env TOKENIZERS_PARALLELISM='false'",
+                    "--env EFLOMAL_PATH=/root/.clearml/venvs-builds/3.10/task_repository/silnlp.git/.venv/lib/python3.10/site-packages/eflomal/bin",
                 ],
                 docker_setup_bash_script=[
-                    "apt install -y python3-venv",
+                    "apt install -y python3-venv python3-dev",
                     "python3 -m pip install --user pipx",
                     "PATH=$PATH:/root/.local/bin",
                     "pipx install poetry==1.7.1",
