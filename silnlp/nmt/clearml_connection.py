@@ -51,10 +51,9 @@ class SILClearML:
                 docker_image="ghcr.io/sillsdev/silnlp:latest",
                 docker_arguments=[
                     "--env TOKENIZERS_PARALLELISM='false'",
-                    "--env EFLOMAL_PATH=/root/.clearml/venvs-builds/3.10/task_repository/silnlp.git/.venv/lib/python3.10/site-packages/eflomal/bin",
                 ],
                 docker_setup_bash_script=[
-                    "apt install -y python3-venv python3-dev",
+                    "apt install -y python3-venv",
                     "python3 -m pip install --user pipx",
                     "PATH=$PATH:/root/.local/bin",
                     "pipx install poetry==1.7.1",
