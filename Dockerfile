@@ -60,7 +60,7 @@ COPY --from=builder /src/requirements.txt .
 RUN pip install -r requirements.txt && rm requirements.txt
 
 # Set eflomal path
-ENV EFLOMAL_PATH=/usr/local/lib/python3.8/dist-packages/eflomal/bin
+ENV EFLOMAL_PATH=/usr/local/lib/python3.10/dist-packages/eflomal/bin
 
 # Install fast_align
 RUN apt-get update && \
