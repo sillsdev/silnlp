@@ -9,7 +9,6 @@ EFLOMAL_PATH = Path(get_env_path("EFLOMAL_PATH"), "eflomal")
 
 
 def is_eflomal_available() -> bool:
-    print("EFLOMAL PATH !!!: ", EFLOMAL_PATH)
     return EFLOMAL_PATH.is_file()
 
 

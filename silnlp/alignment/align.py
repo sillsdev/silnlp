@@ -87,21 +87,6 @@ def main() -> None:
 
     clearml = SILClearML(args.experiments, args.clearml_queue)
 
-    """Trying to find path to venv on clearml"""
-    venv_path = Path("/root/.clearml/venvs-builds/3.10/task_repository/silnlp.git/.venv/lib/python3.10/site-packages")
-    if venv_path.exists():
-        for item in venv_path.iterdir():
-            print(item)
-
-        eflomal_dir = venv_path / "eflomal"
-        if eflomal_dir.exists():
-            for item in eflomal_dir.iterdir():
-                print(item)
-        else:
-            print("no eflomal :(")
-    else:
-        print("does not exist!!!")
-
     for exp_dir in get_experiment_dirs(args.experiments):
         exp_name = get_experiment_name(exp_dir)
         if not args.skip_align:
