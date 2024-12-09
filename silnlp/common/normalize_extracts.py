@@ -121,15 +121,12 @@ def display_warnings(normalized_summaries_with_line_numbers: List[Tuple[Sentence
     if len(warnings_with_line_number) > 0:
         logger.warning(f"{len(warnings_with_line_number)} warnings found")
         for warning, line_number in warnings_with_line_number:
-            # Pretty print out all the transformation relative to the original string
-            # TODO This is just for debugging and will be replaced by better reporting
             logger.warning(100 * "=")
             sentence = warning.slice.outer
             indent = 12 * " "
             logger.warning(f"line: {line_number}")
             num_blocks_of_10 = len(sentence) // 10 + 1
             tens_row = (" " * 9).join([str(i) for i in range(0, num_blocks_of_10)])
-            # analysis_indent = 12 * " "
             logger.warning(indent + tens_row)
             logger.warning(indent + "0123456789" * num_blocks_of_10)
             logger.warning(indent[0:-1] + f"'{sentence}'")
@@ -176,7 +173,6 @@ def run(cli_input: CliInput) -> None:
         input_lines: List[str] = load_extract_file(input_path)
         logger.debug(f"Found {len(input_lines)} lines in file")
         normalized_summaries_with_line_numbers: List[Tuple[SentenceNormalizationSummary, int]] = [
-            # TODO - process the summaries
             # TODO - replace normalizer with one defined by cli input
             (standard_normalizer.normalize(extract_sentence), index + 1)
             for index, extract_sentence in enumerate(input_lines)

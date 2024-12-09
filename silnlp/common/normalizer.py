@@ -39,6 +39,9 @@ class StringSlice:
     # The string the slice came from
     outer: str
 
+    def length(self) -> int:
+        return self.end_index - self.start_index
+
 
 def shift_slice(slice: StringSlice, offset: int, new_outer: str) -> StringSlice:
     """Shifts a slice that is from a substring to a new outer string"""
@@ -144,10 +147,8 @@ class Normalizer:
     """
 
     def __init__(self, punctuation_normalization_rules: List[PunctuationNormalizationRule]):
+        self.validate_normalization_rules(punctuation_normalization_rules)
         self.punctuation_normalization_rules = punctuation_normalization_rules
-        # TODO - ensure no duplicate characters
-        # TODO - ensure strings are length 1
-        # TODO - ensure no whitespace
 
         # The constructor defines many complex regexes which are compiled once and stored
         # inside the class to prevent recompilation on every sentence normalized
@@ -158,7 +159,6 @@ class Normalizer:
         self.supported_punctuation: Set[str] = set(self.punctuation_char_2_normalization_rule.keys())
 
         self.consecutive_spaces = regex.compile("\\s+")
-        self.single_whitespace = regex.compile("\\s")
 
         # Regex escape all the punctuation characters defined in the rules so that they be shoved into a regex
         escaped_punctuation_chars = "".join(regex.escape(rule.character) for rule in punctuation_normalization_rules)
@@ -214,10 +214,55 @@ class Normalizer:
             f"(?<=\S\s+)[{escaped_left_right_clinging_punctuation_chars}](?=\s+\S)"
         )
 
+    def validate_normalization_rules(self, punctuation_normalization_rules: List[PunctuationNormalizationRule]) -> None:
+        """
+        Does basic checks on the punctuation normalization rules to make sure they are conceptually sound
+        For example:
+        - ensure punctuation characters don't have more than 1 rule
+        - ensure punctuation characters are indeed single characters and not multi-character strings
+        - ensure that whitespace characters aren't being used as punctuation characters
+        """
+
+        supported_punctuation: List[str] = [rule.character for rule in punctuation_normalization_rules]
+
+        # Ensure there are no duplicates punctuation characters in the rules
+        # Conceptually it doesn't make sense for a character to have more than one rule
+        supported_punctuation_distinct: Set[str] = set(supported_punctuation)
+        characters_and_counts = [(p, supported_punctuation.count(p)) for p in supported_punctuation_distinct]
+        duplicates_and_counts = list(filter(lambda character_and_count: character_and_count[1] > 1, characters_and_counts))
+        for char, count in duplicates_and_counts:
+            print(f"[char={char}][count={count}]")
+        if duplicates_and_counts:
+            logger.error(f"{len(duplicates_and_counts)} punctuation character(s) are found in multiple rules")
+            for punctuation_char, count in duplicates_and_counts:
+                logger.error(f"  [punctuation='{punctuation_char}'][count='{count}'] Punctuation character occurs in multiple rules")
+            raise Exception(f"Invalid punctuation normalization rules - {len(duplicates_and_counts)} character(s) appear in multiple rules")
+
+        # Ensure punctuation characters are indeed single character strings
+        multiple_char_punctuations = list(filter(lambda punctuation: len(punctuation) > 1, supported_punctuation))
+        if multiple_char_punctuations:
+            logger.error(f"{len(multiple_char_punctuations)} punctuation character(s) found containing more than 1 character")
+            for multiple_char_punctuation in multiple_char_punctuations:
+                logger.error(f"  [punctuation='{multiple_char_punctuation}'][length='{len(multiple_char_punctuation)}'] Punctuation character contains multiple characters")
+            raise Exception(f"Invalid punctuation normalization rules - {len(multiple_char_punctuations)} character(s) have multiple characters")
+
+        # Ensure punctuation characters aren't whitespace
+        whitespace_regex = regex.compile("\\s")
+        whitespace_punctuations = list(filter(lambda punctuation: whitespace_regex.match(punctuation), supported_punctuation))
+        if whitespace_punctuations:
+            logger.error(f"{len(whitespace_punctuations)} whitespace punctuation character(s) found")
+            for whitespace in whitespace_punctuations:
+                encoded = whitespace.encode("unicode_escape")
+                logger.error(f"  [punctuation={encoded!r}'][ord='{ord(whitespace)}'] Punctuation character is whitespace")
+            raise Exception(f"Invalid punctuation normalization rules - {len(whitespace_punctuations)} character(s) are whitespace")
+
+
+
     def normalize(self, sentence: str) -> SentenceNormalizationSummary:
         """
         Generates a series of transformations and warnings for normalizing the string passed.
         """
+        logger.debug("======================")
         logger.debug(f"Normalizing '{sentence}'")
 
         all_transformations: List[SentenceTransformation] = self.find_transformations_sorted(sentence)
@@ -237,28 +282,27 @@ class Normalizer:
             + self.search_false_positives(sentence)
         )
 
-        logger.debug(f"#transformations={len(all_transformations)}")
-        logger.debug(f"#warnings={len(all_warnings)}")
+        logger.debug(f"[#transformations={len(all_transformations)}][#warnings={len(all_warnings)}]")
 
         # Pretty print out all the transformation relative to the original string
-        # TODO This is just for debugging and will be replaced by better reporting
-        num_blocks_of_10 = len(sentence) // 10 + 1
-        tens_row = (" " * 9).join([str(i) for i in range(0, num_blocks_of_10)])
-        logger.debug(">>> " + tens_row)
-        logger.debug(">>> " + "0123456789" * num_blocks_of_10)
-        logger.debug(">>> " + sentence)
-        for transformation in all_transformations:
-            slice = transformation.slice
-            indent = ">>> " + slice.start_index * " "
-            back_padding = (len(sentence) + 5 - slice.start_index - len(slice.slice)) * " "
-            logger.debug(
-                indent
-                + regex.sub(self.single_whitespace, "~", slice.slice)
-                + back_padding
-                + f"({slice.start_index},{slice.end_index})"
-                + " "
-                + transformation.description
-            )
+        if all_transformations:
+            num_blocks_of_10 = len(sentence) // 10 + 1
+            tens_row = (" " * 9).join([str(i) for i in range(0, num_blocks_of_10)])
+            logger.debug("" + tens_row)
+            logger.debug("" + "0123456789" * num_blocks_of_10)
+            logger.debug("" + sentence)
+            for transformation in all_transformations:
+                slice = transformation.slice
+                indent = slice.start_index * " "
+                back_padding = (len(sentence) + 5 - slice.start_index - slice.length()) * " "
+                logger.debug(
+                    indent
+                    + "^" * slice.length()
+                    + back_padding
+                    + f"({slice.start_index},{slice.end_index})"
+                    + " "
+                    + transformation.description
+                )
 
         # Rebuild the string by applying all the transformations
         # We extract the parts unaffected by normalization, then rebuild by interleaving them with the normalized parts
@@ -267,21 +311,24 @@ class Normalizer:
         #   -----   ---------   ---     <-- original parts
         #        ---         ---        <-- parts to normalize
         #        ", "         "! "      <-- normalized replacements
-        logger.debug(f"Reconstructing normalized string from {len(all_transformations)} transformations")
-        parts = []
-        last_part_end_index = 0
-        for transformation in all_transformations:
-            # The part prior to this normalization segment
-            parts.append(sentence[last_part_end_index : transformation.slice.start_index])
-            last_part_end_index = transformation.slice.end_index
-            parts.append(transformation.replacement)
-        # Deal with the ending original part
-        parts.append(sentence[last_part_end_index:])
+        if all_transformations:
+            logger.debug(f"Reconstructing normalized string from {len(all_transformations)} transformations")
+            parts = []
+            last_part_end_index = 0
+            for transformation in all_transformations:
+                # The part prior to this normalization segment
+                parts.append(sentence[last_part_end_index : transformation.slice.start_index])
+                last_part_end_index = transformation.slice.end_index
+                parts.append(transformation.replacement)
+            # Deal with the ending original part
+            parts.append(sentence[last_part_end_index:])
 
-        normalized = "".join(parts)
-        logger.debug(f"Normalized string is: '{normalized}'")
-        # TODO - test an example where there's no normalization
-        # TODO - shortcircuit this if no normalization? I guess it will be pretty fast
+            normalized = "".join(parts)
+            logger.debug(f"* Original:   '{sentence}'")
+            logger.debug(f"* Normalized: '{normalized}'" + (" (unchanged)" if sentence == normalized else ""))
+        else:
+            logger.debug("No transformations applied, normalization has no effect")
+            normalized = sentence
 
         return SentenceNormalizationSummary(
             original_sentence=sentence,
@@ -291,9 +338,41 @@ class Normalizer:
         )
 
     def find_transformations_sorted(self, sentence: str) -> List[SentenceTransformation]:
+        """
+        Searches the sentence passed for slices of text that need normalization.
+        Example:
+          My friend(John) said  to me...
+                   ^          ^^
+
+        In the example a left clinging character '(' is found which needs space added before it,
+        and a double space is between two words.
+
+        For each case found, a SentenceTransformation is generated which describes the change, i
+        - the area of the string to be changed represented as a slice
+        - what to change it to
+        - why it's being changed to
+
+        Note the changes are applied elsewhere - this method only generates a description of the changes.
+        """
         # Boundary whitespace is dealt with specially first and later logic analyses the trimmed input
+        # Later searching uses sentence_trimmed hence won't refind the boundary cases
+        # It will right shift the slices found by the amount left trimmed
         boundary_trim_transformations, sentence_trimmed, trim_offset = self.compute_boundary_transformations(sentence)
 
+        # NOTE: This method only handles single consecutive punctuation.
+        # In this context "consecutive" means two punctuations next to each other ignoring whitespace.
+        # Example:
+        #       Hi there, . How are you ?
+        #               ^^^^           ^^
+        #               multiple       single
+        # Multiple punctuation groups aren't transformed, but are instead captured as warnings (see related warning code).
+        #
+        # In this context "punctuation" refers only to the characters defined in the normalization rules.
+        # The search regex is built by regex escaping the punctuation characters and combining them.
+        #
+        # Note the regex captures surrounding whitespace to analyze whether it is consistent with the normalization rules
+        # for the punctuation.
+        # For example in the example above, if '?' is right clinging, then the whitespace before it needs to be removed.
         single_punctuation_transformations: List[SentenceTransformation] = []
         for slice in find_slices(self.single_punctuation_with_optional_whitespace_regex, sentence_trimmed):
             # Figure out the punctuation character that was found in the slice and find the associated normalization rule for it
@@ -306,10 +385,11 @@ class Normalizer:
                     SentenceTransformation(
                         slice=shift_slice(slice, trim_offset, sentence),
                         replacement=normalized,
-                        description=f"Punctuation ({punctuation_char}) normalized by rule {rule.category}",
+                        description=f"Punctuation '{punctuation_char}' normalized by rule {rule.category}",
                     )
                 )
 
+        # Search for blocks of consecutive whitespace that should be shrunk to a single space character
         consecutive_spaces_transformations = [
             SentenceTransformation(
                 slice=shift_slice(slice, trim_offset, sentence),
@@ -335,11 +415,22 @@ class Normalizer:
             )
         )
 
-        # TODO - put in a general check that the transformations aren't overlapping
-        return sorted(
+        transformations_sorted = sorted(
             boundary_trim_transformations + consecutive_spaces_transformations + single_punctuation_transformations,
             key=lambda transformation: transformation.slice.start_index,
         )
+
+        # Assert that none of the transformations are overlapping (they _shouldn't_ if everything is programmed correctly).
+        # Ensuring non-overlapping transformations guarantees that no matter what order you apply them,
+        # the normalized sentence is the same.
+        # This gives more flexibility to the consumer to what order they apply the transformations
+        # (in reality it will probably always be first to last though)
+        for index in range(0, len(transformations_sorted) - 1):
+            current = transformations_sorted[index]
+            next = transformations_sorted[index + 1]
+            assert current.slice.end_index <= next.slice.start_index, f"Transformation at index {index} overlaps following transformation"
+
+        return transformations_sorted
 
     def normalize_single_punctuation_slice(
         self, punctuation_rule: PunctuationNormalizationRule, slice: StringSlice
@@ -368,15 +459,15 @@ class Normalizer:
                 # The punctuation char has no surrounding whitespace
                 # That means it's either boxed in, e.g. abc"def or it's at the boundary, e.g. abc"
                 # In the first case we don't know which way it should cling and can't do anything
+                # (separate warning code picks this up)
                 # In the second case there's nothing to do
                 # So in both cases there's nothing to do, just return the original punctuation
-                # TODO - warn on the first case
                 return None
             elif slice.slice[0] != punctuation_char and slice.slice[-1] != punctuation_char:
                 # The punctuation char has whitespace on both sides
                 # In this case we don't know which way it should cling so all we can do is shrink
                 # the punctuation on both sides to a single space
-                # TODO - warn on this case
+                # (separate warning code picks this up)
                 return " " + punctuation_char + " "
             elif slice.slice[0] == punctuation_char:
                 # The punctuation char has space to the right, e.g. `abc" def`
@@ -394,7 +485,8 @@ class Normalizer:
             else:
                 return " " + punctuation_char + " "
         else:
-            # TODO warn for this case - we don't recognize the rule category
+            logger.warn(f"Punctuation '{punctuation_char}' detected with unhandled punctuation category: '{punctuation_rule.category}'")
+            logger.warn("Ignoring punctuation, however a handler should always be defined")
             return None
 
     def compute_boundary_transformations(self, sentence: str) -> Tuple[List[SentenceTransformation], str, int]:
