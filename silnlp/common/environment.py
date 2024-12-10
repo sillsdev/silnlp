@@ -175,7 +175,13 @@ class SilNlpEnv:
                 f"No paratext project name is given.  Data still in the cache directory of {self.pt_projects_dir}"
             )
         config = Config(read_timeout=600)
-        s3 = boto3.resource("s3", config=config)
+        s3 = boto3.resource(
+            service_name="s3",
+            endpoint_url=os.getenv("B2_ENDPOINT"),
+            aws_access_key=os.getenv("B2_ACCOUNT_ID"),
+            aws_secret_access_key=os.getenv("B2_APPLICATION_KEY"),
+            config=config,
+        )
         data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
         len_silnlp_path = len(pt_projects_path)
         pt_projects_path = pt_projects_path + name
@@ -209,7 +215,13 @@ class SilNlpEnv:
                 f"No experiment name is given.  Data still in the cache directory of {self.mt_experiments_dir}"
             )
         config = Config(read_timeout=600)
-        s3 = boto3.resource("s3", config=config)
+        s3 = boto3.resource(
+            service_name="s3",
+            endpoint_url=os.getenv("B2_ENDPOINT"),
+            aws_access_key=os.getenv("B2_ACCOUNT_ID"),
+            aws_secret_access_key=os.getenv("B2_APPLICATION_KEY"),
+            config=config,
+        )
         data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
         len_silnlp_path = len(experiments_path)
         experiment_path = experiments_path + name
@@ -242,7 +254,13 @@ class SilNlpEnv:
             )
         experiment_path = str(self.mt_dir.relative_to(self.data_dir) / "experiments") + "/"
         config = Config(read_timeout=600)
-        s3 = boto3.resource("s3", config=config)
+        s3 = boto3.resource(
+            service_name="s3",
+            endpoint_url=os.getenv("B2_ENDPOINT"),
+            aws_access_key=os.getenv("B2_ACCOUNT_ID"),
+            aws_secret_access_key=os.getenv("B2_APPLICATION_KEY"),
+            config=config,
+        )
         data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
         temp_folder = str(self.mt_experiments_dir / name)
         # we don't need to delete all existing files - it will just overwrite them
@@ -286,7 +304,13 @@ def download_if_s3_paths(paths: Iterable[S3Path]) -> List[Path]:
                 temp_root = Path(tempfile.TemporaryDirectory().name)
                 temp_root.mkdir()
                 config = Config(read_timeout=600)
-                s3 = boto3.resource("s3", config=config)
+                s3 = boto3.resource(
+                    service_name="s3",
+                    endpoint_url=os.getenv("B2_ENDPOINT"),
+                    aws_access_key=os.getenv("B2_ACCOUNT_ID"),
+                    aws_secret_access_key=os.getenv("B2_APPLICATION_KEY"),
+                    config=config,
+                )
                 data_bucket = s3.Bucket(str(SIL_NLP_ENV.data_dir).strip("\\/"))
                 s3_setup = True
             temp_path = temp_root / path.name
