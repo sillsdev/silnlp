@@ -19,7 +19,7 @@
 	"containerEnv": {
 		"B2_ACCOUNT_ID": "${localEnv:B2_ACCOUNT_ID}",
 		"B2_APPLICATION_KEY": "${localEnv:B2_APPLICATION_KEY}",
-		"B2_ENDPOINT": "https://s3.us-east-001.backblazeb2.com",
+		"B2_ENDPOINT": "https://s3.us-east-005.backblazeb2.com",
 		"CLEARML_API_ACCESS_KEY": "${localEnv:CLEARML_API_ACCESS_KEY}",
 		"CLEARML_API_SECRET_KEY": "${localEnv:CLEARML_API_SECRET_KEY}"
 	},

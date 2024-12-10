@@ -174,11 +174,14 @@ class SilNlpEnv:
             raise Exception(
                 f"No paratext project name is given.  Data still in the cache directory of {self.pt_projects_dir}"
             )
-        config = Config(read_timeout=600)
+        config = Config(
+            read_timeout=600,
+            signature_version="s3v4",
+        )
         s3 = boto3.resource(
             service_name="s3",
             endpoint_url=os.getenv("B2_ENDPOINT"),
-            aws_access_key=os.getenv("B2_ACCOUNT_ID"),
+            aws_access_key_id=os.getenv("B2_ACCOUNT_ID"),
             aws_secret_access_key=os.getenv("B2_APPLICATION_KEY"),
             config=config,
         )
@@ -214,11 +217,14 @@ class SilNlpEnv:
             raise Exception(
                 f"No experiment name is given.  Data still in the cache directory of {self.mt_experiments_dir}"
             )
-        config = Config(read_timeout=600)
+        config = Config(
+            read_timeout=600,
+            signature_version="s3v4",
+        )
         s3 = boto3.resource(
             service_name="s3",
             endpoint_url=os.getenv("B2_ENDPOINT"),
-            aws_access_key=os.getenv("B2_ACCOUNT_ID"),
+            aws_access_key_id=os.getenv("B2_ACCOUNT_ID"),
             aws_secret_access_key=os.getenv("B2_APPLICATION_KEY"),
             config=config,
         )
@@ -253,11 +259,14 @@ class SilNlpEnv:
                 f"No experiment name is given.  Data still in the temp directory of {self.mt_experiments_dir}"
             )
         experiment_path = str(self.mt_dir.relative_to(self.data_dir) / "experiments") + "/"
-        config = Config(read_timeout=600)
+        config = Config(
+            read_timeout=600,
+            signature_version="s3v4",
+        )
         s3 = boto3.resource(
             service_name="s3",
             endpoint_url=os.getenv("B2_ENDPOINT"),
-            aws_access_key=os.getenv("B2_ACCOUNT_ID"),
+            aws_access_key_id=os.getenv("B2_ACCOUNT_ID"),
             aws_secret_access_key=os.getenv("B2_APPLICATION_KEY"),
             config=config,
         )
@@ -303,11 +312,14 @@ def download_if_s3_paths(paths: Iterable[S3Path]) -> List[Path]:
             if not s3_setup:
                 temp_root = Path(tempfile.TemporaryDirectory().name)
                 temp_root.mkdir()
-                config = Config(read_timeout=600)
+                config = Config(
+                    read_timeout=600,
+                    signature_version="s3v4",
+                )
                 s3 = boto3.resource(
                     service_name="s3",
                     endpoint_url=os.getenv("B2_ENDPOINT"),
-                    aws_access_key=os.getenv("B2_ACCOUNT_ID"),
+                    aws_access_key_id=os.getenv("B2_ACCOUNT_ID"),
                     aws_secret_access_key=os.getenv("B2_APPLICATION_KEY"),
                     config=config,
                 )

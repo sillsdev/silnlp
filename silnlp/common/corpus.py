@@ -40,9 +40,11 @@ def get_scripture_parallel_corpus(
     src_sentences: List[str] = []
     trg_sentences: List[str] = []
     indices: List[int] = []
-    with (SIL_NLP_ENV.assets_dir / "vref.txt").open("r", encoding="utf-8") as vref_file, src_file_path.open(
-        "r", encoding="utf-8"
-    ) as src_file, trg_file_path.open("r", encoding="utf-8") as trg_file:
+    with (
+        (SIL_NLP_ENV.assets_dir / "vref.txt").open("r", encoding="utf-8") as vref_file,
+        src_file_path.open("r", encoding="utf-8") as src_file,
+        trg_file_path.open("r", encoding="utf-8") as trg_file,
+    ):
         # Read lines before using zip to catch last lines of src/trg file if the other ends in one or more empty lines
         vref_lines = vref_file.readlines()
         src_lines = src_file.readlines()
