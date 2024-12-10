@@ -12,14 +12,13 @@
 		"--gpus",
 		"all",
 		"-v",
-		"${env:HOME}/.aws:/root/.aws", // Mount user's AWS credentials into the container
+		"${env:HOME}/.b2:/root/.b2", // Mount user's Backblaze B2 credentials into the container
 		"-v",
 		"${env:HOME}/clearml/.clearml/hf-cache:/root/.cache/huggingface"
 	],
 	"containerEnv": {
-		"AWS_REGION": "${localEnv:AWS_REGION}",
-		"AWS_ACCESS_KEY_ID": "${localEnv:AWS_ACCESS_KEY_ID}",
-		"AWS_SECRET_ACCESS_KEY": "${localEnv:AWS_SECRET_ACCESS_KEY}",
+		"B2_ACCOUNT_ID": "${localEnv:B2_ACCOUNT_ID}",
+		"B2_APPLICATION_KEY": "${localEnv:B2_APPLICATION_KEY}",
 		"CLEARML_API_ACCESS_KEY": "${localEnv:CLEARML_API_ACCESS_KEY}",
 		"CLEARML_API_SECRET_KEY": "${localEnv:CLEARML_API_SECRET_KEY}"
 	},
