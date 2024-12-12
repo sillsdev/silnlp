@@ -764,6 +764,17 @@ class OutputGroup:
         return translation_results
 
 
+# class UpdatedPipeline(_TranslationPipeline):
+#     def postprocess(
+#         self,
+#         model_outputs,
+#         return_type=ReturnType.FULL_TEXT,
+#         clean_up_tokenization_spaces=False,
+#         continue_final_message=None,
+#     ):
+#         super().postprocess(model_outputs, clean_up_tokenization_spaces)
+
+
 class HuggingFaceNMTModel(NMTModel):
     def __init__(self, config: HuggingFaceConfig, mixed_precision: bool, num_devices: int) -> None:
         self._config = config
@@ -1114,9 +1125,11 @@ class HuggingFaceNMTModel(NMTModel):
         pipeline = _TranslationPipeline(
             model=model,
             tokenizer=tokenizer,
+            batch_size=16,
             src_lang=lang_codes.get(src_iso, src_iso),
             tgt_lang=lang_codes.get(trg_iso, trg_iso),
             device=0,
+            max_length=200,
         )
 
         num_drafts = self.get_num_drafts()

@@ -190,8 +190,10 @@ class Translator(ABC):
                 empty_sents.append((i, vrefs.pop(i)))
 
         # TranslationResult properties: translation, source/target tokens, confidences, sources, alignment, phrases
-        translation_results = list(self.translate(sentences, src_iso, trg_iso, produce_multiple_translations, vrefs))
-        translations = [[tr.translation for tr in tg] for tg in translation_results]
+        translation_results = [
+            r[0] for r in self.translate(sentences, src_iso, trg_iso, produce_multiple_translations, vrefs)
+        ]
+        translations = [tr.translation for tr in translation_results]
 
         # Add empty sentences back in
         for idx, vref in reversed(empty_sents):
