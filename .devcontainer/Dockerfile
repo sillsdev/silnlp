@@ -23,6 +23,10 @@ RUN apt-get install --no-install-recommends -y \
     gdb \
     curl \
     unzip
+RUN apt-get update
+RUN apt-get install --no-install-recommends -y \
+    less \
+    nano
 # Make some useful symlinks that are expected to exist
 RUN ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python3  & \
     ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python

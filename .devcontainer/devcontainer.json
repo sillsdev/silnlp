@@ -14,7 +14,11 @@
 		"-v",
 		"${env:HOME}/.aws:/root/.aws", // Mount user's AWS credentials into the container
 		"-v",
-		"${env:HOME}/clearml/.clearml/hf-cache:/root/.cache/huggingface"
+		"${env:HOME}/clearml/.clearml/hf-cache:/root/.cache/huggingface",
+		"--cap-add",
+		"SYS_ADMIN",
+		"--device",
+		"/dev/fuse"
 	],
 	"containerEnv": {
 		"AWS_REGION": "${localEnv:AWS_REGION}",
