@@ -274,7 +274,7 @@ class HuggingFaceConfig(Config):
                     "max_source_length": 200,
                     "max_target_length": 200,
                     "gradient_checkpointing": True,
-                    "gradient_checkpointing_kwargs": {"use_reentrant": True},
+                    "gradient_checkpointing_kwargs": {"use_reentrant": False},
                     "save_steps": 1000,
                     "per_device_train_batch_size": 16,
                     "save_strategy": "steps",
@@ -754,6 +754,7 @@ class HuggingFaceNMTModel(NMTModel):
         set_seed(self._config.data["seed"])
         self._dictionary: Optional[Dict[VerseRef, Set[str]]] = None
         self._is_t5 = self._config.model_prefix in SUPPORTED_T5_MODELS
+        self._num_devices = num_devices
 
     def train(self) -> None:
         training_args = self._create_training_arguments()
@@ -779,15 +780,18 @@ class HuggingFaceNMTModel(NMTModel):
             num_labels=0,
             attn_implementation=self._config.params.get("attn_implementation", "eager"),
         )
-        device_map = {
-            "lm_head": 0,
-            "model.shared": 0,
-            "model.encoder": 0,
-            "model.decoder.embed_tokens": 0,
-            "model.decoder.embed_positions": 1,
-            "model.decoder.layers": 1,
-            "model.decoder.layer_norm": 1,
-        }
+        if self._num_devices == 2 and self._config.model_prefix == "facebook/nllb-200":
+            device_map = {
+                "lm_head": 0,
+                "model.shared": 0,
+                "model.encoder": 0,
+                "model.decoder.embed_tokens": 0,
+                "model.decoder.embed_positions": 1,
+                "model.decoder.layers": 1,
+                "model.decoder.layer_norm": 1,
+            }
+        else:
+            device_map = None
         model = cast(
             PreTrainedModel,
             AutoModelForSeq2SeqLM.from_pretrained(self._config.model, config=model_config, device_map=device_map),
@@ -1015,7 +1019,11 @@ class HuggingFaceNMTModel(NMTModel):
         tokenizer = self._config.get_tokenizer()
         model = self._create_inference_model(ckpt, tokenizer)
         pipeline = PretokenizedTranslationPipeline(
-            model=model, tokenizer=tokenizer, src_lang=self._config.test_src_lang, tgt_lang=self._config.test_trg_lang
+            model=model,
+            tokenizer=tokenizer,
+            src_lang=self._config.test_src_lang,
+            tgt_lang=self._config.test_trg_lang,
+            device=0,
         )
         pipeline.model = torch.compile(pipeline.model)
         for input_path, translation_path, vref_path in zip(
@@ -1571,20 +1579,10 @@ class HuggingFaceNMTModel(NMTModel):
             base_model = self._create_tied_embedding_weights(base_model)
             model = PeftModel.from_pretrained(base_model, model_name)
         else:
-            device_map = {
-                "lm_head": 0,
-                "model.shared": 0,
-                "model.encoder": 0,
-                "model.decoder.embed_tokens": 0,
-                "model.decoder.embed_positions": 1,
-                "model.decoder.layers": 1,
-                "model.decoder.layer_norm": 1,
-            }
             model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(
                 model_name,
                 torch_dtype=dtype if self._mixed_precision else "auto",
                 attn_implementation=self._config.params.get("attn_implementation", "eager"),
-                device_map=device_map,
             )
         if self._config.infer.get("better_transformer"):
             model = model.to_bettertransformer()
