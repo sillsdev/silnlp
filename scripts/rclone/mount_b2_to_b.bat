@@ -10,4 +10,4 @@ rem   copy your key and secret to rclone.conf
 
 rem run rclone - execute this file in the rclone folder
 
-call rclone mount --vfs-cache-mode full --use-server-modtime s3silnlp:silnlp S: 
+call rclone mount --vfs-cache-mode full --use-server-modtime b2silnlp:silnlp B: 

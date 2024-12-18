@@ -11,9 +11,14 @@ from typing import Callable, Iterable, List, Optional, Sequence, Union
 import boto3
 from botocore.config import Config
 from dotenv import load_dotenv
-from s3path import S3Path
+from s3path import PureS3Path, S3Path, register_configuration_parameter
 
 load_dotenv()
+
+# Suppress urllib3 warnings about unverified HTTPS requests
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -23,13 +28,12 @@ class SilNlpEnv:
         self.root_dir = Path.home() / ".silnlp"
         self.assets_dir = Path(__file__).parent.parent / "assets"
         self.is_bucket = False
+        self.bucket_service = os.getenv("BUCKET_SERVICE", "").lower()
 
-        # Root data directory
-        self.set_data_dir()
+        self.set_s3_bucket()
 
     def set_data_dir(self, data_dir: Optional[Path] = None):
-        if data_dir is None:
-            data_dir = self.resolve_data_dir()
+        data_dir = self.resolve_data_dir(data_dir)
 
         self.data_dir = pathify(data_dir)
 
@@ -123,46 +127,104 @@ class SilNlpEnv:
         self.align_gold_dir = self.align_dir / "gold"
         self.align_experiments_dir = self.align_dir / "experiments"
 
-    def resolve_data_dir(self) -> Path:
+    def resolve_data_dir(self, data_path) -> Path:
         self.is_bucket = False
-        sil_nlp_data_path = get_env_path("SIL_NLP_DATA_PATH", default="")
-        if sil_nlp_data_path != "":
-            temp_path = Path(sil_nlp_data_path)
+        if data_path != "":
+            temp_path = Path(data_path)
             if temp_path.is_dir():
-                LOGGER.info(f"Using workspace: {sil_nlp_data_path} as per environment variable SIL_NLP_DATA_PATH.")
-                return Path(sil_nlp_data_path)
+                LOGGER.info(f"Using workspace: {data_path} as per environment variable data_path.")
+                return Path(data_path)
             else:
-                temp_s3_path = S3Path(sil_nlp_data_path)
+                temp_s3_path = S3Path(data_path)
                 if temp_s3_path.is_dir():
-                    LOGGER.info(
-                        f"Using s3 workspace: {sil_nlp_data_path} as per environment variable SIL_NLP_DATA_PATH."
-                    )
+                    LOGGER.info(f"Using s3 workspace: {data_path}.")
                     self.is_bucket = True
-                    return S3Path(sil_nlp_data_path)
+                    return S3Path(data_path)
                 else:
                     raise Exception(
-                        f"The path defined by environment variable SIL_NLP_DATA_PATH ({sil_nlp_data_path}) is not a "
+                        f"The path defined by environment variable data_path ({data_path}) is not a "
                         + "real or s3 directory."
                     )
 
         gutenberg_path = Path("G:/Shared drives/Gutenberg")
         if gutenberg_path.is_dir():
-            LOGGER.info(
-                f"Using workspace: {gutenberg_path}.  To change the workspace, set the environment variable "
-                + "SIL_NLP_DATA_PATH."
-            )
+            LOGGER.info(f"Using workspace: {gutenberg_path}.")
             return gutenberg_path
 
-        s3root = S3Path("/silnlp")
+        s3root = S3Path(data_path)
         if s3root.is_dir():
-            LOGGER.info(
-                f"Using s3 workspace workspace: {s3root}.  To change the workspace, set the environment variable "
-                + "SIL_NLP_DATA_PATH."
-            )
+            LOGGER.info(f"Using s3 workspace: {s3root}.")
             self.is_bucket = True
             return s3root
 
         raise FileExistsError("No valid path exists")
+
+    def set_resource(self, bucket_name: str, endpoint_url: str, access_key: str, secret_key: str):
+        resource = boto3.resource(
+            service_name="s3",
+            endpoint_url=endpoint_url,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            config=Config(read_timeout=600),
+            # Verify is false if endpoint_url is an IP address. Aqua/Cheetah connecting to MinIO need this disabled for now.
+            verify=False if re.match(r"https://\d+\.\d+\.\d+\.\d+", endpoint_url) else True,
+        )
+
+        bucket = resource.Bucket(bucket_name)
+        # Tests the connection to the bucket. Delete is used because it fails fast and is free of api cost from Backblaze.
+        bucket.delete_objects(Delete={"Objects": [{"Key": "conn_test_key"}]})
+        register_configuration_parameter(PureS3Path("/"), resource=resource)
+        self.set_data_dir(S3Path(f"/{bucket_name}"))
+        self.bucket = bucket
+
+    def set_s3_bucket(self):
+        # TEMPORARY: This allows users to still connect to AWS S3 if they have not set up MinIO or B2 yet. This will be removed in the future.
+        if self.bucket_service == "aws" or (os.getenv("MINIO_ACCESS_KEY") is None and os.getenv("B2_KEY_ID") is None):
+            LOGGER.warning("Support for AWS S3 will soon be removed. Please set up MinIO and/or B2 credentials.")
+            resource = boto3.resource(
+                service_name="s3",
+                config=Config(read_timeout=600),
+            )
+            bucket = resource.Bucket("silnlp")
+            register_configuration_parameter(PureS3Path("/"), resource=resource)
+            self.set_data_dir(S3Path(f"/silnlp"))
+            self.bucket = bucket
+            self.bucket_service = "aws"
+            return
+
+        if self.bucket_service not in ["", "minio", "b2"]:
+            LOGGER.warning("Optional BUCKET_SERVICE environment variable must be either 'minio' or 'b2' if included.")
+            self.bucket_service = ""
+        if self.bucket_service == "":
+            LOGGER.info("No bucket service specified. Will try MinIO first, then B2.")
+        if self.bucket_service in ["", "minio"]:
+            try:
+                LOGGER.info("Trying to connect to MINIO bucket.")
+                self.set_resource(
+                    "nlp-research",
+                    os.getenv("MINIO_ENDPOINT_URL"),
+                    os.getenv("MINIO_ACCESS_KEY"),
+                    os.getenv("MINIO_SECRET_KEY"),
+                )
+                LOGGER.info("Connected to MINIO bucket.")
+                self.bucket_service = "minio"
+            except Exception as e:
+                LOGGER.info(e)
+                LOGGER.info("MINIO connection failed.")
+        if self.bucket_service in ["", "b2"]:
+            try:
+                LOGGER.info("Trying to connect to B2 bucket.")
+                self.set_resource(
+                    "silnlp",
+                    os.getenv("B2_ENDPOINT_URL"),
+                    os.getenv("B2_KEY_ID"),
+                    os.getenv("B2_APPLICATION_KEY"),
+                )
+                LOGGER.info("Connected to B2 bucket.")
+                self.bucket_service = "b2"
+            except Exception as e:
+                LOGGER.info(e)
+                LOGGER.info("B2 connection failed.")
 
     def copy_pt_project_from_bucket(self, name: Union[str, Path], patterns: Union[str, Sequence[str]] = []):
         if not self.is_bucket:
@@ -174,12 +236,9 @@ class SilNlpEnv:
             raise Exception(
                 f"No paratext project name is given.  Data still in the cache directory of {self.pt_projects_dir}"
             )
-        config = Config(read_timeout=600)
-        s3 = boto3.resource("s3", config=config)
-        data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
         len_silnlp_path = len(pt_projects_path)
         pt_projects_path = pt_projects_path + name
-        objs = list(data_bucket.object_versions.filter(Prefix=pt_projects_path + "/"))
+        objs = list(self.bucket.object_versions.filter(Prefix=pt_projects_path + "/"))
         if len(objs) == 0:
             LOGGER.info("No files found in the bucket under: " + pt_projects_path)
             return
@@ -196,7 +255,7 @@ class SilNlpEnv:
                     LOGGER.debug("File already exists in local cache: " + rel_path)
                 else:
                     LOGGER.info("Downloading " + rel_path)
-                    try_n_times(lambda: data_bucket.download_file(obj.object_key, str(temp_dest_path)))
+                    try_n_times(lambda: self.bucket.download_file(obj.object_key, str(temp_dest_path)))
 
     def copy_experiment_from_bucket(self, name: Union[str, Path], patterns: Union[str, Sequence[str]] = []):
         if not self.is_bucket:
@@ -208,12 +267,9 @@ class SilNlpEnv:
             raise Exception(
                 f"No experiment name is given.  Data still in the cache directory of {self.mt_experiments_dir}"
             )
-        config = Config(read_timeout=600)
-        s3 = boto3.resource("s3", config=config)
-        data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
         len_silnlp_path = len(experiments_path)
         experiment_path = experiments_path + name
-        objs = list(data_bucket.object_versions.filter(Prefix=experiment_path + "/"))
+        objs = list(self.bucket.object_versions.filter(Prefix=experiment_path + "/"))
         if len(objs) == 0:
             LOGGER.info("No files found in the bucket under: " + experiment_path)
             return
@@ -230,7 +286,7 @@ class SilNlpEnv:
                     LOGGER.debug("File already exists in local cache: " + rel_path)
                 else:
                     LOGGER.info("Downloading " + rel_path)
-                    try_n_times(lambda: data_bucket.download_file(obj.object_key, str(temp_dest_path)))
+                    try_n_times(lambda: self.bucket.download_file(obj.object_key, str(temp_dest_path)))
 
     def copy_experiment_to_bucket(self, name: str, patterns: Union[str, Sequence[str]] = [], overwrite: bool = False):
         if not self.is_bucket:
@@ -241,14 +297,11 @@ class SilNlpEnv:
                 f"No experiment name is given.  Data still in the temp directory of {self.mt_experiments_dir}"
             )
         experiment_path = str(self.mt_dir.relative_to(self.data_dir) / "experiments") + "/"
-        config = Config(read_timeout=600)
-        s3 = boto3.resource("s3", config=config)
-        data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
         temp_folder = str(self.mt_experiments_dir / name)
         # we don't need to delete all existing files - it will just overwrite them
         len_exp_dir = len(str(self.mt_experiments_dir))
         files_already_in_s3 = set()
-        for obj in data_bucket.object_versions.filter(Prefix=experiment_path + name):
+        for obj in self.bucket.object_versions.filter(Prefix=experiment_path + name):
             files_already_in_s3.add(str(obj.object_key))
 
         if isinstance(patterns, str):
@@ -264,7 +317,7 @@ class SilNlpEnv:
                         LOGGER.debug("File already exists in S3 bucket: " + dest_file)
                     else:
                         LOGGER.info("Uploading " + dest_file)
-                        try_n_times(lambda: data_bucket.upload_file(source_file, dest_file))
+                        try_n_times(lambda: self.bucket.upload_file(source_file, dest_file))
 
     def get_source_experiment_path(self, tmp_path: Path) -> str:
         end_of_path = str(tmp_path)[len(str(self.mt_experiments_dir)) :]
@@ -273,26 +326,23 @@ class SilNlpEnv:
             source_path = source_path[1:]
         return source_path
 
+    def download_if_s3_paths(self, paths: Iterable[S3Path]) -> List[Path]:
+        return_paths = []
+        s3_setup = False
 
-def download_if_s3_paths(paths: Iterable[S3Path]) -> List[Path]:
-    return_paths = []
-    s3_setup = False
-
-    for path in paths:
-        if type(path) is not S3Path:
-            return_paths.append(path)
-        else:
-            if not s3_setup:
-                temp_root = Path(tempfile.TemporaryDirectory().name)
-                temp_root.mkdir()
-                config = Config(read_timeout=600)
-                s3 = boto3.resource("s3", config=config)
-                data_bucket = s3.Bucket(str(SIL_NLP_ENV.data_dir).strip("\\/"))
-                s3_setup = True
-            temp_path = temp_root / path.name
-            try_n_times(lambda: data_bucket.download_file(path.key, str(temp_path)))
-            return_paths.append(temp_path)
-    return return_paths
+        for path in paths:
+            if type(path) is not S3Path:
+                return_paths.append(path)
+            else:
+                if not s3_setup:
+                    temp_root = Path(tempfile.TemporaryDirectory().name)
+                    temp_root.mkdir()
+                    self.set_s3_bucket()
+                    s3_setup = True
+                temp_path = temp_root / path.name
+                try_n_times(lambda: self.bucket.download_file(path.key, str(temp_path)))
+                return_paths.append(temp_path)
+        return return_paths
 
 
 def try_n_times(func: Callable, n=10):
