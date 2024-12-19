@@ -163,11 +163,8 @@ class SilNlpEnv:
             config=Config(read_timeout=600),
         )
         bucket = resource.Bucket(bucket_name)
-        # Tests the connection to the bucket. Put and delete are used because they fail fast and are free of api cost from Backblaze.
-        random_suffix = str(int(time.time())) + "_" + str(os.getpid())
-        test_key = f"connection_test_{random_suffix}"
-        bucket.put_object(Key=test_key, Body=b"test", ACL="private")
-        bucket.delete_objects(Delete={"Objects": [{"Key": test_key}]})
+        # Tests the connection to the bucket. Delete is used because it fails fast and is free of api cost from Backblaze.
+        bucket.delete_objects(Delete={"Objects": [{"Key": "conn_test_key"}]})
         register_configuration_parameter(PureS3Path("/"), resource=resource)
         self.set_data_dir(S3Path(f"/{bucket_name}"))
         self.bucket = bucket
