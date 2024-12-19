@@ -23,6 +23,7 @@ class SilNlpEnv:
         self.root_dir = Path.home() / ".silnlp"
         self.assets_dir = Path(__file__).parent.parent / "assets"
         self.is_bucket = False
+        self.bucket_service = os.getenv("BUCKET_SERVICE", "").lower()
 
         self.set_s3_bucket()
 
@@ -172,25 +173,39 @@ class SilNlpEnv:
         self.bucket = bucket
 
     def set_s3_bucket(self):
-        try:
-            LOGGER.info("Trying to connect to MINIO bucket.")
-            self.set_resource(
-                "nlp-research",
-                os.getenv("MINIO_ENDPOINT_URL"),
-                os.getenv("MINIO_ACCESS_KEY"),
-                os.getenv("MINIO_SECRET_KEY"),
-            )
-            LOGGER.info("Connected to MINIO bucket.")
-        except Exception as e:
-            LOGGER.info(e)
-            LOGGER.info("MINIO connection failed. Trying to connect to B2 bucket.")
-            self.set_resource(
-                "silnlp",
-                os.getenv("B2_ENDPOINT_URL"),
-                os.getenv("B2_KEY_ID"),
-                os.getenv("B2_APPLICATION_KEY"),
-            )
-            LOGGER.info("Connected to B2 bucket.")
+        if self.bucket_service not in ["", "minio", "b2"]:
+            LOGGER.warning("Optional BUCKET_SERVICE environment variable must be either 'minio' or 'b2' if included.")
+            self.bucket_service = ""
+        if self.bucket_service == "":
+            LOGGER.info("No bucket service specified. Will try MinIO first, then B2.")
+        if self.bucket_service in ["", "minio"]:
+            try:
+                LOGGER.info("Trying to connect to MINIO bucket.")
+                self.set_resource(
+                    "nlp-research",
+                    os.getenv("MINIO_ENDPOINT_URL"),
+                    os.getenv("MINIO_ACCESS_KEY"),
+                    os.getenv("MINIO_SECRET_KEY"),
+                )
+                LOGGER.info("Connected to MINIO bucket.")
+                self.bucket_service = "minio"
+            except Exception as e:
+                LOGGER.info(e)
+                LOGGER.info("MINIO connection failed.")
+        if self.bucket_service in ["", "b2"]:
+            try:
+                LOGGER.info("Trying to connect to B2 bucket.")
+                self.set_resource(
+                    "silnlp",
+                    os.getenv("B2_ENDPOINT_URL"),
+                    os.getenv("B2_KEY_ID"),
+                    os.getenv("B2_APPLICATION_KEY"),
+                )
+                LOGGER.info("Connected to B2 bucket.")
+                self.bucket_service = "b2"
+            except Exception as e:
+                LOGGER.info(e)
+                LOGGER.info("B2 connection failed.")
 
     def copy_pt_project_from_bucket(self, name: Union[str, Path], patterns: Union[str, Sequence[str]] = []):
         if not self.is_bucket:
