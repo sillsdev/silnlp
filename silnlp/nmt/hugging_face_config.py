@@ -274,7 +274,7 @@ class HuggingFaceConfig(Config):
                     "max_source_length": 200,
                     "max_target_length": 200,
                     "gradient_checkpointing": True,
-                    "gradient_checkpointing_kwargs": {"use_reentrant": False},
+                    "gradient_checkpointing_kwargs": {"use_reentrant": True},
                     "save_steps": 1000,
                     "per_device_train_batch_size": 16,
                     "save_strategy": "steps",
