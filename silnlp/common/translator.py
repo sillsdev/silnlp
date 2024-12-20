@@ -29,6 +29,7 @@ from machine.translation import TranslationResult
 
 from .corpus import load_corpus, write_corpus
 from .paratext import get_book_path, get_iso, get_project_dir
+from .usfm_preservation import AttentionUsfmInserter, StatisticalUsfmInserter
 
 LOGGER = logging.getLogger(__package__ + ".translate")
 nltk.download("punkt")
@@ -223,166 +224,25 @@ class Translator(ABC):
                 sentences.pop(i)
                 empty_sents.append((i, vrefs.pop(i)))
 
-        # NOTE: Parse sentences
-        tokenizer = UsfmTokenizer(src_settings.stylesheet)
-        sentence_toks = [tokenizer.tokenize(sent) for sent in sentences]
+        statistical = False
+        if statistical:
+            usfm_inserter = StatisticalUsfmInserter(sentences, vrefs, src_settings.stylesheet, "eflomal")
+        else:
+            usfm_inserter = AttentionUsfmInserter(sentences, vrefs, src_settings.stylesheet)
+        text_only_src_sents = usfm_inserter.extract_markers()
 
-        to_delete = ["fig"]
-        inline_markers = []  # NOTE: (sent_idx, start idx in text only sent, tok (inc. \s and spaces))
-        text_only_src_sents = ["" for _ in sentence_toks]
-        for i, toks in enumerate(sentence_toks):
-            ignore_scope = None
-            for tok in toks:
-                if ignore_scope is not None:
-                    if tok.type == UsfmTokenType.END and tok.marker[:-1] == ignore_scope.marker:
-                        ignore_scope = None
-                elif tok.type == UsfmTokenType.NOTE or (
-                    tok.type == UsfmTokenType.CHARACTER and tok.marker in to_delete
-                ):
-                    ignore_scope = tok
-                elif tok.type in [UsfmTokenType.PARAGRAPH, UsfmTokenType.CHARACTER, UsfmTokenType.END]:
-                    inline_markers.append((i, len(text_only_src_sents[i]), tok.to_usfm()))
-                elif tok.type == UsfmTokenType.TEXT:
-                    text_only_src_sents[i] += tok.text
-        print("\ninline markers")
-        for m in inline_markers:
-            print(m)
-
-        # TranslationResult properties: translation, source/target tokens, confidences, sources, alignment, phrases
         translation_groups = self.translate(text_only_src_sents, src_iso, trg_iso, produce_multiple_translations, vrefs)
         translation_results = [r[0] for r in translation_groups]
-        translations = [[tr.translation] for tr in translation_results]
+        translations = [tr.translation for tr in translation_results]
 
-        # NOTE: Map each token to a character range in the original strings
-        # tokenizer: PreTrainedTokenizer = self._model._config.get_tokenizer()
-        src_tok_ranges = []
-        trg_tok_ranges = []
-        for sent, tr in zip(text_only_src_sents, translation_results):
-            # look at hf BatchEncoding methods (return type of tokenizer("text")) for alternatives if not working
-            if (
-                "".join(tr.source_tokens).replace("▁", " ")[1:]
-                != sent  # orig: "".join(tr.source_tokens)[1:].replace("▁", " ")
-                or "".join(tr.target_tokens).replace("▁", " ")[1:] != tr.translation
-            ):
-                print("bad")
-                print(tr.source_tokens)
-                print("".join(tr.source_tokens).replace("▁", " ")[1:])
-                print(sent)
-                print(tr.target_tokens)
-                print("".join(tr.target_tokens).replace("▁", " ")[1:])
-                print(tr.translation)
-            src_sent_tok_ranges = [(0, len(tr.source_tokens[0]) - 1)]
-            trg_sent_tok_ranges = [(0, len(tr.target_tokens[0]) - 1)]
-            for tok in tr.source_tokens[1:]:
-                if "▁" in tok[1:]:
-                    print("bad2")
-                src_sent_tok_ranges.append(
-                    (src_sent_tok_ranges[-1][1] + (1 if tok[0] == "▁" else 0), src_sent_tok_ranges[-1][1] + len(tok))
-                )
-            src_tok_ranges.append(src_sent_tok_ranges)
-            for tok in tr.target_tokens[1:]:
-                if "▁" in tok[1:]:
-                    print("bad2_trg")
-                trg_sent_tok_ranges.append(
-                    (trg_sent_tok_ranges[-1][1] + (1 if tok[0] == "▁" else 0), trg_sent_tok_ranges[-1][1] + len(tok))
-                )
-            trg_tok_ranges.append(trg_sent_tok_ranges)
+        rows = usfm_inserter.construct_rows(translation_results, vrefs)
 
-        """NOTE: Match markers to their closest token idx"""
-        toks_after_markers = []
-        for marker in inline_markers:
-            sent_idx, start_idx, _ = marker
-            for i, tok_range in reversed(list(enumerate(src_tok_ranges[sent_idx]))):
-                if tok_range[0] <= start_idx or i == 0:  # should this be < and then add i+1?
-                    toks_after_markers.append(i)
-                    break
-        print("\nsrc toks after markers")
-        print(toks_after_markers)
-        for m, tok in zip(inline_markers, toks_after_markers):
-            print(m)
-            print(translation_results[m[0]].source_tokens[tok])
-            try:
-                print(translation_results[m[0]].source_tokens[tok - 1 : tok + 2])
-            except:
-                pass
-            print(sentences[m[0]])
-
-        """NOTE: Decide where to reinsert markers"""
-        # seems like each target word is aligned to a single source word
-        # so, a source word can be aligned to 0, 1, or more target words
-        trg_toks_after_markers = []
-        for idx, (sent_idx, _, _) in zip(toks_after_markers, inline_markers):
-            offset = 0
-            while True:
-                try:
-                    # if aligning with a token before the marker, get the last target token it aligns to
-                    # if aligning with a token after the marker, get the first target token it aligns to
-                    pos = -1 if offset < 0 else 0
-                    trg_toks_after_markers.append(
-                        list(translation_results[sent_idx].alignment.get_row_aligned_indices(idx + offset))[pos]
-                    )
-                    # TODO: could try adjusting trg idx to be "closer" to the marker (i.e. subtracting for 3 for offset 3)
-                    break
-                except:
-                    # outward expanding search: offset = 0, -1, 1, -2, 2, ...
-                    offset = -offset - (1 if offset >= 0 else 0)
-        print("\ntrg toks after markers")
-        print(trg_toks_after_markers)
-
-        to_insert = [[] for _ in vrefs]
-        # NOTE: Collect the markers to be inserted
-        for mark, next_trg_tok in zip(inline_markers, trg_toks_after_markers):
-            sent_idx, _, marker = mark
-            trg_str_idx = trg_tok_ranges[sent_idx][next_trg_tok][0]
-
-            # figure out the order of the markers in the sentence to handle ambiguity for directly adjacent markers
-            insert_place = 0
-            while insert_place < len(to_insert[sent_idx]) and to_insert[sent_idx][insert_place][0] <= trg_str_idx:
-                insert_place += 1
-
-            to_insert[sent_idx].insert(insert_place, (trg_str_idx, marker))
-        print("\nto insert")
-        for inserts, vref in zip(to_insert, vrefs):
-            if len(inserts) > 0:
-                print(vref, inserts)
-
-        # NOTE: Construct rows to update the USFM file with
-        # Create rows for each paragraph marker and insert character markers back into text
-        rows = []
-        for ref, tr, inserts in zip(vrefs, translation_results, to_insert):
-            trg_sent = tr.translation
-            if len(inserts) == 0:
-                rows.append(([ref], trg_sent))
-                continue
-
-            row_texts = [trg_sent[: inserts[0][0]]]
-            for i, (insert_idx, marker) in enumerate(inserts):
-                is_char_marker = (
-                    src_settings.stylesheet.get_tag(marker.strip(" \\+*")).style_type == UsfmStyleType.CHARACTER
-                )
-                if not is_char_marker:
-                    row_texts.append("")
-
-                row_text = (
-                    (marker if is_char_marker else "")
-                    + (" " if "*" in marker and insert_idx < len(trg_sent) and trg_sent[insert_idx].isalpha() else "")
-                    + (trg_sent[insert_idx : inserts[i + 1][0]] if i + 1 < len(inserts) else trg_sent[insert_idx:])
-                )
-                # don't want a space before an end marker
-                if i + 1 < len(inserts) and "*" in inserts[i + 1][1] and len(row_text) > 0 and row_text[-1] == " ":
-                    row_text = row_text[:-1]
-                row_texts[-1] += row_text
-
-            for row_text in row_texts:
-                rows.append(([ref], row_text))
-        print("\nrows")
-        for r in rows:
-            print(r)
-
-        """NOTE: Update USFM and write out"""
-        with open(src_file_path, encoding="utf-8-sig") as f:
+        # Update USFM and write out
+        with open(src_file_path, encoding=src_settings.encoding) as f:
             usfm = f.read()
-        handler = ParagraphUpdateUsfmParserHandler(rows, behavior=UpdateUsfmBehavior.PREFER_NEW)
+        handler = ParagraphUpdateUsfmParserHandler(
+            rows, behavior=UpdateUsfmBehavior.STRIP_EXISTING
+        )  # does this take care of empty sentences?
         parse_usfm(usfm, handler, src_settings.stylesheet, src_settings.versification, preserve_whitespace=False)
         usfm_out = handler.get_usfm(src_settings.stylesheet)
 
