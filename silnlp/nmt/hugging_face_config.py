@@ -1111,8 +1111,10 @@ class HuggingFaceNMTModel(NMTModel):
         vrefs: Optional[Iterable[VerseRef]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Iterable[TranslationGroup]:
-        tokenizer = PunctuationNormalizingTokenizer(self._config.get_tokenizer())
-        # tokenizer = self._config.get_tokenizer()
+        tokenizer = self._config.get_tokenizer()
+        if(isinstance(tokenizer, (NllbTokenizer, NllbTokenizerFast))):
+          tokenizer = PunctuationNormalizingTokenizer(tokenizer)
+        
         model = self._create_inference_model(ckpt, tokenizer)
         if model.config.max_length != None and model.config.max_length < 512:
             model.config.max_length = 512
