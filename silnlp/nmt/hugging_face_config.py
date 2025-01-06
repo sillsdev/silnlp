@@ -9,7 +9,19 @@ from copy import deepcopy
 from enum import Enum
 from itertools import repeat
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+    cast,
+)
 
 import datasets.utils.logging as datasets_logging
 import evaluate
@@ -23,7 +35,10 @@ from datasets import Dataset
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
 from sacremoses import MosesPunctNormalizer
 from tokenizers import AddedToken, NormalizedString, Regex
-from tokenizers.implementations import SentencePieceBPETokenizer, SentencePieceUnigramTokenizer
+from tokenizers.implementations import (
+    SentencePieceBPETokenizer,
+    SentencePieceUnigramTokenizer,
+)
 from tokenizers.normalizers import Normalizer
 from torch import Tensor, TensorType, nn, optim
 from torch.utils.data import Sampler
@@ -45,6 +60,7 @@ from transformers import (
     PreTrainedModel,
     PreTrainedTokenizer,
     PreTrainedTokenizerBase,
+    PreTrainedTokenizerFast,
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
     T5Tokenizer,
@@ -71,7 +87,13 @@ from transformers.utils.logging import tqdm
 from ..common.corpus import Term, count_lines, get_terms
 from ..common.environment import SIL_NLP_ENV, download_if_s3_paths
 from ..common.translator import DraftGroup, TranslationGroup
-from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
+from ..common.utils import (
+    NoiseMethod,
+    ReplaceRandomToken,
+    Side,
+    create_noise_methods,
+    merge_dict,
+)
 from .config import CheckpointType, Config, DataFile, NMTModel
 from .tokenizer import NullTokenizer, Tokenizer
 
@@ -1090,6 +1112,9 @@ class HuggingFaceNMTModel(NMTModel):
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Iterable[TranslationGroup]:
         tokenizer = self._config.get_tokenizer()
+        if(isinstance(tokenizer, (NllbTokenizer, NllbTokenizerFast))):
+          tokenizer = PunctuationNormalizingTokenizer(tokenizer)
+        
         model = self._create_inference_model(ckpt, tokenizer)
         if model.config.max_length != None and model.config.max_length < 512:
             model.config.max_length = 512
@@ -1621,6 +1646,40 @@ class HuggingFaceNMTModel(NMTModel):
                 model.generation_config.forced_bos_token_id = forced_bos_token_id
 
         return model, tokenizer
+
+
+class PunctuationNormalizingTokenizer(PreTrainedTokenizerFast):
+    def __init__(self, tokenizer: PreTrainedTokenizerFast) -> None:
+        self._wrapped_tokenizer = tokenizer
+        self._tokenizer = tokenizer._tokenizer
+        self._mpn = MosesPunctNormalizer()
+        self._mpn.substitutions = [(re.compile(r), sub) for r, sub in self._mpn.substitutions]
+        self._pad_token = tokenizer._pad_token
+
+    def __call__(
+        self,
+        text: Union[str, List[str], List[List[str]]] = None,
+        text_pair: Union[str, List[str], List[List[str]]] = None,
+        text_target: Union[str, List[str], List[List[str]]] = None,
+        text_pair_target: Union[str, List[str], List[List[str]]] = None,
+        **kwargs,
+    ) -> BatchEncoding:
+        if text is None:
+            raise ValueError('"text" input to PunctuationNormalizingTokenizer cannot be None')
+
+        if isinstance(text, str):
+            text = self._mpn.normalize(text)
+        elif isinstance(text, (list, tuple)) and len(text) > 0:
+            if isinstance(text[0], (list, tuple)) and len(text[0]) > 0:
+                text = [[self._mpn.normalize(item) for item in row] for row in text]
+            text = [self._mpn.normalize(item) for item in text]
+        return self._wrapped_tokenizer(text, **kwargs)
+
+    def token_to_id(self, token: str) -> int:
+        return self._wrapped_tokenizer.token_to_id(token)
+
+    def decode(self, *args, **kwargs):
+        return self._wrapped_tokenizer.decode(*args, **kwargs)
 
 
 class HuggingFaceTokenizer(Tokenizer):
