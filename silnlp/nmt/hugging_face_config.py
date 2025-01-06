@@ -30,6 +30,7 @@ import pandas as pd
 import torch
 import transformers.utils.logging as transformers_logging
 import yaml
+from accelerate import infer_auto_device_map, init_empty_weights
 from accelerate.utils.memory import should_reduce_batch_size
 from datasets import Dataset
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
@@ -775,6 +776,7 @@ class HuggingFaceNMTModel(NMTModel):
         set_seed(self._config.data["seed"])
         self._dictionary: Optional[Dict[VerseRef, Set[str]]] = None
         self._is_t5 = self._config.model_prefix in SUPPORTED_T5_MODELS
+        self._num_devices = num_devices
 
     def train(self) -> None:
         training_args = self._create_training_arguments()
@@ -800,9 +802,21 @@ class HuggingFaceNMTModel(NMTModel):
             num_labels=0,
             attn_implementation=self._config.params.get("attn_implementation", "eager"),
         )
+        if self._num_devices == 2 and self._config.model_prefix == "facebook/nllb-200":
+            device_map = {
+                "lm_head": 0,
+                "model.shared": 0,
+                "model.encoder": 0,
+                "model.decoder.embed_tokens": 0,
+                "model.decoder.embed_positions": 1,
+                "model.decoder.layers": 1,
+                "model.decoder.layer_norm": 1,
+            }
+        else:
+            device_map = None
         model = cast(
             PreTrainedModel,
-            AutoModelForSeq2SeqLM.from_pretrained(self._config.model, config=model_config),
+            AutoModelForSeq2SeqLM.from_pretrained(self._config.model, config=model_config, device_map=device_map),
         )
         if self._config.train.get("better_transformer"):
             model = model.to_bettertransformer()
