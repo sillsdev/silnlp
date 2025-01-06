@@ -1653,6 +1653,7 @@ class PunctuationNormalizingTokenizer(PreTrainedTokenizerFast):
         self._wrapped_tokenizer = tokenizer
         self._tokenizer = tokenizer._tokenizer
         self._mpn = MosesPunctNormalizer()
+        self._mpn.substitutions = [(re.compile(r), sub) for r, sub in self._mpn.substitutions]
         self._pad_token = tokenizer._pad_token
 
     def __call__(
