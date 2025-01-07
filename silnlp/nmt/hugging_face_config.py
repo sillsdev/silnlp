@@ -9,19 +9,7 @@ from copy import deepcopy
 from enum import Enum
 from itertools import repeat
 from pathlib import Path
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    TypeVar,
-    Union,
-    cast,
-)
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
 
 import datasets.utils.logging as datasets_logging
 import evaluate
@@ -36,10 +24,7 @@ from datasets import Dataset
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
 from sacremoses import MosesPunctNormalizer
 from tokenizers import AddedToken, NormalizedString, Regex
-from tokenizers.implementations import (
-    SentencePieceBPETokenizer,
-    SentencePieceUnigramTokenizer,
-)
+from tokenizers.implementations import SentencePieceBPETokenizer, SentencePieceUnigramTokenizer
 from tokenizers.normalizers import Normalizer
 from torch import Tensor, TensorType, nn, optim
 from torch.utils.data import Sampler
@@ -88,13 +73,7 @@ from transformers.utils.logging import tqdm
 from ..common.corpus import Term, count_lines, get_terms
 from ..common.environment import SIL_NLP_ENV, download_if_s3_paths
 from ..common.translator import DraftGroup, TranslationGroup
-from ..common.utils import (
-    NoiseMethod,
-    ReplaceRandomToken,
-    Side,
-    create_noise_methods,
-    merge_dict,
-)
+from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
 from .config import CheckpointType, Config, DataFile, NMTModel
 from .tokenizer import NullTokenizer, Tokenizer
 
@@ -800,7 +779,7 @@ class HuggingFaceNMTModel(NMTModel):
             label2id={},
             id2label={},
             num_labels=0,
-            attn_implementation=self._config.params.get("attn_implementation", "eager"),
+            attn_implementation=self._config.params.get("attn_implementation", "sdpa"),
         )
         if self._num_devices == 2 and self._config.model_prefix == "facebook/nllb-200":
             device_map = {
@@ -1126,9 +1105,9 @@ class HuggingFaceNMTModel(NMTModel):
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Iterable[TranslationGroup]:
         tokenizer = self._config.get_tokenizer()
-        if(isinstance(tokenizer, (NllbTokenizer, NllbTokenizerFast))):
-          tokenizer = PunctuationNormalizingTokenizer(tokenizer)
-        
+        if isinstance(tokenizer, (NllbTokenizer, NllbTokenizerFast)):
+            tokenizer = PunctuationNormalizingTokenizer(tokenizer)
+
         model = self._create_inference_model(ckpt, tokenizer)
         if model.config.max_length != None and model.config.max_length < 512:
             model.config.max_length = 512
@@ -1595,7 +1574,7 @@ class HuggingFaceNMTModel(NMTModel):
             base_model = AutoModelForSeq2SeqLM.from_pretrained(
                 self._config.model,
                 torch_dtype=dtype if self._mixed_precision else "auto",
-                attn_implementation=self._config.params.get("attn_implementation", "eager"),
+                attn_implementation=self._config.params.get("attn_implementation", "sdpa"),
             )
             if len(tokenizer) != base_model.get_input_embeddings().weight.size(dim=0):
                 base_model.resize_token_embeddings(
@@ -1607,7 +1586,7 @@ class HuggingFaceNMTModel(NMTModel):
             model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(
                 model_name,
                 torch_dtype=dtype if self._mixed_precision else "auto",
-                attn_implementation=self._config.params.get("attn_implementation", "eager"),
+                attn_implementation=self._config.params.get("attn_implementation", "sdpa"),
             )
         if self._config.infer.get("better_transformer"):
             model = model.to_bettertransformer()
