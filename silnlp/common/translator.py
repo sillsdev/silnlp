@@ -224,7 +224,7 @@ class Translator(ABC):
                 sentences.pop(i)
                 empty_sents.append((i, vrefs.pop(i)))
 
-        statistical = False
+        statistical = True
         if statistical:
             usfm_inserter = StatisticalUsfmInserter(sentences, vrefs, src_settings.stylesheet, "eflomal")
         else:
@@ -241,7 +241,7 @@ class Translator(ABC):
         with open(src_file_path, encoding=src_settings.encoding) as f:
             usfm = f.read()
         handler = ParagraphUpdateUsfmParserHandler(
-            rows, behavior=UpdateUsfmBehavior.STRIP_EXISTING
+            rows, behavior=UpdateUsfmBehavior.PREFER_NEW
         )  # does this take care of empty sentences?
         parse_usfm(usfm, handler, src_settings.stylesheet, src_settings.versification, preserve_whitespace=False)
         usfm_out = handler.get_usfm(src_settings.stylesheet)

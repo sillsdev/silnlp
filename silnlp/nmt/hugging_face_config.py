@@ -1540,7 +1540,7 @@ class HuggingFaceNMTModel(NMTModel):
             force_words_ids=force_words_ids,
             batch_size=batch_size,
             return_text=not return_tensors,
-            return_tensors=return_tensors,
+            # return_tensors=return_tensors,
         )
 
         if num_return_sequences == 1:
