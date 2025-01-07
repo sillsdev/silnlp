@@ -1,6 +1,7 @@
 import argparse
 import re
 import time
+from typing import Tuple
 
 import boto3
 
@@ -8,10 +9,48 @@ MONTH_IN_SECONDS = 2628288
 
 
 def clean_s3(max_months: int, dry_run: bool) -> None:
-    max_age = max_months * MONTH_IN_SECONDS
+    print("Cleaning research")
+    research_total_deleted, research_total_space_freed = clean_research(max_months, dry_run)
+    print("Cleaning production")
+    production_total_deleted, production_total_space_freed = clean_production(max_months, dry_run)
+
+    total_deleted = research_total_deleted + production_total_deleted
+    storage_space_freed = research_total_space_freed + production_total_space_freed
+
+    print("Research:")
+    print("Number of files " + ("that would be " if dry_run else "") + f"deleted: {research_total_deleted}")
+    print(
+        "Storage space " + ("that would be " if dry_run else "") + f"freed (GB): {research_total_space_freed / 2 ** 30}"
+    )
+    print("Production:")
+    print("Number of files " + ("that would be " if dry_run else "") + f"deleted: {production_total_deleted}")
+    print(
+        "Storage space "
+        + ("that would be " if dry_run else "")
+        + f"freed (GB): {production_total_space_freed / 2 ** 30}"
+    )
+    print("Total:")
+    print("Number of files " + ("that would be " if dry_run else "") + f"deleted: {total_deleted}")
+    print("Storage space " + ("that would be " if dry_run else "") + f"freed (GB): {storage_space_freed / 2 ** 30}")
+
+
+def clean_research(max_months: int, dry_run: bool) -> Tuple[int, int]:
     regex_to_delete = re.compile(
         r"^MT/experiments/.+/run/(checkpoint.*(pytorch_model\.bin|\.safetensors)$|ckpt.+\.(data-00000-of-00001|index)$)"
     )
+    return _delete_data(max_months, dry_run, regex_to_delete)
+
+
+def clean_production(max_months: int, dry_run: bool) -> Tuple[int, int]:
+    regex_to_delete = re.compile(
+        r"^(production|dev|int-qa|ext-qa)/builds/.+"
+        r"(pretranslate.src.json|pretranslate.tgt.json|train.src.txt|train.tgt.txt)"
+    )
+    return _delete_data(max_months, dry_run, regex_to_delete)
+
+
+def _delete_data(max_months: int, dry_run: bool, regex_to_delete: str) -> Tuple[int, int]:
+    max_age = max_months * MONTH_IN_SECONDS
 
     s3 = boto3.client("s3")
     paginator = s3.get_paginator("list_objects_v2")
@@ -32,8 +71,7 @@ def clean_s3(max_months: int, dry_run: bool) -> None:
                 print("Deleted")
             total_deleted += 1
             storage_space_freed += obj["Size"]
-    print("Number of files " + ("that would be " if dry_run else "") + f"deleted: {total_deleted}")
-    print("Storage space " + ("that would be " if dry_run else "") + f"freed (GB): {storage_space_freed / 2 ** 30}")
+    return total_deleted, storage_space_freed
 
 
 def main() -> None:
