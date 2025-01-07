@@ -71,7 +71,7 @@ from transformers.utils import (
 from transformers.utils.logging import tqdm
 
 from ..common.corpus import Term, count_lines, get_terms
-from ..common.environment import SIL_NLP_ENV, download_if_s3_paths
+from ..common.environment import SIL_NLP_ENV
 from ..common.translator import DraftGroup, TranslationGroup
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
 from .config import CheckpointType, Config, DataFile, NMTModel
@@ -452,7 +452,7 @@ class HuggingFaceConfig(Config):
         self, file_paths, vocab_size
     ) -> Tuple[List[str], Union[SentencePieceBPETokenizer, SentencePieceUnigramTokenizer]]:
         assert self._tokenizer is not None
-        files = [str(f) for f in download_if_s3_paths(file_paths)]
+        files = [str(f) for f in SIL_NLP_ENV.download_if_s3_paths(file_paths)]
         sp_tokenizer = self._train_sp_tokenizer(files, vocab_size)
         sp_keys, tok_keys = sp_tokenizer.get_vocab().keys(), self._tokenizer.get_vocab().keys()
         missing_tokens = sorted(list(set(sp_keys) - set(tok_keys)))
