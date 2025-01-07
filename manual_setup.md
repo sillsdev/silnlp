@@ -89,6 +89,7 @@ See [ClearML setup](clear_ml_setup.md).
 
 ### Additional Environment Variables
 * Set the following environment variables with your respective credentials: CLEARML_API_ACCESS_KEY, CLEARML_API_SECRET_KEY, B2_KEY_ID, B2_APPLICATION_KEY, MINIO_ACCESS_KEY, MINIO_SECRET_KEY.
+* Set SIL_NLP_DATA_PATH to "/silnlp" if you are not using B2 or MinIO and will be storing files locally.
 * Set CLEARML_API_HOST to "https://api.sil.hosted.allegro.ai".
 * Set B2_ENDPOINT_URL to https://s3.us-east-005.backblazeb2.com
 * Set MINIO_ENDPOINT_URL to https://truenas.psonet.languagetechnology.org:9000

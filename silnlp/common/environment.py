@@ -30,10 +30,11 @@ class SilNlpEnv:
         self.is_bucket = False
         self.bucket_service = os.getenv("BUCKET_SERVICE", "").lower()
 
-        self.set_s3_bucket()
+        self.set_data_dir()
 
     def set_data_dir(self, data_dir: Optional[Path] = None):
-        data_dir = self.resolve_data_dir(data_dir)
+        if data_dir is None:
+            data_dir = self.resolve_data_dir()
 
         self.data_dir = pathify(data_dir)
 
@@ -127,31 +128,28 @@ class SilNlpEnv:
         self.align_gold_dir = self.align_dir / "gold"
         self.align_experiments_dir = self.align_dir / "experiments"
 
-    def resolve_data_dir(self, data_path) -> Path:
+    def resolve_data_dir(self) -> Path:
         self.is_bucket = False
-        if data_path != "":
-            temp_path = Path(data_path)
+        sil_nlp_data_path = os.getenv("SIL_NLP_DATA_PATH", default="")
+        if sil_nlp_data_path != "" and self.bucket_service == "":
+            temp_path = Path(sil_nlp_data_path)
             if temp_path.is_dir():
-                LOGGER.info(f"Using workspace: {data_path} as per environment variable data_path.")
-                return Path(data_path)
+                LOGGER.info(f"Using workspace: {sil_nlp_data_path} as per environment variable SIL_NLP_DATA_PATH.")
+                return Path(sil_nlp_data_path)
             else:
-                temp_s3_path = S3Path(data_path)
-                if temp_s3_path.is_dir():
-                    LOGGER.info(f"Using s3 workspace: {data_path}.")
-                    self.is_bucket = True
-                    return S3Path(data_path)
-                else:
-                    raise Exception(
-                        f"The path defined by environment variable data_path ({data_path}) is not a "
-                        + "real or s3 directory."
-                    )
+                raise Exception(
+                    f"The path defined by environment variable SIL_NLP_DATA_PATH ({sil_nlp_data_path}) is not a "
+                    + "real directory."
+                )
 
         gutenberg_path = Path("G:/Shared drives/Gutenberg")
         if gutenberg_path.is_dir():
             LOGGER.info(f"Using workspace: {gutenberg_path}.")
             return gutenberg_path
 
-        s3root = S3Path(data_path)
+        self.set_s3_bucket()
+        sil_nlp_data_path = f"/{self.bucket.name}"
+        s3root = S3Path(sil_nlp_data_path)
         if s3root.is_dir():
             LOGGER.info(f"Using s3 workspace: {s3root}.")
             self.is_bucket = True
@@ -174,7 +172,6 @@ class SilNlpEnv:
         # Tests the connection to the bucket. Delete is used because it fails fast and is free of api cost from Backblaze.
         bucket.delete_objects(Delete={"Objects": [{"Key": "conn_test_key"}]})
         register_configuration_parameter(PureS3Path("/"), resource=resource)
-        self.set_data_dir(S3Path(f"/{bucket_name}"))
         self.bucket = bucket
 
     def set_s3_bucket(self):
@@ -187,7 +184,6 @@ class SilNlpEnv:
             )
             bucket = resource.Bucket("silnlp")
             register_configuration_parameter(PureS3Path("/"), resource=resource)
-            self.set_data_dir(S3Path(f"/silnlp"))
             self.bucket = bucket
             self.bucket_service = "aws"
             return
@@ -209,8 +205,8 @@ class SilNlpEnv:
                 LOGGER.info("Connected to MINIO bucket.")
                 self.bucket_service = "minio"
             except Exception as e:
-                LOGGER.info(e)
-                LOGGER.info("MINIO connection failed.")
+                LOGGER.warning(e)
+                LOGGER.warning("MINIO connection failed.")
         if self.bucket_service in ["", "b2"]:
             try:
                 LOGGER.info("Trying to connect to B2 bucket.")
@@ -223,8 +219,8 @@ class SilNlpEnv:
                 LOGGER.info("Connected to B2 bucket.")
                 self.bucket_service = "b2"
             except Exception as e:
-                LOGGER.info(e)
-                LOGGER.info("B2 connection failed.")
+                LOGGER.warning(e)
+                LOGGER.warning("B2 connection failed.")
 
     def copy_pt_project_from_bucket(self, name: Union[str, Path], patterns: Union[str, Sequence[str]] = []):
         if not self.is_bucket:
