@@ -71,6 +71,7 @@ These are the main requirements for the SILNLP code to run on a local machine. S
    MINIO_ACCESS_KEY=xxxxxxxxx
    MINIO_SECRET_KEY=xxxxxxx
    ```
+   * Include SIL_NLP_DATA_PATH="/silnlp" if you are not using B2 or MinIO and will be storing files locally.
    * If you do not intend to use SILNLP with ClearML and/or B2/MinIO, you can leave out the respective variables. If you need to generate ClearML credentials, see [ClearML setup](clear_ml_setup.md).
    * Note that this does not give you direct access to a B2 or MinIO bucket from within the Docker container, it only allows you to run scripts referencing files in the bucket.
 
@@ -143,6 +144,7 @@ These are the main requirements for the SILNLP code to run on a local machine. S
    MINIO_ACCESS_KEY=xxxxxxxxx
    MINIO_SECRET_KEY=xxxxxxx
    ```
+   * Include SIL_NLP_DATA_PATH="/silnlp" if you are not using B2 or MinIO and will be storing files locally.
    * If you need to generate ClearML credentials, see [ClearML setup](clear_ml_setup.md).
    * Note that this does not give you direct access to a B2 or MinIO bucket from within the Docker container, it only allows you to run scripts referencing files in the bucket.
    * For instructions on how to permanently set up environment variables for your operating system, see the corresponding section under the Development Environment Setup header below.
