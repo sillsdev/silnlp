@@ -4,7 +4,7 @@ We use Backblaze B2 and MinIO storage for storing our experiment data. Here is s
 
 ### Note For MinIO setup
 
-In order to access the MinIO bucket locally, you must have a VPN connected to its network.
+In order to access the MinIO bucket locally, you must have a VPN connected to its network. If you need VPN access, please reach out to an SILNLP dev team member.
 
 ### Install and configure rclone
 
