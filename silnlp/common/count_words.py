@@ -136,7 +136,7 @@ def main() -> None:
     print(f"Internal Consistency score is {score}.\n  Score of 100 indicates that the top source words "
           f"each average 1 target rendering.\n  Score = 100*1/(average trg_words per most common src_word)")
 
-    with open(f"{lex_path}\\lex_stats.csv", "w", encoding="utf8") as stats_file:
+    with (lex_path / "lex_stats.csv").open("w", encoding="utf8") as stats_file:
         writer = csv.writer(stats_file)
         writer.writerow(['#_Src_wds','#_trg_wds','Unique_src','Unique_trg','Num_top_wds','Avg_inst',
                          'avg_trg_renderings','avg_diverse_renderings'])
