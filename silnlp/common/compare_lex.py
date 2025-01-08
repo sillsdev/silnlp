@@ -70,13 +70,11 @@ def main() -> None:
                 output_file.writelines(word+'\n')
 
         # Write source words missing from the alternate source file
-        unmatched_src_file1 = lex_path1 / "unmatched_src_words.txt"
-        unmatched_src_file2 = lex_path2 / "unmatched_src_words.txt"
-        with open(unmatched_src_file1, "w", encoding="utf8") as output_file:
+        with (lex_path1 / "unmatched_src_words.txt").open("w", encoding="utf8") as output_file:
             output_file.writelines(f'src.txt words not found in {src_file2}\n')
             for word in src1_only_words:
                 output_file.writelines(word+'\n')
-        with open(unmatched_src_file2, "w", encoding="utf8") as output_file:
+        with (lex_path2 / "unmatched_src_words.txt").open("w", encoding="utf8") as output_file:
             output_file.writelines(f'src.txt words not found in {src_file1}\n')
             for word in src2_only_words:
                 output_file.writelines(word+'\n')
