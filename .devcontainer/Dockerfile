@@ -50,3 +50,13 @@ ENV CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
 ENV SIL_NLP_DATA_PATH=/silnlp
 ENV EFLOMAL_PATH=/workspaces/silnlp/.venv/lib/python3.10/site-packages/eflomal/bin
 CMD ["bash"]
+# Set up the S3 bucket
+RUN apt update
+RUN apt install -y fuse3
+RUN mkdir /tmp/rclone
+RUN curl https://downloads.rclone.org/rclone-current-linux-amd64.zip -o /tmp/rclone/rclone.zip
+RUN unzip /tmp/rclone/rclone.zip -d /tmp/rclone
+RUN echo $(ls /tmp/rclone) && cp /tmp/rclone/rclone-*-linux-amd64/rclone /usr/bin
+RUN rm -r /tmp/rclone
+RUN mkdir -p /silnlp
+RUN mkdir -p ~/.config/rclone
