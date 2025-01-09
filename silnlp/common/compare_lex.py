@@ -1,10 +1,11 @@
 import argparse
 import numpy
 import re
+from typing import List
 
 from ..common.environment import SIL_NLP_ENV
 
-def get_all_words(src_file: str) -> list:
+def get_all_words(src_file: str) -> List:
     words = []
     pattern = re.compile(r",(?=\S)")  # Look for commas with no following space
     with open(src_file, "r", encoding = "utf8") as src_data_file:     
@@ -18,7 +19,7 @@ def get_all_words(src_file: str) -> list:
                     words.append(word)  
     return words
 
-def find_unique(words1: list, words2: list) -> list:
+def find_unique(words1: List, words2: List) -> List:
     unique_words = []
     for word in words1:
         if word not in words2:

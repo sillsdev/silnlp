@@ -8,11 +8,7 @@ import re
 from ..common.environment import SIL_NLP_ENV 
 
 def is_word(word: str) -> bool:
-    val = False
-    for char in word:
-        if char.isalpha():
-            val = True
-    return val
+    return any(char.isalpha() for char in word)
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Counts lexicon entries")
