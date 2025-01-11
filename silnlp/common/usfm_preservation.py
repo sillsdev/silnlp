@@ -13,8 +13,8 @@ from .corpus import load_corpus, write_corpus
 
 
 class UsfmInserter:
-    orig_src_sents: List[str]  # w/ markers
-    vrefs: List[ScriptureRef]
+    orig_src_sents: List[str] = []  # w/ markers
+    vrefs: List[ScriptureRef] = []
     stylesheet: UsfmStylesheet
 
     markers: List[Tuple[int, int, str]] = []  # (sent_idx, start idx in text_only_sent, tok (inc. \s and spaces))
@@ -24,8 +24,11 @@ class UsfmInserter:
     translation_results: List[TranslationResult]
 
     def __init__(self, orig_src_sents: List[str], vrefs: List[ScriptureRef], stylesheet: UsfmStylesheet):
-        self.orig_src_sents = orig_src_sents
-        self.vrefs = vrefs
+        for sent, ref in zip(orig_src_sents, vrefs):
+            if len(ref.path) > 0 and ref.path[-1].name == "rem":
+                continue
+            self.orig_src_sents.append(sent)
+            self.vrefs.append(ref)
         self.stylesheet = stylesheet
 
     def extract_markers(self):
@@ -122,20 +125,27 @@ class UsfmInserter:
                 None,
                 200**2,
             )  # trg token index, offset of corresponding src token from the marker, num crossings
+            # TODO: might need to change how the "checked" set works, if a hyp has been checked, it doesn't necessarily mean that any hyp
+            # that would follow in the searching sequence would have also been checked.
+            # it may be worth while to redo the hyps overall, i.e. the next couple of tokens will already have been checked
+            # during "hyp 0" if needed, so it may be simpler to ALWAYS check 0, 1, -1, 2, -2, and then only go further if none found yet
+            # this would probably be about the same practically, but it might make the code more straightforward
             checked = set()  # to prevent checking the same idx twice
             for hyp in hyps:
                 src_hyp = tok_after_marker + hyp
                 if src_hyp in checked:
                     continue
-                aligned_trg_toks = list(alignment_matrices[sent_idx].get_row_aligned_indices(src_hyp))
-                # if aligning to a token that precedes that marker,
-                # the trg token predicted to be closest to the marker is the last token aligned to the src rather than the first
-                if hyp < 0:
-                    aligned_trg_toks.reverse()
-
+                # TODO: I think this will stop the search prematurely when the initial hyp is at the edge of a sentence
+                # e.g. if the hyp is index 0, it will search at 0, 1, and stop at -1, even though it could still search further forward
                 trg_hyp = -1
                 while trg_hyp == -1 and src_hyp >= 0 and src_hyp < len(self.src_toks[sent_idx]):
                     checked.add(src_hyp)
+                    aligned_trg_toks = list(alignment_matrices[sent_idx].get_row_aligned_indices(src_hyp))
+                    # if aligning to a token that precedes that marker,
+                    # the trg token predicted to be closest to the marker is the last token aligned to the src rather than the first
+                    if hyp < 0:
+                        aligned_trg_toks.reverse()
+
                     if len(aligned_trg_toks) > 0:
                         trg_hyp = aligned_trg_toks[0]
                     else:  # continue the search outwards
@@ -143,31 +153,18 @@ class UsfmInserter:
                 if trg_hyp != -1:
                     num_crossings = num_align_crossings(sent_idx, src_hyp, trg_hyp)
                     if num_crossings < best_hyp[2]:
-                        # replace hyp with src_hyp - adj_src_tok
-                        # above is what I was trying to do before with offsetting the farther away hyps, but it's worse
-                        # am I doing this below now with "insert_idx = insert_idx - best_hyp[1]"?
                         best_hyp = (trg_hyp, hyp, num_crossings)
 
             if best_hyp[0] == -1:
                 trg_toks_after_markers.append(len(self.trg_toks[sent_idx]))  # insert at the end of the sentence
                 continue
 
-            # insert_idx = best_hyp[0]
-            # # do this before or after subtracting the offset? only subtract offset if not adjacent to punct? check before and after subtraction?
-            # if self.trg_toks[sent_idx][insert_idx] in [",", ".", "!", "?"]:
-            #     insert_idx += 1
-            # # subtracting hyp at the end may be bad in other cases, or make wrong answers worse/more confusing
-            # else:
-            #     insert_idx -= best_hyp[1]  # - best_hyp[1]
-            #     if self.trg_toks[sent_idx][insert_idx] in [",", ".", "!", "?"]:
-            #         insert_idx += 1
-
             trg_toks_after_markers.append(best_hyp[0])
             # for end markers, preventing double adding (from punct first) was almost the same but slightly worse
 
         return trg_toks_after_markers
 
-    def construct_rows(self, translation_results: List[TranslationResult], vrefs: List[ScriptureRef]):
+    def construct_rows(self, translation_results: List[TranslationResult]):
         self.translation_results = translation_results
         self.trg_sents = [tr.translation for tr in translation_results]
 
@@ -222,7 +219,7 @@ class UsfmInserter:
         # Construct rows for the USFM file
         # Insert character markers back into text and create new rows at each paragraph marker
         rows = []
-        for ref, translation, inserts in zip(vrefs, self.trg_sents, to_insert):
+        for ref, translation, inserts in zip(self.vrefs, self.trg_sents, to_insert):
             if len(inserts) == 0:
                 rows.append(([ref], translation))
                 continue
@@ -287,7 +284,6 @@ class StatisticalUsfmInserter(UsfmInserter):
     def get_alignment_matrices(self):
         alignments = []
         with TemporaryDirectory() as td:
-            # align_sents(toks, trg_toks, aligner, align_path) # Path(f"zzz_PN_KTs/tpi_aps/train.src.detok.txt"),Path(f"zzz_PN_KTs/tpi_aps/train.trg.detok.txt")
             # eflomal
             align_path = Path(td, "sym-align.txt")
             write_corpus(Path(td, "src_align.txt"), self.src_sents)
@@ -305,116 +301,12 @@ class StatisticalUsfmInserter(UsfmInserter):
 
         return alignments
 
-    def predict_marker_locations(self, src_toks_after_markers):
-        # return super().predict_marker_locations(src_toks_after_markers)
-        print("here old")
-        # Align sentences
-        with TemporaryDirectory() as td:
-            # align_sents(toks, trg_toks, aligner, align_path) # Path(f"zzz_PN_KTs/tpi_aps/train.src.detok.txt"),Path(f"zzz_PN_KTs/tpi_aps/train.trg.detok.txt")
-            # eflomal
-            align_path = Path(td, "sym-align.txt")
-            write_corpus(Path(td, "src_align.txt"), self.src_sents)
-            write_corpus(Path(td, "trg_align.txt"), self.trg_sents)
-            compute_alignment_scores(Path(td, "src_align.txt"), Path(td, "trg_align.txt"), self.aligner, align_path)
-
-            if self.aligner == "eflomal":
-                align_lines = [
-                    [(lambda x: (int(x[0]), int(x[1])))(pair.split("-")) for pair in line.split()]
-                    for line in load_corpus(align_path)
-                ]
-            else:
-                align_lines = [
-                    [(lambda x: (int(x[0]), int(x[1])))(pair.split(":")[0].split("-")) for pair in line.split()]
-                    for line in load_corpus(align_path)
-                ]
-
-        # Gets the number of alignment pairs that "cross the line" between (src_idx - .5) and (trg_idx - .5)
-        def num_align_crossings(sent_idx: int, src_idx: int, trg_idx: int) -> int:
-            crossings = 0
-            for i, j in align_lines[sent_idx]:
-                if i < src_idx and j >= trg_idx:
-                    crossings += 1
-                if i >= src_idx and j < trg_idx:
-                    crossings += 1
-            return crossings
-
-        trg_toks_after_markers = []
-        for marker, tok_after_marker in zip(self.markers, src_toks_after_markers):
-            sent_idx = marker[0]
-            mark = marker[2].strip(" \\+")
-
-            # If the token on either side of a hypothesis is punctuation, use that
-            # can also try a less extreme version where the punct hyps are still subject to having the least crossings, but they are still always checked first
-            trg_hyp = -1
-            punct_hyps = [-1, 0]
-            for punct_hyp in punct_hyps:
-                src_hyp = tok_after_marker + punct_hyp
-                if src_hyp < 0 or src_hyp >= len(self.src_toks[sent_idx]):
-                    continue
-                # only accept pairs where both the src and trg token are punct
-                # can define more specifically what the punct tokens can look like later
-                if len(self.src_toks[sent_idx][src_hyp]) > 0 and not any(
-                    c.isalpha() for c in self.src_toks[sent_idx][src_hyp]
-                ):
-                    align_pairs = reversed(align_lines[sent_idx]) if punct_hyp < 0 else align_lines[sent_idx]
-                    for s, t in align_pairs:
-                        if s == src_hyp and not any(c.isalpha() for c in self.trg_toks[sent_idx][t]):
-                            trg_hyp = t
-                            break
-                if trg_hyp != -1:
-                    # if this search gets expanded beyond [-1,0] can do insert_idx -= punct_hyp
-                    insert_idx = trg_hyp + 1 if punct_hyp < 0 else trg_hyp
-                    trg_toks_after_markers.append(insert_idx)
-                    break
-            if trg_hyp != -1:
-                continue
-
-            hyps = [0, 1, 2]
-            best_hyp = (-1, None, len(align_lines[sent_idx]))
-            checked = set()  # to prevent checking the same idx twice
-            for hyp in hyps:
-                align_pairs = reversed(align_lines[sent_idx]) if hyp < 0 else align_lines[sent_idx]
-                src_hyp = tok_after_marker + hyp
-                if src_hyp in checked:
-                    continue
-                trg_hyp = -1
-                while trg_hyp == -1 and src_hyp >= 0 and src_hyp < len(self.src_toks[sent_idx]):
-                    checked.add(src_hyp)
-                    trg_hyps = [t for (s, t) in align_pairs if s == src_hyp]
-                    if len(trg_hyps) > 0:
-                        trg_hyp = trg_hyps[0]
-                    else:
-                        src_hyp += -1 if hyp < 0 else 1
-                if trg_hyp != -1:
-                    num_crossings = num_align_crossings(sent_idx, src_hyp, trg_hyp)
-                    if num_crossings < best_hyp[2]:
-                        # replace hyp with src_hyp - adj_src_tok
-                        # above is what I was trying to do before with offsetting the farther away hyps, but it's worse
-                        # am I doing this below now with "insert_idx = insert_idx - best_hyp[1]"?
-                        best_hyp = (trg_hyp, hyp, num_crossings)
-
-            if best_hyp[0] == -1:
-                trg_toks_after_markers.append(len(self.trg_toks[sent_idx]))  # insert at the end of the sentence
-            else:
-                # insert_idx = best_hyp[0]
-                # # do this before or after subtracting the offset? only subtract offset if not adjacent to punct? check before and after subtraction?
-                # if self.trg_toks[sent_idx][insert_idx] in [",", ".", "!", "?"]:
-                #     insert_idx += 1
-                # # subtracting hyp at the end may be bad in other cases, or make wrong answers worse/more confusing
-                # else:
-                #     insert_idx = insert_idx - best_hyp[1]  # - best_hyp[1]
-                #     if self.trg_toks[sent_idx][insert_idx] in [",", ".", "!", "?"]:
-                #         insert_idx += 1
-
-                trg_toks_after_markers.append(best_hyp[0])
-                # for end markers, preventing double adding (from punct first) was almost the same but slightly worse
-
-        return trg_toks_after_markers
-
 
 class AttentionUsfmInserter(UsfmInserter):
     # NOTE: the "▁" characters in this function are from the NllbTokenizer and are not the same character as the standard underscore
     def create_tok_ranges(self):
+        self.src_toks = []
+        self.trg_toks = []
         src_tok_ranges = []
         trg_tok_ranges = []
         for tr in self.translation_results:
@@ -426,6 +318,7 @@ class AttentionUsfmInserter(UsfmInserter):
                         src_sent_tok_ranges[-1].end + len(tok),
                     )
                 )
+            self.src_toks.append(tr.source_tokens)
             src_tok_ranges.append(src_sent_tok_ranges)
             trg_sent_tok_ranges = [Range.create(0, len(tr.target_tokens[0]) - 1)]
             for tok in tr.target_tokens[1:]:
@@ -435,42 +328,9 @@ class AttentionUsfmInserter(UsfmInserter):
                         trg_sent_tok_ranges[-1].end + len(tok),
                     )
                 )
+            self.trg_toks.append(tr.target_tokens)
             trg_tok_ranges.append(trg_sent_tok_ranges)
-        # for src_sent, tr in zip(self.src_sents, self.translation_results):
-        #     tok_start = src_sent.index(tr.source_tokens[0].strip("▁"))
-        #     src_sent_tok_ranges = [Range.create(tok_start, tok_start + len(tr.source_tokens[0].strip("▁")))]
-        #     for tok in tr.source_tokens[1:]:
-        #         tok_start = src_sent.index(tok.strip("▁"), src_sent_tok_ranges[-1].end)
-        #         src_sent_tok_ranges.append(Range.create(tok_start, tok_start + len(tok.strip("▁"))))
-        #     src_tok_ranges.append(src_sent_tok_ranges)
-        #     tok_start = tr.translation.index(tr.target_tokens[0].strip("▁"))
-        #     trg_sent_tok_ranges = [Range.create(tok_start, tok_start + len(tr.target_tokens[0].strip("▁")))]
-        #     for tok in tr.target_tokens[1:]:
-        #         tok_start = tr.translation.index(tok.strip("▁"), trg_sent_tok_ranges[-1].end)
-        #         trg_sent_tok_ranges.append(Range.create(tok_start, tok_start + len(tok.strip("▁"))))
-        # trg_tok_ranges.append(trg_sent_tok_ranges)
         return src_tok_ranges, trg_tok_ranges
 
     def get_alignment_matrices(self):
         return [tr.alignment for tr in self.translation_results]
-
-    def predict_marker_locations(self, src_toks_after_markers: List[int]):
-        trg_toks_after_markers = []
-        for idx, (sent_idx, _, _) in zip(src_toks_after_markers, self.markers):
-            offset = 0
-            while True:
-                try:
-                    # if aligning with a token before the marker, get the last target token it aligns to
-                    # if aligning with a token after the marker, get the first target token it aligns to
-                    pos = -1 if offset < 0 else 0
-                    adjacent_tok = list(
-                        self.translation_results[sent_idx].alignment.get_row_aligned_indices(idx + offset)
-                    )[pos]
-                    trg_toks_after_markers.append(adjacent_tok + (1 if pos == -1 else 0))
-                    # TODO: could try adjusting trg idx to be "closer" to the marker (i.e. subtracting for 3 for offset 3)
-                    break
-                except:
-                    # outward expanding search: offset = 0, -1, 1, -2, 2, ...
-                    offset = -offset - (1 if offset >= 0 else 0)
-
-        return trg_toks_after_markers
