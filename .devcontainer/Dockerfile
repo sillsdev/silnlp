@@ -23,10 +23,9 @@ RUN apt-get install --no-install-recommends -y \
     gdb \
     curl \
     unzip
-RUN apt-get update
 RUN apt-get install --no-install-recommends -y \
-    less \
-    nano
+    fuse3 \
+    rclone
 # Make some useful symlinks that are expected to exist
 RUN ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python3  & \
     ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python
@@ -45,18 +44,11 @@ RUN mkdir -p /root/.cache/silnlp/experiments
 RUN mkdir /root/.cache/silnlp/projects
 ENV SIL_NLP_CACHE_EXPERIMENT_DIR=/root/.cache/silnlp/experiments
 ENV SIL_NLP_CACHE_PROJECT_DIR=/root/.cache/silnlp/projects
+# Set up the S3 bucket
+RUN mkdir -p /silnlp
+RUN mkdir -p ~/.config/rclone
 # Set environment variables
 ENV CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
 ENV SIL_NLP_DATA_PATH=/silnlp
 ENV EFLOMAL_PATH=/workspaces/silnlp/.venv/lib/python3.10/site-packages/eflomal/bin
 CMD ["bash"]
-# Set up the S3 bucket
-RUN apt update
-RUN apt install -y fuse3
-RUN mkdir /tmp/rclone
-RUN curl https://downloads.rclone.org/rclone-current-linux-amd64.zip -o /tmp/rclone/rclone.zip
-RUN unzip /tmp/rclone/rclone.zip -d /tmp/rclone
-RUN echo $(ls /tmp/rclone) && cp /tmp/rclone/rclone-*-linux-amd64/rclone /usr/bin
-RUN rm -r /tmp/rclone
-RUN mkdir -p /silnlp
-RUN mkdir -p ~/.config/rclone
