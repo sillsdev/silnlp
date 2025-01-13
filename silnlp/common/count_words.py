@@ -14,7 +14,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Counts lexicon entries")
     parser.add_argument("experiment", help="Experiment folder from path S:\\Alignment\\experiments\\")
     parser.add_argument("--aligner", help="Aligner: eflomal, fast-align, hmm", default="eflomal")
-    parser.add_argument("--num", help="Number of most common words to include", default=100)
+    parser.add_argument("--num", help="Number of most common words to include", type=int, default=100)
     parser.add_argument("--stats", help="True or False: Print word count and number of renderings for common words", 
                         action='store_true')
     args = parser.parse_args()
