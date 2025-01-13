@@ -8,33 +8,30 @@ import boto3
 MONTH_IN_SECONDS = 2628288
 
 
-def clean_s3(max_months: int, dry_run: bool) -> None:
-    print("Cleaning research")
-    research_total_deleted, research_total_space_freed = clean_research(max_months, dry_run)
-    print("Cleaning production")
-    production_total_deleted, production_total_space_freed = clean_production(max_months, dry_run)
+def stats(
+    num_deleted_research: int,
+    num_deleted_production: int,
+    space_freed_research: int,
+    space_freed_production: int,
+    dry_run: bool,
+) -> None:
 
-    total_deleted = research_total_deleted + production_total_deleted
-    storage_space_freed = research_total_space_freed + production_total_space_freed
+    total_deleted = num_deleted_research + num_deleted_production
+    total_space_freed = space_freed_research + space_freed_production
 
     print("Research:")
-    print("Number of files " + ("that would be " if dry_run else "") + f"deleted: {research_total_deleted}")
-    print(
-        "Storage space " + ("that would be " if dry_run else "") + f"freed (GB): {research_total_space_freed / 2 ** 30}"
-    )
+    print("Number of files " + ("that would be " if dry_run else "") + f"deleted: {num_deleted_research}")
+    print("Storage space " + ("that would be " if dry_run else "") + f"freed (GB): {space_freed_research / 2 ** 30}")
     print("Production:")
-    print("Number of files " + ("that would be " if dry_run else "") + f"deleted: {production_total_deleted}")
-    print(
-        "Storage space "
-        + ("that would be " if dry_run else "")
-        + f"freed (GB): {production_total_space_freed / 2 ** 30}"
-    )
+    print("Number of files " + ("that would be " if dry_run else "") + f"deleted: {num_deleted_production}")
+    print("Storage space " + ("that would be " if dry_run else "") + f"freed (GB): {space_freed_production / 2 ** 30}")
     print("Total:")
     print("Number of files " + ("that would be " if dry_run else "") + f"deleted: {total_deleted}")
-    print("Storage space " + ("that would be " if dry_run else "") + f"freed (GB): {storage_space_freed / 2 ** 30}")
+    print("Storage space " + ("that would be " if dry_run else "") + f"freed (GB): {total_space_freed / 2 ** 30}")
 
 
 def clean_research(max_months: int, dry_run: bool) -> Tuple[int, int]:
+    print("Cleaning research")
     regex_to_delete = re.compile(
         r"^MT/experiments/.+/run/(checkpoint.*(pytorch_model\.bin|\.safetensors)$|ckpt.+\.(data-00000-of-00001|index)$)"
     )
@@ -42,10 +39,8 @@ def clean_research(max_months: int, dry_run: bool) -> Tuple[int, int]:
 
 
 def clean_production(max_months: int, dry_run: bool) -> Tuple[int, int]:
-    regex_to_delete = re.compile(
-        r"^(production|dev|int-qa|ext-qa)/builds/.+"
-        r"(pretranslate.src.json|pretranslate.tgt.json|train.src.txt|train.tgt.txt)"
-    )
+    print("Cleaning production")
+    regex_to_delete = re.compile(r"^(production|dev|int-qa|ext-qa)/builds/.+")
     return _delete_data(max_months, dry_run, regex_to_delete)
 
 
@@ -75,8 +70,13 @@ def _delete_data(max_months: int, dry_run: bool, regex_to_delete: str) -> Tuple[
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Remove old model checkpoints from S3 bucket")
-    parser.add_argument("--max-months", type=int, default=1, help="Maximum age of checkpoints to keep in months")
+    parser = argparse.ArgumentParser(description="Remove old files from S3 bucket")
+    parser.add_argument(
+        "--max-months-research", type=int, default=1, help="Maximum age of research checkpoints to keep in months"
+    )
+    parser.add_argument(
+        "--max-months-production", type=int, default=2, help="Maximum age of production files to keep in months"
+    )
     parser.add_argument(
         "--dry-run",
         default=False,
@@ -85,7 +85,10 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    clean_s3(args.max_months, args.dry_run)
+    num_deleted_research, space_freed_research = clean_research(args.max_months_research, args.dry_run)
+    num_deleted_production, space_freed_production = clean_production(args.max_months_production, args.dry_run)
+
+    stats(num_deleted_research, num_deleted_production, space_freed_research, space_freed_production, args.dry_run)
 
 
 if __name__ == "__main__":
