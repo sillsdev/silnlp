@@ -143,8 +143,9 @@ These are the main requirements for the SILNLP code to run on a local machine. S
    * Note that this does not give you direct access to an AWS S3 bucket from within the Docker container, it only allows you to run scripts referencing files in the bucket.
    * For instructions on how to permanently set up environment variables for your operating system, see the corresponding section under the Development Environment Setup header below.
 
-11. If using AWS, create caches and cache environment variables
-   * Follow the corresponding instructions under [Create SILNLP cache](https://github.com/sillsdev/silnlp/blob/master/manual_setup.md#create-silnlp-cache) in manual_setup.md to set up the caches.
+11. If using AWS, there are two options:
+   * Option 1: Mount the bucket to your filesystem following the instructions under [Install and Configure Rclone](https://github.com/sillsdev/silnlp/blob/master/s3_bucket_setup.md#install-and-configure-rclone).
+   * Option 2: Create a local cache for the bucket following the instructions under [Create SILNLP cache](https://github.com/sillsdev/silnlp/blob/master/manual_setup.md#create-silnlp-cache).
 
 ## Development Environment Setup
 

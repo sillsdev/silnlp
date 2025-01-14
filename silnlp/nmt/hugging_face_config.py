@@ -19,6 +19,7 @@ import pandas as pd
 import torch
 import transformers.utils.logging as transformers_logging
 import yaml
+from accelerate import infer_auto_device_map, init_empty_weights
 from accelerate.utils.memory import should_reduce_batch_size
 from datasets import Dataset
 from machine.annotations import Range
@@ -49,6 +50,7 @@ from transformers import (
     PreTrainedModel,
     PreTrainedTokenizer,
     PreTrainedTokenizerBase,
+    PreTrainedTokenizerFast,
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
     T5Tokenizer,
@@ -321,7 +323,9 @@ class HuggingFaceConfig(Config):
                     "activation_dropout": 0.0,
                     "learning_rate": 0.0002,
                     "lr_scheduler_type": "cosine",
+                    "attention_implementation": "eager",
                 },
+                "model": "facebook/nllb-200-distilled-1.3B",
             },
             config,
         )
@@ -782,6 +786,7 @@ class HuggingFaceNMTModel(NMTModel):
         set_seed(self._config.data["seed"])
         self._dictionary: Optional[Dict[VerseRef, Set[str]]] = None
         self._is_t5 = self._config.model_prefix in SUPPORTED_T5_MODELS
+        self._num_devices = num_devices
 
     def train(self) -> None:
         training_args = self._create_training_arguments()
@@ -805,10 +810,23 @@ class HuggingFaceNMTModel(NMTModel):
             label2id={},
             id2label={},
             num_labels=0,
+            attn_implementation=self._config.params.get("attn_implementation", "sdpa"),
         )
+        if self._num_devices == 2 and self._config.model_prefix == "facebook/nllb-200":
+            device_map = {
+                "lm_head": 0,
+                "model.shared": 0,
+                "model.encoder": 0,
+                "model.decoder.embed_tokens": 0,
+                "model.decoder.embed_positions": 1,
+                "model.decoder.layers": 1,
+                "model.decoder.layer_norm": 1,
+            }
+        else:
+            device_map = None
         model = cast(
             PreTrainedModel,
-            AutoModelForSeq2SeqLM.from_pretrained(self._config.model, config=model_config, attn_implementation="eager"),
+            AutoModelForSeq2SeqLM.from_pretrained(self._config.model, config=model_config, device_map=device_map),
         )
         if self._config.train.get("better_transformer"):
             model = model.to_bettertransformer()
@@ -1118,6 +1136,9 @@ class HuggingFaceNMTModel(NMTModel):
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Iterable[TranslationGroup]:
         tokenizer = self._config.get_tokenizer()
+        if isinstance(tokenizer, (NllbTokenizer, NllbTokenizerFast)):
+            tokenizer = PunctuationNormalizingTokenizer(tokenizer)
+
         model = self._create_inference_model(ckpt, tokenizer)
         if model.config.max_length is not None and model.config.max_length < 512:
             model.config.max_length = 512
@@ -1624,7 +1645,9 @@ class HuggingFaceNMTModel(NMTModel):
             and model_name != self._config.model
         ):
             base_model = AutoModelForSeq2SeqLM.from_pretrained(
-                self._config.model, torch_dtype=dtype if self._mixed_precision else "auto", attn_implementation="eager"
+                self._config.model,
+                torch_dtype=dtype if self._mixed_precision else "auto",
+                attn_implementation=self._config.params.get("attn_implementation", "sdpa"),
             )
             if len(tokenizer) != base_model.get_input_embeddings().weight.size(dim=0):
                 base_model.resize_token_embeddings(
@@ -1634,7 +1657,9 @@ class HuggingFaceNMTModel(NMTModel):
             model = PeftModel.from_pretrained(base_model, model_name)
         else:
             model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(
-                model_name, torch_dtype=dtype if self._mixed_precision else "auto", attn_implementation="eager"
+                model_name,
+                torch_dtype=dtype if self._mixed_precision else "auto",
+                attn_implementation=self._config.params.get("attn_implementation", "sdpa"),
             )
         if self._config.infer.get("better_transformer"):
             model = model.to_bettertransformer()
@@ -1687,6 +1712,40 @@ class HuggingFaceNMTModel(NMTModel):
                 model.generation_config.forced_bos_token_id = forced_bos_token_id
 
         return model, tokenizer
+
+
+class PunctuationNormalizingTokenizer(PreTrainedTokenizerFast):
+    def __init__(self, tokenizer: PreTrainedTokenizerFast) -> None:
+        self._wrapped_tokenizer = tokenizer
+        self._tokenizer = tokenizer._tokenizer
+        self._mpn = MosesPunctNormalizer()
+        self._mpn.substitutions = [(re.compile(r), sub) for r, sub in self._mpn.substitutions]
+        self._pad_token = tokenizer._pad_token
+
+    def __call__(
+        self,
+        text: Union[str, List[str], List[List[str]]] = None,
+        text_pair: Union[str, List[str], List[List[str]]] = None,
+        text_target: Union[str, List[str], List[List[str]]] = None,
+        text_pair_target: Union[str, List[str], List[List[str]]] = None,
+        **kwargs,
+    ) -> BatchEncoding:
+        if text is None:
+            raise ValueError('"text" input to PunctuationNormalizingTokenizer cannot be None')
+
+        if isinstance(text, str):
+            text = self._mpn.normalize(text)
+        elif isinstance(text, (list, tuple)) and len(text) > 0:
+            if isinstance(text[0], (list, tuple)) and len(text[0]) > 0:
+                text = [[self._mpn.normalize(item) for item in row] for row in text]
+            text = [self._mpn.normalize(item) for item in text]
+        return self._wrapped_tokenizer(text, **kwargs)
+
+    def token_to_id(self, token: str) -> int:
+        return self._wrapped_tokenizer.token_to_id(token)
+
+    def decode(self, *args, **kwargs):
+        return self._wrapped_tokenizer.decode(*args, **kwargs)
 
 
 class HuggingFaceTokenizer(Tokenizer):

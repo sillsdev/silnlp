@@ -163,7 +163,7 @@ class Translator(ABC):
         self.translate_usfm(
             book_path,
             output_path,
-            get_iso(src_project),
+            get_iso(get_project_dir(src_project)),
             trg_iso,
             produce_multiple_translations,
             chapters,

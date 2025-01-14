@@ -45,10 +45,8 @@ def get_project_dir(project: str) -> Path:
     return SIL_NLP_ENV.pt_projects_dir / project
 
 
-def get_iso(project: str) -> str:
-    project_dir = get_project_dir(project)
-    settings = FileParatextProjectSettingsParser(project_dir).parse()
-    return settings.language_code
+def get_iso(project_dir: Path) -> str:
+    return FileParatextProjectSettingsParser(project_dir).parse().language_code
 
 
 def extract_project(
@@ -60,7 +58,7 @@ def extract_project(
     extract_lemmas: bool = False,
     output_project_vrefs: bool = False,
 ) -> Tuple[Path, int]:
-    iso = get_iso(project_dir.name)
+    iso = get_iso(project_dir)
 
     ref_corpus: TextCorpus = create_versification_ref_corpus()
 
@@ -217,9 +215,11 @@ def extract_terms_list(
     terms_vrefs_path = get_terms_vrefs_path(list_name, mt_terms_dir=output_dir)
 
     references: Dict[str, List[VerseRef]] = {}
-    with terms_metadata_path.open("w", encoding="utf-8", newline="\n") as terms_metadata_file, terms_glosses_path.open(
-        "w", encoding="utf-8", newline="\n"
-    ) as terms_glosses_file, terms_vrefs_path.open("w", encoding="utf-8", newline="\n") as terms_vrefs_file:
+    with (
+        terms_metadata_path.open("w", encoding="utf-8", newline="\n") as terms_metadata_file,
+        terms_glosses_path.open("w", encoding="utf-8", newline="\n") as terms_glosses_file,
+        terms_vrefs_path.open("w", encoding="utf-8", newline="\n") as terms_vrefs_file,
+    ):
         if os.path.exists(terms_xml_path):
             with terms_xml_path.open("rb") as terms_file:
                 terms_tree = etree.parse(terms_file)
