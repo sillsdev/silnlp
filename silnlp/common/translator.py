@@ -29,7 +29,7 @@ from machine.translation import TranslationResult
 
 from .corpus import load_corpus, write_corpus
 from .paratext import get_book_path, get_iso, get_project_dir
-from .usfm_preservation import AttentionUsfmInserter, StatisticalUsfmInserter
+from .usfm_preservation import StatisticalUsfmPreserver
 
 LOGGER = logging.getLogger(__package__ + ".translate")
 nltk.download("punkt")
@@ -224,25 +224,20 @@ class Translator(ABC):
                 sentences.pop(i)
                 empty_sents.append((i, vrefs.pop(i)))
 
-        statistical = True
-        if statistical:
-            usfm_inserter = StatisticalUsfmInserter(sentences, vrefs, src_settings.stylesheet, "eflomal")
-        else:
-            usfm_inserter = AttentionUsfmInserter(sentences, vrefs, src_settings.stylesheet)
-        text_only_src_sents = usfm_inserter.extract_markers()
+        usfm_preserver = StatisticalUsfmPreserver(sentences, vrefs, src_settings.stylesheet, "eflomal")
 
-        translation_groups = self.translate(text_only_src_sents, src_iso, trg_iso, produce_multiple_translations, vrefs)
+        translation_groups = self.translate(
+            usfm_preserver.text_only_sents, src_iso, trg_iso, produce_multiple_translations, vrefs
+        )
         translation_results = [r[0] for r in translation_groups]
         translations = [tr.translation for tr in translation_results]
 
-        rows = usfm_inserter.construct_rows(translation_results, vrefs)
+        rows = usfm_preserver.construct_rows(translation_results)
 
         # Update USFM and write out
         with open(src_file_path, encoding=src_settings.encoding) as f:
             usfm = f.read()
-        handler = ParagraphUpdateUsfmParserHandler(
-            rows, behavior=UpdateUsfmBehavior.PREFER_NEW
-        )  # does this take care of empty sentences?
+        handler = ParagraphUpdateUsfmParserHandler(rows, behavior=UpdateUsfmBehavior.PREFER_NEW)
         parse_usfm(usfm, handler, src_settings.stylesheet, src_settings.versification, preserve_whitespace=False)
         usfm_out = handler.get_usfm(src_settings.stylesheet)
 
