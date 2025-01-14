@@ -73,7 +73,7 @@ from transformers.utils.logging import tqdm
 from ..common.corpus import Term, count_lines, get_terms
 from ..common.environment import SIL_NLP_ENV, download_if_s3_paths
 from ..common.translator import DraftGroup, TranslationGroup
-from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
+from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, get_mt_exp_dir, merge_dict
 from .config import CheckpointType, Config, DataFile, NMTModel
 from .tokenizer import NullTokenizer, Tokenizer
 
@@ -327,6 +327,33 @@ class HuggingFaceConfig(Config):
         )
         self._tokenizer: Optional[PreTrainedTokenizer] = None
         self.model_prefix = get_model_prefix(config.get("model", ""))
+
+        if "parent" in config["data"]:
+            SIL_NLP_ENV.copy_experiment_from_bucket(config["data"]["parent"])
+            parent_dir = Path(get_mt_exp_dir(config["data"]["parent"]))
+            parent_model_dir = parent_dir / "run"
+            if not parent_model_dir.is_dir():
+                LOGGER.error(f"The parent experiment does not contain a checkpoint.")
+            else:
+                trainer_state_path = parent_model_dir / "trainer_state.json"
+                with open(trainer_state_path, "r") as file:
+                    trainer_state = json.load(file)
+                parent_model_path = trainer_state.get("best_model_checkpoint", None)
+                parent_model_name = os.path.basename(parent_model_path)
+                parent_model = parent_model_dir / parent_model_name
+                LOGGER.info("Using parent model. This might be different from the model specified in config.")
+
+                with (parent_dir / "config.yml").open("r", encoding="utf-8") as file:
+                    parent_configs = yaml.safe_load(file)
+
+                parent_base_model = parent_configs.get("model")
+                parent_model_prefix = get_model_prefix(parent_base_model)
+                current_model_prefix = get_model_prefix(config.get("model", ""))
+                if parent_model_prefix != current_model_prefix:
+                    LOGGER.error(f"The parent model and the config model are not in the same type.")
+
+                config["model"] = str(parent_model)
+                self.model_prefix = parent_model_prefix
 
         super().__init__(exp_dir, config)
 
@@ -609,6 +636,9 @@ class HuggingFaceConfig(Config):
                     SIL_NLP_ENV.assets_dir / "tokenizers" / self.model_prefix / "tokenizer_config.json"
                 ).is_file():
                     model_name_or_path = str(SIL_NLP_ENV.assets_dir / "tokenizers" / self.model_prefix)
+                elif self.has_parent:
+                    parent_model_path = Path(self.model)
+                    model_name_or_path = str(parent_model_path.parents[1])
                 else:
                     model_name_or_path = self.model
                 self._tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True)
@@ -617,7 +647,14 @@ class HuggingFaceConfig(Config):
 
     def get_tokenizer(self) -> PreTrainedTokenizer:
         if self._tokenizer is None:
-            model_name_or_path = str(self.exp_dir) if (self.exp_dir / "tokenizer_config.json").is_file() else self.model
+            if (self.exp_dir / "tokenizer_config.json").is_file():
+                model_name_or_path = str(self.exp_dir)
+            elif self.has_parent:
+                model_name_or_path_path = Path(model_name_or_path)
+                model_name_or_path = str(model_name_or_path_path.parents[1])
+            else:
+                model_name_or_path = self.model
+
             self._tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True)
             self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
         return self._tokenizer
@@ -961,6 +998,7 @@ class HuggingFaceNMTModel(NMTModel):
             sequential_sampling=self._config.train.get("sequential_sampling", False),
             better_transformer=self._config.train.get("better_transformer", False),
             auto_grad_acc=self._config.train.get("auto_grad_acc", False),
+            model_prefix=self._config.model_prefix,
         )
         early_stopping: Optional[dict] = self._config.eval["early_stopping"]
         if early_stopping:
@@ -1812,6 +1850,7 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         sequential_sampling: bool = False,
         better_transformer: bool = False,
         auto_grad_acc: bool = False,
+        model_prefix: Optional[str] = None,
     ):
         super().__init__(
             model,
@@ -1829,6 +1868,7 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         self._sequential_sampling = sequential_sampling
         self._better_transformer = better_transformer
         self._auto_grac_acc = auto_grad_acc
+        self.model_prefix = model_prefix
 
     def _get_train_sampler(self) -> Optional[Sampler]:
         if self._sequential_sampling:
@@ -1881,7 +1921,8 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         elif isinstance(self.model, PeftModel):
             if self._better_transformer:
                 self.model = self.model.reverse_bettertransformer()
-            output_dir += "/adapter" if self.model.name_or_path.startswith("facebook/nllb-200") else ""
+            if self.model_prefix:
+                output_dir += "/adapter" if self.model_prefix == "facebook/nllb-200" else ""
             self.model.save_pretrained(
                 output_dir,
                 state_dict=state_dict,
