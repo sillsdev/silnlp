@@ -187,6 +187,38 @@ def has_best_checkpoint(model_dir: Path) -> bool:
     return "best_model_checkpoint" in trainer_state and trainer_state["best_model_checkpoint"] is not None
 
 
+def load_parent_exp(parent_exp: str) -> Tuple[str, str]:
+    SIL_NLP_ENV.copy_experiment_from_bucket(parent_exp)
+    parent_dir = Path(get_mt_exp_dir(parent_exp))
+    parent_model_dir = parent_dir / "run"
+    if not parent_model_dir.is_dir():
+        LOGGER.error("The parent experiment does not contain a checkpoint.")
+        raise ValueError(f"Invalid path {parent_model_dir}")
+
+    trainer_state_path = parent_model_dir / "trainer_state.json"
+    with open(trainer_state_path, "r") as file:
+        trainer_state = json.load(file)
+    parent_model_path = trainer_state.get("best_model_checkpoint", None)
+    parent_model_name = os.path.basename(parent_model_path)
+    parent_model = parent_model_dir / parent_model_name
+
+    parent_model_files = os.listdir(parent_model)
+    valid_model_files = [f for f in parent_model_files if f.endswith(".safetensors")]
+    if not valid_model_files:
+        LOGGER.error("The checkpoint folder does not contain a model.")
+        raise ValueError(f"Incomplete folder {parent_model}")
+
+    LOGGER.info("Using parent model. This might be different from the model specified in config.")
+
+    with (parent_dir / "config.yml").open("r", encoding="utf-8") as file:
+        parent_configs = yaml.safe_load(file)
+
+    parent_base_model = parent_configs.get("model")
+    parent_model_prefix = get_model_prefix(parent_base_model)
+
+    return str(parent_model), parent_model_prefix
+
+
 OPTIMIZER_STATE_FILES = {"optimizer.pt", "rng_state.pth", "scaler.pt", "scheduler.pt"}
 
 
@@ -329,31 +361,12 @@ class HuggingFaceConfig(Config):
         self.model_prefix = get_model_prefix(config.get("model", ""))
 
         if "parent" in config["data"]:
-            SIL_NLP_ENV.copy_experiment_from_bucket(config["data"]["parent"])
-            parent_dir = Path(get_mt_exp_dir(config["data"]["parent"]))
-            parent_model_dir = parent_dir / "run"
-            if not parent_model_dir.is_dir():
-                LOGGER.error(f"The parent experiment does not contain a checkpoint.")
-            else:
-                trainer_state_path = parent_model_dir / "trainer_state.json"
-                with open(trainer_state_path, "r") as file:
-                    trainer_state = json.load(file)
-                parent_model_path = trainer_state.get("best_model_checkpoint", None)
-                parent_model_name = os.path.basename(parent_model_path)
-                parent_model = parent_model_dir / parent_model_name
-                LOGGER.info("Using parent model. This might be different from the model specified in config.")
-
-                with (parent_dir / "config.yml").open("r", encoding="utf-8") as file:
-                    parent_configs = yaml.safe_load(file)
-
-                parent_base_model = parent_configs.get("model")
-                parent_model_prefix = get_model_prefix(parent_base_model)
-                current_model_prefix = get_model_prefix(config.get("model", ""))
-                if parent_model_prefix != current_model_prefix:
-                    LOGGER.error(f"The parent model and the config model are not in the same type.")
-
-                config["model"] = str(parent_model)
-                self.model_prefix = parent_model_prefix
+            parent_model, parent_model_prefix = load_parent_exp(config["data"]["parent"])
+            if parent_model_prefix != self.model_prefix:
+                LOGGER.error("The parent model and the config model are not in the same type.")
+                raise ValueError(f"Unmatched model prefix {parent_model_prefix} and {self.model_prefix}")
+            config["model"] = parent_model
+            self.model_prefix = parent_model_prefix
 
         super().__init__(exp_dir, config)
 
