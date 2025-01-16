@@ -5,9 +5,9 @@ from tempfile import TemporaryDirectory
 from typing import List, Tuple
 
 from machine.annotations import Range
-from machine.corpora import ScriptureRef, UsfmStylesheet, UsfmStyleType, UsfmToken, UsfmTokenizer, UsfmTokenType
+from machine.corpora import ScriptureRef, UsfmStylesheet, UsfmToken, UsfmTokenizer, UsfmTokenType
 from machine.tokenization import LatinWordTokenizer
-from machine.translation import TranslationResult, WordAlignmentMatrix
+from machine.translation import WordAlignmentMatrix
 
 from ..alignment.utils import compute_alignment_scores
 from .corpus import load_corpus, write_corpus
@@ -23,12 +23,13 @@ def all_punct(string: str) -> bool:
 
 
 class UsfmPreserver:
-    _src_sents: List[str]  # w/o markers
-    _trg_sents: List[str]
+    _src_sents: List[str]
     _vrefs: List[ScriptureRef]
-    _stylesheet: UsfmStylesheet
-    _markers: List[Tuple[int, int, str]] = []  # (sent_idx, start idx in text_only_sent, tok (inc. \ and spaces))
-    _ignored_segments: List[Tuple[ScriptureRef, str]] = []
+
+    # (sent_idx, start idx in text_only_sent, is_paragraph_marker, tok (inc. \ and spaces))
+    _markers: List[Tuple[int, int, str]]
+    # (vref, segment)
+    _ignored_segments: List[Tuple[ScriptureRef, str]]
 
     def __init__(self, src_sents: List[str], vrefs: List[ScriptureRef], stylesheet: UsfmStylesheet):
         usfm_tokenizer = UsfmTokenizer(stylesheet)
@@ -38,15 +39,21 @@ class UsfmPreserver:
             if len(ref.path) == 0 or ref.path[-1].name != "rem":
                 sentence_toks.append(usfm_tokenizer.tokenize(sent))
                 self._vrefs.append(ref)
-        self._src_sents = self._extract_markers(sentence_toks)
-        self._stylesheet = stylesheet
+            else:  # TODO: should I still do this when it's in the main pipeline?
+                print(ref, sent)
 
+        self._src_sents = self._extract_markers(sentence_toks)
+        self._src_tok_ranges = self._tokenize_sents(self._src_sents)
+
+    # Source sentences without USFM markers, to be used as input to an MT model
     @property
-    def text_only_sents(self) -> List[str]:  # TODO: is it bad to have mismatching names?
+    def src_sents(self) -> List[str]:
         return self._src_sents
 
     def _extract_markers(self, sentence_toks: List[List[UsfmToken]]) -> List[str]:
         to_delete = ["fig"]
+        markers = []
+        ignored_segments = []
         text_only_sents = ["" for _ in sentence_toks]
         for i, (toks, ref) in enumerate(zip(sentence_toks, self._vrefs)):
             ignored_segment = ""
@@ -55,62 +62,62 @@ class UsfmPreserver:
                 if ignore_scope is not None:
                     ignored_segment += tok.to_usfm()
                     if tok.type == UsfmTokenType.END and tok.marker[:-1] == ignore_scope.marker:
-                        self._ignored_segments.append((ref, ignored_segment))
+                        ignored_segments.append((ref, ignored_segment))
                         ignored_segment = ""
                         ignore_scope = None
                 elif tok.type == UsfmTokenType.NOTE or tok.marker in to_delete:
                     ignored_segment += tok.to_usfm()
                     ignore_scope = tok
                 elif tok.type in [UsfmTokenType.PARAGRAPH, UsfmTokenType.CHARACTER, UsfmTokenType.END]:
-                    self._markers.append((i, len(text_only_sents[i]), tok.to_usfm()))
+                    markers.append((i, len(text_only_sents[i]), tok.type == UsfmTokenType.PARAGRAPH, tok.to_usfm()))
                 elif tok.type == UsfmTokenType.TEXT:
                     text_only_sents[i] += tok.text
 
+        self._markers = markers
+        self._ignored_segments = ignored_segments
         return text_only_sents
 
-    def construct_rows(self, translation_results: List[TranslationResult]) -> List[Tuple[List[ScriptureRef], str]]:
-        self._trg_sents = [tr.translation for tr in translation_results]
-
+    def construct_rows(self, translations: List[str]) -> List[Tuple[List[ScriptureRef], str]]:
         # Map each token to a character range in the original strings
-        src_tok_ranges, trg_tok_ranges = self._create_tok_ranges()
+        # src_tok_ranges, trg_tok_ranges = self._create_tok_ranges()
+        trg_tok_ranges = self._tokenize_sents(translations)
 
         # Get index of the text token immediately following each marker and predict the corresponding token on the target side
         adj_src_toks = []
-        for sent_idx, start_idx, _ in self._markers:
-            for i, tok_range in reversed(list(enumerate(src_tok_ranges[sent_idx]))):
+        for sent_idx, start_idx, _, _ in self._markers:
+            for i, tok_range in reversed(list(enumerate(self._src_tok_ranges[sent_idx]))):
                 if tok_range.start < start_idx:
                     adj_src_toks.append(i + 1)
                     break
                 if i == 0:
                     adj_src_toks.append(i)
-        adj_trg_toks = self._predict_marker_locations(adj_src_toks)
+        adj_trg_toks = self._predict_marker_locations(adj_src_toks, translations, trg_tok_ranges)
 
         # Collect the markers to be inserted
         to_insert = [[] for _ in trg_tok_ranges]
-        for i, ((sent_idx, _, marker), adj_trg_tok) in enumerate(zip(self._markers, adj_trg_toks)):
+        for i, ((sent_idx, _, is_para_marker, marker), adj_trg_tok) in enumerate(zip(self._markers, adj_trg_toks)):
             trg_str_idx = (
                 trg_tok_ranges[sent_idx][adj_trg_tok].start
                 if adj_trg_tok < len(trg_tok_ranges[sent_idx])
-                else len(self._trg_sents[sent_idx])
+                else len(translations[sent_idx])
             )
 
             # Determine the order of the markers in the sentence to handle ambiguity for directly adjacent markers
             insert_pos = 0
             while insert_pos < len(to_insert[sent_idx]) and to_insert[sent_idx][insert_pos][0] <= trg_str_idx:
                 insert_pos += 1
-            to_insert[sent_idx].insert(insert_pos, (trg_str_idx, marker))
+            to_insert[sent_idx].insert(insert_pos, (trg_str_idx, is_para_marker, marker))
 
         # Construct rows for the USFM file
         # Insert character markers back into text and create new rows at each paragraph marker
         rows = []
-        for ref, translation, inserts in zip(self._vrefs, self._trg_sents, to_insert):
+        for ref, translation, inserts in zip(self._vrefs, translations, to_insert):
             if len(inserts) == 0:
                 rows.append(([ref], translation))
                 continue
 
             row_texts = [translation[: inserts[0][0]]]
-            for i, (insert_idx, marker) in enumerate(inserts):
-                is_para_marker = self._stylesheet.get_tag(marker.strip(" \\+*")).style_type == UsfmStyleType.PARAGRAPH
+            for i, (insert_idx, is_para_marker, marker) in enumerate(inserts):
                 if is_para_marker:
                     row_texts.append("")
 
@@ -140,24 +147,29 @@ class UsfmPreserver:
                 rows.append(([ref], row_text))
 
         # Add any note-type segments to the ends of their verses
+        segment_idx = 0
         for i, row in enumerate(rows):
             ref = row[0][0]
             # Only add segments to the last row of a given vref
             if i + 1 < len(rows) and rows[i + 1][0][0].verse_ref == ref.verse_ref:
                 continue
             # Add the text all segments with a matching vref
-            while len(self._ignored_segments) > 0 and self._ignored_segments[0][0].verse_ref == ref.verse_ref:
-                rows[i] = ([ref], rows[i][1] + self._ignored_segments[0][1])
-                self._ignored_segments.pop(0)
+            while len(self._ignored_segments) > 0 and self._ignored_segments[segment_idx][0].verse_ref == ref.verse_ref:
+                rows[i] = ([ref], rows[i][1] + self._ignored_segments[segment_idx][1])
+                segment_idx += 1
         return rows
 
     @abstractmethod
-    def _create_tok_ranges(self): ...
+    def _tokenize_sents(self, sents: List[str]) -> List[List[Range[int]]]: ...
 
     @abstractmethod
-    def _get_alignment_matrices(self): ...
+    def _get_alignment_matrices(
+        self, trg_sents: List[str], trg_tok_ranges: List[List[Range[int]]]
+    ) -> List[WordAlignmentMatrix]: ...
 
-    def _predict_marker_locations(self, adj_src_toks: List[int]) -> List[int]:
+    def _predict_marker_locations(
+        self, adj_src_toks: List[int], trg_sents: List[str], trg_tok_ranges: List[List[Range[int]]]
+    ) -> List[int]:
         alignment_matrices: List[WordAlignmentMatrix] = self._get_alignment_matrices()
 
         # Gets the number of alignment pairs that "cross the line" between
@@ -172,29 +184,28 @@ class UsfmPreserver:
             return crossings
 
         adj_trg_toks = []
-        for (sent_idx, _, _), adj_src_tok in zip(self._markers, adj_src_toks):
+        for (sent_idx, _, _, _), adj_src_tok in zip(self._markers, adj_src_toks):
             # If the token on either side of a potential target location is punctuation,
             # use it as the basis for deciding the target marker location
             trg_hyp = -1
             punct_hyps = [-1, 0]
             for punct_hyp in punct_hyps:
                 src_hyp = adj_src_tok + punct_hyp
-                if src_hyp < 0 or src_hyp >= len(self._src_toks[sent_idx]):
+                if src_hyp < 0 or src_hyp >= len(self._src_tok_ranges[sent_idx]):
                     continue
                 # only accept aligned pairs where both the src and trg token are punct
-                # if len(self._src_toks[sent_idx][src_hyp]) > 0 and all_punct(self._src_toks[sent_idx][src_hyp]):  # should be the same as before
-                if len(self.src_toks[sent_idx][src_hyp]) > 0 and not any(
-                    c.isalpha() for c in self.src_toks[sent_idx][src_hyp]
+                src_hyp_range = self._src_tok_ranges[sent_idx][src_hyp]
+                # if src_hyp_range.length > 0 and all_punct(self._src_sents[sent_idx][src_hyp_range.start : src_hyp_range.end]):  # should be the same as before
+                if src_hyp_range.length > 0 and not any(
+                    self._src_sents[sent_idx][char_idx].isalpha() for char_idx in src_hyp_range
                 ):
                     aligned_trg_toks = list(alignment_matrices[sent_idx].get_row_aligned_indices(src_hyp))
                     # if aligning to a token that precedes that marker,
                     # the trg token predicted to be closest to the marker is the last token aligned to the src rather than the first
-                    if punct_hyp < 0:
-                        aligned_trg_toks.reverse()
-
-                    for trg_tok in aligned_trg_toks:
-                        # if all_punct(self._trg_toks[sent_idx][trg_tok]):  # should be the same as before
-                        if not any(c.isalpha() for c in self.trg_toks[sent_idx][trg_tok]):
+                    for trg_tok in reversed(aligned_trg_toks) if punct_hyp < 0 else aligned_trg_toks:
+                        trg_tok_range = trg_tok_ranges[sent_idx][trg_tok]
+                        # if all_punct(trg_sents[sent_idx][trg_tok_range.start : trg_tok_range.end]):  # should be the same as before
+                        if not any(trg_sents[sent_idx][char_idx].isalpha() for char_idx in trg_tok_range):
                             trg_hyp = trg_tok
                             break
                 if trg_hyp != -1:
@@ -206,19 +217,15 @@ class UsfmPreserver:
                 continue
 
             hyps = [0, 1, 2]
-            # TODO: set max crossings more intelligently
-            best_hyp = (
-                -1,
-                None,
-                200**2,
-            )  # trg token index, offset of corresponding src token from the marker, num crossings
-            checked = set()  # to prevent checking the same idx twice
+            best_hyp = -1
+            best_num_crossings = 200**2  # mostly meaningless, a big number
+            checked = set()
             for hyp in hyps:
                 src_hyp = adj_src_tok + hyp
                 if src_hyp in checked:
                     continue
                 trg_hyp = -1
-                while trg_hyp == -1 and src_hyp >= 0 and src_hyp < len(self._src_toks[sent_idx]):
+                while trg_hyp == -1 and src_hyp >= 0 and src_hyp < len(self._src_tok_ranges[sent_idx]):
                     checked.add(src_hyp)
                     aligned_trg_toks = list(alignment_matrices[sent_idx].get_row_aligned_indices(src_hyp))
                     if len(aligned_trg_toks) > 0:
@@ -229,15 +236,16 @@ class UsfmPreserver:
                         src_hyp += -1 if hyp < 0 else 1
                 if trg_hyp != -1:
                     num_crossings = num_align_crossings(sent_idx, src_hyp, trg_hyp)
-                    if num_crossings < best_hyp[2]:
-                        best_hyp = (trg_hyp, hyp, num_crossings)
+                    if num_crossings < best_num_crossings:
+                        best_hyp = trg_hyp
+                        best_num_crossings = num_crossings
 
             # if no alignments found, insert at the end of the sentence
-            if best_hyp[0] == -1:
-                adj_trg_toks.append(len(self._trg_toks[sent_idx]))
+            if best_hyp == -1:
+                adj_trg_toks.append(len(trg_tok_ranges[sent_idx]))
                 continue
 
-            adj_trg_toks.append(best_hyp[0])
+            adj_trg_toks.append(best_hyp)
 
         return adj_trg_toks
 
@@ -247,28 +255,18 @@ class StatisticalUsfmPreserver(UsfmPreserver):
         self._aligner = aligner
         super().__init__(src_sentences, vrefs, stylesheet)
 
-    def _create_tok_ranges(self) -> Tuple[List[List[Range[int]]], List[List[Range[int]]]]:
+    def _tokenize_sents(self, sents: List[str]) -> List[List[Range[int]]]:
         tokenizer = LatinWordTokenizer()
-        src_tok_ranges = [list(tokenizer.tokenize_as_ranges(sent)) for sent in self._src_sents]
-        # self._src_toks = [list(tokenizer.tokenize(sent)) for sent in self._src_sents]
-        self._src_toks = [
-            [sent[r.start : r.end] for r in ranges] for sent, ranges in zip(self._src_sents, src_tok_ranges)
-        ]
+        return [list(tokenizer.tokenize_as_ranges(sent)) for sent in sents]
 
-        trg_tok_ranges = [list(tokenizer.tokenize_as_ranges(sent)) for sent in self._trg_sents]
-        # self._trg_toks = [list(tokenizer.tokenize(sent)) for sent in self._trg_sents]
-        self._trg_toks = [
-            [sent[r.start : r.end] for r in ranges] for sent, ranges in zip(self._trg_sents, trg_tok_ranges)
-        ]
-
-        return src_tok_ranges, trg_tok_ranges
-
-    def _get_alignment_matrices(self) -> List[WordAlignmentMatrix]:
+    def _get_alignment_matrices(
+        self, trg_sents: List[str], trg_tok_ranges: List[List[Range[int]]]
+    ) -> List[WordAlignmentMatrix]:
         alignments = []
         with TemporaryDirectory() as td:
             align_path = Path(td, "sym-align.txt")
             write_corpus(Path(td, "src_align.txt"), self._src_sents)
-            write_corpus(Path(td, "trg_align.txt"), self._trg_sents)
+            write_corpus(Path(td, "trg_align.txt"), trg_sents)
             compute_alignment_scores(Path(td, "src_align.txt"), Path(td, "trg_align.txt"), self._aligner, align_path)
 
             for i, line in enumerate(load_corpus(align_path)):
@@ -277,45 +275,56 @@ class StatisticalUsfmPreserver(UsfmPreserver):
                     pair = pair.split("-") if self._aligner == "eflomal" else pair.split(":")[0].split("-")
                     pairs.append((int(pair[0]), int(pair[1])))
                 alignments.append(
-                    WordAlignmentMatrix.from_word_pairs(len(self._src_toks[i]), len(self._trg_toks[i]), pairs)
+                    WordAlignmentMatrix.from_word_pairs(len(self._src_tok_ranges[i]), len(trg_tok_ranges[i]), pairs)
                 )
 
         return alignments
 
 
+"""
+Necessary changes to use AttentionUsfmPreserver:
+* Use machine.py's _TranslationPipeline (in translation.huggingface.hugging_face_nmt_engine)
+  to output attentions along with the translations
+* Build TranslationResults based on the outputs of the pipeline, using the logic from
+  HuggingFaceNmtEngine._try_translate_n_batch (also in translation.huggingface.hugging_face_nmt_engine)
+"""
+
+
 class AttentionUsfmPreserver(UsfmPreserver):
+    def __init__(self, src_sents, vrefs, stylesheet):
+        raise NotImplementedError(
+            "AttentionUsfmPreserver is not a supported class. See class definition for more information about the work needed to use."
+        )
+
+    """
     def construct_rows(self, translation_results: List[TranslationResult]) -> List[Tuple[List[ScriptureRef], str]]:
         self._translation_results = translation_results
+        # TODO: do source token ranges need to be reconstructed for each draft?
+        self._src_tok_ranges = self._construct_tok_ranges([tr.source_tokens for tr in translation_results])
+
         super().construct_rows(translation_results)
 
-    # NOTE: the "▁" characters in this function are from the NllbTokenizer and are not the same character as the standard underscore
-    def _create_tok_ranges(self) -> Tuple[List[List[Range[int]]], List[List[Range[int]]]]:
-        self._src_toks = []
-        self._trg_toks = []
-        src_tok_ranges = []
-        trg_tok_ranges = []
-        for tr in self._translation_results:
-            src_sent_tok_ranges = [Range.create(0, len(tr.source_tokens[0]) - 1)]
-            for tok in tr.source_tokens[1:]:
-                src_sent_tok_ranges.append(
+    # NOTE: only used for target side
+    # NOTE: _tokenize_sents is called for the source side in UsfmPreserver.__init__, but it will get overwritten
+    #       with the correct tokens when construct_rows is called
+    def _tokenize_sents(self, sents: List[str]) -> Tuple[List[List[Range[int]]], List[List[str]]]:
+        return self._construct_tok_ranges([tr.target_tokens for tr in self._translation_results])
+
+    # NOTE: the "▁" characters in this function are from the NllbTokenizer and are not the same character as the typical underscore
+    def _construct_tok_ranges(self, toks: List[str]) -> List[List[Range[int]]]:
+        tok_ranges = []
+        for sent_toks in toks:
+            sent_tok_ranges = [Range.create(0, len(sent_toks[0]) - 1)]
+            for tok in sent_toks[1:]:
+                sent_tok_ranges.append(
                     Range.create(
-                        src_sent_tok_ranges[-1].end + (1 if tok[0] == "▁" else 0),
-                        src_sent_tok_ranges[-1].end + len(tok),
+                        sent_tok_ranges[-1].end + (1 if tok[0] == "▁" else 0),
+                        sent_tok_ranges[-1].end + len(tok),
                     )
                 )
-            self._src_toks.append(tr.source_tokens)
-            src_tok_ranges.append(src_sent_tok_ranges)
-            trg_sent_tok_ranges = [Range.create(0, len(tr.target_tokens[0]) - 1)]
-            for tok in tr.target_tokens[1:]:
-                trg_sent_tok_ranges.append(
-                    Range.create(
-                        trg_sent_tok_ranges[-1].end + (1 if tok[0] == "▁" else 0),
-                        trg_sent_tok_ranges[-1].end + len(tok),
-                    )
-                )
-            self._trg_toks.append(tr.target_tokens)
-            trg_tok_ranges.append(trg_sent_tok_ranges)
-        return src_tok_ranges, trg_tok_ranges
+            tok_ranges.append(sent_tok_ranges)
+        return tok_ranges
 
     def _get_alignment_matrices(self) -> List[WordAlignmentMatrix]:
         return [tr.alignment for tr in self._translation_results]
+    """

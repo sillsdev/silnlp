@@ -1,7 +1,6 @@
 import logging
 import re
 from abc import ABC, abstractmethod
-from collections import defaultdict
 from datetime import date
 from itertools import groupby
 from pathlib import Path
@@ -18,9 +17,7 @@ from machine.corpora import (
     UsfmFileText,
     UsfmParserState,
     UsfmStylesheet,
-    UsfmStyleType,
     UsfmTextType,
-    UsfmTokenizer,
     UsfmTokenType,
     parse_usfm,
 )
@@ -46,6 +43,9 @@ class ParagraphUpdateUsfmParserHandler(UpdateUsfmParserHandler):
                 state.tokens[self._token_index].type == UsfmTokenType.PARAGRAPH
                 and state.tokens[self._token_index].marker != "rem"
             ):
+                # Because paragraph marker tokens are passed at the end of the verse,
+                # it is necessary to calculate how many positions each one needs to move up.
+                # This logic inserts them between the earliest instance of consecutive text tokens in the verse
                 num_text = 0
                 rem_offset = 0
                 for i in range(len(self._tokens) - 1, -1, -1):
@@ -83,7 +83,7 @@ def insert_draft_remark(
 
 
 # A group of multiple translations of a single sentence
-TranslationGroup = List[TranslationResult]
+TranslationGroup = List[str]
 
 # A list representing a single draft (one translation of each input sentence)
 TranslatedDraft = List[str]
@@ -195,7 +195,7 @@ class Translator(ABC):
                 src_settings.get_book_id(src_file_path.name),
                 src_file_path,
                 src_settings.versification,
-                include_markers=True,
+                include_markers=True,  # TODO: go back to old settings if trg_project?
                 include_all_text=True,
                 project=src_settings.name,
             )
@@ -226,74 +226,65 @@ class Translator(ABC):
 
         usfm_preserver = StatisticalUsfmPreserver(sentences, vrefs, src_settings.stylesheet, "eflomal")
 
-        translation_groups = self.translate(
-            usfm_preserver.text_only_sents, src_iso, trg_iso, produce_multiple_translations, vrefs
-        )
-        translation_results = [r[0] for r in translation_groups]
-        translations = [tr.translation for tr in translation_results]
+        translations = self.translate(usfm_preserver.src_sents, src_iso, trg_iso, produce_multiple_translations, vrefs)
 
-        rows = usfm_preserver.construct_rows(translation_results)
+        # TODO: will this work with the usfm preserver? need to add empty sents back to src_sents also?
+        # Add empty sentences back in
+        for idx, vref in reversed(empty_sents):
+            translations.insert(idx, [])
+            vrefs.insert(idx, vref)
 
-        # Update USFM and write out
-        with open(src_file_path, encoding=src_settings.encoding) as f:
-            usfm = f.read()
-        handler = ParagraphUpdateUsfmParserHandler(rows, behavior=UpdateUsfmBehavior.PREFER_NEW)
-        parse_usfm(usfm, handler, src_settings.stylesheet, src_settings.versification, preserve_whitespace=False)
-        usfm_out = handler.get_usfm(src_settings.stylesheet)
+        draft_set: DraftGroup = DraftGroup(translations)
+        for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
+            if usfm_preserver is not None:
+                rows = usfm_preserver.construct_rows(translated_draft)
+            else:
+                rows = [([ref], translation) for ref, translation in zip(vrefs, translated_draft)]
 
-        # Insert draft remark and write to output path
-        description = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
-        usfm_out = insert_draft_remark(usfm_out, vrefs[0].book, description, experiment_ckpt_str)
-        with trg_file_path.open("w", encoding=src_settings.encoding) as f:
-            f.write(usfm_out)
+            # Insert translation into the USFM structure of an existing project
+            # If the target project is not the same as the translated file's original project,
+            # no verses outside of the ones translated will be overwritten
+            use_src_project = trg_project is None and src_from_project
+            trg_format_project = src_file_path.parent.name if use_src_project else trg_project
+            if usfm_preserver is not None:
+                with open(src_file_path, encoding=src_settings.encoding) as f:
+                    usfm = f.read()
+                handler = ParagraphUpdateUsfmParserHandler(rows, behavior=UpdateUsfmBehavior.PREFER_NEW)
+                parse_usfm(usfm, handler, src_settings.stylesheet, src_settings.versification)
+                usfm_out = handler.get_usfm(src_settings.stylesheet)
+            elif trg_format_project is not None:
+                dest_project_path = get_project_dir(trg_format_project)
+                dest_updater = FileParatextProjectTextUpdater(dest_project_path)
+                usfm_out = dest_updater.update_usfm(
+                    book_id=src_file_text.id,
+                    rows=rows,
+                    behavior=UpdateUsfmBehavior.STRIP_EXISTING if use_src_project else UpdateUsfmBehavior.PREFER_NEW,
+                )
 
-        # # Add empty sentences back in
-        # for idx, vref in reversed(empty_sents):
-        #     translations.insert(idx, [])
-        #     vrefs.insert(idx, vref)
+                if usfm_out is None:
+                    raise FileNotFoundError(f"Book {src_file_text.id} does not exist in target project {trg_project}")
+            # Insert translation into the USFM structure of an individual file
+            else:
+                with open(src_file_path, encoding="utf-8-sig") as f:
+                    usfm = f.read()
+                handler = UpdateUsfmParserHandler(
+                    rows=rows, id_text=vrefs[0].book, behavior=UpdateUsfmBehavior.STRIP_EXISTING
+                )
+                parse_usfm(usfm, handler)
+                usfm_out = handler.get_usfm()
 
-        # draft_set: DraftGroup = DraftGroup(translations)
-        # for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
-        #     rows = [([ref], translation) for ref, translation in zip(vrefs, translated_draft)]
+            # Insert draft remark and write to output path
+            description = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
+            usfm_out = insert_draft_remark(usfm_out, vrefs[0].book, description, experiment_ckpt_str)
+            encoding = src_settings.encoding if src_from_project else "utf-8"
 
-        #     # Insert translation into the USFM structure of an existing project
-        #     # If the target project is not the same as the translated file's original project,
-        #     # no verses outside of the ones translated will be overwritten
-        #     use_src_project = trg_project is None and src_from_project
-        #     trg_format_project = src_file_path.parent.name if use_src_project else trg_project
-        #     if trg_format_project is not None:
-        #         dest_project_path = get_project_dir(trg_format_project)
-        #         dest_updater = FileParatextProjectTextUpdater(dest_project_path)
-        #         usfm_out = dest_updater.update_usfm(
-        #             book_id=src_file_text.id,
-        #             rows=rows,
-        #             behavior=UpdateUsfmBehavior.STRIP_EXISTING if use_src_project else UpdateUsfmBehavior.PREFER_NEW,
-        #         )
+            if produce_multiple_translations:
+                trg_draft_file_path = trg_file_path.with_suffix(f".{draft_index}{trg_file_path.suffix}")
+            else:
+                trg_draft_file_path = trg_file_path
 
-        #         if usfm_out is None:
-        #             raise FileNotFoundError(f"Book {src_file_text.id} does not exist in target project {trg_project}")
-        #     # Insert translation into the USFM structure of an individual file
-        #     else:
-        #         with open(src_file_path, encoding="utf-8-sig") as f:
-        #             usfm = f.read()
-        #         handler = UpdateUsfmParserHandler(
-        #             rows=rows, id_text=vrefs[0].book, behavior=UpdateUsfmBehavior.STRIP_EXISTING
-        #         )
-        #         parse_usfm(usfm, handler)
-        #         usfm_out = handler.get_usfm()
-
-        #     # Insert draft remark and write to output path
-        #     description = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
-        #     usfm_out = insert_draft_remark(usfm_out, vrefs[0].book, description, experiment_ckpt_str)
-        #     encoding = src_settings.encoding if src_from_project else "utf-8"
-
-        #     if produce_multiple_translations:
-        #         trg_draft_file_path = trg_file_path.with_suffix(f".{draft_index}{trg_file_path.suffix}")
-        #     else:
-        #         trg_draft_file_path = trg_file_path
-
-        #     with trg_draft_file_path.open("w", encoding=encoding) as f:
-        #         f.write(usfm_out)
+            with trg_draft_file_path.open("w", encoding=encoding) as f:
+                f.write(usfm_out)
 
     def translate_docx(
         self,
