@@ -1,4 +1,5 @@
 import argparse
+import csv
 import re
 import time
 from typing import Tuple
@@ -35,37 +36,49 @@ def clean_research(max_months: int, dry_run: bool) -> Tuple[int, int]:
     regex_to_delete = re.compile(
         r"^MT/experiments/.+/run/(checkpoint.*(pytorch_model\.bin|\.safetensors)$|ckpt.+\.(data-00000-of-00001|index)$)"
     )
-    return _delete_data(max_months, dry_run, regex_to_delete)
+    # create a csv filename to store the deleted files that includes the current datetime
+    output_csv = f"deleted_research_files_{time.strftime('%Y%m%d-%H%M%S')}" + ("_dryrun" if dry_run else "") + ".csv"
+    return _delete_data(max_months, dry_run, regex_to_delete, output_csv)
 
 
 def clean_production(max_months: int, dry_run: bool) -> Tuple[int, int]:
     print("Cleaning production")
     regex_to_delete = re.compile(r"^(production|dev|int-qa|ext-qa)/builds/.+")
-    return _delete_data(max_months, dry_run, regex_to_delete)
+    output_csv = f"deleted_production_files_{time.strftime('%Y%m%d-%H%M%S')}" + ("_dryrun" if dry_run else "") + ".csv"
+    return _delete_data(max_months, dry_run, regex_to_delete, output_csv)
 
 
-def _delete_data(max_months: int, dry_run: bool, regex_to_delete: str) -> Tuple[int, int]:
+def _delete_data(max_months: int, dry_run: bool, regex_to_delete: str, output_csv: str) -> Tuple[int, int]:
     max_age = max_months * MONTH_IN_SECONDS
 
     s3 = boto3.client("s3")
     paginator = s3.get_paginator("list_objects_v2")
     total_deleted = 0
     storage_space_freed = 0
-    for page in paginator.paginate(Bucket="silnlp"):
-        for obj in page["Contents"]:
-            if regex_to_delete.search(obj["Key"]) is None:
-                continue
-            last_modified = obj["LastModified"].timestamp()
-            now = time.time()
-            if now - last_modified <= max_age:
-                continue
-            print(obj["Key"])
-            print(f"{(now - last_modified) / MONTH_IN_SECONDS} months old")
-            if not dry_run:
-                s3.delete_object(Bucket="silnlp", Key=obj["Key"])
-                print("Deleted")
-            total_deleted += 1
-            storage_space_freed += obj["Size"]
+    with open(output_csv, mode="w", newline="", encoding="utf-8") as csv_file:
+        csv_writer = csv.writer(csv_file)
+        if dry_run:
+            csv_writer.writerow(["Filename", "LastModified", "Eligible for Deletion"])
+        else:
+            csv_writer.writerow(["Filename", "LastModified", "Deleted"])
+        for page in paginator.paginate(Bucket="silnlp"):
+            for obj in page["Contents"]:
+                s3_filename = obj["Key"]
+                if regex_to_delete.search(s3_filename) is None:
+                    continue
+                last_modified = obj["LastModified"].timestamp()
+                now = time.time()
+                delete = False
+                if now - last_modified > max_age:
+                    delete = True
+                    print(s3_filename)
+                    print(f"{(now - last_modified) / MONTH_IN_SECONDS} months old")
+                    if not dry_run:
+                        s3.delete_object(Bucket="silnlp", Key=s3_filename)
+                        print("Deleted")
+                    total_deleted += 1
+                    storage_space_freed += obj["Size"]
+                csv_writer.writerow([s3_filename, last_modified, delete])
     return total_deleted, storage_space_freed
 
 
