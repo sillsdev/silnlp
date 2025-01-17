@@ -194,14 +194,9 @@ def load_parent_exp(parent_exp: str) -> Tuple[str, str]:
     if not parent_model_dir.is_dir():
         LOGGER.error("The parent experiment does not contain a checkpoint.")
         raise ValueError(f"Invalid path {parent_model_dir}")
-
-    trainer_state_path = parent_model_dir / "trainer_state.json"
-    with open(trainer_state_path, "r") as file:
-        trainer_state = json.load(file)
-    parent_model_path = trainer_state.get("best_model_checkpoint", None)
-    parent_model_name = os.path.basename(parent_model_path)
-    parent_model = parent_model_dir / parent_model_name
-
+    parent_model = get_last_checkpoint(parent_model_dir)
+    if has_best_checkpoint(parent_model_dir):
+        parent_model = get_best_checkpoint(parent_model_dir)
     parent_model_files = os.listdir(parent_model)
     valid_model_files = [f for f in parent_model_files if f.endswith(".safetensors")]
     if not valid_model_files:
@@ -209,10 +204,8 @@ def load_parent_exp(parent_exp: str) -> Tuple[str, str]:
         raise ValueError(f"Incomplete folder {parent_model}")
 
     LOGGER.info("Using parent model. This might be different from the model specified in config.")
-
     with (parent_dir / "config.yml").open("r", encoding="utf-8") as file:
         parent_configs = yaml.safe_load(file)
-
     parent_base_model = parent_configs.get("model")
     parent_model_prefix = get_model_prefix(parent_base_model)
 
