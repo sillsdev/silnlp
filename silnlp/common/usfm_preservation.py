@@ -12,15 +12,6 @@ from machine.translation import WordAlignmentMatrix
 from ..alignment.utils import compute_alignment_scores
 from .corpus import load_corpus, write_corpus
 
-PUNCT_CATEGORIES = ["Pi", "Pf", "Po", "Ps", "Pe"]
-
-
-def all_punct(string: str) -> bool:
-    for c in string:
-        if unicodedata.category(c) not in PUNCT_CATEGORIES:
-            return False
-    return True
-
 
 class UsfmPreserver:
     _src_sents: List[str]
@@ -36,11 +27,13 @@ class UsfmPreserver:
         sentence_toks = []
         self._vrefs = []
         for sent, ref in zip(src_sents, vrefs):
+            # TODO: filtering out \rem markers in combination with the PREFER_NEW update behavior allows
+            # the original markers + content to be transferred over without having to touch them
+            # This can be extended to work for a customizable list of markers (that are on their own line)
+            # Inline markers that need to be transferred can be treated like footnotes currently are
             if len(ref.path) == 0 or ref.path[-1].name != "rem":
                 sentence_toks.append(usfm_tokenizer.tokenize(sent))
                 self._vrefs.append(ref)
-            else:  # TODO: should I still do this when it's in the main pipeline?
-                print(ref, sent)
 
         self._src_sents = self._extract_markers(sentence_toks)
         self._src_tok_ranges = self._tokenize_sents(self._src_sents)
@@ -126,9 +119,6 @@ class UsfmPreserver:
                     + (
                         " "  # Extra space if inserting an end marker before a non-punctuation character
                         if "*" in marker and insert_idx < len(translation) and translation[insert_idx].isalpha()
-                        # and not all_punct(
-                        #     translation[insert_idx]
-                        # )  # different from before, previously was "all alpha", now is "not all punct"
                         else ""
                     )
                     + (
@@ -138,7 +128,7 @@ class UsfmPreserver:
                     )
                 )
                 # Prevent spaces before end markers
-                if i + 1 < len(inserts) and "*" in inserts[i + 1][1] and len(row_text) > 0 and row_text[-1] == " ":
+                if i + 1 < len(inserts) and "*" in inserts[i + 1][2] and len(row_text) > 0 and row_text[-1] == " ":
                     row_text = row_text[:-1]
                 row_texts[-1] += row_text
 
@@ -154,7 +144,10 @@ class UsfmPreserver:
             if i + 1 < len(rows) and rows[i + 1][0][0].verse_ref == ref.verse_ref:
                 continue
             # Add the text all segments with a matching vref
-            while len(self._ignored_segments) > 0 and self._ignored_segments[segment_idx][0].verse_ref == ref.verse_ref:
+            while (
+                segment_idx < len(self._ignored_segments)
+                and self._ignored_segments[segment_idx][0].verse_ref == ref.verse_ref
+            ):
                 rows[i] = ([ref], rows[i][1] + self._ignored_segments[segment_idx][1])
                 segment_idx += 1
         return rows
@@ -170,7 +163,7 @@ class UsfmPreserver:
     def _predict_marker_locations(
         self, adj_src_toks: List[int], trg_sents: List[str], trg_tok_ranges: List[List[Range[int]]]
     ) -> List[int]:
-        alignment_matrices: List[WordAlignmentMatrix] = self._get_alignment_matrices()
+        alignment_matrices: List[WordAlignmentMatrix] = self._get_alignment_matrices(trg_sents, trg_tok_ranges)
 
         # Gets the number of alignment pairs that "cross the line" between
         # the src marker position and the potential trg marker position, (src_idx - .5) and (trg_idx - .5)
@@ -195,7 +188,6 @@ class UsfmPreserver:
                     continue
                 # only accept aligned pairs where both the src and trg token are punct
                 src_hyp_range = self._src_tok_ranges[sent_idx][src_hyp]
-                # if src_hyp_range.length > 0 and all_punct(self._src_sents[sent_idx][src_hyp_range.start : src_hyp_range.end]):  # should be the same as before
                 if src_hyp_range.length > 0 and not any(
                     self._src_sents[sent_idx][char_idx].isalpha() for char_idx in src_hyp_range
                 ):
@@ -204,7 +196,6 @@ class UsfmPreserver:
                     # the trg token predicted to be closest to the marker is the last token aligned to the src rather than the first
                     for trg_tok in reversed(aligned_trg_toks) if punct_hyp < 0 else aligned_trg_toks:
                         trg_tok_range = trg_tok_ranges[sent_idx][trg_tok]
-                        # if all_punct(trg_sents[sent_idx][trg_tok_range.start : trg_tok_range.end]):  # should be the same as before
                         if not any(trg_sents[sent_idx][char_idx].isalpha() for char_idx in trg_tok_range):
                             trg_hyp = trg_tok
                             break
