@@ -187,29 +187,13 @@ def has_best_checkpoint(model_dir: Path) -> bool:
     return "best_model_checkpoint" in trainer_state and trainer_state["best_model_checkpoint"] is not None
 
 
-def load_parent_exp(parent_exp: str) -> Tuple[str, str]:
-    SIL_NLP_ENV.copy_experiment_from_bucket(parent_exp)
-    parent_dir = Path(get_mt_exp_dir(parent_exp))
-    parent_model_dir = parent_dir / "run"
-    if not parent_model_dir.is_dir():
-        LOGGER.error("The parent experiment does not contain a checkpoint.")
-        raise ValueError(f"Invalid path {parent_model_dir}")
-    parent_model = get_last_checkpoint(parent_model_dir)
-    if has_best_checkpoint(parent_model_dir):
-        parent_model = get_best_checkpoint(parent_model_dir)
-    parent_model_files = os.listdir(parent_model)
-    valid_model_files = [f for f in parent_model_files if f.endswith(".safetensors")]
-    if not valid_model_files:
-        LOGGER.error("The checkpoint folder does not contain a model.")
-        raise ValueError(f"Incomplete folder {parent_model}")
-
-    LOGGER.info("Using parent model. This might be different from the model specified in config.")
-    with (parent_dir / "config.yml").open("r", encoding="utf-8") as file:
-        parent_configs = yaml.safe_load(file)
-    parent_base_model = parent_configs.get("model")
-    parent_model_prefix = get_model_prefix(parent_base_model)
-
-    return str(parent_model), parent_model_prefix
+def get_parent_last_checkpoint(model_dir: Path) -> Path:
+    trainer_state_path = model_dir / "trainer_state.json"
+    with trainer_state_path.open("r", encoding="utf-8") as f:
+        trainer_state = json.load(f)
+    max_step = trainer_state["max_steps"]
+    last_checkpoint = "checkpoint-" + str(max_step)
+    return model_dir / last_checkpoint
 
 
 OPTIMIZER_STATE_FILES = {"optimizer.pt", "rng_state.pth", "scaler.pt", "scheduler.pt"}
@@ -280,6 +264,27 @@ def get_model_prefix(model: str) -> str:
         if model.startswith(prefix):
             return prefix
     return ""
+
+
+def get_parent_model_prefix(parent_exp: str) -> str:
+    SIL_NLP_ENV.copy_experiment_from_bucket(parent_exp, patterns="config.yml")
+    parent_dir = Path(get_mt_exp_dir(parent_exp))
+    with (parent_dir / "config.yml").open("r", encoding="utf-8") as file:
+        parent_configs = yaml.safe_load(file)
+    parent_base_model = parent_configs.get("model")
+    parent_model_prefix = get_model_prefix(parent_base_model)
+    return parent_model_prefix
+
+
+def get_parent_model_name(parent_exp: str) -> str:
+    parent_dir = Path(get_mt_exp_dir(parent_exp))
+    parent_model_dir = parent_dir / "run"
+    SIL_NLP_ENV.copy_experiment_from_bucket(parent_exp, patterns="run/trainer_state.json")
+    parent_model = get_parent_last_checkpoint(parent_model_dir)
+    if has_best_checkpoint(parent_model_dir):
+        parent_model = get_best_checkpoint(parent_model_dir)
+    LOGGER.info("Using parent model. This might be different from the model specified in config.")
+    return str(parent_model)
 
 
 class HuggingFaceConfig(Config):
@@ -354,11 +359,13 @@ class HuggingFaceConfig(Config):
         self.model_prefix = get_model_prefix(config.get("model", ""))
 
         if "parent" in config["data"]:
-            parent_model, parent_model_prefix = load_parent_exp(config["data"]["parent"])
+            parent = config["data"]["parent"]
+            parent_model_name = get_parent_model_name(parent)
+            parent_model_prefix = get_parent_model_prefix(parent)
             if parent_model_prefix != self.model_prefix:
                 LOGGER.error("The parent model and the config model are not in the same type.")
                 raise ValueError(f"Unmatched model prefix {parent_model_prefix} and {self.model_prefix}")
-            config["model"] = parent_model
+            config["model"] = parent_model_name
             self.model_prefix = parent_model_prefix
 
         super().__init__(exp_dir, config)
@@ -643,8 +650,7 @@ class HuggingFaceConfig(Config):
                 ).is_file():
                     model_name_or_path = str(SIL_NLP_ENV.assets_dir / "tokenizers" / self.model_prefix)
                 elif self.has_parent:
-                    parent_model_path = Path(self.model)
-                    model_name_or_path = str(parent_model_path.parents[1])
+                    model_name_or_path = self.data["parent"]
                 else:
                     model_name_or_path = self.model
                 self._tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True)
@@ -656,8 +662,7 @@ class HuggingFaceConfig(Config):
             if (self.exp_dir / "tokenizer_config.json").is_file():
                 model_name_or_path = str(self.exp_dir)
             elif self.has_parent:
-                model_name_or_path_path = Path(model_name_or_path)
-                model_name_or_path = str(model_name_or_path_path.parents[1])
+                model_name_or_path = self.data["parent"]
             else:
                 model_name_or_path = self.model
 
