@@ -1109,7 +1109,7 @@ class HuggingFaceNMTModel(NMTModel):
             tokenizer = PunctuationNormalizingTokenizer(tokenizer)
 
         model = self._create_inference_model(ckpt, tokenizer)
-        if model.config.max_length != None and model.config.max_length < 512:
+        if model.config.max_length is not None and model.config.max_length < 512:
             model.config.max_length = 512
         lang_codes: Dict[str, str] = self._config.data["lang_codes"]
         pipeline = TranslationPipeline(
