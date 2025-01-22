@@ -58,13 +58,16 @@ class SILExperiment:
         if not config_file.exists():
             raise RuntimeError(f"ERROR: Config file does not exist in experiment folder {exp_dir}.")
         SIL_NLP_ENV.copy_experiment_from_bucket(self.name)
+        if self.config.has_parent:
+            SIL_NLP_ENV.copy_experiment_from_bucket(self.config.data["parent"])
         self.config.preprocess(self.make_stats, self.force_align)
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name, overwrite=self.force_align)
 
     def train(self):
         os.system("nvidia-smi")
         SIL_NLP_ENV.copy_experiment_from_bucket(self.name)
-
+        if self.config.has_parent:
+            SIL_NLP_ENV.copy_experiment_from_bucket(self.config.data["parent"])
         model = self.config.create_model(self.mixed_precision, self.num_devices)
         model.save_effective_config(self.config.exp_dir / f"effective-config-{self.rev_hash}.yml")
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=f"effective-config-{self.rev_hash}.yml")

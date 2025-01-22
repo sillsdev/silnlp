@@ -73,7 +73,7 @@ from transformers.utils.logging import tqdm
 from ..common.corpus import Term, count_lines, get_terms
 from ..common.environment import SIL_NLP_ENV, download_if_s3_paths
 from ..common.translator import DraftGroup, TranslationGroup
-from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
+from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, get_mt_exp_dir, merge_dict
 from .config import CheckpointType, Config, DataFile, NMTModel
 from .tokenizer import NullTokenizer, Tokenizer
 
@@ -187,6 +187,15 @@ def has_best_checkpoint(model_dir: Path) -> bool:
     return "best_model_checkpoint" in trainer_state and trainer_state["best_model_checkpoint"] is not None
 
 
+def get_parent_last_checkpoint(model_dir: Path) -> Path:
+    trainer_state_path = model_dir / "trainer_state.json"
+    with trainer_state_path.open("r", encoding="utf-8") as f:
+        trainer_state = json.load(f)
+    max_step = trainer_state["max_steps"]
+    last_checkpoint = "checkpoint-" + str(max_step)
+    return model_dir / last_checkpoint
+
+
 OPTIMIZER_STATE_FILES = {"optimizer.pt", "rng_state.pth", "scaler.pt", "scheduler.pt"}
 
 
@@ -255,6 +264,27 @@ def get_model_prefix(model: str) -> str:
         if model.startswith(prefix):
             return prefix
     return ""
+
+
+def get_parent_model_prefix(parent_exp: str) -> str:
+    SIL_NLP_ENV.copy_experiment_from_bucket(parent_exp, patterns="config.yml")
+    parent_dir = Path(get_mt_exp_dir(parent_exp))
+    with (parent_dir / "config.yml").open("r", encoding="utf-8") as file:
+        parent_configs = yaml.safe_load(file)
+    parent_base_model = parent_configs.get("model")
+    parent_model_prefix = get_model_prefix(parent_base_model)
+    return parent_model_prefix
+
+
+def get_parent_model_name(parent_exp: str) -> str:
+    parent_dir = Path(get_mt_exp_dir(parent_exp))
+    parent_model_dir = parent_dir / "run"
+    SIL_NLP_ENV.copy_experiment_from_bucket(parent_exp, patterns="run/trainer_state.json")
+    parent_model = get_parent_last_checkpoint(parent_model_dir)
+    if has_best_checkpoint(parent_model_dir):
+        parent_model = get_best_checkpoint(parent_model_dir)
+    LOGGER.info("Using parent model. This might be different from the model specified in config.")
+    return str(parent_model)
 
 
 class HuggingFaceConfig(Config):
@@ -327,6 +357,16 @@ class HuggingFaceConfig(Config):
         )
         self._tokenizer: Optional[PreTrainedTokenizer] = None
         self.model_prefix = get_model_prefix(config.get("model", ""))
+
+        if "parent" in config["data"]:
+            parent = config["data"]["parent"]
+            parent_model_name = get_parent_model_name(parent)
+            parent_model_prefix = get_parent_model_prefix(parent)
+            if parent_model_prefix != self.model_prefix:
+                LOGGER.error("The parent model and the config model are not in the same type.")
+                raise ValueError(f"Unmatched model prefix {parent_model_prefix} and {self.model_prefix}")
+            config["model"] = parent_model_name
+            self.model_prefix = parent_model_prefix
 
         super().__init__(exp_dir, config)
 
@@ -609,6 +649,8 @@ class HuggingFaceConfig(Config):
                     SIL_NLP_ENV.assets_dir / "tokenizers" / self.model_prefix / "tokenizer_config.json"
                 ).is_file():
                     model_name_or_path = str(SIL_NLP_ENV.assets_dir / "tokenizers" / self.model_prefix)
+                elif self.has_parent:
+                    model_name_or_path = self.data["parent"]
                 else:
                     model_name_or_path = self.model
                 self._tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True)
@@ -617,7 +659,13 @@ class HuggingFaceConfig(Config):
 
     def get_tokenizer(self) -> PreTrainedTokenizer:
         if self._tokenizer is None:
-            model_name_or_path = str(self.exp_dir) if (self.exp_dir / "tokenizer_config.json").is_file() else self.model
+            if (self.exp_dir / "tokenizer_config.json").is_file():
+                model_name_or_path = str(self.exp_dir)
+            elif self.has_parent:
+                model_name_or_path = self.data["parent"]
+            else:
+                model_name_or_path = self.model
+
             self._tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True)
             self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
         return self._tokenizer
@@ -961,6 +1009,7 @@ class HuggingFaceNMTModel(NMTModel):
             sequential_sampling=self._config.train.get("sequential_sampling", False),
             better_transformer=self._config.train.get("better_transformer", False),
             auto_grad_acc=self._config.train.get("auto_grad_acc", False),
+            model_prefix=self._config.model_prefix,
         )
         early_stopping: Optional[dict] = self._config.eval["early_stopping"]
         if early_stopping:
@@ -1812,6 +1861,7 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         sequential_sampling: bool = False,
         better_transformer: bool = False,
         auto_grad_acc: bool = False,
+        model_prefix: Optional[str] = None,
     ):
         super().__init__(
             model,
@@ -1829,6 +1879,7 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         self._sequential_sampling = sequential_sampling
         self._better_transformer = better_transformer
         self._auto_grac_acc = auto_grad_acc
+        self.model_prefix = model_prefix
 
     def _get_train_sampler(self) -> Optional[Sampler]:
         if self._sequential_sampling:
@@ -1881,7 +1932,8 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         elif isinstance(self.model, PeftModel):
             if self._better_transformer:
                 self.model = self.model.reverse_bettertransformer()
-            output_dir += "/adapter" if self.model.name_or_path.startswith("facebook/nllb-200") else ""
+            if self.model_prefix:
+                output_dir += "/adapter" if self.model_prefix == "facebook/nllb-200" else ""
             self.model.save_pretrained(
                 output_dir,
                 state_dict=state_dict,
