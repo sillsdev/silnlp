@@ -244,7 +244,7 @@ class Translator(ABC):
         # Prevents pre-existing text from showing up in the sections of translated text
         if not preserve_usfm_markers:
             for idx, vref in reversed(empty_sents):
-                translations.insert(idx, [])
+                translations.insert(idx, ["" for _ in range(len(translations[0]))])
                 vrefs.insert(idx, vref)
 
         draft_set: DraftGroup = DraftGroup(translations)
