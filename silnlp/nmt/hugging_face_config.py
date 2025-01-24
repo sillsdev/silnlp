@@ -693,9 +693,21 @@ class HuggingFaceConfig(Config):
                 return 0
             categories_set: Optional[Set[str]] = None if categories is None else set(categories)
 
+            if terms_config["include_glosses"]:
+                if terms_config["include_glosses"] in ["en", "fr", "id", "es"]:
+                    gloss_iso = terms_config["include_glosses"]
+                src_gloss_iso = list(self.src_isos.intersection(["en", "fr", "id", "es"]))
+                trg_gloss_iso = list(self.trg_isos.intersection(["en", "fr", "id", "es"]))
+                if src_gloss_iso:
+                    gloss_iso = src_gloss_iso[0]
+                elif trg_gloss_iso:
+                    gloss_iso = trg_gloss_iso[0]
+            else:
+                gloss_iso = None
+
             all_trg_terms: List[Tuple[DataFile, Dict[str, Term], str]] = []
             for trg_terms_file, tags_str in trg_terms_files:
-                all_trg_terms.append((trg_terms_file, get_terms(trg_terms_file.path), tags_str))
+                all_trg_terms.append((trg_terms_file, get_terms(trg_terms_file.path, iso=gloss_iso), tags_str))
             for trg_terms_file, trg_terms, tags_str in all_trg_terms:
                 tokenizer.set_trg_lang(trg_terms_file.iso)
                 for trg_term in trg_terms.values():
@@ -716,11 +728,11 @@ class HuggingFaceConfig(Config):
                     dict_vref_file.write("\t".join(str(vref) for vref in trg_term.vrefs) + "\n")
                     dict_count += 1
 
-            if terms_config["include_glosses"] and "en" in self.trg_isos:
+            if gloss_iso is not None:
                 all_src_terms: List[Tuple[DataFile, Dict[str, Term], str]] = []
                 for src_terms_file, tags_str in src_terms_files:
-                    all_src_terms.append((src_terms_file, get_terms(src_terms_file.path), tags_str))
-                tokenizer.set_trg_lang("en")
+                    all_src_terms.append((src_terms_file, get_terms(src_terms_file.path, iso=gloss_iso), tags_str))
+                tokenizer.set_trg_lang(gloss_iso)
                 for src_term_file, src_terms, tags_str in all_src_terms:
                     for src_term in src_terms.values():
                         if categories_set is not None and src_term.cat not in categories_set:
