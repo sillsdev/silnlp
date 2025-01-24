@@ -349,7 +349,7 @@ class HuggingFaceConfig(Config):
                     "activation_dropout": 0.0,
                     "learning_rate": 0.0002,
                     "lr_scheduler_type": "cosine",
-                    "attention_implementation": "eager",
+                    "attn_implementation": "sdpa",
                 },
                 "model": "facebook/nllb-200-distilled-1.3B",
             },
@@ -827,7 +827,7 @@ class HuggingFaceNMTModel(NMTModel):
             label2id={},
             id2label={},
             num_labels=0,
-            attn_implementation=self._config.params.get("attn_implementation", "sdpa"),
+            attn_implementation=self._config.params["attn_implementation"],
         )
         if self._num_devices == 2 and self._config.model_prefix == "facebook/nllb-200":
             device_map = {
@@ -1623,7 +1623,7 @@ class HuggingFaceNMTModel(NMTModel):
             base_model = AutoModelForSeq2SeqLM.from_pretrained(
                 self._config.model,
                 torch_dtype=dtype if self._mixed_precision else "auto",
-                attn_implementation=self._config.params.get("attn_implementation", "sdpa"),
+                attn_implementation=self._config.params["attn_implementation"],
             )
             if len(tokenizer) != base_model.get_input_embeddings().weight.size(dim=0):
                 base_model.resize_token_embeddings(
@@ -1635,7 +1635,7 @@ class HuggingFaceNMTModel(NMTModel):
             model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(
                 model_name,
                 torch_dtype=dtype if self._mixed_precision else "auto",
-                attn_implementation=self._config.params.get("attn_implementation", "sdpa"),
+                attn_implementation=self._config.params["attn_implementation"],
             )
         if self._config.infer.get("better_transformer"):
             model = model.to_bettertransformer()
