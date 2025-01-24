@@ -40,9 +40,11 @@ def get_scripture_parallel_corpus(
     src_sentences: List[str] = []
     trg_sentences: List[str] = []
     indices: List[int] = []
-    with (SIL_NLP_ENV.assets_dir / "vref.txt").open("r", encoding="utf-8") as vref_file, src_file_path.open(
-        "r", encoding="utf-8"
-    ) as src_file, trg_file_path.open("r", encoding="utf-8") as trg_file:
+    with (
+        (SIL_NLP_ENV.assets_dir / "vref.txt").open("r", encoding="utf-8") as vref_file,
+        src_file_path.open("r", encoding="utf-8") as src_file,
+        trg_file_path.open("r", encoding="utf-8") as trg_file,
+    ):
         # Read lines before using zip to catch last lines of src/trg file if the other ends in one or more empty lines
         vref_lines = vref_file.readlines()
         src_lines = src_file.readlines()
@@ -222,7 +224,10 @@ def get_terms_glosses_path(list_name: str, iso: str = "en", mt_terms_dir: Path =
     gl_path = SIL_NLP_ENV.assets_dir / f"{iso}-{list_name}-glosses.txt"
     if gl_path.is_file():
         return gl_path
-    return mt_terms_dir / f"{iso}-{list_name}-glosses.txt"
+    gl_path = mt_terms_dir / f"{iso}-{list_name}-glosses.txt"
+    if gl_path.is_file():
+        return gl_path
+    return SIL_NLP_ENV.assets_dir / f"{iso}-Major-glosses.txt"
 
 
 def get_terms_vrefs_path(list_name: str, mt_terms_dir: Path = SIL_NLP_ENV.mt_terms_dir) -> Path:
@@ -274,6 +279,8 @@ def get_terms(terms_renderings_path: Path, iso: str = "en") -> Dict[str, Term]:
     for metadata_line, glosses_line, renderings_line, vrefs_line in itertools.zip_longest(
         terms_metadata, terms_glosses, terms_renderings, terms_vrefs
     ):
+        if metadata_line is None or len(metadata_line) == 0:
+            continue
         term_id, cat, domain = metadata_line.split("\t", maxsplit=3)
         glosses = [] if glosses_line is None or len(glosses_line) == 0 else glosses_line.split("\t")
         renderings = [] if len(renderings_line) == 0 else renderings_line.split("\t")
