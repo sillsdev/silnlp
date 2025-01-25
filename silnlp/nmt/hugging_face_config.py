@@ -650,7 +650,9 @@ class HuggingFaceConfig(Config):
                 ).is_file():
                     model_name_or_path = str(SIL_NLP_ENV.assets_dir / "tokenizers" / self.model_prefix)
                 elif self.has_parent:
-                    model_name_or_path = self.data["parent"]
+                    parent_exp = self.data["parent"]
+                    parent_dir = Path(get_mt_exp_dir(parent_exp))
+                    model_name_or_path = str(parent_dir)
                 else:
                     model_name_or_path = self.model
                 self._tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True)
@@ -662,7 +664,9 @@ class HuggingFaceConfig(Config):
             if (self.exp_dir / "tokenizer_config.json").is_file():
                 model_name_or_path = str(self.exp_dir)
             elif self.has_parent:
-                model_name_or_path = self.data["parent"]
+                parent_exp = self.data["parent"]
+                parent_dir = Path(get_mt_exp_dir(parent_exp))
+                model_name_or_path = str(parent_dir)
             else:
                 model_name_or_path = self.model
 
