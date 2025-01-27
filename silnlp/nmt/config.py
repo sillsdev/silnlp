@@ -1106,7 +1106,7 @@ class Config(ABC):
             elif trg_gloss_iso:
                 gloss_iso = trg_gloss_iso[0]
         else:
-            gloss_iso = None
+            gloss_iso = ""
 
         all_src_terms: List[Tuple[DataFile, Dict[str, Term], str]] = []
         for src_terms_file, tags_str in src_terms_files:
@@ -1124,7 +1124,7 @@ class Config(ABC):
                 cur_terms["source_lang"] = src_terms_file.iso
                 cur_terms["target_lang"] = trg_terms_file.iso
                 terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
-        if gloss_iso is not None:
+        if gloss_iso is not "":
             if gloss_iso in self.trg_isos:
                 for src_terms_file, src_terms, tags_str in all_src_terms:
                     cur_terms = get_terms_data_frame(src_terms, categories_set, filter_books)
