@@ -227,7 +227,10 @@ def get_terms_glosses_path(list_name: str, iso: str = "", mt_terms_dir: Path = S
     gl_path = mt_terms_dir / f"{iso}-{list_name}-glosses.txt"
     if gl_path.is_file():
         return gl_path
-    return SIL_NLP_ENV.assets_dir / f"{iso}-Major-glosses.txt"
+    gl_path = SIL_NLP_ENV.assets_dir / f"{list_name}-glosses.txt"
+    if gl_path.is_file():
+        return gl_path
+    return mt_terms_dir / f"{list_name}-glosses.txt"
 
 
 def get_terms_vrefs_path(list_name: str, mt_terms_dir: Path = SIL_NLP_ENV.mt_terms_dir) -> Path:
