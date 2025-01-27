@@ -281,7 +281,7 @@ def get_terms_glosses_file_paths(terms_files: List[DataFile]) -> Set[Path]:
     glosses_file_paths: Set[Path] = set()
     for terms_file in terms_files:
         list_name = get_terms_list(terms_file.path)
-        glosses_path = get_terms_glosses_path(list_name)
+        glosses_path = get_terms_glosses_path(list_name, iso=terms_file.iso)
         if glosses_path.is_file():
             glosses_file_paths.add(glosses_path)
     return glosses_file_paths
