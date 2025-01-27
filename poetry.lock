@@ -5182,13 +5182,13 @@ type = ["importlib-metadata (>=7.0.2)", "jaraco.develop (>=7.21)", "mypy (==1.12
 
 [[package]]
 name = "sil-machine"
-version = "1.3.0"
+version = "1.4.0"
 description = "A natural language processing library that is focused on providing tools for resource-poor languages."
 optional = false
 python-versions = "<3.13,>=3.9"
 files = [
-    {file = "sil_machine-1.3.0-py3-none-any.whl", hash = "sha256:3e0c38f483b7c8e7fd11ed67b25c0923e29029ddfc75414fa0ccc90a74c0adce"},
-    {file = "sil_machine-1.3.0.tar.gz", hash = "sha256:64f31a44c89b00a8565893a4776150456c0ca1d68bb0dcce4f2af899810908d7"},
+    {file = "sil_machine-1.4.0-py3-none-any.whl", hash = "sha256:ceea8358c426d5bd129e6a8dff779aa19430ac69087b99a7177660fd24f26eaf"},
+    {file = "sil_machine-1.4.0.tar.gz", hash = "sha256:7f66567313e29654b8cf44d4c9d1156700a879313450a400e018bf06a1818e44"},
 ]
 
 [package.dependencies]
@@ -5200,6 +5200,7 @@ numpy = ">=1.24.4,<2.0.0"
 regex = ">=2021.7.6"
 sil-thot = {version = ">=3.4.4,<4.0.0", optional = true, markers = "extra == \"thot\""}
 sortedcontainers = ">=2.4.0,<3.0.0"
+urllib3 = "<2"
 
 [package.extras]
 huggingface = ["datasets (>=2.4.0,<3.0.0)", "sacremoses (>=0.0.53,<0.0.54)", "transformers (>=4.38.0,<4.46)"]
@@ -5843,20 +5844,19 @@ files = [
 
 [[package]]
 name = "urllib3"
-version = "2.2.3"
+version = "1.26.20"
 description = "HTTP library with thread-safe connection pooling, file post, and more."
 optional = false
-python-versions = ">=3.8"
+python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,>=2.7"
 files = [
-    {file = "urllib3-2.2.3-py3-none-any.whl", hash = "sha256:ca899ca043dcb1bafa3e262d73aa25c465bfb49e0bd9dd5d59f1d0acba2f8fac"},
-    {file = "urllib3-2.2.3.tar.gz", hash = "sha256:e7d814a81dad81e6caf2ec9fdedb284ecc9c73076b62654547cc64ccdcae26e9"},
+    {file = "urllib3-1.26.20-py2.py3-none-any.whl", hash = "sha256:0ed14ccfbf1c30a9072c7ca157e4319b70d65f623e91e7b32fadb2853431016e"},
+    {file = "urllib3-1.26.20.tar.gz", hash = "sha256:40c2dc0c681e47eb8f90e7e27bf6ff7df2e677421fd46756da1161c39ca70d32"},
 ]
 
 [package.extras]
-brotli = ["brotli (>=1.0.9)", "brotlicffi (>=0.8.0)"]
-h2 = ["h2 (>=4,<5)"]
-socks = ["pysocks (>=1.5.6,!=1.5.7,<2.0)"]
-zstd = ["zstandard (>=0.18.0)"]
+brotli = ["brotli (==1.0.9)", "brotli (>=1.0.9)", "brotlicffi (>=0.8.0)", "brotlipy (>=0.6.0)"]
+secure = ["certifi", "cryptography (>=1.3.4)", "idna (>=2.0.0)", "ipaddress", "pyOpenSSL (>=0.14)", "urllib3-secure-extra"]
+socks = ["PySocks (>=1.5.6,!=1.5.7,<2.0)"]
 
 [[package]]
 name = "wcwidth"
@@ -6221,4 +6221,4 @@ eflomal = ["eflomal"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.11"
-content-hash = "3fec6fb0ef84fce740a3925b6b688f7bf6b17c7b15f86cac335ed540c8a38622"
+content-hash = "c5e3ebf9de9457a4197c42804dd239851f0c5880ec3f07bf1748b287d1870055"
