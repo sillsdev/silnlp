@@ -111,6 +111,7 @@ class SILExperiment:
                     config.get("trg_iso"),
                     self.produce_multiple_translations,
                     config.get("include_inline_elements", False),
+                    config.get("preserve_usfm_markers", False),
                 )
             elif config.get("src_prefix"):
                 translator.translate_text_files(
@@ -130,6 +131,7 @@ class SILExperiment:
                     config.get("trg_iso"),
                     self.produce_multiple_translations,
                     config.get("include_inline_elements", False),
+                    config.get("preserve_usfm_markers", False),
                 )
             else:
                 raise RuntimeError("A Scripture book, file, or file prefix must be specified for translation.")
