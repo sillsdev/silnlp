@@ -219,7 +219,7 @@ def get_terms_metadata_path(list_name: str, mt_terms_dir: Path = SIL_NLP_ENV.mt_
     return mt_terms_dir / f"{list_name}-metadata.txt"
 
 
-def get_terms_glosses_path(list_name: str, iso: str = "en", mt_terms_dir: Path = SIL_NLP_ENV.mt_terms_dir) -> Path:
+def get_terms_glosses_path(list_name: str, iso: str = "", mt_terms_dir: Path = SIL_NLP_ENV.mt_terms_dir) -> Path:
     iso = iso.lower()
     gl_path = SIL_NLP_ENV.assets_dir / f"{iso}-{list_name}-glosses.txt"
     if gl_path.is_file():
