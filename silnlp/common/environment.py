@@ -174,7 +174,7 @@ class SilNlpEnv:
             raise Exception(
                 f"No paratext project name is given.  Data still in the cache directory of {self.pt_projects_dir}"
             )
-        config = Config(read_timeout=600)
+        config = Config(connect_timeout=600, read_timeout=600)
         s3 = boto3.resource("s3", config=config)
         data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
         len_silnlp_path = len(pt_projects_path)
@@ -208,7 +208,7 @@ class SilNlpEnv:
             raise Exception(
                 f"No experiment name is given.  Data still in the cache directory of {self.mt_experiments_dir}"
             )
-        config = Config(read_timeout=600)
+        config = Config(connect_timeout=600, read_timeout=600)
         s3 = boto3.resource("s3", config=config)
         data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
         len_silnlp_path = len(experiments_path)
@@ -241,7 +241,7 @@ class SilNlpEnv:
                 f"No experiment name is given.  Data still in the temp directory of {self.mt_experiments_dir}"
             )
         experiment_path = str(self.mt_dir.relative_to(self.data_dir) / "experiments") + "/"
-        config = Config(read_timeout=600)
+        config = Config(connect_timeout=600, read_timeout=600)
         s3 = boto3.resource("s3", config=config)
         data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
         temp_folder = str(self.mt_experiments_dir / name)
@@ -285,7 +285,7 @@ def download_if_s3_paths(paths: Iterable[S3Path]) -> List[Path]:
             if not s3_setup:
                 temp_root = Path(tempfile.TemporaryDirectory().name)
                 temp_root.mkdir()
-                config = Config(read_timeout=600)
+                config = Config(connect_timeout=600, read_timeout=600)
                 s3 = boto3.resource("s3", config=config)
                 data_bucket = s3.Bucket(str(SIL_NLP_ENV.data_dir).strip("\\/"))
                 s3_setup = True
