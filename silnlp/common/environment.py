@@ -9,6 +9,7 @@ from platform import system, uname
 from typing import Callable, Iterable, List, Optional, Sequence, Union
 
 import boto3
+from boto3.s3.transfer import TransferConfig
 from botocore.config import Config
 from dotenv import load_dotenv
 from s3path import S3Path
@@ -16,6 +17,9 @@ from s3path import S3Path
 load_dotenv()
 
 LOGGER = logging.getLogger(__name__)
+
+
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 
 class SilNlpEnv:
@@ -174,7 +178,8 @@ class SilNlpEnv:
             raise Exception(
                 f"No paratext project name is given.  Data still in the cache directory of {self.pt_projects_dir}"
             )
-        config = Config(connect_timeout=600, read_timeout=600)
+        config = Config(retries={"mode": "adaptive", "max_attempts": 10}, connect_timeout=600, read_timeout=600)
+        transfer_config = TransferConfig(max_concurrency=4)
         s3 = boto3.resource("s3", config=config)
         data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
         len_silnlp_path = len(pt_projects_path)
@@ -196,7 +201,9 @@ class SilNlpEnv:
                     LOGGER.debug("File already exists in local cache: " + rel_path)
                 else:
                     LOGGER.info("Downloading " + rel_path)
-                    try_n_times(lambda: data_bucket.download_file(obj.object_key, str(temp_dest_path)))
+                    try_n_times(
+                        lambda: data_bucket.download_file(obj.object_key, str(temp_dest_path), Config=transfer_config)
+                    )
 
     def copy_experiment_from_bucket(self, name: Union[str, Path], patterns: Union[str, Sequence[str]] = []):
         if not self.is_bucket:
@@ -208,7 +215,8 @@ class SilNlpEnv:
             raise Exception(
                 f"No experiment name is given.  Data still in the cache directory of {self.mt_experiments_dir}"
             )
-        config = Config(connect_timeout=600, read_timeout=600)
+        config = Config(retries={"mode": "adaptive", "max_attempts": 10}, connect_timeout=600, read_timeout=600)
+        transfer_config = TransferConfig(max_concurrency=4)
         s3 = boto3.resource("s3", config=config)
         data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
         len_silnlp_path = len(experiments_path)
@@ -230,7 +238,9 @@ class SilNlpEnv:
                     LOGGER.debug("File already exists in local cache: " + rel_path)
                 else:
                     LOGGER.info("Downloading " + rel_path)
-                    try_n_times(lambda: data_bucket.download_file(obj.object_key, str(temp_dest_path)))
+                    try_n_times(
+                        lambda: data_bucket.download_file(obj.object_key, str(temp_dest_path), Config=transfer_config)
+                    )
 
     def copy_experiment_to_bucket(self, name: str, patterns: Union[str, Sequence[str]] = [], overwrite: bool = False):
         if not self.is_bucket:
@@ -241,7 +251,8 @@ class SilNlpEnv:
                 f"No experiment name is given.  Data still in the temp directory of {self.mt_experiments_dir}"
             )
         experiment_path = str(self.mt_dir.relative_to(self.data_dir) / "experiments") + "/"
-        config = Config(connect_timeout=600, read_timeout=600)
+        config = Config(retries={"mode": "adaptive", "max_attempts": 10}, connect_timeout=600, read_timeout=600)
+        transfer_config = TransferConfig(max_concurrency=4)
         s3 = boto3.resource("s3", config=config)
         data_bucket = s3.Bucket(str(self.data_dir).strip("\\/"))
         temp_folder = str(self.mt_experiments_dir / name)
@@ -264,7 +275,7 @@ class SilNlpEnv:
                         LOGGER.debug("File already exists in S3 bucket: " + dest_file)
                     else:
                         LOGGER.info("Uploading " + dest_file)
-                        try_n_times(lambda: data_bucket.upload_file(source_file, dest_file))
+                        try_n_times(lambda: data_bucket.upload_file(source_file, dest_file, Config=transfer_config))
 
     def get_source_experiment_path(self, tmp_path: Path) -> str:
         end_of_path = str(tmp_path)[len(str(self.mt_experiments_dir)) :]
@@ -285,12 +296,13 @@ def download_if_s3_paths(paths: Iterable[S3Path]) -> List[Path]:
             if not s3_setup:
                 temp_root = Path(tempfile.TemporaryDirectory().name)
                 temp_root.mkdir()
-                config = Config(connect_timeout=600, read_timeout=600)
+                config = Config(retries={"mode": "adaptive", "max_attempts": 10}, connect_timeout=600, read_timeout=600)
                 s3 = boto3.resource("s3", config=config)
                 data_bucket = s3.Bucket(str(SIL_NLP_ENV.data_dir).strip("\\/"))
                 s3_setup = True
             temp_path = temp_root / path.name
-            try_n_times(lambda: data_bucket.download_file(path.key, str(temp_path)))
+            transfer_config = TransferConfig(max_concurrency=4)
+            try_n_times(lambda: data_bucket.download_file(path.key, str(temp_path), Config=transfer_config))
             return_paths.append(temp_path)
     return return_paths
 
