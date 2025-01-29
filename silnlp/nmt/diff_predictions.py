@@ -621,7 +621,7 @@ def main() -> None:
     if args.include_dict and dictDf is not None:
         add_dictionary(writer, dictDf, text_wrap_column_width + 20)
 
-    writer.save()
+    writer.close()
     #    os.remove(exp1_graph)
     print(f"Output is in {output_path}")
 
