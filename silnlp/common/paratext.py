@@ -211,7 +211,9 @@ def extract_terms_list(
     terms_xml_path = dir / list_file_name
 
     terms_metadata_path = get_terms_metadata_path(list_name, mt_terms_dir=output_dir)
-    terms_glosses_path = get_terms_glosses_path(list_name, mt_terms_dir=output_dir, iso=get_iso(dir))
+    terms_glosses_path = get_terms_glosses_path(
+        list_name, mt_terms_dir=output_dir, iso=get_iso(project_dir) if project_dir is not None else None
+    )
     terms_vrefs_path = get_terms_vrefs_path(list_name, mt_terms_dir=output_dir)
 
     references: Dict[str, List[VerseRef]] = {}
