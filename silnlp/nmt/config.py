@@ -1118,13 +1118,7 @@ class Config(ABC):
 
         all_src_terms: List[Tuple[DataFile, Dict[str, Term], str]] = []
         for src_terms_file, tags_str in src_terms_files:
-            all_src_terms.append(
-                (
-                    src_terms_file,
-                    get_terms(src_terms_file.path, iso=gloss_iso if gloss_iso is not None else ""),
-                    tags_str,
-                )
-            )
+            all_src_terms.append((src_terms_file, get_terms(src_terms_file.path, iso=gloss_iso), tags_str))
 
         all_trg_terms: List[Tuple[DataFile, Dict[str, Term], str]] = []
         for trg_terms_file, tags_str in trg_terms_files:
