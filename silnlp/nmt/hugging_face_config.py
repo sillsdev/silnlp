@@ -694,18 +694,25 @@ class HuggingFaceConfig(Config):
             categories_set: Optional[Set[str]] = None if categories is None else set(categories)
 
             if terms_config["include_glosses"]:
-            gloss_iso = (
-                terms_config["include_glosses"].lower() if isinstance(terms_config["include_glosses"], str) else None
-            )
-            if gloss_iso not in ["en", "fr", "id", "es"]:
-                src_gloss_iso = list(self.src_isos.intersection(["en", "fr", "id", "es"]))
-                trg_gloss_iso = list(self.trg_isos.intersection(["en", "fr", "id", "es"]))
-                if src_gloss_iso:
-                    gloss_iso = src_gloss_iso[0]
-                elif trg_gloss_iso:
-                    gloss_iso = trg_gloss_iso[0]
-        else:
-            gloss_iso = None
+                gloss_iso: str = (
+                    terms_config["include_glosses"].lower()
+                    if isinstance(terms_config["include_glosses"], str)
+                    else None
+                )
+                if gloss_iso not in ["en", "fr", "id", "es"]:
+                    src_gloss_iso = list(self.src_isos.intersection(["en", "fr", "id", "es"]))
+                    trg_gloss_iso = list(self.trg_isos.intersection(["en", "fr", "id", "es"]))
+                    if src_gloss_iso:
+                        gloss_iso = src_gloss_iso[0]
+                    elif trg_gloss_iso:
+                        gloss_iso = trg_gloss_iso[0]
+
+                if gloss_iso is None:
+                    raise ValueError(
+                        f"Gloss language code, {gloss_iso}, does not match the language codes in the source, target, or the following: en, fr, id, es."
+                    )
+            else:
+                gloss_iso = None
 
             all_trg_terms: List[Tuple[DataFile, Dict[str, Term], str]] = []
             for trg_terms_file, tags_str in trg_terms_files:

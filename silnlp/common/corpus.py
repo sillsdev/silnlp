@@ -220,7 +220,7 @@ def get_terms_metadata_path(list_name: str, mt_terms_dir: Path = SIL_NLP_ENV.mt_
 
 
 def get_terms_glosses_path(list_name: str, iso: str, mt_terms_dir: Path = SIL_NLP_ENV.mt_terms_dir) -> Path:
-    iso = iso.lower() if isinstance(iso, str) else ""
+    iso = iso.lower()
     gl_path = SIL_NLP_ENV.assets_dir / f"{iso}-{list_name}-glosses.txt"
     if gl_path.is_file():
         return gl_path
@@ -269,13 +269,16 @@ class Term:
 def get_terms(terms_renderings_path: Path, iso: str) -> Dict[str, Term]:
     list_name = get_terms_list(terms_renderings_path)
     terms_metadata_path = get_terms_metadata_path(list_name)
-    terms_glosses_path = get_terms_glosses_path(list_name, iso=iso)
     terms_vrefs_path = get_terms_vrefs_path(list_name)
     terms: Dict[str, Term] = {}
     terms_metadata = load_corpus(terms_metadata_path)
-    terms_glosses = load_corpus(terms_glosses_path) if terms_glosses_path.is_file() else iter([])
     terms_renderings = load_corpus(terms_renderings_path)
     terms_vrefs = load_corpus(terms_vrefs_path) if terms_vrefs_path.is_file() else iter([])
+    if iso is not None:
+        terms_glosses_path = get_terms_glosses_path(list_name, iso=iso)
+        terms_glosses = load_corpus(terms_glosses_path) if terms_glosses_path.is_file() else iter([])
+    else:
+        terms_glosses = iter([])
     for metadata_line, glosses_line, renderings_line, vrefs_line in itertools.zip_longest(
         terms_metadata, terms_glosses, terms_renderings, terms_vrefs
     ):
