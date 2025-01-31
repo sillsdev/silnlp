@@ -211,7 +211,9 @@ def extract_terms_list(
     terms_xml_path = dir / list_file_name
 
     terms_metadata_path = get_terms_metadata_path(list_name, mt_terms_dir=output_dir)
-    terms_glosses_path = get_terms_glosses_path(list_name, mt_terms_dir=output_dir)
+    terms_glosses_path = get_terms_glosses_path(
+        list_name, mt_terms_dir=output_dir, iso=get_iso(project_dir) if project_dir is not None else "en"
+    )
     terms_vrefs_path = get_terms_vrefs_path(list_name, mt_terms_dir=output_dir)
 
     references: Dict[str, List[VerseRef]] = {}
@@ -384,7 +386,7 @@ def extract_term_renderings(project_dir: Path, corpus_filename: Path, output_dir
         terms_renderings_path.unlink()
         if list_type == "Project":
             terms_metadata_path.unlink()
-            terms_glosses_path = get_terms_glosses_path(list_name, mt_terms_dir=output_dir)
+            terms_glosses_path = get_terms_glosses_path(list_name, mt_terms_dir=output_dir, iso=settings.language_code)
             if terms_glosses_path.is_file():
                 terms_glosses_path.unlink()
     return count
