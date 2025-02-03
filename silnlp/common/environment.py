@@ -339,7 +339,6 @@ def get_env_path(name: str, default: str = ".") -> str:
 
 def generate_s3_config() -> Config:
     s3_config = Config(
-        s3={"addressing_style": "path"},
         retries={"mode": "adaptive", "max_attempts": 10},
         connect_timeout=600,
         read_timeout=600,

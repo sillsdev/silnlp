@@ -113,6 +113,9 @@ pandas-stubs = "^1.0.4"
 types-regex = "^2023.10.3.0"
 lxml-stubs = "^0.4.0"
 mypy = "^1.7.1"
+urllib3 = "^2.3.0"
+boto3 = "^1.36.11"
+botocore = "^1.36.11"
 
 [tool.poetry.extras]
 eflomal = ["eflomal"]
