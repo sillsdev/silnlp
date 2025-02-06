@@ -1106,13 +1106,15 @@ class Config(ABC):
                 elif trg_gloss_iso:
                     gloss_iso = trg_gloss_iso[0]
                 else:
-                    raise ValueError(
+                    LOGGER.warning(
                         "Glosses could not be included. No source or target language matches any of the supported gloss language codes: en, fr, id, es."
                     )
+                    gloss_iso = None
             elif gloss_iso not in ["en", "fr", "id", "es"]:
-                raise ValueError(
+                LOGGER.warning(
                     f"Gloss language code, {gloss_iso}, does not match the supported gloss language codes: en, fr, id, es."
                 )
+                gloss_iso = None
         else:
             gloss_iso = None
 
