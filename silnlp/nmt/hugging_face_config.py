@@ -1253,6 +1253,7 @@ class HuggingFaceNMTModel(NMTModel):
             for param in params:
                 if param in section_config:
                     args[param] = section_config[param]
+        # For context on floating point precision, see https://github.com/sillsdev/silnlp/issues/647
         merge_dict(
             args,
             {
