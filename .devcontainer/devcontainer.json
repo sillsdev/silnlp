@@ -20,7 +20,7 @@
 		"--device",
 		"/dev/fuse",
 		"--security-opt",
-		"apparmor=docker-apparmor"
+		"apparmor=unconfined"
 	],
 	"containerEnv": {
 		"AWS_REGION": "${localEnv:AWS_REGION}",
