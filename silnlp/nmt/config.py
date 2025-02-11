@@ -232,7 +232,7 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
         is_lexical_data: bool = pair["lexical"]
 
         if "mapping" not in pair:
-            pair["mapping"] = DataFileMapping.ONE_TO_ONE.name.lower()
+            pair["mapping"] = DataFileMapping.MANY_TO_MANY.name.lower()
         mapping = DataFileMapping[pair["mapping"].upper()]
         if not is_scripture and mapping != DataFileMapping.ONE_TO_ONE:
             raise RuntimeError("Basic corpus pairs only support one-to-one mapping.")
