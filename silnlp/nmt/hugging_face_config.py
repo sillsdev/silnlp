@@ -1096,6 +1096,8 @@ class HuggingFaceNMTModel(NMTModel):
         lang_codes: Dict[str, str] = self._config.data["lang_codes"]
         tokenizer = self._config.get_tokenizer()
         model = self._create_inference_model(ckpt, tokenizer)
+        model.to(0)
+        model = torch.compile(model)
         for input_path, translation_path, src_trg_iso, vref_path in zip(
             input_paths,
             translation_paths,
@@ -1109,7 +1111,6 @@ class HuggingFaceNMTModel(NMTModel):
                 tgt_lang=lang_codes.get(src_trg_iso[1]),
                 device=0,
             )
-            pipeline.model = torch.compile(pipeline.model)
             length = count_lines(input_path)
             with ExitStack() as stack:
                 src_file = stack.enter_context(input_path.open("r", encoding="utf-8-sig"))
