@@ -6,10 +6,10 @@ from pathlib import Path
 from typing import Collection, Generator, Iterable, List, Optional, TextIO
 
 from machine.corpora import AlignedWordPair, ParallelTextCorpus, ParallelTextRow, TextFileTextCorpus
-from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
+from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_chapters
 from machine.tokenization import LatinWordTokenizer, WhitespaceTokenizer
 
-from ..common.corpus import get_mt_corpus_path, get_scripture_parallel_corpus
+from ..common.corpus import get_mt_corpus_path, get_scripture_parallel_corpus, include_chapters
 from ..common.environment import SIL_NLP_ENV
 from ..common.stemmer import Stemmer
 from ..common.utils import set_seed
@@ -161,9 +161,11 @@ def main() -> None:
                 src_file_path.parent == SIL_NLP_ENV.mt_scripture_dir
                 or trg_file_path.parent == SIL_NLP_ENV.mt_scripture_dir
             ):
-                corpus = ParallelTextCorpus.from_pandas(
-                    get_scripture_parallel_corpus(src_file_path, trg_file_path), ref_column="vref"
-                )
+                corpus = get_scripture_parallel_corpus(src_file_path, trg_file_path)
+                corpus_books = get_chapters(config.get("corpus_books", []))
+                if len(corpus_books) > 0:
+                    corpus = include_chapters(corpus, corpus_books)
+                corpus = ParallelTextCorpus.from_pandas(corpus, ref_column="vref")
                 is_scripture = True
             else:
                 src_corpus = TextFileTextCorpus(src_file_path)
