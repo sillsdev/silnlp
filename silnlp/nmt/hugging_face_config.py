@@ -170,6 +170,9 @@ SP_TOKENIZER_CONFIG = {
     "google/madlad400": {"type": "Unigram", "special_tokens": ["<unk>", "<s>", "</s>"], "unk_token": "<unk>"},
 }
 
+# "loss" and "eval_loss" are both evaluation loss
+# The early stopping callback adds "eval_" to all metrics that don't already start with it
+DEFAULT_METRICS = ["loss", "eval_loss"]
 EVAL_METRICS_MODULES = {"bleu": "sacrebleu", "chrf3": "chrf", "chrf3+": "chrf", "chrf3++": "chrf"}
 
 
@@ -960,12 +963,14 @@ class HuggingFaceNMTModel(NMTModel):
             src_noise=src_noise,
         )
 
+        metric_name = ""
         if self._config.eval["metric_for_best_model"] is not None:
             metric_name = self._config.eval["metric_for_best_model"].lower()
-            metric_module = EVAL_METRICS_MODULES.get(metric_name)
-            if metric_module is None:
-                raise ValueError(f"{metric_name} is not a supported metric.")
-            metric = evaluate.load(metric_module)
+            if metric_name not in DEFAULT_METRICS:
+                metric_module = EVAL_METRICS_MODULES.get(metric_name)
+                if metric_module is None:
+                    raise ValueError(f"{metric_name} is not a supported metric.")
+                metric = evaluate.load(metric_module)
         all_special_ids = set(tokenizer.all_special_ids)
 
         def compute_metrics(eval_preds):
@@ -1031,7 +1036,7 @@ class HuggingFaceNMTModel(NMTModel):
             train_dataset,
             eval_dataset,
             tokenizer,
-            compute_metrics=compute_metrics,
+            compute_metrics=None if metric_name in DEFAULT_METRICS else compute_metrics,
             sequential_sampling=self._config.train.get("sequential_sampling", False),
             better_transformer=self._config.train.get("better_transformer", False),
             auto_grad_acc=self._config.train.get("auto_grad_acc", False),
