@@ -221,12 +221,6 @@ class Translator(ABC):
                 if stylesheet.get_tag(marker).text_type == UsfmTextType.NOTE_TEXT or marker in NON_NOTE_INLINE_ELEMENTS:
                     sentences.pop(i)
                     vrefs.pop(i)
-        # Set aside empty sentences
-        empty_sents = []
-        for i in reversed(range(len(sentences))):
-            if len(sentences[i]) == 0:
-                sentences.pop(i)
-                empty_sents.append((i, vrefs.pop(i)))
 
         if preserve_usfm_markers:
             if trg_project is not None:
@@ -235,17 +229,25 @@ class Translator(ABC):
                     --trg-project will be ignored"
                 )
 
-            usfm_preserver = StatisticalUsfmPreserver(sentences, vrefs, stylesheet, "eflomal")
-            sentences = usfm_preserver.src_sents  # won't necessarily line up with vrefs anymore
+            usfm_preserver = StatisticalUsfmPreserver(sentences, vrefs, stylesheet, include_inline_elements, "eflomal")
+            sentences = usfm_preserver.src_sents
+            vrefs = usfm_preserver.vrefs
+
+        # Set aside empty sentences
+        empty_sents = []
+        for i in reversed(range(len(sentences))):
+            if len(sentences[i].strip()) == 0:
+                sentences.pop(i)
+                empty_sents.append((i, vrefs.pop(i)))
 
         translations = list(self.translate(sentences, src_iso, trg_iso, produce_multiple_translations, vrefs))
 
         # Add empty sentences back in
         # Prevents pre-existing text from showing up in the sections of translated text
-        if not preserve_usfm_markers:
-            for idx, vref in reversed(empty_sents):
-                translations.insert(idx, ["" for _ in range(len(translations[0]))])
-                vrefs.insert(idx, vref)
+        for idx, vref in reversed(empty_sents):
+            sentences.insert(idx, "")
+            translations.insert(idx, ["" for _ in range(len(translations[0]))])
+            vrefs.insert(idx, vref)
 
         draft_set: DraftGroup = DraftGroup(translations)
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):

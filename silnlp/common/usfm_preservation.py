@@ -19,10 +19,13 @@ class UsfmPreserver:
 
     # (sent_idx, start idx in text_only_sent, is_paragraph_marker, tok (inc. \ and spaces))
     _markers: List[Tuple[int, int, str]]
-    # (vref, segment)
-    _ignored_segments: List[Tuple[ScriptureRef, str]]
+    # (vref, embed)
+    _embeds: List[Tuple[ScriptureRef, str]]
+    _include_embeds: bool
 
-    def __init__(self, src_sents: List[str], vrefs: List[ScriptureRef], stylesheet: UsfmStylesheet):
+    def __init__(
+        self, src_sents: List[str], vrefs: List[ScriptureRef], stylesheet: UsfmStylesheet, include_embeds: bool = False
+    ):
         usfm_tokenizer = UsfmTokenizer(stylesheet)
         sentence_toks = []
         self._vrefs = []
@@ -35,6 +38,7 @@ class UsfmPreserver:
                 sentence_toks.append(usfm_tokenizer.tokenize(sent))
                 self._vrefs.append(ref)
 
+        self._include_embeds = include_embeds
         self._src_sents = self._extract_markers(sentence_toks)
         self._src_tok_ranges = self._tokenize_sents(self._src_sents)
 
@@ -43,31 +47,36 @@ class UsfmPreserver:
     def src_sents(self) -> List[str]:
         return self._src_sents
 
+    @property
+    def vrefs(self) -> List[ScriptureRef]:
+        return self._vrefs
+
     def _extract_markers(self, sentence_toks: List[List[UsfmToken]]) -> List[str]:
-        to_delete = ["fig"]
+        to_transfer = ["fig"]
         markers = []
-        ignored_segments = []
+        embeds = []
         text_only_sents = ["" for _ in sentence_toks]
         for i, (toks, ref) in enumerate(zip(sentence_toks, self._vrefs)):
-            ignored_segment = ""
-            ignore_scope = None
+            embed_text = ""
+            curr_embed = None
             for tok in toks:
-                if ignore_scope is not None:
-                    ignored_segment += tok.to_usfm()
-                    if tok.type == UsfmTokenType.END and tok.marker[:-1] == ignore_scope.marker:
-                        ignored_segments.append((ref, ignored_segment))
-                        ignored_segment = ""
-                        ignore_scope = None
-                elif tok.type == UsfmTokenType.NOTE or tok.marker in to_delete:
-                    ignored_segment += tok.to_usfm()
-                    ignore_scope = tok
+                if curr_embed is not None:
+                    embed_text += tok.to_usfm()
+                    if tok.type == UsfmTokenType.END and tok.marker[:-1] == curr_embed.marker:
+                        if self._include_embeds:
+                            embeds.append((ref, embed_text))
+                        embed_text = ""
+                        curr_embed = None
+                elif tok.type == UsfmTokenType.NOTE or tok.marker in to_transfer:
+                    embed_text += tok.to_usfm()
+                    curr_embed = tok
                 elif tok.type in [UsfmTokenType.PARAGRAPH, UsfmTokenType.CHARACTER, UsfmTokenType.END]:
                     markers.append((i, len(text_only_sents[i]), tok.type == UsfmTokenType.PARAGRAPH, tok.to_usfm()))
                 elif tok.type == UsfmTokenType.TEXT:
                     text_only_sents[i] += tok.text
 
         self._markers = markers
-        self._ignored_segments = ignored_segments
+        self._embeds = embeds
         return text_only_sents
 
     def construct_rows(self, translations: List[str]) -> List[Tuple[List[ScriptureRef], str]]:
@@ -102,14 +111,14 @@ class UsfmPreserver:
             to_insert[sent_idx].insert(insert_pos, (trg_str_idx, is_para_marker, marker))
 
         # Construct rows for the USFM file
-        # Insert character markers back into text and create new rows at each paragraph marker
+        embed_idx = 0
         rows = []
         for ref, translation, inserts in zip(self._vrefs, translations, to_insert):
             if len(inserts) == 0:
-                rows.append(([ref], translation))
-                continue
+                row_texts = [translation]
+            else:
+                row_texts = [translation[: inserts[0][0]]]
 
-            row_texts = [translation[: inserts[0][0]]]
             for i, (insert_idx, is_para_marker, marker) in enumerate(inserts):
                 if is_para_marker:
                     row_texts.append("")
@@ -132,24 +141,19 @@ class UsfmPreserver:
                     row_text = row_text[:-1]
                 row_texts[-1] += row_text
 
+            # Append transferred embeds to the last row that matches their ScriptureRef
+            while embed_idx < len(self._embeds) and self._embeds[embed_idx][0] == ref:
+                row_texts[-1] += self._embeds[embed_idx][1]
+                embed_idx += 1
+
             # One row_text for each paragraph in a sentence
             for row_text in row_texts:
                 rows.append(([ref], row_text))
 
-        # Add any note-type segments to the ends of their verses
-        segment_idx = 0
-        for i, row in enumerate(rows):
-            ref = row[0][0]
-            # Only add segments to the last row of a given vref
-            if i + 1 < len(rows) and rows[i + 1][0][0].verse_ref == ref.verse_ref:
-                continue
-            # Add the text all segments with a matching vref
-            while (
-                segment_idx < len(self._ignored_segments)
-                and self._ignored_segments[segment_idx][0].verse_ref == ref.verse_ref
-            ):
-                rows[i] = ([ref], rows[i][1] + self._ignored_segments[segment_idx][1])
-                segment_idx += 1
+        # Add any remaining embeds
+        for embed in self._embeds[embed_idx:]:
+            rows.append(([embed[0]], embed[1]))
+
         return rows
 
     @abstractmethod
@@ -242,9 +246,9 @@ class UsfmPreserver:
 
 
 class StatisticalUsfmPreserver(UsfmPreserver):
-    def __init__(self, src_sentences, vrefs, stylesheet, aligner="eflomal"):
+    def __init__(self, src_sentences, vrefs, stylesheet, include_embeds, aligner="eflomal"):
         self._aligner = aligner
-        super().__init__(src_sentences, vrefs, stylesheet)
+        super().__init__(src_sentences, vrefs, stylesheet, include_embeds)
 
     def _tokenize_sents(self, sents: List[str]) -> List[List[Range[int]]]:
         tokenizer = LatinWordTokenizer()
@@ -282,7 +286,7 @@ Necessary changes to use AttentionUsfmPreserver:
 
 
 class AttentionUsfmPreserver(UsfmPreserver):
-    def __init__(self, src_sents, vrefs, stylesheet):
+    def __init__(self, src_sents, vrefs, stylesheet, include_embeds):
         raise NotImplementedError(
             "AttentionUsfmPreserver is not a supported class. See class definition for more information about the work needed to use."
         )
