@@ -4,20 +4,34 @@ import re
 from typing import List
 
 from ..common.environment import SIL_NLP_ENV
+from machine.tokenization import LatinWordTokenizer
 
+# Latin Tokenizer from machine library
 def get_all_words(src_file: str) -> List:
     words = []
-    pattern = re.compile(r",(?=\S)")  # Look for commas with no following space
-    with open(src_file, "r", encoding = "utf8") as src_data_file:     
+    tokenizer = LatinWordTokenizer()
+    with open(src_file, "r", encoding = "utf8") as src_data_file:
         for line in src_data_file:
-            for word in line.split(" "):
-                word = word.strip().strip("\'\"\\;,:.!?()-[]0123456789").lower()
-                finder = pattern.search(word)
-                if finder:             # Add space after commas as needed
-                    word = word[:finder.span()[1]]+" "+word[finder.span()[1]:]
+            line_words = tokenizer.tokenize(line)
+            for word in line_words:
                 if word != "":
-                    words.append(word)  
-    return words
+                    words.append(word)
+    return(words)
+
+# Naive whitespace-based script-agnostic word splitter
+#def get_all_words(src_file: str) -> List:
+#    words = []
+#    pattern = re.compile(r",(?=\S)")  # Look for commas with no following space
+#    with open(src_file, "r", encoding = "utf8") as src_data_file:     
+#        for line in src_data_file:
+#            for word in line.split(" "):
+#                word = word.strip().strip("\'\"\\;,:.!?()-[]0123456789").lower()
+#                finder = pattern.search(word)
+#                if finder:             # Add space after commas as needed
+#                    word = word[:finder.span()[1]]+" "+word[finder.span()[1]:]
+#                if word != "":
+#                    words.append(word)  
+#    return words
 
 def find_unique(words1: List, words2: List) -> List:
     unique_words = []
@@ -37,6 +51,7 @@ def main() -> None:
                         action='store_true')
     parser.add_argument("--trg", help="If set, only the target side of the two experiment lexicons is compared", 
                         action='store_true')
+    parser.add_argument("--books", help="Books to include from src and trg.")
     args = parser.parse_args()
 
     # If not explicitly limited, compare both source and target lexicons
@@ -109,7 +124,7 @@ def main() -> None:
             for word in trg1_only_words:
                 output_file.writelines(word+'\n')
         with (lex_path2 / "unmatched_trg_words.txt").open("w", encoding="utf8") as output_file:
-            output_file.writelines(f'src.txt words not found in {trg_file1}\n')
+            output_file.writelines(f'trg.txt words not found in {trg_file1}\n')
             for word in trg2_only_words:
                 output_file.writelines(word+'\n')
     
