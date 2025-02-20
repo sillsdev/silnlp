@@ -469,7 +469,8 @@ def main() -> None:
 
     get_git_revision_hash()
 
-    exp_name = args.experiment
+    # Experiment path relative to MT/experiments
+    exp_name = args.experiment.replace("\\", "/")
 
     if args.clearml_queue is not None and "cpu" not in args.clearml_queue:
         LOGGER.warning("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
