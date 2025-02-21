@@ -275,35 +275,40 @@ def get_terms(terms_renderings_path: Path, iso: Optional[str] = None) -> Dict[st
     terms_renderings = load_corpus(terms_renderings_path)
     terms_vrefs = load_corpus(terms_vrefs_path) if terms_vrefs_path.is_file() else iter([])
     terms_glosses: Dict[str, List[str]] = {}
+    terms_glosses_corpus = iter([])
     if iso is not None:
         terms_glosses_path = get_terms_glosses_path(list_name, iso=iso)
         if terms_glosses_path.is_file():
             terms_glosses_corpus = load_corpus(terms_glosses_path)
             glosses_list_name = terms_glosses_path.stem.split("-")[1]
-            term_glosses_metadata_path = get_terms_metadata_path(glosses_list_name)
-            terms_glosses_metadata = load_corpus(term_glosses_metadata_path)
-            for glosses_line, gloss_metadata_line in itertools.zip_longest(
-                terms_glosses_corpus, terms_glosses_metadata
-            ):
-                if gloss_metadata_line is None or len(gloss_metadata_line) == 0:
-                    continue
-                glosses = glosses_line.split("\t")
-                term_id = gloss_metadata_line.split("\t")[0]
-                terms_glosses[term_id] = glosses
-    for metadata_line, renderings_line, vrefs_line in itertools.zip_longest(
-        terms_metadata, terms_renderings, terms_vrefs
+            if glosses_list_name != list_name:
+                term_glosses_metadata_path = get_terms_metadata_path(glosses_list_name)
+                terms_glosses_metadata = load_corpus(term_glosses_metadata_path)
+                for glosses_line, gloss_metadata_line in itertools.zip_longest(
+                    terms_glosses_corpus, terms_glosses_metadata
+                ):
+                    if gloss_metadata_line is None or len(gloss_metadata_line) == 0:
+                        continue
+                    glosses = glosses_line.split("\t")
+                    term_id = gloss_metadata_line.split("\t")[0]
+                    terms_glosses[term_id] = glosses
+    for metadata_line, glosses_line, renderings_line, vrefs_line in itertools.zip_longest(
+        terms_metadata, terms_glosses_corpus, terms_renderings, terms_vrefs
     ):
         if metadata_line is None or len(metadata_line) == 0:
             continue
         term_id, cat, domain = metadata_line.split("\t", maxsplit=3)
-        glosses = [] if glosses_line is None or len(glosses_line) == 0 else glosses_line.split("\t")
+        if len(terms_glosses) > 0:
+            glosses = terms_glosses.get(term_id, [])
+        else:
+            glosses = [] if glosses_line is None or len(glosses_line) == 0 else glosses_line.split("\t")
         renderings = [] if len(renderings_line) == 0 else renderings_line.split("\t")
         vrefs = (
             set()
             if vrefs_line is None or len(vrefs_line) == 0
             else set(VerseRef.from_string(vref, ORIGINAL_VERSIFICATION) for vref in vrefs_line.split("\t"))
         )
-        glosses = terms_glosses.get(term_id, [])
+
         terms[term_id] = Term(term_id, cat, domain, glosses, renderings, vrefs)
     return terms
 
@@ -322,11 +327,17 @@ def get_terms_corpus(
         if cats is not None and (src_term.cat not in cats and trg_term.cat not in cats):
             continue
 
-        vrefs = (
+        src_vrefs = (
             src_term.vrefs
             if filter_books is None
             else {vref for vref in src_term.vrefs if vref.book_num in filter_books}
         )
+        trg_vrefs = (
+            trg_term.vrefs
+            if filter_books is None
+            else {vref for vref in trg_term.vrefs if vref.book_num in filter_books}
+        )
+        vrefs = src_vrefs.union(trg_vrefs)
         if len(vrefs) == 0:
             continue
 
