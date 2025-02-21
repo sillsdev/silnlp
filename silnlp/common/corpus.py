@@ -274,13 +274,24 @@ def get_terms(terms_renderings_path: Path, iso: Optional[str] = None) -> Dict[st
     terms_metadata = load_corpus(terms_metadata_path)
     terms_renderings = load_corpus(terms_renderings_path)
     terms_vrefs = load_corpus(terms_vrefs_path) if terms_vrefs_path.is_file() else iter([])
+    terms_glosses: Dict[str, List[str]] = {}
     if iso is not None:
         terms_glosses_path = get_terms_glosses_path(list_name, iso=iso)
-        terms_glosses = load_corpus(terms_glosses_path) if terms_glosses_path.is_file() else iter([])
-    else:
-        terms_glosses = iter([])
-    for metadata_line, glosses_line, renderings_line, vrefs_line in itertools.zip_longest(
-        terms_metadata, terms_glosses, terms_renderings, terms_vrefs
+        if terms_glosses_path.is_file():
+            terms_glosses_corpus = load_corpus(terms_glosses_path)
+            glosses_list_name = terms_glosses_path.stem.split("-")[1]
+            term_glosses_metadata_path = get_terms_metadata_path(glosses_list_name)
+            terms_glosses_metadata = load_corpus(term_glosses_metadata_path)
+            for glosses_line, gloss_metadata_line in itertools.zip_longest(
+                terms_glosses_corpus, terms_glosses_metadata
+            ):
+                if gloss_metadata_line is None or len(gloss_metadata_line) == 0:
+                    continue
+                glosses = glosses_line.split("\t")
+                term_id = gloss_metadata_line.split("\t")[0]
+                terms_glosses[term_id] = glosses
+    for metadata_line, renderings_line, vrefs_line in itertools.zip_longest(
+        terms_metadata, terms_renderings, terms_vrefs
     ):
         if metadata_line is None or len(metadata_line) == 0:
             continue
@@ -292,6 +303,7 @@ def get_terms(terms_renderings_path: Path, iso: Optional[str] = None) -> Dict[st
             if vrefs_line is None or len(vrefs_line) == 0
             else set(VerseRef.from_string(vref, ORIGINAL_VERSIFICATION) for vref in vrefs_line.split("\t"))
         )
+        glosses = terms_glosses.get(term_id, [])
         terms[term_id] = Term(term_id, cat, domain, glosses, renderings, vrefs)
     return terms
 
@@ -304,11 +316,10 @@ def get_terms_corpus(
 ) -> pd.DataFrame:
     data: Set[Tuple[str, str, str]] = set()
     for src_term in src_terms.values():
-        if cats is not None and src_term.cat not in cats:
-            continue
-
         trg_term = trg_terms.get(src_term.id)
         if trg_term is None:
+            continue
+        if cats is not None and (src_term.cat not in cats and trg_term.cat not in cats):
             continue
 
         vrefs = (
