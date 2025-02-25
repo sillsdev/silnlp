@@ -14,9 +14,10 @@ def get_all_words(src_file: str) -> List:
         for line in src_data_file:
             line_words = tokenizer.tokenize(line)
             for word in line_words:
-                if word != "":
+                word = word.strip().strip("\'\"\\;,:.!?()-[]0123456789").lower()
+                if word != "" and not word.isnumeric():
                     words.append(word)
-    return(words)
+    return words
 
 # Naive whitespace-based script-agnostic word splitter
 #def get_all_words(src_file: str) -> List:
@@ -51,7 +52,6 @@ def main() -> None:
                         action='store_true')
     parser.add_argument("--trg", help="If set, only the target side of the two experiment lexicons is compared", 
                         action='store_true')
-    parser.add_argument("--books", help="Books to include from src and trg.")
     args = parser.parse_args()
 
     # If not explicitly limited, compare both source and target lexicons
