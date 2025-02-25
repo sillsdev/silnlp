@@ -714,6 +714,22 @@ class Config(ABC):
                 cur_train = corpus
             corpus_count = len(cur_train)
 
+            vref_part = []
+            if "use_part" in self.data and self.data["use_part"]:
+                with open(self.exp_dir / "vref_part.txt", "r", encoding="utf-8") as file:
+                    vref_part = [line.strip() for line in file]
+
+            if len(vref_part) > 0 and pair.is_train:
+                print("Before TRAIN:")
+                print(cur_train)
+                extra_train = corpus[corpus["vref"].astype(str).isin(vref_part)].copy()
+                cur_train = pd.concat([cur_train, extra_train])
+                cur_train["vref_str"] = cur_train["vref"].astype(str)
+                cur_train = cur_train.drop_duplicates(subset=["vref_str"])
+                cur_train.drop(columns=["vref_str"])
+                print("After TRAIN:")
+                print(cur_train)
+
             if pair.is_train and pair.score_threshold > 0:
                 pair_align_path = (
                     self.exp_dir / f"{src_file.iso}-{src_file.project}_{trg_file.iso}-{trg_file.project}.csv"
@@ -758,6 +774,12 @@ class Config(ABC):
                     )
 
                 cur_test.drop("score", axis=1, inplace=True, errors="ignore")
+                print("Before TEST:")
+                print(cur_test)
+                if len(vref_part) > 0:
+                    cur_test = cur_test[~cur_test["vref"].astype(str).isin(vref_part)]
+                    print("After TEST:")
+                    print(cur_test)
                 if src_file.include_test:
                     self._add_to_eval_data_set(
                         src_file.iso,
