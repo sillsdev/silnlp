@@ -225,9 +225,7 @@ def get_terms_glosses_path(list_name: str, iso: str, mt_terms_dir: Path = SIL_NL
     if gl_path.is_file():
         return gl_path
     gl_path = mt_terms_dir / f"{iso}-{list_name}-glosses.txt"
-    if gl_path.is_file():
-        return gl_path
-    return SIL_NLP_ENV.assets_dir / f"{iso}-Major-glosses.txt"
+    return gl_path
 
 
 def get_terms_vrefs_path(list_name: str, mt_terms_dir: Path = SIL_NLP_ENV.mt_terms_dir) -> Path:
@@ -274,34 +272,18 @@ def get_terms(terms_renderings_path: Path, iso: Optional[str] = None) -> Dict[st
     terms_metadata = load_corpus(terms_metadata_path)
     terms_renderings = load_corpus(terms_renderings_path)
     terms_vrefs = load_corpus(terms_vrefs_path) if terms_vrefs_path.is_file() else iter([])
-    terms_glosses: Dict[str, List[str]] = {}
-    terms_glosses_corpus = iter([])
+    terms_glosses = iter([])
     if iso is not None:
         terms_glosses_path = get_terms_glosses_path(list_name, iso=iso)
         if terms_glosses_path.is_file():
-            terms_glosses_corpus = load_corpus(terms_glosses_path)
-            glosses_list_name = terms_glosses_path.stem.split("-")[1]
-            if glosses_list_name != list_name:
-                term_glosses_metadata_path = get_terms_metadata_path(glosses_list_name)
-                terms_glosses_metadata = load_corpus(term_glosses_metadata_path)
-                for glosses_line, gloss_metadata_line in itertools.zip_longest(
-                    terms_glosses_corpus, terms_glosses_metadata
-                ):
-                    if gloss_metadata_line is None or len(gloss_metadata_line) == 0:
-                        continue
-                    glosses = glosses_line.split("\t")
-                    term_id = gloss_metadata_line.split("\t")[0]
-                    terms_glosses[term_id] = glosses
+            terms_glosses = load_corpus(terms_glosses_path)
     for metadata_line, glosses_line, renderings_line, vrefs_line in itertools.zip_longest(
-        terms_metadata, terms_glosses_corpus, terms_renderings, terms_vrefs
+        terms_metadata, terms_glosses, terms_renderings, terms_vrefs
     ):
         if metadata_line is None or len(metadata_line) == 0:
             continue
         term_id, cat, domain = metadata_line.split("\t", maxsplit=3)
-        if len(terms_glosses) > 0:
-            glosses = terms_glosses.get(term_id, [])
-        else:
-            glosses = [] if glosses_line is None or len(glosses_line) == 0 else glosses_line.split("\t")
+        glosses = [] if glosses_line is None or len(glosses_line) == 0 else glosses_line.split("\t")
         renderings = [] if len(renderings_line) == 0 else renderings_line.split("\t")
         vrefs = (
             set()
