@@ -225,9 +225,7 @@ def get_terms_glosses_path(list_name: str, iso: str, mt_terms_dir: Path = SIL_NL
     if gl_path.is_file():
         return gl_path
     gl_path = mt_terms_dir / f"{iso}-{list_name}-glosses.txt"
-    if gl_path.is_file():
-        return gl_path
-    return SIL_NLP_ENV.assets_dir / f"{iso}-Major-glosses.txt"
+    return gl_path
 
 
 def get_terms_vrefs_path(list_name: str, mt_terms_dir: Path = SIL_NLP_ENV.mt_terms_dir) -> Path:
@@ -274,11 +272,11 @@ def get_terms(terms_renderings_path: Path, iso: Optional[str] = None) -> Dict[st
     terms_metadata = load_corpus(terms_metadata_path)
     terms_renderings = load_corpus(terms_renderings_path)
     terms_vrefs = load_corpus(terms_vrefs_path) if terms_vrefs_path.is_file() else iter([])
+    terms_glosses = iter([])
     if iso is not None:
         terms_glosses_path = get_terms_glosses_path(list_name, iso=iso)
-        terms_glosses = load_corpus(terms_glosses_path) if terms_glosses_path.is_file() else iter([])
-    else:
-        terms_glosses = iter([])
+        if terms_glosses_path.is_file():
+            terms_glosses = load_corpus(terms_glosses_path)
     for metadata_line, glosses_line, renderings_line, vrefs_line in itertools.zip_longest(
         terms_metadata, terms_glosses, terms_renderings, terms_vrefs
     ):
@@ -292,6 +290,7 @@ def get_terms(terms_renderings_path: Path, iso: Optional[str] = None) -> Dict[st
             if vrefs_line is None or len(vrefs_line) == 0
             else set(VerseRef.from_string(vref, ORIGINAL_VERSIFICATION) for vref in vrefs_line.split("\t"))
         )
+
         terms[term_id] = Term(term_id, cat, domain, glosses, renderings, vrefs)
     return terms
 
@@ -304,18 +303,23 @@ def get_terms_corpus(
 ) -> pd.DataFrame:
     data: Set[Tuple[str, str, str]] = set()
     for src_term in src_terms.values():
-        if cats is not None and src_term.cat not in cats:
-            continue
-
         trg_term = trg_terms.get(src_term.id)
         if trg_term is None:
             continue
+        if cats is not None and (src_term.cat not in cats and trg_term.cat not in cats):
+            continue
 
-        vrefs = (
+        src_vrefs = (
             src_term.vrefs
             if filter_books is None
             else {vref for vref in src_term.vrefs if vref.book_num in filter_books}
         )
+        trg_vrefs = (
+            trg_term.vrefs
+            if filter_books is None
+            else {vref for vref in trg_term.vrefs if vref.book_num in filter_books}
+        )
+        vrefs = src_vrefs.union(trg_vrefs)
         if len(vrefs) == 0:
             continue
 
