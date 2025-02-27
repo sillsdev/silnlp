@@ -23,6 +23,9 @@ RUN apt-get install --no-install-recommends -y \
     gdb \
     curl \
     unzip
+RUN apt-get install --no-install-recommends -y \
+    fuse3 \
+    rclone
 # Make some useful symlinks that are expected to exist
 RUN ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python3  & \
     ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python
@@ -41,6 +44,9 @@ RUN mkdir -p /root/.cache/silnlp/experiments
 RUN mkdir /root/.cache/silnlp/projects
 ENV SIL_NLP_CACHE_EXPERIMENT_DIR=/root/.cache/silnlp/experiments
 ENV SIL_NLP_CACHE_PROJECT_DIR=/root/.cache/silnlp/projects
+# Set up the S3 bucket
+RUN mkdir -p ~/S
+RUN mkdir -p ~/.config/rclone
 # Set environment variables
 ENV CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
 ENV SIL_NLP_DATA_PATH=/silnlp
