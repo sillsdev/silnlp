@@ -22,7 +22,7 @@ def main() -> None:
         help="Set of scorers",
     )
     parser.add_argument(
-        "--score-empty", type=bool, required=False, help="If true, do not calculate BLEU score on segment pairs where at least one segment is empty", default=False
+        "--score-empty", type=bool, required=False, help="If true, also calculate BLEU score on segment pairs where at least one segment is empty", default=False
     )
 
     args = parser.parse_args()
