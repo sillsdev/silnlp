@@ -48,7 +48,7 @@ def compare_translations(project1: Path, project2: Path, scorers: Set[str], scor
     b_lines = []
     with parallel_corpus.get_rows() as rows:
         for row in rows:
-            if not score_empty and (len(row.source_text.strip()) == 0 or len(row.target_text.strip()) == 0):
+            if not score_empty and row.is_empty:
                 continue
             a_lines.append(row.source_text)
             b_lines.append(row.target_text)
