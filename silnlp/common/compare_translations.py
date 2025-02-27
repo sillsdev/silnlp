@@ -21,8 +21,12 @@ def main() -> None:
         default={"bleu", "chrf3", "chrf3+", "chrf3++", "spbleu", "ter"},
         help="Set of scorers",
     )
+    parser.add_argument(
+        "--score-empty", type=bool, required=False, help="If true, do not calculate BLEU score on segment pairs where at least one segment is empty", default=False
+    )
+
     args = parser.parse_args()
-    scores = compare_translations(args.projects[0], args.projects[1], args.scorers)
+    scores = compare_translations(args.projects[0], args.projects[1], args.scorers, args.score_empty)
 
     print(f"{args.projects[0]},{args.projects[1]}")
     if args.output_file is not None:
@@ -36,7 +40,7 @@ def main() -> None:
             print(f"{key},{value}")
 
 
-def compare_translations(project1: Path, project2: Path, scorers: Set[str]) -> Dict[str, float]:
+def compare_translations(project1: Path, project2: Path, scorers: Set[str], score_empty:bool=False) -> Dict[str, float]:
     corpus_a = ParatextTextCorpus(project1)
     corpus_b = ParatextTextCorpus(project2)
     parallel_corpus = corpus_a.align_rows(corpus_b)
@@ -44,9 +48,10 @@ def compare_translations(project1: Path, project2: Path, scorers: Set[str]) -> D
     b_lines = []
     with parallel_corpus.get_rows() as rows:
         for row in rows:
+            if not score_empty and (len(row.source_text.strip()) == 0 or len(row.target_text.strip()) == 0):
+                continue
             a_lines.append(row.source_text)
             b_lines.append(row.target_text)
-
     return score_pair(a_lines, [b_lines], scorers)
 
 
