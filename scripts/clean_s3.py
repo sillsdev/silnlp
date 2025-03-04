@@ -59,7 +59,7 @@ def _delete_data(
     total_deleted = 0
     storage_space_freed = 0
     keep_until_dates = {}
-    # First pass, identify keep until files
+    # First pass, identify keep until files, which must follow the format keep_until_YYYY-MM-DD.lock
     for page in paginator.paginate(Bucket="silnlp"):
         for obj in page["Contents"]:
             s3_filename = obj["Key"]
