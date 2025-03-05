@@ -1,5 +1,6 @@
 import argparse
 import csv
+import datetime
 import re
 import time
 from typing import Tuple
@@ -38,7 +39,7 @@ def clean_research(max_months: int, dry_run: bool) -> Tuple[int, int]:
     )
     # create a csv filename to store the deleted files that includes the current datetime
     output_csv = f"deleted_research_files_{time.strftime('%Y%m%d-%H%M%S')}" + ("_dryrun" if dry_run else "") + ".csv"
-    return _delete_data(max_months, dry_run, regex_to_delete, output_csv)
+    return _delete_data(max_months, dry_run, regex_to_delete, output_csv, checkpoint_protection=True)
 
 
 def clean_production(max_months: int, dry_run: bool) -> Tuple[int, int]:
@@ -48,27 +49,78 @@ def clean_production(max_months: int, dry_run: bool) -> Tuple[int, int]:
     return _delete_data(max_months, dry_run, regex_to_delete, output_csv)
 
 
-def _delete_data(max_months: int, dry_run: bool, regex_to_delete: str, output_csv: str) -> Tuple[int, int]:
+def _delete_data(
+    max_months: int, dry_run: bool, regex_to_delete: str, output_csv: str, checkpoint_protection: bool = False
+) -> Tuple[int, int]:
     max_age = max_months * MONTH_IN_SECONDS
 
     s3 = boto3.client("s3")
     paginator = s3.get_paginator("list_objects_v2")
     total_deleted = 0
     storage_space_freed = 0
+    keep_until_dates = {}
+    # First pass, identify keep until files
+    # which must follow the format keep_until_YYYY-MM-DD.lock and be located in the same folder
+    # as the experiment's config.yml file
+    for page in paginator.paginate(Bucket="silnlp"):
+        for obj in page["Contents"]:
+            s3_filename = obj["Key"]
+            parts = s3_filename.split("/")
+
+            if parts[-1].startswith("keep_until_"):
+                try:
+                    date_str = parts[-1].split("_")[-1].replace(".lock", "")
+                    keep_until_timestamp = datetime.datetime.strptime(date_str, "%Y-%m-%d").timestamp()
+
+                    folder_path = "/".join(parts[:-1])
+                    keep_until_dates[folder_path] = keep_until_timestamp
+                except ValueError:
+                    print(f"Invalid keep_until format in {s3_filename}. Should follow keep_until_YYYY-MM-DD.lock")
+
     with open(output_csv, mode="w", newline="", encoding="utf-8") as csv_file:
         csv_writer = csv.writer(csv_file)
         if dry_run:
-            csv_writer.writerow(["Filename", "LastModified", "Eligible for Deletion"])
+            csv_writer.writerow(["Filename", "LastModified", "Eligible for Deletion", "Extra Info"])
         else:
-            csv_writer.writerow(["Filename", "LastModified", "Deleted"])
+            csv_writer.writerow(["Filename", "LastModified", "Deleted", "Extra Info"])
         for page in paginator.paginate(Bucket="silnlp"):
             for obj in page["Contents"]:
                 s3_filename = obj["Key"]
                 if regex_to_delete.search(s3_filename) is None:
                     continue
+
                 last_modified = obj["LastModified"].timestamp()
                 now = time.time()
+
                 delete = False
+                if checkpoint_protection:
+                    parts = s3_filename.split("/")
+                    if len(parts) >= 4:
+                        experiment_folder = "/".join(parts[:-3])
+                        if experiment_folder in keep_until_dates:
+                            protect_until = keep_until_dates[experiment_folder]
+                            if now < protect_until:
+                                print(
+                                    f"Skipping {s3_filename} (Experiment '{experiment_folder}' protected until "
+                                    f"{datetime.datetime.fromtimestamp(protect_until, tz=datetime.timezone.utc)})"
+                                )
+                                csv_writer.writerow(
+                                    [
+                                        s3_filename,
+                                        last_modified,
+                                        delete,
+                                        f"Protected until "
+                                        f"{datetime.datetime.fromtimestamp(protect_until, tz=datetime.timezone.utc)})",
+                                    ]
+                                )
+                                continue
+                    else:
+                        raise RuntimeError(
+                            f"Invalide checkpoint path: {s3_filename}. "
+                            f"Either disable checkpoint protection "
+                            f"or double check that only checkpoints are included in the regex_to_delete."
+                        )
+
                 if now - last_modified > max_age:
                     delete = True
                     print(s3_filename)
