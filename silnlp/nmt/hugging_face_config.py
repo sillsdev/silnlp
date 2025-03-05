@@ -1093,29 +1093,25 @@ class HuggingFaceNMTModel(NMTModel):
         self,
         input_paths: List[Path],
         translation_paths: List[Path],
-        src_trg_isos: List[Tuple[str, str]],
         produce_multiple_translations: bool = False,
         vref_paths: Optional[List[Path]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
-        lang_codes: Dict[str, str] = self._config.data["lang_codes"]
         tokenizer = self._config.get_tokenizer()
         model = self._create_inference_model(ckpt, tokenizer)
-        model.to(0)
-        model = torch.compile(model)
-        for input_path, translation_path, src_trg_iso, vref_path in zip(
+        pipeline = PretokenizedTranslationPipeline(
+            model=model,
+            tokenizer=tokenizer,
+            src_lang=self._config.test_src_lang,
+            tgt_lang=self._config.test_trg_lang,
+            device=0,
+        )
+        pipeline.model = torch.compile(pipeline.model)
+        for input_path, translation_path, vref_path in zip(
             input_paths,
             translation_paths,
-            src_trg_isos,
             cast(Iterable[Optional[Path]], repeat(None) if vref_paths is None else vref_paths),
         ):
-            pipeline = PretokenizedTranslationPipeline(
-                model=model,
-                tokenizer=tokenizer,
-                src_lang=lang_codes.get(src_trg_iso[0]),
-                tgt_lang=lang_codes.get(src_trg_iso[1]),
-                device=0,
-            )
             length = count_lines(input_path)
             with ExitStack() as stack:
                 src_file = stack.enter_context(input_path.open("r", encoding="utf-8-sig"))
