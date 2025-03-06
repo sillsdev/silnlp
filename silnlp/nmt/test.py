@@ -369,7 +369,6 @@ def test_checkpoint(
     translation_file_names: List[str] = []
     refs_patterns: List[str] = []
     translation_detok_file_names: List[str] = []
-    src_trg_isos: List[Tuple[str, str]] = []
     suffix_str = "_".join(map(lambda n: book_number_to_id(n), sorted(books.keys())))
     if len(suffix_str) > 0:
         suffix_str += "-"
@@ -383,7 +382,6 @@ def test_checkpoint(
         translation_file_names.append(f"test.trg-predictions.txt.{suffix_str}")
         refs_patterns.append("test.trg.detok*.txt")
         translation_detok_file_names.append(f"test.trg-predictions.detok.txt.{suffix_str}")
-        src_trg_isos.append((config.default_test_src_iso, config.default_test_trg_iso))
     else:
         # test data is split into separate files
         for src_iso in sorted(config.test_src_isos):
@@ -398,7 +396,6 @@ def test_checkpoint(
                     translation_file_names.append(f"{prefix}.trg-predictions.txt.{suffix_str}")
                     refs_patterns.append(f"{prefix}.trg.detok*.txt")
                     translation_detok_file_names.append(f"{prefix}.trg-predictions.detok.txt.{suffix_str}")
-                    src_trg_isos.append((src_iso, trg_iso))
 
     checkpoint_name = "averaged checkpoint" if step == -1 else f"checkpoint {step}"
 
@@ -417,7 +414,6 @@ def test_checkpoint(
         model.translate_test_files(
             source_paths,
             translation_paths,
-            src_trg_isos,
             produce_multiple_translations,
             vref_paths,
             step if checkpoint_type is CheckpointType.OTHER else checkpoint_type,

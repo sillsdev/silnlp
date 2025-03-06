@@ -320,7 +320,6 @@ class NMTModel(ABC):
         self,
         input_paths: List[Path],
         translation_paths: List[Path],
-        src_trg_isos: List[Tuple[str, str]],
         produce_multiple_translations: bool = False,
         vref_paths: Optional[List[Path]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
