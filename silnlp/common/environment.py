@@ -28,7 +28,7 @@ class SilNlpEnv:
         self.root_dir = Path.home() / ".silnlp"
         self.assets_dir = Path(__file__).parent.parent / "assets"
         self.is_bucket = False
-        self.bucket_service = os.getenv("BUCKET_SERVICE", "").lower()
+        self.bucket_service = os.getenv("BUCKET_SERVICE", "minio").lower()
 
         self.set_data_dir()
 
@@ -188,26 +188,23 @@ class SilNlpEnv:
             self.bucket_service = "aws"
             return
 
-        if self.bucket_service not in ["", "minio", "b2"]:
-            LOGGER.warning("Optional BUCKET_SERVICE environment variable must be either 'minio' or 'b2' if included.")
-            self.bucket_service = ""
-        if self.bucket_service == "":
-            LOGGER.info("No bucket service specified. Will try MinIO first, then B2.")
-        if self.bucket_service in ["", "minio"]:
+        if self.bucket_service not in ["minio", "b2"]:
+            LOGGER.warning("BUCKET_SERVICE environment variable must be either 'minio' or 'b2'. Default is 'minio'.")
+            self.bucket_service = "minio"
+        if self.bucket_service in ["minio"]:
             try:
-                LOGGER.info("Trying to connect to MINIO bucket.")
+                LOGGER.info("Trying to connect to MinIO bucket.")
                 self.set_resource(
                     "nlp-research",
                     os.getenv("MINIO_ENDPOINT_URL"),
                     os.getenv("MINIO_ACCESS_KEY"),
                     os.getenv("MINIO_SECRET_KEY"),
                 )
-                LOGGER.info("Connected to MINIO bucket.")
-                self.bucket_service = "minio"
+                LOGGER.info("Connected to MinIO bucket.")
             except Exception as e:
                 LOGGER.warning(e)
-                LOGGER.warning("MINIO connection failed.")
-        if self.bucket_service in ["", "b2"]:
+                LOGGER.warning("MinIO connection failed.")
+        if self.bucket_service in ["b2"]:
             try:
                 LOGGER.info("Trying to connect to B2 bucket.")
                 self.set_resource(
@@ -217,7 +214,6 @@ class SilNlpEnv:
                     os.getenv("B2_APPLICATION_KEY"),
                 )
                 LOGGER.info("Connected to B2 bucket.")
-                self.bucket_service = "b2"
             except Exception as e:
                 LOGGER.warning(e)
                 LOGGER.warning("B2 connection failed.")
