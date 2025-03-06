@@ -1,6 +1,7 @@
 import argparse
 import csv
 import datetime
+import os
 import re
 import time
 from typing import Tuple
@@ -39,22 +40,38 @@ def clean_research(max_months: int, dry_run: bool) -> Tuple[int, int]:
     )
     # create a csv filename to store the deleted files that includes the current datetime
     output_csv = f"deleted_research_files_{time.strftime('%Y%m%d-%H%M%S')}" + ("_dryrun" if dry_run else "") + ".csv"
-    return _delete_data(max_months, dry_run, regex_to_delete, output_csv, checkpoint_protection=True)
+    return _delete_data(
+        max_months, dry_run, regex_to_delete, output_csv, bucket_service="minio", checkpoint_protection=True
+    )
 
 
 def clean_production(max_months: int, dry_run: bool) -> Tuple[int, int]:
     print("Cleaning production")
     regex_to_delete = re.compile(r"^(production|dev|int-qa|ext-qa)/builds/.+")
     output_csv = f"deleted_production_files_{time.strftime('%Y%m%d-%H%M%S')}" + ("_dryrun" if dry_run else "") + ".csv"
-    return _delete_data(max_months, dry_run, regex_to_delete, output_csv)
+    return _delete_data(max_months, dry_run, regex_to_delete, output_csv, bucket_service="aws")
 
 
 def _delete_data(
-    max_months: int, dry_run: bool, regex_to_delete: str, output_csv: str, checkpoint_protection: bool = False
+    max_months: int,
+    dry_run: bool,
+    regex_to_delete: str,
+    output_csv: str,
+    bucket_service: str,
+    checkpoint_protection: bool = False,
 ) -> Tuple[int, int]:
     max_age = max_months * MONTH_IN_SECONDS
-
-    s3 = boto3.client("s3")
+    if bucket_service == "minio":
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=os.getenv("MINIO_ENDPOINT_URL"),
+            aws_access_key_id=os.getenv("MINIO_ACCESS_KEY"),
+            aws_secret_access_key=os.getenv("MINIO_SECRET_KEY"),
+        )
+        bucket_name = "nlp-research"
+    else:
+        s3 = boto3.client("s3")
+        bucket_name = "silnlp"
     paginator = s3.get_paginator("list_objects_v2")
     total_deleted = 0
     storage_space_freed = 0
@@ -62,7 +79,7 @@ def _delete_data(
     # First pass, identify keep until files
     # which must follow the format keep_until_YYYY-MM-DD.lock and be located in the same folder
     # as the experiment's config.yml file
-    for page in paginator.paginate(Bucket="silnlp"):
+    for page in paginator.paginate(Bucket=bucket_name):
         for obj in page["Contents"]:
             s3_filename = obj["Key"]
             parts = s3_filename.split("/")
@@ -83,7 +100,7 @@ def _delete_data(
             csv_writer.writerow(["Filename", "LastModified", "Eligible for Deletion", "Extra Info"])
         else:
             csv_writer.writerow(["Filename", "LastModified", "Deleted", "Extra Info"])
-        for page in paginator.paginate(Bucket="silnlp"):
+        for page in paginator.paginate(Bucket=bucket_name):
             for obj in page["Contents"]:
                 s3_filename = obj["Key"]
                 if regex_to_delete.search(s3_filename) is None:
@@ -126,7 +143,7 @@ def _delete_data(
                     print(s3_filename)
                     print(f"{(now - last_modified) / MONTH_IN_SECONDS} months old")
                     if not dry_run:
-                        s3.delete_object(Bucket="silnlp", Key=s3_filename)
+                        s3.delete_object(Bucket=bucket_name, Key=s3_filename)
                         print("Deleted")
                     total_deleted += 1
                     storage_space_freed += obj["Size"]
