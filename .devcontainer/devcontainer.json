@@ -12,14 +12,18 @@
 		"--gpus",
 		"all",
 		"-v",
-		"${env:HOME}/.aws:/root/.aws", // Mount user's AWS credentials into the container
-		"-v",
 		"${env:HOME}/clearml/.clearml/hf-cache:/root/.cache/huggingface"
 	],
 	"containerEnv": {
 		"AWS_REGION": "${localEnv:AWS_REGION}",
 		"AWS_ACCESS_KEY_ID": "${localEnv:AWS_ACCESS_KEY_ID}",
 		"AWS_SECRET_ACCESS_KEY": "${localEnv:AWS_SECRET_ACCESS_KEY}",
+		"MINIO_ENDPOINT_URL": "${localEnv:MINIO_ENDPOINT_URL}",
+		"MINIO_ACCESS_KEY": "${localEnv:MINIO_ACCESS_KEY}",
+		"MINIO_SECRET_KEY": "${localEnv:MINIO_SECRET_KEY}",
+		"B2_ENDPOINT_URL": "${localEnv:B2_ENDPOINT_URL}",
+		"B2_KEY_ID": "${localEnv:B2_KEY_ID}",
+		"B2_APPLICATION_KEY": "${localEnv:B2_APPLICATION_KEY}",
 		"CLEARML_API_ACCESS_KEY": "${localEnv:CLEARML_API_ACCESS_KEY}",
 		"CLEARML_API_SECRET_KEY": "${localEnv:CLEARML_API_SECRET_KEY}"
 	},
