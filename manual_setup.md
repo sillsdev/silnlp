@@ -73,9 +73,9 @@ __Download and install__ the following before creating any projects or starting 
       "editor.formatOnSave": true,
    ```
 
-### S3 bucket setup
+### MinIO and/or B2 bucket(s) setup
 
-See [S3 bucket setup](s3_bucket_setup.md).
+See [Bucket setup](bucket_setup.md).
 
 ### ClearML setup
 
@@ -88,8 +88,11 @@ See [ClearML setup](clear_ml_setup.md).
 * Create the directory "$HOME/.cache/silnlp/projects" and set the environment variable SIL_NLP_CACHE_PROJECT_DIR to that path.
 
 ### Additional Environment Variables
-* Set the following environment variables with your respective credentials: CLEARML_API_ACCESS_KEY, CLEARML_API_SECRET_KEY, AWS_ACCESS_KEY_ID, and AWS_SECRET_ACCESS_KEY.
-* Set SIL_NLP_DATA_PATH to "/silnlp" and CLEARML_API_HOST to "https://api.sil.hosted.allegro.ai".
+* Set the following environment variables with your respective credentials: CLEARML_API_ACCESS_KEY, CLEARML_API_SECRET_KEY, MINIO_ACCESS_KEY, MINIO_SECRET_KEY B2_KEY_ID, B2_APPLICATION_KEY.
+* Set SIL_NLP_DATA_PATH to "/silnlp" if you are not using MinIO or B2 and will be storing files locally.
+* Set CLEARML_API_HOST to "https://api.sil.hosted.allegro.ai".
+* Set MINIO_ENDPOINT_URL to https://truenas.psonet.languagetechnology.org:9000
+* Set B2_ENDPOINT_URL to https://s3.us-east-005.backblazeb2.com
 
 ### Setting Up and Running Experiments
 
