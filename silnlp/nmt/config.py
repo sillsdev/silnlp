@@ -776,7 +776,7 @@ class Config(ABC):
                 cur_test.drop("score", axis=1, inplace=True, errors="ignore")
                 print("Before TEST:")
                 print(cur_test)
-                if len(vref_part) > 0:
+                if len(vref_part) > 0 and pair.use_test_set_from == "":
                     cur_test = cur_test[~cur_test["vref"].astype(str).isin(vref_part)]
                     print("After TEST:")
                     print(cur_test)
