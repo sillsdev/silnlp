@@ -62,15 +62,18 @@ These are the main requirements for the SILNLP code to run on a local machine. S
    Create a text file with the following content and edit as necessary:
    ```
    CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
-   CLEARML_API_ACCESS_KEY=xxxxx
-   CLEARML_API_SECRET_KEY=xxxxx
-   AWS_REGION="us-east-1"
-   AWS_ACCESS_KEY_ID=xxxxx
-   AWS_SECRET_ACCESS_KEY=xxxxx
-   SIL_NLP_DATA_PATH="/silnlp"
+   CLEARML_API_ACCESS_KEY=xxxxxxx
+   CLEARML_API_SECRET_KEY=xxxxxxx
+   MINIO_ENDPOINT_URL=https://truenas.psonet.languagetechnology.org:9000
+   MINIO_ACCESS_KEY=xxxxxxxxx
+   MINIO_SECRET_KEY=xxxxxxx
+   B2_ENDPOINT_URL=https://s3.us-east-005.backblazeb2.com
+   B2_KEY_ID=xxxxxxxx
+   B2_APPLICATION_KEY=xxxxxxxx
    ```
-   * If you do not intend to use SILNLP with ClearML and/or AWS, you can leave out the respective variables. If you need to generate ClearML credentials, see [ClearML setup](clear_ml_setup.md).
-   * Note that this does not give you direct access to an AWS S3 bucket from within the Docker container, it only allows you to run scripts referencing files in the bucket.
+   * Include SIL_NLP_DATA_PATH="/silnlp" if you are not using MinIO or B2 and will be storing files locally.
+   * If you do not intend to use SILNLP with ClearML, MinIO, and/or B2, you can leave out the respective variables. If you need to generate ClearML credentials, see [ClearML setup](clear_ml_setup.md).
+   * Note that this does not give you direct access to a MinIO or B2 bucket from within the Docker container, it only allows you to run scripts referencing files in the bucket.
 
 6. Start container
    
@@ -129,22 +132,25 @@ These are the main requirements for the SILNLP code to run on a local machine. S
    poetry install
    ```
 
-10. If using ClearML and/or AWS, set the following environment variables:
+10. If using ClearML, MinIO, and/or B2, set the following environment variables:
    ```
    CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
-   CLEARML_API_ACCESS_KEY=xxxxx
-   CLEARML_API_SECRET_KEY=xxxxx
-   AWS_REGION="us-east-1"
-   AWS_ACCESS_KEY_ID=xxxxx
-   AWS_SECRET_ACCESS_KEY=xxxxx
-   SIL_NLP_DATA_PATH="/silnlp"
+   CLEARML_API_ACCESS_KEY=xxxxxxx
+   CLEARML_API_SECRET_KEY=xxxxxxx
+   MINIO_ENDPOINT_URL=https://truenas.psonet.languagetechnology.org:9000
+   MINIO_ACCESS_KEY=xxxxxxxxx
+   MINIO_SECRET_KEY=xxxxxxx
+   B2_ENDPOINT_URL=https://s3.us-east-005.backblazeb2.com
+   B2_KEY_ID=xxxxxxxx
+   B2_APPLICATION_KEY=xxxxxxxx
    ```
+   * Include SIL_NLP_DATA_PATH="/silnlp" if you are not using MinIO or B2 and will be storing files locally.
    * If you need to generate ClearML credentials, see [ClearML setup](clear_ml_setup.md).
-   * Note that this does not give you direct access to an AWS S3 bucket from within the Docker container, it only allows you to run scripts referencing files in the bucket.
+   * Note that this does not give you direct access to a MinIO or B2 bucket from within the Docker container, it only allows you to run scripts referencing files in the bucket.
    * For instructions on how to permanently set up environment variables for your operating system, see the corresponding section under the Development Environment Setup header below.
 
-11. If using AWS, there are two options:
-   * Option 1: Mount the bucket to your filesystem following the instructions under [Install and Configure Rclone](https://github.com/sillsdev/silnlp/blob/master/s3_bucket_setup.md#install-and-configure-rclone).
+11. If using MinIO or B2, there are two options:
+   * Option 1: Mount the bucket to your filesystem following the instructions under [Install and Configure Rclone](https://github.com/sillsdev/silnlp/blob/master/bucket_setup.md#install-and-configure-rclone).
    * Option 2: Create a local cache for the bucket following the instructions under [Create SILNLP cache](https://github.com/sillsdev/silnlp/blob/master/manual_setup.md#create-silnlp-cache).
 
 ## Development Environment Setup
@@ -177,7 +183,7 @@ Follow the instructions below to set up a Dev Container in VS Code. This is the 
 
 4. Define environment variables.
 
-   Set the following environment variables with your respective credentials: CLEARML_API_ACCESS_KEY, CLEARML_API_SECRET_KEY, AWS_ACCESS_KEY_ID, and AWS_SECRET_ACCESS_KEY. Additionally, set AWS_REGION. The typical value is "us-east-1".
+   Set the following environment variables with your respective credentials: CLEARML_API_ACCESS_KEY, CLEARML_API_SECRET_KEY, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, B2_KEY_ID, B2_APPLICATION_KEY. Also set MINIO_ENDPOINT_URL to https://truenas.psonet.languagetechnology.org:9000 and B2_ENDPOINT_URL to https://s3.us-east-005.backblazeb2.com with no quotations.
    * Linux / macOS users: To set environment variables permanently, add each variable as a new line to the `.bashrc` file (Linux) or `.profile` file (macOS) in your home directory with the format 
       ```
       export VAR="VAL"
@@ -210,7 +216,7 @@ Follow the instructions below to set up a Dev Container in VS Code. This is the 
 10. Install and activate Poetry environment.
       * In the VS Code terminal, run `poetry install` to install the necessary Python libraries, and then run `poetry shell` to enter the environment in the terminal. 
 
-11. (Optional) Locally mount the S3 bucket. This will allow you to interact directly with the S3 bucket from your local terminal (outside of the dev container). See instructions [here](s3_bucket_setup.md).
+11. (Optional) Locally mount the MinIO and/or B2 bucket(s). This will allow you to interact directly with the bucket(s) from your local terminal (outside of the dev container). See instructions [here](bucket_setup.md).
 
 To get back into the dev container and poetry environment each subsequent time, open the silnlp folder in VS Code, select the "Reopen in Container" option from the Remote Connection menu (bottom left corner), and use the `poetry shell` command in the terminal.
 
