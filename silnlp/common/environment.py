@@ -28,7 +28,7 @@ class SilNlpEnv:
         self.root_dir = Path.home() / ".silnlp"
         self.assets_dir = Path(__file__).parent.parent / "assets"
         self.is_bucket = False
-        self.bucket_service = os.getenv("BUCKET_SERVICE", "").lower()
+        self.bucket_service = os.getenv("BUCKET_SERVICE", "minio").lower()
 
         self.set_data_dir()
 
@@ -131,7 +131,7 @@ class SilNlpEnv:
     def resolve_data_dir(self) -> Path:
         self.is_bucket = False
         sil_nlp_data_path = os.getenv("SIL_NLP_DATA_PATH", default="")
-        if sil_nlp_data_path != "" and self.bucket_service == "":
+        if sil_nlp_data_path != "":
             temp_path = Path(sil_nlp_data_path)
             if temp_path.is_dir():
                 LOGGER.info(f"Using workspace: {sil_nlp_data_path} as per environment variable SIL_NLP_DATA_PATH.")
@@ -187,9 +187,6 @@ class SilNlpEnv:
             self.bucket = bucket
             self.bucket_service = "aws"
             return
-
-        if self.bucket_service == "":
-            self.bucket_service = "minio"
 
         if self.bucket_service not in ["minio", "b2"]:
             LOGGER.warning("BUCKET_SERVICE environment variable must be either 'minio' or 'b2'.")
