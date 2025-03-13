@@ -1212,6 +1212,8 @@ class HuggingFaceNMTModel(NMTModel):
             model.config.max_length = 512
         lang_codes: Dict[str, str] = self._config.data["lang_codes"]
 
+        # The tokenizer isn't wrapped until after calling _create_inference_model,
+        # because the tokenizer's input/output language codes are set there
         if isinstance(tokenizer, (NllbTokenizer, NllbTokenizerFast)):
             tokenizer = PunctuationNormalizingTokenizer(tokenizer)
 
