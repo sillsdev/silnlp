@@ -17,6 +17,7 @@ Backblaze B2 is only used as a backup storage option when the MinIO bucket is un
 The following will mount /silnlp on your B drive or /nlp-research on your M drive and allow you to explore, read and write.
 * Install WinFsp: http://www.secfs.net/winfsp/rel/  (Click the button to "Download WinFsp Installer" not the "SSHFS-Win (x64)" installer)
 * Download rclone from: https://rclone.org/downloads/
+* If you already have rclone installed, make sure it is updated to at least version 1.43 to support Backblaze
 * Unzip to your desktop (or some convient location). 
 * Add the folder that contains rclone.exe to your PATH environment variable.
 * Take the `scripts/rclone/rclone.conf` file from this SILNLP repo and copy it to `~\AppData\Roaming\rclone` (creating folders if necessary)
