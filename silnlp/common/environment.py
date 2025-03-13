@@ -163,7 +163,7 @@ class SilNlpEnv:
             endpoint_url=endpoint_url,
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_key,
-            config=Config(read_timeout=600),
+            config=generate_s3_config(),
             # Verify is false if endpoint_url is an IP address. Aqua/Cheetah connecting to MinIO need this disabled for now.
             verify=False if re.match(r"https://\d+\.\d+\.\d+\.\d+", endpoint_url) else True,
         )
@@ -180,7 +180,7 @@ class SilNlpEnv:
             LOGGER.warning("Support for AWS S3 will soon be removed. Please set up MinIO and/or B2 credentials.")
             resource = boto3.resource(
                 service_name="s3",
-                config=Config(read_timeout=600),
+                config=generate_s3_config(),
             )
             bucket = resource.Bucket("silnlp")
             register_configuration_parameter(PureS3Path("/"), resource=resource)
