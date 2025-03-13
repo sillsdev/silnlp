@@ -189,7 +189,7 @@ class SilNlpEnv:
             return
 
         if self.bucket_service not in ["minio", "b2"]:
-            LOGGER.warning("BUCKET_SERVICE environment variable must be either 'minio' or 'b2'.")
+            LOGGER.warning("BUCKET_SERVICE environment variable must be either 'minio' or 'b2'. Default is 'minio'.")
             self.bucket_service = "minio"
         if self.bucket_service in ["minio"]:
             try:
