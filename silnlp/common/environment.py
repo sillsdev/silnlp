@@ -28,7 +28,7 @@ class SilNlpEnv:
         self.root_dir = Path.home() / ".silnlp"
         self.assets_dir = Path(__file__).parent.parent / "assets"
         self.is_bucket = False
-        self.bucket_service = os.getenv("BUCKET_SERVICE", "minio").lower()
+        self.bucket_service = os.getenv("BUCKET_SERVICE", "").lower()
 
         self.set_data_dir()
 
@@ -187,6 +187,9 @@ class SilNlpEnv:
             self.bucket = bucket
             self.bucket_service = "aws"
             return
+
+        if self.bucket_service == "":
+            self.bucket_service = "minio"
 
         if self.bucket_service not in ["minio", "b2"]:
             LOGGER.warning("BUCKET_SERVICE environment variable must be either 'minio' or 'b2'. Default is 'minio'.")
