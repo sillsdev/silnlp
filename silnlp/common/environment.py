@@ -137,9 +137,9 @@ class SilNlpEnv:
                 LOGGER.info(f"Using workspace: {sil_nlp_data_path} as per environment variable SIL_NLP_DATA_PATH.")
                 return Path(sil_nlp_data_path)
             else:
-                raise Exception(
+                LOGGER.warning(
                     f"The path defined by environment variable SIL_NLP_DATA_PATH ({sil_nlp_data_path}) is not a "
-                    + "real directory."
+                    + "local directory."
                 )
 
         gutenberg_path = Path("G:/Shared drives/Gutenberg")
