@@ -9,7 +9,19 @@ from copy import deepcopy
 from enum import Enum
 from itertools import repeat
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+    cast,
+)
 
 import datasets.utils.logging as datasets_logging
 import evaluate
@@ -24,7 +36,10 @@ from datasets import Dataset
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
 from sacremoses import MosesPunctNormalizer
 from tokenizers import AddedToken, NormalizedString, Regex
-from tokenizers.implementations import SentencePieceBPETokenizer, SentencePieceUnigramTokenizer
+from tokenizers.implementations import (
+    SentencePieceBPETokenizer,
+    SentencePieceUnigramTokenizer,
+)
 from tokenizers.normalizers import Normalizer
 from torch import Tensor, TensorType, nn, optim
 from torch.utils.data import Sampler
@@ -73,7 +88,14 @@ from transformers.utils.logging import tqdm
 from ..common.corpus import Term, count_lines, get_terms
 from ..common.environment import SIL_NLP_ENV
 from ..common.translator import DraftGroup, TranslationGroup
-from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, get_mt_exp_dir, merge_dict
+from ..common.utils import (
+    NoiseMethod,
+    ReplaceRandomToken,
+    Side,
+    create_noise_methods,
+    get_mt_exp_dir,
+    merge_dict,
+)
 from .config import CheckpointType, Config, DataFile, NMTModel
 from .tokenizer import NullTokenizer, Tokenizer
 
@@ -1185,13 +1207,16 @@ class HuggingFaceNMTModel(NMTModel):
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Iterable[TranslationGroup]:
         tokenizer = self._config.get_tokenizer()
-        if isinstance(tokenizer, (NllbTokenizer, NllbTokenizerFast)):
-            tokenizer = PunctuationNormalizingTokenizer(tokenizer)
-
         model = self._create_inference_model(ckpt, tokenizer)
         if model.config.max_length is not None and model.config.max_length < 512:
             model.config.max_length = 512
         lang_codes: Dict[str, str] = self._config.data["lang_codes"]
+
+        # The tokenizer isn't wrapped until after calling _create_inference_model,
+        # because the tokenizer's input/output language codes are set there
+        if isinstance(tokenizer, (NllbTokenizer, NllbTokenizerFast)):
+            tokenizer = PunctuationNormalizingTokenizer(tokenizer)
+
         pipeline = TranslationPipeline(
             model=model,
             tokenizer=tokenizer,
