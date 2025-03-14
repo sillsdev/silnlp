@@ -12,9 +12,10 @@ from sacrebleu.metrics import BLEU, BLEUScore
 
 from ..common.environment import SIL_NLP_ENV
 from ..common.metrics import compute_meteor_score
-from ..common.utils import get_git_revision_hash
+from ..common.utils import get_git_revision_hash, get_mt_exp_dir
 from .config import CheckpointType, Config, NMTModel
 from .config_utils import load_config
+from .hugging_face_config import get_best_checkpoint, get_parent_last_checkpoint, has_best_checkpoint
 from .tokenizer import Tokenizer
 
 LOGGER = logging.getLogger(__package__ + ".test")
@@ -541,6 +542,10 @@ def test(
     exp_name = experiment
     SIL_NLP_ENV.copy_experiment_from_bucket(exp_name)
     config = load_config(exp_name)
+    if config.has_parent:
+        SIL_NLP_ENV.copy_experiment_from_bucket(config.data["parent"])
+        parent_dir = Path(get_mt_exp_dir(config.data["parent"]))
+        parent_model_dir = parent_dir / "run"
 
     if not any(config.exp_dir.glob("test*.src.txt")):
         LOGGER.info("No test dataset.")
@@ -628,19 +633,54 @@ def test(
             )
 
     if not config.model_dir.exists():
-        results[0] = test_checkpoint(
-            config,
-            model,
-            tokenizer,
-            force_infer,
-            by_book,
-            ref_projects,
-            CheckpointType.OTHER,
-            0,
-            scorers,
-            books_nums,
-            produce_multiple_translations,
-        )
+
+        if config.has_parent:
+            if has_best_checkpoint(parent_model_dir):
+                step = get_best_checkpoint(parent_model_dir).stem[-4:]
+                if step not in results:
+                    results[step] = test_checkpoint(
+                        config,
+                        model,
+                        tokenizer,
+                        force_infer,
+                        by_book,
+                        ref_projects,
+                        CheckpointType.BEST,
+                        step,
+                        scorers,
+                        books_nums,
+                        produce_multiple_translations,
+                    )
+            step = get_parent_last_checkpoint(parent_model_dir).stem[-4:]
+            if step not in results:
+                results[step] = test_checkpoint(
+                    config,
+                    model,
+                    tokenizer,
+                    force_infer,
+                    by_book,
+                    ref_projects,
+                    CheckpointType.LAST,
+                    step,
+                    scorers,
+                    books_nums,
+                    produce_multiple_translations,
+                )
+
+        else:
+            results[0] = test_checkpoint(
+                config,
+                model,
+                tokenizer,
+                force_infer,
+                by_book,
+                ref_projects,
+                CheckpointType.OTHER,
+                0,
+                scorers,
+                books_nums,
+                produce_multiple_translations,
+            )
 
     SIL_NLP_ENV.copy_experiment_to_bucket(
         exp_name, patterns=("scores-*.csv", "test.*trg-predictions.*"), overwrite=True

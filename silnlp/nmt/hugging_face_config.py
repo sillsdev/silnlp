@@ -1642,6 +1642,16 @@ class HuggingFaceNMTModel(NMTModel):
         if self._config.model_dir.exists():
             checkpoint_path, _ = self.get_checkpoint_path(ckpt)
             model_name = str(checkpoint_path)
+        elif self._config.has_parent:
+            LOGGER.info("Using parent model.")
+            parent_dir = Path(get_mt_exp_dir(self._config.data["parent"]))
+            parent_model_dir = parent_dir / "run"
+
+            if parent_model_dir.exists():
+                if ckpt is CheckpointType.BEST and has_best_checkpoint(parent_model_dir):
+                    model_name = get_best_checkpoint(parent_model_dir)
+                elif ckpt is CheckpointType.LAST:
+                    model_name = get_parent_last_checkpoint(parent_model_dir)
         else:
             LOGGER.warn("Model has no checkpoints. Using base model.")
             model_name = self._config.model
@@ -1676,6 +1686,7 @@ class HuggingFaceNMTModel(NMTModel):
         if self._config.model_prefix == "google/madlad400" or model_name == self._config.model:
             model, tokenizer = self._configure_model(model, tokenizer)
 
+        print(model)
         return model
 
     def _configure_model(
