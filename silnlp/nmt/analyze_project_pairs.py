@@ -475,7 +475,7 @@ def main() -> None:
     if args.clearml_queue is not None and "cpu" not in args.clearml_queue:
         LOGGER.warning("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
         exit()
-    clearml = SILClearML(exp_name, args.clearml_queue)
+    clearml = SILClearML(exp_name, args.clearml_queue, bucket_service=SIL_NLP_ENV.bucket_service)
 
     SIL_NLP_ENV.copy_experiment_from_bucket(exp_name)
 
