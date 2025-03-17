@@ -262,6 +262,7 @@ class TranslationTask:
             project_suffix="_infer",
             experiment_suffix=experiment_suffix,
             commit=self.commit,
+            bucket_service=SIL_NLP_ENV.bucket_service,
         )
         self.name = clearml.name
 

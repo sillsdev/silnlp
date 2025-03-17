@@ -21,7 +21,7 @@ class SILClearML:
     experiment_suffix: str = ""
     clearml_project_folder: str = ""
     commit: Optional[str] = None
-    bucket_service: Optional[str] = None
+    bucket_service: str = ""
 
     def __post_init__(self) -> None:
         self.name = self.name.replace("\\", "/")
