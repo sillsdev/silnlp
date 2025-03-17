@@ -6,7 +6,11 @@
 	"build": {
 		"context": "..",
 		// Path is relative to the devcontainer.json file.
-		"dockerfile": "Dockerfile"
+		"dockerfile": "Dockerfile",
+		"args": {
+            "MINIO_ENDPOINT_URL": "${localEnv:MINIO_ENDPOINT_URL}",
+			"MINIO_ENDPOINT_IP": "${localEnv:MINIO_ENDPOINT_IP}"
+        }
 	},
 	"runArgs": [
 		"--gpus",
@@ -19,6 +23,7 @@
 		"AWS_ACCESS_KEY_ID": "${localEnv:AWS_ACCESS_KEY_ID}",
 		"AWS_SECRET_ACCESS_KEY": "${localEnv:AWS_SECRET_ACCESS_KEY}",
 		"MINIO_ENDPOINT_URL": "${localEnv:MINIO_ENDPOINT_URL}",
+		"MINIO_ENDPOINT_IP": "${localEnv:MINIO_ENDPOINT_IP}",
 		"MINIO_ACCESS_KEY": "${localEnv:MINIO_ACCESS_KEY}",
 		"MINIO_SECRET_KEY": "${localEnv:MINIO_SECRET_KEY}",
 		"B2_ENDPOINT_URL": "${localEnv:B2_ENDPOINT_URL}",
@@ -69,7 +74,7 @@
 			]
 		}
 	},
-	"postStartCommand": "poetry install"
+	"postStartCommand": "poetry install && sh /workspaces/silnlp/.devcontainer/update_hosts.sh"
 	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
 	// "remoteUser": "root"
 }
