@@ -204,7 +204,7 @@ class Translator(ABC):
                 )
                 trg_project = None
 
-            usfm_preserver = StatisticalUsfmPreserver(sentences, vrefs, stylesheet, include_inline_elements, "hmm")
+            usfm_preserver = StatisticalUsfmPreserver(sentences, vrefs, stylesheet, include_inline_elements, "eflomal")
             sentences = usfm_preserver.src_sents
 
         # Set aside empty sentences
