@@ -175,9 +175,8 @@ class SilNlpEnv:
         self.bucket = bucket
 
     def set_s3_bucket(self):
-        # TEMPORARY: This allows users to still connect to AWS S3 if they have not set up MinIO or B2 yet. This will be removed in the future.
         if self.bucket_service == "aws" or (os.getenv("MINIO_ACCESS_KEY") is None and os.getenv("B2_KEY_ID") is None):
-            LOGGER.warning("Support for AWS S3 will soon be removed. Please set up MinIO and/or B2 credentials.")
+            LOGGER.info("Trying to connect to AWS S3 bucket.")
             resource = boto3.resource(
                 service_name="s3",
                 config=generate_s3_config(),
@@ -186,6 +185,7 @@ class SilNlpEnv:
             register_configuration_parameter(PureS3Path("/"), resource=resource)
             self.bucket = bucket
             self.bucket_service = "aws"
+            LOGGER.info("Connected to AWS S3 bucket.")
             return
 
         if self.bucket_service == "":
