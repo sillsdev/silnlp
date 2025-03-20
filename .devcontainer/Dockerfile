@@ -43,6 +43,5 @@ ENV SIL_NLP_CACHE_EXPERIMENT_DIR=/root/.cache/silnlp/experiments
 ENV SIL_NLP_CACHE_PROJECT_DIR=/root/.cache/silnlp/projects
 # Set environment variables
 ENV CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
-ENV SIL_NLP_DATA_PATH=/silnlp
-ENV EFLOMAL_PATH=/workspaces/silnlp/.venv/lib/python3.12/site-packages/eflomal/bin
+ENV EFLOMAL_PATH=/workspaces/silnlp/.venv/lib/python3.10/site-packages/eflomal/bin
 CMD ["bash"]

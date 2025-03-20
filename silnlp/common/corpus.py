@@ -40,9 +40,11 @@ def get_scripture_parallel_corpus(
     src_sentences: List[str] = []
     trg_sentences: List[str] = []
     indices: List[int] = []
-    with (SIL_NLP_ENV.assets_dir / "vref.txt").open("r", encoding="utf-8") as vref_file, src_file_path.open(
-        "r", encoding="utf-8"
-    ) as src_file, trg_file_path.open("r", encoding="utf-8") as trg_file:
+    with (
+        (SIL_NLP_ENV.assets_dir / "vref.txt").open("r", encoding="utf-8") as vref_file,
+        src_file_path.open("r", encoding="utf-8") as src_file,
+        trg_file_path.open("r", encoding="utf-8") as trg_file,
+    ):
         # Read lines before using zip to catch last lines of src/trg file if the other ends in one or more empty lines
         vref_lines = vref_file.readlines()
         src_lines = src_file.readlines()
@@ -217,12 +219,13 @@ def get_terms_metadata_path(list_name: str, mt_terms_dir: Path = SIL_NLP_ENV.mt_
     return mt_terms_dir / f"{list_name}-metadata.txt"
 
 
-def get_terms_glosses_path(list_name: str, iso: str = "en", mt_terms_dir: Path = SIL_NLP_ENV.mt_terms_dir) -> Path:
+def get_terms_glosses_path(list_name: str, iso: str, mt_terms_dir: Path = SIL_NLP_ENV.mt_terms_dir) -> Path:
     iso = iso.lower()
     gl_path = SIL_NLP_ENV.assets_dir / f"{iso}-{list_name}-glosses.txt"
     if gl_path.is_file():
         return gl_path
-    return mt_terms_dir / f"{iso}-{list_name}-glosses.txt"
+    gl_path = mt_terms_dir / f"{iso}-{list_name}-glosses.txt"
+    return gl_path
 
 
 def get_terms_vrefs_path(list_name: str, mt_terms_dir: Path = SIL_NLP_ENV.mt_terms_dir) -> Path:
@@ -261,19 +264,24 @@ class Term:
     vrefs: Set[VerseRef]
 
 
-def get_terms(terms_renderings_path: Path, iso: str = "en") -> Dict[str, Term]:
+def get_terms(terms_renderings_path: Path, iso: Optional[str] = None) -> Dict[str, Term]:
     list_name = get_terms_list(terms_renderings_path)
     terms_metadata_path = get_terms_metadata_path(list_name)
-    terms_glosses_path = get_terms_glosses_path(list_name, iso=iso)
     terms_vrefs_path = get_terms_vrefs_path(list_name)
     terms: Dict[str, Term] = {}
     terms_metadata = load_corpus(terms_metadata_path)
-    terms_glosses = load_corpus(terms_glosses_path) if terms_glosses_path.is_file() else iter([])
     terms_renderings = load_corpus(terms_renderings_path)
     terms_vrefs = load_corpus(terms_vrefs_path) if terms_vrefs_path.is_file() else iter([])
+    terms_glosses = iter([])
+    if iso is not None:
+        terms_glosses_path = get_terms_glosses_path(list_name, iso=iso)
+        if terms_glosses_path.is_file():
+            terms_glosses = load_corpus(terms_glosses_path)
     for metadata_line, glosses_line, renderings_line, vrefs_line in itertools.zip_longest(
         terms_metadata, terms_glosses, terms_renderings, terms_vrefs
     ):
+        if metadata_line is None or len(metadata_line) == 0:
+            continue
         term_id, cat, domain = metadata_line.split("\t", maxsplit=3)
         glosses = [] if glosses_line is None or len(glosses_line) == 0 else glosses_line.split("\t")
         renderings = [] if len(renderings_line) == 0 else renderings_line.split("\t")
@@ -282,6 +290,7 @@ def get_terms(terms_renderings_path: Path, iso: str = "en") -> Dict[str, Term]:
             if vrefs_line is None or len(vrefs_line) == 0
             else set(VerseRef.from_string(vref, ORIGINAL_VERSIFICATION) for vref in vrefs_line.split("\t"))
         )
+
         terms[term_id] = Term(term_id, cat, domain, glosses, renderings, vrefs)
     return terms
 
@@ -294,18 +303,23 @@ def get_terms_corpus(
 ) -> pd.DataFrame:
     data: Set[Tuple[str, str, str]] = set()
     for src_term in src_terms.values():
-        if cats is not None and src_term.cat not in cats:
-            continue
-
         trg_term = trg_terms.get(src_term.id)
         if trg_term is None:
             continue
+        if cats is not None and (src_term.cat not in cats and trg_term.cat not in cats):
+            continue
 
-        vrefs = (
+        src_vrefs = (
             src_term.vrefs
             if filter_books is None
             else {vref for vref in src_term.vrefs if vref.book_num in filter_books}
         )
+        trg_vrefs = (
+            trg_term.vrefs
+            if filter_books is None
+            else {vref for vref in trg_term.vrefs if vref.book_num in filter_books}
+        )
+        vrefs = src_vrefs.union(trg_vrefs)
         if len(vrefs) == 0:
             continue
 

@@ -9,7 +9,19 @@ from copy import deepcopy
 from enum import Enum
 from itertools import repeat
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+    cast,
+)
 
 import datasets.utils.logging as datasets_logging
 import evaluate
@@ -18,12 +30,16 @@ import pandas as pd
 import torch
 import transformers.utils.logging as transformers_logging
 import yaml
+from accelerate import infer_auto_device_map, init_empty_weights
 from accelerate.utils.memory import should_reduce_batch_size
 from datasets import Dataset
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
 from sacremoses import MosesPunctNormalizer
 from tokenizers import AddedToken, NormalizedString, Regex
-from tokenizers.implementations import SentencePieceBPETokenizer, SentencePieceUnigramTokenizer
+from tokenizers.implementations import (
+    SentencePieceBPETokenizer,
+    SentencePieceUnigramTokenizer,
+)
 from tokenizers.normalizers import Normalizer
 from torch import Tensor, TensorType, nn, optim
 from torch.utils.data import Sampler
@@ -45,6 +61,7 @@ from transformers import (
     PreTrainedModel,
     PreTrainedTokenizer,
     PreTrainedTokenizerBase,
+    PreTrainedTokenizerFast,
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
     T5Tokenizer,
@@ -69,9 +86,16 @@ from transformers.utils import (
 from transformers.utils.logging import tqdm
 
 from ..common.corpus import Term, count_lines, get_terms
-from ..common.environment import SIL_NLP_ENV, download_if_s3_paths
+from ..common.environment import SIL_NLP_ENV
 from ..common.translator import DraftGroup, TranslationGroup
-from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
+from ..common.utils import (
+    NoiseMethod,
+    ReplaceRandomToken,
+    Side,
+    create_noise_methods,
+    get_mt_exp_dir,
+    merge_dict,
+)
 from .config import CheckpointType, Config, DataFile, NMTModel
 from .tokenizer import NullTokenizer, Tokenizer
 
@@ -168,6 +192,9 @@ SP_TOKENIZER_CONFIG = {
     "google/madlad400": {"type": "Unigram", "special_tokens": ["<unk>", "<s>", "</s>"], "unk_token": "<unk>"},
 }
 
+# "loss" and "eval_loss" are both evaluation loss
+# The early stopping callback adds "eval_" to all metrics that don't already start with it
+DEFAULT_METRICS = ["loss", "eval_loss"]
 EVAL_METRICS_MODULES = {"bleu": "sacrebleu", "chrf3": "chrf", "chrf3+": "chrf", "chrf3++": "chrf"}
 
 
@@ -183,6 +210,15 @@ def has_best_checkpoint(model_dir: Path) -> bool:
     with trainer_state_path.open("r", encoding="utf-8") as f:
         trainer_state = json.load(f)
     return "best_model_checkpoint" in trainer_state and trainer_state["best_model_checkpoint"] is not None
+
+
+def get_parent_last_checkpoint(model_dir: Path) -> Path:
+    trainer_state_path = model_dir / "trainer_state.json"
+    with trainer_state_path.open("r", encoding="utf-8") as f:
+        trainer_state = json.load(f)
+    max_step = trainer_state["max_steps"]
+    last_checkpoint = "checkpoint-" + str(max_step)
+    return model_dir / last_checkpoint
 
 
 OPTIMIZER_STATE_FILES = {"optimizer.pt", "rng_state.pth", "scaler.pt", "scheduler.pt"}
@@ -255,6 +291,27 @@ def get_model_prefix(model: str) -> str:
     return ""
 
 
+def get_parent_model_prefix(parent_exp: str) -> str:
+    SIL_NLP_ENV.copy_experiment_from_bucket(parent_exp, patterns="config.yml")
+    parent_dir = Path(get_mt_exp_dir(parent_exp))
+    with (parent_dir / "config.yml").open("r", encoding="utf-8") as file:
+        parent_configs = yaml.safe_load(file)
+    parent_base_model = parent_configs.get("model")
+    parent_model_prefix = get_model_prefix(parent_base_model)
+    return parent_model_prefix
+
+
+def get_parent_model_name(parent_exp: str) -> str:
+    parent_dir = Path(get_mt_exp_dir(parent_exp))
+    parent_model_dir = parent_dir / "run"
+    SIL_NLP_ENV.copy_experiment_from_bucket(parent_exp, patterns="run/trainer_state.json")
+    parent_model = get_parent_last_checkpoint(parent_model_dir)
+    if has_best_checkpoint(parent_model_dir):
+        parent_model = get_best_checkpoint(parent_model_dir)
+    LOGGER.info("Using parent model. This might be different from the model specified in config.")
+    return str(parent_model)
+
+
 class HuggingFaceConfig(Config):
     def __init__(self, exp_dir: Path, config: dict) -> None:
         config = merge_dict(
@@ -317,7 +374,7 @@ class HuggingFaceConfig(Config):
                     "activation_dropout": 0.0,
                     "learning_rate": 0.0002,
                     "lr_scheduler_type": "cosine",
-                    "attention_implementation": "eager",
+                    "attn_implementation": "sdpa",
                 },
                 "model": "facebook/nllb-200-distilled-1.3B",
             },
@@ -325,6 +382,16 @@ class HuggingFaceConfig(Config):
         )
         self._tokenizer: Optional[PreTrainedTokenizer] = None
         self.model_prefix = get_model_prefix(config.get("model", ""))
+
+        if "parent" in config["data"]:
+            parent = config["data"]["parent"]
+            parent_model_name = get_parent_model_name(parent)
+            parent_model_prefix = get_parent_model_prefix(parent)
+            if parent_model_prefix != self.model_prefix:
+                LOGGER.error("The parent model and the config model are not in the same type.")
+                raise ValueError(f"Unmatched model prefix {parent_model_prefix} and {self.model_prefix}")
+            config["model"] = parent_model_name
+            self.model_prefix = parent_model_prefix
 
         super().__init__(exp_dir, config)
 
@@ -450,7 +517,7 @@ class HuggingFaceConfig(Config):
         self, file_paths, vocab_size
     ) -> Tuple[List[str], Union[SentencePieceBPETokenizer, SentencePieceUnigramTokenizer]]:
         assert self._tokenizer is not None
-        files = [str(f) for f in download_if_s3_paths(file_paths)]
+        files = [str(f) for f in SIL_NLP_ENV.download_if_s3_paths(file_paths)]
         sp_tokenizer = self._train_sp_tokenizer(files, vocab_size)
         sp_keys, tok_keys = sp_tokenizer.get_vocab().keys(), self._tokenizer.get_vocab().keys()
         missing_tokens = sorted(list(set(sp_keys) - set(tok_keys)))
@@ -607,6 +674,10 @@ class HuggingFaceConfig(Config):
                     SIL_NLP_ENV.assets_dir / "tokenizers" / self.model_prefix / "tokenizer_config.json"
                 ).is_file():
                     model_name_or_path = str(SIL_NLP_ENV.assets_dir / "tokenizers" / self.model_prefix)
+                elif self.has_parent:
+                    parent_exp = self.data["parent"]
+                    parent_dir = Path(get_mt_exp_dir(parent_exp))
+                    model_name_or_path = str(parent_dir)
                 else:
                     model_name_or_path = self.model
                 self._tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True)
@@ -615,7 +686,15 @@ class HuggingFaceConfig(Config):
 
     def get_tokenizer(self) -> PreTrainedTokenizer:
         if self._tokenizer is None:
-            model_name_or_path = str(self.exp_dir) if (self.exp_dir / "tokenizer_config.json").is_file() else self.model
+            if (self.exp_dir / "tokenizer_config.json").is_file():
+                model_name_or_path = str(self.exp_dir)
+            elif self.has_parent:
+                parent_exp = self.data["parent"]
+                parent_dir = Path(get_mt_exp_dir(parent_exp))
+                model_name_or_path = str(parent_dir)
+            else:
+                model_name_or_path = self.model
+
             self._tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True)
             self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
         return self._tokenizer
@@ -639,9 +718,31 @@ class HuggingFaceConfig(Config):
                 return 0
             categories_set: Optional[Set[str]] = None if categories is None else set(categories)
 
+            if terms_config["include_glosses"]:
+                gloss_iso: str = str(terms_config["include_glosses"]).lower()
+                if gloss_iso == "true":
+                    src_gloss_iso = list(self.src_isos.intersection(["en", "fr", "id", "es"]))
+                    trg_gloss_iso = list(self.trg_isos.intersection(["en", "fr", "id", "es"]))
+                    if src_gloss_iso:
+                        gloss_iso = src_gloss_iso[0]
+                    elif trg_gloss_iso:
+                        gloss_iso = trg_gloss_iso[0]
+                    else:
+                        LOGGER.warning(
+                            "Glosses could not be included. No source or target language matches any of the supported gloss language codes: en, fr, id, es."
+                        )
+                        gloss_iso = None
+                elif gloss_iso not in ["en", "fr", "id", "es"]:
+                    LOGGER.warning(
+                        f"Gloss language code, {gloss_iso}, does not match the supported gloss language codes: en, fr, id, es."
+                    )
+                    gloss_iso = None
+            else:
+                gloss_iso = None
+
             all_trg_terms: List[Tuple[DataFile, Dict[str, Term], str]] = []
             for trg_terms_file, tags_str in trg_terms_files:
-                all_trg_terms.append((trg_terms_file, get_terms(trg_terms_file.path), tags_str))
+                all_trg_terms.append((trg_terms_file, get_terms(trg_terms_file.path, iso=gloss_iso), tags_str))
             for trg_terms_file, trg_terms, tags_str in all_trg_terms:
                 tokenizer.set_trg_lang(trg_terms_file.iso)
                 for trg_term in trg_terms.values():
@@ -662,11 +763,11 @@ class HuggingFaceConfig(Config):
                     dict_vref_file.write("\t".join(str(vref) for vref in trg_term.vrefs) + "\n")
                     dict_count += 1
 
-            if terms_config["include_glosses"] and "en" in self.trg_isos:
+            if gloss_iso is not None:
                 all_src_terms: List[Tuple[DataFile, Dict[str, Term], str]] = []
                 for src_terms_file, tags_str in src_terms_files:
-                    all_src_terms.append((src_terms_file, get_terms(src_terms_file.path), tags_str))
-                tokenizer.set_trg_lang("en")
+                    all_src_terms.append((src_terms_file, get_terms(src_terms_file.path, iso=gloss_iso), tags_str))
+                tokenizer.set_trg_lang(gloss_iso)
                 for src_term_file, src_terms, tags_str in all_src_terms:
                     for src_term in src_terms.values():
                         if categories_set is not None and src_term.cat not in categories_set:
@@ -753,6 +854,7 @@ class HuggingFaceNMTModel(NMTModel):
         set_seed(self._config.data["seed"])
         self._dictionary: Optional[Dict[VerseRef, Set[str]]] = None
         self._is_t5 = self._config.model_prefix in SUPPORTED_T5_MODELS
+        self._num_devices = num_devices
 
     def train(self) -> None:
         training_args = self._create_training_arguments()
@@ -776,11 +878,23 @@ class HuggingFaceNMTModel(NMTModel):
             label2id={},
             id2label={},
             num_labels=0,
-            attn_implementation=self._config.params.get("attn_implementation", "eager"),
+            attn_implementation=self._config.params["attn_implementation"],
         )
+        if self._num_devices == 2 and self._config.model_prefix == "facebook/nllb-200":
+            device_map = {
+                "lm_head": 0,
+                "model.shared": 0,
+                "model.encoder": 0,
+                "model.decoder.embed_tokens": 0,
+                "model.decoder.embed_positions": 1,
+                "model.decoder.layers": 1,
+                "model.decoder.layer_norm": 1,
+            }
+        else:
+            device_map = None
         model = cast(
             PreTrainedModel,
-            AutoModelForSeq2SeqLM.from_pretrained(self._config.model, config=model_config),
+            AutoModelForSeq2SeqLM.from_pretrained(self._config.model, config=model_config, device_map=device_map),
         )
         if self._config.train.get("better_transformer"):
             model = model.to_bettertransformer()
@@ -871,12 +985,14 @@ class HuggingFaceNMTModel(NMTModel):
             src_noise=src_noise,
         )
 
+        metric_name = ""
         if self._config.eval["metric_for_best_model"] is not None:
             metric_name = self._config.eval["metric_for_best_model"].lower()
-            metric_module = EVAL_METRICS_MODULES.get(metric_name)
-            if metric_module is None:
-                raise ValueError(f"{metric_name} is not a supported metric.")
-            metric = evaluate.load(metric_module)
+            if metric_name not in DEFAULT_METRICS:
+                metric_module = EVAL_METRICS_MODULES.get(metric_name)
+                if metric_module is None:
+                    raise ValueError(f"{metric_name} is not a supported metric.")
+                metric = evaluate.load(metric_module)
         all_special_ids = set(tokenizer.all_special_ids)
 
         def compute_metrics(eval_preds):
@@ -942,10 +1058,11 @@ class HuggingFaceNMTModel(NMTModel):
             train_dataset,
             eval_dataset,
             tokenizer,
-            compute_metrics=compute_metrics,
+            compute_metrics=None if metric_name in DEFAULT_METRICS else compute_metrics,
             sequential_sampling=self._config.train.get("sequential_sampling", False),
             better_transformer=self._config.train.get("better_transformer", False),
             auto_grad_acc=self._config.train.get("auto_grad_acc", False),
+            model_prefix=self._config.model_prefix,
         )
         early_stopping: Optional[dict] = self._config.eval["early_stopping"]
         if early_stopping:
@@ -1091,9 +1208,15 @@ class HuggingFaceNMTModel(NMTModel):
     ) -> Iterable[TranslationGroup]:
         tokenizer = self._config.get_tokenizer()
         model = self._create_inference_model(ckpt, tokenizer)
-        if model.config.max_length != None and model.config.max_length < 512:
+        if model.config.max_length is not None and model.config.max_length < 512:
             model.config.max_length = 512
         lang_codes: Dict[str, str] = self._config.data["lang_codes"]
+
+        # The tokenizer isn't wrapped until after calling _create_inference_model,
+        # because the tokenizer's input/output language codes are set there
+        if isinstance(tokenizer, (NllbTokenizer, NllbTokenizerFast)):
+            tokenizer = PunctuationNormalizingTokenizer(tokenizer)
+
         pipeline = TranslationPipeline(
             model=model,
             tokenizer=tokenizer,
@@ -1160,6 +1283,7 @@ class HuggingFaceNMTModel(NMTModel):
             for param in params:
                 if param in section_config:
                     args[param] = section_config[param]
+        # For context on floating point precision, see https://github.com/sillsdev/silnlp/issues/647
         merge_dict(
             args,
             {
@@ -1556,7 +1680,7 @@ class HuggingFaceNMTModel(NMTModel):
             base_model = AutoModelForSeq2SeqLM.from_pretrained(
                 self._config.model,
                 torch_dtype=dtype if self._mixed_precision else "auto",
-                attn_implementation=self._config.params.get("attn_implementation", "eager"),
+                attn_implementation=self._config.params["attn_implementation"],
             )
             if len(tokenizer) != base_model.get_input_embeddings().weight.size(dim=0):
                 base_model.resize_token_embeddings(
@@ -1568,7 +1692,7 @@ class HuggingFaceNMTModel(NMTModel):
             model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(
                 model_name,
                 torch_dtype=dtype if self._mixed_precision else "auto",
-                attn_implementation=self._config.params.get("attn_implementation", "eager"),
+                attn_implementation=self._config.params["attn_implementation"],
             )
         if self._config.infer.get("better_transformer"):
             model = model.to_bettertransformer()
@@ -1621,6 +1745,40 @@ class HuggingFaceNMTModel(NMTModel):
                 model.generation_config.forced_bos_token_id = forced_bos_token_id
 
         return model, tokenizer
+
+
+class PunctuationNormalizingTokenizer(PreTrainedTokenizerFast):
+    def __init__(self, tokenizer: PreTrainedTokenizerFast) -> None:
+        self._wrapped_tokenizer = tokenizer
+        self._tokenizer = tokenizer._tokenizer
+        self._mpn = MosesPunctNormalizer()
+        self._mpn.substitutions = [(re.compile(r), sub) for r, sub in self._mpn.substitutions]
+        self._pad_token = tokenizer._pad_token
+
+    def __call__(
+        self,
+        text: Union[str, List[str], List[List[str]]] = None,
+        text_pair: Union[str, List[str], List[List[str]]] = None,
+        text_target: Union[str, List[str], List[List[str]]] = None,
+        text_pair_target: Union[str, List[str], List[List[str]]] = None,
+        **kwargs,
+    ) -> BatchEncoding:
+        if text is None:
+            raise ValueError('"text" input to PunctuationNormalizingTokenizer cannot be None')
+
+        if isinstance(text, str):
+            text = self._mpn.normalize(text)
+        elif isinstance(text, (list, tuple)) and len(text) > 0:
+            if isinstance(text[0], (list, tuple)) and len(text[0]) > 0:
+                text = [[self._mpn.normalize(item) for item in row] for row in text]
+            text = [self._mpn.normalize(item) for item in text]
+        return self._wrapped_tokenizer(text, **kwargs)
+
+    def token_to_id(self, token: str) -> int:
+        return self._wrapped_tokenizer.token_to_id(token)
+
+    def decode(self, *args, **kwargs):
+        return self._wrapped_tokenizer.decode(*args, **kwargs)
 
 
 class HuggingFaceTokenizer(Tokenizer):
@@ -1760,6 +1918,7 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         sequential_sampling: bool = False,
         better_transformer: bool = False,
         auto_grad_acc: bool = False,
+        model_prefix: Optional[str] = None,
     ):
         super().__init__(
             model,
@@ -1777,6 +1936,7 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         self._sequential_sampling = sequential_sampling
         self._better_transformer = better_transformer
         self._auto_grac_acc = auto_grad_acc
+        self.model_prefix = model_prefix
 
     def _get_train_sampler(self) -> Optional[Sampler]:
         if self._sequential_sampling:
@@ -1829,7 +1989,8 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         elif isinstance(self.model, PeftModel):
             if self._better_transformer:
                 self.model = self.model.reverse_bettertransformer()
-            output_dir += "/adapter" if self.model.name_or_path.startswith("facebook/nllb-200") else ""
+            if self.model_prefix:
+                output_dir += "/adapter" if self.model_prefix == "facebook/nllb-200" else ""
             self.model.save_pretrained(
                 output_dir,
                 state_dict=state_dict,

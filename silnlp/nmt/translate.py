@@ -55,6 +55,7 @@ class TranslationTask:
         trg_iso: Optional[str],
         produce_multiple_translations: bool = False,
         include_inline_elements: bool = False,
+        preserve_usfm_markers: bool = False,
     ):
         book_nums = get_chapters(books)
         translator, config, step_str = self._init_translation_task(
@@ -114,6 +115,7 @@ class TranslationTask:
                     chapters,
                     trg_project,
                     include_inline_elements,
+                    preserve_usfm_markers,
                     experiment_ckpt_str,
                 )
             except Exception as e:
@@ -174,6 +176,7 @@ class TranslationTask:
         trg_iso: Optional[str],
         produce_multiple_translations: bool = False,
         include_inline_elements: bool = False,
+        preserve_usfm_markers: bool = False,
     ) -> None:
         translator, config, step_str = self._init_translation_task(
             experiment_suffix=f"_{self.checkpoint}_{os.path.basename(src)}"
@@ -247,6 +250,7 @@ class TranslationTask:
                     trg_iso,
                     produce_multiple_translations,
                     include_inline_elements=include_inline_elements,
+                    preserve_usfm_markers=preserve_usfm_markers,
                     experiment_ckpt_str=experiment_ckpt_str,
                 )
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM"), overwrite=True)
@@ -258,6 +262,7 @@ class TranslationTask:
             project_suffix="_infer",
             experiment_suffix=experiment_suffix,
             commit=self.commit,
+            bucket_service=SIL_NLP_ENV.bucket_service,
         )
         self.name = clearml.name
 
@@ -317,6 +322,12 @@ def main() -> None:
         help="Include inline elements for projects in USFM format",
     )
     parser.add_argument(
+        "--preserve-usfm-markers",
+        default=False,
+        action="store_true",
+        help="Insert UFSM markers from source text into translations",
+    )
+    parser.add_argument(
         "--clearml-queue",
         default=None,
         type=str,
@@ -352,6 +363,7 @@ def main() -> None:
             args.trg_iso,
             args.multiple_translations,
             args.include_inline_elements,
+            args.preserve_usfm_markers,
         )
     elif args.src_prefix is not None:
         if args.debug:
@@ -377,7 +389,13 @@ def main() -> None:
             )
             exit()
         translator.translate_files(
-            args.src, args.trg, args.src_iso, args.trg_iso, args.multiple_translations, args.include_inline_elements
+            args.src,
+            args.trg,
+            args.src_iso,
+            args.trg_iso,
+            args.multiple_translations,
+            args.include_inline_elements,
+            args.preserve_usfm_markers,
         )
     else:
         raise RuntimeError("A Scripture book, file, or file prefix must be specified.")

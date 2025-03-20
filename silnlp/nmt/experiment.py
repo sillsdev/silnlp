@@ -33,7 +33,9 @@ class SILExperiment:
     commit: Optional[str] = None
 
     def __post_init__(self):
-        self.clearml = SILClearML(self.name, self.clearml_queue, commit=self.commit)
+        self.clearml = SILClearML(
+            self.name, self.clearml_queue, commit=self.commit, bucket_service=SIL_NLP_ENV.bucket_service
+        )
         self.name: str = self.clearml.name
         self.config: Config = self.clearml.config
         self.rev_hash = get_git_revision_hash()
@@ -58,13 +60,16 @@ class SILExperiment:
         if not config_file.exists():
             raise RuntimeError(f"ERROR: Config file does not exist in experiment folder {exp_dir}.")
         SIL_NLP_ENV.copy_experiment_from_bucket(self.name)
+        if self.config.has_parent:
+            SIL_NLP_ENV.copy_experiment_from_bucket(self.config.data["parent"])
         self.config.preprocess(self.make_stats, self.force_align)
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name, overwrite=self.force_align)
 
     def train(self):
         os.system("nvidia-smi")
         SIL_NLP_ENV.copy_experiment_from_bucket(self.name)
-
+        if self.config.has_parent:
+            SIL_NLP_ENV.copy_experiment_from_bucket(self.config.data["parent"])
         model = self.config.create_model(self.mixed_precision, self.num_devices)
         model.save_effective_config(self.config.exp_dir / f"effective-config-{self.rev_hash}.yml")
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=f"effective-config-{self.rev_hash}.yml")
@@ -108,6 +113,7 @@ class SILExperiment:
                     config.get("trg_iso"),
                     self.produce_multiple_translations,
                     config.get("include_inline_elements", False),
+                    config.get("preserve_usfm_markers", False),
                 )
             elif config.get("src_prefix"):
                 translator.translate_text_files(
@@ -127,6 +133,7 @@ class SILExperiment:
                     config.get("trg_iso"),
                     self.produce_multiple_translations,
                     config.get("include_inline_elements", False),
+                    config.get("preserve_usfm_markers", False),
                 )
             else:
                 raise RuntimeError("A Scripture book, file, or file prefix must be specified for translation.")
