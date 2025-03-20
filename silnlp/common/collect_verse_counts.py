@@ -252,10 +252,10 @@ def collect_verse_counts(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Collect various counts from a corpus of Bible extracts")
+    parser.add_argument("folder", help="An experiment folder (typically in MT/experiments) that contains a config.yml file. The results will be saved in this folder.")
     parser.add_argument(
-        "--input-folder", default=SIL_NLP_ENV.mt_scripture_dir, help="Folder with corpus of Bible extracts"
+        "--input-folder", default=SIL_NLP_ENV.mt_scripture_dir, help="Folder with corpus of Bible extract files."
     )
-    parser.add_argument("folder", help="Folder containing config.yml file and where results will be saved.")
     parser.add_argument(
         "--files",
         default="",
@@ -285,7 +285,7 @@ def main() -> None:
     if file_patterns == "":
         if not folder.exists():
             LOGGER.error(
-                f"Folder {folder} does not exist. Please provide a folder containing a config.yml file or a list of files with the --files argument."
+                f"Folder {folder} does not exist. Please provide an experiment folder, typically in MT/experiments, containing a config.yml file or a list of files with the --files argument."
             )
             return
         else:
