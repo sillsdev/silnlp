@@ -92,24 +92,22 @@ def main():
     args = parser.parse_args()
 
     folder = Path(args.folder)
-
-    csv_filename = f"{folder}_{args.output_filename}"
-    excel_filename = f"{folder}_{args.output_filename}"
+    base_filename = f"{folder.name}_{args.output_filename}"
 
     if not folder.is_dir():
         folder = Path(SIL_NLP_ENV.mt_experiments_dir) / args.folder
 
     # Check for lock files and ask the user to close them.
-    check_for_lock_file(folder, csv_filename, "csv")
-    check_for_lock_file(folder, excel_filename, "xlsx")
+    check_for_lock_file(folder, base_filename, "csv")
+    check_for_lock_file(folder, base_filename, "xlsx")
 
     data = aggregate_csv(folder)
 
     # Write the aggregated data to a new CSV file
-    write_to_csv(data, folder, csv_filename)
+    write_to_csv(data, folder, base_filename)
 
     # Write the aggregated data to an Excel file
-    write_to_excel(data, folder, excel_filename)
+    write_to_excel(data, folder, base_filename)
 
 
 if __name__ == "__main__":
