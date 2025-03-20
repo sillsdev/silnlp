@@ -51,6 +51,9 @@ class SILClearML:
                 docker_image="ghcr.io/sillsdev/silnlp:latest",
                 docker_arguments=[
                     "--env TOKENIZERS_PARALLELISM='false'",
+                    "--cap-add SYS_ADMIN",
+                    "--device /dev/fuse",
+                    "--security-opt apparmor=docker-apparmor",
                 ],
                 docker_setup_bash_script=[
                     "apt install -y python3-venv",
@@ -63,6 +66,20 @@ class SILClearML:
                         "sed -i 's/include-system-site-packages = .*/include-system-site-packages = true/' "
                         "/root/.local/share/pipx/venvs/poetry/pyvenv.cfg"
                     ),
+                    # automatically connect to the S3 bucket
+                    "apt-get install --no-install-recommends -y fuse3 rclone",
+                    "mkdir -p /root/S",
+                    "mkdir -p /root/.config/rclone",
+                    "cp scripts/rclone/rclone.conf /root/.config/rclone",
+                    'echo "[s3silnlp]" >> /root/.config/rclone/rclone.conf',
+                    'echo "type = s3" >> /root/.config/rclone/rclone.conf',
+                    'echo "provider = AWS" >> /root/.config/rclone/rclone.conf',
+                    'echo "access_key_id = $AWS_ACCESS_KEY_ID" >> /root/.config/rclone/rclone.conf',
+                    'echo "secret_access_key = $AWS_SECRET_ACCESS_KEY" >> /root/.config/rclone/rclone.conf',
+                    'echo "region = us-east-1" >> /root/.config/rclone/rclone.conf',
+                    #'sed -i -e "s#access_key_id = x*#access_key_id = $AWS_ACCESS_KEY_ID#" /root/.config/rclone/rclone.conf',
+                    #'sed -i -e "s#secret_access_key = x*#secret_access_key = $AWS_SECRET_ACCESS_KEY#" /root/.config/rclone/rclone.conf',
+                    "nohup rclone mount --vfs-cache-mode full --use-server-modtime s3silnlp:silnlp /root/S 2>\\&1 > /root/nohup.out \\&",
                 ],
             )
             if self.commit:
