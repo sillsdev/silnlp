@@ -1,4 +1,3 @@
-import unicodedata
 from abc import abstractmethod
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -9,6 +8,7 @@ from machine.corpora import ScriptureRef, UsfmStylesheet, UsfmToken, UsfmTokeniz
 from machine.tokenization import LatinWordTokenizer
 from machine.translation import WordAlignmentMatrix
 
+from ..alignment.eflomal import to_word_alignment_matrix
 from ..alignment.utils import compute_alignment_scores
 from .corpus import load_corpus, write_corpus
 
@@ -21,25 +21,17 @@ class UsfmPreserver:
     _markers: List[Tuple[int, int, str]]
     # (vref, embed)
     _embeds: List[Tuple[ScriptureRef, str]]
-    _include_embeds: bool
 
     def __init__(
         self, src_sents: List[str], vrefs: List[ScriptureRef], stylesheet: UsfmStylesheet, include_embeds: bool = False
     ):
         usfm_tokenizer = UsfmTokenizer(stylesheet)
         sentence_toks = []
-        self._vrefs = []
-        for sent, ref in zip(src_sents, vrefs):
-            # TODO: filtering out \rem markers in combination with the PREFER_NEW update behavior allows
-            # the original markers + content to be transferred over without having to touch them
-            # This can be extended to work for a customizable list of markers (that are on their own line)
-            # Inline markers that need to be transferred can be treated like footnotes currently are
-            if len(ref.path) == 0 or ref.path[-1].name != "rem":
-                sentence_toks.append(usfm_tokenizer.tokenize(sent))
-                self._vrefs.append(ref)
+        for sent in src_sents:
+            sentence_toks.append(usfm_tokenizer.tokenize(sent))
+        self._vrefs = vrefs
 
-        self._include_embeds = include_embeds
-        self._src_sents = self._extract_markers(sentence_toks)
+        self._src_sents = self._extract_markers(sentence_toks, include_embeds)
         self._src_tok_ranges = self._tokenize_sents(self._src_sents)
 
     # Source sentences without USFM markers, to be used as input to an MT model
@@ -47,11 +39,7 @@ class UsfmPreserver:
     def src_sents(self) -> List[str]:
         return self._src_sents
 
-    @property
-    def vrefs(self) -> List[ScriptureRef]:
-        return self._vrefs
-
-    def _extract_markers(self, sentence_toks: List[List[UsfmToken]]) -> List[str]:
+    def _extract_markers(self, sentence_toks: List[List[UsfmToken]], include_embeds: bool) -> List[str]:
         to_transfer = ["fig"]
         markers = []
         embeds = []
@@ -63,7 +51,7 @@ class UsfmPreserver:
                 if curr_embed is not None:
                     embed_text += tok.to_usfm()
                     if tok.type == UsfmTokenType.END and tok.marker[:-1] == curr_embed.marker:
-                        if self._include_embeds:
+                        if include_embeds:
                             embeds.append((ref, embed_text))
                         embed_text = ""
                         curr_embed = None
@@ -81,7 +69,6 @@ class UsfmPreserver:
 
     def construct_rows(self, translations: List[str]) -> List[Tuple[List[ScriptureRef], str]]:
         # Map each token to a character range in the original strings
-        # src_tok_ranges, trg_tok_ranges = self._create_tok_ranges()
         trg_tok_ranges = self._tokenize_sents(translations)
 
         # Get index of the text token immediately following each marker and predict the corresponding token on the target side
@@ -114,17 +101,14 @@ class UsfmPreserver:
         embed_idx = 0
         rows = []
         for ref, translation, inserts in zip(self._vrefs, translations, to_insert):
-            if len(inserts) == 0:
-                row_texts = [translation]
-            else:
-                row_texts = [translation[: inserts[0][0]]]
+            row_text = translation[: inserts[0][0]] if len(inserts) > 0 else translation
 
             for i, (insert_idx, is_para_marker, marker) in enumerate(inserts):
                 if is_para_marker:
-                    row_texts.append("")
+                    row_text += "\n"
 
-                row_text = (
-                    ("" if is_para_marker else marker)  # Paragraph markers are inserted by the USFM updater
+                row_text += (
+                    marker
                     + (
                         " "  # Extra space if inserting an end marker before a non-punctuation character
                         if "*" in marker and insert_idx < len(translation) and translation[insert_idx].isalpha()
@@ -139,20 +123,13 @@ class UsfmPreserver:
                 # Prevent spaces before end markers
                 if i + 1 < len(inserts) and "*" in inserts[i + 1][2] and len(row_text) > 0 and row_text[-1] == " ":
                     row_text = row_text[:-1]
-                row_texts[-1] += row_text
 
-            # Append transferred embeds to the last row that matches their ScriptureRef
+            # Append any transferred embeds that match the current ScriptureRef
             while embed_idx < len(self._embeds) and self._embeds[embed_idx][0] == ref:
-                row_texts[-1] += self._embeds[embed_idx][1]
+                row_text += self._embeds[embed_idx][1]
                 embed_idx += 1
 
-            # One row_text for each paragraph in a sentence
-            for row_text in row_texts:
-                rows.append(([ref], row_text))
-
-        # Add any remaining embeds
-        for embed in self._embeds[embed_idx:]:
-            rows.append(([embed[0]], embed[1]))
+            rows.append(([ref], row_text))
 
         return rows
 
@@ -160,14 +137,12 @@ class UsfmPreserver:
     def _tokenize_sents(self, sents: List[str]) -> List[List[Range[int]]]: ...
 
     @abstractmethod
-    def _get_alignment_matrices(
-        self, trg_sents: List[str], trg_tok_ranges: List[List[Range[int]]]
-    ) -> List[WordAlignmentMatrix]: ...
+    def _get_alignment_matrices(self, trg_sents: List[str]) -> List[WordAlignmentMatrix]: ...
 
     def _predict_marker_locations(
         self, adj_src_toks: List[int], trg_sents: List[str], trg_tok_ranges: List[List[Range[int]]]
     ) -> List[int]:
-        alignment_matrices: List[WordAlignmentMatrix] = self._get_alignment_matrices(trg_sents, trg_tok_ranges)
+        alignment_matrices: List[WordAlignmentMatrix] = self._get_alignment_matrices(trg_sents)
 
         # Gets the number of alignment pairs that "cross the line" between
         # the src marker position and the potential trg marker position, (src_idx - .5) and (trg_idx - .5)
@@ -254,26 +229,14 @@ class StatisticalUsfmPreserver(UsfmPreserver):
         tokenizer = LatinWordTokenizer()
         return [list(tokenizer.tokenize_as_ranges(sent)) for sent in sents]
 
-    def _get_alignment_matrices(
-        self, trg_sents: List[str], trg_tok_ranges: List[List[Range[int]]]
-    ) -> List[WordAlignmentMatrix]:
-        alignments = []
+    def _get_alignment_matrices(self, trg_sents: List[str]) -> List[WordAlignmentMatrix]:
         with TemporaryDirectory() as td:
             align_path = Path(td, "sym-align.txt")
             write_corpus(Path(td, "src_align.txt"), self._src_sents)
             write_corpus(Path(td, "trg_align.txt"), trg_sents)
             compute_alignment_scores(Path(td, "src_align.txt"), Path(td, "trg_align.txt"), self._aligner, align_path)
 
-            for i, line in enumerate(load_corpus(align_path)):
-                pairs = []
-                for pair in line.split():
-                    pair = pair.split("-") if self._aligner == "eflomal" else pair.split(":")[0].split("-")
-                    pairs.append((int(pair[0]), int(pair[1])))
-                alignments.append(
-                    WordAlignmentMatrix.from_word_pairs(len(self._src_tok_ranges[i]), len(trg_tok_ranges[i]), pairs)
-                )
-
-        return alignments
+            return [to_word_alignment_matrix(line) for line in load_corpus(align_path)]
 
 
 """
