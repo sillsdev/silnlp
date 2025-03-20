@@ -52,7 +52,6 @@ def aggregate_csv(folder_path):
 
 
 def write_to_csv(data_by_header, folder, output_filename):
-
     output_file = folder / f"{output_filename}.csv"
     with open(output_file, "w", newline="") as f:
         writer = csv.writer(f)
