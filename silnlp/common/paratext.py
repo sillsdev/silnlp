@@ -15,14 +15,29 @@ from machine.corpora import (
     Text,
     TextCorpus,
     TextRow,
+    UsfmFileText,
     UsfmFileTextCorpus,
+    UsfmParserHandler,
     create_versification_ref_corpus,
     extract_scripture_corpus,
+    parse_usfm,
 )
-from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, VersificationType, book_id_to_number, get_books
+from machine.scripture import (
+    ORIGINAL_VERSIFICATION,
+    VerseRef,
+    VersificationType,
+    book_id_to_number,
+    book_number_to_id,
+    get_books,
+)
 from machine.tokenization import WhitespaceTokenizer
 
-from .corpus import get_terms_glosses_path, get_terms_metadata_path, get_terms_vrefs_path, load_corpus
+from .corpus import (
+    get_terms_glosses_path,
+    get_terms_metadata_path,
+    get_terms_vrefs_path,
+    load_corpus,
+)
 from .environment import SIL_NLP_ENV
 from .utils import unique_list
 
@@ -414,6 +429,15 @@ def get_book_path(project: str, book: str) -> Path:
     return SIL_NLP_ENV.pt_projects_dir / project / book_file_name
 
 
+def get_book_path_by_book_number(project: str, book_number: int) -> Path:
+    project_dir = get_project_dir(project)
+    settings = FileParatextProjectSettingsParser(project_dir).parse()
+    book_id = book_number_to_id(book_number)
+    book_file_name = settings.get_book_file_name(book_id)
+
+    return SIL_NLP_ENV.pt_projects_dir / project / book_file_name
+
+
 def get_last_verse(project_dir: str, book: str, chapter: int) -> int:
     last_verse = "0"
     book_path = get_book_path(project_dir, book)
@@ -569,3 +593,29 @@ def check_versification(project_dir: str) -> Tuple[bool, List[VersificationType]
 
     matching = True
     return (matching, detected_versification)
+
+
+def read_usfm(project_dir: str, book_number: int) -> str:
+    project_settings = FileParatextProjectSettingsParser(project_dir).parse()
+    book_path: Path = get_book_path_by_book_number(project_dir, book_number)
+    usfm_text_file = UsfmFileText(
+        project_settings.stylesheet,
+        project_settings.encoding,
+        book_number_to_id(book_number),
+        book_path,
+        project_settings.versification,
+        include_all_text=True,
+        project=project_settings.name,
+    )
+    # This is not a public method, but I don't think any method exists in machine.py
+    # to read raw USFM using the project settings
+    return usfm_text_file._read_usfm()
+
+
+def parse_books(project_dir: str, corpus_books: Dict[int, List[int]], usfm_parser_handler: UsfmParserHandler) -> None:
+    project_settings = FileParatextProjectSettingsParser(project_dir).parse()
+    for book_number, chapter_list in corpus_books.items():
+        usfm_text: str = read_usfm(project_dir, book_number)
+
+        # TODO: create a handler wrapper that filters to only selected chapters
+        parse_usfm(usfm_text, usfm_parser_handler, project_settings.stylesheet, project_settings.versification)
