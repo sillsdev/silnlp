@@ -12,6 +12,12 @@ from ..alignment.eflomal import to_word_alignment_matrix
 from ..alignment.utils import compute_alignment_scores
 from .corpus import load_corpus, write_corpus
 
+# Marker "type" is as defined by the UsfmTokenType given to tokens by the UsfmTokenizer,
+# which mostly aligns with a marker's StyleType in the USFM stylesheet
+CHARACTER_TYPE_EMBEDS = ["fig", "fm", "jmp", "rq", "va", "vp", "xt", "xtSee", "xtSeeAlso"]
+PARAGRAPH_TYPE_EMBEDS = ["lit", "r", "rem"]
+NON_NOTE_TYPE_EMBEDS = CHARACTER_TYPE_EMBEDS + PARAGRAPH_TYPE_EMBEDS
+
 
 class UsfmPreserver:
     _src_sents: List[str]
@@ -40,7 +46,6 @@ class UsfmPreserver:
         return self._src_sents
 
     def _extract_markers(self, sentence_toks: List[List[UsfmToken]], include_embeds: bool) -> List[str]:
-        to_transfer = ["fig"]
         markers = []
         embeds = []
         text_only_sents = ["" for _ in sentence_toks]
@@ -55,7 +60,7 @@ class UsfmPreserver:
                             embeds.append((ref, embed_text))
                         embed_text = ""
                         curr_embed = None
-                elif tok.type == UsfmTokenType.NOTE or tok.marker in to_transfer:
+                elif tok.type == UsfmTokenType.NOTE or tok.marker in CHARACTER_TYPE_EMBEDS:
                     embed_text += tok.to_usfm()
                     curr_embed = tok
                 elif tok.type in [UsfmTokenType.PARAGRAPH, UsfmTokenType.CHARACTER, UsfmTokenType.END]:

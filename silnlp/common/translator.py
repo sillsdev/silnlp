@@ -24,12 +24,10 @@ from machine.scripture import VerseRef
 
 from .corpus import load_corpus, write_corpus
 from .paratext import get_book_path, get_iso, get_project_dir
-from .usfm_preservation import StatisticalUsfmPreserver
+from .usfm_preservation import NON_NOTE_TYPE_EMBEDS, StatisticalUsfmPreserver
 
 LOGGER = logging.getLogger(__package__ + ".translate")
 nltk.download("punkt")
-
-NON_NOTE_TYPE_EMBEDS = ["fm", "rq", "xtSeeAlso", "rem", "r"]
 
 
 def insert_draft_remark(
