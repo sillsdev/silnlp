@@ -101,10 +101,27 @@ class QuoteConvention:
             return False
         return True
 
+    def print_summary(self) -> None:
+        print(self.get_name())
+        for level, convention in enumerate(self.levels):
+            ordinal_name = self._get_ordinal_name(level + 1)
+            print("%s%s-level quote%s" % (convention.get_opening_quote(), ordinal_name, convention.get_closing_quote()))
+
+    def _get_ordinal_name(self, level) -> str:
+        if level == 1:
+            return "First"
+        if level == 2:
+            return "Second"
+        if level == 3:
+            return "Third"
+        if level == 4:
+            return "Fourth"
+        return str(level) + "th"
+
 
 class QuoteConventionSet:
-    def __init__(self, conventions: Collection[QuoteConvention]):
-        self.conventions = set(conventions)
+    def __init__(self, conventions: List[QuoteConvention]):
+        self.conventions = conventions
         self._create_quotation_mark_pair_map()
 
     def _create_quotation_mark_pair_map(self) -> None:
@@ -157,7 +174,6 @@ class QuoteConventionSet:
         best_quote_convention: QuoteConvention | None = None
         for quote_convention in self.conventions:
             similarity = tabulated_quotation_marks.calculate_similarity(quote_convention)
-            print("%s has similarity %f" % (quote_convention.get_name(), similarity))
             if similarity > best_similarity:
                 best_similarity = similarity
                 best_quote_convention = quote_convention
@@ -320,7 +336,7 @@ class QuotationMarkMatch:
         return self.get_next_character() is not None and regex_pattern.search(self.get_next_character())
 
     def previous_character_matches(self, regex_pattern: regex.Pattern) -> bool:
-        return self.get_previous_character() is not None and regex_pattern.search(self.get_next_character())
+        return self.get_previous_character() is not None and regex_pattern.search(self.get_previous_character())
 
     def get_previous_character(self) -> str | None:
         if self.start_index == 0:
@@ -425,7 +441,12 @@ class PreliminaryQuotationAnalyzer:
         grouped_quotation_marks: dict[str, list[QuotationMarkMatch]] = self.group_quotation_marks(quotation_marks)
         for mark1, matches1 in grouped_quotation_marks.items():
             # handle cases of identical opening/closing marks
-            if len(matches1) == 2 and (mark1 == '"' or mark1 == "'"):
+            if len(matches1) == 2 and (
+                mark1 == '"'
+                or mark1 == "'"
+                or (mark1 == "\u201d" and "\u201c" not in grouped_quotation_marks)
+                or (mark1 == "\u2019" and "\u2018" not in grouped_quotation_marks)
+            ):
                 if mark1 not in self.earlier_quotation_mark_counts:
                     self.earlier_quotation_mark_counts[mark1] = 0
                 self.earlier_quotation_mark_counts[mark1] += 1
@@ -442,7 +463,6 @@ class PreliminaryQuotationAnalyzer:
                     continue
                 if not matches1[0].precedes(matches2[0]):
                     continue
-                # print("[%s] precedes [%s]" % (matches1[0].get_context(), matches2[0].get_context()))
                 self.record_quotation_mark_sequence(mark1, mark2)
 
     def group_quotation_marks(self, quotation_marks: list[QuotationMarkMatch]) -> dict[str, int]:
@@ -543,15 +563,6 @@ class PreliminaryQuotationAnalyzer:
         self.word_final_occurrences[apostrophe] += 1
 
     def select_compatible_quote_conventions(self) -> QuoteConventionSet:
-        for m, c in self.verse_starting_quotation_mark_counts.items():
-            print("Verse starting %s: %i" % (m, c))
-        for m, c in self.verse_ending_quotation_mark_counts.items():
-            print("Verse ending %s: %i" % (m, c))
-        for m, c in self.earlier_quotation_mark_counts.items():
-            print("Early %s: %i" % (m, c))
-        for m, c in self.later_quotation_mark_counts.items():
-            print("Later %s: %i" % (m, c))
-
         opening_quotation_marks = self.find_opening_quotation_marks()
         closing_quotation_marks = self.find_closing_quotation_marks()
 
@@ -578,7 +589,7 @@ class PreliminaryQuotationAnalyzer:
         ) or num_early_occurrences > num_late_occurrences * 10:
             return True
         if (
-            num_early_occurrences > 0
+            num_early_occurrences > 5
             and abs(num_late_occurrences - num_early_occurrences) / num_early_occurrences < 0.2
             and (quotation_mark == '"' or quotation_mark == "'" or quotation_mark == "\u201d")
         ):
@@ -603,7 +614,7 @@ class PreliminaryQuotationAnalyzer:
         ) or num_late_occurrences > num_early_occurrences * 10:
             return True
         if (
-            num_late_occurrences > 0
+            num_late_occurrences > 5
             and abs(num_late_occurrences - num_early_occurrences) / num_late_occurrences < 0.2
             and (quotation_mark == '"' or quotation_mark == "'" or quotation_mark == "\u201d")
         ):
@@ -611,32 +622,34 @@ class PreliminaryQuotationAnalyzer:
         return False
 
     def count_early_occurrences(self, quotation_mark: str) -> int:
-        num_verse_starting_occurrences: int = (
-            self.verse_starting_quotation_mark_counts[quotation_mark]
-            if quotation_mark in self.verse_starting_quotation_mark_counts
-            else 0
-        )
+        # num_verse_starting_occurrences: int = (
+        #    self.verse_starting_quotation_mark_counts[quotation_mark]
+        #    if quotation_mark in self.verse_starting_quotation_mark_counts
+        #    else 0
+        # )
         num_early_paired_occurrences: int = (
             self.earlier_quotation_mark_counts[quotation_mark]
             if quotation_mark in self.earlier_quotation_mark_counts
             else 0
         )
 
-        return num_verse_starting_occurrences + num_early_paired_occurrences
+        # return num_verse_starting_occurrences + num_early_paired_occurrences
+        return num_early_paired_occurrences
 
     def count_late_occurrences(self, quotation_mark: str) -> int:
-        num_verse_ending_occurrences: int = (
-            self.verse_ending_quotation_mark_counts[quotation_mark]
-            if quotation_mark in self.verse_ending_quotation_mark_counts
-            else 0
-        )
+        # num_verse_ending_occurrences: int = (
+        #    self.verse_ending_quotation_mark_counts[quotation_mark]
+        #    if quotation_mark in self.verse_ending_quotation_mark_counts
+        #    else 0
+        # )
         num_late_paired_occurrences: int = (
             self.later_quotation_mark_counts[quotation_mark]
             if quotation_mark in self.later_quotation_mark_counts
             else 0
         )
 
-        return num_verse_ending_occurrences + num_late_paired_occurrences
+        # return num_verse_ending_occurrences + num_late_paired_occurrences
+        return num_late_paired_occurrences
 
     def is_apostrophe_only(self, mark: str) -> bool:
         if not self.apostrophe_pattern.search(mark):
@@ -647,23 +660,20 @@ class PreliminaryQuotationAnalyzer:
         num_final_apostrophes = self.word_final_occurrences[mark] if mark in self.word_final_occurrences else 0
         num_total_apostrophes = num_initial_apostrophes + num_mid_apostrophes + num_final_apostrophes
 
-        print(
-            "num_initial=%i, num_mid=%i, num_final=%i"
-            % (num_initial_apostrophes, num_mid_apostrophes, num_final_apostrophes)
-        )
         if num_total_apostrophes > 0 and (num_initial_apostrophes == 0 or num_final_apostrophes == 0):
-            return False
+            return True
 
         if (
             num_total_apostrophes > 0
             and abs(num_initial_apostrophes - num_final_apostrophes) / num_total_apostrophes > 0.3
+            and num_mid_apostrophes / num_total_apostrophes > 0.3
         ):
-            return False
+            return True
 
         if num_total_apostrophes > self.num_characters / 50:
-            return False
+            return True
 
-        return True
+        return False
 
 
 class QuotationMarkFinder:
@@ -756,46 +766,30 @@ class QuotationMarkResolver:
         next_mark: QuotationMarkMatch | None,
     ) -> Generator[QuotationMarkMetadata, None, None]:
         quotation_mark = quote_match.get_quotation_mark()
-        print(quotation_mark)
 
         if self.is_opening_quote(quote_match, previous_mark, next_mark):
             if self.is_quotation_continuer(quote_match, previous_mark, next_mark):
-                print(
-                    "Quotation continuer level %i: %s"
-                    % (len(self.quotation_continuer_stack) + 1, quote_match.get_context())
-                )
                 quote = self.process_quotation_continuer(quote_match)
                 yield quote
             else:
                 if self.current_depth >= 4:
-                    print("Unable to analyze quotation marks any further -- too deep")
                     return
 
-                print("Opening quote level %i: %s" % (self.current_depth + 1, quote_match.get_context()))
                 quote = self.process_opening_mark(quote_match)
                 yield quote
         elif self.is_apostrophe(quote_match, previous_mark, next_mark):
-            print("Apostrophe: %s" % quote_match.get_context())
+            pass
         elif self.is_closing_quote(quote_match, previous_mark, next_mark):
             if self.current_depth == 0:
-                print("Unable to analyze quotation marks any further")
                 return
-            print("Closing quote level %i: %s" % (self.current_depth, quote_match.get_context()))
             quote = self.process_closing_mark(quote_match)
             yield quote
         elif self.is_malformed_closing_quote(quote_match, previous_mark, next_mark):
-            print("Closing quote level %i (malformed): %s" % (self.current_depth, quote_match.get_context()))
             quote = self.process_closing_mark(quote_match)
             yield quote
         elif self.is_malformed_opening_quote(quote_match, previous_mark, next_mark):
-            print("Opening quote level %i (malformed): %s" % (self.current_depth + 1, quote_match.get_context()))
             quote = self.process_opening_mark(quote_match)
             yield quote
-        else:
-            print(
-                "Unable to categorize quotation mark %s: %s"
-                % (quote_match.get_quotation_mark(), quote_match.get_context())
-            )
 
     def process_quotation_continuer(self, quote_match: QuotationMarkMatch) -> QuotationMarkMetadata:
         quote = quote_match.resolve(
@@ -996,9 +990,9 @@ class QuotationMarkTabulator:
             self.string_counts[quotation_mark] += 1
             self.total_count += 1
 
-        def get_best_proportion(self) -> tuple[str, float]:
+        def get_best_proportion(self) -> tuple[str, int, int]:
             best_str = max(self.string_counts, key=self.string_counts.get)
-            return (best_str, self.string_counts[best_str] / self.total_count)
+            return (best_str, self.string_counts[best_str], self.total_count)
 
         def calculate_num_differences(self, expected_quotation_mark: str) -> int:
             if expected_quotation_mark not in self.string_counts:
@@ -1029,7 +1023,7 @@ class QuotationMarkTabulator:
 
     def get_most_common_quote_by_depth_and_direction(
         self, depth: int, direction: QuotationDirection
-    ) -> tuple[str, float]:
+    ) -> tuple[str, int, int]:
         return self.quotation_counts_by_depth_and_direction[(depth, direction)].get_best_proportion()
 
     def calculate_similarity(self, quote_convention: QuoteConvention) -> float:
@@ -1052,13 +1046,27 @@ class QuotationMarkTabulator:
 
     def print_summary(self) -> None:
         for depth in range(1, 5):
-            for direction in (QuotationDirection.Opening, QuotationDirection.Closing):
-                if self.has_depth_and_direction_been_observed(depth, direction):
-                    (quotation_mark, proportion) = self.get_most_common_quote_by_depth_and_direction(depth, direction)
-                    print(
-                        "Most common level %i %s quote is %s at %f"
-                        % (depth, direction.value, quotation_mark, proportion * 100)
+            if self.has_depth_and_direction_been_observed(
+                depth, QuotationDirection.Opening
+            ) and self.has_depth_and_direction_been_observed(depth, QuotationDirection.Closing):
+                (opening_quotation_mark, observed_opening_count, total_opening_count) = (
+                    self.get_most_common_quote_by_depth_and_direction(depth, QuotationDirection.Opening)
+                )
+                (closing_quotation_mark, observed_closing_count, total_closing_count) = (
+                    self.get_most_common_quote_by_depth_and_direction(depth, QuotationDirection.Closing)
+                )
+                print(
+                    "The most common level %i quotes are %s (%i of %i opening quotes) and %s (%i of %i closing quotes)"
+                    % (
+                        depth,
+                        opening_quotation_mark,
+                        observed_opening_count,
+                        total_opening_count,
+                        closing_quotation_mark,
+                        observed_closing_count,
+                        total_closing_count,
                     )
+                )
 
 
 class UsfmVerseTextExtractor(UsfmParserHandler):
@@ -1213,6 +1221,15 @@ standard_quote_conventions: QuoteConventionSet = QuoteConventionSet(
             ],
         ),
         QuoteConvention(
+            "french_variant",
+            [
+                SingleLevelQuoteConvention("\u00ab", "\u00bb"),
+                SingleLevelQuoteConvention("\u2039", "\u203a"),
+                SingleLevelQuoteConvention("\u201c", "\u201d"),
+                SingleLevelQuoteConvention("\u2018", "\u2019"),
+            ],
+        ),
+        QuoteConvention(
             "western_european",
             [
                 SingleLevelQuoteConvention("\u00ab", "\u00bb"),
@@ -1254,6 +1271,15 @@ standard_quote_conventions: QuoteConventionSet = QuoteConventionSet(
         ),
         QuoteConvention(
             "standard_german",
+            [
+                SingleLevelQuoteConvention("\u00bb", "\u00ab"),
+                SingleLevelQuoteConvention("\u203a", "\u2039"),
+                SingleLevelQuoteConvention("\u00bb", "\u00ab"),
+                SingleLevelQuoteConvention("\u203a", "\u2039"),
+            ],
+        ),
+        QuoteConvention(
+            "newspaper_german",
             [
                 SingleLevelQuoteConvention("\u201e", "\u201c"),
                 SingleLevelQuoteConvention("\u201a", "\u2018"),
@@ -1308,14 +1334,13 @@ class QuoteConventionAnalysis:
         return self.best_quote_convention
 
     def get_best_quote_convention_similarity_score(self) -> float:
-        return self.best_quote_convention_score
+        return self.best_quote_convention_score * 100
 
 
-def _analyze_quote_convention_for_chapters(chapters: list[Chapter]) -> QuoteConventionAnalysis:
+def _analyze_quote_convention_for_chapters(chapters: list[Chapter]) -> Union[QuoteConventionAnalysis, None]:
     updated_quotation_config = PreliminaryQuotationAnalyzer(
         standard_quote_conventions
     ).narrow_down_possible_quote_conventions(chapters)
-    updated_quotation_config.print_summary()
 
     quotation_mark_tabulator = QuotationMarkTabulator()
     for chapter in chapters:
@@ -1327,16 +1352,17 @@ def _analyze_quote_convention_for_chapters(chapters: list[Chapter]) -> QuoteConv
         ).resolve_quotation_marks(quotation_mark_matches)
         quotation_mark_tabulator.tabulate(resolved_quotation_marks)
 
-    quotation_mark_tabulator.print_summary()
     (best_quote_convention, score) = standard_quote_conventions.find_most_similar_convention(quotation_mark_tabulator)
-    print("Best quote convention is %s with a score of %f" % (best_quote_convention.get_name(), score))
+    quotation_mark_tabulator.print_summary()
 
-    return QuoteConventionAnalysis(best_quote_convention, score)
+    if score > 0:
+        return QuoteConventionAnalysis(best_quote_convention, score)
+    return None
 
 
 def analyze_project_quote_convention(
     paratext_project_name: str, corpus_books: Dict[int, List[int]]
-) -> QuoteConventionAnalysis:
+) -> Union[QuoteConventionAnalysis, None]:
     verse_text_extractor = UsfmVerseTextExtractor()
     parse_books(SIL_NLP_ENV.pt_projects_dir / paratext_project_name, corpus_books, verse_text_extractor)
     return _analyze_quote_convention_for_chapters(verse_text_extractor.get_chapters())
@@ -1344,7 +1370,7 @@ def analyze_project_quote_convention(
 
 def analyze_experiment_target_quote_convention(
     experiment_name: str, corpus_books: Union[Dict[int, List[int]], None] = None
-) -> QuoteConventionAnalysis:
+) -> Union[QuoteConventionAnalysis, None]:
     config: Config = load_config(experiment_name)
     for pair in config.corpus_pairs:
         if not pair.is_scripture or pair.type == DataFileType.TEST or pair.type == DataFileType.VAL:
@@ -1355,10 +1381,13 @@ def analyze_experiment_target_quote_convention(
             return analyze_project_quote_convention(paratext_project_name, corpus_books or pair.corpus_books)
 
 
-def analyze_usfm_quote_convention(usfm: str) -> QuoteConventionAnalysis:
-    verse_text_extractor = UsfmVerseTextExtractor()
-    parse_usfm(usfm, verse_text_extractor)
-    return _analyze_quote_convention_for_chapters(verse_text_extractor.get_chapters())
+def analyze_usfm_quote_convention(
+    usfm_path: Path, encoding: Union[str, None] = None
+) -> Union[QuoteConventionAnalysis, None]:
+    with open(usfm_path, "r", encoding=encoding or "utf-8") as usfm_input:
+        verse_text_extractor = UsfmVerseTextExtractor()
+        parse_usfm(usfm_input.read(), verse_text_extractor)
+        return _analyze_quote_convention_for_chapters(verse_text_extractor.get_chapters())
 
 
 def main() -> None:
@@ -1385,6 +1414,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    quote_convention_analysis: Union[QuoteConventionAnalysis, None] = None
     if args.experiment is not None:
         if args.project is not None:
             LOGGER.warning("Ignoring --project since --experiment was also specified.")
@@ -1392,7 +1422,9 @@ def main() -> None:
             LOGGER.warning("Ignoring --usfm-file since --experiment was also specified.")
         if args.books is not None:
             selected_books = get_chapters(args.books)
-        quote_convention_analysis = analyze_experiment_target_quote_convention(args.experiment, selected_books)
+            quote_convention_analysis = analyze_experiment_target_quote_convention(args.experiment, selected_books)
+        else:
+            quote_convention_analysis = analyze_experiment_target_quote_convention(args.experiment)
 
     elif args.project is not None:
         if args.usfm_file is not None:
@@ -1404,15 +1436,21 @@ def main() -> None:
         quote_convention_analysis = analyze_project_quote_convention(args.project, selected_books)
 
     elif args.usfm_file is not None:
-        with open(args.usfm_file, "r", encoding=args.encoding or "utf-8") as usfm_input:
-            quote_convention_analysis = analyze_usfm_quote_convention(usfm_input.read())
+        quote_convention_analysis = analyze_usfm_quote_convention(args.usfm_file, args.encoding)
 
     else:
         LOGGER.error("One of --experiment, --project, or --usfm-file must be specified")
         return
 
-    print(f"Best quote convention: {quote_convention_analysis.get_best_quote_convention().get_name()}")
-    print(f"Similarity score: {quote_convention_analysis.get_best_quote_convention_similarity_score()}")
+    if quote_convention_analysis is not None:
+        print("======================")
+        print("Best quote convention:")
+        print("----------------------")
+        quote_convention_analysis.get_best_quote_convention().print_summary()
+        print("======================")
+        print("Similarity = %.2f%%" % quote_convention_analysis.get_best_quote_convention_similarity_score())
+    else:
+        print("No quote convention was detected")
 
 
 if __name__ == "__main__":

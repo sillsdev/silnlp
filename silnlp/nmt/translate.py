@@ -8,6 +8,11 @@ from typing import Iterable, Optional, Tuple, Union
 
 from machine.scripture import VerseRef, book_number_to_id, get_chapters
 
+from silnlp.common.analyze_quote_convention import (
+    QuoteConvention,
+    analyze_experiment_target_quote_convention,
+)
+
 from ..common.environment import SIL_NLP_ENV
 from ..common.paratext import book_file_name_digits, get_project_dir
 from ..common.translator import TranslationGroup, Translator
@@ -99,6 +104,12 @@ class TranslationTask:
         experiment_ckpt_str = f"{self.name}:{self.checkpoint}"
         if not config.model_dir.exists():
             experiment_ckpt_str = f"{self.name}:base"
+
+        quote_convention: Union[QuoteConvention, None] = analyze_experiment_target_quote_convention(config.exp_dir)
+        if quote_convention is not None:
+            LOGGER.info(f"The quote convention detected in the target project was {quote_convention}")
+        else:
+            LOGGER.info("No quote convention was detected in the target project")
 
         translation_failed = []
         for book_num, chapters in book_nums.items():
