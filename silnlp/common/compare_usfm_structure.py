@@ -1,4 +1,5 @@
 import argparse
+import logging
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -14,6 +15,8 @@ from machine.corpora import (
 from machine.tokenization import WhitespaceTokenizer
 
 from .usfm_preservation import CHARACTER_TYPE_EMBEDS, PARAGRAPH_TYPE_EMBEDS
+
+LOGGER = logging.getLogger(__package__ + ".compare_usfm_structure")
 
 
 class WhitespaceMarkerTokenizer(WhitespaceTokenizer):
@@ -155,8 +158,8 @@ def main() -> None:
 
     avg_jaro, avg_dist = evaluate_usfm_marker_placement(Path(args.gold), Path(args.pred), args.book, to_ignore)
 
-    print(f"Average (scaled) Jaro similarity of verses with placed markers: {avg_jaro}")
-    print(f"Average Levenshtein distance per marker of verses with placed markers: {avg_dist}")
+    LOGGER.info(f"Average (scaled) Jaro similarity of verses with placed markers: {avg_jaro}")
+    LOGGER.info(f"Average Levenshtein distance per marker of verses with placed markers: {avg_dist}")
 
 
 if __name__ == "__main__":
