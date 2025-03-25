@@ -48,7 +48,7 @@ def filter_markers(
     return filtered_sent, markers
 
 
-# Assumes that the files have identical USFM structure above the verse level
+# Assumes that the files have identical USFM structure
 def evaluate_usfm_marker_placement(
     gold_book_path: Path, pred_book_path: Path, book: Optional[str] = None, to_ignore: Optional[List[str]] = []
 ) -> Tuple[float, float]:
