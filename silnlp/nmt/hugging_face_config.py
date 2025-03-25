@@ -9,19 +9,7 @@ from copy import deepcopy
 from enum import Enum
 from itertools import repeat
 from pathlib import Path
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    TypeVar,
-    Union,
-    cast,
-)
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
 
 import datasets.utils.logging as datasets_logging
 import evaluate
@@ -36,10 +24,7 @@ from datasets import Dataset
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
 from sacremoses import MosesPunctNormalizer
 from tokenizers import AddedToken, NormalizedString, Regex
-from tokenizers.implementations import (
-    SentencePieceBPETokenizer,
-    SentencePieceUnigramTokenizer,
-)
+from tokenizers.implementations import SentencePieceBPETokenizer, SentencePieceUnigramTokenizer
 from tokenizers.normalizers import Normalizer
 from torch import Tensor, TensorType, nn, optim
 from torch.utils.data import Sampler
@@ -71,6 +56,7 @@ from transformers import (
     set_seed,
 )
 from transformers.convert_slow_tokenizer import convert_slow_tokenizer
+from transformers.generation import BeamSearchEncoderDecoderOutput, GreedySearchEncoderDecoderOutput
 from transformers.modeling_utils import unwrap_model
 from transformers.tokenization_utils import BatchEncoding, TruncationStrategy
 from transformers.trainer import TRAINING_ARGS_NAME
@@ -88,14 +74,7 @@ from transformers.utils.logging import tqdm
 from ..common.corpus import Term, count_lines, get_terms
 from ..common.environment import SIL_NLP_ENV
 from ..common.translator import DraftGroup, TranslationGroup
-from ..common.utils import (
-    NoiseMethod,
-    ReplaceRandomToken,
-    Side,
-    create_noise_methods,
-    get_mt_exp_dir,
-    merge_dict,
-)
+from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, get_mt_exp_dir, merge_dict
 from .config import CheckpointType, Config, DataFile, NMTModel
 from .tokenizer import NullTokenizer, Tokenizer
 
@@ -1881,6 +1860,127 @@ class PretokenizedTranslationPipeline(TranslationPipeline):
         tgt_lang_id = self.tokenizer.convert_tokens_to_ids(tgt_lang)
         model_inputs["forced_bos_token_id"] = tgt_lang_id
         return model_inputs
+
+    def _forward(self, model_inputs, **generate_kwargs):
+        in_b, input_length = model_inputs["input_ids"].shape
+
+        input_tokens = model_inputs["input_tokens"]
+        del model_inputs["input_tokens"]
+        if hasattr(self.model, "generation_config") and self.model.generation_config is not None:
+            config = self.model.generation_config
+        else:
+            config = self.model.config
+        generate_kwargs["min_length"] = generate_kwargs.get("min_length", config.min_length)
+        generate_kwargs["max_length"] = generate_kwargs.get("max_length", config.max_length)
+        self.check_inputs(input_length, generate_kwargs["min_length"], generate_kwargs["max_length"])
+        output = self.model.generate(
+            **model_inputs,
+            **generate_kwargs,
+            output_scores=True,
+            return_dict_in_generate=True,
+        )
+
+        if isinstance(output, BeamSearchEncoderDecoderOutput):
+            output_ids = output.sequences
+            beam_indices = output.beam_indices
+            scores = output.scores
+        elif isinstance(output, GreedySearchEncoderDecoderOutput):
+            output_ids = output.sequences
+            beam_indices = torch.zeros_like(output_ids)
+            assert output.scores is not None
+            scores = tuple(torch.nn.functional.log_softmax(logits, dim=-1) for logits in output.scores)
+        else:
+            raise RuntimeError("Cannot postprocess the output of the model.")
+
+        assert beam_indices is not None and scores is not None
+        out_b = output_ids.shape[0]
+        num_beams = scores[0].shape[0] // in_b
+        n_sequences = out_b // in_b
+        start_index = 0
+        if self.model.config.decoder_start_token_id is not None:
+            start_index = 1
+        indices = torch.stack(
+            (
+                torch.arange(output_ids.shape[1] - start_index, device=output_ids.device).expand(in_b, n_sequences, -1),
+                torch.reshape(beam_indices[:, start_index:] % num_beams, (in_b, n_sequences, -1)),
+                torch.reshape(output_ids[:, start_index:], (in_b, n_sequences, -1)),
+            ),
+            dim=3,
+        )
+        scores = torch.stack(scores, dim=0).reshape(len(scores), in_b, num_beams, -1).transpose(0, 1)
+        scores = torch_gather_nd(scores, indices, 1)
+        if self.model.config.decoder_start_token_id is not None:
+            scores = torch.cat((torch.zeros(scores.shape[0], scores.shape[1], 1, device=scores.device), scores), dim=2)
+        output_ids = output_ids.reshape(in_b, n_sequences, *output_ids.shape[1:])
+        return {
+            "output_ids": output_ids,
+            "scores": scores,
+        }
+
+    def postprocess(self, model_outputs, clean_up_tokenization_spaces=False):
+        if self.tokenizer is None:
+            raise RuntimeError("No tokenizer is specified.")
+        all_special_ids = set(self.tokenizer.all_special_ids)
+
+        records = []
+        output_ids: torch.Tensor
+        scores: torch.Tensor
+        for output_ids, scores in zip(
+            model_outputs["output_ids"][0],
+            model_outputs["scores"][0],
+        ):
+            output_tokens: List[str] = []
+            output_indices: List[int] = []
+            for i, output_id in enumerate(output_ids):
+                id = cast(int, output_id.item())
+                if id not in all_special_ids:
+                    output_tokens.append(self.tokenizer.convert_ids_to_tokens(id))
+                    output_indices.append(i)
+            scores = scores[output_indices]
+            records.append(
+                {
+                    "translation_tokens": output_tokens,
+                    "token_scores": scores,
+                    "translation_text": self.tokenizer.decode(
+                        output_ids,
+                        skip_special_tokens=True,
+                        clean_up_tokenization_spaces=clean_up_tokenization_spaces,
+                    ),
+                }
+            )
+        return records
+
+
+def torch_gather_nd(params: torch.Tensor, indices: torch.Tensor, batch_dim: int = 0) -> torch.Tensor:
+    """
+    torch_gather_nd implements tf.gather_nd in PyTorch.
+
+    This supports multiple batch dimensions as well as multiple channel dimensions.
+    """
+    index_shape = indices.shape[:-1]
+    num_dim = indices.size(-1)
+    tail_sizes = params.shape[batch_dim + num_dim :]
+
+    # flatten extra dimensions
+    for s in tail_sizes:
+        row_indices = torch.arange(s, device=params.device)
+        indices = indices.unsqueeze(-2)
+        indices = indices.repeat(*[1 for _ in range(indices.dim() - 2)], s, 1)
+        row_indices = row_indices.expand(*indices.shape[:-2], -1).unsqueeze(-1)
+        indices = torch.cat((indices, row_indices), dim=-1)
+        num_dim += 1
+
+    # flatten indices and params to batch specific ones instead of channel specific
+    for i in range(num_dim):
+        size = prod(params.shape[batch_dim + i + 1 : batch_dim + num_dim])
+        indices[..., i] *= size
+
+    indices = indices.sum(dim=-1)
+    params = params.flatten(batch_dim, -1)
+    indices = indices.flatten(batch_dim, -1)
+
+    out = torch.gather(params, dim=batch_dim, index=indices)
+    return out.reshape(*index_shape, *tail_sizes)
 
 
 class DataCollatorForSeq2SeqNoising:
