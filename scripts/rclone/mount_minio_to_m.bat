@@ -10,4 +10,4 @@ rem   copy your key and secret to rclone.conf
 
 rem run rclone - execute this file in the rclone folder
 
-call rclone mount --vfs-cache-mode full --use-server-modtime --no-check-certificate miniosilnlp:nlp-research M: 
+call rclone mount --vfs-cache-mode full --use-server-modtime miniosilnlp:nlp-research M: 

@@ -164,7 +164,8 @@ class SilNlpEnv:
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_key,
             config=generate_s3_config(),
-            verify=False,
+            # Verify is false if endpoint_url is an IP address. Aqua/Cheetah connecting to MinIO need this disabled for now.
+            verify=False if re.match(r"https://\d+\.\d+\.\d+\.\d+", endpoint_url) else True,
         )
 
         bucket = resource.Bucket(bucket_name)
