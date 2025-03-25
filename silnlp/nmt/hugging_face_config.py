@@ -345,6 +345,8 @@ class HuggingFaceConfig(Config):
                     "log_level": "info",
                     "use_lora": False,
                     "lora_config": {},
+                    "use_apollo": False,
+                    "apollo_config": {"optim_target_modules": '[r".*.attn.*", r".*.mlp.*"]'},
                 },
                 "eval": {
                     "evaluation_strategy": "steps",
@@ -409,6 +411,17 @@ class HuggingFaceConfig(Config):
         if config["train"]["auto_grad_acc"]:
             config["train"]["per_device_train_batch_size"] = 64
             config["train"]["gradient_accumulation_steps"] = 1
+
+        if config["train"]["use_apollo"]:
+            config["params"]["optim"] = "apollo_adamw"
+            config["params"]["optim_target_modules"] = config["train"]["apollo_config"]["optim_target_modules"]
+            config["params"]["optim_args"] = ",".join(
+                [
+                    str(key) + "=" + str(value)
+                    for key, value in config["train"]["apollo_config"].items()
+                    if key != "optim_target_modules"
+                ]
+            )
 
     @property
     def model_dir(self) -> Path:

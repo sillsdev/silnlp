@@ -100,6 +100,7 @@ requests = "^2.31"
 openpyxl = "^3.1.2"
 packaging = "^22.0"
 hanzidentifier = "^1.2.0"
+apollo-torch = "^1.0.3"
 
 [tool.poetry.group.dev.dependencies]
 types-pyyaml = "^6.0.12.12"

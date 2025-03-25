@@ -179,6 +179,22 @@ files = [
 frozenlist = ">=1.1.0"
 
 [[package]]
+name = "apollo-torch"
+version = "1.0.3"
+description = "APOLLO: SGD-like Memory, AdamW-level Performance"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "apollo_torch-1.0.3-py3-none-any.whl", hash = "sha256:8a91398d487dfcde4c6efabf3344157ce1f5052250f0e6ed0821bf4d47943ec5"},
+    {file = "apollo_torch-1.0.3.tar.gz", hash = "sha256:1c661475f1a1b5cbaeda82fcc19a5145d7b333b2e67b7e4ce3a48426236c174a"},
+]
+
+[package.dependencies]
+bitsandbytes = "*"
+torch = "*"
+transformers = "*"
+
+[[package]]
 name = "appnope"
 version = "0.1.4"
 description = "Disable App Nap on macOS >= 10.9"
@@ -282,6 +298,27 @@ chardet = ["chardet"]
 charset-normalizer = ["charset-normalizer"]
 html5lib = ["html5lib"]
 lxml = ["lxml"]
+
+[[package]]
+name = "bitsandbytes"
+version = "0.45.3"
+description = "k-bit optimizers and matrix multiplication routines."
+optional = false
+python-versions = ">=3.8"
+files = [
+    {file = "bitsandbytes-0.45.3-py3-none-manylinux_2_24_x86_64.whl", hash = "sha256:720d67ffa8a5c61c958fb62517e8abbb2ab0ac1b33b66506ae911cb34c836c70"},
+    {file = "bitsandbytes-0.45.3-py3-none-win_amd64.whl", hash = "sha256:7251d71814a653b2b78b69149f1e88753598688c760c99cbbfb0512ba4ea39c6"},
+]
+
+[package.dependencies]
+numpy = ">=1.17"
+torch = ">=2.0,<3"
+
+[package.extras]
+benchmark = ["matplotlib", "pandas"]
+dev = ["bitsandbytes[test]", "build (>=1.0.0,<2)", "pre-commit (>=3.5.0,<4)", "ruff (==0.6.9)", "wheel (>=0.42,<1)"]
+docs = ["hf-doc-builder (==0.5.0)"]
+test = ["einops (>=0.8.0,<0.9.0)", "lion-pytorch (==0.2.3)", "pytest (>=8.3,<9.0)", "scipy (>=1.10.1,<2)", "scipy (>=1.11.4,<2)", "transformers (>=4.30.1,<5)"]
 
 [[package]]
 name = "black"
@@ -6225,4 +6262,4 @@ eflomal = ["eflomal"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.11"
-content-hash = "21a7d7d8b2c8113380a0ddbc629a8cc9a0ff9bdba109cbd87e6d140ea9d4d401"
+content-hash = "08dd61983ff48498fd666430464d590ff37ef17d677bc014387cac75e24e821f"
