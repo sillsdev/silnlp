@@ -172,8 +172,10 @@ class UsfmPreserver:
                     continue
                 # only accept aligned pairs where both the src and trg token are punct
                 src_hyp_range = self._src_tok_ranges[sent_idx][src_hyp]
-                if src_hyp_range.length > 0 and not any(
-                    self._src_sents[sent_idx][char_idx].isalpha() for char_idx in src_hyp_range
+                if (
+                    src_hyp_range.length > 0
+                    and not any(self._src_sents[sent_idx][char_idx].isalpha() for char_idx in src_hyp_range)
+                    and src_hyp < alignment_matrices[sent_idx].row_count
                 ):
                     aligned_trg_toks = list(alignment_matrices[sent_idx].get_row_aligned_indices(src_hyp))
                     # if aligning to a token that precedes that marker,
@@ -200,7 +202,7 @@ class UsfmPreserver:
                 if src_hyp in checked:
                     continue
                 trg_hyp = -1
-                while trg_hyp == -1 and src_hyp >= 0 and src_hyp < len(self._src_tok_ranges[sent_idx]):
+                while trg_hyp == -1 and src_hyp >= 0 and src_hyp < alignment_matrices[sent_idx].row_count:
                     checked.add(src_hyp)
                     aligned_trg_toks = list(alignment_matrices[sent_idx].get_row_aligned_indices(src_hyp))
                     if len(aligned_trg_toks) > 0:
