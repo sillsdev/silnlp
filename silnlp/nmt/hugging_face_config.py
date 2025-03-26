@@ -3,11 +3,11 @@ import json
 import logging
 import os
 import re
-import shutil
 from contextlib import ExitStack
 from copy import deepcopy
 from enum import Enum
 from itertools import repeat
+from math import prod
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
 
@@ -825,6 +825,12 @@ class OutputGroup:
     def get_token_ids(self) -> List[List[int]]:
         return [output["translation_token_ids"] for output in self.outputs]
 
+    def get_token_scores(self) -> List[float]:
+        return [output["token_scores"] for output in self.outputs]
+
+    def get_sequence_score(self) -> List[float]:
+        return [output["sequence_score"] for output in self.outputs]
+
 
 class HuggingFaceNMTModel(NMTModel):
     def __init__(self, config: HuggingFaceConfig, mixed_precision: bool, num_devices: int) -> None:
@@ -1121,14 +1127,12 @@ class HuggingFaceNMTModel(NMTModel):
                 if vref_path is not None:
                     vref_file = stack.enter_context(vref_path.open("r", encoding="utf-8-sig"))
                     vrefs = (VerseRef.from_string(line.strip(), ORIGINAL_VERSIFICATION) for line in vref_file)
-
-                draft_group = DraftGroup(
-                    list(
-                        self._translate_test_sentences(
-                            tokenizer, pipeline, sentences, vrefs, length, produce_multiple_translations
-                        )
+                output = list(
+                    self._translate_test_sentences(
+                        tokenizer, pipeline, sentences, vrefs, length, produce_multiple_translations
                     )
                 )
+                draft_group = DraftGroup([translation for translation, _, _ in output])
 
                 for draft_index, translated_draft in enumerate(draft_group.get_drafts(), 1):
 
@@ -1167,10 +1171,20 @@ class HuggingFaceNMTModel(NMTModel):
             total=length,
             unit="ex",
         ):
-            ids = to_py_obj(output_group.get_token_ids())
-            ids = [[id for id in output[1:] if id != tokenizer.pad_token_id] for output in ids]
+            all_ids = to_py_obj(output_group.get_token_ids())
+            all_scores = to_py_obj(output_group.get_token_scores())
+            sequence_score = to_py_obj(output_group.get_sequence_score())
+            ids = []
+            token_scores = []
+            for id_output, score_output in zip(all_ids, all_scores):
+                for id, score in zip(id_output[1:], score_output[1:]):
+                    if id == tokenizer.pad_token_id:
+                        continue
+                    ids.append(id)
+                    token_scores.append(score)
+            # ids = [[id for id in output[1:] if id != tokenizer.pad_token_id] for output in ids]
             tokens = [tokenizer.convert_ids_to_tokens(id_group) for id_group in ids]
-            yield [" ".join(token_group) for token_group in tokens]
+            yield [" ".join(token_group) for token_group in tokens], token_scores, sequence_score
 
     def get_num_drafts(self) -> int:
         num_drafts = self._config.infer.get("num_drafts", 1)
@@ -1853,8 +1867,6 @@ class PretokenizedTranslationPipeline(TranslationPipeline):
     def _forward(self, model_inputs, **generate_kwargs):
         in_b, input_length = model_inputs["input_ids"].shape
 
-        input_tokens = model_inputs["input_tokens"]
-        del model_inputs["input_tokens"]
         if hasattr(self.model, "generation_config") and self.model.generation_config is not None:
             config = self.model.generation_config
         else:
@@ -1873,11 +1885,13 @@ class PretokenizedTranslationPipeline(TranslationPipeline):
             output_ids = output.sequences
             beam_indices = output.beam_indices
             scores = output.scores
+            sequences_scores = output.sequences_scores
         elif isinstance(output, GreedySearchEncoderDecoderOutput):
             output_ids = output.sequences
             beam_indices = torch.zeros_like(output_ids)
             assert output.scores is not None
             scores = tuple(torch.nn.functional.log_softmax(logits, dim=-1) for logits in output.scores)
+            sequences_scores = output.sequences_scores
         else:
             raise RuntimeError("Cannot postprocess the output of the model.")
 
@@ -1904,12 +1918,12 @@ class PretokenizedTranslationPipeline(TranslationPipeline):
         return {
             "output_ids": output_ids,
             "scores": scores,
+            "sequences_scores": sequences_scores,
         }
 
-    def postprocess(self, model_outputs, clean_up_tokenization_spaces=False):
+    def postprocess(self, model_outputs, return_type=None, clean_up_tokenization_spaces=False):
         if self.tokenizer is None:
             raise RuntimeError("No tokenizer is specified.")
-        all_special_ids = set(self.tokenizer.all_special_ids)
 
         records = []
         output_ids: torch.Tensor
@@ -1919,17 +1933,20 @@ class PretokenizedTranslationPipeline(TranslationPipeline):
             model_outputs["scores"][0],
         ):
             output_tokens: List[str] = []
+            output_token_ids: List[str] = []
             output_indices: List[int] = []
             for i, output_id in enumerate(output_ids):
                 id = cast(int, output_id.item())
-                if id not in all_special_ids:
-                    output_tokens.append(self.tokenizer.convert_ids_to_tokens(id))
-                    output_indices.append(i)
+                output_tokens.append(self.tokenizer.convert_ids_to_tokens(id))
+                output_token_ids.append(id)
+                output_indices.append(i)
             scores = scores[output_indices]
             records.append(
                 {
                     "translation_tokens": output_tokens,
+                    "translation_token_ids": output_token_ids,
                     "token_scores": scores,
+                    "sequence_score": model_outputs["sequences_scores"][0],
                     "translation_text": self.tokenizer.decode(
                         output_ids,
                         skip_special_tokens=True,
