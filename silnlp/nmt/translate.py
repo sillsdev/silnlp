@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Iterable, List, Optional, Tuple, Union
 
 from machine.scripture import VerseRef, book_number_to_id, get_chapters
-from s3path import S3Path
 
 from ..common.environment import SIL_NLP_ENV
 from ..common.paratext import book_file_name_digits, get_project_dir
@@ -43,6 +42,7 @@ class TranslationTask:
     checkpoint: Union[str, int] = "last"
     clearml_queue: Optional[str] = None
     commit: Optional[str] = None
+    files: Optional[List[str]] = None
     data_dirs: Optional[List[str]] = None
 
     def __post_init__(self) -> None:
@@ -333,9 +333,9 @@ class TranslationTask:
             download_paths = []
             for path in paths:
                 if Path(path).is_absolute():
-                    download_paths.append(S3Path(path))
+                    download_paths.append(path)
                 else:
-                    download_paths.append(S3Path(SIL_NLP_ENV.mt_dir / path))
+                    download_paths.append(SIL_NLP_ENV.mt_dir / path)
             SIL_NLP_ENV.download_if_s3_paths(download_paths)
 
         clearml.config.set_seed()
