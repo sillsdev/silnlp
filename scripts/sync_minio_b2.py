@@ -16,12 +16,17 @@ def sync_buckets(include_checkpoints: bool, dry_run: bool) -> None:
         endpoint_url=os.getenv("MINIO_ENDPOINT_URL"),
         aws_access_key_id=os.getenv("MINIO_ACCESS_KEY"),
         aws_secret_access_key=os.getenv("MINIO_SECRET_KEY"),
-        verify=False,
+        # Verify is false if endpoint_url is an IP address. Aqua/Cheetah connecting to MinIO need this disabled for now.
+        verify=False if re.match(r"https://\d+\.\d+\.\d+\.\d+", os.getenv("MINIO_ENDPOINT_URL")) else True,
     )
     minio_bucket = minio_resource.Bucket("nlp-research")
 
     b2_resource = boto3.resource(
         service_name="s3",
+        endpoint_url=os.getenv("B2_ENDPOINT_URL"),
+        aws_access_key_id=os.getenv("B2_KEY_ID"),
+        aws_secret_access_key=os.getenv("B2_APPLICATION_KEY"),
+        verify=True,
     )
     b2_bucket = b2_resource.Bucket("silnlp")
 
