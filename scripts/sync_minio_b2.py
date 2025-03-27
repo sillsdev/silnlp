@@ -81,7 +81,8 @@ def sync_buckets(include_checkpoints: bool, dry_run: bool) -> None:
                 else:
                     csv_writer.writerow([key, "Would be deleted from B2"])
         if not dry_run:
-            b2_bucket.delete_objects(objects_to_delete)
+            delete_params = {"Delete": {"Objects": [{"Key": key} for key in objects_to_delete]}}
+            b2_bucket.delete_objects(Delete=delete_params)
 
         # Sync the objects to the B2 bucket
         length = len(objects_to_sync)
@@ -97,8 +98,8 @@ def sync_buckets(include_checkpoints: bool, dry_run: bool) -> None:
                 with tempfile.TemporaryDirectory() as temp_dir:
                     obj_path = Path(temp_dir) / key
                     obj_path.parent.mkdir(parents=True, exist_ok=True)
-                    try_n_times(lambda: minio_bucket.download_file(key, obj_path))
-                    try_n_times(lambda: b2_bucket.upload_file(obj_path, key))
+                    try_n_times(lambda: minio_bucket.download_file(key, str(obj_path)))
+                    try_n_times(lambda: b2_bucket.upload_file(str(obj_path), key))
                 csv_writer.writerow([key, "Synced to B2"])
             else:
                 print(f"Would be syncing, {x}/{length}: {key}")
@@ -120,7 +121,9 @@ def try_n_times(func: Callable, n=10):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sync MinIO and B2 buckets")
-    parser.add_argument("--include-checkpoints", type=bool, default=False, help="Include model checkpoints in the sync")
+    parser.add_argument(
+        "--include-checkpoints", default=False, action="store_true", help="Include model checkpoints in the sync"
+    )
     parser.add_argument(
         "--dry-run",
         default=False,
