@@ -4,7 +4,7 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional, Tuple, Union
+from typing import Iterable, List, Optional, Tuple, Union
 
 from machine.scripture import VerseRef, book_number_to_id, get_chapters
 
@@ -137,7 +137,9 @@ class TranslationTask:
         trg_iso: Optional[str],
         produce_multiple_translations: bool = False,
     ) -> None:
-        translator, config, _ = self._init_translation_task(experiment_suffix=f"_{self.checkpoint}_{src_prefix}")
+        translator, config, _ = self._init_translation_task(
+            experiment_suffix=f"_{self.checkpoint}_{src_prefix}", patterns=[src_prefix, trg_prefix]
+        )
         if trg_prefix is None:
             raise RuntimeError("A target file prefix must be specified.")
         if start_seq is None or end_seq is None:
@@ -156,11 +158,23 @@ class TranslationTask:
         if trg_iso == "":
             LOGGER.warning("No language code was set for the target language")
 
-        cwd = Path.cwd()
         for i in range(start_seq, end_seq + 1):
             file_num = f"{i:04d}"
-            src_file_path = cwd / f"{src_prefix}{file_num}.txt"
-            trg_file_path = cwd / f"{trg_prefix}{file_num}.txt"
+            src_file = f"{src_prefix}{file_num}.txt"
+            src_file_path = Path(src_file)
+            directory = Path("")
+            if not src_file_path.exists() and not src_file_path.is_absolute():
+                directory = SIL_NLP_ENV.data_dir
+                src_file_path = directory / src_file
+                if not src_file_path.exists():
+                    directory = SIL_NLP_ENV.mt_experiments_dir / self.name
+                    src_file_path = directory / src_file
+            if not src_file_path.exists():
+                raise FileNotFoundError("Cannot find source: " + src_file)
+
+            trg_file = f"{trg_prefix}{file_num}.txt"
+            trg_file_path = directory / trg_file
+
             if src_file_path.is_file() and not trg_file_path.is_file():
                 start = time.time()
                 translator.translate_text(src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations)
@@ -179,7 +193,8 @@ class TranslationTask:
         preserve_usfm_markers: bool = False,
     ) -> None:
         translator, config, step_str = self._init_translation_task(
-            experiment_suffix=f"_{self.checkpoint}_{os.path.basename(src)}"
+            experiment_suffix=f"_{self.checkpoint}_{os.path.basename(src)}",
+            patterns=[src, trg] if trg is not None else [src],
         )
 
         if src_iso is None:
@@ -198,6 +213,8 @@ class TranslationTask:
         src_path = Path(src)
         if not src_path.exists() and not src_path.is_absolute():
             src_path = SIL_NLP_ENV.data_dir / src
+            if not src_path.exists():
+                src_path = SIL_NLP_ENV.mt_experiments_dir / self.name / src
         if not src_path.exists():
             raise FileNotFoundError("Cannot find source: " + src)
 
@@ -205,6 +222,8 @@ class TranslationTask:
             trg_path = Path(trg)
             if not trg_path.exists() and not trg_path.is_absolute():
                 trg_path = SIL_NLP_ENV.data_dir / trg
+                if not trg_path.exists():
+                    trg_path = SIL_NLP_ENV.mt_experiments_dir / self.name / src
             if not trg_path.exists() and ((src_path.is_file() and not trg_path.parent.is_dir()) or src_path.is_dir()):
                 raise FileNotFoundError("Cannot find target: " + trg)
 
@@ -255,7 +274,9 @@ class TranslationTask:
                 )
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM"), overwrite=True)
 
-    def _init_translation_task(self, experiment_suffix: str) -> Tuple[Translator, Config, str]:
+    def _init_translation_task(
+        self, experiment_suffix: str, patterns: Optional[List[str]]
+    ) -> Tuple[Translator, Config, str]:
         clearml = SILClearML(
             self.name,
             self.clearml_queue,
@@ -265,9 +286,28 @@ class TranslationTask:
             bucket_service=SIL_NLP_ENV.bucket_service,
         )
         self.name = clearml.name
+        cleaned_patterns = []
+        for pattern in patterns:
+            if self.name in pattern:
+                pattern = pattern.split(self.name, 1)[-1]
+            if pattern.startswith("/"):
+                pattern = pattern[1:]
+            if pattern.endswith("/"):
+                pattern = pattern[:-1]
+            cleaned_patterns.append(f"*{pattern}*")
 
         SIL_NLP_ENV.copy_experiment_from_bucket(
-            self.name, patterns=("*.vocab", "*.model", "*.yml", "dict.*.txt", "*.json", "checkpoint", "ckpt*.index")
+            self.name,
+            patterns=(
+                "*.vocab",
+                "*.model",
+                "*.yml",
+                "dict.*.txt",
+                "*.json",
+                "checkpoint",
+                "ckpt*.index",
+                *cleaned_patterns,
+            ),
         )
 
         clearml.config.set_seed()
