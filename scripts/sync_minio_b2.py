@@ -74,23 +74,32 @@ def sync_buckets(include_checkpoints: bool, dry_run: bool) -> None:
         for key in b2_objects.keys():
             if key not in minio_objects.keys():
                 objects_to_delete.append(key)
-                csv_writer.writerow([key, "Deleted from B2"])
-        b2_bucket.delete_objects(objects_to_delete)
+                if not dry_run:
+                    csv_writer.writerow([key, "Deleted from B2"])
+                else:
+                    csv_writer.writerow([key, "Would be deleted from B2"])
+        if not dry_run:
+            b2_bucket.delete_objects(objects_to_delete)
 
         # Sync the objects to the B2 bucket
         length = len(objects_to_sync)
-        print(f"Total objects to sync: {len(objects_to_sync)}")
+        if not dry_run:
+            print(f"Total objects to sync: {len(objects_to_sync)}")
+        else:
+            print(f"Total objects that would be synced: {len(objects_to_sync)}")
         x = 0
         for key in objects_to_sync:
             x += 1
-            print(f"Syncing, {x}/{length}: {key}")
-            csv_writer.writerow([key, "Synced to B2"])
             if not dry_run:
+                print(f"Syncing, {x}/{length}: {key}")
                 with tempfile.TemporaryDirectory() as temp_dir:
                     obj_path = Path(temp_dir) / key
                     obj_path.parent.mkdir(parents=True, exist_ok=True)
                     try_n_times(lambda: minio_bucket.download_file(key, obj_path))
                     try_n_times(lambda: b2_bucket.upload_file(obj_path, key))
+                csv_writer.writerow([key, "Synced to B2"])
+            else:
+                csv_writer.writerow([key, "Would be synced to B2"])
 
 
 def try_n_times(func: Callable, n=10):
