@@ -122,7 +122,7 @@ class TranslationTask:
                 translation_failed.append(book)
                 LOGGER.exception(f"Was not able to translate {book}.")
 
-        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM"), overwrite=True)
+        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM", "*infer*"), overwrite=True)
 
         if len(translation_failed) > 0:
             raise RuntimeError(f"Some books failed to translate: {' '.join(translation_failed)}")
@@ -180,7 +180,7 @@ class TranslationTask:
                 translator.translate_text(src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations)
                 end = time.time()
                 print(f"Translated {src_file_path.name} to {trg_file_path.name} in {((end-start)/60):.2f} minutes")
-        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM"), overwrite=True)
+        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM*", "*.txt*"), overwrite=True)
 
     def translate_files(
         self,
@@ -272,7 +272,7 @@ class TranslationTask:
                     preserve_usfm_markers=preserve_usfm_markers,
                     experiment_ckpt_str=experiment_ckpt_str,
                 )
-        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM"), overwrite=True)
+        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM", f"*{trg}*"), overwrite=True)
 
     def _init_translation_task(
         self, experiment_suffix: str, patterns: Optional[List[str]]
@@ -327,10 +327,30 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Translates text using an NMT model")
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument("--checkpoint", type=str, help="Checkpoint to use (last, best, avg, or checkpoint #)")
-    parser.add_argument("--src", default=None, type=str, help="Source file")
-    parser.add_argument("--trg", default=None, type=str, help="Target file")
-    parser.add_argument("--src-prefix", default=None, type=str, help="Source file prefix (e.g., de-news2019-)")
-    parser.add_argument("--trg-prefix", default=None, type=str, help="Target file prefix (e.g., en-news2019-)")
+    parser.add_argument(
+        "--src",
+        default=None,
+        type=str,
+        help="Source file name, can be relative to the data directory or experiment directory",
+    )
+    parser.add_argument(
+        "--trg",
+        default=None,
+        type=str,
+        help="Target file name, can be relative to the data directory or experiment directory",
+    )
+    parser.add_argument(
+        "--src-prefix",
+        default=None,
+        type=str,
+        help="Source file prefix (e.g., de-news2019-), can be relative to the data directory or experiment directory",
+    )
+    parser.add_argument(
+        "--trg-prefix",
+        default=None,
+        type=str,
+        help="Target file prefix (e.g., en-news2019-), can be relative to the data directory or experiment directory",
+    )
     parser.add_argument("--start-seq", default=None, type=int, help="Starting file sequence #")
     parser.add_argument("--end-seq", default=None, type=int, help="Ending file sequence #")
     parser.add_argument("--src-project", default=None, type=str, help="The source project to translate")
