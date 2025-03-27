@@ -34,10 +34,12 @@ def sync_buckets(include_checkpoints: bool, dry_run: bool) -> None:
     minio_objects = {}
 
     # Get all objects in the MinIO bucket
+    print("Getting objects from MinIO")
     for obj in minio_bucket.objects.all():
         minio_objects[obj.key] = obj.last_modified
 
     # Get all objects in the B2 bucket
+    print("Getting objects from B2")
     for obj in b2_bucket.objects.all():
         b2_objects[obj.key] = obj.last_modified
 
