@@ -10,7 +10,7 @@ from typing import Callable
 import boto3
 
 
-def sync_buckets(exclude_checkpoints: bool, dry_run: bool) -> None:
+def sync_buckets(include_checkpoints: bool, dry_run: bool) -> None:
     minio_resource = boto3.resource(
         service_name="s3",
         endpoint_url=os.getenv("MINIO_ENDPOINT_URL"),
@@ -36,7 +36,7 @@ def sync_buckets(exclude_checkpoints: bool, dry_run: bool) -> None:
     for obj in b2_bucket.objects.all():
         b2_objects[obj.key] = obj.last_modified
 
-    if exclude_checkpoints:
+    if not include_checkpoints:
         print("Excluding model checkpoints from the sync")
         keys_to_remove = set()
         for key in minio_objects.keys():
@@ -103,7 +103,7 @@ def try_n_times(func: Callable, n=10):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sync MinIO and B2 buckets")
-    parser.add_argument("--exclude-checkpoints", type=bool, default=False, help="Exclude model checkpoints in the sync")
+    parser.add_argument("--include-checkpoints", type=bool, default=False, help="Include model checkpoints in the sync")
     parser.add_argument(
         "--dry-run",
         default=False,
@@ -112,7 +112,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    sync_buckets(args.exclude_checkpoints, args.dry_run)
+    sync_buckets(args.include_checkpoints, args.dry_run)
 
 
 if __name__ == "__main__":
