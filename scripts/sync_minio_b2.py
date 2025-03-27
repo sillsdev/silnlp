@@ -1,0 +1,119 @@
+import argparse
+import csv
+import os
+import re
+import tempfile
+import time
+from pathlib import Path
+from typing import Callable
+
+import boto3
+
+
+def sync_buckets(exclude_checkpoints: bool, dry_run: bool) -> None:
+    minio_resource = boto3.resource(
+        service_name="s3",
+        endpoint_url=os.getenv("MINIO_ENDPOINT_URL"),
+        aws_access_key_id=os.getenv("MINIO_ACCESS_KEY"),
+        aws_secret_access_key=os.getenv("MINIO_SECRET_KEY"),
+        verify=False,
+    )
+    minio_bucket = minio_resource.Bucket("nlp-research")
+
+    b2_resource = boto3.resource(
+        service_name="s3",
+    )
+    b2_bucket = b2_resource.Bucket("silnlp")
+
+    b2_objects = {}
+    minio_objects = {}
+
+    # Get all objects in the MinIO bucket
+    for obj in minio_bucket.objects.all():
+        minio_objects[obj.key] = obj.last_modified
+
+    # Get all objects in the B2 bucket
+    for obj in b2_bucket.objects.all():
+        b2_objects[obj.key] = obj.last_modified
+
+    if exclude_checkpoints:
+        print("Excluding model checkpoints from the sync")
+        keys_to_remove = set()
+        for key in minio_objects.keys():
+            # Check if key matches regex
+            if re.match(
+                r"^MT/experiments/.+/run/(checkpoint.*(pytorch_model\.bin|\.safetensors)$|ckpt.+\.(data-00000-of-00001|index)$)",
+                key,
+            ):
+                keys_to_remove.add(key)
+
+        for key in keys_to_remove:
+            if key in b2_objects:
+                del b2_objects[key]
+            if key in minio_objects:
+                del minio_objects[key]
+
+    output_csv = f"sync_output_{time.strftime('%Y%m%d-%H%M%S')}" + ("_dryrun" if dry_run else "") + ".csv"
+    with open(output_csv, mode="w", newline="", encoding="utf-8") as csv_file:
+        csv_writer = csv.writer(csv_file)
+        csv_writer.writerow(["Filename", "Action"])
+        # Get the objects that are in the MinIO bucket but not in the B2 bucket, or have been modified
+        objects_to_sync = []
+        for key, value in minio_objects.items():
+            if key not in b2_objects.keys():
+                objects_to_sync.append(key)
+            elif value > b2_objects[key]:
+                objects_to_sync.append(key)
+
+        objects_to_delete = []
+        for key in b2_objects.keys():
+            if key not in minio_objects.keys():
+                objects_to_delete.append(key)
+                csv_writer.writerow([key, "Deleted from B2"])
+        b2_bucket.delete_objects(objects_to_delete)
+
+        # Sync the objects to the B2 bucket
+        length = len(objects_to_sync)
+        print(f"Total objects to sync: {len(objects_to_sync)}")
+        x = 0
+        for key in objects_to_sync:
+            x += 1
+            print(f"Syncing, {x}/{length}: {key}")
+            csv_writer.writerow([key, "Synced to B2"])
+            if not dry_run:
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    obj_path = Path(temp_dir) / key
+                    obj_path.parent.mkdir(parents=True, exist_ok=True)
+                    try_n_times(lambda: minio_bucket.download_file(key, obj_path))
+                    try_n_times(lambda: b2_bucket.upload_file(obj_path, key))
+
+
+def try_n_times(func: Callable, n=10):
+    for i in range(n):
+        try:
+            func()
+            break
+        except Exception as e:
+            if i < n - 1:
+                print(f"Failed {i+1} of {n} times.  Retrying.")
+                time.sleep(2**i)
+            else:
+                raise e
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Sync MinIO and B2 buckets")
+    parser.add_argument("--exclude-checkpoints", type=bool, default=False, help="Exclude model checkpoints in the sync")
+    parser.add_argument(
+        "--dry-run",
+        default=False,
+        action="store_true",
+        help="Don't sync any files, just report what would be synced",
+    )
+    args = parser.parse_args()
+
+    sync_buckets(args.exclude_checkpoints, args.dry_run)
+
+
+if __name__ == "__main__":
+    main()
