@@ -444,8 +444,17 @@ class PreliminaryQuotationAnalyzer:
             if len(matches1) == 2 and (
                 mark1 == '"'
                 or mark1 == "'"
-                or (mark1 == "\u201d" and "\u201c" not in grouped_quotation_marks)
-                or (mark1 == "\u2019" and "\u2018" not in grouped_quotation_marks)
+                or (
+                    mark1 == "\u201d"
+                    and "\u201c" not in grouped_quotation_marks
+                    and "\u201e" not in grouped_quotation_marks
+                )
+                or (
+                    mark1 == "\u2019"
+                    and "\u2018" not in grouped_quotation_marks
+                    and "\u201a" not in grouped_quotation_marks
+                )
+                or (mark1 == "\u00bb" and "\u00ab" not in grouped_quotation_marks)
             ):
                 if mark1 not in self.earlier_quotation_mark_counts:
                     self.earlier_quotation_mark_counts[mark1] = 0
@@ -591,7 +600,7 @@ class PreliminaryQuotationAnalyzer:
         if (
             num_early_occurrences > 5
             and abs(num_late_occurrences - num_early_occurrences) / num_early_occurrences < 0.2
-            and (quotation_mark == '"' or quotation_mark == "'" or quotation_mark == "\u201d")
+            and quotation_mark in ['"', "'", "\u201d", "\u2019", "\u00bb"]
         ):
             return True
         return False
@@ -616,7 +625,7 @@ class PreliminaryQuotationAnalyzer:
         if (
             num_late_occurrences > 5
             and abs(num_late_occurrences - num_early_occurrences) / num_late_occurrences < 0.2
-            and (quotation_mark == '"' or quotation_mark == "'" or quotation_mark == "\u201d")
+            and quotation_mark in ['"', "'", "\u201d", "\u2019", "\u00bb"]
         ):
             return True
         return False
@@ -660,7 +669,9 @@ class PreliminaryQuotationAnalyzer:
         num_final_apostrophes = self.word_final_occurrences[mark] if mark in self.word_final_occurrences else 0
         num_total_apostrophes = num_initial_apostrophes + num_mid_apostrophes + num_final_apostrophes
 
-        if num_total_apostrophes > 0 and (num_initial_apostrophes == 0 or num_final_apostrophes == 0):
+        if num_total_apostrophes > 0 and (
+            num_initial_apostrophes / num_total_apostrophes < 0.1 or num_final_apostrophes / num_total_apostrophes < 0.1
+        ):
             return True
 
         if (
@@ -1270,6 +1281,14 @@ standard_quote_conventions: QuoteConventionSet = QuoteConventionSet(
             ],
         ),
         QuoteConvention(
+            "hybrid_british_typewriter_western_european",
+            [
+                SingleLevelQuoteConvention("\u00ab", "\u00bb"),
+                SingleLevelQuoteConvention("'", "'"),
+                SingleLevelQuoteConvention('"', '"'),
+            ],
+        ),
+        QuoteConvention(
             "standard_german",
             [
                 SingleLevelQuoteConvention("\u00bb", "\u00ab"),
@@ -1297,12 +1316,36 @@ standard_quote_conventions: QuoteConventionSet = QuoteConventionSet(
             ],
         ),
         QuoteConvention(
-            "eastern_european",
+            "standard_finnish",
+            [
+                SingleLevelQuoteConvention("\u00bb", "\u00bb"),
+                SingleLevelQuoteConvention("\u2019", "\u2019"),
+            ],
+        ),
+        QuoteConvention(
+            "standard_hungarian",
             [
                 SingleLevelQuoteConvention("\u201e", "\u201d"),
                 SingleLevelQuoteConvention("\u201a", "\u2019"),
                 SingleLevelQuoteConvention("\u201e", "\u201d"),
                 SingleLevelQuoteConvention("\u201a", "\u2019"),
+            ],
+        ),
+        QuoteConvention(
+            "eastern_european",
+            [
+                SingleLevelQuoteConvention("\u201e", "\u201c"),
+                SingleLevelQuoteConvention("\u201a", "\u2018"),
+                SingleLevelQuoteConvention("\u201e", "\u201c"),
+                SingleLevelQuoteConvention("\u201a", "\u2018"),
+            ],
+        ),
+        QuoteConvention(
+            "standard_russian",
+            [
+                SingleLevelQuoteConvention("\u00ab", "\u00bb"),
+                SingleLevelQuoteConvention("\u201e", "\u201c"),
+                SingleLevelQuoteConvention("\u201a", "\u2018"),
             ],
         ),
         QuoteConvention(
@@ -1337,7 +1380,9 @@ class QuoteConventionAnalysis:
         return self.best_quote_convention_score * 100
 
 
-def _analyze_quote_convention_for_chapters(chapters: list[Chapter]) -> Union[QuoteConventionAnalysis, None]:
+def _analyze_quote_convention_for_chapters(
+    chapters: list[Chapter], print_summary: bool = True
+) -> Union[QuoteConventionAnalysis, None]:
     updated_quotation_config = PreliminaryQuotationAnalyzer(
         standard_quote_conventions
     ).narrow_down_possible_quote_conventions(chapters)
@@ -1353,7 +1398,9 @@ def _analyze_quote_convention_for_chapters(chapters: list[Chapter]) -> Union[Quo
         quotation_mark_tabulator.tabulate(resolved_quotation_marks)
 
     (best_quote_convention, score) = standard_quote_conventions.find_most_similar_convention(quotation_mark_tabulator)
-    quotation_mark_tabulator.print_summary()
+
+    if print_summary:
+        quotation_mark_tabulator.print_summary()
 
     if score > 0:
         return QuoteConventionAnalysis(best_quote_convention, score)
@@ -1382,12 +1429,12 @@ def analyze_experiment_target_quote_convention(
 
 
 def analyze_usfm_quote_convention(
-    usfm_path: Path, encoding: Union[str, None] = None
+    usfm_path: Path, encoding: Union[str, None] = None, print_summary: bool = False
 ) -> Union[QuoteConventionAnalysis, None]:
     with open(usfm_path, "r", encoding=encoding or "utf-8") as usfm_input:
         verse_text_extractor = UsfmVerseTextExtractor()
         parse_usfm(usfm_input.read(), verse_text_extractor)
-        return _analyze_quote_convention_for_chapters(verse_text_extractor.get_chapters())
+        return _analyze_quote_convention_for_chapters(verse_text_extractor.get_chapters(), print_summary)
 
 
 def main() -> None:
