@@ -7,7 +7,7 @@ from contextlib import ExitStack
 from copy import deepcopy
 from enum import Enum
 from itertools import repeat
-from math import prod
+from math import exp, prod
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
 
@@ -1132,19 +1132,40 @@ class HuggingFaceNMTModel(NMTModel):
                         tokenizer, pipeline, sentences, vrefs, length, produce_multiple_translations
                     )
                 )
-                draft_group = DraftGroup([translation for translation, _, _ in output])
+                draft_group = DraftGroup([translation for translation, _, _, _ in output])
 
                 for draft_index, translated_draft in enumerate(draft_group.get_drafts(), 1):
-
+                    confidence_scores_suffix = ".confidences.tsv"
                     if produce_multiple_translations:
                         translation_draft_path = translation_path.with_suffix(
                             f".{draft_index}{translation_path.suffix}"
                         )
+                        confidences_path = translation_path.with_suffix(
+                            f".{draft_index}{translation_path.suffix}{confidence_scores_suffix}"
+                        )
                     else:
                         translation_draft_path = translation_path
+                        confidences_path = translation_path.with_suffix(
+                            f"{translation_path.suffix}{confidence_scores_suffix}"
+                        )
                     out_file = stack.enter_context(translation_draft_path.open("w", encoding="utf-8", newline="\n"))
-
                     out_file.write("\n".join(translated_draft) + "\n")
+                    confidences_file = stack.enter_context(confidences_path.open("w", encoding="utf-8", newline="\n"))
+                    confidences_file.write("\t".join(["Sequence Number"] + [f"Token {i}" for i in range(200)]) + "\n")
+                    confidences_file.write(
+                        "\t".join(["Sequence Score"] + [f"Token Score {i}" for i in range(200)]) + "\n"
+                    )
+                    for sentence_num, _ in enumerate(output):
+                        confidences_file.write(
+                            "\t".join([str(sentence_num)] + output[sentence_num][1][draft_index - 1]) + "\n"
+                        )
+                        confidences_file.write(
+                            "\t".join(
+                                [str(exp(output[sentence_num][3][draft_index - 1]))]
+                                + [str(exp(token_score)) for token_score in output[sentence_num][2][draft_index - 1]]
+                            )
+                            + "\n"
+                        )
 
     def _translate_test_sentences(
         self,
@@ -1176,15 +1197,19 @@ class HuggingFaceNMTModel(NMTModel):
             sequence_score = to_py_obj(output_group.get_sequence_score())
             ids = []
             token_scores = []
-            for id_output, score_output in zip(all_ids, all_scores):
-                for id, score in zip(id_output[1:], score_output[1:]):
+            for output_id, output_score in zip(all_ids, all_scores):
+                output_ids = []
+                output_scores = []
+                for id, score in zip(output_id[1:], output_score[1:]):
                     if id == tokenizer.pad_token_id:
                         continue
-                    ids.append(id)
-                    token_scores.append(score)
+                    output_ids.append(id)
+                    output_scores.append(score)
+                ids.append(output_ids)
+                token_scores.append(output_scores)
             # ids = [[id for id in output[1:] if id != tokenizer.pad_token_id] for output in ids]
             tokens = [tokenizer.convert_ids_to_tokens(id_group) for id_group in ids]
-            yield [" ".join(token_group) for token_group in tokens], token_scores, sequence_score
+            yield [" ".join(token_group) for token_group in tokens], tokens, token_scores, sequence_score
 
     def get_num_drafts(self) -> int:
         num_drafts = self._config.infer.get("num_drafts", 1)
