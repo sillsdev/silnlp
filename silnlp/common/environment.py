@@ -255,7 +255,7 @@ class SilNlpEnv:
     def copy_experiment_from_bucket(self, name: Union[str, Path], patterns: Union[str, Sequence[str]] = []):
         if not self.is_bucket:
             return
-        if os.path.isabs(name):
+        if type(name) is Path and name.is_absolute():
             experiments_path = str(name)
         else:
             name = str(name)

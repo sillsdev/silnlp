@@ -42,6 +42,7 @@ class TranslationTask:
     checkpoint: Union[str, int] = "last"
     clearml_queue: Optional[str] = None
     commit: Optional[str] = None
+    files: Optional[List[str]] = None
     data_dirs: Optional[List[str]] = None
 
     def __post_init__(self) -> None:
