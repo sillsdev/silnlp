@@ -101,6 +101,7 @@ def sync_buckets(include_checkpoints: bool, dry_run: bool) -> None:
                     try_n_times(lambda: b2_bucket.upload_file(obj_path, key))
                 csv_writer.writerow([key, "Synced to B2"])
             else:
+                print(f"Would be syncing, {x}/{length}: {key}")
                 csv_writer.writerow([key, "Would be synced to B2"])
 
 
