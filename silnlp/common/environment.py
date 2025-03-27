@@ -255,7 +255,7 @@ class SilNlpEnv:
     def copy_experiment_from_bucket(self, name: Union[str, Path], patterns: Union[str, Sequence[str]] = []):
         if not self.is_bucket:
             return
-        if type(name) is Path and name.is_absolute():
+        if os.path.isabs(name):
             experiments_path = str(name)
         else:
             name = str(name)
@@ -324,13 +324,11 @@ class SilNlpEnv:
             source_path = source_path[1:]
         return source_path
 
-    def download_if_s3_paths(self, paths: Iterable[S3Path] | Iterable[Path]) -> List[Path]:
+    def download_if_s3_paths(self, paths: Iterable[S3Path]) -> List[Path]:
         return_paths = []
         s3_setup = False
 
         for path in paths:
-            if type(path) is Path:
-                path = S3Path(path)
             if type(path) is not S3Path:
                 return_paths.append(path)
             else:
