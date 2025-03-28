@@ -80,7 +80,7 @@ def sync_buckets(include_checkpoints: bool, dry_run: bool) -> None:
                 else:
                     csv_writer.writerow([key, "Would be deleted from B2"])
         if not dry_run:
-            delete_params = {"Delete": {"Objects": [{"Key": key} for key in objects_to_delete]}}
+            delete_params = {"Objects": [{"Key": key} for key in objects_to_delete]}
             b2_bucket.delete_objects(Delete=delete_params)
 
         # Sync the objects to the B2 bucket
