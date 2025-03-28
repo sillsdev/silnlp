@@ -338,6 +338,18 @@ def main() -> None:
         help="For files in USFM format, carry over embeds from the source project to the output without translating them",
     )
     parser.add_argument(
+        "--include-inline-elements",
+        default=False,
+        action="store_true",
+        help="Deprecated argument, equivalent to --include-embeds",
+    )
+    parser.add_argument(
+        "--preserve-usfm-markers",
+        default=False,
+        action="store_true",
+        help="Deprecated argument, equivalent to --include-paragraph-markers AND --include-style-markers",
+    )
+    parser.add_argument(
         "--clearml-queue",
         default=None,
         type=str,
@@ -361,6 +373,13 @@ def main() -> None:
     translator = TranslationTask(
         name=args.experiment, checkpoint=args.checkpoint, clearml_queue=args.clearml_queue, commit=args.commit
     )
+
+    # For backwards compatibility
+    if args.preserve_usfm_markers:
+        args.include_paragraph_markers = True
+        args.include_style_markers = True
+    if args.include_inline_elements:
+        args.include_embeds = True
 
     if len(args.books) > 0:
         if args.debug:
