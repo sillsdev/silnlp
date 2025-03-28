@@ -7,7 +7,8 @@ import time
 from pathlib import Path
 
 import boto3
-from environment import try_n_times
+
+from silnlp.common.environment import try_n_times
 
 
 def sync_buckets(include_checkpoints: bool, dry_run: bool) -> None:
