@@ -23,7 +23,7 @@ RUN apt-get install --no-install-recommends -y \
     gdb \
     curl \
     unzip
-RUN apt-get install --no-install-recommends -y \
+RUN apt-get update && apt-get install --no-install-recommends -y \
     fuse3 \
     rclone
 # Make some useful symlinks that are expected to exist
