@@ -4,7 +4,7 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional, Tuple, Union
+from typing import Iterable, List, Optional, Tuple, Union
 
 from machine.scripture import VerseRef, book_number_to_id, get_chapters
 
@@ -124,7 +124,7 @@ class TranslationTask:
                 translation_failed.append(book)
                 LOGGER.exception(f"Was not able to translate {book}.")
 
-        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM"), overwrite=True)
+        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM", "*infer*"), overwrite=True)
 
         if len(translation_failed) > 0:
             raise RuntimeError(f"Some books failed to translate: {' '.join(translation_failed)}")
@@ -139,7 +139,9 @@ class TranslationTask:
         trg_iso: Optional[str],
         produce_multiple_translations: bool = False,
     ) -> None:
-        translator, config, _ = self._init_translation_task(experiment_suffix=f"_{self.checkpoint}_{src_prefix}")
+        translator, config, _ = self._init_translation_task(
+            experiment_suffix=f"_{self.checkpoint}_{src_prefix}", patterns=[src_prefix, trg_prefix]
+        )
         if trg_prefix is None:
             raise RuntimeError("A target file prefix must be specified.")
         if start_seq is None or end_seq is None:
@@ -158,17 +160,22 @@ class TranslationTask:
         if trg_iso == "":
             LOGGER.warning("No language code was set for the target language")
 
-        cwd = Path.cwd()
         for i in range(start_seq, end_seq + 1):
             file_num = f"{i:04d}"
-            src_file_path = cwd / f"{src_prefix}{file_num}.txt"
-            trg_file_path = cwd / f"{trg_prefix}{file_num}.txt"
+            src_file = f"{src_prefix}{file_num}.txt"
+            src_file_path = Path(SIL_NLP_ENV.mt_experiments_dir / self.name / src_file)
+            if not src_file_path.exists():
+                raise FileNotFoundError("Cannot find source: " + src_file)
+
+            trg_file = f"{trg_prefix}{file_num}.txt"
+            trg_file_path = Path(SIL_NLP_ENV.mt_experiments_dir / self.name / trg_file)
+
             if src_file_path.is_file() and not trg_file_path.is_file():
                 start = time.time()
                 translator.translate_text(src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations)
                 end = time.time()
                 print(f"Translated {src_file_path.name} to {trg_file_path.name} in {((end-start)/60):.2f} minutes")
-        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM"), overwrite=True)
+        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM*", "*.txt*"), overwrite=True)
 
     def translate_files(
         self,
@@ -182,7 +189,8 @@ class TranslationTask:
         include_embeds: bool = False,
     ) -> None:
         translator, config, step_str = self._init_translation_task(
-            experiment_suffix=f"_{self.checkpoint}_{os.path.basename(src)}"
+            experiment_suffix=f"_{self.checkpoint}_{os.path.basename(src)}",
+            patterns=[src, trg] if trg is not None else [src],
         )
 
         if src_iso is None:
@@ -198,19 +206,12 @@ class TranslationTask:
         if trg_iso == "":
             LOGGER.warning("No language code was set for the target language")
 
-        src_path = Path(src)
-        if not src_path.exists() and not src_path.is_absolute():
-            src_path = SIL_NLP_ENV.data_dir / src
+        src_path = Path(SIL_NLP_ENV.mt_experiments_dir / self.name / src)
         if not src_path.exists():
-            raise FileNotFoundError("Cannot find source: " + src)
+            raise FileNotFoundError(f"Cannot find source: {src} in {self.name}")
 
         if trg is not None:
-            trg_path = Path(trg)
-            if not trg_path.exists() and not trg_path.is_absolute():
-                trg_path = SIL_NLP_ENV.data_dir / trg
-            if not trg_path.exists() and ((src_path.is_file() and not trg_path.parent.is_dir()) or src_path.is_dir()):
-                raise FileNotFoundError("Cannot find target: " + trg)
-
+            trg_path = Path(SIL_NLP_ENV.mt_experiments_dir / self.name / trg)
         else:
             trg_path = config.exp_dir / "infer" / step_str
             if not config.model_dir.exists():
@@ -222,6 +223,7 @@ class TranslationTask:
         else:
             src_file_paths = list(p for p in src_path.rglob("*.*") if p.is_file())
 
+        exts = []
         for src_file_path in src_file_paths:
             if trg_path.is_dir():
                 if src_path.is_file():
@@ -233,10 +235,12 @@ class TranslationTask:
                     trg_file_path.parent.mkdir(exist_ok=True, parents=True)
                     src_name = str(relative_path)
             else:
+                trg_path.parent.mkdir(parents=True, exist_ok=True)
                 trg_file_path = trg_path
                 src_name = src_file_path.name
 
             ext = src_file_path.suffix.lower()
+            exts.append(f"*{ext}")
             LOGGER.info(f"Translating {src_name}")
             if ext == ".txt":
                 translator.translate_text(src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations)
@@ -257,9 +261,11 @@ class TranslationTask:
                     include_embeds=include_embeds,
                     experiment_ckpt_str=experiment_ckpt_str,
                 )
-        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM"), overwrite=True)
+        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM", *exts), overwrite=True)
 
-    def _init_translation_task(self, experiment_suffix: str) -> Tuple[Translator, Config, str]:
+    def _init_translation_task(
+        self, experiment_suffix: str, patterns: Optional[List[str]]
+    ) -> Tuple[Translator, Config, str]:
         clearml = SILClearML(
             self.name,
             self.clearml_queue,
@@ -269,9 +275,28 @@ class TranslationTask:
             bucket_service=SIL_NLP_ENV.bucket_service,
         )
         self.name = clearml.name
+        cleaned_patterns = []
+        for pattern in patterns:
+            if self.name in pattern:
+                pattern = pattern.split(self.name, 1)[-1]
+            if pattern.startswith("/"):
+                pattern = pattern[1:]
+            if pattern.endswith("/"):
+                pattern = pattern[:-1]
+            cleaned_patterns.append(f"*{pattern}*")
 
         SIL_NLP_ENV.copy_experiment_from_bucket(
-            self.name, patterns=("*.vocab", "*.model", "*.yml", "dict.*.txt", "*.json", "checkpoint", "ckpt*.index")
+            self.name,
+            patterns=(
+                "*.vocab",
+                "*.model",
+                "*.yml",
+                "dict.*.txt",
+                "*.json",
+                "checkpoint",
+                "ckpt*.index",
+                *cleaned_patterns,
+            ),
         )
 
         clearml.config.set_seed()
@@ -291,10 +316,30 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Translates text using an NMT model")
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument("--checkpoint", type=str, help="Checkpoint to use (last, best, avg, or checkpoint #)")
-    parser.add_argument("--src", default=None, type=str, help="Source file")
-    parser.add_argument("--trg", default=None, type=str, help="Target file")
-    parser.add_argument("--src-prefix", default=None, type=str, help="Source file prefix (e.g., de-news2019-)")
-    parser.add_argument("--trg-prefix", default=None, type=str, help="Target file prefix (e.g., en-news2019-)")
+    parser.add_argument(
+        "--src",
+        default=None,
+        type=str,
+        help="Source file name, must be in the experiment directory",
+    )
+    parser.add_argument(
+        "--trg",
+        default=None,
+        type=str,
+        help="Target file name, must relative to the experiment directory",
+    )
+    parser.add_argument(
+        "--src-prefix",
+        default=None,
+        type=str,
+        help="Source file prefix (e.g., de-news2019-), must be in the experiment directory",
+    )
+    parser.add_argument(
+        "--trg-prefix",
+        default=None,
+        type=str,
+        help="Target file prefix (e.g., en-news2019-), must be relative to the experiment directory",
+    )
     parser.add_argument("--start-seq", default=None, type=int, help="Starting file sequence #")
     parser.add_argument("--end-seq", default=None, type=int, help="Ending file sequence #")
     parser.add_argument("--src-project", default=None, type=str, help="The source project to translate")
