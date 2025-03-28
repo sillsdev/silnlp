@@ -71,7 +71,7 @@ s3path = "0.3.4"
 sacrebleu = "^2.3.1"
 ctranslate2 = "^3.5.1"
 libclang = "14.0.6"
-sil-machine = {extras = ["thot"], version = "^1.6.1"}
+sil-machine = {extras = ["thot"], version = "^1.6.2"}
 datasets = "^2.7.1"
 torch = {version = "^2.4", source = "torch"}
 sacremoses = "^0.0.53"

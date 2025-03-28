@@ -17,14 +17,13 @@ from machine.corpora import (
     UpdateUsfmTextBehavior,
     UsfmFileText,
     UsfmStylesheet,
-    UsfmTextType,
     parse_usfm,
 )
 from machine.scripture import VerseRef
 
 from .corpus import load_corpus, write_corpus
 from .paratext import get_book_path, get_iso, get_project_dir
-from .usfm_preservation import NON_NOTE_TYPE_EMBEDS, StatisticalUsfmPreserver
+from .usfm_preservation import StatisticalUsfmPreserver
 
 LOGGER = logging.getLogger(__package__ + ".translate")
 nltk.download("punkt")
@@ -117,8 +116,9 @@ class Translator(ABC):
         produce_multiple_translations: bool = False,
         chapters: List[int] = [],
         trg_project: Optional[str] = None,
-        include_inline_elements: bool = False,
-        preserve_usfm_markers: bool = False,
+        include_paragraph_markers: bool = False,
+        include_style_markers: bool = False,
+        include_embeds: bool = False,
         experiment_ckpt_str: str = "",
     ) -> None:
         book_path = get_book_path(src_project, book)
@@ -135,8 +135,9 @@ class Translator(ABC):
             produce_multiple_translations,
             chapters,
             trg_project,
-            include_inline_elements,
-            preserve_usfm_markers,
+            include_paragraph_markers,
+            include_style_markers,
+            include_embeds,
             experiment_ckpt_str,
         )
 
@@ -149,8 +150,9 @@ class Translator(ABC):
         produce_multiple_translations: bool = False,
         chapters: List[int] = [],
         trg_project: Optional[str] = None,
-        include_inline_elements: bool = False,
-        preserve_usfm_markers: bool = False,
+        include_paragraph_markers: bool = False,
+        include_style_markers: bool = False,
+        include_embeds: bool = False,
         experiment_ckpt_str: str = "",
     ) -> None:
         # Create UsfmFileText object for source
@@ -164,13 +166,13 @@ class Translator(ABC):
                 src_settings.get_book_id(src_file_path.name),
                 src_file_path,
                 src_settings.versification,
-                include_markers=preserve_usfm_markers,
+                include_markers=True,
                 include_all_text=True,
                 project=src_settings.name,
             )
         else:
             src_file_text = UsfmFileText(
-                "usfm.sty", "utf-8-sig", "", src_file_path, include_markers=preserve_usfm_markers, include_all_text=True
+                "usfm.sty", "utf-8-sig", "", src_file_path, include_markers=True, include_all_text=True
             )
 
         sentences = [re.sub(" +", " ", s.text.strip()) for s in src_file_text]
@@ -178,34 +180,24 @@ class Translator(ABC):
         LOGGER.info(f"File {src_file_path} parsed correctly.")
 
         # Filter sentences
-        stylesheet = src_settings.stylesheet if src_from_project else UsfmStylesheet("usfm.sty")
         for i in reversed(range(len(sentences))):
             if len(chapters) > 0 and vrefs[i].chapter_num not in chapters:
                 sentences.pop(i)
                 vrefs.pop(i)
-            # When preserving USFM markers, this removes embeds that are on their own line in the USFM.
-            # By doing this and using PREFER_NEW for the text_behavior when updating the USFM,
-            # those embeds are transferred without us needing to touch them
-            # When not preserving USFM markers, this removes ALL embeds from the text,
-            # since any embeds not already on their own line will be pulled out into their own sentence
-            elif preserve_usfm_markers or not include_inline_elements:
-                marker = vrefs[i].path[-1].name if len(vrefs[i].path) > 0 else ""
-                if stylesheet.get_tag(marker).text_type == UsfmTextType.NOTE_TEXT or marker in NON_NOTE_TYPE_EMBEDS:
-                    sentences.pop(i)
-                    vrefs.pop(i)
 
-        if preserve_usfm_markers:
-            if trg_project is not None:
-                LOGGER.warning(
-                    "--preserve-usfm-markers is not compatible with --trg-project. \
-                    --trg-project will be ignored"
-                )
-                trg_project = None
+        usfm_preserver = StatisticalUsfmPreserver(
+            sentences,
+            vrefs,
+            src_settings.stylesheet if src_from_project else UsfmStylesheet("usfm.sty"),
+            include_paragraph_markers,
+            include_style_markers,
+            include_embeds,
+            "eflomal",
+        )
+        sentences = usfm_preserver.src_sents
+        vrefs = usfm_preserver.vrefs
 
-            usfm_preserver = StatisticalUsfmPreserver(sentences, vrefs, stylesheet, include_inline_elements, "eflomal")
-            sentences = usfm_preserver.src_sents
-
-        # Set aside empty sentences
+        # Don't translate empty sentences
         empty_sents = []
         for i in reversed(range(len(sentences))):
             if len(sentences[i].strip()) == 0:
@@ -223,10 +215,7 @@ class Translator(ABC):
 
         draft_set: DraftGroup = DraftGroup(translations)
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
-            if preserve_usfm_markers:
-                rows = usfm_preserver.construct_rows(translated_draft)
-            else:
-                rows = [([ref], translation) for ref, translation in zip(vrefs, translated_draft)]
+            rows = usfm_preserver.construct_rows(translated_draft)
 
             # Insert translation into the USFM structure of an existing project
             # If the target project is not the same as the translated file's original project,
@@ -235,51 +224,47 @@ class Translator(ABC):
                 dest_updater = FileParatextProjectTextUpdater(
                     get_project_dir(trg_project if trg_project is not None else src_file_path.parent.name)
                 )
-                if preserve_usfm_markers:
-                    usfm_out = dest_updater.update_usfm(
-                        book_id=src_file_text.id,
-                        rows=rows,
-                        text_behavior=UpdateUsfmTextBehavior.PREFER_NEW,
-                        paragraph_behavior=UpdateUsfmMarkerBehavior.STRIP,
-                        embed_behavior=UpdateUsfmMarkerBehavior.STRIP,
-                        style_behavior=UpdateUsfmMarkerBehavior.STRIP,
-                    )
-                else:
-                    usfm_out = dest_updater.update_usfm(
-                        book_id=src_file_text.id,
-                        rows=rows,
-                        text_behavior=(
-                            UpdateUsfmTextBehavior.PREFER_NEW
-                            if trg_project is not None
-                            else UpdateUsfmTextBehavior.STRIP_EXISTING
-                        ),
-                    )
+                usfm_out = dest_updater.update_usfm(
+                    book_id=src_file_text.id,
+                    rows=rows,
+                    text_behavior=(
+                        UpdateUsfmTextBehavior.PREFER_NEW
+                        if trg_project is not None
+                        else UpdateUsfmTextBehavior.STRIP_EXISTING
+                    ),
+                    paragraph_behavior=UpdateUsfmMarkerBehavior.STRIP,
+                    embed_behavior=UpdateUsfmMarkerBehavior.STRIP,
+                    style_behavior=UpdateUsfmMarkerBehavior.STRIP,
+                    preserve_paragraph_styles=[],
+                )
 
                 if usfm_out is None:
                     raise FileNotFoundError(f"Book {src_file_text.id} does not exist in target project {trg_project}")
-            else:  # Slightly more manual version of updating for when FileParatextProjectTextUpdater can't be used
-                with open(src_file_path, encoding=src_settings.encoding if src_from_project else "utf-8-sig") as f:
+            else:  # Slightly more manual version for updating an individual file
+                with open(src_file_path, encoding="utf-8-sig") as f:
                     usfm = f.read()
-                # Insert translation into the USFM structure of an individual file
                 handler = UpdateUsfmParserHandler(
                     rows=rows,
                     id_text=vrefs[0].book,
                     text_behavior=UpdateUsfmTextBehavior.STRIP_EXISTING,
+                    paragraph_behavior=UpdateUsfmMarkerBehavior.STRIP,
+                    embed_behavior=UpdateUsfmMarkerBehavior.STRIP,
+                    style_behavior=UpdateUsfmMarkerBehavior.STRIP,
+                    preserve_paragraph_styles=[],
                 )
-                parse_usfm(usfm, handler, stylesheet, src_settings.versification if src_from_project else None)
-                usfm_out = handler.get_usfm(stylesheet)
+                parse_usfm(usfm, handler)
+                usfm_out = handler.get_usfm()
 
             # Insert draft remark and write to output path
             description = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
             usfm_out = insert_draft_remark(usfm_out, vrefs[0].book, description, experiment_ckpt_str)
-            encoding = src_settings.encoding if src_from_project else "utf-8"
 
             if produce_multiple_translations:
                 trg_draft_file_path = trg_file_path.with_suffix(f".{draft_index}{trg_file_path.suffix}")
             else:
                 trg_draft_file_path = trg_file_path
 
-            with trg_draft_file_path.open("w", encoding=encoding) as f:
+            with trg_draft_file_path.open("w", encoding=src_settings.encoding if src_from_project else "utf-8") as f:
                 f.write(usfm_out)
 
     def translate_docx(
