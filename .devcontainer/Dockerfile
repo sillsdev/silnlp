@@ -44,8 +44,8 @@ RUN mkdir -p /root/.cache/silnlp/experiments
 RUN mkdir /root/.cache/silnlp/projects
 ENV SIL_NLP_CACHE_EXPERIMENT_DIR=/root/.cache/silnlp/experiments
 ENV SIL_NLP_CACHE_PROJECT_DIR=/root/.cache/silnlp/projects
-# Set up the S3 bucket
-RUN mkdir -p ~/S
+# Set up the MinIO bucket
+RUN mkdir -p ~/M
 RUN mkdir -p ~/.config/rclone
 # Set environment variables
 ENV CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
