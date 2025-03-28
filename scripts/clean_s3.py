@@ -67,6 +67,8 @@ def _delete_data(
             endpoint_url=os.getenv("MINIO_ENDPOINT_URL"),
             aws_access_key_id=os.getenv("MINIO_ACCESS_KEY"),
             aws_secret_access_key=os.getenv("MINIO_SECRET_KEY"),
+            # Verify is false if endpoint_url is an IP address. Aqua/Cheetah connecting to MinIO need this disabled for now.
+            verify=False if re.match(r"https://\d+\.\d+\.\d+\.\d+", os.getenv("MINIO_ENDPOINT_URL")) else True,
         )
         bucket_name = "nlp-research"
     else:
