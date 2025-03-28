@@ -5174,13 +5174,13 @@ type = ["importlib-metadata (>=7.0.2)", "jaraco.develop (>=7.21)", "mypy (==1.12
 
 [[package]]
 name = "sil-machine"
-version = "1.6.1"
+version = "1.6.2"
 description = "A natural language processing library that is focused on providing tools for resource-poor languages."
 optional = false
 python-versions = "<3.13,>=3.9"
 files = [
-    {file = "sil_machine-1.6.1-py3-none-any.whl", hash = "sha256:38b81f1fc5508e05fe8702c8d0e1a2d5e86e511aa2ce4f30d480744b6a8c8214"},
-    {file = "sil_machine-1.6.1.tar.gz", hash = "sha256:9a4103b5aaaa916f14337b39a1135f5fc40ecff2d46568ed098ac6e99ad07f52"},
+    {file = "sil_machine-1.6.2-py3-none-any.whl", hash = "sha256:89ab7cfe53856c474a1dfb705e90cd3eec6da399b77237005bb16139f43ec353"},
+    {file = "sil_machine-1.6.2.tar.gz", hash = "sha256:25f1818a8a14a4b26e1eacda2f527fbe7ffadba7cdeaa98d450ef5ae6313cc7c"},
 ]
 
 [package.dependencies]
@@ -6217,4 +6217,4 @@ eflomal = ["eflomal"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.11"
-content-hash = "1060ce63116411c4c71f57b346a6d2ad59f08f9b2142abc5f000b95b37e14aca"
+content-hash = "8b1efa077c6a39ee15a1f3276f40478d9ce3f1753f956e1d601d7ba6cf6d11de"
