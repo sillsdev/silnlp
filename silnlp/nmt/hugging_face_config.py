@@ -170,6 +170,8 @@ TRAINING_ARGS_CONFIG_MAPPING = {
         "lr_scheduler_type",
         "max_grad_norm",
         "optim",
+        "optim_target_modules",
+        "optim_args",
         "warmup_ratio",
         "warmup_steps",
         "weight_decay",
@@ -346,7 +348,9 @@ class HuggingFaceConfig(Config):
                     "use_lora": False,
                     "lora_config": {},
                     "use_apollo": False,
-                    "apollo_config": {"optim_target_modules": '[r".*.attn.*", r".*.mlp.*"]'},
+                    "apollo_config": {
+                        "optim_target_modules": '[r".*self_attn.*", r".*encoder_attn.*", r".*fc1.*", r".*fc2.*"]'
+                    },
                 },
                 "eval": {
                     "evaluation_strategy": "steps",
@@ -422,6 +426,8 @@ class HuggingFaceConfig(Config):
                     if key != "optim_target_modules"
                 ]
             )
+            if config["params"]["optim_args"] == "":
+                config["params"]["optim_args"] = None
 
     @property
     def model_dir(self) -> Path:
@@ -1064,6 +1070,7 @@ class HuggingFaceNMTModel(NMTModel):
             result = {k: round(v, 4) for k, v in result.items()}
             return result
 
+        print("training_args", training_args)
         trainer = SilSeq2SeqTrainer(
             model,
             training_args,
@@ -1924,6 +1931,7 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         eval_dataset: Optional[Union[Dataset, Dict[str, Dataset]]] = None,
         tokenizer: Optional[PreTrainedTokenizerBase] = None,
         model_init: Optional[Callable[[], PreTrainedModel]] = None,
+        compute_loss_func: Optional[Callable] = None,
         compute_metrics: Optional[Callable[[EvalPrediction], Dict]] = None,
         callbacks: Optional[List[TrainerCallback]] = None,
         optimizers: Tuple[Optional[optim.Optimizer], Optional[optim.lr_scheduler.LambdaLR]] = (None, None),
@@ -1933,6 +1941,9 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         auto_grad_acc: bool = False,
         model_prefix: Optional[str] = None,
     ):
+        print("model", model)
+        for name, param in model.named_parameters():
+            print(name)
         super().__init__(
             model,
             args,
@@ -1941,6 +1952,7 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
             eval_dataset,
             tokenizer,
             model_init,
+            compute_loss_func,
             compute_metrics,
             callbacks,
             optimizers,
