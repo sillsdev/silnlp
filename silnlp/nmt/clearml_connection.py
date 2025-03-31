@@ -66,18 +66,15 @@ class SILClearML:
                         "sed -i 's/include-system-site-packages = .*/include-system-site-packages = true/' "
                         "/root/.local/share/pipx/venvs/poetry/pyvenv.cfg"
                     ),
-                    # automatically connect to the S3 bucket
+                    # automatically connect to the MinIO bucket
                     "apt-get install --no-install-recommends -y fuse3 rclone",
                     "mkdir -p /root/M",
                     "mkdir -p /root/.config/rclone",
-                    'echo "[miniosilnlp]" >> /root/.config/rclone/rclone.conf',
-                    'echo "type = s3" >> /root/.config/rclone/rclone.conf',
-                    'echo "provider = Other" >> /root/.config/rclone/rclone.conf',
-                    'echo "access_key_id = $MINIO_ACCESS_KEY" >> /root/.config/rclone/rclone.conf',
-                    'echo "secret_access_key = $MINIO_SECRET_KEY" >> /root/.config/rclone/rclone.conf',
-                    'echo "endpoint = https://truenas.psonet.languagetechnology.org:9000" >> /root/.config/rclone/rclone.conf',
-                    "export RCLONE_LOG_LEVEL=DEBUG",
-                    "nohup rclone mount --vfs-cache-mode full --use-server-modtime miniosilnlp:nlp-research /root/M 2>\\&1 > /root/nohup.out \\&",
+                    "cp scripts/rclone/rclone.conf /root/.config/rclone/",
+                    'sed -i -e "s#access_key_id = x*#access_key_id = $MINIO_ACCESS_KEY#" ~/.config/rclone/rclone.conf',
+                    'sed -i -e "s#secret_access_key = x*#secret_access_key = $MINIO_SECRET_KEY#" ~/.config/rclone/rclone.conf',
+                    'sed -i -e "s#endpoint = .*#endpoint = $MINIO_ENDPOINT_URL#" ~/.config/rclone/rclone.conf',
+                    "rclone mount --daemon --no-check-certificate --log-file=/root/rclone_log.txt --log-level=DEBUG --vfs-cache-mode full --use-server-modtime miniosilnlp:nlp-research /root/M",
                 ],
             )
             if self.commit:
