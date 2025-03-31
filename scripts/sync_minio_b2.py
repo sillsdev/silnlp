@@ -5,10 +5,9 @@ import re
 import tempfile
 import time
 from pathlib import Path
+from typing import Callable
 
 import boto3
-
-from silnlp.common.environment import try_n_times
 
 
 def sync_buckets(include_checkpoints: bool, dry_run: bool) -> None:
@@ -103,6 +102,19 @@ def sync_buckets(include_checkpoints: bool, dry_run: bool) -> None:
             else:
                 print(f"Would be syncing, {x}/{length}: {key}")
                 csv_writer.writerow([key, "Would be synced to B2"])
+
+
+def try_n_times(func: Callable, n=10):
+    for i in range(n):
+        try:
+            func()
+            break
+        except Exception as e:
+            if i < n - 1:
+                print(f"Failed {i+1} of {n} times.  Retrying.")
+                time.sleep(2**i)
+            else:
+                raise e
 
 
 def main() -> None:
