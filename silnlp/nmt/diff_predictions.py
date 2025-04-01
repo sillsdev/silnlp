@@ -16,6 +16,7 @@ from sacrebleu.metrics.bleu import BLEU, BLEUScore
 from tqdm import tqdm
 
 from ..common.corpus import load_corpus
+from ..common.environment import SIL_NLP_ENV
 from ..common.utils import get_git_revision_hash
 from .config import get_mt_exp_dir
 from .sp_utils import decode_sp, decode_sp_lines
@@ -41,6 +42,7 @@ SRC_SENTENCE = "Source Sentence"
 TRG_SENTENCE = "Target Sentence"
 SRC_TOKENS = "Source Tokens"
 PREDICTION = "Prediction"
+CONFIDENCE = "Confidence"
 BLEU_SCORE = "BLEU"
 SPBLEU_SCORE = "spBLEU"
 CHRF3_SCORE = "chrF3"
@@ -188,7 +190,7 @@ def adjust_column_widths(df: pd.DataFrame, sheet, col_width: int):
 # Add the em-dash
 all_punctuation = string.punctuation + "\u2014"
 # Add smart quotes
-all_punctuation = all_punctuation + "\u2018" + "\u2019" + "\u201C" + "\u201D"
+all_punctuation = all_punctuation + "\u2018" + "\u2019" + "\u201c" + "\u201d"
 # Add Danda (0964) and Double Danda (0965) for Devanagari scripts
 all_punctuation = all_punctuation + "\u0964" + "\u0965"
 
@@ -469,6 +471,15 @@ def add_scores(df: pd.DataFrame, scorers: List[str], preserve_case: bool, tokeni
             df[TER_SCORE] = scores
 
 
+def get_sequence_confidences(confidences_file: Path) -> List[float]:
+    confidences = []
+    with open(confidences_file, "r") as f:
+        lines = f.readlines()
+        for i in range(3, len(lines), 2):
+            confidences.append(float(lines[i].split("\t")[0]))
+    return confidences
+
+
 def main() -> None:
     global wrap_format
     global text_align_format
@@ -522,6 +533,7 @@ def main() -> None:
     stats_offset = 5
 
     exp1_name = args.exp1
+    SIL_NLP_ENV.copy_experiment_from_bucket(exp1_name)
     exp1_dir = get_mt_exp_dir(exp1_name)
     exp1_type = get_experiment_type(str(exp1_dir))
     if exp1_type != "SMT" and exp1_type != "NMT":
@@ -573,7 +585,7 @@ def main() -> None:
     dictDf = load_dictionary(exp1_dir) if args.include_dict or args.show_dict else None
 
     # Create the initial data frame
-    df = pd.DataFrame(columns=[VREF, SRC_SENTENCE, TRG_SENTENCE, PREDICTION])
+    df = pd.DataFrame(columns=[VREF, SRC_SENTENCE, TRG_SENTENCE, PREDICTION, CONFIDENCE])
 
     # Load the datasets
     df[VREF] = list(load_corpus(Path(vref_file))) if vref_file is not None else ""
@@ -587,6 +599,9 @@ def main() -> None:
     if exp1_type == "NMT":
         df.insert(2, SRC_TOKENS, list(strip_lang_codes(load_corpus(Path(os.path.join(exp1_dir, "test.src.txt"))))))
         prediction_col = "E"
+        df[CONFIDENCE] = get_sequence_confidences(
+            os.path.join(exp1_dir, f"test.trg-predictions.txt.{exp1_step}.confidences.tsv")
+        )
 
     add_scores(df, args.scorers, args.preserve_case, args.tokenize)
 
@@ -623,6 +638,7 @@ def main() -> None:
 
     writer.close()
     #    os.remove(exp1_graph)
+    SIL_NLP_ENV.copy_experiment_to_bucket(exp1_name)
     print(f"Output is in {output_path}")
 
 
