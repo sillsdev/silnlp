@@ -16,6 +16,7 @@ from sacrebleu.metrics.bleu import BLEU, BLEUScore
 from tqdm import tqdm
 
 from ..common.corpus import load_corpus
+from ..common.environment import SIL_NLP_ENV
 from ..common.utils import get_git_revision_hash
 from .config import get_mt_exp_dir
 from .sp_utils import decode_sp, decode_sp_lines
@@ -75,6 +76,15 @@ def sentence_bleu(
         effective_order=use_effective_order,
     )
     return metric.sentence_score(hypothesis, references)
+
+
+def extract_chapter(chapter_num):
+    parts = chapter_num.split()
+    book_name = parts[0]
+    vref_num = parts[1]
+    chap_num, verse_num = vref_num.split(":")
+    order_num = verse_num.split("-")[0]
+    return book_name, int(chap_num), int(order_num)
 
 
 histogram_offset = 0
@@ -188,7 +198,7 @@ def adjust_column_widths(df: pd.DataFrame, sheet, col_width: int):
 # Add the em-dash
 all_punctuation = string.punctuation + "\u2014"
 # Add smart quotes
-all_punctuation = all_punctuation + "\u2018" + "\u2019" + "\u201C" + "\u201D"
+all_punctuation = all_punctuation + "\u2018" + "\u2019" + "\u201c" + "\u201d"
 # Add Danda (0964) and Double Danda (0965) for Devanagari scripts
 all_punctuation = all_punctuation + "\u0964" + "\u0965"
 
@@ -411,6 +421,78 @@ def add_digits_analysis(writer, df: pd.DataFrame, col_width: int):
     sheet.autofilter(0, 0, digits_df.shape[0], digits_df.shape[1] - 1)
 
 
+def add_score_to_chap(df: pd.DataFrame):
+    chapters_pred = {}
+    chapters_trg = {}
+    for _, row in tqdm(df.iterrows()):
+        cur_vref = row[VREF]
+        book_name, chap_num, _ = extract_chapter(cur_vref)
+        key = book_name + " " + str(chap_num)
+        if key not in chapters_pred:
+            chapters_pred[key] = []
+            chapters_trg[key] = []
+            chapters_pred[key].append(row[PREDICTION])
+            chapters_trg[key].append([row[TRG_SENTENCE]])
+
+    return chapters_pred, chapters_trg
+
+
+def add_chap_scores(df: pd.DataFrame, df_chap: pd.DataFrame, scorers: List[str], preserve_case: bool):
+    chapters_pred, chapters_trg = add_score_to_chap(df)
+    for scorer in scorers:
+        scorer = scorer.lower()
+        if scorer == BLEU_SCORE.lower():
+            print("Sentence BLEU is not provided for chapter scoring!")
+            continue
+        if scorer == SPBLEU_SCORE.lower():
+            df_chap[SPBLEU_SCORE] = None
+            print("Calculating spBLEU scores ...")
+            for chap, pred in chapters_pred.items():
+                spbleu_score = sacrebleu.corpus_bleu(
+                    pred, chapters_trg[chap], lowercase=not preserve_case, tokenize="flores200"
+                )
+                df_chap.loc[df_chap[VREF] == chap, SPBLEU_SCORE] = spbleu_score.score
+        elif scorer == CHRF3_SCORE.lower():
+            df_chap[CHRF3_SCORE] = None
+            print("Calculating chrF3 scores ...")
+            for chap, pred in chapters_pred.items():
+                chrf3_score = sacrebleu.corpus_chrf(
+                    pred, chapters_trg[chap], char_order=6, beta=3, remove_whitespace=True
+                )
+                df_chap.loc[df_chap[VREF] == chap, CHRF3_SCORE] = chrf3_score.score
+        elif scorer == CHRF3P_SCORE.lower():
+            print("Calculating chrF3+ scores ...")
+            for chap, pred in chapters_pred.items():
+                chrf3p_score = sacrebleu.corpus_chrf(
+                    pred,
+                    chapters_trg[chap],
+                    char_order=6,
+                    beta=3,
+                    word_order=1,
+                    remove_whitespace=True,
+                    eps_smoothing=True,
+                )
+                df_chap.loc[df_chap[VREF] == chap, CHRF3P_SCORE] = chrf3p_score.score
+        elif scorer == CHRF3PP_SCORE.lower():
+            print("Calculating chrF3++ scores ...")
+            for chap, pred in chapters_pred.items():
+                chrf3pp_score = sacrebleu.corpus_chrf(
+                    pred,
+                    chapters_trg[chap],
+                    char_order=6,
+                    beta=3,
+                    word_order=2,
+                    remove_whitespace=True,
+                    eps_smoothing=True,
+                )
+                df_chap.loc[df_chap[VREF] == chap, CHRF3PP_SCORE] = chrf3pp_score.score
+        elif scorer == TER_SCORE.lower():
+            print("Calculating TER scores ...")
+            for chap, pred in chapters_pred.items():
+                ter_score = sacrebleu.corpus_ter(pred, chapters_trg[chap])
+                df_chap.loc[df_chap[VREF] == chap, TER_SCORE] = ter_score.score if ter_score.score >= 0 else 0
+
+
 def add_scores(df: pd.DataFrame, scorers: List[str], preserve_case: bool, tokenize: bool):
     for scorer in scorers:
         scores: List[float] = []
@@ -507,6 +589,9 @@ def main() -> None:
         "--tokenize", type=str, default="13a", help="Sacrebleu tokenizer (none,13a,intl,zh,ja-mecab,char)"
     )
     parser.add_argument(
+        "--chapter-score", default=False, action="store_true", help="Show scores in chapters rather than in verses"
+    )
+    parser.add_argument(
         "--scorers",
         nargs="*",
         metavar="scorer",
@@ -523,6 +608,13 @@ def main() -> None:
 
     exp1_name = args.exp1
     exp1_dir = get_mt_exp_dir(exp1_name)
+
+    # SIL_NLP_ENV.copy_experiment_from_bucket(exp1_name, patterns="*.txt*")
+    # SIL_NLP_ENV.copy_experiment_from_bucket(exp1_name, patterns="*.csv")
+    # SIL_NLP_ENV.copy_experiment_from_bucket(exp1_name, patterns="*.yaml")
+
+    # exp1_type = "NMT"
+
     exp1_type = get_experiment_type(str(exp1_dir))
     if exp1_type != "SMT" and exp1_type != "NMT":
         print("Can't determine experiment type!")
@@ -534,6 +626,8 @@ def main() -> None:
         else get_last_checkpoint(str(exp1_dir)) if args.last else get_best_checkpoint(str(exp1_dir))
     )
     output_path = os.path.join(exp1_dir, f"diff_predictions.{exp1_step}.xlsx")
+    if args.chapter_score:
+        output_path = os.path.join(exp1_dir, f"diff_predictions.chapters.{exp1_step}.xlsx")
 
     # Set up to generate the Excel output
     writer: pd.ExcelWriter = pd.ExcelWriter(output_path, engine="xlsxwriter")
@@ -588,7 +682,21 @@ def main() -> None:
         df.insert(2, SRC_TOKENS, list(strip_lang_codes(load_corpus(Path(os.path.join(exp1_dir, "test.src.txt"))))))
         prediction_col = "E"
 
-    add_scores(df, args.scorers, args.preserve_case, args.tokenize)
+    if args.chapter_score:
+        df[["ChapName", "ChapNum", "SortNum"]] = df[VREF].apply(lambda x: pd.Series(extract_chapter(x)))
+        df = df.sort_values(by=["ChapName", "ChapNum", "SortNum"])
+
+        df_chap = (
+            df.groupby(["ChapName", "ChapNum"])
+            .agg({SRC_SENTENCE: " ".join, SRC_TOKENS: " ".join, TRG_SENTENCE: " ".join, PREDICTION: " ".join})
+            .reset_index()
+        )
+        df_chap[VREF] = df_chap["ChapName"] + " " + df_chap["ChapNum"].astype(str)
+        df_chap = df_chap[[VREF, SRC_SENTENCE, SRC_TOKENS, TRG_SENTENCE, PREDICTION]]
+        add_chap_scores(df, df_chap, args.scorers, args.preserve_case)
+        df = df_chap
+    else:
+        add_scores(df, args.scorers, args.preserve_case, args.tokenize)
 
     df.sort_values(VREF, inplace=True)
     df = df.reset_index(drop=True)
@@ -624,6 +732,8 @@ def main() -> None:
     writer.close()
     #    os.remove(exp1_graph)
     print(f"Output is in {output_path}")
+
+    # SIL_NLP_ENV.copy_experiment_to_bucket(exp1_name, patterns=("diff_predictions.*"), overwrite=True)
 
 
 if __name__ == "__main__":
