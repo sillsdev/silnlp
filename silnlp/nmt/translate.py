@@ -264,7 +264,7 @@ class TranslationTask:
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM", *exts), overwrite=True)
 
     def _init_translation_task(
-        self, experiment_suffix: str, patterns: Optional[List[str]]
+        self, experiment_suffix: str, patterns: List[str] = []
     ) -> Tuple[Translator, Config, str]:
         clearml = SILClearML(
             self.name,
