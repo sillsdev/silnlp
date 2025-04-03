@@ -16,7 +16,13 @@
 		"--gpus",
 		"all",
 		"-v",
-		"${env:HOME}/clearml/.clearml/hf-cache:/root/.cache/huggingface"
+		"${env:HOME}/clearml/.clearml/hf-cache:/root/.cache/huggingface",
+		"--cap-add",
+		"SYS_ADMIN",
+		"--device",
+		"/dev/fuse",
+		"--security-opt",
+		"apparmor=unconfined"
 	],
 	"containerEnv": {
 		"AWS_REGION": "${localEnv:AWS_REGION}",
@@ -74,7 +80,7 @@
 			]
 		}
 	},
-	"postStartCommand": "poetry install && sh /workspaces/silnlp/.devcontainer/update_hosts.sh"
+	"postStartCommand": "poetry install && sh /workspaces/silnlp/.devcontainer/update_hosts.sh && sh /workspaces/silnlp/minio_bucket_setup.sh"
 	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
 	// "remoteUser": "root"
 }

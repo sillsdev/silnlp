@@ -23,6 +23,9 @@ RUN apt-get install --no-install-recommends -y \
     gdb \
     curl \
     unzip
+RUN apt-get update && apt-get install --no-install-recommends -y \
+    fuse3 \
+    rclone
 # Make some useful symlinks that are expected to exist
 RUN ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python3  & \
     ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python
@@ -41,6 +44,10 @@ RUN mkdir -p /root/.cache/silnlp/experiments
 RUN mkdir /root/.cache/silnlp/projects
 ENV SIL_NLP_CACHE_EXPERIMENT_DIR=/root/.cache/silnlp/experiments
 ENV SIL_NLP_CACHE_PROJECT_DIR=/root/.cache/silnlp/projects
+# Set up the MinIO/Backblaze bucket
+RUN mkdir -p ~/M
+RUN mkdir -p ~/B
+RUN mkdir -p ~/.config/rclone
 # Set environment variables
 ENV CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
 ENV EFLOMAL_PATH=/workspaces/silnlp/.venv/lib/python3.10/site-packages/eflomal/bin
