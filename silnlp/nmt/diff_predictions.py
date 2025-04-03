@@ -617,7 +617,7 @@ def main() -> None:
     stats_offset = 5
 
     exp1_name = args.exp1
-    SIL_NLP_ENV.copy_experiment_from_bucket(exp1_name)
+    SIL_NLP_ENV.copy_experiment_from_bucket(exp1_name, no_checkpoints=True)
     exp1_dir = get_mt_exp_dir(exp1_name)
 
     # SIL_NLP_ENV.copy_experiment_from_bucket(exp1_name, patterns="*.txt*")
