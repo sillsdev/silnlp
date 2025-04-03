@@ -252,7 +252,9 @@ class SilNlpEnv:
                     LOGGER.info("Downloading " + rel_path)
                     try_n_times(lambda: self.bucket.download_file(obj.object_key, str(temp_dest_path)))
 
-    def copy_experiment_from_bucket(self, name: Union[str, Path], patterns: Union[str, Sequence[str]] = []):
+    def copy_experiment_from_bucket(
+        self, name: Union[str, Path], patterns: Union[str, Sequence[str]] = [], no_checkpoints: bool = False
+    ):
         if not self.is_bucket:
             return
         name = str(name)
@@ -275,6 +277,12 @@ class SilNlpEnv:
             pure_path = PurePath(rel_path)
             if len(patterns) == 0 or any(pure_path.match(pattern) for pattern in patterns):
                 # copy over project files and experiment files
+                if no_checkpoints:
+                    checkpoint_regex = re.compile(
+                        r"^MT/experiments/.+/run/(checkpoint.*(pytorch_model\.bin|\.safetensors)$|ckpt.+\.(data-00000-of-00001|index)$)"
+                    )
+                    if checkpoint_regex.match(str(obj.object_key)):
+                        continue
                 temp_dest_path = self.mt_experiments_dir / rel_path
                 temp_dest_path.parent.mkdir(parents=True, exist_ok=True)
                 if temp_dest_path.exists():
