@@ -281,7 +281,7 @@ def get_terms_glosses_file_paths(terms_files: List[DataFile]) -> Set[Path]:
     glosses_file_paths: Set[Path] = set()
     for terms_file in terms_files:
         list_name = get_terms_list(terms_file.path)
-        glosses_path = get_terms_glosses_path(list_name)
+        glosses_path = get_terms_glosses_path(list_name, iso=terms_file.iso)
         if glosses_path.is_file():
             glosses_file_paths.add(glosses_path)
     return glosses_file_paths
@@ -1096,13 +1096,35 @@ class Config(ABC):
             return None
         categories_set: Optional[Set[str]] = None if categories is None else set(categories)
 
+        if terms_config["include_glosses"]:
+            gloss_iso: str = str(terms_config["include_glosses"]).lower()
+            if gloss_iso == "true":
+                src_gloss_iso = list(self.src_isos.intersection(["en", "fr", "id", "es"]))
+                trg_gloss_iso = list(self.trg_isos.intersection(["en", "fr", "id", "es"]))
+                if src_gloss_iso:
+                    gloss_iso = src_gloss_iso[0]
+                elif trg_gloss_iso:
+                    gloss_iso = trg_gloss_iso[0]
+                else:
+                    LOGGER.warning(
+                        "Glosses could not be included. No source or target language matches any of the supported gloss language codes: en, fr, id, es."
+                    )
+                    gloss_iso = None
+            elif gloss_iso not in ["en", "fr", "id", "es"]:
+                LOGGER.warning(
+                    f"Gloss language code, {gloss_iso}, does not match the supported gloss language codes: en, fr, id, es."
+                )
+                gloss_iso = None
+        else:
+            gloss_iso = None
+
         all_src_terms: List[Tuple[DataFile, Dict[str, Term], str]] = []
         for src_terms_file, tags_str in src_terms_files:
-            all_src_terms.append((src_terms_file, get_terms(src_terms_file.path), tags_str))
+            all_src_terms.append((src_terms_file, get_terms(src_terms_file.path, iso=gloss_iso), tags_str))
 
         all_trg_terms: List[Tuple[DataFile, Dict[str, Term], str]] = []
         for trg_terms_file, tags_str in trg_terms_files:
-            all_trg_terms.append((trg_terms_file, get_terms(trg_terms_file.path), tags_str))
+            all_trg_terms.append((trg_terms_file, get_terms(trg_terms_file.path, iso=gloss_iso), tags_str))
 
         for src_terms_file, src_terms, tags_str in all_src_terms:
             for trg_terms_file, trg_terms, trg_tags_str in all_trg_terms:
@@ -1112,22 +1134,21 @@ class Config(ABC):
                 cur_terms["source_lang"] = src_terms_file.iso
                 cur_terms["target_lang"] = trg_terms_file.iso
                 terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
-        if terms_config["include_glosses"]:
-            for gloss_iso in ["en", "fr", "id", "es"]:
-                if gloss_iso in self.trg_isos:
-                    for src_terms_file, src_terms, tags_str in all_src_terms:
-                        cur_terms = get_terms_data_frame(src_terms, categories_set, filter_books)
-                        cur_terms = cur_terms.rename(columns={"rendering": "source", "gloss": "target"})
-                        cur_terms["source_lang"] = src_terms_file.iso
-                        cur_terms["target_lang"] = gloss_iso
-                        terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
-                if gloss_iso in self.src_isos or gloss_iso == terms_config["include_glosses"]:
-                    for trg_terms_file, trg_terms, tags_str in all_trg_terms:
-                        cur_terms = get_terms_data_frame(trg_terms, categories_set, filter_books)
-                        cur_terms = cur_terms.rename(columns={"rendering": "target", "gloss": "source"})
-                        cur_terms["source_lang"] = gloss_iso
-                        cur_terms["target_lang"] = trg_terms_file.iso
-                        terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
+        if gloss_iso is not None:
+            if gloss_iso in self.trg_isos:
+                for src_terms_file, src_terms, tags_str in all_src_terms:
+                    cur_terms = get_terms_data_frame(src_terms, categories_set, filter_books)
+                    cur_terms = cur_terms.rename(columns={"rendering": "source", "gloss": "target"})
+                    cur_terms["source_lang"] = src_terms_file.iso
+                    cur_terms["target_lang"] = gloss_iso
+                    terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
+            if gloss_iso in self.src_isos or gloss_iso == terms_config["include_glosses"]:
+                for trg_terms_file, trg_terms, tags_str in all_trg_terms:
+                    cur_terms = get_terms_data_frame(trg_terms, categories_set, filter_books)
+                    cur_terms = cur_terms.rename(columns={"rendering": "target", "gloss": "source"})
+                    cur_terms["source_lang"] = gloss_iso
+                    cur_terms["target_lang"] = trg_terms_file.iso
+                    terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
         return terms
 
     def _write_val_trg(self, tokenizer: Optional[Tokenizer], val: Dict[Tuple[str, str], pd.DataFrame]) -> None:

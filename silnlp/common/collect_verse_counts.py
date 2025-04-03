@@ -252,10 +252,10 @@ def collect_verse_counts(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Collect various counts from a corpus of Bible extracts")
+    parser.add_argument("folder", help="An experiment folder (typically in MT/experiments) that contains a config.yml file. The results will be saved in this folder.")
     parser.add_argument(
-        "--input-folder", default=SIL_NLP_ENV.mt_scripture_dir, help="Folder with corpus of Bible extracts"
+        "--input-folder", default=SIL_NLP_ENV.mt_scripture_dir, help="Folder with corpus of Bible extract files."
     )
-    parser.add_argument("--output-folder", help="Folder in which to save results", required=True)
     parser.add_argument(
         "--files",
         default="",
@@ -271,38 +271,38 @@ def main() -> None:
     args = parser.parse_args()
 
     # If the output folder doesn't exist locally, assume it's an experiment folder
-    output_folder = args.output_folder.replace("\\", "/")
-    if Path(output_folder).exists():
+    folder = args.folder.replace("\\", "/")
+    if Path(folder).exists():
         exp_name = None
-        output_folder = Path(output_folder)
+        folder = Path(folder)
     else:
-        exp_name = output_folder
-        output_folder = get_mt_exp_dir(output_folder)
+        exp_name = folder
+        folder = get_mt_exp_dir(folder)
         SIL_NLP_ENV.copy_experiment_from_bucket(exp_name, patterns="config.yml")
 
-    # If no files are listed and output_folder is an experiment, use the files listed in the config file
+    # If no files are listed and folder is an experiment, use the files listed in the config file
     file_patterns = args.files
     if file_patterns == "":
-        if not output_folder.exists():
+        if not folder.exists():
             LOGGER.error(
-                "No files found. Please provide a list of files with --files or an experiment folder for --output-folder."
+                f"Folder {folder} does not exist. Please provide an experiment folder, typically in MT/experiments, containing a config.yml file or a list of files with the --files argument."
             )
             return
         else:
             LOGGER.info("No files provided with --files. Using files from experiment config.yml.")
 
-        with (output_folder / "config.yml").open("r", encoding="utf-8") as file:
+        with (folder / "config.yml").open("r", encoding="utf-8") as file:
             config = yaml.safe_load(file)
         if config is None or len(config.keys()) == 0:
             LOGGER.error("Config file has no contents.")
             return
-        config = HuggingFaceConfig(output_folder, config)
+        config = HuggingFaceConfig(folder, config)
         files: Set[Path] = set()
         for pair in config.corpus_pairs:
             files.update([f.path for f in pair.src_files] + [f.path for f in pair.trg_files])
         file_patterns = ";".join([f.name for f in files])
 
-    collect_verse_counts(args.input_folder, output_folder, file_patterns, args.deutero, args.recount)
+    collect_verse_counts(args.input_folder, folder, file_patterns, args.deutero, args.recount)
 
     if exp_name:
         SIL_NLP_ENV.copy_experiment_to_bucket(exp_name, overwrite=args.recount)

@@ -23,7 +23,7 @@ LOGGER = logging.getLogger(__package__ + ".analyze_project_pairs")
 ALIGNMENT_SCORES_FILE = re.compile(r"([a-z]{2,3}-.+)_([a-z]{2,3}-.+)")
 
 
-def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = False) -> None:
+def get_corpus_stats(config: Config, exp_name: str, force_align: bool = False, deutero: bool = False) -> None:
     stats_path = config.exp_dir / "corpus-stats.csv"
     if stats_path.is_file() and not force_align:
         stats_df = pd.read_csv(stats_path, dtype=str, keep_default_na=False, index_col=["src_project", "trg_project"])
@@ -94,7 +94,7 @@ def get_corpus_stats(config: Config, force_align: bool = False, deutero: bool = 
                 LOGGER.info(f"Computing alignment scores using {get_aligner_name(aligner_id)}")
                 add_alignment_scores(corpus, aligner_id)
                 corpus.to_csv(pair_stats_path, index=False)
-                SIL_NLP_ENV.copy_experiment_to_bucket(config.exp_dir, pair_stats_path.name, overwrite=True)
+                SIL_NLP_ENV.copy_experiment_to_bucket(exp_name, pair_stats_path.name, overwrite=True)
 
             alignment_score = corpus["score"].mean()
             filtered_count = 0
@@ -469,12 +469,13 @@ def main() -> None:
 
     get_git_revision_hash()
 
-    exp_name = args.experiment
+    # Experiment path relative to MT/experiments
+    exp_name = args.experiment.replace("\\", "/")
 
     if args.clearml_queue is not None and "cpu" not in args.clearml_queue:
         LOGGER.warning("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
         exit()
-    clearml = SILClearML(exp_name, args.clearml_queue)
+    clearml = SILClearML(exp_name, args.clearml_queue, bucket_service=SIL_NLP_ENV.bucket_service)
 
     SIL_NLP_ENV.copy_experiment_from_bucket(exp_name)
 
@@ -494,7 +495,7 @@ def main() -> None:
     collect_verse_counts(SIL_NLP_ENV.mt_scripture_dir, config.exp_dir, file_patterns, args.deutero, args.recalculate)
     SIL_NLP_ENV.copy_experiment_to_bucket(exp_name, "*_detailed_percentages.csv", overwrite=args.recalculate)
 
-    get_corpus_stats(config, args.recalculate, args.deutero)
+    get_corpus_stats(config, exp_name, args.recalculate, args.deutero)
 
     # Add stats about projects in extra alignment files in the experiment folder
     extra_projects = get_extra_alignments(config, args.deutero)

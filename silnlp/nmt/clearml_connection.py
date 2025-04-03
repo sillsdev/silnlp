@@ -21,6 +21,7 @@ class SILClearML:
     experiment_suffix: str = ""
     clearml_project_folder: str = ""
     commit: Optional[str] = None
+    bucket_service: str = ""
 
     def __post_init__(self) -> None:
         self.name = self.name.replace("\\", "/")
@@ -51,6 +52,7 @@ class SILClearML:
                 docker_image="ghcr.io/sillsdev/silnlp:latest",
                 docker_arguments=[
                     "--env TOKENIZERS_PARALLELISM='false'",
+                    "--env BUCKET_SERVICE=" + self.bucket_service,
                     "--cap-add SYS_ADMIN",
                     "--device /dev/fuse",
                     "--security-opt apparmor=docker-apparmor",
