@@ -205,8 +205,8 @@ class SilNlpEnv:
                 )
                 LOGGER.info("Connected to MinIO bucket.")
             except Exception as e:
-                LOGGER.warning(e)
-                LOGGER.warning("MinIO connection failed.")
+                LOGGER.exception("MinIO connection failed.")
+                raise e
         if self.bucket_service in ["b2"]:
             try:
                 LOGGER.info("Trying to connect to B2 bucket.")
@@ -218,8 +218,8 @@ class SilNlpEnv:
                 )
                 LOGGER.info("Connected to B2 bucket.")
             except Exception as e:
-                LOGGER.warning(e)
-                LOGGER.warning("B2 connection failed.")
+                LOGGER.exception("B2 connection failed.")
+                raise e
 
     def copy_pt_project_from_bucket(self, name: Union[str, Path], patterns: Union[str, Sequence[str]] = []):
         if not self.is_bucket:

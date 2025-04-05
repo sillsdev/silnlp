@@ -112,8 +112,9 @@ class SILExperiment:
                     config.get("trg_project"),
                     config.get("trg_iso"),
                     self.produce_multiple_translations,
-                    config.get("include_inline_elements", False),
-                    config.get("preserve_usfm_markers", False),
+                    config.get("include_paragraph_markers", False) or config.get("preserve_usfm_markers", False),
+                    config.get("include_style_markers", False) or config.get("preserve_usfm_markers", False),
+                    config.get("include_embeds", False) or config.get("include_inline_elements", False),
                 )
             elif config.get("src_prefix"):
                 translator.translate_text_files(
@@ -132,8 +133,9 @@ class SILExperiment:
                     config.get("src_iso"),
                     config.get("trg_iso"),
                     self.produce_multiple_translations,
-                    config.get("include_inline_elements", False),
-                    config.get("preserve_usfm_markers", False),
+                    config.get("include_paragraph_markers", False) or config.get("preserve_usfm_markers", False),
+                    config.get("include_style_markers", False) or config.get("preserve_usfm_markers", False),
+                    config.get("include_embeds", False) or config.get("include_inline_elements", False),
                 )
             else:
                 raise RuntimeError("A Scripture book, file, or file prefix must be specified for translation.")
