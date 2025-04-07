@@ -10,9 +10,11 @@ from pathlib import Path
 from typing import Any, Iterable, List, Optional
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import sacrebleu
 from sacrebleu.metrics.bleu import BLEU, BLEUScore
+from scipy.stats import gmean
 from tqdm import tqdm
 
 from ..common.corpus import load_corpus
@@ -55,9 +57,9 @@ DICT_TRG = "Target"
 _SUPPORTED_SCORERS = {BLEU_SCORE, SPBLEU_SCORE, CHRF3_SCORE, CHRF3P_SCORE, CHRF3PP_SCORE, TER_SCORE}
 
 
-def sentence_bleu(
-    hypothesis: str,
-    references: List[str],
+def corpus_bleu(
+    hypothesis: List[str],
+    references: List[List[str]],
     smooth_method: str = "exp",
     smooth_value: Optional[float] = None,
     lowercase: bool = False,
@@ -76,7 +78,7 @@ def sentence_bleu(
         tokenize=tokenize,
         effective_order=use_effective_order,
     )
-    return metric.sentence_score(hypothesis, references)
+    return metric.corpus_score(hypothesis, references)
 
 
 def extract_chapter(chapter_num):
@@ -443,8 +445,13 @@ def add_chap_scores(df: pd.DataFrame, df_chap: pd.DataFrame, scorers: List[str],
     for scorer in scorers:
         scorer = scorer.lower()
         if scorer == BLEU_SCORE.lower():
-            print("Sentence BLEU is not provided for chapter scoring!")
-            continue
+            df_chap[BLEU_SCORE] = None
+            print("Calculating BLEU scores ...")
+            for chap, pred in chapters_pred.items():
+                bleu = corpus_bleu(
+                    pred, chapters_trg[chap], lowercase=not preserve_case, tokenize="intl", use_effective_order=False
+                )
+                df_chap.loc[df_chap[VREF] == chap, BLEU_SCORE] = bleu.score
         if scorer == SPBLEU_SCORE.lower():
             df_chap[SPBLEU_SCORE] = None
             print("Calculating spBLEU scores ...")
@@ -500,8 +507,8 @@ def add_scores(df: pd.DataFrame, scorers: List[str], preserve_case: bool, tokeni
         scorer = scorer.lower()
         if scorer == BLEU_SCORE.lower():
             for index, row in tqdm(df.iterrows(), desc="Calculating BLEU scores ..."):
-                bleu = sentence_bleu(
-                    row[PREDICTION], [row[TRG_SENTENCE]], lowercase=not preserve_case, tokenize=tokenize
+                bleu = corpus_bleu(
+                    [row[PREDICTION]], [[row[TRG_SENTENCE]]], lowercase=not preserve_case, tokenize=tokenize
                 )
                 scores.append(bleu.score)
             df[BLEU_SCORE] = scores
@@ -697,16 +704,56 @@ def main() -> None:
         )
 
     if args.chapter_score:
+        add_scores(df, args.scorers, args.preserve_case, args.tokenize)
         df[["ChapName", "ChapNum", "SortNum"]] = df[VREF].apply(lambda x: pd.Series(extract_chapter(x)))
         df = df.sort_values(by=["ChapName", "ChapNum", "SortNum"])
 
         df_chap = (
             df.groupby(["ChapName", "ChapNum"])
-            .agg({SRC_SENTENCE: " ".join, SRC_TOKENS: " ".join, TRG_SENTENCE: " ".join, PREDICTION: " ".join})
+            .agg(
+                {
+                    SRC_SENTENCE: " ".join,
+                    SRC_TOKENS: " ".join,
+                    TRG_SENTENCE: " ".join,
+                    PREDICTION: " ".join,
+                    CONFIDENCE: [gmean, "mean", "median"],
+                    BLEU_SCORE: "mean",  # TODO: Don't hardcode
+                    CHRF3_SCORE: "mean",
+                    CHRF3PP_SCORE: "mean",
+                }
+            )
             .reset_index()
         )
+        df_chap.columns = [
+            "ChapName",
+            "ChapNum",
+            SRC_SENTENCE,
+            SRC_TOKENS,
+            TRG_SENTENCE,
+            PREDICTION,
+            CONFIDENCE,
+            "Confidence AMean",
+            "Confidence Median",
+            "BLEU Mean Score",
+            "chrF3 Mean Score",
+            "chrF3++ Mean Score",
+        ]
         df_chap[VREF] = df_chap["ChapName"] + " " + df_chap["ChapNum"].astype(str)
-        df_chap = df_chap[[VREF, SRC_SENTENCE, SRC_TOKENS, TRG_SENTENCE, PREDICTION]]
+        df_chap = df_chap[
+            [
+                VREF,
+                SRC_SENTENCE,
+                SRC_TOKENS,
+                TRG_SENTENCE,
+                PREDICTION,
+                CONFIDENCE,
+                "Confidence AMean",
+                "Confidence Median",
+                "BLEU Mean Score",
+                "chrF3 Mean Score",
+                "chrF3++ Mean Score",
+            ]
+        ]
         add_chap_scores(df, df_chap, args.scorers, args.preserve_case)
         df = df_chap
     else:
@@ -745,10 +792,9 @@ def main() -> None:
 
     writer.close()
     #    os.remove(exp1_graph)
-    SIL_NLP_ENV.copy_experiment_to_bucket(exp1_name)
     print(f"Output is in {output_path}")
 
-    # SIL_NLP_ENV.copy_experiment_to_bucket(exp1_name, patterns=("diff_predictions.*"), overwrite=True)
+    SIL_NLP_ENV.copy_experiment_to_bucket(exp1_name, patterns=("diff_predictions.*"), overwrite=True)
 
 
 if __name__ == "__main__":
