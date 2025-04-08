@@ -433,9 +433,9 @@ def add_score_to_chap(df: pd.DataFrame):
         key = book_name + " " + str(chap_num)
         if key not in chapters_pred:
             chapters_pred[key] = []
-            chapters_trg[key] = []
-            chapters_pred[key].append(row[PREDICTION])
-            chapters_trg[key].append([row[TRG_SENTENCE]])
+            chapters_trg[key] = [[]]
+        chapters_pred[key].append(row[PREDICTION])
+        chapters_trg[key][0].append(row[TRG_SENTENCE])
 
     return chapters_pred, chapters_trg
 
