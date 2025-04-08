@@ -126,7 +126,27 @@ class SilNlpEnv:
         else:
             self.align_dir = self.data_dir / "Alignment"
         self.align_gold_dir = self.align_dir / "gold"
-        self.align_experiments_dir = self.align_dir / "experiments"
+        if self.is_bucket:
+            sil_nlp_cache_dir = os.getenv("SIL_NLP_CACHE_EXPERIMENT_DIR")
+            if sil_nlp_cache_dir is not None:
+                temp_path = Path(sil_nlp_cache_dir)
+                if not hasattr(self, "align_experiments_dir"):
+                    if temp_path.is_dir():
+                        LOGGER.info(
+                            f"Using cache dir: {sil_nlp_cache_dir} as per environment variable "
+                            + "SIL_NLP_CACHE_EXPERIMENT_DIR."
+                        )
+                        self.align_experiments_dir = temp_path
+                    else:
+                        raise Exception(
+                            "The path in SIL_NLP_CACHE_EXPERIMENT_DIR does not exist.  Create it first: "
+                            + sil_nlp_cache_dir
+                        )
+            else:
+                self.align_experiments_dir = Path(tempfile.TemporaryDirectory().name)
+                self.align_experiments_dir.mkdir()
+        else:
+            self.align_experiments_dir = self.align_dir / "experiments"
 
     def resolve_data_dir(self) -> Path:
         self.is_bucket = False
@@ -320,6 +340,70 @@ class SilNlpEnv:
         if source_path.startswith("/"):
             source_path = source_path[1:]
         return source_path
+
+    def copy_alignment_experiment_from_bucket(self, name: Union[str, Path], patterns: Union[str, Sequence[str]] = []):
+        if not self.is_bucket:
+            return
+        name = str(name)
+        experiments_path = str(self.align_dir.relative_to(self.data_dir) / "experiments") + "/"
+        name = name.split(experiments_path)[-1]
+        if len(name) == 0:
+            raise Exception(
+                f"No experiment name is given.  Data still in the cache directory of {self.mt_experiments_dir}"
+            )
+        len_silnlp_path = len(experiments_path)
+        experiment_path = experiments_path + name
+        objs = list(self.bucket.object_versions.filter(Prefix=experiment_path + "/"))
+        if len(objs) == 0:
+            LOGGER.info("No files found in the bucket under: " + experiment_path)
+            return
+        if isinstance(patterns, str):
+            patterns = [patterns]
+        for obj in objs:
+            rel_path = str(obj.object_key)[len_silnlp_path:]
+            pure_path = PurePath(rel_path)
+            if len(patterns) == 0 or any(pure_path.match(pattern) for pattern in patterns):
+                # copy over project files and experiment files
+                temp_dest_path = self.align_experiments_dir / rel_path
+                temp_dest_path.parent.mkdir(parents=True, exist_ok=True)
+                # if temp_dest_path.exists():
+                #     LOGGER.debug("File already exists in local cache: " + rel_path)
+                # else:
+                LOGGER.info("Downloading " + rel_path)
+                try_n_times(lambda: self.bucket.download_file(obj.object_key, str(temp_dest_path)))
+
+    def copy_alignment_experiment_to_bucket(
+        self, name: str, patterns: Union[str, Sequence[str]] = [], overwrite: bool = False
+    ):
+        if not self.is_bucket:
+            return
+        name = str(name)
+        if len(name) == 0:
+            raise Exception(
+                f"No experiment name is given.  Data still in the temp directory of {self.mt_experiments_dir}"
+            )
+        experiment_path = str(self.align_dir.relative_to(self.data_dir) / "experiments") + "/"
+        temp_folder = str(self.align_experiments_dir / name)
+        # we don't need to delete all existing files - it will just overwrite them
+        len_exp_dir = len(str(self.align_experiments_dir))
+        files_already_in_s3 = set()
+        for obj in self.bucket.object_versions.filter(Prefix=experiment_path + name):
+            files_already_in_s3.add(str(obj.object_key))
+
+        if isinstance(patterns, str):
+            patterns = [patterns]
+        for root, _, files in os.walk(temp_folder, topdown=False):
+            s3_dest_path = str(experiment_path + root[len_exp_dir + 1 :].replace("\\", "/"))
+            for file in files:
+                pure_path = PurePath(file)
+                if len(patterns) == 0 or any(pure_path.match(pattern) for pattern in patterns):
+                    source_file = os.path.join(root, file)
+                    dest_file = s3_dest_path + "/" + file
+                    if not overwrite and dest_file in files_already_in_s3:
+                        LOGGER.debug("File already exists in S3 bucket: " + dest_file)
+                    else:
+                        LOGGER.info("Uploading " + dest_file)
+                        try_n_times(lambda: self.bucket.upload_file(source_file, dest_file))
 
     def download_if_s3_paths(self, paths: Iterable[S3Path]) -> List[Path]:
         return_paths = []

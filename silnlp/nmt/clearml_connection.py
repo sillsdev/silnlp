@@ -32,7 +32,7 @@ class SILClearML:
             exp_name = "/".join(name_parts[1:])
         if self.queue_name is None:
             self.task = None
-            self._load_config()
+            # self._load_config()
             LOGGER.info("No ClearML task initiated.")
             return
 
@@ -46,7 +46,7 @@ class SILClearML:
             )
 
             self._determine_clearml_project_name()
-            self._load_config()
+            # self._load_config()
 
             self.task.set_base_docker(
                 docker_image="ghcr.io/sillsdev/silnlp:latest",

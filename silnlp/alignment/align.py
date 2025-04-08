@@ -6,6 +6,8 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from ..common.environment import SIL_NLP_ENV
+from ..nmt.clearml_connection import SILClearML
 from .config import ALIGNERS, get_aligner, get_aligner_name, get_all_book_paths, load_config
 from .utils import get_experiment_dirs, get_experiment_name
 
@@ -70,9 +72,20 @@ def main() -> None:
     parser.add_argument("--aligners", nargs="*", metavar="aligner", default=[], help="Aligners")
     parser.add_argument("--skip-align", default=False, action="store_true", help="Skips aligning corpora")
     parser.add_argument("--skip-extract-lexicon", default=False, action="store_true", help="Skips extracting lexicons")
+    parser.add_argument(
+        "--clearml-queue",
+        default=None,
+        type=str,
+        help="Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run "
+        + "it locally and register it with ClearML.",
+    )
     args = parser.parse_args()
 
     aligner_ids = list(ALIGNERS.keys() if len(args.aligners) == 0 else args.aligners)
+
+    SIL_NLP_ENV.copy_alignment_experiment_from_bucket(args.experiments)  # patterns="config.yml"
+
+    clearml = SILClearML(args.experiments, args.clearml_queue)
 
     for exp_dir in get_experiment_dirs(args.experiments):
         exp_name = get_experiment_name(exp_dir)
@@ -90,6 +103,8 @@ def main() -> None:
         if not args.skip_extract_lexicon:
             LOGGER.info(f"Extracting lexicons {exp_name}")
             extract_lexicons(aligner_ids, exp_dir)
+
+    SIL_NLP_ENV.copy_alignment_experiment_to_bucket(args.experiments)
 
 
 if __name__ == "__main__":
