@@ -180,6 +180,7 @@ def add_stats(df: pd.DataFrame, sheet):
             sheet.write_number(f"{column_id}2", df[column_name].mean(), score_format)
             sheet.write_number(f"{column_id}3", df[column_name].median(), score_format)
             sheet.write_number(f"{column_id}4", df[column_name].std(), score_format)
+            # sheet.write_number(f"{column_id}4", 0, score_format)
             column_idx += 1
 
 
@@ -430,9 +431,9 @@ def add_score_to_chap(df: pd.DataFrame):
         key = book_name + " " + str(chap_num)
         if key not in chapters_pred:
             chapters_pred[key] = []
-            chapters_trg[key] = []
-            chapters_pred[key].append(row[PREDICTION])
-            chapters_trg[key].append([row[TRG_SENTENCE]])
+            chapters_trg[key] = [[]]
+        chapters_pred[key].append(row[PREDICTION])
+        chapters_trg[key][0].append(row[TRG_SENTENCE])
 
     return chapters_pred, chapters_trg
 
