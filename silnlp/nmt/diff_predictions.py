@@ -617,6 +617,7 @@ def main() -> None:
         type=str.lower,
         help=f"List of scorers - {_SUPPORTED_SCORERS}",
     )
+    parser.add_argument("--confidence", default=False, action="store_true", help="Show confidence scores")
     args = parser.parse_args()
 
     print("Git commit:", get_git_revision_hash())
@@ -699,61 +700,40 @@ def main() -> None:
     if exp1_type == "NMT":
         df.insert(2, SRC_TOKENS, list(strip_lang_codes(load_corpus(Path(os.path.join(exp1_dir, "test.src.txt"))))))
         prediction_col = "E"
-        df[CONFIDENCE] = get_sequence_confidences(
-            os.path.join(exp1_dir, f"test.trg-predictions.txt.{exp1_step}.confidences.tsv")
-        )
+        if args.confidence:
+            df[CONFIDENCE] = get_sequence_confidences(
+                os.path.join(exp1_dir, f"test.trg-predictions.txt.{exp1_step}.confidences.tsv")
+            )
 
     if args.chapter_score:
         add_scores(df, args.scorers, args.preserve_case, args.tokenize)
         df[["ChapName", "ChapNum", "SortNum"]] = df[VREF].apply(lambda x: pd.Series(extract_chapter(x)))
         df = df.sort_values(by=["ChapName", "ChapNum", "SortNum"])
 
-        df_chap = (
-            df.groupby(["ChapName", "ChapNum"])
-            .agg(
-                {
-                    SRC_SENTENCE: " ".join,
-                    SRC_TOKENS: " ".join,
-                    TRG_SENTENCE: " ".join,
-                    PREDICTION: " ".join,
-                    CONFIDENCE: [gmean, "mean", "median"],
-                    BLEU_SCORE: "mean",  # TODO: Don't hardcode
-                    CHRF3_SCORE: "mean",
-                    CHRF3PP_SCORE: "mean",
-                }
-            )
-            .reset_index()
-        )
-        df_chap.columns = [
-            "ChapName",
-            "ChapNum",
-            SRC_SENTENCE,
-            SRC_TOKENS,
-            TRG_SENTENCE,
-            PREDICTION,
-            CONFIDENCE,
-            "Confidence AMean",
-            "Confidence Median",
-            "BLEU Mean Score",
-            "chrF3 Mean Score",
-            "chrF3++ Mean Score",
-        ]
+        agg_dict = {
+            SRC_SENTENCE: " ".join,
+            SRC_TOKENS: " ".join,
+            TRG_SENTENCE: " ".join,
+            PREDICTION: " ".join,
+        }
+        if args.confidence:
+            agg_dict[CONFIDENCE] = [gmean, "mean", "median"]
+        agg_dict[BLEU_SCORE] = "mean"  # TODO: Remove when we no longer need to calculate mean scores
+        agg_dict[CHRF3_SCORE] = "mean"
+        agg_dict[CHRF3PP_SCORE] = "mean"
+
+        df_chap = df.groupby(["ChapName", "ChapNum"]).agg(agg_dict).reset_index()
+
+        columns = ["ChapName", "ChapNum", SRC_SENTENCE, SRC_TOKENS, TRG_SENTENCE, PREDICTION]
+        if args.confidence:
+            columns += [CONFIDENCE, "Confidence AMean", "Confidence Median"]
+        columns += ["BLEU Mean Score", "chrF3 Mean Score", "chrF3++ Mean Score"]
+
+        df_chap.columns = columns
+
         df_chap[VREF] = df_chap["ChapName"] + " " + df_chap["ChapNum"].astype(str)
-        df_chap = df_chap[
-            [
-                VREF,
-                SRC_SENTENCE,
-                SRC_TOKENS,
-                TRG_SENTENCE,
-                PREDICTION,
-                CONFIDENCE,
-                "Confidence AMean",
-                "Confidence Median",
-                "BLEU Mean Score",
-                "chrF3 Mean Score",
-                "chrF3++ Mean Score",
-            ]
-        ]
+        df_chap = df_chap[[VREF] + columns[2:]]
+
         add_chap_scores(df, df_chap, args.scorers, args.preserve_case)
         df = df_chap
     else:
