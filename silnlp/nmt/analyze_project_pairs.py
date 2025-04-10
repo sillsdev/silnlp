@@ -469,13 +469,11 @@ def main() -> None:
 
     get_git_revision_hash()
 
-    # Experiment path relative to MT/experiments
-    exp_name = args.experiment.replace("\\", "/")
-
     if args.clearml_queue is not None and "cpu" not in args.clearml_queue:
         LOGGER.warning("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
         exit()
-    clearml = SILClearML(exp_name, args.clearml_queue, bucket_service=SIL_NLP_ENV.bucket_service)
+    clearml = SILClearML(args.experiment, args.clearml_queue, bucket_service=SIL_NLP_ENV.bucket_service)
+    exp_name = clearml.name
 
     SIL_NLP_ENV.copy_experiment_from_bucket(exp_name)
 
