@@ -86,14 +86,14 @@ def get_corpus_stats(config: Config, exp_name: str, force_align: bool = False, d
                 pair_stats_path = alt_pair_stats_path
 
             if pair_stats_path.is_file():
-                LOGGER.info(f"\nUsing existing alignment scores from {pair_stats_path} for the alignment beteween {source} and {target}")
+                LOGGER.info(f"\n\nFound alignment scores between {source} and {target} in file: {pair_stats_path}")
                 pair_stats = pd.read_csv(pair_stats_path)
                 pair_stats["idx"] = corpus.index
                 pair_stats.set_index("idx", inplace=True)
                 corpus.insert(3, "score", pair_stats["score"])
             else:
                 aligner_id = config.data["aligner"]
-                LOGGER.info(f"\nComputing alignment beteween {source} and {target} using {get_aligner_name(aligner_id)}")
+                LOGGER.info(f"\n\nComputing alignment beteween {source} and {target} using {get_aligner_name(aligner_id)}")
                 add_alignment_scores(corpus, aligner_id)
                 corpus.to_csv(pair_stats_path, index=False)
                 SIL_NLP_ENV.copy_experiment_to_bucket(exp_name, pair_stats_path.name, overwrite=True)
