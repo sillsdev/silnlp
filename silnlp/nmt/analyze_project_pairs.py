@@ -515,7 +515,7 @@ def main() -> None:
         "*_alignment_breakdown.xlsx",
         "*_analysis.xlsx",
     ]
-    SIL_NLP_ENV.copy_experiment_to_bucket(exp_name, patterns, overwrite=args.recalculate)
+    SIL_NLP_ENV.copy_experiment_to_bucket(exp_name, patterns, overwrite=True)
 
 
 if __name__ == "__main__":
