@@ -57,9 +57,9 @@ DICT_TRG = "Target"
 _SUPPORTED_SCORERS = {BLEU_SCORE, SPBLEU_SCORE, CHRF3_SCORE, CHRF3P_SCORE, CHRF3PP_SCORE, TER_SCORE}
 
 
-def corpus_bleu(
-    hypothesis: List[str],
-    references: List[List[str]],
+def sentence_bleu(
+    hypothesis: str,
+    references: List[str],
     smooth_method: str = "exp",
     smooth_value: Optional[float] = None,
     lowercase: bool = False,
@@ -78,7 +78,7 @@ def corpus_bleu(
         tokenize=tokenize,
         effective_order=use_effective_order,
     )
-    return metric.corpus_score(hypothesis, references)
+    return metric.sentence_score(hypothesis, references)
 
 
 def extract_chapter(chapter_num):
@@ -440,7 +440,7 @@ def add_score_to_chap(df: pd.DataFrame):
     return chapters_pred, chapters_trg
 
 
-def add_chap_scores(df: pd.DataFrame, df_chap: pd.DataFrame, scorers: List[str], preserve_case: bool):
+def add_chap_scores(df: pd.DataFrame, df_chap: pd.DataFrame, scorers: List[str], preserve_case: bool, tokenize: bool):
     chapters_pred, chapters_trg = add_score_to_chap(df)
     for scorer in scorers:
         scorer = scorer.lower()
@@ -448,9 +448,7 @@ def add_chap_scores(df: pd.DataFrame, df_chap: pd.DataFrame, scorers: List[str],
             df_chap[BLEU_SCORE] = None
             print("Calculating BLEU scores ...")
             for chap, pred in chapters_pred.items():
-                bleu = corpus_bleu(
-                    pred, chapters_trg[chap], lowercase=not preserve_case, tokenize="intl", use_effective_order=False
-                )
+                bleu = sacrebleu.corpus_bleu(pred, chapters_trg[chap], lowercase=not preserve_case, tokenize=tokenize)
                 df_chap.loc[df_chap[VREF] == chap, BLEU_SCORE] = bleu.score
         if scorer == SPBLEU_SCORE.lower():
             df_chap[SPBLEU_SCORE] = None
@@ -507,7 +505,7 @@ def add_scores(df: pd.DataFrame, scorers: List[str], preserve_case: bool, tokeni
         scorer = scorer.lower()
         if scorer == BLEU_SCORE.lower():
             for index, row in tqdm(df.iterrows(), desc="Calculating BLEU scores ..."):
-                bleu = corpus_bleu(
+                bleu = sentence_bleu(
                     [row[PREDICTION]], [[row[TRG_SENTENCE]]], lowercase=not preserve_case, tokenize=tokenize
                 )
                 scores.append(bleu.score)
@@ -515,7 +513,7 @@ def add_scores(df: pd.DataFrame, scorers: List[str], preserve_case: bool, tokeni
         elif scorer == SPBLEU_SCORE.lower():
             for index, row in tqdm(df.iterrows(), desc="Calculating spBLEU scores ..."):
                 spbleu_score = sacrebleu.corpus_bleu(
-                    [row[PREDICTION]], [[row[TRG_SENTENCE]]], lowercase=not preserve_case, tokenize="flores200"
+                    row[PREDICTION], [row[TRG_SENTENCE]], lowercase=not preserve_case, tokenize="flores200"
                 )
                 scores.append(spbleu_score.score)
             df[SPBLEU_SCORE] = scores
@@ -699,7 +697,6 @@ def main() -> None:
             )
 
     if args.chapter_score:
-        add_scores(df, args.scorers, args.preserve_case, args.tokenize)
         df[["ChapName", "ChapNum", "SortNum"]] = df[VREF].apply(lambda x: pd.Series(extract_chapter(x)))
         df = df.sort_values(by=["ChapName", "ChapNum", "SortNum"])
 
@@ -723,7 +720,7 @@ def main() -> None:
         df_chap[VREF] = df_chap["ChapName"] + " " + df_chap["ChapNum"].astype(str)
         df_chap = df_chap[[VREF] + columns[2:]]
 
-        add_chap_scores(df, df_chap, args.scorers, args.preserve_case)
+        add_chap_scores(df, df_chap, args.scorers, args.preserve_case, args.tokenize)
         df = df_chap
     else:
         add_scores(df, args.scorers, args.preserve_case, args.tokenize)
