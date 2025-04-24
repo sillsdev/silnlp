@@ -1,7 +1,5 @@
 import logging
-import re
 import shutil
-import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -58,7 +56,6 @@ class SILClearML:
                     "--cap-add SYS_ADMIN",
                     "--device /dev/fuse",
                     "--security-opt apparmor=docker-apparmor",
-                    "--env SIL_NLP_DATA_PATH=/root/M",
                 ],
                 docker_setup_bash_script=[
                     "apt install -y python3-venv",
@@ -157,24 +154,3 @@ class SILClearML:
 
         self.config = create_config(exp_dir, config)
         SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns="config.yml")
-
-    def check_transfers(self) -> None:
-        # check the rclone log for transfer completion. Two successful checks are used to confirm that the transfer is complete.
-        LOGGER.info("Checking rclone transfer progress.")
-        time.sleep(60)  # wait for the latest poll interval
-        while True:
-            with open("/root/rclone_log.txt", "r", encoding="utf-8") as log_file:
-                log_lines = log_file.readlines()
-            transfers_complete = False
-            for line in reversed(log_lines):
-                if "vfs cache: cleaned" in line:
-                    transfers_complete = bool(re.match(r".*in use 0, to upload 0, uploading 0,.*", line))
-                    break
-            if transfers_complete:
-                LOGGER.info(line)
-                LOGGER.info("rclone transfers are complete.")
-                break
-            else:
-                LOGGER.info(line)
-                LOGGER.info("rclone transfers are still in progress. Waiting one minute.")
-            time.sleep(60)
