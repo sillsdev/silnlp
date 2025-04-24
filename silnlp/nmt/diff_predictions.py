@@ -677,7 +677,10 @@ def main() -> None:
     dictDf = load_dictionary(exp1_dir) if args.include_dict or args.show_dict else None
 
     # Create the initial data frame
-    df = pd.DataFrame(columns=[VREF, SRC_SENTENCE, TRG_SENTENCE, PREDICTION, CONFIDENCE])
+    df_columns = [VREF, SRC_SENTENCE, TRG_SENTENCE, PREDICTION]
+    if args.confidence:
+        df_columns.append(CONFIDENCE)
+    df = pd.DataFrame(columns=df_columns)
 
     # Load the datasets
     df[VREF] = list(load_corpus(Path(vref_file))) if vref_file is not None else ""
