@@ -506,14 +506,14 @@ def add_scores(df: pd.DataFrame, scorers: List[str], preserve_case: bool, tokeni
         if scorer == BLEU_SCORE.lower():
             for index, row in tqdm(df.iterrows(), desc="Calculating BLEU scores ..."):
                 bleu = sentence_bleu(
-                    [row[PREDICTION]], [[row[TRG_SENTENCE]]], lowercase=not preserve_case, tokenize=tokenize
+                    row[PREDICTION], [row[TRG_SENTENCE]], lowercase=not preserve_case, tokenize=tokenize
                 )
                 scores.append(bleu.score)
             df[BLEU_SCORE] = scores
         elif scorer == SPBLEU_SCORE.lower():
             for index, row in tqdm(df.iterrows(), desc="Calculating spBLEU scores ..."):
                 spbleu_score = sacrebleu.corpus_bleu(
-                    row[PREDICTION], [row[TRG_SENTENCE]], lowercase=not preserve_case, tokenize="flores200"
+                    [row[PREDICTION]], [[row[TRG_SENTENCE]]], lowercase=not preserve_case, tokenize="flores200"
                 )
                 scores.append(spbleu_score.score)
             df[SPBLEU_SCORE] = scores
