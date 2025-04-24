@@ -345,8 +345,8 @@ class SilNlpEnv:
 
 def check_transfers() -> None:
     # check if rclone is running
-    if not os.path.exists("/root/rclone_log.txt"):
-        LOGGER.info("No rclone mount log file found.  No transfers to check.")
+    if not os.path.exists("/root/rclone_log.txt") or os.getenv("SIL_NLP_DATA_PATH", default="") == "":
+        LOGGER.info("No rclone mount found. No transfers to check.")
         return
     # check the rclone log for transfer completion. Two successful checks are used to confirm that the transfer is complete.
     LOGGER.info("Checking rclone transfer progress.")
