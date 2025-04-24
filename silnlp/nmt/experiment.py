@@ -42,14 +42,17 @@ class SILExperiment:
         self.config.set_seed()
 
     def run(self):
-        if self.run_prep:
-            self.preprocess()
-        if self.run_train:
-            self.train()
-        if self.run_test:
-            self.test()
-        if self.run_translate:
-            self.translate()
+        try:
+            if self.run_prep:
+                self.preprocess()
+            if self.run_train:
+                self.train()
+            if self.run_test:
+                self.test()
+            if self.run_translate:
+                self.translate()
+        finally:
+            self.clearml.check_transfers()
 
     def preprocess(self):
         # Do some basic checks before starting the experiment

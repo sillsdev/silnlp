@@ -489,33 +489,38 @@ def main() -> None:
             LOGGER.error(f"The source file {str(file)} does not exist")
             return
 
-    file_patterns = ";".join([f.name for f in data_files])
-    collect_verse_counts(SIL_NLP_ENV.mt_scripture_dir, config.exp_dir, file_patterns, args.deutero, args.recalculate)
-    SIL_NLP_ENV.copy_experiment_to_bucket(exp_name, "*_detailed_percentages.csv", overwrite=args.recalculate)
-
-    get_corpus_stats(config, exp_name, args.recalculate, args.deutero)
-
-    # Add stats about projects in extra alignment files in the experiment folder
-    extra_projects = get_extra_alignments(config, args.deutero)
-    all_projects = set(extra_projects) | set([f.name for f in data_files])
-    if len(all_projects) > len(data_files):
-        LOGGER.info("Adding verse counts for projects in extra alignment files")
-        collect_verse_counts(SIL_NLP_ENV.mt_scripture_dir, config.exp_dir, ";".join(all_projects), args.deutero)
+    try:
+        file_patterns = ";".join([f.name for f in data_files])
+        collect_verse_counts(
+            SIL_NLP_ENV.mt_scripture_dir, config.exp_dir, file_patterns, args.deutero, args.recalculate
+        )
         SIL_NLP_ENV.copy_experiment_to_bucket(exp_name, "*_detailed_percentages.csv", overwrite=args.recalculate)
 
-    # Create summary outputs
-    if args.create_summaries:
-        create_alignment_breakdown_file(config, args.deutero)
-        create_summary_file(config)
+        get_corpus_stats(config, exp_name, args.recalculate, args.deutero)
 
-    patterns = [
-        "verse_counts.csv",
-        "verse_percentages.csv",
-        "corpus-stats.csv",
-        "*_alignment_breakdown.xlsx",
-        "*_analysis.xlsx",
-    ]
-    SIL_NLP_ENV.copy_experiment_to_bucket(exp_name, patterns, overwrite=True)
+        # Add stats about projects in extra alignment files in the experiment folder
+        extra_projects = get_extra_alignments(config, args.deutero)
+        all_projects = set(extra_projects) | set([f.name for f in data_files])
+        if len(all_projects) > len(data_files):
+            LOGGER.info("Adding verse counts for projects in extra alignment files")
+            collect_verse_counts(SIL_NLP_ENV.mt_scripture_dir, config.exp_dir, ";".join(all_projects), args.deutero)
+            SIL_NLP_ENV.copy_experiment_to_bucket(exp_name, "*_detailed_percentages.csv", overwrite=args.recalculate)
+
+        # Create summary outputs
+        if args.create_summaries:
+            create_alignment_breakdown_file(config, args.deutero)
+            create_summary_file(config)
+
+        patterns = [
+            "verse_counts.csv",
+            "verse_percentages.csv",
+            "corpus-stats.csv",
+            "*_alignment_breakdown.xlsx",
+            "*_analysis.xlsx",
+        ]
+        SIL_NLP_ENV.copy_experiment_to_bucket(exp_name, patterns, overwrite=True)
+    finally:
+        clearml.check_transfers()
 
 
 if __name__ == "__main__":
