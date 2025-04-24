@@ -58,7 +58,7 @@ class SILClearML:
                     "--cap-add SYS_ADMIN",
                     "--device /dev/fuse",
                     "--security-opt apparmor=docker-apparmor",
-                    # "--env SIL_NLP_DATA_PATH=/root/M", Uncomment if you want to use rclone mount rather than boto3
+                    "--env SIL_NLP_DATA_PATH=/root/M",
                 ],
                 docker_setup_bash_script=[
                     "apt install -y python3-venv",
