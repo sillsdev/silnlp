@@ -627,13 +627,6 @@ def main() -> None:
     exp1_name = args.exp1
     SIL_NLP_ENV.copy_experiment_from_bucket(exp1_name, no_checkpoints=True)
     exp1_dir = get_mt_exp_dir(exp1_name)
-
-    # SIL_NLP_ENV.copy_experiment_from_bucket(exp1_name, patterns="*.txt*")
-    # SIL_NLP_ENV.copy_experiment_from_bucket(exp1_name, patterns="*.csv")
-    # SIL_NLP_ENV.copy_experiment_from_bucket(exp1_name, patterns="*.yaml")
-
-    # exp1_type = "NMT"
-
     exp1_type = get_experiment_type(str(exp1_dir))
     if exp1_type != "SMT" and exp1_type != "NMT":
         print("Can't determine experiment type!")
@@ -717,17 +710,13 @@ def main() -> None:
             PREDICTION: " ".join,
         }
         if args.confidence:
-            agg_dict[CONFIDENCE] = [gmean, "mean", "median"]
-        agg_dict[BLEU_SCORE] = "mean"  # TODO: Remove when we no longer need to calculate mean scores
-        agg_dict[CHRF3_SCORE] = "mean"
-        agg_dict[CHRF3PP_SCORE] = "mean"
+            agg_dict[CONFIDENCE] = gmean
 
         df_chap = df.groupby(["ChapName", "ChapNum"]).agg(agg_dict).reset_index()
 
         columns = ["ChapName", "ChapNum", SRC_SENTENCE, SRC_TOKENS, TRG_SENTENCE, PREDICTION]
         if args.confidence:
-            columns += [CONFIDENCE, "Confidence AMean", "Confidence Median"]
-        columns += ["BLEU Mean Score", "chrF3 Mean Score", "chrF3++ Mean Score"]
+            columns += [CONFIDENCE]
 
         df_chap.columns = columns
 
