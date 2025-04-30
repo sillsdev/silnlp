@@ -9,14 +9,14 @@ from typing import Iterable, List, Optional
 import docx
 import nltk
 from iso639 import Lang
-from machine.corpora import (
+from machine.corpora import (  # UpdateUsfmMarkerBehavior, UpdateUsfmTextBehavior, FileParatextProjectTextUpdater,
     FileParatextProjectSettingsParser,
-    FileParatextProjectTextUpdater,
-    UpdateUsfmMarkerBehavior,
+    UpdateUsfmBehavior,
     UpdateUsfmParserHandler,
-    UpdateUsfmTextBehavior,
     UsfmFileText,
+    UsfmParserState,
     UsfmStylesheet,
+    UsfmTokenType,
     parse_usfm,
 )
 from machine.scripture import VerseRef
@@ -27,6 +27,36 @@ from .usfm_preservation import StatisticalUsfmPreserver
 
 LOGGER = logging.getLogger(__package__ + ".translate")
 nltk.download("punkt")
+
+
+class ParagraphUpdateUsfmParserHandler(UpdateUsfmParserHandler):
+    def _collect_tokens(self, state: UsfmParserState) -> None:
+        self._tokens.extend(self._new_tokens)
+        self._new_tokens.clear()
+        while self._token_index <= state.index + state.special_token_count:
+            if (
+                state.tokens[self._token_index].type == UsfmTokenType.PARAGRAPH
+                and state.tokens[self._token_index].marker != "rem"
+            ):
+                # Because paragraph marker tokens are passed at the end of the verse,
+                # it is necessary to calculate how many positions each one needs to move up.
+                # This logic inserts them between the earliest instance of consecutive text tokens in the verse
+                num_text = 0
+                rem_offset = 0
+                for i in range(len(self._tokens) - 1, -1, -1):
+                    if self._tokens[i].type == UsfmTokenType.TEXT:
+                        num_text += 1
+                    elif self._tokens[i].type == UsfmTokenType.PARAGRAPH and self._tokens[i].marker == "rem":
+                        rem_offset += num_text + 1
+                        num_text = 0
+                    else:
+                        break
+                if num_text >= 2:
+                    self._tokens.insert(-(rem_offset + num_text - 1), state.tokens[self._token_index])
+                    self._token_index += 1
+                    break  # should this be continue instead? is there just no difference bc only 1 paragraph marker is added at a time?
+            self._tokens.append(state.tokens[self._token_index])
+            self._token_index += 1
 
 
 def insert_draft_remark(
@@ -220,40 +250,54 @@ class Translator(ABC):
             # Insert translation into the USFM structure of an existing project
             # If the target project is not the same as the translated file's original project,
             # no verses outside of the ones translated will be overwritten
-            if trg_project is not None or src_from_project:
-                dest_updater = FileParatextProjectTextUpdater(
-                    get_project_dir(trg_project if trg_project is not None else src_file_path.parent.name)
-                )
-                usfm_out = dest_updater.update_usfm(
-                    book_id=src_file_text.id,
-                    rows=rows,
-                    text_behavior=(
-                        UpdateUsfmTextBehavior.PREFER_NEW
-                        if trg_project is not None
-                        else UpdateUsfmTextBehavior.STRIP_EXISTING
-                    ),
-                    paragraph_behavior=UpdateUsfmMarkerBehavior.STRIP,
-                    embed_behavior=UpdateUsfmMarkerBehavior.STRIP,
-                    style_behavior=UpdateUsfmMarkerBehavior.STRIP,
-                    preserve_paragraph_styles=[],
-                )
+            with open(src_file_path, encoding=src_settings.encoding if src_from_project else "utf-8-sig") as f:
+                usfm = f.read()
+            handler = ParagraphUpdateUsfmParserHandler(
+                rows=rows,
+                id_text=vrefs[0].book,
+                behavior=UpdateUsfmBehavior.STRIP_EXISTING,
+            )
+            stylesheet = src_settings.stylesheet if src_from_project else UsfmStylesheet("usfm.sty")
+            parse_usfm(usfm, handler, stylesheet, src_settings.versification if src_from_project else None)
+            usfm_out = handler.get_usfm(stylesheet)
 
-                if usfm_out is None:
-                    raise FileNotFoundError(f"Book {src_file_text.id} does not exist in target project {trg_project}")
-            else:  # Slightly more manual version for updating an individual file
-                with open(src_file_path, encoding="utf-8-sig") as f:
-                    usfm = f.read()
-                handler = UpdateUsfmParserHandler(
-                    rows=rows,
-                    id_text=vrefs[0].book,
-                    text_behavior=UpdateUsfmTextBehavior.STRIP_EXISTING,
-                    paragraph_behavior=UpdateUsfmMarkerBehavior.STRIP,
-                    embed_behavior=UpdateUsfmMarkerBehavior.STRIP,
-                    style_behavior=UpdateUsfmMarkerBehavior.STRIP,
-                    preserve_paragraph_styles=[],
-                )
-                parse_usfm(usfm, handler)
-                usfm_out = handler.get_usfm()
+            # NOTE: Above is a temporary use of the USFM updater,
+            # and below is the version compatible with the most current version of sil-machine/machine.py (1.6.2)
+
+            # if trg_project is not None or src_from_project:
+            #     dest_updater = FileParatextProjectTextUpdater(
+            #         get_project_dir(trg_project if trg_project is not None else src_file_path.parent.name)
+            #     )
+            #     usfm_out = dest_updater.update_usfm(
+            #         book_id=src_file_text.id,
+            #         rows=rows,
+            #         text_behavior=(
+            #             UpdateUsfmTextBehavior.PREFER_NEW
+            #             if trg_project is not None
+            #             else UpdateUsfmTextBehavior.STRIP_EXISTING
+            #         ),
+            #         paragraph_behavior=UpdateUsfmMarkerBehavior.STRIP,
+            #         embed_behavior=UpdateUsfmMarkerBehavior.STRIP,
+            #         style_behavior=UpdateUsfmMarkerBehavior.STRIP,
+            #         preserve_paragraph_styles=[],
+            #     )
+
+            #     if usfm_out is None:
+            #         raise FileNotFoundError(f"Book {src_file_text.id} does not exist in target project {trg_project}")
+            # else:  # Slightly more manual version for updating an individual file
+            #     with open(src_file_path, encoding="utf-8-sig") as f:
+            #         usfm = f.read()
+            #     handler = UpdateUsfmParserHandler(
+            #         rows=rows,
+            #         id_text=vrefs[0].book,
+            #         text_behavior=UpdateUsfmTextBehavior.STRIP_EXISTING,
+            #         paragraph_behavior=UpdateUsfmMarkerBehavior.STRIP,
+            #         embed_behavior=UpdateUsfmMarkerBehavior.STRIP,
+            #         style_behavior=UpdateUsfmMarkerBehavior.STRIP,
+            #         preserve_paragraph_styles=[],
+            #     )
+            #     parse_usfm(usfm, handler)
+            #     usfm_out = handler.get_usfm()
 
             # Insert draft remark and write to output path
             description = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
