@@ -15,6 +15,8 @@ from s3path import PureS3Path, S3Path, register_configuration_parameter
 
 load_dotenv()
 
+import atexit
+
 # Suppress urllib3 warnings about unverified HTTPS requests
 import urllib3
 
@@ -25,6 +27,7 @@ LOGGER = logging.getLogger(__name__)
 
 class SilNlpEnv:
     def __init__(self):
+        atexit.register(check_transfers)
         self.root_dir = Path.home() / ".silnlp"
         self.assets_dir = Path(__file__).parent.parent / "assets"
         self.is_bucket = False
@@ -338,6 +341,34 @@ class SilNlpEnv:
                 try_n_times(lambda: self.bucket.download_file(path.key, str(temp_path)))
                 return_paths.append(temp_path)
         return return_paths
+
+
+def check_transfers() -> None:
+    # check if rclone is running or if CHECK_TRANSFERS is set
+    if (
+        not os.path.exists("/root/rclone_log.txt")
+        or os.getenv("SIL_NLP_DATA_PATH", default="") == ""
+        or os.getenv("CHECK_TRANSFERS", default=0) == 0
+    ):
+        return
+    LOGGER.info("Checking rclone transfer progress.")
+    time.sleep(60)  # wait for the latest poll interval
+    while True:
+        with open("/root/rclone_log.txt", "r", encoding="utf-8") as log_file:
+            log_lines = log_file.readlines()
+        transfers_complete = False
+        for line in reversed(log_lines):
+            if "vfs cache: cleaned" in line:
+                transfers_complete = bool(re.match(r".*in use 0, to upload 0, uploading 0,.*", line))
+                break
+        if transfers_complete:
+            LOGGER.info(line)
+            LOGGER.info("rclone transfers are complete.")
+            break
+        else:
+            LOGGER.info(line)
+            LOGGER.info("rclone transfers are still in progress. Waiting one minute.")
+        time.sleep(60)
 
 
 def try_n_times(func: Callable, n=10):
