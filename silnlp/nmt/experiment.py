@@ -182,7 +182,7 @@ def main() -> None:
         nargs="*",
         metavar="scorer",
         choices=_SUPPORTED_SCORERS,
-        default=["bleu", "sentencebleu", "chrf3", "chrf3+", "chrf3++", "spbleu"],
+        default=["bleu", "sentencebleu", "chrf3", "chrf3+", "chrf3++", "spbleu", "confidence"],
         help=f"List of scorers - {_SUPPORTED_SCORERS}",
     )
 
