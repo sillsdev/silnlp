@@ -9,6 +9,7 @@ from typing import IO, Dict, List, Optional, Set, TextIO, Tuple
 import sacrebleu
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_number_to_id, get_chapters
 from sacrebleu.metrics import BLEU, BLEUScore
+from scipy.stats import gmean
 
 from ..common.environment import SIL_NLP_ENV
 from ..common.metrics import compute_meteor_score
@@ -22,7 +23,7 @@ LOGGER = logging.getLogger(__package__ + ".test")
 
 logging.getLogger("sacrebleu").setLevel(logging.ERROR)
 
-_SUPPORTED_SCORERS = ["bleu", "sentencebleu", "chrf3", "chrf3+", "chrf3++", "spbleu", "meteor", "ter"]
+_SUPPORTED_SCORERS = ["bleu", "sentencebleu", "chrf3", "chrf3+", "chrf3++", "spbleu", "meteor", "ter", "confidence"]
 
 
 class PairScore:
@@ -84,6 +85,7 @@ def score_pair(
     src_iso: str,
     trg_iso: str,
     predictions_detok_file_name: str,
+    predictions_conf_file_name: str,
     scorers: Set[str],
     config: Config,
     ref_projects: Set[str],
@@ -143,6 +145,14 @@ def score_pair(
         if ter_score.score >= 0:
             other_scores["TER"] = ter_score.score
 
+    if "confidence" in scorers:
+        confidences = []
+        with open(config.exp_dir / predictions_conf_file_name, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            for i in range(3, len(lines), 2):
+                confidences.append(float(lines[i].split("\t")[0]))
+        other_scores["confidence"] = gmean(confidences)
+
     return PairScore(book, src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores, draft_index)
 
 
@@ -151,6 +161,7 @@ def score_individual_books(
     src_iso: str,
     trg_iso: str,
     predictions_detok_file_name: str,
+    predictions_conf_file_name: str,
     scorers: Set[str],
     config: Config,
     ref_projects: Set[str],
@@ -164,7 +175,16 @@ def score_individual_books(
         overall_sys.extend(pair_sys)
         book_scores.append(
             score_pair(
-                pair_sys, pair_refs, book, src_iso, trg_iso, predictions_detok_file_name, scorers, config, ref_projects
+                pair_sys,
+                pair_refs,
+                book,
+                src_iso,
+                trg_iso,
+                predictions_detok_file_name,
+                predictions_conf_file_name,
+                scorers,
+                config,
+                ref_projects,
             )
         )
     return book_scores
@@ -370,6 +390,7 @@ def test_checkpoint(
     translation_file_names: List[str] = []
     refs_patterns: List[str] = []
     translation_detok_file_names: List[str] = []
+    translation_conf_file_names: List[str] = []
     suffix_str = "_".join(map(lambda n: book_number_to_id(n), sorted(books.keys())))
     if len(suffix_str) > 0:
         suffix_str += "-"
@@ -383,6 +404,7 @@ def test_checkpoint(
         translation_file_names.append(f"test.trg-predictions.txt.{suffix_str}")
         refs_patterns.append("test.trg.detok*.txt")
         translation_detok_file_names.append(f"test.trg-predictions.detok.txt.{suffix_str}")
+        translation_conf_file_names.append(f"test.trg-predictions.txt.{suffix_str}.confidences.tsv")
     else:
         # test data is split into separate files
         for src_iso in sorted(config.test_src_isos):
@@ -397,6 +419,7 @@ def test_checkpoint(
                     translation_file_names.append(f"{prefix}.trg-predictions.txt.{suffix_str}")
                     refs_patterns.append(f"{prefix}.trg.detok*.txt")
                     translation_detok_file_names.append(f"{prefix}.trg-predictions.detok.txt.{suffix_str}")
+                    translation_conf_file_names.append(f"{prefix}.trg-predictions.txt.{suffix_str}.confidences.tsv")
 
     checkpoint_name = "averaged checkpoint" if step == -1 else f"checkpoint {step}"
 
@@ -449,6 +472,7 @@ def test_checkpoint(
         predictions_file_name,
         refs_pattern,
         predictions_detok_file_name,
+        predictions_conf_file_name,
         draft_index,
     ) in zip(
         vref_file_names,
@@ -456,6 +480,7 @@ def test_checkpoint(
         translation_file_names,
         refs_patterns,
         translation_detok_file_names,
+        translation_conf_file_names,
         draft_indices,
     ):
         src_iso = config.default_test_src_iso
@@ -495,6 +520,7 @@ def test_checkpoint(
                 src_iso,
                 trg_iso,
                 predictions_detok_file_name,
+                predictions_conf_file_name,
                 scorers,
                 config,
                 ref_projects,
@@ -505,7 +531,14 @@ def test_checkpoint(
         if by_book:
             if len(book_dict) != 0:
                 book_scores = score_individual_books(
-                    book_dict, src_iso, trg_iso, predictions_detok_file_name, scorers, config, ref_projects
+                    book_dict,
+                    src_iso,
+                    trg_iso,
+                    predictions_detok_file_name,
+                    predictions_conf_file_name,
+                    scorers,
+                    config,
+                    ref_projects,
                 )
                 scores.extend(book_scores)
             else:
