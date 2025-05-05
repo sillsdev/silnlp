@@ -90,6 +90,7 @@ def score_pair(
     config: Config,
     ref_projects: Set[str],
     draft_index: int = 1,
+    pair_confs: Optional[List[float]] = None,
 ) -> PairScore:
     bleu_score = None
     if "bleu" in scorers:
@@ -146,11 +147,11 @@ def score_pair(
             other_scores["TER"] = ter_score.score
 
     if "confidence" in scorers:
-        confidences = []
-        with open(config.exp_dir / predictions_conf_file_name, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-            for i in range(3, len(lines), 2):
-                confidences.append(float(lines[i].split("\t")[0]))
+        if pair_confs is not None:
+            confidences = pair_confs
+        else:
+            with open(config.exp_dir / predictions_conf_file_name, "r", encoding="utf-8") as f:
+                confidences = [float(line.split("\t")[0]) for line in list(f)[3::2]]
         other_scores["confidence"] = gmean(confidences)
 
     return PairScore(book, src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores, draft_index)
@@ -172,6 +173,7 @@ def score_individual_books(
     for book, book_tuple in book_dict.items():
         pair_sys = book_tuple[0]
         pair_refs = book_tuple[1]
+        pair_confs = book_tuple[2]
         overall_sys.extend(pair_sys)
         book_scores.append(
             score_pair(
@@ -185,6 +187,7 @@ def score_individual_books(
                 scorers,
                 config,
                 ref_projects,
+                pair_confs=pair_confs,
             )
         )
     return book_scores
@@ -195,11 +198,12 @@ def process_individual_books(
     pred_file_path: Path,
     ref_file_paths: List[Path],
     vref_file_path: Path,
+    conf_file_path: Path,
     select_rand_ref_line: bool,
     books: Dict[int, List[int]],
 ) -> Dict[str, Tuple[List[str], List[List[str]]]]:
     # Output data structure
-    book_dict: Dict[str, Tuple[List[str], List[List[str]]]] = {}
+    book_dict: Dict[str, Tuple[List[str], List[List[str]], List[float]]] = {}
     with ExitStack() as stack:
         # Get all references
         ref_files: List[TextIO] = []
@@ -208,12 +212,15 @@ def process_individual_books(
 
         vref_file = stack.enter_context(vref_file_path.open("r", encoding="utf-8"))
         pred_file = stack.enter_context(pred_file_path.open("r", encoding="utf-8"))
+        conf_file = stack.enter_context(conf_file_path.open("r", encoding="utf-8"))
+        conf_list = [float(line.strip().split("\t")[0]) for line in list(conf_file)[3::2]]
 
-        for lines in zip(pred_file, vref_file, *ref_files):
+        for lines in zip(pred_file, vref_file, conf_list, *ref_files):
             # Get file lines
             pred_line = lines[0].strip()
             detok_pred = tokenizer.detokenize(pred_line)
             vref = lines[1].strip()
+            confidence = lines[2]
             # Get book
             if vref == "":
                 continue
@@ -223,24 +230,24 @@ def process_individual_books(
                 continue
             # If book not in dictionary add the book
             if vref.book not in book_dict:
-                book_dict[vref.book] = ([], [])
-            book_pred, book_refs = book_dict[vref.book]
+                book_dict[vref.book] = ([], [], [])
+            book_pred, book_refs, book_conf = book_dict[vref.book]
 
-            # Add detokenized prediction to nested dictionary
+            # Add detokenized prediction and confidence to nested dictionary
             book_pred.append(detok_pred)
-
+            book_conf.append(confidence)
             # Check if random ref line selected or not
             if select_rand_ref_line:
-                ref_lines: List[str] = [line.strip() for line in lines[2:] if len(line.strip()) > 0]
+                ref_lines: List[str] = [line.strip() for line in lines[3:] if len(line.strip()) > 0]
                 ref_index = random.randint(0, len(ref_lines) - 1)
-                ref_line = ref_lines[ref_index + 2].strip()
+                ref_line = ref_lines[ref_index + 3].strip()
                 if len(book_refs) == 0:
                     book_refs.append([])
                 book_refs[0].append(ref_line)
             else:
                 # For each reference text, add to book_refs
                 for ref_index in range(len(ref_files)):
-                    ref_line = lines[ref_index + 2].strip()
+                    ref_line = lines[ref_index + 3].strip()
                     if len(book_refs) == ref_index:
                         book_refs.append([])
                     book_refs[ref_index].append(ref_line)
@@ -251,6 +258,7 @@ def load_test_data(
     tokenizer: Tokenizer,
     vref_file_name: str,
     pred_file_name: str,
+    conf_file_name: str,
     ref_pattern: str,
     output_file_name: str,
     ref_projects: Set[str],
@@ -262,6 +270,7 @@ def load_test_data(
     refs: List[List[str]] = []
     book_dict: Dict[str, Tuple[List[str], List[List[str]]]] = {}
     pred_file_path = config.exp_dir / pred_file_name
+    conf_file_path = config.exp_dir / conf_file_name
     with ExitStack() as stack:
         pred_file = stack.enter_context(pred_file_path.open("r", encoding="utf-8"))
         out_file = stack.enter_context((config.exp_dir / output_file_name).open("w", encoding="utf-8"))
@@ -313,6 +322,7 @@ def load_test_data(
                 pred_file_path,
                 ref_file_paths,
                 vref_file_path,
+                conf_file_path,
                 select_rand_ref_line,
                 books,
             )
@@ -494,6 +504,7 @@ def test_checkpoint(
             tokenizer,
             vref_file_name,
             predictions_file_name,
+            predictions_conf_file_name,
             refs_pattern,
             predictions_detok_file_name,
             ref_projects,
