@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any, Iterable, List, Optional
 
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 import sacrebleu
 from sacrebleu.metrics.bleu import BLEU, BLEUScore
