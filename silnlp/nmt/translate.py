@@ -122,7 +122,7 @@ class TranslationTask:
                 translation_failed.append(book)
                 LOGGER.exception(f"Was not able to translate {book}.")
 
-        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM"), overwrite=True)
+        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM", "*.SFM.confidences.tsv"), overwrite=True)
 
         if len(translation_failed) > 0:
             raise RuntimeError(f"Some books failed to translate: {' '.join(translation_failed)}")

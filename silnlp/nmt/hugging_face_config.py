@@ -1235,7 +1235,7 @@ class HuggingFaceNMTModel(NMTModel):
         if isinstance(tokenizer, (NllbTokenizer, NllbTokenizerFast)):
             tokenizer = PunctuationNormalizingTokenizer(tokenizer)
 
-        pipeline = TranslationPipeline(
+        pipeline = SilTranslationPipeline(
             model=model,
             tokenizer=tokenizer,
             src_lang=lang_codes.get(src_iso, src_iso),
@@ -1262,7 +1262,25 @@ class HuggingFaceNMTModel(NMTModel):
         ):
             if isinstance(outputs, OutputGroup):
                 outputs = [outputs]
-            yield from [output_group.get_translated_text() for output_group in outputs]
+            for output_group in outputs:
+                translated_text = to_py_obj(output_group.get_translated_text())
+                all_ids = to_py_obj(output_group.get_token_ids())
+                all_scores = to_py_obj(output_group.get_token_scores())
+                sequence_score = to_py_obj(output_group.get_sequence_score())
+                ids = []
+                token_scores = []
+                for output_id, output_score in zip(all_ids, all_scores):
+                    output_ids = []
+                    output_scores = []
+                    for id, score in zip(output_id[1:], output_score[1:]):
+                        if id == tokenizer.pad_token_id:
+                            continue
+                        output_ids.append(id)
+                        output_scores.append(score)
+                    ids.append(output_ids)
+                    token_scores.append(output_scores)
+                tokens = [tokenizer.convert_ids_to_tokens(id_group) for id_group in ids]
+                yield translated_text, tokens, token_scores, sequence_score
 
     def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
         step: Optional[int] = None
@@ -1882,13 +1900,7 @@ class CustomNormalizerWrapper:
         self._tokenizer.normalize_normalized_string(line)
 
 
-class PretokenizedTranslationPipeline(TranslationPipeline):
-    def preprocess(self, *args, truncation=TruncationStrategy.DO_NOT_TRUNCATE, src_lang=None, tgt_lang=None):
-        model_inputs = batch_prepare_for_model(self.tokenizer, args, return_tensors=self.framework)
-        tgt_lang_id = self.tokenizer.convert_tokens_to_ids(tgt_lang)
-        model_inputs["forced_bos_token_id"] = tgt_lang_id
-        return model_inputs
-
+class SilTranslationPipeline(TranslationPipeline):
     def _forward(self, model_inputs, **generate_kwargs):
         in_b, input_length = model_inputs["input_ids"].shape
 
@@ -1980,6 +1992,14 @@ class PretokenizedTranslationPipeline(TranslationPipeline):
                 }
             )
         return records
+
+
+class PretokenizedTranslationPipeline(SilTranslationPipeline):
+    def preprocess(self, *args, truncation=TruncationStrategy.DO_NOT_TRUNCATE, src_lang=None, tgt_lang=None):
+        model_inputs = batch_prepare_for_model(self.tokenizer, args, return_tensors=self.framework)
+        tgt_lang_id = self.tokenizer.convert_tokens_to_ids(tgt_lang)
+        model_inputs["forced_bos_token_id"] = tgt_lang_id
+        return model_inputs
 
 
 def torch_gather_nd(params: torch.Tensor, indices: torch.Tensor, batch_dim: int = 0) -> torch.Tensor:
