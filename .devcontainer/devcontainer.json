@@ -8,9 +8,9 @@
 		// Path is relative to the devcontainer.json file.
 		"dockerfile": "Dockerfile",
 		"args": {
-            "MINIO_ENDPOINT_URL": "${localEnv:MINIO_ENDPOINT_URL}",
+			"MINIO_ENDPOINT_URL": "${localEnv:MINIO_ENDPOINT_URL}",
 			"MINIO_ENDPOINT_IP": "${localEnv:MINIO_ENDPOINT_IP}"
-        }
+		}
 	},
 	"runArgs": [
 		"--gpus",
@@ -36,7 +36,8 @@
 		"B2_KEY_ID": "${localEnv:B2_KEY_ID}",
 		"B2_APPLICATION_KEY": "${localEnv:B2_APPLICATION_KEY}",
 		"CLEARML_API_ACCESS_KEY": "${localEnv:CLEARML_API_ACCESS_KEY}",
-		"CLEARML_API_SECRET_KEY": "${localEnv:CLEARML_API_SECRET_KEY}"
+		"CLEARML_API_SECRET_KEY": "${localEnv:CLEARML_API_SECRET_KEY}",
+		"SIL_NLP_DATA_PATH": "/root/M"
 	},
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},
