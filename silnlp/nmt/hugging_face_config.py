@@ -271,7 +271,6 @@ def get_model_prefix(model: str) -> str:
 
 
 def get_parent_model_prefix(parent_exp: str) -> str:
-    SIL_NLP_ENV.copy_experiment_from_bucket(parent_exp, patterns="config.yml")
     parent_dir = Path(get_mt_exp_dir(parent_exp))
     with (parent_dir / "config.yml").open("r", encoding="utf-8") as file:
         parent_configs = yaml.safe_load(file)
@@ -283,7 +282,6 @@ def get_parent_model_prefix(parent_exp: str) -> str:
 def get_parent_model_name(parent_exp: str) -> str:
     parent_dir = Path(get_mt_exp_dir(parent_exp))
     parent_model_dir = parent_dir / "run"
-    SIL_NLP_ENV.copy_experiment_from_bucket(parent_exp, patterns="run/trainer_state.json")
     parent_model = get_parent_last_checkpoint(parent_model_dir)
     if has_best_checkpoint(parent_model_dir):
         parent_model = get_best_checkpoint(parent_model_dir)
@@ -496,7 +494,7 @@ class HuggingFaceConfig(Config):
         self, file_paths, vocab_size
     ) -> Tuple[List[str], Union[SentencePieceBPETokenizer, SentencePieceUnigramTokenizer]]:
         assert self._tokenizer is not None
-        files = [str(f) for f in SIL_NLP_ENV.download_if_s3_paths(file_paths)]
+        files = [str(f) for f in file_paths]
         sp_tokenizer = self._train_sp_tokenizer(files, vocab_size)
         sp_keys, tok_keys = sp_tokenizer.get_vocab().keys(), self._tokenizer.get_vocab().keys()
         missing_tokens = sorted(list(set(sp_keys) - set(tok_keys)))

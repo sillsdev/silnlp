@@ -68,14 +68,11 @@ class TranslationTask:
                 raise RuntimeError("A source project must be specified.")
             src_project = next(iter(config.src_projects))
 
-        SIL_NLP_ENV.copy_pt_project_from_bucket(src_project)
-
         src_project_dir = get_project_dir(src_project)
         if not src_project_dir.is_dir():
             raise FileNotFoundError(f"Source project {src_project} not found in projects folder {src_project_dir}")
 
         if any(len(book_nums[book]) > 0 for book in book_nums) and trg_project is not None:
-            SIL_NLP_ENV.copy_pt_project_from_bucket(trg_project)
 
             trg_project_dir = get_project_dir(trg_project)
             if not trg_project_dir.is_dir():
@@ -123,8 +120,6 @@ class TranslationTask:
             except Exception as e:
                 translation_failed.append(book)
                 LOGGER.exception(f"Was not able to translate {book}.")
-
-        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM", "*infer*", "*.confidences.tsv"), overwrite=True)
 
         if len(translation_failed) > 0:
             raise RuntimeError(f"Some books failed to translate: {' '.join(translation_failed)}")
@@ -176,8 +171,6 @@ class TranslationTask:
                 end = time.time()
                 print(f"Translated {src_file_path.name} to {trg_file_path.name} in {((end-start)/60):.2f} minutes")
 
-        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM*", "*.txt*", "*.confidences.tsv"), overwrite=True)
-
     def translate_files(
         self,
         src: str,
@@ -224,7 +217,6 @@ class TranslationTask:
         else:
             src_file_paths = list(p for p in src_path.rglob("*.*") if p.is_file())
 
-        exts = []
         for src_file_path in src_file_paths:
             if trg_path.is_dir():
                 if src_path.is_file():
@@ -241,7 +233,6 @@ class TranslationTask:
                 src_name = src_file_path.name
 
             ext = src_file_path.suffix.lower()
-            exts.append(f"*{ext}")
             LOGGER.info(f"Translating {src_name}")
             if ext == ".txt":
                 translator.translate_text(src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations)
@@ -262,44 +253,16 @@ class TranslationTask:
                     include_embeds=include_embeds,
                     experiment_ckpt_str=experiment_ckpt_str,
                 )
-        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM", *exts, "*.confidences.tsv"), overwrite=True)
 
-
-    def _init_translation_task(
-        self, experiment_suffix: str, patterns: List[str] = []
-    ) -> Tuple[Translator, Config, str]:
+    def _init_translation_task(self, experiment_suffix: str) -> Tuple[Translator, Config, str]:
         clearml = SILClearML(
             self.name,
             self.clearml_queue,
             project_suffix="_infer",
             experiment_suffix=experiment_suffix,
             commit=self.commit,
-            bucket_service=SIL_NLP_ENV.bucket_service,
         )
         self.name = clearml.name
-        cleaned_patterns = []
-        for pattern in patterns:
-            if self.name in pattern:
-                pattern = pattern.split(self.name, 1)[-1]
-            if pattern.startswith("/"):
-                pattern = pattern[1:]
-            if pattern.endswith("/"):
-                pattern = pattern[:-1]
-            cleaned_patterns.append(f"*{pattern}*")
-
-        SIL_NLP_ENV.copy_experiment_from_bucket(
-            self.name,
-            patterns=(
-                "*.vocab",
-                "*.model",
-                "*.yml",
-                "dict.*.txt",
-                "*.json",
-                "checkpoint",
-                "ckpt*.index",
-                *cleaned_patterns,
-            ),
-        )
 
         clearml.config.set_seed()
 
@@ -307,7 +270,6 @@ class TranslationTask:
         translator = NMTTranslator(model, self.checkpoint)
         if clearml.config.model_dir.exists():
             checkpoint_path, step = model.get_checkpoint_path(self.checkpoint)
-            SIL_NLP_ENV.copy_experiment_from_bucket(self.name, patterns=checkpoint_path.name + "/*.*")
             step_str = "avg" if step == -1 else str(step)
         else:
             step_str = "last"
