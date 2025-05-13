@@ -52,27 +52,7 @@ class SilNlpEnv:
         else:
             self.pt_dir = self.data_dir / "Paratext"
         self.pt_terms_dir = self.pt_dir / "terms"
-        if self.is_bucket:
-            sil_nlp_cache_dir = os.getenv("SIL_NLP_CACHE_PROJECT_DIR")
-            if sil_nlp_cache_dir is not None:
-                temp_path = Path(sil_nlp_cache_dir)
-                if not hasattr(self, "pt_projects_dir"):
-                    if temp_path.is_dir():
-                        LOGGER.info(
-                            f"Using cache dir: {sil_nlp_cache_dir} as per environment variable "
-                            + "SIL_NLP_CACHE_PROJECT_DIR."
-                        )
-                        self.pt_projects_dir = temp_path
-                    else:
-                        raise Exception(
-                            "The path in SIL_NLP_CACHE_PROJECT_DIR does not exist.  Create it first: "
-                            + sil_nlp_cache_dir
-                        )
-            else:
-                self.pt_projects_dir = Path(tempfile.TemporaryDirectory().name)
-                self.pt_projects_dir.mkdir()
-        else:
-            self.pt_projects_dir = self.pt_dir / "projects"
+        self.pt_projects_dir = self.pt_dir / "projects"
 
     def set_machine_translation_dir(self, mt_dir: Optional[Path] = None):
         if mt_dir is not None:
@@ -93,27 +73,8 @@ class SilNlpEnv:
             self.mt_scripture_dir = self.data_dir / os.getenv("SIL_NLP_MT_SCRIPTURE_DIR")
         else:
             self.mt_scripture_dir = self.mt_dir / "scripture"
-        if self.is_bucket:
-            sil_nlp_cache_dir = os.getenv("SIL_NLP_CACHE_EXPERIMENT_DIR")
-            if sil_nlp_cache_dir is not None:
-                temp_path = Path(sil_nlp_cache_dir)
-                if not hasattr(self, "mt_experiments_dir"):
-                    if temp_path.is_dir():
-                        LOGGER.info(
-                            f"Using cache dir: {sil_nlp_cache_dir} as per environment variable "
-                            + "SIL_NLP_CACHE_EXPERIMENT_DIR."
-                        )
-                        self.mt_experiments_dir = temp_path
-                    else:
-                        raise Exception(
-                            "The path in SIL_NLP_CACHE_EXPERIMENT_DIR does not exist.  Create it first: "
-                            + sil_nlp_cache_dir
-                        )
-            else:
-                self.mt_experiments_dir = Path(tempfile.TemporaryDirectory().name)
-                self.mt_experiments_dir.mkdir()
-        else:
-            self.mt_experiments_dir = self.mt_dir / "experiments"
+
+        self.mt_experiments_dir = self.mt_dir / "experiments"
 
     def set_alignment_dir(self, align_dir: Optional[Path] = None):
         if align_dir is not None:
@@ -127,9 +88,8 @@ class SilNlpEnv:
         self.align_experiments_dir = self.align_dir / "experiments"
 
     def resolve_data_dir(self) -> Path:
-        self.is_bucket = False
         sil_nlp_data_path = os.getenv("SIL_NLP_DATA_PATH", default="")
-        if sil_nlp_data_path != "" and self.bucket_service == "":
+        if sil_nlp_data_path != "":
             temp_path = Path(sil_nlp_data_path)
             if temp_path.is_dir():
                 LOGGER.info(f"Using workspace: {sil_nlp_data_path} as per environment variable SIL_NLP_DATA_PATH.")
