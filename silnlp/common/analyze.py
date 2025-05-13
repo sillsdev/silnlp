@@ -10,13 +10,13 @@ from tqdm import tqdm
 
 from ..alignment.config import get_aligner_name
 from ..alignment.utils import add_alignment_scores
+from ..nmt.clearml_connection import SILClearML
+from ..nmt.config import Config, get_data_file_pairs
 from .collect_verse_counts import DT_CANON, NT_CANON, OT_CANON, collect_verse_counts
 from .corpus import filter_parallel_corpus, get_mt_corpus_path, get_scripture_parallel_corpus, include_chapters
 from .environment import SIL_NLP_ENV
 from .script_utils import is_represented, predict_script_code
 from .utils import get_git_revision_hash
-from ..nmt.clearml_connection import SILClearML
-from ..nmt.config import Config, get_data_file_pairs
 
 LOGGER = logging.getLogger(__package__ + ".analyze_project_pairs")
 
@@ -93,10 +93,11 @@ def get_corpus_stats(config: Config, exp_name: str, force_align: bool = False, d
                 corpus.insert(3, "score", pair_stats["score"])
             else:
                 aligner_id = config.data["aligner"]
-                LOGGER.info(f"\n\nComputing alignment beteween {source} and {target} using {get_aligner_name(aligner_id)}")
+                LOGGER.info(
+                    f"\n\nComputing alignment beteween {source} and {target} using {get_aligner_name(aligner_id)}"
+                )
                 add_alignment_scores(corpus, aligner_id)
                 corpus.to_csv(pair_stats_path, index=False)
-                SIL_NLP_ENV.copy_experiment_to_bucket(exp_name, pair_stats_path.name, overwrite=True)
 
             alignment_score = corpus["score"].mean()
             filtered_count = 0
@@ -474,10 +475,8 @@ def main() -> None:
     if args.clearml_queue is not None and "cpu" not in args.clearml_queue:
         LOGGER.warning("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
         exit()
-    clearml = SILClearML(args.experiment, args.clearml_queue, bucket_service=SIL_NLP_ENV.bucket_service)
+    clearml = SILClearML(args.experiment, args.clearml_queue)
     exp_name = clearml.name
-
-    SIL_NLP_ENV.copy_experiment_from_bucket(exp_name)
 
     config = clearml.config
     config.set_seed()
@@ -493,7 +492,6 @@ def main() -> None:
 
     file_patterns = ";".join([f.name for f in data_files])
     collect_verse_counts(SIL_NLP_ENV.mt_scripture_dir, config.exp_dir, file_patterns, args.deutero, args.recalculate)
-    SIL_NLP_ENV.copy_experiment_to_bucket(exp_name, "*_detailed_percentages.csv", overwrite=args.recalculate)
 
     get_corpus_stats(config, exp_name, args.recalculate, args.deutero)
 
@@ -503,7 +501,6 @@ def main() -> None:
     if len(all_projects) > len(data_files):
         LOGGER.info("Adding verse counts for projects in extra alignment files")
         collect_verse_counts(SIL_NLP_ENV.mt_scripture_dir, config.exp_dir, ";".join(all_projects), args.deutero)
-        SIL_NLP_ENV.copy_experiment_to_bucket(exp_name, "*_detailed_percentages.csv", overwrite=args.recalculate)
 
     # Create summary outputs
     if args.create_summaries:
@@ -517,7 +514,6 @@ def main() -> None:
         "*_alignment_breakdown.xlsx",
         "*_analysis.xlsx",
     ]
-    SIL_NLP_ENV.copy_experiment_to_bucket(exp_name, patterns, overwrite=True)
 
 
 if __name__ == "__main__":
