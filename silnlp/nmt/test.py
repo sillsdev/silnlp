@@ -11,7 +11,6 @@ from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_number_to_i
 from sacrebleu.metrics import BLEU, BLEUScore
 from scipy.stats import gmean
 
-from ..common.environment import SIL_NLP_ENV
 from ..common.metrics import compute_meteor_score
 from ..common.utils import get_git_revision_hash
 from .config import CheckpointType, Config, NMTModel
@@ -583,7 +582,6 @@ def test(
     produce_multiple_translations: bool = False,
 ):
     exp_name = experiment
-    SIL_NLP_ENV.copy_experiment_from_bucket(exp_name)
     config = load_config(exp_name)
 
     if not any(config.exp_dir.glob("test*.src.txt")):
@@ -686,9 +684,6 @@ def test(
             produce_multiple_translations,
         )
 
-    SIL_NLP_ENV.copy_experiment_to_bucket(
-        exp_name, patterns=("scores-*.csv", "test.*trg-predictions.*"), overwrite=True
-    )
     for step in sorted(results.keys()):
         num_refs = results[step][0].num_refs
         if num_refs == 0:
