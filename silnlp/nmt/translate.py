@@ -255,7 +255,9 @@ class TranslationTask:
                     preserve_usfm_markers=preserve_usfm_markers,
                     experiment_ckpt_str=experiment_ckpt_str,
                 )
-        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM"), overwrite=True)
+        SIL_NLP_ENV.copy_experiment_to_bucket(
+            self.name, patterns=("*.SFM", "*.SFM.confidences.tsv", "*.txt", "*.txt.confidences.tsv"), overwrite=True
+        )
 
     def _init_translation_task(self, experiment_suffix: str) -> Tuple[Translator, Config, str]:
         clearml = SILClearML(
