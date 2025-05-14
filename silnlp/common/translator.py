@@ -99,15 +99,34 @@ class Translator(ABC):
         trg_iso: str,
         produce_multiple_translations: bool = False,
     ) -> None:
-        draft_set: DraftGroup = DraftGroup(
-            list(self.translate(load_corpus(src_file_path), src_iso, trg_iso, produce_multiple_translations))
-        )
+        output = list(self.translate(load_corpus(src_file_path), src_iso, trg_iso, produce_multiple_translations))
+        translations = [translation for translation, _, _, _ in output]
+        draft_set = DraftGroup(translations)
+        confidence_scores_suffix = ".confidences.tsv"
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
             if produce_multiple_translations:
                 trg_draft_file_path = trg_file_path.with_suffix(f".{draft_index}{trg_file_path.suffix}")
+                confidences_path = trg_file_path.with_suffix(
+                    f".{draft_index}{trg_file_path.suffix}{confidence_scores_suffix}"
+                )
             else:
                 trg_draft_file_path = trg_file_path
+                confidences_path = trg_file_path.with_suffix(f"{trg_file_path.suffix}{confidence_scores_suffix}")
             write_corpus(trg_draft_file_path, translated_draft)
+            with confidences_path.open("w", encoding="utf-8", newline="\n") as confidences_file:
+                confidences_file.write("\t".join(["Sequence Number"] + [f"Token {i}" for i in range(200)]) + "\n")
+                confidences_file.write("\t".join(["Sequence Score"] + [f"Token Score {i}" for i in range(200)]) + "\n")
+                for sentence_num, _ in enumerate(output):
+                    confidences_file.write(
+                        "\t".join([str(sentence_num)] + output[sentence_num][1][draft_index - 1]) + "\n"
+                    )
+                    confidences_file.write(
+                        "\t".join(
+                            [str(exp(output[sentence_num][3][draft_index - 1]))]
+                            + [str(exp(token_score)) for token_score in output[sentence_num][2][draft_index - 1]]
+                        )
+                        + "\n"
+                    )
 
     def translate_book(
         self,
