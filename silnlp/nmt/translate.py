@@ -166,7 +166,9 @@ class TranslationTask:
                 translator.translate_text(src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations)
                 end = time.time()
                 print(f"Translated {src_file_path.name} to {trg_file_path.name} in {((end-start)/60):.2f} minutes")
-        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM"), overwrite=True)
+        SIL_NLP_ENV.copy_experiment_to_bucket(
+            self.name, patterns=("*.SFM", "*.SFM.confidences.tsv", "*.txt", "*.txt.confidences.tsv"), overwrite=True
+        )
 
     def translate_files(
         self,
