@@ -124,7 +124,7 @@ class TranslationTask:
                 translation_failed.append(book)
                 LOGGER.exception(f"Was not able to translate {book}.")
 
-        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM", "*infer*"), overwrite=True)
+        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM", "*infer*", "*.confidences.tsv"), overwrite=True)
 
         if len(translation_failed) > 0:
             raise RuntimeError(f"Some books failed to translate: {' '.join(translation_failed)}")
@@ -175,7 +175,8 @@ class TranslationTask:
                 translator.translate_text(src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations)
                 end = time.time()
                 print(f"Translated {src_file_path.name} to {trg_file_path.name} in {((end-start)/60):.2f} minutes")
-        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM*", "*.txt*"), overwrite=True)
+
+        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM*", "*.txt*", "*.confidences.tsv"), overwrite=True)
 
     def translate_files(
         self,
@@ -261,7 +262,8 @@ class TranslationTask:
                     include_embeds=include_embeds,
                     experiment_ckpt_str=experiment_ckpt_str,
                 )
-        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM", *exts), overwrite=True)
+        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=("*.SFM", *exts, "*.confidences.tsv"), overwrite=True)
+
 
     def _init_translation_task(
         self, experiment_suffix: str, patterns: List[str] = []

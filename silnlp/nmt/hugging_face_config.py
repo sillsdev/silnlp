@@ -3,25 +3,13 @@ import json
 import logging
 import os
 import re
-import shutil
 from contextlib import ExitStack
 from copy import deepcopy
 from enum import Enum
 from itertools import repeat
+from math import exp, prod
 from pathlib import Path
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    TypeVar,
-    Union,
-    cast,
-)
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
 
 import datasets.utils.logging as datasets_logging
 import evaluate
@@ -36,10 +24,7 @@ from datasets import Dataset
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
 from sacremoses import MosesPunctNormalizer
 from tokenizers import AddedToken, NormalizedString, Regex
-from tokenizers.implementations import (
-    SentencePieceBPETokenizer,
-    SentencePieceUnigramTokenizer,
-)
+from tokenizers.implementations import SentencePieceBPETokenizer, SentencePieceUnigramTokenizer
 from tokenizers.normalizers import Normalizer
 from torch import Tensor, TensorType, nn, optim
 from torch.utils.data import Sampler
@@ -71,6 +56,7 @@ from transformers import (
     set_seed,
 )
 from transformers.convert_slow_tokenizer import convert_slow_tokenizer
+from transformers.generation import BeamSearchEncoderDecoderOutput, GreedySearchEncoderDecoderOutput
 from transformers.modeling_utils import unwrap_model
 from transformers.tokenization_utils import BatchEncoding, TruncationStrategy
 from transformers.trainer import TRAINING_ARGS_NAME
@@ -88,14 +74,7 @@ from transformers.utils.logging import tqdm
 from ..common.corpus import Term, count_lines, get_terms
 from ..common.environment import SIL_NLP_ENV
 from ..common.translator import DraftGroup, TranslationGroup
-from ..common.utils import (
-    NoiseMethod,
-    ReplaceRandomToken,
-    Side,
-    create_noise_methods,
-    get_mt_exp_dir,
-    merge_dict,
-)
+from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, get_mt_exp_dir, merge_dict
 from .config import CheckpointType, Config, DataFile, NMTModel
 from .tokenizer import NullTokenizer, Tokenizer
 
@@ -846,6 +825,12 @@ class OutputGroup:
     def get_token_ids(self) -> List[List[int]]:
         return [output["translation_token_ids"] for output in self.outputs]
 
+    def get_token_scores(self) -> List[float]:
+        return [output["token_scores"] for output in self.outputs]
+
+    def get_sequence_score(self) -> List[float]:
+        return [output["sequence_score"] for output in self.outputs]
+
 
 class HuggingFaceNMTModel(NMTModel):
     def __init__(self, config: HuggingFaceConfig, mixed_precision: bool, num_devices: int) -> None:
@@ -1142,26 +1127,45 @@ class HuggingFaceNMTModel(NMTModel):
                 if vref_path is not None:
                     vref_file = stack.enter_context(vref_path.open("r", encoding="utf-8-sig"))
                     vrefs = (VerseRef.from_string(line.strip(), ORIGINAL_VERSIFICATION) for line in vref_file)
-
-                draft_group = DraftGroup(
-                    list(
-                        self._translate_test_sentences(
-                            tokenizer, pipeline, sentences, vrefs, length, produce_multiple_translations
-                        )
+                output = list(
+                    self._translate_test_sentences(
+                        tokenizer, pipeline, sentences, vrefs, length, produce_multiple_translations
                     )
                 )
+                draft_group = DraftGroup([translation for translation, _, _, _ in output])
 
                 for draft_index, translated_draft in enumerate(draft_group.get_drafts(), 1):
-
+                    confidence_scores_suffix = ".confidences.tsv"
                     if produce_multiple_translations:
                         translation_draft_path = translation_path.with_suffix(
                             f".{draft_index}{translation_path.suffix}"
                         )
+                        confidences_path = translation_path.with_suffix(
+                            f".{draft_index}{translation_path.suffix}{confidence_scores_suffix}"
+                        )
                     else:
                         translation_draft_path = translation_path
+                        confidences_path = translation_path.with_suffix(
+                            f"{translation_path.suffix}{confidence_scores_suffix}"
+                        )
                     out_file = stack.enter_context(translation_draft_path.open("w", encoding="utf-8", newline="\n"))
-
                     out_file.write("\n".join(translated_draft) + "\n")
+                    confidences_file = stack.enter_context(confidences_path.open("w", encoding="utf-8", newline="\n"))
+                    confidences_file.write("\t".join(["Sequence Number"] + [f"Token {i}" for i in range(200)]) + "\n")
+                    confidences_file.write(
+                        "\t".join(["Sequence Score"] + [f"Token Score {i}" for i in range(200)]) + "\n"
+                    )
+                    for sentence_num, _ in enumerate(output):
+                        confidences_file.write(
+                            "\t".join([str(sentence_num)] + output[sentence_num][1][draft_index - 1]) + "\n"
+                        )
+                        confidences_file.write(
+                            "\t".join(
+                                [str(exp(output[sentence_num][3][draft_index - 1]))]
+                                + [str(exp(token_score)) for token_score in output[sentence_num][2][draft_index - 1]]
+                            )
+                            + "\n"
+                        )
 
     def _translate_test_sentences(
         self,
@@ -1188,10 +1192,24 @@ class HuggingFaceNMTModel(NMTModel):
             total=length,
             unit="ex",
         ):
-            ids = to_py_obj(output_group.get_token_ids())
-            ids = [[id for id in output[1:] if id != tokenizer.pad_token_id] for output in ids]
+            all_ids = to_py_obj(output_group.get_token_ids())
+            all_scores = to_py_obj(output_group.get_token_scores())
+            sequence_score = to_py_obj(output_group.get_sequence_score())
+            ids = []
+            token_scores = []
+            for output_id, output_score in zip(all_ids, all_scores):
+                output_ids = []
+                output_scores = []
+                for id, score in zip(output_id[1:], output_score[1:]):
+                    if id == tokenizer.pad_token_id:
+                        continue
+                    output_ids.append(id)
+                    output_scores.append(score)
+                ids.append(output_ids)
+                token_scores.append(output_scores)
+            # ids = [[id for id in output[1:] if id != tokenizer.pad_token_id] for output in ids]
             tokens = [tokenizer.convert_ids_to_tokens(id_group) for id_group in ids]
-            yield [" ".join(token_group) for token_group in tokens]
+            yield [" ".join(token_group) for token_group in tokens], tokens, token_scores, sequence_score
 
     def get_num_drafts(self) -> int:
         num_drafts = self._config.infer.get("num_drafts", 1)
@@ -1217,7 +1235,7 @@ class HuggingFaceNMTModel(NMTModel):
         if isinstance(tokenizer, (NllbTokenizer, NllbTokenizerFast)):
             tokenizer = PunctuationNormalizingTokenizer(tokenizer)
 
-        pipeline = TranslationPipeline(
+        pipeline = SilTranslationPipeline(
             model=model,
             tokenizer=tokenizer,
             src_lang=lang_codes.get(src_iso, src_iso),
@@ -1244,7 +1262,25 @@ class HuggingFaceNMTModel(NMTModel):
         ):
             if isinstance(outputs, OutputGroup):
                 outputs = [outputs]
-            yield from [output_group.get_translated_text() for output_group in outputs]
+            for output_group in outputs:
+                translated_text = to_py_obj(output_group.get_translated_text())
+                all_ids = to_py_obj(output_group.get_token_ids())
+                all_scores = to_py_obj(output_group.get_token_scores())
+                sequence_score = to_py_obj(output_group.get_sequence_score())
+                ids = []
+                token_scores = []
+                for output_id, output_score in zip(all_ids, all_scores):
+                    output_ids = []
+                    output_scores = []
+                    for id, score in zip(output_id[1:], output_score[1:]):
+                        if id == tokenizer.pad_token_id:
+                            continue
+                        output_ids.append(id)
+                        output_scores.append(score)
+                    ids.append(output_ids)
+                    token_scores.append(output_scores)
+                tokens = [tokenizer.convert_ids_to_tokens(id_group) for id_group in ids]
+                yield translated_text, tokens, token_scores, sequence_score
 
     def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
         step: Optional[int] = None
@@ -1864,12 +1900,138 @@ class CustomNormalizerWrapper:
         self._tokenizer.normalize_normalized_string(line)
 
 
-class PretokenizedTranslationPipeline(TranslationPipeline):
+class SilTranslationPipeline(TranslationPipeline):
+    def _forward(self, model_inputs, **generate_kwargs):
+        in_b, input_length = model_inputs["input_ids"].shape
+
+        if hasattr(self.model, "generation_config") and self.model.generation_config is not None:
+            config = self.model.generation_config
+        else:
+            config = self.model.config
+        generate_kwargs["min_length"] = generate_kwargs.get("min_length", config.min_length)
+        generate_kwargs["max_length"] = generate_kwargs.get("max_length", config.max_length)
+        self.check_inputs(input_length, generate_kwargs["min_length"], generate_kwargs["max_length"])
+        output = self.model.generate(
+            **model_inputs,
+            **generate_kwargs,
+            output_scores=True,
+            return_dict_in_generate=True,
+        )
+
+        if isinstance(output, BeamSearchEncoderDecoderOutput):
+            output_ids = output.sequences
+            beam_indices = output.beam_indices
+            scores = output.scores
+            sequences_scores = output.sequences_scores
+        elif isinstance(output, GreedySearchEncoderDecoderOutput):
+            output_ids = output.sequences
+            beam_indices = torch.zeros_like(output_ids)
+            assert output.scores is not None
+            scores = tuple(torch.nn.functional.log_softmax(logits, dim=-1) for logits in output.scores)
+            sequences_scores = output.sequences_scores
+        else:
+            raise RuntimeError("Cannot postprocess the output of the model.")
+
+        assert beam_indices is not None and scores is not None
+        out_b = output_ids.shape[0]
+        num_beams = scores[0].shape[0] // in_b
+        n_sequences = out_b // in_b
+        start_index = 0
+        if self.model.config.decoder_start_token_id is not None:
+            start_index = 1
+        indices = torch.stack(
+            (
+                torch.arange(output_ids.shape[1] - start_index, device=output_ids.device).expand(in_b, n_sequences, -1),
+                torch.reshape(beam_indices[:, start_index:] % num_beams, (in_b, n_sequences, -1)),
+                torch.reshape(output_ids[:, start_index:], (in_b, n_sequences, -1)),
+            ),
+            dim=3,
+        )
+        scores = torch.stack(scores, dim=0).reshape(len(scores), in_b, num_beams, -1).transpose(0, 1)
+        scores = torch_gather_nd(scores, indices, 1)
+        if self.model.config.decoder_start_token_id is not None:
+            scores = torch.cat((torch.zeros(scores.shape[0], scores.shape[1], 1, device=scores.device), scores), dim=2)
+        output_ids = output_ids.reshape(in_b, n_sequences, *output_ids.shape[1:])
+        return {
+            "output_ids": output_ids,
+            "scores": scores,
+            "sequences_scores": sequences_scores,
+        }
+
+    def postprocess(self, model_outputs, return_type=None, clean_up_tokenization_spaces=False):
+        if self.tokenizer is None:
+            raise RuntimeError("No tokenizer is specified.")
+
+        records = []
+        output_ids: torch.Tensor
+        scores: torch.Tensor
+        for output_ids, scores in zip(
+            model_outputs["output_ids"][0],
+            model_outputs["scores"][0],
+        ):
+            output_tokens: List[str] = []
+            output_token_ids: List[str] = []
+            output_indices: List[int] = []
+            for i, output_id in enumerate(output_ids):
+                id = cast(int, output_id.item())
+                output_tokens.append(self.tokenizer.convert_ids_to_tokens(id))
+                output_token_ids.append(id)
+                output_indices.append(i)
+            scores = scores[output_indices]
+            records.append(
+                {
+                    "translation_tokens": output_tokens,
+                    "translation_token_ids": output_token_ids,
+                    "token_scores": scores,
+                    "sequence_score": model_outputs["sequences_scores"][0],
+                    "translation_text": self.tokenizer.decode(
+                        output_ids,
+                        skip_special_tokens=True,
+                        clean_up_tokenization_spaces=clean_up_tokenization_spaces,
+                    ),
+                }
+            )
+        return records
+
+
+class PretokenizedTranslationPipeline(SilTranslationPipeline):
     def preprocess(self, *args, truncation=TruncationStrategy.DO_NOT_TRUNCATE, src_lang=None, tgt_lang=None):
         model_inputs = batch_prepare_for_model(self.tokenizer, args, return_tensors=self.framework)
         tgt_lang_id = self.tokenizer.convert_tokens_to_ids(tgt_lang)
         model_inputs["forced_bos_token_id"] = tgt_lang_id
         return model_inputs
+
+
+def torch_gather_nd(params: torch.Tensor, indices: torch.Tensor, batch_dim: int = 0) -> torch.Tensor:
+    """
+    torch_gather_nd implements tf.gather_nd in PyTorch.
+
+    This supports multiple batch dimensions as well as multiple channel dimensions.
+    """
+    index_shape = indices.shape[:-1]
+    num_dim = indices.size(-1)
+    tail_sizes = params.shape[batch_dim + num_dim :]
+
+    # flatten extra dimensions
+    for s in tail_sizes:
+        row_indices = torch.arange(s, device=params.device)
+        indices = indices.unsqueeze(-2)
+        indices = indices.repeat(*[1 for _ in range(indices.dim() - 2)], s, 1)
+        row_indices = row_indices.expand(*indices.shape[:-2], -1).unsqueeze(-1)
+        indices = torch.cat((indices, row_indices), dim=-1)
+        num_dim += 1
+
+    # flatten indices and params to batch specific ones instead of channel specific
+    for i in range(num_dim):
+        size = prod(params.shape[batch_dim + i + 1 : batch_dim + num_dim])
+        indices[..., i] *= size
+
+    indices = indices.sum(dim=-1)
+    params = params.flatten(batch_dim, -1)
+    indices = indices.flatten(batch_dim, -1)
+
+    out = torch.gather(params, dim=batch_dim, index=indices)
+    return out.reshape(*index_shape, *tail_sizes)
 
 
 class DataCollatorForSeq2SeqNoising:

@@ -3,6 +3,7 @@ import re
 from abc import ABC, abstractmethod
 from datetime import date
 from itertools import groupby
+from math import exp
 from pathlib import Path
 from typing import Iterable, List, Optional
 
@@ -127,15 +128,34 @@ class Translator(ABC):
         trg_iso: str,
         produce_multiple_translations: bool = False,
     ) -> None:
-        draft_set: DraftGroup = DraftGroup(
-            list(self.translate(load_corpus(src_file_path), src_iso, trg_iso, produce_multiple_translations))
-        )
+        output = list(self.translate(load_corpus(src_file_path), src_iso, trg_iso, produce_multiple_translations))
+        translations = [translation for translation, _, _, _ in output]
+        draft_set = DraftGroup(translations)
+        confidence_scores_suffix = ".confidences.tsv"
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
             if produce_multiple_translations:
                 trg_draft_file_path = trg_file_path.with_suffix(f".{draft_index}{trg_file_path.suffix}")
+                confidences_path = trg_file_path.with_suffix(
+                    f".{draft_index}{trg_file_path.suffix}{confidence_scores_suffix}"
+                )
             else:
                 trg_draft_file_path = trg_file_path
+                confidences_path = trg_file_path.with_suffix(f"{trg_file_path.suffix}{confidence_scores_suffix}")
             write_corpus(trg_draft_file_path, translated_draft)
+            with confidences_path.open("w", encoding="utf-8", newline="\n") as confidences_file:
+                confidences_file.write("\t".join(["Sequence Number"] + [f"Token {i}" for i in range(200)]) + "\n")
+                confidences_file.write("\t".join(["Sequence Score"] + [f"Token Score {i}" for i in range(200)]) + "\n")
+                for sentence_num, _ in enumerate(output):
+                    confidences_file.write(
+                        "\t".join([str(sentence_num)] + output[sentence_num][1][draft_index - 1]) + "\n"
+                    )
+                    confidences_file.write(
+                        "\t".join(
+                            [str(exp(output[sentence_num][3][draft_index - 1]))]
+                            + [str(exp(token_score)) for token_score in output[sentence_num][2][draft_index - 1]]
+                        )
+                        + "\n"
+                    )
 
     def translate_book(
         self,
@@ -234,7 +254,9 @@ class Translator(ABC):
                 sentences.pop(i)
                 empty_sents.append((i, vrefs.pop(i)))
 
-        translations = list(self.translate(sentences, src_iso, trg_iso, produce_multiple_translations, vrefs))
+        output = list(self.translate(sentences, src_iso, trg_iso, produce_multiple_translations, vrefs))
+
+        translations = [translation for translation, _, _, _ in output]
 
         # Add empty sentences back in
         # Prevents pre-existing text from showing up in the sections of translated text
@@ -242,6 +264,7 @@ class Translator(ABC):
             sentences.insert(idx, "")
             translations.insert(idx, ["" for _ in range(len(translations[0]))])
             vrefs.insert(idx, vref)
+            output.insert(idx, [None, None, None, None])
 
         draft_set: DraftGroup = DraftGroup(translations)
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
@@ -302,14 +325,33 @@ class Translator(ABC):
             # Insert draft remark and write to output path
             description = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
             usfm_out = insert_draft_remark(usfm_out, vrefs[0].book, description, experiment_ckpt_str)
-
+            confidence_scores_suffix = ".confidences.tsv"
             if produce_multiple_translations:
                 trg_draft_file_path = trg_file_path.with_suffix(f".{draft_index}{trg_file_path.suffix}")
+                confidences_path = trg_file_path.with_suffix(
+                    f".{draft_index}{trg_file_path.suffix}{confidence_scores_suffix}"
+                )
             else:
                 trg_draft_file_path = trg_file_path
-
+                confidences_path = trg_file_path.with_suffix(f"{trg_file_path.suffix}{confidence_scores_suffix}")
             with trg_draft_file_path.open("w", encoding=src_settings.encoding if src_from_project else "utf-8") as f:
                 f.write(usfm_out)
+            with confidences_path.open("w", encoding="utf-8", newline="\n") as confidences_file:
+                confidences_file.write("\t".join(["VRef"] + [f"Token {i}" for i in range(200)]) + "\n")
+                confidences_file.write("\t".join(["Sequence Score"] + [f"Token Score {i}" for i in range(200)]) + "\n")
+                for sentence_num, _ in enumerate(output):
+                    if output[sentence_num][0] is None:
+                        continue
+                    confidences_file.write(
+                        "\t".join([str(vrefs[sentence_num])] + output[sentence_num][1][draft_index - 1]) + "\n"
+                    )
+                    confidences_file.write(
+                        "\t".join(
+                            [str(exp(output[sentence_num][3][draft_index - 1]))]
+                            + [str(exp(token_score)) for token_score in output[sentence_num][2][draft_index - 1]]
+                        )
+                        + "\n"
+                    )
 
     def translate_docx(
         self,
