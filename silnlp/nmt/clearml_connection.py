@@ -53,6 +53,11 @@ class SILClearML:
                 docker_arguments=[
                     "--env TOKENIZERS_PARALLELISM='false'",
                     "--env BUCKET_SERVICE=" + self.bucket_service,
+                    "--cap-add SYS_ADMIN",
+                    "--device /dev/fuse",
+                    "--security-opt apparmor=docker-apparmor",
+                    "--env CHECK_TRANSFERS=1",
+                    "--env SIL_NLP_DATA_PATH=/root/M",
                 ],
                 docker_setup_bash_script=[
                     "apt install -y python3-venv",
@@ -65,6 +70,15 @@ class SILClearML:
                         "sed -i 's/include-system-site-packages = .*/include-system-site-packages = true/' "
                         "/root/.local/share/pipx/venvs/poetry/pyvenv.cfg"
                     ),
+                    # automatically connect to the MinIO bucket
+                    "apt-get install --no-install-recommends -y fuse3 rclone",
+                    "mkdir -p /root/M",
+                    "mkdir -p /root/.config/rclone",
+                    "cp scripts/rclone/rclone.conf /root/.config/rclone/",
+                    'sed -i -e "s#access_key_id = x*#access_key_id = $MINIO_ACCESS_KEY#" ~/.config/rclone/rclone.conf',
+                    'sed -i -e "s#secret_access_key = x*#secret_access_key = $MINIO_SECRET_KEY#" ~/.config/rclone/rclone.conf',
+                    'sed -i -e "s#endpoint = .*#endpoint = $MINIO_ENDPOINT_URL#" ~/.config/rclone/rclone.conf',
+                    "rclone mount --daemon --no-check-certificate --log-file=/root/rclone_log.txt --log-level=DEBUG --vfs-cache-mode full --use-server-modtime miniosilnlp:nlp-research /root/M",
                 ],
             )
             if self.commit:

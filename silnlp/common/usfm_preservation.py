@@ -25,51 +25,92 @@ class UsfmPreserver:
 
     # (sent_idx, start idx in text_only_sent, is_paragraph_marker, tok (inc. \ and spaces))
     _markers: List[Tuple[int, int, str]]
-    # (vref, embed)
-    _embeds: List[Tuple[ScriptureRef, str]]
+    # (sent_idx, embed)
+    _char_embeds: List[Tuple[int, str]]
+    # (sent_idx, ref, embed contents)
+    _para_embeds: List[Tuple[int, ScriptureRef, str]]
 
     def __init__(
-        self, src_sents: List[str], vrefs: List[ScriptureRef], stylesheet: UsfmStylesheet, include_embeds: bool = False
+        self,
+        src_sents: List[str],
+        vrefs: List[ScriptureRef],
+        stylesheet: UsfmStylesheet,
+        include_paragraph_markers: bool = False,
+        include_style_markers: bool = False,
+        include_embeds: bool = False,
     ):
+        # Remove sentences that are paragraph-type embeds
+        # NOTE: when only dealing with inserting back into the same USFM structure, i.e. translate_usfm's trg_project is None,
+        # paragraph-type embeds can be handled more simply with the updater's preserve_paragraph_styles argument,
+        # but because this approach is necessary when updating a project different from the source, we use it for both cases
+        src_sents, self._vrefs = self._remove_para_embeds(src_sents, vrefs, include_embeds)
+
         usfm_tokenizer = UsfmTokenizer(stylesheet)
         sentence_toks = []
         for sent in src_sents:
             sentence_toks.append(usfm_tokenizer.tokenize(sent))
-        self._vrefs = vrefs
 
-        self._src_sents = self._extract_markers(sentence_toks, include_embeds)
+        # Take markers and character-type embeds out of sentences
+        self._src_sents = self._extract_markers(
+            sentence_toks, include_paragraph_markers, include_style_markers, include_embeds
+        )
         self._src_tok_ranges = self._tokenize_sents(self._src_sents)
 
-    # Source sentences without USFM markers, to be used as input to an MT model
+    # Source sentences without USFM markers or embeds, to be used as input to an MT model
     @property
     def src_sents(self) -> List[str]:
         return self._src_sents
 
-    def _extract_markers(self, sentence_toks: List[List[UsfmToken]], include_embeds: bool) -> List[str]:
+    @property
+    def vrefs(self) -> List[ScriptureRef]:
+        return self._vrefs
+
+    def _remove_para_embeds(
+        self, sents: List[str], vrefs: List[ScriptureRef], include_embeds: bool
+    ) -> List[ScriptureRef]:
+        para_embeds = []
+        for i, (sent, ref) in reversed(list(enumerate(zip(sents, vrefs)))):
+            if (ref.path[-1].name if len(ref.path) > 0 else "") in PARAGRAPH_TYPE_EMBEDS:
+                para_embeds.append((i, ref, sent if include_embeds else ""))
+                sents.pop(i)
+                vrefs.pop(i)
+
+        self._para_embeds = list(reversed(para_embeds))
+        return sents, vrefs
+
+    def _extract_markers(
+        self,
+        sentence_toks: List[List[UsfmToken]],
+        include_paragraph_markers: bool,
+        include_style_markers: bool,
+        include_embeds: bool,
+    ) -> List[str]:
         markers = []
-        embeds = []
+        char_embeds = []
         text_only_sents = ["" for _ in sentence_toks]
-        for i, (toks, ref) in enumerate(zip(sentence_toks, self._vrefs)):
-            embed_text = ""
+        for i, toks in enumerate(sentence_toks):
+            embed_usfm = ""
             curr_embed = None
             for tok in toks:
                 if curr_embed is not None:
-                    embed_text += tok.to_usfm()
+                    embed_usfm += tok.to_usfm()
                     if tok.type == UsfmTokenType.END and tok.marker[:-1] == curr_embed.marker:
                         if include_embeds:
-                            embeds.append((ref, embed_text))
-                        embed_text = ""
+                            char_embeds.append((i, embed_usfm))
+                        embed_usfm = ""
                         curr_embed = None
                 elif tok.type == UsfmTokenType.NOTE or tok.marker in CHARACTER_TYPE_EMBEDS:
-                    embed_text += tok.to_usfm()
+                    embed_usfm += tok.to_usfm()
                     curr_embed = tok
-                elif tok.type in [UsfmTokenType.PARAGRAPH, UsfmTokenType.CHARACTER, UsfmTokenType.END]:
-                    markers.append((i, len(text_only_sents[i]), tok.type == UsfmTokenType.PARAGRAPH, tok.to_usfm()))
+                elif tok.type == UsfmTokenType.PARAGRAPH and include_paragraph_markers:
+                    markers.append((i, len(text_only_sents[i]), True, tok.to_usfm()))
+                elif tok.type in [UsfmTokenType.CHARACTER, UsfmTokenType.END] and include_style_markers:
+                    markers.append((i, len(text_only_sents[i]), False, tok.to_usfm()))
                 elif tok.type == UsfmTokenType.TEXT:
                     text_only_sents[i] += tok.text
 
         self._markers = markers
-        self._embeds = embeds
+        self._char_embeds = char_embeds
         return text_only_sents
 
     def construct_rows(self, translations: List[str]) -> List[Tuple[List[ScriptureRef], str]]:
@@ -104,37 +145,71 @@ class UsfmPreserver:
 
         # Construct rows for the USFM file
         embed_idx = 0
+        para_embed_idx = 0
         rows = []
-        for ref, translation, inserts in zip(self._vrefs, translations, to_insert):
-            row_text = translation[: inserts[0][0]] if len(inserts) > 0 else translation
 
-            for i, (insert_idx, is_para_marker, marker) in enumerate(inserts):
+        # Add any paragraph-style embeds that come before the main sentences
+        while para_embed_idx < len(self._para_embeds) and self._para_embeds[para_embed_idx][0] == para_embed_idx:
+            rows.append(([self._para_embeds[para_embed_idx][1]], self._para_embeds[para_embed_idx][2]))
+            para_embed_idx += 1
+
+        for i, (ref, translation, inserts) in enumerate(zip(self._vrefs, translations, to_insert)):
+            # row_text = translation[: inserts[0][0]] if len(inserts) > 0 else translation
+            row_texts = [translation[: inserts[0][0]]] if len(inserts) > 0 else [translation]
+
+            for j, (insert_idx, is_para_marker, marker) in enumerate(inserts):
                 if is_para_marker:
-                    row_text += "\n"
+                    row_texts.append("")
 
-                row_text += (
-                    marker
+                # row_text += (
+                row_texts[-1] += (
+                    #     ("\n" if is_para_marker else "")
+                    #     + marker
+                    (marker if not is_para_marker else "")
                     + (
                         " "  # Extra space if inserting an end marker before a non-punctuation character
                         if "*" in marker and insert_idx < len(translation) and translation[insert_idx].isalpha()
                         else ""
                     )
                     + (
-                        translation[insert_idx : inserts[i + 1][0]]
-                        if i + 1 < len(inserts)
+                        translation[insert_idx : inserts[j + 1][0]]
+                        if j + 1 < len(inserts)
                         else translation[insert_idx:]
                     )
                 )
                 # Prevent spaces before end markers
-                if i + 1 < len(inserts) and "*" in inserts[i + 1][2] and len(row_text) > 0 and row_text[-1] == " ":
-                    row_text = row_text[:-1]
+                # if j + 1 < len(inserts) and "*" in inserts[j + 1][2] and len(row_text) > 0 and row_text[-1] == " ":
+                #     row_text = row_text[:-1]
+                if (
+                    j + 1 < len(inserts)
+                    and "*" in inserts[j + 1][2]
+                    and len(row_texts[-1]) > 0
+                    and row_texts[-1][-1] == " "
+                ):
+                    row_texts[-1] = row_texts[-1][:-1]
 
             # Append any transferred embeds that match the current ScriptureRef
-            while embed_idx < len(self._embeds) and self._embeds[embed_idx][0] == ref:
-                row_text += self._embeds[embed_idx][1]
+            while embed_idx < len(self._char_embeds) and self._char_embeds[embed_idx][0] == i:
+                # row_text += self._char_embeds[embed_idx][1]
+                row_texts[-1] += self._char_embeds[embed_idx][1]
                 embed_idx += 1
 
-            rows.append(([ref], row_text))
+            # rows.append(([ref], row_text))
+            for row_text in row_texts:
+                rows.append(([ref], row_text))
+
+            # (sent_idx, ref, embed contents)
+            # sent_idx == orig idx, in order
+            while (
+                para_embed_idx < len(self._para_embeds)
+                and self._para_embeds[para_embed_idx][0] == i + 1 + para_embed_idx
+            ):
+                rows.append(([self._para_embeds[para_embed_idx][1]], self._para_embeds[para_embed_idx][2]))
+                para_embed_idx += 1
+
+        # # Add transferred paragraph-type embeds
+        # for sent_idx, ref, sent in self._para_embeds:
+        #     rows.insert(sent_idx, ([ref], sent))
 
         return rows
 
@@ -147,6 +222,9 @@ class UsfmPreserver:
     def _predict_marker_locations(
         self, adj_src_toks: List[int], trg_sents: List[str], trg_tok_ranges: List[List[Range[int]]]
     ) -> List[int]:
+        if len(adj_src_toks) == 0:
+            return []
+
         alignment_matrices: List[WordAlignmentMatrix] = self._get_alignment_matrices(trg_sents)
 
         # Gets the number of alignment pairs that "cross the line" between
@@ -228,9 +306,20 @@ class UsfmPreserver:
 
 
 class StatisticalUsfmPreserver(UsfmPreserver):
-    def __init__(self, src_sentences, vrefs, stylesheet, include_embeds, aligner="eflomal"):
+    def __init__(
+        self,
+        src_sentences,
+        vrefs,
+        stylesheet,
+        include_paragraph_markers,
+        include_style_markers,
+        include_embeds,
+        aligner="eflomal",
+    ):
         self._aligner = aligner
-        super().__init__(src_sentences, vrefs, stylesheet, include_embeds)
+        super().__init__(
+            src_sentences, vrefs, stylesheet, include_paragraph_markers, include_style_markers, include_embeds
+        )
 
     def _tokenize_sents(self, sents: List[str]) -> List[List[Range[int]]]:
         tokenizer = LatinWordTokenizer()
@@ -256,7 +345,7 @@ Necessary changes to use AttentionUsfmPreserver:
 
 
 class AttentionUsfmPreserver(UsfmPreserver):
-    def __init__(self, src_sents, vrefs, stylesheet, include_embeds):
+    def __init__(self, src_sents, vrefs, stylesheet, include_paragraph_markers, include_style_markers, include_embeds):
         raise NotImplementedError(
             "AttentionUsfmPreserver is not a supported class. See class definition for more information about the work needed to use."
         )
