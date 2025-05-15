@@ -151,7 +151,7 @@ def try_n_times(func: Callable, n=10):
 
 def pathify(path: Path) -> Path:
     # If it does not act like a path, make it a path
-    if type(path) in Path:
+    if isinstance(path, Path):
         return path
     else:
         return Path(path)
