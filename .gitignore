@@ -39,3 +39,4 @@ tests/**/temp*
 
 # omit any clean_projects reports.
 /**/clean_projects*.csv
+rclone_log.txt
