@@ -10,54 +10,23 @@ from typing import Iterable, List, Optional
 import docx
 import nltk
 from iso639 import Lang
-from machine.corpora import (  # UpdateUsfmMarkerBehavior, UpdateUsfmTextBehavior, FileParatextProjectTextUpdater,
+from machine.corpora import (
     FileParatextProjectSettingsParser,
-    UpdateUsfmBehavior,
+    FileParatextProjectTextUpdater,
+    UpdateUsfmMarkerBehavior,
     UpdateUsfmParserHandler,
+    UpdateUsfmTextBehavior,
     UsfmFileText,
-    UsfmParserState,
-    UsfmStylesheet,
-    UsfmTokenType,
     parse_usfm,
 )
 from machine.scripture import VerseRef
 
 from .corpus import load_corpus, write_corpus
 from .paratext import get_book_path, get_iso, get_project_dir
-from .usfm_preservation import StatisticalUsfmPreserver
+from .usfm_preservation import construct_place_markers_handler
 
 LOGGER = logging.getLogger(__package__ + ".translate")
 nltk.download("punkt")
-
-
-class ParagraphUpdateUsfmParserHandler(UpdateUsfmParserHandler):
-    def _collect_tokens(self, state: UsfmParserState) -> None:
-        self._tokens.extend(self._new_tokens)
-        self._new_tokens.clear()
-        while self._token_index <= state.index + state.special_token_count:
-            if (
-                state.tokens[self._token_index].type == UsfmTokenType.PARAGRAPH
-                and state.tokens[self._token_index].marker != "rem"
-            ):
-                # Because paragraph marker tokens are passed at the end of the verse,
-                # it is necessary to calculate how many positions each one needs to move up.
-                # This logic inserts them between the earliest instance of consecutive text tokens in the verse
-                num_text = 0
-                rem_offset = 0
-                for i in range(len(self._tokens) - 1, -1, -1):
-                    if self._tokens[i].type == UsfmTokenType.TEXT:
-                        num_text += 1
-                    elif self._tokens[i].type == UsfmTokenType.PARAGRAPH and self._tokens[i].marker == "rem":
-                        rem_offset += num_text + 1
-                        num_text = 0
-                    else:
-                        break
-                if num_text >= 2:
-                    self._tokens.insert(-(rem_offset + num_text - 1), state.tokens[self._token_index])
-                    self._token_index += 1
-                    break  # should this be continue instead? is there just no difference bc only 1 paragraph marker is added at a time?
-            self._tokens.append(state.tokens[self._token_index])
-            self._token_index += 1
 
 
 def insert_draft_remark(
@@ -216,43 +185,28 @@ class Translator(ABC):
                 src_settings.get_book_id(src_file_path.name),
                 src_file_path,
                 src_settings.versification,
-                include_markers=True,
                 include_all_text=True,
                 project=src_settings.name,
             )
         else:
-            src_file_text = UsfmFileText(
-                "usfm.sty", "utf-8-sig", "", src_file_path, include_markers=True, include_all_text=True
-            )
+            src_file_text = UsfmFileText("usfm.sty", "utf-8-sig", "", src_file_path, include_all_text=True)
 
         sentences = [re.sub(" +", " ", s.text.strip()) for s in src_file_text]
         vrefs = [s.ref for s in src_file_text]
         LOGGER.info(f"File {src_file_path} parsed correctly.")
 
         # Filter sentences
+        empty_sents = []
         for i in reversed(range(len(sentences))):
             if len(chapters) > 0 and vrefs[i].chapter_num not in chapters:
                 sentences.pop(i)
                 vrefs.pop(i)
-
-        usfm_preserver = StatisticalUsfmPreserver(
-            sentences,
-            vrefs,
-            src_settings.stylesheet if src_from_project else UsfmStylesheet("usfm.sty"),
-            include_paragraph_markers,
-            include_style_markers,
-            include_embeds,
-            "eflomal",
-        )
-        sentences = usfm_preserver.src_sents
-        vrefs = usfm_preserver.vrefs
-
-        # Don't translate empty sentences
-        empty_sents = []
-        for i in reversed(range(len(sentences))):
-            if len(sentences[i].strip()) == 0:
+            elif len(sentences[i].strip()) == 0:
                 sentences.pop(i)
                 empty_sents.append((i, vrefs.pop(i)))
+        # TODO: need to filter out embeds? they will each have their own sentence now
+        # include_all_markers=False and include_all_text=True gives embeds, section headers, and the intro
+        # is machine taking care of this for now, i.e. ignoring embeds?
 
         output = list(self.translate(sentences, src_iso, trg_iso, produce_multiple_translations, vrefs))
 
@@ -266,61 +220,56 @@ class Translator(ABC):
             vrefs.insert(idx, vref)
             output.insert(idx, [None, None, None, None])
 
+        # Update behaviors
+        tb = UpdateUsfmTextBehavior.PREFER_NEW if trg_project is not None else UpdateUsfmTextBehavior.STRIP_EXISTING
+        pb = UpdateUsfmMarkerBehavior.PRESERVE if include_paragraph_markers else UpdateUsfmMarkerBehavior.STRIP
+        sb = UpdateUsfmMarkerBehavior.PRESERVE if include_style_markers else UpdateUsfmMarkerBehavior.STRIP
+        eb = UpdateUsfmMarkerBehavior.PRESERVE if include_embeds else UpdateUsfmMarkerBehavior.STRIP
+
         draft_set: DraftGroup = DraftGroup(translations)
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
-            rows = usfm_preserver.construct_rows(translated_draft)
+            # TODO: make actual list for verse ranges? was this the issue w/ verse ranges?
+            rows = [([ref], translation) for ref, translation in zip(vrefs, translated_draft)]
+
+            update_block_handlers = []
+            if include_paragraph_markers or include_style_markers or include_embeds:
+                update_block_handlers.append(construct_place_markers_handler(vrefs, sentences, translated_draft))
 
             # Insert translation into the USFM structure of an existing project
             # If the target project is not the same as the translated file's original project,
             # no verses outside of the ones translated will be overwritten
-            with open(src_file_path, encoding=src_settings.encoding if src_from_project else "utf-8-sig") as f:
-                usfm = f.read()
-            handler = ParagraphUpdateUsfmParserHandler(
-                rows=rows,
-                id_text=vrefs[0].book,
-                behavior=UpdateUsfmBehavior.STRIP_EXISTING,
-            )
-            stylesheet = src_settings.stylesheet if src_from_project else UsfmStylesheet("usfm.sty")
-            parse_usfm(usfm, handler, stylesheet, src_settings.versification if src_from_project else None)
-            usfm_out = handler.get_usfm(stylesheet)
+            if trg_project is not None or src_from_project:
+                dest_updater = FileParatextProjectTextUpdater(
+                    get_project_dir(trg_project if trg_project is not None else src_file_path.parent.name)
+                )
+                usfm_out = dest_updater.update_usfm(
+                    book_id=src_file_text.id,
+                    rows=rows,
+                    text_behavior=tb,
+                    paragraph_behavior=pb,
+                    embed_behavior=eb,
+                    style_behavior=sb,
+                    preserve_paragraph_styles=[],
+                    update_block_handlers=update_block_handlers,
+                )
 
-            # NOTE: Above is a temporary use of the USFM updater,
-            # and below is the version compatible with the most current version of sil-machine/machine.py (1.6.2)
-
-            # if trg_project is not None or src_from_project:
-            #     dest_updater = FileParatextProjectTextUpdater(
-            #         get_project_dir(trg_project if trg_project is not None else src_file_path.parent.name)
-            #     )
-            #     usfm_out = dest_updater.update_usfm(
-            #         book_id=src_file_text.id,
-            #         rows=rows,
-            #         text_behavior=(
-            #             UpdateUsfmTextBehavior.PREFER_NEW
-            #             if trg_project is not None
-            #             else UpdateUsfmTextBehavior.STRIP_EXISTING
-            #         ),
-            #         paragraph_behavior=UpdateUsfmMarkerBehavior.STRIP,
-            #         embed_behavior=UpdateUsfmMarkerBehavior.STRIP,
-            #         style_behavior=UpdateUsfmMarkerBehavior.STRIP,
-            #         preserve_paragraph_styles=[],
-            #     )
-
-            #     if usfm_out is None:
-            #         raise FileNotFoundError(f"Book {src_file_text.id} does not exist in target project {trg_project}")
-            # else:  # Slightly more manual version for updating an individual file
-            #     with open(src_file_path, encoding="utf-8-sig") as f:
-            #         usfm = f.read()
-            #     handler = UpdateUsfmParserHandler(
-            #         rows=rows,
-            #         id_text=vrefs[0].book,
-            #         text_behavior=UpdateUsfmTextBehavior.STRIP_EXISTING,
-            #         paragraph_behavior=UpdateUsfmMarkerBehavior.STRIP,
-            #         embed_behavior=UpdateUsfmMarkerBehavior.STRIP,
-            #         style_behavior=UpdateUsfmMarkerBehavior.STRIP,
-            #         preserve_paragraph_styles=[],
-            #     )
-            #     parse_usfm(usfm, handler)
-            #     usfm_out = handler.get_usfm()
+                if usfm_out is None:
+                    raise FileNotFoundError(f"Book {src_file_text.id} does not exist in target project {trg_project}")
+            else:  # Slightly more manual version for updating an individual file
+                with open(src_file_path, encoding="utf-8-sig") as f:
+                    usfm = f.read()
+                handler = UpdateUsfmParserHandler(
+                    rows=rows,
+                    id_text=vrefs[0].book,
+                    text_behavior=tb,
+                    paragraph_behavior=pb,
+                    embed_behavior=eb,
+                    style_behavior=sb,
+                    preserve_paragraph_styles=[],
+                    update_block_handlers=update_block_handlers,
+                )
+                parse_usfm(usfm, handler)
+                usfm_out = handler.get_usfm()
 
             # Insert draft remark and write to output path
             description = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
