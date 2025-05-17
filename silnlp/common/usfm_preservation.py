@@ -113,7 +113,7 @@ class UsfmPreserver:
                 sents.pop(i)
                 vrefs.pop(i)
 
-        self._para_embeds = list(reversed(para_embeds))
+        self._para_embeds = reversed(para_embeds)
         return sents, vrefs
 
     def _extract_markers(
@@ -183,27 +183,15 @@ class UsfmPreserver:
 
         # Construct rows for the USFM file
         embed_idx = 0
-        para_embed_idx = 0
         rows = []
 
-        # Add any paragraph-style embeds that come before the main sentences
-        while para_embed_idx < len(self._para_embeds) and self._para_embeds[para_embed_idx][0] == para_embed_idx:
-            rows.append(([self._para_embeds[para_embed_idx][1]], self._para_embeds[para_embed_idx][2]))
-            para_embed_idx += 1
-
         for i, (ref, translation, inserts) in enumerate(zip(self._vrefs, translations, to_insert)):
-            # row_text = translation[: inserts[0][0]] if len(inserts) > 0 else translation
-            row_texts = [translation[: inserts[0][0]]] if len(inserts) > 0 else [translation]
+            row_text = translation[: inserts[0][0]] if len(inserts) > 0 else translation
 
             for j, (insert_idx, is_para_marker, marker) in enumerate(inserts):
-                if is_para_marker:
-                    row_texts.append("")
-
-                # row_text += (
-                row_texts[-1] += (
-                    #     ("\n" if is_para_marker else "")
-                    #     + marker
-                    (marker if not is_para_marker else "")
+                row_text += (
+                    ("\n" if is_para_marker else "")
+                    + marker
                     + (
                         " "  # Extra space if inserting an end marker before a non-punctuation character
                         if "*" in marker and insert_idx < len(translation) and translation[insert_idx].isalpha()
@@ -216,38 +204,19 @@ class UsfmPreserver:
                     )
                 )
                 # Prevent spaces before end markers
-                # if j + 1 < len(inserts) and "*" in inserts[j + 1][2] and len(row_text) > 0 and row_text[-1] == " ":
-                #     row_text = row_text[:-1]
-                if (
-                    j + 1 < len(inserts)
-                    and "*" in inserts[j + 1][2]
-                    and len(row_texts[-1]) > 0
-                    and row_texts[-1][-1] == " "
-                ):
-                    row_texts[-1] = row_texts[-1][:-1]
+                if j + 1 < len(inserts) and "*" in inserts[j + 1][2] and len(row_text) > 0 and row_text[-1] == " ":
+                    row_text = row_text[:-1]
 
             # Append any transferred embeds that match the current ScriptureRef
             while embed_idx < len(self._char_embeds) and self._char_embeds[embed_idx][0] == i:
-                # row_text += self._char_embeds[embed_idx][1]
-                row_texts[-1] += self._char_embeds[embed_idx][1]
+                row_text += self._char_embeds[embed_idx][1]
                 embed_idx += 1
 
-            # rows.append(([ref], row_text))
-            for row_text in row_texts:
-                rows.append(([ref], row_text))
+            rows.append(([ref], row_text))
 
-            # (sent_idx, ref, embed contents)
-            # sent_idx == orig idx, in order
-            while (
-                para_embed_idx < len(self._para_embeds)
-                and self._para_embeds[para_embed_idx][0] == i + 1 + para_embed_idx
-            ):
-                rows.append(([self._para_embeds[para_embed_idx][1]], self._para_embeds[para_embed_idx][2]))
-                para_embed_idx += 1
-
-        # # Add transferred paragraph-type embeds
-        # for sent_idx, ref, sent in self._para_embeds:
-        #     rows.insert(sent_idx, ([ref], sent))
+        # Add transferred paragraph-type embeds
+        for sent_idx, ref, sent in self._para_embeds:
+            rows.insert(sent_idx, ([ref], sent))
 
         return rows
 
