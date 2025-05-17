@@ -17,13 +17,15 @@ from machine.corpora import (
     UpdateUsfmParserHandler,
     UpdateUsfmTextBehavior,
     UsfmFileText,
+    UsfmStylesheet,
+    UsfmTextType,
     parse_usfm,
 )
 from machine.scripture import VerseRef
 
 from .corpus import load_corpus, write_corpus
 from .paratext import get_book_path, get_iso, get_project_dir
-from .usfm_preservation import construct_place_markers_handler
+from .usfm_preservation import PARAGRAPH_TYPE_EMBEDS, construct_place_markers_handler
 
 LOGGER = logging.getLogger(__package__ + ".translate")
 nltk.download("punkt")
@@ -35,7 +37,7 @@ def insert_draft_remark(
     description: str,
     experiment_ckpt_str: str,
 ) -> str:
-    remark = f"\\rem This draft of {book} was machine translated on {date.today()} from {description} using model {experiment_ckpt_str}. It should be reviewed and edited carefully.\n"
+    remark = f"\\rem This draft of {book} was machine translated on {date.today()} from {description} using model {experiment_ckpt_str}. It should be reviewed and edited carefully."
 
     lines = usfm.split("\n")
     insert_idx = (
@@ -190,23 +192,27 @@ class Translator(ABC):
             )
         else:
             src_file_text = UsfmFileText("usfm.sty", "utf-8-sig", "", src_file_path, include_all_text=True)
+        stylesheet = src_settings.stylesheet if src_from_project else UsfmStylesheet("usfm.sty")
 
         sentences = [re.sub(" +", " ", s.text.strip()) for s in src_file_text]
         vrefs = [s.ref for s in src_file_text]
         LOGGER.info(f"File {src_file_path} parsed correctly.")
 
         # Filter sentences
-        empty_sents = []
         for i in reversed(range(len(sentences))):
-            if len(chapters) > 0 and vrefs[i].chapter_num not in chapters:
+            marker = vrefs[i].path[-1].name if len(vrefs[i].path) > 0 else ""
+            if (
+                (len(chapters) > 0 and vrefs[i].chapter_num not in chapters)
+                or marker in PARAGRAPH_TYPE_EMBEDS
+                or stylesheet.get_tag(marker).text_type == UsfmTextType.NOTE_TEXT
+            ):
                 sentences.pop(i)
                 vrefs.pop(i)
-            elif len(sentences[i].strip()) == 0:
+        empty_sents = []
+        for i in reversed(range(len(sentences))):
+            if len(sentences[i].strip()) == 0:
                 sentences.pop(i)
                 empty_sents.append((i, vrefs.pop(i)))
-        # TODO: need to filter out embeds? they will each have their own sentence now
-        # include_all_markers=False and include_all_text=True gives embeds, section headers, and the intro
-        # is machine taking care of this for now, i.e. ignoring embeds?
 
         output = list(self.translate(sentences, src_iso, trg_iso, produce_multiple_translations, vrefs))
 
@@ -228,7 +234,6 @@ class Translator(ABC):
 
         draft_set: DraftGroup = DraftGroup(translations)
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
-            # TODO: make actual list for verse ranges? was this the issue w/ verse ranges?
             rows = [([ref], translation) for ref, translation in zip(vrefs, translated_draft)]
 
             update_block_handlers = []
@@ -249,7 +254,7 @@ class Translator(ABC):
                     paragraph_behavior=pb,
                     embed_behavior=eb,
                     style_behavior=sb,
-                    preserve_paragraph_styles=[],
+                    preserve_paragraph_styles=PARAGRAPH_TYPE_EMBEDS if include_embeds else [],
                     update_block_handlers=update_block_handlers,
                 )
 
@@ -265,7 +270,7 @@ class Translator(ABC):
                     paragraph_behavior=pb,
                     embed_behavior=eb,
                     style_behavior=sb,
-                    preserve_paragraph_styles=[],
+                    preserve_paragraph_styles=PARAGRAPH_TYPE_EMBEDS if include_embeds else [],
                     update_block_handlers=update_block_handlers,
                 )
                 parse_usfm(usfm, handler)

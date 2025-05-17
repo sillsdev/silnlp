@@ -40,18 +40,18 @@ def get_alignment_matrices(
 
 
 def construct_place_markers_handler(
-    refs: List[ScriptureRef], source: List[str], translation: List[str]
+    refs: List[ScriptureRef], source: List[str], translation: List[str], aligner: str = "eflomal"
 ) -> PlaceMarkersUsfmUpdateBlockHandler:
     align_info = []
     tokenizer = LatinWordTokenizer()
-    alignments = get_alignment_matrices(source, translation)
+    alignments = get_alignment_matrices(source, translation, aligner)
     for ref, s, t, alignment in zip(refs, source, translation, alignments):
         align_info.append(
             PlaceMarkersAlignmentInfo(
-                [str(r) for r in ref.verse_ref.all_verses()],
-                tokenizer.tokenize(s),
-                tokenizer.tokenize(t),
-                alignment,
+                refs=[str(ref)],
+                source_tokens=list(tokenizer.tokenize(s)),
+                translation_tokens=list(tokenizer.tokenize(t)),
+                alignment=alignment,
             )
         )
     return PlaceMarkersUsfmUpdateBlockHandler(align_info)
