@@ -160,40 +160,6 @@ def main() -> None:
     LOGGER.info(f"Average (scaled) Jaro similarity of verses with placed markers: {avg_jaro}")
     LOGGER.info(f"Average Levenshtein distance per marker of verses with placed markers: {avg_dist}")
 
-    # # base  adj_src_tok_to_trg_hyp
-    # f_base = "zzz_USFM_eval/base/kmr_eng/23ISA_"
-    # files = ["hmm", "eflomal1", "eflomal2", "eflomal3"]
-    # jaros = []
-    # dists = []
-    # # all markers
-    # for file in files:
-    #     f = Path(f"{f_base}{file}.SFM")
-    #     avg_jaro, avg_dist = evaluate_usfm_marker_placement(Path(args.gold), f, args.book, [])
-    #     jaros.append(str(avg_jaro))
-    #     dists.append(str(avg_dist))
-    # # jaros.append("\n")
-    # # dists.append("\n")
-    # # # paragraph only
-    # # for file in files:
-    # #     f = Path(f"{f_base}{file}.SFM")
-    # #     avg_jaro, avg_dist = evaluate_usfm_marker_placement(
-    # #         Path(args.gold), f, args.book, ["tl", "ord", "nd", "bk", "qt"]
-    # #     )
-    # #     jaros.append(str(avg_jaro))
-    # #     dists.append(str(avg_dist))
-    # # jaros.append("\n")
-    # # dists.append("\n")
-    # # # character only
-    # # for file in files:
-    # #     f = Path(f"{f_base}{file}.SFM")
-    # #     avg_jaro, avg_dist = evaluate_usfm_marker_placement(Path(args.gold), f, args.book, ["d", "q2", "b", "q1"])
-    # #     jaros.append(str(avg_jaro))
-    # #     dists.append(str(avg_dist))
-
-    # print("\n".join(jaros))
-    # print("")
-    # print("\n".join(dists))
-
 
 if __name__ == "__main__":
     main()
