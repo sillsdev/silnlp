@@ -33,18 +33,19 @@ def filter_markers(
     curr_embed = None
     filtered_sent = ""
     for tok in usfm_tokenizer.tokenize(sent):
+        base_marker = tok.marker.strip("+*") if tok.marker is not None else None
         if curr_embed is not None:
-            if tok.type == UsfmTokenType.END and tok.marker[:-1] == curr_embed.marker:
+            if tok.type == UsfmTokenType.END and base_marker == curr_embed:
                 curr_embed = None
         elif tok.type == UsfmTokenType.TEXT:
             filtered_sent += tok.to_usfm()
         elif tok.marker is None:
             continue
-        elif tok.type == UsfmTokenType.NOTE or tok.marker in CHARACTER_TYPE_EMBEDS:
+        elif tok.type == UsfmTokenType.NOTE or base_marker in CHARACTER_TYPE_EMBEDS:
             if tok.end_marker is not None:
-                curr_embed = tok
+                curr_embed = base_marker
         elif tok.type in [UsfmTokenType.PARAGRAPH, UsfmTokenType.CHARACTER, UsfmTokenType.END]:
-            if tok.marker not in to_ignore:
+            if base_marker not in to_ignore:
                 filtered_sent += tok.to_usfm()
                 markers.append(tok.marker)
 
@@ -63,7 +64,6 @@ def evaluate_usfm_marker_placement(
             settings.encoding,
             settings.get_book_id(gold_book_path.name),
             gold_book_path,
-            settings.versification,
             include_markers=True,
             include_all_text=True,
         )
@@ -72,7 +72,6 @@ def evaluate_usfm_marker_placement(
             settings.encoding,
             settings.get_book_id(gold_book_path.name),
             pred_book_path,
-            settings.versification,
             include_markers=True,
             include_all_text=True,
         )
@@ -110,7 +109,7 @@ def evaluate_usfm_marker_placement(
             gold_markers.pop(gold_markers.index(marker))
 
         gold_sent_toks.append(list(tokenizer.tokenize(gs_text)))
-        pred_sent_toks.append(list(tokenizer.tokenize(ps_text)) + gold_markers)
+        pred_sent_toks.append(list(tokenizer.tokenize(ps_text)) + [m.strip("*") for m in gold_markers])
 
     jaro_scores = []
     dists_per_marker = []
@@ -160,6 +159,40 @@ def main() -> None:
 
     LOGGER.info(f"Average (scaled) Jaro similarity of verses with placed markers: {avg_jaro}")
     LOGGER.info(f"Average Levenshtein distance per marker of verses with placed markers: {avg_dist}")
+
+    # # base  adj_src_tok_to_trg_hyp
+    # f_base = "zzz_USFM_eval/base/kmr_eng/23ISA_"
+    # files = ["hmm", "eflomal1", "eflomal2", "eflomal3"]
+    # jaros = []
+    # dists = []
+    # # all markers
+    # for file in files:
+    #     f = Path(f"{f_base}{file}.SFM")
+    #     avg_jaro, avg_dist = evaluate_usfm_marker_placement(Path(args.gold), f, args.book, [])
+    #     jaros.append(str(avg_jaro))
+    #     dists.append(str(avg_dist))
+    # # jaros.append("\n")
+    # # dists.append("\n")
+    # # # paragraph only
+    # # for file in files:
+    # #     f = Path(f"{f_base}{file}.SFM")
+    # #     avg_jaro, avg_dist = evaluate_usfm_marker_placement(
+    # #         Path(args.gold), f, args.book, ["tl", "ord", "nd", "bk", "qt"]
+    # #     )
+    # #     jaros.append(str(avg_jaro))
+    # #     dists.append(str(avg_dist))
+    # # jaros.append("\n")
+    # # dists.append("\n")
+    # # # character only
+    # # for file in files:
+    # #     f = Path(f"{f_base}{file}.SFM")
+    # #     avg_jaro, avg_dist = evaluate_usfm_marker_placement(Path(args.gold), f, args.book, ["d", "q2", "b", "q1"])
+    # #     jaros.append(str(avg_jaro))
+    # #     dists.append(str(avg_dist))
+
+    # print("\n".join(jaros))
+    # print("")
+    # print("\n".join(dists))
 
 
 if __name__ == "__main__":
