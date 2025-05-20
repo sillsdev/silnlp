@@ -7,32 +7,32 @@ from ..common.environment import SIL_NLP_ENV
 from machine.tokenization import LatinWordTokenizer
 
 # Latin Tokenizer from machine library
-def get_all_words(src_file: str) -> List:
-    words = []
-    tokenizer = LatinWordTokenizer()
-    with open(src_file, "r", encoding = "utf8") as src_data_file:
-        for line in src_data_file:
-            line_words = tokenizer.tokenize(line)
-            for word in line_words:
-                word = word.strip().strip("\'\"\\;,:.!?()-[]0123456789").lower()
-                if word != "" and not word.isnumeric():
-                    words.append(word)
-    return words
-
-# Naive whitespace-based script-agnostic word splitter
 #def get_all_words(src_file: str) -> List:
 #    words = []
-#    pattern = re.compile(r",(?=\S)")  # Look for commas with no following space
-#    with open(src_file, "r", encoding = "utf8") as src_data_file:     
+#    tokenizer = LatinWordTokenizer()
+#    with open(src_file, "r", encoding = "utf8") as src_data_file:
 #        for line in src_data_file:
-#            for word in line.split(" "):
+#            line_words = tokenizer.tokenize(line)
+#            for word in line_words:
 #                word = word.strip().strip("\'\"\\;,:.!?()-[]0123456789").lower()
-#                finder = pattern.search(word)
-#                if finder:             # Add space after commas as needed
-#                    word = word[:finder.span()[1]]+" "+word[finder.span()[1]:]
-#                if word != "":
-#                    words.append(word)  
+#                if word != "" and not word.isnumeric():
+#                    words.append(word)
 #    return words
+
+# Naive whitespace-based script-agnostic word splitter
+def get_all_words(src_file: str) -> List:
+    words = []
+    pattern = re.compile(r",(?=\S)")  # Look for commas with no following space
+    with open(src_file, "r", encoding = "utf8") as src_data_file:     
+        for line in src_data_file:
+            for word in line.split(" "):
+                word = word.strip().strip("\'\"\\;,:.!?()-[]0123456789").lower()
+                finder = pattern.search(word)
+                if finder:             # Add space after commas as needed
+                    word = word[:finder.span()[1]]+" "+word[finder.span()[1]:]
+                if word != "":
+                    words.append(word)  
+    return words
 
 def find_unique(words1: List, words2: List) -> List:
     unique_words = []
