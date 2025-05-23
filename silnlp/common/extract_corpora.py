@@ -62,7 +62,6 @@ def main() -> None:
     # Which projects have data we can find?
     projects_found: Set[str] = set()
     for project in projects:
-        SIL_NLP_ENV.copy_pt_project_from_bucket(project)
         project_path = SIL_NLP_ENV.pt_projects_dir / project
         if project_path.is_dir():
             projects_found.add(project)

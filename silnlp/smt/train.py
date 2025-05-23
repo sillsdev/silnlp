@@ -56,7 +56,6 @@ def create_thot_smt_config_file(config_file_path: Path, model_type: ThotWordAlig
 
 def train(exp_name: str) -> None:
     exp_dir = get_mt_exp_dir(exp_name)
-    SIL_NLP_ENV.copy_experiment_from_bucket(exp_name)
     config = load_config(exp_name)
 
     src_file_path = exp_dir / "train.src.txt"
@@ -76,13 +75,16 @@ def train(exp_name: str) -> None:
     )
     parallel_corpus = src_corpus.align_rows(trg_corpus).lowercase()
 
-    with ThotSmtModelTrainer(
-        model_type,
-        parallel_corpus,
-        engine_config_file_path,
-        lowercase_source=True,
-        lowercase_target=True,
-    ) as trainer, tqdm(total=1.0, bar_format="{percentage:3.0f}%|{bar:40}|{desc}", leave=False) as pbar:
+    with (
+        ThotSmtModelTrainer(
+            model_type,
+            parallel_corpus,
+            engine_config_file_path,
+            lowercase_source=True,
+            lowercase_target=True,
+        ) as trainer,
+        tqdm(total=1.0, bar_format="{percentage:3.0f}%|{bar:40}|{desc}", leave=False) as pbar,
+    ):
 
         def progress(status: ProgressStatus) -> None:
             pbar.update(status.percent_completed - pbar.n)

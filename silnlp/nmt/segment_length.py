@@ -11,7 +11,6 @@ import logging
 
 import matplotlib.pyplot as plt
 
-from ..common.environment import SIL_NLP_ENV
 from ..common.utils import get_mt_exp_dir
 
 logging.basicConfig()
@@ -24,7 +23,6 @@ def main() -> None:
     args = parser.parse_args()
 
     exp_name = args.experiment
-    SIL_NLP_ENV.copy_experiment_from_bucket(exp_name)
 
     exp_dir = get_mt_exp_dir(exp_name)
     data = []
@@ -41,7 +39,6 @@ def main() -> None:
     plt.ylabel("Number of Segments")
     plt.title("Distribution of Segment Lengths")
     plt.savefig(exp_dir / "histogram_seg_length.png")
-    SIL_NLP_ENV.copy_experiment_to_bucket(exp_name)
 
 
 if __name__ == "__main__":
