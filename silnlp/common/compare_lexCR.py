@@ -97,14 +97,27 @@ def main() -> None:
                 output_file.writelines(entry[0] + '\t' + str(entry[1]) + '\n')
 
         # Write source words missing from the alternate source file
+        #with (lex_path1 / "unmatched_src_words.txt").open("w", encoding="utf8") as output_file:
+        #    output_file.writelines(f'src.txt words not found in {src_file2}\n')
+        #    for word in src1_only_words:
+        #        output_file.writelines(word+'\n')
+        #with (lex_path2 / "unmatched_src_words.txt").open("w", encoding="utf8") as output_file:
+        #    output_file.writelines(f'src.txt words not found in {src_file1}\n')
+        #    for word in src2_only_words:
+        #        output_file.writelines(word+'\n')
+
+
+        # Rewrite of above section to include counts in the output file: 
         with (lex_path1 / "unmatched_src_words.txt").open("w", encoding="utf8") as output_file:
             output_file.writelines(f'src.txt words not found in {src_file2}\n')
-            for word in src1_only_words:
-                output_file.writelines(word+'\n')
+            for entry in src1_word_counter:
+                if entry[0] in src1_only_words:
+                    output_file.writelines(entry[0] + '\t' + str(entry[1]) + '\n')
         with (lex_path2 / "unmatched_src_words.txt").open("w", encoding="utf8") as output_file:
             output_file.writelines(f'src.txt words not found in {src_file1}\n')
-            for word in src2_only_words:
-                output_file.writelines(word+'\n')
+            for entry in src2_word_counter:
+                if entry[0] in src2_only_words:
+                    output_file.writelines(entry[0] + '\t' + str(entry[1]) + '\n')
 
     # Compare target words and write results to files
     if args.trg == True:
