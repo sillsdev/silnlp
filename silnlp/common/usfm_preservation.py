@@ -297,7 +297,7 @@ class UsfmPreserver:
                     else:  # continue the search outwards
                         src_hyp += -1 if hyp < 0 else 1
                 if trg_hyp != -1:
-                    num_crossings = num_align_crossings(sent_idx, src_hyp, trg_hyp)
+                    num_crossings = num_align_crossings(sent_idx, adj_src_tok, trg_hyp)
                     if num_crossings < best_num_crossings:
                         best_hyp = trg_hyp
                         best_num_crossings = num_crossings

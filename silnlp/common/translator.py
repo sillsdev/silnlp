@@ -254,7 +254,6 @@ class Translator(ABC):
                     paragraph_behavior=pb,
                     embed_behavior=eb,
                     style_behavior=sb,
-                    preserve_paragraph_styles=PARAGRAPH_TYPE_EMBEDS if include_embeds else [],
                     update_block_handlers=update_block_handlers,
                 )
 
@@ -270,7 +269,6 @@ class Translator(ABC):
                     paragraph_behavior=pb,
                     embed_behavior=eb,
                     style_behavior=sb,
-                    preserve_paragraph_styles=PARAGRAPH_TYPE_EMBEDS if include_embeds else [],
                     update_block_handlers=update_block_handlers,
                 )
                 parse_usfm(usfm, handler)
