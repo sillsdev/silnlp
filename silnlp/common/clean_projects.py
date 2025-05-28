@@ -12,11 +12,12 @@ from machine.corpora import FileParatextProjectSettingsParser, ParatextProjectSe
 from tqdm import tqdm
 
 # --- Global Constants ---
-PROJECTS_FOLDER_DEFAULT = "M:/Paratext/projects" 
+PROJECTS_FOLDER_DEFAULT = "M:/Paratext/projects"
 logger = logging.getLogger(__name__)
 SETTINGS_FILENAME = "Settings.xml"
 
 # --- Configuration for Deletion/Keep Rules ---
+# These are matched with lower cased versions of the filename, they must be listed in lower case here.
 
 FILES_TO_DELETE_BY_NAME_CI = {
     "allclustercorrections.txt",
@@ -76,8 +77,7 @@ FILES_TO_KEEP_BY_NAME_CI = {
     "bookNames.xml",
     "canons.xml",
     "lexicon.xml",
-    "TermRenderings.xml",
-
+    "termrenderings.xml",
 }
 
 EXTENSIONS_TO_KEEP_CI = {
@@ -94,9 +94,7 @@ SUBFOLDERS_TO_PRESERVE_BY_NAME_CI = {}
 
 
 def has_settings_file(project_folder: Path) -> bool:
-    return (project_folder / SETTINGS_FILENAME).is_file() or (
-        project_folder / SETTINGS_FILENAME.lower()
-    ).is_file()
+    return (project_folder / SETTINGS_FILENAME).is_file() or (project_folder / SETTINGS_FILENAME.lower()).is_file()
 
 
 class ProjectCleaner:
@@ -118,9 +116,7 @@ class ProjectCleaner:
         self.log_buffer.append(full_message)
 
     def _log_action(self, action: str, item_path: Path):
-        full_message = (
-            f"{self.log_prefix}{action}: {item_path.relative_to(self.project_path)}"
-        )
+        full_message = f"{self.log_prefix}{action}: {item_path.relative_to(self.project_path)}"
         self.log_buffer.append(full_message)
 
     def _parse_settings(self):
@@ -129,7 +125,7 @@ class ProjectCleaner:
             settings_file_path = self.project_path / SETTINGS_FILENAME.lower()
             if not settings_file_path.exists():
                 warning_msg = f"Warning: {SETTINGS_FILENAME} not found."
-                if self.args.verbose > 0: # Condition to buffer this warning
+                if self.args.verbose > 0:  # Condition to buffer this warning
                     self._log_info(warning_msg)
                 self.parsing_errors.append(f"{SETTINGS_FILENAME} not found.")
                 return
@@ -138,7 +134,7 @@ class ProjectCleaner:
             parser = FileParatextProjectSettingsParser(str(self.project_path))
             project_settings = parser.parse()
             self.project_settings = project_settings
-            
+
             # Log raw settings related to file naming now that self.project_settings is assigned.
             self._log_info(
                 f"Settings - FileNamePrePart:'{self.project_settings.file_name_prefix}' "
@@ -148,34 +144,27 @@ class ProjectCleaner:
 
         except Exception as e:
             error_msg = f"Error parsing {SETTINGS_FILENAME}: {e}"
-            if self.args.verbose > 0: # Condition to buffer this error message
+            if self.args.verbose > 0:  # Condition to buffer this error message
                 self._log_info(error_msg)
             self.parsing_errors.append(error_msg)
             # Log that specific settings details could not be retrieved
             self._log_info(
-                f"Settings - Could not log file naming details (PrePart, PostPart, BookNameForm) due to parsing error: {e}"
+                f"Settings - Couldn't log naming details (PrePart, PostPart, BookNameForm) due to parsing error: {e}"
             )
 
         # The following code correctly uses self.project_settings,
         # which will be None if parsing failed, and thus these blocks will be skipped.
 
         if project_settings.biblical_terms_file_name:
-            terms_file_path = (
-                self.project_path / project_settings.biblical_terms_file_name
-            )
+            terms_file_path = self.project_path / project_settings.biblical_terms_file_name
             if terms_file_path.is_file():
                 self.biblical_terms_files.add(terms_file_path)
-                self._log_info(
-                    f"Found BiblicalTermsListSetting file: {terms_file_path.name}"
-                )
+                self._log_info(f"Found BiblicalTermsListSetting file: {terms_file_path.name}")
             else:
                 warning_msg = f"Warning: BiblicalTermsListSetting file not found at expected path: {terms_file_path}"
-                if self.args.verbose > 0: # Condition to buffer this warning
+                if self.args.verbose > 0:  # Condition to buffer this warning
                     self._log_info(warning_msg)
-                self.parsing_errors.append(
-                    f"BiblicalTermsListSetting file not found: {terms_file_path.name}"
-                )
-
+                self.parsing_errors.append(f"BiblicalTermsListSetting file not found: {terms_file_path.name}")
 
     def analyze_project_contents(self):
         self._parse_settings()
@@ -201,32 +190,22 @@ class ProjectCleaner:
 
         # Scripture files are identified using ParatextProjectSettings.get_book_id()
         if self.project_settings:
-            for (
-                item
-            ) in (
-                self.project_path.iterdir()
-            ):  # Scripture files are typically at the project root
+            for item in self.project_path.iterdir():  # Scripture files are typically at the project root
                 if item.is_file():
                     book_id = self.project_settings.get_book_id(item.name)
                     if book_id is not None:
                         self.files_to_keep.add(item)
                         if self.args.verbose > 1:
-                            self._log_info(
-                                f"Kept scripture file (via get_book_id): {item.name}"
-                            )
+                            self._log_info(f"Kept scripture file (via get_book_id): {item.name}")
         elif self.args.verbose > 0:
-            self._log_info(
-                "Project settings not available; cannot use get_book_id for scripture identification."
-            )
+            self._log_info("Project settings not available; cannot use get_book_id for scripture identification.")
 
         for item in all_items_in_project:
             if item.is_file() and item.suffix.lower() in EXTENSIONS_TO_KEEP_CI:
                 self.files_to_keep.add(item)
 
         if self.args.verbose > 1:
-            self._log_info(
-                f"Identified {len(self.files_to_keep)} files to keep initially."
-            )
+            self._log_info(f"Identified {len(self.files_to_keep)} files to keep initially.")
 
         # --- Pass 2: Identify files to DELETE ---
         for item_path in all_items_in_project:
@@ -241,17 +220,12 @@ class ProjectCleaner:
             if item_name_lower in FILES_TO_DELETE_BY_NAME_CI:
                 delete_file = True
                 reason = "specific name"
-            elif any(
-                item_path.match(pattern) for pattern in FILES_TO_DELETE_BY_PATTERN
-            ):
+            elif any(item_path.match(pattern) for pattern in FILES_TO_DELETE_BY_PATTERN):
                 delete_file = True
                 reason = "pattern match"
-            elif any(
-                sub_str in item_name_lower
-                for sub_str in FILENAME_SUBSTRINGS_TO_DELETE_CI
-            ):
+            elif any(sub_str in item_name_lower for sub_str in FILENAME_SUBSTRINGS_TO_DELETE_CI):
                 delete_file = True
-                reason = "substring match"  
+                reason = "substring match"
             elif item_suffix_lower in EXTENSIONS_TO_DELETE_CI:
                 delete_file = True
                 reason = f"extension ({item_suffix_lower})"
@@ -274,9 +248,7 @@ class ProjectCleaner:
             if delete_file:
                 self.files_to_delete.add(item_path)
                 if self.args.verbose > 1:
-                    self._log_info(
-                        f"Marked for deletion ({reason}): {item_path.relative_to(self.project_path)}"
-                    )
+                    self._log_info(f"Marked for deletion ({reason}): {item_path.relative_to(self.project_path)}")
 
         # --- Pass 3: Identify folders to DELETE ---
         for item in self.project_path.iterdir():
@@ -339,6 +311,7 @@ def process_single_project_for_cleaning(
     cleaner.execute_cleanup()
     return project_path.name, cleaner.log_buffer, cleaner.parsing_errors
 
+
 # --- Main Function ---
 def main():
     parser = argparse.ArgumentParser(
@@ -363,9 +336,7 @@ def main():
         default=0,
         help="Increase output verbosity. -v for project-level info, -vv for file-level decisions.",
     )
-    parser.add_argument(
-        "--log-file", help="Path to a file to log actions and verbose information."
-    )
+    parser.add_argument("--log-file", help="Path to a file to log actions and verbose information.")
     args = parser.parse_args()
 
     # --- Configure Logging ---
@@ -391,7 +362,7 @@ def main():
     if args.dry_run:
         print("DRY RUN mode enabled.")
     logger.info(
-        f"Starting cleanup process. Projects root: {args.projects_root}. Dry run: {args.dry_run}. Verbose: {args.verbose}."
+        f"Starting cleanup process for: {args.projects_root}. Dry run: {args.dry_run}. Verbose: {args.verbose}."
     )
 
     projects_root_path = Path(args.projects_root)
@@ -409,7 +380,7 @@ def main():
         if item.is_dir():
             all_folders.append(item)
 
-    test = True
+    test = False
 
     if test:
         all_folders = all_folders[:200]
@@ -426,20 +397,20 @@ def main():
     project_folders = []
     non_project_folders = []
 
-
-
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        
+
         # Submit tasks for each folder
         future_to_folder = {executor.submit(has_settings_file, folder): folder for folder in all_folders}
 
         # Iterate over completed tasks using tqdm, add mininterval for smoother updates
         # if individual has_settings_file calls are very fast.
-        for future in tqdm(concurrent.futures.as_completed(future_to_folder),
-                           total=len(all_folders),
-                           desc="Identifying project folders",
-                           unit="folder",
-                           disable=args.verbose > 0):
+        for future in tqdm(
+            concurrent.futures.as_completed(future_to_folder),
+            total=len(all_folders),
+            desc="Identifying project folders",
+            unit="folder",
+            disable=args.verbose > 0,
+        ):
             folder = future_to_folder[future]
             try:
                 is_project = future.result()
@@ -450,9 +421,8 @@ def main():
             except Exception as exc:
                 logger.error(f"Error checking folder {folder}: {exc}")
                 if args.verbose > 0:
-                     print(f"Error checking folder {folder}: {exc}")
+                    print(f"Error checking folder {folder}: {exc}")
                 non_project_folders.append(folder)
-
 
     found_msg = f"Found {len(project_folders)} project folders."
     logger.info(found_msg)
@@ -460,9 +430,7 @@ def main():
         print(found_msg)
 
     if non_project_folders:
-        non_project_msg = (
-            f"Found {len(non_project_folders)} non-project folders (will be ignored):"
-        )
+        non_project_msg = f"Found {len(non_project_folders)} non-project folders (will be ignored):"
         logger.info(non_project_msg)
         if args.verbose > 0:
             print(non_project_msg)
@@ -496,7 +464,7 @@ def main():
             desc="Cleaning projects",
             unit="project",
             disable=args.verbose > 0,  # tqdm is disabled if verbose output is on
-            mininterval=0.01 # More frequent updates, similar to the folder identification step
+            mininterval=0.01,  # More frequent updates, similar to the folder identification step
         ):
             processed_project_path = future_to_project_path_map[future]
             try:
@@ -509,7 +477,9 @@ def main():
                 if args.verbose > 0:
                     print(crit_error_msg)
                 # Store a placeholder for sorted output
-                processed_project_data.append((processed_project_path.name, [], [f"Critical error: {exc}"], processed_project_path))
+                processed_project_data.append(
+                    (processed_project_path.name, [], [f"Critical error: {exc}"], processed_project_path)
+                )
 
     # Sort all collected data by project name
     processed_project_data.sort(key=lambda x: x[0])
@@ -518,19 +488,19 @@ def main():
     for project_name, project_logs, project_parsing_errors, _project_path in processed_project_data:
         # Log messages collected by the cleaner
         for log_msg_from_buffer in project_logs:
-            logger.info(log_msg_from_buffer) # Already formatted with [ProjectName] prefix by ProjectCleaner
-            if args.verbose > 0: # Print to console if verbose
+            logger.info(log_msg_from_buffer)  # Already formatted with [ProjectName] prefix by ProjectCleaner
+            if args.verbose > 0:  # Print to console if verbose
                 print(log_msg_from_buffer)
 
         # Log parsing errors, ensuring they are associated with the project
         if project_parsing_errors:
             for err_str in project_parsing_errors:
                 error_log_message = f"[{project_name}] Config Error: {err_str}"
-                logger.warning(error_log_message) # Use warning for parsing/config errors
+                logger.warning(error_log_message)  # Use warning for parsing/config errors
                 if args.verbose > 0:
                     print(error_log_message)
-        
-        logger.info(f"[{project_name}] Processing completed.") # Log overall completion for this project
+
+        logger.info(f"[{project_name}] Processing completed.")  # Log overall completion for this project
 
     final_msg = "\nCleanup process completed."
     logger.info(final_msg)
