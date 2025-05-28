@@ -381,13 +381,7 @@ def main():
             all_folders.append(item)
 
     test = False
-
-    if test:
-        all_folders = all_folders[:200]
-        # Use a single ThreadPoolExecutor for concurrent I/O-bound tasks
-        max_workers = 1
-    else:
-        max_workers = 10
+    max_workers = 10
 
     found_total_msg = f"Found {len(all_folders)} total directories in {args.projects_root}."
     logger.info(found_total_msg)
