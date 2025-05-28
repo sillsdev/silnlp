@@ -66,7 +66,7 @@ def evaluate_usfm_marker_placement(
     only_paragraph: bool = False,
     only_style: bool = False,
     to_ignore: List[str] = [],
-) -> Tuple[float, float]:
+) -> Optional[Tuple[float, float]]:
     try:
         settings = FileParatextProjectSettingsParser(gold_book_path.parent).parse()
         stylesheet = settings.stylesheet
@@ -124,7 +124,7 @@ def evaluate_usfm_marker_placement(
 
     # No verses with markers that should be evaluated
     if len(gold_sent_toks) == 0:
-        return -1, -1
+        return None
 
     jaro_scores = []
     dists_per_marker = []
@@ -171,42 +171,40 @@ def main() -> None:
     to_ignore = args.ignored_markers[0].split(";") if len(args.ignored_markers) == 1 else args.ignored_markers
 
     # Evaluate all marker placement
-    avg_jaro, avg_dist = evaluate_usfm_marker_placement(
-        Path(args.gold), Path(args.pred), args.book, to_ignore=to_ignore
-    )
-    if avg_jaro == -1:
+    scores = evaluate_usfm_marker_placement(Path(args.gold), Path(args.pred), args.book, to_ignore=to_ignore)
+    if scores is None:
         LOGGER.info("No verses with markers found.")
         exit()
-    LOGGER.info(f"Average (scaled) Jaro similarity of verses with placed markers: {avg_jaro}")
-    LOGGER.info(f"Average Levenshtein distance per marker of verses with placed markers: {avg_dist}")
+    LOGGER.info(f"Average (scaled) Jaro similarity of verses with placed markers: {scores[0]}")
+    LOGGER.info(f"Average Levenshtein distance per marker of verses with placed markers: {scores[1]}")
 
     # Evaluate paragraph marker placement
-    avg_jaro_para, avg_dist_para = evaluate_usfm_marker_placement(
+    scores_para = evaluate_usfm_marker_placement(
         Path(args.gold), Path(args.pred), args.book, only_paragraph=True, to_ignore=to_ignore
     )
-    if avg_jaro_para == -1:
+    if scores_para is None:
         LOGGER.info("No verses with paragraph markers found.")
         exit()
 
     # Evaluate style marker placement
-    avg_jaro_style, avg_dist_style = evaluate_usfm_marker_placement(
+    scores_style = evaluate_usfm_marker_placement(
         Path(args.gold), Path(args.pred), args.book, only_style=True, to_ignore=to_ignore
     )
-    if avg_jaro_style == -1:
+    if scores_style is None:
         LOGGER.info("No verses with style markers found.")
         exit()
 
     LOGGER.info(
-        f"Average (scaled) Jaro similarity of verses with placed markers (only paragraph markers): {avg_jaro_para}"
+        f"Average (scaled) Jaro similarity of verses with placed markers (only paragraph markers): {scores_para[0]}"
     )
     LOGGER.info(
-        f"Average Levenshtein distance per marker of verses with placed markers (only paragraph markers): {avg_dist_para}"
+        f"Average Levenshtein distance per marker of verses with placed markers (only paragraph markers): {scores_para[1]}"
     )
     LOGGER.info(
-        f"Average (scaled) Jaro similarity of verses with placed markers (only style markers): {avg_jaro_style}"
+        f"Average (scaled) Jaro similarity of verses with placed markers (only style markers): {scores_style[0]}"
     )
     LOGGER.info(
-        f"Average Levenshtein distance per marker of verses with placed markers (only style markers): {avg_dist_style}"
+        f"Average Levenshtein distance per marker of verses with placed markers (only style markers): {scores_style[1]}"
     )
 
 

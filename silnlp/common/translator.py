@@ -227,10 +227,14 @@ class Translator(ABC):
             output.insert(idx, [None, None, None, None])
 
         # Update behaviors
-        tb = UpdateUsfmTextBehavior.PREFER_NEW if trg_project is not None else UpdateUsfmTextBehavior.STRIP_EXISTING
-        pb = UpdateUsfmMarkerBehavior.PRESERVE if include_paragraph_markers else UpdateUsfmMarkerBehavior.STRIP
-        sb = UpdateUsfmMarkerBehavior.PRESERVE if include_style_markers else UpdateUsfmMarkerBehavior.STRIP
-        eb = UpdateUsfmMarkerBehavior.PRESERVE if include_embeds else UpdateUsfmMarkerBehavior.STRIP
+        text_behavior = (
+            UpdateUsfmTextBehavior.PREFER_NEW if trg_project is not None else UpdateUsfmTextBehavior.STRIP_EXISTING
+        )
+        paragraph_behavior = (
+            UpdateUsfmMarkerBehavior.PRESERVE if include_paragraph_markers else UpdateUsfmMarkerBehavior.STRIP
+        )
+        style_behavior = UpdateUsfmMarkerBehavior.PRESERVE if include_style_markers else UpdateUsfmMarkerBehavior.STRIP
+        embed_behavior = UpdateUsfmMarkerBehavior.PRESERVE if include_embeds else UpdateUsfmMarkerBehavior.STRIP
 
         draft_set: DraftGroup = DraftGroup(translations)
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
@@ -250,10 +254,10 @@ class Translator(ABC):
                 usfm_out = dest_updater.update_usfm(
                     book_id=src_file_text.id,
                     rows=rows,
-                    text_behavior=tb,
-                    paragraph_behavior=pb,
-                    embed_behavior=eb,
-                    style_behavior=sb,
+                    text_behavior=text_behavior,
+                    paragraph_behavior=paragraph_behavior,
+                    embed_behavior=embed_behavior,
+                    style_behavior=style_behavior,
                     update_block_handlers=update_block_handlers,
                 )
 
@@ -265,10 +269,10 @@ class Translator(ABC):
                 handler = UpdateUsfmParserHandler(
                     rows=rows,
                     id_text=vrefs[0].book,
-                    text_behavior=tb,
-                    paragraph_behavior=pb,
-                    embed_behavior=eb,
-                    style_behavior=sb,
+                    text_behavior=text_behavior,
+                    paragraph_behavior=paragraph_behavior,
+                    embed_behavior=embed_behavior,
+                    style_behavior=style_behavior,
                     update_block_handlers=update_block_handlers,
                 )
                 parse_usfm(usfm, handler)
