@@ -129,7 +129,7 @@ TRAINING_ARGS_CONFIG_MAPPING = {
         "eval_accumulation_steps",
         "eval_delay",
         "eval_steps",
-        "evaluation_strategy",
+        "eval_strategy",
         "greater_is_better",
         "include_inputs_for_metrics",
         "load_best_model_at_end",
@@ -326,7 +326,7 @@ class HuggingFaceConfig(Config):
                     "lora_config": {},
                 },
                 "eval": {
-                    "evaluation_strategy": "steps",
+                    "eval_strategy": "steps",
                     "eval_steps": 1000,
                     "early_stopping": None,
                     "load_best_model_at_end": True,
@@ -380,7 +380,7 @@ class HuggingFaceConfig(Config):
 
         # disable evaluation if there is no validation split
         if not self.has_val_split:
-            config["eval"]["evaluation_strategy"] = "no"
+            config["eval"]["eval_strategy"] = "no"
             config["eval"]["load_best_model_at_end"] = False
             config["eval"]["early_stopping"] = None
             config["eval"]["metric_for_best_model"] = None
