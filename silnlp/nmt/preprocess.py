@@ -1,7 +1,6 @@
 import argparse
 import logging
 
-from ..common.environment import SIL_NLP_ENV
 from ..common.utils import get_git_revision_hash
 from .config_utils import load_config
 
@@ -20,12 +19,10 @@ def main() -> None:
     get_git_revision_hash()
 
     exp_name = args.experiment
-    SIL_NLP_ENV.copy_experiment_from_bucket(exp_name)
     config = load_config(exp_name)
 
     config.set_seed()
     config.preprocess(args.stats, args.force_align)
-    SIL_NLP_ENV.copy_experiment_to_bucket(exp_name, overwrite=args.force_align)
 
 
 if __name__ == "__main__":

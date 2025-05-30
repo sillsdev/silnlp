@@ -5,7 +5,6 @@ from typing import Optional
 
 import yaml
 
-from ..common.environment import SIL_NLP_ENV
 from .config import get_mt_exp_dir
 from .config_utils import create_config
 
@@ -21,7 +20,6 @@ class SILClearML:
     experiment_suffix: str = ""
     clearml_project_folder: str = ""
     commit: Optional[str] = None
-    bucket_service: str = ""
 
     def __post_init__(self) -> None:
         self.name = self.name.replace("\\", "/")
@@ -52,7 +50,6 @@ class SILClearML:
                 docker_image="ghcr.io/sillsdev/silnlp:latest",
                 docker_arguments=[
                     "--env TOKENIZERS_PARALLELISM='false'",
-                    "--env BUCKET_SERVICE=" + self.bucket_service,
                     "--cap-add SYS_ADMIN",
                     "--device /dev/fuse",
                     "--security-opt apparmor=docker-apparmor",
@@ -118,8 +115,6 @@ class SILClearML:
             self.name = self.name[: -len(self.experiment_suffix)]
 
     def _load_config(self) -> None:
-        # copy from S3 bucket to temp first
-        SIL_NLP_ENV.copy_experiment_from_bucket(self.name, patterns="config.yml")
         # if the project/experiment yaml file already exists, use it to re-read the config.  If not, write it.
         exp_dir = get_mt_exp_dir(self.name)
         if self.task is None:
@@ -155,4 +150,3 @@ class SILClearML:
             yaml.safe_dump(data=config, stream=file)
 
         self.config = create_config(exp_dir, config)
-        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns="config.yml")
