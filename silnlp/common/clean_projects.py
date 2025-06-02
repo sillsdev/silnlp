@@ -155,8 +155,8 @@ class ProjectCleaner:
         # The following code correctly uses self.project_settings,
         # which will be None if parsing failed, and thus these blocks will be skipped.
 
-        if project_settings.biblical_terms_file_name:
-            terms_file_path = self.project_path / project_settings.biblical_terms_file_name
+        if self.project_settings and self.project_settings.biblical_terms_file_name:
+            terms_file_path = self.project_path / self.project_settings.biblical_terms_file_name
             if terms_file_path.is_file():
                 self.biblical_terms_files.add(terms_file_path)
                 self._log_info(f"Found BiblicalTermsListSetting file: {terms_file_path.name}")
@@ -164,7 +164,7 @@ class ProjectCleaner:
                 warning_msg = f"Warning: BiblicalTermsListSetting file not found at expected path: {terms_file_path}"
                 if self.args.verbose > 0:  # Condition to buffer this warning
                     self._log_info(warning_msg)
-                self.parsing_errors.append(f"BiblicalTermsListSetting file not found: {terms_file_path.name}")
+                self.parsing_errors.append(f"BiblicalTermsListSetting file not found: {self.project_settings.biblical_terms_file_name})")
 
     def analyze_project_contents(self):
         self._parse_settings()
@@ -340,7 +340,9 @@ def main():
     args = parser.parse_args()
 
     # --- Configure Logging ---
-    log_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    #log_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    log_formatter = logging.Formatter("2025-05-29 14:30:00,000 - %(levelname)s - %(message)s")
+    
     logger.setLevel(logging.INFO)
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(log_formatter)
@@ -380,7 +382,6 @@ def main():
         if item.is_dir():
             all_folders.append(item)
 
-    test = False
     max_workers = 10
 
     found_total_msg = f"Found {len(all_folders)} total directories in {args.projects_root}."
