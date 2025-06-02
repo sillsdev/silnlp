@@ -26,25 +26,32 @@ class WhitespaceMarkerTokenizer(WhitespaceTokenizer):
 
 # Filter out embeds and ignored markers from sentence and create list of all remaining markers
 def filter_markers(
-    sent: str, stylesheet: UsfmStylesheet = UsfmStylesheet("usfm.sty"), to_ignore: List[str] = []
+    sent: str,
+    stylesheet: UsfmStylesheet = UsfmStylesheet("usfm.sty"),
+    only_paragraph: bool = False,
+    only_style: bool = False,
+    to_ignore: List[str] = [],
 ) -> Tuple[str, List[str]]:
     markers = []
     usfm_tokenizer = UsfmTokenizer(stylesheet)
     curr_embed = None
     filtered_sent = ""
     for tok in usfm_tokenizer.tokenize(sent):
+        base_marker = tok.marker.strip("+*") if tok.marker is not None else None
         if curr_embed is not None:
-            if tok.type == UsfmTokenType.END and tok.marker[:-1] == curr_embed.marker:
+            if tok.type == UsfmTokenType.END and base_marker == curr_embed:
                 curr_embed = None
         elif tok.type == UsfmTokenType.TEXT:
             filtered_sent += tok.to_usfm()
         elif tok.marker is None:
             continue
-        elif tok.type == UsfmTokenType.NOTE or tok.marker in CHARACTER_TYPE_EMBEDS:
+        elif tok.type == UsfmTokenType.NOTE or base_marker in CHARACTER_TYPE_EMBEDS:
             if tok.end_marker is not None:
-                curr_embed = tok
-        elif tok.type in [UsfmTokenType.PARAGRAPH, UsfmTokenType.CHARACTER, UsfmTokenType.END]:
-            if tok.marker not in to_ignore:
+                curr_embed = base_marker
+        elif (tok.type == UsfmTokenType.PARAGRAPH and not only_style) or (
+            tok.type in [UsfmTokenType.CHARACTER, UsfmTokenType.END] and not only_paragraph
+        ):
+            if base_marker not in to_ignore:
                 filtered_sent += tok.to_usfm()
                 markers.append(tok.marker)
 
@@ -53,8 +60,13 @@ def filter_markers(
 
 # Assumes that the files have identical USFM structure
 def evaluate_usfm_marker_placement(
-    gold_book_path: Path, pred_book_path: Path, book: Optional[str] = None, to_ignore: Optional[List[str]] = []
-) -> Tuple[float, float]:
+    gold_book_path: Path,
+    pred_book_path: Path,
+    book: Optional[str] = None,
+    only_paragraph: bool = False,
+    only_style: bool = False,
+    to_ignore: List[str] = [],
+) -> Optional[Tuple[float, float]]:
     try:
         settings = FileParatextProjectSettingsParser(gold_book_path.parent).parse()
         stylesheet = settings.stylesheet
@@ -63,7 +75,6 @@ def evaluate_usfm_marker_placement(
             settings.encoding,
             settings.get_book_id(gold_book_path.name),
             gold_book_path,
-            settings.versification,
             include_markers=True,
             include_all_text=True,
         )
@@ -72,7 +83,6 @@ def evaluate_usfm_marker_placement(
             settings.encoding,
             settings.get_book_id(gold_book_path.name),
             pred_book_path,
-            settings.versification,
             include_markers=True,
             include_all_text=True,
         )
@@ -97,8 +107,8 @@ def evaluate_usfm_marker_placement(
         if len(gs.ref.path) > 0 and gs.ref.path[-1].name in PARAGRAPH_TYPE_EMBEDS:
             continue
 
-        gs_text, gold_markers = filter_markers(gs.text, stylesheet, to_ignore)
-        ps_text, pred_markers = filter_markers(ps.text, stylesheet, to_ignore)
+        gs_text, gold_markers = filter_markers(gs.text, stylesheet, only_paragraph, only_style, to_ignore)
+        ps_text, pred_markers = filter_markers(ps.text, stylesheet, only_paragraph, only_style, to_ignore)
 
         if len(gold_markers) == 0:
             continue
@@ -111,6 +121,10 @@ def evaluate_usfm_marker_placement(
 
         gold_sent_toks.append(list(tokenizer.tokenize(gs_text)))
         pred_sent_toks.append(list(tokenizer.tokenize(ps_text)) + gold_markers)
+
+    # No verses with markers that should be evaluated
+    if len(gold_sent_toks) == 0:
+        return None
 
     jaro_scores = []
     dists_per_marker = []
@@ -156,10 +170,42 @@ def main() -> None:
 
     to_ignore = args.ignored_markers[0].split(";") if len(args.ignored_markers) == 1 else args.ignored_markers
 
-    avg_jaro, avg_dist = evaluate_usfm_marker_placement(Path(args.gold), Path(args.pred), args.book, to_ignore)
+    # Evaluate all marker placement
+    scores = evaluate_usfm_marker_placement(Path(args.gold), Path(args.pred), args.book, to_ignore=to_ignore)
+    if scores is None:
+        LOGGER.info("No verses with markers found.")
+        exit()
+    LOGGER.info(f"Average (scaled) Jaro similarity of verses with placed markers: {scores[0]}")
+    LOGGER.info(f"Average Levenshtein distance per marker of verses with placed markers: {scores[1]}")
 
-    LOGGER.info(f"Average (scaled) Jaro similarity of verses with placed markers: {avg_jaro}")
-    LOGGER.info(f"Average Levenshtein distance per marker of verses with placed markers: {avg_dist}")
+    # Evaluate paragraph marker placement
+    scores_para = evaluate_usfm_marker_placement(
+        Path(args.gold), Path(args.pred), args.book, only_paragraph=True, to_ignore=to_ignore
+    )
+    if scores_para is None:
+        LOGGER.info("No verses with paragraph markers found.")
+        exit()
+
+    # Evaluate style marker placement
+    scores_style = evaluate_usfm_marker_placement(
+        Path(args.gold), Path(args.pred), args.book, only_style=True, to_ignore=to_ignore
+    )
+    if scores_style is None:
+        LOGGER.info("No verses with style markers found.")
+        exit()
+
+    LOGGER.info(
+        f"Average (scaled) Jaro similarity of verses with placed markers (only paragraph markers): {scores_para[0]}"
+    )
+    LOGGER.info(
+        f"Average Levenshtein distance per marker of verses with placed markers (only paragraph markers): {scores_para[1]}"
+    )
+    LOGGER.info(
+        f"Average (scaled) Jaro similarity of verses with placed markers (only style markers): {scores_style[0]}"
+    )
+    LOGGER.info(
+        f"Average Levenshtein distance per marker of verses with placed markers (only style markers): {scores_style[1]}"
+    )
 
 
 if __name__ == "__main__":

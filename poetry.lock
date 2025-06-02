@@ -5174,13 +5174,13 @@ type = ["importlib-metadata (>=7.0.2)", "jaraco.develop (>=7.21)", "mypy (==1.12
 
 [[package]]
 name = "sil-machine"
-version = "1.4.0"
+version = "1.7.1"
 description = "A natural language processing library that is focused on providing tools for resource-poor languages."
 optional = false
 python-versions = "<3.13,>=3.9"
 files = [
-    {file = "sil_machine-1.4.0-py3-none-any.whl", hash = "sha256:ceea8358c426d5bd129e6a8dff779aa19430ac69087b99a7177660fd24f26eaf"},
-    {file = "sil_machine-1.4.0.tar.gz", hash = "sha256:7f66567313e29654b8cf44d4c9d1156700a879313450a400e018bf06a1818e44"},
+    {file = "sil_machine-1.7.1-py3-none-any.whl", hash = "sha256:346c02ac083f2f571b219e19d18b0dbc12f1c47d3c8d5a911ea1281a2c77d6f9"},
+    {file = "sil_machine-1.7.1.tar.gz", hash = "sha256:00955c0c11ef755f666662817e1f92d59ba316c50b780ce9a918d15947c9a5f5"},
 ]
 
 [package.dependencies]
@@ -5190,15 +5190,15 @@ charset-normalizer = ">=2.1.1,<3.0.0"
 networkx = ">=3,<4"
 numpy = ">=1.24.4,<2.0.0"
 regex = ">=2021.7.6"
-sil-thot = {version = ">=3.4.4,<4.0.0", optional = true, markers = "extra == \"thot\""}
+sil-thot = {version = ">=3.4.6,<4.0.0", optional = true, markers = "extra == \"thot\""}
 sortedcontainers = ">=2.4.0,<3.0.0"
 urllib3 = "<2"
 
 [package.extras]
 huggingface = ["datasets (>=2.4.0,<3.0.0)", "sacremoses (>=0.0.53,<0.0.54)", "transformers (>=4.38.0,<4.46)"]
-jobs = ["clearml[s3] (>=1.13.1,<2.0.0)", "dynaconf (>=3.2.5,<4.0.0)", "json-stream (>=1.3.0,<2.0.0)"]
+jobs = ["clearml[s3] (>=1.13.1,<2.0.0)", "dynaconf (>=3.2.5,<4.0.0)", "eflomal (>=2.0.0,<3.0.0)", "json-stream (>=1.3.0,<2.0.0)"]
 sentencepiece = ["sentencepiece (>=0.2.0,<0.3.0)"]
-thot = ["sil-thot (>=3.4.4,<4.0.0)"]
+thot = ["sil-thot (>=3.4.6,<4.0.0)"]
 
 [[package]]
 name = "sil-thot"
@@ -6217,4 +6217,4 @@ eflomal = ["eflomal"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.11"
-content-hash = "54d8af4e3f58502aa4dd5ed36edec8ceb0f4ea759b220d292252de9c28bb73e5"
+content-hash = "ba728bfe6d200ee3f20f9c430df4773d255c0cf2aa8016267b2c14156062887a"
