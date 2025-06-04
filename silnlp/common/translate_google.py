@@ -49,9 +49,6 @@ def main() -> None:
 
     get_git_revision_hash()
 
-    SIL_NLP_ENV.copy_experiment_from_bucket(args.experiment)
-    SIL_NLP_ENV.copy_pt_project_from_bucket(args.src_project)
-
     root_dir = get_mt_exp_dir(args.experiment)
     src_project: str = args.src_project
     book: str = args.book
@@ -65,8 +62,6 @@ def main() -> None:
 
     translator = GoogleTranslator()
     translator.translate_book(src_project, book, output_path, trg_iso, experiment_ckpt_str=args.experiment)
-
-    SIL_NLP_ENV.copy_experiment_to_bucket(args.experiment)
 
 
 if __name__ == "__main__":

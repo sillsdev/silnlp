@@ -88,11 +88,6 @@ def collect_verse_counts(
     project_names = [f.stem for f in extract_files]
     projects_to_process = project_names
 
-    bucket_files = ["verse_counts.csv", "verse_percentages.csv", "complete_counts.csv"]
-    SIL_NLP_ENV.copy_experiment_from_bucket("verse_counts", bucket_files)
-    SIL_NLP_ENV.copy_experiment_from_bucket(
-        "verse_counts/partially_complete_books", [f"{f}.csv" for f in project_names]
-    )
     partial_books_path = SIL_NLP_ENV.mt_experiments_dir / "verse_counts" / "partially_complete_books"
     partial_books_path.mkdir(exist_ok=True, parents=True)
 
@@ -242,13 +237,6 @@ def collect_verse_counts(
             else:
                 df.to_csv(partial_books_out_path)
 
-    # Copy new and updated files to the S3 bucket
-    if len(projects_to_process) > 0:
-        SIL_NLP_ENV.copy_experiment_to_bucket("verse_counts", bucket_files, True)
-        SIL_NLP_ENV.copy_experiment_to_bucket(
-            "verse_counts/partially_complete_books", [f"{f}.csv" for f in projects_to_process], True
-        )
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Collect various counts from a corpus of Bible extracts")
@@ -281,7 +269,6 @@ def main() -> None:
     else:
         exp_name = folder
         folder = get_mt_exp_dir(folder)
-        SIL_NLP_ENV.copy_experiment_from_bucket(exp_name, patterns="config.yml")
 
     # If no files are listed and folder is an experiment, use the files listed in the config file
     file_patterns = args.files
@@ -306,9 +293,6 @@ def main() -> None:
         file_patterns = ";".join([f.name for f in files])
 
     collect_verse_counts(args.input_folder, folder, file_patterns, args.deutero, args.recount)
-
-    if exp_name:
-        SIL_NLP_ENV.copy_experiment_to_bucket(exp_name, overwrite=args.recount)
 
 
 if __name__ == "__main__":
