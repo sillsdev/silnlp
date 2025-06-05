@@ -241,7 +241,7 @@ class Translator(ABC):
             rows = [([ref], translation) for ref, translation in zip(vrefs, translated_draft)]
 
             update_block_handlers = []
-            if include_paragraph_markers or include_style_markers or include_embeds:
+            if include_paragraph_markers or include_style_markers:
                 update_block_handlers.append(construct_place_markers_handler(vrefs, sentences, translated_draft))
 
             # Insert translation into the USFM structure of an existing project
