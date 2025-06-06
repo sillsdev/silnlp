@@ -221,7 +221,7 @@ Follow the instructions below to set up a Dev Container in VS Code. This is the 
 To get back into the dev container and poetry environment each subsequent time, open the silnlp folder in VS Code, select the "Reopen in Container" option from the Remote Connection menu (bottom left corner), and use the `poetry shell` command in the terminal.
 
 ## Setting Up and Running Experiments
-See the [wiki](../../wiki) for information on setting up and running experiments. The most important pages for getting started are the ones on [file structure](../../wiki/Folder-structure-and-file-naming-conventions), [model configuration](../../wiki/Configure-a-model), and [running experiments](../../wiki/NMT:-Usage). A lot of the instructions are specific to NMT, but are still helpful starting points for doing other things like [alignment](../../wiki/Alignment:-Usage).
+See the [wiki](../../wiki) for information on setting up and running experiments. The most important pages for getting started are the ones on [file structure](../../wiki/File-conventions-and-cleanup), [model configuration](../../wiki/Configure-a-model), and [running experiments](../../wiki/NMT:-Usage). A lot of the instructions are specific to NMT, but are still helpful starting points for doing other things like [alignment](../../wiki/Alignment:-Usage).
 
 See [this](../../wiki/Using-the-Python-Debugger) page for information on using the VS code debugger.
 
