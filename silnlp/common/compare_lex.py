@@ -1,4 +1,5 @@
 import argparse
+from collections import Counter
 import numpy
 import re
 from typing import List
@@ -14,7 +15,7 @@ from machine.tokenization import LatinWordTokenizer
 #        for line in src_data_file:
 #            line_words = tokenizer.tokenize(line)
 #            for word in line_words:
-#                word = word.strip().strip("\'\"\\;,:.!?()-[]0123456789").lower()
+#                word = word.strip().strip("\'\"\\;,:.!?()-[]").lower()
 #                if word != "" and not word.isnumeric():
 #                    words.append(word)
 #    return words
@@ -74,6 +75,8 @@ def main() -> None:
         unique_src_words2 = numpy.unique(numpy.array(src_words2))
         src1_only_words = find_unique(unique_src_words1,unique_src_words2)
         src2_only_words = find_unique(unique_src_words2,unique_src_words1)
+        src1_word_counter = Counter(src_words1).most_common()
+        src2_word_counter = Counter(src_words2).most_common()
 
         # Write unique source words to files
         src_words_file1 = lex_path1 / "src_words.txt"
@@ -85,15 +88,36 @@ def main() -> None:
             for word in unique_src_words2:
                 output_file.writelines(word+'\n')
 
+        # Re-write src_words files with counts
+        with (lex_path1 / "src_words.txt").open("w", encoding = "utf8") as output_file:  
+            for entry in src1_word_counter:
+                output_file.writelines(entry[0] + '\t' + str(entry[1]) + '\n')
+        with (lex_path2 / "src_words.txt").open("w", encoding = "utf8") as output_file:  
+            for entry in src2_word_counter:
+                output_file.writelines(entry[0] + '\t' + str(entry[1]) + '\n')
+
         # Write source words missing from the alternate source file
+        #with (lex_path1 / "unmatched_src_words.txt").open("w", encoding="utf8") as output_file:
+        #    output_file.writelines(f'src.txt words not found in {src_file2}\n')
+        #    for word in src1_only_words:
+        #        output_file.writelines(word+'\n')
+        #with (lex_path2 / "unmatched_src_words.txt").open("w", encoding="utf8") as output_file:
+        #    output_file.writelines(f'src.txt words not found in {src_file1}\n')
+        #    for word in src2_only_words:
+        #        output_file.writelines(word+'\n')
+
+
+        # Rewrite of above section to include counts in the output file: 
         with (lex_path1 / "unmatched_src_words.txt").open("w", encoding="utf8") as output_file:
             output_file.writelines(f'src.txt words not found in {src_file2}\n')
-            for word in src1_only_words:
-                output_file.writelines(word+'\n')
+            for entry in src1_word_counter:
+                if entry[0] in src1_only_words:
+                    output_file.writelines(entry[0] + '\t' + str(entry[1]) + '\n')
         with (lex_path2 / "unmatched_src_words.txt").open("w", encoding="utf8") as output_file:
             output_file.writelines(f'src.txt words not found in {src_file1}\n')
-            for word in src2_only_words:
-                output_file.writelines(word+'\n')
+            for entry in src2_word_counter:
+                if entry[0] in src2_only_words:
+                    output_file.writelines(entry[0] + '\t' + str(entry[1]) + '\n')
 
     # Compare target words and write results to files
     if args.trg == True:
