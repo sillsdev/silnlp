@@ -50,6 +50,7 @@ def main():
                     word_count = 0
                     for word in word_list:
                         #if NFD(NFD(word[1])) in NFD(NFD(verse[1])):
+                        #if word[1] in verse[1]: # (to find all instances; not just first)
                         if word[1] in verse[1] and word[1] not in seen_words:
                             for entry in src_word_counts:
                                  if entry[0] == word[1]:
