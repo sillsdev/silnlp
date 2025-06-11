@@ -65,24 +65,40 @@ def main() -> None:
         project_path = SIL_NLP_ENV.pt_projects_dir / project
         if project_path.is_dir():
             projects_found.add(project)
+    extract_corpora(
+        projects=projects_found,
+        include=args.include,
+        exclude=args.exclude,
+        markers=args.markers,
+        lemmas=args.lemmas,
+        project_vrefs=args.project_vrefs,
+    )
+    # Tell the user which projects couldn't be found.
+    for project in projects:
+        if project not in projects_found:
+            LOGGER.warning(f"Couldn't find project {project} in {SIL_NLP_ENV.pt_projects_dir}.")
 
+
+def extract_corpora(
+    projects: Set[str], include=[], exclude=[], markers=False, lemmas=False, project_vrefs=False
+) -> None:
     # Process the projects that have data and tell the user.
-    if len(projects_found) > 0:
-        expected_verse_count = get_expected_verse_count(args.include, args.exclude)
+    if len(projects) > 0:
+        expected_verse_count = get_expected_verse_count(include, exclude)
         SIL_NLP_ENV.mt_scripture_dir.mkdir(exist_ok=True, parents=True)
         SIL_NLP_ENV.mt_terms_dir.mkdir(exist_ok=True, parents=True)
-        for project in projects_found:
+        for project in projects:
             LOGGER.info(f"Extracting {project}...")
             project_dir = get_project_dir(project)
             check_versification(project_dir)
             corpus_filename, verse_count = extract_project(
                 project_dir,
                 SIL_NLP_ENV.mt_scripture_dir,
-                args.include,
-                args.exclude,
-                args.markers,
-                args.lemmas,
-                args.project_vrefs,
+                include,
+                exclude,
+                markers,
+                lemmas,
+                project_vrefs,
             )
             # check if the number of lines in the file is correct (the same as vref.txt)
             LOGGER.info(f"# of Verses: {verse_count}")
@@ -93,11 +109,6 @@ def main() -> None:
             LOGGER.info("Done.")
     else:
         LOGGER.warning(f"Couldn't find any data to process for any project in {SIL_NLP_ENV.pt_projects_dir}.")
-
-    # Tell the user which projects couldn't be found.
-    for project in projects:
-        if project not in projects_found:
-            LOGGER.warning(f"Couldn't find project {project} in {SIL_NLP_ENV.pt_projects_dir}.")
 
 
 if __name__ == "__main__":

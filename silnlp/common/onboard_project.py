@@ -71,6 +71,41 @@ def main() -> None:
     parser.add_argument(
         "--overwrite", help="Overwrite any existing files and folders", default=False, action="store_true"
     )
+    parser.add_argument(
+        "--extract-corpora",
+        help="Extract text corpora.",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--include",
+        metavar="books",
+        nargs="+",
+        default=[],
+        help="The books to include; e.g., 'NT', 'OT', 'GEN'. Only used with extract-corpora.",
+    )
+    parser.add_argument(
+        "--exclude",
+        metavar="books",
+        nargs="+",
+        default=[],
+        help="The books to exclude; e.g., 'NT', 'OT', 'GEN'. Only used with extract-corpora.",
+    )
+    parser.add_argument(
+        "--markers", default=False, action="store_true", help="Include USFM markers. Only used with extract-corpora."
+    )
+    parser.add_argument(
+        "--lemmas",
+        default=False,
+        action="store_true",
+        help="Extract lemmas if available. Only used with extract-corpora.",
+    )
+    parser.add_argument(
+        "--project-vrefs",
+        default=False,
+        action="store_true",
+        help="Extract project verse refs. Only used with extract-corpora.",
+    )
 
     args = parser.parse_args()
     project_name = args.project
@@ -80,6 +115,18 @@ def main() -> None:
 
     if args.copy_from:
         copy_paratext_project_folder(Path(args.copy_from), paratext_project_dir, overwrite=args.overwrite)
+
+    if args.extract_corpora:
+        from .extract_corpora import extract_corpora
+
+        extract_corpora(
+            projects={project_name},
+            include=args.include,
+            exclude=args.exclude,
+            markers=args.markers,
+            lemmas=args.lemmas,
+            project_vrefs=args.project_vrefs,
+        )
 
 
 if __name__ == "__main__":
