@@ -67,11 +67,11 @@ def main() -> None:
             projects_found.add(project)
     extract_corpora(
         projects=projects_found,
-        include=args.include,
-        exclude=args.exclude,
-        markers=args.markers,
-        lemmas=args.lemmas,
-        project_vrefs=args.project_vrefs,
+        books_to_include=args.include,
+        books_to_exclude=args.exclude,
+        include_markers=args.markers,
+        extract_lemmas=args.lemmas,
+        extract_project_vrefs=args.project_vrefs,
     )
     # Tell the user which projects couldn't be found.
     for project in projects:
@@ -80,11 +80,16 @@ def main() -> None:
 
 
 def extract_corpora(
-    projects: Set[str], include=[], exclude=[], markers=False, lemmas=False, project_vrefs=False
+    projects: Set[str],
+    books_to_include=[],
+    books_to_exclude=[],
+    include_markers=False,
+    extract_lemmas=False,
+    extract_project_vrefs=False,
 ) -> None:
     # Process the projects that have data and tell the user.
     if len(projects) > 0:
-        expected_verse_count = get_expected_verse_count(include, exclude)
+        expected_verse_count = get_expected_verse_count(books_to_include, books_to_exclude)
         SIL_NLP_ENV.mt_scripture_dir.mkdir(exist_ok=True, parents=True)
         SIL_NLP_ENV.mt_terms_dir.mkdir(exist_ok=True, parents=True)
         for project in projects:
@@ -94,11 +99,11 @@ def extract_corpora(
             corpus_filename, verse_count = extract_project(
                 project_dir,
                 SIL_NLP_ENV.mt_scripture_dir,
-                include,
-                exclude,
-                markers,
-                lemmas,
-                project_vrefs,
+                books_to_include,
+                books_to_exclude,
+                include_markers,
+                extract_lemmas,
+                extract_project_vrefs,
             )
             # check if the number of lines in the file is correct (the same as vref.txt)
             LOGGER.info(f"# of Verses: {verse_count}")

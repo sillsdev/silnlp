@@ -121,11 +121,11 @@ def main() -> None:
 
         extract_corpora(
             projects={project_name},
-            include=args.include,
-            exclude=args.exclude,
-            markers=args.markers,
-            lemmas=args.lemmas,
-            project_vrefs=args.project_vrefs,
+            books_to_include=args.include,
+            books_to_exclude=args.exclude,
+            include_markers=args.markers,
+            extract_lemmas=args.lemmas,
+            extract_project_vrefs=args.project_vrefs,
         )
 
 
