@@ -32,6 +32,10 @@ LOGGER = logging.getLogger(__package__ + ".postprocess_draft")
 
 # NOTE: only using first book of first translate request for now
 def get_paths_from_exp(config: Config) -> Tuple[Path, Path]:
+    # TODO: default to first draft in the infer folder
+    if not (config.exp_dir / "translate_config.yml").exists():
+        raise ValueError("Experiment translate_config.yml not found. Please use --source and --draft options instead.")
+
     with (config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as file:
         translate_config = yaml.safe_load(file)["translate"][0]
     src_project = translate_config.get("src_project", next(iter(config.src_projects)))
@@ -89,10 +93,16 @@ def main() -> None:
         description="Applies draft postprocessing steps to a draft. Can be used with no postprocessing options to create a base draft."
     )
     parser.add_argument(
-        "source_or_experiment",
-        help="Path of the source USFM file or an experiment directory. \
-        If in a Paratext project, the project settings will be used when reading the files. \
-        If an experiment directory, will use translate config to find source and draft files.",
+        "--experiment",
+        default=None,
+        help="Name of an experiment directory in MT/experiments. \
+        If this option is used, the experiment's translate config will be used to find source and draft files.",
+    )
+    parser.add_argument(
+        "--source",
+        default=None,
+        help="Path of the source USFM file. \
+        If in a Paratext project, the project settings will be used when reading the files.",
     )
     parser.add_argument(
         "--draft",
@@ -101,15 +111,15 @@ def main() -> None:
         Must have the exact same USFM structure as 'source', which it will if it is a draft from that source.",
     )
     parser.add_argument(
-        "--output-folder",
-        default=None,
-        help="Output folder for the postprocessed draft. Defaults to the folder of the original draft.",
-    )
-    parser.add_argument(
         "--book",
         default=None,
         help="3-letter book id of book being evaluated, e.g. MAT. \
         Only necessary if the source file is not in a Paratext project directory.",
+    )
+    parser.add_argument(
+        "--output-folder",
+        default=None,
+        help="Output folder for the postprocessed draft. Defaults to the folder of the original draft.",
     )
     parser.add_argument(
         "--include-paragraph-markers",
@@ -138,14 +148,18 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    source_or_experiment = args.source_or_experiment.replace("\\", "/")
-    if get_mt_exp_dir(source_or_experiment).exists():
-        exp_dir = get_mt_exp_dir(source_or_experiment)
+    if args.experiment and (args.source or args.draft or args.book):
+        LOGGER.info("--experiment option used. --source, --draft, and --book will be ignored.")
+    if not (args.experiment or (args.source and args.draft)):
+        raise ValueError("Not enough options used. Please use --experiment OR --source and --draft.")
+
+    experiment = args.experiment.replace("\\", "/") if args.experiment else None
+    if experiment and get_mt_exp_dir(experiment).exists():
+        exp_dir = get_mt_exp_dir(experiment)
         if args.clearml_queue is not None:
             if "cpu" not in args.clearml_queue:
-                LOGGER.warning("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
-                exit()
-            clearml = SILClearML(source_or_experiment, args.clearml_queue)
+                raise ValueError("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
+            clearml = SILClearML(experiment, args.clearml_queue)
             config = clearml.config
         else:
             with (exp_dir / "config.yml").open("r", encoding="utf-8") as file:
@@ -154,13 +168,9 @@ def main() -> None:
 
         src_path, draft_path = get_paths_from_exp(config)
     elif args.clearml_queue is not None:
-        LOGGER.warning("Must pass an experiment name to use ClearML.")
-        exit()
+        raise ValueError("Must use --experiment option to use ClearML.")
     else:
-        if args.draft is None:
-            LOGGER.warning("Must pass a draft book path if not using an experiment.")
-            exit()
-        src_path = Path(source_or_experiment)
+        src_path = Path(args.source.replace("\\", "/"))
         draft_path = Path(args.draft.replace("\\", "/"))
 
     if str(src_path).startswith(str(get_project_dir(""))):
