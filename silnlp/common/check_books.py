@@ -50,7 +50,8 @@ def parse_book(project_dir: str, book: str):
 
     settings = FileParatextProjectSettingsParser(project_dir).parse()
     book_path = Path(project_dir) / settings.get_book_file_name(book)
-
+    LOGGER.info(f"Attempting to parse {book} from {book_path}.")
+    
     if not book_path.is_file():
         raise RuntimeError(f"Can't find file {book_path} for book {book}")
 

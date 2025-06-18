@@ -6,13 +6,13 @@ from machine.corpora import FileParatextProjectSettingsParser, UsfmFileText, Usf
 def main() -> None:
     """
     Print out all paragraph and character markers for a book
-    To use set book, fpath, and out_path. fpath should be a path to a book in a Paratext project
+    To use set book, fpath, and marker_file. fpath should be a path to a book in a Paratext project
     """
 
-    book = "MAT"
-    fpath = Path("")
-    out_path = Path("")
-    sentences_file = Path("")
+    book = "PRO"
+    fpath = Path(r"M:/Paratext/projects/NIV11/20PRONIV11.SFM")
+    marker_file = Path(r"E:/Work/Draft Quality Improvements/NIV_PRO_paragraphs.txt")
+    sentences_file = Path(r"E:/Work/Draft Quality Improvements/NIV_PRO_sentences.txt")
 
     settings = FileParatextProjectSettingsParser(fpath.parent).parse()
     file_text = UsfmFileText(
@@ -52,7 +52,7 @@ def main() -> None:
                 elif tok.type in [UsfmTokenType.PARAGRAPH, UsfmTokenType.CHARACTER, UsfmTokenType.END]:
                     usfm_markers[-1].append(tok.marker)
 
-    with out_path.open("w", encoding=settings.encoding) as f:
+    with marker_file.open("w", encoding=settings.encoding) as f:
         for ref, markers in zip(vrefs, usfm_markers):
             f.write(f"{ref} {markers}\n")
 
