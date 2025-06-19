@@ -100,6 +100,7 @@ def evaluate_usfm_marker_placement(
 
     tokenizer = WhitespaceMarkerTokenizer()
 
+    # Remove remarks, as they are irrelevant and any added in the translation pipeline will cause the files to be misaligned
     gold_file_sents = [
         gs.text for gs in gold_file_text if not (len(gs.ref.path) > 0 and gs.ref.path[-1].name in PARAGRAPH_TYPE_EMBEDS)
     ]
