@@ -100,15 +100,19 @@ def evaluate_usfm_marker_placement(
 
     tokenizer = WhitespaceMarkerTokenizer()
 
+    gold_file_sents = [
+        gs.text for gs in gold_file_text if not (len(gs.ref.path) > 0 and gs.ref.path[-1].name in PARAGRAPH_TYPE_EMBEDS)
+    ]
+    pred_file_sents = [
+        ps.text for ps in pred_file_text if not (len(ps.ref.path) > 0 and ps.ref.path[-1].name in PARAGRAPH_TYPE_EMBEDS)
+    ]
+
     gold_sent_toks = []
     pred_sent_toks = []
     num_markers = []
-    for gs, ps in zip(gold_file_text, pred_file_text):
-        if len(gs.ref.path) > 0 and gs.ref.path[-1].name in PARAGRAPH_TYPE_EMBEDS:
-            continue
-
-        gs_text, gold_markers = filter_markers(gs.text, stylesheet, only_paragraph, only_style, to_ignore)
-        ps_text, pred_markers = filter_markers(ps.text, stylesheet, only_paragraph, only_style, to_ignore)
+    for gs, ps in zip(gold_file_sents, pred_file_sents):
+        gs_text, gold_markers = filter_markers(gs, stylesheet, only_paragraph, only_style, to_ignore)
+        ps_text, pred_markers = filter_markers(ps, stylesheet, only_paragraph, only_style, to_ignore)
 
         if len(gold_markers) == 0:
             continue
