@@ -40,7 +40,7 @@ def get_paths_from_exp(config: Config) -> Tuple[Path, Path]:
         translate_config = yaml.safe_load(file)["translate"][0]
     src_project = translate_config.get("src_project", next(iter(config.src_projects)))
     books = translate_config["books"]
-    book = books[0] if isinstance(books, list) else books.split(";")[0]  # TODO: handle partial book translation
+    book = books[0][:3] if isinstance(books, list) else books.split(";")[0][:3]
     book_num = book_id_to_number(book)
 
     ckpt = translate_config.get("checkpoint", "last")
@@ -89,9 +89,7 @@ def get_sentences(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Applies draft postprocessing steps to a draft. Can be used with no postprocessing options to create a base draft."
-    )
+    parser = argparse.ArgumentParser(description="Applies draft postprocessing steps to a draft.")
     parser.add_argument(
         "--experiment",
         default=None,
@@ -173,6 +171,27 @@ def main() -> None:
         src_path = Path(args.source.replace("\\", "/"))
         draft_path = Path(args.draft.replace("\\", "/"))
 
+    # If no postprocessing options are used, use any postprocessing requests in the experiment's translate config
+    if args.include_paragraph_markers or args.include_style_markers or args.include_embeds:
+        postprocess_configs = [
+            {
+                "include_paragraph_markers": args.include_paragraph_markers,
+                "include_style_markers": args.include_style_markers,
+                "include_embeds": args.include_embeds,
+            }
+        ]
+    else:
+        if args.experiment:
+            LOGGER.info("No postprocessing options used. Applying postprocessing requests from translate config.")
+            with (config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as file:
+                postprocess_configs = yaml.safe_load(file).get("postprocess", [])
+            if len(postprocess_configs) == 0:
+                LOGGER.info("No postprocessing requests found.")
+                exit()
+        else:
+            LOGGER.info("Please use at least one postprocessing option.")
+            exit()
+
     if str(src_path).startswith(str(get_project_dir(""))):
         settings = FileParatextProjectSettingsParser(src_path.parent).parse()
         stylesheet = settings.stylesheet
@@ -198,36 +217,61 @@ def main() -> None:
                 f"'source' and 'draft' must have the exact same USFM structure. Mismatched ref: {src_ref} {draft_ref}"
             )
 
-    paragraph_behavior = (
-        UpdateUsfmMarkerBehavior.PRESERVE if args.include_paragraph_markers else UpdateUsfmMarkerBehavior.STRIP
-    )
-    style_behavior = UpdateUsfmMarkerBehavior.PRESERVE if args.include_style_markers else UpdateUsfmMarkerBehavior.STRIP
-    embed_behavior = UpdateUsfmMarkerBehavior.PRESERVE if args.include_embeds else UpdateUsfmMarkerBehavior.STRIP
+    if any(
+        ppc.get("include_paragraph_markers", False) or ppc.get("include_style_markers", False)
+        for ppc in postprocess_configs
+    ):
+        place_markers_handler = construct_place_markers_handler(src_refs, src_sents, draft_sents)
 
-    update_block_handlers = []
-    if args.include_paragraph_markers or args.include_style_markers:
-        update_block_handlers.append(construct_place_markers_handler(src_refs, src_sents, draft_sents))
+    for postprocess_config in postprocess_configs:
+        update_block_handlers = []
+        if postprocess_config.get("include_paragraph_markers", False) or postprocess_config.get(
+            "include_style_markers", False
+        ):
+            update_block_handlers.append(place_markers_handler)
 
-    with src_path.open(encoding=encoding) as f:
-        usfm = f.read()
-    handler = UpdateUsfmParserHandler(
-        rows=[([ref], sent) for ref, sent in zip(src_refs, draft_sents)],
-        id_text=book,
-        text_behavior=UpdateUsfmTextBehavior.STRIP_EXISTING,
-        paragraph_behavior=paragraph_behavior,
-        embed_behavior=embed_behavior,
-        style_behavior=style_behavior,
-        update_block_handlers=update_block_handlers,
-    )
-    parse_usfm(usfm, handler)
-    usfm_out = handler.get_usfm()
+        paragraph_behavior = (
+            UpdateUsfmMarkerBehavior.PRESERVE
+            if postprocess_config.get("include_paragraph_markers", False)
+            else UpdateUsfmMarkerBehavior.STRIP
+        )
+        style_behavior = (
+            UpdateUsfmMarkerBehavior.PRESERVE
+            if postprocess_config.get("include_style_markers", False)
+            else UpdateUsfmMarkerBehavior.STRIP
+        )
+        embed_behavior = (
+            UpdateUsfmMarkerBehavior.PRESERVE
+            if postprocess_config.get("include_embeds", False)
+            else UpdateUsfmMarkerBehavior.STRIP
+        )
+        marker_placement_suffix = (
+            "_"
+            + ("p" if postprocess_config.get("include_paragraph_markers", False) else "")
+            + ("s" if postprocess_config.get("include_style_markers", False) else "")
+            + ("e" if postprocess_config.get("include_embeds", False) else "")
+        )
 
-    usfm_out = insert_draft_remarks(usfm_out, draft_remarks)
+        with src_path.open(encoding=encoding) as f:
+            usfm = f.read()
+        handler = UpdateUsfmParserHandler(
+            rows=[([ref], sent) for ref, sent in zip(src_refs, draft_sents)],
+            id_text=book,
+            text_behavior=UpdateUsfmTextBehavior.STRIP_EXISTING,
+            paragraph_behavior=paragraph_behavior,
+            embed_behavior=embed_behavior,
+            style_behavior=style_behavior,
+            update_block_handlers=update_block_handlers,
+        )
+        parse_usfm(usfm, handler)
+        usfm_out = handler.get_usfm()
 
-    out_dir = Path(args.output_folder.replace("\\", "/")) if args.output_folder else draft_path.parent
-    out_path = out_dir / f"{draft_path.stem}_postprocessed{draft_path.suffix}"
-    with out_path.open("w", encoding="utf-8" if encoding == "utf-8-sig" else encoding) as f:
-        f.write(usfm_out)
+        usfm_out = insert_draft_remarks(usfm_out, draft_remarks)
+
+        out_dir = Path(args.output_folder.replace("\\", "/")) if args.output_folder else draft_path.parent
+        out_path = out_dir / f"{draft_path.stem}{marker_placement_suffix}{draft_path.suffix}"
+        with out_path.open("w", encoding="utf-8" if encoding == "utf-8-sig" else encoding) as f:
+            f.write(usfm_out)
 
 
 if __name__ == "__main__":
