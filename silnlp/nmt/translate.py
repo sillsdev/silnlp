@@ -4,7 +4,7 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple, Union
+from typing import Dict, Iterable, List, Optional, Tuple, Union
 
 from machine.scripture import VerseRef, book_number_to_id, get_chapters
 
@@ -54,9 +54,7 @@ class TranslationTask:
         trg_project: Optional[str],
         trg_iso: Optional[str],
         produce_multiple_translations: bool = False,
-        include_paragraph_markers: bool = False,
-        include_style_markers: bool = False,
-        include_embeds: bool = False,
+        postprocess_configs: List[Dict[str, bool]] = [],
     ):
         book_nums = get_chapters(books)
         translator, config, step_str = self._init_translation_task(
@@ -112,9 +110,7 @@ class TranslationTask:
                     produce_multiple_translations,
                     chapters,
                     trg_project,
-                    include_paragraph_markers,
-                    include_style_markers,
-                    include_embeds,
+                    postprocess_configs,
                     experiment_ckpt_str,
                 )
             except Exception as e:
@@ -178,9 +174,7 @@ class TranslationTask:
         src_iso: Optional[str],
         trg_iso: Optional[str],
         produce_multiple_translations: bool = False,
-        include_paragraph_markers: bool = False,
-        include_style_markers: bool = False,
-        include_embeds: bool = False,
+        postprocess_configs: List[Dict[str, bool]] = [],
     ) -> None:
         translator, config, step_str = self._init_translation_task(
             experiment_suffix=f"_{self.checkpoint}_{os.path.basename(src)}",
@@ -248,9 +242,7 @@ class TranslationTask:
                     src_iso,
                     trg_iso,
                     produce_multiple_translations,
-                    include_paragraph_markers=include_paragraph_markers,
-                    include_style_markers=include_style_markers,
-                    include_embeds=include_embeds,
+                    postprocess_configs,
                     experiment_ckpt_str=experiment_ckpt_str,
                 )
 
@@ -383,12 +375,13 @@ def main() -> None:
         name=args.experiment, checkpoint=args.checkpoint, clearml_queue=args.clearml_queue, commit=args.commit
     )
 
-    # For backwards compatibility
-    if args.preserve_usfm_markers:
-        args.include_paragraph_markers = True
-        args.include_style_markers = True
-    if args.include_inline_elements:
-        args.include_embeds = True
+    postprocess_configs = [
+        {
+            "include_paragraph_markers": args.include_paragraph_markers or args.preserve_usfm_markers,
+            "include_style_markers": args.include_style_markers or args.preserve_usfm_markers,
+            "include_embeds": args.include_embeds or args.include_inline_elements,
+        }
+    ]
 
     if len(args.books) > 0:
         if args.debug:
@@ -400,9 +393,7 @@ def main() -> None:
             args.trg_project,
             args.trg_iso,
             args.multiple_translations,
-            args.include_paragraph_markers,
-            args.include_style_markers,
-            args.include_embeds,
+            postprocess_configs,
         )
     elif args.src_prefix is not None:
         if args.debug:
@@ -428,14 +419,7 @@ def main() -> None:
             )
             exit()
         translator.translate_files(
-            args.src,
-            args.trg,
-            args.src_iso,
-            args.trg_iso,
-            args.multiple_translations,
-            args.include_paragraph_markers,
-            args.include_style_markers,
-            args.include_embeds,
+            args.src, args.trg, args.src_iso, args.trg_iso, args.multiple_translations, postprocess_configs
         )
     else:
         raise RuntimeError("A Scripture book, file, or file prefix must be specified.")
