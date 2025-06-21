@@ -67,11 +67,10 @@ XlsxWriter = "^3.2.0"
 python-Levenshtein = "^0.27.1"
 lxml = "^4.6.3"
 tqdm = "^4.62.2"
-s3path = "0.3.4"
 sacrebleu = "^2.3.1"
 ctranslate2 = "^3.5.1"
 libclang = "14.0.6"
-sil-machine = {extras = ["thot"], version = "^1.6.2"}
+sil-machine = {extras = ["thot"], version = "1.7.2"}
 datasets = "^2.7.1"
 torch = {version = "^2.4", source = "torch"}
 sacremoses = "^0.0.53"

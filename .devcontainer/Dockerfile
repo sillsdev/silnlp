@@ -39,11 +39,6 @@ RUN poetry config virtualenvs.create true && \
     poetry config virtualenvs.in-project true
 # Clean up
 RUN rm -rf /var/lib/apt/lists/*
-# Create caches
-RUN mkdir -p /root/.cache/silnlp/experiments
-RUN mkdir /root/.cache/silnlp/projects
-ENV SIL_NLP_CACHE_EXPERIMENT_DIR=/root/.cache/silnlp/experiments
-ENV SIL_NLP_CACHE_PROJECT_DIR=/root/.cache/silnlp/projects
 # Set up the MinIO/Backblaze bucket
 RUN mkdir -p ~/M
 RUN mkdir -p ~/B

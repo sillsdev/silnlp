@@ -33,9 +33,7 @@ class SILExperiment:
     commit: Optional[str] = None
 
     def __post_init__(self):
-        self.clearml = SILClearML(
-            self.name, self.clearml_queue, commit=self.commit, bucket_service=SIL_NLP_ENV.bucket_service
-        )
+        self.clearml = SILClearML(self.name, self.clearml_queue, commit=self.commit)
         self.name: str = self.clearml.name
         self.config: Config = self.clearml.config
         self.rev_hash = get_git_revision_hash()
@@ -59,28 +57,17 @@ class SILExperiment:
         config_file = Path(exp_dir, "config.yml")
         if not config_file.exists():
             raise RuntimeError(f"ERROR: Config file does not exist in experiment folder {exp_dir}.")
-        SIL_NLP_ENV.copy_experiment_from_bucket(self.name)
-        if self.config.has_parent:
-            SIL_NLP_ENV.copy_experiment_from_bucket(self.config.data["parent"])
         self.config.preprocess(self.make_stats, self.force_align)
-        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, overwrite=self.force_align)
 
     def train(self):
         os.system("nvidia-smi")
-        SIL_NLP_ENV.copy_experiment_from_bucket(self.name)
-        if self.config.has_parent:
-            SIL_NLP_ENV.copy_experiment_from_bucket(self.config.data["parent"])
         model = self.config.create_model(self.mixed_precision, self.num_devices)
         model.save_effective_config(self.config.exp_dir / f"effective-config-{self.rev_hash}.yml")
-        SIL_NLP_ENV.copy_experiment_to_bucket(self.name, patterns=f"effective-config-{self.rev_hash}.yml")
         print(f"=== Training ({self.name}) ===")
         model.train()
-        if self.save_checkpoints:
-            SIL_NLP_ENV.copy_experiment_to_bucket(self.name)
         print("Training completed")
 
     def test(self):
-        SIL_NLP_ENV.copy_experiment_from_bucket(self.name)
         test(
             experiment=self.name,
             last=self.config.model_dir.exists(),
@@ -89,12 +76,8 @@ class SILExperiment:
             scorers=self.scorers,
             produce_multiple_translations=self.produce_multiple_translations,
         )
-        SIL_NLP_ENV.copy_experiment_to_bucket(
-            self.name, patterns=("scores-*.csv", "test.*trg-predictions.*"), overwrite=True
-        )
 
     def translate(self):
-        SIL_NLP_ENV.copy_experiment_from_bucket(self.name, patterns="*.yml")
         with (self.config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as file:
             translate_configs = yaml.safe_load(file)
 
@@ -184,7 +167,7 @@ def main() -> None:
         nargs="*",
         metavar="scorer",
         choices=_SUPPORTED_SCORERS,
-        default=["bleu", "sentencebleu", "chrf3", "chrf3+", "chrf3++", "spbleu"],
+        default=["bleu", "sentencebleu", "chrf3", "chrf3+", "chrf3++", "spbleu", "confidence"],
         help=f"List of scorers - {_SUPPORTED_SCORERS}",
     )
 
