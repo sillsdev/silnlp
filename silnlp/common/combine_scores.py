@@ -8,6 +8,30 @@ import pandas as pd
 
 from ..common.environment import SIL_NLP_ENV
 
+# Columns for current style detection and transformation (match actual input files)
+CURRENT_STYLE_COLUMNS = [
+    "book", "draft_index", "src_iso", "trg_iso", "num_refs", "references", "sent_len",
+    "BLEU", "BLEU_1gram_prec", "BLEU_2gram_prec", "BLEU_3gram_prec", "BLEU_4gram_prec",
+    "BLEU_brevity_penalty", "BLEU_total_sys_len", "BLEU_total_ref_len",
+    "chrF3", "chrF3+", "chrF3++", "spBLEU", "confidence"
+]
+
+# Columns to filter out
+COLUMNS_TO_REMOVE = [
+    "BLEU_1gram_prec", "BLEU_2gram_prec", "BLEU_3gram_prec", "BLEU_4gram_prec", "BLEU_brevity_penalty",
+    "BLEU_total_sys_len", "BLEU_total_ref_len", "chrF3", "chrF3+", "spBLEU", "confidence"
+]
+
+# Columns to move to the end
+COLUMNS_TO_END = [
+    "book", "draft_index", "num_refs", "references", "sent_len"
+]
+
+# Final column order for current style
+CURRENT_STYLE_OUTPUT_COLUMNS = [
+    "src_iso", "trg_iso", "BLEU", "chrF3++"
+] + COLUMNS_TO_END
+
 
 def check_for_lock_file(folder: Path, filename: str, file_type: str):
     """Check for lock files and ask the user to close them then exit."""
@@ -26,6 +50,27 @@ def check_for_lock_file(folder: Path, filename: str, file_type: str):
         sys.exit()
 
 
+def is_current_style(header):
+    """Check if the header matches the current style (all columns present, no extras)."""
+    header = [col.strip() for col in header]
+    return set(CURRENT_STYLE_COLUMNS).issubset(set(header))
+
+
+def transform_current_style_rows(header, rows):
+    """Remove and reorder columns for current style."""
+    # Map column name to index
+    col_idx = {col: i for i, col in enumerate(header)}
+    # Only keep columns in CURRENT_STYLE_OUTPUT_COLUMNS
+    new_header = [col for col in CURRENT_STYLE_OUTPUT_COLUMNS if col in col_idx]
+    new_rows = []
+    for row in rows:
+        if len(row) < len(header):
+            continue  # skip incomplete or blank rows
+        new_row = [row[col_idx[col]] for col in new_header]
+        new_rows.append(new_row)
+    return new_header, new_rows
+
+
 def aggregate_csv(folder_path):
     # Dictionary to store rows by header type
     data_by_header = defaultdict(list)
@@ -40,13 +85,27 @@ def aggregate_csv(folder_path):
         with open(csv_file, "r") as f:
             reader = csv.reader(f)
             rows = list(reader)
-            header = tuple(rows[0])  # Use tuple to make it hashable
+            header = list(rows[0])  # Use list for easier manipulation
 
             # Add columns to the beginning of each row
-            if header not in data_by_header:
-                data_by_header[header].append(["Series", "Experiment", "Steps"] + list(header))
-            for row in rows[1:]:
-                data_by_header[header].append([series, experiment, steps] + row)
+            print(f"Processing {csv_file}")
+            print(f"Header: {header}")
+            print(f"Is current style: {is_current_style(header)}")
+            if is_current_style(header):
+                # Transform header and rows for current style
+                transformed_header, transformed_rows = transform_current_style_rows(header, rows[1:])
+                # Add Series, Experiment, Steps to the beginning
+                new_header = ["Series", "Experiment", "Steps"] + transformed_header
+                if tuple(new_header) not in data_by_header:
+                    data_by_header[tuple(new_header)].append(new_header)
+                for row in transformed_rows:
+                    data_by_header[tuple(new_header)].append([series, experiment, steps] + row)
+            else:
+                # Old style: keep as is
+                if tuple(header) not in data_by_header:
+                    data_by_header[tuple(header)].append(["Series", "Experiment", "Steps"] + header)
+                for row in rows[1:]:
+                    data_by_header[tuple(header)].append([series, experiment, steps] + row)
 
     return data_by_header
 
