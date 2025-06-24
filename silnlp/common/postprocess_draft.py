@@ -142,7 +142,9 @@ def postprocess_drafts(
             update_block_handlers.append(place_markers_handler)
 
         usfm_out = update_draft(usfm, rows, postprocess_config, update_block_handlers)
-        usfm_out = insert_draft_remarks(usfm_out, draft_remarks)
+
+        postprocess_remark = f"Post-processing options used: {' '.join(opt for opt in postprocess_config.keys() if postprocess_config[opt])}"
+        usfm_out = insert_draft_remarks(usfm_out, draft_remarks + [postprocess_remark])
 
         marker_placement_suffix = (
             "_"
