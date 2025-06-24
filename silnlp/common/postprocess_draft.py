@@ -3,7 +3,7 @@ import logging
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import yaml
 from machine.corpora import (
@@ -15,6 +15,7 @@ from machine.corpora import (
     UsfmFileText,
     UsfmStylesheet,
     UsfmTextType,
+    UsfmUpdateBlockHandler,
     parse_usfm,
 )
 from machine.scripture import book_number_to_id, get_chapters
@@ -91,6 +92,102 @@ def get_sentences(
         refs.append(sent.ref)
 
     return sents, refs, draft_remarks
+
+
+def postprocess_drafts(
+    src_path: Path,
+    draft_path: Path,
+    postprocess_configs: List[Dict[str, bool]],
+    book: Optional[str] = None,
+    out_dir: Optional[Path] = None,
+) -> None:
+    if str(src_path).startswith(str(get_project_dir(""))):
+        settings = FileParatextProjectSettingsParser(src_path.parent).parse()
+        stylesheet = settings.stylesheet
+        encoding = settings.encoding
+        book = settings.get_book_id(src_path.name)
+    else:
+        stylesheet = UsfmStylesheet("usfm.sty")
+        encoding = "utf-8-sig"
+        if book is None:
+            raise ValueError(
+                "--book argument must be passed if the source file is not in a Paratext project directory."
+            )
+
+    src_sents, src_refs, _ = get_sentences(src_path, stylesheet, encoding, book)
+    draft_sents, draft_refs, draft_remarks = get_sentences(draft_path, stylesheet, encoding, book)
+
+    # Verify reference parity
+    if len(src_refs) != len(draft_refs):
+        LOGGER.warning(f"Can't process {src_path} and {draft_path}: Unequal number of verses/references")
+        return
+    for src_ref, draft_ref in zip(src_refs, draft_refs):
+        if src_ref.to_relaxed() != draft_ref.to_relaxed():
+            LOGGER.warning(
+                f"Can't process {src_path} and {draft_path}: Mismatched ref, {src_ref} != {draft_ref}. Files must have the exact same USFM structure"
+            )
+            return
+
+    # Initialize UsfmUpdateBlockHandlers as necessary
+    if any(ppc["include_paragraph_markers"] or ppc["include_style_markers"] for ppc in postprocess_configs):
+        place_markers_handler = construct_place_markers_handler(src_refs, src_sents, draft_sents)
+
+    with src_path.open(encoding=encoding) as f:
+        usfm = f.read()
+    rows = [([ref], sent) for ref, sent in zip(src_refs, draft_sents)]
+
+    for postprocess_config in postprocess_configs:
+        update_block_handlers = []
+        if postprocess_config["include_paragraph_markers"] or postprocess_config["include_style_markers"]:
+            update_block_handlers.append(place_markers_handler)
+
+        usfm_out = update_draft(usfm, rows, postprocess_config, update_block_handlers)
+        usfm_out = insert_draft_remarks(usfm_out, draft_remarks)
+
+        marker_placement_suffix = (
+            "_"
+            + ("p" if postprocess_config["include_paragraph_markers"] else "")
+            + ("s" if postprocess_config["include_style_markers"] else "")
+            + ("e" if postprocess_config["include_embeds"] else "")
+        )
+        if not out_dir:
+            out_dir = draft_path.parent
+        out_path = out_dir / f"{draft_path.stem}{marker_placement_suffix}{draft_path.suffix}"
+        with out_path.open("w", encoding="utf-8" if encoding == "utf-8-sig" else encoding) as f:
+            f.write(usfm_out)
+
+
+def update_draft(
+    usfm: str,
+    rows: List[Tuple[List[ScriptureRef], str]],
+    postprocess_config: Dict[str, bool],
+    update_block_handlers: List[UsfmUpdateBlockHandler] = [],
+) -> str:
+    paragraph_behavior = (
+        UpdateUsfmMarkerBehavior.PRESERVE
+        if postprocess_config["include_paragraph_markers"]
+        else UpdateUsfmMarkerBehavior.STRIP
+    )
+    style_behavior = (
+        UpdateUsfmMarkerBehavior.PRESERVE
+        if postprocess_config["include_style_markers"]
+        else UpdateUsfmMarkerBehavior.STRIP
+    )
+    embed_behavior = (
+        UpdateUsfmMarkerBehavior.PRESERVE if postprocess_config["include_embeds"] else UpdateUsfmMarkerBehavior.STRIP
+    )
+
+    handler = UpdateUsfmParserHandler(
+        rows=rows,
+        id_text=rows[0][0][0].book,
+        text_behavior=UpdateUsfmTextBehavior.STRIP_EXISTING,
+        paragraph_behavior=paragraph_behavior,
+        embed_behavior=embed_behavior,
+        style_behavior=style_behavior,
+        update_block_handlers=update_block_handlers,
+    )
+    parse_usfm(usfm, handler)
+    return handler.get_usfm()
 
 
 def main() -> None:
@@ -198,85 +295,10 @@ def main() -> None:
             LOGGER.info("Please use at least one postprocessing option.")
             exit()
 
+    if args.output_folder:
+        args.output_folder = Path(args.output_folder.replace("\\", "/"))
     for src_path, draft_path in zip(src_paths, draft_paths):
-        if str(src_path).startswith(str(get_project_dir(""))):
-            settings = FileParatextProjectSettingsParser(src_path.parent).parse()
-            stylesheet = settings.stylesheet
-            encoding = settings.encoding
-            book = settings.get_book_id(src_path.name)
-        else:
-            stylesheet = UsfmStylesheet("usfm.sty")
-            encoding = "utf-8-sig"
-            book = args.book
-            if book is None:
-                raise ValueError(
-                    "--book argument must be passed if the source file is not in a Paratext project directory."
-                )
-
-        src_sents, src_refs, _ = get_sentences(src_path, stylesheet, encoding, book)
-        draft_sents, draft_refs, draft_remarks = get_sentences(draft_path, stylesheet, encoding, book)
-
-        if len(src_refs) != len(draft_refs):
-            LOGGER.warning(f"Can't process {src_path} and {draft_path}: Unequal number of verses/references")
-            continue
-        for src_ref, draft_ref in zip(src_refs, draft_refs):
-            if src_ref.to_relaxed() != draft_ref.to_relaxed():
-                LOGGER.warning(
-                    f"Can't process {src_path} and {draft_path}: Mismatched ref: {src_ref} {draft_ref}. Files must have the exact same USFM structure"
-                )
-                continue
-
-        if any(ppc["include_paragraph_markers"] or ppc["include_style_markers"] for ppc in postprocess_configs):
-            place_markers_handler = construct_place_markers_handler(src_refs, src_sents, draft_sents)
-
-        for postprocess_config in postprocess_configs:
-            update_block_handlers = []
-            if postprocess_config["include_paragraph_markers"] or postprocess_config["include_style_markers"]:
-                update_block_handlers.append(place_markers_handler)
-
-            paragraph_behavior = (
-                UpdateUsfmMarkerBehavior.PRESERVE
-                if postprocess_config["include_paragraph_markers"]
-                else UpdateUsfmMarkerBehavior.STRIP
-            )
-            style_behavior = (
-                UpdateUsfmMarkerBehavior.PRESERVE
-                if postprocess_config["include_style_markers"]
-                else UpdateUsfmMarkerBehavior.STRIP
-            )
-            embed_behavior = (
-                UpdateUsfmMarkerBehavior.PRESERVE
-                if postprocess_config["include_embeds"]
-                else UpdateUsfmMarkerBehavior.STRIP
-            )
-            marker_placement_suffix = (
-                "_"
-                + ("p" if postprocess_config["include_paragraph_markers"] else "")
-                + ("s" if postprocess_config["include_style_markers"] else "")
-                + ("e" if postprocess_config["include_embeds"] else "")
-            )
-
-            with src_path.open(encoding=encoding) as f:
-                usfm = f.read()
-            handler = UpdateUsfmParserHandler(
-                rows=[([ref], sent) for ref, sent in zip(src_refs, draft_sents)],
-                id_text=book,
-                text_behavior=UpdateUsfmTextBehavior.STRIP_EXISTING,
-                paragraph_behavior=paragraph_behavior,
-                embed_behavior=embed_behavior,
-                style_behavior=style_behavior,
-                update_block_handlers=update_block_handlers,
-            )
-            parse_usfm(usfm, handler)
-            usfm_out = handler.get_usfm()
-
-            # TODO: back a level
-            usfm_out = insert_draft_remarks(usfm_out, draft_remarks)
-
-            out_dir = Path(args.output_folder.replace("\\", "/")) if args.output_folder else draft_path.parent
-            out_path = out_dir / f"{draft_path.stem}{marker_placement_suffix}{draft_path.suffix}"
-            with out_path.open("w", encoding="utf-8" if encoding == "utf-8-sig" else encoding) as f:
-                f.write(usfm_out)
+        postprocess_drafts(src_path, draft_path, postprocess_configs, args.book, args.output_folder)
 
 
 if __name__ == "__main__":
