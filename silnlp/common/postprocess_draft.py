@@ -1,6 +1,7 @@
 import argparse
 import logging
 import re
+from collections import defaultdict
 from pathlib import Path
 from typing import List, Tuple
 
@@ -25,7 +26,7 @@ from ..nmt.config_utils import create_config
 from ..nmt.hugging_face_config import get_best_checkpoint
 from .paratext import book_file_name_digits, get_book_path, get_project_dir
 from .usfm_preservation import PARAGRAPH_TYPE_EMBEDS, construct_place_markers_handler
-from .utils import get_mt_exp_dir
+from .utils import get_mt_exp_dir, merge_dict
 
 LOGGER = logging.getLogger(__package__ + ".postprocess_draft")
 
@@ -185,6 +186,7 @@ def main() -> None:
             LOGGER.info("No postprocessing options used. Applying postprocessing requests from translate config.")
             with (config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as file:
                 postprocess_configs = yaml.safe_load(file).get("postprocess", [])
+                postprocess_configs = [merge_dict(defaultdict(lambda: False), ppc) for ppc in postprocess_configs]
             if len(postprocess_configs) == 0:
                 LOGGER.info("No postprocessing requests found.")
                 exit()
@@ -217,39 +219,34 @@ def main() -> None:
                 f"'source' and 'draft' must have the exact same USFM structure. Mismatched ref: {src_ref} {draft_ref}"
             )
 
-    if any(
-        ppc.get("include_paragraph_markers", False) or ppc.get("include_style_markers", False)
-        for ppc in postprocess_configs
-    ):
+    if any(ppc["include_paragraph_markers"] or ppc["include_style_markers"] for ppc in postprocess_configs):
         place_markers_handler = construct_place_markers_handler(src_refs, src_sents, draft_sents)
 
     for postprocess_config in postprocess_configs:
         update_block_handlers = []
-        if postprocess_config.get("include_paragraph_markers", False) or postprocess_config.get(
-            "include_style_markers", False
-        ):
+        if postprocess_config["include_paragraph_markers"] or postprocess_config["include_style_markers"]:
             update_block_handlers.append(place_markers_handler)
 
         paragraph_behavior = (
             UpdateUsfmMarkerBehavior.PRESERVE
-            if postprocess_config.get("include_paragraph_markers", False)
+            if postprocess_config["include_paragraph_markers"]
             else UpdateUsfmMarkerBehavior.STRIP
         )
         style_behavior = (
             UpdateUsfmMarkerBehavior.PRESERVE
-            if postprocess_config.get("include_style_markers", False)
+            if postprocess_config["include_style_markers"]
             else UpdateUsfmMarkerBehavior.STRIP
         )
         embed_behavior = (
             UpdateUsfmMarkerBehavior.PRESERVE
-            if postprocess_config.get("include_embeds", False)
+            if postprocess_config["include_embeds"]
             else UpdateUsfmMarkerBehavior.STRIP
         )
         marker_placement_suffix = (
             "_"
-            + ("p" if postprocess_config.get("include_paragraph_markers", False) else "")
-            + ("s" if postprocess_config.get("include_style_markers", False) else "")
-            + ("e" if postprocess_config.get("include_embeds", False) else "")
+            + ("p" if postprocess_config["include_paragraph_markers"] else "")
+            + ("s" if postprocess_config["include_style_markers"] else "")
+            + ("e" if postprocess_config["include_embeds"] else "")
         )
 
         with src_path.open(encoding=encoding) as f:

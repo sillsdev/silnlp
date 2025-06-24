@@ -1,6 +1,7 @@
 import logging
 import re
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from datetime import date
 from itertools import groupby
 from math import exp
@@ -26,6 +27,7 @@ from machine.scripture import VerseRef
 from .corpus import load_corpus, write_corpus
 from .paratext import get_book_path, get_iso, get_project_dir
 from .usfm_preservation import PARAGRAPH_TYPE_EMBEDS, construct_place_markers_handler
+from .utils import merge_dict
 
 LOGGER = logging.getLogger(__package__ + ".translate")
 nltk.download("punkt")
@@ -220,19 +222,14 @@ class Translator(ABC):
             vrefs.insert(idx, vref)
             output.insert(idx, [None, None, None, None])
 
-        # Base draft
-        postprocess_configs = [
-            {"include_paragraph_markers": False, "include_style_markers": False, "include_embeds": False}
-        ] + postprocess_configs
+        # Prepare configs: add base draft and default value
+        postprocess_configs = [merge_dict(defaultdict(lambda: False), ppc) for ppc in [{}] + postprocess_configs]
 
         draft_set: DraftGroup = DraftGroup(translations)
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
             rows = [([ref], translation) for ref, translation in zip(vrefs, translated_draft)]
 
-            if any(
-                ppc.get("include_paragraph_markers", False) or ppc.get("include_style_markers", False)
-                for ppc in postprocess_configs
-            ):
+            if any(ppc["include_paragraph_markers"] or ppc["include_style_markers"] for ppc in postprocess_configs):
                 place_markers_handler = construct_place_markers_handler(vrefs, sentences, translated_draft)
 
             for postprocess_config in postprocess_configs:
@@ -244,31 +241,29 @@ class Translator(ABC):
                 )
                 paragraph_behavior = (
                     UpdateUsfmMarkerBehavior.PRESERVE
-                    if postprocess_config.get("include_paragraph_markers", False)
+                    if postprocess_config["include_paragraph_markers"]
                     else UpdateUsfmMarkerBehavior.STRIP
                 )
                 style_behavior = (
                     UpdateUsfmMarkerBehavior.PRESERVE
-                    if postprocess_config.get("include_style_markers", False)
+                    if postprocess_config["include_style_markers"]
                     else UpdateUsfmMarkerBehavior.STRIP
                 )
                 embed_behavior = (
                     UpdateUsfmMarkerBehavior.PRESERVE
-                    if postprocess_config.get("include_embeds", False)
+                    if postprocess_config["include_embeds"]
                     else UpdateUsfmMarkerBehavior.STRIP
                 )
                 marker_placement_suffix = (
                     "_"
-                    + ("p" if postprocess_config.get("include_paragraph_markers", False) else "")
-                    + ("s" if postprocess_config.get("include_style_markers", False) else "")
-                    + ("e" if postprocess_config.get("include_embeds", False) else "")
+                    + ("p" if postprocess_config["include_paragraph_markers"] else "")
+                    + ("s" if postprocess_config["include_style_markers"] else "")
+                    + ("e" if postprocess_config["include_embeds"] else "")
                 )
                 marker_placement_suffix = "" if len(marker_placement_suffix) == 1 else marker_placement_suffix
 
                 update_block_handlers = []
-                if postprocess_config.get("include_paragraph_markers", False) or postprocess_config.get(
-                    "include_style_markers", False
-                ):
+                if postprocess_config["include_paragraph_markers"] or postprocess_config["include_style_markers"]:
                     update_block_handlers.append(place_markers_handler)
 
                 # Insert translation into the USFM structure of an existing project
