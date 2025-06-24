@@ -33,10 +33,15 @@ def filter_markers(
     to_ignore: List[str] = [],
 ) -> Tuple[str, List[str]]:
     markers = []
-    usfm_tokenizer = UsfmTokenizer(stylesheet)
     curr_embed = None
     filtered_sent = ""
-    for tok in usfm_tokenizer.tokenize(sent):
+    usfm_tokens = list(UsfmTokenizer(stylesheet).tokenize(sent))
+
+    # Remove trivially-placed end-of-verse paragraph markers
+    while len(usfm_tokens) > 0 and usfm_tokens[-1].type == UsfmTokenType.PARAGRAPH:
+        usfm_tokens.pop()
+
+    for tok in usfm_tokens:
         base_marker = tok.marker.strip("+*") if tok.marker is not None else None
         if curr_embed is not None:
             if tok.type == UsfmTokenType.END and base_marker == curr_embed:
