@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import shutil
 from contextlib import ExitStack
 from copy import deepcopy
 from enum import Enum
