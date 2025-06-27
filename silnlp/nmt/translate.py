@@ -4,7 +4,7 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple, Union
+from typing import Iterable, Optional, Tuple, Union
 
 from machine.scripture import VerseRef, book_number_to_id, get_chapters
 
@@ -14,6 +14,7 @@ from ..common.translator import TranslationGroup, Translator
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import SILClearML
 from .config import CheckpointType, Config, NMTModel
+from .postprocess import PostprocessHandler
 
 LOGGER = logging.getLogger(__package__ + ".translate")
 
@@ -54,7 +55,7 @@ class TranslationTask:
         trg_project: Optional[str],
         trg_iso: Optional[str],
         produce_multiple_translations: bool = False,
-        postprocess_configs: List[Dict[str, bool]] = [],
+        postprocess_handler: PostprocessHandler = PostprocessHandler(),
     ):
         book_nums = get_chapters(books)
         translator, config, step_str = self._init_translation_task(
@@ -110,7 +111,7 @@ class TranslationTask:
                     produce_multiple_translations,
                     chapters,
                     trg_project,
-                    postprocess_configs,
+                    postprocess_handler,
                     experiment_ckpt_str,
                 )
             except Exception as e:
@@ -174,7 +175,7 @@ class TranslationTask:
         src_iso: Optional[str],
         trg_iso: Optional[str],
         produce_multiple_translations: bool = False,
-        postprocess_configs: List[Dict[str, bool]] = [],
+        postprocess_handler: PostprocessHandler = PostprocessHandler(),
     ) -> None:
         translator, config, step_str = self._init_translation_task(
             experiment_suffix=f"_{self.checkpoint}_{os.path.basename(src)}",
@@ -242,7 +243,7 @@ class TranslationTask:
                     src_iso,
                     trg_iso,
                     produce_multiple_translations,
-                    postprocess_configs,
+                    postprocess_handler,
                     experiment_ckpt_str=experiment_ckpt_str,
                 )
 
@@ -382,6 +383,7 @@ def main() -> None:
             "include_embeds": args.include_embeds or args.include_inline_elements,
         }
     ]
+    postprocess_handler = PostprocessHandler(postprocess_configs)
 
     if len(args.books) > 0:
         if args.debug:
@@ -393,7 +395,7 @@ def main() -> None:
             args.trg_project,
             args.trg_iso,
             args.multiple_translations,
-            postprocess_configs,
+            postprocess_handler,
         )
     elif args.src_prefix is not None:
         if args.debug:
@@ -419,7 +421,7 @@ def main() -> None:
             )
             exit()
         translator.translate_files(
-            args.src, args.trg, args.src_iso, args.trg_iso, args.multiple_translations, postprocess_configs
+            args.src, args.trg, args.src_iso, args.trg_iso, args.multiple_translations, postprocess_handler
         )
     else:
         raise RuntimeError("A Scripture book, file, or file prefix must be specified.")

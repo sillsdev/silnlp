@@ -1,12 +1,11 @@
 import logging
 import re
 from abc import ABC, abstractmethod
-from collections import defaultdict
 from datetime import date
 from itertools import groupby
 from math import exp
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Iterable, List, Optional
 
 import docx
 import nltk
@@ -14,7 +13,6 @@ from iso639 import Lang
 from machine.corpora import (
     FileParatextProjectSettingsParser,
     FileParatextProjectTextUpdater,
-    UpdateUsfmMarkerBehavior,
     UpdateUsfmParserHandler,
     UpdateUsfmTextBehavior,
     UsfmFileText,
@@ -24,31 +22,24 @@ from machine.corpora import (
 )
 from machine.scripture import VerseRef
 
+from ..nmt.postprocess import PostprocessHandler
 from .corpus import load_corpus, write_corpus
 from .paratext import get_book_path, get_iso, get_project_dir
-from .usfm_preservation import PARAGRAPH_TYPE_EMBEDS, construct_place_markers_handler
-from .utils import merge_dict
+from .postprocess_utils import PARAGRAPH_TYPE_EMBEDS
 
 LOGGER = logging.getLogger(__package__ + ".translate")
 nltk.download("punkt")
 
 
-def insert_draft_remark(
-    usfm: str,
-    book: str,
-    description: str,
-    experiment_ckpt_str: str,
-) -> str:
-    remark = f"\\rem This draft of {book} was machine translated on {date.today()} from {description} using model {experiment_ckpt_str}. It should be reviewed and edited carefully."
-
+def insert_draft_remarks(usfm: str, remarks: List[str]) -> str:
     lines = usfm.split("\n")
     insert_idx = (
         1
         + (len(lines) > 1 and (lines[1].startswith("\\ide") or lines[1].startswith("\\usfm")))
         + (len(lines) > 2 and (lines[2].startswith("\\ide") or lines[2].startswith("\\usfm")))
     )
-    lines.insert(insert_idx, remark)
-    return "\n".join(lines)
+    remarks = [f"\\rem {r}" for r in remarks]
+    return "\n".join(lines[:insert_idx] + remarks + lines[insert_idx:])
 
 
 # A group of multiple translations of a single sentence
@@ -139,7 +130,7 @@ class Translator(ABC):
         produce_multiple_translations: bool = False,
         chapters: List[int] = [],
         trg_project: Optional[str] = None,
-        postprocess_configs: List[Dict[str, bool]] = [],
+        postprocess_handler: PostprocessHandler = PostprocessHandler(),
         experiment_ckpt_str: str = "",
     ) -> None:
         book_path = get_book_path(src_project, book)
@@ -156,7 +147,7 @@ class Translator(ABC):
             produce_multiple_translations,
             chapters,
             trg_project,
-            postprocess_configs,
+            postprocess_handler,
             experiment_ckpt_str,
         )
 
@@ -169,7 +160,7 @@ class Translator(ABC):
         produce_multiple_translations: bool = False,
         chapters: List[int] = [],
         trg_project: Optional[str] = None,
-        postprocess_configs: List[Dict[str, bool]] = [],
+        postprocess_handler: PostprocessHandler = PostprocessHandler(),
         experiment_ckpt_str: str = "",
     ) -> None:
         # Create UsfmFileText object for source
@@ -222,50 +213,17 @@ class Translator(ABC):
             vrefs.insert(idx, vref)
             output.insert(idx, [None, None, None, None])
 
-        # Prepare configs: add base draft and default value
-        postprocess_configs = [merge_dict(defaultdict(lambda: False), ppc) for ppc in [{}] + postprocess_configs]
+        text_behavior = (
+            UpdateUsfmTextBehavior.PREFER_NEW if trg_project is not None else UpdateUsfmTextBehavior.STRIP_EXISTING
+        )
 
         draft_set: DraftGroup = DraftGroup(translations)
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
             rows = [([ref], translation) for ref, translation in zip(vrefs, translated_draft)]
 
-            if any(ppc["include_paragraph_markers"] or ppc["include_style_markers"] for ppc in postprocess_configs):
-                place_markers_handler = construct_place_markers_handler(vrefs, sentences, translated_draft)
+            postprocess_handler.create_update_block_handlers(vrefs, sentences, translated_draft)
 
-            for postprocess_config in postprocess_configs:
-                # Update behaviors
-                text_behavior = (
-                    UpdateUsfmTextBehavior.PREFER_NEW
-                    if trg_project is not None
-                    else UpdateUsfmTextBehavior.STRIP_EXISTING
-                )
-                paragraph_behavior = (
-                    UpdateUsfmMarkerBehavior.PRESERVE
-                    if postprocess_config["include_paragraph_markers"]
-                    else UpdateUsfmMarkerBehavior.STRIP
-                )
-                style_behavior = (
-                    UpdateUsfmMarkerBehavior.PRESERVE
-                    if postprocess_config["include_style_markers"]
-                    else UpdateUsfmMarkerBehavior.STRIP
-                )
-                embed_behavior = (
-                    UpdateUsfmMarkerBehavior.PRESERVE
-                    if postprocess_config["include_embeds"]
-                    else UpdateUsfmMarkerBehavior.STRIP
-                )
-                marker_placement_suffix = (
-                    "_"
-                    + ("p" if postprocess_config["include_paragraph_markers"] else "")
-                    + ("s" if postprocess_config["include_style_markers"] else "")
-                    + ("e" if postprocess_config["include_embeds"] else "")
-                )
-                marker_placement_suffix = "" if len(marker_placement_suffix) == 1 else marker_placement_suffix
-
-                update_block_handlers = []
-                if postprocess_config["include_paragraph_markers"] or postprocess_config["include_style_markers"]:
-                    update_block_handlers.append(place_markers_handler)
-
+            for config in postprocess_handler.configs:
                 # Insert translation into the USFM structure of an existing project
                 # If the target project is not the same as the translated file's original project,
                 # no verses outside of the ones translated will be overwritten
@@ -277,10 +235,10 @@ class Translator(ABC):
                         book_id=src_file_text.id,
                         rows=rows,
                         text_behavior=text_behavior,
-                        paragraph_behavior=paragraph_behavior,
-                        embed_behavior=embed_behavior,
-                        style_behavior=style_behavior,
-                        update_block_handlers=update_block_handlers,
+                        paragraph_behavior=config.get_paragraph_behavior(),
+                        embed_behavior=config.get_embed_behavior(),
+                        style_behavior=config.get_style_behavior(),
+                        update_block_handlers=config.update_block_handlers,
                     )
 
                     if usfm_out is None:
@@ -294,18 +252,25 @@ class Translator(ABC):
                         rows=rows,
                         id_text=vrefs[0].book,
                         text_behavior=text_behavior,
-                        paragraph_behavior=paragraph_behavior,
-                        embed_behavior=embed_behavior,
-                        style_behavior=style_behavior,
-                        update_block_handlers=update_block_handlers,
+                        paragraph_behavior=config.get_paragraph_behavior(),
+                        embed_behavior=config.get_embed_behavior(),
+                        style_behavior=config.get_style_behavior(),
+                        update_block_handlers=config.update_block_handlers,
                     )
                     parse_usfm(usfm, handler)
                     usfm_out = handler.get_usfm()
 
-                # Insert draft remark and write to output path
+                # Insert draft remarks
                 description = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
-                usfm_out = insert_draft_remark(usfm_out, vrefs[0].book, description, experiment_ckpt_str)
-                trg_draft_file_path = trg_file_path.with_stem(trg_file_path.stem + marker_placement_suffix)
+                remarks = [
+                    f"This draft of {vrefs[0].book} was machine translated on {date.today()} from {description} using model {experiment_ckpt_str}. It should be reviewed and edited carefully."
+                ]
+                if len(config.get_postprocess_remark()) > 0:
+                    remarks.append(config.get_postprocess_remark())
+                usfm_out = insert_draft_remarks(usfm_out, remarks)
+
+                # Construct output file name write to file
+                trg_draft_file_path = trg_file_path.with_stem(trg_file_path.stem + config.get_postprocess_suffix())
                 if produce_multiple_translations:
                     trg_draft_file_path = trg_draft_file_path.with_suffix(f".{draft_index}{trg_file_path.suffix}")
                 with trg_draft_file_path.open(
