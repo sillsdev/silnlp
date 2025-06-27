@@ -14,7 +14,7 @@ from machine.corpora import (
 )
 from machine.tokenization import WhitespaceTokenizer
 
-from .usfm_preservation import CHARACTER_TYPE_EMBEDS, PARAGRAPH_TYPE_EMBEDS
+from .usfm_utils import CHARACTER_TYPE_EMBEDS, PARAGRAPH_TYPE_EMBEDS
 
 LOGGER = logging.getLogger(__package__ + ".compare_usfm_structure")
 

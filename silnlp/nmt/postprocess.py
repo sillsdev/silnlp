@@ -1,109 +1,106 @@
 import argparse
 import logging
+import re
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import List, Optional, Tuple
 
 import yaml
 from machine.corpora import (
     FileParatextProjectSettingsParser,
-    PlaceMarkersAlignmentInfo,
-    PlaceMarkersUsfmUpdateBlockHandler,
     ScriptureRef,
-    UpdateUsfmMarkerBehavior,
     UpdateUsfmParserHandler,
     UpdateUsfmTextBehavior,
+    UsfmFileText,
     UsfmStylesheet,
-    UsfmUpdateBlockHandler,
+    UsfmTextType,
     parse_usfm,
 )
-from machine.tokenization import LatinWordTokenizer
+from machine.scripture import book_number_to_id, get_chapters
+from transformers.trainer_utils import get_last_checkpoint
 
-from ..common.paratext import get_project_dir
-from ..common.postprocess_utils import (
-    get_alignment_matrices,
-    get_draft_paths_from_exp,
-    get_sentences,
-    insert_draft_remarks,
-)
-from ..common.utils import get_git_revision_hash, merge_dict
+from ..common.paratext import book_file_name_digits, get_book_path, get_project_dir
+from ..common.postprocesser import PostprocessHandler
+from ..common.usfm_utils import PARAGRAPH_TYPE_EMBEDS
+from ..common.utils import get_git_revision_hash
 from .clearml_connection import SILClearML
+from .config import Config
 from .config_utils import load_config
+from .hugging_face_config import get_best_checkpoint
 
 LOGGER = logging.getLogger(__package__ + ".postprocess")
 
-POSTPROCESS_OPTIONS = {"include_paragraph_markers": False, "include_style_markers": False, "include_embeds": False}
-POSTPROCESS_SUFFIX_CHARS = ["p", "s", "e"]
+
+# NOTE: to be replaced by new machine.py remark functionality
+def insert_draft_remarks(usfm: str, remarks: List[str]) -> str:
+    lines = usfm.split("\n")
+    remark_lines = [f"\\rem {r}" for r in remarks]
+    return "\n".join(lines[:1] + remark_lines + lines[1:])
 
 
-class PostprocessConfig:
-    update_block_handlers: List[UsfmUpdateBlockHandler] = []
+# Takes the path to a USFM file and the relevant info to parse it
+# and returns the text of all non-embed sentences and their respective references,
+# along with any remarks (\rem) that were inserted at the beginning of the file
+def get_sentences(
+    book_path: Path, stylesheet: UsfmStylesheet, encoding: str, book: str, chapters: List[int] = []
+) -> Tuple[List[str], List[ScriptureRef], List[str]]:
+    sents = []
+    refs = []
+    draft_remarks = []
+    for sent in UsfmFileText(stylesheet, encoding, book, book_path, include_all_text=True):
+        marker = sent.ref.path[-1].name if len(sent.ref.path) > 0 else ""
+        if marker == "rem" and len(refs) == 0:  # TODO: \ide and \usfm lines could potentially come before the remark(s)
+            draft_remarks.append(sent.text)
+            continue
+        if (
+            marker in PARAGRAPH_TYPE_EMBEDS
+            or stylesheet.get_tag(marker).text_type == UsfmTextType.NOTE_TEXT
+            or (len(chapters) > 0 and sent.ref.chapter_num not in chapters)
+        ):
+            continue
 
-    def __init__(self, config: Dict[str, Union[bool, str]]) -> None:
-        # TODO: need to make a copy of the default dict?
-        self._config = merge_dict(POSTPROCESS_OPTIONS, config)
+        sents.append(re.sub(" +", " ", sent.text.strip()))
+        refs.append(sent.ref)
 
-    def _get_usfm_marker_behavior(self, preserve: bool) -> UpdateUsfmMarkerBehavior:
-        return UpdateUsfmMarkerBehavior.PRESERVE if preserve else UpdateUsfmMarkerBehavior.STRIP
-
-    def get_paragraph_behavior(self) -> UpdateUsfmMarkerBehavior:
-        return self._get_usfm_marker_behavior(self._config["include_paragraph_markers"])
-
-    def get_style_behavior(self) -> UpdateUsfmMarkerBehavior:
-        return self._get_usfm_marker_behavior(self._config["include_style_markers"])
-
-    def get_embed_behavior(self) -> UpdateUsfmMarkerBehavior:
-        return self._get_usfm_marker_behavior(self._config["include_embeds"])
-
-    def get_postprocess_suffix(self) -> str:
-        suffix = "_"
-        for option, char in zip(POSTPROCESS_OPTIONS, POSTPROCESS_SUFFIX_CHARS):
-            if self._config[option]:
-                suffix += char
-
-        return suffix if len(suffix) > 1 else ""
-
-    def get_postprocess_remark(self) -> str:
-        return f"Post-processing options used: {' '.join(opt for opt in POSTPROCESS_OPTIONS if self._config[opt])}"
+    return sents, refs, draft_remarks
 
 
-class PostprocessHandler:
-    # TODO: check if one of the configs is already all default?
-    def __init__(self, configs: List[Dict[str, Union[bool, str]]] = [], include_base: bool = True) -> None:
-        self.configs = [PostprocessConfig(config) for config in ([{}] if include_base else []) + configs]
+# Get the paths of all drafts that would be produced by an experiment's translate config and that exist
+def get_draft_paths_from_exp(config: Config) -> Tuple[List[Path], List[Path]]:
+    with (config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as file:
+        translate_requests = yaml.safe_load(file).get("translate", [])
 
-    # NOTE: Update block handlers may need to be created/recreated at different times
-    # For example, the marker placement handler needs to be recreated for each new draft because it uses text alignment,
-    # but other handlers may only need to be created once overall, or once per source project.
-    # This may change what part of the process we want this function to be called at
-    def create_update_block_handlers(self, refs: List[ScriptureRef], source: List[str], translation: List[str]) -> None:
-        # USFM marker placement handler needs to be recreated for each draft
-        if any(config["include_paragraph_markers"] or config["include_style_markers"] for config in self.configs):
-            place_markers_handler = self._construct_place_markers_handler(refs, source, translation)
+    src_paths = []
+    draft_paths = []
+    for translate_request in translate_requests:
+        src_project = translate_request.get("src_project", next(iter(config.src_projects)))
 
-        for config in self.configs:
-            # TODO: make sure the configs are changing
-            if config["include_paragraph_markers"] or config["include_style_markers"]:
-                if len(config.update_block_handlers) == 0:
-                    config.update_block_handlers.append(place_markers_handler)
-                else:  # NOTE: this assumes a set order of update block handlers
-                    config.update_block_handlers[0] = place_markers_handler
+        ckpt = translate_request.get("checkpoint", "last")
+        if ckpt == "best":
+            step_str = get_best_checkpoint(config.model_dir).name[11:]
+        elif ckpt == "last":
+            step_str = Path(get_last_checkpoint(config.model_dir)).name[11:]
+        else:
+            step_str = str(ckpt)
 
-    def _construct_place_markers_handler(
-        self, refs: List[ScriptureRef], source: List[str], translation: List[str], aligner: str = "eflomal"
-    ) -> PlaceMarkersUsfmUpdateBlockHandler:
-        align_info = []
-        tokenizer = LatinWordTokenizer()
-        alignments = get_alignment_matrices(source, translation, aligner)
-        for ref, s, t, alignment in zip(refs, source, translation, alignments):
-            align_info.append(
-                PlaceMarkersAlignmentInfo(
-                    refs=[str(ref)],
-                    source_tokens=list(tokenizer.tokenize(s)),
-                    translation_tokens=list(tokenizer.tokenize(t)),
-                    alignment=alignment,
-                )
+        book_nums = get_chapters(translate_request.get("books", [])).keys()
+        for book_num in book_nums:
+            book = book_number_to_id(book_num)
+
+            src_path = get_book_path(src_project, book)
+            draft_path = (
+                config.exp_dir / "infer" / step_str / src_project / f"{book_file_name_digits(book_num)}{book}.SFM"
             )
-        return PlaceMarkersUsfmUpdateBlockHandler(align_info)
+            if draft_path.exists():
+                src_paths.append(src_path)
+                draft_paths.append(draft_path)
+            elif draft_path.with_suffix(f".{1}{draft_path.suffix}").exists():  # multiple drafts
+                for i in range(1, config.infer.get("num_drafts", 1) + 1):
+                    src_paths.append(src_path)
+                    draft_paths.append(draft_path.with_suffix(f".{i}{draft_path.suffix}"))
+            else:
+                LOGGER.warning(f"Draft not found: {draft_path}")
+
+    return src_paths, draft_paths
 
 
 def postprocess_draft(

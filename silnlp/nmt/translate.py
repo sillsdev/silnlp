@@ -10,11 +10,11 @@ from machine.scripture import VerseRef, book_number_to_id, get_chapters
 
 from ..common.environment import SIL_NLP_ENV
 from ..common.paratext import book_file_name_digits, get_project_dir
+from ..common.postprocesser import PostprocessHandler
 from ..common.translator import TranslationGroup, Translator
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import SILClearML
 from .config import CheckpointType, Config, NMTModel
-from .postprocess import PostprocessHandler
 
 LOGGER = logging.getLogger(__package__ + ".translate")
 

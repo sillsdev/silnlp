@@ -6,9 +6,9 @@ import yaml
 
 from ..nmt.clearml_connection import SILClearML
 from ..nmt.config_utils import load_config
-from ..nmt.postprocess import PostprocessHandler, postprocess_draft
+from ..nmt.postprocess import get_draft_paths_from_exp, postprocess_draft
 from .paratext import get_project_dir
-from .postprocess_utils import get_draft_paths_from_exp
+from .postprocesser import PostprocessHandler
 from .utils import get_mt_exp_dir
 
 LOGGER = logging.getLogger(__package__ + ".postprocess_draft")

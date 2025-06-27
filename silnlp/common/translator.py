@@ -22,10 +22,10 @@ from machine.corpora import (
 )
 from machine.scripture import VerseRef
 
-from ..nmt.postprocess import PostprocessHandler
 from .corpus import load_corpus, write_corpus
 from .paratext import get_book_path, get_iso, get_project_dir
-from .postprocess_utils import PARAGRAPH_TYPE_EMBEDS
+from .postprocesser import PostprocessHandler
+from .usfm_utils import PARAGRAPH_TYPE_EMBEDS
 
 LOGGER = logging.getLogger(__package__ + ".translate")
 nltk.download("punkt")
