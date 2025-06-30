@@ -188,7 +188,7 @@ def main() -> None:
     with (config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as file:
         postprocess_configs = yaml.safe_load(file).get("postprocess", [])
 
-    postprocess_handler = PostprocessHandler(postprocess_configs)
+    postprocess_handler = PostprocessHandler(postprocess_configs, include_base=False)
 
     for src_path, draft_path in zip(src_paths, draft_paths):
         postprocess_draft(src_path, draft_path, postprocess_handler)

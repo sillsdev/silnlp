@@ -265,8 +265,9 @@ class Translator(ABC):
                 remarks = [
                     f"This draft of {vrefs[0].book} was machine translated on {date.today()} from {description} using model {experiment_ckpt_str}. It should be reviewed and edited carefully."
                 ]
-                if len(config.get_postprocess_remark()) > 0:
-                    remarks.append(config.get_postprocess_remark())
+                postprocess_remark = config.get_postprocess_remark()
+                if len(postprocess_remark) > 0:
+                    remarks.append(postprocess_remark)
                 usfm_out = insert_draft_remarks(usfm_out, remarks)
 
                 # Construct output file name write to file

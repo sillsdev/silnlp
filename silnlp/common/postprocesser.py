@@ -22,11 +22,9 @@ POSTPROCESS_SUFFIX_CHARS = ["p", "s", "e"]
 
 
 class PostprocessConfig:
-    update_block_handlers: List[UsfmUpdateBlockHandler] = []
-
     def __init__(self, config: Dict[str, Union[bool, str]]) -> None:
-        # TODO: need to make a copy of the default dict?
-        self._config = merge_dict(POSTPROCESS_OPTIONS, config)
+        self._config = merge_dict(dict(POSTPROCESS_OPTIONS), config)
+        self.update_block_handlers: List[UsfmUpdateBlockHandler] = []
 
     def _get_usfm_marker_behavior(self, preserve: bool) -> UpdateUsfmMarkerBehavior:
         return UpdateUsfmMarkerBehavior.PRESERVE if preserve else UpdateUsfmMarkerBehavior.STRIP
@@ -42,14 +40,18 @@ class PostprocessConfig:
 
     def get_postprocess_suffix(self) -> str:
         suffix = "_"
-        for option, char in zip(POSTPROCESS_OPTIONS, POSTPROCESS_SUFFIX_CHARS):
-            if self._config[option]:
+        for (option, default), char in zip(POSTPROCESS_OPTIONS.items(), POSTPROCESS_SUFFIX_CHARS):
+            if self._config[option] != default:
                 suffix += char
 
         return suffix if len(suffix) > 1 else ""
 
     def get_postprocess_remark(self) -> str:
-        return f"Post-processing options used: {' '.join(opt for opt in POSTPROCESS_OPTIONS if self._config[opt])}"
+        used = [option for (option, default) in POSTPROCESS_OPTIONS.items() if self._config[option] != default]
+        return f"Post-processing options used: {' '.join(used)}" if len(used) > 0 else ""
+
+    def __getitem__(self, key):
+        return self._config[key]
 
 
 class PostprocessHandler:
@@ -65,7 +67,6 @@ class PostprocessHandler:
             place_markers_handler = self._construct_place_markers_handler(refs, source, translation)
 
         for config in self.configs:
-            # TODO: make sure the configs are changing
             if config["include_paragraph_markers"] or config["include_style_markers"]:
                 if len(config.update_block_handlers) == 0:
                     config.update_block_handlers.append(place_markers_handler)
@@ -77,7 +78,7 @@ class PostprocessHandler:
     ) -> PlaceMarkersUsfmUpdateBlockHandler:
         align_info = []
         tokenizer = LatinWordTokenizer()
-        alignments = self.get_alignment_matrices(source, translation, aligner)
+        alignments = self._get_alignment_matrices(source, translation, aligner)
         for ref, s, t, alignment in zip(refs, source, translation, alignments):
             align_info.append(
                 PlaceMarkersAlignmentInfo(
