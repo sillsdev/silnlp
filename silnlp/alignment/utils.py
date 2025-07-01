@@ -6,7 +6,7 @@ from typing import List, Optional, Set
 
 import pandas as pd
 
-from ..common.corpus import tokenize_corpus, write_corpus
+from ..common.corpus import load_corpus, tokenize_corpus, write_corpus
 from ..common.environment import SIL_NLP_ENV
 from .config import get_aligner
 from .lexicon import Lexicon
@@ -61,7 +61,7 @@ def compute_alignment_score(
                 prob = max(direct_prob, inverse_prob)
                 probs.append(prob)
         else:
-            LOGGER.warn(
+            LOGGER.warning(
                 f"No pairs in alignment! src >>{src_sentence}<< trg >>{trg_sentence}<< alignment >>{alignment}<<"
             )
 
@@ -90,6 +90,13 @@ def add_alignment_scores(corpus: pd.DataFrame, aligner_id: str = "fast_align") -
 def compute_alignment_scores(
     src_input_path: Path, trg_input_path: Path, aligner_id: str = "fast_align", sym_align_path: Path = None
 ) -> List[float]:
+    # Check for alignable pairs
+    src_sents = list(load_corpus(src_input_path))
+    trg_sents = list(load_corpus(trg_input_path))
+    if not any(len(s) > 0 and len(t) > 0 for s, t in zip(src_sents, trg_sents)):
+        LOGGER.warning("No pairs to align.")
+        return [0 for _ in src_sents]
+
     with tempfile.TemporaryDirectory() as td:
         temp_dir = Path(td)
         src_tok_output_path = temp_dir / "tokenize-src-output.txt"
@@ -114,9 +121,11 @@ def compute_alignment_scores(
             inverse_lexicon = None
 
         scores: List[float] = []
-        with src_tok_output_path.open("r", encoding="utf-8") as src_tok_output_file, trg_tok_output_path.open(
-            "r", encoding="utf-8"
-        ) as trg_tok_output_file, sym_align_path.open("r", encoding="utf-8") as sym_align_file:
+        with (
+            src_tok_output_path.open("r", encoding="utf-8") as src_tok_output_file,
+            trg_tok_output_path.open("r", encoding="utf-8") as trg_tok_output_file,
+            sym_align_path.open("r", encoding="utf-8") as sym_align_file,
+        ):
             for src_sentence, trg_sentence, alignment in zip(src_tok_output_file, trg_tok_output_file, sym_align_file):
                 if src_sentence.strip() == "" or trg_sentence.strip() == "":
                     scores.append(-1)
