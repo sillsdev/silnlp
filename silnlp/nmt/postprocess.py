@@ -176,8 +176,6 @@ def main() -> None:
     get_git_revision_hash()
 
     if args.clearml_queue is not None:
-        if "cpu" not in args.clearml_queue:
-            raise ValueError("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
         clearml = SILClearML(args.experiment, args.clearml_queue)
         config = clearml.config
     else:
