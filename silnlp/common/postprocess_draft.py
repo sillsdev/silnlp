@@ -8,7 +8,7 @@ from ..nmt.clearml_connection import SILClearML
 from ..nmt.config_utils import load_config
 from ..nmt.postprocess import get_draft_paths_from_exp, postprocess_draft
 from .paratext import get_project_dir
-from .postprocesser import PostprocessHandler
+from .postprocesser import PostprocessConfig, PostprocessHandler
 from .utils import get_mt_exp_dir
 
 LOGGER = logging.getLogger(__package__ + ".postprocess_draft")
@@ -122,7 +122,7 @@ def main() -> None:
         else:
             LOGGER.info("Please use at least one postprocessing option.")
             exit()
-    postprocess_handler = PostprocessHandler(postprocess_configs, include_base=False)
+    postprocess_handler = PostprocessHandler([PostprocessConfig(pc) for pc in postprocess_configs], include_base=False)
 
     if args.output_folder:
         args.output_folder = Path(args.output_folder.replace("\\", "/"))

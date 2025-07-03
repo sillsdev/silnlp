@@ -22,7 +22,7 @@ POSTPROCESS_SUFFIX_CHARS = ["p", "s", "e"]
 
 
 class PostprocessConfig:
-    def __init__(self, config: Dict[str, Union[bool, str]]) -> None:
+    def __init__(self, config: Dict[str, Union[bool, str]] = {}) -> None:
         self._config = merge_dict(dict(POSTPROCESS_OPTIONS), config)
         self.update_block_handlers: List[UsfmUpdateBlockHandler] = []
 
@@ -55,8 +55,8 @@ class PostprocessConfig:
 
 
 class PostprocessHandler:
-    def __init__(self, configs: List[Dict[str, Union[bool, str]]] = [], include_base: bool = True) -> None:
-        self.configs = [PostprocessConfig(config) for config in ([{}] if include_base else []) + configs]
+    def __init__(self, configs: List[PostprocessConfig] = [], include_base: bool = True) -> None:
+        self.configs = ([PostprocessConfig()] if include_base else []) + configs
 
     # NOTE: Update block handlers may need to be created/recreated at different times
     # For example, the marker placement handler needs to be recreated for each new draft because it uses text alignment,

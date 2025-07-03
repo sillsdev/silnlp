@@ -19,7 +19,7 @@ from machine.scripture import book_number_to_id, get_chapters
 from transformers.trainer_utils import get_last_checkpoint
 
 from ..common.paratext import book_file_name_digits, get_book_path, get_project_dir
-from ..common.postprocesser import PostprocessHandler
+from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.usfm_utils import PARAGRAPH_TYPE_EMBEDS
 from ..common.utils import get_git_revision_hash
 from .clearml_connection import SILClearML
@@ -186,7 +186,7 @@ def main() -> None:
     with (config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as file:
         postprocess_configs = yaml.safe_load(file).get("postprocess", [])
 
-    postprocess_handler = PostprocessHandler(postprocess_configs, include_base=False)
+    postprocess_handler = PostprocessHandler([PostprocessConfig(pc) for pc in postprocess_configs], include_base=False)
 
     for src_path, draft_path in zip(src_paths, draft_paths):
         postprocess_draft(src_path, draft_path, postprocess_handler)

@@ -7,7 +7,7 @@ from typing import Optional, Set
 import yaml
 
 from ..common.environment import SIL_NLP_ENV
-from ..common.postprocesser import PostprocessHandler
+from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import SILClearML
 from .config import Config, get_mt_exp_dir
@@ -82,7 +82,9 @@ class SILExperiment:
         with (self.config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as file:
             translate_configs = yaml.safe_load(file)
 
-        postprocess_handler = PostprocessHandler(translate_configs.get("postprocess", []))
+        postprocess_handler = PostprocessHandler(
+            [PostprocessConfig(pc) for pc in translate_configs.get("postprocess", [])]
+        )
 
         for config in translate_configs.get("translate", []):
             translator = TranslationTask(
