@@ -7,6 +7,7 @@ from typing import Optional, Set
 import yaml
 
 from ..common.environment import SIL_NLP_ENV
+from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import SILClearML
 from .config import Config, get_mt_exp_dir
@@ -81,6 +82,10 @@ class SILExperiment:
         with (self.config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as file:
             translate_configs = yaml.safe_load(file)
 
+        postprocess_handler = PostprocessHandler(
+            [PostprocessConfig(pc) for pc in translate_configs.get("postprocess", [])]
+        )
+
         for config in translate_configs.get("translate", []):
             translator = TranslationTask(
                 name=self.name, checkpoint=config.get("checkpoint", "last"), commit=self.commit
@@ -95,9 +100,7 @@ class SILExperiment:
                     config.get("trg_project"),
                     config.get("trg_iso"),
                     self.produce_multiple_translations,
-                    config.get("include_paragraph_markers", False) or config.get("preserve_usfm_markers", False),
-                    config.get("include_style_markers", False) or config.get("preserve_usfm_markers", False),
-                    config.get("include_embeds", False) or config.get("include_inline_elements", False),
+                    postprocess_handler,
                 )
             elif config.get("src_prefix"):
                 translator.translate_text_files(
@@ -116,9 +119,7 @@ class SILExperiment:
                     config.get("src_iso"),
                     config.get("trg_iso"),
                     self.produce_multiple_translations,
-                    config.get("include_paragraph_markers", False) or config.get("preserve_usfm_markers", False),
-                    config.get("include_style_markers", False) or config.get("preserve_usfm_markers", False),
-                    config.get("include_embeds", False) or config.get("include_inline_elements", False),
+                    postprocess_handler,
                 )
             else:
                 raise RuntimeError("A Scripture book, file, or file prefix must be specified for translation.")
