@@ -19,7 +19,7 @@ from machine.scripture import book_number_to_id, get_chapters
 from transformers.trainer_utils import get_last_checkpoint
 
 from ..common.paratext import book_file_name_digits, get_book_path, get_project_dir
-from ..common.postprocesser import PostprocessConfig, PostprocessHandler
+from ..common.postprocesser import PostprocessConfig, PostprocessHandler, extract_postprocess_options_from_dict
 from ..common.usfm_utils import PARAGRAPH_TYPE_EMBEDS
 from ..common.utils import get_git_revision_hash
 from .clearml_connection import SILClearML
@@ -65,12 +65,13 @@ def get_sentences(
 
 
 # Get the paths of all drafts that would be produced by an experiment's translate config and that exist
-def get_draft_paths_from_exp(config: Config) -> Tuple[List[Path], List[Path]]:
+def get_draft_paths_from_exp(config: Config) -> Tuple[List[Path], List[Path], List[dict]]:
     with (config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as file:
         translate_requests = yaml.safe_load(file).get("translate", [])
 
     src_paths = []
     draft_paths = []
+    postprocess_configs = []
     for translate_request in translate_requests:
         src_project = translate_request.get("src_project", next(iter(config.src_projects)))
 
@@ -81,6 +82,9 @@ def get_draft_paths_from_exp(config: Config) -> Tuple[List[Path], List[Path]]:
             step_str = Path(get_last_checkpoint(config.model_dir)).name[11:]
         else:
             step_str = str(ckpt)
+
+        # Backwards compatibility
+        postprocess_config = extract_postprocess_options_from_dict(translate_request)
 
         book_nums = get_chapters(translate_request.get("books", [])).keys()
         for book_num in book_nums:
@@ -93,14 +97,16 @@ def get_draft_paths_from_exp(config: Config) -> Tuple[List[Path], List[Path]]:
             if draft_path.exists():
                 src_paths.append(src_path)
                 draft_paths.append(draft_path)
+                postprocess_configs.append(postprocess_config)
             elif draft_path.with_suffix(f".{1}{draft_path.suffix}").exists():  # multiple drafts
                 for i in range(1, config.infer.get("num_drafts", 1) + 1):
                     src_paths.append(src_path)
                     draft_paths.append(draft_path.with_suffix(f".{i}{draft_path.suffix}"))
+                    postprocess_configs.append(postprocess_config)
             else:
                 LOGGER.warning(f"Draft not found: {draft_path}")
 
-    return src_paths, draft_paths
+    return src_paths, draft_paths, postprocess_configs
 
 
 def postprocess_draft(
@@ -161,6 +167,22 @@ def postprocess_draft(
             f.write(usfm_out)
 
 
+def postprocess_experiment(config: Config, out_dir: Optional[Path] = None) -> None:
+    src_paths, draft_paths, legacy_pcs = get_draft_paths_from_exp(config)
+    with (config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as file:
+        postprocess_configs = yaml.safe_load(file).get("postprocess", [])
+
+    postprocess_handler = PostprocessHandler([PostprocessConfig(pc) for pc in postprocess_configs], include_base=False)
+
+    for src_path, draft_path, legacy_pc in zip(src_paths, draft_paths, legacy_pcs):
+        if postprocess_configs:
+            postprocess_draft(src_path, draft_path, postprocess_handler, out_dir=out_dir)
+        elif len(legacy_pc.keys()) > 0:
+            postprocess_draft(
+                src_path, draft_path, PostprocessHandler([PostprocessConfig(legacy_pc)], False), out_dir=out_dir
+            )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Postprocess the drafts created by an NMT model")
     parser.add_argument("experiment", help="Experiment name")
@@ -182,14 +204,7 @@ def main() -> None:
         config = load_config(args.experiment.replace("\\", "/"))
     config.set_seed()
 
-    src_paths, draft_paths = get_draft_paths_from_exp(config)
-    with (config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as file:
-        postprocess_configs = yaml.safe_load(file).get("postprocess", [])
-
-    postprocess_handler = PostprocessHandler([PostprocessConfig(pc) for pc in postprocess_configs], include_base=False)
-
-    for src_path, draft_path in zip(src_paths, draft_paths):
-        postprocess_draft(src_path, draft_path, postprocess_handler)
+    postprocess_experiment(config)
 
 
 if __name__ == "__main__":

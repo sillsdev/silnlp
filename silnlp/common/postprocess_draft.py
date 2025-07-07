@@ -2,13 +2,11 @@ import argparse
 import logging
 from pathlib import Path
 
-import yaml
-
 from ..nmt.clearml_connection import SILClearML
 from ..nmt.config_utils import load_config
-from ..nmt.postprocess import get_draft_paths_from_exp, postprocess_draft
+from ..nmt.postprocess import get_draft_paths_from_exp, postprocess_draft, postprocess_experiment
 from .paratext import get_project_dir
-from .postprocesser import PostprocessConfig, PostprocessHandler
+from .postprocesser import PostprocessConfig, PostprocessHandler, extract_postprocess_options_from_dict
 from .utils import get_mt_exp_dir
 
 LOGGER = logging.getLogger(__package__ + ".postprocess_draft")
@@ -72,13 +70,19 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    experiment = args.experiment.replace("\\", "/") if args.experiment else None
+    args.output_folder = Path(args.output_folder.replace("\\", "/")) if args.output_folder else None
+    postprocess_config = extract_postprocess_options_from_dict(vars(args))
+
     if args.experiment and (args.source or args.draft or args.book):
         LOGGER.info("--experiment option used. --source, --draft, and --book will be ignored.")
     if not (args.experiment or (args.source and args.draft)):
         raise ValueError("Not enough options used. Please use --experiment OR --source and --draft.")
 
-    experiment = args.experiment.replace("\\", "/") if args.experiment else None
-    if experiment and get_mt_exp_dir(experiment).exists():
+    if experiment:
+        if not get_mt_exp_dir(experiment).exists():
+            raise ValueError(f"Experiment {experiment} not found.")
+
         if args.clearml_queue is not None:
             if "cpu" not in args.clearml_queue:
                 raise ValueError("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
@@ -88,10 +92,14 @@ def main() -> None:
             config = load_config(experiment)
 
         if not (config.exp_dir / "translate_config.yml").exists():
-            raise ValueError(
-                "Experiment translate_config.yml not found. Please use --source and --draft options instead."
-            )
-        src_paths, draft_paths = get_draft_paths_from_exp(config)
+            raise ValueError("Experiment translate_config.yml not found.")
+
+        if len(postprocess_config.keys()) > 0:
+            src_paths, draft_paths, _ = get_draft_paths_from_exp(config)
+        else:
+            LOGGER.info("No postprocessing options used. Applying postprocessing requests from translate config.")
+            postprocess_experiment(config, args.output_folder)
+            exit()
     elif args.clearml_queue is not None:
         raise ValueError("Must use --experiment option to use ClearML.")
     else:
@@ -102,30 +110,11 @@ def main() -> None:
                 "--book argument must be passed if the source file is not in a Paratext project directory."
             )
 
-    # If no postprocessing options are used, use any postprocessing requests in the experiment's translate config
-    if args.include_paragraph_markers or args.include_style_markers or args.include_embeds:
-        postprocess_configs = [
-            {
-                "include_paragraph_markers": args.include_paragraph_markers,
-                "include_style_markers": args.include_style_markers,
-                "include_embeds": args.include_embeds,
-            }
-        ]
-    else:
-        if args.experiment:
-            LOGGER.info("No postprocessing options used. Applying postprocessing requests from translate config.")
-            with (config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as file:
-                postprocess_configs = yaml.safe_load(file).get("postprocess", [])
-            if len(postprocess_configs) == 0:
-                LOGGER.info("No postprocessing requests found in translate config.")
-                exit()
-        else:
-            LOGGER.info("Please use at least one postprocessing option.")
-            exit()
-    postprocess_handler = PostprocessHandler([PostprocessConfig(pc) for pc in postprocess_configs], include_base=False)
+    if len(postprocess_config.keys()) == 0:
+        LOGGER.info("Please use at least one postprocessing option.")
+        exit()
+    postprocess_handler = PostprocessHandler([PostprocessConfig(postprocess_config)], include_base=False)
 
-    if args.output_folder:
-        args.output_folder = Path(args.output_folder.replace("\\", "/"))
     for src_path, draft_path in zip(src_paths, draft_paths):
         postprocess_draft(src_path, draft_path, postprocess_handler, args.book, args.output_folder)
 
