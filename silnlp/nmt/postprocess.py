@@ -184,7 +184,9 @@ def postprocess_experiment(config: Config, out_dir: Optional[Path] = None) -> No
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Postprocess the drafts created by an NMT model")
+    parser = argparse.ArgumentParser(
+        description="Postprocess the drafts created by an NMT model based on the experiment's translate config."
+    )
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument(
         "--clearml-queue",
