@@ -13,7 +13,6 @@ from iso639 import Lang
 from machine.corpora import (
     FileParatextProjectSettingsParser,
     FileParatextProjectTextUpdater,
-    UpdateUsfmMarkerBehavior,
     UpdateUsfmParserHandler,
     UpdateUsfmTextBehavior,
     UsfmFileText,
@@ -25,28 +24,22 @@ from machine.scripture import VerseRef
 
 from .corpus import load_corpus, write_corpus
 from .paratext import get_book_path, get_iso, get_project_dir
-from .usfm_preservation import PARAGRAPH_TYPE_EMBEDS, construct_place_markers_handler
+from .postprocesser import PostprocessHandler
+from .usfm_utils import PARAGRAPH_TYPE_EMBEDS
 
 LOGGER = logging.getLogger(__package__ + ".translate")
 nltk.download("punkt")
 
 
-def insert_draft_remark(
-    usfm: str,
-    book: str,
-    description: str,
-    experiment_ckpt_str: str,
-) -> str:
-    remark = f"\\rem This draft of {book} was machine translated on {date.today()} from {description} using model {experiment_ckpt_str}. It should be reviewed and edited carefully."
-
+def insert_draft_remarks(usfm: str, remarks: List[str]) -> str:
     lines = usfm.split("\n")
     insert_idx = (
         1
         + (len(lines) > 1 and (lines[1].startswith("\\ide") or lines[1].startswith("\\usfm")))
         + (len(lines) > 2 and (lines[2].startswith("\\ide") or lines[2].startswith("\\usfm")))
     )
-    lines.insert(insert_idx, remark)
-    return "\n".join(lines)
+    remarks = [f"\\rem {r}" for r in remarks]
+    return "\n".join(lines[:insert_idx] + remarks + lines[insert_idx:])
 
 
 # A group of multiple translations of a single sentence
@@ -137,9 +130,7 @@ class Translator(ABC):
         produce_multiple_translations: bool = False,
         chapters: List[int] = [],
         trg_project: Optional[str] = None,
-        include_paragraph_markers: bool = False,
-        include_style_markers: bool = False,
-        include_embeds: bool = False,
+        postprocess_handler: PostprocessHandler = PostprocessHandler(),
         experiment_ckpt_str: str = "",
     ) -> None:
         book_path = get_book_path(src_project, book)
@@ -156,9 +147,7 @@ class Translator(ABC):
             produce_multiple_translations,
             chapters,
             trg_project,
-            include_paragraph_markers,
-            include_style_markers,
-            include_embeds,
+            postprocess_handler,
             experiment_ckpt_str,
         )
 
@@ -171,9 +160,7 @@ class Translator(ABC):
         produce_multiple_translations: bool = False,
         chapters: List[int] = [],
         trg_project: Optional[str] = None,
-        include_paragraph_markers: bool = False,
-        include_style_markers: bool = False,
-        include_embeds: bool = False,
+        postprocess_handler: PostprocessHandler = PostprocessHandler(),
         experiment_ckpt_str: str = "",
     ) -> None:
         # Create UsfmFileText object for source
@@ -226,72 +213,79 @@ class Translator(ABC):
             vrefs.insert(idx, vref)
             output.insert(idx, [None, None, None, None])
 
-        # Update behaviors
         text_behavior = (
             UpdateUsfmTextBehavior.PREFER_NEW if trg_project is not None else UpdateUsfmTextBehavior.STRIP_EXISTING
         )
-        paragraph_behavior = (
-            UpdateUsfmMarkerBehavior.PRESERVE if include_paragraph_markers else UpdateUsfmMarkerBehavior.STRIP
-        )
-        style_behavior = UpdateUsfmMarkerBehavior.PRESERVE if include_style_markers else UpdateUsfmMarkerBehavior.STRIP
-        embed_behavior = UpdateUsfmMarkerBehavior.PRESERVE if include_embeds else UpdateUsfmMarkerBehavior.STRIP
 
         draft_set: DraftGroup = DraftGroup(translations)
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
             rows = [([ref], translation) for ref, translation in zip(vrefs, translated_draft)]
 
-            update_block_handlers = []
-            if include_paragraph_markers or include_style_markers:
-                update_block_handlers.append(construct_place_markers_handler(vrefs, sentences, translated_draft))
+            postprocess_handler.create_update_block_handlers(vrefs, sentences, translated_draft)
 
-            # Insert translation into the USFM structure of an existing project
-            # If the target project is not the same as the translated file's original project,
-            # no verses outside of the ones translated will be overwritten
-            if trg_project is not None or src_from_project:
-                dest_updater = FileParatextProjectTextUpdater(
-                    get_project_dir(trg_project if trg_project is not None else src_file_path.parent.name)
-                )
-                usfm_out = dest_updater.update_usfm(
-                    book_id=src_file_text.id,
-                    rows=rows,
-                    text_behavior=text_behavior,
-                    paragraph_behavior=paragraph_behavior,
-                    embed_behavior=embed_behavior,
-                    style_behavior=style_behavior,
-                    update_block_handlers=update_block_handlers,
-                )
+            for config in postprocess_handler.configs:
+                # Insert translation into the USFM structure of an existing project
+                # If the target project is not the same as the translated file's original project,
+                # no verses outside of the ones translated will be overwritten
+                if trg_project is not None or src_from_project:
+                    dest_updater = FileParatextProjectTextUpdater(
+                        get_project_dir(trg_project if trg_project is not None else src_file_path.parent.name)
+                    )
+                    usfm_out = dest_updater.update_usfm(
+                        book_id=src_file_text.id,
+                        rows=rows,
+                        text_behavior=text_behavior,
+                        paragraph_behavior=config.get_paragraph_behavior(),
+                        embed_behavior=config.get_embed_behavior(),
+                        style_behavior=config.get_style_behavior(),
+                        update_block_handlers=config.update_block_handlers,
+                    )
 
-                if usfm_out is None:
-                    raise FileNotFoundError(f"Book {src_file_text.id} does not exist in target project {trg_project}")
-            else:  # Slightly more manual version for updating an individual file
-                with open(src_file_path, encoding="utf-8-sig") as f:
-                    usfm = f.read()
-                handler = UpdateUsfmParserHandler(
-                    rows=rows,
-                    id_text=vrefs[0].book,
-                    text_behavior=text_behavior,
-                    paragraph_behavior=paragraph_behavior,
-                    embed_behavior=embed_behavior,
-                    style_behavior=style_behavior,
-                    update_block_handlers=update_block_handlers,
-                )
-                parse_usfm(usfm, handler)
-                usfm_out = handler.get_usfm()
+                    if usfm_out is None:
+                        raise FileNotFoundError(
+                            f"Book {src_file_text.id} does not exist in target project {trg_project}"
+                        )
+                else:  # Slightly more manual version for updating an individual file
+                    with open(src_file_path, encoding="utf-8-sig") as f:
+                        usfm = f.read()
+                    handler = UpdateUsfmParserHandler(
+                        rows=rows,
+                        id_text=vrefs[0].book,
+                        text_behavior=text_behavior,
+                        paragraph_behavior=config.get_paragraph_behavior(),
+                        embed_behavior=config.get_embed_behavior(),
+                        style_behavior=config.get_style_behavior(),
+                        update_block_handlers=config.update_block_handlers,
+                    )
+                    parse_usfm(usfm, handler)
+                    usfm_out = handler.get_usfm()
 
-            # Insert draft remark and write to output path
-            description = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
-            usfm_out = insert_draft_remark(usfm_out, vrefs[0].book, description, experiment_ckpt_str)
+                # Insert draft remarks
+                description = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
+                remarks = [
+                    f"This draft of {vrefs[0].book} was machine translated on {date.today()} from {description} using model {experiment_ckpt_str}. It should be reviewed and edited carefully."
+                ]
+                postprocess_remark = config.get_postprocess_remark()
+                if len(postprocess_remark) > 0:
+                    remarks.append(postprocess_remark)
+                usfm_out = insert_draft_remarks(usfm_out, remarks)
+
+                # Construct output file name write to file
+                trg_draft_file_path = trg_file_path.with_stem(trg_file_path.stem + config.get_postprocess_suffix())
+                if produce_multiple_translations:
+                    trg_draft_file_path = trg_draft_file_path.with_suffix(f".{draft_index}{trg_file_path.suffix}")
+                with trg_draft_file_path.open(
+                    "w", encoding=src_settings.encoding if src_from_project else "utf-8"
+                ) as f:
+                    f.write(usfm_out)
+
             confidence_scores_suffix = ".confidences.tsv"
             if produce_multiple_translations:
-                trg_draft_file_path = trg_file_path.with_suffix(f".{draft_index}{trg_file_path.suffix}")
                 confidences_path = trg_file_path.with_suffix(
                     f".{draft_index}{trg_file_path.suffix}{confidence_scores_suffix}"
                 )
             else:
-                trg_draft_file_path = trg_file_path
                 confidences_path = trg_file_path.with_suffix(f"{trg_file_path.suffix}{confidence_scores_suffix}")
-            with trg_draft_file_path.open("w", encoding=src_settings.encoding if src_from_project else "utf-8") as f:
-                f.write(usfm_out)
             with confidences_path.open("w", encoding="utf-8", newline="\n") as confidences_file:
                 confidences_file.write("\t".join(["VRef"] + [f"Token {i}" for i in range(200)]) + "\n")
                 confidences_file.write("\t".join(["Sequence Score"] + [f"Token Score {i}" for i in range(200)]) + "\n")
