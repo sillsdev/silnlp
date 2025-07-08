@@ -30,13 +30,6 @@ from .hugging_face_config import get_best_checkpoint
 LOGGER = logging.getLogger(__package__ + ".postprocess")
 
 
-# NOTE: to be replaced by new machine.py remark functionality
-def insert_draft_remarks(usfm: str, remarks: List[str]) -> str:
-    lines = usfm.split("\n")
-    remark_lines = [f"\\rem {r}" for r in remarks]
-    return "\n".join(lines[:1] + remark_lines + lines[1:])
-
-
 # Takes the path to a USFM file and the relevant info to parse it
 # and returns the text of all non-embed sentences and their respective references,
 # along with any remarks (\rem) that were inserted at the beginning of the file
@@ -48,7 +41,7 @@ def get_sentences(
     draft_remarks = []
     for sent in UsfmFileText(stylesheet, encoding, book, book_path, include_all_text=True):
         marker = sent.ref.path[-1].name if len(sent.ref.path) > 0 else ""
-        if marker == "rem" and len(refs) == 0:  # TODO: \ide and \usfm lines could potentially come before the remark(s)
+        if marker == "rem" and len(refs) == 0:
             draft_remarks.append(sent.text)
             continue
         if (
@@ -154,11 +147,10 @@ def postprocess_draft(
             embed_behavior=config.get_embed_behavior(),
             style_behavior=config.get_style_behavior(),
             update_block_handlers=config.update_block_handlers,
+            remarks=(draft_remarks + [config.get_postprocess_remark()]),
         )
         parse_usfm(usfm, handler)
         usfm_out = handler.get_usfm()
-
-        usfm_out = insert_draft_remarks(usfm_out, draft_remarks + [config.get_postprocess_remark()])
 
         if not out_dir:
             out_dir = draft_path.parent
