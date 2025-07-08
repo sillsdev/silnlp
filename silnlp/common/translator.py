@@ -178,7 +178,11 @@ class Translator(ABC):
                 project=src_settings.name,
             )
         else:
-            src_file_text = UsfmFileText("usfm.sty", "utf-8-sig", "", src_file_path, include_all_text=True)
+            # Guess book ID
+            with src_file_path.open(encoding="utf-8-sig") as f:
+                book_id = f.read().split()[1].upper()
+
+            src_file_text = UsfmFileText("usfm.sty", "utf-8-sig", book_id, src_file_path, include_all_text=True)
         stylesheet = src_settings.stylesheet if src_from_project else UsfmStylesheet("usfm.sty")
 
         sentences = [re.sub(" +", " ", s.text.strip()) for s in src_file_text]

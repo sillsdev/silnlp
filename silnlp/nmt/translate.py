@@ -131,9 +131,7 @@ class TranslationTask:
         trg_iso: Optional[str],
         produce_multiple_translations: bool = False,
     ) -> None:
-        translator, config, _ = self._init_translation_task(
-            experiment_suffix=f"_{self.checkpoint}_{src_prefix}", patterns=[src_prefix, trg_prefix]
-        )
+        translator, config, _ = self._init_translation_task(experiment_suffix=f"_{self.checkpoint}_{src_prefix}")
         if trg_prefix is None:
             raise RuntimeError("A target file prefix must be specified.")
         if start_seq is None or end_seq is None:
@@ -178,8 +176,7 @@ class TranslationTask:
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
     ) -> None:
         translator, config, step_str = self._init_translation_task(
-            experiment_suffix=f"_{self.checkpoint}_{os.path.basename(src)}",
-            patterns=[src, trg] if trg is not None else [src],
+            experiment_suffix=f"_{self.checkpoint}_{os.path.basename(src)}"
         )
 
         if src_iso is None:
