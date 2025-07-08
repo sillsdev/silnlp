@@ -21,6 +21,10 @@ POSTPROCESS_OPTIONS = {"include_paragraph_markers": False, "include_style_marker
 POSTPROCESS_SUFFIX_CHARS = ["p", "s", "e"]
 
 
+def extract_postprocess_options_from_dict(config: dict) -> Dict[str, Union[bool, str]]:
+    return {k: v for k, v in config.items() if k in POSTPROCESS_OPTIONS.keys() and v != POSTPROCESS_OPTIONS[k]}
+
+
 class PostprocessConfig:
     def __init__(self, config: Dict[str, Union[bool, str]] = {}) -> None:
         self._config = merge_dict(dict(POSTPROCESS_OPTIONS), config)

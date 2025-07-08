@@ -10,7 +10,7 @@ from machine.scripture import VerseRef, book_number_to_id, get_chapters
 
 from ..common.environment import SIL_NLP_ENV
 from ..common.paratext import book_file_name_digits, get_project_dir
-from ..common.postprocesser import PostprocessConfig, PostprocessHandler
+from ..common.postprocesser import PostprocessConfig, PostprocessHandler, extract_postprocess_options_from_dict
 from ..common.translator import TranslationGroup, Translator
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import SILClearML
@@ -376,11 +376,12 @@ def main() -> None:
         name=args.experiment, checkpoint=args.checkpoint, clearml_queue=args.clearml_queue, commit=args.commit
     )
 
-    postprocess_config = {
-        "include_paragraph_markers": args.include_paragraph_markers or args.preserve_usfm_markers,
-        "include_style_markers": args.include_style_markers or args.preserve_usfm_markers,
-        "include_embeds": args.include_embeds or args.include_inline_elements,
-    }
+    postprocess_config = extract_postprocess_options_from_dict(vars(args))
+    if args.preserve_usfm_markers:
+        postprocess_config["include_paragraph_markers"] = True
+        postprocess_config["include_style_markers"] = True
+    if args.include_inline_elements:
+        postprocess_config["include_embeds"] = True
     postprocess_handler = PostprocessHandler([PostprocessConfig(postprocess_config)])
 
     if len(args.books) > 0:
