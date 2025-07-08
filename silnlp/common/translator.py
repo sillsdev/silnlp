@@ -20,7 +20,7 @@ from machine.corpora import (
     UsfmTextType,
     parse_usfm,
 )
-from machine.scripture import VerseRef
+from machine.scripture import VerseRef, is_book_id_valid
 
 from .corpus import load_corpus, write_corpus
 from .paratext import get_book_path, get_iso, get_project_dir
@@ -181,6 +181,8 @@ class Translator(ABC):
             # Guess book ID
             with src_file_path.open(encoding="utf-8-sig") as f:
                 book_id = f.read().split()[1].upper()
+            if not is_book_id_valid(book_id):
+                raise ValueError(f"Book ID not detected: {book_id}")
 
             src_file_text = UsfmFileText("usfm.sty", "utf-8-sig", book_id, src_file_path, include_all_text=True)
         stylesheet = src_settings.stylesheet if src_from_project else UsfmStylesheet("usfm.sty")
