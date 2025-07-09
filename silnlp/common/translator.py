@@ -31,17 +31,6 @@ LOGGER = logging.getLogger(__package__ + ".translate")
 nltk.download("punkt")
 
 
-def insert_draft_remarks(usfm: str, remarks: List[str]) -> str:
-    lines = usfm.split("\n")
-    insert_idx = (
-        1
-        + (len(lines) > 1 and (lines[1].startswith("\\ide") or lines[1].startswith("\\usfm")))
-        + (len(lines) > 2 and (lines[2].startswith("\\ide") or lines[2].startswith("\\usfm")))
-    )
-    remarks = [f"\\rem {r}" for r in remarks]
-    return "\n".join(lines[:insert_idx] + remarks + lines[insert_idx:])
-
-
 # A group of multiple translations of a single sentence
 TranslationGroup = List[str]
 
@@ -224,6 +213,12 @@ class Translator(ABC):
             postprocess_handler.create_update_block_handlers(vrefs, sentences, translated_draft)
 
             for config in postprocess_handler.configs:
+                # Compile draft remarks
+                draft_src_str = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
+                draft_remark = f"This draft of {vrefs[0].book} was machine translated on {date.today()} from {draft_src_str} using model {experiment_ckpt_str}. It should be reviewed and edited carefully."
+                postprocess_remark = config.get_postprocess_remark()
+                remarks = [draft_remark] + ([postprocess_remark] if len(postprocess_remark) > 0 else [])
+
                 # Insert translation into the USFM structure of an existing project
                 # If the target project is not the same as the translated file's original project,
                 # no verses outside of the ones translated will be overwritten
@@ -239,6 +234,7 @@ class Translator(ABC):
                         embed_behavior=config.get_embed_behavior(),
                         style_behavior=config.get_style_behavior(),
                         update_block_handlers=config.update_block_handlers,
+                        remarks=remarks,
                     )
 
                     if usfm_out is None:
@@ -256,19 +252,10 @@ class Translator(ABC):
                         embed_behavior=config.get_embed_behavior(),
                         style_behavior=config.get_style_behavior(),
                         update_block_handlers=config.update_block_handlers,
+                        remarks=remarks,
                     )
                     parse_usfm(usfm, handler)
                     usfm_out = handler.get_usfm()
-
-                # Insert draft remarks
-                description = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
-                remarks = [
-                    f"This draft of {vrefs[0].book} was machine translated on {date.today()} from {description} using model {experiment_ckpt_str}. It should be reviewed and edited carefully."
-                ]
-                postprocess_remark = config.get_postprocess_remark()
-                if len(postprocess_remark) > 0:
-                    remarks.append(postprocess_remark)
-                usfm_out = insert_draft_remarks(usfm_out, remarks)
 
                 # Construct output file name write to file
                 trg_draft_file_path = trg_file_path.with_stem(trg_file_path.stem + config.get_postprocess_suffix())
