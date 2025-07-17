@@ -6,7 +6,7 @@ from ..nmt.clearml_connection import SILClearML
 from ..nmt.config_utils import load_config
 from ..nmt.postprocess import get_draft_paths_from_exp, postprocess_draft, postprocess_experiment
 from .paratext import get_project_dir
-from .postprocesser import PostprocessConfig, PostprocessHandler, extract_postprocess_options_from_dict
+from .postprocesser import PostprocessConfig, PostprocessHandler
 from .utils import get_mt_exp_dir
 
 LOGGER = logging.getLogger(__package__ + ".postprocess_draft")
@@ -74,7 +74,7 @@ def main() -> None:
 
     experiment = args.experiment.replace("\\", "/") if args.experiment else None
     args.output_folder = Path(args.output_folder.replace("\\", "/")) if args.output_folder else None
-    postprocess_config = extract_postprocess_options_from_dict(vars(args))
+    postprocess_config = PostprocessConfig(vars(args))
 
     if args.experiment and (args.source or args.draft or args.book):
         LOGGER.info("--experiment option used. --source, --draft, and --book will be ignored.")
@@ -96,7 +96,7 @@ def main() -> None:
         if not (config.exp_dir / "translate_config.yml").exists():
             raise ValueError("Experiment translate_config.yml not found.")
 
-        if len(postprocess_config.keys()) > 0:
+        if not postprocess_config.is_base_config():
             src_paths, draft_paths, _ = get_draft_paths_from_exp(config)
         else:
             LOGGER.info("No postprocessing options used. Applying postprocessing requests from translate config.")
@@ -112,9 +112,9 @@ def main() -> None:
                 "--book argument must be passed if the source file is not in a Paratext project directory."
             )
 
-    if len(postprocess_config.keys()) == 0:
+    if postprocess_config.is_base_config():
         raise ValueError("Please use at least one postprocessing option.")
-    postprocess_handler = PostprocessHandler([PostprocessConfig(postprocess_config)], include_base=False)
+    postprocess_handler = PostprocessHandler([postprocess_config], include_base=False)
 
     for src_path, draft_path in zip(src_paths, draft_paths):
         postprocess_draft(src_path, draft_path, postprocess_handler, args.book, args.output_folder)
