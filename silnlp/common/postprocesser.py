@@ -1,12 +1,13 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Dict, List, Union
+from typing import Dict, List, Optional, Union
 
 from machine.corpora import (
     PlaceMarkersAlignmentInfo,
     PlaceMarkersUsfmUpdateBlockHandler,
     ScriptureRef,
     UpdateUsfmMarkerBehavior,
+    UpdateUsfmRow,
     UsfmUpdateBlockHandler,
 )
 from machine.tokenization import LatinWordTokenizer
@@ -17,8 +18,12 @@ from ..alignment.utils import compute_alignment_scores
 from .corpus import load_corpus, write_corpus
 from .utils import merge_dict
 
-POSTPROCESS_OPTIONS = {"include_paragraph_markers": False, "include_style_markers": False, "include_embeds": False}
-POSTPROCESS_SUFFIX_CHARS = ["p", "s", "e"]
+"""
+Possible values for non-boolean options
+paragraph_behavior: end, place, strip
+"""
+POSTPROCESS_OPTIONS = {"paragraph_behavior": "end", "include_style_markers": False, "include_embeds": False}
+POSTPROCESS_SUFFIX_CHARS = [{"place": "p", "strip": "x"}, "s", "e"]
 
 
 def extract_postprocess_options_from_dict(config: dict) -> Dict[str, Union[bool, str]]:
@@ -29,12 +34,13 @@ class PostprocessConfig:
     def __init__(self, config: Dict[str, Union[bool, str]] = {}) -> None:
         self._config = merge_dict(dict(POSTPROCESS_OPTIONS), config)
         self.update_block_handlers: List[UsfmUpdateBlockHandler] = []
+        self.rows: List[UpdateUsfmRow] = []
 
     def _get_usfm_marker_behavior(self, preserve: bool) -> UpdateUsfmMarkerBehavior:
         return UpdateUsfmMarkerBehavior.PRESERVE if preserve else UpdateUsfmMarkerBehavior.STRIP
 
     def get_paragraph_behavior(self) -> UpdateUsfmMarkerBehavior:
-        return self._get_usfm_marker_behavior(self._config["include_paragraph_markers"])
+        return self._get_usfm_marker_behavior(self._config["paragraph_behavior"] != "strip")
 
     def get_style_behavior(self) -> UpdateUsfmMarkerBehavior:
         return self._get_usfm_marker_behavior(self._config["include_style_markers"])
@@ -42,17 +48,27 @@ class PostprocessConfig:
     def get_embed_behavior(self) -> UpdateUsfmMarkerBehavior:
         return self._get_usfm_marker_behavior(self._config["include_embeds"])
 
+    # NOTE: Each postprocessing configuration needs to have a unique suffix so files don't overwrite each other
     def get_postprocess_suffix(self) -> str:
         suffix = "_"
         for (option, default), char in zip(POSTPROCESS_OPTIONS.items(), POSTPROCESS_SUFFIX_CHARS):
             if self._config[option] != default:
-                suffix += char
+                if isinstance(default, str):
+                    suffix += char[self._config[option]]
+                else:
+                    suffix += char
 
         return suffix if len(suffix) > 1 else ""
 
-    def get_postprocess_remark(self) -> str:
-        used = [option for (option, default) in POSTPROCESS_OPTIONS.items() if self._config[option] != default]
-        return f"Post-processing options used: {' '.join(used)}" if len(used) > 0 else ""
+    def get_postprocess_remark(self) -> Optional[str]:
+        used = []
+        for option, default in POSTPROCESS_OPTIONS.items():
+            if self._config[option] != default:
+                used.append(option)
+                if isinstance(default, str):
+                    used[-1] += f":{self._config[option]}"
+
+        return f"Post-processing options used: {' '.join(used)}" if len(used) > 0 else None
 
     def __getitem__(self, key):
         return self._config[key]
@@ -61,38 +77,49 @@ class PostprocessConfig:
 class PostprocessHandler:
     def __init__(self, configs: List[PostprocessConfig] = [], include_base: bool = True) -> None:
         self.configs = ([PostprocessConfig()] if include_base else []) + configs
-
-    # NOTE: Update block handlers may need to be created/recreated at different times
-    # For example, the marker placement handler needs to be recreated for each new draft because it uses text alignment,
-    # but other handlers may only need to be created once overall, or once per source project.
-    # This may change what part of the process we want this function to be called at
-    def create_update_block_handlers(self, refs: List[ScriptureRef], source: List[str], translation: List[str]) -> None:
-        if any(config["include_paragraph_markers"] or config["include_style_markers"] for config in self.configs):
-            place_markers_handler = self._construct_place_markers_handler(refs, source, translation)
-
         for config in self.configs:
-            if config["include_paragraph_markers"] or config["include_style_markers"]:
-                if len(config.update_block_handlers) == 0:
-                    config.update_block_handlers.append(place_markers_handler)
-                else:  # NOTE: this assumes a set order of update block handlers
-                    config.update_block_handlers[0] = place_markers_handler
+            if config["paragraph_behavior"] == "place" or config["include_style_markers"]:
+                config.update_block_handlers.append(PlaceMarkersUsfmUpdateBlockHandler())
 
-    def _construct_place_markers_handler(
-        self, refs: List[ScriptureRef], source: List[str], translation: List[str], aligner: str = "eflomal"
-    ) -> PlaceMarkersUsfmUpdateBlockHandler:
-        align_info = []
+    # NOTE: Row metadata may need to be created/recreated at different times
+    # For example, the marker placement metadata needs to be recreated for each new draft because it uses text alignment,
+    # but other metadata may only need to be created once overall, or once per source project.
+    # This may change what part of the process we want this function to be called at
+    def construct_rows(self, refs: List[ScriptureRef], source: List[str], translation: List[str]) -> None:
+        for config in self.configs:
+            config.rows = [UpdateUsfmRow([ref], t, {}) for ref, t in zip(refs, translation)]
+
+        self._construct_place_markers_metadata(source, translation)
+
+    def _construct_place_markers_metadata(
+        self, source: List[str], translation: List[str], aligner: str = "eflomal"
+    ) -> None:
+        pm_configs = [
+            config
+            for config in self.configs
+            if config["paragraph_behavior"] == "place" or config["include_style_markers"]
+        ]
+        if len(pm_configs) == 0:
+            return
+
         tokenizer = LatinWordTokenizer()
         alignments = self._get_alignment_matrices(source, translation, aligner)
-        for ref, s, t, alignment in zip(refs, source, translation, alignments):
-            align_info.append(
-                PlaceMarkersAlignmentInfo(
-                    refs=[str(ref)],
-                    source_tokens=list(tokenizer.tokenize(s)),
-                    translation_tokens=list(tokenizer.tokenize(t)),
+        for i, (s, t, alignment) in enumerate(zip(source, translation, alignments)):
+            source_tokens = list(tokenizer.tokenize(s))
+            translation_tokens = list(tokenizer.tokenize(t))
+
+            for config in pm_configs:
+                config.rows[i].metadata["alignment_info"] = PlaceMarkersAlignmentInfo(
+                    source_tokens=source_tokens,
+                    translation_tokens=translation_tokens,
                     alignment=alignment,
+                    paragraph_behavior=(
+                        UpdateUsfmMarkerBehavior.PRESERVE
+                        if config["paragraph_behavior"] == "place"
+                        else UpdateUsfmMarkerBehavior.STRIP
+                    ),
+                    style_behavior=config.get_style_behavior(),
                 )
-            )
-        return PlaceMarkersUsfmUpdateBlockHandler(align_info)
 
     def _get_alignment_matrices(
         self, src_sents: List[str], trg_sents: List[str], aligner: str = "eflomal"

@@ -214,16 +214,14 @@ class Translator(ABC):
 
         draft_set: DraftGroup = DraftGroup(translations)
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
-            rows = [([ref], translation) for ref, translation in zip(vrefs, translated_draft)]
-
-            postprocess_handler.create_update_block_handlers(vrefs, sentences, translated_draft)
+            postprocess_handler.construct_rows(vrefs, sentences, translated_draft)
 
             for config in postprocess_handler.configs:
                 # Compile draft remarks
                 draft_src_str = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
                 draft_remark = f"This draft of {vrefs[0].book} was machine translated on {date.today()} from {draft_src_str} using model {experiment_ckpt_str}. It should be reviewed and edited carefully."
                 postprocess_remark = config.get_postprocess_remark()
-                remarks = [draft_remark] + ([postprocess_remark] if len(postprocess_remark) > 0 else [])
+                remarks = [draft_remark] + ([postprocess_remark] if postprocess_remark else [])
 
                 # Insert translation into the USFM structure of an existing project
                 # If the target project is not the same as the translated file's original project,
@@ -234,7 +232,7 @@ class Translator(ABC):
                     )
                     usfm_out = dest_updater.update_usfm(
                         book_id=src_file_text.id,
-                        rows=rows,
+                        rows=config.rows,
                         text_behavior=text_behavior,
                         paragraph_behavior=config.get_paragraph_behavior(),
                         embed_behavior=config.get_embed_behavior(),
@@ -251,7 +249,7 @@ class Translator(ABC):
                     with open(src_file_path, encoding="utf-8-sig") as f:
                         usfm = f.read()
                     handler = UpdateUsfmParserHandler(
-                        rows=rows,
+                        rows=config.rows,
                         id_text=vrefs[0].book,
                         text_behavior=text_behavior,
                         paragraph_behavior=config.get_paragraph_behavior(),

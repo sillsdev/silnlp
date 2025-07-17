@@ -132,15 +132,14 @@ def postprocess_draft(
             )
             return
 
-    postprocess_handler.create_update_block_handlers(src_refs, src_sents, draft_sents)
+    postprocess_handler.construct_rows(src_refs, src_sents, draft_sents)
 
     with src_path.open(encoding=encoding) as f:
         usfm = f.read()
-    rows = [([ref], sent) for ref, sent in zip(src_refs, draft_sents)]
 
     for config in postprocess_handler.configs:
         handler = UpdateUsfmParserHandler(
-            rows=rows,
+            rows=config.rows,
             id_text=book,
             text_behavior=UpdateUsfmTextBehavior.STRIP_EXISTING,
             paragraph_behavior=config.get_paragraph_behavior(),

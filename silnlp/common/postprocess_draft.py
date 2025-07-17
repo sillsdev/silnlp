@@ -47,10 +47,9 @@ def main() -> None:
         help="Output folder for the postprocessed draft. Defaults to the folder of the original draft.",
     )
     parser.add_argument(
-        "--include-paragraph-markers",
-        default=False,
-        action="store_true",
-        help="Attempt to place paragraph markers in translated verses based on the source project's markers",
+        "--paragraph-behavior",
+        default="end",
+        help="Behavior of paragraph markers for files in USFM format, possible values are 'end', 'place', and 'strip'",
     )
     parser.add_argument(
         "--include-style-markers",

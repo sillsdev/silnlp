@@ -319,10 +319,9 @@ def main() -> None:
         help='Produce multiple translations of each verse. These will be saved in separate files with suffixes like ".1.txt", ".2.txt", etc.',
     )
     parser.add_argument(
-        "--include-paragraph-markers",
-        default=False,
-        action="store_true",
-        help="For files in USFM format, attempt to place paragraph markers in translated verses based on the source project's markers",
+        "--paragraph-behavior",
+        default="end",
+        help="Behavior of paragraph markers for files in USFM format, possible values are 'end', 'place', and 'strip'",
     )
     parser.add_argument(
         "--include-style-markers",
@@ -349,6 +348,12 @@ def main() -> None:
         help="Deprecated argument, equivalent to --include-paragraph-markers AND --include-style-markers",
     )
     parser.add_argument(
+        "--include-paragraph-markers",
+        default=False,
+        action="store_true",
+        help="For files in USFM format, attempt to place paragraph markers in translated verses based on the source project's markers",
+    )
+    parser.add_argument(
         "--clearml-queue",
         default=None,
         type=str,
@@ -373,9 +378,12 @@ def main() -> None:
         name=args.experiment, checkpoint=args.checkpoint, clearml_queue=args.clearml_queue, commit=args.commit
     )
 
+    # Get postprocessing options and do backwards-compatiblity adjustments
     postprocess_config = extract_postprocess_options_from_dict(vars(args))
+    if args.include_paragraph_markers:
+        postprocess_config["paragraph_behavior"] = "place"
     if args.preserve_usfm_markers:
-        postprocess_config["include_paragraph_markers"] = True
+        postprocess_config["paragraph_behavior"] = "place"
         postprocess_config["include_style_markers"] = True
     if args.include_inline_elements:
         postprocess_config["include_embeds"] = True
