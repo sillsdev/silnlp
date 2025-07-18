@@ -240,7 +240,7 @@ class TranslationTask:
                     src_iso,
                     trg_iso,
                     produce_multiple_translations,
-                    postprocess_handler,
+                    postprocess_handler=postprocess_handler,
                     experiment_ckpt_str=experiment_ckpt_str,
                 )
 

@@ -17,7 +17,7 @@ from ..alignment.eflomal import to_word_alignment_matrix
 from ..alignment.utils import compute_alignment_scores
 from .corpus import load_corpus, write_corpus
 
-POSTPROCESS_OPTIONS = {
+POSTPROCESS_DEFAULTS = {
     "paragraph_behavior": "end",  # Possible values: end, place, strip
     "include_style_markers": False,
     "include_embeds": False,
@@ -28,10 +28,10 @@ POSTPROCESS_SUFFIX_CHARS = [{"place": "p", "strip": "x"}, "s", "e"]
 class PostprocessConfig:
     def __init__(self, config: dict = {}) -> None:
         self._config = {}
-        for option, default in POSTPROCESS_OPTIONS.items():
+        for option, default in POSTPROCESS_DEFAULTS.items():
             self._config[option] = config.get(option, default)
 
-        # Backwards-compatibility
+        # Backwards compatibility
         if config.get("include_paragraph_markers") or config.get("preserve_usfm_markers"):
             self._config["paragraph_behavior"] = "place"
         if config.get("preserve_usfm_markers"):
@@ -60,7 +60,7 @@ class PostprocessConfig:
     # NOTE: Each postprocessing configuration needs to have a unique suffix so files don't overwrite each other
     def get_postprocess_suffix(self) -> str:
         suffix = "_"
-        for (option, default), char in zip(POSTPROCESS_OPTIONS.items(), POSTPROCESS_SUFFIX_CHARS):
+        for (option, default), char in zip(POSTPROCESS_DEFAULTS.items(), POSTPROCESS_SUFFIX_CHARS):
             if self._config[option] != default:
                 if isinstance(default, str):
                     suffix += char[self._config[option]]
@@ -71,7 +71,7 @@ class PostprocessConfig:
 
     def get_postprocess_remark(self) -> Optional[str]:
         used = []
-        for option, default in POSTPROCESS_OPTIONS.items():
+        for option, default in POSTPROCESS_DEFAULTS.items():
             if self._config[option] != default:
                 used.append(option)
                 if isinstance(default, str):
@@ -80,7 +80,7 @@ class PostprocessConfig:
         return f"Post-processing options used: {' '.join(used)}" if len(used) > 0 else None
 
     def is_base_config(self) -> bool:
-        return self._config == POSTPROCESS_OPTIONS
+        return self._config == POSTPROCESS_DEFAULTS
 
     def __getitem__(self, key):
         return self._config[key]
