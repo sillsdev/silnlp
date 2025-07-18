@@ -10,7 +10,7 @@ from machine.scripture import VerseRef, book_number_to_id, get_chapters
 
 from ..common.environment import SIL_NLP_ENV
 from ..common.paratext import book_file_name_digits, get_project_dir
-from ..common.postprocesser import PostprocessConfig, PostprocessHandler, extract_postprocess_options_from_dict
+from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.translator import TranslationGroup, Translator
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import SILClearML
@@ -240,7 +240,7 @@ class TranslationTask:
                     src_iso,
                     trg_iso,
                     produce_multiple_translations,
-                    postprocess_handler,
+                    postprocess_handler=postprocess_handler,
                     experiment_ckpt_str=experiment_ckpt_str,
                 )
 
@@ -319,10 +319,9 @@ def main() -> None:
         help='Produce multiple translations of each verse. These will be saved in separate files with suffixes like ".1.txt", ".2.txt", etc.',
     )
     parser.add_argument(
-        "--include-paragraph-markers",
-        default=False,
-        action="store_true",
-        help="For files in USFM format, attempt to place paragraph markers in translated verses based on the source project's markers",
+        "--paragraph-behavior",
+        default="end",
+        help="Behavior of paragraph markers for files in USFM format, possible values are 'end', 'place', and 'strip'",
     )
     parser.add_argument(
         "--include-style-markers",
@@ -349,6 +348,12 @@ def main() -> None:
         help="Deprecated argument, equivalent to --include-paragraph-markers AND --include-style-markers",
     )
     parser.add_argument(
+        "--include-paragraph-markers",
+        default=False,
+        action="store_true",
+        help="For files in USFM format, attempt to place paragraph markers in translated verses based on the source project's markers",
+    )
+    parser.add_argument(
         "--clearml-queue",
         default=None,
         type=str,
@@ -373,13 +378,7 @@ def main() -> None:
         name=args.experiment, checkpoint=args.checkpoint, clearml_queue=args.clearml_queue, commit=args.commit
     )
 
-    postprocess_config = extract_postprocess_options_from_dict(vars(args))
-    if args.preserve_usfm_markers:
-        postprocess_config["include_paragraph_markers"] = True
-        postprocess_config["include_style_markers"] = True
-    if args.include_inline_elements:
-        postprocess_config["include_embeds"] = True
-    postprocess_handler = PostprocessHandler([PostprocessConfig(postprocess_config)])
+    postprocess_handler = PostprocessHandler([PostprocessConfig(vars(args))])
 
     if len(args.books) > 0:
         if args.debug:
