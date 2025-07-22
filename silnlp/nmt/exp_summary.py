@@ -90,22 +90,33 @@ def flatten_dict(data: dict, chapters: list, baseline={}) -> list:
     global metrics
 
     rows = []
-    for lang_pair in data:
-        for chap in range(1, chap_num + 1):
-            row = [lang_pair, chap]
-            row.extend([None, None, None] * len(metrics) * len(data[lang_pair]))
-            row.extend([None] * len(chapters))
-            row.extend([None] * (1 + len(metrics)))
+    if len(data) > 0:
+        for lang_pair in data:
+            for chap in range(1, chap_num + 1):
+                row = [lang_pair, chap]
+                row.extend([None, None, None] * len(metrics) * len(data[lang_pair]))
+                row.extend([None] * len(chapters))
+                row.extend([None] * (1 + len(metrics)))
 
-            for res_chap in data[lang_pair]:
-                if chap in data[lang_pair][res_chap]:
+                for res_chap in data[lang_pair]:
+                    if chap in data[lang_pair][res_chap]:
+                        for m in range(len(metrics)):
+                            index_m = 3 + 1 + len(metrics) + chapters.index(res_chap) * (len(metrics) * 3 + 1) + m * 3
+                            row[index_m] = data[lang_pair][res_chap][chap][m]
+                if len(baseline) > 0:
                     for m in range(len(metrics)):
-                        index_m = 3 + 1 + len(metrics) + chapters.index(res_chap) * (len(metrics) * 3 + 1) + m * 3
-                        row[index_m] = data[lang_pair][res_chap][chap][m]
-            if len(baseline) > 0:
+                        row[3 + m] = baseline[lang_pair][chap][m]
+                rows.append(row)
+    else:
+        for lang_pair in baseline:
+            for chap in range(1, chap_num + 1):
+                row = [lang_pair, chap]
+                row.extend([None] * (1 + len(metrics)))
+
                 for m in range(len(metrics)):
                     row[3 + m] = baseline[lang_pair][chap][m]
-            rows.append(row)
+                rows.append(row)
+
     return rows
 
 
@@ -228,8 +239,10 @@ def main() -> None:
     global metrics
     global key_word
 
-    parser = argparse.ArgumentParser(description="Pull results")
-    parser.add_argument("exp1", type=str, help="Experiment folder")
+    parser = argparse.ArgumentParser(
+        description="Pull results. At least one --exp or --baseline needs to be specified."
+    )
+    parser.add_argument("--exp", type=str, help="Experiment folder with progression results")
     parser.add_argument(
         "--trained-books", nargs="*", required=True, type=str.upper, help="Books that are trained in the exp"
     )
@@ -243,8 +256,11 @@ def main() -> None:
         help="Metrics that will be analyzed with",
     )
     parser.add_argument("--key-word", type=str, default="conf", help="Key word in the filename for the exp group")
-    parser.add_argument("--baseline", type=str, help="Baseline for the exp group")
+    parser.add_argument("--baseline", type=str, help="Baseline or non-progression result for the exp group")
     args = parser.parse_args()
+
+    if not (args.exp or args.baseline):
+        parser.error("At least one --exp or --baseline needs to be specified.")
 
     trained_books = args.trained_books
     target_book = args.target_book
@@ -252,20 +268,22 @@ def main() -> None:
     metrics = args.metrics
     key_word = args.key_word
 
-    exp1_name = args.exp1
-    exp1_dir = get_mt_exp_dir(exp1_name)
+    exp1_name = args.exp
+    exp1_dir = get_mt_exp_dir(exp1_name) if exp1_name else None
 
     exp2_name = args.baseline
     exp2_dir = get_mt_exp_dir(exp2_name) if exp2_name else None
 
     folder_name = "+".join(all_books)
-    os.makedirs(os.path.join(exp1_dir, "a_result_folder"), exist_ok=True)
-    output_path = os.path.join(exp1_dir, "a_result_folder", f"{folder_name}.xlsx")
+    result_dir = exp1_dir if exp1_dir else exp2_dir
+    os.makedirs(os.path.join(result_dir, "a_result_folder"), exist_ok=True)
+    output_path = os.path.join(result_dir, "a_result_folder", f"{folder_name}.xlsx")
 
     data = {}
     chapters = []
-    read_data(exp1_dir, data, chapters)
-    chapters = sorted(set(chapters))
+    if exp1_dir:
+        read_data(exp1_dir, data, chapters)
+        chapters = sorted(set(chapters))
 
     baseline_data = {}
     if exp2_dir:
