@@ -18,7 +18,7 @@ metrics = []
 key_word = ""
 
 
-def read_data(file_path, data, chapters):
+def read_data(file_path: str, data: dict, chapters: list) -> None:
     global chap_num
     global all_books
     global key_word
@@ -47,7 +47,7 @@ def read_data(file_path, data, chapters):
                     print(folder_path + " has no diff_predictions file.")
 
 
-def extract_data(filename, header_row=5) -> dict:
+def extract_data(filename: str, header_row=5) -> dict:
     global chap_num
     global metrics
     global target_book
@@ -85,7 +85,7 @@ def extract_data(filename, header_row=5) -> dict:
     return result
 
 
-def flatten_dict(data, chapters, baseline={}) -> list:
+def flatten_dict(data: dict, chapters: list, baseline={}) -> list:
     global chap_num
     global metrics
 
@@ -109,7 +109,7 @@ def flatten_dict(data, chapters, baseline={}) -> list:
     return rows
 
 
-def create_xlsx(rows, chapters, output_path):
+def create_xlsx(rows: list, chapters: list, output_path: str) -> None:
     global chap_num
     global metrics
 
