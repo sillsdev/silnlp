@@ -21,6 +21,7 @@ from machine.corpora import (
     parse_usfm,
 )
 from machine.scripture import VerseRef, is_book_id_valid
+from scipy.stats import gmean
 
 from .corpus import load_corpus, write_corpus
 from .paratext import get_book_path, get_iso, get_project_dir
@@ -293,6 +294,19 @@ class Translator(ABC):
                         )
                         + "\n"
                     )
+            chapter_confidences = {}
+            for sentence_num, vref in enumerate(vrefs):
+                vref_confidence = str(exp(output[sentence_num][3][draft_index - 1]))
+                if vref.chapter_num not in chapter_confidences:
+                    chapter_confidences[vref.chapter_num] = [vref_confidence]
+                chapter_confidences[vref.chapter_num].append(vref_confidence)
+            with confidences_path.with_suffix(".chapters.tsv").open(
+                "w", encoding="utf-8", newline="\n"
+            ) as chapter_confidences_file:
+                chapter_confidences_file.write("Chapter\tConfidence\n")
+                for chapter, confidences in chapter_confidences.items():
+                    chapter_confidence = gmean(confidences)
+                    chapter_confidences_file.write(f"{chapter}\t{chapter_confidence}\n")
 
     def translate_docx(
         self,
