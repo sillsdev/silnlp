@@ -391,6 +391,7 @@ def test_checkpoint(
     scorers: Set[str],
     books: Dict[int, List[int]],
     produce_multiple_translations: bool = False,
+    save_confidences: bool = False,
 ) -> List[PairScore]:
     config.set_seed()
     vref_file_names: List[str] = []
@@ -447,6 +448,7 @@ def test_checkpoint(
             source_paths,
             translation_paths,
             produce_multiple_translations,
+            save_confidences,
             vref_paths,
             step if checkpoint_type is CheckpointType.OTHER else checkpoint_type,
         )
@@ -580,6 +582,7 @@ def test(
     books: List[str] = [],
     by_book: bool = False,
     produce_multiple_translations: bool = False,
+    save_confidences: bool = False,
 ):
     exp_name = experiment
     config = load_config(exp_name)
@@ -612,6 +615,7 @@ def test(
             scorers,
             books_nums,
             produce_multiple_translations,
+            save_confidences,
         )
 
     if avg:
@@ -629,6 +633,7 @@ def test(
                 scorers,
                 books_nums,
                 produce_multiple_translations,
+                save_confidences,
             )
         except ValueError:
             LOGGER.warn("No average checkpoint available.")
@@ -650,6 +655,7 @@ def test(
                 scorers,
                 books_nums,
                 produce_multiple_translations,
+                save_confidences,
             )
 
     if last or (not best and checkpoint is None and not avg and config.model_dir.exists()):
@@ -667,6 +673,7 @@ def test(
                 scorers,
                 books_nums,
                 produce_multiple_translations,
+                save_confidences,
             )
 
     if not config.model_dir.exists():
@@ -682,6 +689,7 @@ def test(
             scorers,
             books_nums,
             produce_multiple_translations,
+            save_confidences,
         )
 
     for step in sorted(results.keys()):
@@ -743,6 +751,12 @@ def main() -> None:
         action="store_true",
         help="Produce multiple translations of each verse.",
     )
+    parser.add_argument(
+        "--save-confidences",
+        default=False,
+        action="store_true",
+        help="Create files for verse, chapter, book confidence.",
+    )
     args = parser.parse_args()
 
     get_git_revision_hash()
@@ -764,6 +778,7 @@ def main() -> None:
         books=books,
         by_book=args.by_book,
         produce_multiple_translations=args.multiple_translations,
+        save_confidences=args.save_confidences,
     )
 
 

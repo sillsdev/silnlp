@@ -81,35 +81,50 @@ class Translator(ABC):
         src_iso: str,
         trg_iso: str,
         produce_multiple_translations: bool = False,
+        save_confidences: bool = False,
     ) -> None:
         output = list(self.translate(load_corpus(src_file_path), src_iso, trg_iso, produce_multiple_translations))
         translations = [translation for translation, _, _, _ in output]
         draft_set = DraftGroup(translations)
-        confidence_scores_suffix = ".confidences.tsv"
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
             if produce_multiple_translations:
                 trg_draft_file_path = trg_file_path.with_suffix(f".{draft_index}{trg_file_path.suffix}")
-                confidences_path = trg_file_path.with_suffix(
-                    f".{draft_index}{trg_file_path.suffix}{confidence_scores_suffix}"
-                )
             else:
                 trg_draft_file_path = trg_file_path
-                confidences_path = trg_file_path.with_suffix(f"{trg_file_path.suffix}{confidence_scores_suffix}")
             write_corpus(trg_draft_file_path, translated_draft)
-            with confidences_path.open("w", encoding="utf-8", newline="\n") as confidences_file:
-                confidences_file.write("\t".join(["Sequence Number"] + [f"Token {i}" for i in range(200)]) + "\n")
-                confidences_file.write("\t".join(["Sequence Score"] + [f"Token Score {i}" for i in range(200)]) + "\n")
-                for sentence_num, _ in enumerate(output):
-                    confidences_file.write(
-                        "\t".join([str(sentence_num)] + output[sentence_num][1][draft_index - 1]) + "\n"
+
+            if save_confidences:
+                confidence_scores_suffix = ".confidences.tsv"
+                if produce_multiple_translations:
+                    confidences_path = trg_file_path.with_suffix(
+                        f".{draft_index}{trg_file_path.suffix}{confidence_scores_suffix}"
                     )
+                else:
+                    confidences_path = trg_file_path.with_suffix(f"{trg_file_path.suffix}{confidence_scores_suffix}")
+                sequence_confidences: List[float] = []
+                with confidences_path.open("w", encoding="utf-8", newline="\n") as confidences_file:
+                    confidences_file.write("\t".join(["Sequence Number"] + [f"Token {i}" for i in range(200)]) + "\n")
                     confidences_file.write(
-                        "\t".join(
-                            [str(exp(output[sentence_num][3][draft_index - 1]))]
-                            + [str(exp(token_score)) for token_score in output[sentence_num][2][draft_index - 1]]
+                        "\t".join(["Sequence Score"] + [f"Token Score {i}" for i in range(200)]) + "\n"
+                    )
+                    for sentence_num, _ in enumerate(output):
+                        sequence_confidences.append(exp(output[sentence_num][3][draft_index - 1]))
+                        confidences_file.write(
+                            "\t".join([str(sentence_num)] + output[sentence_num][1][draft_index - 1]) + "\n"
                         )
-                        + "\n"
-                    )
+                        confidences_file.write(
+                            "\t".join(
+                                [str(exp(output[sentence_num][3][draft_index - 1]))]
+                                + [str(exp(token_score)) for token_score in output[sentence_num][2][draft_index - 1]]
+                            )
+                            + "\n"
+                        )
+                with (trg_file_path.parent / "confidences.files.tsv").open(
+                    "a", encoding="utf-8", newline="\n"
+                ) as file_confidences_file:
+                    if file_confidences_file.tell() == 0:
+                        file_confidences_file.write("File\tConfidence\n")
+                    file_confidences_file.write(f"{str(trg_file_path)}\t{gmean(sequence_confidences)}\n")
 
     def translate_book(
         self,
@@ -118,6 +133,7 @@ class Translator(ABC):
         output_path: Path,
         trg_iso: str,
         produce_multiple_translations: bool = False,
+        save_confidences: bool = False,
         chapters: List[int] = [],
         trg_project: Optional[str] = None,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
@@ -135,6 +151,7 @@ class Translator(ABC):
             get_iso(get_project_dir(src_project)),
             trg_iso,
             produce_multiple_translations,
+            save_confidences,
             chapters,
             trg_project,
             postprocess_handler,
@@ -148,6 +165,7 @@ class Translator(ABC):
         src_iso: str,
         trg_iso: str,
         produce_multiple_translations: bool = False,
+        save_confidences: bool = True,
         chapters: List[int] = [],
         trg_project: Optional[str] = None,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
@@ -271,52 +289,58 @@ class Translator(ABC):
                 ) as f:
                     f.write(usfm_out)
 
-            confidence_scores_suffix = ".confidences.tsv"
-            if produce_multiple_translations:
-                confidences_path = trg_file_path.with_suffix(
-                    f".{draft_index}{trg_file_path.suffix}{confidence_scores_suffix}"
-                )
-            else:
-                confidences_path = trg_file_path.with_suffix(f"{trg_file_path.suffix}{confidence_scores_suffix}")
-            with confidences_path.open("w", encoding="utf-8", newline="\n") as confidences_file:
-                confidences_file.write("\t".join(["VRef"] + [f"Token {i}" for i in range(200)]) + "\n")
-                confidences_file.write("\t".join(["Sequence Score"] + [f"Token Score {i}" for i in range(200)]) + "\n")
-                for sentence_num, _ in enumerate(output):
-                    if output[sentence_num][0] is None:
-                        continue
-                    confidences_file.write(
-                        "\t".join([str(vrefs[sentence_num])] + output[sentence_num][1][draft_index - 1]) + "\n"
+            if save_confidences:
+                confidence_scores_suffix = ".confidences.tsv"
+                if produce_multiple_translations:
+                    confidences_path = trg_file_path.with_suffix(
+                        f".{draft_index}{trg_file_path.suffix}{confidence_scores_suffix}"
                     )
+                else:
+                    confidences_path = trg_file_path.with_suffix(f"{trg_file_path.suffix}{confidence_scores_suffix}")
+                with confidences_path.open("w", encoding="utf-8", newline="\n") as confidences_file:
+                    confidences_file.write("\t".join(["VRef"] + [f"Token {i}" for i in range(200)]) + "\n")
                     confidences_file.write(
-                        "\t".join(
-                            [str(exp(output[sentence_num][3][draft_index - 1]))]
-                            + [str(exp(token_score)) for token_score in output[sentence_num][2][draft_index - 1]]
+                        "\t".join(["Sequence Score"] + [f"Token Score {i}" for i in range(200)]) + "\n"
+                    )
+                    for sentence_num, _ in enumerate(output):
+                        if output[sentence_num][0] is None:
+                            continue
+                        confidences_file.write(
+                            "\t".join([str(vrefs[sentence_num])] + output[sentence_num][1][draft_index - 1]) + "\n"
                         )
-                        + "\n"
-                    )
-            chapter_confidences: Dict[str, float] = {}
-            all_verse_confidences: List[float] = []
-            for sentence_num, vref in enumerate(vrefs):
-                if not vref.is_verse or output[sentence_num][0] is None:
-                    continue
-                vref_confidence = exp(output[sentence_num][3][draft_index - 1])
-                if vref.chapter_num not in chapter_confidences:
-                    chapter_confidences[vref.chapter_num] = [vref_confidence]
-                chapter_confidences[vref.chapter_num].append(vref_confidence)
-            with confidences_path.with_suffix(".chapters.tsv").open(
-                "w", encoding="utf-8", newline="\n"
-            ) as chapter_confidences_file:
-                chapter_confidences_file.write("Chapter\tConfidence\n")
-                for chapter, confidences in chapter_confidences.items():
-                    all_verse_confidences += confidences
-                    chapter_confidence = gmean(confidences)
-                    chapter_confidences_file.write(f"{chapter}\t{chapter_confidence}\n")
-            with (trg_file_path.parent / "confidences.books.tsv").open(
-                "a", encoding="utf-8", newline="\n"
-            ) as book_confidences_file:
-                if book_confidences_file.tell() == 0:
-                    book_confidences_file.write("Book\tConfidence\n")
-                book_confidences_file.write(f"{vrefs[0].book}\t{gmean(all_verse_confidences)}\n")
+                        confidences_file.write(
+                            "\t".join(
+                                [str(exp(output[sentence_num][3][draft_index - 1]))]
+                                + [str(exp(token_score)) for token_score in output[sentence_num][2][draft_index - 1]]
+                            )
+                            + "\n"
+                        )
+
+                chapter_confidences: Dict[str, float] = {}
+                for sentence_num, vref in enumerate(vrefs):
+                    if not vref.is_verse or output[sentence_num][0] is None:
+                        continue
+                    vref_confidence = exp(output[sentence_num][3][draft_index - 1])
+                    if vref.chapter_num not in chapter_confidences:
+                        chapter_confidences[vref.chapter_num] = [vref_confidence]
+                    chapter_confidences[vref.chapter_num].append(vref_confidence)
+
+                all_verse_confidences: List[float] = []
+                with confidences_path.with_suffix(".chapters.tsv").open(
+                    "w", encoding="utf-8", newline="\n"
+                ) as chapter_confidences_file:
+                    chapter_confidences_file.write("Chapter\tConfidence\n")
+                    for chapter, confidences in chapter_confidences.items():
+                        all_verse_confidences += confidences
+                        chapter_confidence = gmean(confidences)
+                        chapter_confidences_file.write(f"{chapter}\t{chapter_confidence}\n")
+
+                with (trg_file_path.parent / "confidences.books.tsv").open(
+                    "a", encoding="utf-8", newline="\n"
+                ) as book_confidences_file:
+                    if book_confidences_file.tell() == 0:
+                        book_confidences_file.write("Book\tConfidence\n")
+                    book_confidences_file.write(f"{vrefs[0].book}\t{gmean(all_verse_confidences)}\n")
 
     def translate_docx(
         self,
