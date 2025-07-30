@@ -166,7 +166,7 @@ class Translator(ABC):
         src_iso: str,
         trg_iso: str,
         produce_multiple_translations: bool = False,
-        save_confidences: bool = True,
+        save_confidences: bool = False,
         chapters: List[int] = [],
         trg_project: Optional[str] = None,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
@@ -323,7 +323,7 @@ class Translator(ABC):
                         continue
                     vref_confidence = exp(output[sentence_num][3][draft_index - 1])
                     if vref.chapter_num not in chapter_confidences:
-                        chapter_confidences[vref.chapter_num] = [vref_confidence]
+                        chapter_confidences[vref.chapter_num] = []
                     chapter_confidences[vref.chapter_num].append(vref_confidence)
 
                 all_verse_confidences: List[float] = []
