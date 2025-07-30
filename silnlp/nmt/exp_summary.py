@@ -18,7 +18,7 @@ metrics = []
 key_word = ""
 
 
-def read_data(file_path: str, data: dict, chapters: list) -> None:
+def read_data(file_path: str, data: dict, chapters: set) -> None:
     global chap_num
     global all_books
     global key_word
@@ -40,7 +40,7 @@ def read_data(file_path: str, data: dict, chapters: list) -> None:
                 if diff_pred_file:
                     r = extract_data(diff_pred_file[0])
                     data[lang_pair][int(m.group(1))] = r
-                    chapters.append(int(m.group(1)))
+                    chapters.add(int(m.group(1)))
                     if int(m.group(1)) > chap_num:
                         chap_num = int(m.group(1))
                 else:
@@ -53,7 +53,13 @@ def extract_data(filename: str, header_row=5) -> dict:
     global target_book
 
     metrics = [m.lower() for m in metrics]
-    df = pd.read_excel(filename, header=header_row)
+    try:
+        df = pd.read_excel(filename, header=header_row)
+    except ValueError as e:
+        print(f"An error occurs in {filename}")
+        print(e)
+        return {}
+
     df.columns = [col.strip().lower() for col in df.columns]
 
     result = {}
@@ -105,7 +111,7 @@ def flatten_dict(data: dict, chapters: list, baseline={}) -> list:
                             row[index_m] = data[lang_pair][res_chap][chap][m]
                 if len(baseline) > 0:
                     for m in range(len(metrics)):
-                        row[3 + m] = baseline[lang_pair][chap][m]
+                        row[3 + m] = baseline[lang_pair][chap][m] if lang_pair in baseline else None
                 rows.append(row)
     else:
         for lang_pair in baseline:
@@ -156,7 +162,7 @@ def create_xlsx(rows: list, chapters: list, output_path: str) -> None:
         ws.cell(row=2, column=3 + i, value=baseline_header)
 
     col = 3 + len(metrics) + 1
-    for _ in range(len(groups) - 2):
+    for _ in range(len(groups) - 3):
         for i, sub_header in enumerate(sub_headers):
             ws.cell(row=2, column=col + i, value=sub_header)
 
@@ -280,10 +286,10 @@ def main() -> None:
     output_path = os.path.join(result_dir, "a_result_folder", f"{folder_name}.xlsx")
 
     data = {}
-    chapters = []
+    chapters = set()
     if exp1_dir:
         read_data(exp1_dir, data, chapters)
-        chapters = sorted(set(chapters))
+        chapters = sorted(chapters)
 
     baseline_data = {}
     if exp2_dir:
