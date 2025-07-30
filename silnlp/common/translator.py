@@ -317,7 +317,7 @@ class Translator(ABC):
                             + "\n"
                         )
 
-                chapter_confidences: Dict[str, float] = {}
+                chapter_confidences: Dict[str, List[float]] = {}
                 for sentence_num, vref in enumerate(vrefs):
                     if not vref.is_verse or output[sentence_num][0] is None:
                         continue
