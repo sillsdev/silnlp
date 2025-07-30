@@ -5,7 +5,7 @@ from datetime import date
 from itertools import groupby
 from math import exp
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 import docx
 import nltk
@@ -294,9 +294,12 @@ class Translator(ABC):
                         )
                         + "\n"
                     )
-            chapter_confidences = {}
+            chapter_confidences: Dict[str, float] = {}
+            all_verse_confidences: List[float] = []
             for sentence_num, vref in enumerate(vrefs):
-                vref_confidence = str(exp(output[sentence_num][3][draft_index - 1]))
+                if not vref.is_verse or output[sentence_num][0] is None:
+                    continue
+                vref_confidence = exp(output[sentence_num][3][draft_index - 1])
                 if vref.chapter_num not in chapter_confidences:
                     chapter_confidences[vref.chapter_num] = [vref_confidence]
                 chapter_confidences[vref.chapter_num].append(vref_confidence)
@@ -305,8 +308,15 @@ class Translator(ABC):
             ) as chapter_confidences_file:
                 chapter_confidences_file.write("Chapter\tConfidence\n")
                 for chapter, confidences in chapter_confidences.items():
+                    all_verse_confidences += confidences
                     chapter_confidence = gmean(confidences)
                     chapter_confidences_file.write(f"{chapter}\t{chapter_confidence}\n")
+            with (trg_file_path.parent / "confidences.books.tsv").open(
+                "a", encoding="utf-8", newline="\n"
+            ) as book_confidences_file:
+                if book_confidences_file.tell() == 0:
+                    book_confidences_file.write("Book\tConfidence\n")
+                book_confidences_file.write(f"{vrefs[0].book}\t{gmean(all_verse_confidences)}\n")
 
     def translate_docx(
         self,
