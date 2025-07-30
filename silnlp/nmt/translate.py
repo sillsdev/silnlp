@@ -166,7 +166,13 @@ class TranslationTask:
             if src_file_path.is_file() and not trg_file_path.is_file():
                 start = time.time()
                 translator.translate_text(
-                    src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations, save_confidences
+                    src_file_path,
+                    trg_file_path,
+                    src_iso,
+                    trg_iso,
+                    produce_multiple_translations,
+                    save_confidences,
+                    trg_prefix,
                 )
                 end = time.time()
                 print(f"Translated {src_file_path.name} to {trg_file_path.name} in {((end-start)/60):.2f} minutes")

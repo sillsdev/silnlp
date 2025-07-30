@@ -82,6 +82,7 @@ class Translator(ABC):
         trg_iso: str,
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
+        trg_prefix: str = "",
     ) -> None:
         output = list(self.translate(load_corpus(src_file_path), src_iso, trg_iso, produce_multiple_translations))
         translations = [translation for translation, _, _, _ in output]
@@ -119,12 +120,12 @@ class Translator(ABC):
                             )
                             + "\n"
                         )
-                with (trg_file_path.parent / "confidences.files.tsv").open(
+                with (trg_file_path.parent / f"{trg_prefix}confidences.files.tsv").open(
                     "a", encoding="utf-8", newline="\n"
                 ) as file_confidences_file:
                     if file_confidences_file.tell() == 0:
                         file_confidences_file.write("File\tConfidence\n")
-                    file_confidences_file.write(f"{str(trg_file_path)}\t{gmean(sequence_confidences)}\n")
+                    file_confidences_file.write(f"{trg_file_path.name}\t{gmean(sequence_confidences)}\n")
 
     def translate_book(
         self,

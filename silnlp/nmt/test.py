@@ -148,8 +148,14 @@ def score_pair(
         if pair_confs is not None:
             confidences = pair_confs
         else:
-            with open(config.exp_dir / predictions_conf_file_name, "r", encoding="utf-8") as f:
-                confidences = [float(line.split("\t")[0]) for line in list(f)[3::2]]
+            try:
+                with open(config.exp_dir / predictions_conf_file_name, "r", encoding="utf-8") as f:
+                    confidences = [float(line.split("\t")[0]) for line in list(f)[3::2]]
+            except FileNotFoundError as e:
+                raise FileNotFoundError(
+                    "Cannot use confidence as a scorer because the confidences file is missing. "
+                    "Include the --save-confidences option to generate the file and enable confidence scoring."
+                ) from e
         other_scores["confidence"] = gmean(confidences)
 
     return PairScore(book, src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores, draft_index)

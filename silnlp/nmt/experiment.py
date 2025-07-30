@@ -182,7 +182,7 @@ def main() -> None:
         nargs="*",
         metavar="scorer",
         choices=_SUPPORTED_SCORERS,
-        default=["bleu", "sentencebleu", "chrf3", "chrf3+", "chrf3++", "spbleu", "confidence"],
+        default=["bleu", "sentencebleu", "chrf3", "chrf3+", "chrf3++", "spbleu"],
         help=f"List of scorers - {_SUPPORTED_SCORERS}",
     )
 
@@ -213,7 +213,7 @@ def main() -> None:
         run_test=args.test,
         run_translate=args.translate,
         produce_multiple_translations=args.multiple_translations,
-        confidence=args.confidence,
+        save_confidences=args.save_confidences,
         scorers=set(s.lower() for s in args.scorers),
         score_by_book=args.score_by_book,
         commit=args.commit,
