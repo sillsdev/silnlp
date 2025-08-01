@@ -761,7 +761,7 @@ def main() -> None:
         "--save-confidences",
         default=False,
         action="store_true",
-        help="Create files for verse, chapter, book confidence.",
+        help="Generate file with verse confidences.",
     )
     args = parser.parse_args()
 

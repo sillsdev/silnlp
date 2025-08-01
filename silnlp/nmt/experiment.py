@@ -164,7 +164,7 @@ def main() -> None:
         "--save-confidences",
         default=False,
         action="store_true",
-        help="Create files for verse, chapter, book confidence.",
+        help="Generate confidence files for test and/or translate step.",
     )
     parser.add_argument("--score-by-book", default=False, action="store_true", help="Score individual books")
     parser.add_argument("--mt-dir", default=None, type=str, help="The machine translation directory.")

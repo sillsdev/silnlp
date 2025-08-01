@@ -337,7 +337,8 @@ def main() -> None:
         "--save-confidences",
         default=False,
         action="store_true",
-        help="Create files for verse, chapter, book confidence.",
+        help="Generate files for verse, chapter, and book confidences if translating from .usfm or .sfm files. "
+        "Or generate them for sequence and trg file confidences if translating from .txt files.",
     )
     parser.add_argument(
         "--paragraph-behavior",

@@ -74,7 +74,7 @@ from transformers.utils.logging import tqdm
 
 from ..common.corpus import Term, count_lines, get_terms
 from ..common.environment import SIL_NLP_ENV
-from ..common.translator import DraftGroup, TranslationGroup
+from ..common.translator import DraftGroup, TranslationGroup, generate_confidence_files
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, get_mt_exp_dir, merge_dict
 from .config import CheckpointType, Config, DataFile, NMTModel
 from .tokenizer import NullTokenizer, Tokenizer
@@ -1145,38 +1145,12 @@ class HuggingFaceNMTModel(NMTModel):
                     out_file.write("\n".join(translated_draft) + "\n")
 
                     if save_confidences:
-                        confidence_scores_suffix = ".confidences.tsv"
-                        if produce_multiple_translations:
-                            confidences_path = translation_path.with_suffix(
-                                f".{draft_index}{translation_path.suffix}{confidence_scores_suffix}"
-                            )
-                        else:
-                            confidences_path = translation_path.with_suffix(
-                                f"{translation_path.suffix}{confidence_scores_suffix}"
-                            )
-                        confidences_file = stack.enter_context(
-                            confidences_path.open("w", encoding="utf-8", newline="\n")
+                        generate_confidence_files(
+                            output,
+                            translation_path,
+                            produce_multiple_translations=produce_multiple_translations,
+                            draft_index=draft_index,
                         )
-                        confidences_file.write(
-                            "\t".join(["Sequence Number"] + [f"Token {i}" for i in range(200)]) + "\n"
-                        )
-                        confidences_file.write(
-                            "\t".join(["Sequence Score"] + [f"Token Score {i}" for i in range(200)]) + "\n"
-                        )
-                        for sentence_num, _ in enumerate(output):
-                            confidences_file.write(
-                                "\t".join([str(sentence_num)] + output[sentence_num][1][draft_index - 1]) + "\n"
-                            )
-                            confidences_file.write(
-                                "\t".join(
-                                    [str(exp(output[sentence_num][3][draft_index - 1]))]
-                                    + [
-                                        str(exp(token_score))
-                                        for token_score in output[sentence_num][2][draft_index - 1]
-                                    ]
-                                )
-                                + "\n"
-                            )
 
     def _translate_test_sentences(
         self,
