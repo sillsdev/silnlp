@@ -136,7 +136,7 @@ def generate_confidence_files(
                 f"Invalid trg file extension {ext} when using --save-confidences in the translate step."
                 f"Valid file extensions for --save-confidences are .usfm, .sfm, and .txt."
             )
-        with (file_confidences_path).open("a", encoding="utf-8", newline="\n") as file_confidences_file:
+        with file_confidences_path.open("a", encoding="utf-8", newline="\n") as file_confidences_file:
             if file_confidences_file.tell() == 0:
                 file_confidences_file.write(f"{row1_col1_header}\tConfidence\n")
             file_confidences_file.write(f"{col1_entry}\t{gmean(sequence_confidences)}\n")
