@@ -6,7 +6,7 @@ from datetime import date
 from itertools import groupby
 from math import exp
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import DefaultDict, Iterable, List, Optional
 
 import docx
 import nltk
@@ -70,7 +70,7 @@ def generate_confidence_files(
     translate_step: bool = False,
     trg_prefix: str = "",
     produce_multiple_translations: bool = False,
-    draft_index: Optional[int] = None,
+    draft_index: int = 0,
     vrefs: Optional[List[VerseRef]] = None,
 ) -> None:
     if produce_multiple_translations:
@@ -105,7 +105,7 @@ def generate_confidence_files(
             )
     if translate_step:
         if ext in {".usfm", ".sfm"}:
-            chapter_confidences: defaultdict[str, List[float]] = defaultdict(list)
+            chapter_confidences: DefaultDict[int, List[float]] = defaultdict(list)
             for sentence_num, vref in enumerate(vrefs):
                 if not vref.is_verse or output[sentence_num][0] is None:
                     continue
