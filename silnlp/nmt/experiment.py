@@ -29,6 +29,7 @@ class SILExperiment:
     run_test: bool = False
     run_translate: bool = False
     produce_multiple_translations: bool = False
+    save_confidences: bool = False
     scorers: Set[str] = field(default_factory=set)
     score_by_book: bool = False
     commit: Optional[str] = None
@@ -76,6 +77,7 @@ class SILExperiment:
             by_book=self.score_by_book,
             scorers=self.scorers,
             produce_multiple_translations=self.produce_multiple_translations,
+            save_confidences=self.save_confidences,
         )
 
     def translate(self):
@@ -103,6 +105,7 @@ class SILExperiment:
                     config.get("trg_project"),
                     config.get("trg_iso"),
                     self.produce_multiple_translations,
+                    self.save_confidences,
                     postprocess_handler,
                 )
             elif config.get("src_prefix"):
@@ -114,6 +117,7 @@ class SILExperiment:
                     config.get("src_iso"),
                     config.get("trg_iso"),
                     self.produce_multiple_translations,
+                    self.save_confidences,
                 )
             elif config.get("src"):
                 translator.translate_files(
@@ -122,6 +126,7 @@ class SILExperiment:
                     config.get("src_iso"),
                     config.get("trg_iso"),
                     self.produce_multiple_translations,
+                    self.save_confidences,
                     postprocess_handler,
                 )
             else:
@@ -155,6 +160,12 @@ def main() -> None:
         action="store_true",
         help='Produce multiple translations of each verse. These will be saved in separate files with suffixes like ".1.txt", ".2.txt", etc.',
     )
+    parser.add_argument(
+        "--save-confidences",
+        default=False,
+        action="store_true",
+        help="Generate confidence files for test and/or translate step.",
+    )
     parser.add_argument("--score-by-book", default=False, action="store_true", help="Score individual books")
     parser.add_argument("--mt-dir", default=None, type=str, help="The machine translation directory.")
     parser.add_argument(
@@ -171,7 +182,7 @@ def main() -> None:
         nargs="*",
         metavar="scorer",
         choices=_SUPPORTED_SCORERS,
-        default=["bleu", "sentencebleu", "chrf3", "chrf3+", "chrf3++", "spbleu", "confidence"],
+        default=["bleu", "sentencebleu", "chrf3", "chrf3+", "chrf3++", "spbleu"],
         help=f"List of scorers - {_SUPPORTED_SCORERS}",
     )
 
@@ -202,6 +213,7 @@ def main() -> None:
         run_test=args.test,
         run_translate=args.translate,
         produce_multiple_translations=args.multiple_translations,
+        save_confidences=args.save_confidences,
         scorers=set(s.lower() for s in args.scorers),
         score_by_book=args.score_by_book,
         commit=args.commit,

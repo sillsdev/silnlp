@@ -55,6 +55,7 @@ class TranslationTask:
         trg_project: Optional[str],
         trg_iso: Optional[str],
         produce_multiple_translations: bool = False,
+        save_confidences: bool = False,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
     ):
         book_nums = get_chapters(books)
@@ -109,6 +110,7 @@ class TranslationTask:
                     output_path,
                     trg_iso,
                     produce_multiple_translations,
+                    save_confidences,
                     chapters,
                     trg_project,
                     postprocess_handler,
@@ -130,6 +132,7 @@ class TranslationTask:
         src_iso: Optional[str],
         trg_iso: Optional[str],
         produce_multiple_translations: bool = False,
+        save_confidences: bool = False,
     ) -> None:
         translator, config, _ = self._init_translation_task(experiment_suffix=f"_{self.checkpoint}_{src_prefix}")
         if trg_prefix is None:
@@ -162,7 +165,15 @@ class TranslationTask:
 
             if src_file_path.is_file() and not trg_file_path.is_file():
                 start = time.time()
-                translator.translate_text(src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations)
+                translator.translate_text(
+                    src_file_path,
+                    trg_file_path,
+                    src_iso,
+                    trg_iso,
+                    produce_multiple_translations,
+                    save_confidences,
+                    trg_prefix,
+                )
                 end = time.time()
                 print(f"Translated {src_file_path.name} to {trg_file_path.name} in {((end-start)/60):.2f} minutes")
 
@@ -173,6 +184,7 @@ class TranslationTask:
         src_iso: Optional[str],
         trg_iso: Optional[str],
         produce_multiple_translations: bool = False,
+        save_confidences: bool = False,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
     ) -> None:
         translator, config, step_str = self._init_translation_task(
@@ -227,7 +239,9 @@ class TranslationTask:
             ext = src_file_path.suffix.lower()
             LOGGER.info(f"Translating {src_name}")
             if ext == ".txt":
-                translator.translate_text(src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations)
+                translator.translate_text(
+                    src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations, save_confidences
+                )
             elif ext == ".docx":
                 translator.translate_docx(src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations)
             elif ext == ".usfm" or ext == ".sfm":
@@ -240,6 +254,7 @@ class TranslationTask:
                     src_iso,
                     trg_iso,
                     produce_multiple_translations,
+                    save_confidences,
                     postprocess_handler=postprocess_handler,
                     experiment_ckpt_str=experiment_ckpt_str,
                 )
@@ -319,6 +334,13 @@ def main() -> None:
         help='Produce multiple translations of each verse. These will be saved in separate files with suffixes like ".1.txt", ".2.txt", etc.',
     )
     parser.add_argument(
+        "--save-confidences",
+        default=False,
+        action="store_true",
+        help="Generate files for verse, chapter, and book confidences if translating from .usfm or .sfm files. "
+        "Or generate them for sequence and trg file confidences if translating from .txt files.",
+    )
+    parser.add_argument(
         "--paragraph-behavior",
         default="end",
         help="Behavior of paragraph markers for files in USFM format, possible values are 'end', 'place', and 'strip'",
@@ -390,6 +412,7 @@ def main() -> None:
             args.trg_project,
             args.trg_iso,
             args.multiple_translations,
+            args.save_confidences,
             postprocess_handler,
         )
     elif args.src_prefix is not None:
@@ -407,6 +430,7 @@ def main() -> None:
             args.src_iso,
             args.trg_iso,
             args.multiple_translations,
+            args.save_confidences,
         )
     elif args.src is not None:
         if args.debug:
@@ -416,7 +440,13 @@ def main() -> None:
             )
             exit()
         translator.translate_files(
-            args.src, args.trg, args.src_iso, args.trg_iso, args.multiple_translations, postprocess_handler
+            args.src,
+            args.trg,
+            args.src_iso,
+            args.trg_iso,
+            args.multiple_translations,
+            args.save_confidences,
+            postprocess_handler,
         )
     else:
         raise RuntimeError("A Scripture book, file, or file prefix must be specified.")

@@ -557,10 +557,17 @@ def add_scores(df: pd.DataFrame, scorers: List[str], preserve_case: bool, tokeni
 
 def get_sequence_confidences(confidences_file: Path) -> List[float]:
     confidences = []
-    with open(confidences_file, "r", encoding="utf-8") as f:
-        lines = f.readlines()
-        for i in range(3, len(lines), 2):
-            confidences.append(float(lines[i].split("\t")[0]))
+    try:
+        with open(confidences_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            for i in range(3, len(lines), 2):
+                confidences.append(float(lines[i].split("\t")[0]))
+    except FileNotFoundError as e:
+        raise FileNotFoundError(
+            "Cannot include confidence because the confidences file is missing. Include the --save-confidences "
+            "option when running test.py to generate the file and enable confidence scoring."
+        ) from e
+
     return confidences
 
 
