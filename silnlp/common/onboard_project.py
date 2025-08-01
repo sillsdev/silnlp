@@ -83,11 +83,22 @@ def main() -> None:
         "--overwrite", help="Overwrite any existing files and folders", default=False, action="store_true"
     )
 
+    parser.add_argument(
+        "--extract-corpora",
+        default=False,
+        action="store_true",
+        help="Extract text corpora from the Paratext project.",
+    )
+
+    parser.add_argument(
+        "--collect-verse-counts",
+        default=False,
+        action="store_true",
+        help="Collect various counts from the extracted Paratext project.",
+    )
+
     args = parser.parse_args()
     project_name = args.project
-
-    if not args.config:
-        raise ValueError("Config file is required. Please provide a valid config.yml file using --config.")
 
     if not args.copy_from:
         raise ValueError(
@@ -100,13 +111,16 @@ def main() -> None:
     if args.copy_from:
         copy_paratext_project_folder(Path(args.copy_from), paratext_project_dir, overwrite=args.overwrite)
 
-    config_file = Path(args.config)
-    if not config_file.exists():
-        raise FileNotFoundError(f"Config file '{config_file}' does not exist.")
-    with config_file.open("r", encoding="utf-8") as file:
-        config = yaml.safe_load(file)
+    if args.config:
+        config_file = Path(args.config)
+        if not config_file.exists():
+            raise FileNotFoundError(f"Config file '{config_file}' does not exist.")
+        with config_file.open("r", encoding="utf-8") as file:
+            config = yaml.safe_load(file)
+    else:
+        config = {}
 
-    if "extract_corpora" in config:
+    if args.extract_corpora:
         from .extract_corpora import extract_corpora
 
         LOGGER.info(f"Extracting {project_name}.")
@@ -121,7 +135,11 @@ def main() -> None:
             ),
         )
 
-    if "verse_counts" in config:
+    if args.collect_verse_counts:
+        if not args.extract_corpora:
+            LOGGER.warning(
+                "--extract_corpora was not included. Collecting verse counts requires the corpus to be extracted first."
+            )
         from .collect_verse_counts import collect_verse_counts
 
         LOGGER.info(f"Collecting verse counts from {project_name}.")
@@ -137,7 +155,7 @@ def main() -> None:
         collect_verse_counts(
             input_folder=project_name,
             output_folder=output_folder,
-            file_patterns=(config["verse_counts"]["files"] if "files" in config["verse_counts"] else project_name),
+            file_patterns=(config["verse_counts"]["files"] if "files" in config["verse_counts"] else "*.txt"),
             deutero=config["verse_counts"]["deutero"] if "deutero" in config["verse_counts"] else False,
             recount=config["verse_counts"]["recount"] if "recount" in config["verse_counts"] else False,
         )
