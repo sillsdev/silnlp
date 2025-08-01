@@ -71,8 +71,11 @@ class PairScore:
                 f",{self.bleu.precisions[2]:.2f},{self.bleu.precisions[3]:.2f},{self.bleu.bp:.3f}"
                 f",{self.bleu.sys_len:d},{self.bleu.ref_len:d}"
             )
-        for val in self.other_scores.values():
-            file.write(f",{val:.2f}")
+        for scorer, val in self.other_scores.items():
+            if scorer == "confidence":
+                file.write(f",{val:.8f}")
+            else:
+                file.write(f",{val:.2f}")
         file.write("\n")
 
 
