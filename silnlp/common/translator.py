@@ -123,7 +123,10 @@ def generate_confidence_files(
 
             file_confidences_path = trg_file_path.parent / "confidences.books.tsv"
             row1_col1_header = "Book"
-            col1_entry = vrefs[0].book
+            if vrefs:
+                col1_entry = vrefs[0].book
+            else:
+                col1_entry = trg_file_path.stem
         elif ext == ".txt":
             file_confidences_path = trg_file_path.parent / f"{trg_prefix}confidences.files.tsv"
             row1_col1_header = "File"
@@ -131,7 +134,7 @@ def generate_confidence_files(
         else:
             raise ValueError(
                 f"Invalid trg file extension {ext} when using --save-confidences in the translate step."
-                f"Valid file extensions for --save-confidence are .usfm, .sfm, and .txt."
+                f"Valid file extensions for --save-confidences are .usfm, .sfm, and .txt."
             )
         with (file_confidences_path).open("a", encoding="utf-8", newline="\n") as file_confidences_file:
             if file_confidences_file.tell() == 0:
