@@ -264,10 +264,8 @@ def main() -> None:
     # If the output folder doesn't exist locally, assume it's an experiment folder
     folder = args.folder.replace("\\", "/")
     if Path(folder).exists():
-        exp_name = None
         folder = Path(folder)
     else:
-        exp_name = folder
         folder = get_mt_exp_dir(folder)
 
     # If no files are listed and folder is an experiment, use the files listed in the config file

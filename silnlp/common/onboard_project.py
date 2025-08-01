@@ -2,6 +2,8 @@ import argparse
 import logging
 from pathlib import Path
 
+import yaml
+
 from .environment import SIL_NLP_ENV
 
 LOGGER = logging.getLogger(__package__ + ".onboard_project")
@@ -71,40 +73,11 @@ def main() -> None:
     parser.add_argument(
         "--overwrite", help="Overwrite any existing files and folders", default=False, action="store_true"
     )
+
     parser.add_argument(
-        "--extract-corpora",
-        help="Extract text corpora.",
-        default=False,
-        action="store_true",
-    )
-    parser.add_argument(
-        "--include",
-        metavar="books",
-        nargs="+",
-        default=[],
-        help="The books to include; e.g., 'NT', 'OT', 'GEN'. Only used with extract-corpora.",
-    )
-    parser.add_argument(
-        "--exclude",
-        metavar="books",
-        nargs="+",
-        default=[],
-        help="The books to exclude; e.g., 'NT', 'OT', 'GEN'. Only used with extract-corpora.",
-    )
-    parser.add_argument(
-        "--markers", default=False, action="store_true", help="Include USFM markers. Only used with extract-corpora."
-    )
-    parser.add_argument(
-        "--lemmas",
-        default=False,
-        action="store_true",
-        help="Extract lemmas if available. Only used with extract-corpora.",
-    )
-    parser.add_argument(
-        "--project-vrefs",
-        default=False,
-        action="store_true",
-        help="Extract project verse refs. Only used with extract-corpora.",
+        "--config",
+        help="Path to a configuration file in YAML format. This is used to configure the onboarding process.",
+        default=None,
     )
 
     args = parser.parse_args()
@@ -116,17 +89,58 @@ def main() -> None:
     if args.copy_from:
         copy_paratext_project_folder(Path(args.copy_from), paratext_project_dir, overwrite=args.overwrite)
 
-    if args.extract_corpora:
-        from .extract_corpora import extract_corpora
+    args = parser.parse_args()
+    project_name = args.project
 
-        extract_corpora(
-            projects={project_name},
-            books_to_include=args.include,
-            books_to_exclude=args.exclude,
-            include_markers=args.markers,
-            extract_lemmas=args.lemmas,
-            extract_project_vrefs=args.project_vrefs,
-        )
+    LOGGER.info(f"Onboarding project: {args.project}")
+    paratext_project_dir: Path = create_paratext_project_folder_if_not_exists(project_name)
+
+    if args.copy_from:
+        copy_paratext_project_folder(Path(args.copy_from), paratext_project_dir, overwrite=args.overwrite)
+
+    if args.config:
+        config_file = Path(args.config)
+        if not config_file.exists():
+            raise FileNotFoundError(f"Configuration file '{config_file}' does not exist.")
+        with config_file.open("r", encoding="utf-8") as file:
+            config = yaml.safe_load(file)
+
+        if "extract_corpora" in config:
+            from .extract_corpora import extract_corpora
+
+            extract_corpora(
+                projects={project_name},
+                books_to_include=config["extract_corpora"]["include"] if "include" in config["extract_corpora"] else [],
+                books_to_exclude=config["extract_corpora"]["exclude"] if "exclude" in config["extract_corpora"] else [],
+                include_markers=(
+                    config["extract_corpora"]["markers"] if "markers" in config["extract_corpora"] else False
+                ),
+                extract_lemmas=config["extract_corpora"]["lemmas"] if "lemmas" in config["extract_corpora"] else False,
+                extract_project_vrefs=(
+                    config["extract_corpora"]["project-vrefs"]
+                    if "project-vrefs" in config["extract_corpora"]
+                    else False
+                ),
+            )
+
+        if "verse_counts" in config:
+            from .collect_verse_counts import collect_verse_counts
+
+            if config["verse_counts"]["output_folder"]:
+                output_folder = Path(config["verse_counts"]["output_folder"])
+                if not output_folder.exists():
+                    output_folder.mkdir(parents=True, exist_ok=True)
+            else:
+                output_folder = SIL_NLP_ENV.mt_experiments_dir / "verse_counts" / project_name
+                if not output_folder.exists():
+                    output_folder.mkdir(parents=True, exist_ok=True)
+            collect_verse_counts(
+                input_folder=project_name,
+                output_folder=output_folder,
+                file_patterns=(config["verse_counts"]["files"] if "files" in config["verse_counts"] else project_name),
+                deutero=config["verse_counts"]["deutero"] if "deutero" in config["verse_counts"] else False,
+                recount=config["verse_counts"]["recount"] if "recount" in config["verse_counts"] else False,
+            )
 
 
 if __name__ == "__main__":
