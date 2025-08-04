@@ -153,9 +153,9 @@ def main() -> None:
             if not output_folder.exists():
                 output_folder.mkdir(parents=True, exist_ok=True)
         collect_verse_counts(
-            input_folder=project_name,
+            input_folder=config["verse_counts"]["input_folder"] if "input_folder" in config["verse_counts"] else SIL_NLP_ENV.mt_scripture_dir,
             output_folder=output_folder,
-            file_patterns=(config["verse_counts"]["files"] if "files" in config["verse_counts"] else "*.txt"),
+            file_patterns=(config["verse_counts"]["files"] if "files" in config["verse_counts"] else f"{project_name}.txt"),
             deutero=config["verse_counts"]["deutero"] if "deutero" in config["verse_counts"] else False,
             recount=config["verse_counts"]["recount"] if "recount" in config["verse_counts"] else False,
         )
