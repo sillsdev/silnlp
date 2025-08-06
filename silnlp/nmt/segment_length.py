@@ -3,7 +3,7 @@
 #   for each line in file
 #     add length of segment in tokens to the list
 # plot the histogram of the data, choose bin numbers by experiment
-# log number of lengths over 200
+# log number of lengths over 512
 
 
 import argparse
@@ -30,7 +30,7 @@ def main() -> None:
         for line in f:
             data.append(len(line.split()))
 
-    print(f"Num seg lengths >= 200: {sum(seg_length >= 200 for seg_length in data)}")
+    print(f"Num seg lengths >= 512: {sum(seg_length >= 512 for seg_length in data)}")
     print(f"Max seg length: {max(data)}")
     print(f"Avg seg length: {sum(data)/len(data)}")
 

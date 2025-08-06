@@ -630,15 +630,15 @@ class Config(ABC):
 
         top_header = "Tokens/Verse"
         tokens_verse_df = distribution_df(top_header, src_tokens_per_verse, trg_tokens_per_verse)
-        num_verses_200_df = pd.DataFrame(
+        num_verses_512_df = pd.DataFrame(
             {
-                (top_header, "Num Verses >= 200 Tokens"): [
-                    sum(seg_length >= 200 for seg_length in src_tokens_per_verse),
-                    sum(seg_length >= 200 for seg_length in trg_tokens_per_verse),
+                (top_header, "Num Verses >= 512 Tokens"): [
+                    sum(seg_length >= 512 for seg_length in src_tokens_per_verse),
+                    sum(seg_length >= 512 for seg_length in trg_tokens_per_verse),
                 ]
             }
         )
-        tokens_verse_df = pd.concat([tokens_verse_df, num_verses_200_df], axis=1)
+        tokens_verse_df = pd.concat([tokens_verse_df, num_verses_512_df], axis=1)
         existing_stats = pd.concat([existing_stats, tokens_verse_df], axis=1)
 
         top_header = "Characters/Verse"

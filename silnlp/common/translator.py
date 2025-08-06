@@ -96,8 +96,8 @@ class Translator(ABC):
                 confidences_path = trg_file_path.with_suffix(f"{trg_file_path.suffix}{confidence_scores_suffix}")
             write_corpus(trg_draft_file_path, translated_draft)
             with confidences_path.open("w", encoding="utf-8", newline="\n") as confidences_file:
-                confidences_file.write("\t".join(["Sequence Number"] + [f"Token {i}" for i in range(200)]) + "\n")
-                confidences_file.write("\t".join(["Sequence Score"] + [f"Token Score {i}" for i in range(200)]) + "\n")
+                confidences_file.write("\t".join(["Sequence Number"] + [f"Token {i}" for i in range(512)]) + "\n")
+                confidences_file.write("\t".join(["Sequence Score"] + [f"Token Score {i}" for i in range(512)]) + "\n")
                 for sentence_num, _ in enumerate(output):
                     confidences_file.write(
                         "\t".join([str(sentence_num)] + output[sentence_num][1][draft_index - 1]) + "\n"
@@ -278,8 +278,8 @@ class Translator(ABC):
             else:
                 confidences_path = trg_file_path.with_suffix(f"{trg_file_path.suffix}{confidence_scores_suffix}")
             with confidences_path.open("w", encoding="utf-8", newline="\n") as confidences_file:
-                confidences_file.write("\t".join(["VRef"] + [f"Token {i}" for i in range(200)]) + "\n")
-                confidences_file.write("\t".join(["Sequence Score"] + [f"Token Score {i}" for i in range(200)]) + "\n")
+                confidences_file.write("\t".join(["VRef"] + [f"Token {i}" for i in range(512)]) + "\n")
+                confidences_file.write("\t".join(["Sequence Score"] + [f"Token Score {i}" for i in range(512)]) + "\n")
                 for sentence_num, _ in enumerate(output):
                     if output[sentence_num][0] is None:
                         continue

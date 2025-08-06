@@ -305,8 +305,8 @@ class HuggingFaceConfig(Config):
                     "add_new_lang_code": True,
                 },
                 "train": {
-                    "max_source_length": 200,
-                    "max_target_length": 200,
+                    "max_source_length": 512,
+                    "max_target_length": 512,
                     "gradient_checkpointing": True,
                     "gradient_checkpointing_kwargs": {"use_reentrant": True},
                     "save_steps": 1000,
@@ -1150,9 +1150,9 @@ class HuggingFaceNMTModel(NMTModel):
                     out_file = stack.enter_context(translation_draft_path.open("w", encoding="utf-8", newline="\n"))
                     out_file.write("\n".join(translated_draft) + "\n")
                     confidences_file = stack.enter_context(confidences_path.open("w", encoding="utf-8", newline="\n"))
-                    confidences_file.write("\t".join(["Sequence Number"] + [f"Token {i}" for i in range(200)]) + "\n")
+                    confidences_file.write("\t".join(["Sequence Number"] + [f"Token {i}" for i in range(512)]) + "\n")
                     confidences_file.write(
-                        "\t".join(["Sequence Score"] + [f"Token Score {i}" for i in range(200)]) + "\n"
+                        "\t".join(["Sequence Score"] + [f"Token Score {i}" for i in range(512)]) + "\n"
                     )
                     for sentence_num, _ in enumerate(output):
                         confidences_file.write(
