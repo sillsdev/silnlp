@@ -132,7 +132,11 @@ def write_to_excel(data_by_header, folder, output_filename):
             # Create a DataFrame for the current header
             df = pd.DataFrame(rows[1:], columns=rows[0])
             # Convert columns to appropriate data types
-            df = df.apply(pd.to_numeric, errors="ignore")
+            for col in df.columns:
+                try:
+                    df[col] = pd.to_numeric(df[col])
+                except Exception:
+                    pass
             # Generate a unique sheet name
             sheet_name = f"Table_{i + 1}"
             sheet_names.append(sheet_name)
