@@ -3,6 +3,7 @@ import csv
 import sys
 from collections import defaultdict
 from pathlib import Path
+import openpyxl
 
 import pandas as pd
 
@@ -19,12 +20,12 @@ CURRENT_STYLE_COLUMNS = [
 # Columns to filter out
 COLUMNS_TO_REMOVE = [
     "BLEU_1gram_prec", "BLEU_2gram_prec", "BLEU_3gram_prec", "BLEU_4gram_prec", "BLEU_brevity_penalty",
-    "BLEU_total_sys_len", "BLEU_total_ref_len", "chrF3", "chrF3+", "spBLEU", "confidence"
+    "BLEU_total_sys_len", "BLEU_total_ref_len", "chrF3", "chrF3+"
 ]
 
-# Columns to move to the end
+# Columns to move to the end of the row for csv output and hide in Excel output.
 COLUMNS_TO_END = [
-    "book", "draft_index", "num_refs", "references", "sent_len"
+    "book", "draft_index", "num_refs", "references", "sent_len", "spBLEU", "confidence"
 ]
 
 # Final column order for current style
@@ -89,8 +90,8 @@ def aggregate_csv(folder_path):
 
             # Add columns to the beginning of each row
             print(f"Processing {csv_file}")
-            print(f"Header: {header}")
-            print(f"Is current style: {is_current_style(header)}")
+            #print(f"Header: {header}")
+            #print(f"Is current style: {is_current_style(header)}")
             if is_current_style(header):
                 # Transform header and rows for current style
                 transformed_header, transformed_rows = transform_current_style_rows(header, rows[1:])
@@ -125,7 +126,8 @@ def write_to_csv(data_by_header, folder, output_filename):
 
 def write_to_excel(data_by_header, folder, output_filename):
     output_file = folder / f"{output_filename}.xlsx"
-    with pd.ExcelWriter(output_file) as writer:
+    with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
+        sheet_names = []
         for i, (header, rows) in enumerate(data_by_header.items()):
             # Create a DataFrame for the current header
             df = pd.DataFrame(rows[1:], columns=rows[0])
@@ -133,8 +135,34 @@ def write_to_excel(data_by_header, folder, output_filename):
             df = df.apply(pd.to_numeric, errors="ignore")
             # Generate a unique sheet name
             sheet_name = f"Table_{i + 1}"
+            sheet_names.append(sheet_name)
             # Write the DataFrame to the Excel file
             df.to_excel(writer, sheet_name=sheet_name, index=False)
+    # Now, hide columns in COLUMNS_TO_END in all sheets and auto-size visible columns
+    wb = openpyxl.load_workbook(output_file)
+    for sheet_name in sheet_names:
+        ws = wb[sheet_name]
+        header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True))
+        # Hide columns in COLUMNS_TO_END
+        for col_idx, col_name in enumerate(header_row, 1):
+            col_letter = openpyxl.utils.get_column_letter(col_idx)
+            if col_name in COLUMNS_TO_END:
+                ws.column_dimensions[col_letter].hidden = True
+            else:
+                # Auto-size visible columns
+                max_length = len(str(col_name)) if col_name else 0
+                for cell in ws[openpyxl.utils.get_column_letter(col_idx)]:
+                    if cell.row == 1:
+                        continue  # skip header, already counted
+                    try:
+                        cell_length = len(str(cell.value)) if cell.value is not None else 0
+                        if cell_length > max_length:
+                            max_length = cell_length
+                    except Exception:
+                        pass
+                # Add a little extra space
+                ws.column_dimensions[col_letter].width = max_length + 2
+    wb.save(output_file)
     print(f"Wrote scores to {output_file}")
 
 
