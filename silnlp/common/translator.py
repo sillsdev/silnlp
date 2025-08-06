@@ -1,11 +1,12 @@
 import logging
 import re
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from datetime import date
 from itertools import groupby
 from math import exp
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import DefaultDict, Iterable, List, Optional
 
 import docx
 import nltk
@@ -13,7 +14,6 @@ from iso639 import Lang
 from machine.corpora import (
     FileParatextProjectSettingsParser,
     FileParatextProjectTextUpdater,
-    UpdateUsfmMarkerBehavior,
     UpdateUsfmParserHandler,
     UpdateUsfmTextBehavior,
     UsfmFileText,
@@ -21,33 +21,18 @@ from machine.corpora import (
     UsfmTextType,
     parse_usfm,
 )
-from machine.scripture import VerseRef
+from machine.scripture import VerseRef, is_book_id_valid
+from scipy.stats import gmean
 
 from .corpus import load_corpus, write_corpus
 from .paratext import get_book_path, get_iso, get_project_dir
-from .usfm_preservation import PARAGRAPH_TYPE_EMBEDS, construct_place_markers_handler
+from .postprocesser import PostprocessHandler
+from .usfm_utils import PARAGRAPH_TYPE_EMBEDS
 
 LOGGER = logging.getLogger(__package__ + ".translate")
 nltk.download("punkt")
 
-
-def insert_draft_remark(
-    usfm: str,
-    book: str,
-    description: str,
-    experiment_ckpt_str: str,
-) -> str:
-    remark = f"\\rem This draft of {book} was machine translated on {date.today()} from {description} using model {experiment_ckpt_str}. It should be reviewed and edited carefully."
-
-    lines = usfm.split("\n")
-    insert_idx = (
-        1
-        + (len(lines) > 1 and (lines[1].startswith("\\ide") or lines[1].startswith("\\usfm")))
-        + (len(lines) > 2 and (lines[2].startswith("\\ide") or lines[2].startswith("\\usfm")))
-    )
-    lines.insert(insert_idx, remark)
-    return "\n".join(lines)
-
+CONFIDENCE_SCORES_SUFFIX = ".confidences.tsv"
 
 # A group of multiple translations of a single sentence
 TranslationGroup = List[str]
@@ -79,6 +64,84 @@ class DraftGroup:
         return ["" for _ in range(self.num_drafts)]
 
 
+def generate_confidence_files(
+    output: List[TranslationGroup],
+    trg_file_path: Path,
+    translate_step: bool = False,
+    trg_prefix: str = "",
+    produce_multiple_translations: bool = False,
+    draft_index: int = 0,
+    vrefs: Optional[List[VerseRef]] = None,
+) -> None:
+    if produce_multiple_translations:
+        confidences_path = trg_file_path.with_suffix(f".{draft_index}{trg_file_path.suffix}{CONFIDENCE_SCORES_SUFFIX}")
+    else:
+        confidences_path = trg_file_path.with_suffix(f"{trg_file_path.suffix}{CONFIDENCE_SCORES_SUFFIX}")
+    sequence_confidences: List[float] = []
+    ext = trg_file_path.suffix.lower()
+    with confidences_path.open("w", encoding="utf-8", newline="\n") as confidences_file:
+        if translate_step and ext in {".usfm", ".sfm"}:
+            row1_col1_header = "VRef"
+        else:
+            row1_col1_header = "Sequence Number"
+        confidences_file.write("\t".join([f"{row1_col1_header}"] + [f"Token {i}" for i in range(200)]) + "\n")
+        confidences_file.write("\t".join(["Sequence Score"] + [f"Token Score {i}" for i in range(200)]) + "\n")
+        for sentence_num, _ in enumerate(output):
+            if output[sentence_num][0] is None:
+                continue
+            sequence_label = [str(sentence_num)]
+            if translate_step:
+                if ext in {".usfm", ".sfm"}:
+                    sequence_label = [str(vrefs[sentence_num])]
+                elif ext == ".txt":
+                    sequence_confidences.append(exp(output[sentence_num][3][draft_index - 1]))
+            confidences_file.write("\t".join(sequence_label + output[sentence_num][1][draft_index - 1]) + "\n")
+            confidences_file.write(
+                "\t".join(
+                    [str(exp(output[sentence_num][3][draft_index - 1]))]
+                    + [str(exp(token_score)) for token_score in output[sentence_num][2][draft_index - 1]]
+                )
+                + "\n"
+            )
+    if translate_step:
+        if ext in {".usfm", ".sfm"}:
+            chapter_confidences: DefaultDict[int, List[float]] = defaultdict(list)
+            for sentence_num, vref in enumerate(vrefs):
+                if not vref.is_verse or output[sentence_num][0] is None:
+                    continue
+                vref_confidence = exp(output[sentence_num][3][draft_index - 1])
+                chapter_confidences[vref.chapter_num].append(vref_confidence)
+
+            with confidences_path.with_suffix(".chapters.tsv").open(
+                "w", encoding="utf-8", newline="\n"
+            ) as chapter_confidences_file:
+                chapter_confidences_file.write("Chapter\tConfidence\n")
+                for chapter, confidences in chapter_confidences.items():
+                    sequence_confidences += confidences
+                    chapter_confidence = gmean(confidences)
+                    chapter_confidences_file.write(f"{chapter}\t{chapter_confidence}\n")
+
+            file_confidences_path = trg_file_path.parent / "confidences.books.tsv"
+            row1_col1_header = "Book"
+            if vrefs:
+                col1_entry = vrefs[0].book
+            else:
+                col1_entry = trg_file_path.stem
+        elif ext == ".txt":
+            file_confidences_path = trg_file_path.parent / f"{trg_prefix}confidences.files.tsv"
+            row1_col1_header = "File"
+            col1_entry = trg_file_path.name
+        else:
+            raise ValueError(
+                f"Invalid trg file extension {ext} when using --save-confidences in the translate step."
+                f"Valid file extensions for --save-confidences are .usfm, .sfm, and .txt."
+            )
+        with file_confidences_path.open("a", encoding="utf-8", newline="\n") as file_confidences_file:
+            if file_confidences_file.tell() == 0:
+                file_confidences_file.write(f"{row1_col1_header}\tConfidence\n")
+            file_confidences_file.write(f"{col1_entry}\t{gmean(sequence_confidences)}\n")
+
+
 class Translator(ABC):
     @abstractmethod
     def translate(
@@ -98,35 +161,28 @@ class Translator(ABC):
         src_iso: str,
         trg_iso: str,
         produce_multiple_translations: bool = False,
+        save_confidences: bool = False,
+        trg_prefix: str = "",
     ) -> None:
         output = list(self.translate(load_corpus(src_file_path), src_iso, trg_iso, produce_multiple_translations))
         translations = [translation for translation, _, _, _ in output]
         draft_set = DraftGroup(translations)
-        confidence_scores_suffix = ".confidences.tsv"
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
             if produce_multiple_translations:
                 trg_draft_file_path = trg_file_path.with_suffix(f".{draft_index}{trg_file_path.suffix}")
-                confidences_path = trg_file_path.with_suffix(
-                    f".{draft_index}{trg_file_path.suffix}{confidence_scores_suffix}"
-                )
             else:
                 trg_draft_file_path = trg_file_path
-                confidences_path = trg_file_path.with_suffix(f"{trg_file_path.suffix}{confidence_scores_suffix}")
             write_corpus(trg_draft_file_path, translated_draft)
-            with confidences_path.open("w", encoding="utf-8", newline="\n") as confidences_file:
-                confidences_file.write("\t".join(["Sequence Number"] + [f"Token {i}" for i in range(200)]) + "\n")
-                confidences_file.write("\t".join(["Sequence Score"] + [f"Token Score {i}" for i in range(200)]) + "\n")
-                for sentence_num, _ in enumerate(output):
-                    confidences_file.write(
-                        "\t".join([str(sentence_num)] + output[sentence_num][1][draft_index - 1]) + "\n"
-                    )
-                    confidences_file.write(
-                        "\t".join(
-                            [str(exp(output[sentence_num][3][draft_index - 1]))]
-                            + [str(exp(token_score)) for token_score in output[sentence_num][2][draft_index - 1]]
-                        )
-                        + "\n"
-                    )
+
+            if save_confidences:
+                generate_confidence_files(
+                    output,
+                    trg_file_path,
+                    translate_step=True,
+                    trg_prefix=trg_prefix,
+                    produce_multiple_translations=produce_multiple_translations,
+                    draft_index=draft_index,
+                )
 
     def translate_book(
         self,
@@ -135,11 +191,10 @@ class Translator(ABC):
         output_path: Path,
         trg_iso: str,
         produce_multiple_translations: bool = False,
+        save_confidences: bool = False,
         chapters: List[int] = [],
         trg_project: Optional[str] = None,
-        include_paragraph_markers: bool = False,
-        include_style_markers: bool = False,
-        include_embeds: bool = False,
+        postprocess_handler: PostprocessHandler = PostprocessHandler(),
         experiment_ckpt_str: str = "",
     ) -> None:
         book_path = get_book_path(src_project, book)
@@ -154,11 +209,10 @@ class Translator(ABC):
             get_iso(get_project_dir(src_project)),
             trg_iso,
             produce_multiple_translations,
+            save_confidences,
             chapters,
             trg_project,
-            include_paragraph_markers,
-            include_style_markers,
-            include_embeds,
+            postprocess_handler,
             experiment_ckpt_str,
         )
 
@@ -169,11 +223,10 @@ class Translator(ABC):
         src_iso: str,
         trg_iso: str,
         produce_multiple_translations: bool = False,
+        save_confidences: bool = False,
         chapters: List[int] = [],
         trg_project: Optional[str] = None,
-        include_paragraph_markers: bool = False,
-        include_style_markers: bool = False,
-        include_embeds: bool = False,
+        postprocess_handler: PostprocessHandler = PostprocessHandler(),
         experiment_ckpt_str: str = "",
     ) -> None:
         # Create UsfmFileText object for source
@@ -191,7 +244,13 @@ class Translator(ABC):
                 project=src_settings.name,
             )
         else:
-            src_file_text = UsfmFileText("usfm.sty", "utf-8-sig", "", src_file_path, include_all_text=True)
+            # Guess book ID
+            with src_file_path.open(encoding="utf-8-sig") as f:
+                book_id = f.read().split()[1].upper()
+            if not is_book_id_valid(book_id):
+                raise ValueError(f"Book ID not detected: {book_id}")
+
+            src_file_text = UsfmFileText("usfm.sty", "utf-8-sig", book_id, src_file_path, include_all_text=True)
         stylesheet = src_settings.stylesheet if src_from_project else UsfmStylesheet("usfm.sty")
 
         sentences = [re.sub(" +", " ", s.text.strip()) for s in src_file_text]
@@ -226,88 +285,77 @@ class Translator(ABC):
             vrefs.insert(idx, vref)
             output.insert(idx, [None, None, None, None])
 
-        # Update behaviors
         text_behavior = (
             UpdateUsfmTextBehavior.PREFER_NEW if trg_project is not None else UpdateUsfmTextBehavior.STRIP_EXISTING
         )
-        paragraph_behavior = (
-            UpdateUsfmMarkerBehavior.PRESERVE if include_paragraph_markers else UpdateUsfmMarkerBehavior.STRIP
-        )
-        style_behavior = UpdateUsfmMarkerBehavior.PRESERVE if include_style_markers else UpdateUsfmMarkerBehavior.STRIP
-        embed_behavior = UpdateUsfmMarkerBehavior.PRESERVE if include_embeds else UpdateUsfmMarkerBehavior.STRIP
 
         draft_set: DraftGroup = DraftGroup(translations)
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
-            rows = [([ref], translation) for ref, translation in zip(vrefs, translated_draft)]
+            postprocess_handler.construct_rows(vrefs, sentences, translated_draft)
 
-            update_block_handlers = []
-            if include_paragraph_markers or include_style_markers:
-                update_block_handlers.append(construct_place_markers_handler(vrefs, sentences, translated_draft))
+            for config in postprocess_handler.configs:
+                # Compile draft remarks
+                draft_src_str = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
+                draft_remark = f"This draft of {vrefs[0].book} was machine translated on {date.today()} from {draft_src_str} using model {experiment_ckpt_str}. It should be reviewed and edited carefully."
+                postprocess_remark = config.get_postprocess_remark()
+                remarks = [draft_remark] + ([postprocess_remark] if postprocess_remark else [])
 
-            # Insert translation into the USFM structure of an existing project
-            # If the target project is not the same as the translated file's original project,
-            # no verses outside of the ones translated will be overwritten
-            if trg_project is not None or src_from_project:
-                dest_updater = FileParatextProjectTextUpdater(
-                    get_project_dir(trg_project if trg_project is not None else src_file_path.parent.name)
-                )
-                usfm_out = dest_updater.update_usfm(
-                    book_id=src_file_text.id,
-                    rows=rows,
-                    text_behavior=text_behavior,
-                    paragraph_behavior=paragraph_behavior,
-                    embed_behavior=embed_behavior,
-                    style_behavior=style_behavior,
-                    update_block_handlers=update_block_handlers,
-                )
-
-                if usfm_out is None:
-                    raise FileNotFoundError(f"Book {src_file_text.id} does not exist in target project {trg_project}")
-            else:  # Slightly more manual version for updating an individual file
-                with open(src_file_path, encoding="utf-8-sig") as f:
-                    usfm = f.read()
-                handler = UpdateUsfmParserHandler(
-                    rows=rows,
-                    id_text=vrefs[0].book,
-                    text_behavior=text_behavior,
-                    paragraph_behavior=paragraph_behavior,
-                    embed_behavior=embed_behavior,
-                    style_behavior=style_behavior,
-                    update_block_handlers=update_block_handlers,
-                )
-                parse_usfm(usfm, handler)
-                usfm_out = handler.get_usfm()
-
-            # Insert draft remark and write to output path
-            description = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
-            usfm_out = insert_draft_remark(usfm_out, vrefs[0].book, description, experiment_ckpt_str)
-            confidence_scores_suffix = ".confidences.tsv"
-            if produce_multiple_translations:
-                trg_draft_file_path = trg_file_path.with_suffix(f".{draft_index}{trg_file_path.suffix}")
-                confidences_path = trg_file_path.with_suffix(
-                    f".{draft_index}{trg_file_path.suffix}{confidence_scores_suffix}"
-                )
-            else:
-                trg_draft_file_path = trg_file_path
-                confidences_path = trg_file_path.with_suffix(f"{trg_file_path.suffix}{confidence_scores_suffix}")
-            with trg_draft_file_path.open("w", encoding=src_settings.encoding if src_from_project else "utf-8") as f:
-                f.write(usfm_out)
-            with confidences_path.open("w", encoding="utf-8", newline="\n") as confidences_file:
-                confidences_file.write("\t".join(["VRef"] + [f"Token {i}" for i in range(200)]) + "\n")
-                confidences_file.write("\t".join(["Sequence Score"] + [f"Token Score {i}" for i in range(200)]) + "\n")
-                for sentence_num, _ in enumerate(output):
-                    if output[sentence_num][0] is None:
-                        continue
-                    confidences_file.write(
-                        "\t".join([str(vrefs[sentence_num])] + output[sentence_num][1][draft_index - 1]) + "\n"
+                # Insert translation into the USFM structure of an existing project
+                # If the target project is not the same as the translated file's original project,
+                # no verses outside of the ones translated will be overwritten
+                if trg_project is not None or src_from_project:
+                    dest_updater = FileParatextProjectTextUpdater(
+                        get_project_dir(trg_project if trg_project is not None else src_file_path.parent.name)
                     )
-                    confidences_file.write(
-                        "\t".join(
-                            [str(exp(output[sentence_num][3][draft_index - 1]))]
-                            + [str(exp(token_score)) for token_score in output[sentence_num][2][draft_index - 1]]
+                    usfm_out = dest_updater.update_usfm(
+                        book_id=src_file_text.id,
+                        rows=config.rows,
+                        text_behavior=text_behavior,
+                        paragraph_behavior=config.get_paragraph_behavior(),
+                        embed_behavior=config.get_embed_behavior(),
+                        style_behavior=config.get_style_behavior(),
+                        update_block_handlers=config.update_block_handlers,
+                        remarks=remarks,
+                    )
+
+                    if usfm_out is None:
+                        raise FileNotFoundError(
+                            f"Book {src_file_text.id} does not exist in target project {trg_project}"
                         )
-                        + "\n"
+                else:  # Slightly more manual version for updating an individual file
+                    with open(src_file_path, encoding="utf-8-sig") as f:
+                        usfm = f.read()
+                    handler = UpdateUsfmParserHandler(
+                        rows=config.rows,
+                        id_text=vrefs[0].book,
+                        text_behavior=text_behavior,
+                        paragraph_behavior=config.get_paragraph_behavior(),
+                        embed_behavior=config.get_embed_behavior(),
+                        style_behavior=config.get_style_behavior(),
+                        update_block_handlers=config.update_block_handlers,
+                        remarks=remarks,
                     )
+                    parse_usfm(usfm, handler)
+                    usfm_out = handler.get_usfm()
+
+                # Construct output file name write to file
+                trg_draft_file_path = trg_file_path.with_stem(trg_file_path.stem + config.get_postprocess_suffix())
+                if produce_multiple_translations:
+                    trg_draft_file_path = trg_draft_file_path.with_suffix(f".{draft_index}{trg_file_path.suffix}")
+                with trg_draft_file_path.open(
+                    "w", encoding=src_settings.encoding if src_from_project else "utf-8"
+                ) as f:
+                    f.write(usfm_out)
+
+            if save_confidences:
+                generate_confidence_files(
+                    output,
+                    trg_file_path,
+                    translate_step=True,
+                    produce_multiple_translations=produce_multiple_translations,
+                    draft_index=draft_index,
+                    vrefs=vrefs,
+                )
 
     def translate_docx(
         self,

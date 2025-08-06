@@ -7,6 +7,7 @@ from typing import Optional, Set
 import yaml
 
 from ..common.environment import SIL_NLP_ENV
+from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import SILClearML
 from .config import Config, get_mt_exp_dir
@@ -28,6 +29,7 @@ class SILExperiment:
     run_test: bool = False
     run_translate: bool = False
     produce_multiple_translations: bool = False
+    save_confidences: bool = False
     scorers: Set[str] = field(default_factory=set)
     score_by_book: bool = False
     commit: Optional[str] = None
@@ -75,16 +77,24 @@ class SILExperiment:
             by_book=self.score_by_book,
             scorers=self.scorers,
             produce_multiple_translations=self.produce_multiple_translations,
+            save_confidences=self.save_confidences,
         )
 
     def translate(self):
         with (self.config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as file:
             translate_configs = yaml.safe_load(file)
 
+        postprocess_configs = translate_configs.get("postprocess", [])
+        postprocess_handler = PostprocessHandler([PostprocessConfig(pc) for pc in postprocess_configs])
+
         for config in translate_configs.get("translate", []):
             translator = TranslationTask(
                 name=self.name, checkpoint=config.get("checkpoint", "last"), commit=self.commit
             )
+
+            # Backwards compatibility
+            if not postprocess_configs:
+                postprocess_handler = PostprocessHandler([PostprocessConfig(config)])
 
             if len(config.get("books", [])) > 0:
                 if isinstance(config["books"], list):
@@ -95,9 +105,8 @@ class SILExperiment:
                     config.get("trg_project"),
                     config.get("trg_iso"),
                     self.produce_multiple_translations,
-                    config.get("include_paragraph_markers", False) or config.get("preserve_usfm_markers", False),
-                    config.get("include_style_markers", False) or config.get("preserve_usfm_markers", False),
-                    config.get("include_embeds", False) or config.get("include_inline_elements", False),
+                    self.save_confidences,
+                    postprocess_handler,
                 )
             elif config.get("src_prefix"):
                 translator.translate_text_files(
@@ -108,6 +117,7 @@ class SILExperiment:
                     config.get("src_iso"),
                     config.get("trg_iso"),
                     self.produce_multiple_translations,
+                    self.save_confidences,
                 )
             elif config.get("src"):
                 translator.translate_files(
@@ -116,9 +126,8 @@ class SILExperiment:
                     config.get("src_iso"),
                     config.get("trg_iso"),
                     self.produce_multiple_translations,
-                    config.get("include_paragraph_markers", False) or config.get("preserve_usfm_markers", False),
-                    config.get("include_style_markers", False) or config.get("preserve_usfm_markers", False),
-                    config.get("include_embeds", False) or config.get("include_inline_elements", False),
+                    self.save_confidences,
+                    postprocess_handler,
                 )
             else:
                 raise RuntimeError("A Scripture book, file, or file prefix must be specified for translation.")
@@ -151,6 +160,12 @@ def main() -> None:
         action="store_true",
         help='Produce multiple translations of each verse. These will be saved in separate files with suffixes like ".1.txt", ".2.txt", etc.',
     )
+    parser.add_argument(
+        "--save-confidences",
+        default=False,
+        action="store_true",
+        help="Generate confidence files for test and/or translate step.",
+    )
     parser.add_argument("--score-by-book", default=False, action="store_true", help="Score individual books")
     parser.add_argument("--mt-dir", default=None, type=str, help="The machine translation directory.")
     parser.add_argument(
@@ -167,7 +182,7 @@ def main() -> None:
         nargs="*",
         metavar="scorer",
         choices=_SUPPORTED_SCORERS,
-        default=["bleu", "sentencebleu", "chrf3", "chrf3+", "chrf3++", "spbleu", "confidence"],
+        default=["bleu", "sentencebleu", "chrf3", "chrf3+", "chrf3++", "spbleu"],
         help=f"List of scorers - {_SUPPORTED_SCORERS}",
     )
 
@@ -198,6 +213,7 @@ def main() -> None:
         run_test=args.test,
         run_translate=args.translate,
         produce_multiple_translations=args.multiple_translations,
+        save_confidences=args.save_confidences,
         scorers=set(s.lower() for s in args.scorers),
         score_by_book=args.score_by_book,
         commit=args.commit,

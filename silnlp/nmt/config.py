@@ -321,6 +321,7 @@ class NMTModel(ABC):
         input_paths: List[Path],
         translation_paths: List[Path],
         produce_multiple_translations: bool = False,
+        save_confidences: bool = False,
         vref_paths: Optional[List[Path]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None: ...
