@@ -19,7 +19,7 @@ SETTINGS_FILENAME = "Settings.xml"
 # --- Configuration for Deletion/Keep Rules ---
 # These are matched with lower cased versions of the filename, they must be listed in lower case here.
 
-FILES_TO_DELETE_BY_NAME_CI = {
+FILES_TO_DELETE_BY_NAME = {
     "allclustercorrections.txt",
     "keys.asc",
 }
@@ -29,9 +29,9 @@ FILES_TO_DELETE_BY_PATTERN = [
     "readme",
 ]
 
-FILENAME_SUBSTRINGS_TO_DELETE_CI = ["error", "hyphenatedwords", "note"]
+FILENAME_SUBSTRINGS_TO_DELETE = ["error", "hyphenatedwords", "note"]
 
-EXTENSIONS_TO_DELETE_CI = {
+EXTENSIONS_TO_DELETE = {
     ".bak",
     ".css",
     ".csv",
@@ -66,7 +66,7 @@ EXTENSIONS_TO_DELETE_CI = {
     ".zip",
 }
 
-FILES_TO_KEEP_BY_NAME_CI = {
+FILES_TO_KEEP_BY_NAME = {
     "settings.xml",
     "autocorrect.txt",
     "copr.htm",
@@ -80,7 +80,7 @@ FILES_TO_KEEP_BY_NAME_CI = {
     "termrenderings.xml",
 }
 
-EXTENSIONS_TO_KEEP_CI = {
+EXTENSIONS_TO_KEEP = {
     ".cct",
     ".dic",
     ".ldml",
@@ -88,7 +88,7 @@ EXTENSIONS_TO_KEEP_CI = {
 }
 
 # All subfolders should be deleted
-SUBFOLDERS_TO_PRESERVE_BY_NAME_CI = {}
+SUBFOLDERS_TO_PRESERVE_BY_NAME = {}
 
 # --- Helper Functions ---
 
@@ -181,7 +181,7 @@ class ProjectCleaner:
                 self.files_to_keep.add(settings_path_lower)
 
         for item in self.project_path.iterdir():
-            if item.is_file() and item.name.lower() in FILES_TO_KEEP_BY_NAME_CI:
+            if item.is_file() and item.name.lower() in FILES_TO_KEEP_BY_NAME:
                 self.files_to_keep.add(item)
 
         for terms_file in self.biblical_terms_files:
@@ -201,7 +201,7 @@ class ProjectCleaner:
             self._log_info("Project settings not available; cannot use get_book_id for scripture identification.")
 
         for item in all_items_in_project:
-            if item.is_file() and item.suffix.lower() in EXTENSIONS_TO_KEEP_CI:
+            if item.is_file() and item.suffix.lower() in EXTENSIONS_TO_KEEP:
                 self.files_to_keep.add(item)
 
         if self.args.verbose > 1:
@@ -217,16 +217,16 @@ class ProjectCleaner:
             delete_file = False
             reason = ""
 
-            if item_name_lower in FILES_TO_DELETE_BY_NAME_CI:
+            if item_name_lower in FILES_TO_DELETE_BY_NAME:
                 delete_file = True
                 reason = "specific name"
             elif any(item_path.match(pattern) for pattern in FILES_TO_DELETE_BY_PATTERN):
                 delete_file = True
                 reason = "pattern match"
-            elif any(sub_str in item_name_lower for sub_str in FILENAME_SUBSTRINGS_TO_DELETE_CI):
+            elif any(sub_str in item_name_lower for sub_str in FILENAME_SUBSTRINGS_TO_DELETE):
                 delete_file = True
                 reason = "substring match"
-            elif item_suffix_lower in EXTENSIONS_TO_DELETE_CI:
+            elif item_suffix_lower in EXTENSIONS_TO_DELETE:
                 delete_file = True
                 reason = f"extension ({item_suffix_lower})"
             elif item_name_lower.startswith(".") or item_name_lower.startswith("_"):
@@ -253,7 +253,7 @@ class ProjectCleaner:
         # --- Pass 3: Identify folders to DELETE ---
         for item in self.project_path.iterdir():
             if item.is_dir():
-                if item.name.lower() not in SUBFOLDERS_TO_PRESERVE_BY_NAME_CI:
+                if item.name.lower() not in SUBFOLDERS_TO_PRESERVE_BY_NAME:
                     self.folders_to_delete.add(item)
                 elif self.args.verbose > 1:
                     self._log_info(f"Preserving subfolder: {item.name}")
@@ -319,10 +319,9 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "projects_root",
-        nargs="?",
-        default=PROJECTS_FOLDER_DEFAULT,
-        help="The root directory containing Paratext project folders.",
+        "folders",
+        nargs="*",
+        help="One or more Paratext project root directories to clean. If not specified, uses SIL_NLP_ENV.pt_projects_dir.",
     )
     parser.add_argument(
         "--dry-run",
@@ -339,9 +338,19 @@ def main():
     parser.add_argument("--log-file", help="Path to a file to log actions and verbose information.")
     args = parser.parse_args()
 
+    # --- Import environment if needed ---
+    if not args.folders:
+        try:
+            from silnlp.common.environment import SIL_NLP_ENV
+            projects_root_paths = [SIL_NLP_ENV.pt_projects_dir]
+        except ImportError as e:
+            print("Could not import SIL_NLP_ENV from environment.py. Please specify at least one folder.")
+            sys.exit(1)
+    else:
+        projects_root_paths = [Path(folder) for folder in args.folders]
+
     # --- Configure Logging ---
     log_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-    
     logger.setLevel(logging.INFO)
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(log_formatter)
@@ -359,31 +368,31 @@ def main():
         file_handler.setLevel(logging.INFO)
         logger.addHandler(file_handler)
 
-    print(f"Starting cleanup process for projects in: {args.projects_root}")
-    if args.dry_run:
-        print("DRY RUN mode enabled.")
-    logger.info(
-        f"Starting cleanup process for: {args.projects_root}. Dry run: {args.dry_run}. Verbose: {args.verbose}."
-    )
+    for projects_root_path in projects_root_paths:
+        print(f"Starting cleanup process for projects in: {projects_root_path}")
+        if args.dry_run:
+            print("DRY RUN mode enabled.")
+        logger.info(
+            f"Starting cleanup process for: {projects_root_path}. Dry run: {args.dry_run}. Verbose: {args.verbose}."
+        )
 
-    projects_root_path = Path(args.projects_root)
-    if not projects_root_path.is_dir():
-        print(f"Error: Projects root folder not found: {args.projects_root}")
-        sys.exit(1)
+        if not Path(projects_root_path).is_dir():
+            print(f"Error: Projects root folder not found: {projects_root_path}")
+            sys.exit(1)
 
     # Initial scan for all items to determine directories
     initial_items = list(projects_root_path.glob("*"))
     all_folders = []
     if args.verbose > 0:
-        print(f"Scanning {len(initial_items)} items in {args.projects_root} to find directories...")
+        print(f"Scanning {len(initial_items)} items in {projects_root_path} to find directories...")
 
-    for item in tqdm(initial_items, desc=f"Scanning {args.projects_root}", unit="item", disable=args.verbose > 0):
+    for item in tqdm(initial_items, desc=f"Scanning {projects_root_path}", unit="item", disable=args.verbose > 0):
         if item.is_dir():
             all_folders.append(item)
 
     max_workers = 10
 
-    found_total_msg = f"Found {len(all_folders)} total directories in {args.projects_root}."
+    found_total_msg = f"Found {len(all_folders)} total directories in {projects_root_path}."
     logger.info(found_total_msg)
     if args.verbose > 0:
         print(found_total_msg)
@@ -391,33 +400,39 @@ def main():
     project_folders = []
     non_project_folders = []
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
 
-        # Submit tasks for each folder
-        future_to_folder = {executor.submit(has_settings_file, folder): folder for folder in all_folders}
+            # Submit tasks for each folder
+            future_to_folder = {executor.submit(has_settings_file, folder): folder for folder in all_folders}
 
-        # Iterate over completed tasks using tqdm, add mininterval for smoother updates
-        # if individual has_settings_file calls are very fast.
-        for future in tqdm(
-            concurrent.futures.as_completed(future_to_folder),
-            total=len(all_folders),
-            desc="Identifying project folders",
-            unit="folder",
-            disable=args.verbose > 0,
-        ):
-            folder = future_to_folder[future]
-            try:
-                is_project = future.result()
-                if is_project:
-                    project_folders.append(folder)
-                else:
+            # Iterate over completed tasks using tqdm, add mininterval for smoother updates
+            # if individual has_settings_file calls are very fast.
+            for future in tqdm(
+                concurrent.futures.as_completed(future_to_folder),
+                total=len(all_folders),
+                desc="Identifying project folders",
+                unit="folder",
+                disable=args.verbose > 0,
+            ):
+                folder = future_to_folder[future]
+                try:
+                    is_project = future.result()
+                    if is_project:
+                        project_folders.append(folder)
+                    else:
+                        non_project_folders.append(folder)
+                except Exception as exc:
+                    logger.error(f"Error checking folder {folder}: {exc}")
+                    if args.verbose > 0:
+                        print(f"Error checking folder {folder}: {exc}")
                     non_project_folders.append(folder)
-            except Exception as exc:
-                logger.error(f"Error checking folder {folder}: {exc}")
-                if args.verbose > 0:
-                    print(f"Error checking folder {folder}: {exc}")
-                non_project_folders.append(folder)
-
+    except KeyboardInterrupt:
+        print("\nInterrupted by user. Attempting to shut down workers...")
+        logger.warning("Interrupted by user. Attempting to shut down workers...")
+        executor.shutdown(wait=False, cancel_futures=True)
+        sys.exit(1)
+        
     found_msg = f"Found {len(project_folders)} project folders."
     logger.info(found_msg)
     if args.verbose > 0:
@@ -445,35 +460,42 @@ def main():
 
     # Concurrently process each project folder for cleaning
     # Re-use max_workers from the previous section, or define a new one if desired.
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Store future to project_path to retrieve the original Path object for robust error messages
-        future_to_project_path_map = {
-            executor.submit(process_single_project_for_cleaning, project_path, args): project_path
-            for project_path in project_folders
-        }
 
-        for future in tqdm(
-            concurrent.futures.as_completed(future_to_project_path_map),
-            total=len(project_folders),
-            desc="Cleaning projects",
-            unit="project",
-            disable=args.verbose > 0,  # tqdm is disabled if verbose output is on
-            mininterval=0.01,  # More frequent updates, similar to the folder identification step
-        ):
-            processed_project_path = future_to_project_path_map[future]
-            try:
-                project_name, project_logs, project_errors = future.result()
-                processed_project_data.append((project_name, project_logs, project_errors, processed_project_path))
-            except Exception as exc:
-                # Log critical errors during processing immediately, as they might prevent log collection
-                crit_error_msg = f"Critical error during processing of project {processed_project_path.name}: {exc}"
-                logger.error(crit_error_msg)
-                if args.verbose > 0:
-                    print(crit_error_msg)
-                # Store a placeholder for sorted output
-                processed_project_data.append(
-                    (processed_project_path.name, [], [f"Critical error: {exc}"], processed_project_path)
-                )
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Store future to project_path to retrieve the original Path object for robust error messages
+            future_to_project_path_map = {
+                executor.submit(process_single_project_for_cleaning, project_path, args): project_path
+                for project_path in project_folders
+            }
+
+            for future in tqdm(
+                concurrent.futures.as_completed(future_to_project_path_map),
+                total=len(project_folders),
+                desc="Cleaning projects",
+                unit="project",
+                disable=args.verbose > 0,  # tqdm is disabled if verbose output is on
+                mininterval=0.01,  # More frequent updates, similar to the folder identification step
+            ):
+                processed_project_path = future_to_project_path_map[future]
+                try:
+                    project_name, project_logs, project_errors = future.result()
+                    processed_project_data.append((project_name, project_logs, project_errors, processed_project_path))
+                except Exception as exc:
+                    # Log critical errors during processing immediately, as they might prevent log collection
+                    crit_error_msg = f"Critical error during processing of project {processed_project_path.name}: {exc}"
+                    logger.error(crit_error_msg)
+                    if args.verbose > 0:
+                        print(crit_error_msg)
+                    # Store a placeholder for sorted output
+                    processed_project_data.append(
+                        (processed_project_path.name, [], [f"Critical error: {exc}"], processed_project_path)
+                    )
+    except KeyboardInterrupt:
+        print("\nInterrupted by user. Attempting to shut down workers...")
+        logger.warning("Interrupted by user. Attempting to shut down workers...")
+        executor.shutdown(wait=False, cancel_futures=True)
+        sys.exit(1)
 
     # Sort all collected data by project name
     processed_project_data.sort(key=lambda x: x[0])
