@@ -340,8 +340,7 @@ def main():
     args = parser.parse_args()
 
     # --- Configure Logging ---
-    #log_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-    log_formatter = logging.Formatter("2025-05-29 14:30:00,000 - %(levelname)s - %(message)s")
+    log_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
     
     logger.setLevel(logging.INFO)
     console_handler = logging.StreamHandler(sys.stdout)
