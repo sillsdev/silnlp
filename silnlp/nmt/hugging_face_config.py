@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import shutil
 from contextlib import ExitStack
 from copy import deepcopy
 from enum import Enum
@@ -73,7 +74,7 @@ from transformers.utils.logging import tqdm
 
 from ..common.corpus import Term, count_lines, get_terms
 from ..common.environment import SIL_NLP_ENV
-from ..common.translator import DraftGroup, TranslationGroup
+from ..common.translator import DraftGroup, TranslationGroup, generate_confidence_files
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, get_mt_exp_dir, merge_dict
 from .config import CheckpointType, Config, DataFile, NMTModel
 from .tokenizer import NullTokenizer, Tokenizer
@@ -271,7 +272,6 @@ def get_model_prefix(model: str) -> str:
 
 
 def get_parent_model_prefix(parent_exp: str) -> str:
-    SIL_NLP_ENV.copy_experiment_from_bucket(parent_exp, patterns="config.yml")
     parent_dir = Path(get_mt_exp_dir(parent_exp))
     with (parent_dir / "config.yml").open("r", encoding="utf-8") as file:
         parent_configs = yaml.safe_load(file)
@@ -283,7 +283,6 @@ def get_parent_model_prefix(parent_exp: str) -> str:
 def get_parent_model_name(parent_exp: str) -> str:
     parent_dir = Path(get_mt_exp_dir(parent_exp))
     parent_model_dir = parent_dir / "run"
-    SIL_NLP_ENV.copy_experiment_from_bucket(parent_exp, patterns="run/trainer_state.json")
     parent_model = get_parent_last_checkpoint(parent_model_dir)
     if has_best_checkpoint(parent_model_dir):
         parent_model = get_best_checkpoint(parent_model_dir)
@@ -496,7 +495,7 @@ class HuggingFaceConfig(Config):
         self, file_paths, vocab_size
     ) -> Tuple[List[str], Union[SentencePieceBPETokenizer, SentencePieceUnigramTokenizer]]:
         assert self._tokenizer is not None
-        files = [str(f) for f in SIL_NLP_ENV.download_if_s3_paths(file_paths)]
+        files = [str(f) for f in file_paths]
         sp_tokenizer = self._train_sp_tokenizer(files, vocab_size)
         sp_keys, tok_keys = sp_tokenizer.get_vocab().keys(), self._tokenizer.get_vocab().keys()
         missing_tokens = sorted(list(set(sp_keys) - set(tok_keys)))
@@ -1101,6 +1100,7 @@ class HuggingFaceNMTModel(NMTModel):
         input_paths: List[Path],
         translation_paths: List[Path],
         produce_multiple_translations: bool = False,
+        save_confidences: bool = False,
         vref_paths: Optional[List[Path]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
@@ -1135,36 +1135,21 @@ class HuggingFaceNMTModel(NMTModel):
                 draft_group = DraftGroup([translation for translation, _, _, _ in output])
 
                 for draft_index, translated_draft in enumerate(draft_group.get_drafts(), 1):
-                    confidence_scores_suffix = ".confidences.tsv"
                     if produce_multiple_translations:
                         translation_draft_path = translation_path.with_suffix(
                             f".{draft_index}{translation_path.suffix}"
                         )
-                        confidences_path = translation_path.with_suffix(
-                            f".{draft_index}{translation_path.suffix}{confidence_scores_suffix}"
-                        )
                     else:
                         translation_draft_path = translation_path
-                        confidences_path = translation_path.with_suffix(
-                            f"{translation_path.suffix}{confidence_scores_suffix}"
-                        )
                     out_file = stack.enter_context(translation_draft_path.open("w", encoding="utf-8", newline="\n"))
                     out_file.write("\n".join(translated_draft) + "\n")
-                    confidences_file = stack.enter_context(confidences_path.open("w", encoding="utf-8", newline="\n"))
-                    confidences_file.write("\t".join(["Sequence Number"] + [f"Token {i}" for i in range(200)]) + "\n")
-                    confidences_file.write(
-                        "\t".join(["Sequence Score"] + [f"Token Score {i}" for i in range(200)]) + "\n"
-                    )
-                    for sentence_num, _ in enumerate(output):
-                        confidences_file.write(
-                            "\t".join([str(sentence_num)] + output[sentence_num][1][draft_index - 1]) + "\n"
-                        )
-                        confidences_file.write(
-                            "\t".join(
-                                [str(exp(output[sentence_num][3][draft_index - 1]))]
-                                + [str(exp(token_score)) for token_score in output[sentence_num][2][draft_index - 1]]
-                            )
-                            + "\n"
+
+                    if save_confidences:
+                        generate_confidence_files(
+                            output,
+                            translation_path,
+                            produce_multiple_translations=produce_multiple_translations,
+                            draft_index=draft_index,
                         )
 
     def _translate_test_sentences(

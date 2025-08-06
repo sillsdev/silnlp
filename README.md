@@ -149,9 +149,8 @@ These are the main requirements for the SILNLP code to run on a local machine. S
    * Note that this does not give you direct access to a MinIO or B2 bucket from within the Docker container, it only allows you to run scripts referencing files in the bucket.
    * For instructions on how to permanently set up environment variables for your operating system, see the corresponding section under the Development Environment Setup header below.
 
-11. If using MinIO or B2, there are two options:
-   * Option 1: Mount the bucket to your filesystem following the instructions under [Install and Configure Rclone](https://github.com/sillsdev/silnlp/blob/master/bucket_setup.md#install-and-configure-rclone).
-   * Option 2: Create a local cache for the bucket following the instructions under [Create SILNLP cache](https://github.com/sillsdev/silnlp/blob/master/manual_setup.md#create-silnlp-cache).
+11. If using MinIO or B2, you will need to set up rclone:
+   * Mount the bucket to your filesystem following the instructions under [Install and Configure Rclone](https://github.com/sillsdev/silnlp/blob/master/bucket_setup.md#install-and-configure-rclone).
 
 ## Development Environment Setup
 
@@ -221,7 +220,7 @@ Follow the instructions below to set up a Dev Container in VS Code. This is the 
 To get back into the dev container and poetry environment each subsequent time, open the silnlp folder in VS Code, select the "Reopen in Container" option from the Remote Connection menu (bottom left corner), and use the `poetry shell` command in the terminal.
 
 ## Setting Up and Running Experiments
-See the [wiki](../../wiki) for information on setting up and running experiments. The most important pages for getting started are the ones on [file structure](../../wiki/Folder-structure-and-file-naming-conventions), [model configuration](../../wiki/Configure-a-model), and [running experiments](../../wiki/NMT:-Usage). A lot of the instructions are specific to NMT, but are still helpful starting points for doing other things like [alignment](../../wiki/Alignment:-Usage).
+See the [wiki](../../wiki) for information on setting up and running experiments. The most important pages for getting started are the ones on [file structure](../../wiki/File-conventions-and-cleanup), [model configuration](../../wiki/Configure-a-model), and [running experiments](../../wiki/NMT:-Usage). A lot of the instructions are specific to NMT, but are still helpful starting points for doing other things like [alignment](../../wiki/Alignment:-Usage).
 
 See [this](../../wiki/Using-the-Python-Debugger) page for information on using the VS code debugger.
 

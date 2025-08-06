@@ -1,16 +1,16 @@
 import argparse
-from io import TextIOWrapper
 import logging
 import os.path
-from pathlib import Path
 import time
+from io import TextIOWrapper
+from pathlib import Path
 from typing import List, Optional
 
 from machine.corpora import ParallelTextCorpus
 from machine.translation import (
-    PhraseTranslationSuggester,
-    InteractiveTranslatorFactory,
     InteractiveTranslator,
+    InteractiveTranslatorFactory,
+    PhraseTranslationSuggester,
     TranslationSuggestion,
 )
 from machine.translation.thot import ThotSmtModel, ThotWordAlignmentModelType
@@ -18,7 +18,7 @@ from machine.translation.thot import ThotSmtModel, ThotWordAlignmentModelType
 from ..common.corpus import get_scripture_parallel_corpus
 from ..common.environment import SIL_NLP_ENV
 from ..common.utils import get_git_revision_hash, get_mt_exp_dir
-from .config import load_config, create_word_tokenizer, create_word_detokenizer
+from .config import create_word_detokenizer, create_word_tokenizer, load_config
 
 LOGGER = logging.getLogger(__package__ + ".suggest")
 
@@ -287,7 +287,6 @@ def main() -> None:
 
     exp_name = args.experiment
     exp_dir = get_mt_exp_dir(exp_name)
-    SIL_NLP_ENV.copy_experiment_from_bucket(exp_name)
     config = load_config(exp_name)
 
     engine_dir = exp_dir / f"engine{os.sep}"

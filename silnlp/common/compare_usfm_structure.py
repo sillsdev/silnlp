@@ -14,7 +14,7 @@ from machine.corpora import (
 )
 from machine.tokenization import WhitespaceTokenizer
 
-from .usfm_preservation import CHARACTER_TYPE_EMBEDS, PARAGRAPH_TYPE_EMBEDS
+from .usfm_utils import CHARACTER_TYPE_EMBEDS, PARAGRAPH_TYPE_EMBEDS
 
 LOGGER = logging.getLogger(__package__ + ".compare_usfm_structure")
 
@@ -33,10 +33,15 @@ def filter_markers(
     to_ignore: List[str] = [],
 ) -> Tuple[str, List[str]]:
     markers = []
-    usfm_tokenizer = UsfmTokenizer(stylesheet)
     curr_embed = None
     filtered_sent = ""
-    for tok in usfm_tokenizer.tokenize(sent):
+    usfm_tokens = list(UsfmTokenizer(stylesheet).tokenize(sent))
+
+    # Remove trivially-placed end-of-verse paragraph markers
+    while len(usfm_tokens) > 0 and usfm_tokens[-1].type == UsfmTokenType.PARAGRAPH:
+        usfm_tokens.pop()
+
+    for tok in usfm_tokens:
         base_marker = tok.marker.strip("+*") if tok.marker is not None else None
         if curr_embed is not None:
             if tok.type == UsfmTokenType.END and base_marker == curr_embed:
@@ -100,15 +105,20 @@ def evaluate_usfm_marker_placement(
 
     tokenizer = WhitespaceMarkerTokenizer()
 
+    # Remove remarks, as they are irrelevant and any added in the translation pipeline will cause the files to be misaligned
+    gold_file_sents = [
+        gs.text for gs in gold_file_text if not (len(gs.ref.path) > 0 and gs.ref.path[-1].name in PARAGRAPH_TYPE_EMBEDS)
+    ]
+    pred_file_sents = [
+        ps.text for ps in pred_file_text if not (len(ps.ref.path) > 0 and ps.ref.path[-1].name in PARAGRAPH_TYPE_EMBEDS)
+    ]
+
     gold_sent_toks = []
     pred_sent_toks = []
     num_markers = []
-    for gs, ps in zip(gold_file_text, pred_file_text):
-        if len(gs.ref.path) > 0 and gs.ref.path[-1].name in PARAGRAPH_TYPE_EMBEDS:
-            continue
-
-        gs_text, gold_markers = filter_markers(gs.text, stylesheet, only_paragraph, only_style, to_ignore)
-        ps_text, pred_markers = filter_markers(ps.text, stylesheet, only_paragraph, only_style, to_ignore)
+    for gs, ps in zip(gold_file_sents, pred_file_sents):
+        gs_text, gold_markers = filter_markers(gs, stylesheet, only_paragraph, only_style, to_ignore)
+        ps_text, pred_markers = filter_markers(ps, stylesheet, only_paragraph, only_style, to_ignore)
 
         if len(gold_markers) == 0:
             continue
