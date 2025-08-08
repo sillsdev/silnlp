@@ -26,7 +26,6 @@ LOGGER = logging.getLogger(__name__)
 class SilNlpEnv:
     def __init__(self):
         atexit.register(check_transfers)
-        atexit.register(self.delete_temp_model_dir)
         self.root_dir = Path.home() / ".silnlp"
         self.assets_dir = Path(__file__).parent.parent / "assets"
         self.temp_model_dir: Optional[Path] = None
@@ -113,6 +112,7 @@ class SilNlpEnv:
     def get_temp_model_dir(self) -> Path:
         if not self.temp_model_dir:
             self.temp_model_dir = Path(tempfile.mkdtemp(prefix="silnlp_model_"))
+            atexit.register(self.delete_temp_model_dir)
         return self.temp_model_dir
 
     def delete_temp_model_dir(self) -> None:
