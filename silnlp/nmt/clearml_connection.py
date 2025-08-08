@@ -83,8 +83,8 @@ class SILClearML:
             if self.commit:
                 self.task.set_script(commit=self.commit)
             if self.queue_name.lower() not in ("local", "locally"):
-                self.task.execute_remotely(queue_name=self.queue_name)
                 SIL_NLP_ENV.delete_temp_model_dir()
+                self.task.execute_remotely(queue_name=self.queue_name)
         except LoginError as e:
             if self.queue_name is None:
                 LOGGER.info(
