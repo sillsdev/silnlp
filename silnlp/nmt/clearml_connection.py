@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from typing import Optional
 
 import yaml
-from common.environment import SIL_NLP_ENV
 
+from ..common.environment import SIL_NLP_ENV
 from .config import get_mt_exp_dir
 from .config_utils import create_config
 
