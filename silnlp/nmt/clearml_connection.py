@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import yaml
+from environment import SIL_NLP_ENV
 
 from .config import get_mt_exp_dir
 from .config_utils import create_config
@@ -83,6 +84,7 @@ class SILClearML:
                 self.task.set_script(commit=self.commit)
             if self.queue_name.lower() not in ("local", "locally"):
                 self.task.execute_remotely(queue_name=self.queue_name)
+                SIL_NLP_ENV.delete_temp_model_dir()
         except LoginError as e:
             if self.queue_name is None:
                 LOGGER.info(
