@@ -27,6 +27,7 @@ class SilNlpEnv:
         atexit.register(check_transfers)
         self.root_dir = Path.home() / ".silnlp"
         self.assets_dir = Path(__file__).parent.parent / "assets"
+        self.temp_model_dir: Optional[Path] = None
 
         self.set_data_dir()
 
