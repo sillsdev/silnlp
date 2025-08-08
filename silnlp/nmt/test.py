@@ -595,7 +595,7 @@ def test(
     save_checkpoints: bool = False,
 ):
     exp_name = experiment
-    config = load_config(exp_name, save_checkpoints=save_checkpoints)
+    config = load_config(exp_name, save_checkpoints)
 
     if not any(config.exp_dir.glob("test*.src.txt")):
         LOGGER.info("No test dataset.")
