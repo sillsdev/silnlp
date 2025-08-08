@@ -107,6 +107,11 @@ class SilNlpEnv:
 
         raise FileExistsError("No valid path exists")
 
+    def get_temp_model_dir(self) -> Path:
+        if not self.temp_model_dir:
+            self.temp_model_dir = Path(tempfile.mkdtemp(prefix="silnlp_model_"))
+        return self.temp_model_dir
+
 
 def check_transfers() -> None:
     # check if rclone is running or if CHECK_TRANSFERS is set

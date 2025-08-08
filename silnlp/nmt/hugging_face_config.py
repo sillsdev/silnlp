@@ -85,8 +85,6 @@ if is_safetensors_available():
 if is_peft_available():
     from peft import LoraConfig, PeftModel, TaskType, get_peft_model
 
-import tempfile
-
 LOGGER = logging.getLogger(__name__)
 
 
@@ -296,7 +294,7 @@ class HuggingFaceConfig(Config):
     def __init__(self, exp_dir: Path, config: dict, use_default_model_dir: bool = True) -> None:
         ckpt_dir = str(exp_dir / "run")
         if not use_default_model_dir:
-            ckpt_dir = tempfile.mkdtemp(prefix="silnlp_run_")
+            ckpt_dir = SIL_NLP_ENV.get_temp_model_dir()
         config = merge_dict(
             {
                 "data": {
