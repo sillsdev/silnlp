@@ -116,7 +116,7 @@ class SilNlpEnv:
         return self.temp_model_dir
 
     def delete_temp_model_dir(self) -> None:
-        if self.temp_model_dir.is_dir():
+        if self.temp_model_dir and self.temp_model_dir.is_dir():
             shutil.rmtree(self.temp_model_dir)
 
 
