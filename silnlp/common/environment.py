@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import time
@@ -25,6 +26,7 @@ LOGGER = logging.getLogger(__name__)
 class SilNlpEnv:
     def __init__(self):
         atexit.register(check_transfers)
+        atexit.register(self.delete_temp_model_dir)
         self.root_dir = Path.home() / ".silnlp"
         self.assets_dir = Path(__file__).parent.parent / "assets"
         self.temp_model_dir: Optional[Path] = None
@@ -112,6 +114,10 @@ class SilNlpEnv:
         if not self.temp_model_dir:
             self.temp_model_dir = Path(tempfile.mkdtemp(prefix="silnlp_model_"))
         return self.temp_model_dir
+
+    def delete_temp_model_dir(self) -> None:
+        if self.temp_model_dir and self.temp_model_dir.is_dir():
+            shutil.rmtree(self.temp_model_dir)
 
 
 def check_transfers() -> None:
