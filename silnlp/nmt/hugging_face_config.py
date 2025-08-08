@@ -85,6 +85,8 @@ if is_safetensors_available():
 if is_peft_available():
     from peft import LoraConfig, PeftModel, TaskType, get_peft_model
 
+import tempfile
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -291,7 +293,10 @@ def get_parent_model_name(parent_exp: str) -> str:
 
 
 class HuggingFaceConfig(Config):
-    def __init__(self, exp_dir: Path, config: dict) -> None:
+    def __init__(self, exp_dir: Path, config: dict, use_default_model_dir: bool = True) -> None:
+        ckpt_dir = str(exp_dir / "run")
+        if not use_default_model_dir:
+            ckpt_dir = tempfile.mkdtemp(prefix="silnlp_run_")
         config = merge_dict(
             {
                 "data": {
@@ -317,7 +322,7 @@ class HuggingFaceConfig(Config):
                     "auto_grad_acc": False,
                     "max_steps": 5000,
                     "group_by_length": True,
-                    "output_dir": str(exp_dir / "run"),
+                    "output_dir": ckpt_dir,
                     "delete_checkpoint_optimizer_state": True,
                     "delete_checkpoint_tokenizer": True,
                     "log_level": "info",
