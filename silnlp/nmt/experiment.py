@@ -35,7 +35,9 @@ class SILExperiment:
     commit: Optional[str] = None
 
     def __post_init__(self):
-        self.clearml = SILClearML(self.name, self.clearml_queue, commit=self.commit)
+        self.clearml = SILClearML(
+            self.name, self.clearml_queue, commit=self.commit, use_default_model_dir=self.save_checkpoints
+        )
         self.name: str = self.clearml.name
         self.config: Config = self.clearml.config
         self.rev_hash = get_git_revision_hash()
@@ -78,6 +80,7 @@ class SILExperiment:
             scorers=self.scorers,
             produce_multiple_translations=self.produce_multiple_translations,
             save_confidences=self.save_confidences,
+            save_checkpoints=self.save_checkpoints,
         )
 
     def translate(self):

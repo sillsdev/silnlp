@@ -5,6 +5,7 @@ from typing import Optional
 
 import yaml
 
+from ..common.environment import SIL_NLP_ENV
 from .config import get_mt_exp_dir
 from .config_utils import create_config
 
@@ -20,6 +21,7 @@ class SILClearML:
     experiment_suffix: str = ""
     clearml_project_folder: str = ""
     commit: Optional[str] = None
+    use_default_model_dir: bool = True
 
     def __post_init__(self) -> None:
         self.name = self.name.replace("\\", "/")
@@ -81,6 +83,7 @@ class SILClearML:
             if self.commit:
                 self.task.set_script(commit=self.commit)
             if self.queue_name.lower() not in ("local", "locally"):
+                SIL_NLP_ENV.delete_temp_model_dir()
                 self.task.execute_remotely(queue_name=self.queue_name)
         except LoginError as e:
             if self.queue_name is None:
@@ -122,7 +125,7 @@ class SILClearML:
                 config = yaml.safe_load(file)
             if config is None or len(config.keys()) == 0:
                 raise RuntimeError("Config file has no contents.")
-            self.config = create_config(exp_dir, config)
+            self.config = create_config(exp_dir, config, self.use_default_model_dir)
             return
         # There is a ClearML task - lets' do more complex importing.
         proj_dir = get_mt_exp_dir(self.clearml_project_folder)
@@ -149,4 +152,4 @@ class SILClearML:
         with (exp_dir / "config.yml").open("w+", encoding="utf-8") as file:
             yaml.safe_dump(data=config, stream=file)
 
-        self.config = create_config(exp_dir, config)
+        self.config = create_config(exp_dir, config, self.use_default_model_dir)
