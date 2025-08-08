@@ -15,14 +15,12 @@ from silnlp.nmt.config import get_mt_exp_dir
 
 @dataclass
 class VerseScore:
-    vref: str
+    vref: VerseRef
     confidence: float
     projected_chrf3: Optional[float] = None
 
 
-def estimate_quality(
-    experiment: str, diff_predictions_file_name: str, confidences_relative_path: str
-) -> List[VerseScore]:
+def estimate_quality(experiment: str, diff_predictions_file_name: str, confidences_relative_path: str) -> None:
     exp_dir = Path(get_mt_exp_dir(experiment))
     chrf3_scores, confidence_scores = extract_diff_predictions(exp_dir / diff_predictions_file_name)
     if len(chrf3_scores) != len(confidence_scores):
@@ -100,7 +98,9 @@ def extract_confidences(input_file_path: Path) -> List[VerseScore]:
                 cols = line.split("\t")
                 if cols:
                     vref_confidences += [
-                        VerseScore(f"{current_book} {current_chapter}:{current_verse}", float(cols[0]))
+                        VerseScore(
+                            VerseRef.from_string(f"{current_book} {current_chapter}:{current_verse}"), float(cols[0])
+                        )
                     ]
     return vref_confidences
 
@@ -123,7 +123,7 @@ def compute_usable_proportions(
     chapter_counts = defaultdict(lambda: defaultdict(int))
 
     for verse_score in verse_scores:
-        vref = VerseRef.from_string(verse_score.vref)
+        vref = verse_score.vref
         if vref.verse_num == 0:
             continue
 
@@ -176,11 +176,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Estimate the quality of drafts created by an NMT model.")
     parser.add_argument("experiment", help="Experiment name")
     parser.add_argument(
-        "diff_predictions_file_name", help="The diff predictions filename to determine line of best fit."
+        "diff_predictions_file_name", help="The diff predictions file name to determine line of best fit."
     )
     parser.add_argument(
         "confidences_relative_path",
-        help="The file path to the confidences file relative to the current experiment directory.",
+        help="The file path to the confidences file relative to the current experiment directory "
+        + "e.g. 'infer/5000/source/631JHN.SFM.confidences.tsv'",
     )
     args = parser.parse_args()
 
