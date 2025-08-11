@@ -906,7 +906,10 @@ class HuggingFaceNMTModel(NMTModel):
 
         # Change specific variables based on the type of model
         model, tokenizer = self._configure_model(
-            model, tokenizer, self._config.test_src_lang, self._config.test_trg_lang
+            model,
+            tokenizer,
+            self._config.val_src_lang if self._config.val_src_lang else self._config.test_src_lang,
+            self._config.val_trg_lang if self._config.val_trg_lang else self._config.test_trg_lang,
         )
 
         def load_text_dataset(src_path: Path, trg_path: Path) -> Optional[Dataset]:
