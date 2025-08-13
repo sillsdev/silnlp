@@ -42,13 +42,13 @@ def project_chrf3(diff_predictions_file: Path, confidence_file: Path) -> List[Ve
     return verse_scores
 
 
-def extract_diff_predictions(diff_predictions_file_path) -> Tuple[List[str], List[str]]:
+def extract_diff_predictions(diff_predictions_file_path) -> Tuple[List[float], List[float]]:
     chrf3_scores = extract_diff_predictions_column(diff_predictions_file_path, "chrf3")
     confidence_scores = extract_diff_predictions_column(diff_predictions_file_path, "confidence")
     return chrf3_scores, confidence_scores
 
 
-def extract_diff_predictions_column(file_path: Path, target_header: str) -> List[str]:
+def extract_diff_predictions_column(file_path: Path, target_header: str) -> List[float]:
     wb = load_workbook(file_path)
     ws = wb.active
 
@@ -73,7 +73,7 @@ def extract_diff_predictions_column(file_path: Path, target_header: str) -> List
     for row in ws.iter_rows(min_row=header_row_idx + 1, min_col=col_idx, max_col=col_idx):
         cell_value = row[0].value
         if cell_value is not None:
-            data.append(cell_value)
+            data.append(float(cell_value))
 
     return data
 
@@ -117,9 +117,7 @@ class UsabilityParameters:
     variance: float
 
 
-def compute_usable_proportions(
-    verse_scores: List[VerseScore], output_dir: Path
-) -> Tuple[Dict[str, float], Dict[str, Dict[int, float]]]:
+def compute_usable_proportions(verse_scores: List[VerseScore], output_dir: Path) -> None:
     usable_params, unusable_params = parse_parameters(output_dir / "usability_parameters.tsv")
 
     book_totals = defaultdict(float)
@@ -188,7 +186,7 @@ def main() -> None:
     parser.add_argument(
         "confidence_files",
         nargs="*",
-        help="Relative paths for the confidence files to process (relative to experiment folder or --dir if specified)"
+        help="Relative paths for the confidence files to process (relative to experiment folder or --dir if specified) "
         + "e.g. 'infer/5000/source/631JHN.SFM.confidences.tsv' or '631JHN.SFM.confidences.tsv --dir infer/5000/source'",
     )
     parser.add_argument(
