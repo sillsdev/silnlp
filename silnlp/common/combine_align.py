@@ -4,6 +4,9 @@ from pathlib import Path
 import regex as re
 from ..common.environment import SIL_NLP_ENV
 
+# List of keywords to exclude from filenames
+EXCLUDED_KEYWORDS = ["XRI", "_AI", "train"]
+
 # A hardcoded list of major language ISO codes from the Flores-200 benchmark.
 # This list can be modified as needed.
 MAJOR_LANGS = {
@@ -41,29 +44,29 @@ def combine_config_files(root_folder: Path, output_filename: str = "config.yml")
     """
     Finds and combines all config.yml files in subfolders with specific names.
     Re-sorts languages, de-duplicates entries, and sets a new aligner.
+    Filters out older files with dates and files with excluded keywords.                                                                     
     """
     print(f"Searching for config.yml files in subfolders of: {root_folder}")
 
-    # Use sets to collect all unique corpora
-    all_major_corpora = set()
-    all_minor_corpora = set()
+    # Dictionary to hold corpus names, grouped by language code
+    corpus_by_lang = {}
     
     # Initialize a base config with defaults
     global_config = {
         'data': {
             'aligner': 'eflomal',
             'corpus_pairs': [{
-                'type': 'train',
+                'mapping': 'many_to_many',
                 'src': [],
                 'trg': [],
-                'mapping': 'many_to_many',
                 'test_size': 0,
+                'type': 'train',
                 'val_size': 0
             }]
         }
     }
-    
-    found_first_config = False
+    tokenize_setting = None
+
 
     # Find all config.yml files in subdirectories
     for config_file in root_folder.rglob('**/config.yml'):
@@ -81,48 +84,78 @@ def combine_config_files(root_folder: Path, output_filename: str = "config.yml")
             with open(config_file, 'r') as f:
                 config = yaml.safe_load(f)
 
-            if not found_first_config and 'data' in config and 'tokenize' in config['data']:
-                global_config['data']['tokenize'] = config['data']['tokenize']
-                found_first_config = True
+            if tokenize_setting is None and 'data' in config and 'tokenize' in config['data']:
+                tokenize_setting = config['data']['tokenize']
 
             if 'data' in config and 'corpus_pairs' in config['data']:
                 for pair in config['data']['corpus_pairs']:
-                    src_list = set(pair.get('src', []))
-                    trg_list = set(pair.get('trg', []))
-                    
                     # Handle cases where 'src' or 'trg' are single strings, not lists
                     src_items = pair.get('src', [])
                     if isinstance(src_items, str):
                         src_items = [src_items]
-                    src_list = set(src_items)
                     
                     trg_items = pair.get('trg', [])
                     if isinstance(trg_items, str):
                         trg_items = [trg_items]
-                    trg_list = set(trg_items)
-
-                    all_corpora = src_list.union(trg_list)
                     
+                    all_corpora = set(src_items).union(set(trg_items))
+
                     for corpus in all_corpora:
+                        # Filter out files with excluded keywords
+                        if any(keyword.lower() in corpus.lower() for keyword in EXCLUDED_KEYWORDS):
+                            print(f"Excluding file due to keyword: {corpus}")
+                            continue
+
                         lang_code = extract_lang_code(corpus)
-                        if lang_code: # Only process if a valid lang_code was extracted
-                            if lang_code in MAJOR_LANGS:
-                                all_major_corpora.add(corpus)
+                        if lang_code:
+                            if lang_code not in corpus_by_lang:
+                                corpus_by_lang[lang_code] = {'dated': [], 'undated': []}
+
+                            # Extract date from filename if present
+                            date_match = re.search(r'_(\d{4}_\d{2}_\d{2})', corpus)
+                            if date_match:
+                                date_str = date_match.group(1)
+                                                               
+                                corpus_by_lang[lang_code]['dated'].append((date_str, corpus))
                             else:
-                                all_minor_corpora.add(corpus)
+                                corpus_by_lang[lang_code]['undated'].append(corpus)
                         else:
-                            print(f"Skipping invalid corpus name: {corpus} in {config_file}")
+                            print(f"Skipping invalid corpus name: {corpus}")
 
         except Exception as e:
             print(f"Error processing {config_file}: {e}")
     
-    # Update the src corpora with all files.
-    global_config['data']['corpus_pairs'][0]['src'] = sorted(list(all_major_corpora))
-    global_config['data']['corpus_pairs'][0]['src'] = sorted(list(all_minor_corpora))
-    
-    # Update the trg corpora with only the minor language corpora.
-    global_config['data']['corpus_pairs'][0]['trg'] = sorted(list(all_minor_corpora))
+    # Filter for the most recent file for each language and include all undated files
+    final_corpora = set()
+    for lang_code, corpora_dict in corpus_by_lang.items():
+        # Keep all undated files
+        for corpus in corpora_dict['undated']:
+            final_corpora.add(corpus)
+        
+        # Keep only the most recent dated file, if any exist
+        if corpora_dict['dated']:
+            corpora_dict['dated'].sort(key=lambda x: x[0], reverse=True)
+                                                   
+            final_corpora.add(corpora_dict['dated'][0][1])
 
+    # Separate filtered corpora into major and minor languages
+    major_corpora = set()
+    minor_corpora = set()
+    for corpus in final_corpora:
+        lang_code = extract_lang_code(corpus)
+        if lang_code and lang_code in MAJOR_LANGS:
+            major_corpora.add(corpus)
+        else:
+            minor_corpora.add(corpus)
+
+    # The new 'src' list is the sorted combination of major and minor languages
+    # The new 'trg' list is the sorted list of minor languages
+    global_config['data']['corpus_pairs'][0]['src'] = sorted(list(major_corpora)) + sorted(list(minor_corpora))
+    global_config['data']['corpus_pairs'][0]['trg'] = sorted(list(minor_corpora))
+
+    # Add tokenize setting if it was found
+    if tokenize_setting is not None:
+        global_config['data']['tokenize'] = tokenize_setting
     # Write the combined config to a new file in the root folder
     output_path = root_folder / output_filename
     try:
@@ -158,4 +191,3 @@ if __name__ == '__main__':
         print(f"Error: Couldn't find {args.folder} or {folder}.")
     else:
         combine_config_files(folder, args.output_filename)
-
