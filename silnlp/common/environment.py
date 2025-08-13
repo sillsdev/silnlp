@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import time
@@ -27,6 +28,7 @@ class SilNlpEnv:
         atexit.register(check_transfers)
         self.root_dir = Path.home() / ".silnlp"
         self.assets_dir = Path(__file__).parent.parent / "assets"
+        self.temp_model_dir: Optional[Path] = None
 
         self.set_data_dir()
 
@@ -106,6 +108,16 @@ class SilNlpEnv:
             return gutenberg_path
 
         raise FileExistsError("No valid path exists")
+
+    def get_temp_model_dir(self) -> Path:
+        if not self.temp_model_dir:
+            self.temp_model_dir = Path(tempfile.mkdtemp(prefix="silnlp_model_"))
+            atexit.register(self.delete_temp_model_dir)
+        return self.temp_model_dir
+
+    def delete_temp_model_dir(self) -> None:
+        if self.temp_model_dir and self.temp_model_dir.is_dir():
+            shutil.rmtree(self.temp_model_dir)
 
 
 def check_transfers() -> None:
