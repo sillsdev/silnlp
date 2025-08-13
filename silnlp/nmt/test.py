@@ -602,6 +602,8 @@ def test(
 
     books_nums = get_chapters(books)
 
+    if save_confidences and "confidence" not in scorers:
+        scorers.add("confidence")
     if len(scorers) == 0:
         scorers.add("bleu")
     scorers.intersection_update(set(_SUPPORTED_SCORERS))
