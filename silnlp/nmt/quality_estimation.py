@@ -1,16 +1,19 @@
 import argparse
+import logging
 import re
 from collections import defaultdict
 from dataclasses import dataclass
 from math import exp
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 from machine.scripture import VerseRef
 from openpyxl import load_workbook
 from scipy.stats import linregress
 
 from silnlp.nmt.config import get_mt_exp_dir
+
+LOGGER = logging.getLogger(__package__ + ".quality_estimation")
 
 
 @dataclass
@@ -30,7 +33,10 @@ def estimate_quality(diff_predictions_file: Path, confidence_files: List[Path]):
 def project_chrf3(diff_predictions_file: Path, confidence_file: Path) -> List[VerseScore]:
     chrf3_scores, confidence_scores = extract_diff_predictions(diff_predictions_file)
     if len(chrf3_scores) != len(confidence_scores):
-        raise ValueError("The number of chrF3 scores and confidence scores do not match.")
+        raise ValueError(
+            f"The number of chrF3 scores ({len(chrf3_scores)}) and confidence scores ({len(confidence_scores)}) "
+            f"in {diff_predictions_file} do not match."
+        )
     slope, intercept = linregress(confidence_scores, chrf3_scores)[:2]
     verse_scores = extract_confidences(confidence_file)
     with open(confidence_file.with_suffix(".projected_chrf3.tsv"), "w", encoding="utf-8") as output_file:
@@ -129,6 +135,9 @@ def compute_usable_proportions(verse_scores: List[VerseScore], output_dir: Path)
         vref = verse_score.vref
         if vref.verse_num == 0:
             continue
+        if verse_score.projected_chrf3 is None:
+            LOGGER.warning(f"{vref} does not have a projected chrf3. Skipping.")
+            continue
 
         prob = calculate_usable_prob(verse_score.projected_chrf3, usable_params, unusable_params)
         book_totals[vref.book] += prob
@@ -157,11 +166,17 @@ def parse_parameters(parameter_file: Path) -> Tuple[UsabilityParameters, Usabili
     }
     if parameter_file.exists():
         with open(parameter_file, "r", encoding="utf-8") as f:
-            for line in f:
-                label, count, mean, variance = line.strip().split("\t")
+            for line_num, line in enumerate(f, start=1):
+                parts = line.strip().split("\t")
+                if len(parts) != 4:
+                    raise ValueError(
+                        f"Malformed line {line_num} in {parameter_file}: expected 4 tab-separated columns, "
+                        f"got {len(parts)}. Line content: {line.strip()}"
+                    )
+                label, count, mean, variance = parts
                 params[label] = UsabilityParameters(float(count), float(mean), float(variance))
     else:
-        print(f"Warning: {parameter_file} does not exist. Using default parameters.")
+        LOGGER.warning(f"{parameter_file} does not exist. Using default parameters.")
 
     return params["usable"], params["unusable"]
 
