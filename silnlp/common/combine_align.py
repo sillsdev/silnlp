@@ -43,7 +43,6 @@ def combine_config_files(root_folder: Path, output_filename: str = "config.yml")
     Re-sorts languages, de-duplicates entries, and sets a new aligner.
     """
     print(f"Searching for config.yml files in subfolders of: {root_folder}")
-    output_file = root_folder / output_filename
 
     # Use sets to collect all unique corpora
     all_major_corpora = set()
@@ -119,13 +118,13 @@ def combine_config_files(root_folder: Path, output_filename: str = "config.yml")
     
     # Update the src corpora with all files.
     global_config['data']['corpus_pairs'][0]['src'] = sorted(list(all_major_corpora))
-    global_config['data']['corpus_pairs'][0]['src'] += sorted(list(all_minor_corpora))
+    global_config['data']['corpus_pairs'][0]['src'] = sorted(list(all_minor_corpora))
     
     # Update the trg corpora with only the minor language corpora.
     global_config['data']['corpus_pairs'][0]['trg'] = sorted(list(all_minor_corpora))
 
     # Write the combined config to a new file in the root folder
-    output_path = root_folder / 'combined_config.yml'
+    output_path = root_folder / output_filename
     try:
         with open(output_path, 'w') as f:
             yaml.dump(global_config, f, sort_keys=False)
