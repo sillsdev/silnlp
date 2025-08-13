@@ -176,7 +176,7 @@ def parse_parameters(parameter_file: Path) -> Tuple[UsabilityParameters, Usabili
                 label, count, mean, variance = parts
                 params[label] = UsabilityParameters(float(count), float(mean), float(variance))
     else:
-        LOGGER.warning(f"{parameter_file} does not exist. Using default parameters.")
+        LOGGER.warning(f"{parameter_file.name} does not exist. Using default parameters.")
 
     return params["usable"], params["unusable"]
 
