@@ -20,21 +20,26 @@ class VerseScore:
     projected_chrf3: Optional[float] = None
 
 
-def estimate_quality(experiment: str, diff_predictions_file_name: str, confidences_relative_path: str) -> None:
-    exp_dir = Path(get_mt_exp_dir(experiment))
-    chrf3_scores, confidence_scores = extract_diff_predictions(exp_dir / diff_predictions_file_name)
+def estimate_quality(diff_predictions_file: Path, confidence_files: List[Path]):
+    verse_scores: List[VerseScore] = []
+    for confidence_file in confidence_files:
+        verse_scores += project_chrf3(diff_predictions_file, confidence_file)
+    compute_usable_proportions(verse_scores, confidence_files[0].parent)
+
+
+def project_chrf3(diff_predictions_file: Path, confidence_file: Path) -> List[VerseScore]:
+    chrf3_scores, confidence_scores = extract_diff_predictions(diff_predictions_file)
     if len(chrf3_scores) != len(confidence_scores):
         raise ValueError("The number of chrF3 scores and confidence scores do not match.")
     slope, intercept = linregress(confidence_scores, chrf3_scores)[:2]
-    vref_scores = extract_confidences(exp_dir / confidences_relative_path)
-    with open(exp_dir / "projected_chrf3.tsv", "w", encoding="utf-8") as output_file:
+    verse_scores = extract_confidences(confidence_file)
+    with open(confidence_file.with_suffix(".projected_chrf3.tsv"), "w", encoding="utf-8") as output_file:
         output_file.write("VRef\tConfidence\tProjected chrF3\n")
-        for vref_score in vref_scores:
-            projected_chrf3 = slope * vref_score.confidence + intercept
-            vref_score.projected_chrf3 = projected_chrf3
-            output_file.write(f"{vref_score.vref}\t{vref_score.confidence}\t{projected_chrf3:.2f}\n")
-
-    compute_usable_proportions(vref_scores, exp_dir)
+        for verse_score in verse_scores:
+            projected_chrf3 = slope * verse_score.confidence + intercept
+            verse_score.projected_chrf3 = projected_chrf3
+            output_file.write(f"{verse_score.vref}\t{verse_score.confidence}\t{projected_chrf3:.2f}\n")
+    return verse_scores
 
 
 def extract_diff_predictions(diff_predictions_file_path) -> Tuple[List[str], List[str]]:
@@ -133,16 +138,18 @@ def compute_usable_proportions(
         chapter_totals[vref.book][vref.chapter_num] += prob
         chapter_counts[vref.book][vref.chapter_num] += 1
 
-    with open(output_dir / "usability_books.tsv", "w", encoding="utf-8", newline="\n") as f:
+    with open(output_dir / "usability_books.tsv", "w", encoding="utf-8", newline="\n") as book_file:
+        book_file.write("Book\tUsability\n")
         for book in sorted(book_totals):
             avg_prob = book_totals[book] / book_counts[book]
-            f.write(f"{book}\t{avg_prob:.6f}\n")
+            book_file.write(f"{book}\t{avg_prob:.6f}\n")
 
-    with open(output_dir / "usability_chapters.tsv", "w", encoding="utf-8", newline="\n") as f:
+    with open(output_dir / "usability_chapters.tsv", "w", encoding="utf-8", newline="\n") as chapter_file:
+        chapter_file.write("Book\tChapter\tUsability\n")
         for book in sorted(chapter_totals):
             for chapter in sorted(chapter_totals[book]):
                 avg_prob = chapter_totals[book][chapter] / chapter_counts[book][chapter]
-                f.write(f"{book}\t{chapter}\t{avg_prob:.6f}\n")
+                chapter_file.write(f"{book}\t{chapter}\t{avg_prob:.6f}\n")
 
 
 def parse_parameters(parameter_file: Path) -> Tuple[UsabilityParameters, UsabilityParameters]:
@@ -179,13 +186,54 @@ def main() -> None:
         "diff_predictions_file_name", help="The diff predictions file name to determine line of best fit."
     )
     parser.add_argument(
-        "confidences_relative_path",
-        help="The file path to the confidences file relative to the current experiment directory "
-        + "e.g. 'infer/5000/source/631JHN.SFM.confidences.tsv'",
+        "confidence_files",
+        nargs="*",
+        help="Relative paths for the confidence files to process (relative to experiment folder or --dir if specified)"
+        + "e.g. 'infer/5000/source/631JHN.SFM.confidences.tsv' or '631JHN.SFM.confidences.tsv --dir infer/5000/source'",
+    )
+    parser.add_argument(
+        "--confidence-dir",
+        type=Path,
+        help="Folder (relative to experiment folder) containing confidence files e.g. 'infer/5000/source/'",
+    )
+    parser.add_argument(
+        "--books",
+        nargs="+",
+        metavar="book_ids",
+        help="Provide book ids (e.g. 1JN LUK) to select confidence files rather than providing file paths with "
+        + "the confidence_files positional argument",
     )
     args = parser.parse_args()
 
-    estimate_quality(args.experiment, args.diff_predictions_file_name, args.confidences_relative_path)
+    using_files = bool(args.confidence_files)
+    using_books = bool(args.books)
+
+    if using_files and using_books:
+        raise ValueError("Specify either confidence_files or --books, not both.")
+    if not using_files and not using_books:
+        raise ValueError(
+            "You must specify either confidence_files or --books to indicate which confidence files to use."
+        )
+
+    exp_dir = Path(get_mt_exp_dir(args.experiment))
+    if bool(args.confidence_dir):
+        confidence_dir = exp_dir / args.confidence_dir
+    else:
+        confidence_dir = exp_dir
+
+    if using_files:
+        if len(args.confidence_files) == 0:
+            raise ValueError("Please provide at least one confidence file for the confidence_files argument.")
+        confidence_files = [confidence_dir / confidence_file for confidence_file in args.confidence_files]
+
+    elif using_books:
+        if len(args.books) == 0:
+            raise ValueError("Please provide at least one book for the --books argument.")
+        confidence_files = []
+        for book_id in args.books:
+            confidence_files.extend(confidence_dir.glob(f"[0-9]*{book_id}.*.confidences.tsv"))
+
+    estimate_quality(exp_dir / args.diff_predictions_file_name, confidence_files)
 
 
 if __name__ == "__main__":
