@@ -2,6 +2,12 @@ from pathlib import Path
 
 from machine.corpora import FileParatextProjectSettingsParser, UsfmFileText, UsfmTokenizer, UsfmTokenType
 
+# Marker "type" is as defined by the UsfmTokenType given to tokens by the UsfmTokenizer,
+# which mostly aligns with a marker's StyleType in the USFM stylesheet
+CHARACTER_TYPE_EMBEDS = ["fig", "fm", "jmp", "rq", "va", "vp", "xt", "xtSee", "xtSeeAlso"]
+PARAGRAPH_TYPE_EMBEDS = ["lit", "r", "rem"]
+NON_NOTE_TYPE_EMBEDS = CHARACTER_TYPE_EMBEDS + PARAGRAPH_TYPE_EMBEDS
+
 
 def main() -> None:
     """
@@ -32,7 +38,7 @@ def main() -> None:
     with sentences_file.open("w", encoding=settings.encoding) as f:
         for sent in file_text:
             f.write(f"{sent}\n")
-            if len(sent.ref.path) > 0 and sent.ref.path[-1].name == "rem":
+            if len(sent.ref.path) > 0 and sent.ref.path[-1].name in PARAGRAPH_TYPE_EMBEDS:
                 continue
 
             vrefs.append(sent.ref)
@@ -40,13 +46,12 @@ def main() -> None:
             usfm_toks = usfm_tokenizer.tokenize(sent.text.strip())
 
             ignore_scope = None
-            to_delete = ["fig"]
             for tok in usfm_toks:
                 if ignore_scope is not None:
                     if tok.type == UsfmTokenType.END and tok.marker[:-1] == ignore_scope.marker:
                         ignore_scope = None
                 elif tok.type == UsfmTokenType.NOTE or (
-                    tok.type == UsfmTokenType.CHARACTER and tok.marker in to_delete
+                    tok.type == UsfmTokenType.CHARACTER and tok.marker in CHARACTER_TYPE_EMBEDS
                 ):
                     ignore_scope = tok
                 elif tok.type in [UsfmTokenType.PARAGRAPH, UsfmTokenType.CHARACTER, UsfmTokenType.END]:
