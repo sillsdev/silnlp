@@ -17,22 +17,18 @@ CURRENT_STYLE_COLUMNS = [
     "chrF3", "chrF3+", "chrF3++", "spBLEU", "confidence"
 ]
 
-# Columns to filter out
-COLUMNS_TO_REMOVE = [
+# Columns to hide in Excel output
+COLUMNS_TO_HIDE = [
     "BLEU_1gram_prec", "BLEU_2gram_prec", "BLEU_3gram_prec", "BLEU_4gram_prec", "BLEU_brevity_penalty",
-    "BLEU_total_sys_len", "BLEU_total_ref_len", "chrF3", "chrF3+"
-]
-
-# Columns to move to the end of the row for csv output and hide in Excel output.
-COLUMNS_TO_END = [
+    "BLEU_total_sys_len", "BLEU_total_ref_len", "chrF3", "chrF3+",
     "book", "draft_index", "num_refs", "references", "sent_len", "spBLEU", "confidence"
 ]
 
 # Final column order for current style
 CURRENT_STYLE_OUTPUT_COLUMNS = [
-    "src_iso", "trg_iso", "BLEU", "chrF3++"
-] + COLUMNS_TO_END
-
+    "src_iso", "trg_iso", "BLEU", "chrF3++",
+    "book", "draft_index", "num_refs", "references", "sent_len", "spBLEU", "confidence"
+]
 
 def check_for_lock_file(folder: Path, filename: str, file_type: str):
     """Check for lock files and ask the user to close them then exit."""
@@ -110,6 +106,36 @@ def aggregate_csv(folder_path):
 
     return data_by_header
 
+def sort_rows_by_chrf3pp(header, rows):
+    """Sort rows by chrF3++ in descending order if column exists."""
+    try:
+        idx = header.index("chrF3++")
+        # Convert to float for sorting, missing/empty values become -inf
+        def get_chrf3pp(row):
+            try:
+                val = row[idx]
+                return float(val) if val not in ("", None) else float("-inf")
+            except Exception:
+                return float("-inf")
+        return sorted(rows, key=get_chrf3pp, reverse=True)
+    except ValueError:
+        return rows
+
+def filter_excel_rows(header, rows):
+    """Filter out rows where trg_iso == 'ALL' and chrF3++ is empty. Skip rows that are too short."""
+    try:
+        trg_idx = header.index("trg_iso")
+        chrf_idx = header.index("chrF3++")
+        filtered = []
+        for row in rows:
+            # Skip rows that are too short
+            if len(row) <= max(trg_idx, chrf_idx):
+                continue
+            if not (row[trg_idx] == "ALL" and (row[chrf_idx] == "" or row[chrf_idx] is None)):
+                filtered.append(row)
+        return filtered
+    except ValueError:
+        return rows
 
 def write_to_csv(data_by_header, folder, output_filename):
 
@@ -117,7 +143,9 @@ def write_to_csv(data_by_header, folder, output_filename):
     with open(output_file, "w", newline="") as f:
         writer = csv.writer(f)
         for header, rows in data_by_header.items():
-            writer.writerows(rows)
+            # Sort rows (excluding header) by chrF3++
+            sorted_rows = [rows[0]] + sort_rows_by_chrf3pp(rows[0], rows[1:])
+            writer.writerows(sorted_rows)
             writer.writerow([])  # Add a blank row to separate different types
         # Write the folder path to the last line of the CSV file
         writer.writerow([folder])
@@ -129,28 +157,25 @@ def write_to_excel(data_by_header, folder, output_filename):
     with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
         sheet_names = []
         for i, (header, rows) in enumerate(data_by_header.items()):
-            # Create a DataFrame for the current header
-            df = pd.DataFrame(rows[1:], columns=rows[0])
-            # Convert columns to appropriate data types
-            for col in df.columns:
-                try:
-                    df[col] = pd.to_numeric(df[col])
-                except Exception:
-                    pass
-            # Generate a unique sheet name
+            # Filter and sort rows for Excel
+            filtered_rows = filter_excel_rows(rows[0], rows[1:])
+            sorted_rows = sort_rows_by_chrf3pp(rows[0], filtered_rows)
+            # If no data rows remain, add a dummy row (all empty) to avoid openpyxl error
+            if not sorted_rows:
+                sorted_rows = []
+            df = pd.DataFrame(sorted_rows, columns=rows[0])
             sheet_name = f"Table_{i + 1}"
             sheet_names.append(sheet_name)
-            # Write the DataFrame to the Excel file
             df.to_excel(writer, sheet_name=sheet_name, index=False)
-    # Now, hide columns in COLUMNS_TO_END in all sheets and auto-size visible columns
+    # Now, hide columns in COLUMNS_TO_HIDE in all sheets and auto-size visible columns
     wb = openpyxl.load_workbook(output_file)
     for sheet_name in sheet_names:
         ws = wb[sheet_name]
         header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True))
-        # Hide columns in COLUMNS_TO_END
+        # Hide columns in COLUMNS_TO_HIDE
         for col_idx, col_name in enumerate(header_row, 1):
             col_letter = openpyxl.utils.get_column_letter(col_idx)
-            if col_name in COLUMNS_TO_END:
+            if col_name in COLUMNS_TO_HIDE:
                 ws.column_dimensions[col_letter].hidden = True
             else:
                 # Auto-size visible columns
@@ -164,11 +189,11 @@ def write_to_excel(data_by_header, folder, output_filename):
                             max_length = cell_length
                     except Exception:
                         pass
-                # Add a little extra space
                 ws.column_dimensions[col_letter].width = max_length + 2
+        # Ensure at least one row is visible (header)
+        ws.sheet_state = "visible"
     wb.save(output_file)
     print(f"Wrote scores to {output_file}")
-
 
 def main():
     parser = argparse.ArgumentParser(description="Aggregate CSV files in a folder.")
