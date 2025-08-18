@@ -592,9 +592,10 @@ def test(
     by_book: bool = False,
     produce_multiple_translations: bool = False,
     save_confidences: bool = False,
+    save_checkpoints: bool = False,
 ):
     exp_name = experiment
-    config = load_config(exp_name)
+    config = load_config(exp_name, save_checkpoints)
 
     if not any(config.exp_dir.glob("test*.src.txt")):
         LOGGER.info("No test dataset.")
