@@ -156,7 +156,7 @@ def write_to_excel(data_by_header, folder, output_filename):
         sheet_names = []
         for i, (header, rows) in enumerate(data_by_header.items()):
             # Filter and sort rows for Excel
-            filtered_rows = filter_excel_rows(rows[0], rows[1:])
+            filtered_rows = delete_rows(rows[0], rows[1:])
             sorted_rows = sort_rows_by_chrf3pp(rows[0], filtered_rows)
             # If no data rows remain, add a dummy row (all empty) to avoid openpyxl error
             if not sorted_rows:
