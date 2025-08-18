@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
@@ -14,8 +13,9 @@ def load_config(exp_name: str, use_default_model_dir: bool = True) -> Config:
 
     with config_path.open("r", encoding="utf-8") as file:
         config: dict = yaml.safe_load(file)
-    return create_config(exp_dir, config, use_default_model_dir)
+        config["use_default_model_dir"] = use_default_model_dir
+    return create_config(exp_dir, config)
 
 
-def create_config(exp_dir: Path, config: dict, use_default_model_dir: bool = True) -> Config:
-    return HuggingFaceConfig(exp_dir, config, use_default_model_dir)
+def create_config(exp_dir: Path, config: dict) -> Config:
+    return HuggingFaceConfig(exp_dir, config)

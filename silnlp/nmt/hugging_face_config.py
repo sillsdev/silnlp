@@ -291,10 +291,8 @@ def get_parent_model_name(parent_exp: str) -> str:
 
 
 class HuggingFaceConfig(Config):
-    def __init__(self, exp_dir: Path, config: dict, use_default_model_dir: bool = True) -> None:
-        ckpt_dir = str(exp_dir / "run")
-        if not use_default_model_dir:
-            ckpt_dir = SIL_NLP_ENV.get_temp_model_dir()
+    def __init__(self, exp_dir: Path, config: dict) -> None:
+        ckpt_dir = str(exp_dir / "run") if config["use_default_model_dir"] else SIL_NLP_ENV.get_temp_model_dir()
         config = merge_dict(
             {
                 "data": {
