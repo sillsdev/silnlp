@@ -5,6 +5,7 @@ from typing import Optional
 
 import yaml
 
+from ..common.environment import SIL_NLP_ENV
 from .config import get_mt_exp_dir
 from .config_utils import create_config
 
@@ -20,6 +21,7 @@ class SILClearML:
     experiment_suffix: str = ""
     clearml_project_folder: str = ""
     commit: Optional[str] = None
+    use_default_model_dir: bool = True
 
     def __post_init__(self) -> None:
         self.name = self.name.replace("\\", "/")
@@ -81,6 +83,7 @@ class SILClearML:
             if self.commit:
                 self.task.set_script(commit=self.commit)
             if self.queue_name.lower() not in ("local", "locally"):
+                SIL_NLP_ENV.delete_temp_model_dir()
                 self.task.execute_remotely(queue_name=self.queue_name)
         except LoginError as e:
             if self.queue_name is None:
@@ -120,6 +123,7 @@ class SILClearML:
         if self.task is None:
             with (exp_dir / "config.yml").open("r", encoding="utf-8") as file:
                 config = yaml.safe_load(file)
+                config["use_default_model_dir"] = self.use_default_model_dir
             if config is None or len(config.keys()) == 0:
                 raise RuntimeError("Config file has no contents.")
             self.config = create_config(exp_dir, config)
@@ -135,6 +139,7 @@ class SILClearML:
             # read in the project/experiment yaml file
             with (exp_dir / "config.yml").open("r", encoding="utf-8") as file:
                 config = yaml.safe_load(file)
+                config["use_default_model_dir"] = self.use_default_model_dir
         else:
             config = {}
         if config is None or len(config.keys()) == 0:
