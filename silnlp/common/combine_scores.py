@@ -48,7 +48,7 @@ def check_for_lock_file(folder: Path, filename: str, file_type: str):
 
 
 def is_current_style(header):
-    """Check if the header matches the current style (all columns present, no extras)."""
+    """Check if the header matches the current style (all columns present, additional columns accepted)."""
     header = [col.strip() for col in header]
     return set(CURRENT_STYLE_COLUMNS).issubset(set(header))
 
@@ -86,8 +86,6 @@ def aggregate_csv(folder_path):
 
             # Add columns to the beginning of each row
             print(f"Processing {csv_file}")
-            #print(f"Header: {header}")
-            #print(f"Is current style: {is_current_style(header)}")
             if is_current_style(header):
                 # Transform header and rows for current style
                 transformed_header, transformed_rows = transform_current_style_rows(header, rows[1:])
@@ -121,8 +119,8 @@ def sort_rows_by_chrf3pp(header, rows):
     except ValueError:
         return rows
 
-def filter_excel_rows(header, rows):
-    """Filter out rows where trg_iso == 'ALL' and chrF3++ is empty. Skip rows that are too short."""
+def delete_rows(header, rows):
+    """Rows containing 'ALL' in the trg_iso columnn and without a chrF3++ score are deleted as they are not useful."""
     try:
         trg_idx = header.index("trg_iso")
         chrf_idx = header.index("chrF3++")
@@ -158,7 +156,7 @@ def write_to_excel(data_by_header, folder, output_filename):
         sheet_names = []
         for i, (header, rows) in enumerate(data_by_header.items()):
             # Filter and sort rows for Excel
-            filtered_rows = filter_excel_rows(rows[0], rows[1:])
+            filtered_rows = delete_rows(rows[0], rows[1:])
             sorted_rows = sort_rows_by_chrf3pp(rows[0], filtered_rows)
             # If no data rows remain, add a dummy row (all empty) to avoid openpyxl error
             if not sorted_rows:
