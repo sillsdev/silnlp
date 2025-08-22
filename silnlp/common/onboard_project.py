@@ -4,7 +4,9 @@ from pathlib import Path
 
 import yaml
 
+from .collect_verse_counts import collect_verse_counts
 from .environment import SIL_NLP_ENV
+from .extract_corpora import extract_corpora
 
 LOGGER = logging.getLogger(__package__ + ".onboard_project")
 
@@ -64,7 +66,6 @@ def main() -> None:
     parser.add_argument(
         "project",
         help="Paratext project name. The project will be stored on the bucket at Paratext/projects/<project>.",
-        required=True,
         type=str,
     )
     parser.add_argument(
@@ -98,17 +99,14 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+    if not args.project:
+        raise ValueError("Project name is required. Please provide a valid Paratext project name using <project>.")
+
     project_name = args.project
 
-    if not args.copy_from:
-        raise ValueError(
-            "Copy path is required. Please provide a valid local Paratext project folder using --copy-from."
-        )
-
-    LOGGER.info(f"Onboarding project: {args.project}")
-    paratext_project_dir: Path = create_paratext_project_folder_if_not_exists(project_name)
-
     if args.copy_from:
+        LOGGER.info(f"Onboarding project: {args.project}")
+        paratext_project_dir: Path = create_paratext_project_folder_if_not_exists(project_name)
         copy_paratext_project_folder(Path(args.copy_from), paratext_project_dir, overwrite=args.overwrite)
 
     if args.config:
@@ -118,11 +116,9 @@ def main() -> None:
         with config_file.open("r", encoding="utf-8") as file:
             config = yaml.safe_load(file)
     else:
-        config = {}
+        raise ValueError("Config file is required. Please provide a valid configuration file using --config.")
 
     if args.extract_corpora:
-        from .extract_corpora import extract_corpora
-
         LOGGER.info(f"Extracting {project_name}.")
         extract_corpora(
             projects={project_name},
@@ -140,7 +136,6 @@ def main() -> None:
             LOGGER.warning(
                 "--extract_corpora was not included. Collecting verse counts requires the corpus to be extracted first."
             )
-        from .collect_verse_counts import collect_verse_counts
 
         LOGGER.info(f"Collecting verse counts from {project_name}.")
 
@@ -152,10 +147,31 @@ def main() -> None:
             output_folder = SIL_NLP_ENV.mt_experiments_dir / "verse_counts" / project_name
             if not output_folder.exists():
                 output_folder.mkdir(parents=True, exist_ok=True)
+        input_folder = (
+            config["verse_counts"]["input_folder"]
+            if "input_folder" in config["verse_counts"]
+            else SIL_NLP_ENV.mt_scripture_dir
+        )
+        file_patterns = (
+            config["verse_counts"]["files"] if "files" in config["verse_counts"] else f"*{project_name}*.txt"
+        )
+
+        input_folder_path = Path(input_folder)
+        if not input_folder_path.exists():
+            LOGGER.error(f"Input folder '{input_folder_path}' does not exist. Skipping verse counts collection.")
+            return
+
+        matched_files = list(input_folder_path.glob(file_patterns))
+        if not matched_files:
+            LOGGER.error(
+                f"No files matching pattern '{file_patterns}' found in '{input_folder_path}'. Skipping verse counts collection."
+            )
+            return
+
         collect_verse_counts(
-            input_folder=config["verse_counts"]["input_folder"] if "input_folder" in config["verse_counts"] else SIL_NLP_ENV.mt_scripture_dir,
+            input_folder=input_folder_path,
             output_folder=output_folder,
-            file_patterns=(config["verse_counts"]["files"] if "files" in config["verse_counts"] else f"{project_name}.txt"),
+            file_patterns=file_patterns,
             deutero=config["verse_counts"]["deutero"] if "deutero" in config["verse_counts"] else False,
             recount=config["verse_counts"]["recount"] if "recount" in config["verse_counts"] else False,
         )
