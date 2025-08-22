@@ -23,14 +23,12 @@ class VerseScore:
     projected_chrf3: Optional[float] = None
 
 
-def estimate_quality(diff_predictions_file: Path, confidence_files: List[Path]):
-    verse_scores: List[VerseScore] = []
-    for confidence_file in confidence_files:
-        verse_scores += project_chrf3(diff_predictions_file, confidence_file)
+def estimate_quality(diff_predictions_file: Path, confidence_files: List[Path]) -> None:
+    verse_scores: List[VerseScore] = project_chrf3(diff_predictions_file, confidence_files)
     compute_usable_proportions(verse_scores, confidence_files[0].parent)
 
 
-def project_chrf3(diff_predictions_file: Path, confidence_file: Path) -> List[VerseScore]:
+def project_chrf3(diff_predictions_file: Path, confidence_files: List[Path]) -> List[VerseScore]:
     chrf3_scores, confidence_scores = extract_diff_predictions(diff_predictions_file)
     if len(chrf3_scores) != len(confidence_scores):
         raise ValueError(
@@ -38,13 +36,16 @@ def project_chrf3(diff_predictions_file: Path, confidence_file: Path) -> List[Ve
             f"in {diff_predictions_file} do not match."
         )
     slope, intercept = linregress(confidence_scores, chrf3_scores)[:2]
-    verse_scores = extract_confidences(confidence_file)
-    with open(confidence_file.with_suffix(".projected_chrf3.tsv"), "w", encoding="utf-8") as output_file:
-        output_file.write("VRef\tConfidence\tProjected chrF3\n")
-        for verse_score in verse_scores:
-            projected_chrf3 = slope * verse_score.confidence + intercept
-            verse_score.projected_chrf3 = projected_chrf3
-            output_file.write(f"{verse_score.vref}\t{verse_score.confidence}\t{projected_chrf3:.2f}\n")
+    verse_scores: List[VerseScore] = []
+    for confidence_file in confidence_files:
+        file_scores = extract_confidences(confidence_file)
+        verse_scores += file_scores
+        with open(confidence_file.with_suffix(".projected_chrf3.tsv"), "w", encoding="utf-8") as output_file:
+            output_file.write("VRef\tConfidence\tProjected chrF3\n")
+            for verse_score in verse_scores:
+                projected_chrf3 = slope * verse_score.confidence + intercept
+                verse_score.projected_chrf3 = projected_chrf3
+                output_file.write(f"{verse_score.vref}\t{verse_score.confidence}\t{projected_chrf3:.2f}\n")
     return verse_scores
 
 
@@ -194,27 +195,31 @@ def calculate_usable_prob(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Estimate the quality of drafts created by an NMT model.")
-    parser.add_argument("experiment", help="Experiment name")
     parser.add_argument(
-        "diff_predictions_file_name", help="The diff predictions file name to determine line of best fit."
+        "diff_predictions", help="The diff predictions path relative to MT/experiments to determine line of best fit."
     )
     parser.add_argument(
         "confidence_files",
         nargs="*",
-        help="Relative paths for the confidence files to process (relative to experiment folder or --dir if specified) "
-        + "e.g. 'infer/5000/source/631JHN.SFM.confidences.tsv' or '631JHN.SFM.confidences.tsv --dir infer/5000/source'",
+        help="Relative paths for the confidence files to process (relative to MT/experiments or --confidence-dir "
+        + "if specified) e.g. 'project_folder/exp_folder/infer/5000/source/631JN.SFM.confidences.tsv' or "
+        + "'631JN.SFM.confidences.tsv --confidence-dir project_folder/exp_folder/infer/5000/source'.",
     )
     parser.add_argument(
         "--confidence-dir",
         type=Path,
-        help="Folder (relative to experiment folder) containing confidence files e.g. 'infer/5000/source/'",
+        default=None,
+        help="Folder (relative to experiment MT/experiments) containing confidence files e.g. 'infer/5000/source/'.",
     )
     parser.add_argument(
         "--books",
         nargs="+",
         metavar="book_ids",
         help="Provide book ids (e.g. 1JN LUK) to select confidence files rather than providing file paths with "
-        + "the confidence_files positional argument",
+        + "the confidence_files positional argument.",
+    )
+    parser.add_argument(
+        "--draft-index", type=int, default=None, help="If using --books with multiple drafts, specify the draft index."
     )
     args = parser.parse_args()
 
@@ -228,25 +233,30 @@ def main() -> None:
             "You must specify either confidence_files or --books to indicate which confidence files to use."
         )
 
-    exp_dir = Path(get_mt_exp_dir(args.experiment))
-    if bool(args.confidence_dir):
-        confidence_dir = exp_dir / args.confidence_dir
-    else:
-        confidence_dir = exp_dir
+    confidence_dir = get_mt_exp_dir(args.confidence_dir or Path())
 
     if using_files:
         if len(args.confidence_files) == 0:
             raise ValueError("Please provide at least one confidence file for the confidence_files argument.")
-        confidence_files = [confidence_dir / confidence_file for confidence_file in args.confidence_files]
+        confidence_files = [
+            confidence_dir / confidence_file if confidence_dir else confidence_file
+            for confidence_file in args.confidence_files
+        ]
 
     elif using_books:
         if len(args.books) == 0:
             raise ValueError("Please provide at least one book for the --books argument.")
+        if args.draft_index is not None:
+            if not isinstance(args.draft_index, int) or args.draft_index < 0:
+                raise ValueError("Draft index must be a non-negative integer.")
+            draft_suffix = "." + str(args.draft_index)
+        else:
+            draft_suffix = ""
         confidence_files = []
         for book_id in args.books:
-            confidence_files.extend(confidence_dir.glob(f"[0-9]*{book_id}.*.confidences.tsv"))
+            confidence_files.extend(confidence_dir.glob(f"[0-9]*{book_id}{draft_suffix}.*.confidences.tsv"))
 
-    estimate_quality(exp_dir / args.diff_predictions_file_name, confidence_files)
+    estimate_quality(get_mt_exp_dir(args.diff_predictions), confidence_files)
 
 
 if __name__ == "__main__":
