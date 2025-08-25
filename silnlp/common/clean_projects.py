@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+from ast import Raise
 import concurrent.futures
 import fnmatch
 import logging
@@ -9,11 +10,13 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+# from silnlp.common.environment import SIL_NLP_ENV
 from machine.corpora import FileParatextProjectSettingsParser, ParatextProjectSettings
 from tqdm import tqdm
 
 # --- Global Constants ---
-PROJECTS_FOLDER_DEFAULT = "M:/Paratext/projects"
+
+# PROJECTS_FOLDER_DEFAULT = SIL_NLP_ENV.pt_projects_dir
 logger = logging.getLogger(__name__)
 SETTINGS_FILENAME = "Settings.xml"
 
@@ -332,8 +335,7 @@ def main():
     parser.add_argument(
         "folders",
         nargs="*",
-        help="One or more Paratext project root directories to clean. If not specified, \
-            uses SIL_NLP_ENV.pt_projects_dir.",
+        help="One or more Paratext project root directories to clean.",
     )
     parser.add_argument(
         "--dry-run",
@@ -351,17 +353,10 @@ def main():
     parser.add_argument("--log-file", help="Path to a file to log actions and verbose information.")
     args = parser.parse_args()
 
-    # --- Import environment if needed ---
-    if not args.folders:
-        try:
-            from silnlp.common.environment import SIL_NLP_ENV
-
-            projects_root_path = [Path(SIL_NLP_ENV.pt_projects_dir)]
-        except ImportError as e:
-            print(f"Could not import SIL_NLP_ENV from environment.py. {e}")
-            sys.exit(1)
-    else:
+    if args.folders:
         projects_root_paths = [Path(folder) for folder in args.folders]
+    else:
+        raise ValueError("At least one project folder must be specified as an argument.")
 
     # --- Configure Logging ---
     log_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
@@ -468,9 +463,6 @@ def main():
             return
 
         processed_project_data: [list[tuple[str, list[str], list[str], Path]]] = []
-
-        # Concurrently process each project folder for cleaning
-        # Re-use max_workers from the previous section, or define a new one if desired.
 
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
