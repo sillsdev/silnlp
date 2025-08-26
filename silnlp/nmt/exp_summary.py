@@ -303,7 +303,13 @@ def main() -> None:
             if baseline_diff_pred:
                 baseline_data[lang_pair] = extract_data(baseline_diff_pred[0])
             else:
-                print(f"Baseline experiment has no diff_predictions file in {baseline_path}")
+                print(f"Checking experiments under {baseline_path}...")
+                sub_baseline_path = os.path.join(baseline_path, "+".join(trained_books))
+                baseline_diff_pred = glob.glob(os.path.join(sub_baseline_path, "diff_predictions*"))
+                if baseline_diff_pred:
+                    baseline_data[lang_pair] = extract_data(baseline_diff_pred[0])
+                else:
+                    print(f"Baseline experiment has no diff_predictions file in {sub_baseline_path}")
 
     print("Writing data...")
     rows = flatten_dict(data, chapters, baseline=baseline_data)
