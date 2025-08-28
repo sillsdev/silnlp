@@ -115,6 +115,7 @@ class TranslationTask:
                     trg_project,
                     postprocess_handler,
                     experiment_ckpt_str,
+                    config.corpus_pairs,
                 )
             except Exception as e:
                 translation_failed.append(book)
@@ -257,6 +258,7 @@ class TranslationTask:
                     save_confidences,
                     postprocess_handler=postprocess_handler,
                     experiment_ckpt_str=experiment_ckpt_str,
+                    training_corpus_pairs=config.corpus_pairs,
                 )
 
     def _init_translation_task(self, experiment_suffix: str) -> Tuple[Translator, Config, str]:
