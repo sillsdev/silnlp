@@ -2,6 +2,7 @@ import argparse
 import glob
 import os
 import re
+from typing import Dict, List, Set, Tuple
 
 import pandas as pd
 from openpyxl import Workbook
@@ -10,18 +11,15 @@ from openpyxl.utils import get_column_letter
 
 from .config import get_mt_exp_dir
 
-chap_num = 0
-
 
 def read_group_results(
     file_path: str,
     target_book: str,
-    all_books: list[str],
-    metrics: list[str],
+    all_books: List[str],
+    metrics: List[str],
     key_word: str,
-) -> tuple[dict[str, dict[int, list[str]]], set[int]]:
-    global chap_num
-
+    chap_num: int,
+) -> Tuple[Dict[str, Dict[int, List[float]]], Set[int], int]:
     data = {}
     chapter_groups = set()
     for lang_pair in os.listdir(file_path):
@@ -38,37 +36,38 @@ def read_group_results(
                 folder_path = os.path.join(file_path, lang_pair, os.path.basename(groups))
                 diff_pred_file = glob.glob(os.path.join(folder_path, "diff_predictions*"))
                 if diff_pred_file:
-                    r = extract_diff_pred_data(diff_pred_file[0], metrics, target_book)
+                    r, chap_num = extract_diff_pred_data(diff_pred_file[0], metrics, target_book, chap_num)
                     data[lang_pair][int(m.group(1))] = r
                 else:
                     data[lang_pair][int(m.group(1))] = {}
                     print(folder_path + " has no diff_predictions file.")
                 chapter_groups.add(int(m.group(1)))
                 chap_num = max(chap_num, int(m.group(1)))
-    return data, chapter_groups
+    return data, chapter_groups, chap_num
 
 
-def extract_diff_pred_data(filename: str, metrics: list[str], target_book: str, header_row=5) -> dict[int, list[str]]:
-    global chap_num
-
+def extract_diff_pred_data(
+    filename: str, metrics: List[str], target_book: str, chap_num: int, header_row=5
+) -> Tuple[Dict[int, List[float]], int]:
     metrics = [m.lower() for m in metrics]
     try:
         df = pd.read_excel(filename, header=header_row)
     except ValueError as e:
         print(f"An error occurs in {filename}")
         print(e)
-        return {}
+        return {}, chap_num
 
     df.columns = [col.strip().lower() for col in df.columns]
 
     result = {}
     metric_warning = False
+    uncalculated_metric = set()
     for _, row in df.iterrows():
         vref = row["vref"]
         m = re.match(r"(\d?[A-Z]{2,3}) (\d+)", str(vref))
         if not m:
             print(f"Invalid VREF format: {str(vref)}")
-            return {}
+            continue
 
         book_name, chap = m.groups()
         if book_name != target_book:
@@ -78,22 +77,21 @@ def extract_diff_pred_data(filename: str, metrics: list[str], target_book: str, 
         values = []
         for metric in metrics:
             if metric in row:
-                values.append(row[metric])
+                values.append(float(row[metric]))
             else:
                 metric_warning = True
+                uncalculated_metric.add(metric)
                 values.append(None)
 
         result[int(chap)] = values
 
     if metric_warning:
-        print("Warning: {metric} was not calculated in {filename}")
+        print(f"Warning: {uncalculated_metric} was not calculated in {filename}")
 
-    return result
+    return result, chap_num
 
 
-def flatten_dict(data: dict, chapter_groups: list[int], metrics: list[str], baseline={}) -> list[str]:
-    global chap_num
-
+def flatten_dict(data: Dict, chapter_groups: List[int], metrics: List[str], chap_num: int, baseline={}) -> List[str]:
     rows = []
     if len(data) > 0:
         for lang_pair in data:
@@ -127,9 +125,9 @@ def flatten_dict(data: dict, chapter_groups: list[int], metrics: list[str], base
     return rows
 
 
-def create_xlsx(rows: list[str], chapter_groups: list[str], output_path: str, metrics: list[str]) -> None:
-    global chap_num
-
+def create_xlsx(
+    rows: List[str], chapter_groups: List[str], output_path: str, metrics: List[str], chap_num: int
+) -> None:
     wb = Workbook()
     ws = wb.active
 
@@ -238,70 +236,70 @@ def create_xlsx(rows: list[str], chapter_groups: list[str], output_path: str, me
 # python -m silnlp.nmt.exp_summary Catapult_Reloaded_Confidences
 # --trained-books MRK --target-book MAT --metrics chrf3 confidence --key-word conf --baseline Catapult_Reloaded/2nd_book/MRK
 def main() -> None:
-    global chap_num
-
     parser = argparse.ArgumentParser(
-        description="Pulling results from a single experiment and/or multiple experiment groups."
-        "A valid experiment should have the following format:"
-        "baseline/lang_pair/exp_group/diff_predictions or baseline/lang_pair/diff_predictions for a single experiment"
+        description="Pulling results from a single experiment and/or multiple experiment groups. "
+        "A valid experiment should have the following format: "
+        "baseline/lang_pair/exp_group/diff_predictions or baseline/lang_pair/diff_predictions for a single experiment "
         "or "
-        "exp/lang_pair/exp_groups/diff_predictions for multiple experiment groups"
-        "More information in --exp and --baseline."
-        "Use --exp for multiple experiment groups and --baseline for a single experiment."
-        "At least one --exp or --baseline needs to be specified."
+        "exp/lang_pair/exp_groups/diff_predictions for multiple experiment groups "
+        "More information in --exp and --baseline. "
+        "Use --exp for multiple experiment groups and --baseline for a single experiment. "
+        "At least one --exp or --baseline needs to be specified. "
     )
     parser.add_argument(
         "--exp",
         type=str,
         help="Experiment folder with progression results. "
-        "A valid experiment groups should have the following format:"
-        "exp/lang_pair/exp_groups/diff_predictions"
-        "where there should be at least one exp_groups that naming in the following format:"
-        "*book*+*book*_*key-word*_order_*number*_ch"
-        "where *book*+*book*... are the combination of all --trained-books with the last one being --target-book."
-        "More information in --key-word.",
+        "A valid experiment groups should have the following format: "
+        "exp/lang_pair/exp_groups/diff_predictions "
+        "where there should be at least one exp_groups that naming in the following format: "
+        "*book*+*book*_*key-word*_order_*number*_ch "
+        "where *book*+*book*... are the combination of all --trained-books with the last one being --target-book. "
+        "More information in --key-word. ",
     )
     parser.add_argument(
-        "--trained-books", nargs="*", required=True, type=str.upper, help="Books that are trained in the exp"
+        "--trained-books", nargs="*", required=True, type=str.upper, help="Books that are trained in the exp "
     )
-    parser.add_argument("--target-book", required=True, type=str.upper, help="Book that is going to be analyzed")
+    parser.add_argument("--target-book", required=True, type=str.upper, help="Book that is going to be analyzed ")
     parser.add_argument(
         "--metrics",
         nargs="*",
         metavar="metrics",
         default=["chrf3", "confidence"],
         type=str.lower,
-        help="Metrics that will be analyzed with",
+        help="Metrics that will be analyzed with ",
     )
     parser.add_argument(
         "--key-word",
         type=str,
         default="conf",
-        help="Key word in the filename for the exp group to distinguish between the experiment purpose."
-        "For example, in LUK+ACT_conf_order_12_ch, the key-word should be conf."
-        "Another example, in LUK+ACT_standard_order_12_ch, the key-word should be standard.",
+        help="Key word in the filename for the exp group to distinguish between the experiment purpose. "
+        "For example, in LUK+ACT_conf_order_12_ch, the key-word should be conf. "
+        "Another example, in LUK+ACT_standard_order_12_ch, the key-word should be standard. ",
     )
     parser.add_argument(
         "--baseline",
         type=str,
-        help="A non-progression folder for a single experiment."
-        "A valid single experiment should have the following format:"
-        "baseline/lang_pair/exp_group/diff_predictions where exp_group will be in the following format:"
-        "*book*+*book*... as the combination of all --trained-books."
-        "or"
+        help="A non-progression folder for a single experiment. "
+        "A valid single experiment should have the following format: "
+        "baseline/lang_pair/exp_group/diff_predictions where exp_group will be in the following format: "
+        "*book*+*book*... as the combination of all --trained-books. "
+        "or "
         "baseline/lang_pair/diff_predictions "
-        "where the information of --trained-books should have already been indicated in the baseline name.",
+        "where the information of --trained-books should have already been indicated in the baseline name. ",
     )
     args = parser.parse_args()
 
     if not (args.exp or args.baseline):
-        parser.error("At least one --exp or --baseline needs to be specified.")
+        parser.error("At least one --exp or --baseline needs to be specified. ")
 
     trained_books = args.trained_books
     target_book = args.target_book
     all_books = trained_books + [target_book]
     metrics = args.metrics
     key_word = args.key_word
+
+    chap_num = 0
 
     multi_group_exp_name = args.exp
     multi_group_exp_dir = get_mt_exp_dir(multi_group_exp_name) if multi_group_exp_name else None
@@ -317,7 +315,9 @@ def main() -> None:
     data = {}
     chapter_groups = set()
     if multi_group_exp_dir:
-        data, chapter_groups = read_group_results(multi_group_exp_dir, target_book, all_books, metrics, key_word)
+        data, chapter_groups, chap_num = read_group_results(
+            multi_group_exp_dir, target_book, all_books, metrics, key_word, chap_num
+        )
         chapter_groups = sorted(chapter_groups)
 
     baseline_data = {}
@@ -330,19 +330,23 @@ def main() -> None:
             baseline_path = os.path.join(single_group_exp_dir, lang_pair)
             baseline_diff_pred = glob.glob(os.path.join(baseline_path, "diff_predictions*"))
             if baseline_diff_pred:
-                baseline_data[lang_pair] = extract_diff_pred_data(baseline_diff_pred[0], metrics, target_book)
+                baseline_data[lang_pair], chap_num = extract_diff_pred_data(
+                    baseline_diff_pred[0], metrics, target_book, chap_num
+                )
             else:
                 print(f"Checking experiments under {baseline_path}...")
                 sub_baseline_path = os.path.join(baseline_path, "+".join(trained_books))
                 baseline_diff_pred = glob.glob(os.path.join(sub_baseline_path, "diff_predictions*"))
                 if baseline_diff_pred:
-                    baseline_data[lang_pair] = extract_diff_pred_data(baseline_diff_pred[0], metrics, target_book)
+                    baseline_data[lang_pair], chap_num = extract_diff_pred_data(
+                        baseline_diff_pred[0], metrics, target_book, chap_num
+                    )
                 else:
                     print(f"Baseline experiment has no diff_predictions file in {sub_baseline_path}")
 
     print("Writing data...")
-    rows = flatten_dict(data, chapter_groups, metrics, baseline=baseline_data)
-    create_xlsx(rows, chapter_groups, output_path, metrics)
+    rows = flatten_dict(data, chapter_groups, metrics, chap_num, baseline=baseline_data)
+    create_xlsx(rows, chapter_groups, output_path, metrics, chap_num)
     print(f"Result is in {output_path}")
 
 
