@@ -2,7 +2,7 @@ import argparse
 import logging
 import re
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import yaml
 from attr import dataclass
@@ -69,7 +69,7 @@ def get_sentences(
 class DraftMetadata:
     source_path: Path
     draft_path: Path
-    postprocess_config: PostprocessConfig
+    source_project: str
 
 
 # Get the paths of all drafts that would be produced by an experiment's translate config and that exist
@@ -89,9 +89,6 @@ def get_draft_paths_from_exp(config: Config) -> List[DraftMetadata]:
         else:
             step_str = str(ckpt)
 
-        # Backwards compatibility
-        postprocess_config = PostprocessConfig(translate_request)
-
         book_nums = get_chapters(translate_request.get("books", [])).keys()
         for book_num in book_nums:
             book = book_number_to_id(book_num)
@@ -102,11 +99,7 @@ def get_draft_paths_from_exp(config: Config) -> List[DraftMetadata]:
             )
             if draft_path.exists():
                 draft_metadata_list.append(
-                    DraftMetadata(
-                        source_path=src_path,
-                        draft_path=draft_path,
-                        postprocess_config=postprocess_config,
-                    )
+                    DraftMetadata(source_path=src_path, draft_path=draft_path, source_project=src_project)
                 )
             elif draft_path.with_suffix(f".{1}{draft_path.suffix}").exists():  # multiple drafts
                 for i in range(1, config.infer.get("num_drafts", 1) + 1):
@@ -114,7 +107,7 @@ def get_draft_paths_from_exp(config: Config) -> List[DraftMetadata]:
                         DraftMetadata(
                             source_path=src_path,
                             draft_path=draft_path.with_suffix(f".{i}{draft_path.suffix}"),
-                            postprocess_config=postprocess_config,
+                            source_project=src_project,
                         )
                     )
             else:
@@ -124,33 +117,34 @@ def get_draft_paths_from_exp(config: Config) -> List[DraftMetadata]:
 
 
 def postprocess_draft(
-    src_path: Path,
-    draft_path: Path,
+    draft_metadata: DraftMetadata,
     postprocess_handler: PostprocessHandler,
     book: Optional[str] = None,
     out_dir: Optional[Path] = None,
     training_corpus_pairs: List[CorpusPair] = [],
 ) -> None:
-    if str(src_path).startswith(str(get_project_dir(""))):
-        settings = FileParatextProjectSettingsParser(src_path.parent).parse()
+    if str(draft_metadata.source_path).startswith(str(get_project_dir(""))):
+        settings = FileParatextProjectSettingsParser(draft_metadata.source_path.parent).parse()
         stylesheet = settings.stylesheet
         encoding = settings.encoding
-        book = settings.get_book_id(src_path.name)
+        book = settings.get_book_id(draft_metadata.source_path.name)
     else:
         stylesheet = UsfmStylesheet("usfm.sty")
         encoding = "utf-8-sig"
 
-    src_sentences = get_sentences(src_path, stylesheet, encoding, book)
-    draft_sentences = get_sentences(draft_path, stylesheet, encoding, book)
+    src_sentences = get_sentences(draft_metadata.source_path, stylesheet, encoding, book)
+    draft_sentences = get_sentences(draft_metadata.draft_path, stylesheet, encoding, book)
 
     # Verify reference parity
     if len(src_sentences.sentences) != len(draft_sentences.sentences):
-        LOGGER.warning(f"Can't process {src_path} and {draft_path}: Unequal number of verses/references")
+        LOGGER.warning(
+            f"Can't process {draft_metadata.source_path} and {draft_path}: Unequal number of verses/references"
+        )
         return
     for src_sentence, draft_sentence in zip(src_sentences.sentences, draft_sentences.sentences):
         if src_sentence.ref.to_relaxed() != draft_sentence.ref.to_relaxed():
             LOGGER.warning(
-                f"Can't process {src_path} and {draft_path}: Mismatched ref, {src_ref} != {draft_ref}. Files must have the exact same USFM structure"
+                f"Can't process {draft_metadata.source_path} and {draft_path}: Mismatched ref, {src_ref} != {draft_ref}. Files must have the exact same USFM structure"
             )
             return
 
@@ -161,7 +155,7 @@ def postprocess_draft(
             [s.text for s in draft_sentences.sentences],
         )
 
-    with src_path.open(encoding=encoding) as f:
+    with draft_metadata.source_path.open(encoding=encoding) as f:
         source_usfm = f.read()
 
     for config in postprocess_handler.configs:
@@ -171,21 +165,25 @@ def postprocess_draft(
                 source_usfm, config.rows, draft_sentences.remarks
             )
         else:
-            with draft_path.open(encoding=encoding) as f:
+            with draft_metadata.draft_path.open(encoding=encoding) as f:
                 target_usfm = f.read()
 
         if config.is_quotation_mark_denormalization_required():
             try:
                 quotation_denormalization_postprocessor = config.create_denormalize_quotation_marks_postprocessor(
-                    training_corpus_pairs
+                    training_corpus_pairs,
+                    draft_metadata.source_project,
                 )
                 target_usfm = quotation_denormalization_postprocessor.postprocess_usfm(target_usfm)
             except (UnknownQuoteConventionException, NoDetectedQuoteConventionException) as e:
                 raise e
 
         if not out_dir:
-            out_dir = draft_path.parent
-        out_path = out_dir / f"{draft_path.stem}{config.get_postprocess_suffix()}{draft_path.suffix}"
+            out_dir = draft_metadata.draft_path.parent
+        out_path = (
+            out_dir
+            / f"{draft_metadata.draft_path.stem}{config.get_postprocess_suffix()}{draft_metadata.draft_path.suffix}"
+        )
         with out_path.open(
             "w", encoding="utf-8" if encoding == "utf-8-sig" or encoding == "utf_8_sig" else encoding
         ) as f:
@@ -203,17 +201,8 @@ def postprocess_experiment(config: Config, out_dir: Optional[Path] = None) -> No
     for draft_metadata in draft_metadata_list:
         if postprocess_configs:
             postprocess_draft(
-                draft_metadata.source_path,
-                draft_metadata.draft_path,
+                draft_metadata,
                 postprocess_handler,
-                out_dir=out_dir,
-                training_corpus_pairs=config.corpus_pairs,
-            )
-        elif not draft_metadata.postprocess_config.is_base_config():
-            postprocess_draft(
-                draft_metadata.source_path,
-                draft_metadata.draft_path,
-                PostprocessHandler([draft_metadata.postprocess_config], False),
                 out_dir=out_dir,
                 training_corpus_pairs=config.corpus_pairs,
             )

@@ -260,6 +260,11 @@ class TranslationTask:
                     postprocess_handler=postprocess_handler,
                     experiment_ckpt_str=experiment_ckpt_str,
                     training_corpus_pairs=config.corpus_pairs,
+                    src_project=(
+                        config.corpus_pairs[0].src_files[0].project
+                        if config.corpus_pairs and config.corpus_pairs[0].src_files
+                        else None
+                    ),
                 )
 
     def _init_translation_task(self, experiment_suffix: str) -> Tuple[Translator, Config, str]:

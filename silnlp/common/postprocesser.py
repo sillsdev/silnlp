@@ -24,7 +24,6 @@ from machine.punctuation_analysis import (
     QuoteConventionAnalysis,
     QuoteConventionDetector,
 )
-from machine.scripture import get_chapters
 from machine.tokenization import LatinWordTokenizer
 from machine.translation import WordAlignmentMatrix
 
@@ -327,13 +326,11 @@ class PostprocessConfig:
         )
 
     def create_denormalize_quotation_marks_postprocessor(
-        self,
-        training_corpus_pairs: List[CorpusPair],
+        self, training_corpus_pairs: List[CorpusPair], translation_source_project_name: Optional[str]
     ) -> DenormalizeQuotationMarksPostprocessor:
         _, training_target_project_name, selected_training_books = self._get_experiment_training_info(
             training_corpus_pairs,
         )
-        translation_source_project_name = self._config.get("src_project")
 
         return DenormalizeQuotationMarksPostprocessor(
             self._config["source_quote_convention"],

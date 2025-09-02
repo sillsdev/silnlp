@@ -95,9 +95,8 @@ class SILExperiment:
                 name=self.name, checkpoint=translate_config.get("checkpoint", "last"), commit=self.commit
             )
 
-            # Backwards compatibility
             if not postprocess_configs:
-                postprocess_handler = PostprocessHandler([PostprocessConfig(translate_config)])
+                postprocess_handler = PostprocessHandler([])
 
             if len(translate_config.get("books", [])) > 0:
                 if isinstance(translate_config["books"], list):

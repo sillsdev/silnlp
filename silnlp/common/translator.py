@@ -218,6 +218,7 @@ class Translator(ABC):
             postprocess_handler,
             experiment_ckpt_str,
             training_corpus_pairs,
+            src_project,
         )
 
     def translate_usfm(
@@ -233,6 +234,7 @@ class Translator(ABC):
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
         experiment_ckpt_str: str = "",
         training_corpus_pairs: List[CorpusPair] = [],
+        src_project: Optional[str] = None,
     ) -> None:
         # Create UsfmFileText object for source
         src_from_project = False
@@ -365,7 +367,7 @@ class Translator(ABC):
                 if config.is_quotation_mark_denormalization_required():
                     try:
                         quotation_denormalization_postprocessor = (
-                            config.create_denormalize_quotation_marks_postprocessor(training_corpus_pairs)
+                            config.create_denormalize_quotation_marks_postprocessor(training_corpus_pairs, src_project)
                         )
                         usfm_out = quotation_denormalization_postprocessor.postprocess_usfm(usfm_out)
                     except (UnknownQuoteConventionException, NoDetectedQuoteConventionException) as e:
@@ -375,8 +377,16 @@ class Translator(ABC):
                 trg_draft_file_path = trg_file_path.with_stem(trg_file_path.stem + config.get_postprocess_suffix())
                 if produce_multiple_translations:
                     trg_draft_file_path = trg_draft_file_path.with_suffix(f".{draft_index}{trg_file_path.suffix}")
+
                 with trg_draft_file_path.open(
-                    "w", encoding=src_settings.encoding if src_from_project else "utf-8"
+                    "w",
+                    encoding=(
+                        "utf-8"
+                        if not src_from_project
+                        or src_from_project
+                        and (src_settings.encoding == "utf-8-sig" or src_settings.encoding == "utf_8_sig")
+                        else src_settings.encoding
+                    ),
                 ) as f:
                     f.write(usfm_out)
 
