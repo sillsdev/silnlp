@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional, Tuple, Union
 
+from flake8 import LOG
 from machine.scripture import VerseRef, book_number_to_id, get_chapters
 
 from ..common.environment import SIL_NLP_ENV
@@ -376,6 +377,24 @@ def main() -> None:
         default=False,
         action="store_true",
         help="For files in USFM format, attempt to place paragraph markers in translated verses based on the source project's markers",
+    )
+    parser.add_argument(
+        "--denormalize-quotation-marks",
+        default=False,
+        action="store_true",
+        help="For files in USFM format, attempt to change the draft's quotation marks to match the target project's quote convention",
+    )
+    parser.add_argument(
+        "--source-quote-convention",
+        default="detect",
+        type=str,
+        help="The quote convention for the source project. If not specified, it will be detected automatically.",
+    )
+    parser.add_argument(
+        "--target-quote-convention",
+        default="detect",
+        type=str,
+        help="The quote convention for the target project. If not specified, it will be detected automatically.",
     )
     parser.add_argument(
         "--clearml-queue",

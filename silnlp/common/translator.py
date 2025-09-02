@@ -6,7 +6,6 @@ from datetime import date
 from itertools import groupby
 from math import exp
 from pathlib import Path
-from pydoc import text
 from typing import DefaultDict, Iterable, List, Optional
 
 import docx
@@ -297,7 +296,8 @@ class Translator(ABC):
 
         draft_set: DraftGroup = DraftGroup(translations)
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
-            postprocess_handler.construct_rows(vrefs, sentences, translated_draft)
+            if any([config.is_marker_placement_required() for config in postprocess_handler.configs]):
+                postprocess_handler.construct_rows(vrefs, sentences, translated_draft)
 
             for config in postprocess_handler.configs:
 
@@ -313,12 +313,25 @@ class Translator(ABC):
                 if trg_project is not None or src_from_project:
                     project_dir = get_project_dir(trg_project if trg_project is not None else src_file_path.parent.name)
                     dest_updater = FileParatextProjectTextUpdater(project_dir)
-                    usfm_out = dest_updater.update_usfm(
-                        book_id=src_file_text.id,
-                        rows=config.rows,
-                        text_behavior=text_behavior,
-                        remarks=remarks,
-                    )
+                    if config.is_marker_placement_required():
+                        place_markers_postprocessor = config.create_place_markers_postprocessor()
+                        usfm_out = dest_updater.update_usfm(
+                            book_id=src_file_text.id,
+                            rows=config.rows,
+                            text_behavior=text_behavior,
+                            paragraph_behavior=config.get_paragraph_behavior(),
+                            embed_behavior=config.get_embed_behavior(),
+                            style_behavior=config.get_style_behavior(),
+                            update_block_handlers=place_markers_postprocessor.get_update_block_handlers(),
+                            remarks=remarks,
+                        )
+                    else:
+                        usfm_out = dest_updater.update_usfm(
+                            book_id=src_file_text.id,
+                            rows=config.rows,
+                            text_behavior=text_behavior,
+                            remarks=remarks,
+                        )
 
                     if usfm_out is None:
                         raise FileNotFoundError(
@@ -327,19 +340,27 @@ class Translator(ABC):
                 else:  # Slightly more manual version for updating an individual file
                     with open(src_file_path, encoding="utf-8-sig") as f:
                         usfm = f.read()
-                    handler = UpdateUsfmParserHandler(
-                        rows=config.rows,
-                        id_text=vrefs[0].book,
-                        text_behavior=text_behavior,
-                        remarks=remarks,
-                    )
+                    if config.is_marker_placement_required():
+                        place_markers_postprocessor = config.create_place_markers_postprocessor()
+                        handler = UpdateUsfmParserHandler(
+                            rows=config.rows,
+                            id_text=vrefs[0].book,
+                            text_behavior=text_behavior,
+                            paragraph_behavior=config.get_paragraph_behavior(),
+                            embed_behavior=config.get_embed_behavior(),
+                            style_behavior=config.get_style_behavior(),
+                            update_block_handlers=place_markers_postprocessor.get_update_block_handlers(),
+                            remarks=remarks,
+                        )
+                    else:
+                        handler = UpdateUsfmParserHandler(
+                            rows=config.rows,
+                            id_text=vrefs[0].book,
+                            text_behavior=text_behavior,
+                            remarks=remarks,
+                        )
                     parse_usfm(usfm, handler)
                     usfm_out = handler.get_usfm()
-
-                # Post-process the USFM output
-                if config.is_marker_placement_required():
-                    place_markers_postprocessor = config.create_place_markers_postprocessor()
-                    usfm_out = place_markers_postprocessor.postprocess_usfm(usfm_out, config.rows)
 
                 if config.is_quotation_mark_denormalization_required():
                     try:

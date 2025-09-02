@@ -1,7 +1,7 @@
 import logging
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from machine.corpora import (
     PlaceMarkersAlignmentInfo,
@@ -42,8 +42,8 @@ POSTPROCESS_DEFAULTS = {
     "include_style_markers": False,
     "include_embeds": False,
     "denormalize_quotation_marks": False,
-    "source_quote_convention": "standard_english",
-    "target_quote_convention": "standard_english",
+    "source_quote_convention": "detect",
+    "target_quote_convention": "detect",
 }
 POSTPROCESS_SUFFIX_CHARS = {
     "paragraph_behavior": {"place": "p", "strip": "x"},
@@ -69,6 +69,9 @@ class PlaceMarkersPostprocessor:
         self._embed_behavior = embed_behavior
         self._style_behavior = style_behavior
         self._update_block_handlers = [PlaceMarkersUsfmUpdateBlockHandler()]
+
+    def get_update_block_handlers(self) -> Sequence[UsfmUpdateBlockHandler]:
+        return self._update_block_handlers
 
     def _create_remark(self) -> str:
         behavior_map: Dict[UpdateUsfmMarkerBehavior, List[str]] = {
@@ -157,7 +160,7 @@ class DenormalizeQuotationMarksPostprocessor:
         if convention_name is None or convention_name == "detect":
             if project_name is None:
                 raise ValueError(
-                    "The experiment's translate_config.yml must exist and specify a source project name, since an explicit source quote convention name was not provided."
+                    "The source project name must be explicitly provided or be present in translate_config.yml, since an explicit source quote convention name was not provided."
                 )
             if selected_training_books is None:
                 raise ValueError(
@@ -258,6 +261,9 @@ class PostprocessConfig:
             self._config["include_style_markers"] = True
         if config.get("include_inline_elements"):
             self._config["include_embeds"] = True
+
+        if config.get("src_project"):
+            self._config["src_project"] = config.get("src_project")
 
         self.update_block_handlers: List[UsfmUpdateBlockHandler] = []
         self.rows: List[UpdateUsfmRow] = []
