@@ -76,14 +76,12 @@ Create file for environment variables
    If you do not intend to use SILNLP with ClearML, MinIO, and/or B2, you can exclude the --device, --cap-add, and --security-opt flags.
 
    You will need to replace the placehoders "path/to/env-vars-file" and "path/to/docker-apparmor" with the respective real paths.
-   
-   The env-vars-file is the file you created at the beginning of the Environment Setup section.
-
-   The docker-apparmor file is in the silnlp repo. You do not need to clone the entire repo, just download the docker-apparmor file.
+   * The env-vars-file is the file you created at the beginning of the Environment Setup section.
+   * The docker-apparmor file is in the silnlp repo. You do not need to clone the entire repo, just download the docker-apparmor file.
    
    A docker container should be created. You should be able to see a container named 'silnlp' on the Containers page of Docker Desktop.
 
-5. Start container
+6. Start container
    
    In a terminal, run:
    ```
@@ -94,7 +92,7 @@ Create file for environment variables
    * After this step, the terminal should change to say `root@xxxxx:~/silnlp#`, where `xxxxx` is a string of letters and numbers, instead of your current working directory. This is the command line for the docker container, and you're able to run SILNLP scripts from here.
    * To leave the container, run `exit`, and to stop it, run `docker stop silnlp`. It can be started again by repeating step 6. Stopping the container will not erase any changes made in the container environment, but removing  it will.
 
-6. (Optional) Mount the rclone bucket
+7. (Optional) Mount the rclone bucket
 
    While in the /root/silnlp directory (the default on startup), run the following command:
 
