@@ -840,6 +840,8 @@ class HuggingFaceNMTModel(NMTModel):
         self._dictionary: Optional[Dict[VerseRef, Set[str]]] = None
         self._is_t5 = self._config.model_prefix in SUPPORTED_T5_MODELS
         self._num_devices = num_devices
+        self._cached_model: Optional[PreTrainedModel] = None
+        self._cached_translate_params: Optional[Tuple[Union[CheckpointType, str, int], str, str]] = None
 
     def train(self) -> None:
         training_args = self._create_training_arguments()
@@ -1218,7 +1220,11 @@ class HuggingFaceNMTModel(NMTModel):
         src_lang = self._config.data["lang_codes"].get(src_iso, src_iso)
         trg_lang = self._config.data["lang_codes"].get(trg_iso, trg_iso)
         tokenizer = self._config.get_tokenizer()
-        model = self._create_inference_model(ckpt, tokenizer, src_lang, trg_lang)
+        if self._cached_translate_params == (ckpt, src_lang, trg_lang) and self._cached_model is not None:
+            model = self._cached_model
+        else:
+            model = self._cached_model = self._create_inference_model(ckpt, tokenizer, src_lang, trg_lang)
+            self._cached_translate_params = (ckpt, src_lang, trg_lang)
         if model.config.max_length is not None and model.config.max_length < 512:
             model.config.max_length = 512
 
