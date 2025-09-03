@@ -190,13 +190,17 @@ def postprocess_draft(
             f.write(target_usfm)
 
 
-def postprocess_experiment(config: Config, out_dir: Optional[Path] = None) -> None:
+def postprocess_experiment(
+    config: Config, postprocess_handler: Optional[PostprocessHandler] = None, out_dir: Optional[Path] = None
+) -> None:
     draft_metadata_list = get_draft_paths_from_exp(config)
+
     with (config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as file:
         translate_config = yaml.safe_load(file)
         postprocess_configs = [PostprocessConfig(pc) for pc in translate_config.get("postprocess", [])]
 
-    postprocess_handler = PostprocessHandler(postprocess_configs, include_base=False)
+    if postprocess_handler is None:
+        postprocess_handler = PostprocessHandler(postprocess_configs, include_base=False)
 
     for draft_metadata in draft_metadata_list:
         if postprocess_configs:

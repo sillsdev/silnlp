@@ -5,7 +5,6 @@ from pathlib import Path
 from ..nmt.clearml_connection import SILClearML
 from ..nmt.config_utils import load_config
 from ..nmt.postprocess import get_draft_paths_from_exp, postprocess_draft, postprocess_experiment
-from .paratext import get_project_dir
 from .postprocesser import PostprocessConfig, PostprocessHandler
 from .utils import get_mt_exp_dir
 
@@ -19,27 +18,10 @@ def main() -> None:
     )
     parser.add_argument(
         "--experiment",
+        required=True,
         default=None,
         help="Name of an experiment directory in MT/experiments. \
         If this option is used, the experiment's translate config will be used to find source and draft files.",
-    )
-    parser.add_argument(
-        "--source",
-        default=None,
-        help="Path of the source USFM file. \
-        If in a Paratext project, the project settings will be used when reading the files.",
-    )
-    parser.add_argument(
-        "--draft",
-        default=None,
-        help="Path of the draft USFM file that postprocessing will be applied to. \
-        Must have the exact same USFM structure as 'source', which it will if it is a draft from that source.",
-    )
-    parser.add_argument(
-        "--book",
-        default=None,
-        help="3-letter book id of book being evaluated, e.g. MAT. \
-        Only necessary if the source file is not in a Paratext project directory.",
     )
     parser.add_argument(
         "--output-folder",
@@ -64,6 +46,30 @@ def main() -> None:
         help="Carry over embeds from the source project to the output without translating them",
     )
     parser.add_argument(
+        "--denormalize-quotation-marks",
+        default=False,
+        action="store_true",
+        help="For files in USFM format, attempt to change the draft's quotation marks to match the target project's quote convention",
+    )
+    parser.add_argument(
+        "--source-quote-convention",
+        default="detect",
+        type=str,
+        help="The quote convention for the source project. If not specified, it will be detected automatically.",
+    )
+    parser.add_argument(
+        "--target-quote-convention",
+        default="detect",
+        type=str,
+        help="The quote convention for the target project. If not specified, it will be detected automatically.",
+    )
+    parser.add_argument(
+        "--source-project",
+        default="",
+        help="The name of the Paratext project used as the source. When the source quote convention is set to 'detect' or not specified,"
+        + " this project will be used to detect the source quote convention.",
+    )
+    parser.add_argument(
         "--clearml-queue",
         default=None,
         type=str,
@@ -72,52 +78,30 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    experiment = args.experiment.replace("\\", "/") if args.experiment else None
+    experiment = args.experiment.replace("\\", "/")
     args.output_folder = Path(args.output_folder.replace("\\", "/")) if args.output_folder else None
     postprocess_config = PostprocessConfig(vars(args))
 
-    if args.experiment and (args.source or args.draft or args.book):
-        LOGGER.info("--experiment option used. --source, --draft, and --book will be ignored.")
-    if not (args.experiment or (args.source and args.draft)):
-        raise ValueError("Not enough options used. Please use --experiment OR --source and --draft.")
+    if not get_mt_exp_dir(experiment).exists():
+        raise ValueError(f"Experiment {experiment} not found.")
 
-    if experiment:
-        if not get_mt_exp_dir(experiment).exists():
-            raise ValueError(f"Experiment {experiment} not found.")
-
-        if args.clearml_queue is not None:
-            if "cpu" not in args.clearml_queue:
-                raise ValueError("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
-            clearml = SILClearML(experiment, args.clearml_queue)
-            config = clearml.config
-        else:
-            config = load_config(experiment)
-
-        if not (config.exp_dir / "translate_config.yml").exists():
-            raise ValueError("Experiment translate_config.yml not found.")
-
-        if not postprocess_config.is_base_config():
-            src_paths, draft_paths, _ = get_draft_paths_from_exp(config)
-        else:
-            LOGGER.info("No postprocessing options used. Applying postprocessing requests from translate config.")
-            postprocess_experiment(config, args.output_folder)
-            exit()
-    elif args.clearml_queue is not None:
-        raise ValueError("Must use --experiment option to use ClearML.")
+    if args.clearml_queue is not None:
+        if "cpu" not in args.clearml_queue:
+            raise ValueError("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
+        clearml = SILClearML(experiment, args.clearml_queue)
+        config = clearml.config
     else:
-        src_paths = [Path(args.source.replace("\\", "/"))]
-        draft_paths = [Path(args.draft.replace("\\", "/"))]
-        if not str(src_paths[0]).startswith(str(get_project_dir(""))) and args.book is None:
-            raise ValueError(
-                "--book argument must be passed if the source file is not in a Paratext project directory."
-            )
+        config = load_config(experiment)
+
+    if not (config.exp_dir / "translate_config.yml").exists():
+        raise ValueError("Experiment translate_config.yml not found.")
 
     if postprocess_config.is_base_config():
-        raise ValueError("Please use at least one postprocessing option.")
-    postprocess_handler = PostprocessHandler([postprocess_config], include_base=False)
-
-    for src_path, draft_path in zip(src_paths, draft_paths):
-        postprocess_draft(src_path, draft_path, postprocess_handler, args.book, args.output_folder)
+        LOGGER.info("No postprocessing options used. Applying postprocessing requests from translate config.")
+        postprocess_experiment(config, out_dir=args.output_folder)
+    else:
+        postprocess_handler = PostprocessHandler([postprocess_config], include_base=False)
+        postprocess_experiment(config, postprocess_handler=postprocess_handler, out_dir=args.output_folder)
 
 
 if __name__ == "__main__":
