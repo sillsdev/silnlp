@@ -74,8 +74,12 @@ Create file for environment variables
    docker create -it --name silnlp --device /dev/fuse --cap-add SYS_ADMIN --env-file path/to/env-vars-file --security-opt apparmor=path/to/docker-apparmor ghcr.io/sillsdev/silnlp:latest
    ```
    If you do not intend to use SILNLP with ClearML, MinIO, and/or B2, you can exclude the --device, --cap-add, and --security-opt flags.
+
+   You will need to replace the placehoders "path/to/env-vars-file" and "path/to/docker-apparmor" with the respective real paths.
    
-   The docker-apparmor file is in the silnlp repo. You do not need to clone the entire repo, just download the docker-apparmor file. 
+   The env-vars-file is the file you created at the beginning of the Environment Setup section.
+
+   The docker-apparmor file is in the silnlp repo. You do not need to clone the entire repo, just download the docker-apparmor file.
    
    A docker container should be created. You should be able to see a container named 'silnlp' on the Containers page of Docker Desktop.
 
