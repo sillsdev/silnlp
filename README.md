@@ -96,11 +96,11 @@ Create file for environment variables
 
    While in the /root/silnlp directory (the default on startup), run the following command:
 
-   If you are using rclone to mount MinIO:
+   If you are using rclone to mount MinIO (This is the default option):
    ```
       ./rclone_setup.sh minio
    ```
-   If you are using rclone to mount Backblaze:
+   If you are using rclone to mount Backblaze (Only used as a backup option):
    ```
       ./rclone_setup.sh backblaze
    ```
