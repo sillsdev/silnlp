@@ -1701,7 +1701,7 @@ class HuggingFaceNMTModel(NMTModel):
             checkpoint_path, _ = self.get_checkpoint_path(ckpt)
             model_name = str(checkpoint_path)
         else:
-            LOGGER.warn("Model has no checkpoints. Using base model.")
+            LOGGER.warning("Model has no checkpoints. Using base model.")
             model_name = self._config.model
 
         dtype = torch.bfloat16 if self._is_t5 else torch.float16

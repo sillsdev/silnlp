@@ -92,7 +92,10 @@ class SILExperiment:
 
         for translate_config in translate_configs.get("translate", []):
             translator = TranslationTask(
-                name=self.name, checkpoint=translate_config.get("checkpoint", "last"), commit=self.commit
+                name=self.name,
+                checkpoint=config.get("checkpoint", "last"),
+                save_checkpoints=self.save_checkpoints,
+                commit=self.commit,
             )
 
             if not postprocess_configs:
