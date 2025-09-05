@@ -176,7 +176,8 @@ def postprocess_draft(
                 )
                 target_usfm = quotation_denormalization_postprocessor.postprocess_usfm(target_usfm)
             except (UnknownQuoteConventionException, NoDetectedQuoteConventionException) as e:
-                raise e
+                LOGGER.warning(str(e) + " Skipping quotation mark denormalization.")
+                continue
 
         if not out_dir:
             out_dir = draft_metadata.draft_path.parent

@@ -360,7 +360,8 @@ class Translator(ABC):
                         )
                         usfm_out = quotation_denormalization_postprocessor.postprocess_usfm(usfm_out)
                     except (UnknownQuoteConventionException, NoDetectedQuoteConventionException) as e:
-                        raise e
+                        LOGGER.warning(str(e) + " Skipping quotation mark denormalization.")
+                        continue
 
                 # Construct output file name write to file
                 trg_draft_file_path = trg_file_path.with_stem(trg_file_path.stem + config.get_postprocess_suffix())

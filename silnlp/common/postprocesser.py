@@ -119,17 +119,13 @@ class PlaceMarkersPostprocessor:
 
 class UnknownQuoteConventionException(Exception):
     def __init__(self, convention_name: str):
-        super().__init__(
-            f'"{convention_name}" is not a known quote convention. Skipping quotation mark denormalization.'
-        )
+        super().__init__(f'"{convention_name}" is not a known quote convention.')
         self.convention_name = convention_name
 
 
 class NoDetectedQuoteConventionException(Exception):
     def __init__(self, project_name: str):
-        super().__init__(
-            f'Could not detect quote convention for project "{project_name}". Skipping quotation mark denormalization.'
-        )
+        super().__init__(f'Could not detect quote convention for project "{project_name}".')
         self.project_name = project_name
 
 
@@ -200,6 +196,9 @@ class DenormalizeQuotationMarksPostprocessor:
         quote_convention_analysis: QuoteConventionAnalysis | None = quote_convention_detector.detect_quote_convention()
         if quote_convention_analysis is None:
             raise NoDetectedQuoteConventionException(project_name)
+        LOGGER.info(
+            f'Detected quote convention for project "{project_name}" is "{quote_convention_analysis.best_quote_convention.name}" with score {quote_convention_analysis.best_quote_convention_score:.2f}.'
+        )
         return quote_convention_analysis.best_quote_convention
 
     def _create_update_block_handlers(
