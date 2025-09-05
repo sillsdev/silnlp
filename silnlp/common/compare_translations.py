@@ -18,7 +18,7 @@ def main() -> None:
         "--scorers",
         nargs="*",
         metavar="scorer",
-        default={"bleu", "chrf3", "chrf3+", "chrf3++", "spbleu", "ter"},
+        default={"bleu", "chrf3", "chrf3+", "chrf3++", "spbleu", "ter", "m-bleu", "m-chrf3", "m-chrf3+", "m-chrf3++"},
         help="Set of scorers",
     )
     parser.add_argument(
@@ -81,6 +81,43 @@ def score_pair(pair_sys: List[str], pair_refs: List[List[str]], scorers: Set[str
             pair_sys, pair_refs, char_order=6, beta=3, word_order=2, remove_whitespace=True, eps_smoothing=True
         )
         scores["chrF3++"] = chrfpp_score.score
+
+    if "m-bleu" in scorers:
+        bleu_scores = []
+        for sentence, references in zip(pair_sys, pair_refs):
+            bleu_score = sacrebleu.sentence_bleu(
+                sentence,
+                references,
+                lowercase=True,
+                tokenize=config.data.get("sacrebleu_tokenize", "13a"),
+            )
+            bleu_scores.append(bleu_score)
+        scores["m-BLEU"] = sum(bleu_scores) / len(bleu_scores)
+
+    if "m-chrf3" in scorers:
+        chrf3_scores = []
+        for sentence, references in zip(pair_sys, pair_refs):
+            chrf3_score = sacrebleu.sentence_chrf(sentence, references, char_order=6, beta=3, remove_whitespace=True)
+            chrf3_scores.append(chrf3_score.score)
+        scores["m-chrf3"] = sum(chrf3_scores) / len(chrf3_scores)
+
+    if "m-chrf3+" in scorers:
+        chrfp_scores = []
+        for sentence, references in zip(pair_sys, pair_refs):
+            chrfp_score = sacrebleu.sentence_chrf(
+                sentence, references, char_order=6, beta=3, word_order=1, remove_whitespace=True, eps_smoothing=True
+            )
+            chrfp_scores.append(chrfp_score.score)
+        scores["m-chrf3+"] = sum(chrfp_scores) / len(chrfp_scores)
+
+    if "m-chrf3++" in scorers:
+        chrfpp_scores = []
+        for sentence, references in zip(pair_sys, pair_refs):
+            chrfpp_score = sacrebleu.sentence_chrf(
+                sentence, references, char_order=6, beta=3, word_order=2, remove_whitespace=True, eps_smoothing=True
+            )
+            chrfpp_scores.append(chrfpp_score.score)
+        scores["m-chrf3+"] = sum(chrfpp_scores) / len(chrfpp_scores)
 
     if "spbleu" in scorers:
         spbleu_score = sacrebleu.corpus_bleu(
