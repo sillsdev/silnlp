@@ -140,7 +140,7 @@ def score_pair(
     if "m-bleu" in scorers:
         bleu_scores = []
         for sentence, references in zip(pair_sys, pair_refs):
-            bleu_score = sacrebleu.sentence_bleu(
+            bleu_score = sentence_bleu(
                 sentence,
                 references,
                 lowercase=True,
