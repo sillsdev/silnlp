@@ -6,6 +6,30 @@ import sacrebleu
 from machine.corpora import ParatextTextCorpus
 
 
+def sentence_bleu(
+    hypothesis: str,
+    references: List[str],
+    smooth_method: str = "exp",
+    smooth_value: Optional[float] = None,
+    lowercase: bool = False,
+    tokenize="13a",
+    use_effective_order: bool = True,
+):
+    """
+    Substitute for the sacrebleu version of sentence_bleu, which uses settings that aren't consistent with
+    the values we use for corpus_bleu, and isn't fully parameterized
+    """
+    metric = BLEU(
+        smooth_method=smooth_method,
+        smooth_value=smooth_value,
+        force=False,
+        lowercase=lowercase,
+        tokenize=tokenize,
+        effective_order=use_effective_order,
+    )
+    return metric.sentence_score(hypothesis, references)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compare translations")
     parser.add_argument(
@@ -85,11 +109,10 @@ def score_pair(pair_sys: List[str], pair_refs: List[List[str]], scorers: Set[str
     if "m-bleu" in scorers:
         bleu_scores = []
         for sentence, references in zip(pair_sys, pair_refs):
-            bleu_score = sacrebleu.sentence_bleu(
+            bleu_score = sentence_bleu(
                 sentence,
                 references,
                 lowercase=True,
-                tokenize=config.data.get("sacrebleu_tokenize", "13a"),
             )
             bleu_scores.append(bleu_score)
         scores["m-BLEU"] = sum(bleu_scores) / len(bleu_scores)
