@@ -2,7 +2,7 @@ import argparse
 import logging
 import re
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 import yaml
 from attr import dataclass
@@ -138,13 +138,13 @@ def postprocess_draft(
     # Verify reference parity
     if len(src_sentences.sentences) != len(draft_sentences.sentences):
         LOGGER.warning(
-            f"Can't process {draft_metadata.source_path} and {draft_path}: Unequal number of verses/references"
+            f"Can't process {draft_metadata.source_path} and {draft_metadata.draft_path}: Unequal number of verses/references"
         )
         return
     for src_sentence, draft_sentence in zip(src_sentences.sentences, draft_sentences.sentences):
         if src_sentence.ref.to_relaxed() != draft_sentence.ref.to_relaxed():
             LOGGER.warning(
-                f"Can't process {draft_metadata.source_path} and {draft_path}: Mismatched ref, {src_ref} != {draft_ref}. Files must have the exact same USFM structure"
+                f"Can't process {draft_metadata.source_path} and {draft_metadata.draft_path}: Mismatched ref, {src_sentence.ref} != {draft_sentence.ref}. Files must have the exact same USFM structure"
             )
             return
 
