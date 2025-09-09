@@ -132,19 +132,23 @@ def compute_usable_proportions(verse_scores: List[VerseScore], output_dir: Path)
     chapter_totals = defaultdict(lambda: defaultdict(float))
     chapter_counts = defaultdict(lambda: defaultdict(int))
 
-    for verse_score in verse_scores:
-        vref = verse_score.vref
-        if vref.verse_num == 0:
-            continue
-        if verse_score.projected_chrf3 is None:
-            LOGGER.warning(f"{vref} does not have a projected chrf3. Skipping.")
-            continue
+    with open(output_dir / "usability_verses.tsv", "w", encoding="utf-8", newline="\n") as verse_file:
+        verse_file.write("Book\tChapter\tVerse\tUsability\n")
+        for verse_score in verse_scores:
+            vref = verse_score.vref
+            if vref.verse_num == 0:
+                continue
+            if verse_score.projected_chrf3 is None:
+                LOGGER.warning(f"{vref} does not have a projected chrf3. Skipping.")
+                continue
 
-        prob = calculate_usable_prob(verse_score.projected_chrf3, usable_params, unusable_params)
-        book_totals[vref.book] += prob
-        book_counts[vref.book] += 1
-        chapter_totals[vref.book][vref.chapter_num] += prob
-        chapter_counts[vref.book][vref.chapter_num] += 1
+            prob = calculate_usable_prob(verse_score.projected_chrf3, usable_params, unusable_params)
+            book_totals[vref.book] += prob
+            book_counts[vref.book] += 1
+            chapter_totals[vref.book][vref.chapter_num] += prob
+            chapter_counts[vref.book][vref.chapter_num] += 1
+
+            verse_file.write(f"{vref.book}\t{vref.chapter_num}\t{vref.verse_num}\t{prob:.6f}\n")
 
     with open(output_dir / "usability_books.tsv", "w", encoding="utf-8", newline="\n") as book_file:
         book_file.write("Book\tUsability\n")
@@ -201,6 +205,7 @@ def main() -> None:
     parser.add_argument(
         "confidence_files",
         nargs="*",
+        type=Path,
         help="Relative paths for the confidence files to process (relative to MT/experiments or --confidence-dir "
         + "if specified) e.g. 'project_folder/exp_folder/infer/5000/source/631JN.SFM.confidences.tsv' or "
         + "'631JN.SFM.confidences.tsv --confidence-dir project_folder/exp_folder/infer/5000/source'.",
