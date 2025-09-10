@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import argparse
-from ast import Raise
 import concurrent.futures
 import fnmatch
 import logging
@@ -10,13 +9,11 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-# from silnlp.common.environment import SIL_NLP_ENV
 from machine.corpora import FileParatextProjectSettingsParser, ParatextProjectSettings
 from tqdm import tqdm
 
 # --- Global Constants ---
 
-# PROJECTS_FOLDER_DEFAULT = SIL_NLP_ENV.pt_projects_dir
 logger = logging.getLogger(__name__)
 SETTINGS_FILENAME = "Settings.xml"
 
