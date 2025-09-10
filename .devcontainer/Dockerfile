@@ -39,10 +39,6 @@ RUN poetry config virtualenvs.create true && \
     poetry config virtualenvs.in-project true
 # Clean up
 RUN rm -rf /var/lib/apt/lists/*
-# Set up the MinIO/Backblaze bucket
-RUN mkdir -p ~/M
-RUN mkdir -p ~/B
-RUN mkdir -p ~/.config/rclone
 # Set environment variables
 ENV CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
 ENV EFLOMAL_PATH=/workspaces/silnlp/.venv/lib/python3.10/site-packages/eflomal/bin
