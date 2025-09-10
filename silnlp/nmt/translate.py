@@ -399,7 +399,11 @@ def main() -> None:
     get_git_revision_hash()
 
     translator = TranslationTask(
-        name=args.experiment, checkpoint=args.checkpoint, clearml_queue=args.clearml_queue, commit=args.commit
+        name=args.experiment,
+        checkpoint=args.checkpoint,
+        save_checkpoints=True,
+        clearml_queue=args.clearml_queue,
+        commit=args.commit,
     )
 
     postprocess_handler = PostprocessHandler([PostprocessConfig(vars(args))])

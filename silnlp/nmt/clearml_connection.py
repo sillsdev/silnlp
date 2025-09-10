@@ -123,9 +123,9 @@ class SILClearML:
         if self.task is None:
             with (exp_dir / "config.yml").open("r", encoding="utf-8") as file:
                 config = yaml.safe_load(file)
-                config["use_default_model_dir"] = self.use_default_model_dir
             if config is None or len(config.keys()) == 0:
                 raise RuntimeError("Config file has no contents.")
+            config["use_default_model_dir"] = self.use_default_model_dir
             self.config = create_config(exp_dir, config)
             return
         # There is a ClearML task - lets' do more complex importing.
@@ -139,7 +139,6 @@ class SILClearML:
             # read in the project/experiment yaml file
             with (exp_dir / "config.yml").open("r", encoding="utf-8") as file:
                 config = yaml.safe_load(file)
-                config["use_default_model_dir"] = self.use_default_model_dir
         else:
             config = {}
         if config is None or len(config.keys()) == 0:
@@ -153,5 +152,5 @@ class SILClearML:
         exp_dir.mkdir(parents=True, exist_ok=True)
         with (exp_dir / "config.yml").open("w+", encoding="utf-8") as file:
             yaml.safe_dump(data=config, stream=file)
-
+        config["use_default_model_dir"] = self.use_default_model_dir
         self.config = create_config(exp_dir, config)
