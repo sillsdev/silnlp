@@ -94,7 +94,7 @@ class SILExperiment:
             translator = TranslationTask(
                 name=self.name,
                 checkpoint=config.get("checkpoint", "last"),
-                save_checkpoints=self.save_checkpoints,
+                use_default_model_dir=self.save_checkpoints,
                 commit=self.commit,
             )
 

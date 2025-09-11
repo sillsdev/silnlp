@@ -41,7 +41,7 @@ class NMTTranslator(Translator):
 class TranslationTask:
     name: str
     checkpoint: Union[str, int] = "last"
-    save_checkpoints: bool = False
+    use_default_model_dir: bool = True
     clearml_queue: Optional[str] = None
     commit: Optional[str] = None
 
@@ -401,7 +401,6 @@ def main() -> None:
     translator = TranslationTask(
         name=args.experiment,
         checkpoint=args.checkpoint,
-        save_checkpoints=True,
         clearml_queue=args.clearml_queue,
         commit=args.commit,
     )
