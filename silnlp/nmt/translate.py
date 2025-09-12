@@ -267,7 +267,7 @@ class TranslationTask:
             project_suffix="_infer",
             experiment_suffix=experiment_suffix,
             commit=self.commit,
-            use_default_model_dir=self.save_checkpoints,
+            use_default_model_dir=self.use_default_model_dir,
         )
         self.name = clearml.name
 
