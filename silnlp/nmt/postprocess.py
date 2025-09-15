@@ -121,8 +121,11 @@ def postprocess_draft(
     postprocess_handler: PostprocessHandler,
     book: Optional[str] = None,
     out_dir: Optional[Path] = None,
-    training_corpus_pairs: List[CorpusPair] = [],
+    training_corpus_pairs: Optional[List[CorpusPair]] = None,
 ) -> None:
+    if training_corpus_pairs is None:
+        training_corpus_pairs = []
+
     if str(draft_metadata.source_path).startswith(str(get_project_dir(""))):
         settings = FileParatextProjectSettingsParser(draft_metadata.source_path.parent).parse()
         stylesheet = settings.stylesheet

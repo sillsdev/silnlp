@@ -4,7 +4,7 @@ from pathlib import Path
 
 from ..nmt.clearml_connection import SILClearML
 from ..nmt.config_utils import load_config
-from ..nmt.postprocess import get_draft_paths_from_exp, postprocess_draft, postprocess_experiment
+from ..nmt.postprocess import postprocess_experiment
 from .postprocesser import PostprocessConfig, PostprocessHandler
 from .utils import get_mt_exp_dir
 

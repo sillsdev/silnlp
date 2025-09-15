@@ -2,7 +2,7 @@ import logging
 import os
 from contextlib import ExitStack
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Set, TextIO, Tuple
+from typing import Dict, List, Optional, Set, TextIO, Tuple
 from xml.sax.saxutils import escape
 
 import regex as re
@@ -15,22 +15,11 @@ from machine.corpora import (
     Text,
     TextCorpus,
     TextRow,
-    UsfmFileText,
     UsfmFileTextCorpus,
-    UsfmParserHandler,
     create_versification_ref_corpus,
     extract_scripture_corpus,
-    parse_usfm,
 )
-from machine.scripture import (
-    BOOK_NUMBERS,
-    ORIGINAL_VERSIFICATION,
-    VerseRef,
-    VersificationType,
-    book_id_to_number,
-    book_number_to_id,
-    get_books,
-)
+from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, VersificationType, book_id_to_number, get_books
 from machine.tokenization import WhitespaceTokenizer
 
 from .corpus import get_terms_glosses_path, get_terms_metadata_path, get_terms_vrefs_path, load_corpus
@@ -427,15 +416,6 @@ def get_book_path(project: str, book: str) -> Path:
     return SIL_NLP_ENV.pt_projects_dir / project / book_file_name
 
 
-def get_book_path_by_book_number(project: str, book_number: int) -> Path:
-    project_dir = get_project_dir(project)
-    settings = FileParatextProjectSettingsParser(project_dir).parse()
-    book_id = book_number_to_id(book_number)
-    book_file_name = settings.get_book_file_name(book_id)
-
-    return SIL_NLP_ENV.pt_projects_dir / project / book_file_name
-
-
 def get_last_verse(project_dir: str, book: str, chapter: int) -> int:
     last_verse = "0"
     book_path = get_book_path(project_dir, book)
@@ -591,35 +571,3 @@ def check_versification(project_dir: str) -> Tuple[bool, List[VersificationType]
 
     matching = True
     return (matching, detected_versification)
-
-
-def read_usfm(project_dir: str, book_number: int) -> str:
-    project_settings = FileParatextProjectSettingsParser(get_project_dir(project_dir)).parse()
-    book_path: Path = get_book_path_by_book_number(project_dir, book_number)
-
-    if not book_path.exists():
-        raise FileNotFoundError(f"USFM file for book number {book_number} not found in project {project_dir}")
-
-    usfm_text_file = UsfmFileText(
-        project_settings.stylesheet,
-        project_settings.encoding,
-        book_number_to_id(book_number),
-        book_path,
-        project_settings.versification,
-        include_all_text=True,
-        project=project_settings.name,
-    )
-    # This is not a public method, but I don't think any method exists in machine.py
-    # to read raw USFM using the project settings
-    return usfm_text_file._read_usfm()
-
-
-# This is a placeholder until the ParatextProjectQuoteConventionDetector is released in machine.py
-def parse_project(project_dir: str, selected_books: Iterable[int], usfm_parser_handler: UsfmParserHandler) -> None:
-    project_settings = FileParatextProjectSettingsParser(get_project_dir(project_dir)).parse()
-    for book_number in selected_books:
-        try:
-            usfm = read_usfm(project_dir, book_number)
-        except FileNotFoundError:
-            continue
-        parse_usfm(usfm, usfm_parser_handler, project_settings.stylesheet, project_settings.versification)
