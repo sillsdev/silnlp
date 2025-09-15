@@ -11,7 +11,7 @@ from machine.scripture import VerseRef
 from openpyxl import load_workbook
 from scipy.stats import linregress
 
-from silnlp.nmt.config import get_mt_exp_dir
+from .config import get_mt_exp_dir
 
 LOGGER = logging.getLogger(__package__ + ".quality_estimation")
 
