@@ -62,7 +62,7 @@ def main():
     parser.add_argument(
         "usability_verses_file",
         type=Path,
-        help="Path to the usability verses file (TSV format).",
+        help="Path to the usability verses tsv file relative to MT/experiments/",
     )
     parser.add_argument(
         "--sample-size",
