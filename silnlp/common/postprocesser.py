@@ -187,8 +187,8 @@ class DenormalizeQuotationMarksPostprocessor:
             raise NoDetectedQuoteConventionException(project_name)
         LOGGER.info(
             f'Detected quote convention for project "{project_name}" is '
-            + '"{quote_convention_analysis.best_quote_convention.name}" with score '
-            + "{quote_convention_analysis.best_quote_convention_score:.2f}."
+            + f'"{quote_convention_analysis.best_quote_convention.name}" with score '
+            + f"{quote_convention_analysis.best_quote_convention_score:.2f}."
         )
         self._project_convention_cache[project_name] = quote_convention_analysis.best_quote_convention
 
@@ -222,17 +222,7 @@ class DenormalizeQuotationMarksPostprocessor:
 
         if len(processed_chapters) == 0:
             return self._NO_CHAPTERS_REMARK_SENTENCE
-        return (
-            self._REMARK_SENTENCE
-            + ", ".join(
-                [
-                    str(chapter_num)
-                    for chapter_num, strategy in enumerate(best_chapter_strategies, 1)
-                    if strategy != QuotationMarkUpdateStrategy.SKIP
-                ]
-            )
-            + "."
-        )
+        return self._REMARK_SENTENCE + ", ".join(processed_chapters) + "."
 
     def postprocess_usfm(
         self,

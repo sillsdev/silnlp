@@ -15,19 +15,6 @@ from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books
 from machine.tokenization import LatinWordTokenizer
 from tqdm import tqdm
 
-from silnlp.common.translator import TranslationGroup
-from silnlp.nmt.corpora import (
-    BASIC_DATA_PROJECT,
-    CorpusPair,
-    DataFile,
-    DataFileMapping,
-    IsoPairInfo,
-    get_data_file_pairs,
-    get_parallel_corpus_size,
-    get_terms_glosses_file_paths,
-    parse_corpus_pairs,
-)
-
 from ..alignment.config import get_aligner_name
 from ..alignment.utils import add_alignment_scores
 from ..common.corpus import (
@@ -45,8 +32,20 @@ from ..common.corpus import (
     write_corpus,
 )
 from ..common.environment import SIL_NLP_ENV
+from ..common.translator import TranslationGroup
 from ..common.utils import NoiseMethod, Side, get_mt_exp_dir, set_seed
 from .augment import AugmentMethod
+from .corpora import (
+    BASIC_DATA_PROJECT,
+    CorpusPair,
+    DataFile,
+    DataFileMapping,
+    IsoPairInfo,
+    get_data_file_pairs,
+    get_parallel_corpus_size,
+    get_terms_glosses_file_paths,
+    parse_corpus_pairs,
+)
 from .tokenizer import Tokenizer
 
 LOGGER = logging.getLogger(__package__ + ".config")
