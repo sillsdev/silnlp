@@ -41,7 +41,7 @@ class NMTTranslator(Translator):
 class TranslationTask:
     name: str
     checkpoint: Union[str, int] = "last"
-    save_checkpoints: bool = False
+    use_default_model_dir: bool = True
     clearml_queue: Optional[str] = None
     commit: Optional[str] = None
 
@@ -267,7 +267,7 @@ class TranslationTask:
             project_suffix="_infer",
             experiment_suffix=experiment_suffix,
             commit=self.commit,
-            use_default_model_dir=self.save_checkpoints,
+            use_default_model_dir=self.use_default_model_dir,
         )
         self.name = clearml.name
 
@@ -399,7 +399,10 @@ def main() -> None:
     get_git_revision_hash()
 
     translator = TranslationTask(
-        name=args.experiment, checkpoint=args.checkpoint, clearml_queue=args.clearml_queue, commit=args.commit
+        name=args.experiment,
+        checkpoint=args.checkpoint,
+        clearml_queue=args.clearml_queue,
+        commit=args.commit,
     )
 
     postprocess_handler = PostprocessHandler([PostprocessConfig(vars(args))])
