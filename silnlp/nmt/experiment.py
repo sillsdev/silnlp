@@ -80,7 +80,7 @@ class SILExperiment:
             scorers=self.scorers,
             produce_multiple_translations=self.produce_multiple_translations,
             save_confidences=self.save_confidences,
-            save_checkpoints=self.save_checkpoints,
+            use_default_model_dir=self.save_checkpoints,
         )
 
     def translate(self):
@@ -94,7 +94,7 @@ class SILExperiment:
             translator = TranslationTask(
                 name=self.name,
                 checkpoint=config.get("checkpoint", "last"),
-                use_default_model_dir=True if not (self.run_train) else self.save_checkpoints,
+                use_default_model_dir=self.save_checkpoints,
                 commit=self.commit,
             )
 
@@ -155,7 +155,12 @@ def main() -> None:
         help="Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run "
         + "it locally and register it with ClearML.",
     )
-    parser.add_argument("--save-checkpoints", default=False, action="store_true", help="Save checkpoints to S3 bucket")
+    parser.add_argument(
+        "--save-checkpoints",
+        default=False,
+        action="store_true",
+        help="Save checkpoints to bucket. Only used if running the train step.",
+    )
     parser.add_argument("--preprocess", default=False, action="store_true", help="Run the preprocess step.")
     parser.add_argument("--train", default=False, action="store_true", help="Run the train step.")
     parser.add_argument("--test", default=False, action="store_true", help="Run the test step.")
@@ -205,6 +210,9 @@ def main() -> None:
         args.preprocess = True
         args.train = True
         args.test = True
+
+    if not args.train:
+        args.save_checkpoints = True
 
     exp = SILExperiment(
         name=args.experiment,
