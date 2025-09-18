@@ -24,9 +24,11 @@ from machine.corpora import (
 from machine.scripture import VerseRef, is_book_id_valid
 from scipy.stats import gmean
 
+from silnlp.nmt.corpora import CorpusPair
+
 from .corpus import load_corpus, write_corpus
 from .paratext import get_book_path, get_iso, get_project_dir
-from .postprocesser import PostprocessHandler
+from .postprocesser import NoDetectedQuoteConventionException, PostprocessHandler, UnknownQuoteConventionException
 from .usfm_utils import PARAGRAPH_TYPE_EMBEDS
 
 LOGGER = logging.getLogger(__package__ + ".translate")
@@ -196,6 +198,7 @@ class Translator(ABC):
         trg_project: Optional[str] = None,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
         experiment_ckpt_str: str = "",
+        training_corpus_pairs: List[CorpusPair] = [],
     ) -> None:
         book_path = get_book_path(src_project, book)
         if not book_path.is_file():
@@ -214,6 +217,8 @@ class Translator(ABC):
             trg_project,
             postprocess_handler,
             experiment_ckpt_str,
+            training_corpus_pairs,
+            src_project,
         )
 
     def translate_usfm(
@@ -228,6 +233,8 @@ class Translator(ABC):
         trg_project: Optional[str] = None,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
         experiment_ckpt_str: str = "",
+        training_corpus_pairs: List[CorpusPair] = [],
+        src_project: Optional[str] = None,
     ) -> None:
         # Create UsfmFileText object for source
         src_from_project = False
@@ -294,6 +301,7 @@ class Translator(ABC):
             postprocess_handler.construct_rows(vrefs, sentences, translated_draft)
 
             for config in postprocess_handler.configs:
+
                 # Compile draft remarks
                 draft_src_str = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
                 draft_remark = f"This draft of {vrefs[0].book} was machine translated on {date.today()} from {draft_src_str} using model {experiment_ckpt_str}. It should be reviewed and edited carefully."
@@ -304,9 +312,8 @@ class Translator(ABC):
                 # If the target project is not the same as the translated file's original project,
                 # no verses outside of the ones translated will be overwritten
                 if trg_project is not None or src_from_project:
-                    dest_updater = FileParatextProjectTextUpdater(
-                        get_project_dir(trg_project if trg_project is not None else src_file_path.parent.name)
-                    )
+                    project_dir = get_project_dir(trg_project if trg_project is not None else src_file_path.parent.name)
+                    dest_updater = FileParatextProjectTextUpdater(project_dir)
                     usfm_out = dest_updater.update_usfm(
                         book_id=src_file_text.id,
                         rows=config.rows,
@@ -314,7 +321,11 @@ class Translator(ABC):
                         paragraph_behavior=config.get_paragraph_behavior(),
                         embed_behavior=config.get_embed_behavior(),
                         style_behavior=config.get_style_behavior(),
-                        update_block_handlers=config.update_block_handlers,
+                        update_block_handlers=(
+                            config.create_place_markers_postprocessor().get_update_block_handlers()
+                            if config.is_marker_placement_required()
+                            else None
+                        ),
                         remarks=remarks,
                     )
 
@@ -332,18 +343,40 @@ class Translator(ABC):
                         paragraph_behavior=config.get_paragraph_behavior(),
                         embed_behavior=config.get_embed_behavior(),
                         style_behavior=config.get_style_behavior(),
-                        update_block_handlers=config.update_block_handlers,
+                        update_block_handlers=(
+                            config.create_place_markers_postprocessor().get_update_block_handlers()
+                            if config.is_marker_placement_required()
+                            else None
+                        ),
                         remarks=remarks,
                     )
                     parse_usfm(usfm, handler)
                     usfm_out = handler.get_usfm()
 
+                if config.is_quotation_mark_denormalization_required():
+                    try:
+                        quotation_denormalization_postprocessor = (
+                            config.create_denormalize_quotation_marks_postprocessor(training_corpus_pairs, src_project)
+                        )
+                        usfm_out = quotation_denormalization_postprocessor.postprocess_usfm(usfm_out)
+                    except (UnknownQuoteConventionException, NoDetectedQuoteConventionException) as e:
+                        LOGGER.warning(str(e) + " Skipping quotation mark denormalization.")
+                        continue
+
                 # Construct output file name write to file
                 trg_draft_file_path = trg_file_path.with_stem(trg_file_path.stem + config.get_postprocess_suffix())
                 if produce_multiple_translations:
                     trg_draft_file_path = trg_draft_file_path.with_suffix(f".{draft_index}{trg_file_path.suffix}")
+
                 with trg_draft_file_path.open(
-                    "w", encoding=src_settings.encoding if src_from_project else "utf-8"
+                    "w",
+                    encoding=(
+                        "utf-8"
+                        if not src_from_project
+                        or src_from_project
+                        and (src_settings.encoding == "utf-8-sig" or src_settings.encoding == "utf_8_sig")
+                        else src_settings.encoding
+                    ),
                 ) as f:
                     f.write(usfm_out)
 

@@ -90,7 +90,7 @@ class SILExperiment:
         postprocess_configs = translate_configs.get("postprocess", [])
         postprocess_handler = PostprocessHandler([PostprocessConfig(pc) for pc in postprocess_configs])
 
-        for config in translate_configs.get("translate", []):
+        for translate_config in translate_configs.get("translate", []):
             translator = TranslationTask(
                 name=self.name,
                 checkpoint=config.get("checkpoint", "last"),
@@ -98,39 +98,38 @@ class SILExperiment:
                 commit=self.commit,
             )
 
-            # Backwards compatibility
             if not postprocess_configs:
-                postprocess_handler = PostprocessHandler([PostprocessConfig(config)])
+                postprocess_handler = PostprocessHandler([])
 
-            if len(config.get("books", [])) > 0:
-                if isinstance(config["books"], list):
-                    config["books"] = ";".join(config["books"])
+            if len(translate_config.get("books", [])) > 0:
+                if isinstance(translate_config["books"], list):
+                    translate_config["books"] = ";".join(translate_config["books"])
                 translator.translate_books(
-                    config["books"],
-                    config.get("src_project"),
-                    config.get("trg_project"),
-                    config.get("trg_iso"),
+                    translate_config["books"],
+                    translate_config.get("src_project"),
+                    translate_config.get("trg_project"),
+                    translate_config.get("trg_iso"),
                     self.produce_multiple_translations,
                     self.save_confidences,
                     postprocess_handler,
                 )
-            elif config.get("src_prefix"):
+            elif translate_config.get("src_prefix"):
                 translator.translate_text_files(
-                    config.get("src_prefix"),
-                    config.get("trg_prefix"),
-                    config.get("start_seq"),
-                    config.get("end_seq"),
-                    config.get("src_iso"),
-                    config.get("trg_iso"),
+                    translate_config.get("src_prefix"),
+                    translate_config.get("trg_prefix"),
+                    translate_config.get("start_seq"),
+                    translate_config.get("end_seq"),
+                    translate_config.get("src_iso"),
+                    translate_config.get("trg_iso"),
                     self.produce_multiple_translations,
                     self.save_confidences,
                 )
-            elif config.get("src"):
+            elif translate_config.get("src"):
                 translator.translate_files(
-                    config.get("src"),
-                    config.get("trg"),
-                    config.get("src_iso"),
-                    config.get("trg_iso"),
+                    translate_config.get("src"),
+                    translate_config.get("trg"),
+                    translate_config.get("src_iso"),
+                    translate_config.get("trg_iso"),
                     self.produce_multiple_translations,
                     self.save_confidences,
                     postprocess_handler,

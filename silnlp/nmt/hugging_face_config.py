@@ -76,7 +76,8 @@ from ..common.corpus import Term, count_lines, get_terms
 from ..common.environment import SIL_NLP_ENV
 from ..common.translator import DraftGroup, TranslationGroup, generate_confidence_files
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, get_mt_exp_dir, merge_dict
-from .config import CheckpointType, Config, DataFile, NMTModel
+from .config import CheckpointType, Config, NMTModel
+from .corpora import DataFile
 from .tokenizer import NullTokenizer, Tokenizer
 
 if is_safetensors_available():
