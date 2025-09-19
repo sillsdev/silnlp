@@ -2,6 +2,7 @@ import argparse
 import logging
 import os
 import time
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional, Tuple, Union
@@ -19,7 +20,7 @@ from .config import CheckpointType, Config, NMTModel
 LOGGER = logging.getLogger(__package__ + ".translate")
 
 
-class NMTTranslator(Translator):
+class NMTTranslator(Translator, AbstractContextManager):
     def __init__(self, model: NMTModel, checkpoint: Union[CheckpointType, str, int]) -> None:
         self._model = model
         self._checkpoint = checkpoint
@@ -35,6 +36,10 @@ class NMTTranslator(Translator):
         return self._model.translate(
             sentences, src_iso, trg_iso, produce_multiple_translations, vrefs, self._checkpoint
         )
+    
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        if hasattr(self._model, 'clear_cache'):
+            self._model.clear_cache()
 
 
 @dataclass
@@ -62,66 +67,66 @@ class TranslationTask:
         translator, config, step_str = self._init_translation_task(
             experiment_suffix=f"_{self.checkpoint}_{[book_number_to_id(book) for book in book_nums.keys()]}"
         )
+        with translator:
+            if src_project is None:
+                if len(config.src_projects) != 1:
+                    raise RuntimeError("A source project must be specified.")
+                src_project = next(iter(config.src_projects))
 
-        if src_project is None:
-            if len(config.src_projects) != 1:
-                raise RuntimeError("A source project must be specified.")
-            src_project = next(iter(config.src_projects))
+            src_project_dir = get_project_dir(src_project)
+            if not src_project_dir.is_dir():
+                raise FileNotFoundError(f"Source project {src_project} not found in projects folder {src_project_dir}")
 
-        src_project_dir = get_project_dir(src_project)
-        if not src_project_dir.is_dir():
-            raise FileNotFoundError(f"Source project {src_project} not found in projects folder {src_project_dir}")
+            if any(len(book_nums[book]) > 0 for book in book_nums) and trg_project is not None:
 
-        if any(len(book_nums[book]) > 0 for book in book_nums) and trg_project is not None:
+                trg_project_dir = get_project_dir(trg_project)
+                if not trg_project_dir.is_dir():
+                    raise FileNotFoundError(f"Target project {trg_project} not found in projects folder {trg_project_dir}")
+            else:
+                trg_project = None
 
-            trg_project_dir = get_project_dir(trg_project)
-            if not trg_project_dir.is_dir():
-                raise FileNotFoundError(f"Target project {trg_project} not found in projects folder {trg_project_dir}")
-        else:
-            trg_project = None
+            if trg_iso is None:
+                trg_iso = config.default_test_trg_iso
+                if trg_iso == "" and len(config.trg_isos) > 0:
+                    trg_iso = next(iter(config.trg_isos))
+            if trg_iso == "":
+                LOGGER.warning("No language code was set for the target language")
 
-        if trg_iso is None:
-            trg_iso = config.default_test_trg_iso
-            if trg_iso == "" and len(config.trg_isos) > 0:
-                trg_iso = next(iter(config.trg_isos))
-        if trg_iso == "":
-            LOGGER.warning("No language code was set for the target language")
+            output_dir = config.exp_dir / "infer" / step_str / src_project
+            if not config.model_dir.exists():
+                output_dir = config.exp_dir / "infer" / "base" / src_project
+            if trg_project is not None:
+                output_dir = output_dir / trg_project
+            output_dir.mkdir(exist_ok=True, parents=True)
 
-        output_dir = config.exp_dir / "infer" / step_str / src_project
-        if not config.model_dir.exists():
-            output_dir = config.exp_dir / "infer" / "base" / src_project
-        if trg_project is not None:
-            output_dir = output_dir / trg_project
-        output_dir.mkdir(exist_ok=True, parents=True)
+            experiment_ckpt_str = f"{self.name}:{self.checkpoint}"
+            if not config.model_dir.exists():
+                experiment_ckpt_str = f"{self.name}:base"
 
-        experiment_ckpt_str = f"{self.name}:{self.checkpoint}"
-        if not config.model_dir.exists():
-            experiment_ckpt_str = f"{self.name}:base"
+            translation_failed = []
+            for book_num, chapters in book_nums.items():
+                book = book_number_to_id(book_num)
+                try:
+                    LOGGER.info(f"Translating {book} ...")
+                    output_path = output_dir / f"{book_file_name_digits(book_num)}{book}.SFM"
+                    translator.translate_book(
+                        src_project,
+                        book,
+                        output_path,
+                        trg_iso,
+                        produce_multiple_translations,
+                        save_confidences,
+                        chapters,
+                        trg_project,
+                        postprocess_handler,
+                        experiment_ckpt_str,
+                    )
+                except Exception as e:
+                    translation_failed.append(book)
+                    LOGGER.exception(f"Was not able to translate {book}.")
 
-        translation_failed = []
-        for book_num, chapters in book_nums.items():
-            book = book_number_to_id(book_num)
-            try:
-                LOGGER.info(f"Translating {book} ...")
-                output_path = output_dir / f"{book_file_name_digits(book_num)}{book}.SFM"
-                translator.translate_book(
-                    src_project,
-                    book,
-                    output_path,
-                    trg_iso,
-                    produce_multiple_translations,
-                    save_confidences,
-                    chapters,
-                    trg_project,
-                    postprocess_handler,
-                    experiment_ckpt_str,
-                )
-            except Exception as e:
-                translation_failed.append(book)
-                LOGGER.exception(f"Was not able to translate {book}.")
-
-        if len(translation_failed) > 0:
-            raise RuntimeError(f"Some books failed to translate: {' '.join(translation_failed)}")
+            if len(translation_failed) > 0:
+                raise RuntimeError(f"Some books failed to translate: {' '.join(translation_failed)}")
 
     def translate_text_files(
         self,
@@ -135,47 +140,48 @@ class TranslationTask:
         save_confidences: bool = False,
     ) -> None:
         translator, config, _ = self._init_translation_task(experiment_suffix=f"_{self.checkpoint}_{src_prefix}")
-        if trg_prefix is None:
-            raise RuntimeError("A target file prefix must be specified.")
-        if start_seq is None or end_seq is None:
-            raise RuntimeError("Start and end sequence numbers must be specified.")
+        with translator:
+            if trg_prefix is None:
+                raise RuntimeError("A target file prefix must be specified.")
+            if start_seq is None or end_seq is None:
+                raise RuntimeError("Start and end sequence numbers must be specified.")
 
-        if src_iso is None:
-            src_iso = config.default_test_src_iso
-            if src_iso == "" and len(config.src_iso) > 0:
-                src_iso = next(iter(config.src_iso))
-        if src_iso == "":
-            LOGGER.warning("No language code was set for the source language")
-        if trg_iso is None:
-            trg_iso = config.default_test_trg_iso
-            if trg_iso == "" and len(config.trg_isos) > 0:
-                trg_iso = next(iter(config.trg_isos))
-        if trg_iso == "":
-            LOGGER.warning("No language code was set for the target language")
+            if src_iso is None:
+                src_iso = config.default_test_src_iso
+                if src_iso == "" and len(config.src_iso) > 0:
+                    src_iso = next(iter(config.src_iso))
+            if src_iso == "":
+                LOGGER.warning("No language code was set for the source language")
+            if trg_iso is None:
+                trg_iso = config.default_test_trg_iso
+                if trg_iso == "" and len(config.trg_isos) > 0:
+                    trg_iso = next(iter(config.trg_isos))
+            if trg_iso == "":
+                LOGGER.warning("No language code was set for the target language")
 
-        for i in range(start_seq, end_seq + 1):
-            file_num = f"{i:04d}"
-            src_file = f"{src_prefix}{file_num}.txt"
-            src_file_path = Path(SIL_NLP_ENV.mt_experiments_dir / self.name / src_file)
-            if not src_file_path.exists():
-                raise FileNotFoundError("Cannot find source: " + src_file)
+            for i in range(start_seq, end_seq + 1):
+                file_num = f"{i:04d}"
+                src_file = f"{src_prefix}{file_num}.txt"
+                src_file_path = Path(SIL_NLP_ENV.mt_experiments_dir / self.name / src_file)
+                if not src_file_path.exists():
+                    raise FileNotFoundError("Cannot find source: " + src_file)
 
-            trg_file = f"{trg_prefix}{file_num}.txt"
-            trg_file_path = Path(SIL_NLP_ENV.mt_experiments_dir / self.name / trg_file)
+                trg_file = f"{trg_prefix}{file_num}.txt"
+                trg_file_path = Path(SIL_NLP_ENV.mt_experiments_dir / self.name / trg_file)
 
-            if src_file_path.is_file() and not trg_file_path.is_file():
-                start = time.time()
-                translator.translate_text(
-                    src_file_path,
-                    trg_file_path,
-                    src_iso,
-                    trg_iso,
-                    produce_multiple_translations,
-                    save_confidences,
-                    trg_prefix,
-                )
-                end = time.time()
-                print(f"Translated {src_file_path.name} to {trg_file_path.name} in {((end-start)/60):.2f} minutes")
+                if src_file_path.is_file() and not trg_file_path.is_file():
+                    start = time.time()
+                    translator.translate_text(
+                        src_file_path,
+                        trg_file_path,
+                        src_iso,
+                        trg_iso,
+                        produce_multiple_translations,
+                        save_confidences,
+                        trg_prefix,
+                    )
+                    end = time.time()
+                    print(f"Translated {src_file_path.name} to {trg_file_path.name} in {((end-start)/60):.2f} minutes")
 
     def translate_files(
         self,
@@ -190,74 +196,74 @@ class TranslationTask:
         translator, config, step_str = self._init_translation_task(
             experiment_suffix=f"_{self.checkpoint}_{os.path.basename(src)}"
         )
+        with translator:
+            if src_iso is None:
+                src_iso = config.default_test_src_iso
+                if src_iso == "" and len(config.src_iso) > 0:
+                    src_iso = next(iter(config.src_iso))
+            if src_iso == "":
+                LOGGER.warning("No language code was set for the source language")
+            if trg_iso is None:
+                trg_iso = config.default_test_trg_iso
+                if trg_iso == "" and len(config.trg_isos) > 0:
+                    trg_iso = next(iter(config.trg_isos))
+            if trg_iso == "":
+                LOGGER.warning("No language code was set for the target language")
 
-        if src_iso is None:
-            src_iso = config.default_test_src_iso
-            if src_iso == "" and len(config.src_iso) > 0:
-                src_iso = next(iter(config.src_iso))
-        if src_iso == "":
-            LOGGER.warning("No language code was set for the source language")
-        if trg_iso is None:
-            trg_iso = config.default_test_trg_iso
-            if trg_iso == "" and len(config.trg_isos) > 0:
-                trg_iso = next(iter(config.trg_isos))
-        if trg_iso == "":
-            LOGGER.warning("No language code was set for the target language")
+            src_path = Path(SIL_NLP_ENV.mt_experiments_dir / self.name / src)
+            if not src_path.exists():
+                raise FileNotFoundError(f"Cannot find source: {src} in {self.name}")
 
-        src_path = Path(SIL_NLP_ENV.mt_experiments_dir / self.name / src)
-        if not src_path.exists():
-            raise FileNotFoundError(f"Cannot find source: {src} in {self.name}")
-
-        if trg is not None:
-            trg_path = Path(SIL_NLP_ENV.mt_experiments_dir / self.name / trg)
-        else:
-            trg_path = config.exp_dir / "infer" / step_str
-            if not config.model_dir.exists():
-                trg_path = config.exp_dir / "infer" / "base"
-            trg_path.mkdir(exist_ok=True, parents=True)
-
-        if src_path.is_file():
-            src_file_paths = [src_path]
-        else:
-            src_file_paths = list(p for p in src_path.rglob("*.*") if p.is_file())
-
-        for src_file_path in src_file_paths:
-            if trg_path.is_dir():
-                if src_path.is_file():
-                    trg_file_path = trg_path / src_file_path.name
-                    src_name = src_file_path.name
-                else:
-                    relative_path = src_file_path.relative_to(src_path)
-                    trg_file_path = trg_path / relative_path
-                    trg_file_path.parent.mkdir(exist_ok=True, parents=True)
-                    src_name = str(relative_path)
+            if trg is not None:
+                trg_path = Path(SIL_NLP_ENV.mt_experiments_dir / self.name / trg)
             else:
-                trg_path.parent.mkdir(parents=True, exist_ok=True)
-                trg_file_path = trg_path
-                src_name = src_file_path.name
-
-            ext = src_file_path.suffix.lower()
-            LOGGER.info(f"Translating {src_name}")
-            if ext == ".txt":
-                translator.translate_text(
-                    src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations, save_confidences
-                )
-            elif ext == ".docx":
-                translator.translate_docx(src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations)
-            elif ext == ".usfm" or ext == ".sfm":
-                experiment_ckpt_str = f"{self.name}:{self.checkpoint}"
+                trg_path = config.exp_dir / "infer" / step_str
                 if not config.model_dir.exists():
-                    experiment_ckpt_str = f"{self.name}:base"
-                translator.translate_usfm(
-                    src_file_path,
-                    trg_file_path,
-                    src_iso,
-                    trg_iso,
-                    produce_multiple_translations,
-                    save_confidences,
-                    postprocess_handler=postprocess_handler,
-                    experiment_ckpt_str=experiment_ckpt_str,
-                )
+                    trg_path = config.exp_dir / "infer" / "base"
+                trg_path.mkdir(exist_ok=True, parents=True)
+
+            if src_path.is_file():
+                src_file_paths = [src_path]
+            else:
+                src_file_paths = list(p for p in src_path.rglob("*.*") if p.is_file())
+
+            for src_file_path in src_file_paths:
+                if trg_path.is_dir():
+                    if src_path.is_file():
+                        trg_file_path = trg_path / src_file_path.name
+                        src_name = src_file_path.name
+                    else:
+                        relative_path = src_file_path.relative_to(src_path)
+                        trg_file_path = trg_path / relative_path
+                        trg_file_path.parent.mkdir(exist_ok=True, parents=True)
+                        src_name = str(relative_path)
+                else:
+                    trg_path.parent.mkdir(parents=True, exist_ok=True)
+                    trg_file_path = trg_path
+                    src_name = src_file_path.name
+
+                ext = src_file_path.suffix.lower()
+                LOGGER.info(f"Translating {src_name}")
+                if ext == ".txt":
+                    translator.translate_text(
+                        src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations, save_confidences
+                    )
+                elif ext == ".docx":
+                    translator.translate_docx(src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations)
+                elif ext == ".usfm" or ext == ".sfm":
+                    experiment_ckpt_str = f"{self.name}:{self.checkpoint}"
+                    if not config.model_dir.exists():
+                        experiment_ckpt_str = f"{self.name}:base"
+                    translator.translate_usfm(
+                        src_file_path,
+                        trg_file_path,
+                        src_iso,
+                        trg_iso,
+                        produce_multiple_translations,
+                        save_confidences,
+                        postprocess_handler=postprocess_handler,
+                        experiment_ckpt_str=experiment_ckpt_str,
+                    )
 
     def _init_translation_task(self, experiment_suffix: str) -> Tuple[Translator, Config, str]:
         clearml = SILClearML(
