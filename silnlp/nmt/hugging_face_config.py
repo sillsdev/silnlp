@@ -6,6 +6,7 @@ import re
 import shutil
 from contextlib import ExitStack
 from copy import deepcopy
+from dataclasses import dataclass
 from enum import Enum
 from itertools import repeat
 from math import exp, prod
@@ -832,6 +833,20 @@ class OutputGroup:
     def get_sequence_score(self) -> List[float]:
         return [output["sequence_score"] for output in self.outputs]
 
+@dataclass
+class InferenceModelParams:
+    checkpoint: Union[CheckpointType, str, int]
+    src_lang: str
+    trg_lang: str
+
+    def __post_init__(self):
+        if not isinstance(self.checkpoint, (CheckpointType, str, int)):
+            raise ValueError("checkpoint must be a CheckpointType, string, or integer")
+        if not isinstance(self.src_lang, str):
+            raise ValueError("src_lang must be a string")
+        if not isinstance(self.trg_lang, str):
+            raise ValueError("trg_lang must be a string")
+
 
 class HuggingFaceNMTModel(NMTModel):
     def __init__(self, config: HuggingFaceConfig, mixed_precision: bool, num_devices: int) -> None:
@@ -841,8 +856,8 @@ class HuggingFaceNMTModel(NMTModel):
         self._dictionary: Optional[Dict[VerseRef, Set[str]]] = None
         self._is_t5 = self._config.model_prefix in SUPPORTED_T5_MODELS
         self._num_devices = num_devices
-        self._cached_model: Optional[PreTrainedModel] = None
-        self._cached_translate_params: Optional[Tuple[Union[CheckpointType, str, int], str, str]] = None
+        self._cached_inference_model: Optional[PreTrainedModel] = None
+        self._inference_model_params: Optional[InferenceModelParams] = None
 
     def train(self) -> None:
         training_args = self._create_training_arguments()
@@ -1220,12 +1235,13 @@ class HuggingFaceNMTModel(NMTModel):
     ) -> Iterable[TranslationGroup]:
         src_lang = self._config.data["lang_codes"].get(src_iso, src_iso)
         trg_lang = self._config.data["lang_codes"].get(trg_iso, trg_iso)
+        inference_model_params = InferenceModelParams(ckpt, src_lang, trg_lang)
         tokenizer = self._config.get_tokenizer()
-        if self._cached_translate_params == (ckpt, src_lang, trg_lang) and self._cached_model is not None:
-            model = self._cached_model
+        if self._inference_model_params == inference_model_params and self._cached_inference_model is not None:
+            model = self._cached_inference_model
         else:
-            model = self._cached_model = self._create_inference_model(ckpt, tokenizer, src_lang, trg_lang)
-            self._cached_translate_params = (ckpt, src_lang, trg_lang)
+            model = self._cached_inference_model = self._create_inference_model(ckpt, tokenizer, src_lang, trg_lang)
+            self._inference_model_params = inference_model_params
         if model.config.max_length is not None and model.config.max_length < 512:
             model.config.max_length = 512
 
@@ -1309,6 +1325,10 @@ class HuggingFaceNMTModel(NMTModel):
         else:
             raise ValueError(f"Unsupported checkpoint type: {ckpt}.")
         return ckpt_path, step
+
+    def clear_cache(self) -> None:
+        self._cached_inference_model = None
+        self._inference_model_params = None
 
     def _create_training_arguments(self) -> Seq2SeqTrainingArguments:
         parser = HfArgumentParser(Seq2SeqTrainingArguments)
