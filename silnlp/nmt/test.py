@@ -137,6 +137,8 @@ def score_pair(
         )
         other_scores["spBLEU"] = spbleu_score.score
 
+    # m-bleu, m-chrf3, m-chrf3+, and m-chrf3++ are from the paper https://arxiv.org/pdf/2407.12832
+    # These metrics are implemented at the verse-level, rather than the sentence-level
     if "m-bleu" in scorers:
         bleu_scores = []
         for sentence, references in zip(pair_sys, pair_refs):
@@ -147,14 +149,22 @@ def score_pair(
                 tokenize=config.data.get("sacrebleu_tokenize", "13a"),
             )
             bleu_scores.append(bleu_score)
-        other_scores["m-BLEU"] = sum(bleu_scores) / len(bleu_scores)
+        if len(bleu_scores) == 0:
+            other_scores["m-BLEU"] = 0
+        else:
+            other_scores["m-BLEU"] = sum(bleu_scores) / len(bleu_scores)
 
     if "m-chrf3" in scorers:
         chrf3_scores = []
         for sentence, references in zip(pair_sys, pair_refs):
-            chrf3_score = sacrebleu.sentence_chrf(sentence, references, char_order=6, beta=3, remove_whitespace=True)
+            chrf3_score = sacrebleu.sentence_chrf(
+                sentence, references, char_order=6, beta=3, remove_whitespace=True
+            )
             chrf3_scores.append(chrf3_score.score)
-        other_scores["m-chrf3"] = sum(chrf3_scores) / len(chrf3_scores)
+        if len(chrf3_scores) == 0:
+            other_scores["m-chrf3"] = 0
+        else:
+            other_scores["m-chrf3"] = sum(chrf3_scores) / len(chrf3_scores)
 
     if "m-chrf3+" in scorers:
         chrfp_scores = []
@@ -163,7 +173,10 @@ def score_pair(
                 sentence, references, char_order=6, beta=3, word_order=1, remove_whitespace=True, eps_smoothing=True
             )
             chrfp_scores.append(chrfp_score.score)
-        other_scores["m-chrf3+"] = sum(chrfp_scores) / len(chrfp_scores)
+        if len(chrfp_scores) == 0:
+            other_scores["m-chrf3+"] = 0
+        else:
+            other_scores["m-chrf3+"] = sum(chrfp_scores) / len(chrfp_scores)
 
     if "m-chrf3++" in scorers:
         chrfpp_scores = []
@@ -172,7 +185,10 @@ def score_pair(
                 sentence, references, char_order=6, beta=3, word_order=2, remove_whitespace=True, eps_smoothing=True
             )
             chrfpp_scores.append(chrfpp_score.score)
-        other_scores["m-chrf3+"] = sum(chrfpp_scores) / len(chrfpp_scores)
+        if len(chrfpp_scores) == 0:
+            other_scores["m-chrf3+"] = 0
+        else:
+            other_scores["m-chrf3+"] = sum(chrfpp_scores) / len(chrfpp_scores)
 
     if "meteor" in scorers:
         meteor_score = compute_meteor_score(trg_iso, pair_sys, pair_refs)
