@@ -121,7 +121,7 @@ class TranslationTask:
                         postprocess_handler,
                         experiment_ckpt_str,
                         config.corpus_pairs,
-                )
+                    )
                 except Exception as e:
                     translation_failed.append(book)
                     LOGGER.exception(f"Was not able to translate {book}.")
