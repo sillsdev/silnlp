@@ -175,7 +175,7 @@ SP_TOKENIZER_CONFIG = {
 # "loss" and "eval_loss" are both evaluation loss
 # The early stopping callback adds "eval_" to all metrics that don't already start with it
 DEFAULT_METRICS = ["loss", "eval_loss"]
-EVAL_METRICS_MODULES = {"bleu": "sacrebleu", "chrf3": "chrf", "chrf3+": "chrf", "chrf3++": "chrf", "m-bleu": "sacrebleu", "m-chrf3": "chrf3", "m-chrf3+": "chrf3", "m-chrf3++": "chrf3"}
+EVAL_METRICS_MODULES = {"bleu": "sacrebleu", "chrf3": "chrf", "chrf3+": "chrf", "chrf3++": "chrf", "m-bleu": "sacrebleu", "m-chrf3": "chrf", "m-chrf3+": "chrf", "m-chrf3++": "chrf"}
 
 
 def get_best_checkpoint(model_dir: Path) -> Path:
