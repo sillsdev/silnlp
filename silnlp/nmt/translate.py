@@ -38,8 +38,7 @@ class NMTTranslator(Translator, AbstractContextManager):
         )
     
     def __exit__(self, exc_type, exc_value, traceback) -> None:
-        if hasattr(self._model, 'clear_cache'):
-            self._model.clear_cache()
+        self._model.clear_cache()
 
 
 @dataclass

@@ -339,6 +339,9 @@ class NMTModel(ABC):
     @abstractmethod
     def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]: ...
 
+    @abstractmethod
+    def clear_cache(self) -> None: ...
+
 
 class Config(ABC):
     def __init__(self, exp_dir: Path, config: dict) -> None:
