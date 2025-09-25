@@ -1,28 +1,240 @@
+import logging
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import List, Optional
+from typing import Dict, List, Optional, Sequence
 
 from machine.corpora import (
+    FileParatextProjectQuoteConventionDetector,
     PlaceMarkersAlignmentInfo,
     PlaceMarkersUsfmUpdateBlockHandler,
+    QuotationMarkDenormalizationFirstPass,
+    QuotationMarkDenormalizationUsfmUpdateBlockHandler,
+    QuotationMarkUpdateSettings,
+    QuotationMarkUpdateStrategy,
     ScriptureRef,
     UpdateUsfmMarkerBehavior,
+    UpdateUsfmParserHandler,
     UpdateUsfmRow,
+    UpdateUsfmTextBehavior,
     UsfmUpdateBlockHandler,
+    parse_usfm,
 )
+from machine.punctuation_analysis import STANDARD_QUOTE_CONVENTIONS, QuoteConvention, QuoteConventionDetector
 from machine.tokenization import LatinWordTokenizer
 from machine.translation import WordAlignmentMatrix
+
+from silnlp.common.paratext import get_project_dir
+from silnlp.nmt.corpora import CorpusPair
 
 from ..alignment.eflomal import to_word_alignment_matrix
 from ..alignment.utils import compute_alignment_scores
 from .corpus import load_corpus, write_corpus
 
+LOGGER = logging.getLogger(__package__ + ".translate")
+
 POSTPROCESS_DEFAULTS = {
     "paragraph_behavior": "end",  # Possible values: end, place, strip
     "include_style_markers": False,
     "include_embeds": False,
+    "denormalize_quotation_marks": False,
+    "source_quote_convention": "detect",
+    "target_quote_convention": "detect",
 }
-POSTPROCESS_SUFFIX_CHARS = [{"place": "p", "strip": "x"}, "s", "e"]
+POSTPROCESS_SUFFIX_CHARS = {
+    "paragraph_behavior": {"place": "p", "strip": "x"},
+    "include_style_markers": "s",
+    "include_embeds": "e",
+    "denormalize_quotation_marks": "q",
+}
+
+
+class PlaceMarkersPostprocessor:
+    _BEHAVIOR_DESCRIPTION_MAP = {
+        UpdateUsfmMarkerBehavior.PRESERVE: " have positions preserved.",
+        UpdateUsfmMarkerBehavior.STRIP: " were removed.",
+    }
+
+    def __init__(
+        self,
+        paragraph_behavior: UpdateUsfmMarkerBehavior,
+        embed_behavior: UpdateUsfmMarkerBehavior,
+        style_behavior: UpdateUsfmMarkerBehavior,
+    ):
+        self._paragraph_behavior = paragraph_behavior
+        self._embed_behavior = embed_behavior
+        self._style_behavior = style_behavior
+        self._update_block_handlers = [PlaceMarkersUsfmUpdateBlockHandler()]
+
+    def get_update_block_handlers(self) -> Sequence[UsfmUpdateBlockHandler]:
+        return self._update_block_handlers
+
+    def _create_remark(self) -> str:
+        behavior_map: Dict[UpdateUsfmMarkerBehavior, List[str]] = {
+            UpdateUsfmMarkerBehavior.PRESERVE: [],
+            UpdateUsfmMarkerBehavior.STRIP: [],
+        }
+        behavior_map[self._paragraph_behavior].append("paragraph markers")
+        behavior_map[self._embed_behavior].append("embed markers")
+        behavior_map[self._style_behavior].append("style markers")
+
+        remark_sentences = [
+            self._create_remark_sentence_for_behavior(behavior, items)
+            for behavior, items in behavior_map.items()
+            if len(items) > 0
+        ]
+        return " ".join(remark_sentences)
+
+    def _create_remark_sentence_for_behavior(self, behavior: UpdateUsfmMarkerBehavior, items: List[str]) -> str:
+        return self._format_group_of_items_for_remark(items) + self._BEHAVIOR_DESCRIPTION_MAP[behavior]
+
+    def _format_group_of_items_for_remark(self, items: List[str]) -> str:
+        if len(items) == 1:
+            return items[0].capitalize()
+        elif len(items) == 2:
+            return f"{items[0].capitalize()} and {items[1]}"
+        return f"{items[0].capitalize()}, {', '.join(items[1:-1])}, and {items[-1]}"
+
+    def postprocess_usfm(
+        self,
+        usfm: str,
+        rows: List[UpdateUsfmRow],
+        remarks: Optional[List[str]] = None,
+    ) -> str:
+        if remarks is None:
+            remarks = []
+
+        handler = UpdateUsfmParserHandler(
+            rows=rows,
+            text_behavior=UpdateUsfmTextBehavior.STRIP_EXISTING,
+            paragraph_behavior=self._paragraph_behavior,
+            embed_behavior=self._embed_behavior,
+            style_behavior=self._style_behavior,
+            update_block_handlers=self._update_block_handlers,
+            remarks=remarks + [self._create_remark()],
+        )
+        parse_usfm(usfm, handler)
+        return handler.get_usfm()
+
+
+class UnknownQuoteConventionException(Exception):
+    def __init__(self, convention_name: str):
+        super().__init__(f'"{convention_name}" is not a known quote convention.')
+        self.convention_name = convention_name
+
+
+class NoDetectedQuoteConventionException(Exception):
+    def __init__(self, project_name: str):
+        super().__init__(f'Could not detect quote convention for project "{project_name}".')
+        self.project_name = project_name
+
+
+class DenormalizeQuotationMarksPostprocessor:
+    _NO_CHAPTERS_REMARK_SENTENCE = "Quotation marks were not denormalized in any chapters due to errors."
+    _REMARK_SENTENCE = (
+        "Quotation marks in the following chapters have been automatically denormalized after translation: "
+    )
+    _project_convention_cache: Dict[str, QuoteConvention] = {}
+
+    def __init__(
+        self,
+        source_quote_convention_name: str | None,
+        target_quote_convention_name: str | None,
+        source_project_name: str | None = None,
+        target_project_name: str | None = None,
+    ):
+        self._source_quote_convention = self._get_source_quote_convention(
+            source_quote_convention_name, source_project_name
+        )
+        self._target_quote_convention = self._get_target_quote_convention(
+            target_quote_convention_name, target_project_name
+        )
+
+    def _get_source_quote_convention(self, convention_name: str | None, project_name: str | None) -> QuoteConvention:
+        if convention_name is None or convention_name == "detect":
+            if project_name is None:
+                raise ValueError(
+                    "The source project name must be explicitly provided or be present in translate_config.yml, since an explicit source quote convention name was not provided."
+                )
+            return self._detect_quote_convention(project_name)
+        return self._get_named_quote_convention(convention_name)
+
+    def _get_target_quote_convention(self, convention_name: str | None, project_name: str | None) -> QuoteConvention:
+        if convention_name is None or convention_name == "detect":
+            if project_name is None:
+                raise ValueError(
+                    "The experiment's config.yml must exist and specify a target project name, since an explicit target quote convention name was not provided."
+                )
+            return self._detect_quote_convention(project_name)
+        return self._get_named_quote_convention(convention_name)
+
+    def _get_named_quote_convention(self, convention_name: str) -> QuoteConvention:
+        convention = STANDARD_QUOTE_CONVENTIONS.get_quote_convention_by_name(convention_name)
+
+        if convention is None:
+            raise UnknownQuoteConventionException(convention_name)
+        return convention
+
+    def _detect_quote_convention(self, project_name: str) -> QuoteConvention:
+        if project_name in self._project_convention_cache:
+            return self._project_convention_cache[project_name]
+
+        quote_convention_detector = QuoteConventionDetector()
+
+        quote_convention_detector = FileParatextProjectQuoteConventionDetector(get_project_dir(project_name))
+        quote_convention_analysis = quote_convention_detector.get_quote_convention_analysis()
+
+        if quote_convention_analysis is None:
+            raise NoDetectedQuoteConventionException(project_name)
+        LOGGER.info(
+            f'Detected quote convention for project "{project_name}" is '
+            + f'"{quote_convention_analysis.best_quote_convention.name}" with score '
+            + f"{quote_convention_analysis.best_quote_convention_score:.2f}."
+        )
+        self._project_convention_cache[project_name] = quote_convention_analysis.best_quote_convention
+
+        return quote_convention_analysis.best_quote_convention
+
+    def _create_update_block_handlers(
+        self, chapter_strategies: List[QuotationMarkUpdateStrategy]
+    ) -> List[UsfmUpdateBlockHandler]:
+        return [
+            QuotationMarkDenormalizationUsfmUpdateBlockHandler(
+                self._source_quote_convention,
+                self._target_quote_convention,
+                QuotationMarkUpdateSettings(chapter_strategies=chapter_strategies),
+            )
+        ]
+
+    def _get_best_chapter_strategies(self, usfm: str) -> List[QuotationMarkUpdateStrategy]:
+        quotation_mark_update_first_pass = QuotationMarkDenormalizationFirstPass(
+            self._source_quote_convention, self._target_quote_convention
+        )
+
+        parse_usfm(usfm, quotation_mark_update_first_pass)
+        return quotation_mark_update_first_pass.find_best_chapter_strategies()
+
+    def _create_remark(self, best_chapter_strategies: List[QuotationMarkUpdateStrategy]) -> str:
+        processed_chapters: List[str] = [
+            str(chapter_num)
+            for chapter_num, strategy in enumerate(best_chapter_strategies, 1)
+            if strategy != QuotationMarkUpdateStrategy.SKIP
+        ]
+
+        if len(processed_chapters) == 0:
+            return self._NO_CHAPTERS_REMARK_SENTENCE
+        return self._REMARK_SENTENCE + ", ".join(processed_chapters) + "."
+
+    def postprocess_usfm(
+        self,
+        usfm: str,
+    ) -> str:
+        best_chapter_strategies = self._get_best_chapter_strategies(usfm)
+        handler = UpdateUsfmParserHandler(
+            update_block_handlers=self._create_update_block_handlers(best_chapter_strategies),
+            remarks=[self._create_remark(best_chapter_strategies)],
+        )
+        parse_usfm(usfm, handler)
+        return handler.get_usfm()
 
 
 class PostprocessConfig:
@@ -39,11 +251,11 @@ class PostprocessConfig:
         if config.get("include_inline_elements"):
             self._config["include_embeds"] = True
 
+        if config.get("src_project"):
+            self._config["src_project"] = config.get("src_project")
+
         self.update_block_handlers: List[UsfmUpdateBlockHandler] = []
         self.rows: List[UpdateUsfmRow] = []
-
-        if self._config["paragraph_behavior"] == "place" or self._config["include_style_markers"]:
-            self.update_block_handlers.append(PlaceMarkersUsfmUpdateBlockHandler())
 
     def _get_usfm_marker_behavior(self, preserve: bool) -> UpdateUsfmMarkerBehavior:
         return UpdateUsfmMarkerBehavior.PRESERVE if preserve else UpdateUsfmMarkerBehavior.STRIP
@@ -60,12 +272,12 @@ class PostprocessConfig:
     # NOTE: Each postprocessing configuration needs to have a unique suffix so files don't overwrite each other
     def get_postprocess_suffix(self) -> str:
         suffix = "_"
-        for (option, default), char in zip(POSTPROCESS_DEFAULTS.items(), POSTPROCESS_SUFFIX_CHARS):
-            if self._config[option] != default:
+        for option, default in POSTPROCESS_DEFAULTS.items():
+            if option in POSTPROCESS_SUFFIX_CHARS and self._config[option] != default:
                 if isinstance(default, str):
-                    suffix += char[self._config[option]]
+                    suffix += POSTPROCESS_SUFFIX_CHARS[option][self._config[option]]
                 else:
-                    suffix += char
+                    suffix += POSTPROCESS_SUFFIX_CHARS[option]
 
         return suffix if len(suffix) > 1 else ""
 
@@ -82,12 +294,79 @@ class PostprocessConfig:
     def is_base_config(self) -> bool:
         return self._config == POSTPROCESS_DEFAULTS
 
+    def is_marker_placement_required(self) -> bool:
+        return self._config["paragraph_behavior"] == "place" or self._config["include_style_markers"]
+
+    def is_quotation_mark_denormalization_required(self) -> bool:
+        return self._config["denormalize_quotation_marks"]
+
+    def is_quote_convention_detection_required(self) -> bool:
+        return self.is_quotation_mark_denormalization_required() and (
+            self._config["source_quote_convention"] is None
+            or self._config["source_quote_convention"] == "detect"
+            or self._config["target_quote_convention"] is None
+            or self._config["target_quote_convention"] == "detect"
+        )
+
+    def create_place_markers_postprocessor(self) -> PlaceMarkersPostprocessor:
+        return PlaceMarkersPostprocessor(
+            paragraph_behavior=self.get_paragraph_behavior(),
+            embed_behavior=self.get_embed_behavior(),
+            style_behavior=self.get_style_behavior(),
+        )
+
+    def create_denormalize_quotation_marks_postprocessor(
+        self, training_corpus_pairs: List[CorpusPair], translation_source_project_name: Optional[str]
+    ) -> DenormalizeQuotationMarksPostprocessor:
+        training_target_project_name = self._get_training_target_project_name(
+            training_corpus_pairs,
+        )
+
+        return DenormalizeQuotationMarksPostprocessor(
+            self._config["source_quote_convention"],
+            self._config["target_quote_convention"],
+            translation_source_project_name,
+            training_target_project_name,
+        )
+
+    def _get_training_target_project_name(
+        self,
+        training_corpus_pairs: List[CorpusPair],
+    ) -> Optional[str]:
+        # Target project info is only needed for quote convention detection
+        if self.is_quote_convention_detection_required():
+            if len(training_corpus_pairs) > 1:
+                LOGGER.warning(
+                    "The experiment has multiple corpus pairs. Quotation mark denormalization is unlikely to work correctly in this scenario."
+                )
+            if len(training_corpus_pairs) > 0 and len(training_corpus_pairs[0].src_files) > 1:
+                LOGGER.warning(
+                    "The experiment has multiple source projects. Quotation mark denormalization is unlikely to work correctly in this scenario."
+                )
+            if len(training_corpus_pairs) > 0 and len(training_corpus_pairs[0].trg_files) > 1:
+                LOGGER.warning(
+                    "The experiment has multiple target projects. Quotation mark denormalization is unlikely to work correctly in this scenario."
+                )
+
+            target_project_name = (
+                training_corpus_pairs[0].trg_files[0].project
+                if len(training_corpus_pairs) > 0 and len(training_corpus_pairs[0].trg_files) > 0
+                else None
+            )
+
+            return target_project_name
+
+        return None
+
     def __getitem__(self, key):
         return self._config[key]
 
 
 class PostprocessHandler:
-    def __init__(self, configs: List[PostprocessConfig] = [], include_base: bool = True) -> None:
+    def __init__(self, configs: Optional[List[PostprocessConfig]] = None, include_base: bool = True) -> None:
+        if configs is None:
+            configs = []
+
         self.configs = ([PostprocessConfig()] if include_base else []) + configs
 
     # NOTE: Row metadata may need to be created/recreated at different times
@@ -118,17 +397,19 @@ class PostprocessHandler:
             translation_tokens = list(tokenizer.tokenize(t))
 
             for config in pm_configs:
-                config.rows[i].metadata["alignment_info"] = PlaceMarkersAlignmentInfo(
-                    source_tokens=source_tokens,
-                    translation_tokens=translation_tokens,
-                    alignment=alignment,
-                    paragraph_behavior=(
-                        UpdateUsfmMarkerBehavior.PRESERVE
-                        if config["paragraph_behavior"] == "place"
-                        else UpdateUsfmMarkerBehavior.STRIP
-                    ),
-                    style_behavior=config.get_style_behavior(),
-                )
+                row_metadata = config.rows[i].metadata
+                if row_metadata is not None:
+                    row_metadata["alignment_info"] = PlaceMarkersAlignmentInfo(
+                        source_tokens=source_tokens,
+                        translation_tokens=translation_tokens,
+                        alignment=alignment,
+                        paragraph_behavior=(
+                            UpdateUsfmMarkerBehavior.PRESERVE
+                            if config["paragraph_behavior"] == "place"
+                            else UpdateUsfmMarkerBehavior.STRIP
+                        ),
+                        style_behavior=config.get_style_behavior(),
+                    )
 
     def _get_alignment_matrices(
         self, src_sents: List[str], trg_sents: List[str], aligner: str = "eflomal"

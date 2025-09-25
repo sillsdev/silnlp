@@ -81,7 +81,7 @@
 			]
 		}
 	},
-	"postStartCommand": "poetry install && sh /workspaces/silnlp/.devcontainer/update_hosts.sh && sh /workspaces/silnlp/minio_bucket_setup.sh"
+	"postStartCommand": "poetry install && sh /workspaces/silnlp/.devcontainer/update_hosts.sh && sh /workspaces/silnlp/rclone_setup.sh minio"
 	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
 	// "remoteUser": "root"
 }

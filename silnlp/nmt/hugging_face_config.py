@@ -6,6 +6,7 @@ import re
 import shutil
 from contextlib import ExitStack
 from copy import deepcopy
+from dataclasses import dataclass
 from enum import Enum
 from itertools import repeat
 from math import exp, prod
@@ -76,7 +77,8 @@ from ..common.corpus import Term, count_lines, get_terms
 from ..common.environment import SIL_NLP_ENV
 from ..common.translator import DraftGroup, TranslationGroup, generate_confidence_files
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, get_mt_exp_dir, merge_dict
-from .config import CheckpointType, Config, DataFile, NMTModel
+from .config import CheckpointType, Config, NMTModel
+from .corpora import DataFile
 from .tokenizer import NullTokenizer, Tokenizer
 
 if is_safetensors_available():
@@ -292,6 +294,7 @@ def get_parent_model_name(parent_exp: str) -> str:
 
 class HuggingFaceConfig(Config):
     def __init__(self, exp_dir: Path, config: dict) -> None:
+        ckpt_dir = str(exp_dir / "run") if config["use_default_model_dir"] else SIL_NLP_ENV.get_temp_model_dir()
         config = merge_dict(
             {
                 "data": {
@@ -317,7 +320,7 @@ class HuggingFaceConfig(Config):
                     "auto_grad_acc": False,
                     "max_steps": 5000,
                     "group_by_length": True,
-                    "output_dir": str(exp_dir / "run"),
+                    "output_dir": ckpt_dir,
                     "delete_checkpoint_optimizer_state": True,
                     "delete_checkpoint_tokenizer": True,
                     "log_level": "info",
@@ -830,6 +833,20 @@ class OutputGroup:
     def get_sequence_score(self) -> List[float]:
         return [output["sequence_score"] for output in self.outputs]
 
+@dataclass
+class InferenceModelParams:
+    checkpoint: Union[CheckpointType, str, int]
+    src_lang: str
+    trg_lang: str
+
+    def __post_init__(self):
+        if not isinstance(self.checkpoint, (CheckpointType, str, int)):
+            raise ValueError("checkpoint must be a CheckpointType, string, or integer")
+        if not isinstance(self.src_lang, str):
+            raise ValueError("src_lang must be a string")
+        if not isinstance(self.trg_lang, str):
+            raise ValueError("trg_lang must be a string")
+
 
 class HuggingFaceNMTModel(NMTModel):
     def __init__(self, config: HuggingFaceConfig, mixed_precision: bool, num_devices: int) -> None:
@@ -839,6 +856,8 @@ class HuggingFaceNMTModel(NMTModel):
         self._dictionary: Optional[Dict[VerseRef, Set[str]]] = None
         self._is_t5 = self._config.model_prefix in SUPPORTED_T5_MODELS
         self._num_devices = num_devices
+        self._cached_inference_model: Optional[PreTrainedModel] = None
+        self._inference_model_params: Optional[InferenceModelParams] = None
 
     def train(self) -> None:
         training_args = self._create_training_arguments()
@@ -905,7 +924,12 @@ class HuggingFaceNMTModel(NMTModel):
             model = self._convert_to_lora_model(model)
 
         # Change specific variables based on the type of model
-        model, tokenizer = self._configure_model(model, tokenizer)
+        model, tokenizer = self._configure_model(
+            model,
+            tokenizer,
+            self._config.val_src_lang if self._config.val_src_lang else self._config.test_src_lang,
+            self._config.val_trg_lang if self._config.val_trg_lang else self._config.test_trg_lang,
+        )
 
         def load_text_dataset(src_path: Path, trg_path: Path) -> Optional[Dataset]:
             if not src_path.is_file() or not trg_path.is_file():
@@ -1105,7 +1129,7 @@ class HuggingFaceNMTModel(NMTModel):
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
         tokenizer = self._config.get_tokenizer()
-        model = self._create_inference_model(ckpt, tokenizer)
+        model = self._create_inference_model(ckpt, tokenizer, self._config.test_src_lang, self._config.test_trg_lang)
         pipeline = PretokenizedTranslationPipeline(
             model=model,
             tokenizer=tokenizer,
@@ -1209,11 +1233,17 @@ class HuggingFaceNMTModel(NMTModel):
         vrefs: Optional[Iterable[VerseRef]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Iterable[TranslationGroup]:
+        src_lang = self._config.data["lang_codes"].get(src_iso, src_iso)
+        trg_lang = self._config.data["lang_codes"].get(trg_iso, trg_iso)
+        inference_model_params = InferenceModelParams(ckpt, src_lang, trg_lang)
         tokenizer = self._config.get_tokenizer()
-        model = self._create_inference_model(ckpt, tokenizer)
+        if self._inference_model_params == inference_model_params and self._cached_inference_model is not None:
+            model = self._cached_inference_model
+        else:
+            model = self._cached_inference_model = self._create_inference_model(ckpt, tokenizer, src_lang, trg_lang)
+            self._inference_model_params = inference_model_params
         if model.config.max_length is not None and model.config.max_length < 512:
             model.config.max_length = 512
-        lang_codes: Dict[str, str] = self._config.data["lang_codes"]
 
         # The tokenizer isn't wrapped until after calling _create_inference_model,
         # because the tokenizer's input/output language codes are set there
@@ -1223,8 +1253,8 @@ class HuggingFaceNMTModel(NMTModel):
         pipeline = SilTranslationPipeline(
             model=model,
             tokenizer=tokenizer,
-            src_lang=lang_codes.get(src_iso, src_iso),
-            tgt_lang=lang_codes.get(trg_iso, trg_iso),
+            src_lang=src_lang,
+            tgt_lang=trg_lang,
             device=0,
         )
 
@@ -1295,6 +1325,10 @@ class HuggingFaceNMTModel(NMTModel):
         else:
             raise ValueError(f"Unsupported checkpoint type: {ckpt}.")
         return ckpt_path, step
+
+    def clear_cache(self) -> None:
+        self._cached_inference_model = None
+        self._inference_model_params = None
 
     def _create_training_arguments(self) -> Seq2SeqTrainingArguments:
         parser = HfArgumentParser(Seq2SeqTrainingArguments)
@@ -1683,13 +1717,17 @@ class HuggingFaceNMTModel(NMTModel):
         return self._flatten_tokenized_translations(translations)
 
     def _create_inference_model(
-        self, ckpt: Union[CheckpointType, str, int], tokenizer: PreTrainedTokenizer
+        self,
+        ckpt: Union[CheckpointType, str, int],
+        tokenizer: PreTrainedTokenizer,
+        src_lang: str,
+        trg_lang: str,
     ) -> PreTrainedModel:
         if self._config.model_dir.exists():
             checkpoint_path, _ = self.get_checkpoint_path(ckpt)
             model_name = str(checkpoint_path)
         else:
-            LOGGER.warn("Model has no checkpoints. Using base model.")
+            LOGGER.warning("Model has no checkpoints. Using base model.")
             model_name = self._config.model
 
         dtype = torch.bfloat16 if self._is_t5 else torch.float16
@@ -1720,47 +1758,47 @@ class HuggingFaceNMTModel(NMTModel):
         if model_name == self._config.model and len(tokenizer) != model.get_input_embeddings().weight.size(dim=0):
             model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if self._mixed_precision else None)
         if self._config.model_prefix == "google/madlad400" or model_name == self._config.model:
-            model, tokenizer = self._configure_model(model, tokenizer)
+            model, tokenizer = self._configure_model(model, tokenizer, src_lang, trg_lang)
 
         return model
 
     def _configure_model(
-        self, model: PreTrainedModel, tokenizer: PreTrainedTokenizer
+        self, model: PreTrainedModel, tokenizer: PreTrainedTokenizer, src_lang: str, trg_lang: str
     ) -> Tuple[PreTrainedModel, PreTrainedTokenizer]:
         # Set decoder_start_token_id
         if (
-            self._config.val_trg_lang != ""
+            trg_lang != ""
             and model.config.decoder_start_token_id is None
             and isinstance(tokenizer, (MBartTokenizer, MBartTokenizerFast))
         ):
             if isinstance(tokenizer, MBartTokenizer):
-                model.config.decoder_start_token_id = tokenizer.lang_code_to_id[self._config.val_trg_lang]
+                model.config.decoder_start_token_id = tokenizer.lang_code_to_id[trg_lang]
             else:
-                model.config.decoder_start_token_id = tokenizer.convert_tokens_to_ids(self._config.val_trg_lang)
+                model.config.decoder_start_token_id = tokenizer.convert_tokens_to_ids(trg_lang)
 
         if self._config.model_prefix == "google/madlad400":
             model.config.decoder_start_token_id = tokenizer.pad_token_id
             model.generation_config.decoder_start_token_id = tokenizer.pad_token_id
             model.config.max_length = 256
             model.generation_config.max_new_tokens = 256
-            tokenizer.tgt_lang = self._config.val_trg_lang
+            tokenizer.tgt_lang = trg_lang
 
         if model.config.decoder_start_token_id is None:
             raise ValueError("Make sure that `config.decoder_start_token_id` is correctly defined")
 
         if (
-            self._config.val_src_lang != ""
-            and self._config.val_trg_lang != ""
+            src_lang != ""
+            and trg_lang != ""
             and isinstance(
                 tokenizer, (MBartTokenizer, MBartTokenizerFast, M2M100Tokenizer, NllbTokenizer, NllbTokenizerFast)
             )
         ):
-            tokenizer.src_lang = self._config.val_src_lang
-            tokenizer.tgt_lang = self._config.val_trg_lang
+            tokenizer.src_lang = src_lang
+            tokenizer.tgt_lang = trg_lang
 
             # For multilingual translation models like mBART-50 and M2M100 we need to force the target language token
             # as the first generated token.
-            forced_bos_token_id = tokenizer.convert_tokens_to_ids(self._config.val_trg_lang)
+            forced_bos_token_id = tokenizer.convert_tokens_to_ids(trg_lang)
             model.config.forced_bos_token_id = forced_bos_token_id
             if model.generation_config is not None:
                 model.generation_config.forced_bos_token_id = forced_bos_token_id

@@ -592,9 +592,10 @@ def test(
     by_book: bool = False,
     produce_multiple_translations: bool = False,
     save_confidences: bool = False,
+    use_default_model_dir: bool = False,
 ):
     exp_name = experiment
-    config = load_config(exp_name)
+    config = load_config(exp_name, use_default_model_dir)
 
     if not any(config.exp_dir.glob("test*.src.txt")):
         LOGGER.info("No test dataset.")
@@ -602,6 +603,8 @@ def test(
 
     books_nums = get_chapters(books)
 
+    if save_confidences and "confidence" not in scorers:
+        scorers.add("confidence")
     if len(scorers) == 0:
         scorers.add("bleu")
     scorers.intersection_update(set(_SUPPORTED_SCORERS))
