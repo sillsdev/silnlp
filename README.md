@@ -98,14 +98,14 @@ Create file for environment variables
 
    If you are using rclone to mount MinIO (This is the default option):
    ```
-      ./rclone_setup.sh minio
+      source ./rclone_setup.sh minio
    ```
    If you are using rclone to mount Backblaze (Only used as a backup option):
    ```
-      ./rclone_setup.sh backblaze
+      source ./rclone_setup.sh backblaze
    ```
 
-   This will mount the specified bucket within the docker container.
+   This will mount the specified bucket within the docker container. This command will need to be run every time the container is opened.
 
 ### Option 2: Conda
 1. If using a local GPU, install the corresponding [NVIDIA driver](https://www.nvidia.com/download/index.aspx)
