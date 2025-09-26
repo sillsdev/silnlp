@@ -63,7 +63,7 @@ class SentenceTranslation:
         return "\t".join(self._tokens)
 
     def join_token_scores_for_confidence_file(self) -> str:
-        return "\t".join([self._sequence_score] + self._token_scores)
+        return "\t".join([str(exp(ts)) for ts in [self._sequence_score] + self._token_scores])
 
 
 # A group of multiple translations of a single sentence
@@ -76,8 +76,7 @@ class TranslatedDraft:
         self._sentence_translations = sentence_translations
 
     def has_sequence_confidence_scores(self) -> bool:
-        # If any sentence has a sequence score, all sentences should have one
-        return self._sentence_translations[0].has_sequence_confidence_score()
+        return any([st.has_sequence_confidence_score() for st in self._sentence_translations])
 
     def write_confidence_scores_to_file(
         self,
@@ -89,6 +88,8 @@ class TranslatedDraft:
             confidences_file.write("\t".join([f"{row1col1_label}"] + [f"Token {i}" for i in range(200)]) + "\n")
             confidences_file.write("\t".join(["Sequence Score"] + [f"Token Score {i}" for i in range(200)]) + "\n")
             for sentence_num, sentence_translation in enumerate(self._sentence_translations):
+                if not sentence_translation.has_sequence_confidence_score():
+                    continue
                 sequence_label = str(sentence_num)
                 if vrefs is not None:
                     sequence_label = str(vrefs[sentence_num])
@@ -113,7 +114,7 @@ class TranslatedDraft:
 
     def get_all_sequence_confidence_scores(self) -> List[float]:
         return [
-            st.get_sequence_confidence_score()
+            exp(st.get_sequence_confidence_score())
             for st in self._sentence_translations
             if st.get_sequence_confidence_score() is not None
         ]
@@ -386,7 +387,7 @@ class Translator(ABC):
         for idx, vref in reversed(empty_sents):
             sentences.insert(idx, "")
             vrefs.insert(idx, vref)
-            sentence_translation_groups.insert(idx, SentenceTranslation("", [], [], None))
+            sentence_translation_groups.insert(idx, [SentenceTranslation("", [], [], None)])
 
         text_behavior = (
             UpdateUsfmTextBehavior.PREFER_NEW if trg_project is not None else UpdateUsfmTextBehavior.STRIP_EXISTING

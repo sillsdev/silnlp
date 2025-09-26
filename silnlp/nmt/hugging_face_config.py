@@ -9,6 +9,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
 from itertools import repeat
+from math import prod
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
 
@@ -829,7 +830,12 @@ class ModelOutput:
 
     def convert_to_sentence_translation(self, tokenizer: PreTrainedTokenizer) -> SentenceTranslation:
         tokens = tokenizer.convert_ids_to_tokens(self.translation_token_ids)
-        return SentenceTranslation(self.translated_text, tokens, self.token_scores, self.sequence_score)
+        return SentenceTranslation(
+            to_py_obj(self.translated_text),
+            to_py_obj(tokens),
+            to_py_obj(self.token_scores),
+            to_py_obj(self.sequence_score),
+        )
 
 
 # This class represents multiple translations of a single input sequence
@@ -849,7 +855,7 @@ class ModelOutputGroup:
         ]
 
     def convert_to_sentence_translation_group(self, tokenizer: PreTrainedTokenizer) -> SentenceTranslationGroup:
-        return SentenceTranslationGroup(
+        return list(
             [model_output.convert_to_sentence_translation(tokenizer) for model_output in self._get_model_outputs()]
         )
 
@@ -1257,7 +1263,7 @@ class HuggingFaceNMTModel(NMTModel):
             total=len(sentences),
             unit="ex",
         ):
-            yield model_output_group.convert_to_sentence_translation_group(model_output_group, tokenizer)
+            yield model_output_group.convert_to_sentence_translation_group(tokenizer)
 
     def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
         step: Optional[int] = None
