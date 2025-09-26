@@ -2231,6 +2231,7 @@ def find_executable_batch_size(function: callable = None, starting_batch_size: i
 def _should_reduce_batch_size(exception: Exception) -> bool:
     if should_reduce_batch_size(exception):
         return True
+    # Check for MIG Out of Memory error. Can remove when should_reduce_batch_size works on MIGs.
     if 'NVML_SUCCESS == r INTERNAL ASSERT FAILED at "../c10/cuda/CUDACachingAllocator.cpp"' in str(exception):
         return True
     return False
