@@ -381,13 +381,14 @@ class Translator(ABC):
         sentence_translation_groups: List[SentenceTranslationGroup] = list(
             self.translate(sentences, src_iso, trg_iso, produce_multiple_translations, vrefs)
         )
+        num_drafts = len(sentence_translation_groups[0])
 
         # Add empty sentences back in
         # Prevents pre-existing text from showing up in the sections of translated text
         for idx, vref in reversed(empty_sents):
             sentences.insert(idx, "")
             vrefs.insert(idx, vref)
-            sentence_translation_groups.insert(idx, [SentenceTranslation("", [], [], None)])
+            sentence_translation_groups.insert(idx, [SentenceTranslation("", [], [], None)] * num_drafts)
 
         text_behavior = (
             UpdateUsfmTextBehavior.PREFER_NEW if trg_project is not None else UpdateUsfmTextBehavior.STRIP_EXISTING
