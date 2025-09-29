@@ -37,6 +37,7 @@ nltk.download("punkt")
 CONFIDENCE_SCORES_SUFFIX = ".confidences.tsv"
 
 
+# A single translation of a single sentence
 class SentenceTranslation:
     def __init__(
         self,
@@ -70,7 +71,7 @@ class SentenceTranslation:
 SentenceTranslationGroup = List[SentenceTranslation]
 
 
-# A list representing a single draft (one translation of each input sentence)
+# A class representing a single draft (one translation of each input sentence)
 class TranslatedDraft:
     def __init__(self, sentence_translations: List[SentenceTranslation]):
         self._sentence_translations = sentence_translations
