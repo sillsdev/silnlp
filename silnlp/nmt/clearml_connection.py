@@ -11,6 +11,8 @@ from .config_utils import create_config
 
 LOGGER = logging.getLogger(__name__)
 
+TAGS_LIST = ["research", "dev", "eitl", "onboarding"]
+
 
 @dataclass
 class SILClearML:
@@ -22,6 +24,7 @@ class SILClearML:
     clearml_project_folder: str = ""
     commit: Optional[str] = None
     use_default_model_dir: bool = True
+    tag: Optional[str] = None
 
     def __post_init__(self) -> None:
         self.name = self.name.replace("\\", "/")
@@ -43,6 +46,7 @@ class SILClearML:
             self.task: Task = Task.init(
                 project_name=self.project_prefix + project + self.project_suffix,
                 task_name=exp_name + self.experiment_suffix,
+                tags=[f"silnlp-{self.tag}"] if self.tag else None,
             )
 
             self._determine_clearml_project_name()

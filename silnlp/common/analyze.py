@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 from ..alignment.config import get_aligner_name
 from ..alignment.utils import add_alignment_scores
-from ..nmt.clearml_connection import SILClearML
+from ..nmt.clearml_connection import TAGS_LIST, SILClearML
 from ..nmt.config import Config, get_data_file_pairs
 from .collect_verse_counts import DT_CANON, NT_CANON, OT_CANON, collect_verse_counts
 from .corpus import filter_parallel_corpus, get_mt_corpus_path, get_scripture_parallel_corpus, include_chapters
@@ -468,6 +468,14 @@ def main() -> None:
         help="Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run "
         + "it locally and register it with ClearML.",
     )
+    parser.add_argument(
+        "--clearml-tag",
+        metavar="tag",
+        choices=TAGS_LIST,
+        default=None,
+        type=str,
+        help=f"Tag to add to the ClearML Task - {TAGS_LIST}",
+    )
     args = parser.parse_args()
 
     get_git_revision_hash()
@@ -475,7 +483,7 @@ def main() -> None:
     if args.clearml_queue is not None and "cpu" not in args.clearml_queue:
         LOGGER.warning("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
         exit()
-    clearml = SILClearML(args.experiment, args.clearml_queue)
+    clearml = SILClearML(args.experiment, args.clearml_queue, tag=args.clearml_tag)
     exp_name = clearml.name
 
     config = clearml.config

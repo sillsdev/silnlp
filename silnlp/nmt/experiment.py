@@ -9,7 +9,7 @@ import yaml
 from ..common.environment import SIL_NLP_ENV
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.utils import get_git_revision_hash, show_attrs
-from .clearml_connection import SILClearML
+from .clearml_connection import TAGS_LIST, SILClearML
 from .config import Config, get_mt_exp_dir
 from .test import _SUPPORTED_SCORERS, test
 from .translate import TranslationTask
@@ -33,10 +33,15 @@ class SILExperiment:
     scorers: Set[str] = field(default_factory=set)
     score_by_book: bool = False
     commit: Optional[str] = None
+    clearml_tag: Optional[str] = None
 
     def __post_init__(self):
         self.clearml = SILClearML(
-            self.name, self.clearml_queue, commit=self.commit, use_default_model_dir=self.save_checkpoints
+            self.name,
+            self.clearml_queue,
+            commit=self.commit,
+            use_default_model_dir=self.save_checkpoints,
+            tag=self.clearml_tag,
         )
         self.name: str = self.clearml.name
         self.config: Config = self.clearml.config
@@ -155,6 +160,17 @@ def main() -> None:
         + "it locally and register it with ClearML.",
     )
     parser.add_argument(
+        "--clearml-tag",
+        metavar="tag",
+        choices=TAGS_LIST,
+        default=None,
+        type=str,
+        help=f"Tag to add to the ClearML Task - {TAGS_LIST}",
+    )
+    parser.add_argument(
+        "--commit", type=str, default=None, help="The silnlp git commit id with which to run a remote job"
+    )
+    parser.add_argument(
         "--save-checkpoints",
         default=False,
         action="store_true",
@@ -183,9 +199,6 @@ def main() -> None:
         default=False,
         action="store_true",
         help="Show information about the environment variables and arguments.",
-    )
-    parser.add_argument(
-        "--commit", type=str, default=None, help="The silnlp git commit id with which to run a remote job"
     )
     parser.add_argument(
         "--scorers",
@@ -220,6 +233,8 @@ def main() -> None:
         mixed_precision=not args.disable_mixed_precision,
         num_devices=args.num_devices,
         clearml_queue=args.clearml_queue,
+        clearml_tag=args.clearml_tag,
+        commit=args.commit,
         save_checkpoints=args.save_checkpoints,
         run_prep=args.preprocess,
         run_train=args.train,
@@ -229,7 +244,6 @@ def main() -> None:
         save_confidences=args.save_confidences,
         scorers=set(s.lower() for s in args.scorers),
         score_by_book=args.score_by_book,
-        commit=args.commit,
     )
     exp.run()
 
