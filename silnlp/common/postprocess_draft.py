@@ -87,6 +87,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.clearml_queue is not None and args.clearml_tag is None:
+        parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
+
     experiment = args.experiment.replace("\\", "/")
     args.output_folder = Path(args.output_folder.replace("\\", "/")) if args.output_folder else None
     postprocess_config = PostprocessConfig(vars(args))

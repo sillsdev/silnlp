@@ -440,6 +440,9 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    if args.clearml_queue is not None and args.clearml_tag is None:
+        parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
+
     get_git_revision_hash()
 
     translator = TranslationTask(

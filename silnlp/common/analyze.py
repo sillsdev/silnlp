@@ -480,9 +480,13 @@ def main() -> None:
 
     get_git_revision_hash()
 
-    if args.clearml_queue is not None and "cpu" not in args.clearml_queue:
-        LOGGER.warning("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
-        exit()
+    if args.clearml_queue is not None:
+        if "cpu" not in args.clearml_queue:
+            LOGGER.warning("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
+            exit()
+        if args.clearml_tag is None:
+            parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
+
     clearml = SILClearML(args.experiment, args.clearml_queue, tag=args.clearml_tag)
     exp_name = clearml.name
 

@@ -211,6 +211,9 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    if args.clearml_queue is not None and args.clearml_tag is None:
+        parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
+
     if args.mt_dir is not None:
         SIL_NLP_ENV.set_machine_translation_dir(SIL_NLP_ENV.data_dir / args.mt_dir)
 
