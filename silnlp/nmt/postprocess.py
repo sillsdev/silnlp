@@ -19,7 +19,7 @@ from ..common.postprocesser import (
 )
 from ..common.usfm_utils import PARAGRAPH_TYPE_EMBEDS
 from ..common.utils import get_git_revision_hash
-from .clearml_connection import SILClearML
+from .clearml_connection import TAGS_LIST, SILClearML
 from .config import Config
 from .config_utils import load_config
 from .corpora import CorpusPair
@@ -228,7 +228,18 @@ def main() -> None:
         help="Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run "
         + "it locally and register it with ClearML.",
     )
+    parser.add_argument(
+        "--clearml-tag",
+        metavar="tag",
+        choices=TAGS_LIST,
+        default=None,
+        type=str,
+        help=f"Tag to add to the ClearML Task - {TAGS_LIST}",
+    )
     args = parser.parse_args()
+
+    if args.clearml_queue is not None and args.clearml_tag is None:
+        parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
 
     get_git_revision_hash()
 
