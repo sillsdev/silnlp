@@ -148,7 +148,7 @@ def score_pair(
                 lowercase=True,
                 tokenize=config.data.get("sacrebleu_tokenize", "13a"),
             )
-            bleu_scores.append(bleu_score)
+            bleu_scores.append(bleu_score.score)
         if len(bleu_scores) == 0:
             other_scores["m-BLEU"] = 0
         else:
@@ -186,9 +186,9 @@ def score_pair(
             )
             chrfpp_scores.append(chrfpp_score.score)
         if len(chrfpp_scores) == 0:
-            other_scores["m-chrf3+"] = 0
+            other_scores["m-chrf3++"] = 0
         else:
-            other_scores["m-chrf3+"] = sum(chrfpp_scores) / len(chrfpp_scores)
+            other_scores["m-chrf3++"] = sum(chrfpp_scores) / len(chrfpp_scores)
 
     if "meteor" in scorers:
         meteor_score = compute_meteor_score(trg_iso, pair_sys, pair_refs)
