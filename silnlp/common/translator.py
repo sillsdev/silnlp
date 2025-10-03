@@ -120,7 +120,7 @@ class TranslatedDraft:
             if st.get_sequence_confidence_score() is not None
         ]
 
-    def get_rows_for_postprocess(self) -> List[str]:
+    def get_all_translations(self) -> List[str]:
         return [st.get_translation() for st in self._sentence_translations]
 
 
@@ -397,7 +397,7 @@ class Translator(ABC):
 
         draft_set: DraftGroup = DraftGroup(sentence_translation_groups)
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
-            postprocess_handler.construct_rows(vrefs, sentences, translated_draft.get_rows_for_postprocess())
+            postprocess_handler.construct_rows(vrefs, sentences, translated_draft.get_all_translations())
 
             for config in postprocess_handler.configs:
 
