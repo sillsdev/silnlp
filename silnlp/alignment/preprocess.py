@@ -9,6 +9,8 @@ from machine.corpora import AlignedWordPair, ParallelTextCorpus, ParallelTextRow
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_chapters
 from machine.tokenization import LatinWordTokenizer, WhitespaceTokenizer
 
+from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML
+
 from ..common.corpus import get_mt_corpus_path, get_scripture_parallel_corpus, include_chapters
 from ..common.environment import SIL_NLP_ENV
 from ..common.stemmer import Stemmer
@@ -139,7 +141,31 @@ def stem(src_stemmer: Stemmer, trg_stemmer: Stemmer, row: ParallelTextRow) -> Pa
 def main() -> None:
     parser = argparse.ArgumentParser(description="Preprocesses Clear gold standard alignments")
     parser.add_argument("experiments", type=str, help="Experiment pattern")
+    parser.add_argument(
+        "--clearml-queue",
+        default=None,
+        type=str,
+        help="Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run "
+        + "it locally and register it with ClearML.",
+    )
+    parser.add_argument(
+        "--clearml-tag",
+        metavar="tag",
+        choices=TAGS_LIST,
+        default=None,
+        type=str,
+        help=f"Tag to add to the ClearML Task - {TAGS_LIST}",
+    )
     args = parser.parse_args()
+
+    if args.clearml_queue is not None:
+        if "cpu" not in args.clearml_queue:
+            LOGGER.warning("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
+            exit()
+        if args.clearml_tag is None:
+            parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
+
+    clearml = SILClearML(args.experiments, args.clearml_queue, tag=args.clearml_tag, skip_config=True)
 
     for exp_dir in get_experiment_dirs(args.experiments):
         exp_name = get_experiment_name(exp_dir)

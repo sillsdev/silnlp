@@ -64,7 +64,11 @@ ENV EFLOMAL_PATH=/usr/local/lib/python3.10/dist-packages/eflomal/bin
 
 # Install fast_align
 RUN apt-get update && \
-    apt-get install --no-install-recommends -y libgoogle-perftools-dev libsparsehash-dev
+    apt-get install --no-install-recommends -y \
+    dotnet-sdk-8.0 \
+    aspnetcore-runtime-8.0 \
+    libgoogle-perftools-dev \
+    libsparsehash-dev
 RUN git clone https://github.com/clab/fast_align.git
 RUN mkdir fast_align/build
 RUN cmake -S fast_align -B fast_align/build

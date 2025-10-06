@@ -23,6 +23,10 @@ RUN apt-get install --no-install-recommends -y \
     gdb \
     curl \
     unzip
+RUN apt-get update && \
+    apt-get install --no-install-recommends -y \
+    dotnet-sdk-8.0 \
+    aspnetcore-runtime-8.0
 RUN apt-get update && apt-get install --no-install-recommends -y \
     fuse3 \
     rclone

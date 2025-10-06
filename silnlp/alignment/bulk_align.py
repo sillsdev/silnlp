@@ -7,6 +7,8 @@ from typing import List
 
 import matplotlib.pyplot as plt
 
+from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML
+
 from ..common.corpus import get_scripture_parallel_corpus, tokenize_corpus
 from .config import ALIGNERS
 from .utils import compute_alignment_scores
@@ -87,7 +89,31 @@ def main() -> None:
         action="store_true",
         help="Use multiple processes, that is if the chosen alignement algorithm does not do so already.",
     )
+    parser.add_argument(
+        "--clearml-queue",
+        default=None,
+        type=str,
+        help="Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run "
+        + "it locally and register it with ClearML.",
+    )
+    parser.add_argument(
+        "--clearml-tag",
+        metavar="tag",
+        choices=TAGS_LIST,
+        default=None,
+        type=str,
+        help=f"Tag to add to the ClearML Task - {TAGS_LIST}",
+    )
     args = parser.parse_args()
+
+    if args.clearml_queue is not None:
+        if "cpu" not in args.clearml_queue:
+            LOGGER.warning("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
+            exit()
+        if args.clearml_tag is None:
+            parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
+
+    clearml = SILClearML(args.output_dir, args.clearml_queue, tag=args.clearml_tag, skip_config=True)
 
     if args.aligner not in ALIGNERS.keys():
         raise Exception("Need to use one of the following aligners:\n  " + "\n  ".join(ALIGNERS.keys()))
