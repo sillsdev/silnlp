@@ -5,10 +5,13 @@ from typing import Optional
 
 import yaml
 
+from ..common.environment import SIL_NLP_ENV
 from .config import get_mt_exp_dir
 from .config_utils import create_config
 
 LOGGER = logging.getLogger(__name__)
+
+TAGS_LIST = ["research", "dev", "eitl", "onboarding"]
 
 
 @dataclass
@@ -20,6 +23,8 @@ class SILClearML:
     experiment_suffix: str = ""
     clearml_project_folder: str = ""
     commit: Optional[str] = None
+    use_default_model_dir: bool = True
+    tag: Optional[str] = None
 
     def __post_init__(self) -> None:
         self.name = self.name.replace("\\", "/")
@@ -41,6 +46,7 @@ class SILClearML:
             self.task: Task = Task.init(
                 project_name=self.project_prefix + project + self.project_suffix,
                 task_name=exp_name + self.experiment_suffix,
+                tags=[f"silnlp-{self.tag}"] if self.tag else None,
             )
 
             self._determine_clearml_project_name()
@@ -81,6 +87,7 @@ class SILClearML:
             if self.commit:
                 self.task.set_script(commit=self.commit)
             if self.queue_name.lower() not in ("local", "locally"):
+                SIL_NLP_ENV.delete_temp_model_dir()
                 self.task.execute_remotely(queue_name=self.queue_name)
         except LoginError as e:
             if self.queue_name is None:
@@ -122,6 +129,7 @@ class SILClearML:
                 config = yaml.safe_load(file)
             if config is None or len(config.keys()) == 0:
                 raise RuntimeError("Config file has no contents.")
+            config["use_default_model_dir"] = self.use_default_model_dir
             self.config = create_config(exp_dir, config)
             return
         # There is a ClearML task - lets' do more complex importing.
@@ -148,5 +156,5 @@ class SILClearML:
         exp_dir.mkdir(parents=True, exist_ok=True)
         with (exp_dir / "config.yml").open("w+", encoding="utf-8") as file:
             yaml.safe_dump(data=config, stream=file)
-
+        config["use_default_model_dir"] = self.use_default_model_dir
         self.config = create_config(exp_dir, config)

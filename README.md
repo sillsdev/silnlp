@@ -23,6 +23,24 @@ These are the main requirements for the SILNLP code to run on a local machine. S
 | Environment variables | To tell SILNLP where to find the data, etc.                       |
 
 ## Environment Setup
+Create file for environment variables
+   
+   Create a text file with the following content and edit as necessary:
+   ```
+   CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
+   CLEARML_API_ACCESS_KEY=xxxxxxx
+   CLEARML_API_SECRET_KEY=xxxxxxx
+   MINIO_ENDPOINT_URL=https://truenas.psonet.languagetechnology.org:9000
+   MINIO_ACCESS_KEY=xxxxxxxxx
+   MINIO_SECRET_KEY=xxxxxxx
+   B2_ENDPOINT_URL=https://s3.us-east-005.backblazeb2.com
+   B2_KEY_ID=xxxxxxxx
+   B2_APPLICATION_KEY=xxxxxxxx
+   ```
+   * Include SIL_NLP_DATA_PATH="/silnlp" if you are not using MinIO or B2 and will be storing files locally.
+   * If you do not intend to use SILNLP with ClearML, MinIO, and/or B2, you can leave out the respective variables. If you need to generate ClearML credentials, see [ClearML setup](clear_ml_setup.md).
+   * Note that this does not give you direct access to a MinIO or B2 bucket from within the Docker container, it only allows you to run scripts referencing files in the bucket.
+
 ### Option 1: Docker
 1. If using a local GPU, install the corresponding [NVIDIA driver](https://www.nvidia.com/download/index.aspx)
    
@@ -49,42 +67,45 @@ These are the main requirements for the SILNLP code to run on a local machine. S
    
    If you're using a local GPU, then in a terminal, run:
    ```
-   docker create -it --gpus all --name silnlp ghcr.io/sillsdev/silnlp:latest
+   docker create -it --gpus all --name silnlp --device /dev/fuse --cap-add SYS_ADMIN --env-file path/to/env-vars-file --security-opt apparmor=path/to/docker-apparmor ghcr.io/sillsdev/silnlp:latest
    ```
    Otherwise, run:
    ```
-   docker create -it --name silnlp ghcr.io/sillsdev/silnlp:latest
+   docker create -it --name silnlp --device /dev/fuse --cap-add SYS_ADMIN --env-file path/to/env-vars-file --security-opt apparmor=path/to/docker-apparmor ghcr.io/sillsdev/silnlp:latest
    ```
-   A docker container should be created. You should be able to see a container named 'silnlp' on the Containers page of Docker Desktop.
+   If you do not intend to use SILNLP with ClearML, MinIO, and/or B2, you can exclude the --device, --cap-add, and --security-opt flags.
 
-5. Create file for environment variables
+   You will need to replace the placehoders "path/to/env-vars-file" and "path/to/docker-apparmor" with the respective real paths.
+   * The env-vars-file is the file you created at the beginning of the Environment Setup section.
+   * The docker-apparmor file is in the silnlp repo. You do not need to clone the entire repo, just download the docker-apparmor file.
    
-   Create a text file with the following content and edit as necessary:
-   ```
-   CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
-   CLEARML_API_ACCESS_KEY=xxxxxxx
-   CLEARML_API_SECRET_KEY=xxxxxxx
-   MINIO_ENDPOINT_URL=https://truenas.psonet.languagetechnology.org:9000
-   MINIO_ACCESS_KEY=xxxxxxxxx
-   MINIO_SECRET_KEY=xxxxxxx
-   B2_ENDPOINT_URL=https://s3.us-east-005.backblazeb2.com
-   B2_KEY_ID=xxxxxxxx
-   B2_APPLICATION_KEY=xxxxxxxx
-   ```
-   * Include SIL_NLP_DATA_PATH="/silnlp" if you are not using MinIO or B2 and will be storing files locally.
-   * If you do not intend to use SILNLP with ClearML, MinIO, and/or B2, you can leave out the respective variables. If you need to generate ClearML credentials, see [ClearML setup](clear_ml_setup.md).
-   * Note that this does not give you direct access to a MinIO or B2 bucket from within the Docker container, it only allows you to run scripts referencing files in the bucket.
+   A docker container should be created. You should be able to see a container named 'silnlp' on the Containers page of Docker Desktop.
 
 6. Start container
    
    In a terminal, run:
    ```
       docker start silnlp
-      docker exec -it --env-file path/to/env_vars_file silnlp bash
+      docker exec -it silnlp bash
    ```
 
    * After this step, the terminal should change to say `root@xxxxx:~/silnlp#`, where `xxxxx` is a string of letters and numbers, instead of your current working directory. This is the command line for the docker container, and you're able to run SILNLP scripts from here.
    * To leave the container, run `exit`, and to stop it, run `docker stop silnlp`. It can be started again by repeating step 6. Stopping the container will not erase any changes made in the container environment, but removing  it will.
+
+7. (Optional) Mount the rclone bucket
+
+   While in the /root/silnlp directory (the default on startup), run the following command:
+
+   If you are using rclone to mount MinIO (This is the default option):
+   ```
+      source ./rclone_setup.sh minio
+   ```
+   If you are using rclone to mount Backblaze (Only used as a backup option):
+   ```
+      source ./rclone_setup.sh backblaze
+   ```
+
+   This will mount the specified bucket within the docker container. This command will need to be run every time the container is opened.
 
 ### Option 2: Conda
 1. If using a local GPU, install the corresponding [NVIDIA driver](https://www.nvidia.com/download/index.aspx)
@@ -132,24 +153,7 @@ These are the main requirements for the SILNLP code to run on a local machine. S
    poetry install
    ```
 
-10. If using ClearML, MinIO, and/or B2, set the following environment variables:
-   ```
-   CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
-   CLEARML_API_ACCESS_KEY=xxxxxxx
-   CLEARML_API_SECRET_KEY=xxxxxxx
-   MINIO_ENDPOINT_URL=https://truenas.psonet.languagetechnology.org:9000
-   MINIO_ACCESS_KEY=xxxxxxxxx
-   MINIO_SECRET_KEY=xxxxxxx
-   B2_ENDPOINT_URL=https://s3.us-east-005.backblazeb2.com
-   B2_KEY_ID=xxxxxxxx
-   B2_APPLICATION_KEY=xxxxxxxx
-   ```
-   * Include SIL_NLP_DATA_PATH="/silnlp" if you are not using MinIO or B2 and will be storing files locally.
-   * If you need to generate ClearML credentials, see [ClearML setup](clear_ml_setup.md).
-   * Note that this does not give you direct access to a MinIO or B2 bucket from within the Docker container, it only allows you to run scripts referencing files in the bucket.
-   * For instructions on how to permanently set up environment variables for your operating system, see the corresponding section under the Development Environment Setup header below.
-
-11. If using MinIO or B2, you will need to set up rclone:
+10. If using MinIO or B2, you will need to set up rclone:
    * Mount the bucket to your filesystem following the instructions under [Install and Configure Rclone](https://github.com/sillsdev/silnlp/blob/master/bucket_setup.md#install-and-configure-rclone).
 
 ## Development Environment Setup

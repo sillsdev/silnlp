@@ -105,6 +105,7 @@ def extract_corpora(
                 extract_lemmas,
                 extract_project_vrefs,
             )
+            LOGGER.info(f"Extracted corpus file: {corpus_filename}")
             # check if the number of lines in the file is correct (the same as vref.txt)
             LOGGER.info(f"# of Verses: {verse_count}")
             if verse_count != expected_verse_count:

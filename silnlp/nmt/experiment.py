@@ -9,7 +9,7 @@ import yaml
 from ..common.environment import SIL_NLP_ENV
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.utils import get_git_revision_hash, show_attrs
-from .clearml_connection import SILClearML
+from .clearml_connection import TAGS_LIST, SILClearML
 from .config import Config, get_mt_exp_dir
 from .test import _SUPPORTED_SCORERS, test
 from .translate import TranslationTask
@@ -33,9 +33,16 @@ class SILExperiment:
     scorers: Set[str] = field(default_factory=set)
     score_by_book: bool = False
     commit: Optional[str] = None
+    clearml_tag: Optional[str] = None
 
     def __post_init__(self):
-        self.clearml = SILClearML(self.name, self.clearml_queue, commit=self.commit)
+        self.clearml = SILClearML(
+            self.name,
+            self.clearml_queue,
+            commit=self.commit,
+            use_default_model_dir=self.save_checkpoints,
+            tag=self.clearml_tag,
+        )
         self.name: str = self.clearml.name
         self.config: Config = self.clearml.config
         self.rev_hash = get_git_revision_hash()
@@ -78,6 +85,7 @@ class SILExperiment:
             scorers=self.scorers,
             produce_multiple_translations=self.produce_multiple_translations,
             save_confidences=self.save_confidences,
+            use_default_model_dir=self.save_checkpoints,
         )
 
     def translate(self):
@@ -87,44 +95,46 @@ class SILExperiment:
         postprocess_configs = translate_configs.get("postprocess", [])
         postprocess_handler = PostprocessHandler([PostprocessConfig(pc) for pc in postprocess_configs])
 
-        for config in translate_configs.get("translate", []):
+        for translate_config in translate_configs.get("translate", []):
             translator = TranslationTask(
-                name=self.name, checkpoint=config.get("checkpoint", "last"), commit=self.commit
+                name=self.name,
+                checkpoint=translate_config.get("checkpoint", "last"),
+                use_default_model_dir=self.save_checkpoints,
+                commit=self.commit,
             )
 
-            # Backwards compatibility
             if not postprocess_configs:
-                postprocess_handler = PostprocessHandler([PostprocessConfig(config)])
+                postprocess_handler = PostprocessHandler([])
 
-            if len(config.get("books", [])) > 0:
-                if isinstance(config["books"], list):
-                    config["books"] = ";".join(config["books"])
+            if len(translate_config.get("books", [])) > 0:
+                if isinstance(translate_config["books"], list):
+                    translate_config["books"] = ";".join(translate_config["books"])
                 translator.translate_books(
-                    config["books"],
-                    config.get("src_project"),
-                    config.get("trg_project"),
-                    config.get("trg_iso"),
+                    translate_config["books"],
+                    translate_config.get("src_project"),
+                    translate_config.get("trg_project"),
+                    translate_config.get("trg_iso"),
                     self.produce_multiple_translations,
                     self.save_confidences,
                     postprocess_handler,
                 )
-            elif config.get("src_prefix"):
+            elif translate_config.get("src_prefix"):
                 translator.translate_text_files(
-                    config.get("src_prefix"),
-                    config.get("trg_prefix"),
-                    config.get("start_seq"),
-                    config.get("end_seq"),
-                    config.get("src_iso"),
-                    config.get("trg_iso"),
+                    translate_config.get("src_prefix"),
+                    translate_config.get("trg_prefix"),
+                    translate_config.get("start_seq"),
+                    translate_config.get("end_seq"),
+                    translate_config.get("src_iso"),
+                    translate_config.get("trg_iso"),
                     self.produce_multiple_translations,
                     self.save_confidences,
                 )
-            elif config.get("src"):
+            elif translate_config.get("src"):
                 translator.translate_files(
-                    config.get("src"),
-                    config.get("trg"),
-                    config.get("src_iso"),
-                    config.get("trg_iso"),
+                    translate_config.get("src"),
+                    translate_config.get("trg"),
+                    translate_config.get("src_iso"),
+                    translate_config.get("trg_iso"),
                     self.produce_multiple_translations,
                     self.save_confidences,
                     postprocess_handler,
@@ -149,7 +159,23 @@ def main() -> None:
         help="Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run "
         + "it locally and register it with ClearML.",
     )
-    parser.add_argument("--save-checkpoints", default=False, action="store_true", help="Save checkpoints to S3 bucket")
+    parser.add_argument(
+        "--clearml-tag",
+        metavar="tag",
+        choices=TAGS_LIST,
+        default=None,
+        type=str,
+        help=f"Tag to add to the ClearML Task - {TAGS_LIST}",
+    )
+    parser.add_argument(
+        "--commit", type=str, default=None, help="The silnlp git commit id with which to run a remote job"
+    )
+    parser.add_argument(
+        "--save-checkpoints",
+        default=False,
+        action="store_true",
+        help="Save checkpoints to bucket. Only used if running the train step.",
+    )
     parser.add_argument("--preprocess", default=False, action="store_true", help="Run the preprocess step.")
     parser.add_argument("--train", default=False, action="store_true", help="Run the train step.")
     parser.add_argument("--test", default=False, action="store_true", help="Run the test step.")
@@ -175,9 +201,6 @@ def main() -> None:
         help="Show information about the environment variables and arguments.",
     )
     parser.add_argument(
-        "--commit", type=str, default=None, help="The silnlp git commit id with which to run a remote job"
-    )
-    parser.add_argument(
         "--scorers",
         nargs="*",
         metavar="scorer",
@@ -187,6 +210,9 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+
+    if args.clearml_queue is not None and args.clearml_tag is None:
+        parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
 
     if args.mt_dir is not None:
         SIL_NLP_ENV.set_machine_translation_dir(SIL_NLP_ENV.data_dir / args.mt_dir)
@@ -200,6 +226,9 @@ def main() -> None:
         args.train = True
         args.test = True
 
+    if not args.train:
+        args.save_checkpoints = True
+
     exp = SILExperiment(
         name=args.experiment,
         make_stats=args.stats,
@@ -207,6 +236,8 @@ def main() -> None:
         mixed_precision=not args.disable_mixed_precision,
         num_devices=args.num_devices,
         clearml_queue=args.clearml_queue,
+        clearml_tag=args.clearml_tag,
+        commit=args.commit,
         save_checkpoints=args.save_checkpoints,
         run_prep=args.preprocess,
         run_train=args.train,
@@ -216,7 +247,6 @@ def main() -> None:
         save_confidences=args.save_confidences,
         scorers=set(s.lower() for s in args.scorers),
         score_by_book=args.score_by_book,
-        commit=args.commit,
     )
     exp.run()
 
