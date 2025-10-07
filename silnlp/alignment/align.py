@@ -89,16 +89,22 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    aligner_ids = list(ALIGNERS.keys() if len(args.aligners) == 0 else args.aligners)
     if args.clearml_queue is not None:
         if "cpu" not in args.clearml_queue:
             LOGGER.warning("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
             exit()
         if args.clearml_tag is None:
             parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
-
-    clearml = SILClearML(args.experiments, args.clearml_queue, tag=args.clearml_tag, skip_config=True)
-
-    aligner_ids = list(ALIGNERS.keys() if len(args.aligners) == 0 else args.aligners)
+        if args.clearml_queue.lower() not in ("local", "locally"):
+            # Remove .NET aligners
+            aligner_ids = [
+                aid for aid in aligner_ids if not (aid.startswith("dotnet") or aid.startswith(".NET") or aid == "pt")
+            ]
+            LOGGER.warning(
+                "The .NET aligners cannot be used on remote ClearML queues. They have been removed from the list of aligners to run."
+            )
+        clearml = SILClearML(args.experiments, args.clearml_queue, tag=args.clearml_tag, skip_config=True)
 
     for exp_dir in get_experiment_dirs(args.experiments):
         exp_name = get_experiment_name(exp_dir)
