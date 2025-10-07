@@ -14,7 +14,7 @@ from ..common.paratext import book_file_name_digits, get_project_dir
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.translator import TranslationGroup, Translator
 from ..common.utils import get_git_revision_hash, show_attrs
-from .clearml_connection import SILClearML
+from .clearml_connection import TAGS_LIST, SILClearML
 from .config import CheckpointType, Config, NMTModel
 
 LOGGER = logging.getLogger(__package__ + ".translate")
@@ -36,7 +36,7 @@ class NMTTranslator(Translator, AbstractContextManager):
         return self._model.translate(
             sentences, src_iso, trg_iso, produce_multiple_translations, vrefs, self._checkpoint
         )
-    
+
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         self._model.clear_cache()
 
@@ -48,6 +48,7 @@ class TranslationTask:
     use_default_model_dir: bool = True
     clearml_queue: Optional[str] = None
     commit: Optional[str] = None
+    clearml_tag: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.checkpoint is None:
@@ -81,7 +82,9 @@ class TranslationTask:
 
                 trg_project_dir = get_project_dir(trg_project)
                 if not trg_project_dir.is_dir():
-                    raise FileNotFoundError(f"Target project {trg_project} not found in projects folder {trg_project_dir}")
+                    raise FileNotFoundError(
+                        f"Target project {trg_project} not found in projects folder {trg_project_dir}"
+                    )
             else:
                 trg_project = None
 
@@ -250,7 +253,9 @@ class TranslationTask:
                         src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations, save_confidences
                     )
                 elif ext == ".docx":
-                    translator.translate_docx(src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations)
+                    translator.translate_docx(
+                        src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations
+                    )
                 elif ext == ".usfm" or ext == ".sfm":
                     experiment_ckpt_str = f"{self.name}:{self.checkpoint}"
                     if not config.model_dir.exists():
@@ -280,6 +285,7 @@ class TranslationTask:
             experiment_suffix=experiment_suffix,
             commit=self.commit,
             use_default_model_dir=self.use_default_model_dir,
+            tag=self.clearml_tag,
         )
         self.name = clearml.name
 
@@ -415,16 +421,27 @@ def main() -> None:
         + "it locally and register it with ClearML.",
     )
     parser.add_argument(
+        "--clearml-tag",
+        metavar="tag",
+        choices=TAGS_LIST,
+        default=None,
+        type=str,
+        help=f"Tag to add to the ClearML Task - {TAGS_LIST}",
+    )
+    parser.add_argument(
+        "--commit", type=str, default=None, help="The silnlp git commit id with which to run a remote job"
+    )
+    parser.add_argument(
         "--debug",
         default=False,
         action="store_true",
         help="Show information about the environment variables and arguments.",
     )
-    parser.add_argument(
-        "--commit", type=str, default=None, help="The silnlp git commit id with which to run a remote job"
-    )
 
     args = parser.parse_args()
+
+    if args.clearml_queue is not None and args.clearml_tag is None:
+        parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
 
     get_git_revision_hash()
 
@@ -433,6 +450,7 @@ def main() -> None:
         checkpoint=args.checkpoint,
         clearml_queue=args.clearml_queue,
         commit=args.commit,
+        clearml_tag=args.clearml_tag,
     )
 
     postprocess_handler = PostprocessHandler([PostprocessConfig(vars(args))])

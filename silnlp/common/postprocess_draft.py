@@ -2,7 +2,7 @@ import argparse
 import logging
 from pathlib import Path
 
-from ..nmt.clearml_connection import SILClearML
+from ..nmt.clearml_connection import TAGS_LIST, SILClearML
 from ..nmt.config_utils import load_config
 from ..nmt.postprocess import postprocess_experiment
 from .postprocesser import PostprocessConfig, PostprocessHandler
@@ -76,7 +76,19 @@ def main() -> None:
         help="Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run "
         + "it locally and register it with ClearML.",
     )
+
+    parser.add_argument(
+        "--clearml-tag",
+        metavar="tag",
+        choices=TAGS_LIST,
+        default=None,
+        type=str,
+        help=f"Tag to add to the ClearML Task - {TAGS_LIST}",
+    )
     args = parser.parse_args()
+
+    if args.clearml_queue is not None and args.clearml_tag is None:
+        parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
 
     experiment = args.experiment.replace("\\", "/")
     args.output_folder = Path(args.output_folder.replace("\\", "/")) if args.output_folder else None
@@ -88,7 +100,7 @@ def main() -> None:
     if args.clearml_queue is not None:
         if "cpu" not in args.clearml_queue:
             raise ValueError("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
-        clearml = SILClearML(experiment, args.clearml_queue)
+        clearml = SILClearML(experiment, args.clearml_queue, tag=args.clearml_tag)
         config = clearml.config
     else:
         config = load_config(experiment)
