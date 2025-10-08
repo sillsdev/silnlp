@@ -1,33 +1,35 @@
 import argparse
-import random
 import shutil
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from collections.abc import Set
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Dict, List, Optional
+from typing import Collection, Dict, Generator, List, Optional, TextIO
 
-import numpy as np
-import numpy.typing as npt
-from machine.corpora import FileParatextProjectSettingsParser, ScriptureRef, UsfmFileText
+import regex
+from machine.corpora import AlignedWordPair, FileParatextProjectSettingsParser, ScriptureRef, UsfmFileText
 from machine.scripture import VerseRef
 from machine.tokenization import LatinWordTokenizer
-from machine.translation import WordAlignmentMatrix
 from pyparsing import Iterable
 
 from silnlp.common.environment import SIL_NLP_ENV
 
 from ..common.corpus import load_corpus, write_corpus
-from .eflomal import to_word_alignment_matrix
 from .utils import compute_alignment_scores
+
+unicode_letter_regex = regex.compile("\\p{L}")
+
+
+def contains_letter(token: str) -> bool:
+    return unicode_letter_regex.search(token)
 
 
 @dataclass
-class Passage:
+class VerseRange:
     start_ref: VerseRef
     end_ref: VerseRef
-    text: str
 
     def is_ref_in_range(self, ref: VerseRef) -> bool:
         return ref.compare_to(self.start_ref) >= 0 and ref.compare_to(self.end_ref) <= 0
@@ -39,14 +41,37 @@ class Verse:
     text: str
 
 
+class VerseCollector(VerseRange):
+    @abstractmethod
+    def add_verse(self, verse: Verse) -> None: ...
+
+
 @dataclass
-class SegmentedPassage:
-    start_ref: VerseRef
-    end_ref: VerseRef
+class Passage(VerseRange):
+    text: str
+
+
+@dataclass
+class SegmentedPassage(Passage):
     verses: List[Verse]
 
-    def is_ref_in_range(self, ref: VerseRef) -> bool:
-        return ref.compare_to(self.start_ref) >= 0 and ref.compare_to(self.end_ref) <= 0
+    def write_to_file(self, file: TextIO) -> None:
+        for verse in self.verses:
+            file.write(verse.text + "\n")
+
+
+class SegmentedPassageBuilder(VerseCollector):
+    def __init__(self, start_ref: VerseRef, end_ref: VerseRef):
+        super().__init__(start_ref, end_ref)
+        self._text = ""
+        self._verses: List[Verse] = []
+
+    def add_verse(self, verse: Verse) -> None:
+        self._verses.append(verse)
+        self._text += verse.text + " "
+
+    def build(self) -> SegmentedPassage:
+        return SegmentedPassage(self.start_ref, self.end_ref, self._text.replace("  ", " ").strip(), self._verses)
 
 
 class PassageReader:
@@ -71,7 +96,41 @@ class PassageReader:
         return self._passages
 
 
-class ParallelPassage:
+class WordAlignments:
+    def __init__(self, aligned_pairs: Collection[AlignedWordPair]):
+        self._aligned_pairs = aligned_pairs
+        self._target_tokens_by_source_token: Dict[int, List[int]] = self._create_source_to_target_alignment_lookup(
+            aligned_pairs
+        )
+        self._cached_crossed_alignments: Dict[tuple[int, int], int] = {}
+
+    def _create_source_to_target_alignment_lookup(
+        self, aligned_pairs: Collection[AlignedWordPair]
+    ) -> Dict[int, List[int]]:
+        target_tokens_by_source_token: Dict[int, List[int]] = defaultdict(list)
+        for aligned_word_pair in aligned_pairs:
+            target_tokens_by_source_token[aligned_word_pair.source_index].append(aligned_word_pair.target_index)
+        return target_tokens_by_source_token
+
+    def get_aligned_words(self, source_word_index: int) -> List[int]:
+        if source_word_index not in self._target_tokens_by_source_token:
+            return []
+        return self._target_tokens_by_source_token.get(source_word_index)
+
+    def get_num_crossed_alignments(self, src_word_index: int, trg_word_index: int) -> int:
+        if (src_word_index, trg_word_index) in self._cached_crossed_alignments:
+            return self._cached_crossed_alignments[(src_word_index, trg_word_index)]
+        num_crossings = 0
+        for aligned_word_pair in self._aligned_pairs:
+            if (
+                aligned_word_pair.source_index < src_word_index and aligned_word_pair.target_index > trg_word_index
+            ) or (aligned_word_pair.source_index > src_word_index and aligned_word_pair.target_index < trg_word_index):
+                num_crossings += 1
+        self._cached_crossed_alignments[(src_word_index, trg_word_index)] = num_crossings
+        return num_crossings
+
+
+class VerseSegmenter(ABC):
     PROHIBITED_VERSE_STARTING_CHARACTERS: Set[str] = {
         " ",
         ",",
@@ -90,126 +149,44 @@ class ParallelPassage:
     }
     PROHIBITED_VERSE_ENDING_CHARACTERS: Set[str] = {"(", "[", "{", "«", "‹", "“", "‘"}
 
-    def __init__(
+    @abstractmethod
+    def predict_target_verse_token_offsets(
         self,
-        start_ref: VerseRef,
-        end_ref: VerseRef,
-        source_verses: List[Verse],
+        source_tokens: List[str],
+        target_tokens: List[str],
+        source_verse_token_offsets: List[int],
+        word_alignments: WordAlignments,
+    ) -> List[int]: ...
+
+    def segment_verses(
+        self,
+        references: List[VerseRef],
+        source_tokens: List[str],
+        target_tokens: List[str],
         target_text: str,
-        word_alignment_matrix: Optional[WordAlignmentMatrix] = None,
-    ):
-        self._start_ref = start_ref
-        self._end_ref = end_ref
-        self._source_verses = source_verses
-        self._target_text = target_text
-        self._word_alignment_matrix = word_alignment_matrix
-        self._cached_crossed_alignments: Dict[tuple[int, int], int] = {}
-
-    def tokenize_text(self) -> None:
-        tokenizer = LatinWordTokenizer()
-        self._tokenized_source_verses = [list(tokenizer.tokenize(verse.text)) for verse in self._source_verses]
-        self._tokenized_source_text = [token for verse in self._tokenized_source_verses for token in verse]
-        self._source_verse_token_offsets = self._calculate_verse_token_offsets()
-        self._tokenized_target_text = list(tokenizer.tokenize(self._target_text))
-
-    def _calculate_verse_token_offsets(self) -> List[int]:
-        offsets = []
-        current_offset = 0
-        for verse in self._tokenized_source_verses:
-            current_offset += len(verse)
-            offsets.append(current_offset)
-        return offsets
-
-    def is_ref_in_range(self, ref: VerseRef) -> bool:
-        return ref.compare_to(self._start_ref) >= 0 and ref.compare_to(self._end_ref) <= 0
-
-    def add_source_verse(self, source_verse: Verse) -> None:
-        self._source_verses.append(source_verse)
-
-    def get_source_text(self) -> str:
-        return " ".join([verse.text for verse in self._source_verses])
-
-    def get_token_separated_source_text(self) -> str:
-        tokenizer = LatinWordTokenizer()
-        tokens = []
-        for verse in self._source_verses:
-            tokens.extend([token for token in tokenizer.tokenize(verse.text)])
-        return " ".join(tokens)
-
-    def get_target_text(self) -> str:
-        return self._target_text
-
-    def get_token_separated_target_text(self) -> str:
-        tokenizer = LatinWordTokenizer()
-        tokens = [token for token in tokenizer.tokenize(self._target_text)]
-        return " ".join(tokens)
-
-    def load_word_alignment_matrix(self, alignment_line: str) -> None:
-        self._word_alignment_matrix = to_word_alignment_matrix(alignment_line)
-        self._word_alignments = self._word_alignment_matrix.to_aligned_word_pairs()
-
-    # TODO: remove
-    def _calculate_crossed_alignments(self) -> npt.NDArray[np.int_]:
-        crossed_alignments = np.zeros(
-            shape=(self._word_alignment_matrix.row_count, self._word_alignment_matrix.column_count), dtype=np.int_
+        source_verse_token_offsets: List[int],
+        word_alignments: WordAlignments,
+    ) -> List[Verse]:
+        target_verse_offsets: List[int] = self.predict_target_verse_token_offsets(
+            source_tokens, target_tokens, source_verse_token_offsets, word_alignments
         )
-        for src_word_index in range(self._word_alignment_matrix.row_count):
-            for aligned_trg_word_index in self._word_alignment_matrix.get_row_aligned_indices(src_word_index):
-                for earlier_src_index in range(src_word_index):
-                    for later_trg_index in range(aligned_trg_word_index + 1, self._word_alignment_matrix.column_count):
-                        crossed_alignments[earlier_src_index, later_trg_index] += 1
-                for later_src_index in range(src_word_index + 1, self._word_alignment_matrix.row_count):
-                    for earlier_trg_index in range(0, aligned_trg_word_index):
-                        crossed_alignments[later_src_index, earlier_trg_index] += 1
-        return crossed_alignments
+        return self._create_target_verses_from_offsets(references, target_tokens, target_verse_offsets, target_text)
 
-    def _get_num_crossed_alignments(self, src_word_index: int, trg_word_index: int) -> int:
-        if (src_word_index, trg_word_index) in self._cached_crossed_alignments:
-            return self._cached_crossed_alignments[(src_word_index, trg_word_index)]
-        num_crossings = 0
-        for aligned_word_pair in self._word_alignments:
-            if (
-                aligned_word_pair.source_index < src_word_index and aligned_word_pair.target_index > trg_word_index
-            ) or (aligned_word_pair.source_index > src_word_index and aligned_word_pair.target_index < trg_word_index):
-                num_crossings += 1
-        self._cached_crossed_alignments[(src_word_index, trg_word_index)] = num_crossings
-        return num_crossings
-
-    def segment_target_passage(self) -> SegmentedPassage:
-        last_target_verse_offset = -1
-        target_verse_offsets: List[int] = []
-        for verse_index, (source_verse, verse_token_offset) in enumerate(
-            zip(self._source_verses[:-1], self._source_verse_token_offsets[:-1])
-        ):
-            fewest_crossed_alignments = 1000000
-            best_split_indices = []
-            for trg_word_index in range(last_target_verse_offset + 1, self._word_alignment_matrix.column_count):
-                crossed_alignments = self._get_num_crossed_alignments(verse_token_offset - 1, trg_word_index)
-
-                if trg_word_index < self._word_alignment_matrix.column_count - 1:
-                    crossed_alignments += self._get_num_crossed_alignments(verse_token_offset, trg_word_index)
-
-                if crossed_alignments == fewest_crossed_alignments:
-                    best_split_indices.append(trg_word_index)
-                elif crossed_alignments < fewest_crossed_alignments:
-                    fewest_crossed_alignments = crossed_alignments
-                    best_split_indices = [trg_word_index]
-            if len(best_split_indices) == 0:
-                target_verse_offsets.append(-1)
-            else:
-                target_verse_offsets.append(random.choice(best_split_indices))
-            last_target_verse_offset = target_verse_offsets[-1]
-        return self._create_target_verses_from_offsets(target_verse_offsets)
-
-    def _create_target_verses_from_offsets(self, target_verse_offsets: List[int]) -> SegmentedPassage:
+    def _create_target_verses_from_offsets(
+        self,
+        references: List[VerseRef],
+        target_tokens: List[str],
+        target_verse_offsets: List[int],
+        target_text: str,
+    ) -> SegmentedPassage:
         target_verses = []
 
         current_verse_starting_char_index = 0
         current_verse_ending_char_index = 0
         current_verse_offset_index = 0
-        for target_word_index, target_word in enumerate(self._tokenized_target_text):
+        for target_word_index, target_word in enumerate(target_tokens):
             if target_verse_offsets[current_verse_offset_index] == -1:
-                verse_ref = self._source_verses[current_verse_offset_index].reference
+                verse_ref = references[current_verse_offset_index]
                 target_verses.append(Verse(verse_ref, ""))
 
                 current_verse_starting_char_index = current_verse_ending_char_index
@@ -218,8 +195,8 @@ class ParallelPassage:
                     break
 
             elif target_word_index == target_verse_offsets[current_verse_offset_index]:
-                verse_ref = self._source_verses[current_verse_offset_index].reference
-                verse_text = self._target_text[current_verse_starting_char_index:current_verse_ending_char_index]
+                verse_ref = references[current_verse_offset_index]
+                verse_text = target_text[current_verse_starting_char_index:current_verse_ending_char_index]
                 target_verses.append(Verse(verse_ref, verse_text))
 
                 current_verse_starting_char_index = current_verse_ending_char_index
@@ -227,15 +204,19 @@ class ParallelPassage:
                 if current_verse_offset_index >= len(target_verse_offsets):
                     break
 
-            current_verse_ending_char_index = self._target_text.index(
-                target_word, current_verse_ending_char_index
-            ) + len(target_word)
+            current_verse_ending_char_index = target_text.index(target_word, current_verse_ending_char_index) + len(
+                target_word
+            )
 
-        last_verse_ref = self._source_verses[-1].reference
-        last_verse_text = self._target_text[current_verse_starting_char_index:]
-        target_verses.append(Verse(last_verse_ref, last_verse_text))
+        while current_verse_offset_index < len(references):
+            last_verse_ref = references[current_verse_offset_index]
+            last_verse_text = target_text[current_verse_starting_char_index:]
+            target_verses.append(Verse(last_verse_ref, last_verse_text))
 
-        return SegmentedPassage(self._start_ref, self._end_ref, self._adjust_verse_boundaries(target_verses))
+            current_verse_starting_char_index = len(target_text)
+            current_verse_offset_index += 1
+
+        return self._adjust_verse_boundaries(target_verses)
 
     def _adjust_verse_boundaries(self, target_verses: List[Verse]) -> List[Verse]:
         for verse, next_verse in zip(target_verses[:-1], target_verses[1:]):
@@ -246,6 +227,243 @@ class ParallelPassage:
                 next_verse.text = verse.text[-1] + next_verse.text
                 verse.text = verse.text[:-1]
         return target_verses
+
+
+class FewestCrossedAlignmentsVerseSegmenter(VerseSegmenter):
+    def predict_target_verse_token_offsets(
+        self,
+        source_tokens: List[str],
+        target_tokens: List[str],
+        source_verse_token_offsets: List[int],
+        word_alignments: WordAlignments,
+    ) -> List[int]:
+        last_target_verse_offset = -1
+        target_verse_offsets: List[int] = []
+        for verse_token_offset in source_verse_token_offsets[:-1]:
+            if verse_token_offset == len(source_tokens):
+                target_verse_offsets.append(len(target_tokens))
+                continue
+
+            fewest_crossed_alignments = 1000000
+            best_split_indices = []
+            for trg_word_index in range(last_target_verse_offset + 1, len(target_tokens)):
+                crossed_alignments = word_alignments.get_num_crossed_alignments(verse_token_offset - 1, trg_word_index)
+
+                if trg_word_index < len(target_tokens):
+                    crossed_alignments += word_alignments.get_num_crossed_alignments(verse_token_offset, trg_word_index)
+
+                if crossed_alignments == fewest_crossed_alignments:
+                    best_split_indices.append(trg_word_index)
+                elif crossed_alignments < fewest_crossed_alignments:
+                    fewest_crossed_alignments = crossed_alignments
+                    best_split_indices = [trg_word_index]
+            if len(best_split_indices) == 0:
+                target_verse_offsets.append(-1)
+            else:
+                if verse_token_offset > 0 and not contains_letter(source_tokens[verse_token_offset - 1]):
+                    aligned_words = word_alignments.get_aligned_words(verse_token_offset - 1)
+                    if (
+                        len(aligned_words) == 1
+                        and not contains_letter(target_tokens[aligned_words[0]])
+                        and aligned_words[0] in best_split_indices
+                    ):
+                        target_verse_offsets.append(aligned_words[0])
+                        last_target_verse_offset = target_verse_offsets[-1]
+                        continue
+                if not contains_letter(source_tokens[verse_token_offset]):
+                    aligned_words = word_alignments.get_aligned_words(verse_token_offset)
+                    if (
+                        len(aligned_words) == 1
+                        and not contains_letter(target_tokens[aligned_words[0]])
+                        and aligned_words[0]
+                        and best_split_indices
+                    ):
+                        target_verse_offsets.append(aligned_words[0])
+                        last_target_verse_offset = target_verse_offsets[-1]
+                        continue
+                target_verse_offsets.append(best_split_indices[0])
+            last_target_verse_offset = target_verse_offsets[-1]
+        return target_verse_offsets
+
+
+class AdaptedMarkerPlacementVerseSegmenter(VerseSegmenter):
+    def predict_target_verse_token_offsets(
+        self,
+        source_tokens: List[str],
+        target_tokens: List[str],
+        source_verse_token_offsets: List[int],
+        word_alignments: WordAlignments,
+    ) -> List[int]:
+        return [
+            self._predict_single_verse_token_offset(
+                source_tokens, target_tokens, source_verse_token_offset, word_alignments
+            )
+            for source_verse_token_offset in source_verse_token_offsets[:-1]
+        ]
+
+    def _predict_single_verse_token_offset(
+        self,
+        source_tokens: List[str],
+        target_tokens: List[str],
+        source_verse_token_offset: int,
+        word_alignments: WordAlignments,
+    ) -> int:
+        # If the token on either side of a potential target location is punctuation,
+        # use it as the basis for deciding the target marker location
+        trg_hyp = -1
+        punct_hyps = [-1, 0]
+        for punct_hyp in punct_hyps:
+            src_hyp = source_verse_token_offset + punct_hyp
+            if src_hyp < 0 or src_hyp >= len(source_tokens):
+                continue
+            # Only accept aligned pairs where both the src and trg token are punctuation
+            hyp_tok = source_tokens[src_hyp]
+            if len(hyp_tok) > 0 and not any(c.isalpha() for c in hyp_tok) and src_hyp < len(source_tokens):
+                aligned_trg_toks = word_alignments.get_aligned_words(src_hyp)
+                # If aligning to a token that precedes that marker,
+                # the trg token predicted to be closest to the marker
+                # is the last token aligned to the src rather than the first
+                for trg_idx in reversed(aligned_trg_toks) if punct_hyp < 0 else aligned_trg_toks:
+                    trg_tok = target_tokens[trg_idx]
+                    if len(trg_tok) > 0 and not any(c.isalpha() for c in trg_tok):
+                        trg_hyp = trg_idx
+                        break
+            if trg_hyp != -1:
+                # Since the marker location is represented by the token after the marker,
+                # adjust the index when aligning to punctuation that precedes the token
+                return trg_hyp + (1 if punct_hyp == -1 else 0)
+
+        hyps = [0, 1, 2]
+        best_hyp = -1
+        best_num_crossings = 200**2  # mostly meaningless, a big number
+        checked = set()
+        for hyp in hyps:
+            src_hyp = source_verse_token_offset + hyp
+            if src_hyp in checked:
+                continue
+            trg_hyp = -1
+            while trg_hyp == -1 and src_hyp >= 0 and src_hyp < len(source_tokens):
+                checked.add(src_hyp)
+                aligned_trg_toks = word_alignments.get_aligned_words(src_hyp)
+                if len(aligned_trg_toks) > 0:
+                    # If aligning with a source token that precedes the marker,
+                    # the target token predicted to be closest to the marker is the last aligned token rather than the first
+                    trg_hyp = aligned_trg_toks[-1 if hyp < 0 else 0]
+                else:  # continue the search outwards
+                    src_hyp += -1 if hyp < 0 else 1
+            if trg_hyp != -1:
+                num_crossings = word_alignments.get_num_crossed_alignments(source_verse_token_offset, trg_hyp)
+                if num_crossings < best_num_crossings:
+                    best_hyp = trg_hyp
+                    best_num_crossings = num_crossings
+                if num_crossings == 0:
+                    break
+
+        # If no alignments found, insert at the end of the sentence
+        return best_hyp if best_hyp != -1 else len(target_tokens)
+
+
+class ParallelPassage(VerseRange):
+
+    def __init__(
+        self,
+        start_ref: VerseRef,
+        end_ref: VerseRef,
+        source_verses: List[Verse],
+        target_text: str,
+        word_alignments: WordAlignments,
+        tokenized_source_verses: Optional[List[List[str]]] = None,
+        tokenized_source_text: Optional[List[str]] = None,
+        tokenized_target_text: Optional[List[str]] = None,
+        verse_token_offsets: Optional[List[int]] = None,
+    ):
+        super().__init__(start_ref, end_ref)
+        self._start_ref = start_ref
+        self._end_ref = end_ref
+        self._source_verses = source_verses
+        self._target_text = target_text
+        self._word_alignments = word_alignments
+
+        if tokenized_source_verses is not None:
+            self._tokenized_source_verses = tokenized_source_verses
+        else:
+            self._tokenized_source_verses: List[List[str]] = []
+
+        if tokenized_source_text is not None:
+            self._tokenized_source_text = tokenized_source_text
+        else:
+            self._tokenized_source_text = []
+
+        if tokenized_target_text is not None:
+            self._tokenized_target_text = tokenized_target_text
+        else:
+            self._tokenized_target_text = []
+
+        if verse_token_offsets is not None:
+            self._source_verse_token_offsets = verse_token_offsets
+        else:
+            self._source_verse_token_offsets = []
+
+    def segment_target_passage(self, verse_segmenter: VerseSegmenter) -> SegmentedPassage:
+        target_verses: List[Verse] = verse_segmenter.segment_verses(
+            [verse.reference for verse in self._source_verses],
+            self._tokenized_source_text,
+            self._tokenized_target_text,
+            self._target_text,
+            self._source_verse_token_offsets,
+            self._word_alignments,
+        )
+        return SegmentedPassage(self._start_ref, self._end_ref, self._target_text, target_verses)
+
+    def get_source_passage(self) -> SegmentedPassage:
+        return SegmentedPassage(
+            self._start_ref, self._end_ref, " ".join([v.text for v in self._source_verses]), self._source_verses
+        )
+
+
+class ParallelPassageBuilder(VerseCollector):
+    tokenizer = LatinWordTokenizer()
+
+    def __init__(self, start_ref: VerseRef, end_ref: VerseRef, target_text: str):
+        super().__init__(start_ref, end_ref)
+        self._target_text = target_text
+        self._tokenized_target_text = list(self.tokenizer.tokenize(self._target_text))
+        self._source_verses: List[Verse] = []
+        self._word_alignments: WordAlignments
+        self._tokenized_source_verses: List[List[str]] = []
+        self._tokenized_source_text: List[str] = []
+        self._verse_token_offsets: List[int] = []
+
+    def add_verse(self, verse: Verse) -> None:
+        self._source_verses.append(verse)
+        tokens = list(self.tokenizer.tokenize(verse.text))
+        self._tokenized_source_verses.append(tokens)
+        self._tokenized_source_text.extend(tokens)
+        self._verse_token_offsets.append(len(self._tokenized_source_text))
+
+    def get_token_separated_source_text_for_alignment(self) -> str:
+        return " ".join(self._tokenized_source_text)
+
+    def get_token_separated_target_text_for_alignment(self) -> str:
+        return " ".join(self._tokenized_target_text)
+
+    def set_word_alignments(self, word_alignments: WordAlignments) -> None:
+        self._word_alignments = word_alignments
+
+    def build(self) -> ParallelPassage:
+        if self._word_alignments is None:
+            raise ValueError("Word alignments not loaded")
+        return ParallelPassage(
+            self.start_ref,
+            self.end_ref,
+            self._source_verses,
+            self._target_text,
+            self._word_alignments,
+            self._tokenized_source_verses,
+            self._tokenized_source_text,
+            self._tokenized_target_text,
+            self._verse_token_offsets,
+        )
 
 
 class ParallelPassageCollectionFactory:
@@ -269,7 +487,7 @@ class ParallelPassageCollectionFactory:
 
 class AlignmentGenerator(ABC):
     @abstractmethod
-    def generate(self, source_passages: List[str], target_passages: List[str]) -> List[str]:
+    def generate(self, source_passages: List[str], target_passages: List[str]) -> Generator[WordAlignments, None, None]:
         pass
 
 
@@ -278,7 +496,7 @@ class EflomalAlignmentGenerator(AlignmentGenerator):
         self._save_alignments = save_alignments
         self._target_passage_file = target_passage_file
 
-    def generate(self, source_passages: List[str], target_passages: List[str]) -> List[str]:
+    def generate(self, source_passages: List[str], target_passages: List[str]) -> Generator[WordAlignments, None, None]:
         with TemporaryDirectory() as td:
             align_path = Path(td, "sym-align.txt")
             src_path = Path(td, "src_align.txt")
@@ -288,7 +506,7 @@ class EflomalAlignmentGenerator(AlignmentGenerator):
             compute_alignment_scores(Path(td, "src_align.txt"), Path(td, "trg_align.txt"), "eflomal", align_path)
 
             for line in load_corpus(align_path):
-                yield line
+                yield WordAlignments(AlignedWordPair.from_string(line))
 
             if self._save_alignments:
                 assert self._target_passage_file is not None
@@ -300,83 +518,93 @@ class SavedAlignmentGenerator(AlignmentGenerator):
     def __init__(self, alignment_file: Path):
         self._alignment_file = alignment_file
 
-    def generate(self, source_passages: List[str], target_passages: List[str]) -> List[str]:
-        return load_corpus(self._alignment_file)
+    def generate(self, source_passages: List[str], target_passages: List[str]) -> Generator[WordAlignments, None, None]:
+        for alignment_line in load_corpus(self._alignment_file):
+            yield WordAlignments(AlignedWordPair.from_string(alignment_line))
+
+
+class ParatextProjectReader:
+    def __init__(self, project_name: str):
+        self._project_name = project_name
+
+    def collect_verses(self, verse_collectors: List[VerseCollector]) -> List[VerseCollector]:
+        settings = FileParatextProjectSettingsParser(SIL_NLP_ENV.pt_projects_dir / self._project_name).parse()
+        stylesheet = settings.stylesheet
+        encoding = settings.encoding
+        for book in self._get_all_required_books(verse_collectors):
+            usfm_text = UsfmFileText(
+                stylesheet,
+                encoding,
+                book,
+                SIL_NLP_ENV.pt_projects_dir / self._project_name / settings.get_book_file_name(book),
+            )
+            for row in usfm_text:
+                for verse_collector in verse_collectors:
+                    if isinstance(row.ref, ScriptureRef) and verse_collector.is_ref_in_range(row.ref.verse_ref):
+                        verse_collector.add_verse(Verse(row.ref.verse_ref, row.text))
+        return verse_collectors
+
+    def _get_all_required_books(self, verse_collectors: List[VerseCollector]) -> Set[str]:
+        all_books: Set[str] = set()
+        for verse_collector in verse_collectors:
+            all_books.add(verse_collector.start_ref.book)
+            all_books.add(verse_collector.end_ref.book)
+        return all_books
 
 
 class ParallelPassageCollection:
     def __init__(self, source_project_name: str, target_passage_file: Path, alignment_generator: AlignmentGenerator):
         target_passages = PassageReader(target_passage_file).get_passages()
-        self._collect_parallel_passages(source_project_name, target_passages)
-        self._create_word_alignment_matrix(alignment_generator)
+        parallel_passage_builders = self._collect_parallel_passages(source_project_name, target_passages)
+        self._create_word_alignment_matrix(parallel_passage_builders, alignment_generator)
+        self._parallel_passages = [
+            parallel_passage_builder.build() for parallel_passage_builder in parallel_passage_builders
+        ]
 
-    def _get_all_books_in_passages(self, passages: List[Passage]) -> Set[str]:
-        all_books: Set[str] = set()
-        for passage in passages:
-            all_books.add(passage.start_ref.book)
-            all_books.add(passage.end_ref.book)
-        return all_books
+    def _collect_parallel_passages(
+        self, source_project_name: str, target_passages: List[Passage]
+    ) -> List[ParallelPassageBuilder]:
+        paratext_project_reader = ParatextProjectReader(source_project_name)
+        parallel_passage_builders = [ParallelPassageBuilder(t.start_ref, t.end_ref, t.text) for t in target_passages]
+        return paratext_project_reader.collect_verses(parallel_passage_builders)
 
-    def _collect_parallel_passages(self, source_project_name: str, target_passages: List[Passage]) -> None:
-        self._parallel_passages = [ParallelPassage(t.start_ref, t.end_ref, [], t.text) for t in target_passages]
-
-        settings = FileParatextProjectSettingsParser(SIL_NLP_ENV.pt_projects_dir / source_project_name).parse()
-        stylesheet = settings.stylesheet
-        encoding = settings.encoding
-        for book in self._get_all_books_in_passages(target_passages):
-            usfm_text = UsfmFileText(
-                stylesheet,
-                encoding,
-                book,
-                SIL_NLP_ENV.pt_projects_dir / source_project_name / settings.get_book_file_name(book),
-            )
-            for row in usfm_text:
-                for parallel_passage in self._parallel_passages:
-                    if isinstance(row.ref, ScriptureRef) and parallel_passage.is_ref_in_range(row.ref.verse_ref):
-                        parallel_passage.add_source_verse(Verse(row.ref.verse_ref, row.text))
-        for passage in self._parallel_passages:
-            passage.tokenize_text()
-
-    def _create_word_alignment_matrix(self, alignment_generator: AlignmentGenerator) -> None:
-        for index, alignment_line in enumerate(
+    def _create_word_alignment_matrix(
+        self, parallel_passage_builders: List[ParallelPassageBuilder], alignment_generator: AlignmentGenerator
+    ) -> None:
+        for index, word_alignments in enumerate(
             alignment_generator.generate(
-                [passage.get_token_separated_source_text() for passage in self._parallel_passages],
-                [passage.get_token_separated_target_text() for passage in self._parallel_passages],
+                [
+                    passage_builder.get_token_separated_source_text_for_alignment()
+                    for passage_builder in parallel_passage_builders
+                ],
+                [
+                    passage_builder.get_token_separated_target_text_for_alignment()
+                    for passage_builder in parallel_passage_builders
+                ],
             )
         ):
-            self._parallel_passages[index].load_word_alignment_matrix(alignment_line)
+            parallel_passage_builders[index].set_word_alignments(word_alignments)
 
-    def segment_target_passages(self) -> Iterable[SegmentedPassage]:
+    def segment_target_passages(self, verse_segmenter: VerseSegmenter) -> Iterable[SegmentedPassage]:
         for passage in self._parallel_passages:
-            yield passage.segment_target_passage()
+            yield passage.segment_target_passage(verse_segmenter)
+
+    def get_source_segmented_passages(self) -> List[SegmentedPassage]:
+        return [parallel_passage.get_source_passage() for parallel_passage in self._parallel_passages]
 
 
 class ReferenceVerseSegmentationReader:
     def read_passages(self, target_project_name: str, target_passage_file: Path):
-        self._passages = PassageReader(target_passage_file).get_passages()
-        return self._read_segmented_passages(target_project_name)
+        passages = PassageReader(target_passage_file).get_passages()
+        return self._read_segmented_passages(passages, target_project_name)
 
-    def _read_segmented_passages(self, target_project_name: str) -> List[SegmentedPassage]:
-        segmented_passages: List[SegmentedPassage] = [
-            SegmentedPassage(p.start_ref, p.end_ref, []) for p in self._passages
+    def _read_segmented_passages(self, passages: List[Passage], target_project_name: str) -> List[SegmentedPassage]:
+        paratext_project_reader = ParatextProjectReader(target_project_name)
+        segmented_passage_builders: List[SegmentedPassageBuilder] = [
+            SegmentedPassageBuilder(p.start_ref, p.end_ref) for p in passages
         ]
-
-        settings = FileParatextProjectSettingsParser(SIL_NLP_ENV.pt_projects_dir / target_project_name).parse()
-        stylesheet = settings.stylesheet
-        encoding = settings.encoding
-        for segmented_passage in segmented_passages:
-            usfm_text = UsfmFileText(
-                stylesheet,
-                encoding,
-                segmented_passage.start_ref.book,
-                SIL_NLP_ENV.pt_projects_dir
-                / target_project_name
-                / settings.get_book_file_name(segmented_passage.start_ref.book),
-            )
-            for row in usfm_text:
-                if isinstance(row.ref, ScriptureRef) and segmented_passage.is_ref_in_range(row.ref.verse_ref):
-                    segmented_passage.verses.append(Verse(row.ref.verse_ref, row.text))
-        return segmented_passages
+        paratext_project_reader.collect_verses(segmented_passage_builders)
+        return [segmented_passage_builder.build() for segmented_passage_builder in segmented_passage_builders]
 
 
 class SegmentationEvaluation:
@@ -465,16 +693,24 @@ def main() -> None:
     parallel_passages = ParallelPassageCollectionFactory(args.save_alignments, args.use_saved_alignments).create(
         args.source_project, Path(args.target_passages)
     )
-    segmented_passages = list(parallel_passages.segment_target_passages())
-    for segmented_passage in segmented_passages:
-        for verse in segmented_passage.verses:
-            print(f"{verse.reference}\t{verse.text}")
+    src_segmented_passages = parallel_passages.get_source_segmented_passages()
+
+    verse_segmenter = FewestCrossedAlignmentsVerseSegmenter()
+    trg_segmented_passages = list(parallel_passages.segment_target_passages(verse_segmenter))
+
+    src_path = Path(args.target_passages).with_suffix(".src.txt")
+    trg_path = Path(args.target_passages).with_suffix(".trg.txt")
+    with open(src_path, "w", encoding="utf-8") as src_output, open(trg_path, "w", encoding="utf-8") as trg_output:
+        for src_passage, trg_passage in zip(src_segmented_passages, trg_segmented_passages):
+            src_passage.write_to_file(src_output)
+            trg_passage.write_to_file(trg_output)
+
     if args.compare_against is not None:
         reference_segmentations = ReferenceVerseSegmentationReader().read_passages(
             args.compare_against, Path(args.target_passages)
         )
         segmentation_evaluator = SegmentationEvaluator(reference_segmentations)
-        segmentation_evaluation = segmentation_evaluator.evaluate_segmentation(segmented_passages)
+        segmentation_evaluation = segmentation_evaluator.evaluate_segmentation(trg_segmented_passages)
         print(
             f"Segmentation accuracy = {segmentation_evaluation.get_accuracy() * 100}%, average distance = {segmentation_evaluation.get_average_distance()} characters"
         )
