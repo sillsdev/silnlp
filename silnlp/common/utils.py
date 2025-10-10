@@ -193,3 +193,14 @@ def create_noise_methods(params: List[dict]) -> List[NoiseMethod]:
             raise ValueError("Invalid noise type: %s" % noise_type)
         methods.append(noise_method_class(*args))
     return methods
+
+
+def _get_tags_str(tags: Optional[List[str]]) -> str:
+    tags_str = ""
+    if tags is not None and len(tags) > 0:
+        tags_str += " ".join(f"<{t}>" for t in tags) + " "
+    return tags_str
+
+
+def add_tags_to_sentence(tags: Optional[List[str]], sentence: str) -> str:
+    return _get_tags_str(tags) + sentence
