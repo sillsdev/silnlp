@@ -7,9 +7,10 @@ from enum import Enum, Flag, auto
 from inspect import getmembers
 from pathlib import Path, PurePath
 from types import FunctionType
-from typing import Any, List, Optional, Set, Type
+from typing import Any, List, Optional, Set, Type, cast
 
 import numpy as np
+import pandas as pd
 
 from ..common.environment import SIL_NLP_ENV
 
@@ -204,3 +205,10 @@ def _get_tags_str(tags: Optional[List[str]]) -> str:
 
 def add_tags_to_sentence(tags: Optional[List[str]], sentence: str) -> str:
     return _get_tags_str(tags) + sentence
+
+
+def add_tags_to_dataframe(tags: Optional[List[str]], df_sentences: pd.DataFrame) -> pd.DataFrame:
+    tags_str = _get_tags_str(tags)
+    if tags_str != "":
+        cast(Any, df_sentences).loc[:, "source"] = tags_str + df_sentences.loc[:, "source"]
+    return df_sentences
