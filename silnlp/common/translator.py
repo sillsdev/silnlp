@@ -24,6 +24,7 @@ from machine.corpora import (
 from machine.scripture import VerseRef, is_book_id_valid
 from scipy.stats import gmean
 
+from silnlp.common.utils import add_tags_to_sentence
 from silnlp.nmt.corpora import CorpusPair
 
 from .corpus import load_corpus, write_corpus
@@ -264,9 +265,12 @@ class Translator(ABC):
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
         trg_prefix: str = "",
+        tags: Optional[List[str]] = None,
     ) -> None:
+
+        sentences = [add_tags_to_sentence(tags, sentence) for sentence in load_corpus(src_file_path)]
         sentence_translation_groups: List[SentenceTranslationGroup] = list(
-            self.translate(load_corpus(src_file_path), src_iso, trg_iso, produce_multiple_translations)
+            self.translate(sentences, src_iso, trg_iso, produce_multiple_translations)
         )
         draft_set = DraftGroup(sentence_translation_groups)
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
@@ -298,6 +302,7 @@ class Translator(ABC):
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
         experiment_ckpt_str: str = "",
         training_corpus_pairs: List[CorpusPair] = [],
+        tags: Optional[List[str]] = None,
     ) -> None:
         book_path = get_book_path(src_project, book)
         if not book_path.is_file():
@@ -317,6 +322,7 @@ class Translator(ABC):
             postprocess_handler,
             experiment_ckpt_str,
             training_corpus_pairs,
+            tags,
         )
 
     def translate_usfm(
@@ -332,6 +338,7 @@ class Translator(ABC):
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
         experiment_ckpt_str: str = "",
         training_corpus_pairs: List[CorpusPair] = [],
+        tags: Optional[List[str]] = None,
     ) -> None:
         # Create UsfmFileText object for source
         src_from_project = False
@@ -357,7 +364,7 @@ class Translator(ABC):
             src_file_text = UsfmFileText("usfm.sty", "utf-8-sig", book_id, src_file_path, include_all_text=True)
         stylesheet = src_settings.stylesheet if src_from_project else UsfmStylesheet("usfm.sty")
 
-        sentences = [re.sub(" +", " ", s.text.strip()) for s in src_file_text]
+        sentences = [re.sub(" +", " ", add_tags_to_sentence(tags, s.text.strip())) for s in src_file_text]
         vrefs = [s.ref for s in src_file_text]
         LOGGER.info(f"File {src_file_path} parsed correctly.")
 
@@ -494,6 +501,7 @@ class Translator(ABC):
         src_iso: str,
         trg_iso: str,
         produce_multiple_translations: bool = False,
+        tags: Optional[List[str]] = None,
     ) -> None:
         tokenizer: nltk.tokenize.PunktSentenceTokenizer
         try:
@@ -510,7 +518,7 @@ class Translator(ABC):
 
         for i in range(len(doc.paragraphs)):
             for sentence in tokenizer.tokenize(doc.paragraphs[i].text, "test"):
-                sentences.append(sentence)
+                sentences.append(add_tags_to_sentence(tags, sentence))
                 paras.append(i)
 
         draft_set: DraftGroup = DraftGroup(

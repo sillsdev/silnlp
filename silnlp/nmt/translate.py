@@ -5,7 +5,7 @@ import time
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional, Tuple, Union
+from typing import Iterable, List, Optional, Tuple, Union
 
 from machine.scripture import VerseRef, book_number_to_id, get_chapters
 
@@ -63,6 +63,7 @@ class TranslationTask:
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
+        tags: Optional[List[str]] = None,
     ):
         book_nums = get_chapters(books)
         translator, config, step_str = self._init_translation_task(
@@ -124,6 +125,7 @@ class TranslationTask:
                         postprocess_handler,
                         experiment_ckpt_str,
                         config.corpus_pairs,
+                        tags,
                     )
                 except Exception as e:
                     translation_failed.append(book)
@@ -142,6 +144,7 @@ class TranslationTask:
         trg_iso: Optional[str],
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
+        tags: Optional[List[str]] = None,
     ) -> None:
         translator, config, _ = self._init_translation_task(experiment_suffix=f"_{self.checkpoint}_{src_prefix}")
         with translator:
@@ -183,6 +186,7 @@ class TranslationTask:
                         produce_multiple_translations,
                         save_confidences,
                         trg_prefix,
+                        tags,
                     )
                     end = time.time()
                     print(f"Translated {src_file_path.name} to {trg_file_path.name} in {((end-start)/60):.2f} minutes")
@@ -196,6 +200,7 @@ class TranslationTask:
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
+        tags: Optional[List[str]] = None,
     ) -> None:
         translator, config, step_str = self._init_translation_task(
             experiment_suffix=f"_{self.checkpoint}_{os.path.basename(src)}"
@@ -250,11 +255,17 @@ class TranslationTask:
                 LOGGER.info(f"Translating {src_name}")
                 if ext == ".txt":
                     translator.translate_text(
-                        src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations, save_confidences
+                        src_file_path,
+                        trg_file_path,
+                        src_iso,
+                        trg_iso,
+                        produce_multiple_translations,
+                        save_confidences,
+                        tags,
                     )
                 elif ext == ".docx":
                     translator.translate_docx(
-                        src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations
+                        src_file_path, trg_file_path, src_iso, trg_iso, produce_multiple_translations, tags
                     )
                 elif ext == ".usfm" or ext == ".sfm":
                     experiment_ckpt_str = f"{self.name}:{self.checkpoint}"
@@ -270,6 +281,7 @@ class TranslationTask:
                         postprocess_handler=postprocess_handler,
                         experiment_ckpt_str=experiment_ckpt_str,
                         training_corpus_pairs=config.corpus_pairs,
+                        tags=tags,
                     )
 
     def _init_translation_task(self, experiment_suffix: str) -> Tuple[Translator, Config, str]:

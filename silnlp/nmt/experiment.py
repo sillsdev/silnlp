@@ -106,6 +106,9 @@ class SILExperiment:
             if not postprocess_configs:
                 postprocess_handler = PostprocessHandler([])
 
+            if isinstance(translate_config["tags"], list):
+                translate_config["tags"] = ",".join(translate_config["tags"])
+
             if len(translate_config.get("books", [])) > 0:
                 if isinstance(translate_config["books"], list):
                     translate_config["books"] = ";".join(translate_config["books"])
@@ -117,6 +120,7 @@ class SILExperiment:
                     self.produce_multiple_translations,
                     self.save_confidences,
                     postprocess_handler,
+                    translate_config.get("tags"),
                 )
             elif translate_config.get("src_prefix"):
                 translator.translate_text_files(
@@ -128,6 +132,7 @@ class SILExperiment:
                     translate_config.get("trg_iso"),
                     self.produce_multiple_translations,
                     self.save_confidences,
+                    translate_config.get("tags"),
                 )
             elif translate_config.get("src"):
                 translator.translate_files(
@@ -138,6 +143,7 @@ class SILExperiment:
                     self.produce_multiple_translations,
                     self.save_confidences,
                     postprocess_handler,
+                    translate_config.get("tags"),
                 )
             else:
                 raise RuntimeError("A Scripture book, file, or file prefix must be specified for translation.")
