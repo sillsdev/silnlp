@@ -325,6 +325,7 @@ class Translator(ABC):
                             else None
                         ),
                         remarks=remarks,
+                        compare_segments=True,
                     )
 
                     if usfm_out is None:
