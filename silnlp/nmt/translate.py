@@ -270,11 +270,6 @@ class TranslationTask:
                         postprocess_handler=postprocess_handler,
                         experiment_ckpt_str=experiment_ckpt_str,
                         training_corpus_pairs=config.corpus_pairs,
-                        src_project=(
-                            config.corpus_pairs[0].src_files[0].project
-                            if config.corpus_pairs and config.corpus_pairs[0].src_files
-                            else None
-                        ),
                     )
 
     def _init_translation_task(self, experiment_suffix: str) -> Tuple[Translator, Config, str]:
@@ -400,12 +395,6 @@ def main() -> None:
         default=False,
         action="store_true",
         help="For files in USFM format, attempt to change the draft's quotation marks to match the target project's quote convention",
-    )
-    parser.add_argument(
-        "--source-quote-convention",
-        default="detect",
-        type=str,
-        help="The quote convention for the source project. If not specified, it will be detected automatically.",
     )
     parser.add_argument(
         "--target-quote-convention",

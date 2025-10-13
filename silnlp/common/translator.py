@@ -317,7 +317,6 @@ class Translator(ABC):
             postprocess_handler,
             experiment_ckpt_str,
             training_corpus_pairs,
-            src_project,
         )
 
     def translate_usfm(
@@ -333,7 +332,6 @@ class Translator(ABC):
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
         experiment_ckpt_str: str = "",
         training_corpus_pairs: List[CorpusPair] = [],
-        src_project: Optional[str] = None,
     ) -> None:
         # Create UsfmFileText object for source
         src_from_project = False
@@ -426,6 +424,7 @@ class Translator(ABC):
                             else None
                         ),
                         remarks=remarks,
+                        compare_segments=True,
                     )
 
                     if usfm_out is None:
@@ -455,7 +454,7 @@ class Translator(ABC):
                 if config.is_quotation_mark_denormalization_required():
                     try:
                         quotation_denormalization_postprocessor = (
-                            config.create_denormalize_quotation_marks_postprocessor(training_corpus_pairs, src_project)
+                            config.create_denormalize_quotation_marks_postprocessor(training_corpus_pairs)
                         )
                         usfm_out = quotation_denormalization_postprocessor.postprocess_usfm(usfm_out)
                     except (UnknownQuoteConventionException, NoDetectedQuoteConventionException) as e:
