@@ -244,7 +244,7 @@ class FewestCrossedAlignmentsVerseSegmenter(VerseSegmenter):
                 target_verse_offsets.append(len(target_tokens))
                 continue
 
-            fewest_crossed_alignments = 1000000
+            fewest_crossed_alignments = 1_000_000
             best_split_indices = []
             for trg_word_index in range(last_target_verse_offset + 1, len(target_tokens)):
                 crossed_alignments = word_alignments.get_num_crossed_alignments(verse_token_offset - 1, trg_word_index)

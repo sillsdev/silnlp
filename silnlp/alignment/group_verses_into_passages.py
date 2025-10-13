@@ -68,10 +68,16 @@ def assign_verses_to_passages(project_name: str, passage_file: Path) -> List[Pas
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Collect verse counts and compute alignment scores")
+    parser = argparse.ArgumentParser(
+        description="Collects text from a Paratext project and groups in into specified passages."
+    )
     parser.add_argument("--project", help="Name of source Paratext project", required=True, type=str)
-    parser.add_argument("--input-passages", help=".tsv file with target passages", required=True, type=str)
-    parser.add_argument("--output-passages", help=".tsv file with target passages", required=True, type=str)
+    parser.add_argument(
+        "--input-passages", help="Input .tsv file with source passage references", required=True, type=str
+    )
+    parser.add_argument(
+        "--output-passages", help="Output .tsv file to contain target passages", required=True, type=str
+    )
     args = parser.parse_args()
 
     passages = assign_verses_to_passages(args.project, Path(args.input_passages))
