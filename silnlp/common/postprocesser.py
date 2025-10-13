@@ -1,16 +1,11 @@
 import logging
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from machine.corpora import (
-    FileParatextProjectQuoteConventionDetector,
     PlaceMarkersAlignmentInfo,
     PlaceMarkersUsfmUpdateBlockHandler,
-    QuotationMarkDenormalizationFirstPass,
-    QuotationMarkDenormalizationUsfmUpdateBlockHandler,
-    QuotationMarkUpdateSettings,
-    QuotationMarkUpdateStrategy,
     ScriptureRef,
     UpdateUsfmMarkerBehavior,
     UpdateUsfmParserHandler,
@@ -19,7 +14,16 @@ from machine.corpora import (
     UsfmUpdateBlockHandler,
     parse_usfm,
 )
-from machine.punctuation_analysis import STANDARD_QUOTE_CONVENTIONS, QuoteConvention, QuoteConventionDetector
+from machine.punctuation_analysis import (
+    STANDARD_QUOTE_CONVENTIONS,
+    FileParatextProjectQuoteConventionDetector,
+    QuotationMarkDenormalizationFirstPass,
+    QuotationMarkDenormalizationUsfmUpdateBlockHandler,
+    QuotationMarkUpdateSettings,
+    QuotationMarkUpdateStrategy,
+    QuoteConvention,
+    QuoteConventionDetector,
+)
 from machine.tokenization import LatinWordTokenizer
 from machine.translation import WordAlignmentMatrix
 
@@ -37,7 +41,6 @@ POSTPROCESS_DEFAULTS = {
     "include_style_markers": False,
     "include_embeds": False,
     "denormalize_quotation_marks": False,
-    "source_quote_convention": "detect",
     "target_quote_convention": "detect",
 }
 POSTPROCESS_SUFFIX_CHARS = {
@@ -137,34 +140,26 @@ class DenormalizeQuotationMarksPostprocessor:
 
     def __init__(
         self,
-        source_quote_convention_name: str | None,
         target_quote_convention_name: str | None,
-        source_project_name: str | None = None,
         target_project_name: str | None = None,
+        include_chapters: Optional[Dict[int, List[int]]] = None,
     ):
-        self._source_quote_convention = self._get_source_quote_convention(
-            source_quote_convention_name, source_project_name
-        )
         self._target_quote_convention = self._get_target_quote_convention(
-            target_quote_convention_name, target_project_name
+            target_quote_convention_name, target_project_name, include_chapters
         )
 
-    def _get_source_quote_convention(self, convention_name: str | None, project_name: str | None) -> QuoteConvention:
-        if convention_name is None or convention_name == "detect":
-            if project_name is None:
-                raise ValueError(
-                    "The source project name must be explicitly provided or be present in translate_config.yml, since an explicit source quote convention name was not provided."
-                )
-            return self._detect_quote_convention(project_name)
-        return self._get_named_quote_convention(convention_name)
-
-    def _get_target_quote_convention(self, convention_name: str | None, project_name: str | None) -> QuoteConvention:
+    def _get_target_quote_convention(
+        self,
+        convention_name: str | None,
+        project_name: str | None,
+        include_chapters: Optional[Dict[int, List[int]]] = None,
+    ) -> QuoteConvention:
         if convention_name is None or convention_name == "detect":
             if project_name is None:
                 raise ValueError(
                     "The experiment's config.yml must exist and specify a target project name, since an explicit target quote convention name was not provided."
                 )
-            return self._detect_quote_convention(project_name)
+            return self._detect_quote_convention(project_name, include_chapters)
         return self._get_named_quote_convention(convention_name)
 
     def _get_named_quote_convention(self, convention_name: str) -> QuoteConvention:
@@ -174,14 +169,18 @@ class DenormalizeQuotationMarksPostprocessor:
             raise UnknownQuoteConventionException(convention_name)
         return convention
 
-    def _detect_quote_convention(self, project_name: str) -> QuoteConvention:
+    def _detect_quote_convention(
+        self, project_name: str, include_chapters: Optional[Dict[int, List[int]]] = None
+    ) -> QuoteConvention:
         if project_name in self._project_convention_cache:
             return self._project_convention_cache[project_name]
 
         quote_convention_detector = QuoteConventionDetector()
 
         quote_convention_detector = FileParatextProjectQuoteConventionDetector(get_project_dir(project_name))
-        quote_convention_analysis = quote_convention_detector.get_quote_convention_analysis()
+        quote_convention_analysis = quote_convention_detector.get_quote_convention_analysis(
+            include_chapters=include_chapters
+        )
 
         if quote_convention_analysis is None:
             raise NoDetectedQuoteConventionException(project_name)
@@ -199,16 +198,13 @@ class DenormalizeQuotationMarksPostprocessor:
     ) -> List[UsfmUpdateBlockHandler]:
         return [
             QuotationMarkDenormalizationUsfmUpdateBlockHandler(
-                self._source_quote_convention,
                 self._target_quote_convention,
                 QuotationMarkUpdateSettings(chapter_strategies=chapter_strategies),
             )
         ]
 
     def _get_best_chapter_strategies(self, usfm: str) -> List[QuotationMarkUpdateStrategy]:
-        quotation_mark_update_first_pass = QuotationMarkDenormalizationFirstPass(
-            self._source_quote_convention, self._target_quote_convention
-        )
+        quotation_mark_update_first_pass = QuotationMarkDenormalizationFirstPass(self._target_quote_convention)
 
         parse_usfm(usfm, quotation_mark_update_first_pass)
         return quotation_mark_update_first_pass.find_best_chapter_strategies()
@@ -250,9 +246,6 @@ class PostprocessConfig:
             self._config["include_style_markers"] = True
         if config.get("include_inline_elements"):
             self._config["include_embeds"] = True
-
-        if config.get("src_project"):
-            self._config["src_project"] = config.get("src_project")
 
         self.update_block_handlers: List[UsfmUpdateBlockHandler] = []
         self.rows: List[UpdateUsfmRow] = []
@@ -302,10 +295,7 @@ class PostprocessConfig:
 
     def is_quote_convention_detection_required(self) -> bool:
         return self.is_quotation_mark_denormalization_required() and (
-            self._config["source_quote_convention"] is None
-            or self._config["source_quote_convention"] == "detect"
-            or self._config["target_quote_convention"] is None
-            or self._config["target_quote_convention"] == "detect"
+            self._config["target_quote_convention"] is None or self._config["target_quote_convention"] == "detect"
         )
 
     def create_place_markers_postprocessor(self) -> PlaceMarkersPostprocessor:
@@ -316,23 +306,20 @@ class PostprocessConfig:
         )
 
     def create_denormalize_quotation_marks_postprocessor(
-        self, training_corpus_pairs: List[CorpusPair], translation_source_project_name: Optional[str]
+        self, training_corpus_pairs: List[CorpusPair]
     ) -> DenormalizeQuotationMarksPostprocessor:
-        training_target_project_name = self._get_training_target_project_name(
+        training_target_project_name, include_chapters = self._get_training_project_info(
             training_corpus_pairs,
         )
 
         return DenormalizeQuotationMarksPostprocessor(
-            self._config["source_quote_convention"],
-            self._config["target_quote_convention"],
-            translation_source_project_name,
-            training_target_project_name,
+            self._config["target_quote_convention"], training_target_project_name, include_chapters
         )
 
-    def _get_training_target_project_name(
+    def _get_training_project_info(
         self,
         training_corpus_pairs: List[CorpusPair],
-    ) -> Optional[str]:
+    ) -> Tuple[Optional[str], Optional[Dict[int, List[int]]]]:
         # Target project info is only needed for quote convention detection
         if self.is_quote_convention_detection_required():
             if len(training_corpus_pairs) > 1:
@@ -348,15 +335,10 @@ class PostprocessConfig:
                     "The experiment has multiple target projects. Quotation mark denormalization is unlikely to work correctly in this scenario."
                 )
 
-            target_project_name = (
-                training_corpus_pairs[0].trg_files[0].project
-                if len(training_corpus_pairs) > 0 and len(training_corpus_pairs[0].trg_files) > 0
-                else None
-            )
+            if len(training_corpus_pairs) > 0 and len(training_corpus_pairs[0].trg_files) > 0:
+                return training_corpus_pairs[0].trg_files[0].project, training_corpus_pairs[0].corpus_books
 
-            return target_project_name
-
-        return None
+        return None, None
 
     def __getitem__(self, key):
         return self._config[key]

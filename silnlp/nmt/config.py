@@ -32,7 +32,7 @@ from ..common.corpus import (
     write_corpus,
 )
 from ..common.environment import SIL_NLP_ENV
-from ..common.translator import TranslationGroup
+from ..common.translator import SentenceTranslationGroup
 from ..common.utils import NoiseMethod, Side, add_tags_to_dataframe, add_tags_to_sentence, get_mt_exp_dir, set_seed
 from .augment import AugmentMethod
 from .corpora import (
@@ -86,7 +86,7 @@ class NMTModel(ABC):
         trg_iso: str,
         vrefs: Optional[Iterable[VerseRef]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
-    ) -> Iterable[TranslationGroup]: ...
+    ) -> Iterable[SentenceTranslationGroup]: ...
 
     @abstractmethod
     def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]: ...

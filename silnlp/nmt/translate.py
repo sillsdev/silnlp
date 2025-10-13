@@ -12,7 +12,7 @@ from machine.scripture import VerseRef, book_number_to_id, get_chapters
 from ..common.environment import SIL_NLP_ENV
 from ..common.paratext import book_file_name_digits, get_project_dir
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
-from ..common.translator import TranslationGroup, Translator
+from ..common.translator import SentenceTranslationGroup, Translator
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
 from .config import CheckpointType, Config, NMTModel
@@ -32,7 +32,7 @@ class NMTTranslator(Translator, AbstractContextManager):
         trg_iso: str,
         produce_multiple_translations: bool = False,
         vrefs: Optional[Iterable[VerseRef]] = None,
-    ) -> Iterable[TranslationGroup]:
+    ) -> Iterable[SentenceTranslationGroup]:
         return self._model.translate(
             sentences, src_iso, trg_iso, produce_multiple_translations, vrefs, self._checkpoint
         )
@@ -281,11 +281,6 @@ class TranslationTask:
                         postprocess_handler=postprocess_handler,
                         experiment_ckpt_str=experiment_ckpt_str,
                         training_corpus_pairs=config.corpus_pairs,
-                        src_project=(
-                            config.corpus_pairs[0].src_files[0].project
-                            if config.corpus_pairs and config.corpus_pairs[0].src_files
-                            else None
-                        ),
                         tags=tags,
                     )
 
@@ -412,12 +407,6 @@ def main() -> None:
         default=False,
         action="store_true",
         help="For files in USFM format, attempt to change the draft's quotation marks to match the target project's quote convention",
-    )
-    parser.add_argument(
-        "--source-quote-convention",
-        default="detect",
-        type=str,
-        help="The quote convention for the source project. If not specified, it will be detected automatically.",
     )
     parser.add_argument(
         "--target-quote-convention",
