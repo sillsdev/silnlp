@@ -397,12 +397,6 @@ def main() -> None:
         help="For files in USFM format, attempt to change the draft's quotation marks to match the target project's quote convention",
     )
     parser.add_argument(
-        "--source-quote-convention",
-        default="detect",
-        type=str,
-        help="The quote convention for the source project. If not specified, it will be detected automatically.",
-    )
-    parser.add_argument(
         "--target-quote-convention",
         default="detect",
         type=str,

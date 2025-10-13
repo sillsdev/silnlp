@@ -52,22 +52,10 @@ def main() -> None:
         help="For files in USFM format, attempt to change the draft's quotation marks to match the target project's quote convention",
     )
     parser.add_argument(
-        "--source-quote-convention",
-        default="detect",
-        type=str,
-        help="The quote convention for the source project. If not specified, it will be detected automatically.",
-    )
-    parser.add_argument(
         "--target-quote-convention",
         default="detect",
         type=str,
         help="The quote convention for the target project. If not specified, it will be detected automatically.",
-    )
-    parser.add_argument(
-        "--source-project",
-        default="",
-        help="The name of the Paratext project used as the source. When the source quote convention is set to 'detect' or not specified,"
-        + " this project will be used to detect the source quote convention.",
     )
     parser.add_argument(
         "--clearml-queue",
