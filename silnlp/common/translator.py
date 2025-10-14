@@ -61,6 +61,9 @@ class SentenceTranslation:
     def get_sequence_confidence_score(self) -> Optional[float]:
         return self._sequence_score
 
+    def join_tokens_for_test_file(self) -> str:
+        return " ".join([token for token in self._tokens if token != "<pad>"])
+
     def join_tokens_for_confidence_file(self) -> str:
         return "\t".join(self._tokens)
 
@@ -123,6 +126,9 @@ class TranslatedDraft:
 
     def get_all_translations(self) -> List[str]:
         return [st.get_translation() for st in self._sentence_translations]
+
+    def get_all_tokenized_translations(self) -> List[str]:
+        return [st.join_tokens_for_test_file() for st in self._sentence_translations]
 
 
 # A wrapper around List[SentenceTranslationGroup] that allows upstream consumers to view a

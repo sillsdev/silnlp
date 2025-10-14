@@ -1178,12 +1178,12 @@ class HuggingFaceNMTModel(NMTModel):
                 if vref_path is not None:
                     vref_file = stack.enter_context(vref_path.open("r", encoding="utf-8-sig"))
                     vrefs = (VerseRef.from_string(line.strip(), ORIGINAL_VERSIFICATION) for line in vref_file)
-                output = list(
+                sentence_translation_groups: List[SentenceTranslationGroup] = list(
                     self._translate_test_sentences(
                         tokenizer, pipeline, sentences, vrefs, length, produce_multiple_translations
                     )
                 )
-                draft_group = DraftGroup([translation for translation, _, _, _ in output])
+                draft_group = DraftGroup(sentence_translation_groups)
 
                 for draft_index, translated_draft in enumerate(draft_group.get_drafts(), 1):
                     if produce_multiple_translations:
@@ -1193,7 +1193,7 @@ class HuggingFaceNMTModel(NMTModel):
                     else:
                         translation_draft_path = translation_path
                     out_file = stack.enter_context(translation_draft_path.open("w", encoding="utf-8", newline="\n"))
-                    out_file.write("\n".join(translated_draft) + "\n")
+                    out_file.write("\n".join(translated_draft.get_all_tokenized_translations()) + "\n")
 
                     if save_confidences:
                         generate_test_confidence_files(
