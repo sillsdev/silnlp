@@ -48,15 +48,11 @@ SPBLEU_SCORE = "spBLEU"
 CHRF3_SCORE = "chrF3"
 CHRF3P_SCORE = "chrF3+"
 CHRF3PP_SCORE = "chrF3++"
-MBLEU_SCORE = "m-BLEU"
-MCHRF3_SCORE = "m-chrF3"
-MCHRF3P_SCORE = "m-chrF3+"
-MCHRF3PP_SCORE = "m-chrF3++"
 TER_SCORE = "TER"
 DICT_SRC = "Source"
 DICT_TRG = "Target"
 
-_SUPPORTED_SCORERS = {BLEU_SCORE, SPBLEU_SCORE, CHRF3_SCORE, CHRF3P_SCORE, CHRF3PP_SCORE, MBLEU_SCORE, MCHRF3_SCORE, MCHRF3P_SCORE, MCHRF3PP_SCORE, TER_SCORE}
+_SUPPORTED_SCORERS = {BLEU_SCORE, SPBLEU_SCORE, CHRF3_SCORE, CHRF3P_SCORE, CHRF3PP_SCORE, TER_SCORE}
 
 
 def sentence_bleu(
@@ -176,9 +172,9 @@ def add_stats(df: pd.DataFrame, sheet):
     sheet.write_string("A2", "Mean")
     sheet.write_string("A3", "Median")
     sheet.write_string("A4", "STD")
-    column_list = ["B", "C", "D", "E", "F", "G", "H", "I", "J"]
+    column_list = ["B", "C", "D", "E", "F"]
     column_idx = 0
-    for column_name in [BLEU_SCORE, SPBLEU_SCORE, CHRF3_SCORE, CHRF3P_SCORE, CHRF3PP_SCORE, MBLEU_SCORE, MCHRF3_SCORE, MCHRF3P_SCORE, MCHRF3PP_SCORE, TER_SCORE]:
+    for column_name in [BLEU_SCORE, SPBLEU_SCORE, CHRF3_SCORE, CHRF3P_SCORE, CHRF3PP_SCORE, TER_SCORE]:
         if column_name in df:
             column_id = column_list[column_idx]
             sheet.write_string(f"{column_id}1", f"{column_name}")
@@ -494,63 +490,6 @@ def add_chap_scores(df: pd.DataFrame, df_chap: pd.DataFrame, scorers: List[str],
                     eps_smoothing=True,
                 )
                 df_chap.loc[df_chap[VREF] == chap, CHRF3PP_SCORE] = chrf3pp_score.score
-        elif scorer == MBLEU_SCORE.lower():
-            df_chap[MBLEU_SCORE] = None
-            print("Calculating m-BLEU scores ...")
-            for chap, pred in chapters_pred.items():
-                bleu_scores = []
-                for sentence, references in zip(pred, chapters_trg[chap]):
-                    bleu_score = sentence_bleu(
-                        sentence,
-                        references,
-                        lowercase=not preserve_case,
-                        tokenize = tokenize
-                    )
-                    bleu_scores.append(bleu_score)
-                df_chap.loc[df_chap[VREF] == chap, MBLEU_SCORE] = sum(bleu_scores) / len(bleu_scores)
-        elif scorer == MCHRF3_SCORE.lower():
-            df_chap[MCHRF3_SCORE] = None
-            print("Calculating m-chrF3 scores ...")
-            for chap, pred in chapters_pred.items():
-                chrf3_scores = []
-                for sentence, references in zip(pred, chapters_trg[chap]):
-                    chrf3_score = sacrebleu.sentence_chrf(sentence, references, char_order=6, beta=3, remove_whitespace=True)
-                    chrf3_scores.append(chrf3_score.score)
-                df_chap.loc[df_chap[VREF] == chap, MCHRF3_SCORE] = sum(chrf3_scores) / len(chrf3_scores)
-        elif scorer == MCHRF3P_SCORE.lower():
-            df_chap[MCHRF3P_SCORE] = None
-            print("Calculating m-chrF3+ scores ...")
-            for chap, pred in chapters_pred.items():
-                chrf3p_scores = []
-                for sentence, references in zip(pred, chapters_trg[chap]):
-                    chrf3p_score = sacrebleu.sentence_chrf(
-                        sentence,
-                        references,
-                        char_order=6,
-                        beta=3,
-                        word_order=1,
-                        remove_whitespace=True,
-                        eps_smoothing=True,
-                    )
-                    chrf3p_scores.append(chrf3p_score.score)
-                df_chap.loc[df_chap[VREF] == chap, MCHRF3P_SCORE] = sum(chrf3p_scores) / len(chrf3p_scores)
-        elif scorer == MCHRF3PP_SCORE.lower():
-            df_chap[MCHRF3PP_SCORE] = None
-            print("Calculating m-chrF3++ scores ...")
-            for chap, pred in chapters_pred.items():
-                chrf3pp_scores = []
-                for sentence, references in zip(pred, chapters_trg[chap]):
-                    chrf3pp_score = sacrebleu.sentence_chrf(
-                        sentence,
-                        references,
-                        char_order=6,
-                        beta=3,
-                        word_order=2,
-                        remove_whitespace=True,
-                        eps_smoothing=True,
-                    )
-                    chrf3pp_scores.append(chrf3pp_score.score)
-                df_chap.loc[df_chap[VREF] == chap, MCHRF3PP_SCORE] = sum(chrf3pp_scores) / len(chrf3pp_scores)
         elif scorer == TER_SCORE.lower():
             print("Calculating TER scores ...")
             for chap, pred in chapters_pred.items():
@@ -609,13 +548,6 @@ def add_scores(df: pd.DataFrame, scorers: List[str], preserve_case: bool, tokeni
                 )
                 scores.append(chrf3pp_score.score)
             df[CHRF3PP_SCORE] = scores
-        elif scorer == MBLEU_SCORE.lower():
-            for index, row in tqdm(df.iterrows(), desc="Calculating m-BLEU scores ..."):
-                bleu = sentence_bleu(
-                    row[PREDICTION], [row[TRG_SENTENCE]], lowercase=not preserve_case, tokenize=tokenize
-                )
-                scores.append(bleu.score)
-            df[BLEU_SCORE] = scores
         elif scorer == TER_SCORE.lower():
             for index, row in tqdm(df.iterrows(), desc="Calculating TER scores ..."):
                 ter_score = sacrebleu.corpus_ter([row[PREDICTION]], [[row[TRG_SENTENCE]]])

@@ -6,30 +6,6 @@ import sacrebleu
 from machine.corpora import ParatextTextCorpus
 
 
-def sentence_bleu(
-    hypothesis: str,
-    references: List[str],
-    smooth_method: str = "exp",
-    smooth_value: Optional[float] = None,
-    lowercase: bool = False,
-    tokenize="13a",
-    use_effective_order: bool = True,
-):
-    """
-    Substitute for the sacrebleu version of sentence_bleu, which uses settings that aren't consistent with
-    the values we use for corpus_bleu, and isn't fully parameterized
-    """
-    metric = BLEU(
-        smooth_method=smooth_method,
-        smooth_value=smooth_value,
-        force=False,
-        lowercase=lowercase,
-        tokenize=tokenize,
-        effective_order=use_effective_order,
-    )
-    return metric.sentence_score(hypothesis, references)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compare translations")
     parser.add_argument(
@@ -42,7 +18,7 @@ def main() -> None:
         "--scorers",
         nargs="*",
         metavar="scorer",
-        default={"bleu", "chrf3", "chrf3+", "chrf3++", "spbleu", "ter", "m-bleu", "m-chrf3", "m-chrf3+", "m-chrf3++"},
+        default={"bleu", "chrf3", "chrf3+", "chrf3++", "spbleu", "ter"},
         help="Set of scorers",
     )
     parser.add_argument(
@@ -105,46 +81,6 @@ def score_pair(pair_sys: List[str], pair_refs: List[List[str]], scorers: Set[str
             pair_sys, pair_refs, char_order=6, beta=3, word_order=2, remove_whitespace=True, eps_smoothing=True
         )
         scores["chrF3++"] = chrfpp_score.score
-
-    if "m-bleu" in scorers:
-        bleu_scores = []
-        for sentence_i, sentence in enumerate(pair_sys):
-            references = [reference[sentence_i] for reference in pair_refs]
-            bleu_score = sentence_bleu(
-                sentence,
-                references,
-                lowercase=True,
-            )
-            bleu_scores.append(bleu_score.score)
-        scores["m-BLEU"] = sum(bleu_scores) / len(bleu_scores)
-
-    if "m-chrf3" in scorers:
-        chrf3_scores = []
-        for sentence_i, sentence in enumerate(pair_sys):
-            references = [reference[sentence_i] for reference in pair_refs]
-            chrf3_score = sacrebleu.sentence_chrf(sentence, references, char_order=6, beta=3, remove_whitespace=True)
-            chrf3_scores.append(chrf3_score.score)
-        scores["m-chrf3"] = sum(chrf3_scores) / len(chrf3_scores)
-
-    if "m-chrf3+" in scorers:
-        chrfp_scores = []
-        for sentence_i, sentence in enumerate(pair_sys):
-            references = [reference[sentence_i] for reference in pair_refs]
-            chrfp_score = sacrebleu.sentence_chrf(
-                sentence, references, char_order=6, beta=3, word_order=1, remove_whitespace=True, eps_smoothing=True
-            )
-            chrfp_scores.append(chrfp_score.score)
-        scores["m-chrf3+"] = sum(chrfp_scores) / len(chrfp_scores)
-
-    if "m-chrf3++" in scorers:
-        chrfpp_scores = []
-        for sentence_i, sentence in enumerate(pair_sys):
-            references = [reference[sentence_i] for reference in pair_refs]
-            chrfpp_score = sacrebleu.sentence_chrf(
-                sentence, references, char_order=6, beta=3, word_order=2, remove_whitespace=True, eps_smoothing=True
-            )
-            chrfpp_scores.append(chrfpp_score.score)
-        scores["m-chrf3+"] = sum(chrfpp_scores) / len(chrfpp_scores)
 
     if "spbleu" in scorers:
         spbleu_score = sacrebleu.corpus_bleu(
