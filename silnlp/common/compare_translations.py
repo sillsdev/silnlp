@@ -108,25 +108,28 @@ def score_pair(pair_sys: List[str], pair_refs: List[List[str]], scorers: Set[str
 
     if "m-bleu" in scorers:
         bleu_scores = []
-        for sentence, references in zip(pair_sys, pair_refs):
+        for sentence_i, sentence in enumerate(pair_sys):
+            references = [reference[sentence_i] for reference in pair_refs]
             bleu_score = sentence_bleu(
                 sentence,
                 references,
                 lowercase=True,
             )
-            bleu_scores.append(bleu_score)
+            bleu_scores.append(bleu_score.score)
         scores["m-BLEU"] = sum(bleu_scores) / len(bleu_scores)
 
     if "m-chrf3" in scorers:
         chrf3_scores = []
-        for sentence, references in zip(pair_sys, pair_refs):
+        for sentence_i, sentence in enumerate(pair_sys):
+            references = [reference[sentence_i] for reference in pair_refs]
             chrf3_score = sacrebleu.sentence_chrf(sentence, references, char_order=6, beta=3, remove_whitespace=True)
             chrf3_scores.append(chrf3_score.score)
         scores["m-chrf3"] = sum(chrf3_scores) / len(chrf3_scores)
 
     if "m-chrf3+" in scorers:
         chrfp_scores = []
-        for sentence, references in zip(pair_sys, pair_refs):
+        for sentence_i, sentence in enumerate(pair_sys):
+            references = [reference[sentence_i] for reference in pair_refs]
             chrfp_score = sacrebleu.sentence_chrf(
                 sentence, references, char_order=6, beta=3, word_order=1, remove_whitespace=True, eps_smoothing=True
             )
@@ -135,7 +138,8 @@ def score_pair(pair_sys: List[str], pair_refs: List[List[str]], scorers: Set[str
 
     if "m-chrf3++" in scorers:
         chrfpp_scores = []
-        for sentence, references in zip(pair_sys, pair_refs):
+        for sentence_i, sentence in enumerate(pair_sys):
+            references = [reference[sentence_i] for reference in pair_refs]
             chrfpp_score = sacrebleu.sentence_chrf(
                 sentence, references, char_order=6, beta=3, word_order=2, remove_whitespace=True, eps_smoothing=True
             )
