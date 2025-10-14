@@ -1193,7 +1193,7 @@ class HuggingFaceNMTModel(NMTModel):
                     else:
                         translation_draft_path = translation_path
                     out_file = stack.enter_context(translation_draft_path.open("w", encoding="utf-8", newline="\n"))
-                    out_file.write("\n".join(translated_draft.get_all_translations()) + "\n")
+                    out_file.write("\n".join(translated_draft.get_all_tokenized_translations()) + "\n")
 
                     if save_confidences:
                         generate_test_confidence_files(
