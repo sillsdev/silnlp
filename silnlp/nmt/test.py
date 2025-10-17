@@ -21,7 +21,7 @@ LOGGER = logging.getLogger(__package__ + ".test")
 
 logging.getLogger("sacrebleu").setLevel(logging.ERROR)
 
-_SUPPORTED_SCORERS = ["bleu", "sentencebleu", "chrf3", "chrf3+", "chrf3++", "spbleu", "meteor", "ter", "confidence"]
+_SUPPORTED_SCORERS = ["bleu", "sentencebleu", "chrf3", "chrf3+", "chrf3++", "spbleu", "m-bleu", "m-chrf3", "m-chrf3+", "m-chrf3++", "meteor", "ter", "confidence"]
 
 
 class PairScore:
@@ -136,6 +136,63 @@ def score_pair(
             tokenize="flores200",
         )
         other_scores["spBLEU"] = spbleu_score.score
+
+    # m-bleu, m-chrf3, m-chrf3+, and m-chrf3++ are from the paper https://arxiv.org/pdf/2407.12832
+    # These metrics are implemented at the verse-level, rather than the sentence-level
+    if "m-bleu" in scorers:
+        bleu_scores = []
+        for sentence_i, sentence in enumerate(pair_sys):
+            references = [reference[sentence_i] for reference in pair_refs]
+            bleu_score = sentence_bleu(
+                sentence,
+                references,
+                lowercase=True,
+                tokenize=config.data.get("sacrebleu_tokenize", "13a"),
+            )
+            bleu_scores.append(bleu_score.score)
+        if len(bleu_scores) == 0:
+            other_scores["m-BLEU"] = 0
+        else:
+            other_scores["m-BLEU"] = sum(bleu_scores) / len(bleu_scores)
+
+    if "m-chrf3" in scorers:
+        chrf3_scores = []
+        for sentence_i, sentence in enumerate(pair_sys):
+            references = [reference[sentence_i] for reference in pair_refs]
+            chrf3_score = sacrebleu.sentence_chrf(
+                sentence, references, char_order=6, beta=3, remove_whitespace=True
+            )
+            chrf3_scores.append(chrf3_score.score)
+        if len(chrf3_scores) == 0:
+            other_scores["m-chrf3"] = 0
+        else:
+            other_scores["m-chrf3"] = sum(chrf3_scores) / len(chrf3_scores)
+
+    if "m-chrf3+" in scorers:
+        chrfp_scores = []
+        for sentence_i, sentence in enumerate(pair_sys):
+            references = [reference[sentence_i] for reference in pair_refs]
+            chrfp_score = sacrebleu.sentence_chrf(
+                sentence, references, char_order=6, beta=3, word_order=1, remove_whitespace=True, eps_smoothing=True
+            )
+            chrfp_scores.append(chrfp_score.score)
+        if len(chrfp_scores) == 0:
+            other_scores["m-chrf3+"] = 0
+        else:
+            other_scores["m-chrf3+"] = sum(chrfp_scores) / len(chrfp_scores)
+
+    if "m-chrf3++" in scorers:
+        chrfpp_scores = []
+        for sentence_i, sentence in enumerate(pair_sys):
+            references = [reference[sentence_i] for reference in pair_refs]
+            chrfpp_score = sacrebleu.sentence_chrf(
+                sentence, references, char_order=6, beta=3, word_order=2, remove_whitespace=True, eps_smoothing=True
+            )
+            chrfpp_scores.append(chrfpp_score.score)
+        if len(chrfpp_scores) == 0:
+            other_scores["m-chrf3++"] = 0
+        else:
+            other_scores["m-chrf3++"] = sum(chrfpp_scores) / len(chrfpp_scores)
 
     if "meteor" in scorers:
         meteor_score = compute_meteor_score(trg_iso, pair_sys, pair_refs)
