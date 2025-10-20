@@ -1,4 +1,5 @@
 import argparse
+import getpass
 import logging
 import tempfile
 import zipfile
@@ -131,7 +132,6 @@ def main() -> None:
     parser.add_argument(
         "--overwrite", help="Overwrite any existing files and folders", default=False, action="store_true"
     )
-    parser.add_argument("--zip-password", help="Password for the zip file", default=None, type=str)
 
     parser.add_argument(
         "--extract-corpora",
@@ -171,14 +171,11 @@ def main() -> None:
     if args.project.endswith(".zip"):
         with zipfile.ZipFile(args.project, "r") as zip_ref:
             # Check if any file in the zip is encrypted
-            needs_password = any(zinfo.flag_bits & 0x1 for zinfo in zip_ref.infolist())
-            if needs_password and not args.zip_password:
-                raise ValueError(
-                    "Zip file is encrypted but no password given. Please provide a password using --zip-password."
-                )
             temp_dir = tempfile.TemporaryDirectory()
+            needs_password = any(zinfo.flag_bits & 0x1 for zinfo in zip_ref.infolist())
             if needs_password:
-                zip_ref.extractall(temp_dir.name, pwd=args.zip_password.encode())
+                pwd = getpass.getpass(prompt=f"Enter password for zip file '{args.project}': ")
+                zip_ref.extractall(temp_dir.name, pwd=pwd.encode())
             else:
                 zip_ref.extractall(temp_dir.name)
         args.copy_from = temp_dir.name
