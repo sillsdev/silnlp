@@ -12,6 +12,7 @@ from itertools import repeat
 from math import prod
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
+from unicodedata import normalize
 
 import datasets.utils.logging as datasets_logging
 import evaluate
@@ -1818,10 +1819,12 @@ class PunctuationNormalizingTokenizer(PreTrainedTokenizerFast):
 
         if isinstance(text, str):
             text = self._mpn.normalize(text)
+            text = normalize("NFKC", text)
         elif isinstance(text, (list, tuple)) and len(text) > 0:
             if isinstance(text[0], (list, tuple)) and len(text[0]) > 0:
-                text = [[self._mpn.normalize(item) for item in row] for row in text]
-            text = [self._mpn.normalize(item) for item in text]
+                text = [[normalize("NFKC", self._mpn.normalize(item)) for item in row] for row in text]
+            else:
+                text = [normalize("NFKC", self._mpn.normalize(item)) for item in text]
         return self._wrapped_tokenizer(text, **kwargs)
 
     def token_to_id(self, token: str) -> int:
@@ -1863,6 +1866,7 @@ class HuggingFaceTokenizer(Tokenizer):
     ) -> str:
         if isinstance(self._tokenizer, (NllbTokenizer, NllbTokenizerFast)):
             line = self._mpn.normalize(line)
+            line = normalize("NFKC", line)
         if not add_dummy_prefix:
             line = "\ufffc" + line
         if side == Side.SOURCE:
