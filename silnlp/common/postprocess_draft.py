@@ -78,19 +78,18 @@ def main() -> None:
     if args.clearml_queue is not None and args.clearml_tag is None:
         parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
 
-    experiment = args.experiment.replace("\\", "/")
+    experiment = args.experiment
     args.output_folder = Path(args.output_folder.replace("\\", "/")) if args.output_folder else None
     postprocess_config = PostprocessConfig(vars(args))
-
-    if not get_mt_exp_dir(experiment).exists():
-        raise ValueError(f"Experiment {experiment} not found.")
 
     if args.clearml_queue is not None:
         if "cpu" not in args.clearml_queue:
             raise ValueError("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
         clearml = SILClearML(experiment, args.clearml_queue, tag=args.clearml_tag)
+        experiment = clearml.name
         config = clearml.config
     else:
+        experiment = experiment.replace("\\", "/")
         config = load_config(experiment)
 
     if not (config.exp_dir / "translate_config.yml").exists():
