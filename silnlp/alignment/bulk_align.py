@@ -7,6 +7,8 @@ from typing import List
 
 import matplotlib.pyplot as plt
 
+from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML
+
 from ..common.corpus import get_scripture_parallel_corpus, tokenize_corpus
 from .config import ALIGNERS
 from .utils import compute_alignment_scores
@@ -80,14 +82,42 @@ def main() -> None:
     parser.add_argument("src_path", type=str, help="Path to source Bible text")
     parser.add_argument("trg_dir", type=str, help="folder of Bibles to align to")
     parser.add_argument("output_dir", type=str, help="folder to contain Bible alignments")
-    parser.add_argument("--aligner", type=str, default="fast_align", help="Aligner to use for extraction")
+    parser.add_argument(
+        "--aligner", type=str, default="fast_align", help="Aligner to use for extraction", choices=list(ALIGNERS.keys())
+    )
     parser.add_argument(
         "--multiprocess",
         default=False,
         action="store_true",
         help="Use multiple processes, that is if the chosen alignement algorithm does not do so already.",
     )
+    parser.add_argument(
+        "--clearml-queue",
+        default=None,
+        type=str,
+        help="Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run "
+        + "it locally and register it with ClearML.",
+    )
+    parser.add_argument(
+        "--clearml-tag",
+        metavar="tag",
+        choices=TAGS_LIST,
+        default=None,
+        type=str,
+        help=f"Tag to add to the ClearML Task - {TAGS_LIST}",
+    )
     args = parser.parse_args()
+
+    if args.clearml_queue is not None:
+        if "cpu" not in args.clearml_queue:
+            LOGGER.warning("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
+            exit()
+        if args.clearml_tag is None:
+            parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
+        if args.clearml_queue.lower() not in ("local", "locally") and (args.aligner.startswith("dotnet")):
+            LOGGER.error("The .NET aligners cannot be used on remote ClearML queues.")
+            exit()
+        clearml = SILClearML(args.output_dir, args.clearml_queue, tag=args.clearml_tag, skip_config=True)
 
     if args.aligner not in ALIGNERS.keys():
         raise Exception("Need to use one of the following aligners:\n  " + "\n  ".join(ALIGNERS.keys()))
