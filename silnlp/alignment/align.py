@@ -100,9 +100,7 @@ def main() -> None:
             parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
         if args.clearml_queue.lower() not in ("local", "locally"):
             # Remove .NET aligners
-            aligner_ids = [
-                aid for aid in aligner_ids if not (aid.startswith("dotnet") or aid.startswith(".NET") or aid == "pt")
-            ]
+            aligner_ids = [aid for aid in aligner_ids if not aid.startswith("dotnet")]
             LOGGER.warning(
                 "The .NET aligners cannot be used on remote ClearML queues. They have been removed from the list of aligners to run."
             )

@@ -114,9 +114,7 @@ def main() -> None:
             exit()
         if args.clearml_tag is None:
             parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
-        if args.clearml_queue.lower() not in ("local", "locally") and (
-            args.aligner.startswith("dotnet") or args.aligner.startswith("net") or args.aligner == "pt"
-        ):
+        if args.clearml_queue.lower() not in ("local", "locally") and (args.aligner.startswith("dotnet")):
             LOGGER.error("The .NET aligners cannot be used on remote ClearML queues.")
             exit()
         clearml = SILClearML(args.output_dir, args.clearml_queue, tag=args.clearml_tag, skip_config=True)
