@@ -82,7 +82,9 @@ def main() -> None:
     parser.add_argument("src_path", type=str, help="Path to source Bible text")
     parser.add_argument("trg_dir", type=str, help="folder of Bibles to align to")
     parser.add_argument("output_dir", type=str, help="folder to contain Bible alignments")
-    parser.add_argument("--aligner", type=str, default="fast_align", help="Aligner to use for extraction")
+    parser.add_argument(
+        "--aligner", type=str, default="fast_align", help="Aligner to use for extraction", choices=list(ALIGNERS.keys())
+    )
     parser.add_argument(
         "--multiprocess",
         default=False,
