@@ -69,7 +69,9 @@ def extract_lexicons(aligner_ids: List[str], exp_dir: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Aligns the parallel corpus for an experiment")
     parser.add_argument("experiments", type=str, help="Experiment pattern")
-    parser.add_argument("--aligners", nargs="*", metavar="aligner", default=[], help="Aligners")
+    parser.add_argument(
+        "--aligners", nargs="*", metavar="aligner", default=[], help="Aligners", choices=list(ALIGNERS.keys())
+    )
     parser.add_argument("--skip-align", default=False, action="store_true", help="Skips aligning corpora")
     parser.add_argument("--skip-extract-lexicon", default=False, action="store_true", help="Skips extracting lexicons")
     parser.add_argument(
