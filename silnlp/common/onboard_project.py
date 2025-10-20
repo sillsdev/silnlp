@@ -1,8 +1,14 @@
 import argparse
 import logging
+import tempfile
+import zipfile
+from datetime import datetime
 from pathlib import Path
 
+import wildebeest.wb_analysis as wb_ana
 import yaml
+
+from scripts.clean_projects import execute_and_report
 
 from .collect_verse_counts import collect_verse_counts
 from .environment import SIL_NLP_ENV
@@ -58,6 +64,48 @@ def copy_paratext_project_folder(source_dir: Path, project_name: str, overwrite=
             _copy_file_to_paratext_project(source_item, target_item, overwrite=overwrite)
 
 
+def collect_verse_counts_wrapper(project_name: str, config: dict) -> None:
+
+    output_folder = Path(config.get("output_folder", SIL_NLP_ENV.mt_experiments_dir / "verse_counts" / project_name))
+    if not output_folder.exists():
+        output_folder.mkdir(parents=True, exist_ok=True)
+
+    input_folder = config.get("input_folder", SIL_NLP_ENV.mt_scripture_dir)
+
+    file_patterns = config.get("files", f"*{project_name}*.txt")
+
+    input_folder_path = Path(input_folder)
+    if not input_folder_path.exists():
+        LOGGER.error(f"Input folder '{input_folder_path}' does not exist. Skipping verse counts collection.")
+        return
+
+    matched_files = list(input_folder_path.glob(file_patterns))
+    if not matched_files:
+        LOGGER.error(
+            f"No files matching pattern '{file_patterns}' found in '{input_folder_path}'. Skipping verse counts collection."
+        )
+        return
+
+    collect_verse_counts(
+        input_folder=input_folder_path,
+        output_folder=output_folder,
+        file_patterns=file_patterns,
+        deutero=config.get("deutero", False),
+        recount=config.get("recount", False),
+    )
+
+
+def get_config(config_path: str) -> dict:
+    if config_path:
+        config_file = Path(config_path)
+        if not config_file.exists():
+            raise FileNotFoundError(f"Config file '{config_file}' does not exist.")
+        with config_file.open("r", encoding="utf-8") as file:
+            return yaml.safe_load(file)
+    else:
+        return {}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Performs several steps to onboard a new project before training a model.",
@@ -83,6 +131,7 @@ def main() -> None:
     parser.add_argument(
         "--overwrite", help="Overwrite any existing files and folders", default=False, action="store_true"
     )
+    parser.add_argument("--zip-password", help="Password for the zip file", default=None, type=str)
 
     parser.add_argument(
         "--extract-corpora",
@@ -97,38 +146,77 @@ def main() -> None:
         action="store_true",
         help="Collect various counts from the extracted Paratext project.",
     )
+    parser.add_argument(
+        "--clean-project",
+        default=False,
+        action="store_true",
+        help="Cleans the Paratext project folder by removing unnecessary files and folders.",
+    )
+    parser.add_argument(
+        "--timestamp",
+        default=False,
+        action="store_true",
+        help="Add a timestamp to the project folder name when creating a new Paratext project folder.",
+    )
+    parser.add_argument(
+        "--wildebeest", default=False, action="store_true", help="Run Wildebeest analysis on the extracted corpora."
+    )
 
     args = parser.parse_args()
     if not args.project:
         raise ValueError("Project name is required. Please provide a valid Paratext project name using <project>.")
 
+    config = get_config(args.config) if args.config else {}
+
+    if args.project.endswith(".zip"):
+        with zipfile.ZipFile(args.project, "r") as zip_ref:
+            # Check if any file in the zip is encrypted
+            needs_password = any(zinfo.flag_bits & 0x1 for zinfo in zip_ref.infolist())
+            if needs_password and not args.zip_password:
+                raise ValueError(
+                    "Zip file is encrypted but no password given. Please provide a password using --zip-password."
+                )
+            temp_dir = tempfile.TemporaryDirectory()
+            if needs_password:
+                zip_ref.extractall(temp_dir.name, pwd=args.zip_password.encode())
+            else:
+                zip_ref.extractall(temp_dir.name)
+        args.copy_from = temp_dir.name
+        args.project = Path(args.project).stem
+
     project_name = args.project
+    if args.timestamp:
+
+        now = datetime.now()
+        timestamp = now.strftime("%Y_%m_%d")
+        project_name = f"{args.project}_{timestamp}"
+        LOGGER.info(f"Timestamping project. New project name: {project_name}")
 
     if args.copy_from:
         LOGGER.info(f"Onboarding project: {args.project}")
         paratext_project_dir: Path = create_paratext_project_folder_if_not_exists(project_name)
         copy_paratext_project_folder(Path(args.copy_from), paratext_project_dir, overwrite=args.overwrite)
 
-    if args.config:
-        config_file = Path(args.config)
-        if not config_file.exists():
-            raise FileNotFoundError(f"Config file '{config_file}' does not exist.")
-        with config_file.open("r", encoding="utf-8") as file:
-            config = yaml.safe_load(file)
-    else:
-        raise ValueError("Config file is required. Please provide a valid configuration file using --config.")
+    if args.clean_project:
+        LOGGER.info(f"Cleaning Paratext project folder for {project_name}.")
+        execute_and_report(
+            argparse.Namespace(
+                input=get_paratext_project_dir(project_name),
+                delete_subfolders=True,
+                confirm_delete=True,
+                dry_run=False,
+            )
+        )
 
     if args.extract_corpora:
-        LOGGER.info(f"Extracting {project_name}.")
+        extract_config = config.get("extract_corpora", {})
         extract_corpora(
             projects={project_name},
-            books_to_include=config["extract_corpora"]["include"] if "include" in config["extract_corpora"] else [],
-            books_to_exclude=config["extract_corpora"]["exclude"] if "exclude" in config["extract_corpora"] else [],
-            include_markers=(config["extract_corpora"]["markers"] if "markers" in config["extract_corpora"] else False),
-            extract_lemmas=config["extract_corpora"]["lemmas"] if "lemmas" in config["extract_corpora"] else False,
-            extract_project_vrefs=(
-                config["extract_corpora"]["project-vrefs"] if "project-vrefs" in config["extract_corpora"] else False
-            ),
+            books_to_include=extract_config.get("include", []),
+            books_to_exclude=extract_config.get("exclude", []),
+            include_markers=extract_config.get("markers", False),
+            extract_lemmas=extract_config.get("lemmas", False),
+            extract_project_vrefs=extract_config.get("project-vrefs", False),
         )
 
     if args.collect_verse_counts:
@@ -136,45 +224,20 @@ def main() -> None:
             LOGGER.warning(
                 "--extract_corpora was not included. Collecting verse counts requires the corpus to be extracted first."
             )
-
         LOGGER.info(f"Collecting verse counts from {project_name}.")
+        collect_verse_counts_wrapper(project_name, config.get("verse_counts", {}))
 
-        if config["verse_counts"]["output_folder"]:
-            output_folder = Path(config["verse_counts"]["output_folder"])
-            if not output_folder.exists():
-                output_folder.mkdir(parents=True, exist_ok=True)
-        else:
-            output_folder = SIL_NLP_ENV.mt_experiments_dir / "verse_counts" / project_name
-            if not output_folder.exists():
-                output_folder.mkdir(parents=True, exist_ok=True)
-        input_folder = (
-            config["verse_counts"]["input_folder"]
-            if "input_folder" in config["verse_counts"]
-            else SIL_NLP_ENV.mt_scripture_dir
-        )
-        file_patterns = (
-            config["verse_counts"]["files"] if "files" in config["verse_counts"] else f"*{project_name}*.txt"
-        )
+    if args.wildebeest:
+        if not args.extract_corpora:
+            LOGGER.warning("--extract_corpora was not included. Wildebeest requires the corpus to be extracted first.")
 
-        input_folder_path = Path(input_folder)
-        if not input_folder_path.exists():
-            LOGGER.error(f"Input folder '{input_folder_path}' does not exist. Skipping verse counts collection.")
-            return
-
-        matched_files = list(input_folder_path.glob(file_patterns))
-        if not matched_files:
-            LOGGER.error(
-                f"No files matching pattern '{file_patterns}' found in '{input_folder_path}'. Skipping verse counts collection."
-            )
-            return
-
-        collect_verse_counts(
-            input_folder=input_folder_path,
-            output_folder=output_folder,
-            file_patterns=file_patterns,
-            deutero=config["verse_counts"]["deutero"] if "deutero" in config["verse_counts"] else False,
-            recount=config["verse_counts"]["recount"] if "recount" in config["verse_counts"] else False,
-        )
+        extract_file = list(SIL_NLP_ENV.mt_scripture_dir.glob(f"*{project_name}.txt"))[0]
+        LOGGER.info(f"Running Wildebeest analysis on {extract_file}.")
+        with (
+            open(f"{project_name}_wildebeest.json", "w", encoding="utf-8") as json_f,
+            open(f"{project_name}_wildebeest.txt", "w", encoding="utf-8") as txt_f,
+        ):
+            wb_ana.process(in_file=extract_file, json_output=json_f, pp_output=txt_f)
 
 
 if __name__ == "__main__":
