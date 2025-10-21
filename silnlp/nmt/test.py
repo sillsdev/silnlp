@@ -13,6 +13,7 @@ from scipy.stats import gmean
 
 from ..common.metrics import compute_meteor_score
 from ..common.utils import get_git_revision_hash
+from .clearml_connection import TAGS_LIST, SILClearML
 from .config import CheckpointType, Config, NMTModel
 from .config_utils import load_config
 from .tokenizer import Tokenizer
@@ -663,7 +664,7 @@ def test(
     by_book: bool = False,
     produce_multiple_translations: bool = False,
     save_confidences: bool = False,
-    use_default_model_dir: bool = False,
+    use_default_model_dir: bool = True,
 ):
     exp_name = experiment
     config = load_config(exp_name, use_default_model_dir)
@@ -840,7 +841,29 @@ def main() -> None:
         action="store_true",
         help="Generate file with verse confidences.",
     )
+    parser.add_argument(
+        "--clearml-queue",
+        default=None,
+        type=str,
+        help="Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run "
+        + "it locally and register it with ClearML.",
+    )
+    parser.add_argument(
+        "--clearml-tag",
+        metavar="tag",
+        choices=TAGS_LIST,
+        default=None,
+        type=str,
+        help=f"Tag to add to the ClearML Task - {TAGS_LIST}",
+    )
     args = parser.parse_args()
+    experiment = args.experiment
+
+    if args.clearml_queue is not None:
+        clearml = SILClearML(experiment, args.clearml_queue, tag=args.clearml_tag)
+        experiment = clearml.name
+    else:
+        experiment = experiment.replace("\\", "/")
 
     get_git_revision_hash()
 
@@ -850,7 +873,7 @@ def main() -> None:
         books = args.books
 
     test(
-        args.experiment,
+        experiment,
         checkpoint=args.checkpoint,
         last=args.last,
         best=args.best,
