@@ -38,6 +38,8 @@ def main() -> None:
     if args.clearml_queue is not None:
         experiments_str = ", ".join(experiments)
         clearml = SILClearML(experiments_str, args.clearml_queue, tag=args.clearml_tag, skip_config=True)
+        experiments_str = clearml.name
+        experiments = experiments_str.split(", ")
 
     rev_hash = get_git_revision_hash()
 
