@@ -166,7 +166,7 @@ def main() -> None:
             exit()
         if args.clearml_tag is None:
             parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
-        clearml = SILClearML(args.experiments, args.clearml_queue, tag=args.clearml_tag, skip_config=True)
+        clearml = SILClearML(experiments, args.clearml_queue, tag=args.clearml_tag, skip_config=True)
         experiments = clearml.name
 
     for exp_dir in get_experiment_dirs(experiments):
