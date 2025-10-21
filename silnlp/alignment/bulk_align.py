@@ -108,6 +108,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    output_dir = args.output_dir
+
     if args.clearml_queue is not None:
         if "cpu" not in args.clearml_queue:
             LOGGER.warning("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
@@ -117,23 +119,24 @@ def main() -> None:
         if args.clearml_queue.lower() not in ("local", "locally") and (args.aligner.startswith("dotnet")):
             LOGGER.error("The .NET aligners cannot be used on remote ClearML queues.")
             exit()
-        clearml = SILClearML(args.output_dir, args.clearml_queue, tag=args.clearml_tag, skip_config=True)
+        clearml = SILClearML(output_dir, args.clearml_queue, tag=args.clearml_tag, skip_config=True)
+        output_dir = clearml.name
 
     if args.aligner not in ALIGNERS.keys():
         raise Exception("Need to use one of the following aligners:\n  " + "\n  ".join(ALIGNERS.keys()))
     if not os.path.exists(args.src_path):
         raise Exception("Source path does not exist:" + args.src_path)
     if not os.path.isdir(args.trg_dir):
-        raise Exception("Target dir is not a real directory:" + args.output_dir)
-    if not os.path.isdir(args.output_dir):
-        raise Exception("Output dir is not a real directory:" + args.output_dir)
+        raise Exception("Target dir is not a real directory:" + output_dir)
+    if not os.path.isdir(output_dir):
+        raise Exception("Output dir is not a real directory:" + output_dir)
 
     src_basename = os.path.splitext(os.path.basename(args.src_path))[0]
 
     process_alignments(
         src_path=Path(args.src_path),
         trg_paths=list(Path(args.trg_dir).glob("*.txt")),
-        output_dir=Path(args.output_dir) / (args.aligner + "_" + src_basename),
+        output_dir=Path(output_dir) / (args.aligner + "_" + src_basename),
         aligner=args.aligner,
         multiprocess=args.multiprocess,
     )

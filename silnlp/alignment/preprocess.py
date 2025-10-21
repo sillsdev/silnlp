@@ -158,15 +158,18 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    experiments = args.experiments
+
     if args.clearml_queue is not None:
         if "cpu" not in args.clearml_queue:
             LOGGER.warning("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
             exit()
         if args.clearml_tag is None:
             parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
-        clearml = SILClearML(args.experiments, args.clearml_queue, tag=args.clearml_tag, skip_config=True)
+        clearml = SILClearML(experiments, args.clearml_queue, tag=args.clearml_tag, skip_config=True)
+        experiments = clearml.name
 
-    for exp_dir in get_experiment_dirs(args.experiments):
+    for exp_dir in get_experiment_dirs(experiments):
         exp_name = get_experiment_name(exp_dir)
         LOGGER.info(f"Preprocessing {exp_name}")
         config = load_config(exp_dir)
