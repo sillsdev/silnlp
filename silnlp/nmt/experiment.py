@@ -106,7 +106,7 @@ class SILExperiment:
             if not postprocess_configs:
                 postprocess_handler = PostprocessHandler([])
 
-            if isinstance(translate_config["tags"], list):
+            if "tags" in translate_config and isinstance(translate_config["tags"], list):
                 translate_config["tags"] = ",".join(translate_config["tags"])
 
             if len(translate_config.get("books", [])) > 0:
@@ -211,7 +211,18 @@ def main() -> None:
         nargs="*",
         metavar="scorer",
         choices=_SUPPORTED_SCORERS,
-        default=["bleu", "sentencebleu", "chrf3", "chrf3+", "chrf3++", "m-bleu", "m-chrf3", "m-chrf3+", "m-chrf3++", "spbleu"],
+        default=[
+            "bleu",
+            "sentencebleu",
+            "chrf3",
+            "chrf3+",
+            "chrf3++",
+            "m-bleu",
+            "m-chrf3",
+            "m-chrf3+",
+            "m-chrf3++",
+            "spbleu",
+        ],
         help=f"List of scorers - {_SUPPORTED_SCORERS}",
     )
 
