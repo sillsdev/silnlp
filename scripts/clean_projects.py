@@ -3,15 +3,18 @@ import csv
 import shutil
 from datetime import datetime
 from pathlib import Path
+
 from tqdm import tqdm
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Clean up unnecessary files and folders.")
-    parser.add_argument("--input", type=Path, default=Path("S:/Paratext/projects"), help="Folder to search.")
+    parser.add_argument("--input", type=Path, default=Path("/root/M/Paratext/projects"), help="Folder to search.")
     parser.add_argument("--delete-subfolders", action="store_true", help="Delete subfolders inside projects.")
     parser.add_argument("--confirm-delete", action="store_true", help="Skip confirmation and delete directly.")
     parser.add_argument("--dry-run", action="store_true", help="Generate a CSV report without deleting.")
     return parser.parse_args()
+
 
 def should_delete(path: Path):
     patterns = [
@@ -26,6 +29,7 @@ def should_delete(path: Path):
     ]
     return any(pattern in path.name for pattern in patterns)
 
+
 def find_items_to_delete(root_path: Path, delete_subfolders: bool):
     files_to_delete = []
     folders_to_delete = []
@@ -36,7 +40,7 @@ def find_items_to_delete(root_path: Path, delete_subfolders: bool):
             print(f" Warning: Ignoring symlink found: {project_folder}")
             continue
         if project_folder.is_dir():
-            for path in project_folder.glob('*'):
+            for path in project_folder.glob("*"):
                 if path.is_file() and should_delete(path):
                     files_to_delete.append(path)
                 if path.is_dir() and delete_subfolders:
@@ -44,11 +48,12 @@ def find_items_to_delete(root_path: Path, delete_subfolders: bool):
 
     return files_to_delete, folders_to_delete
 
-def execute_and_report(args):
+
+def clean_projects(args):
     now = datetime.now()
-    now_filestamp = now.strftime('%Y%m%d_%H%M%S')
-    now_csv_date = now.strftime('%Y %m %d')
-    now_csv_time = now.strftime('%H:%M:%S')
+    now_filestamp = now.strftime("%Y%m%d_%H%M%S")
+    now_csv_date = now.strftime("%Y %m %d")
+    now_csv_time = now.strftime("%H:%M:%S")
 
     # Find files/folders to delete, with subfolder handling based on the option
     files_to_delete, folders_to_delete = find_items_to_delete(args.input, args.delete_subfolders)
@@ -64,7 +69,7 @@ def execute_and_report(args):
         csv_writer.writerow(["Path", "Type", "Size (bytes)", "Deleted"])
 
         for folder_to_delete in folders_to_delete:
-            size = sum(f.stat().st_size for f in folder_to_delete.glob('*') if f.is_file())
+            size = sum(f.stat().st_size for f in folder_to_delete.glob("*") if f.is_file())
             total_size += size
 
             deleted = "No" if args.dry_run else try_delete(folder_to_delete, args)
@@ -88,6 +93,7 @@ def delete_item(item):
         shutil.rmtree(item)
     return
 
+
 def try_delete(item: Path, args) -> str:
 
     if args.confirm_delete:
@@ -95,7 +101,7 @@ def try_delete(item: Path, args) -> str:
         return "Yes"
     else:
         confirmation = input(f"Delete {item}? (y/n): ").strip().lower()
-        if confirmation == 'y':
+        if confirmation == "y":
             delete_item(item)
             return "Yes"
         else:
@@ -103,8 +109,9 @@ def try_delete(item: Path, args) -> str:
 
 
 def main():
-    args = parse_arguments()   
-    execute_and_report(args)
+    args = parse_arguments()
+    clean_projects(args)
+
 
 if __name__ == "__main__":
     main()

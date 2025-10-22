@@ -5788,6 +5788,16 @@ plot = ["bokeh", "colorcet", "datashader", "holoviews", "matplotlib", "pandas", 
 tbb = ["tbb (>=2019.0)"]
 
 [[package]]
+name = "unicodeblock"
+version = "0.3.1"
+description = "Python Unicode Block Utilities"
+optional = false
+python-versions = "*"
+files = [
+    {file = "unicodeblock-0.3.1.tar.gz", hash = "sha256:02d53cd05a80a5693b934e5119070c3515a80183d4dc1c06943c76d9a0da434f"},
+]
+
+[[package]]
 name = "uritemplate"
 version = "4.1.1"
 description = "Implementation of RFC 6570 URI Templates"
@@ -5841,6 +5851,37 @@ MarkupSafe = ">=2.1.1"
 
 [package.extras]
 watchdog = ["watchdog (>=2.3)"]
+
+[[package]]
+name = "wheel"
+version = "0.45.1"
+description = "A built-package format for Python"
+optional = false
+python-versions = ">=3.8"
+files = [
+    {file = "wheel-0.45.1-py3-none-any.whl", hash = "sha256:708e7481cc80179af0e556bbf0cc00b8444c7321e2700b8d8580231d13017248"},
+    {file = "wheel-0.45.1.tar.gz", hash = "sha256:661e1abd9198507b1409a20c02106d9670b2576e916d58f520316666abca6729"},
+]
+
+[package.extras]
+test = ["pytest (>=6.0.0)", "setuptools (>=65)"]
+
+[[package]]
+name = "wildebeest-nlp"
+version = "0.9.2"
+description = "The wildebeest scripts investigate, repair and normalize a wide range of text file problems at the character level, e.g. encoding errors, normalization of characters into their canonical form, mapping digits and some punctuation to ASCII, deletion of some non-printable characters."
+optional = false
+python-versions = ">=3.8"
+files = [
+    {file = "wildebeest-nlp-0.9.2.tar.gz", hash = "sha256:3c09c1b15999cd98e3db2f53b6c76949593efe2f0f33b997de479f3955835642"},
+    {file = "wildebeest_nlp-0.9.2-py3-none-any.whl", hash = "sha256:090754039aee379bc71295512cc642a44758499ce9556c4b2fec4ddd124d2f13"},
+]
+
+[package.dependencies]
+regex = ">=2021.8.3"
+tqdm = ">=4.40"
+unicodeblock = ">=0.3.1"
+wheel = ">=0.38.4"
 
 [[package]]
 name = "wrapt"
@@ -6177,4 +6218,4 @@ eflomal = ["eflomal"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.11"
-content-hash = "74a4bd4cbad92fe77b596af737f7f48be2011bd3c90fb620a5fce1513e973b1b"
+content-hash = "3e4a937d7d0af586c911af5efa4354e72322260f8b5132ab4f635cccf15937e1"
