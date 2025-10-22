@@ -9,7 +9,7 @@ from pathlib import Path
 import wildebeest.wb_analysis as wb_ana
 import yaml
 
-from scripts.clean_projects import execute_and_report
+from scripts.clean_projects import clean_projects
 
 from .collect_verse_counts import collect_verse_counts
 from .environment import SIL_NLP_ENV
@@ -65,15 +65,17 @@ def copy_paratext_project_folder(source_dir: Path, project_name: str, overwrite=
             _copy_file_to_paratext_project(source_item, target_item, overwrite=overwrite)
 
 
-def collect_verse_counts_wrapper(project_name: str, config: dict) -> None:
+def collect_verse_counts_wrapper(project_name: str, verse_counts_config: dict) -> None:
 
-    output_folder = Path(config.get("output_folder", SIL_NLP_ENV.mt_experiments_dir / "verse_counts" / project_name))
+    output_folder = Path(
+        verse_counts_config.get("output_folder", SIL_NLP_ENV.mt_experiments_dir / "verse_counts" / project_name)
+    )
     if not output_folder.exists():
         output_folder.mkdir(parents=True, exist_ok=True)
 
-    input_folder = config.get("input_folder", SIL_NLP_ENV.mt_scripture_dir)
+    input_folder = verse_counts_config.get("input_folder", SIL_NLP_ENV.mt_scripture_dir)
 
-    file_patterns = config.get("files", f"*{project_name}*.txt")
+    file_patterns = verse_counts_config.get("files", f"*{project_name}*.txt")
 
     input_folder_path = Path(input_folder)
     if not input_folder_path.exists():
@@ -91,8 +93,8 @@ def collect_verse_counts_wrapper(project_name: str, config: dict) -> None:
         input_folder=input_folder_path,
         output_folder=output_folder,
         file_patterns=file_patterns,
-        deutero=config.get("deutero", False),
-        recount=config.get("recount", False),
+        deutero=verse_counts_config.get("deutero", False),
+        recount=verse_counts_config.get("recount", False),
     )
 
 
@@ -196,7 +198,7 @@ def main() -> None:
 
     if args.clean_project:
         LOGGER.info(f"Cleaning Paratext project folder for {project_name}.")
-        execute_and_report(
+        clean_projects(
             argparse.Namespace(
                 input=get_paratext_project_dir(project_name),
                 delete_subfolders=True,

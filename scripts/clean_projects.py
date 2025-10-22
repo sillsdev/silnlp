@@ -49,7 +49,7 @@ def find_items_to_delete(root_path: Path, delete_subfolders: bool):
     return files_to_delete, folders_to_delete
 
 
-def execute_and_report(args):
+def clean_projects(args):
     now = datetime.now()
     now_filestamp = now.strftime("%Y%m%d_%H%M%S")
     now_csv_date = now.strftime("%Y %m %d")
@@ -110,7 +110,7 @@ def try_delete(item: Path, args) -> str:
 
 def main():
     args = parse_arguments()
-    execute_and_report(args)
+    clean_projects(args)
 
 
 if __name__ == "__main__":
