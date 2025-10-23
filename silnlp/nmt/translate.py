@@ -15,7 +15,8 @@ from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.translator import SentenceTranslationGroup, Translator
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
-from .config import CheckpointType, Config, NMTModel
+from .config import CheckpointType, Config, NMTModel, get_mt_exp_dir
+from .quality_estimation import estimate_quality
 
 LOGGER = logging.getLogger((__package__ or "") + ".translate")
 
@@ -61,7 +62,7 @@ class TranslationTask:
         save_confidences: bool = False,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
         tags: Optional[List[str]] = None,
-    ):
+    ) -> List[Path]:
         book_nums = get_chapters(books)
         translator, config, step_str = self._init_translation_task(
             experiment_suffix=f"_{self.checkpoint}_{[book_number_to_id(book) for book in book_nums.keys()]}"
@@ -105,6 +106,7 @@ class TranslationTask:
                 experiment_ckpt_str = f"{self.name}:base"
 
             translation_failed: List[str] = []
+            confidence_files: List[Path] = []
             for book_num, chapters in book_nums.items():
                 book = book_number_to_id(book_num)
                 try:
@@ -124,12 +126,16 @@ class TranslationTask:
                         config.corpus_pairs,
                         tags,
                     )
+                    if save_confidences:
+                        confidence_files.extend(output_path.parent.glob(f"{output_path.name}*.confidences.tsv"))
                 except Exception:
                     translation_failed.append(book)
                     LOGGER.exception(f"Was not able to translate {book}.")
 
             if len(translation_failed) > 0:
                 raise RuntimeError(f"Some books failed to translate: {' '.join(translation_failed)}")
+
+            return confidence_files
 
     def translate_text_files(
         self,
@@ -142,7 +148,7 @@ class TranslationTask:
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
         tags: Optional[List[str]] = None,
-    ) -> None:
+    ) -> List[Path]:
         translator, config, _ = self._init_translation_task(experiment_suffix=f"_{self.checkpoint}_{src_prefix}")
         with translator:
             if src_iso is None:
@@ -158,6 +164,7 @@ class TranslationTask:
             if trg_iso == "":
                 LOGGER.warning("No language code was set for the target language")
 
+            confidence_files = []
             for i in range(start_seq, end_seq + 1):
                 file_num = f"{i:04d}"
                 src_file = f"{src_prefix}{file_num}.txt"
@@ -183,6 +190,11 @@ class TranslationTask:
                     end = time.time()
                     print(f"Translated {src_file_path.name} to {trg_file_path.name} in {((end-start)/60):.2f} minutes")
 
+                    if save_confidences:
+                        confidence_files.extend(trg_file_path.parent.glob(f"{trg_file_path.name}*.confidences.tsv"))
+
+            return confidence_files
+
     def translate_files(
         self,
         src: str,
@@ -193,7 +205,7 @@ class TranslationTask:
         save_confidences: bool = False,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
         tags: Optional[List[str]] = None,
-    ) -> None:
+    ) -> List[Path]:
         translator, config, step_str = self._init_translation_task(
             experiment_suffix=f"_{self.checkpoint}_{os.path.basename(src)}"
         )
@@ -228,6 +240,7 @@ class TranslationTask:
             else:
                 src_file_paths = list(p for p in src_path.rglob("*.*") if p.is_file())
 
+            confidence_files = []
             for src_file_path in src_file_paths:
                 if trg_path.is_dir():
                     if src_path.is_file():
@@ -275,6 +288,11 @@ class TranslationTask:
                         training_corpus_pairs=config.corpus_pairs,
                         tags=tags,
                     )
+
+                if save_confidences:
+                    confidence_files.extend(trg_file_path.parent.glob(f"{trg_file_path.name}*.confidences.tsv"))
+
+            return confidence_files
 
     def _init_translation_task(self, experiment_suffix: str) -> Tuple[Translator, Config, str]:
         clearml = SILClearML(
@@ -424,6 +442,18 @@ def main() -> None:
         "--commit", type=str, default=None, help="The silnlp git commit id with which to run a remote job"
     )
     parser.add_argument(
+        "--quality-estimation",
+        default=False,
+        action="store_true",
+        help="Run quality estimation after translation completes. Requires --save-confidences and --diff-predictions.",
+    )
+    parser.add_argument(
+        "--diff-predictions",
+        type=str,
+        default=None,
+        help="Path to diff predictions file (relative to MT/experiments) for quality estimation.",
+    )
+    parser.add_argument(
         "--debug",
         default=False,
         action="store_true",
@@ -434,6 +464,12 @@ def main() -> None:
 
     if args.clearml_queue is not None and args.clearml_tag is None:
         parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
+
+    if args.quality_estimation and not args.save_confidences:
+        parser.error("--quality-estimation requires --save-confidences to be enabled.")
+
+    if args.quality_estimation and args.diff_predictions is None:
+        parser.error("--quality-estimation requires --diff-predictions to be specified.")
 
     get_git_revision_hash()
 
@@ -447,12 +483,13 @@ def main() -> None:
     )
 
     postprocess_handler = PostprocessHandler([PostprocessConfig(vars(args))])
+    confidence_files: List[Path] = []
 
     if len(args.books) > 0:
         if args.debug:
             show_attrs(cli_args=args, actions=[f"Will attempt to translate books {args.books} into {args.trg_iso}"])
             exit()
-        translator.translate_books(
+        confidence_files = translator.translate_books(
             ";".join(args.books),
             args.src_project,
             args.trg_project,
@@ -472,7 +509,7 @@ def main() -> None:
             raise RuntimeError("A target file prefix must be specified.")
         if args.start_seq is None or args.end_seq is None:
             raise RuntimeError("Start and end sequence numbers must be specified.")
-        translator.translate_text_files(
+        confidence_files = translator.translate_text_files(
             args.src_prefix,
             args.trg_prefix,
             args.start_seq,
@@ -489,7 +526,7 @@ def main() -> None:
                 actions=[f"Will attempt to translate {args.src} from {args.src_iso} into {args.trg_iso}."],
             )
             exit()
-        translator.translate_files(
+        confidence_files = translator.translate_files(
             args.src,
             args.trg,
             args.src_iso,
@@ -500,6 +537,14 @@ def main() -> None:
         )
     else:
         raise RuntimeError("A Scripture book, file, or file prefix must be specified.")
+
+    if args.quality_estimation and args.save_confidences and args.diff_predictions and confidence_files:
+        LOGGER.info("Running quality estimation...")
+        diff_predictions_path = get_mt_exp_dir(args.diff_predictions)
+        estimate_quality(diff_predictions_path, confidence_files)
+        LOGGER.info("Quality estimation completed.")
+    elif args.quality_estimation and args.save_confidences and not confidence_files:
+        LOGGER.warning("Quality estimation was requested but no confidence files were generated during translation.")
 
 
 if __name__ == "__main__":
