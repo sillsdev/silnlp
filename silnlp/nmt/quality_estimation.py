@@ -1,6 +1,7 @@
 import argparse
 import logging
 import re
+from abc import ABC
 from collections import defaultdict
 from dataclasses import dataclass
 from math import exp
@@ -124,6 +125,38 @@ class UsabilityParameters:
     variance: float
 
 
+class Thresholds(ABC):
+    GREEN_THRESHOLD: float
+    YELLOW_THRESHOLD: float
+    GREEN_LABEL = "Green"
+    YELLOW_LABEL = "Yellow"
+    RED_LABEL = "Red"
+
+    @classmethod
+    def return_label(cls, prob: float) -> str:
+        if prob >= cls.GREEN_THRESHOLD:
+            return cls.GREEN_LABEL
+        elif prob >= cls.YELLOW_THRESHOLD:
+            return cls.YELLOW_LABEL
+        else:
+            return cls.RED_LABEL
+
+
+class BookThresholds(Thresholds):
+    GREEN_THRESHOLD = 0.6
+    YELLOW_THRESHOLD = 0.5
+
+
+class ChapterThresholds(Thresholds):
+    GREEN_THRESHOLD = 0.6
+    YELLOW_THRESHOLD = 0.3
+
+
+class VerseThresholds(Thresholds):
+    GREEN_THRESHOLD = 0.6
+    YELLOW_THRESHOLD = 0.3
+
+
 def compute_usable_proportions(verse_scores: List[VerseScore], output_dir: Path) -> None:
     usable_params, unusable_params = parse_parameters(output_dir / "usability_parameters.tsv")
 
@@ -133,7 +166,7 @@ def compute_usable_proportions(verse_scores: List[VerseScore], output_dir: Path)
     chapter_counts = defaultdict(lambda: defaultdict(int))
 
     with open(output_dir / "usability_verses.tsv", "w", encoding="utf-8", newline="\n") as verse_file:
-        verse_file.write("Book\tChapter\tVerse\tUsability\n")
+        verse_file.write("Book\tChapter\tVerse\tUsability\tLabel\n")
         for verse_score in verse_scores:
             vref = verse_score.vref
             if vref.verse_num == 0:
@@ -143,25 +176,29 @@ def compute_usable_proportions(verse_scores: List[VerseScore], output_dir: Path)
                 continue
 
             prob = calculate_usable_prob(verse_score.projected_chrf3, usable_params, unusable_params)
+            label = VerseThresholds.return_label(prob)
+
             book_totals[vref.book] += prob
             book_counts[vref.book] += 1
             chapter_totals[vref.book][vref.chapter_num] += prob
             chapter_counts[vref.book][vref.chapter_num] += 1
 
-            verse_file.write(f"{vref.book}\t{vref.chapter_num}\t{vref.verse_num}\t{prob:.6f}\n")
+            verse_file.write(f"{vref.book}\t{vref.chapter_num}\t{vref.verse_num}\t{prob:.6f}\t{label}\n")
 
     with open(output_dir / "usability_books.tsv", "w", encoding="utf-8", newline="\n") as book_file:
-        book_file.write("Book\tUsability\n")
+        book_file.write("Book\tUsability\tLabel\n")
         for book in sorted(book_totals):
             avg_prob = book_totals[book] / book_counts[book]
-            book_file.write(f"{book}\t{avg_prob:.6f}\n")
+            label = BookThresholds.return_label(avg_prob)
+            book_file.write(f"{book}\t{avg_prob:.6f}\t{label}\n")
 
     with open(output_dir / "usability_chapters.tsv", "w", encoding="utf-8", newline="\n") as chapter_file:
-        chapter_file.write("Book\tChapter\tUsability\n")
+        chapter_file.write("Book\tChapter\tUsability\tLabel\n")
         for book in sorted(chapter_totals):
             for chapter in sorted(chapter_totals[book]):
                 avg_prob = chapter_totals[book][chapter] / chapter_counts[book][chapter]
-                chapter_file.write(f"{book}\t{chapter}\t{avg_prob:.6f}\n")
+                label = ChapterThresholds.return_label(avg_prob)
+                chapter_file.write(f"{book}\t{chapter}\t{avg_prob:.6f}\t{label}\n")
 
 
 def parse_parameters(parameter_file: Path) -> Tuple[UsabilityParameters, UsabilityParameters]:
