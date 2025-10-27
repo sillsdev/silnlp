@@ -1,6 +1,7 @@
 import argparse
 import getpass
 import logging
+import sys
 import tempfile
 import zipfile
 from datetime import datetime
@@ -9,7 +10,7 @@ from pathlib import Path
 import wildebeest.wb_analysis as wb_ana
 import yaml
 
-from scripts.clean_projects import clean_projects
+import silnlp.common.clean_projects as clean_projects
 
 from .collect_verse_counts import collect_verse_counts
 from .environment import SIL_NLP_ENV
@@ -115,21 +116,24 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "project",
+        "projects",
         help="Paratext project name. The project will be stored on the bucket at Paratext/projects/<project>.",
-        type=str,
+        nargs="*",
+        default=None,
     )
     parser.add_argument(
         "--copy-from",
-        help="Path to a downloaded Paratext project folder. The local project will be copied to the bucket.",
+        help="Path to a downloaded Paratext project folder. The local project will be copied to the bucket. If provided without a value, uses the user's Downloads directory.",
+        nargs="?",
+        const=Path.home() / "Downloads",
         default=None,
-        type=str,
+        type=Path,
     )
     parser.add_argument(
         "--config",
         help="Path to a configuration file in YAML format. This is used to configure the onboarding process.",
         default=None,
-        type=str,
+        type=Path,
     )
     parser.add_argument(
         "--overwrite", help="Overwrite any existing files and folders", default=False, action="store_true"
@@ -152,7 +156,7 @@ def main() -> None:
         "--clean-project",
         default=False,
         action="store_true",
-        help="Cleans the Paratext project folder by removing unnecessary files and folders.",
+        help="Cleans the Paratext project folder by removing unnecessary files and folders before copying. Only used if --copy-from is provided.",
     )
     parser.add_argument(
         "--timestamp",
@@ -163,80 +167,110 @@ def main() -> None:
     parser.add_argument(
         "--wildebeest", default=False, action="store_true", help="Run Wildebeest analysis on the extracted corpora."
     )
+    parser.add_argument(
+        "--zip-password",
+        default=None,
+        type=str,
+        help="Password for a Paratext project zip file, if it is encrypted.",
+    )
 
     args = parser.parse_args()
-    if not args.project:
+    if not args.projects:
         raise ValueError("Project name is required. Please provide a valid Paratext project name using <project>.")
 
     config = get_config(args.config) if args.config else {}
 
-    if args.project.endswith(".zip"):
-        with zipfile.ZipFile(args.project, "r") as zip_ref:
-            # Check if any file in the zip is encrypted
-            temp_dir = tempfile.TemporaryDirectory()
-            needs_password = any(zinfo.flag_bits & 0x1 for zinfo in zip_ref.infolist())
-            if needs_password:
-                pwd = getpass.getpass(prompt=f"Enter password for zip file '{args.project}': ")
-                zip_ref.extractall(temp_dir.name, pwd=pwd.encode())
-            else:
-                zip_ref.extractall(temp_dir.name)
-        args.copy_from = temp_dir.name
-        args.project = Path(args.project).stem
+    if args.clean_project and args.copy_from:
+        LOGGER.info("Cleaning Paratext project folders.")
+        old_argv = sys.argv
+        try:
+            sys.argv = ["--folders", str(args.copy_from)]
+            clean_projects.main()
+        finally:
+            sys.argv = old_argv
 
-    project_name = args.project
-    if args.timestamp:
+    for project in args.projects:
+        if project.endswith(".zip"):
+            with zipfile.ZipFile(project, "r") as zip_ref:
+                # Check if any file in the zip is encrypted
+                temp_dir = tempfile.TemporaryDirectory()
+                needs_password = any(zinfo.flag_bits & 0x1 for zinfo in zip_ref.infolist())
+                if needs_password:
+                    if args.zip_password:
+                        pwd = args.zip_password
+                    else:
+                        pwd = getpass.getpass(prompt=f"Enter password for zip file '{project}': ")
+                    zip_ref.extractall(temp_dir.name, pwd=pwd.encode())
+                else:
+                    zip_ref.extractall(temp_dir.name)
+            args.copy_from = temp_dir.name
+            project = Path(project).stem
 
-        now = datetime.now()
-        timestamp = now.strftime("%Y_%m_%d")
-        project_name = f"{args.project}_{timestamp}"
-        LOGGER.info(f"Timestamping project. New project name: {project_name}")
+        project_name = project
+        if args.timestamp:
 
-    if args.copy_from:
-        LOGGER.info(f"Onboarding project: {args.project}")
-        paratext_project_dir: Path = create_paratext_project_folder_if_not_exists(project_name)
-        copy_paratext_project_folder(Path(args.copy_from), paratext_project_dir, overwrite=args.overwrite)
+            now = datetime.now()
+            timestamp = now.strftime("%Y_%m_%d")
+            project_name = f"{project}_{timestamp}"
+            LOGGER.info(f"Timestamping project. New project name: {project_name}")
 
-    if args.clean_project:
-        LOGGER.info(f"Cleaning Paratext project folder for {project_name}.")
-        clean_projects(
-            argparse.Namespace(
-                input=get_paratext_project_dir(project_name),
-                delete_subfolders=True,
-                confirm_delete=True,
-                dry_run=False,
+        if args.copy_from:
+            LOGGER.info(f"Copying project: {project}")
+            paratext_project_dir: Path = create_paratext_project_folder_if_not_exists(project_name)
+            source_path = Path(args.copy_from)
+            if source_path.name != project_name:
+                source_path = Path(source_path / project_name)
+            copy_paratext_project_folder(source_path, paratext_project_dir, overwrite=args.overwrite)
+
+        if args.extract_corpora:
+            extract_config = config.get("extract_corpora", {})
+            extract_corpora(
+                projects={project_name},
+                books_to_include=extract_config.get("include", []),
+                books_to_exclude=extract_config.get("exclude", []),
+                include_markers=extract_config.get("markers", False),
+                extract_lemmas=extract_config.get("lemmas", False),
+                extract_project_vrefs=extract_config.get("project-vrefs", False),
             )
-        )
 
-    if args.extract_corpora:
-        extract_config = config.get("extract_corpora", {})
-        extract_corpora(
-            projects={project_name},
-            books_to_include=extract_config.get("include", []),
-            books_to_exclude=extract_config.get("exclude", []),
-            include_markers=extract_config.get("markers", False),
-            extract_lemmas=extract_config.get("lemmas", False),
-            extract_project_vrefs=extract_config.get("project-vrefs", False),
-        )
+        if args.collect_verse_counts:
+            if not args.extract_corpora:
+                LOGGER.warning(
+                    "--extract_corpora was not included. Collecting verse counts requires the corpus to be extracted first."
+                )
+            LOGGER.info(f"Collecting verse counts from {project_name}.")
+            collect_verse_counts_wrapper(project_name, config.get("verse_counts", {}))
 
-    if args.collect_verse_counts:
-        if not args.extract_corpora:
-            LOGGER.warning(
-                "--extract_corpora was not included. Collecting verse counts requires the corpus to be extracted first."
-            )
-        LOGGER.info(f"Collecting verse counts from {project_name}.")
-        collect_verse_counts_wrapper(project_name, config.get("verse_counts", {}))
+        if args.wildebeest:
+            if not args.extract_corpora:
+                LOGGER.warning(
+                    "--extract_corpora was not included. Wildebeest requires the corpus to be extracted first."
+                )
 
-    if args.wildebeest:
-        if not args.extract_corpora:
-            LOGGER.warning("--extract_corpora was not included. Wildebeest requires the corpus to be extracted first.")
-
-        extract_file = list(SIL_NLP_ENV.mt_scripture_dir.glob(f"*{project_name}.txt"))[0]
-        LOGGER.info(f"Running Wildebeest analysis on {extract_file}.")
-        with (
-            open(f"{project_name}_wildebeest.json", "w", encoding="utf-8") as json_f,
-            open(f"{project_name}_wildebeest.txt", "w", encoding="utf-8") as txt_f,
-        ):
-            wb_ana.process(in_file=extract_file, json_output=json_f, pp_output=txt_f)
+            extract_file = list(SIL_NLP_ENV.mt_scripture_dir.glob(f"*{project_name}.txt"))[0]
+            extract_file = str(extract_file)
+            LOGGER.info(f"Running Wildebeest analysis on {extract_file}.")
+            wildebeest_config = config.get("wildebeest", {})
+            old_argv = sys.argv
+            try:
+                sys.argv = [
+                    "wb_ana",
+                    "-i",
+                    extract_file,
+                    "-j",
+                    f"{project_name}_wildebeest.json",
+                    "-o",
+                    f"{project_name}_wildebeest.txt",
+                    "-x",
+                    str(wildebeest_config.get("max_examples", 500)),
+                    "-n",
+                    str(wildebeest_config.get("max_cases", 500)),
+                    "-r",
+                    str(wildebeest_config.get("ref_id_file", "silnlp/assets/vref.txt")),
+                ]
+                wb_ana.main()
+            finally:
+                sys.argv = old_argv
 
 
 if __name__ == "__main__":
