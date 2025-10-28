@@ -167,12 +167,6 @@ def main() -> None:
     parser.add_argument(
         "--wildebeest", default=False, action="store_true", help="Run Wildebeest analysis on the extracted corpora."
     )
-    parser.add_argument(
-        "--zip-password",
-        default=None,
-        type=str,
-        help="Password for a Paratext project zip file, if it is encrypted.",
-    )
 
     args = parser.parse_args()
     if not args.projects:
@@ -196,10 +190,10 @@ def main() -> None:
                 temp_dir = tempfile.TemporaryDirectory()
                 needs_password = any(zinfo.flag_bits & 0x1 for zinfo in zip_ref.infolist())
                 if needs_password:
-                    if args.zip_password:
-                        pwd = args.zip_password
-                    else:
-                        pwd = getpass.getpass(prompt=f"Enter password for zip file '{project}': ")
+                    if config.get("zip_passwords"):
+                        pwd = config["zip_passwords"].get(project, None)
+                    if not pwd:
+                        pwd = getpass.getpass(prompt=f"Enter password for {project}: ")
                     zip_ref.extractall(temp_dir.name, pwd=pwd.encode())
                 else:
                     zip_ref.extractall(temp_dir.name)
@@ -223,7 +217,7 @@ def main() -> None:
             copy_paratext_project_folder(source_path, paratext_project_dir, overwrite=args.overwrite)
 
         if args.extract_corpora:
-            extract_config = config.get("extract_corpora", {})
+            extract_config: dict = config.get("extract_corpora", {})
             extract_corpora(
                 projects={project_name},
                 books_to_include=extract_config.get("include", []),
