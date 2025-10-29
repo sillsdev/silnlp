@@ -229,7 +229,7 @@ def main() -> None:
         "--diff-predictions",
         type=str,
         default=None,
-        help="Path to diff predictions file (relative to MT/experiments) for quality estimation."
+        help="The diff predictions path relative to MT/experiments for quality estimation."
         + " e.g. 'project_folder/exp_folder/diff_predictions.5000.xlsx'.",
     )
     parser.add_argument("--mt-dir", default=None, type=str, help="The machine translation directory.")
