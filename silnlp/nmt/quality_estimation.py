@@ -237,7 +237,9 @@ def calculate_usable_prob(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Estimate the quality of drafts created by an NMT model.")
     parser.add_argument(
-        "diff_predictions", help="The diff predictions path relative to MT/experiments to determine line of best fit."
+        "diff_predictions",
+        help="The diff predictions path relative to MT/experiments to determine line of best fit."
+        + " e.g. 'project_folder/exp_folder/diff_predictions.5000.xlsx'.",
     )
     parser.add_argument(
         "confidence_files",
