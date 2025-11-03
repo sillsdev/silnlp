@@ -41,6 +41,11 @@ def stratified_sample(
         .reset_index(drop=True)
     )
     sample = sample[["Book", "Chapter", "Verse", "Usability"]]
+
+    book_order = {book: i for i, book in enumerate(ALL_BOOK_IDS)}
+    sample["book_order"] = sample["Book"].map(book_order)
+    sample = sample.sort_values(["book_order", "Chapter", "Verse"]).drop(columns=["book_order"]).reset_index(drop=True)
+
     sample.to_csv(usability_verses_file.parent / "usability_sample.tsv", sep="\t", index=False)
     print(
         {
