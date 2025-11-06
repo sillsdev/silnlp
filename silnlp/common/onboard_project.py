@@ -12,9 +12,12 @@ import yaml
 
 import silnlp.common.clean_projects as clean_projects
 
+from ..nmt.config_utils import create_config
 from .collect_verse_counts import collect_verse_counts
 from .environment import SIL_NLP_ENV
 from .extract_corpora import extract_corpora
+from .iso_info import NLLB_TAG_FROM_ISO
+from .iso_info import data as iso_data
 
 LOGGER = logging.getLogger(__package__ + ".onboard_project")
 
@@ -99,6 +102,42 @@ def collect_verse_counts_wrapper(project_name: str, verse_counts_config: dict) -
     )
 
 
+def calculate_tokenization_stats(project_name: str, stats_config: dict = None) -> None:
+    stats_dir = Path("stats") / project_name
+    if not stats_dir.exists():
+        stats_dir.mkdir(parents=True, exist_ok=True)
+
+    extract_path = list(SIL_NLP_ENV.mt_scripture_dir.glob(f"*{project_name}*.txt"))[0]
+    extract_file = extract_path.stem
+
+    iso_code = extract_file.split("-")[0]
+
+    iso_dict = {**{k: v for k, v in iso_data}, **{v: k for k, v in iso_data}}
+
+    iso_code = iso_dict.get(iso_code, iso_code)
+    nllb_tag = NLLB_TAG_FROM_ISO.get(iso_code, "eng_Latn")
+
+    if stats_config is None:
+        stats_config = {
+            "use_default_model_dir": False,
+            "data": {
+                "corpus_pairs": [
+                    {
+                        "src": extract_file,
+                        "trg": extract_file,
+                        "type": "train",
+                        "lang_codes": {iso_code: nllb_tag},
+                    }
+                ],
+            },
+        }
+
+    config = create_config(exp_dir=stats_dir, config=stats_config)
+
+    config.set_seed()
+    config.preprocess(stats=True, force_align=True)
+
+
 def get_config(config_path: str) -> dict:
     if config_path:
         config_file = Path(config_path)
@@ -167,6 +206,7 @@ def main() -> None:
     parser.add_argument(
         "--wildebeest", default=False, action="store_true", help="Run Wildebeest analysis on the extracted corpora."
     )
+    parser.add_argument("--stats", default=False, action="store_true", help="Compute tokenization statistics")
 
     args = parser.parse_args()
     if not args.projects:
@@ -265,6 +305,11 @@ def main() -> None:
                 wb_ana.main()
             finally:
                 sys.argv = old_argv
+
+        if args.stats:
+            if not args.extract_corpora:
+                LOGGER.warning("--extract_corpora was not included. Stats requires the corpus to be extracted first.")
+            calculate_tokenization_stats(project_name, config.get("stats", None))
 
 
 if __name__ == "__main__":

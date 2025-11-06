@@ -330,6 +330,7 @@ class Config(ABC):
 
         src_tokens_per_verse, src_chars_per_token = [], []
         for src_tok_file in self.exp_dir.glob("*.src.txt"):
+            src_tok_file = src_tok_file.name
             with open(self.exp_dir / src_tok_file, "r+", encoding="utf-8") as f:
                 for line in f:
                     src_tokens_per_verse.append(len(line.split()))
@@ -337,6 +338,7 @@ class Config(ABC):
 
         trg_tokens_per_verse, trg_chars_per_token = [], []
         for trg_tok_file in self.exp_dir.glob("*.trg.txt"):
+            trg_tok_file = trg_tok_file.name
             with open(self.exp_dir / trg_tok_file, "r+", encoding="utf-8") as f:
                 for line in f:
                     trg_tokens_per_verse.append(len(line.split()))
@@ -344,6 +346,7 @@ class Config(ABC):
 
         src_chars_per_verse, src_words_per_verse, src_chars_per_word = [], [], []
         for src_detok_file in self.exp_dir.glob("*.src.detok.txt"):
+            src_detok_file = src_detok_file.name
             with open(self.exp_dir / src_detok_file, "r+", encoding="utf-8") as f:
                 for line in f:
                     src_chars_per_verse.append(len(line))
@@ -353,6 +356,7 @@ class Config(ABC):
 
         trg_chars_per_verse, trg_words_per_verse, trg_chars_per_word = [], [], []
         for trg_detok_file in self.exp_dir.glob("*.trg.detok.txt"):
+            trg_detok_file = trg_detok_file.name
             with open(self.exp_dir / trg_detok_file, "r+", encoding="utf-8") as f:
                 for line in f:
                     trg_chars_per_verse.append(len(line))
