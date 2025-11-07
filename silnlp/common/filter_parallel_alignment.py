@@ -1,11 +1,12 @@
+import argparse
 import os
 from pathlib import Path
-import argparse
+
 import pandas as pd
 
-from .utils import get_git_revision_hash
-from .corpus import load_corpus, write_corpus
 from ..alignment.utils import add_alignment_scores
+from .corpus import load_corpus, write_corpus
+from .utils import get_git_revision_hash
 
 
 def main() -> None:
@@ -39,7 +40,8 @@ def main() -> None:
         write_corpus(Path(score_file_name), corpus["score"].astype(str))
     else:
         print("Loading alignment scores ...")
-        corpus["score"] = list(load_corpus(Path(args.score)))
+        scores = list(load_corpus(Path(args.score)))
+        corpus["score"] = pd.to_numeric(scores, errors="coerce")
 
     print(f"Filtering corpus (lowest {args.quantile*100}% of alignment scores)")
     score_threshold = corpus["score"].quantile(args.quantile)
