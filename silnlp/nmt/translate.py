@@ -64,6 +64,7 @@ class TranslationTask:
         save_confidences: bool = False,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
         tags: Optional[List[str]] = None,
+        render_in_html: Optional[bool] = False,
     ):
         book_nums = get_chapters(books)
         translator, config, step_str = self._init_translation_task(
@@ -126,6 +127,7 @@ class TranslationTask:
                         experiment_ckpt_str,
                         config.corpus_pairs,
                         tags,
+                        render_in_html or False,
                     )
                 except Exception as e:
                     translation_failed.append(book)
@@ -201,6 +203,7 @@ class TranslationTask:
         save_confidences: bool = False,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
         tags: Optional[List[str]] = None,
+        render_in_html: Optional[bool] = False,
     ) -> None:
         translator, config, step_str = self._init_translation_task(
             experiment_suffix=f"_{self.checkpoint}_{os.path.basename(src)}"
@@ -271,18 +274,32 @@ class TranslationTask:
                     experiment_ckpt_str = f"{self.name}:{self.checkpoint}"
                     if not config.model_dir.exists():
                         experiment_ckpt_str = f"{self.name}:base"
-                    translator.translate_usfm(
-                        src_file_path,
-                        trg_file_path,
-                        src_iso,
-                        trg_iso,
-                        produce_multiple_translations,
-                        save_confidences,
-                        postprocess_handler=postprocess_handler,
-                        experiment_ckpt_str=experiment_ckpt_str,
-                        training_corpus_pairs=config.corpus_pairs,
-                        tags=tags,
-                    )
+                    if render_in_html:
+                        translator.translate_usfm_into_html(
+                            src_file_path,
+                            trg_file_path,
+                            src_iso,
+                            trg_iso,
+                            produce_multiple_translations,
+                            save_confidences,
+                            postprocess_handler=postprocess_handler,
+                            experiment_ckpt_str=experiment_ckpt_str,
+                            training_corpus_pairs=config.corpus_pairs,
+                            tags=tags,
+                        )
+                    else:
+                        translator.translate_usfm(
+                            src_file_path,
+                            trg_file_path,
+                            src_iso,
+                            trg_iso,
+                            produce_multiple_translations,
+                            save_confidences,
+                            postprocess_handler=postprocess_handler,
+                            experiment_ckpt_str=experiment_ckpt_str,
+                            training_corpus_pairs=config.corpus_pairs,
+                            tags=tags,
+                        )
 
     def _init_translation_task(self, experiment_suffix: str) -> Tuple[Translator, Config, str]:
         clearml = SILClearML(
@@ -415,6 +432,12 @@ def main() -> None:
         help="The quote convention for the target project. If not specified, it will be detected automatically.",
     )
     parser.add_argument(
+        "--render-in-html",
+        default=False,
+        action="store_true",
+        help="For files in USFM format, produce a translated .html file instead of .sfm",
+    )
+    parser.add_argument(
         "--clearml-queue",
         default=None,
         type=str,
@@ -468,6 +491,7 @@ def main() -> None:
             args.multiple_translations,
             args.save_confidences,
             postprocess_handler,
+            render_in_html=args.render_in_html,
         )
     elif args.src_prefix is not None:
         if args.debug:
@@ -501,6 +525,7 @@ def main() -> None:
             args.multiple_translations,
             args.save_confidences,
             postprocess_handler,
+            render_in_html=args.render_in_html,
         )
     else:
         raise RuntimeError("A Scripture book, file, or file prefix must be specified.")

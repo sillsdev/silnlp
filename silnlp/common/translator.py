@@ -68,7 +68,20 @@ class SentenceTranslation:
         return "\t".join(self._tokens)
 
     def join_token_scores_for_confidence_file(self) -> str:
-        return "\t".join([str(exp(ts)) for ts in [self._sequence_score] + self._token_scores])
+        return "\t".join([str(exp(ts)) for ts in [self._sequence_score or 0] + self._token_scores])
+
+    def join_tokens_for_html(self) -> str:
+        return "".join(
+            [
+                '<span class="conf'
+                + str(int(round(exp(score), 1) * 10))
+                + '">'
+                + token.replace("\u2581", " ")
+                + "</span>"
+                for (token, score) in zip(self._tokens[2:], self._token_scores[2:])
+                if token != "<pad>" and token != "</s>"
+            ]
+        )
 
 
 # A group of multiple translations of a single sentence
@@ -129,6 +142,9 @@ class TranslatedDraft:
 
     def get_all_tokenized_translations(self) -> List[str]:
         return [st.join_tokens_for_test_file() for st in self._sentence_translations]
+
+    def get_all_html_translations(self) -> List[str]:
+        return [st.join_tokens_for_html() for st in self._sentence_translations]
 
 
 # A wrapper around List[SentenceTranslationGroup] that allows upstream consumers to view a
@@ -309,6 +325,7 @@ class Translator(ABC):
         experiment_ckpt_str: str = "",
         training_corpus_pairs: List[CorpusPair] = [],
         tags: Optional[List[str]] = None,
+        render_in_html: bool = False,
     ) -> None:
         book_path = get_book_path(src_project, book)
         if not book_path.is_file():
@@ -316,20 +333,36 @@ class Translator(ABC):
         else:
             LOGGER.info(f"Found the file {book_path} for book {book}")
 
-        self.translate_usfm(
-            book_path,
-            output_path,
-            get_iso(get_project_dir(src_project)),
-            trg_iso,
-            produce_multiple_translations,
-            save_confidences,
-            chapters,
-            trg_project,
-            postprocess_handler,
-            experiment_ckpt_str,
-            training_corpus_pairs,
-            tags,
-        )
+        if render_in_html:
+            self.translate_usfm_into_html(
+                book_path,
+                output_path,
+                get_iso(get_project_dir(src_project)),
+                trg_iso,
+                produce_multiple_translations,
+                save_confidences,
+                chapters,
+                trg_project,
+                postprocess_handler,
+                experiment_ckpt_str,
+                training_corpus_pairs,
+                tags,
+            )
+        else:
+            self.translate_usfm(
+                book_path,
+                output_path,
+                get_iso(get_project_dir(src_project)),
+                trg_iso,
+                produce_multiple_translations,
+                save_confidences,
+                chapters,
+                trg_project,
+                postprocess_handler,
+                experiment_ckpt_str,
+                training_corpus_pairs,
+                tags,
+            )
 
     def translate_usfm(
         self,
@@ -499,6 +532,256 @@ class Translator(ABC):
                     vrefs=vrefs,
                     draft_index=draft_index,
                 )
+
+    def translate_usfm_into_html(
+        self,
+        src_file_path: Path,
+        trg_file_path: Path,
+        src_iso: str,
+        trg_iso: str,
+        produce_multiple_translations: bool = False,
+        save_confidences: bool = False,
+        chapters: List[int] = [],
+        trg_project: Optional[str] = None,
+        postprocess_handler: PostprocessHandler = PostprocessHandler(),
+        experiment_ckpt_str: str = "",
+        training_corpus_pairs: List[CorpusPair] = [],
+        tags: Optional[List[str]] = None,
+    ) -> None:
+        # Create UsfmFileText object for source
+        src_from_project = False
+        if str(src_file_path).startswith(str(get_project_dir(""))):
+            src_from_project = True
+            src_settings = FileParatextProjectSettingsParser(src_file_path.parent).parse()
+            src_file_text = UsfmFileText(
+                src_settings.stylesheet,
+                src_settings.encoding,
+                src_settings.get_book_id(src_file_path.name),
+                src_file_path,
+                src_settings.versification,
+                include_all_text=True,
+                project=src_settings.name,
+            )
+        else:
+            # Guess book ID
+            with src_file_path.open(encoding="utf-8-sig") as f:
+                book_id = f.read().split()[1].upper()
+            if not is_book_id_valid(book_id):
+                raise ValueError(f"Book ID not detected: {book_id}")
+
+            src_file_text = UsfmFileText("usfm.sty", "utf-8-sig", book_id, src_file_path, include_all_text=True)
+        stylesheet = src_settings.stylesheet if src_from_project else UsfmStylesheet("usfm.sty")
+
+        sentences = [re.sub(" +", " ", add_tags_to_sentence(tags, s.text.strip())) for s in src_file_text]
+        vrefs = [s.ref for s in src_file_text]
+        LOGGER.info(f"File {src_file_path} parsed correctly.")
+
+        # Filter sentences
+        for i in reversed(range(len(sentences))):
+            marker = vrefs[i].path[-1].name if len(vrefs[i].path) > 0 else ""
+            if (
+                (len(chapters) > 0 and vrefs[i].chapter_num not in chapters)
+                or marker in PARAGRAPH_TYPE_EMBEDS
+                or stylesheet.get_tag(marker).text_type == UsfmTextType.NOTE_TEXT
+            ):
+                sentences.pop(i)
+                vrefs.pop(i)
+        empty_sents = []
+        for i in reversed(range(len(sentences))):
+            if len(sentences[i].strip()) == 0:
+                sentences.pop(i)
+                empty_sents.append((i, vrefs.pop(i)))
+
+        sentence_translation_groups: List[SentenceTranslationGroup] = list(
+            self.translate(sentences, src_iso, trg_iso, produce_multiple_translations, vrefs)
+        )
+        num_drafts = len(sentence_translation_groups[0])
+
+        # Add empty sentences back in
+        # Prevents pre-existing text from showing up in the sections of translated text
+        for idx, vref in reversed(empty_sents):
+            sentences.insert(idx, "")
+            vrefs.insert(idx, vref)
+            sentence_translation_groups.insert(idx, [SentenceTranslation("", [], [], None)] * num_drafts)
+
+        text_behavior = (
+            UpdateUsfmTextBehavior.PREFER_NEW if trg_project is not None else UpdateUsfmTextBehavior.STRIP_EXISTING
+        )
+
+        draft_set: DraftGroup = DraftGroup(sentence_translation_groups)
+        for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
+            postprocess_handler.construct_rows(vrefs, sentences, translated_draft.get_all_html_translations())
+
+            for config in postprocess_handler.configs:
+
+                # Compile draft remarks
+                draft_src_str = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
+                draft_remark = f"This draft of {vrefs[0].book} was machine translated on {date.today()} from {draft_src_str} using model {experiment_ckpt_str}. It should be reviewed and edited carefully."
+                postprocess_remark = config.get_postprocess_remark()
+                remarks = [draft_remark] + ([postprocess_remark] if postprocess_remark else [])
+
+                # Insert translation into the USFM structure of an existing project
+                # If the target project is not the same as the translated file's original project,
+                # no verses outside of the ones translated will be overwritten
+                if trg_project is not None or src_from_project:
+                    project_dir = get_project_dir(trg_project if trg_project is not None else src_file_path.parent.name)
+                    dest_updater = FileParatextProjectTextUpdater(project_dir)
+                    usfm_out = dest_updater.update_usfm(
+                        book_id=src_file_text.id,
+                        rows=config.rows,
+                        text_behavior=text_behavior,
+                        paragraph_behavior=config.get_paragraph_behavior(),
+                        embed_behavior=config.get_embed_behavior(),
+                        style_behavior=config.get_style_behavior(),
+                        update_block_handlers=(
+                            config.create_place_markers_postprocessor().get_update_block_handlers()
+                            if config.is_marker_placement_required()
+                            else None
+                        ),
+                        remarks=remarks,
+                        compare_segments=True,
+                    )
+
+                    if usfm_out is None:
+                        raise FileNotFoundError(
+                            f"Book {src_file_text.id} does not exist in target project {trg_project}"
+                        )
+                else:  # Slightly more manual version for updating an individual file
+                    with open(src_file_path, encoding="utf-8-sig") as f:
+                        usfm = f.read()
+                    handler = UpdateUsfmParserHandler(
+                        rows=config.rows,
+                        id_text=vrefs[0].book,
+                        text_behavior=text_behavior,
+                        paragraph_behavior=config.get_paragraph_behavior(),
+                        embed_behavior=config.get_embed_behavior(),
+                        style_behavior=config.get_style_behavior(),
+                        update_block_handlers=(
+                            config.create_place_markers_postprocessor().get_update_block_handlers()
+                            if config.is_marker_placement_required()
+                            else None
+                        ),
+                        remarks=remarks,
+                    )
+                    parse_usfm(usfm, handler)
+                    usfm_out = handler.get_usfm()
+
+                if config.is_quotation_mark_denormalization_required():
+                    try:
+                        quotation_denormalization_postprocessor = (
+                            config.create_denormalize_quotation_marks_postprocessor(training_corpus_pairs)
+                        )
+                        usfm_out = quotation_denormalization_postprocessor.postprocess_usfm(usfm_out)
+                    except (UnknownQuoteConventionException, NoDetectedQuoteConventionException) as e:
+                        LOGGER.warning(str(e) + " Skipping quotation mark denormalization.")
+                        continue
+
+                # Construct output file name write to file
+                trg_draft_file_path = trg_file_path.with_stem(trg_file_path.stem + config.get_postprocess_suffix())
+                if produce_multiple_translations:
+                    trg_draft_file_path = trg_draft_file_path.with_suffix(f".{draft_index}{trg_file_path.suffix}")
+
+                html_out = self.convert_usfm_to_html(usfm_out)
+
+                with trg_draft_file_path.open(
+                    "w",
+                    encoding=(
+                        "utf-8"
+                        if not src_from_project
+                        or src_from_project
+                        and (src_settings.encoding == "utf-8-sig" or src_settings.encoding == "utf_8_sig")
+                        else src_settings.encoding
+                    ),
+                ) as f:
+                    f.write(html_out)
+
+            if save_confidences:
+                generate_confidence_files(
+                    translated_draft,
+                    trg_file_path,
+                    produce_multiple_translations=produce_multiple_translations,
+                    vrefs=vrefs,
+                    draft_index=draft_index,
+                )
+
+    def convert_usfm_to_html(self, usfm_out: str) -> str:
+        head_links = """
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400..800;1,400..800&display=swap" rel="stylesheet">
+"""
+        css_style = """
+<style>
+body {
+    display: flex;
+    justify-content: center;
+    font-family: "EB Garamond", serif;
+    font-optical-sizing: auto;
+    font-weight: 400;
+    font-style: normal;
+    font-size: 20px;
+    background-color: #fdf9e1;
+    text-align: justify;
+}
+
+.content {
+    max-width: 550px;
+}
+
+h1 {
+    text-align: center;
+}
+
+h2 {
+    margin-bottom: 0px;
+    margin-top: 10px;
+    font-size: 22px;
+}
+
+.chapter {
+    margin-top: 30px;
+}
+
+.chapter::first-letter {
+    display: inline;
+    initial-letter: 2;
+    margin-right: 7px;
+}
+
+.verse {
+    display: inline;
+    vertical-align: super;
+    font-size: x-small;
+}
+</style>
+"""
+        html_out = re.sub(r"\\c (\d+)", r'<div class="chapter">\1</div>', usfm_out)
+        html_out = re.sub(r"\\v (\d+(\-\d+)?) ?", r'<div class="verse">\1</div>', html_out)
+        html_out = re.sub(r"\\id.*$", "", html_out, flags=re.MULTILINE)
+        html_out = re.sub(r"\\rem.*$", "", html_out, flags=re.MULTILINE)
+        html_out = re.sub(r"\\toc.*$", "", html_out, flags=re.MULTILINE)
+        html_out = re.sub(r"\\mt.*$", "", html_out, flags=re.MULTILINE)
+        html_out = re.sub(r"\\im.*$", "", html_out, flags=re.MULTILINE)
+        html_out = re.sub(r"\\ip.*$", "", html_out, flags=re.MULTILINE)
+        html_out = re.sub(r"\\ie.*$", "", html_out, flags=re.MULTILINE)
+        html_out = re.sub(r"\\h (.*)$", r"<h1>\1</h1>", html_out, flags=re.MULTILINE)
+        html_out = re.sub(r"\\s1 (.*)$", r"<h2>\1</h2>", html_out, flags=re.MULTILINE)
+        html_out = re.sub(r"\\s2 (.*)$", r"<h3>\1</h3>", html_out, flags=re.MULTILINE)
+        html_out = re.sub(r"\\s\\d+ (.*)$", r"<h4>\1</h4>", html_out, flags=re.MULTILINE)
+        html_out = re.sub(r"\\p\b", "", html_out)
+        html_out = re.sub(r"\\q1\b", "", html_out, flags=re.MULTILINE)
+        html_out = re.sub(r"\\q2\b", "", html_out, flags=re.MULTILINE)
+        html_out = re.sub(r"\\m\b", "", html_out)
+        html_out = re.sub(r"\\b\b", "<p>", html_out)
+        return (
+            "<html>\n<head>\n"
+            + head_links
+            + "\n"
+            + css_style
+            + '</head>\n<body>\n<div class="content">\n'
+            + html_out
+            + "</div></body>\n</html>\n"
+        )
 
     def translate_docx(
         self,

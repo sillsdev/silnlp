@@ -34,6 +34,7 @@ class SILExperiment:
     score_by_book: bool = False
     commit: Optional[str] = None
     clearml_tag: Optional[str] = None
+    render_in_html: Optional[bool] = False
 
     def __post_init__(self):
         self.clearml = SILClearML(
@@ -121,6 +122,7 @@ class SILExperiment:
                     self.save_confidences,
                     postprocess_handler,
                     translate_config.get("tags"),
+                    render_in_html=self.render_in_html,
                 )
             elif translate_config.get("src_prefix"):
                 translator.translate_text_files(
@@ -144,6 +146,7 @@ class SILExperiment:
                     self.save_confidences,
                     postprocess_handler,
                     translate_config.get("tags"),
+                    render_in_html=self.render_in_html,
                 )
             else:
                 raise RuntimeError("A Scripture book, file, or file prefix must be specified for translation.")
@@ -186,6 +189,12 @@ def main() -> None:
     parser.add_argument("--train", default=False, action="store_true", help="Run the train step.")
     parser.add_argument("--test", default=False, action="store_true", help="Run the test step.")
     parser.add_argument("--translate", default=False, action="store_true", help="Create drafts.")
+    parser.add_argument(
+        "--render-in-html",
+        default=False,
+        action="store_true",
+        help="For files in USFM format, produce a translated .html file instead of .sfm",
+    )
     parser.add_argument(
         "--multiple-translations",
         default=False,
@@ -264,6 +273,7 @@ def main() -> None:
         save_confidences=args.save_confidences,
         scorers=set(s.lower() for s in args.scorers),
         score_by_book=args.score_by_book,
+        render_in_html=args.render_in_html,
     )
     exp.run()
 
