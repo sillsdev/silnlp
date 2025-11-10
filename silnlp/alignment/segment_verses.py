@@ -257,6 +257,7 @@ class FewestCrossedAlignmentsVerseSegmenter(VerseSegmenter):
                 elif crossed_alignments < fewest_crossed_alignments:
                     fewest_crossed_alignments = crossed_alignments
                     best_split_indices = [trg_word_index]
+
             if len(best_split_indices) == 0:
                 target_verse_offsets.append(-1)
             else:
@@ -275,13 +276,20 @@ class FewestCrossedAlignmentsVerseSegmenter(VerseSegmenter):
                     if (
                         len(aligned_words) == 1
                         and not contains_letter(target_tokens[aligned_words[0]])
-                        and aligned_words[0]
-                        and best_split_indices
+                        and aligned_words[0] in best_split_indices
                     ):
                         target_verse_offsets.append(aligned_words[0])
                         last_target_verse_offset = target_verse_offsets[-1]
                         continue
-                target_verse_offsets.append(best_split_indices[0])
+                if len(best_split_indices) > 1:
+                    best_split_index = best_split_indices[0]
+                    for split_index in best_split_indices:
+                        if not contains_letter(target_tokens[split_index-1]):
+                            best_split_index = split_index
+                            break
+                    target_verse_offsets.append(best_split_index)
+                else:
+                    target_verse_offsets.append(best_split_indices[0])
             last_target_verse_offset = target_verse_offsets[-1]
         return target_verse_offsets
 
@@ -686,7 +694,7 @@ def main() -> None:
         "--save-alignments", help="Save the computed alignments for future use", default=None, action="store_true"
     )
     parser.add_argument(
-        "--use-saved-alignments", help="Save the computed alignments for future use", default=None, action="store_true"
+        "--use-saved-alignments", help="Use pre-computed alignments from a previous run", default=None, action="store_true"
     )
     args = parser.parse_args()
 
