@@ -247,7 +247,11 @@ def delete_tokenizer(checkpoint_path: Path) -> None:
 
 
 def add_lang_code_to_tokenizer(tokenizer: PreTrainedTokenizer, lang_code: str) -> None:
-    tokenizer.add_special_tokens({"additional_special_tokens": lang_code}, replace_additional_special_tokens=False)
+    # Huggingface does not follow its own type hints with this function and expects Dict[str, List[str]]
+    tokenizer.add_special_tokens(
+        {"additional_special_tokens": [lang_code]},  # pyright: ignore[reportArgumentType]
+        replace_additional_special_tokens=False,
+    )
     lang_id = tokenizer.convert_tokens_to_ids(lang_code)
     if isinstance(tokenizer, (MBart50Tokenizer, MBartTokenizer)):
         tokenizer.id_to_lang_code[lang_id] = lang_code
