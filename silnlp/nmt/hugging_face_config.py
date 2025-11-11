@@ -11,7 +11,7 @@ from enum import Enum
 from itertools import repeat
 from math import prod
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
+from typing import Any, Callable, Dict, Generator, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
 
 import datasets.utils.logging as datasets_logging
 import evaluate
@@ -27,7 +27,7 @@ from sacremoses import MosesPunctNormalizer
 from tokenizers import AddedToken, NormalizedString, Regex
 from tokenizers.implementations import SentencePieceBPETokenizer, SentencePieceUnigramTokenizer
 from tokenizers.normalizers import Normalizer
-from torch import Tensor, TensorType, nn, optim
+from torch import Tensor, nn, optim
 from torch.utils.data import Sampler
 from transformers import (
     AutoConfig,
@@ -52,6 +52,7 @@ from transformers import (
     Seq2SeqTrainingArguments,
     T5Tokenizer,
     T5TokenizerFast,
+    TensorType,
     TrainerCallback,
     TranslationPipeline,
     set_seed,
@@ -90,6 +91,8 @@ if is_safetensors_available():
 
 if is_peft_available():
     from peft import LoraConfig, PeftModel, TaskType, get_peft_model
+else:
+    LoraConfig, PeftModel, TaskType, get_peft_model = None, None, None, None
 
 LOGGER = logging.getLogger(__name__)
 
@@ -181,7 +184,16 @@ SP_TOKENIZER_CONFIG = {
 # "loss" and "eval_loss" are both evaluation loss
 # The early stopping callback adds "eval_" to all metrics that don't already start with it
 DEFAULT_METRICS = ["loss", "eval_loss"]
-EVAL_METRICS_MODULES = {"bleu": "sacrebleu", "chrf3": "chrf", "chrf3+": "chrf", "chrf3++": "chrf", "m-bleu": "sacrebleu", "m-chrf3": "chrf", "m-chrf3+": "chrf", "m-chrf3++": "chrf"}
+EVAL_METRICS_MODULES = {
+    "bleu": "sacrebleu",
+    "chrf3": "chrf",
+    "chrf3+": "chrf",
+    "chrf3++": "chrf",
+    "m-bleu": "sacrebleu",
+    "m-chrf3": "chrf",
+    "m-chrf3+": "chrf",
+    "m-chrf3++": "chrf",
+}
 
 
 def get_best_checkpoint(model_dir: Path) -> Path:
@@ -235,7 +247,7 @@ def delete_tokenizer(checkpoint_path: Path) -> None:
 
 
 def add_lang_code_to_tokenizer(tokenizer: PreTrainedTokenizer, lang_code: str) -> None:
-    tokenizer.add_special_tokens({"additional_special_tokens": [lang_code]}, replace_additional_special_tokens=False)
+    tokenizer.add_special_tokens({"additional_special_tokens": lang_code}, replace_additional_special_tokens=False)
     lang_id = tokenizer.convert_tokens_to_ids(lang_code)
     if isinstance(tokenizer, (MBart50Tokenizer, MBartTokenizer)):
         tokenizer.id_to_lang_code[lang_id] = lang_code
@@ -704,7 +716,7 @@ class HuggingFaceConfig(Config):
             categories_set: Optional[Set[str]] = None if categories is None else set(categories)
 
             if terms_config["include_glosses"]:
-                gloss_iso: str = str(terms_config["include_glosses"]).lower()
+                gloss_iso: Optional[str] = str(terms_config["include_glosses"]).lower()
                 if gloss_iso == "true":
                     src_gloss_iso = list(self.src_isos.intersection(["en", "fr", "id", "es"]))
                     trg_gloss_iso = list(self.trg_isos.intersection(["en", "fr", "id", "es"]))
@@ -1242,7 +1254,7 @@ class HuggingFaceNMTModel(NMTModel):
         produce_multiple_translations: bool = False,
         vrefs: Optional[Iterable[VerseRef]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
-    ) -> Iterable[SentenceTranslationGroup]:
+    ) -> Generator[SentenceTranslationGroup, None, None]:
         src_lang = self._config.data["lang_codes"].get(src_iso, src_iso)
         trg_lang = self._config.data["lang_codes"].get(trg_iso, trg_iso)
         inference_model_params = InferenceModelParams(ckpt, src_lang, trg_lang)
@@ -1410,6 +1422,7 @@ class HuggingFaceNMTModel(NMTModel):
         if "embed_tokens" in modules_to_save or "embed_tokens" in target_modules:
             model = self._create_tied_embedding_weights(model)
 
+        assert LoraConfig is not None  # This was conditionally imported
         peft_config = LoraConfig(
             task_type=TaskType.SEQ_2_SEQ_LM,
             r=lora_config.get("r", 4),

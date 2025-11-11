@@ -4,7 +4,7 @@ import random
 from contextlib import ExitStack
 from io import StringIO
 from pathlib import Path
-from typing import IO, Dict, List, Optional, Set, TextIO, Tuple
+from typing import Dict, List, Optional, Set, TextIO, Tuple
 
 import sacrebleu
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_number_to_id, get_chapters
@@ -18,11 +18,11 @@ from .config import CheckpointType, Config, NMTModel
 from .config_utils import load_config
 from .tokenizer import Tokenizer
 
-LOGGER = logging.getLogger(__package__ + ".test")
+LOGGER = logging.getLogger((__package__ or "") + ".test")
 
 logging.getLogger("sacrebleu").setLevel(logging.ERROR)
 
-_SUPPORTED_SCORERS = [
+SUPPORTED_SCORERS = [
     "bleu",
     "sentencebleu",
     "chrf3",
@@ -61,7 +61,7 @@ class PairScore:
         self.book = book
         self.draft_index = draft_index
 
-    def writeHeader(self, file: IO) -> None:
+    def writeHeader(self, file: TextIO) -> None:
         header = (
             "book,draft_index,src_iso,trg_iso,num_refs,references,sent_len"
             + (
@@ -75,7 +75,7 @@ class PairScore:
         )
         file.write(header)
 
-    def write(self, file: IO) -> None:
+    def write(self, file: TextIO) -> None:
         file.write(
             f"{self.book},{self.draft_index},{self.src_iso},{self.trg_iso},"
             f"{self.num_refs},{self.refs},{self.sent_len:d}"
@@ -237,7 +237,7 @@ def score_pair(
 
 
 def score_individual_books(
-    book_dict: Dict[str, Tuple[List[str], List[List[str]]]],
+    book_dict: Dict[str, Tuple[List[str], List[List[str]], List[float]]],
     src_iso: str,
     trg_iso: str,
     predictions_detok_file_name: str,
@@ -280,7 +280,7 @@ def process_individual_books(
     conf_file_path: Path,
     select_rand_ref_line: bool,
     books: Dict[int, List[int]],
-) -> Dict[str, Tuple[List[str], List[List[str]]]]:
+) -> Dict[str, Tuple[List[str], List[List[str]], List[float]]]:
     # Output data structure
     book_dict: Dict[str, Tuple[List[str], List[List[str]], List[float]]] = {}
     with ExitStack() as stack:
@@ -344,10 +344,10 @@ def load_test_data(
     config: Config,
     books: Dict[int, List[int]],
     by_book: bool,
-) -> Tuple[List[str], List[List[str]], Dict[str, Tuple[List[str], List[List[str]]]]]:
+) -> Tuple[List[str], List[List[str]], Dict[str, Tuple[List[str], List[List[str]], List[float]]]]:
     sys: List[str] = []
     refs: List[List[str]] = []
-    book_dict: Dict[str, Tuple[List[str], List[List[str]]]] = {}
+    book_dict: Dict[str, Tuple[List[str], List[List[str]], List[float]]] = {}
     pred_file_path = config.exp_dir / pred_file_name
     conf_file_path = config.exp_dir / conf_file_name
     with ExitStack() as stack:
@@ -364,8 +364,8 @@ def load_test_data(
             else:
                 # use specified refs only
                 ref_file_paths = [p for p in ref_file_paths if config.is_ref_project(ref_projects, p)]
-        ref_files: List[IO] = []
-        vref_file: Optional[IO] = None
+        ref_files: List[TextIO] = []
+        vref_file: Optional[TextIO] = None
         vref_file_path = config.exp_dir / vref_file_name
         if len(books) > 0 and vref_file_path.is_file():
             vref_file = stack.enter_context(vref_file_path.open("r", encoding="utf-8"))
@@ -644,7 +644,7 @@ def test_checkpoint(
         ref_projects_suffix = "_".join(sorted(ref_projects))
         scores_file_root += f"-{ref_projects_suffix}"
     with (config.exp_dir / f"{scores_file_root}.csv").open("w", encoding="utf-8") as scores_file:
-        if scores is not None:
+        if len(scores) > 0:
             scores[0].writeHeader(scores_file)
         for results in scores:
             results.write(scores_file)
@@ -679,7 +679,7 @@ def test(
         scorers.add("confidence")
     if len(scorers) == 0:
         scorers.add("bleu")
-    scorers.intersection_update(set(_SUPPORTED_SCORERS))
+    scorers.intersection_update(set(SUPPORTED_SCORERS))
 
     tokenizer = config.create_tokenizer()
     model = config.create_model()
@@ -720,7 +720,7 @@ def test(
                 save_confidences,
             )
         except ValueError:
-            LOGGER.warn("No average checkpoint available.")
+            LOGGER.warning("No average checkpoint available.")
 
     best_step = 0
     if best and config.has_best_checkpoint:
@@ -823,9 +823,9 @@ def main() -> None:
         "--scorers",
         nargs="*",
         metavar="scorer",
-        choices=_SUPPORTED_SCORERS,
+        choices=SUPPORTED_SCORERS,
         default=[],
-        help=f"List of scorers - {_SUPPORTED_SCORERS}",
+        help=f"List of scorers - {SUPPORTED_SCORERS}",
     )
     parser.add_argument("--books", nargs="*", metavar="book", default=[], help="Books")
     parser.add_argument("--by-book", default=False, action="store_true", help="Score individual books")
