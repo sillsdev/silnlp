@@ -78,7 +78,7 @@ class SentenceTranslation:
             if token == "<pad>" or token == "</s>":
                 continue
             token = token.replace("\u2581", " ")
-            if token.startswith(" "):
+            if token.startswith(" ") and len(current_tokens) > 0:
                 min_conf = min(current_token_scores)
                 html += (
                     '<span class="conf'
