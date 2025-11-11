@@ -71,17 +71,38 @@ class SentenceTranslation:
         return "\t".join([str(exp(ts)) for ts in [self._sequence_score or 0] + self._token_scores])
 
     def join_tokens_for_html(self) -> str:
-        return "".join(
-            [
+        html = ""
+        current_tokens = []
+        current_token_scores = []
+        for token, score in zip(self._tokens[2:], self._token_scores[2:]):
+            if token != "<pad>" and token != "</s>":
+                continue
+            token = token.replace("\u2581", " ")
+            if token.startswith(" "):
+                min_conf = min(current_token_scores)
+                html += (
+                    '<span class="conf'
+                    + str(int(round(exp(min_conf), 1) * 10))
+                    + '">'
+                    + "".join(current_tokens)
+                    + "</span>"
+                )
+                current_tokens = []
+                current_token_scores = []
+            current_tokens.append(token)
+            current_token_scores.append(score)
+
+        if len(current_tokens) > 0:
+            min_conf = min(current_token_scores)
+            html += (
                 '<span class="conf'
-                + str(int(round(exp(score), 1) * 10))
+                + str(int(round(exp(min_conf), 1) * 10))
                 + '">'
-                + token.replace("\u2581", " ")
+                + "".join(current_tokens)
                 + "</span>"
-                for (token, score) in zip(self._tokens[2:], self._token_scores[2:])
-                if token != "<pad>" and token != "</s>"
-            ]
-        )
+            )
+
+        return html
 
 
 # A group of multiple translations of a single sentence
