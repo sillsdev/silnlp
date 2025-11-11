@@ -90,7 +90,7 @@ class TranslatedDraft:
         self,
         confidences_path: Path,
         row1col1_label: str,
-        vrefs: Optional[List[VerseRef]] = None,
+        scripture_refs: Optional[List[ScriptureRef]] = None,
     ) -> None:
         with confidences_path.open("w", encoding="utf-8", newline="\n") as confidences_file:
             confidences_file.write("\t".join([f"{row1col1_label}"] + [f"Token {i}" for i in range(200)]) + "\n")
@@ -99,16 +99,18 @@ class TranslatedDraft:
                 if not sentence_translation.has_sequence_confidence_score():
                     continue
                 sequence_label = str(sentence_num)
-                if vrefs is not None:
-                    sequence_label = str(vrefs[sentence_num])
+                if scripture_refs is not None:
+                    sequence_label = str(scripture_refs[sentence_num])
                 confidences_file.write(
                     sequence_label + "\t" + sentence_translation.join_tokens_for_confidence_file() + "\n"
                 )
                 confidences_file.write(sentence_translation.join_token_scores_for_confidence_file() + "\n")
 
-    def write_chapter_confidence_scores_to_file(self, chapter_confidences_path: Path, vrefs: List[VerseRef]):
+    def write_chapter_confidence_scores_to_file(
+        self, chapter_confidences_path: Path, scripture_refs: List[ScriptureRef]
+    ):
         chapter_confidences: DefaultDict[int, List[float]] = defaultdict(list)
-        for sentence_num, vref in enumerate(vrefs):
+        for sentence_num, vref in enumerate(scripture_refs):
             sequence_confidence_score: Optional[float] = self._sentence_translations[
                 sentence_num
             ].get_sequence_confidence_score()
@@ -159,7 +161,7 @@ def generate_confidence_files(
     trg_file_path: Path,
     trg_prefix: str = "",
     produce_multiple_translations: bool = False,
-    vrefs: Optional[List[VerseRef]] = None,
+    scripture_refs: Optional[List[ScriptureRef]] = None,
     draft_index: int = 0,
 ) -> None:
     if not translated_draft.has_sequence_confidence_scores():
@@ -175,8 +177,8 @@ def generate_confidence_files(
 
     ext = trg_file_path.suffix.lower()
     if ext in {".usfm", ".sfm"}:
-        assert vrefs is not None
-        generate_usfm_confidence_files(translated_draft, trg_file_path, confidences_path, vrefs, draft_index)
+        assert scripture_refs is not None
+        generate_usfm_confidence_files(translated_draft, trg_file_path, confidences_path, scripture_refs, draft_index)
     elif ext == ".txt":
         generate_txt_confidence_files(translated_draft, trg_file_path, confidences_path, trg_prefix)
     else:
@@ -190,24 +192,26 @@ def generate_usfm_confidence_files(
     translated_draft: TranslatedDraft,
     trg_file_path: Path,
     confidences_path: Path,
-    vrefs: List[VerseRef],
+    scripture_refs: List[ScriptureRef],
     draft_index: int = 0,
 ) -> None:
 
-    translated_draft.write_confidence_scores_to_file(confidences_path, "VRef", vrefs)
-    translated_draft.write_chapter_confidence_scores_to_file(confidences_path.with_suffix(".chapters.tsv"), vrefs)
-    _append_book_confidence_score(translated_draft, trg_file_path, vrefs)
+    translated_draft.write_confidence_scores_to_file(confidences_path, "VRef", scripture_refs)
+    translated_draft.write_chapter_confidence_scores_to_file(
+        confidences_path.with_suffix(".chapters.tsv"), scripture_refs
+    )
+    _append_book_confidence_score(translated_draft, trg_file_path, scripture_refs)
 
 
 def _append_book_confidence_score(
     translated_draft: TranslatedDraft,
     trg_file_path: Path,
-    vrefs: List[VerseRef],
+    scripture_refs: List[ScriptureRef],
 ) -> None:
     file_confidences_path = trg_file_path.parent / "confidences.books.tsv"
     row1_col1_header = "Book"
-    if vrefs:
-        col1_entry = vrefs[0].book
+    if scripture_refs:
+        col1_entry = scripture_refs[0].book
     else:
         col1_entry = trg_file_path.stem
 
@@ -508,7 +512,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
                     translated_draft,
                     trg_file_path,
                     produce_multiple_translations=produce_multiple_translations,
-                    vrefs=vrefs,
+                    scripture_refs=scripture_refs,
                     draft_index=draft_index,
                 )
 
