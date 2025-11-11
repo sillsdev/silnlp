@@ -75,7 +75,7 @@ class SentenceTranslation:
         current_tokens = []
         current_token_scores = []
         for token, score in zip(self._tokens[2:], self._token_scores[2:]):
-            if token != "<pad>" and token != "</s>":
+            if token == "<pad>" or token == "</s>":
                 continue
             token = token.replace("\u2581", " ")
             if token.startswith(" "):
@@ -103,6 +103,18 @@ class SentenceTranslation:
             )
 
         return html
+
+        # return "".join(
+        #    [
+        #        '<span class="conf'
+        #        + str(int(round(exp(score), 1) * 10))
+        #        + '">'
+        #        + token.replace("\u2581", " ")
+        #        + "</span>"
+        #        for (token, score) in zip(self._tokens[2:], self._token_scores[2:])
+        #        if token != "<pad>" and token != "</s>"
+        #    ]
+        # )
 
 
 # A group of multiple translations of a single sentence
