@@ -13,6 +13,7 @@ from scipy.stats import gmean
 
 from ..common.metrics import compute_meteor_score
 from ..common.utils import get_git_revision_hash
+from .clearml_connection import TAGS_LIST, SILClearML
 from .config import CheckpointType, Config, NMTModel
 from .config_utils import load_config
 from .tokenizer import Tokenizer
@@ -21,7 +22,21 @@ LOGGER = logging.getLogger(__package__ + ".test")
 
 logging.getLogger("sacrebleu").setLevel(logging.ERROR)
 
-_SUPPORTED_SCORERS = ["bleu", "sentencebleu", "chrf3", "chrf3+", "chrf3++", "spbleu", "meteor", "ter", "confidence"]
+_SUPPORTED_SCORERS = [
+    "bleu",
+    "sentencebleu",
+    "chrf3",
+    "chrf3+",
+    "chrf3++",
+    "spbleu",
+    "m-bleu",
+    "m-chrf3",
+    "m-chrf3+",
+    "m-chrf3++",
+    "meteor",
+    "ter",
+    "confidence",
+]
 
 
 class PairScore:
@@ -136,6 +151,63 @@ def score_pair(
             tokenize="flores200",
         )
         other_scores["spBLEU"] = spbleu_score.score
+
+    # m-bleu, m-chrf3, m-chrf3+, and m-chrf3++ are from the paper https://arxiv.org/pdf/2407.12832
+    # These metrics are implemented at the verse-level, rather than the sentence-level
+    if "m-bleu" in scorers:
+        sentence_bleu_scores: List[float] = []
+        for sentence_i, sentence in enumerate(pair_sys):
+            references = [reference[sentence_i] for reference in pair_refs]
+            sentence_bleu_score = sentence_bleu(
+                sentence,
+                references,
+                lowercase=True,
+                tokenize=config.data.get("sacrebleu_tokenize", "13a"),
+            )
+            sentence_bleu_scores.append(sentence_bleu_score.score)
+        if len(sentence_bleu_scores) == 0:
+            other_scores["m-BLEU"] = 0
+        else:
+            other_scores["m-BLEU"] = sum(sentence_bleu_scores) / len(sentence_bleu_scores)
+
+    if "m-chrf3" in scorers:
+        sentence_chrf3_scores: List[float] = []
+        for sentence_i, sentence in enumerate(pair_sys):
+            references = [reference[sentence_i] for reference in pair_refs]
+            sentence_chrf3_score = sacrebleu.sentence_chrf(
+                sentence, references, char_order=6, beta=3, remove_whitespace=True
+            )
+            sentence_chrf3_scores.append(sentence_chrf3_score.score)
+        if len(sentence_chrf3_scores) == 0:
+            other_scores["m-chrf3"] = 0
+        else:
+            other_scores["m-chrf3"] = sum(sentence_chrf3_scores) / len(sentence_chrf3_scores)
+
+    if "m-chrf3+" in scorers:
+        sentence_chrfp_scores: List[float] = []
+        for sentence_i, sentence in enumerate(pair_sys):
+            references = [reference[sentence_i] for reference in pair_refs]
+            sentence_chrfp_score = sacrebleu.sentence_chrf(
+                sentence, references, char_order=6, beta=3, word_order=1, remove_whitespace=True, eps_smoothing=True
+            )
+            sentence_chrfp_scores.append(sentence_chrfp_score.score)
+        if len(sentence_chrfp_scores) == 0:
+            other_scores["m-chrf3+"] = 0
+        else:
+            other_scores["m-chrf3+"] = sum(sentence_chrfp_scores) / len(sentence_chrfp_scores)
+
+    if "m-chrf3++" in scorers:
+        sentence_chrfpp_scores: List[float] = []
+        for sentence_i, sentence in enumerate(pair_sys):
+            references = [reference[sentence_i] for reference in pair_refs]
+            sentence_chrfpp_score = sacrebleu.sentence_chrf(
+                sentence, references, char_order=6, beta=3, word_order=2, remove_whitespace=True, eps_smoothing=True
+            )
+            sentence_chrfpp_scores.append(sentence_chrfpp_score.score)
+        if len(sentence_chrfpp_scores) == 0:
+            other_scores["m-chrf3++"] = 0
+        else:
+            other_scores["m-chrf3++"] = sum(sentence_chrfpp_scores) / len(sentence_chrfpp_scores)
 
     if "meteor" in scorers:
         meteor_score = compute_meteor_score(trg_iso, pair_sys, pair_refs)
@@ -592,7 +664,7 @@ def test(
     by_book: bool = False,
     produce_multiple_translations: bool = False,
     save_confidences: bool = False,
-    use_default_model_dir: bool = False,
+    use_default_model_dir: bool = True,
 ):
     exp_name = experiment
     config = load_config(exp_name, use_default_model_dir)
@@ -769,7 +841,29 @@ def main() -> None:
         action="store_true",
         help="Generate file with verse confidences.",
     )
+    parser.add_argument(
+        "--clearml-queue",
+        default=None,
+        type=str,
+        help="Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run "
+        + "it locally and register it with ClearML.",
+    )
+    parser.add_argument(
+        "--clearml-tag",
+        metavar="tag",
+        choices=TAGS_LIST,
+        default=None,
+        type=str,
+        help=f"Tag to add to the ClearML Task - {TAGS_LIST}",
+    )
     args = parser.parse_args()
+    experiment = args.experiment
+
+    if args.clearml_queue is not None:
+        clearml = SILClearML(experiment, args.clearml_queue, tag=args.clearml_tag)
+        experiment = clearml.name
+    else:
+        experiment = experiment.replace("\\", "/")
 
     get_git_revision_hash()
 
@@ -779,7 +873,7 @@ def main() -> None:
         books = args.books
 
     test(
-        args.experiment,
+        experiment,
         checkpoint=args.checkpoint,
         last=args.last,
         best=args.best,
@@ -791,6 +885,7 @@ def main() -> None:
         by_book=args.by_book,
         produce_multiple_translations=args.multiple_translations,
         save_confidences=args.save_confidences,
+        use_default_model_dir=True,
     )
 
 

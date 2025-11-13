@@ -175,7 +175,6 @@ def postprocess_draft(
             try:
                 quotation_denormalization_postprocessor = config.create_denormalize_quotation_marks_postprocessor(
                     training_corpus_pairs,
-                    draft_metadata.source_project,
                 )
                 target_usfm = quotation_denormalization_postprocessor.postprocess_usfm(target_usfm)
             except (UnknownQuoteConventionException, NoDetectedQuoteConventionException) as e:

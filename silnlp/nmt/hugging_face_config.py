@@ -9,7 +9,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
 from itertools import repeat
-from math import exp, prod
+from math import prod
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
 
@@ -20,7 +20,6 @@ import pandas as pd
 import torch
 import transformers.utils.logging as transformers_logging
 import yaml
-from accelerate import infer_auto_device_map, init_empty_weights
 from accelerate.utils.memory import should_reduce_batch_size
 from datasets import Dataset
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
@@ -75,7 +74,12 @@ from transformers.utils.logging import tqdm
 
 from ..common.corpus import Term, count_lines, get_terms
 from ..common.environment import SIL_NLP_ENV
-from ..common.translator import DraftGroup, TranslationGroup, generate_confidence_files
+from ..common.translator import (
+    DraftGroup,
+    SentenceTranslation,
+    SentenceTranslationGroup,
+    generate_test_confidence_files,
+)
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, get_mt_exp_dir, merge_dict
 from .config import CheckpointType, Config, NMTModel
 from .corpora import DataFile
@@ -177,7 +181,7 @@ SP_TOKENIZER_CONFIG = {
 # "loss" and "eval_loss" are both evaluation loss
 # The early stopping callback adds "eval_" to all metrics that don't already start with it
 DEFAULT_METRICS = ["loss", "eval_loss"]
-EVAL_METRICS_MODULES = {"bleu": "sacrebleu", "chrf3": "chrf", "chrf3+": "chrf", "chrf3++": "chrf"}
+EVAL_METRICS_MODULES = {"bleu": "sacrebleu", "chrf3": "chrf", "chrf3+": "chrf", "chrf3++": "chrf", "m-bleu": "sacrebleu", "m-chrf3": "chrf", "m-chrf3+": "chrf", "m-chrf3++": "chrf"}
 
 
 def get_best_checkpoint(model_dir: Path) -> Path:
@@ -683,8 +687,8 @@ class HuggingFaceConfig(Config):
     def _write_dictionary(
         self,
         tokenizer: Tokenizer,
-        src_terms_files: List[Tuple[DataFile, str]],
-        trg_terms_files: List[Tuple[DataFile, str]],
+        src_terms_files: List[Tuple[DataFile, List[str]]],
+        trg_terms_files: List[Tuple[DataFile, List[str]]],
     ) -> int:
         terms_config = self.data["terms"]
         dict_count = 0
@@ -721,10 +725,10 @@ class HuggingFaceConfig(Config):
             else:
                 gloss_iso = None
 
-            all_trg_terms: List[Tuple[DataFile, Dict[str, Term], str]] = []
-            for trg_terms_file, tags_str in trg_terms_files:
-                all_trg_terms.append((trg_terms_file, get_terms(trg_terms_file.path, iso=gloss_iso), tags_str))
-            for trg_terms_file, trg_terms, tags_str in all_trg_terms:
+            all_trg_terms: List[Tuple[DataFile, Dict[str, Term], List[str]]] = []
+            for trg_terms_file, tags in trg_terms_files:
+                all_trg_terms.append((trg_terms_file, get_terms(trg_terms_file.path, iso=gloss_iso), tags))
+            for trg_terms_file, trg_terms, tags in all_trg_terms:
                 tokenizer.set_trg_lang(trg_terms_file.iso)
                 for trg_term in trg_terms.values():
                     if categories_set is not None and trg_term.cat not in categories_set:
@@ -745,11 +749,11 @@ class HuggingFaceConfig(Config):
                     dict_count += 1
 
             if gloss_iso is not None:
-                all_src_terms: List[Tuple[DataFile, Dict[str, Term], str]] = []
-                for src_terms_file, tags_str in src_terms_files:
-                    all_src_terms.append((src_terms_file, get_terms(src_terms_file.path, iso=gloss_iso), tags_str))
+                all_src_terms: List[Tuple[DataFile, Dict[str, Term], List[str]]] = []
+                for src_terms_file, tags in src_terms_files:
+                    all_src_terms.append((src_terms_file, get_terms(src_terms_file.path, iso=gloss_iso), tags))
                 tokenizer.set_trg_lang(gloss_iso)
-                for src_term_file, src_terms, tags_str in all_src_terms:
+                for src_term_file, src_terms, tags in all_src_terms:
                     for src_term in src_terms.values():
                         if categories_set is not None and src_term.cat not in categories_set:
                             continue
@@ -817,21 +821,43 @@ def batch_sentences(
         yield batch, None
 
 
-class OutputGroup:
+@dataclass
+class ModelOutput:
+    translated_text: str
+    translation_token_ids: List[int]
+    token_scores: List[float]
+    sequence_score: Optional[float]
+
+    def convert_to_sentence_translation(self, tokenizer: PreTrainedTokenizer) -> SentenceTranslation:
+        tokens = tokenizer.convert_ids_to_tokens(self.translation_token_ids)
+        return SentenceTranslation(
+            to_py_obj(self.translated_text),
+            to_py_obj(tokens),
+            to_py_obj(self.token_scores),
+            to_py_obj(self.sequence_score),
+        )
+
+
+# This class represents multiple translations of a single input sequence
+class ModelOutputGroup:
     def __init__(self, outputs: List[dict]):
-        self.outputs = outputs
+        self._outputs = outputs
 
-    def get_translated_text(self) -> List[str]:
-        return [output["translation_text"] for output in self.outputs]
+    def _get_model_outputs(self) -> List[ModelOutput]:
+        return [
+            ModelOutput(
+                output["translation_text"],
+                output["translation_token_ids"],
+                output["token_scores"],
+                output["sequence_score"],
+            )
+            for output in self._outputs
+        ]
 
-    def get_token_ids(self) -> List[List[int]]:
-        return [output["translation_token_ids"] for output in self.outputs]
-
-    def get_token_scores(self) -> List[float]:
-        return [output["token_scores"] for output in self.outputs]
-
-    def get_sequence_score(self) -> List[float]:
-        return [output["sequence_score"] for output in self.outputs]
+    def convert_to_sentence_translation_group(self, tokenizer: PreTrainedTokenizer) -> SentenceTranslationGroup:
+        return list(
+            [model_output.convert_to_sentence_translation(tokenizer) for model_output in self._get_model_outputs()]
+        )
 
 
 @dataclass
@@ -1152,12 +1178,12 @@ class HuggingFaceNMTModel(NMTModel):
                 if vref_path is not None:
                     vref_file = stack.enter_context(vref_path.open("r", encoding="utf-8-sig"))
                     vrefs = (VerseRef.from_string(line.strip(), ORIGINAL_VERSIFICATION) for line in vref_file)
-                output = list(
+                sentence_translation_groups: List[SentenceTranslationGroup] = list(
                     self._translate_test_sentences(
                         tokenizer, pipeline, sentences, vrefs, length, produce_multiple_translations
                     )
                 )
-                draft_group = DraftGroup([translation for translation, _, _, _ in output])
+                draft_group = DraftGroup(sentence_translation_groups)
 
                 for draft_index, translated_draft in enumerate(draft_group.get_drafts(), 1):
                     if produce_multiple_translations:
@@ -1167,11 +1193,11 @@ class HuggingFaceNMTModel(NMTModel):
                     else:
                         translation_draft_path = translation_path
                     out_file = stack.enter_context(translation_draft_path.open("w", encoding="utf-8", newline="\n"))
-                    out_file.write("\n".join(translated_draft) + "\n")
+                    out_file.write("\n".join(translated_draft.get_all_tokenized_translations()) + "\n")
 
                     if save_confidences:
-                        generate_confidence_files(
-                            output,
+                        generate_test_confidence_files(
+                            translated_draft,
                             translation_path,
                             produce_multiple_translations=produce_multiple_translations,
                             draft_index=draft_index,
@@ -1185,7 +1211,7 @@ class HuggingFaceNMTModel(NMTModel):
         vrefs: Iterable[VerseRef],
         length: int,
         produce_multiple_translations: bool = False,
-    ) -> Iterable[TranslationGroup]:
+    ) -> Iterable[SentenceTranslationGroup]:
         num_drafts = self.get_num_drafts()
         if produce_multiple_translations and num_drafts > 1:
             LOGGER.info("Producing %i translated drafts", num_drafts)
@@ -1195,31 +1221,14 @@ class HuggingFaceNMTModel(NMTModel):
                 "Falling back to a single translation."
             )
 
-        for output_group in tqdm(
+        for model_output_group in tqdm(
             self._translate_sentences(
                 tokenizer, pipeline, sentences, vrefs, produce_multiple_translations, return_tensors=True
             ),
             total=length,
             unit="ex",
         ):
-            all_ids = to_py_obj(output_group.get_token_ids())
-            all_scores = to_py_obj(output_group.get_token_scores())
-            sequence_score = to_py_obj(output_group.get_sequence_score())
-            ids = []
-            token_scores = []
-            for output_id, output_score in zip(all_ids, all_scores):
-                output_ids = []
-                output_scores = []
-                for id, score in zip(output_id[1:], output_score[1:]):
-                    if id == tokenizer.pad_token_id:
-                        continue
-                    output_ids.append(id)
-                    output_scores.append(score)
-                ids.append(output_ids)
-                token_scores.append(output_scores)
-            # ids = [[id for id in output[1:] if id != tokenizer.pad_token_id] for output in ids]
-            tokens = [tokenizer.convert_ids_to_tokens(id_group) for id_group in ids]
-            yield [" ".join(token_group) for token_group in tokens], tokens, token_scores, sequence_score
+            yield model_output_group.convert_to_sentence_translation_group(tokenizer)
 
     def get_num_drafts(self) -> int:
         num_drafts = self._config.infer.get("num_drafts", 1)
@@ -1233,7 +1242,7 @@ class HuggingFaceNMTModel(NMTModel):
         produce_multiple_translations: bool = False,
         vrefs: Optional[Iterable[VerseRef]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
-    ) -> Iterable[TranslationGroup]:
+    ) -> Iterable[SentenceTranslationGroup]:
         src_lang = self._config.data["lang_codes"].get(src_iso, src_iso)
         trg_lang = self._config.data["lang_codes"].get(trg_iso, trg_iso)
         inference_model_params = InferenceModelParams(ckpt, src_lang, trg_lang)
@@ -1271,32 +1280,12 @@ class HuggingFaceNMTModel(NMTModel):
         pipeline.model = torch.compile(pipeline.model)
         if not isinstance(sentences, list):
             sentences = list(sentences)
-        for outputs in tqdm(
+        for model_output_group in tqdm(
             self._translate_sentences(tokenizer, pipeline, sentences, vrefs, produce_multiple_translations),
             total=len(sentences),
             unit="ex",
         ):
-            if isinstance(outputs, OutputGroup):
-                outputs = [outputs]
-            for output_group in outputs:
-                translated_text = to_py_obj(output_group.get_translated_text())
-                all_ids = to_py_obj(output_group.get_token_ids())
-                all_scores = to_py_obj(output_group.get_token_scores())
-                sequence_score = to_py_obj(output_group.get_sequence_score())
-                ids = []
-                token_scores = []
-                for output_id, output_score in zip(all_ids, all_scores):
-                    output_ids = []
-                    output_scores = []
-                    for id, score in zip(output_id[1:], output_score[1:]):
-                        if id == tokenizer.pad_token_id:
-                            continue
-                        output_ids.append(id)
-                        output_scores.append(score)
-                    ids.append(output_ids)
-                    token_scores.append(output_scores)
-                tokens = [tokenizer.convert_ids_to_tokens(id_group) for id_group in ids]
-                yield translated_text, tokens, token_scores, sequence_score
+            yield model_output_group.convert_to_sentence_translation_group(tokenizer)
 
     def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
         step: Optional[int] = None
@@ -1501,7 +1490,7 @@ class HuggingFaceNMTModel(NMTModel):
         vrefs: Optional[Iterable[VerseRef]],
         produce_multiple_translations: bool = False,
         return_tensors: bool = False,
-    ) -> Iterable[OutputGroup]:
+    ) -> Iterable[ModelOutputGroup]:
         batch_size: int = self._config.infer["infer_batch_size"]
 
         dictionary = self._get_dictionary()
@@ -1538,7 +1527,7 @@ class HuggingFaceNMTModel(NMTModel):
         return_tensors: bool,
         force_words_ids: List[List[List[int]]] = None,
         produce_multiple_translations: bool = False,
-    ) -> Iterable[OutputGroup]:
+    ) -> Iterable[ModelOutputGroup]:
 
         num_drafts = self.get_num_drafts()
         if produce_multiple_translations and num_drafts > 1:
@@ -1567,12 +1556,13 @@ class HuggingFaceNMTModel(NMTModel):
 
                 # concatenate the beam search results with the sampling results
                 yield from [
-                    OutputGroup(beam_search_results[i] + sampling_results[i]) for i in range(len(beam_search_results))
+                    ModelOutputGroup(beam_search_results[i] + sampling_results[i])
+                    for i in range(len(beam_search_results))
                 ]
 
             elif multiple_translations_method == "sampling":
                 yield from [
-                    OutputGroup(result)
+                    ModelOutputGroup(result)
                     for result in self._translate_with_sampling(
                         pipeline,
                         sentences,
@@ -1585,7 +1575,7 @@ class HuggingFaceNMTModel(NMTModel):
 
             elif multiple_translations_method == "beam_search":
                 yield from [
-                    OutputGroup(result)
+                    ModelOutputGroup(result)
                     for result in self._translate_with_beam_search(
                         pipeline,
                         sentences,
@@ -1598,7 +1588,7 @@ class HuggingFaceNMTModel(NMTModel):
 
             elif multiple_translations_method == "diverse_beam_search":
                 yield from [
-                    OutputGroup(result)
+                    ModelOutputGroup(result)
                     for result in self._translate_with_diverse_beam_search(
                         pipeline,
                         sentences,
@@ -1613,7 +1603,7 @@ class HuggingFaceNMTModel(NMTModel):
 
         else:
             yield from [
-                OutputGroup([translated_sentence[0]])
+                ModelOutputGroup([translated_sentence[0]])
                 for translated_sentence in self._translate_with_beam_search(
                     pipeline,
                     sentences,
@@ -1952,7 +1942,7 @@ class SilTranslationPipeline(TranslationPipeline):
             beam_indices = torch.zeros_like(output_ids)
             assert output.scores is not None
             scores = tuple(torch.nn.functional.log_softmax(logits, dim=-1) for logits in output.scores)
-            sequences_scores = output.sequences_scores
+            sequences_scores = None
         else:
             raise RuntimeError("Cannot postprocess the output of the model.")
 
@@ -2007,7 +1997,9 @@ class SilTranslationPipeline(TranslationPipeline):
                     "translation_tokens": output_tokens,
                     "translation_token_ids": output_token_ids,
                     "token_scores": scores,
-                    "sequence_score": model_outputs["sequences_scores"][0],
+                    "sequence_score": (
+                        model_outputs["sequences_scores"][0] if model_outputs["sequences_scores"] is not None else None
+                    ),
                     "translation_text": self.tokenizer.decode(
                         output_ids,
                         skip_special_tokens=True,

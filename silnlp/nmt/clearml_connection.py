@@ -25,6 +25,7 @@ class SILClearML:
     commit: Optional[str] = None
     use_default_model_dir: bool = True
     tag: Optional[str] = None
+    skip_config: bool = False
 
     def __post_init__(self) -> None:
         self.name = self.name.replace("\\", "/")
@@ -50,7 +51,8 @@ class SILClearML:
             )
 
             self._determine_clearml_project_name()
-            self._load_config()
+            if not self.skip_config:
+                self._load_config()
 
             self.task.set_base_docker(
                 docker_image="ghcr.io/sillsdev/silnlp:latest",

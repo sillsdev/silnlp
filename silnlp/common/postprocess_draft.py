@@ -52,22 +52,10 @@ def main() -> None:
         help="For files in USFM format, attempt to change the draft's quotation marks to match the target project's quote convention",
     )
     parser.add_argument(
-        "--source-quote-convention",
-        default="detect",
-        type=str,
-        help="The quote convention for the source project. If not specified, it will be detected automatically.",
-    )
-    parser.add_argument(
         "--target-quote-convention",
         default="detect",
         type=str,
         help="The quote convention for the target project. If not specified, it will be detected automatically.",
-    )
-    parser.add_argument(
-        "--source-project",
-        default="",
-        help="The name of the Paratext project used as the source. When the source quote convention is set to 'detect' or not specified,"
-        + " this project will be used to detect the source quote convention.",
     )
     parser.add_argument(
         "--clearml-queue",
@@ -90,19 +78,18 @@ def main() -> None:
     if args.clearml_queue is not None and args.clearml_tag is None:
         parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
 
-    experiment = args.experiment.replace("\\", "/")
+    experiment = args.experiment
     args.output_folder = Path(args.output_folder.replace("\\", "/")) if args.output_folder else None
     postprocess_config = PostprocessConfig(vars(args))
-
-    if not get_mt_exp_dir(experiment).exists():
-        raise ValueError(f"Experiment {experiment} not found.")
 
     if args.clearml_queue is not None:
         if "cpu" not in args.clearml_queue:
             raise ValueError("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
         clearml = SILClearML(experiment, args.clearml_queue, tag=args.clearml_tag)
+        experiment = clearml.name
         config = clearml.config
     else:
+        experiment = experiment.replace("\\", "/")
         config = load_config(experiment)
 
     if not (config.exp_dir / "translate_config.yml").exists():

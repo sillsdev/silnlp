@@ -70,7 +70,7 @@ tqdm = "^4.62.2"
 sacrebleu = "^2.3.1"
 ctranslate2 = "^3.5.1"
 libclang = "14.0.6"
-sil-machine = {extras = ["thot"], version = "1.8.2"}
+sil-machine = {extras = ["thot"], version = "1.8.4"}
 datasets = "^2.7.1"
 torch = {version = "^2.4", source = "torch"}
 sacremoses = "^0.0.53"
@@ -100,6 +100,7 @@ openpyxl = "^3.1.2"
 packaging = "^22.0"
 hanzidentifier = "^1.2.0"
 jarowinkler = "^2.0.1"
+wildebeest-nlp = ">=0.9.0"
 
 [tool.poetry.group.dev.dependencies]
 types-pyyaml = "^6.0.12.12"

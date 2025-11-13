@@ -6,6 +6,8 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML
+
 from .config import ALIGNERS, get_aligner, get_aligner_name, get_all_book_paths, load_config
 from .utils import get_experiment_dirs, get_experiment_name
 
@@ -67,14 +69,47 @@ def extract_lexicons(aligner_ids: List[str], exp_dir: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Aligns the parallel corpus for an experiment")
     parser.add_argument("experiments", type=str, help="Experiment pattern")
-    parser.add_argument("--aligners", nargs="*", metavar="aligner", default=[], help="Aligners")
+    parser.add_argument(
+        "--aligners", nargs="*", metavar="aligner", default=[], help="Aligners", choices=list(ALIGNERS.keys())
+    )
     parser.add_argument("--skip-align", default=False, action="store_true", help="Skips aligning corpora")
     parser.add_argument("--skip-extract-lexicon", default=False, action="store_true", help="Skips extracting lexicons")
+    parser.add_argument(
+        "--clearml-queue",
+        default=None,
+        type=str,
+        help="Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run "
+        + "it locally and register it with ClearML.",
+    )
+    parser.add_argument(
+        "--clearml-tag",
+        metavar="tag",
+        choices=TAGS_LIST,
+        default=None,
+        type=str,
+        help=f"Tag to add to the ClearML Task - {TAGS_LIST}",
+    )
     args = parser.parse_args()
 
-    aligner_ids = list(ALIGNERS.keys() if len(args.aligners) == 0 else args.aligners)
+    experiments = args.experiments
 
-    for exp_dir in get_experiment_dirs(args.experiments):
+    aligner_ids = list(ALIGNERS.keys() if len(args.aligners) == 0 else args.aligners)
+    if args.clearml_queue is not None:
+        if "cpu" not in args.clearml_queue:
+            LOGGER.warning("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
+            exit()
+        if args.clearml_tag is None:
+            parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
+        if args.clearml_queue.lower() not in ("local", "locally"):
+            # Remove .NET aligners
+            aligner_ids = [aid for aid in aligner_ids if not aid.startswith("dotnet")]
+            LOGGER.warning(
+                "The .NET aligners cannot be used on remote ClearML queues. They have been removed from the list of aligners to run."
+            )
+        clearml = SILClearML(experiments, args.clearml_queue, tag=args.clearml_tag, skip_config=True)
+        experiments = clearml.name
+
+    for exp_dir in get_experiment_dirs(experiments):
         exp_name = get_experiment_name(exp_dir)
         if not args.skip_align:
             LOGGER.info(f"Aligning {exp_name}")
