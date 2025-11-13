@@ -3,7 +3,9 @@ import json
 import logging
 from pathlib import Path
 from typing import Dict, List, Set, Tuple, Union
+import regex as re
 import sys
+
 
 from .environment import SIL_NLP_ENV
 from .iso_info import NLLB_ISO_SET, ALT_ISO
@@ -85,6 +87,21 @@ def split_files_by_projects(files: List[Path], projects_dir: Path) -> Tuple[Dict
 def get_equivalent_isocodes(iso_codes: List[str]) -> Set[str]:
     return {code for iso_code in iso_codes for code in (iso_code, ALT_ISO.get_alternative(iso_code)) if code}
 
+def filter_files(files: List[Path], excluded_patterns:List[str]) -> List[Path]:
+    filtered = []
+    date_pattern = re.compile(r'_\d{4}_\d{1,2}_\d{1,2}|_\d{1,2}_\d{1,2}_\d{4}')
+
+    for file in files:
+        parts = file.stem.split('-', 1)
+        if len(parts) != 2: continue
+        iso, name = parts
+        if date_pattern.search(name): continue
+        if len(iso) not in (2, 3): continue
+        if any(pattern.lower() in name.lower() for pattern in excluded_patterns): continue
+        if file.is_file() and file.stat().st_size < 100_000: continue
+        filtered.append(file)
+    return filtered
+
 def main():
     parser = argparse.ArgumentParser(description="Find related ISO language codes.")
     parser.add_argument("iso_codes", nargs="+", help="ISO codes to find related languages for")
@@ -151,7 +168,13 @@ def main():
     
     # Find files matching the codes
     files = get_files_by_iso(all_possible_codes, scripture_dir)
-    existing_projects, missing_projects = split_files_by_projects(files, projects_dir)
+    
+    # Filter out AI and XRI files, and others.
+    excluded_patterns = ['XRI', '600M', '3.3B', '1.3B', 'words', 'name', 'clean', 'transcription','matthew', 'mark', 'mrk','luk']
+    filtered_files = filter_files(files, excluded_patterns)
+    print(f"There are {len(files)} files and {len(files)-len(filtered_files)} were filtered out.")
+    
+    existing_projects, missing_projects = split_files_by_projects(filtered_files, projects_dir)
 
     # Display results
     if existing_projects:
@@ -163,8 +186,8 @@ def main():
         logger.info(f"\nThese {len(missing_projects)} files don't have a corresponding project folder:")
         for file, _ in missing_projects.items():
             logger.info(f"{file.stem}")
-    logger.info(f"\nAll the files:")
-    for file in files:
+    logger.info(f"\nFiltered files:")
+    for file in filtered_files:
         logger.info(f"    - {file.stem}")
 
     if not files:
