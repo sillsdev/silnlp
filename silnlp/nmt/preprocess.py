@@ -4,7 +4,7 @@ import logging
 from ..common.utils import get_git_revision_hash
 from .config_utils import load_config
 
-LOGGER = logging.getLogger(__package__ + ".preprocess")
+LOGGER = logging.getLogger((__package__ or "") + ".preprocess")
 
 
 def main() -> None:

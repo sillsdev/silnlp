@@ -34,7 +34,7 @@ from ..alignment.eflomal import to_word_alignment_matrix
 from ..alignment.utils import compute_alignment_scores
 from .corpus import load_corpus, write_corpus
 
-LOGGER = logging.getLogger(__package__ + ".translate")
+LOGGER = logging.getLogger((__package__ or "") + ".translate")
 
 POSTPROCESS_DEFAULTS = {
     "paragraph_behavior": "end",  # Possible values: end, place, strip

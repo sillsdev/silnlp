@@ -3,6 +3,7 @@ import os
 import random
 import subprocess
 from abc import ABC, abstractmethod
+from argparse import Namespace
 from enum import Enum, Flag, auto
 from inspect import getmembers
 from pathlib import Path, PurePath
@@ -12,7 +13,7 @@ from typing import Any, List, Optional, Set, Type, cast
 import numpy as np
 import pandas as pd
 
-from ..common.environment import SIL_NLP_ENV
+from ..common.environment import SIL_NLP_ENV, SilNlpEnv
 
 LOGGER = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ def print_table(rows):
     print()
 
 
-def show_attrs(cli_args, envs=SIL_NLP_ENV, actions=[]):
+def show_attrs(cli_args: Namespace, envs: SilNlpEnv = SIL_NLP_ENV, actions: List[str] = []) -> None:
 
     env_rows = [(k, v) for k, v in attrs(envs).items()]
     arg_rows = [(k, v) for k, v in cli_args.__dict__.items() if v is not None]
@@ -122,7 +123,7 @@ def check_dotnet() -> None:
                 stderr=subprocess.DEVNULL,
             )
             _is_dotnet_installed = True
-        except:
+        except Exception:
             _is_dotnet_installed = False
 
     if not _is_dotnet_installed:
@@ -131,7 +132,7 @@ def check_dotnet() -> None:
 
 class NoiseMethod(ABC):
     @abstractmethod
-    def __call__(self, tokens: list) -> list:
+    def __call__(self, tokens: list[str]) -> list[str]:
         pass
 
 
