@@ -82,9 +82,14 @@ def collect_verse_counts(
     output_path = output_folder if isinstance(output_folder, Path) else Path(output_folder)
 
     extract_files = set()
+    missing_files = []
     for file_pattern in file_patterns.split(";"):
         file_pattern = file_pattern.strip()
-        extract_files.update(input_path.glob(file_pattern))
+        matched = list(input_path.glob(file_pattern))
+        if not matched:
+            missing_files.append(input_path / file_pattern)
+        extract_files.update(matched)
+
     project_names = [f.stem for f in extract_files]
     projects_to_process = project_names
 
@@ -117,13 +122,18 @@ def collect_verse_counts(
 
     # Get counts for unprocessed files
     complete_verse_counts = get_complete_verse_counts()
+    small_files = []
     partially_complete_projects = []
-    for extract_file_name in tqdm(extract_files):
+    for extract_file_name in tqdm(sorted(extract_files)):
         project_name = extract_file_name.stem
-        if project_name not in projects_to_process:
-            LOGGER.info(f"Found verse counts for {project_name}")
+        # LOGGER.info(f"Processing {project_name}")
+        if extract_file_name.stat().st_size < 41_000:
+            small_files.append(extract_file_name)
+            LOGGER.info(f"Small file found for   {extract_file_name}")
             continue
-        LOGGER.info(f"Processing {project_name}")
+        if project_name not in projects_to_process:
+            LOGGER.info(f"Found verse counts for {extract_file_name}")
+            continue
 
         verse_counts = defaultdict(list)
         with (
@@ -236,13 +246,27 @@ def collect_verse_counts(
                 partial_books_out_path.unlink(missing_ok=True)
             else:
                 df.to_csv(partial_books_out_path)
+    print("\n")
+    if small_files:
+        LOGGER.warning(f"Skipped {len(small_files)} files smaller than 41KB:")
+        for f in small_files:
+            LOGGER.warning(f"  {f.name}")
+    else:
+        LOGGER.info("No files smaller than 41KB were found.")
+    if missing_files:
+        LOGGER.warning(f"Skipped {len(missing_files)} missing files:")
+        for f in missing_files:
+            LOGGER.warning(f"  {f.name}")
+    else:
+        LOGGER.info("All files were found.")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Collect various counts from a corpus of Bible extracts")
     parser.add_argument(
         "folder",
-        help="An experiment folder (typically in MT/experiments) that contains a config.yml file. The results will be saved in this folder.",
+        help="An experiment folder (typically in MT/experiments) that contains a config.yml file."
+        " The results will be saved in this folder.",
     )
     parser.add_argument(
         "--input-folder", default=SIL_NLP_ENV.mt_scripture_dir, help="Folder with corpus of Bible extract files."
@@ -273,7 +297,8 @@ def main() -> None:
     if file_patterns == "":
         if not folder.exists():
             LOGGER.error(
-                f"Folder {folder} does not exist. Please provide an experiment folder, typically in MT/experiments, containing a config.yml file or a list of files with the --files argument."
+                f"Folder {folder} does not exist. Please provide an experiment folder, typically in MT/experiments,"
+                " containing a config.yml file or a list of files with the --files argument."
             )
             return
         else:
