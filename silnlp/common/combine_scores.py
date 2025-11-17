@@ -11,7 +11,7 @@ from ..common.environment import SIL_NLP_ENV
 
 # Columns for current style detection and transformation (match actual input files)
 CURRENT_STYLE_COLUMNS = [
-    "book", "draft_index", "src_iso", "trg_iso", "num_refs", "references", "sent_len",
+    "Series", "Experiment", "Steps", "book", "draft_index", "src_iso", "trg_iso", "num_refs", "references", "sent_len",
     "BLEU", "BLEU_1gram_prec", "BLEU_2gram_prec", "BLEU_3gram_prec", "BLEU_4gram_prec",
     "BLEU_brevity_penalty", "BLEU_total_sys_len", "BLEU_total_ref_len",
     "chrF3", "chrF3+", "chrF3++", "spBLEU", "confidence"
@@ -68,12 +68,19 @@ def transform_current_style_rows(header, rows):
     return new_header, new_rows
 
 
-def aggregate_csv(folder_path):
+def aggregate_scores(folder):
     # Dictionary to store rows by header type
     data_by_header = defaultdict(list)
 
     # Iterate over all CSV files in the folder and its subfolders
-    for csv_file in folder_path.rglob("*/scores-*.csv"):
+    csv_files = folder.rglob("*/scores-*.csv")
+    for csv_file in csv_files:
+        print(csv_file)
+    if not csv_files :
+        print(f"No scores csv files were found in folder {folder.resolve()}")
+        sys.exit(0)
+
+    for csv_file in csv_files:
         series = csv_file.parts[-3]  # Extract series folder name
         experiment = csv_file.parts[-2]  # Extract experiment folder name
         steps = csv_file.stem.split("-")[-1]  # Extract steps from file name
@@ -104,94 +111,61 @@ def aggregate_csv(folder_path):
 
     return data_by_header
 
-def sort_rows_by_chrf3pp(header, rows):
-    """Sort rows by chrF3++ in descending order if column exists."""
-    try:
-        idx = header.index("chrF3++")
-        # Convert to float for sorting, missing/empty values become -inf
-        def get_chrf3pp(row):
-            try:
-                val = row[idx]
-                return float(val) if val not in ("", None) else float("-inf")
-            except Exception:
-                return float("-inf")
-        return sorted(rows, key=get_chrf3pp, reverse=True)
-    except ValueError:
-        return rows
 
-def delete_rows(header, rows):
-    """Rows containing 'ALL' in the trg_iso columnn and without a chrF3++ score are deleted as they are not useful."""
-    try:
-        trg_idx = header.index("trg_iso")
-        chrf_idx = header.index("chrF3++")
-        filtered = []
-        for row in rows:
-            # Skip rows that are too short
-            if len(row) <= max(trg_idx, chrf_idx):
-                continue
-            if not (row[trg_idx] == "ALL" and (row[chrf_idx] == "" or row[chrf_idx] is None)):
-                filtered.append(row)
-        return filtered
-    except ValueError:
-        return rows
+def clean_dataframe(df):
+    cleaned_df = df.copy()
+    cleaned_df = cleaned_df[~((cleaned_df['trg_iso'] == 'ALL') & (cleaned_df['chrF3++'].isna() | (cleaned_df['chrF3++'] == '')))]
+    numeric_cols = ['BLEU', 'BLEU_1gram_prec', 'BLEU_2gram_prec', 'BLEU_3gram_prec', 'BLEU_4gram_prec', 'BLEU_brevity_penalty', 'BLEU_total_sys_len', 'BLEU_total_ref_len', 'chrF3', 'chrF3+', 'chrF3++', 'spBLEU', 'confidence', 'num_refs', 'sent_len', 'draft_index']
+    for col in numeric_cols:
+        if col in cleaned_df.columns: cleaned_df[col] = pd.to_numeric(cleaned_df[col], errors='coerce')
+    string_cols = ['Series', 'Experiment', 'Steps', 'book', 'src_iso', 'trg_iso', 'references']
+    for col in string_cols:
+        if col in cleaned_df.columns: cleaned_df[col] = cleaned_df[col].astype(str).str.strip()
+    return cleaned_df
+    
 
-def write_to_csv(data_by_header, folder, output_filename):
-
-    output_file = folder / f"{output_filename}.csv"
-    with open(output_file, "w", newline="") as f:
-        writer = csv.writer(f)
-        for header, rows in data_by_header.items():
-            # Sort rows (excluding header) by chrF3++
-            sorted_rows = [rows[0]] + sort_rows_by_chrf3pp(rows[0], rows[1:])
-            writer.writerows(sorted_rows)
-            writer.writerow([])  # Add a blank row to separate different types
-        # Write the folder path to the last line of the CSV file
-        writer.writerow([folder])
-    print(f"Wrote scores to {output_file}")
+def merge_all_data(data_by_header):
+    all_dfs = []
+    for header, rows in data_by_header.items():
+        if len(rows) > 1:
+            df = pd.DataFrame(rows[1:], columns=rows[0])
+            all_dfs.append(df)
+    if not all_dfs: return pd.DataFrame()
+    combined = pd.concat(all_dfs, ignore_index=True, sort=False)
+    final_columns = CURRENT_STYLE_COLUMNS
+    for col in final_columns:
+        if col not in combined.columns: combined[col] = None
+    return combined[final_columns]
 
 
-def write_to_excel(data_by_header, folder, output_filename):
+def sort_dataframe(df, sort_by):
+    sort_cols = [col for col, _ in sort_by]
+    sort_ascending = [asc for _, asc in sort_by]
+    return df.sort_values(by=sort_cols, ascending=sort_ascending, na_position='last')
+
+
+def write_to_excel(df, folder, output_filename):
     output_file = folder / f"{output_filename}.xlsx"
-    with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
-        sheet_names = []
-        for i, (header, rows) in enumerate(data_by_header.items()):
-            # Filter and sort rows for Excel
-            filtered_rows = delete_rows(rows[0], rows[1:])
-            sorted_rows = sort_rows_by_chrf3pp(rows[0], filtered_rows)
-            # If no data rows remain, add a dummy row (all empty) to avoid openpyxl error
-            if not sorted_rows:
-                sorted_rows = []
-            df = pd.DataFrame(sorted_rows, columns=rows[0])
-            sheet_name = f"Table_{i + 1}"
-            sheet_names.append(sheet_name)
-            df.to_excel(writer, sheet_name=sheet_name, index=False)
-    # Now, hide columns in COLUMNS_TO_HIDE in all sheets and auto-size visible columns
+    with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name='Scores', index=False)
     wb = openpyxl.load_workbook(output_file)
-    for sheet_name in sheet_names:
-        ws = wb[sheet_name]
-        header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True))
-        # Hide columns in COLUMNS_TO_HIDE
-        for col_idx, col_name in enumerate(header_row, 1):
-            col_letter = openpyxl.utils.get_column_letter(col_idx)
-            if col_name in COLUMNS_TO_HIDE:
-                ws.column_dimensions[col_letter].hidden = True
-            else:
-                # Auto-size visible columns
-                max_length = len(str(col_name)) if col_name else 0
-                for cell in ws[openpyxl.utils.get_column_letter(col_idx)]:
-                    if cell.row == 1:
-                        continue  # skip header, already counted
-                    try:
-                        cell_length = len(str(cell.value)) if cell.value is not None else 0
-                        if cell_length > max_length:
-                            max_length = cell_length
-                    except Exception:
-                        pass
-                ws.column_dimensions[col_letter].width = max_length + 2
-        # Ensure at least one row is visible (header)
-        ws.sheet_state = "visible"
+    ws = wb['Scores']
+    header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True))
+    for col_idx, col_name in enumerate(header_row, 1):
+        col_letter = openpyxl.utils.get_column_letter(col_idx)
+        if col_name in COLUMNS_TO_HIDE: ws.column_dimensions[col_letter].hidden = True
+        else:
+            max_length = len(str(col_name)) if col_name else 0
+            for cell in ws[col_letter]:
+                if cell.row == 1: continue
+                try:
+                    cell_length = len(str(cell.value)) if cell.value is not None else 0
+                    if cell_length > max_length: max_length = cell_length
+                except Exception: pass
+            ws.column_dimensions[col_letter].width = max_length + 2
     wb.save(output_file)
     print(f"Wrote scores to {output_file}")
+
 
 def main():
     parser = argparse.ArgumentParser(description="Aggregate CSV files in a folder.")
@@ -212,16 +186,18 @@ def main():
         folder = Path(SIL_NLP_ENV.mt_experiments_dir) / args.folder
 
     # Check for lock files and ask the user to close them.
-    check_for_lock_file(folder, base_filename, "csv")
     check_for_lock_file(folder, base_filename, "xlsx")
 
-    data = aggregate_csv(folder)
+    # Aggregate the data from all the scores files.
+    data = aggregate_scores(folder)
+    combined_df = merge_all_data(data)
 
-    # Write the aggregated data to a new CSV file
-    write_to_csv(data, folder, base_filename)
+    # Clean and sort the data
+    clean_df = clean_dataframe(combined_df)
+    sorted_df = sort_dataframe(clean_df, sort_by=[("Series", True), ("chrF3++", False), ("BLEU", False)])
 
-    # Write the aggregated data to an Excel file
-    write_to_excel(data, folder, base_filename)
+    # Write the data to an excel file
+    write_to_excel(sorted_df, folder, base_filename)
 
 
 if __name__ == "__main__":
