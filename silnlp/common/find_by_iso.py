@@ -2,7 +2,7 @@ import argparse
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Set, Tuple, Union
+from typing import Dict, List, Set, Tuple
 import regex as re
 import sys
 
@@ -56,8 +56,6 @@ def find_related_isocodes(
     for iso_code in iso_codes:
         if iso_code in language_data:
             lang_info = language_data[iso_code]
-#            logger.info(f"{iso_code}: {lang_info['Name']}, {lang_info['Country']}, {lang_info['Family']}")
-
             iso_set.update(country_data.get(lang_info["Country"], []))
             iso_set.update(family_data.get(lang_info["Family"], []))
 
@@ -114,7 +112,6 @@ def main():
 
     # Create a custom logger
     logger = logging.getLogger(__name__)
-    #logger.basicConfig()
 
     # Set the global logging level
     logger.setLevel(logging.INFO) 
