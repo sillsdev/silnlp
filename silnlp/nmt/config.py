@@ -8,7 +8,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum, auto
 from pathlib import Path
 from statistics import mean, median, stdev
-from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, Union, cast
+from typing import Dict, Generator, Iterable, List, Optional, Set, TextIO, Tuple, Union, cast
 
 import pandas as pd
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books
@@ -48,7 +48,7 @@ from .corpora import (
 )
 from .tokenizer import Tokenizer
 
-LOGGER = logging.getLogger(__package__ + ".config")
+LOGGER = logging.getLogger((__package__ or "") + ".config")
 
 ALIGNMENT_SCORES_FILE = re.compile(r"([a-z]{2,3}-.+)_([a-z]{2,3}-.+)")
 
@@ -84,15 +84,19 @@ class NMTModel(ABC):
         sentences: Iterable[str],
         src_iso: str,
         trg_iso: str,
+        produce_multiple_translations: bool = False,
         vrefs: Optional[Iterable[VerseRef]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
-    ) -> Iterable[SentenceTranslationGroup]: ...
+    ) -> Generator[SentenceTranslationGroup, None, None]: ...
 
     @abstractmethod
     def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]: ...
 
     @abstractmethod
     def clear_cache(self) -> None: ...
+
+    @abstractmethod
+    def get_num_drafts(self) -> int: ...
 
 
 class Config(ABC):
@@ -328,7 +332,8 @@ class Config(ABC):
         else:
             existing_stats = pd.DataFrame({(" ", "Translation Side"): ["Source", "Target"]})
 
-        src_tokens_per_verse, src_chars_per_token = [], []
+        src_tokens_per_verse: List[int] = []
+        src_chars_per_token: List[int] = []
         for src_tok_file in self.exp_dir.glob("*.src.txt"):
             src_tok_file = src_tok_file.name
             with open(self.exp_dir / src_tok_file, "r+", encoding="utf-8") as f:
@@ -336,7 +341,8 @@ class Config(ABC):
                     src_tokens_per_verse.append(len(line.split()))
                     src_chars_per_token.extend([len(token) for token in line.split()])
 
-        trg_tokens_per_verse, trg_chars_per_token = [], []
+        trg_tokens_per_verse: List[int] = []
+        trg_chars_per_token: List[int] = []
         for trg_tok_file in self.exp_dir.glob("*.trg.txt"):
             trg_tok_file = trg_tok_file.name
             with open(self.exp_dir / trg_tok_file, "r+", encoding="utf-8") as f:
@@ -344,7 +350,9 @@ class Config(ABC):
                     trg_tokens_per_verse.append(len(line.split()))
                     trg_chars_per_token.extend([len(token) for token in line.split()])
 
-        src_chars_per_verse, src_words_per_verse, src_chars_per_word = [], [], []
+        src_chars_per_verse: List[int] = []
+        src_words_per_verse: List[int] = []
+        src_chars_per_word: List[int] = []
         for src_detok_file in self.exp_dir.glob("*.src.detok.txt"):
             src_detok_file = src_detok_file.name
             with open(self.exp_dir / src_detok_file, "r+", encoding="utf-8") as f:
@@ -354,7 +362,9 @@ class Config(ABC):
                     src_words_per_verse.append(len(word_line.split()))
                     src_chars_per_word.extend([len(word) for word in word_line.split()])
 
-        trg_chars_per_verse, trg_words_per_verse, trg_chars_per_word = [], [], []
+        trg_chars_per_verse: List[int] = []
+        trg_words_per_verse: List[int] = []
+        trg_chars_per_word: List[int] = []
         for trg_detok_file in self.exp_dir.glob("*.trg.detok.txt"):
             trg_detok_file = trg_detok_file.name
             with open(self.exp_dir / trg_detok_file, "r+", encoding="utf-8") as f:
@@ -850,7 +860,7 @@ class Config(ABC):
         categories_set: Optional[Set[str]] = None if categories is None else set(categories)
 
         if terms_config["include_glosses"]:
-            gloss_iso: str = str(terms_config["include_glosses"]).lower()
+            gloss_iso: Optional[str] = str(terms_config["include_glosses"]).lower()
             if gloss_iso == "true":
                 src_gloss_iso = list(self.src_isos.intersection(["en", "fr", "id", "es"]))
                 trg_gloss_iso = list(self.trg_isos.intersection(["en", "fr", "id", "es"]))
@@ -871,16 +881,16 @@ class Config(ABC):
         else:
             gloss_iso = None
 
-        all_src_terms: List[Tuple[DataFile, Dict[str, Term], str]] = []
+        all_src_terms: List[Tuple[DataFile, Dict[str, Term], List[str]]] = []
         for src_terms_file, tags in src_terms_files:
             all_src_terms.append((src_terms_file, get_terms(src_terms_file.path, iso=gloss_iso), tags))
 
-        all_trg_terms: List[Tuple[DataFile, Dict[str, Term], str]] = []
+        all_trg_terms: List[Tuple[DataFile, Dict[str, Term], List[str]]] = []
         for trg_terms_file, tags in trg_terms_files:
             all_trg_terms.append((trg_terms_file, get_terms(trg_terms_file.path, iso=gloss_iso), tags))
 
         for src_terms_file, src_terms, tags in all_src_terms:
-            for trg_terms_file, trg_terms, trg_tags in all_trg_terms:
+            for trg_terms_file, trg_terms, _ in all_trg_terms:
                 if src_terms_file.iso == trg_terms_file.iso:
                     continue
                 cur_terms = get_terms_corpus(src_terms, trg_terms, categories_set, filter_books)
