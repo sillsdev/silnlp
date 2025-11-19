@@ -241,19 +241,24 @@ def main() -> None:
             project = Path(project).stem
 
         project_name = project
+        if "-" in project_name:
+            LOGGER.info(f"Project name '{project_name}' contains hyphens. Replacing hyphens with underscores.")
+            project_name = project_name.replace("-", "_")
+            LOGGER.info(f"New project name: '{project_name}'")
         if args.timestamp:
-
             now = datetime.now()
             timestamp = now.strftime("%Y_%m_%d")
-            project_name = f"{project}_{timestamp}"
+            project_name = f"{project_name}_{timestamp}"
             LOGGER.info(f"Timestamping project. New project name: {project_name}")
 
         if args.copy_from:
-            LOGGER.info(f"Copying project: {project}")
-            paratext_project_dir: Path = create_paratext_project_folder_if_not_exists(project_name)
+            LOGGER.info(
+                f"Copying project: {project} from {args.copy_from} to {SIL_NLP_ENV.pt_projects_dir}/{project_name}"
+            )
             source_path = Path(args.copy_from)
-            if source_path.name != project_name:
-                source_path = Path(source_path / project_name)
+            if source_path.name != project:
+                source_path = Path(source_path / project)
+            paratext_project_dir: Path = create_paratext_project_folder_if_not_exists(project_name)
             copy_paratext_project_folder(source_path, paratext_project_dir, overwrite=args.overwrite)
 
         if args.extract_corpora:
