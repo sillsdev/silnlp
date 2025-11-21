@@ -47,7 +47,6 @@ class NMTTranslator(Translator):
 class TranslationTask:
     name: str
     checkpoint: Union[str, int] = "last"
-    use_default_model_dir: bool = True
     clearml_queue: Optional[str] = None
     commit: Optional[str] = None
     clearml_tag: Optional[str] = None
@@ -284,7 +283,6 @@ class TranslationTask:
             project_suffix="_infer",
             experiment_suffix=experiment_suffix,
             commit=self.commit,
-            use_default_model_dir=self.use_default_model_dir,
             tag=self.clearml_tag,
         )
         self.name = clearml.name
