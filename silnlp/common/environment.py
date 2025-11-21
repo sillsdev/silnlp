@@ -25,11 +25,11 @@ LOGGER = logging.getLogger(__name__)
 
 class SilNlpEnv:
     def __init__(self):
+        atexit.register(self.delete_path)
         atexit.register(check_transfers)
         self.root_dir = Path.home() / ".silnlp"
         self.assets_dir = Path(__file__).parent.parent / "assets"
-        self.temp_model_dir: Optional[Path] = None
-
+        self.path_to_delete: Optional[Path] = None
         self.set_data_dir()
 
     def set_data_dir(self, data_dir: Optional[Path] = None):
@@ -109,15 +109,12 @@ class SilNlpEnv:
 
         raise FileExistsError("No valid path exists")
 
-    def get_temp_model_dir(self) -> Path:
-        if not self.temp_model_dir:
-            self.temp_model_dir = Path(tempfile.mkdtemp(prefix="silnlp_model_"))
-            atexit.register(self.delete_temp_model_dir)
-        return self.temp_model_dir
+    def delete_path_on_exit(self, path: Union[str, Path]) -> None:
+        self.path_to_delete = pathify(path)
 
-    def delete_temp_model_dir(self) -> None:
-        if self.temp_model_dir and self.temp_model_dir.is_dir():
-            shutil.rmtree(self.temp_model_dir)
+    def delete_path(self) -> None:
+        if self.path_to_delete and self.path_to_delete.is_dir():
+            shutil.rmtree(self.path_to_delete)
 
 
 def check_transfers() -> None:

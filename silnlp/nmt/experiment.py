@@ -23,7 +23,6 @@ class SILExperiment:
     mixed_precision: bool = True
     num_devices: int = 1
     clearml_queue: Optional[str] = None
-    save_checkpoints: bool = False
     run_prep: bool = False
     run_train: bool = False
     run_test: bool = False
@@ -40,7 +39,6 @@ class SILExperiment:
             self.name,
             self.clearml_queue,
             commit=self.commit,
-            use_default_model_dir=self.save_checkpoints,
             tag=self.clearml_tag,
         )
         self.name: str = self.clearml.name
@@ -89,7 +87,6 @@ class SILExperiment:
             scorers=self.scorers,
             produce_multiple_translations=self.produce_multiple_translations,
             save_confidences=self.save_confidences,
-            use_default_model_dir=self.save_checkpoints,
         )
 
     def translate(self):
@@ -104,7 +101,6 @@ class SILExperiment:
             translator = TranslationTask(
                 name=self.name,
                 checkpoint=checkpoint,
-                use_default_model_dir=self.save_checkpoints,
                 commit=self.commit,
             )
 
@@ -253,9 +249,6 @@ def main() -> None:
         args.train = True
         args.test = True
 
-    if not args.train:
-        args.save_checkpoints = True
-
     exp = SILExperiment(
         name=args.experiment,
         make_stats=args.stats,
@@ -265,7 +258,6 @@ def main() -> None:
         clearml_queue=args.clearml_queue,
         clearml_tag=args.clearml_tag,
         commit=args.commit,
-        save_checkpoints=args.save_checkpoints,
         run_prep=args.preprocess,
         run_train=args.train,
         run_test=args.test,
@@ -275,6 +267,9 @@ def main() -> None:
         scorers=set(s.lower() for s in args.scorers),
         score_by_book=args.score_by_book,
     )
+
+    if not args.save_checkpoints:
+        SIL_NLP_ENV.delete_path_on_exit(get_mt_exp_dir(args.experiment) / "run")
     exp.run()
 
 

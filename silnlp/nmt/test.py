@@ -664,10 +664,9 @@ def test(
     by_book: bool = False,
     produce_multiple_translations: bool = False,
     save_confidences: bool = False,
-    use_default_model_dir: bool = True,
 ):
     exp_name = experiment
-    config = load_config(exp_name, use_default_model_dir)
+    config = load_config(exp_name)
 
     if not any(config.exp_dir.glob("test*.src.txt")):
         LOGGER.info("No test dataset.")
@@ -885,7 +884,6 @@ def main() -> None:
         by_book=args.by_book,
         produce_multiple_translations=args.multiple_translations,
         save_confidences=args.save_confidences,
-        use_default_model_dir=True,
     )
 
 
