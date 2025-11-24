@@ -65,7 +65,7 @@ class SentenceTranslation:
         return self._sequence_score
 
     def join_tokens_for_test_file(self) -> str:
-        return " ".join([token for token in self._tokens if token != "<pad>"])
+        return " ".join([token for token in self._tokens[1:] if token != "<pad>"])
 
     def join_tokens_for_confidence_file(self) -> str:
         return "\t".join(self._tokens)
