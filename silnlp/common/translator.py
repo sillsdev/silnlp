@@ -65,6 +65,8 @@ class SentenceTranslation:
         return self._sequence_score
 
     def join_tokens_for_test_file(self) -> str:
+        # The first token is skipped because it is always equal to decoder_start_token_id,
+        # because of the way Huggingface implements encoder-decoder models
         return " ".join([token for token in self._tokens[1:] if token != "<pad>"])
 
     def join_tokens_for_confidence_file(self) -> str:
