@@ -59,7 +59,7 @@ def stratified_sample(
     plt.hist(df["Usability"], bins=20, alpha=0.5, label="Population")
     plt.hist(sample["Usability"], bins=20, alpha=0.5, label="Sample")
     plt.legend()
-    plt.savefig(usability_verses_file.parent / "usability_sample_hist.png")
+    plt.savefig(str(usability_verses_file.parent / "usability_sample_hist.png"))
 
 
 def main():
