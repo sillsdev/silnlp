@@ -34,10 +34,11 @@ def stratified_sample(
         }
     )
 
-    plt.hist(df["Usability"], bins=20, alpha=0.5, label="Population")
-    plt.hist(sample["Usability"], bins=20, alpha=0.5, label="Sample")
-    plt.legend()
-    plt.savefig(str(usability_verses_file.parent / f"usability_sample_hist{books_suffix}.png"))
+    with open(usability_verses_file.parent / f"usability_sample_hist{books_suffix}.png", "wb") as hist_file:
+        plt.hist(df["Usability"], bins=20, alpha=0.5, label="Population")
+        plt.hist(sample["Usability"], bins=20, alpha=0.5, label="Sample")
+        plt.legend()
+        plt.savefig(hist_file)
 
 
 def process_books_argument(
