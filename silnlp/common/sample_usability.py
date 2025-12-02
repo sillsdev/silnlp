@@ -1,5 +1,6 @@
 import argparse
 import logging
+from io import BytesIO
 from pathlib import Path
 from typing import List
 
@@ -34,11 +35,16 @@ def stratified_sample(
         }
     )
 
+    plt.hist(df["Usability"], bins=20, alpha=0.5, label="Population")
+    plt.hist(sample["Usability"], bins=20, alpha=0.5, label="Sample")
+    plt.legend()
+
+    # Save to in-memory buffer to avoid Windows path resolution issues
+    buf = BytesIO()
+    plt.savefig(buf, format="png")
+    plt.close()
     with open(usability_verses_file.parent / f"usability_sample_hist{books_suffix}.png", "wb") as hist_file:
-        plt.hist(df["Usability"], bins=20, alpha=0.5, label="Population")
-        plt.hist(sample["Usability"], bins=20, alpha=0.5, label="Sample")
-        plt.legend()
-        plt.savefig(hist_file)
+        hist_file.write(buf.getvalue())
 
 
 def process_books_argument(
