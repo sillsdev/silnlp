@@ -181,6 +181,12 @@ class VerseSegmenter(ABC):
     ) -> SegmentedPassage:
         target_verses = []
 
+        # Special case where passage is a single verse
+        if len(target_verse_offsets) == 0:
+            verse_ref = references[0]
+            target_verses.append(Verse(verse_ref, target_text))
+            return self._adjust_verse_boundaries(target_verses)
+
         current_verse_starting_char_index = 0
         current_verse_ending_char_index = 0
         current_verse_offset_index = 0
