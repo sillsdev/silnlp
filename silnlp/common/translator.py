@@ -100,9 +100,11 @@ class TranslatedDraft:
             for sentence_num, sentence_translation in enumerate(self._sentence_translations):
                 if not sentence_translation.has_sequence_confidence_score():
                     continue
-                sequence_label = str(sentence_num)
+
                 if scripture_refs is not None:
                     sequence_label = str(scripture_refs[sentence_num])
+                else:
+                    sequence_label = str(sentence_num + 1)
                 confidences_file.write(
                     sequence_label + "\t" + sentence_translation.join_tokens_for_confidence_file() + "\n"
                 )
