@@ -36,7 +36,6 @@ from .postprocesser import NoDetectedQuoteConventionException, PostprocessHandle
 from .usfm_utils import PARAGRAPH_TYPE_EMBEDS
 
 LOGGER = logging.getLogger((__package__ or "") + ".translate")
-nltk.download("punkt")
 
 CONFIDENCE_SCORES_SUFFIX = ".confidences.tsv"
 
@@ -527,6 +526,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
         produce_multiple_translations: bool = False,
         tags: Optional[List[str]] = None,
     ) -> None:
+        nltk.download("punkt")
         tokenizer: nltk.tokenize.PunktSentenceTokenizer
         try:
             src_lang = Lang(src_iso)
