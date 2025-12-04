@@ -325,6 +325,15 @@ class HuggingFaceConfig(Config):
                     "terms": {"train": True, "categories": "PN", "include_glosses": True, "dictionary": False},
                     "lang_codes": {},
                     "add_new_lang_code": True,
+                    "tokenizer": {
+                        "init_unk": False,
+                        "share_vocab": False,
+                        "src_vocab_size": 500,
+                        "trained_tokens": False,
+                        "trg_vocab_size": 500,
+                        "update_src": True,
+                        "update_trg": True,
+                    },
                 },
                 "train": {
                     "max_source_length": 200,
