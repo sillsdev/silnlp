@@ -385,10 +385,6 @@ class HuggingFaceConfig(Config):
                     "lr_scheduler_type": "cosine",
                     "attn_implementation": "sdpa",
                 },
-                "tokenizer": {
-                    "update_src": True,
-                    "update_trg": True,
-                },
                 "model": "facebook/nllb-200-distilled-1.3B",
             },
             config,
