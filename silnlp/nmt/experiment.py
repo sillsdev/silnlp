@@ -1,8 +1,8 @@
 import argparse
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Set
+from typing import Optional, Set, Union
 
 import yaml
 
@@ -11,7 +11,7 @@ from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
 from .config import Config, get_mt_exp_dir
-from .test import _SUPPORTED_SCORERS, test
+from .test import SUPPORTED_SCORERS, test
 from .translate import TranslationTask
 
 
@@ -23,14 +23,13 @@ class SILExperiment:
     mixed_precision: bool = True
     num_devices: int = 1
     clearml_queue: Optional[str] = None
-    save_checkpoints: bool = False
     run_prep: bool = False
     run_train: bool = False
     run_test: bool = False
     run_translate: bool = False
     produce_multiple_translations: bool = False
     save_confidences: bool = False
-    scorers: Set[str] = field(default_factory=set)
+    scorers: Optional[Set[str]] = None
     score_by_book: bool = False
     commit: Optional[str] = None
     clearml_tag: Optional[str] = None
@@ -40,13 +39,15 @@ class SILExperiment:
             self.name,
             self.clearml_queue,
             commit=self.commit,
-            use_default_model_dir=self.save_checkpoints,
             tag=self.clearml_tag,
         )
         self.name: str = self.clearml.name
         self.config: Config = self.clearml.config
         self.rev_hash = get_git_revision_hash()
         self.config.set_seed()
+
+        if self.scorers is None:
+            self.scorers = set()
 
     def run(self):
         if self.run_prep:
@@ -77,6 +78,7 @@ class SILExperiment:
         print("Training completed")
 
     def test(self):
+        assert self.scorers is not None
         test(
             experiment=self.name,
             last=self.config.model_dir.exists(),
@@ -85,7 +87,6 @@ class SILExperiment:
             scorers=self.scorers,
             produce_multiple_translations=self.produce_multiple_translations,
             save_confidences=self.save_confidences,
-            use_default_model_dir=self.save_checkpoints,
         )
 
     def translate(self):
@@ -96,10 +97,10 @@ class SILExperiment:
         postprocess_handler = PostprocessHandler([PostprocessConfig(pc) for pc in postprocess_configs])
 
         for translate_config in translate_configs.get("translate", []):
+            checkpoint: Union[str, int] = translate_config.get("checkpoint", "last") or "last"
             translator = TranslationTask(
                 name=self.name,
-                checkpoint=translate_config.get("checkpoint", "last"),
-                use_default_model_dir=self.save_checkpoints,
+                checkpoint=checkpoint,
                 commit=self.commit,
             )
 
@@ -123,6 +124,11 @@ class SILExperiment:
                     translate_config.get("tags"),
                 )
             elif translate_config.get("src_prefix"):
+                if translate_config.get("trg_prefix") is None:
+                    raise RuntimeError("A target file prefix must be specified.")
+                if translate_config.get("start_seq") is None or translate_config.get("end_seq") is None:
+                    raise RuntimeError("Start and end sequence numbers must be specified.")
+
                 translator.translate_text_files(
                     translate_config.get("src_prefix"),
                     translate_config.get("trg_prefix"),
@@ -210,7 +216,7 @@ def main() -> None:
         "--scorers",
         nargs="*",
         metavar="scorer",
-        choices=_SUPPORTED_SCORERS,
+        choices=SUPPORTED_SCORERS,
         default=[
             "bleu",
             "sentencebleu",
@@ -223,7 +229,7 @@ def main() -> None:
             "m-chrf3++",
             "spbleu",
         ],
-        help=f"List of scorers - {_SUPPORTED_SCORERS}",
+        help=f"List of scorers - {SUPPORTED_SCORERS}",
     )
 
     args = parser.parse_args()
@@ -243,9 +249,6 @@ def main() -> None:
         args.train = True
         args.test = True
 
-    if not args.train:
-        args.save_checkpoints = True
-
     exp = SILExperiment(
         name=args.experiment,
         make_stats=args.stats,
@@ -255,7 +258,6 @@ def main() -> None:
         clearml_queue=args.clearml_queue,
         clearml_tag=args.clearml_tag,
         commit=args.commit,
-        save_checkpoints=args.save_checkpoints,
         run_prep=args.preprocess,
         run_train=args.train,
         run_test=args.test,
@@ -265,6 +267,9 @@ def main() -> None:
         scorers=set(s.lower() for s in args.scorers),
         score_by_book=args.score_by_book,
     )
+
+    if not args.save_checkpoints:
+        SIL_NLP_ENV.delete_path_on_exit(get_mt_exp_dir(args.experiment) / "run")
     exp.run()
 
 

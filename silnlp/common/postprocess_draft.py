@@ -6,9 +6,8 @@ from ..nmt.clearml_connection import TAGS_LIST, SILClearML
 from ..nmt.config_utils import load_config
 from ..nmt.postprocess import postprocess_experiment
 from .postprocesser import PostprocessConfig, PostprocessHandler
-from .utils import get_mt_exp_dir
 
-LOGGER = logging.getLogger(__package__ + ".postprocess_draft")
+LOGGER = logging.getLogger((__package__ or "") + ".postprocess_draft")
 
 
 def main() -> None:

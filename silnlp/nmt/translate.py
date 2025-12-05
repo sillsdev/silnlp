@@ -5,7 +5,7 @@ import time
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple, Union
+from typing import Generator, Iterable, List, Optional, Tuple, Union
 
 from machine.scripture import VerseRef, book_number_to_id, get_chapters
 
@@ -17,12 +17,12 @@ from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
 from .config import CheckpointType, Config, NMTModel
 
-LOGGER = logging.getLogger(__package__ + ".translate")
+LOGGER = logging.getLogger((__package__ or "") + ".translate")
 
 
-class NMTTranslator(Translator, AbstractContextManager):
+class NMTTranslator(Translator):
     def __init__(self, model: NMTModel, checkpoint: Union[CheckpointType, str, int]) -> None:
-        self._model = model
+        self._model: NMTModel = model
         self._checkpoint = checkpoint
 
     def translate(
@@ -32,12 +32,14 @@ class NMTTranslator(Translator, AbstractContextManager):
         trg_iso: str,
         produce_multiple_translations: bool = False,
         vrefs: Optional[Iterable[VerseRef]] = None,
-    ) -> Iterable[SentenceTranslationGroup]:
-        return self._model.translate(
+    ) -> Generator[SentenceTranslationGroup, None, None]:
+        yield from self._model.translate(
             sentences, src_iso, trg_iso, produce_multiple_translations, vrefs, self._checkpoint
         )
 
-    def __exit__(self, exc_type, exc_value, traceback) -> None:
+    def __exit__(
+        self, exc_type, exc_value, traceback  # pyright: ignore[reportUnknownParameterType, reportMissingParameterType]
+    ) -> None:
         self._model.clear_cache()
 
 
@@ -45,14 +47,9 @@ class NMTTranslator(Translator, AbstractContextManager):
 class TranslationTask:
     name: str
     checkpoint: Union[str, int] = "last"
-    use_default_model_dir: bool = True
     clearml_queue: Optional[str] = None
     commit: Optional[str] = None
     clearml_tag: Optional[str] = None
-
-    def __post_init__(self) -> None:
-        if self.checkpoint is None:
-            self.checkpoint = "last"
 
     def translate_books(
         self,
@@ -107,7 +104,7 @@ class TranslationTask:
             if not config.model_dir.exists():
                 experiment_ckpt_str = f"{self.name}:base"
 
-            translation_failed = []
+            translation_failed: List[str] = []
             for book_num, chapters in book_nums.items():
                 book = book_number_to_id(book_num)
                 try:
@@ -127,7 +124,7 @@ class TranslationTask:
                         config.corpus_pairs,
                         tags,
                     )
-                except Exception as e:
+                except Exception:
                     translation_failed.append(book)
                     LOGGER.exception(f"Was not able to translate {book}.")
 
@@ -148,11 +145,6 @@ class TranslationTask:
     ) -> None:
         translator, config, _ = self._init_translation_task(experiment_suffix=f"_{self.checkpoint}_{src_prefix}")
         with translator:
-            if trg_prefix is None:
-                raise RuntimeError("A target file prefix must be specified.")
-            if start_seq is None or end_seq is None:
-                raise RuntimeError("Start and end sequence numbers must be specified.")
-
             if src_iso is None:
                 src_iso = config.default_test_src_iso
                 if src_iso == "" and len(config.src_iso) > 0:
@@ -261,7 +253,7 @@ class TranslationTask:
                         trg_iso,
                         produce_multiple_translations,
                         save_confidences,
-                        tags,
+                        tags=tags,
                     )
                 elif ext == ".docx":
                     translator.translate_docx(
@@ -291,7 +283,6 @@ class TranslationTask:
             project_suffix="_infer",
             experiment_suffix=experiment_suffix,
             commit=self.commit,
-            use_default_model_dir=self.use_default_model_dir,
             tag=self.clearml_tag,
         )
         self.name = clearml.name
@@ -301,7 +292,7 @@ class TranslationTask:
         model = clearml.config.create_model()
         translator = NMTTranslator(model, self.checkpoint)
         if clearml.config.model_dir.exists():
-            checkpoint_path, step = model.get_checkpoint_path(self.checkpoint)
+            _, step = model.get_checkpoint_path(self.checkpoint)
             step_str = "avg" if step == -1 else str(step)
         else:
             step_str = "last"
@@ -446,9 +437,10 @@ def main() -> None:
 
     get_git_revision_hash()
 
+    checkpoint: str = args.checkpoint or "last"
     translator = TranslationTask(
         name=args.experiment,
-        checkpoint=args.checkpoint,
+        checkpoint=checkpoint,
         clearml_queue=args.clearml_queue,
         commit=args.commit,
         clearml_tag=args.clearml_tag,
@@ -476,6 +468,10 @@ def main() -> None:
                 actions=[f"Will attempt to translate matching files from {args.src_iso} into {args.trg_iso}."],
             )
             exit()
+        if args.trg_prefix is None:
+            raise RuntimeError("A target file prefix must be specified.")
+        if args.start_seq is None or args.end_seq is None:
+            raise RuntimeError("Start and end sequence numbers must be specified.")
         translator.translate_text_files(
             args.src_prefix,
             args.trg_prefix,

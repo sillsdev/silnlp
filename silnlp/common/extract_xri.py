@@ -272,7 +272,7 @@ def filter_and_clean(
             continue
 
         def trim(sentence: str, description: str) -> str:
-            trimmed = sentence.strip()
+            trimmed = sentence.strip().replace("\n", " ")
             if trimmed != sentence:
                 clean_logger.debug(
                     f"Boundary whitespace trimmed off '{description}' field. "
