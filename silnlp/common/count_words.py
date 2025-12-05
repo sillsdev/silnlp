@@ -15,8 +15,9 @@ def main() -> None:
     parser.add_argument("experiment", help="Experiment folder from path S:\\Alignment\\experiments\\")
     parser.add_argument("--aligner", help="Aligner: eflomal, fast-align, hmm", default="eflomal")
     parser.add_argument("--num", help="Number of most common words to include", type=int, default=100)
-    parser.add_argument("--stats", help="True or False: Print word count and number of renderings for common words", 
+    parser.add_argument("--stats", help="Print word count and number of renderings for common words", 
                         action='store_true')
+    parser.add_argument("--count", help="Include count in src word files", action='store_true')
     args = parser.parse_args()
 
     # Set up path and lex files
@@ -49,6 +50,8 @@ def main() -> None:
                 if word != "" and not word.isnumeric():
                     src_words.append(word)  
     src_data_word_counter = Counter(src_words).most_common(args.num)
+    if args.count:
+       src_word_counter = Counter(src_words).most_common()
     unique_src_words = numpy.unique(numpy.array(src_words))
 
     # Pull all the separate words from the target data. Take all unique.
@@ -65,7 +68,7 @@ def main() -> None:
                     trg_words.append(word)  
     unique_trg_words = numpy.unique(numpy.array(trg_words))
     
-    # Clean lexicon file and prep for pandas csv reader
+    # Prep lexicon file for pandas csv reader (escape quotes)
     with (lex_path / lex_txt_file).open("r", encoding="utf8") as lexicon:
         with (lex_path / new_lex_txt_file).open("w", encoding="utf8") as new_lex:
             for line in lexicon.readlines():
@@ -111,9 +114,13 @@ def main() -> None:
         for src_wd in common_wd:
             writer.writerow([src_wd, *common_wd[src_wd]])
 
-    with (lex_path / "src_words.txt").open("w", encoding = "utf8") as output_file:
-        for word in unique_src_words:
-            output_file.writelines(word + '\n')
+    with (lex_path / "src_words.txt").open("w", encoding = "utf8") as output_file:  
+            if args.count:
+                for entry in src_word_counter:
+                    output_file.writelines(entry[0] + '\t' + str(entry[1]) + '\n')
+            else:
+                for word in unique_src_words:
+                    output_file.writelines(word + '\n')
 
     # Optionally, output a few stats
     if args.stats:
