@@ -73,7 +73,7 @@ def aggregate_scores(folder):
     data_by_header = defaultdict(list)
 
     # Iterate over all CSV files in the folder and its subfolders
-    csv_files = folder.rglob("*/scores-*.csv")
+    csv_files = list(folder.rglob("*/scores-*.csv"))
     for csv_file in csv_files:
         print(csv_file)
     if not csv_files :
@@ -130,11 +130,14 @@ def merge_all_data(data_by_header):
         if len(rows) > 1:
             df = pd.DataFrame(rows[1:], columns=rows[0])
             all_dfs.append(df)
-    if not all_dfs: return pd.DataFrame()
-    combined = pd.concat(all_dfs, ignore_index=True, sort=False)
     final_columns = CURRENT_STYLE_COLUMNS
+    if not all_dfs:
+        # Return empty DataFrame with expected columns so downstream code can access them safely
+        return pd.DataFrame(columns=final_columns)
+    combined = pd.concat(all_dfs, ignore_index=True, sort=False)
     for col in final_columns:
-        if col not in combined.columns: combined[col] = None
+        if col not in combined.columns:
+            combined[col] = None
     return combined[final_columns]
 
 
