@@ -9,9 +9,9 @@ import pandas as pd
 from machine.scripture import ALL_BOOK_IDS
 
 from ..nmt.config import get_mt_exp_dir
+from ..nmt.quality_estimation import CANONICAL_ORDER
 
 LOGGER = logging.getLogger(__package__ + ".sample_usability")
-CANONICAL_ORDER = {book: i for i, book in enumerate(ALL_BOOK_IDS)}
 
 
 def stratified_sample(
@@ -52,14 +52,14 @@ def process_books_argument(
     books: List[str],
     usability_verses_file: Path,
 ) -> str:
-    books = sorted(books, key=lambda book: CANONICAL_ORDER[book])
-
     missing_books = set(books) - set(df["Book"].unique())
     if missing_books:
         raise ValueError(
-            f"Requested book(s) not found in {usability_verses_file.name}: {', '.join(sorted(missing_books))}"
+            f"Requested book(s) not found in {usability_verses_file.name}: "
+            f"{', '.join(sorted(missing_books, key=lambda b: CANONICAL_ORDER[b]))}"
         )
 
+    books = sorted(books, key=lambda b: CANONICAL_ORDER[b])
     df = df[df["Book"].isin(books)]
     if len(books) <= 5:
         books_suffix = "_" + "_".join(books)

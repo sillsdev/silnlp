@@ -8,13 +8,14 @@ from math import exp
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from machine.scripture import VerseRef
+from machine.scripture import ALL_BOOK_IDS, VerseRef
 from openpyxl import load_workbook
 from scipy.stats import linregress
 
 from .config import get_mt_exp_dir
 
 LOGGER = logging.getLogger(__package__ + ".quality_estimation")
+CANONICAL_ORDER = {book: i for i, book in enumerate(ALL_BOOK_IDS)}
 
 
 @dataclass
@@ -187,14 +188,14 @@ def compute_usable_proportions(verse_scores: List[VerseScore], output_dir: Path)
 
     with open(output_dir / "usability_books.tsv", "w", encoding="utf-8", newline="\n") as book_file:
         book_file.write("Book\tUsability\tLabel\n")
-        for book in sorted(book_totals):
+        for book in sorted(book_totals, key=lambda b: CANONICAL_ORDER[b]):
             avg_prob = book_totals[book] / book_counts[book]
             label = BookThresholds.return_label(avg_prob)
             book_file.write(f"{book}\t{avg_prob:.6f}\t{label}\n")
 
     with open(output_dir / "usability_chapters.tsv", "w", encoding="utf-8", newline="\n") as chapter_file:
         chapter_file.write("Book\tChapter\tUsability\tLabel\n")
-        for book in sorted(chapter_totals):
+        for book in sorted(chapter_totals, key=lambda b: CANONICAL_ORDER[b]):
             for chapter in sorted(chapter_totals[book]):
                 avg_prob = chapter_totals[book][chapter] / chapter_counts[book][chapter]
                 label = ChapterThresholds.return_label(avg_prob)
