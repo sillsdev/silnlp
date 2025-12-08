@@ -3,10 +3,10 @@ import logging
 import re
 from abc import ABC
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import exp
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from machine.scripture import ALL_BOOK_IDS, VerseRef
 from openpyxl import load_workbook
@@ -19,18 +19,46 @@ CANONICAL_ORDER = {book: i for i, book in enumerate(ALL_BOOK_IDS)}
 
 
 @dataclass
-class VerseScore:
-    vref: VerseRef
+class Score:
     confidence: float
-    projected_chrf3: Optional[float] = None
+    projected_chrf3: float
+
+
+@dataclass
+class VerseScore(Score):
+    vref: VerseRef
+
+
+@dataclass
+class ChapterScores:
+    scores: Dict[str, Dict[int, Score]] = field(default_factory=lambda: defaultdict(dict))
+
+    def add_score(self, book: str, chapter: int, score: Score) -> None:
+        self.scores[book][chapter] = score
+
+    def get_score(self, book: str, chapter: int) -> Optional[Score]:
+        return self.scores.get(book, {}).get(chapter)
+
+
+@dataclass
+class BookScores:
+    scores: Dict[str, Score] = field(default_factory=dict)  # book -> Score
+
+    def add_score(self, book: str, score: Score) -> None:
+        self.scores[book] = score
+
+    def get_score(self, book: str) -> Optional[Score]:
+        return self.scores.get(book)
 
 
 def estimate_quality(diff_predictions_file: Path, confidence_files: List[Path]) -> None:
-    verse_scores: List[VerseScore] = project_chrf3(diff_predictions_file, confidence_files)
-    compute_usable_proportions(verse_scores, confidence_files[0].parent)
+    verse_scores, chapter_scores, book_scores = project_chrf3(diff_predictions_file, confidence_files)
+    compute_usable_proportions(verse_scores, chapter_scores, book_scores, confidence_files[0].parent)
 
 
-def project_chrf3(diff_predictions_file: Path, confidence_files: List[Path]) -> List[VerseScore]:
+def project_chrf3(
+    diff_predictions_file: Path, confidence_files: List[Path]
+) -> Tuple[List[VerseScore], ChapterScores, BookScores]:
     chrf3_scores, confidence_scores = extract_diff_predictions(diff_predictions_file)
     if len(chrf3_scores) != len(confidence_scores):
         raise ValueError(
@@ -39,16 +67,33 @@ def project_chrf3(diff_predictions_file: Path, confidence_files: List[Path]) -> 
         )
     slope, intercept = linregress(confidence_scores, chrf3_scores)[:2]
     verse_scores: List[VerseScore] = []
+    chapter_scores: ChapterScores = ChapterScores()
+    book_scores: BookScores = BookScores()
     for confidence_file in confidence_files:
-        file_scores = extract_confidences(confidence_file)
+        file_scores = get_verse_scores(confidence_file, slope, intercept)
+        book = file_scores[0].vref.book if file_scores else None
         verse_scores += file_scores
-        with open(confidence_file.with_suffix(".projected_chrf3.tsv"), "w", encoding="utf-8") as output_file:
-            output_file.write("VRef\tConfidence\tProjected chrF3\n")
-            for verse_score in verse_scores:
-                projected_chrf3 = slope * verse_score.confidence + intercept
-                verse_score.projected_chrf3 = projected_chrf3
-                output_file.write(f"{verse_score.vref}\t{verse_score.confidence}\t{projected_chrf3:.2f}\n")
-    return verse_scores
+        if confidence_file.with_suffix(".chapters.tsv").is_file():
+            with open(confidence_file.with_suffix(".chapters.tsv"), "r", encoding="utf-8") as chapter_file:
+                next(chapter_file)
+                for line in chapter_file:
+                    cols = line.strip().split("\t")
+                    chapter = int(cols[0])
+                    confidence = float(cols[1])
+                    projected_chrf3 = slope * confidence + intercept
+                    score = Score(confidence, projected_chrf3)
+                    chapter_scores.add_score(book, chapter, score)
+    if (confidence_files[0].parent / "confidences.books.tsv").is_file():
+        with open(confidence_files[0].parent / "confidences.books.tsv", "r", encoding="utf-8") as book_file:
+            next(book_file)
+            for line in book_file:
+                cols = line.strip().split("\t")
+                book = cols[0]
+                confidence = float(cols[1])
+                projected_chrf3 = slope * confidence + intercept
+                score = Score(confidence, projected_chrf3)
+                book_scores.add_score(book, score)
+    return verse_scores, chapter_scores, book_scores
 
 
 def extract_diff_predictions(diff_predictions_file_path) -> Tuple[List[float], List[float]]:
@@ -87,7 +132,7 @@ def extract_diff_predictions_column(file_path: Path, target_header: str) -> List
     return data
 
 
-def extract_confidences(input_file_path: Path) -> List[VerseScore]:
+def get_verse_scores(input_file_path: Path, slope: float, intercept: float) -> List[VerseScore]:
     current_book = ""
     current_chapter = 0
     current_verse = 0
@@ -106,14 +151,17 @@ def extract_confidences(input_file_path: Path) -> List[VerseScore]:
                 current_chapter = int(match.group(2))
                 current_verse = int(match.group(3))
                 extra = match.group(4)
-
                 is_at_verse_reference = current_verse != 0 and not extra
             elif is_at_verse_reference:
                 cols = line.split("\t")
                 if cols:
+                    confidence = float(cols[0])
+                    projected_chrf3 = slope * confidence + intercept
                     vref_confidences += [
                         VerseScore(
-                            VerseRef.from_string(f"{current_book} {current_chapter}:{current_verse}"), float(cols[0])
+                            confidence,
+                            projected_chrf3,
+                            VerseRef.from_string(f"{current_book} {current_chapter}:{current_verse}"),
                         )
                     ]
     return vref_confidences
@@ -158,7 +206,9 @@ class VerseThresholds(Thresholds):
     YELLOW_THRESHOLD = 0.3
 
 
-def compute_usable_proportions(verse_scores: List[VerseScore], output_dir: Path) -> None:
+def compute_usable_proportions(
+    verse_scores: List[VerseScore], chapter_scores: ChapterScores, book_scores: BookScores, output_dir: Path
+) -> None:
     usable_params, unusable_params = parse_parameters(output_dir / "usability_parameters.tsv")
 
     book_totals = defaultdict(float)
@@ -167,7 +217,7 @@ def compute_usable_proportions(verse_scores: List[VerseScore], output_dir: Path)
     chapter_counts = defaultdict(lambda: defaultdict(int))
 
     with open(output_dir / "usability_verses.tsv", "w", encoding="utf-8", newline="\n") as verse_file:
-        verse_file.write("Book\tChapter\tVerse\tUsability\tLabel\n")
+        verse_file.write("Book\tChapter\tVerse\tProjected chrF3\tUsability\tLabel\n")
         for verse_score in verse_scores:
             vref = verse_score.vref
             if vref.verse_num == 0:
@@ -184,22 +234,35 @@ def compute_usable_proportions(verse_scores: List[VerseScore], output_dir: Path)
             chapter_totals[vref.book][vref.chapter_num] += prob
             chapter_counts[vref.book][vref.chapter_num] += 1
 
-            verse_file.write(f"{vref.book}\t{vref.chapter_num}\t{vref.verse_num}\t{prob:.6f}\t{label}\n")
+            verse_file.write(
+                f"{vref.book}\t{vref.chapter_num}\t{vref.verse_num}\t{verse_score.projected_chrf3:.6f}\t{prob:.6f}\t{label}\n"
+            )
 
     with open(output_dir / "usability_books.tsv", "w", encoding="utf-8", newline="\n") as book_file:
-        book_file.write("Book\tUsability\tLabel\n")
+        book_file.write("Book\tProjected chrF3\tUsability\tLabel\n")
         for book in sorted(book_totals, key=lambda b: CANONICAL_ORDER[b]):
+            # book/chapter usabilties are calculated from verse avg, not from book/chapter projected chrf3
             avg_prob = book_totals[book] / book_counts[book]
             label = BookThresholds.return_label(avg_prob)
-            book_file.write(f"{book}\t{avg_prob:.6f}\t{label}\n")
+            if not book_scores.get_score(book):
+                LOGGER.warning(f"{book} does not have a projected chrf3.")
+                book_file.write(f"{book}\t\t{avg_prob:.6f}\t{label}\n")
+                continue
+            projected_chrf3 = book_scores.get_score(book).projected_chrf3
+            book_file.write(f"{book}\t{projected_chrf3:.2f}\t{avg_prob:.6f}\t{label}\n")
 
     with open(output_dir / "usability_chapters.tsv", "w", encoding="utf-8", newline="\n") as chapter_file:
-        chapter_file.write("Book\tChapter\tUsability\tLabel\n")
+        chapter_file.write("Book\tChapter\tProjected chrF3\tUsability\tLabel\n")
         for book in sorted(chapter_totals, key=lambda b: CANONICAL_ORDER[b]):
             for chapter in sorted(chapter_totals[book]):
                 avg_prob = chapter_totals[book][chapter] / chapter_counts[book][chapter]
                 label = ChapterThresholds.return_label(avg_prob)
-                chapter_file.write(f"{book}\t{chapter}\t{avg_prob:.6f}\t{label}\n")
+                if not chapter_scores.get_score(book, chapter):
+                    LOGGER.warning(f"{book} {chapter} does not have a projected chrf3.")
+                    chapter_file.write(f"{book}\t{chapter}\t\t{avg_prob:.6f}\t{label}\n")
+                    continue
+                projected_chrf3 = chapter_scores.get_score(book, chapter).projected_chrf3
+                chapter_file.write(f"{book}\t{chapter}\t{projected_chrf3:.2f}\t{avg_prob:.6f}\t{label}\n")
 
 
 def parse_parameters(parameter_file: Path) -> Tuple[UsabilityParameters, UsabilityParameters]:
