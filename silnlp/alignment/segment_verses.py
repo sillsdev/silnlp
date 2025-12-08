@@ -10,7 +10,7 @@ from typing import Collection, Dict, Generator, List, Optional, TextIO
 
 import regex
 from machine.corpora import AlignedWordPair, FileParatextProjectSettingsParser, ScriptureRef, UsfmFileText
-from machine.scripture import VerseRef
+from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
 from machine.tokenization import LatinWordTokenizer
 from pyparsing import Iterable
 
@@ -724,8 +724,14 @@ def main() -> None:
         vref_path = Path(args.target_passages).with_suffix(".vref.txt")
         template_vref_path = SIL_NLP_ENV.assets_dir / "vref.txt"
 
+        for trg_passage in trg_segmented_passages:
+            for verse in trg_passage.verses:
+                verse.reference.change_versification(ORIGINAL_VERSIFICATION)
+
         verse_map: Dict[str, str] = {
-            str(verse.reference): verse.text for trg_passage in trg_segmented_passages for verse in trg_passage.verses
+            str(verse.reference): verse.text
+            for trg_passage in trg_segmented_passages
+            for verse in trg_passage.verses
         }
 
         with (
