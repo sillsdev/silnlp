@@ -192,10 +192,10 @@ def main() -> None:
         help="Collect various counts from the extracted Paratext project.",
     )
     parser.add_argument(
-        "--clean-project",
+        "--no-clean",
         default=False,
         action="store_true",
-        help="Cleans the Paratext project folder by removing unnecessary files and folders before copying. Only used if --copy-from is provided.",
+        help="Skips cleaning the Paratext project folder.",
     )
     parser.add_argument(
         "--timestamp",
@@ -214,7 +214,7 @@ def main() -> None:
 
     config = get_config(args.config) if args.config else {}
 
-    if args.clean_project and args.copy_from:
+    if not args.no_clean:
         LOGGER.info("Cleaning Paratext project folders.")
         old_argv = sys.argv
         try:
@@ -241,6 +241,7 @@ def main() -> None:
             project = Path(project).stem
 
         project_name = project
+        local_project_path = Path(args.copy_from) / project if args.copy_from else None
         if "-" in project_name:
             LOGGER.info(f"Project name '{project_name}' contains hyphens. Replacing hyphens with underscores.")
             project_name = project_name.replace("-", "_")
@@ -251,13 +252,18 @@ def main() -> None:
             project_name = f"{project_name}_{timestamp}"
             LOGGER.info(f"Timestamping project. New project name: {project_name}")
 
+        # Rename local project folder to project_name if it exists
+        if local_project_path.exists() and local_project_path.name != project_name:
+            new_local_project_path = local_project_path.parent / project_name
+            local_project_path.rename(new_local_project_path)
+
         if args.copy_from:
             LOGGER.info(
-                f"Copying project: {project} from {args.copy_from} to {SIL_NLP_ENV.pt_projects_dir}/{project_name}"
+                f"Copying project: {project_name} from {args.copy_from} to {SIL_NLP_ENV.pt_projects_dir}/{project_name}"
             )
             source_path = Path(args.copy_from)
-            if source_path.name != project:
-                source_path = Path(source_path / project)
+            if source_path.name != project_name:
+                source_path = Path(source_path / project_name)
             paratext_project_dir: Path = create_paratext_project_folder_if_not_exists(project_name)
             copy_paratext_project_folder(source_path, paratext_project_dir, overwrite=args.overwrite)
 
