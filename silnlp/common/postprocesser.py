@@ -210,15 +210,42 @@ class DenormalizeQuotationMarksPostprocessor:
         return quotation_mark_update_first_pass.find_best_chapter_strategies()
 
     def _create_remark(self, best_chapter_strategies: List[QuotationMarkUpdateStrategy]) -> str:
-        processed_chapters: List[str] = [
-            str(chapter_num)
+        processed_chapters: List[int] = [
+            chapter_num
             for chapter_num, strategy in enumerate(best_chapter_strategies, 1)
             if strategy != QuotationMarkUpdateStrategy.SKIP
         ]
 
         if len(processed_chapters) == 0:
             return self._NO_CHAPTERS_REMARK_SENTENCE
-        return self._REMARK_SENTENCE + ", ".join(processed_chapters) + "."
+        return (
+            self._REMARK_SENTENCE
+            + ", ".join(self._create_ranges_from_consecutive_chapter_numbers(processed_chapters))
+            + "."
+        )
+
+    def _create_ranges_from_consecutive_chapter_numbers(self, chapters: List[int]) -> List[str]:
+        joined_chapters: List[str] = []
+        start = chapters[0]
+        end = chapters[0]
+
+        for chapter in chapters[1:]:
+            if chapter == end + 1:
+                end = chapter
+            else:
+                if start == end:
+                    joined_chapters.append(str(start))
+                else:
+                    joined_chapters.append(f"{start}-{end}")
+                start = chapter
+                end = chapter
+
+        if start == end:
+            joined_chapters.append(str(start))
+        else:
+            joined_chapters.append(f"{start}-{end}")
+
+        return joined_chapters
 
     def postprocess_usfm(
         self,
