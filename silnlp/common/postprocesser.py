@@ -133,8 +133,12 @@ class NoDetectedQuoteConventionException(Exception):
 
 class DenormalizeQuotationMarksPostprocessor:
     _NO_CHAPTERS_REMARK_SENTENCE = "Quotation marks were not denormalized in any chapters due to errors."
-    _REMARK_SENTENCE = (
+    _ALL_CHAPTERS_REMARK_SENTENCE = "Quotation marks in all chapters were automatically denormalized."
+    _DENORMALIZED_CHAPTERS_REMARK_SENTENCE = (
         "Quotation marks in the following chapters have been automatically denormalized after translation: "
+    )
+    _SKIPPED_CHAPTERS_REMARK_SENTENCE = (
+        "Quotation marks in the following chapters could not be successfully denormalized: "
     )
     _project_convention_cache: Dict[str, QuoteConvention] = {}
 
@@ -215,12 +219,27 @@ class DenormalizeQuotationMarksPostprocessor:
             for chapter_num, strategy in enumerate(best_chapter_strategies, 1)
             if strategy != QuotationMarkUpdateStrategy.SKIP
         ]
+        skipped_chapters: List[int] = [
+            chapter_num
+            for chapter_num, strategy in enumerate(best_chapter_strategies, 1)
+            if strategy == QuotationMarkUpdateStrategy.SKIP
+        ]
 
+        return self._create_remark_from_processed_and_skipped_chapters(processed_chapters, skipped_chapters)
+
+    def _create_remark_from_processed_and_skipped_chapters(
+        self, processed_chapters: List[int], skipped_chapters: List[int]
+    ) -> str:
         if len(processed_chapters) == 0:
             return self._NO_CHAPTERS_REMARK_SENTENCE
+        if len(skipped_chapters) == 0:
+            return self._ALL_CHAPTERS_REMARK_SENTENCE
         return (
-            self._REMARK_SENTENCE
-            + ", ".join(self._create_ranges_from_consecutive_chapter_numbers(processed_chapters))
+            self._DENORMALIZED_CHAPTERS_REMARK_SENTENCE
+            + self.join_items_for_remark(self._create_ranges_from_consecutive_chapter_numbers(processed_chapters))
+            + ". "
+            + self._SKIPPED_CHAPTERS_REMARK_SENTENCE
+            + self.join_items_for_remark(self._create_ranges_from_consecutive_chapter_numbers(skipped_chapters))
             + "."
         )
 
@@ -246,6 +265,13 @@ class DenormalizeQuotationMarksPostprocessor:
             joined_chapters.append(f"{start}-{end}")
 
         return joined_chapters
+
+    def join_items_for_remark(self, items: List[str]) -> str:
+        if len(items) == 1:
+            return items[0]
+        elif len(items) == 2:
+            return f"{items[0]} and {items[1]}"
+        return f"{', '.join(items[:-1])}, and {items[-1]}"
 
     def postprocess_usfm(
         self,
