@@ -35,7 +35,7 @@ class SILExperiment:
     commit: Optional[str] = None
     clearml_tag: Optional[str] = None
     quality_estimation: bool = False
-    diff_predictions: Optional[str] = None
+    test_data_file: Optional[str] = None
 
     def __post_init__(self):
         self.clearml = SILClearML(
@@ -160,10 +160,10 @@ class SILExperiment:
                 raise RuntimeError("A Scripture book, file, or file prefix must be specified for translation.")
 
         # Run quality estimation once after all translations complete
-        if self.quality_estimation and self.save_confidences and self.diff_predictions and confidence_files:
+        if self.quality_estimation and self.save_confidences and self.test_data_file and confidence_files:
             print("Running quality estimation...")
-            diff_predictions_path = get_mt_exp_dir(self.diff_predictions)
-            estimate_quality(diff_predictions_path, confidence_files)
+            test_data_file_path = get_mt_exp_dir(self.test_data_file)
+            estimate_quality(test_data_file_path, confidence_files)
             print("Quality estimation completed.")
         elif self.quality_estimation and self.save_confidences and not confidence_files:
             print("Warning: No confidence files were created during translation.")
@@ -223,14 +223,14 @@ def main() -> None:
         "--quality-estimation",
         default=False,
         action="store_true",
-        help="Run quality estimation after translation completes. Requires --save-confidences and --diff-predictions.",
+        help="Run quality estimation after translation completes. Requires --save-confidences and --test-data-file",
     )
     parser.add_argument(
-        "--diff-predictions",
+        "--test-data-file",
         type=str,
         default=None,
-        help="The diff predictions path relative to MT/experiments for quality estimation."
-        + " e.g. 'project_folder/exp_folder/diff_predictions.5000.xlsx'.",
+        help="The tsv file relative to MT/experiments containing the test data to determine line of best fit."
+        + "e.g. `project_folder/exp_folder/test.trg-predictions.detok.txt.5000.scores.tsv`",
     )
     parser.add_argument("--mt-dir", default=None, type=str, help="The machine translation directory.")
     parser.add_argument(
@@ -267,8 +267,8 @@ def main() -> None:
     if args.quality_estimation and not args.save_confidences:
         parser.error("--quality-estimation requires --save-confidences to be enabled.")
 
-    if args.quality_estimation and args.diff_predictions is None:
-        parser.error("--quality-estimation requires --diff-predictions to be specified.")
+    if args.quality_estimation and args.test_data_file is None:
+        parser.error("--quality-estimation requires --test-data-file to be specified.")
 
     if args.mt_dir is not None:
         SIL_NLP_ENV.set_machine_translation_dir(SIL_NLP_ENV.data_dir / args.mt_dir)
@@ -300,7 +300,7 @@ def main() -> None:
         scorers=set(s.lower() for s in args.scorers),
         score_by_book=args.score_by_book,
         quality_estimation=args.quality_estimation,
-        diff_predictions=args.diff_predictions,
+        test_data_file=args.test_data_file,
     )
 
     if not args.save_checkpoints:

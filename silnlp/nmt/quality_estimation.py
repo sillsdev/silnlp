@@ -51,19 +51,19 @@ class BookScores:
         return self.scores.get(book)
 
 
-def estimate_quality(diff_predictions_file: Path, confidence_files: List[Path]) -> None:
-    verse_scores, chapter_scores, book_scores = project_chrf3(diff_predictions_file, confidence_files)
+def estimate_quality(test_data_file: Path, confidence_files: List[Path]) -> None:
+    verse_scores, chapter_scores, book_scores = project_chrf3(test_data_file, confidence_files)
     compute_usable_proportions(verse_scores, chapter_scores, book_scores, confidence_files[0].parent)
 
 
 def project_chrf3(
-    diff_predictions_file: Path, confidence_files: List[Path]
+    test_data_file: Path, confidence_files: List[Path]
 ) -> Tuple[List[VerseScore], ChapterScores, BookScores]:
-    chrf3_scores, confidence_scores = extract_diff_predictions(diff_predictions_file)
+    chrf3_scores, confidence_scores = extract_test_data(test_data_file)
     if len(chrf3_scores) != len(confidence_scores):
         raise ValueError(
             f"The number of chrF3 scores ({len(chrf3_scores)}) and confidence scores ({len(confidence_scores)}) "
-            f"in {diff_predictions_file} do not match."
+            f"in {test_data_file} do not match."
         )
     slope, intercept = linregress(confidence_scores, chrf3_scores)[:2]
     verse_scores: List[VerseScore] = []
@@ -96,40 +96,32 @@ def project_chrf3(
     return verse_scores, chapter_scores, book_scores
 
 
-def extract_diff_predictions(diff_predictions_file_path) -> Tuple[List[float], List[float]]:
-    chrf3_scores = extract_diff_predictions_column(diff_predictions_file_path, "chrf3")
-    confidence_scores = extract_diff_predictions_column(diff_predictions_file_path, "confidence")
+def extract_test_data(test_data_file_path) -> Tuple[List[float], List[float]]:
+    chrf3_scores: List[float] = []
+    confidence_scores: List[float] = []
+    with open(test_data_file_path, "r", encoding="utf-8") as f:
+        header = next(f).strip().lower().split("\t")
+        try:
+            chrf3_index = header.index("chrf3")
+            confidence_index = header.index("confidence")
+        except ValueError as e:
+            raise ValueError(
+                f"Could not find 'chrF3' and 'confidence' columns in header of {test_data_file_path}: {header}"
+            ) from e
+        for line_num, line in enumerate(f, start=2):
+            cols = line.strip().split("\t")
+            try:
+                chrf3 = float(cols[chrf3_index])
+                confidence = float(cols[confidence_index])
+                chrf3_scores.append(chrf3)
+                confidence_scores.append(confidence)
+            except (ValueError, IndexError) as e:
+                raise ValueError(
+                    f"Error parsing line {line_num} in {test_data_file_path}: {line.strip()}"
+                    f" (chrF3 index: {chrf3_index}, confidence index: {confidence_index})"
+                ) from e
+
     return chrf3_scores, confidence_scores
-
-
-def extract_diff_predictions_column(file_path: Path, target_header: str) -> List[float]:
-    wb = load_workbook(file_path)
-    ws = wb.active
-
-    header_row_idx = None
-    col_idx = None
-
-    for row in ws.iter_rows():
-        for cell in row:
-            if cell.value == "Score Summary":
-                break
-            if str(cell.value).lower() == target_header.lower():
-                header_row_idx = cell.row
-                col_idx = cell.column
-                break
-        if header_row_idx:
-            break
-
-    if not header_row_idx:
-        raise ValueError(f"Header '{target_header}' not found.")
-
-    data = []
-    for row in ws.iter_rows(min_row=header_row_idx + 1, min_col=col_idx, max_col=col_idx):
-        cell_value = row[0].value
-        if cell_value is not None:
-            data.append(float(cell_value))
-
-    return data
 
 
 def get_verse_scores(input_file_path: Path, slope: float, intercept: float) -> List[VerseScore]:
@@ -301,9 +293,10 @@ def calculate_usable_prob(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Estimate the quality of drafts created by an NMT model.")
     parser.add_argument(
-        "diff_predictions",
-        help="The diff predictions path relative to MT/experiments to determine line of best fit."
-        + " e.g. 'project_folder/exp_folder/diff_predictions.5000.xlsx'.",
+        "test_data_file",
+        type=str,
+        help="The tsv file relative to MT/experiments containing the test data to determine line of best fit."
+        + "e.g. `project_folder/exp_folder/test.trg-predictions.detok.txt.5000.scores.tsv",
     )
     parser.add_argument(
         "confidence_files",
@@ -364,7 +357,7 @@ def main() -> None:
         for book_id in args.books:
             confidence_files.extend(confidence_dir.glob(f"[0-9]*{book_id}{draft_suffix}.*.confidences.tsv"))
 
-    estimate_quality(get_mt_exp_dir(args.diff_predictions), confidence_files)
+    estimate_quality(get_mt_exp_dir(args.test_data_file), confidence_files)
 
 
 if __name__ == "__main__":

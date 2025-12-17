@@ -445,14 +445,14 @@ def main() -> None:
         "--quality-estimation",
         default=False,
         action="store_true",
-        help="Run quality estimation after translation completes. Requires --save-confidences and --diff-predictions.",
+        help="Run quality estimation after translation completes. Requires --save-confidences and --test-data-file.",
     )
     parser.add_argument(
-        "--diff-predictions",
+        "--test-data-file",
         type=str,
         default=None,
-        help="The diff predictions path relative to MT/experiments for quality estimation."
-        + " e.g. 'project_folder/exp_folder/diff_predictions.5000.xlsx'.",
+        help="The tsv file relative to MT/experiments containing the test data to determine line of best fit."
+        + "e.g. `project_folder/exp_folder/test.trg-predictions.detok.txt.5000.scores.tsv`",
     )
     parser.add_argument(
         "--debug",
@@ -469,8 +469,8 @@ def main() -> None:
     if args.quality_estimation and not args.save_confidences:
         parser.error("--quality-estimation requires --save-confidences to be enabled.")
 
-    if args.quality_estimation and args.diff_predictions is None:
-        parser.error("--quality-estimation requires --diff-predictions to be specified.")
+    if args.quality_estimation and args.test_data_file is None:
+        parser.error("--quality-estimation requires --test-data-file to be specified.")
 
     get_git_revision_hash()
 
@@ -539,10 +539,10 @@ def main() -> None:
     else:
         raise RuntimeError("A Scripture book, file, or file prefix must be specified.")
 
-    if args.quality_estimation and args.save_confidences and args.diff_predictions and confidence_files:
+    if args.quality_estimation and args.save_confidences and args.test_data_file and confidence_files:
         LOGGER.info("Running quality estimation...")
-        diff_predictions_path = get_mt_exp_dir(args.diff_predictions)
-        estimate_quality(diff_predictions_path, confidence_files)
+        test_data_file_path = get_mt_exp_dir(args.test_data_file)
+        estimate_quality(test_data_file_path, confidence_files)
         LOGGER.info("Quality estimation completed.")
     elif args.quality_estimation and args.save_confidences and not confidence_files:
         LOGGER.warning("Quality estimation was requested but no confidence files were generated during translation.")
