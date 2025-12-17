@@ -24,7 +24,6 @@ logging.getLogger("sacrebleu").setLevel(logging.ERROR)
 
 SUPPORTED_SCORERS = [
     "bleu",
-    "sentencebleu",
     "chrf3",
     "chrf3+",
     "chrf3++",
@@ -33,6 +32,17 @@ SUPPORTED_SCORERS = [
     "m-chrf3",
     "m-chrf3+",
     "m-chrf3++",
+    "meteor",
+    "ter",
+    "confidence",
+]
+
+SUPPORTED_SENTENCE_SCORERS = [
+    "bleu",
+    "chrf3",
+    "chrf3+",
+    "chrf3++",
+    "spbleu",
     "meteor",
     "ter",
     "confidence",
@@ -111,15 +121,6 @@ def score_pair(
     bleu_score = None
     if "bleu" in scorers:
         bleu_score = sacrebleu.corpus_bleu(
-            pair_sys,
-            pair_refs,
-            lowercase=True,
-            tokenize=config.data.get("sacrebleu_tokenize", "13a"),
-        )
-
-    if "sentencebleu" in scorers:
-        write_sentence_bleu(
-            config.exp_dir / (predictions_detok_file_name + ".scores.tsv"),
             pair_sys,
             pair_refs,
             lowercase=True,
@@ -233,7 +234,113 @@ def score_pair(
                 ) from e
         other_scores["confidence"] = gmean(confidences)
 
+    write_pair_verse_scores(
+        pair_sys, pair_refs, trg_iso, predictions_detok_file_name, scorers, other_scores, config, confidences
+    )
+
     return PairScore(book, src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores, draft_index)
+
+
+def write_pair_verse_scores(
+    pair_sys: List[str],
+    pair_refs: List[List[str]],
+    trg_iso: str,
+    predictions_detok_file_name: str,
+    scorers: Set[str],
+    other_scores: Dict[str, float],
+    config: Config,
+    confidences: List[float],
+) -> None:
+    other_verse_scores: Dict[str, float] = {}
+
+    with open(
+        config.exp_dir / (predictions_detok_file_name + ".scores.tsv"), "w", encoding="utf-8", newline="\n"
+    ) as scores_file:
+        header = (
+            "Verse"
+            + (
+                "\tBLEU\tBLEU_1gram_prec\tBLEU_2gram_prec\tBLEU_3gram_prec\tBLEU_4gram_prec\tBLEU_brevity_penalty"
+                if "bleu" in scorers
+                else ""
+            )
+            + ("\t" if len(other_scores) > 0 else "")
+            + "\t".join(other_scores.keys())
+            + "\tPrediction"
+        )
+        for ref in pair_refs:
+            header += "\tReference"
+        header += "\n"
+        scores_file.write(header)
+        for index, pred in enumerate(pair_sys):
+            sentences: List[str] = []
+            for ref in pair_refs:
+                sentences.append(ref[index])
+            if "bleu" in scorers:
+                bleu_verse_score = sacrebleu.sentence_bleu(
+                    pred,
+                    sentences,
+                    lowercase=True,
+                    tokenize=config.data.get("sacrebleu_tokenize", "13a"),
+                )
+
+            other_verse_scores: Dict[str, float] = {}
+            if "chrf3" in scorers:
+                chrf3_verse_score = sacrebleu.corpus_chrf(
+                    [pred], [sentences], char_order=6, beta=3, remove_whitespace=True
+                )
+                other_verse_scores["chrF3"] = chrf3_verse_score.score
+
+            if "chrf3+" in scorers:
+                chrfp_verse_score = sacrebleu.corpus_chrf(
+                    [pred], [sentences], char_order=6, beta=3, word_order=1, remove_whitespace=True, eps_smoothing=True
+                )
+                other_verse_scores["chrF3+"] = chrfp_verse_score.score
+
+            if "chrf3++" in scorers:
+                chrfpp_verse_score = sacrebleu.corpus_chrf(
+                    [pred], [sentences], char_order=6, beta=3, word_order=2, remove_whitespace=True, eps_smoothing=True
+                )
+                other_verse_scores["chrF3++"] = chrfpp_verse_score.score
+
+            if "spbleu" in scorers:
+                spbleu_verse_score = sacrebleu.corpus_bleu(
+                    [pred],
+                    [sentences],
+                    lowercase=True,
+                    tokenize="flores200",
+                )
+                other_verse_scores["spBLEU"] = spbleu_verse_score.score
+
+            if "meteor" in scorers:
+                meteor_verse_score = compute_meteor_score(trg_iso, [pred], [sentences])
+                if meteor_verse_score is not None:
+                    other_verse_scores["METEOR"] = meteor_verse_score
+
+            if "ter" in scorers:
+                ter_verse_score = sacrebleu.corpus_ter([pred], [sentences])
+                if ter_verse_score.score >= 0:
+                    other_verse_scores["TER"] = ter_verse_score.score
+
+            if "confidence" in scorers:
+                other_verse_scores["confidence"] = confidences[index]
+
+            scores_file.write(f"{index + 1}")
+
+            if "bleu" in scorers:
+                scores_file.write(
+                    f"\t{bleu_verse_score.score:.2f}\t{bleu_verse_score.precisions[0]:.2f}\t{bleu_verse_score.precisions[1]:.2f}\t"
+                    f"{bleu_verse_score.precisions[2]:.2f}\t{bleu_verse_score.precisions[3]:.2f}\t{bleu_verse_score.bp:.3f}"
+                )
+            for scorer, val in other_verse_scores.items():
+                if scorer == "confidence":
+                    scores_file.write(f"\t{val:.8f}")
+                else:
+                    scores_file.write(f"\t{val:.2f}")
+
+            scores_file.write("\t" + pred.rstrip("\n"))
+            for sentence in sentences:
+                scores_file.write("\t" + sentence.rstrip("\n"))
+            scores_file.write("\n")
 
 
 def score_individual_books(
@@ -430,34 +537,6 @@ def sentence_bleu(
         effective_order=use_effective_order,
     )
     return metric.sentence_score(hypothesis, references)
-
-
-def write_sentence_bleu(
-    scores_path: Path,
-    preds: List[str],
-    refs: List[List[str]],
-    lowercase: bool = False,
-    tokenize: str = "13a",
-):
-    with scores_path.open("w", encoding="utf-8", newline="\n") as scores_file:
-        scores_file.write("Verse\tBLEU\t1-gram\t2-gram\t3-gram\t4-gram\tBP\tPrediction")
-        for ref in refs:
-            scores_file.write("\tReference")
-        scores_file.write("\n")
-        verse_num = 0
-        for pred in preds:
-            sentences: List[str] = []
-            for ref in refs:
-                sentences.append(ref[verse_num])
-            bleu = sentence_bleu(pred, sentences, lowercase=lowercase, tokenize=tokenize)
-            scores_file.write(
-                f"{verse_num + 1}\t{bleu.score:.2f}\t{bleu.precisions[0]:.2f}\t{bleu.precisions[1]:.2f}\t"
-                f"{bleu.precisions[2]:.2f}\t{bleu.precisions[3]:.2f}\t{bleu.bp:.3f}\t" + pred.rstrip("\n")
-            )
-            for sentence in sentences:
-                scores_file.write("\t" + sentence.rstrip("\n"))
-            scores_file.write("\n")
-            verse_num += 1
 
 
 def test_checkpoint(
