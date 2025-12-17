@@ -10,7 +10,7 @@ from typing import Collection, Dict, Generator, List, Optional, TextIO
 
 import regex
 from machine.corpora import AlignedWordPair, FileParatextProjectSettingsParser, ScriptureRef, UsfmFileText
-from machine.scripture import VerseRef
+from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
 from machine.tokenization import LatinWordTokenizer
 from pyparsing import Iterable
 
@@ -181,6 +181,12 @@ class VerseSegmenter(ABC):
     ) -> SegmentedPassage:
         target_verses = []
 
+        # Special case where passage is a single verse
+        if len(target_verse_offsets) == 0:
+            verse_ref = references[0]
+            target_verses.append(Verse(verse_ref, target_text))
+            return self._adjust_verse_boundaries(target_verses)
+
         current_verse_starting_char_index = 0
         current_verse_ending_char_index = 0
         current_verse_offset_index = 0
@@ -284,7 +290,7 @@ class FewestCrossedAlignmentsVerseSegmenter(VerseSegmenter):
                 if len(best_split_indices) > 1:
                     best_split_index = best_split_indices[0]
                     for split_index in best_split_indices:
-                        if not contains_letter(target_tokens[split_index-1]):
+                        if not contains_letter(target_tokens[split_index - 1]):
                             best_split_index = split_index
                             break
                     target_verse_offsets.append(best_split_index)
@@ -696,6 +702,7 @@ def main() -> None:
     parser.add_argument(
         "--use-saved-alignments", help="Use pre-computed alignments from a previous run", default=None, action="store_true"
     )
+    parser.add_argument("--vref", help="Output vref file for target verses", default=None, action="store_true")
     args = parser.parse_args()
 
     parallel_passages = ParallelPassageCollectionFactory(args.save_alignments, args.use_saved_alignments).create(
@@ -712,6 +719,24 @@ def main() -> None:
         for src_passage, trg_passage in zip(src_segmented_passages, trg_segmented_passages):
             src_passage.write_to_file(src_output)
             trg_passage.write_to_file(trg_output)
+
+    if args.vref is not None:
+        vref_path = Path(args.target_passages).with_suffix(".vref.txt")
+        template_vref_path = SIL_NLP_ENV.assets_dir / "vref.txt"
+
+        verse_map: Dict[str, str] = {
+            str(verse.reference.to_versification(ORIGINAL_VERSIFICATION)): verse.text
+            for trg_passage in trg_segmented_passages
+            for verse in trg_passage.verses
+        }
+
+        with (
+            open(template_vref_path, "r", encoding="utf-8") as template_file,
+            open(vref_path, "w", encoding="utf-8") as vref_output,
+        ):
+            for line in template_file:
+                template_ref = line.rstrip("\n")
+                vref_output.write(f"{verse_map.get(template_ref, '')}\n")
 
     if args.compare_against is not None:
         reference_segmentations = ReferenceVerseSegmentationReader().read_passages(
