@@ -124,6 +124,7 @@ def extract_corpora_wrapper(project_name: str, extract_config: dict, overwrite=F
         include_markers=extract_config.get("markers", False),
         extract_lemmas=extract_config.get("lemmas", False),
         extract_project_vrefs=extract_config.get("project-vrefs", False),
+        extract_surface_forms=extract_config.get("surface-forms", False),
     )
 
 
