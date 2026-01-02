@@ -276,6 +276,7 @@ def main() -> None:
                 include_markers=extract_config.get("markers", False),
                 extract_lemmas=extract_config.get("lemmas", False),
                 extract_project_vrefs=extract_config.get("project-vrefs", False),
+                extract_surface_forms=extract_config.get("surface-forms", False),
             )
 
         if args.collect_verse_counts:
