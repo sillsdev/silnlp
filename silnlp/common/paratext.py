@@ -255,7 +255,7 @@ def extract_term_renderings(project_dir: Path, corpus_filename: Path, output_dir
     terms_renderings_path = output_dir / f"{settings.language_code}-{project_dir.name}-{list_type}-renderings.txt"
     count = 0
 
-    key_terms = {k.id: k for k in FileParatextProjectTermsParser(project_dir).parse([])}
+    key_terms = {k.id: k for k in FileParatextProjectTermsParser(project_dir).parse([], include_glosses=False)}
     extracted_term_ids = set()
     with (
         terms_renderings_path.open("w", encoding="utf-8", newline="\n") as terms_renderings_file,
