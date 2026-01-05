@@ -23,7 +23,7 @@ from machine.corpora import (
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, VersificationType, book_id_to_number, get_books
 from machine.tokenization import WhitespaceTokenizer
 
-from .corpus import get_terms_glosses_path, get_terms_metadata_path, get_terms_vrefs_path, load_corpus
+from .corpus import get_terms_glosses_path, get_terms_metadata_path, load_corpus
 from .environment import SIL_NLP_ENV
 from .utils import unique_list
 
@@ -255,7 +255,7 @@ def extract_term_renderings(project_dir: Path, corpus_filename: Path, output_dir
     terms_renderings_path = output_dir / f"{settings.language_code}-{project_dir.name}-{list_type}-renderings.txt"
     count = 0
 
-    key_terms = {k.id: k for k in FileParatextProjectTermsParser(project_dir).parse([], include_glosses=False)}
+    key_terms = {k.id: k for k in FileParatextProjectTermsParser(project_dir).parse([], use_term_glosses=False)}
     extracted_term_ids = set()
     with (
         terms_renderings_path.open("w", encoding="utf-8", newline="\n") as terms_renderings_file,
