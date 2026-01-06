@@ -1,6 +1,7 @@
 import argparse
 import getpass
 import logging
+import re
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
@@ -11,7 +12,7 @@ from pathlib import Path
 import wildebeest.wb_analysis as wb_ana
 import yaml
 
-import silnlp.common.clean_projects as clean_projects
+from silnlp.common.clean_projects import process_single_project_for_cleaning
 
 from ..nmt.config_utils import create_config
 from .collect_verse_counts import collect_verse_counts
@@ -167,22 +168,26 @@ def error_checking(copy_from: Path | None, project: str) -> None:
         tree = ET.parse(settings_file)
         root = tree.getroot()
         naming_element = root.find(".//Naming")
+        pre_part, post_part, book_name_form = None, None, None
         if naming_element is not None:
             pre_part = naming_element.get("PrePart", "")
             post_part = naming_element.get("PostPart", "")
             book_name_form = naming_element.get("BookNameForm", "")
-            parts = [pre_part, post_part, book_name_form]
         else:
-            naming_element = None
-            parts = [None, None, None]
+            pre_part = root.find(".//FileNamePrePart").text
+            post_part = root.find(".//FileNamePostPart").text
+            book_name_form = root.find(".//FileNameBookNameForm").text
+        book_part = re.sub(r"\d", "[0-9]", book_name_form)
+        book_part = re.sub(r"([A-Z])", r"[A-Z]", book_part)
+        pattern = f"{pre_part}.*{book_part}.*{post_part}"
         matching_files = False
         for file in project_path.iterdir():
-            if all(part is not None and part in file.name for part in parts):
+            if re.match(pattern, file.name):
                 matching_files = True
                 break
         if not matching_files:
             raise ValueError(
-                f"{project_path} does not contain any files using the naming convention, '{naming_element}', found in the Settings.xml file."
+                f"{project_path} does not contain any files using the naming convention, '{pattern}', found in the Settings.xml file."
             )
 
 
@@ -272,22 +277,20 @@ def main() -> None:
 
         if not args.no_clean:
             LOGGER.info(f"Cleaning Paratext project: {project_name}.")
-            old_argv = sys.argv
-            try:
-                sys.argv = ["--folders", str(local_project_path)]
-                clean_projects.main()
-            finally:
-                sys.argv = old_argv
+            process_single_project_for_cleaning(
+                local_project_path,
+                argparse.Namespace(dry_run=False, verbose=0),
+            )
 
         if "-" in project_name:
             LOGGER.info(f"Project name '{project_name}' contains hyphens. Replacing hyphens with underscores.")
             project_name = project_name.replace("-", "_")
             LOGGER.info(f"New project name: '{project_name}'")
-        if args.timestamp:
+        if args.datestamp:
             now = datetime.now()
-            timestamp = now.strftime("%Y_%m_%d")
-            project_name = f"{project_name}_{timestamp}"
-            LOGGER.info(f"Timestamping project. New project name: {project_name}")
+            datestamp = now.strftime("%Y_%m_%d")
+            project_name = f"{project_name}_{datestamp}"
+            LOGGER.info(f"Datestamping project. New project name: {project_name}")
 
         # Rename local project folder to project_name if it exists
         if local_project_path.exists() and local_project_path.name != project_name:
