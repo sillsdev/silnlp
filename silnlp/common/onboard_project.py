@@ -202,10 +202,10 @@ def main() -> None:
         help="Collect various counts from the extracted Paratext project.",
     )
     parser.add_argument(
-        "--clean-project",
+        "--no-clean",
         default=False,
         action="store_true",
-        help="Cleans the Paratext project folder by removing unnecessary files and folders before copying. Only used if --copy-from is provided.",
+        help="Skips cleaning the Paratext project folder.",
     )
     parser.add_argument(
         "--datestamp",

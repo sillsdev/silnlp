@@ -98,24 +98,36 @@ def collect_verse_counts(
 
     # Initialize the data frames and determine which files need to be processed
     verse_counts_path = SIL_NLP_ENV.mt_experiments_dir / "verse_counts" / "verse_counts.csv"
+    verse_counts_df = None
     if verse_counts_path.is_file():
-        verse_counts_df = pd.read_csv(verse_counts_path, index_col="file")
-        if recount:
-            verse_counts_df = verse_counts_df.drop(index=project_names, errors="ignore")
-        projects_to_process = list(set(project_names) - set(verse_counts_df.index))
-        verse_counts_df = verse_counts_df.reindex(set(verse_counts_df.index) | set(project_names))
-    else:
+        try:
+            verse_counts_df = pd.read_csv(verse_counts_path, index_col="file")
+            if recount:
+                verse_counts_df = verse_counts_df.drop(index=project_names, errors="ignore")
+            projects_to_process = list(set(project_names) - set(verse_counts_df.index))
+            verse_counts_df = verse_counts_df.reindex(set(verse_counts_df.index) | set(project_names))
+        except (PermissionError, OSError, IOError) as e:
+            LOGGER.warning(f"Cannot read {verse_counts_path}: {e}. Creating new dataframe.")
+            verse_counts_df = None
+
+    if verse_counts_df is None:
         verse_counts_df = pd.DataFrame(columns=["Books", "Total", "OT", "NT", "DT"] + OT_CANON + NT_CANON + DT_CANON)
         verse_counts_df["file"] = project_names
         verse_counts_df = verse_counts_df.set_index("file")
 
     verse_percentages_path = SIL_NLP_ENV.mt_experiments_dir / "verse_counts" / "verse_percentages.csv"
+    verse_percentages_df = None
     if verse_percentages_path.is_file():
-        verse_percentages_df = pd.read_csv(verse_percentages_path, index_col="file")
-        if recount:
-            verse_percentages_df = verse_percentages_df.drop(index=project_names, errors="ignore")
-        verse_percentages_df = verse_percentages_df.reindex(set(verse_percentages_df.index) | set(project_names))
-    else:
+        try:
+            verse_percentages_df = pd.read_csv(verse_percentages_path, index_col="file")
+            if recount:
+                verse_percentages_df = verse_percentages_df.drop(index=project_names, errors="ignore")
+            projects_to_process = list(set(project_names) - set(verse_percentages_df.index))
+            verse_percentages_df = verse_percentages_df.reindex(set(verse_percentages_df.index) | set(project_names))
+        except (PermissionError, OSError, IOError) as e:
+            LOGGER.warning(f"Cannot read {verse_percentages_path}: {e}. Creating new dataframe.")
+            verse_percentages_df = None
+    if verse_percentages_df is None:
         verse_percentages_df = pd.DataFrame(columns=["Total", "OT", "NT", "DT"] + OT_CANON + NT_CANON + DT_CANON)
         verse_percentages_df["file"] = project_names
         verse_percentages_df = verse_percentages_df.set_index("file")
@@ -225,8 +237,11 @@ def collect_verse_counts(
         verse_percentages_df.loc[project_names, "Total"] = 100 * round(
             verse_counts_df.loc[project_names, "Total"] / verse_counts_df.loc["complete", "Total"], 3
         )
-    verse_counts_df.loc[["complete"] + sorted(project_names)].astype(int).to_csv(output_path / "verse_counts.csv")
-    verse_percentages_df.loc[sorted(project_names)].to_csv(output_path / "verse_percentages.csv")
+    try:
+        verse_counts_df.loc[["complete"] + sorted(project_names)].astype(int).to_csv(output_path / "verse_counts.csv")
+        verse_percentages_df.loc[sorted(project_names)].to_csv(output_path / "verse_percentages.csv")
+    except Exception as e:
+        LOGGER.warning(f"Error saving verse counts or percentages: {e}")
 
     # Copy over chapter counts for partially complete books
     for project in project_names:
