@@ -148,7 +148,17 @@ def get_config(config_path: str) -> dict:
     else:
         return {}
 
-
+def validate_zip(zip_path, expected_folder):
+    "Check if zip is valid for extraction"
+    with zipfile.ZipFile(zip_path) as zf:
+        names = [Path(n) for n in zf.namelist()]
+        if not names: return False
+        roots = {n.parts[0] if len(n.parts) > 1 else n.name.rstrip('/') for n in names}
+        has_root_files = any(len(n.parts) == 1 and not n.name.endswith('/') for n in names)
+        if not has_root_files and len(roots) == 1:
+            return roots.pop() == expected_folder
+        return True
+    
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Performs several steps to onboard a new project before training a model.",
@@ -198,10 +208,10 @@ def main() -> None:
         help="Cleans the Paratext project folder by removing unnecessary files and folders before copying. Only used if --copy-from is provided.",
     )
     parser.add_argument(
-        "--timestamp",
+        "--datestamp",
         default=False,
         action="store_true",
-        help="Add a timestamp to the project folder name when creating a new Paratext project folder.",
+        help="Add a datestamp to the project folder name before copying to the Paratext project folder.",
     )
     parser.add_argument(
         "--wildebeest", default=False, action="store_true", help="Run Wildebeest analysis on the extracted corpora."
@@ -212,60 +222,90 @@ def main() -> None:
     if not args.projects:
         raise ValueError("Project name is required. Please provide a valid Paratext project name using <project>.")
 
-    copy_from_path = Path(args.copy_from).expanduser()
-    missing_folders = [copy_from_path / p for p in args.projects if not (copy_from_path / p).is_dir()]
-    if missing_folders: sys.exit(f"Error these projects were not found: {', '.join(str(missing_folder) for missing_folder in missing_folders)}")
-
     config = get_config(args.config) if args.config else {}
 
-    if args.clean_project and args.copy_from:
+    if args.copy_from:
+        copy_from_path = Path(args.copy_from).expanduser()
+        errors = []
+        
+        for project in args.projects:
+            project_folder = copy_from_path / project
+            project_zip = copy_from_path / f"{project}.zip"
+            
+            if not project_folder.is_dir() and not project_zip.exists():
+                errors.append(f"Project not found: {project} (no folder or zip in {copy_from_path})")
+            elif project_zip.exists() and not project_folder.is_dir():
+                if not validate_zip(project_zip, project): errors.append(f"Invalid zip: {project_zip} does not extract to single folder named {project}")
+            
+            normalized_name = project.replace('-', '_')
+            if args.datestamp: normalized_name = f"{normalized_name}_{datetime.now().strftime('%Y%m%d')}"
+            destination_folder = SIL_NLP_ENV.pt_projects_dir / normalized_name
+            if destination_folder.exists(): errors.append(f"Destination already exists: {destination_folder}")
+        
+        if not SIL_NLP_ENV.pt_projects_dir.exists(): errors.append(f"Destination directory does not exist: {SIL_NLP_ENV.pt_projects_dir}")
+        elif not SIL_NLP_ENV.pt_projects_dir.is_dir(): errors.append(f"Destination is not a directory: {SIL_NLP_ENV.pt_projects_dir}")
+        
+        if errors:
+            for error in errors: LOGGER.error(error)
+            sys.exit("Validation failed. No processing performed.")
+
+
+    if args.copy_from:
+        for project in args.projects:
+            project_folder = copy_from_path / project
+            project_zip = copy_from_path / f"{project}.zip"
+            
+            if project_zip.exists() and not project_folder.is_dir():
+                LOGGER.info(f"Unzipping {project_zip}")
+                try:
+                    with zipfile.ZipFile(project_zip) as zf: zf.extractall(copy_from_path)
+                except RuntimeError:
+                    password = getpass.getpass(f"Password for {project_zip}: ")
+                    with zipfile.ZipFile(project_zip) as zf: zf.extractall(copy_from_path, pwd=password.encode())
+                
+                names = [Path(n) for n in zipfile.ZipFile(project_zip).namelist()]
+                roots = {n.parts[0] if len(n.parts) > 1 else n.name.rstrip('/') for n in names}
+                has_root_files = any(len(n.parts) == 1 and not n.name.endswith('/') for n in names)
+                if has_root_files or len(roots) != 1 or roots.pop() != project:
+                    extracted_folder = copy_from_path / project
+                    extracted_folder.mkdir(exist_ok=True)
+                    for item in copy_from_path.iterdir():
+                        if item.is_file() and item != project_zip: item.rename(extracted_folder / item.name)
+
+
+    project_folders = []
+    for project in args.projects:
+        project_folder = copy_from_path / project
+        normalized_name = project.replace('-', '_')
+        if normalized_name != project:
+            normalized_folder = copy_from_path / normalized_name
+            LOGGER.info(f"Renaming {project_folder} to {normalized_folder}")
+            project_folder = project_folder.rename(normalized_folder)
+        if args.datestamp:
+            date_str = datetime.now().strftime('%Y%m%d')
+            datestamped_folder = copy_from_path / f"{normalized_name}_{date_str}"
+            LOGGER.info(f"Adding datestamp: {project_folder} to {datestamped_folder}")
+            project_folder = project_folder.rename(datestamped_folder)
+        project_folders.append(project_folder)
+        
+
+    if args.clean_project:
         LOGGER.info("Cleaning Paratext project folders.")
         old_argv = sys.argv
         try:
-            sys.argv = ["--folders", str(args.copy_from)]
+            sys.argv = ["clean_projects"] + [str(project_folder) for project_folder in project_folders]
             clean_projects.main()
         finally:
             sys.argv = old_argv
 
-    for project in args.projects:
-        if project.endswith(".zip"):
-            with zipfile.ZipFile(project, "r") as zip_ref:
-                # Check if any file in the zip is encrypted
-                temp_dir = tempfile.TemporaryDirectory()
-                needs_password = any(zinfo.flag_bits & 0x1 for zinfo in zip_ref.infolist())
-                if needs_password:
-                    if config.get("zip_passwords"):
-                        pwd = config["zip_passwords"].get(project, None)
-                    if not pwd:
-                        pwd = getpass.getpass(prompt=f"Enter password for {project}: ")
-                    zip_ref.extractall(temp_dir.name, pwd=pwd.encode())
-                else:
-                    zip_ref.extractall(temp_dir.name)
-            args.copy_from = temp_dir.name
-            project = Path(project).stem
-
-        project_name = project
-        if "-" in project_name:
-            LOGGER.info(f"Project name '{project_name}' contains hyphens. Replacing hyphens with underscores.")
-            project_name = project_name.replace("-", "_")
-            LOGGER.info(f"New project name: '{project_name}'")
-        if args.timestamp:
-            now = datetime.now()
-            timestamp = now.strftime("%Y_%m_%d")
-            project_name = f"{project_name}_{timestamp}"
-            LOGGER.info(f"Timestamping project. New project name: {project_name}")
-
-        if args.copy_from:
-            LOGGER.info(
-                f"Copying project: {project} from {args.copy_from} to {SIL_NLP_ENV.pt_projects_dir}/{project_name}"
-            )
-            source_path = Path(args.copy_from)
-            if source_path.name != project:
-                source_path = Path(source_path / project)
-            paratext_project_dir: Path = create_paratext_project_folder_if_not_exists(project_name)
-            copy_paratext_project_folder(source_path, paratext_project_dir, overwrite=args.overwrite)
+    for project_folder in project_folders:
+        project_name = project_folder.name
+        destination_folder = SIL_NLP_ENV.pt_projects_dir / project_name
+        LOGGER.info(f"Copying {project_name} from {args.copy_from} to {destination_folder}")
+        copy_paratext_project_folder(project_folder, SIL_NLP_ENV.pt_projects_dir, overwrite=args.overwrite)
 
         if args.extract_corpora:
+            LOGGER.info(f"Extracting corpora from {destination_folder}")
             extract_config: dict = config.get("extract_corpora", {})
             extract_corpora(
                 projects={project_name},
