@@ -212,6 +212,10 @@ def main() -> None:
     if not args.projects:
         raise ValueError("Project name is required. Please provide a valid Paratext project name using <project>.")
 
+    copy_from_path = Path(args.copy_from).expanduser()
+    missing_folders = [copy_from_path / p for p in args.projects if not (copy_from_path / p).is_dir()]
+    if missing_folders: sys.exit(f"Error these projects were not found: {', '.join(str(missing_folder) for missing_folder in missing_folders)}")
+
     config = get_config(args.config) if args.config else {}
 
     if args.clean_project and args.copy_from:
