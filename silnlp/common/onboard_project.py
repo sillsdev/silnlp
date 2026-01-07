@@ -1,8 +1,10 @@
 import argparse
 import getpass
 import logging
+import re
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -10,7 +12,7 @@ from pathlib import Path
 import wildebeest.wb_analysis as wb_ana
 import yaml
 
-import silnlp.common.clean_projects as clean_projects
+from silnlp.common.clean_projects import process_single_project_for_cleaning
 
 from ..nmt.config_utils import create_config
 from .collect_verse_counts import collect_verse_counts
@@ -149,6 +151,46 @@ def get_config(config_path: str) -> dict:
         return {}
 
 
+def check_for_project_errors(copy_from: Path | None, project: str) -> None:
+    if copy_from:
+        if not copy_from.exists():
+            raise FileNotFoundError(f"The specified --copy-from path '{copy_from}' does not exist.")
+        project_path = copy_from / project
+        settings_file = project_path / "Settings.xml"
+        if not project_path.exists():
+            raise FileNotFoundError(
+                f"The specified project folder '{project_path}' does not exist in the --copy-from path."
+            )
+        if not settings_file.exists():
+            raise FileNotFoundError(
+                f"The Settings.xml file was not found in the project folder '{project_path}'. Please ensure this is a valid Paratext project folder."
+            )
+        tree = ET.parse(settings_file)
+        root = tree.getroot()
+        naming_element = root.find(".//Naming")
+        pre_part, post_part, book_name_form = None, None, None
+        if naming_element is not None:
+            pre_part = naming_element.get("PrePart", "")
+            post_part = naming_element.get("PostPart", "")
+            book_name_form = naming_element.get("BookNameForm", "")
+        else:
+            pre_part = root.find(".//FileNamePrePart").text
+            post_part = root.find(".//FileNamePostPart").text
+            book_name_form = root.find(".//FileNameBookNameForm").text
+        book_part = re.sub(r"\d", "[0-9]", book_name_form)
+        book_part = re.sub(r"([A-Z])", r"[A-Z]", book_part)
+        pattern = f"{pre_part}.*{book_part}.*{post_part}"
+        matching_files = False
+        for file in project_path.iterdir():
+            if re.match(pattern, file.name):
+                matching_files = True
+                break
+        if not matching_files:
+            raise ValueError(
+                f"{project_path} does not contain any files using the naming convention, '{pattern}', found in the Settings.xml file."
+            )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Performs several steps to onboard a new project before training a model.",
@@ -157,7 +199,7 @@ def main() -> None:
     parser.add_argument(
         "projects",
         help="Paratext project name. The project will be stored on the bucket at Paratext/projects/<project>.",
-        nargs="*",
+        nargs="+",
         default=None,
     )
     parser.add_argument(
@@ -198,10 +240,10 @@ def main() -> None:
         help="Skips cleaning the Paratext project folder.",
     )
     parser.add_argument(
-        "--timestamp",
+        "--datestamp",
         default=False,
         action="store_true",
-        help="Add a timestamp to the project folder name when creating a new Paratext project folder.",
+        help="Add a datestamp to the project folder name when creating a new Paratext project folder.",
     )
     parser.add_argument(
         "--wildebeest", default=False, action="store_true", help="Run Wildebeest analysis on the extracted corpora."
@@ -209,22 +251,12 @@ def main() -> None:
     parser.add_argument("--stats", default=False, action="store_true", help="Compute tokenization statistics")
 
     args = parser.parse_args()
-    if not args.projects:
-        raise ValueError("Project name is required. Please provide a valid Paratext project name using <project>.")
-
     config = get_config(args.config) if args.config else {}
 
-    if not args.no_clean:
-        LOGGER.info("Cleaning Paratext project folders.")
-        old_argv = sys.argv
-        try:
-            sys.argv = ["--folders", str(args.copy_from)]
-            clean_projects.main()
-        finally:
-            sys.argv = old_argv
-
     for project in args.projects:
-        if project.endswith(".zip"):
+        check_for_project_errors(args.copy_from, project)
+        copy_from = args.copy_from
+        if project.endswith(".zip") or project.endswith(".p8z"):
             with zipfile.ZipFile(project, "r") as zip_ref:
                 # Check if any file in the zip is encrypted
                 temp_dir = tempfile.TemporaryDirectory()
@@ -237,31 +269,39 @@ def main() -> None:
                     zip_ref.extractall(temp_dir.name, pwd=pwd.encode())
                 else:
                     zip_ref.extractall(temp_dir.name)
-            args.copy_from = temp_dir.name
+            copy_from = temp_dir.name
             project = Path(project).stem
 
         project_name = project
-        local_project_path = Path(args.copy_from) / project if args.copy_from else None
+        local_project_path = Path(copy_from) / project if copy_from else None
+
+        if not args.no_clean:
+            LOGGER.info(f"Cleaning Paratext project: {project_name}.")
+            process_single_project_for_cleaning(
+                local_project_path,
+                argparse.Namespace(dry_run=False, verbose=0),
+            )
+
         if "-" in project_name:
             LOGGER.info(f"Project name '{project_name}' contains hyphens. Replacing hyphens with underscores.")
             project_name = project_name.replace("-", "_")
             LOGGER.info(f"New project name: '{project_name}'")
-        if args.timestamp:
+        if args.datestamp:
             now = datetime.now()
-            timestamp = now.strftime("%Y_%m_%d")
-            project_name = f"{project_name}_{timestamp}"
-            LOGGER.info(f"Timestamping project. New project name: {project_name}")
+            datestamp = now.strftime("%Y_%m_%d")
+            project_name = f"{project_name}_{datestamp}"
+            LOGGER.info(f"Datestamping project. New project name: {project_name}")
 
         # Rename local project folder to project_name if it exists
         if local_project_path.exists() and local_project_path.name != project_name:
             new_local_project_path = local_project_path.parent / project_name
             local_project_path.rename(new_local_project_path)
 
-        if args.copy_from:
+        if copy_from:
             LOGGER.info(
-                f"Copying project: {project_name} from {args.copy_from} to {SIL_NLP_ENV.pt_projects_dir}/{project_name}"
+                f"Copying project: {project_name} from {copy_from} to {SIL_NLP_ENV.pt_projects_dir}/{project_name}"
             )
-            source_path = Path(args.copy_from)
+            source_path = Path(copy_from)
             if source_path.name != project_name:
                 source_path = Path(source_path / project_name)
             paratext_project_dir: Path = create_paratext_project_folder_if_not_exists(project_name)
@@ -296,6 +336,9 @@ def main() -> None:
             extract_file = str(extract_file)
             LOGGER.info(f"Running Wildebeest analysis on {extract_file}.")
             wildebeest_config = config.get("wildebeest", {})
+            wildebeest_output_dir = SIL_NLP_ENV.mt_experiments_dir / "wildebeest" / project_name
+            if not wildebeest_output_dir.exists():
+                wildebeest_output_dir.mkdir(parents=True, exist_ok=True)
             old_argv = sys.argv
             try:
                 sys.argv = [
@@ -303,9 +346,9 @@ def main() -> None:
                     "-i",
                     extract_file,
                     "-j",
-                    f"{project_name}_wildebeest.json",
+                    f"{wildebeest_output_dir}/{project_name}_wildebeest_report.json",
                     "-o",
-                    f"{project_name}_wildebeest.txt",
+                    f"{wildebeest_output_dir}/{project_name}_wildebeest_report.txt",
                     "-x",
                     str(wildebeest_config.get("max_examples", 500)),
                     "-n",
