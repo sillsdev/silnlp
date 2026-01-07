@@ -141,7 +141,7 @@ class Config(ABC):
                 self.src_projects.update(sf.project for sf in corpus_pair.src_files)
                 self.trg_projects.update(sf.project for sf in corpus_pair.trg_files)
                 if terms_config["include_glosses"]:
-                    for gloss_iso in ["fr", "en", "id", "es"]:
+                    for gloss_iso in ["fr", "en", "id", "es", "pt"]:
                         if gloss_iso in pair_src_isos or gloss_iso == terms_config["include_glosses"]:
                             self.src_file_paths.update(get_terms_glosses_file_paths(corpus_pair.src_terms_files))
                         if gloss_iso in pair_trg_isos:
@@ -862,20 +862,20 @@ class Config(ABC):
         if terms_config["include_glosses"]:
             gloss_iso: Optional[str] = str(terms_config["include_glosses"]).lower()
             if gloss_iso == "true":
-                src_gloss_iso = list(self.src_isos.intersection(["en", "fr", "id", "es"]))
-                trg_gloss_iso = list(self.trg_isos.intersection(["en", "fr", "id", "es"]))
+                src_gloss_iso = list(self.src_isos.intersection(["en", "fr", "id", "es", "pt"]))
+                trg_gloss_iso = list(self.trg_isos.intersection(["en", "fr", "id", "es", "pt"]))
                 if src_gloss_iso:
                     gloss_iso = src_gloss_iso[0]
                 elif trg_gloss_iso:
                     gloss_iso = trg_gloss_iso[0]
                 else:
                     LOGGER.warning(
-                        "Glosses could not be included. No source or target language matches any of the supported gloss language codes: en, fr, id, es."
+                        "Glosses could not be included. No source or target language matches any of the supported gloss language codes: en, fr, id, es, pt."
                     )
                     gloss_iso = None
-            elif gloss_iso not in ["en", "fr", "id", "es"]:
+            elif gloss_iso not in ["en", "fr", "id", "es", "pt"]:
                 LOGGER.warning(
-                    f"Gloss language code, {gloss_iso}, does not match the supported gloss language codes: en, fr, id, es."
+                    f"Gloss language code, {gloss_iso}, does not match the supported gloss language codes: en, fr, id, es, pt."
                 )
                 gloss_iso = None
         else:

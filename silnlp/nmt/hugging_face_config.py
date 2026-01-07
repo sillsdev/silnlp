@@ -730,20 +730,20 @@ class HuggingFaceConfig(Config):
             if terms_config["include_glosses"]:
                 gloss_iso: Optional[str] = str(terms_config["include_glosses"]).lower()
                 if gloss_iso == "true":
-                    src_gloss_iso = list(self.src_isos.intersection(["en", "fr", "id", "es"]))
-                    trg_gloss_iso = list(self.trg_isos.intersection(["en", "fr", "id", "es"]))
+                    src_gloss_iso = list(self.src_isos.intersection(["en", "fr", "id", "es", "pt"]))
+                    trg_gloss_iso = list(self.trg_isos.intersection(["en", "fr", "id", "es", "pt"]))
                     if src_gloss_iso:
                         gloss_iso = src_gloss_iso[0]
                     elif trg_gloss_iso:
                         gloss_iso = trg_gloss_iso[0]
                     else:
                         LOGGER.warning(
-                            "Glosses could not be included. No source or target language matches any of the supported gloss language codes: en, fr, id, es."
+                            "Glosses could not be included. No source or target language matches any of the supported gloss language codes: en, fr, id, es, pt."
                         )
                         gloss_iso = None
-                elif gloss_iso not in ["en", "fr", "id", "es"]:
+                elif gloss_iso not in ["en", "fr", "id", "es", "pt"]:
                     LOGGER.warning(
-                        f"Gloss language code, {gloss_iso}, does not match the supported gloss language codes: en, fr, id, es."
+                        f"Gloss language code, {gloss_iso}, does not match the supported gloss language codes: en, fr, id, es, pt."
                     )
                     gloss_iso = None
             else:
