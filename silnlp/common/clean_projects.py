@@ -105,9 +105,10 @@ def has_settings_file(project_folder: Path) -> bool:
 
 
 class ProjectCleaner:
-    def __init__(self, project_path: Path, args):
+    def __init__(self, project_path: Path, verbose: int, dry_run: bool):
         self.project_path = project_path
-        self.args = args
+        self.verbose = verbose
+        self.dry_run = dry_run
         self.scripture_file_extension = ".SFM"
         self.project_settings: Optional[ParatextProjectSettings] = None
         self.biblical_terms_files = set()
@@ -132,7 +133,7 @@ class ProjectCleaner:
             settings_file_path = self.project_path / SETTINGS_FILENAME.lower()
             if not settings_file_path.exists():
                 warning_msg = f"Warning: {SETTINGS_FILENAME} not found."
-                if self.args.verbose > 0:  # Condition to buffer this warning
+                if self.verbose > 0:  # Condition to buffer this warning
                     self._log_info(warning_msg)
                 self.parsing_errors.append(f"{SETTINGS_FILENAME} not found.")
                 return
@@ -151,7 +152,7 @@ class ProjectCleaner:
 
         except Exception as e:
             error_msg = f"Error parsing {SETTINGS_FILENAME}: {e}"
-            if self.args.verbose > 0:  # Condition to buffer this error message
+            if self.verbose > 0:  # Condition to buffer this error message
                 self._log_info(error_msg)
             self.parsing_errors.append(error_msg)
             # Log that specific settings details could not be retrieved
@@ -169,7 +170,7 @@ class ProjectCleaner:
                 self._log_info(f"Found BiblicalTermsListSetting file: {terms_file_path.name}")
             else:
                 warning_msg = f"Warning: BiblicalTermsListSetting file not found at expected path: {terms_file_path}"
-                if self.args.verbose > 0:  # Condition to buffer this warning
+                if self.verbose > 0:  # Condition to buffer this warning
                     self._log_info(warning_msg)
                 self.parsing_errors.append(
                     f"BiblicalTermsListSetting file not found: {self.project_settings.biblical_terms_file_name}"
@@ -204,16 +205,16 @@ class ProjectCleaner:
                     book_id = self.project_settings.get_book_id(item.name)
                     if book_id is not None:
                         self.files_to_keep.add(item)
-                        if self.args.verbose > 1:
+                        if self.verbose > 1:
                             self._log_info(f"Kept scripture file (via get_book_id): {item.name}")
-        elif self.args.verbose > 0:
+        elif self.verbose > 0:
             self._log_info("Project settings not available; cannot use get_book_id for scripture identification.")
 
         for item in all_items_in_project:
             if item.is_file() and item.suffix.lower() in EXTENSIONS_TO_KEEP:
                 self.files_to_keep.add(item)
 
-        if self.args.verbose > 1:
+        if self.verbose > 1:
             self._log_info(f"Identified {len(self.files_to_keep)} files to keep initially.")
 
         # --- Pass 2: Identify files to DELETE ---
@@ -258,7 +259,7 @@ class ProjectCleaner:
 
             if delete_file:
                 self.files_to_delete.add(item_path)
-                if self.args.verbose > 1:
+                if self.verbose > 1:
                     self._log_info(f"Marked for deletion ({reason}): {item_path.relative_to(self.project_path)}")
 
         # --- Pass 3: Identify folders to DELETE ---
@@ -266,29 +267,29 @@ class ProjectCleaner:
             if item.is_dir():
                 if item.name.lower() not in SUBFOLDERS_TO_PRESERVE_BY_NAME:
                     self.folders_to_delete.add(item)
-                elif self.args.verbose > 1:
+                elif self.verbose > 1:
                     self._log_info(f"Preserving subfolder: {item.name}")
 
-        if self.args.verbose > 0:
+        if self.verbose > 0:
             self._log_info(
                 f"Identified {len(self.files_to_delete)} files and {len(self.folders_to_delete)} folders for deletion."
             )
 
     def execute_cleanup(self):
         if not self.files_to_delete and not self.folders_to_delete:
-            if self.args.verbose > 0:
+            if self.verbose > 0:
                 self._log_info("No items marked for deletion.")
             return
 
-        if self.args.dry_run:
+        if self.dry_run:
             self._log_info("DRY RUN: No actual changes will be made.")
 
         for file_path in sorted(list(self.files_to_delete)):
             self._log_action(
-                "DELETE_FILE (dry_run)" if self.args.dry_run else "DELETE_FILE",
+                "DELETE_FILE (dry_run)" if self.dry_run else "DELETE_FILE",
                 file_path,
             )
-            if not self.args.dry_run and file_path.exists():
+            if not self.dry_run and file_path.exists():
                 try:
                     file_path.unlink()
                 except Exception as e:
@@ -296,28 +297,28 @@ class ProjectCleaner:
 
         for folder_path in sorted(list(self.folders_to_delete)):
             self._log_action(
-                "DELETE_FOLDER (dry_run)" if self.args.dry_run else "DELETE_FOLDER",
+                "DELETE_FOLDER (dry_run)" if self.dry_run else "DELETE_FOLDER",
                 folder_path,
             )
-            if not self.args.dry_run and folder_path.exists():
+            if not self.dry_run and folder_path.exists():
                 try:
                     shutil.rmtree(folder_path)
                 except Exception as e:
                     self._log_info(f"Error deleting folder {folder_path}: {e}")
 
-        if not self.args.dry_run and self.args.verbose > 0:
+        if not self.dry_run and self.verbose > 0:
             self._log_info("Cleanup execution finished.")
 
 
 # --- Helper for concurrent project cleaning ---
 def process_single_project_for_cleaning(
-    project_path: Path, current_args: argparse.Namespace
+    project_path: Path, verbose: int = 0, dry_run: bool = False
 ) -> tuple[str, list[str], list[str]]:
     """
     Creates a ProjectCleaner instance, analyzes, and cleans a single project.
     Returns the project name, a list of log messages, and a list of parsing errors.
     """
-    cleaner = ProjectCleaner(project_path, current_args)
+    cleaner = ProjectCleaner(project_path, verbose, dry_run)
     cleaner.analyze_project_contents()
     cleaner.execute_cleanup()
     return project_path.name, cleaner.log_buffer, cleaner.parsing_errors
@@ -465,7 +466,9 @@ def main():
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                 # Store future to project_path to retrieve the original Path object for robust error messages
                 future_to_project_path_map = {
-                    executor.submit(process_single_project_for_cleaning, project_path, args): project_path
+                    executor.submit(
+                        process_single_project_for_cleaning, project_path, verbose=args.verbose, dry_run=args.dry_run
+                    ): project_path
                     for project_path in project_folders
                 }
 
