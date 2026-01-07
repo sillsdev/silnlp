@@ -279,7 +279,6 @@ def main() -> None:
             LOGGER.info(f"Cleaning Paratext project: {project_name}.")
             process_single_project_for_cleaning(
                 local_project_path,
-                argparse.Namespace(dry_run=False, verbose=0),
             )
 
         if "-" in project_name:
