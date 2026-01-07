@@ -151,7 +151,7 @@ def get_config(config_path: str) -> dict:
         return {}
 
 
-def error_checking(copy_from: Path | None, project: str) -> None:
+def check_for_project_errors(copy_from: Path | None, project: str) -> None:
     if copy_from:
         if not copy_from.exists():
             raise FileNotFoundError(f"The specified --copy-from path '{copy_from}' does not exist.")
@@ -161,7 +161,7 @@ def error_checking(copy_from: Path | None, project: str) -> None:
             raise FileNotFoundError(
                 f"The specified project folder '{project_path}' does not exist in the --copy-from path."
             )
-        elif not settings_file.exists():
+        if not settings_file.exists():
             raise FileNotFoundError(
                 f"The Settings.xml file was not found in the project folder '{project_path}'. Please ensure this is a valid Paratext project folder."
             )
@@ -254,7 +254,7 @@ def main() -> None:
     config = get_config(args.config) if args.config else {}
 
     for project in args.projects:
-        error_checking(args.copy_from, project)
+        check_for_project_errors(args.copy_from, project)
         copy_from = args.copy_from
         if project.endswith(".zip") or project.endswith(".p8z"):
             with zipfile.ZipFile(project, "r") as zip_ref:
