@@ -2,7 +2,7 @@ import argparse
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Set, Union
+from typing import List, Optional, Set, Union
 
 import yaml
 
@@ -11,6 +11,7 @@ from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
 from .config import Config, get_mt_exp_dir
+from .quality_estimation import estimate_quality
 from .test import SUPPORTED_SCORERS, test
 from .translate import TranslationTask
 
@@ -33,6 +34,8 @@ class SILExperiment:
     score_by_book: bool = False
     commit: Optional[str] = None
     clearml_tag: Optional[str] = None
+    quality_estimation: bool = False
+    test_data_file: Optional[str] = None
 
     def __post_init__(self):
         self.clearml = SILClearML(
@@ -96,6 +99,8 @@ class SILExperiment:
         postprocess_configs = translate_configs.get("postprocess", [])
         postprocess_handler = PostprocessHandler([PostprocessConfig(pc) for pc in postprocess_configs])
 
+        confidence_files: List[Path] = []
+
         for translate_config in translate_configs.get("translate", []):
             checkpoint: Union[str, int] = translate_config.get("checkpoint", "last") or "last"
             translator = TranslationTask(
@@ -113,7 +118,7 @@ class SILExperiment:
             if len(translate_config.get("books", [])) > 0:
                 if isinstance(translate_config["books"], list):
                     translate_config["books"] = ";".join(translate_config["books"])
-                translator.translate_books(
+                confidence_files = translator.translate_books(
                     translate_config["books"],
                     translate_config.get("src_project"),
                     translate_config.get("trg_project"),
@@ -129,7 +134,7 @@ class SILExperiment:
                 if translate_config.get("start_seq") is None or translate_config.get("end_seq") is None:
                     raise RuntimeError("Start and end sequence numbers must be specified.")
 
-                translator.translate_text_files(
+                confidence_files = translator.translate_text_files(
                     translate_config.get("src_prefix"),
                     translate_config.get("trg_prefix"),
                     translate_config.get("start_seq"),
@@ -141,7 +146,7 @@ class SILExperiment:
                     translate_config.get("tags"),
                 )
             elif translate_config.get("src"):
-                translator.translate_files(
+                confidence_files = translator.translate_files(
                     translate_config.get("src"),
                     translate_config.get("trg"),
                     translate_config.get("src_iso"),
@@ -153,6 +158,15 @@ class SILExperiment:
                 )
             else:
                 raise RuntimeError("A Scripture book, file, or file prefix must be specified for translation.")
+
+        # Run quality estimation once after all translations complete
+        if self.quality_estimation and self.save_confidences and self.test_data_file and confidence_files:
+            print("Running quality estimation...")
+            test_data_file_path = get_mt_exp_dir(self.test_data_file)
+            estimate_quality(test_data_file_path, confidence_files)
+            print("Quality estimation completed.")
+        elif self.quality_estimation and self.save_confidences and not confidence_files:
+            print("Warning: No confidence files were created during translation.")
 
 
 def main() -> None:
@@ -205,6 +219,19 @@ def main() -> None:
         help="Generate confidence files for test and/or translate step.",
     )
     parser.add_argument("--score-by-book", default=False, action="store_true", help="Score individual books")
+    parser.add_argument(
+        "--quality-estimation",
+        default=False,
+        action="store_true",
+        help="Run quality estimation after translation completes. Requires --save-confidences and --test-data-file",
+    )
+    parser.add_argument(
+        "--test-data-file",
+        type=str,
+        default=None,
+        help="The tsv file relative to MT/experiments containing the test data to determine line of best fit."
+        + "e.g. `project_folder/exp_folder/test.trg-predictions.detok.txt.5000.scores.tsv`",
+    )
     parser.add_argument("--mt-dir", default=None, type=str, help="The machine translation directory.")
     parser.add_argument(
         "--debug",
@@ -237,6 +264,12 @@ def main() -> None:
     if args.clearml_queue is not None and args.clearml_tag is None:
         parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
 
+    if args.quality_estimation and not args.save_confidences:
+        parser.error("--quality-estimation requires --save-confidences to be enabled.")
+
+    if args.quality_estimation and args.test_data_file is None:
+        parser.error("--quality-estimation requires --test-data-file to be specified.")
+
     if args.mt_dir is not None:
         SIL_NLP_ENV.set_machine_translation_dir(SIL_NLP_ENV.data_dir / args.mt_dir)
 
@@ -266,6 +299,8 @@ def main() -> None:
         save_confidences=args.save_confidences,
         scorers=set(s.lower() for s in args.scorers),
         score_by_book=args.score_by_book,
+        quality_estimation=args.quality_estimation,
+        test_data_file=args.test_data_file,
     )
 
     if not args.save_checkpoints:
