@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Generator, Iterable, List, Optional, Tuple, Union
 
+from machine.corpora import UsfmFileTextCorpus, create_versification_ref_corpus, extract_scripture_corpus
 from machine.scripture import VerseRef, book_number_to_id, get_chapters
 
 from ..common.environment import SIL_NLP_ENV
@@ -19,6 +20,16 @@ from .config import CheckpointType, Config, NMTModel
 
 LOGGER = logging.getLogger((__package__ or "") + ".translate")
 
+
+def convert_usfm_to_vref(usfm_path: Path, vref_path: Path) -> None:
+    corpus = UsfmFileTextCorpus(usfm_path.parent, file_pattern=usfm_path.name)
+    book_ids = {t.id for t in corpus.texts}
+    ref_corpus = create_versification_ref_corpus().filter_texts(lambda t: t.id in book_ids)
+    with vref_path.open("w", encoding="utf-8", newline="\n") as output_stream, extract_scripture_corpus(
+        corpus, ref_corpus
+    ) as output:
+        for line, _, _ in output:
+            output_stream.write(line + "\n")
 
 class NMTTranslator(Translator):
     def __init__(self, model: NMTModel, checkpoint: Union[CheckpointType, str, int]) -> None:
@@ -61,6 +72,7 @@ class TranslationTask:
         save_confidences: bool = False,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
         tags: Optional[List[str]] = None,
+        export_to_vref: bool = False,
     ):
         book_nums = get_chapters(books)
         translator, config, step_str = self._init_translation_task(
@@ -124,6 +136,19 @@ class TranslationTask:
                         config.corpus_pairs,
                         tags,
                     )
+                    if export_to_vref:
+                        if produce_multiple_translations:
+                            num_drafts = config.infer.get("num_drafts", 1)
+                            for i in range(1, num_drafts + 1):
+                                draft_path = output_path.with_suffix(f".{i}{output_path.suffix}")
+                                if draft_path.exists():
+                                    vref_path = draft_path.with_suffix(".txt")
+                                    convert_usfm_to_vref(draft_path, vref_path)
+                                    draft_path.unlink()
+                        elif output_path.exists():
+                            vref_path = output_path.with_suffix(".txt")
+                            convert_usfm_to_vref(output_path, vref_path)
+                            output_path.unlink()
                 except Exception:
                     translation_failed.append(book)
                     LOGGER.exception(f"Was not able to translate {book}.")
@@ -193,6 +218,7 @@ class TranslationTask:
         save_confidences: bool = False,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
         tags: Optional[List[str]] = None,
+        export_to_vref: bool = False,
     ) -> None:
         translator, config, step_str = self._init_translation_task(
             experiment_suffix=f"_{self.checkpoint}_{os.path.basename(src)}"
@@ -275,6 +301,19 @@ class TranslationTask:
                         training_corpus_pairs=config.corpus_pairs,
                         tags=tags,
                     )
+                    if export_to_vref:
+                        if produce_multiple_translations:
+                            num_drafts = config.infer.get("num_drafts", 1)
+                            for i in range(1, num_drafts + 1):
+                                draft_path = trg_file_path.with_suffix(f".{i}{trg_file_path.suffix}")
+                                if draft_path.exists():
+                                    vref_path = draft_path.with_suffix(".txt")
+                                    convert_usfm_to_vref(draft_path, vref_path)
+                                    draft_path.unlink()
+                        elif trg_file_path.exists():
+                            vref_path = trg_file_path.with_suffix(".txt")
+                            convert_usfm_to_vref(trg_file_path, vref_path)
+                            trg_file_path.unlink()
 
     def _init_translation_task(self, experiment_suffix: str) -> Tuple[Translator, Config, str]:
         clearml = SILClearML(
@@ -406,6 +445,12 @@ def main() -> None:
         help="The quote convention for the target project. If not specified, it will be detected automatically.",
     )
     parser.add_argument(
+        "--export-to-vref",
+        default=False,
+        action="store_true",
+        help="Export the translated document in VREF format (text file aligned with vref.txt) instead of USFM.",
+    )
+    parser.add_argument(
         "--clearml-queue",
         default=None,
         type=str,
@@ -460,6 +505,7 @@ def main() -> None:
             args.multiple_translations,
             args.save_confidences,
             postprocess_handler,
+            export_to_vref=args.export_to_vref,
         )
     elif args.src_prefix is not None:
         if args.debug:
@@ -497,6 +543,7 @@ def main() -> None:
             args.multiple_translations,
             args.save_confidences,
             postprocess_handler,
+            export_to_vref=args.export_to_vref,
         )
     else:
         raise RuntimeError("A Scripture book, file, or file prefix must be specified.")
