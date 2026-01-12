@@ -126,9 +126,14 @@ class UnknownQuoteConventionException(Exception):
 
 
 class NoDetectedQuoteConventionException(Exception):
-    def __init__(self, project_name: str):
-        super().__init__(f'Could not detect quote convention for project "{project_name}".')
-        self.project_name = project_name
+    def __init__(self, project_names: List[str]):
+        if len(project_names) == 1:
+            super().__init__(f'Could not detect quote convention for project "{project_names[0]}".')
+        else:
+            super().__init__(
+                f'Could not detect quote convention for any of the following projects "{",".join(project_names)}".'
+            )
+        self.project_names = project_names
 
 
 class DenormalizeQuotationMarksPostprocessor:
@@ -181,13 +186,16 @@ class DenormalizeQuotationMarksPostprocessor:
 
         quote_convention_detector = QuoteConventionDetector()
 
-        quote_convention_detector = FileParatextProjectQuoteConventionDetector(get_project_dir(project_name))
-        quote_convention_analysis = quote_convention_detector.get_quote_convention_analysis(
-            include_chapters=include_chapters
-        )
+        try:
+            quote_convention_detector = FileParatextProjectQuoteConventionDetector(get_project_dir(project_name))
+            quote_convention_analysis = quote_convention_detector.get_quote_convention_analysis(
+                include_chapters=include_chapters
+            )
+        except ValueError as verr:
+            raise NoDetectedQuoteConventionException([project_name]) from verr
 
         if quote_convention_analysis is None:
-            raise NoDetectedQuoteConventionException(project_name)
+            raise NoDetectedQuoteConventionException([project_name])
         LOGGER.info(
             f'Detected quote convention for project "{project_name}" is '
             + f'"{quote_convention_analysis.best_quote_convention.name}" with score '
@@ -361,18 +369,26 @@ class PostprocessConfig:
     def create_denormalize_quotation_marks_postprocessor(
         self, training_corpus_pairs: List[CorpusPair]
     ) -> DenormalizeQuotationMarksPostprocessor:
-        training_target_project_name, include_chapters = self._get_training_project_info(
+        training_project_info = self._get_training_project_info(
             training_corpus_pairs,
         )
+        for training_target_project_name, include_chapters in training_project_info:
 
-        return DenormalizeQuotationMarksPostprocessor(
-            self._config["target_quote_convention"], training_target_project_name, include_chapters
+            try:
+                return DenormalizeQuotationMarksPostprocessor(
+                    self._config["target_quote_convention"], training_target_project_name, include_chapters
+                )
+            except NoDetectedQuoteConventionException:
+                LOGGER.warning("No quote convention was detected for project %s" % training_target_project_name)
+
+        raise NoDetectedQuoteConventionException(
+            [project_name for project_name, _ in training_project_info if project_name is not None]
         )
 
     def _get_training_project_info(
         self,
         training_corpus_pairs: List[CorpusPair],
-    ) -> Tuple[Optional[str], Optional[Dict[int, List[int]]]]:
+    ) -> List[Tuple[Optional[str], Optional[Dict[int, List[int]]]]]:
         # Target project info is only needed for quote convention detection
         if self.is_quote_convention_detection_required():
             if len(training_corpus_pairs) > 1:
@@ -389,9 +405,12 @@ class PostprocessConfig:
                 )
 
             if len(training_corpus_pairs) > 0 and len(training_corpus_pairs[0].trg_files) > 0:
-                return training_corpus_pairs[0].trg_files[0].project, training_corpus_pairs[0].corpus_books
+                return [
+                    (corpus_pair.trg_files[0].project, corpus_pair.corpus_books)
+                    for corpus_pair in training_corpus_pairs
+                ]
 
-        return None, None
+        return [(None, None)]
 
     def __getitem__(self, key):
         return self._config[key]
