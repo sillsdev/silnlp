@@ -43,7 +43,8 @@ class Verse:
 
 class VerseCollector(VerseRange):
     @abstractmethod
-    def add_verse(self, verse: Verse) -> None: ...
+    def add_verse(self, verse: Verse) -> None:
+        ...
 
 
 @dataclass
@@ -102,6 +103,9 @@ class WordAlignments:
         self._target_tokens_by_source_token: Dict[int, List[int]] = self._create_source_to_target_alignment_lookup(
             aligned_pairs
         )
+        self._source_tokens_by_target_token: Dict[int, List[int]] = self._create_target_to_source_alignment_lookup(
+            aligned_pairs
+        )
         self._cached_crossed_alignments: Dict[tuple[int, int], int] = {}
 
     def _create_source_to_target_alignment_lookup(
@@ -112,10 +116,23 @@ class WordAlignments:
             target_tokens_by_source_token[aligned_word_pair.source_index].append(aligned_word_pair.target_index)
         return target_tokens_by_source_token
 
-    def get_aligned_words(self, source_word_index: int) -> List[int]:
+    def _create_target_to_source_alignment_lookup(
+        self, aligned_pairs: Collection[AlignedWordPair]
+    ) -> Dict[int, List[int]]:
+        source_tokens_by_target_token: Dict[int, List[int]] = defaultdict(list)
+        for aligned_word_pair in aligned_pairs:
+            source_tokens_by_target_token[aligned_word_pair.target_index].append(aligned_word_pair.source_index)
+        return source_tokens_by_target_token
+
+    def get_target_aligned_words(self, source_word_index: int) -> List[int]:
         if source_word_index not in self._target_tokens_by_source_token:
             return []
         return self._target_tokens_by_source_token.get(source_word_index)
+
+    def get_source_aligned_words(self, target_word_index: int) -> List[int]:
+        if target_word_index not in self._source_tokens_by_target_token:
+            return []
+        return self._source_tokens_by_target_token.get(target_word_index)
 
     def get_num_crossed_alignments(self, src_word_index: int, trg_word_index: int) -> int:
         if (src_word_index, trg_word_index) in self._cached_crossed_alignments:
@@ -147,7 +164,7 @@ class VerseSegmenter(ABC):
         "”",
         "’",
     }
-    PROHIBITED_VERSE_ENDING_CHARACTERS: Set[str] = {"(", "[", "{", "«", "‹", "“", "‘"}
+    PROHIBITED_VERSE_ENDING_CHARACTERS: Set[str] = {"(", "[", "{", "«", "‹", "“", "‘", "¿", "¡"}
 
     @abstractmethod
     def predict_target_verse_token_offsets(
@@ -156,7 +173,8 @@ class VerseSegmenter(ABC):
         target_tokens: List[str],
         source_verse_token_offsets: List[int],
         word_alignments: WordAlignments,
-    ) -> List[int]: ...
+    ) -> List[int]:
+        ...
 
     def segment_verses(
         self,
@@ -263,28 +281,36 @@ class FewestCrossedAlignmentsVerseSegmenter(VerseSegmenter):
                 elif crossed_alignments < fewest_crossed_alignments:
                     fewest_crossed_alignments = crossed_alignments
                     best_split_indices = [trg_word_index]
-
             if len(best_split_indices) == 0:
                 target_verse_offsets.append(-1)
             else:
                 if verse_token_offset > 0 and not contains_letter(source_tokens[verse_token_offset - 1]):
-                    aligned_words = word_alignments.get_aligned_words(verse_token_offset - 1)
+                    aligned_words = word_alignments.get_target_aligned_words(verse_token_offset - 1)
                     if (
                         len(aligned_words) == 1
                         and not contains_letter(target_tokens[aligned_words[0]])
-                        and aligned_words[0] in best_split_indices
+                        and aligned_words[0] + 1 in best_split_indices
                     ):
-                        target_verse_offsets.append(aligned_words[0])
+                        split_index = aligned_words[0]
+                        source_aligned_words = word_alignments.get_source_aligned_words(split_index + 1)
+                        while (
+                            len(source_aligned_words) == 0
+                            and split_index + 1 < len(target_tokens)
+                            and target_tokens[split_index + 1] == '"'
+                        ):
+                            split_index += 1
+                            source_aligned_words = word_alignments.get_source_aligned_words(split_index)
+                        target_verse_offsets.append(split_index + 1)
                         last_target_verse_offset = target_verse_offsets[-1]
                         continue
                 if not contains_letter(source_tokens[verse_token_offset]):
-                    aligned_words = word_alignments.get_aligned_words(verse_token_offset)
+                    aligned_words = word_alignments.get_target_aligned_words(verse_token_offset)
                     if (
                         len(aligned_words) == 1
                         and not contains_letter(target_tokens[aligned_words[0]])
-                        and aligned_words[0] in best_split_indices
+                        and aligned_words[0] + 1 in best_split_indices
                     ):
-                        target_verse_offsets.append(aligned_words[0])
+                        target_verse_offsets.append(aligned_words[0] + 1)
                         last_target_verse_offset = target_verse_offsets[-1]
                         continue
                 if len(best_split_indices) > 1:
@@ -296,6 +322,7 @@ class FewestCrossedAlignmentsVerseSegmenter(VerseSegmenter):
                     target_verse_offsets.append(best_split_index)
                 else:
                     target_verse_offsets.append(best_split_indices[0])
+
             last_target_verse_offset = target_verse_offsets[-1]
         return target_verse_offsets
 
@@ -333,7 +360,7 @@ class AdaptedMarkerPlacementVerseSegmenter(VerseSegmenter):
             # Only accept aligned pairs where both the src and trg token are punctuation
             hyp_tok = source_tokens[src_hyp]
             if len(hyp_tok) > 0 and not any(c.isalpha() for c in hyp_tok) and src_hyp < len(source_tokens):
-                aligned_trg_toks = word_alignments.get_aligned_words(src_hyp)
+                aligned_trg_toks = word_alignments.get_target_aligned_words(src_hyp)
                 # If aligning to a token that precedes that marker,
                 # the trg token predicted to be closest to the marker
                 # is the last token aligned to the src rather than the first
@@ -358,7 +385,7 @@ class AdaptedMarkerPlacementVerseSegmenter(VerseSegmenter):
             trg_hyp = -1
             while trg_hyp == -1 and src_hyp >= 0 and src_hyp < len(source_tokens):
                 checked.add(src_hyp)
-                aligned_trg_toks = word_alignments.get_aligned_words(src_hyp)
+                aligned_trg_toks = word_alignments.get_target_aligned_words(src_hyp)
                 if len(aligned_trg_toks) > 0:
                     # If aligning with a source token that precedes the marker,
                     # the target token predicted to be closest to the marker is the last aligned token rather than the first
@@ -378,7 +405,6 @@ class AdaptedMarkerPlacementVerseSegmenter(VerseSegmenter):
 
 
 class ParallelPassage(VerseRange):
-
     def __init__(
         self,
         start_ref: VerseRef,
@@ -700,7 +726,10 @@ def main() -> None:
         "--save-alignments", help="Save the computed alignments for future use", default=None, action="store_true"
     )
     parser.add_argument(
-        "--use-saved-alignments", help="Use pre-computed alignments from a previous run", default=None, action="store_true"
+        "--use-saved-alignments",
+        help="Use pre-computed alignments from a previous run",
+        default=None,
+        action="store_true",
     )
     parser.add_argument("--vref", help="Output vref file for target verses", default=None, action="store_true")
     args = parser.parse_args()
