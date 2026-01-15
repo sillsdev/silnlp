@@ -184,18 +184,18 @@ class Thresholds(ABC):
 
 
 class BookThresholds(Thresholds):
-    GREEN_THRESHOLD = 0.6
-    YELLOW_THRESHOLD = 0.5
+    GREEN_THRESHOLD = 0.687
+    YELLOW_THRESHOLD = 0.62
 
 
 class ChapterThresholds(Thresholds):
-    GREEN_THRESHOLD = 0.6
-    YELLOW_THRESHOLD = 0.3
+    GREEN_THRESHOLD = 0.687
+    YELLOW_THRESHOLD = 0.62
 
 
 class VerseThresholds(Thresholds):
-    GREEN_THRESHOLD = 0.6
-    YELLOW_THRESHOLD = 0.3
+    GREEN_THRESHOLD = 0.687
+    YELLOW_THRESHOLD = 0.62
 
 
 def compute_usable_proportions(
