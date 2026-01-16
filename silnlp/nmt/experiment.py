@@ -99,8 +99,6 @@ class SILExperiment:
         postprocess_configs = translate_configs.get("postprocess", [])
         postprocess_handler = PostprocessHandler([PostprocessConfig(pc) for pc in postprocess_configs])
 
-        confidence_files: List[Path] = []
-
         for translate_config in translate_configs.get("translate", []):
             checkpoint: Union[str, int] = translate_config.get("checkpoint", "last") or "last"
             translator = TranslationTask(
@@ -118,7 +116,7 @@ class SILExperiment:
             if len(translate_config.get("books", [])) > 0:
                 if isinstance(translate_config["books"], list):
                     translate_config["books"] = ";".join(translate_config["books"])
-                confidence_files = translator.translate_books(
+                translator.translate_books(
                     translate_config["books"],
                     translate_config.get("src_project"),
                     translate_config.get("trg_project"),
@@ -134,7 +132,7 @@ class SILExperiment:
                 if translate_config.get("start_seq") is None or translate_config.get("end_seq") is None:
                     raise RuntimeError("Start and end sequence numbers must be specified.")
 
-                confidence_files = translator.translate_text_files(
+                translator.translate_text_files(
                     translate_config.get("src_prefix"),
                     translate_config.get("trg_prefix"),
                     translate_config.get("start_seq"),
@@ -146,7 +144,7 @@ class SILExperiment:
                     translate_config.get("tags"),
                 )
             elif translate_config.get("src"):
-                confidence_files = translator.translate_files(
+                translator.translate_files(
                     translate_config.get("src"),
                     translate_config.get("trg"),
                     translate_config.get("src_iso"),
@@ -158,15 +156,6 @@ class SILExperiment:
                 )
             else:
                 raise RuntimeError("A Scripture book, file, or file prefix must be specified for translation.")
-
-        # Run quality estimation once after all translations complete
-        if self.quality_estimation and self.save_confidences and self.test_data_file and confidence_files:
-            print("Running quality estimation...")
-            test_data_file_path = get_mt_exp_dir(self.test_data_file)
-            estimate_quality(test_data_file_path, confidence_files)
-            print("Quality estimation completed.")
-        elif self.quality_estimation and self.save_confidences and not confidence_files:
-            print("Warning: No confidence files were created during translation.")
 
 
 def main() -> None:

@@ -15,7 +15,7 @@ LOGGER = logging.getLogger(__package__ + ".sample_usability")
 
 
 def stratified_sample(
-    usability_verses_file: Path, sample_size: int, random_state: int = 42, books: List[str] = None
+    usability_verses_file: Path, sample_size: int, random_seed: int = 42, books: List[str] = None
 ) -> None:
     df = pd.read_csv(usability_verses_file, sep="\t")
 
@@ -23,7 +23,7 @@ def stratified_sample(
     if books is not None and len(books) > 0:
         df, books_suffix = process_books_argument(df, books, usability_verses_file)
 
-    sample = get_sample(df, sample_size, random_state)
+    sample = get_sample(df, sample_size, random_seed)
 
     sample.to_csv(usability_verses_file.parent / f"usability_sample{books_suffix}.tsv", sep="\t", index=False)
     print(
@@ -69,13 +69,13 @@ def process_books_argument(
     return df, books_suffix
 
 
-def get_sample(df: pd.DataFrame, sample_size: int, random_state: int) -> pd.DataFrame:
+def get_sample(df: pd.DataFrame, sample_size: int, random_seed: int) -> pd.DataFrame:
     if sample_size > len(df):
         LOGGER.warning(
             f"The sample size {sample_size} is greater than the dataset size {len(df)}."
             f"Using the dataset size as the sample size."
         )
-        return df.sample(frac=1, random_state=random_state).reset_index(drop=True)
+        return df.sample(frac=1, random_seed=random_seed).reset_index(drop=True)
 
     bin_cap = 10 if len(df) < 1000 else 20
     qbins = min(
@@ -97,7 +97,7 @@ def get_sample(df: pd.DataFrame, sample_size: int, random_state: int) -> pd.Data
         n = n_per_bin[group.name]
         if n == 0:
             return group.iloc[0:0]
-        return group.sample(n=n, random_state=random_state)
+        return group.sample(n=n, random_seed=random_seed)
 
     sample = (
         df.groupby("bin", group_keys=False, observed=True)
@@ -125,10 +125,10 @@ def main():
         help="Number of verses to include in the sample.",
     )
     parser.add_argument(
-        "--random-state",
+        "--random-seed",
         type=int,
         default=42,
-        help="Random state for reproducibility.",
+        help="Random seed for reproducibility.",
     )
     parser.add_argument(
         "--books",
@@ -139,14 +139,14 @@ def main():
     args = parser.parse_args()
 
     sample_size = args.sample_size
-    random_state = args.random_state
+    random_seed = args.random_seed
     books = args.books
 
     if sample_size <= 0 or not isinstance(sample_size, int):
         raise ValueError("Sample size must be a positive integer.")
 
-    if random_state <= 0 or not isinstance(random_state, int):
-        raise ValueError("Random state must be a positive integer.")
+    if random_seed <= 0 or not isinstance(random_seed, int):
+        raise ValueError("Random seed must be a positive integer.")
 
     if books is not None and len(books) > 0:
         invalid_books = set(books) - set(ALL_BOOK_IDS)
@@ -156,7 +156,7 @@ def main():
     usability_verses_file = get_mt_exp_dir(args.usability_verses_file)
     if not usability_verses_file.exists():
         raise FileNotFoundError(f"The usability verses file {usability_verses_file} does not exist.")
-    stratified_sample(usability_verses_file, args.sample_size, args.random_state, args.books)
+    stratified_sample(usability_verses_file, args.sample_size, args.random_seed, args.books)
 
 
 if __name__ == "__main__":

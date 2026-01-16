@@ -60,6 +60,8 @@ class TranslationTask:
         trg_iso: Optional[str],
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
+        quality_estimation: bool = False,
+        test_data_path: Optional[Path] = None,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
         tags: Optional[List[str]] = None,
     ) -> List[Path]:
@@ -135,7 +137,10 @@ class TranslationTask:
             if len(translation_failed) > 0:
                 raise RuntimeError(f"Some books failed to translate: {' '.join(translation_failed)}")
 
-            return confidence_files
+        if quality_estimation:
+            LOGGER.info("Running quality estimation...")
+            estimate_quality(test_data_path, confidence_files)
+            LOGGER.info("Quality estimation completed.")
 
     def translate_text_files(
         self,
@@ -147,6 +152,8 @@ class TranslationTask:
         trg_iso: Optional[str],
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
+        quality_estimation: bool = False,
+        test_data_path: Optional[Path] = None,
         tags: Optional[List[str]] = None,
     ) -> List[Path]:
         translator, config, _ = self._init_translation_task(experiment_suffix=f"_{self.checkpoint}_{src_prefix}")
@@ -193,7 +200,10 @@ class TranslationTask:
                     if save_confidences:
                         confidence_files.extend(trg_file_path.parent.glob(f"{trg_file_path.name}*.confidences.tsv"))
 
-            return confidence_files
+        if quality_estimation:
+            LOGGER.info("Running quality estimation...")
+            estimate_quality(test_data_path, confidence_files)
+            LOGGER.info("Quality estimation completed.")
 
     def translate_files(
         self,
@@ -203,6 +213,8 @@ class TranslationTask:
         trg_iso: Optional[str],
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
+        quality_estimation: bool = False,
+        test_data_path: Optional[Path] = None,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
         tags: Optional[List[str]] = None,
     ) -> List[Path]:
@@ -292,7 +304,10 @@ class TranslationTask:
                 if save_confidences:
                     confidence_files.extend(trg_file_path.parent.glob(f"{trg_file_path.name}*.confidences.tsv"))
 
-            return confidence_files
+        if quality_estimation:
+            LOGGER.info("Running quality estimation...")
+            estimate_quality(test_data_path, confidence_files)
+            LOGGER.info("Quality estimation completed.")
 
     def _init_translation_task(self, experiment_suffix: str) -> Tuple[Translator, Config, str]:
         clearml = SILClearML(
@@ -450,7 +465,7 @@ def main() -> None:
     parser.add_argument(
         "--test-data-file",
         type=str,
-        default=None,
+        default="",
         help="The tsv file relative to MT/experiments containing the test data to determine line of best fit."
         + "e.g. `project_folder/exp_folder/test.trg-predictions.detok.txt.5000.scores.tsv`",
     )
@@ -472,6 +487,10 @@ def main() -> None:
     if args.quality_estimation and args.test_data_file is None:
         parser.error("--quality-estimation requires --test-data-file to be specified.")
 
+    test_data_path = get_mt_exp_dir(args.test_data_file)
+    if not test_data_path.exists():
+        parser.error(f"The test data file {test_data_path} does not exist.")
+
     get_git_revision_hash()
 
     checkpoint: str = args.checkpoint or "last"
@@ -484,19 +503,20 @@ def main() -> None:
     )
 
     postprocess_handler = PostprocessHandler([PostprocessConfig(vars(args))])
-    confidence_files: List[Path] = []
 
     if len(args.books) > 0:
         if args.debug:
             show_attrs(cli_args=args, actions=[f"Will attempt to translate books {args.books} into {args.trg_iso}"])
             exit()
-        confidence_files = translator.translate_books(
+        translator.translate_books(
             ";".join(args.books),
             args.src_project,
             args.trg_project,
             args.trg_iso,
             args.multiple_translations,
             args.save_confidences,
+            args.quality_estimation,
+            test_data_path,
             postprocess_handler,
         )
     elif args.src_prefix is not None:
@@ -510,7 +530,7 @@ def main() -> None:
             raise RuntimeError("A target file prefix must be specified.")
         if args.start_seq is None or args.end_seq is None:
             raise RuntimeError("Start and end sequence numbers must be specified.")
-        confidence_files = translator.translate_text_files(
+        translator.translate_text_files(
             args.src_prefix,
             args.trg_prefix,
             args.start_seq,
@@ -519,6 +539,8 @@ def main() -> None:
             args.trg_iso,
             args.multiple_translations,
             args.save_confidences,
+            args.quality_estimation,
+            test_data_path,
         )
     elif args.src is not None:
         if args.debug:
@@ -527,25 +549,19 @@ def main() -> None:
                 actions=[f"Will attempt to translate {args.src} from {args.src_iso} into {args.trg_iso}."],
             )
             exit()
-        confidence_files = translator.translate_files(
+        translator.translate_files(
             args.src,
             args.trg,
             args.src_iso,
             args.trg_iso,
             args.multiple_translations,
             args.save_confidences,
+            args.quality_estimation,
+            test_data_path,
             postprocess_handler,
         )
     else:
         raise RuntimeError("A Scripture book, file, or file prefix must be specified.")
-
-    if args.quality_estimation and args.save_confidences and args.test_data_file and confidence_files:
-        LOGGER.info("Running quality estimation...")
-        test_data_file_path = get_mt_exp_dir(args.test_data_file)
-        estimate_quality(test_data_file_path, confidence_files)
-        LOGGER.info("Quality estimation completed.")
-    elif args.quality_estimation and args.save_confidences and not confidence_files:
-        LOGGER.warning("Quality estimation was requested but no confidence files were generated during translation.")
 
 
 if __name__ == "__main__":

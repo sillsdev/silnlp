@@ -51,19 +51,32 @@ class BookScores:
         return self.scores.get(book)
 
 
-def estimate_quality(test_data_file: Path, confidence_files: List[Path]) -> None:
-    verse_scores, chapter_scores, book_scores = project_chrf3(test_data_file, confidence_files)
+def estimate_quality(test_data_path: Path, confidence_files: List[Path]) -> None:
+    validate_inputs(test_data_path, confidence_files)
+    verse_scores, chapter_scores, book_scores = project_chrf3(test_data_path, confidence_files)
     compute_usable_proportions(verse_scores, chapter_scores, book_scores, confidence_files[0].parent)
 
 
+def validate_inputs(test_data_path: Path, confidence_files: List[Path]) -> None:
+    if test_data_path is None:
+        raise ValueError("Test data file path must be provided.")
+    if confidence_files is None or len(confidence_files) == 0:
+        raise ValueError("At least one confidence file must be provided.")
+    if not test_data_path.is_file():
+        raise FileNotFoundError(f"Test data file {test_data_path} does not exist.")
+    if not all(cf.is_file() for cf in confidence_files):
+        missing_files = [str(cf) for cf in confidence_files if not cf.is_file()]
+        raise FileNotFoundError(f"The following confidence files do not exist: {', '.join(missing_files)}")
+
+
 def project_chrf3(
-    test_data_file: Path, confidence_files: List[Path]
+    test_data_path: Path, confidence_files: List[Path]
 ) -> Tuple[List[VerseScore], ChapterScores, BookScores]:
-    chrf3_scores, confidence_scores = extract_test_data(test_data_file)
+    chrf3_scores, confidence_scores = extract_test_data(test_data_path)
     if len(chrf3_scores) != len(confidence_scores):
         raise ValueError(
             f"The number of chrF3 scores ({len(chrf3_scores)}) and confidence scores ({len(confidence_scores)}) "
-            f"in {test_data_file} do not match."
+            f"in {test_data_path} do not match."
         )
     slope, intercept = linregress(confidence_scores, chrf3_scores)[:2]
     verse_scores: List[VerseScore] = []
@@ -96,17 +109,17 @@ def project_chrf3(
     return verse_scores, chapter_scores, book_scores
 
 
-def extract_test_data(test_data_file_path) -> Tuple[List[float], List[float]]:
+def extract_test_data(test_data_path: Path) -> Tuple[List[float], List[float]]:
     chrf3_scores: List[float] = []
     confidence_scores: List[float] = []
-    with open(test_data_file_path, "r", encoding="utf-8") as f:
+    with open(test_data_path, "r", encoding="utf-8") as f:
         header = next(f).strip().lower().split("\t")
         try:
             chrf3_index = header.index("chrf3")
             confidence_index = header.index("confidence")
         except ValueError as e:
             raise ValueError(
-                f"Could not find 'chrF3' and 'confidence' columns in header of {test_data_file_path}: {header}"
+                f"Could not find 'chrF3' and 'confidence' columns in header of {test_data_path}: {header}"
             ) from e
         for line_num, line in enumerate(f, start=2):
             cols = line.strip().split("\t")
@@ -117,7 +130,7 @@ def extract_test_data(test_data_file_path) -> Tuple[List[float], List[float]]:
                 confidence_scores.append(confidence)
             except (ValueError, IndexError) as e:
                 raise ValueError(
-                    f"Error parsing line {line_num} in {test_data_file_path}: {line.strip()}"
+                    f"Error parsing line {line_num} in {test_data_path}: {line.strip()}"
                     f" (chrF3 index: {chrf3_index}, confidence index: {confidence_index})"
                 ) from e
 
@@ -296,7 +309,7 @@ def main() -> None:
         "test_data_file",
         type=str,
         help="The tsv file relative to MT/experiments containing the test data to determine line of best fit."
-        + "e.g. `project_folder/exp_folder/test.trg-predictions.detok.txt.5000.scores.tsv",
+        + "e.g. `project_folder/exp_folder/test.trg-predictions.detok.txt.5000.scores.tsv`",
     )
     parser.add_argument(
         "confidence_files",
