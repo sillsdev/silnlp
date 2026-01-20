@@ -138,14 +138,14 @@ def extract_test_data(test_data_path: Path) -> Tuple[List[float], List[float]]:
     return chrf3_scores, confidence_scores
 
 
-def get_verse_scores(input_file_path: Path, slope: float, intercept: float) -> List[VerseScore]:
+def get_verse_scores(confidence_file_path: Path, slope: float, intercept: float) -> List[VerseScore]:
     current_book = ""
     current_chapter = 0
     current_verse = 0
     is_at_verse_reference = False
 
     vref_confidences: List[VerseScore] = []
-    with open(input_file_path, "r", encoding="utf-8") as f:
+    with open(confidence_file_path, "r", encoding="utf-8") as f:
         for line in f:
             line = line.rstrip("\n")
             if line.lower().startswith("vref") or line.lower().startswith("sequence score"):
