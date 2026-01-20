@@ -12,6 +12,7 @@ from sacrebleu.metrics import BLEU, BLEUScore
 from scipy.stats import gmean
 
 from ..common.metrics import compute_meteor_score
+from ..common.translator import CONFIDENCE_SUFFIX
 from ..common.utils import get_git_revision_hash
 from .clearml_connection import TAGS_LIST, SILClearML
 from .config import CheckpointType, Config, NMTModel
@@ -573,7 +574,7 @@ def test_checkpoint(
         translation_file_names.append(f"test.trg-predictions.txt.{suffix_str}")
         refs_patterns.append("test.trg.detok*.txt")
         translation_detok_file_names.append(f"test.trg-predictions.detok.txt.{suffix_str}")
-        translation_conf_file_names.append(f"test.trg-predictions.txt.{suffix_str}.confidences.tsv")
+        translation_conf_file_names.append(f"test.trg-predictions.txt.{suffix_str}{CONFIDENCE_SUFFIX}")
     else:
         # test data is split into separate files
         for src_iso in sorted(config.test_src_isos):
@@ -588,7 +589,7 @@ def test_checkpoint(
                     translation_file_names.append(f"{prefix}.trg-predictions.txt.{suffix_str}")
                     refs_patterns.append(f"{prefix}.trg.detok*.txt")
                     translation_detok_file_names.append(f"{prefix}.trg-predictions.detok.txt.{suffix_str}")
-                    translation_conf_file_names.append(f"{prefix}.trg-predictions.txt.{suffix_str}.confidences.tsv")
+                    translation_conf_file_names.append(f"{prefix}.trg-predictions.txt.{suffix_str}{CONFIDENCE_SUFFIX}")
 
     checkpoint_name = "averaged checkpoint" if step == -1 else f"checkpoint {step}"
 
@@ -620,6 +621,10 @@ def test_checkpoint(
         translation_file_names = [
             str(Path(file_name).with_suffix(f".{draft_index}{Path(file_name).suffix}"))
             for draft_index in range(1, num_drafts + 1)
+            for file_name in translation_file_names
+        ]
+        translation_conf_file_names = [
+            str(Path(file_name).with_suffix(f"{Path(file_name).suffix}{CONFIDENCE_SUFFIX}"))
             for file_name in translation_file_names
         ]
         refs_patterns = num_drafts * refs_patterns

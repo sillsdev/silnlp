@@ -12,6 +12,7 @@ from machine.scripture import ALL_BOOK_IDS, VerseRef
 from openpyxl import load_workbook
 from scipy.stats import linregress
 
+from ..common.translator import CONFIDENCE_SUFFIX, ConfidenceFile
 from .config import get_mt_exp_dir
 
 LOGGER = logging.getLogger(__package__ + ".quality_estimation")
@@ -352,7 +353,7 @@ def main() -> None:
     if using_files:
         if len(args.confidence_files) == 0:
             raise ValueError("Please provide at least one confidence file for the confidence_files argument.")
-        confidence_files = [
+        confidence_file_paths = [
             confidence_dir / confidence_file if confidence_dir else confidence_file
             for confidence_file in args.confidence_files
         ]
@@ -366,9 +367,13 @@ def main() -> None:
             draft_suffix = "." + str(args.draft_index)
         else:
             draft_suffix = ""
-        confidence_files = []
+        confidence_file_paths = []
         for book_id in args.books:
-            confidence_files.extend(confidence_dir.glob(f"[0-9]*{book_id}{draft_suffix}.*.confidences.tsv"))
+            confidence_file_paths.extend(confidence_dir.glob(f"[0-9]*{book_id}{draft_suffix}.*{CONFIDENCE_SUFFIX}"))
+
+    confidence_files = []
+    for confidence_file_path in confidence_file_paths:
+        confidence_files.append(ConfidenceFile(confidence_file_path))
 
     estimate_quality(get_mt_exp_dir(args.test_data_file), confidence_files)
 

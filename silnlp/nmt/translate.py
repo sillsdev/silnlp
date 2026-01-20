@@ -12,7 +12,7 @@ from machine.scripture import VerseRef, book_number_to_id, get_chapters
 from ..common.environment import SIL_NLP_ENV
 from ..common.paratext import book_file_name_digits, get_project_dir
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
-from ..common.translator import SentenceTranslationGroup, Translator
+from ..common.translator import CONFIDENCE_SUFFIX, SentenceTranslationGroup, Translator
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
 from .config import CheckpointType, Config, NMTModel, get_mt_exp_dir
@@ -129,7 +129,7 @@ class TranslationTask:
                         tags,
                     )
                     if save_confidences:
-                        confidence_files.extend(output_path.parent.glob(f"{output_path.name}*.confidences.tsv"))
+                        confidence_files.extend(output_path.parent.glob(f"{output_path.name}*{CONFIDENCE_SUFFIX}"))
                 except Exception:
                     translation_failed.append(book)
                     LOGGER.exception(f"Was not able to translate {book}.")
@@ -198,7 +198,7 @@ class TranslationTask:
                     print(f"Translated {src_file_path.name} to {trg_file_path.name} in {((end-start)/60):.2f} minutes")
 
                     if save_confidences:
-                        confidence_files.extend(trg_file_path.parent.glob(f"{trg_file_path.name}*.confidences.tsv"))
+                        confidence_files.extend(trg_file_path.parent.glob(f"{trg_file_path.name}*{CONFIDENCE_SUFFIX}"))
 
         if quality_estimation:
             LOGGER.info("Running quality estimation...")
@@ -302,7 +302,7 @@ class TranslationTask:
                     )
 
                 if save_confidences:
-                    confidence_files.extend(trg_file_path.parent.glob(f"{trg_file_path.name}*.confidences.tsv"))
+                    confidence_files.extend(trg_file_path.parent.glob(f"{trg_file_path.name}*{CONFIDENCE_SUFFIX}"))
 
         if quality_estimation:
             LOGGER.info("Running quality estimation...")

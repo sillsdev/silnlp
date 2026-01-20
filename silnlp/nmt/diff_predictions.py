@@ -17,6 +17,7 @@ from scipy.stats import gmean
 from tqdm import tqdm
 
 from ..common.corpus import load_corpus
+from ..common.translator import CONFIDENCE_SUFFIX
 from ..common.utils import get_git_revision_hash
 from .config import get_mt_exp_dir
 from .sp_utils import decode_sp, decode_sp_lines
@@ -700,7 +701,7 @@ def main() -> None:
         prediction_col = "E"
         if args.confidence:
             df[CONFIDENCE] = get_sequence_confidences(
-                os.path.join(exp1_dir, f"test.trg-predictions.txt.{exp1_step}.confidences.tsv")
+                os.path.join(exp1_dir, f"test.trg-predictions.txt.{exp1_step}{CONFIDENCE_SUFFIX}")
             )
 
     if args.chapter_score:
