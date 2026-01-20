@@ -285,30 +285,29 @@ def write_pair_verse_scores(
                     lowercase=True,
                     tokenize=config.data.get("sacrebleu_tokenize", "13a"),
                 )
-
             other_verse_scores: Dict[str, float] = {}
             if "chrf3" in scorers:
-                chrf3_verse_score = sacrebleu.corpus_chrf(
-                    [pred], [sentences], char_order=6, beta=3, remove_whitespace=True
+                chrf3_verse_score = sacrebleu.sentence_chrf(
+                    pred, sentences, char_order=6, beta=3, remove_whitespace=True
                 )
                 other_verse_scores["chrF3"] = chrf3_verse_score.score
 
             if "chrf3+" in scorers:
-                chrfp_verse_score = sacrebleu.corpus_chrf(
-                    [pred], [sentences], char_order=6, beta=3, word_order=1, remove_whitespace=True, eps_smoothing=True
+                chrfp_verse_score = sacrebleu.sentence_chrf(
+                    pred, sentences, char_order=6, beta=3, word_order=1, remove_whitespace=True, eps_smoothing=True
                 )
                 other_verse_scores["chrF3+"] = chrfp_verse_score.score
 
             if "chrf3++" in scorers:
-                chrfpp_verse_score = sacrebleu.corpus_chrf(
-                    [pred], [sentences], char_order=6, beta=3, word_order=2, remove_whitespace=True, eps_smoothing=True
+                chrfpp_verse_score = sacrebleu.sentence_chrf(
+                    pred, sentences, char_order=6, beta=3, word_order=2, remove_whitespace=True, eps_smoothing=True
                 )
                 other_verse_scores["chrF3++"] = chrfpp_verse_score.score
 
             if "spbleu" in scorers:
-                spbleu_verse_score = sacrebleu.corpus_bleu(
-                    [pred],
-                    [sentences],
+                spbleu_verse_score = sacrebleu.sentence_bleu(
+                    pred,
+                    sentences,
                     lowercase=True,
                     tokenize="flores200",
                 )
