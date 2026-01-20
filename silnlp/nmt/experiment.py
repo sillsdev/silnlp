@@ -2,7 +2,7 @@ import argparse
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Set, Union
+from typing import Optional, Set, Union
 
 import yaml
 
@@ -11,7 +11,6 @@ from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
 from .config import Config, get_mt_exp_dir
-from .quality_estimation import estimate_quality
 from .test import SUPPORTED_SCORERS, test
 from .translate import TranslationTask
 

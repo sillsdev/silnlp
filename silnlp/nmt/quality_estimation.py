@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from machine.scripture import ALL_BOOK_IDS, VerseRef
-from openpyxl import load_workbook
 from scipy.stats import linregress
 
 from ..common.translator import CONFIDENCE_SUFFIX, ConfidenceFile

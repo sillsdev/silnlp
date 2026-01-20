@@ -7,7 +7,7 @@ from datetime import date
 from itertools import groupby
 from math import exp
 from pathlib import Path
-from typing import DefaultDict, Generator, Iterable, List, Optional, Tuple, cast
+from typing import DefaultDict, Generator, Iterable, List, Optional, Tuple
 
 import docx
 import nltk
