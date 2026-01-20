@@ -254,6 +254,8 @@ def write_pair_verse_scores(
     config: Config,
     confidences: List[float],
 ) -> None:
+    scorers = scorers.intersection(SUPPORTED_SENTENCE_SCORERS)
+    other_scores = {k: v for k, v in other_scores.items() if k in scorers}
     other_verse_scores: Dict[str, float] = {}
 
     with open(
