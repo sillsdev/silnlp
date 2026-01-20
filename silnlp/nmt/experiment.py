@@ -123,6 +123,8 @@ class SILExperiment:
                     translate_config.get("trg_iso"),
                     self.produce_multiple_translations,
                     self.save_confidences,
+                    self.quality_estimation,
+                    get_mt_exp_dir(self.name),
                     postprocess_handler,
                     translate_config.get("tags"),
                 )
@@ -141,6 +143,8 @@ class SILExperiment:
                     translate_config.get("trg_iso"),
                     self.produce_multiple_translations,
                     self.save_confidences,
+                    self.quality_estimation,
+                    get_mt_exp_dir(self.name),
                     translate_config.get("tags"),
                 )
             elif translate_config.get("src"):
@@ -151,6 +155,8 @@ class SILExperiment:
                     translate_config.get("trg_iso"),
                     self.produce_multiple_translations,
                     self.save_confidences,
+                    self.quality_estimation,
+                    get_mt_exp_dir(self.name),
                     postprocess_handler,
                     translate_config.get("tags"),
                 )
@@ -256,8 +262,11 @@ def main() -> None:
     if args.quality_estimation and not args.save_confidences:
         parser.error("--quality-estimation requires --save-confidences to be enabled.")
 
-    if args.quality_estimation and args.test_data_file is None:
-        parser.error("--quality-estimation requires --test-data-file to be specified.")
+    if args.quality_estimation and args.translate and not args.test and args.test_data_file is None:
+        parser.error(
+            "--quality-estimation requires --test-data-file to be specified"
+            " when running the translate step without the test step."
+        )
 
     if args.mt_dir is not None:
         SIL_NLP_ENV.set_machine_translation_dir(SIL_NLP_ENV.data_dir / args.mt_dir)

@@ -14,6 +14,7 @@ from scipy.stats import linregress
 
 from ..common.translator import CONFIDENCE_SUFFIX, ConfidenceFile
 from .config import get_mt_exp_dir
+from .test import VERSE_SCORES_SUFFIX
 
 LOGGER = logging.getLogger(__package__ + ".quality_estimation")
 CANONICAL_ORDER = {book: i for i, book in enumerate(ALL_BOOK_IDS)}
@@ -53,21 +54,29 @@ class BookScores:
 
 
 def estimate_quality(test_data_path: Path, confidence_files: List[Path]) -> None:
-    validate_inputs(test_data_path, confidence_files)
+    test_data_path = validate_inputs(test_data_path, confidence_files)
     verse_scores, chapter_scores, book_scores = project_chrf3(test_data_path, confidence_files)
     compute_usable_proportions(verse_scores, chapter_scores, book_scores, confidence_files[0].parent)
 
 
 def validate_inputs(test_data_path: Path, confidence_files: List[Path]) -> None:
-    if test_data_path is None:
-        raise ValueError("Test data file path must be provided.")
-    if confidence_files is None or len(confidence_files) == 0:
-        raise ValueError("At least one confidence file must be provided.")
-    if not test_data_path.is_file():
+    if not test_data_path.exists():
         raise FileNotFoundError(f"Test data file {test_data_path} does not exist.")
+    elif test_data_path.is_dir():
+        LOGGER.info(f"Searching for files with suffix {VERSE_SCORES_SUFFIX} in directory {test_data_path}.")
+        test_files = list(test_data_path.glob(f"*{VERSE_SCORES_SUFFIX}"))
+        if not test_files:
+            raise ValueError(
+                f"No test data file with the {VERSE_SCORES_SUFFIX} suffix found in directory {test_data_path}."
+            )
+        test_data_path = test_files[0]
+        LOGGER.info(f"Using test data file {test_data_path}.")
+    if len(confidence_files) == 0:
+        raise ValueError("At least one confidence file must be provided.")
     if not all(cf.is_file() for cf in confidence_files):
         missing_files = [str(cf) for cf in confidence_files if not cf.is_file()]
         raise FileNotFoundError(f"The following confidence files do not exist: {', '.join(missing_files)}")
+    return test_data_path
 
 
 def project_chrf3(

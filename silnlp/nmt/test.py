@@ -49,6 +49,8 @@ SUPPORTED_SENTENCE_SCORERS = [
     "confidence",
 ]
 
+VERSE_SCORES_SUFFIX = ".scores.tsv"
+
 
 class PairScore:
     def __init__(
@@ -255,7 +257,7 @@ def write_pair_verse_scores(
     other_verse_scores: Dict[str, float] = {}
 
     with open(
-        config.exp_dir / (predictions_detok_file_name + ".scores.tsv"), "w", encoding="utf-8", newline="\n"
+        config.exp_dir / (predictions_detok_file_name + VERSE_SCORES_SUFFIX), "w", encoding="utf-8", newline="\n"
     ) as scores_file:
         header = (
             "Verse"
