@@ -128,7 +128,7 @@ def extract_test_data(test_data_path: Path) -> Tuple[List[float], List[float]]:
             confidence_index = header.index("confidence")
         except ValueError as e:
             raise ValueError(
-                f"Could not find 'chrF3' and 'confidence' columns in header of {test_data_path}: {header}"
+                f"Could not find 'chrF3' and/or 'confidence' columns in header of {test_data_path}: {header}"
             ) from e
         for line_num, line in enumerate(f, start=2):
             cols = line.strip().split("\t")
