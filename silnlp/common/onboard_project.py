@@ -111,8 +111,9 @@ def collect_verse_counts_wrapper(project_name: str, verse_counts_config: dict, o
 
 
 def extract_corpora_wrapper(project_name: str, extract_config: dict, overwrite=False) -> None:
-    extract_path = list(SIL_NLP_ENV.mt_scripture_dir.glob(f"*{project_name}.txt"))[0]
-    if extract_path.exists() and not overwrite:
+    extract_paths = list(SIL_NLP_ENV.mt_scripture_dir.glob(f"*{project_name}.txt"))
+    extract_path = extract_paths[0] if extract_paths else None
+    if extract_path is not None and not overwrite:
         LOGGER.info(f"Extracted corpus '{extract_path}' already exists. Skipping corpus extraction.")
         return
     LOGGER.info(f"Extracting corpora for project '{project_name}'")
@@ -136,7 +137,11 @@ def wildebeest_analysis_wrapper(project_name: str, wildebeest_config: dict, over
     if not wildebeest_output_dir.exists():
         wildebeest_output_dir.mkdir(parents=True, exist_ok=True)
 
-    extract_path = list(SIL_NLP_ENV.mt_scripture_dir.glob(f"*{project_name}.txt"))[0]
+    try:
+        extract_path = list(SIL_NLP_ENV.mt_scripture_dir.glob(f"*{project_name}.txt"))[0]
+    except IndexError:
+        LOGGER.error(f"No extracted corpus found for project '{project_name}'. Skipping Wildebeest analysis.")
+        return
     LOGGER.info(f"Running Wildebeest analysis on {extract_path}.")
     old_argv = sys.argv
     try:
@@ -169,7 +174,13 @@ def calculate_tokenization_stats(project_name: str, stats_config: dict = None, o
     if not stats_dir.exists():
         stats_dir.mkdir(parents=True, exist_ok=True)
 
-    extract_path = list(SIL_NLP_ENV.mt_scripture_dir.glob(f"*{project_name}*.txt"))[0]
+    try:
+        extract_path = list(SIL_NLP_ENV.mt_scripture_dir.glob(f"*{project_name}*.txt"))[0]
+    except IndexError:
+        LOGGER.error(
+            f"No extracted corpus found for project '{project_name}'. Skipping tokenization stats calculation."
+        )
+        return
     extract_file = extract_path.stem
 
     iso_code = extract_file.split("-")[0]
@@ -270,7 +281,7 @@ def setup_local_project(
     check_for_project_errors(copy_from, project)
 
     project_name = project
-    local_project_path = Path(copy_from) / project if copy_from else None
+    local_project_path = copy_from / project if copy_from else None
 
     if "-" in project_name:
         LOGGER.info(f"Project name '{project_name}' contains hyphens. Replacing hyphens with underscores.")
@@ -353,9 +364,7 @@ def main() -> None:
     config = get_config(args.config) if args.config else {}
 
     for project in args.projects:
-        pwd = None
-        if config.get("zip_passwords"):
-            pwd = config["zip_passwords"].get(project, None)
+        pwd = config.get("zip_password", None)
         project_name, local_project_path, copy_from = setup_local_project(project, args.copy_from, pwd, args.datestamp)
 
         if not args.no_clean:
