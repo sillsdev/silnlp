@@ -3,11 +3,11 @@ import getpass
 import logging
 import re
 import sys
-import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime
 from pathlib import Path
+from typing import Tuple
 
 import wildebeest.wb_analysis as wb_ana
 import yaml
@@ -71,11 +71,16 @@ def copy_paratext_project_folder(source_dir: Path, project_name: str, overwrite=
             _copy_file_to_paratext_project(source_item, target_item, overwrite=overwrite)
 
 
-def collect_verse_counts_wrapper(project_name: str, verse_counts_config: dict) -> None:
+def collect_verse_counts_wrapper(project_name: str, verse_counts_config: dict, overwrite=False) -> None:
 
     output_folder = Path(
-        verse_counts_config.get("output_folder", SIL_NLP_ENV.mt_experiments_dir / "verse_counts" / project_name)
+        verse_counts_config.get(
+            "output_folder", SIL_NLP_ENV.mt_experiments_dir / "OnboardingRequests" / project_name / "verse_counts"
+        )
     )
+    if output_folder.exists() and not overwrite:
+        LOGGER.info(f"Verse counts output folder '{output_folder}' already exists. Skipping verse counts collection.")
+        return
     if not output_folder.exists():
         output_folder.mkdir(parents=True, exist_ok=True)
 
@@ -95,6 +100,7 @@ def collect_verse_counts_wrapper(project_name: str, verse_counts_config: dict) -
         )
         return
 
+    LOGGER.info(f"Collecting verse counts for project '{project_name}'")
     collect_verse_counts(
         input_folder=input_folder_path,
         output_folder=output_folder,
@@ -104,12 +110,77 @@ def collect_verse_counts_wrapper(project_name: str, verse_counts_config: dict) -
     )
 
 
-def calculate_tokenization_stats(project_name: str, stats_config: dict = None) -> None:
-    stats_dir = Path("stats") / project_name
+def extract_corpora_wrapper(project_name: str, extract_config: dict, overwrite=False) -> None:
+    extract_paths = list(SIL_NLP_ENV.mt_scripture_dir.glob(f"*{project_name}.txt"))
+    extract_path = extract_paths[0] if extract_paths else None
+    if extract_path is not None and not overwrite:
+        LOGGER.info(f"Extracted corpus '{extract_path}' already exists. Skipping corpus extraction.")
+        return
+    LOGGER.info(f"Extracting corpora for project '{project_name}'")
+    extract_corpora(
+        projects={project_name},
+        books_to_include=extract_config.get("include", []),
+        books_to_exclude=extract_config.get("exclude", []),
+        include_markers=extract_config.get("markers", False),
+        extract_lemmas=extract_config.get("lemmas", False),
+        extract_project_vrefs=extract_config.get("project-vrefs", False),
+    )
+
+
+def wildebeest_analysis_wrapper(project_name: str, wildebeest_config: dict, overwrite=False) -> None:
+    wildebeest_output_dir = SIL_NLP_ENV.mt_experiments_dir / "OnboardingRequests" / project_name / "wildebeest"
+    if wildebeest_output_dir.exists() and not overwrite:
+        LOGGER.info(
+            f"Wildebeest output directory '{wildebeest_output_dir}' already exists. Skipping Wildebeest analysis."
+        )
+        return
+    if not wildebeest_output_dir.exists():
+        wildebeest_output_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        extract_path = list(SIL_NLP_ENV.mt_scripture_dir.glob(f"*{project_name}.txt"))[0]
+    except IndexError:
+        LOGGER.error(f"No extracted corpus found for project '{project_name}'. Skipping Wildebeest analysis.")
+        return
+    LOGGER.info(f"Running Wildebeest analysis on {extract_path}.")
+    old_argv = sys.argv
+    try:
+        sys.argv = [
+            "wb_ana",
+            "-i",
+            str(extract_path),
+            "-j",
+            f"{wildebeest_output_dir}/{project_name}_wildebeest_report.json",
+            "-o",
+            f"{wildebeest_output_dir}/{project_name}_wildebeest_report.txt",
+            "-x",
+            str(wildebeest_config.get("max_examples", 500)),
+            "-n",
+            str(wildebeest_config.get("max_cases", 500)),
+            "-r",
+            str(wildebeest_config.get("ref_id_file", "silnlp/assets/vref.txt")),
+        ]
+        wb_ana.main()
+    finally:
+        sys.argv = old_argv
+
+
+def calculate_tokenization_stats(project_name: str, stats_config: dict = None, overwrite=False) -> None:
+    stats_dir = SIL_NLP_ENV.mt_experiments_dir / "OnboardingRequests" / project_name / "stats"
+
+    if stats_dir.exists() and not overwrite:
+        LOGGER.info(f"Stats directory '{stats_dir}' already exists. Skipping stats calculation.")
+        return
     if not stats_dir.exists():
         stats_dir.mkdir(parents=True, exist_ok=True)
 
-    extract_path = list(SIL_NLP_ENV.mt_scripture_dir.glob(f"*{project_name}*.txt"))[0]
+    try:
+        extract_path = list(SIL_NLP_ENV.mt_scripture_dir.glob(f"*{project_name}*.txt"))[0]
+    except IndexError:
+        LOGGER.error(
+            f"No extracted corpus found for project '{project_name}'. Skipping tokenization stats calculation."
+        )
+        return
     extract_file = extract_path.stem
 
     iso_code = extract_file.split("-")[0]
@@ -121,7 +192,6 @@ def calculate_tokenization_stats(project_name: str, stats_config: dict = None) -
 
     if stats_config is None:
         stats_config = {
-            "use_default_model_dir": False,
             "data": {
                 "corpus_pairs": [
                     {
@@ -134,6 +204,7 @@ def calculate_tokenization_stats(project_name: str, stats_config: dict = None) -
             },
         }
 
+    LOGGER.info(f"Calculating tokenization stats for project '{project_name}'")
     config = create_config(exp_dir=stats_dir, config=stats_config)
 
     config.set_seed()
@@ -189,6 +260,45 @@ def check_for_project_errors(copy_from: Path | None, project: str) -> None:
             raise ValueError(
                 f"{project_path} does not contain any files using the naming convention, '{pattern}', found in the Settings.xml file."
             )
+
+
+def setup_local_project(
+    project: str, copy_from: Path | None, zip_password: str, datestamp: bool
+) -> Tuple[str, Path | None, Path | None]:
+    if project.endswith(".zip") or project.endswith(".p8z"):
+        with zipfile.ZipFile(copy_from / project, "r") as zip_ref:
+            project = Path(project).stem
+            needs_password = any(zinfo.flag_bits & 0x1 for zinfo in zip_ref.infolist())
+            if needs_password:
+                if zip_password:
+                    pwd = zip_password
+                if not pwd:
+                    pwd = getpass.getpass(prompt=f"Enter password for {project}: ")
+                zip_ref.extractall(copy_from / project, pwd=pwd.encode())
+            else:
+                zip_ref.extractall(copy_from / project)
+
+    check_for_project_errors(copy_from, project)
+
+    project_name = project
+    local_project_path = copy_from / project if copy_from else None
+
+    if "-" in project_name:
+        LOGGER.info(f"Project name '{project_name}' contains hyphens. Replacing hyphens with underscores.")
+        project_name = project_name.replace("-", "_")
+        LOGGER.info(f"New project name: '{project_name}'")
+    if datestamp:
+        now = datetime.now()
+        datestamp = now.strftime("%Y_%m_%d")
+        project_name = f"{project_name}_{datestamp}"
+        LOGGER.info(f"Datestamping project. New project name: {project_name}")
+
+    # Rename local project folder to project_name if it exists
+    if local_project_path.exists() and local_project_path.name != project_name:
+        new_local_project_path = local_project_path.parent / project_name
+        local_project_path = local_project_path.rename(new_local_project_path)
+
+    return project_name, local_project_path, copy_from
 
 
 def main() -> None:
@@ -254,47 +364,14 @@ def main() -> None:
     config = get_config(args.config) if args.config else {}
 
     for project in args.projects:
-        check_for_project_errors(args.copy_from, project)
-        copy_from = args.copy_from
-        if project.endswith(".zip") or project.endswith(".p8z"):
-            with zipfile.ZipFile(project, "r") as zip_ref:
-                # Check if any file in the zip is encrypted
-                temp_dir = tempfile.TemporaryDirectory()
-                needs_password = any(zinfo.flag_bits & 0x1 for zinfo in zip_ref.infolist())
-                if needs_password:
-                    if config.get("zip_passwords"):
-                        pwd = config["zip_passwords"].get(project, None)
-                    if not pwd:
-                        pwd = getpass.getpass(prompt=f"Enter password for {project}: ")
-                    zip_ref.extractall(temp_dir.name, pwd=pwd.encode())
-                else:
-                    zip_ref.extractall(temp_dir.name)
-            copy_from = temp_dir.name
-            project = Path(project).stem
-
-        project_name = project
-        local_project_path = Path(copy_from) / project if copy_from else None
+        pwd = config.get("zip_password", None)
+        project_name, local_project_path, copy_from = setup_local_project(project, args.copy_from, pwd, args.datestamp)
 
         if not args.no_clean:
             LOGGER.info(f"Cleaning Paratext project: {project_name}.")
             process_single_project_for_cleaning(
                 local_project_path,
             )
-
-        if "-" in project_name:
-            LOGGER.info(f"Project name '{project_name}' contains hyphens. Replacing hyphens with underscores.")
-            project_name = project_name.replace("-", "_")
-            LOGGER.info(f"New project name: '{project_name}'")
-        if args.datestamp:
-            now = datetime.now()
-            datestamp = now.strftime("%Y_%m_%d")
-            project_name = f"{project_name}_{datestamp}"
-            LOGGER.info(f"Datestamping project. New project name: {project_name}")
-
-        # Rename local project folder to project_name if it exists
-        if local_project_path.exists() and local_project_path.name != project_name:
-            new_local_project_path = local_project_path.parent / project_name
-            local_project_path.rename(new_local_project_path)
 
         if copy_from:
             LOGGER.info(
@@ -308,14 +385,7 @@ def main() -> None:
 
         if args.extract_corpora:
             extract_config: dict = config.get("extract_corpora", {})
-            extract_corpora(
-                projects={project_name},
-                books_to_include=extract_config.get("include", []),
-                books_to_exclude=extract_config.get("exclude", []),
-                include_markers=extract_config.get("markers", False),
-                extract_lemmas=extract_config.get("lemmas", False),
-                extract_project_vrefs=extract_config.get("project-vrefs", False),
-            )
+            extract_corpora_wrapper(project_name, extract_config, args.overwrite)
 
         if args.collect_verse_counts:
             if not args.extract_corpora:
@@ -323,46 +393,20 @@ def main() -> None:
                     "--extract_corpora was not included. Collecting verse counts requires the corpus to be extracted first."
                 )
             LOGGER.info(f"Collecting verse counts from {project_name}.")
-            collect_verse_counts_wrapper(project_name, config.get("verse_counts", {}))
+            collect_verse_counts_wrapper(project_name, config.get("verse_counts", {}), args.overwrite)
 
         if args.wildebeest:
             if not args.extract_corpora:
                 LOGGER.warning(
                     "--extract_corpora was not included. Wildebeest requires the corpus to be extracted first."
                 )
-
-            extract_file = list(SIL_NLP_ENV.mt_scripture_dir.glob(f"*{project_name}.txt"))[0]
-            extract_file = str(extract_file)
-            LOGGER.info(f"Running Wildebeest analysis on {extract_file}.")
-            wildebeest_config = config.get("wildebeest", {})
-            wildebeest_output_dir = SIL_NLP_ENV.mt_experiments_dir / "wildebeest" / project_name
-            if not wildebeest_output_dir.exists():
-                wildebeest_output_dir.mkdir(parents=True, exist_ok=True)
-            old_argv = sys.argv
-            try:
-                sys.argv = [
-                    "wb_ana",
-                    "-i",
-                    extract_file,
-                    "-j",
-                    f"{wildebeest_output_dir}/{project_name}_wildebeest_report.json",
-                    "-o",
-                    f"{wildebeest_output_dir}/{project_name}_wildebeest_report.txt",
-                    "-x",
-                    str(wildebeest_config.get("max_examples", 500)),
-                    "-n",
-                    str(wildebeest_config.get("max_cases", 500)),
-                    "-r",
-                    str(wildebeest_config.get("ref_id_file", "silnlp/assets/vref.txt")),
-                ]
-                wb_ana.main()
-            finally:
-                sys.argv = old_argv
+            wildebeest_config: dict = config.get("wildebeest", {})
+            wildebeest_analysis_wrapper(project_name, wildebeest_config, args.overwrite)
 
         if args.stats:
             if not args.extract_corpora:
                 LOGGER.warning("--extract_corpora was not included. Stats requires the corpus to be extracted first.")
-            calculate_tokenization_stats(project_name, config.get("stats", None))
+            calculate_tokenization_stats(project_name, config.get("stats", None), args.overwrite)
 
 
 if __name__ == "__main__":
