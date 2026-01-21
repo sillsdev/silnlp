@@ -100,7 +100,7 @@ class PairScore:
                 f",{self.bleu.sys_len:d},{self.bleu.ref_len:d}"
             )
         for scorer, val in self.other_scores.items():
-            if scorer == "confidence":
+            if scorer.lower() == "confidence":
                 file.write(f",{val:.8f}")
             else:
                 file.write(f",{val:.2f}")
@@ -235,7 +235,7 @@ def score_pair(
                     "Cannot use confidence as a scorer because the confidences file is missing. "
                     "Include the --save-confidences option to generate the file and enable confidence scoring."
                 ) from e
-        other_scores["confidence"] = gmean(confidences)
+        other_scores["Confidence"] = gmean(confidences)
 
     write_pair_verse_scores(
         pair_sys, pair_refs, trg_iso, predictions_detok_file_name, scorers, other_scores, config, confidences
@@ -326,7 +326,7 @@ def write_pair_verse_scores(
                     other_verse_scores["TER"] = ter_verse_score.score
 
             if "confidence" in scorers:
-                other_verse_scores["confidence"] = confidences[index]
+                other_verse_scores["Confidence"] = confidences[index]
 
             scores_file.write(f"{index + 1}")
 
@@ -336,7 +336,7 @@ def write_pair_verse_scores(
                     f"{bleu_verse_score.precisions[2]:.2f}\t{bleu_verse_score.precisions[3]:.2f}\t{bleu_verse_score.bp:.3f}"
                 )
             for scorer, val in other_verse_scores.items():
-                if scorer == "confidence":
+                if scorer.lower() == "confidence":
                     scores_file.write(f"\t{val:.8f}")
                 else:
                     scores_file.write(f"\t{val:.2f}")
