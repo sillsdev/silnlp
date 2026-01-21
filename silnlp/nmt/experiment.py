@@ -240,7 +240,6 @@ def main() -> None:
         choices=SUPPORTED_SCORERS,
         default=[
             "bleu",
-            "sentencebleu",
             "chrf3",
             "chrf3+",
             "chrf3++",

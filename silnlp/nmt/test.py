@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Set, TextIO, Tuple
 
 import sacrebleu
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_number_to_id, get_chapters
-from sacrebleu.metrics import BLEU, BLEUScore
+from sacrebleu.metrics import BLEUScore
 from scipy.stats import gmean
 
 from ..common.metrics import compute_meteor_score
@@ -162,7 +162,7 @@ def score_pair(
         sentence_bleu_scores: List[float] = []
         for sentence_i, sentence in enumerate(pair_sys):
             references = [reference[sentence_i] for reference in pair_refs]
-            sentence_bleu_score = sentence_bleu(
+            sentence_bleu_score = sacrebleu.sentence_bleu(
                 sentence,
                 references,
                 lowercase=True,
@@ -517,30 +517,6 @@ def load_test_data(
                 books,
             )
     return sys, refs, book_dict
-
-
-def sentence_bleu(
-    hypothesis: str,
-    references: List[str],
-    smooth_method: str = "exp",
-    smooth_value: Optional[float] = None,
-    lowercase: bool = False,
-    tokenize: str = "13a",
-    use_effective_order: bool = True,
-) -> BLEUScore:
-    """
-    Substitute for the sacrebleu version of sentence_bleu, which uses settings that aren't consistent with
-    the values we use for corpus_bleu, and isn't fully parameterized
-    """
-    metric = BLEU(
-        smooth_method=smooth_method,
-        smooth_value=smooth_value,
-        force=False,
-        lowercase=lowercase,
-        tokenize=tokenize,
-        effective_order=use_effective_order,
-    )
-    return metric.sentence_score(hypothesis, references)
 
 
 def test_checkpoint(
