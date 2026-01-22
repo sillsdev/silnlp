@@ -230,7 +230,7 @@ class ConfidenceFile:
         trg_prefix: str = "",
     ) -> None:
         translated_draft.write_confidence_scores_to_file(self.path, "Sequence Number")
-        translated_draft.write_verse_confidence_scores_to_file(self.path.with_suffix(".verses.tsv"), "Sequence Number")
+        translated_draft.write_verse_confidence_scores_to_file(self.get_verses_path(), "Sequence Number")
         self._append_file_confidence_score(translated_draft, trg_prefix)
 
     def _append_file_confidence_score(
@@ -260,7 +260,9 @@ def generate_confidence_files(
         )
         return
 
-    confidence_file = ConfidenceFile(trg_draft_file_path.with_suffix(CONFIDENCE_SUFFIX))
+    confidence_file = ConfidenceFile(
+        trg_draft_file_path.with_suffix(f"{trg_draft_file_path.suffix}{CONFIDENCE_SUFFIX}")
+    )
 
     ext = trg_draft_file_path.suffix.lower()
     if ext in {".usfm", ".sfm"}:
@@ -279,7 +281,9 @@ def generate_test_confidence_files(
     translated_draft: TranslatedDraft,
     trg_draft_file_path: Path,
 ) -> None:
-    confidence_file = ConfidenceFile(trg_draft_file_path.with_suffix(CONFIDENCE_SUFFIX))
+    confidence_file = ConfidenceFile(
+        trg_draft_file_path.with_suffix(f"{trg_draft_file_path.suffix}{CONFIDENCE_SUFFIX}")
+    )
     translated_draft.write_confidence_scores_to_file(confidence_file.get_path(), "Sequence Number")
 
 
