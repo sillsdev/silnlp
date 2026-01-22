@@ -55,7 +55,7 @@ class BookScores:
 def estimate_quality(verse_test_scores_path: Path, confidence_file_paths: List[Path]) -> None:
     verse_test_scores_path, confidence_files = validate_inputs(verse_test_scores_path, confidence_file_paths)
     verse_scores, chapter_scores, book_scores = project_chrf3(verse_test_scores_path, confidence_files)
-    compute_usable_proportions(verse_scores, chapter_scores, book_scores, confidence_files[0].parent)
+    compute_usable_proportions(verse_scores, chapter_scores, book_scores, confidence_files[0].get_path().parent)
 
 
 def validate_inputs(
