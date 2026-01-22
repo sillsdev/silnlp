@@ -5,10 +5,13 @@ from typing import Optional
 
 import yaml
 
+from ..common.environment import SIL_NLP_ENV
 from .config import get_mt_exp_dir
 from .config_utils import create_config
 
 LOGGER = logging.getLogger(__name__)
+
+TAGS_LIST = ["research", "dev", "eitl", "onboarding"]
 
 
 @dataclass
@@ -20,6 +23,8 @@ class SILClearML:
     experiment_suffix: str = ""
     clearml_project_folder: str = ""
     commit: Optional[str] = None
+    tag: Optional[str] = None
+    skip_config: bool = False
 
     def __post_init__(self) -> None:
         self.name = self.name.replace("\\", "/")
@@ -41,10 +46,12 @@ class SILClearML:
             self.task: Task = Task.init(
                 project_name=self.project_prefix + project + self.project_suffix,
                 task_name=exp_name + self.experiment_suffix,
+                tags=[f"silnlp-{self.tag}"] if self.tag else None,
             )
 
             self._determine_clearml_project_name()
-            self._load_config()
+            if not self.skip_config:
+                self._load_config()
 
             self.task.set_base_docker(
                 docker_image="ghcr.io/sillsdev/silnlp:latest",
@@ -148,5 +155,4 @@ class SILClearML:
         exp_dir.mkdir(parents=True, exist_ok=True)
         with (exp_dir / "config.yml").open("w+", encoding="utf-8") as file:
             yaml.safe_dump(data=config, stream=file)
-
         self.config = create_config(exp_dir, config)

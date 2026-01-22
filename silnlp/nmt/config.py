@@ -4,15 +4,14 @@ import random
 import re
 from abc import ABC, abstractmethod
 from contextlib import ExitStack
-from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
-from enum import Enum, Flag, auto
+from enum import Enum, auto
 from pathlib import Path
 from statistics import mean, median, stdev
-from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Tuple, Union, cast
+from typing import Dict, Generator, Iterable, List, Optional, Set, TextIO, Tuple, Union, cast
 
 import pandas as pd
-from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books, get_chapters
+from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books
 from machine.tokenization import LatinWordTokenizer
 from tqdm import tqdm
 
@@ -22,14 +21,10 @@ from ..common.corpus import (
     Term,
     exclude_chapters,
     filter_parallel_corpus,
-    get_mt_corpus_path,
     get_scripture_parallel_corpus,
     get_terms,
     get_terms_corpus,
     get_terms_data_frame,
-    get_terms_glosses_path,
-    get_terms_list,
-    get_terms_renderings_path,
     include_chapters,
     load_corpus,
     split_corpus,
@@ -37,14 +32,23 @@ from ..common.corpus import (
     write_corpus,
 )
 from ..common.environment import SIL_NLP_ENV
-from ..common.translator import TranslationGroup
-from ..common.utils import NoiseMethod, Side, create_noise_methods, get_mt_exp_dir, is_set, set_seed
-from .augment import AugmentMethod, create_augment_methods
+from ..common.translator import SentenceTranslationGroup
+from ..common.utils import NoiseMethod, Side, add_tags_to_dataframe, add_tags_to_sentence, get_mt_exp_dir, set_seed
+from .augment import AugmentMethod
+from .corpora import (
+    BASIC_DATA_PROJECT,
+    CorpusPair,
+    DataFile,
+    DataFileMapping,
+    IsoPairInfo,
+    get_data_file_pairs,
+    get_parallel_corpus_size,
+    get_terms_glosses_file_paths,
+    parse_corpus_pairs,
+)
 from .tokenizer import Tokenizer
 
-LOGGER = logging.getLogger(__package__ + ".config")
-
-BASIC_DATA_PROJECT = "BASIC"
+LOGGER = logging.getLogger((__package__ or "") + ".config")
 
 ALIGNMENT_SCORES_FILE = re.compile(r"([a-z]{2,3}-.+)_([a-z]{2,3}-.+)")
 
@@ -54,258 +58,6 @@ class CheckpointType(Enum):
     BEST = auto()
     AVERAGE = auto()
     OTHER = auto()
-
-
-class DataFileType(Flag):
-    NONE = 0
-    TRAIN = auto()
-    TEST = auto()
-    VAL = auto()
-    DICT = auto()
-
-
-class DataFileMapping(Enum):
-    ONE_TO_ONE = auto()
-    MIXED_SRC = auto()
-    MANY_TO_MANY = auto()
-
-
-@dataclass
-class DataFile:
-    path: Path
-    iso: str = field(init=False)
-    project: str = field(init=False)
-    include_test: bool = True
-
-    def __post_init__(self):
-        file_name = self.path.stem
-        parts = file_name.split("-")
-        if len(parts) < 2:
-            raise RuntimeError(f"The filename {file_name} needs to be of the format <iso>-<project>")
-        self.iso = parts[0]
-        self.project = (
-            parts[1] if str(self.path.parent).startswith(str(SIL_NLP_ENV.mt_scripture_dir)) else BASIC_DATA_PROJECT
-        )
-
-    @property
-    def is_scripture(self) -> bool:
-        return self.project != BASIC_DATA_PROJECT
-
-
-@dataclass
-class CorpusPair:
-    src_files: List[DataFile]
-    trg_files: List[DataFile]
-    type: DataFileType
-    src_noise: List[NoiseMethod]
-    augmentations: List[AugmentMethod]
-    tags: List[str]
-    size: Union[float, int]
-    test_size: Optional[Union[float, int]]
-    val_size: Optional[Union[float, int]]
-    disjoint_test: bool
-    disjoint_val: bool
-    score_threshold: float
-    corpus_books: Dict[int, List[int]]
-    test_books: Dict[int, List[int]]
-    use_test_set_from: str
-    src_terms_files: List[DataFile]
-    trg_terms_files: List[DataFile]
-    is_lexical_data: bool
-    mapping: DataFileMapping
-
-    @property
-    def is_train(self) -> bool:
-        return is_set(self.type, DataFileType.TRAIN)
-
-    @property
-    def is_test(self) -> bool:
-        return is_set(self.type, DataFileType.TEST)
-
-    @property
-    def is_val(self) -> bool:
-        return is_set(self.type, DataFileType.VAL)
-
-    @property
-    def is_dictionary(self) -> bool:
-        return is_set(self.type, DataFileType.DICT)
-
-    @property
-    def is_scripture(self) -> bool:
-        return self.src_files[0].is_scripture
-
-
-@dataclass
-class IsoPairInfo:
-    test_projects: Set[str] = field(default_factory=set)
-    val_projects: Set[str] = field(default_factory=set)
-    has_basic_test_data: bool = False
-
-    @property
-    def has_multiple_test_projects(self) -> bool:
-        return len(self.test_projects) > 1
-
-    @property
-    def has_test_data(self) -> bool:
-        return len(self.test_projects) > 0 or self.has_basic_test_data
-
-
-def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
-    pairs: List[CorpusPair] = []
-    for pair in corpus_pairs:
-        if "type" not in pair:
-            pair["type"] = ["train", "test", "val"]
-        type_strs: Union[str, List[str]] = pair["type"]
-        if isinstance(type_strs, str):
-            type_strs = type_strs.split(",")
-        type = DataFileType.NONE
-        for type_str in type_strs:
-            type_str = type_str.strip().lower()
-            if type_str == "train":
-                type |= DataFileType.TRAIN
-            elif type_str == "test":
-                type |= DataFileType.TEST
-            elif type_str == "val" or type_str == "validation":
-                type |= DataFileType.VAL
-            elif type_str == "dict" or type_str == "dictionary":
-                type |= DataFileType.DICT
-
-        src: Union[str, List[Union[dict, str]]] = pair["src"]
-        src_files = []
-        if isinstance(src, str):
-            src = src.split(",")
-        for file in src:
-            if isinstance(file, str):
-                src_files.append(DataFile(get_mt_corpus_path(file.strip())))
-            else:
-                src_files.append(DataFile(get_mt_corpus_path(file.pop("name"))))
-                for k, v in file.items():
-                    setattr(src_files[-1], k, v)
-        trg: Union[str, List[Union[dict, str]]] = pair["trg"]
-        trg_files = []
-        if isinstance(trg, str):
-            trg = trg.split(",")
-        for file in trg:
-            if isinstance(file, str):
-                trg_files.append(DataFile(get_mt_corpus_path(file.strip())))
-            else:
-                trg_files.append(DataFile(get_mt_corpus_path(file.pop("name"))))
-                for k, v in file.items():
-                    setattr(trg_files[-1], k, v)
-        is_scripture = src_files[0].is_scripture
-        if not all(df.is_scripture == is_scripture for df in (src_files + trg_files)):
-            raise RuntimeError("All corpora in a corpus pair must contain the same type of data.")
-
-        tags: Union[str, List[str]] = pair.get("tags", [])
-        if isinstance(tags, str):
-            tags = [tag.strip() for tag in tags.split(",")]
-
-        src_noise = create_noise_methods(pair.get("src_noise", []))
-        augmentations = create_augment_methods(pair.get("augment", []))
-
-        if "size" not in pair:
-            pair["size"] = 1.0
-        size: Union[float, int] = pair["size"]
-        if "test_size" not in pair and is_set(type, DataFileType.TRAIN | DataFileType.TEST):
-            pair["test_size"] = 0 if "test_books" in pair else 250
-        test_size: Optional[Union[float, int]] = pair.get("test_size")
-        if "val_size" not in pair and is_set(type, DataFileType.TRAIN | DataFileType.VAL):
-            pair["val_size"] = 250
-        val_size: Optional[Union[float, int]] = pair.get("val_size")
-
-        if "disjoint_test" not in pair:
-            pair["disjoint_test"] = True
-        disjoint_test: bool = pair["disjoint_test"]
-        if "disjoint_val" not in pair:
-            pair["disjoint_val"] = True
-        disjoint_val: bool = pair["disjoint_val"]
-        score_threshold: float = pair.get("score_threshold", 0.0)
-        corpus_books = get_chapters(pair.get("corpus_books", []))
-        test_books = get_chapters(pair.get("test_books", []))
-        use_test_set_from: str = pair.get("use_test_set_from", "")
-
-        src_terms_files = get_terms_files(src_files) if is_set(type, DataFileType.TRAIN) else []
-        trg_terms_files = get_terms_files(trg_files) if is_set(type, DataFileType.TRAIN) else []
-
-        if "lexical" not in pair:
-            pair["lexical"] = is_set(type, DataFileType.DICT)
-        is_lexical_data: bool = pair["lexical"]
-
-        if "mapping" not in pair:
-            pair["mapping"] = DataFileMapping.ONE_TO_ONE.name.lower()
-        mapping = DataFileMapping[pair["mapping"].upper()]
-        if not is_scripture and mapping != DataFileMapping.ONE_TO_ONE:
-            raise RuntimeError("Basic corpus pairs only support one-to-one mapping.")
-        if mapping == DataFileMapping.ONE_TO_ONE and len(src_files) != len(trg_files):
-            raise RuntimeError(
-                "A corpus pair with one-to-one mapping must contain the same number of source and target corpora."
-            )
-
-        pairs.append(
-            CorpusPair(
-                src_files,
-                trg_files,
-                type,
-                src_noise,
-                augmentations,
-                tags,
-                size,
-                test_size,
-                val_size,
-                disjoint_test,
-                disjoint_val,
-                score_threshold,
-                corpus_books,
-                test_books,
-                use_test_set_from,
-                src_terms_files,
-                trg_terms_files,
-                is_lexical_data,
-                mapping,
-            )
-        )
-    return pairs
-
-
-def get_terms_files(files: List[DataFile]) -> List[DataFile]:
-    terms_files: List[DataFile] = []
-    for file in files:
-        terms_path = get_terms_renderings_path(file.iso, file.project)
-        if terms_path is None:
-            continue
-        terms_files.append(DataFile(terms_path))
-    return terms_files
-
-
-def get_terms_glosses_file_paths(terms_files: List[DataFile]) -> Set[Path]:
-    glosses_file_paths: Set[Path] = set()
-    for terms_file in terms_files:
-        list_name = get_terms_list(terms_file.path)
-        glosses_path = get_terms_glosses_path(list_name, iso=terms_file.iso)
-        if glosses_path.is_file():
-            glosses_file_paths.add(glosses_path)
-    return glosses_file_paths
-
-
-def get_parallel_corpus_size(src_file_path: Path, trg_file_path: Path) -> int:
-    count = 0
-    with src_file_path.open("r", encoding="utf-8") as src_file, trg_file_path.open("r", encoding="utf-8") as trg_file:
-        for src_line, trg_line in zip(src_file, trg_file):
-            src_line = src_line.strip()
-            trg_line = trg_line.strip()
-            if len(src_line) > 0 and len(trg_line) > 0:
-                count += 1
-    return count
-
-
-def get_data_file_pairs(corpus_pair: CorpusPair) -> Iterable[Tuple[DataFile, DataFile]]:
-    if corpus_pair.mapping == DataFileMapping.ONE_TO_ONE:
-        for file_pair in zip(corpus_pair.src_files, corpus_pair.trg_files):
-            yield file_pair
-    else:
-        for src_file in corpus_pair.src_files:
-            for trg_file in corpus_pair.trg_files:
-                yield (src_file, trg_file)
 
 
 class NMTModel(ABC):
@@ -321,6 +73,7 @@ class NMTModel(ABC):
         input_paths: List[Path],
         translation_paths: List[Path],
         produce_multiple_translations: bool = False,
+        save_confidences: bool = False,
         vref_paths: Optional[List[Path]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None: ...
@@ -331,12 +84,19 @@ class NMTModel(ABC):
         sentences: Iterable[str],
         src_iso: str,
         trg_iso: str,
+        produce_multiple_translations: bool = False,
         vrefs: Optional[Iterable[VerseRef]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
-    ) -> Iterable[TranslationGroup]: ...
+    ) -> Generator[SentenceTranslationGroup, None, None]: ...
 
     @abstractmethod
     def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]: ...
+
+    @abstractmethod
+    def clear_cache(self) -> None: ...
+
+    @abstractmethod
+    def get_num_drafts(self) -> int: ...
 
 
 class Config(ABC):
@@ -533,8 +293,8 @@ class Config(ABC):
 
         train_count = 0
         terms_config = self.data["terms"]
-        src_terms_files: List[Tuple[DataFile, str]] = []
-        trg_terms_files: List[Tuple[DataFile, str]] = []
+        src_terms_files: List[Tuple[DataFile, List[str]]] = []
+        trg_terms_files: List[Tuple[DataFile, List[str]]] = []
         for pair in self.corpus_pairs:
             if pair.is_scripture:
                 train_count += self._write_scripture_data_sets(tokenizer, pair, force_align)
@@ -543,9 +303,9 @@ class Config(ABC):
 
             if terms_config["dictionary"] or terms_config["train"]:
                 for file in pair.src_terms_files:
-                    src_terms_files.append((file, self._get_tags_str(pair.tags)))
+                    src_terms_files.append((file, pair.tags))
                 for file in pair.trg_terms_files:
-                    trg_terms_files.append((file, self._get_tags_str(pair.tags)))
+                    trg_terms_files.append((file, pair.tags))
 
         terms_train_count = 0
         if terms_config["train"]:
@@ -572,22 +332,29 @@ class Config(ABC):
         else:
             existing_stats = pd.DataFrame({(" ", "Translation Side"): ["Source", "Target"]})
 
-        src_tokens_per_verse, src_chars_per_token = [], []
+        src_tokens_per_verse: List[int] = []
+        src_chars_per_token: List[int] = []
         for src_tok_file in self.exp_dir.glob("*.src.txt"):
+            src_tok_file = src_tok_file.name
             with open(self.exp_dir / src_tok_file, "r+", encoding="utf-8") as f:
                 for line in f:
                     src_tokens_per_verse.append(len(line.split()))
                     src_chars_per_token.extend([len(token) for token in line.split()])
 
-        trg_tokens_per_verse, trg_chars_per_token = [], []
+        trg_tokens_per_verse: List[int] = []
+        trg_chars_per_token: List[int] = []
         for trg_tok_file in self.exp_dir.glob("*.trg.txt"):
+            trg_tok_file = trg_tok_file.name
             with open(self.exp_dir / trg_tok_file, "r+", encoding="utf-8") as f:
                 for line in f:
                     trg_tokens_per_verse.append(len(line.split()))
                     trg_chars_per_token.extend([len(token) for token in line.split()])
 
-        src_chars_per_verse, src_words_per_verse, src_chars_per_word = [], [], []
+        src_chars_per_verse: List[int] = []
+        src_words_per_verse: List[int] = []
+        src_chars_per_word: List[int] = []
         for src_detok_file in self.exp_dir.glob("*.src.detok.txt"):
+            src_detok_file = src_detok_file.name
             with open(self.exp_dir / src_detok_file, "r+", encoding="utf-8") as f:
                 for line in f:
                     src_chars_per_verse.append(len(line))
@@ -595,8 +362,11 @@ class Config(ABC):
                     src_words_per_verse.append(len(word_line.split()))
                     src_chars_per_word.extend([len(word) for word in word_line.split()])
 
-        trg_chars_per_verse, trg_words_per_verse, trg_chars_per_word = [], [], []
+        trg_chars_per_verse: List[int] = []
+        trg_words_per_verse: List[int] = []
+        trg_chars_per_word: List[int] = []
         for trg_detok_file in self.exp_dir.glob("*.trg.detok.txt"):
+            trg_detok_file = trg_detok_file.name
             with open(self.exp_dir / trg_detok_file, "r+", encoding="utf-8") as f:
                 for line in f:
                     trg_chars_per_verse.append(len(line))
@@ -692,8 +462,6 @@ class Config(ABC):
         pair_test_indices: Dict[Tuple[str, str], Set[int]] = {}
         project_isos: Dict[str, str] = {}
 
-        tags_str = self._get_tags_str(pair.tags)
-
         if pair.use_test_set_from != "":
             self._populate_pair_test_indices(pair.use_test_set_from, pair_test_indices)
 
@@ -763,7 +531,7 @@ class Config(ABC):
                         src_file.iso,
                         trg_file.iso,
                         trg_file.project,
-                        tags_str,
+                        pair.tags,
                         test,
                         pair_test_indices,
                         cur_test,
@@ -792,7 +560,7 @@ class Config(ABC):
                 )
 
                 self._add_to_eval_data_set(
-                    src_file.iso, trg_file.iso, trg_file.project, tags_str, val, pair_val_indices, cur_val
+                    src_file.iso, trg_file.iso, trg_file.project, pair.tags, val, pair_val_indices, cur_val
                 )
 
             if pair.is_train:
@@ -815,7 +583,7 @@ class Config(ABC):
                         trg_file.project,
                         src_file.project,
                         pair.mapping == DataFileMapping.MIXED_SRC,
-                        tags_str,
+                        pair.tags,
                         train,
                         mirror_cur_train,
                     )
@@ -824,7 +592,7 @@ class Config(ABC):
                     src_file.project,
                     trg_file.project,
                     pair.mapping == DataFileMapping.MIXED_SRC,
-                    tags_str,
+                    pair.tags,
                     train,
                     cur_train,
                 )
@@ -911,7 +679,7 @@ class Config(ABC):
         src_iso: str,
         trg_iso: str,
         trg_project: str,
-        tags_str: str,
+        tags: List[str],
         dataset: Dict[Tuple[str, str], pd.DataFrame],
         pair_indices: Dict[Tuple[str, str], Set[int]],
         new_data: pd.DataFrame,
@@ -919,7 +687,7 @@ class Config(ABC):
         if len(new_data) == 0:
             return
 
-        self._insert_tags(tags_str, new_data)
+        add_tags_to_dataframe(tags, new_data)
 
         pair_data = dataset.get((src_iso, trg_iso))
 
@@ -940,11 +708,11 @@ class Config(ABC):
         src_project: str,
         trg_project: str,
         mixed_src: bool,
-        tags_str: str,
+        tags: List[str],
         train: Optional[pd.DataFrame],
         cur_train: pd.DataFrame,
     ) -> pd.DataFrame:
-        self._insert_tags(tags_str, cur_train)
+        add_tags_to_dataframe(tags, cur_train)
         if mixed_src:
             cur_train.drop("source_lang", axis=1, inplace=True, errors="ignore")
             cur_train.rename(columns={"source": f"source_{src_project}"}, inplace=True)
@@ -959,12 +727,8 @@ class Config(ABC):
             train = cur_train if train is None else pd.concat([train, cur_train], ignore_index=True)
         return train
 
-    def _insert_tags(self, tags_str: str, sentences: pd.DataFrame) -> None:
-        if tags_str != "":
-            cast(Any, sentences).loc[:, "source"] = tags_str + sentences.loc[:, "source"]
-
     def _add_to_terms_data_set(
-        self, terms: Optional[pd.DataFrame], cur_terms: pd.DataFrame, tags_str: str = ""
+        self, terms: Optional[pd.DataFrame], cur_terms: pd.DataFrame, tags: Optional[List[str]] = []
     ) -> pd.DataFrame:
         if self.mirror:
             mirror_cur_terms = cur_terms.rename(
@@ -975,10 +739,10 @@ class Config(ABC):
                     "target_lang": "source_lang",
                 }
             )
-            self._insert_tags(tags_str, mirror_cur_terms)
+            add_tags_to_dataframe(tags, mirror_cur_terms)
             terms = mirror_cur_terms if terms is None else pd.concat([terms, mirror_cur_terms], ignore_index=True)
 
-        self._insert_tags(tags_str, cur_terms)
+        add_tags_to_dataframe(tags, cur_terms)
         return cur_terms if terms is None else pd.concat([terms, cur_terms], ignore_index=True)
 
     def _write_train(
@@ -1033,8 +797,8 @@ class Config(ABC):
     def _write_terms(
         self,
         tokenizer: Tokenizer,
-        src_terms_files: List[Tuple[DataFile, str]],
-        trg_terms_files: List[Tuple[DataFile, str]],
+        src_terms_files: List[Tuple[DataFile, List[str]]],
+        trg_terms_files: List[Tuple[DataFile, List[str]]],
     ) -> int:
 
         try:
@@ -1082,8 +846,8 @@ class Config(ABC):
 
     def _collect_terms(
         self,
-        src_terms_files: List[Tuple[DataFile, str]],
-        trg_terms_files: List[Tuple[DataFile, str]],
+        src_terms_files: List[Tuple[DataFile, List[str]]],
+        trg_terms_files: List[Tuple[DataFile, List[str]]],
         filter_books: Optional[Set[int]] = None,
     ) -> Optional[pd.DataFrame]:
         terms_config = self.data["terms"]
@@ -1096,7 +860,7 @@ class Config(ABC):
         categories_set: Optional[Set[str]] = None if categories is None else set(categories)
 
         if terms_config["include_glosses"]:
-            gloss_iso: str = str(terms_config["include_glosses"]).lower()
+            gloss_iso: Optional[str] = str(terms_config["include_glosses"]).lower()
             if gloss_iso == "true":
                 src_gloss_iso = list(self.src_isos.intersection(["en", "fr", "id", "es"]))
                 trg_gloss_iso = list(self.trg_isos.intersection(["en", "fr", "id", "es"]))
@@ -1117,37 +881,37 @@ class Config(ABC):
         else:
             gloss_iso = None
 
-        all_src_terms: List[Tuple[DataFile, Dict[str, Term], str]] = []
-        for src_terms_file, tags_str in src_terms_files:
-            all_src_terms.append((src_terms_file, get_terms(src_terms_file.path, iso=gloss_iso), tags_str))
+        all_src_terms: List[Tuple[DataFile, Dict[str, Term], List[str]]] = []
+        for src_terms_file, tags in src_terms_files:
+            all_src_terms.append((src_terms_file, get_terms(src_terms_file.path, iso=gloss_iso), tags))
 
-        all_trg_terms: List[Tuple[DataFile, Dict[str, Term], str]] = []
-        for trg_terms_file, tags_str in trg_terms_files:
-            all_trg_terms.append((trg_terms_file, get_terms(trg_terms_file.path, iso=gloss_iso), tags_str))
+        all_trg_terms: List[Tuple[DataFile, Dict[str, Term], List[str]]] = []
+        for trg_terms_file, tags in trg_terms_files:
+            all_trg_terms.append((trg_terms_file, get_terms(trg_terms_file.path, iso=gloss_iso), tags))
 
-        for src_terms_file, src_terms, tags_str in all_src_terms:
-            for trg_terms_file, trg_terms, trg_tags_str in all_trg_terms:
+        for src_terms_file, src_terms, tags in all_src_terms:
+            for trg_terms_file, trg_terms, _ in all_trg_terms:
                 if src_terms_file.iso == trg_terms_file.iso:
                     continue
                 cur_terms = get_terms_corpus(src_terms, trg_terms, categories_set, filter_books)
                 cur_terms["source_lang"] = src_terms_file.iso
                 cur_terms["target_lang"] = trg_terms_file.iso
-                terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
+                terms = self._add_to_terms_data_set(terms, cur_terms, tags)
         if gloss_iso is not None:
             if gloss_iso in self.trg_isos:
-                for src_terms_file, src_terms, tags_str in all_src_terms:
+                for src_terms_file, src_terms, tags in all_src_terms:
                     cur_terms = get_terms_data_frame(src_terms, categories_set, filter_books)
                     cur_terms = cur_terms.rename(columns={"rendering": "source", "gloss": "target"})
                     cur_terms["source_lang"] = src_terms_file.iso
                     cur_terms["target_lang"] = gloss_iso
-                    terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
+                    terms = self._add_to_terms_data_set(terms, cur_terms, tags)
             if gloss_iso in self.src_isos or gloss_iso == terms_config["include_glosses"]:
-                for trg_terms_file, trg_terms, tags_str in all_trg_terms:
+                for trg_terms_file, trg_terms, tags in all_trg_terms:
                     cur_terms = get_terms_data_frame(trg_terms, categories_set, filter_books)
                     cur_terms = cur_terms.rename(columns={"rendering": "target", "gloss": "source"})
                     cur_terms["source_lang"] = gloss_iso
                     cur_terms["target_lang"] = trg_terms_file.iso
-                    terms = self._add_to_terms_data_set(terms, cur_terms, tags_str)
+                    terms = self._add_to_terms_data_set(terms, cur_terms, tags)
         return terms
 
     def _write_val_trg(self, tokenizer: Optional[Tokenizer], val: Dict[Tuple[str, str], pd.DataFrame]) -> None:
@@ -1237,8 +1001,6 @@ class Config(ABC):
                 train_size = pair.size
                 train_indices = split_corpus(corpus_size, train_size, test_indices | val_indices)
 
-            tags_str = self._get_tags_str(pair.tags)
-
             train_src_file = stack.enter_context(self._open_append(self.train_src_filename()))
             train_trg_file = stack.enter_context(self._open_append(self.train_trg_filename()))
             val_src_file = stack.enter_context(self._open_append(self.val_src_filename()))
@@ -1286,7 +1048,7 @@ class Config(ABC):
                 if len(src_line) == 0 or len(trg_line) == 0:
                     continue
 
-                src_sentence = tags_str + src_line
+                src_sentence = add_tags_to_sentence(pair.tags, src_line)
                 trg_sentence = trg_line
 
                 if pair.is_test and (test_indices is None or index in test_indices):
@@ -1306,7 +1068,7 @@ class Config(ABC):
                         val_trg_ref_file.write("\n")
                     val_count += 1
                 elif pair.is_train and (train_indices is None or index in train_indices):
-                    noised_src_sentence = tags_str + self._noise(pair.src_noise, src_line)
+                    noised_src_sentence = add_tags_to_sentence(pair.tags, self._noise(pair.src_noise, src_line))
                     train_count += self._write_train_sentence_pair(
                         train_src_file,
                         train_trg_file,
@@ -1320,7 +1082,7 @@ class Config(ABC):
                     if self.mirror:
                         tokenizer.set_src_lang(trg_file.iso)
                         tokenizer.set_trg_lang(src_file.iso)
-                        mirror_src_sentence = tags_str + self._noise(pair.src_noise, trg_line)
+                        mirror_src_sentence = add_tags_to_sentence(pair.tags, self._noise(pair.src_noise, trg_line))
                         mirror_trg_sentence = src_line
                         train_count += self._write_train_sentence_pair(
                             train_src_file,
@@ -1389,12 +1151,6 @@ class Config(ABC):
             if vref_file is not None:
                 vref_file.write("\n")
         return len(src_variants)
-
-    def _get_tags_str(self, tags: List[str]) -> str:
-        tags_str = ""
-        if len(tags) > 0:
-            tags_str += " ".join(f"<{t}>" for t in tags) + " "
-        return tags_str
 
     def _noise(self, src_noise: List[NoiseMethod], src_sentence: str) -> str:
         if len(src_noise) == 0:
@@ -1491,6 +1247,6 @@ class Config(ABC):
     def _write_dictionary(
         self,
         tokenizer: Tokenizer,
-        src_terms_files: List[Tuple[DataFile, str]],
-        trg_terms_files: List[Tuple[DataFile, str]],
+        src_terms_files: List[Tuple[DataFile, List[str]]],
+        trg_terms_files: List[Tuple[DataFile, List[str]]],
     ) -> int: ...

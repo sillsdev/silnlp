@@ -45,14 +45,12 @@ import csv
 import logging
 import os
 import time
-
 from dataclasses import dataclass
 from enum import Enum
 from itertools import groupby
 from logging import Logger
 from pathlib import Path
 from typing import List, Optional
-
 
 logger = logging.getLogger(__package__ + ".extract_xri")
 repair_logger = logging.getLogger(logger.name + ".repair")
@@ -122,8 +120,13 @@ def load_sentence_pairs(input_file_path: str) -> List[SentencePair]:
         else:
             raise Exception(f"Unable to find expected column '{column_name}' in input file")
 
+    try:
+        id_column_index = get_column_index("sentence_id")
+    except Exception:
+        id_column_index = get_column_index("id")
+
     column_schema = ColumnSchema(
-        id_column_index=get_column_index("id"),
+        id_column_index=id_column_index,
         source_column_index=get_column_index("source"),
         target_column_index=get_column_index("target"),
         split_column_index=get_column_index("split"),
@@ -269,7 +272,7 @@ def filter_and_clean(
             continue
 
         def trim(sentence: str, description: str) -> str:
-            trimmed = sentence.strip()
+            trimmed = sentence.strip().replace("\n", " ")
             if trimmed != sentence:
                 clean_logger.debug(
                     f"Boundary whitespace trimmed off '{description}' field. "
@@ -284,7 +287,9 @@ def filter_and_clean(
 
         # See discussion: https://github.com/sillsdev/silnlp/issues/546#issuecomment-2391335853
         if len(source) <= 1 or len(target) <= 1:
-            clean_logger.debug("Ignoring sentence pair as it has only one non-whitespace character in either source or target")
+            clean_logger.debug(
+                "Ignoring sentence pair as it has only one non-whitespace character in either source or target"
+            )
             if target == "!":
                 clean_logger.debug("Target sentence is '!' indicating it is not translated.")
             continue
@@ -353,9 +358,7 @@ def remove_duplicates(sentence_pairs: List[SentencePair]) -> List[SentencePair]:
             return duplicates[0]
         else:
             # Duplictes found, choose the best match
-            closest_match = min(
-                duplicates, key=lambda sentence_pair: abs(len(sentence_pair.target) - len(source))
-            )
+            closest_match = min(duplicates, key=lambda sentence_pair: abs(len(sentence_pair.target) - len(source)))
             deduplication_logger.error(
                 f"{len(duplicates)} duplicate sentence pairs found with source: '{source}'. "
                 + f"Id's are {[sentence_pair.id for sentence_pair in duplicates]}. "

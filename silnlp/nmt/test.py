@@ -4,7 +4,7 @@ import random
 from contextlib import ExitStack
 from io import StringIO
 from pathlib import Path
-from typing import IO, Dict, List, Optional, Set, TextIO, Tuple
+from typing import Dict, List, Optional, Set, TextIO, Tuple
 
 import sacrebleu
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_number_to_id, get_chapters
@@ -13,15 +13,30 @@ from scipy.stats import gmean
 
 from ..common.metrics import compute_meteor_score
 from ..common.utils import get_git_revision_hash
+from .clearml_connection import TAGS_LIST, SILClearML
 from .config import CheckpointType, Config, NMTModel
 from .config_utils import load_config
 from .tokenizer import Tokenizer
 
-LOGGER = logging.getLogger(__package__ + ".test")
+LOGGER = logging.getLogger((__package__ or "") + ".test")
 
 logging.getLogger("sacrebleu").setLevel(logging.ERROR)
 
-_SUPPORTED_SCORERS = ["bleu", "sentencebleu", "chrf3", "chrf3+", "chrf3++", "spbleu", "meteor", "ter", "confidence"]
+SUPPORTED_SCORERS = [
+    "bleu",
+    "sentencebleu",
+    "chrf3",
+    "chrf3+",
+    "chrf3++",
+    "spbleu",
+    "m-bleu",
+    "m-chrf3",
+    "m-chrf3+",
+    "m-chrf3++",
+    "meteor",
+    "ter",
+    "confidence",
+]
 
 
 class PairScore:
@@ -46,7 +61,7 @@ class PairScore:
         self.book = book
         self.draft_index = draft_index
 
-    def writeHeader(self, file: IO) -> None:
+    def writeHeader(self, file: TextIO) -> None:
         header = (
             "book,draft_index,src_iso,trg_iso,num_refs,references,sent_len"
             + (
@@ -60,7 +75,7 @@ class PairScore:
         )
         file.write(header)
 
-    def write(self, file: IO) -> None:
+    def write(self, file: TextIO) -> None:
         file.write(
             f"{self.book},{self.draft_index},{self.src_iso},{self.trg_iso},"
             f"{self.num_refs},{self.refs},{self.sent_len:d}"
@@ -71,8 +86,11 @@ class PairScore:
                 f",{self.bleu.precisions[2]:.2f},{self.bleu.precisions[3]:.2f},{self.bleu.bp:.3f}"
                 f",{self.bleu.sys_len:d},{self.bleu.ref_len:d}"
             )
-        for val in self.other_scores.values():
-            file.write(f",{val:.2f}")
+        for scorer, val in self.other_scores.items():
+            if scorer == "confidence":
+                file.write(f",{val:.8f}")
+            else:
+                file.write(f",{val:.2f}")
         file.write("\n")
 
 
@@ -134,6 +152,63 @@ def score_pair(
         )
         other_scores["spBLEU"] = spbleu_score.score
 
+    # m-bleu, m-chrf3, m-chrf3+, and m-chrf3++ are from the paper https://arxiv.org/pdf/2407.12832
+    # These metrics are implemented at the verse-level, rather than the sentence-level
+    if "m-bleu" in scorers:
+        sentence_bleu_scores: List[float] = []
+        for sentence_i, sentence in enumerate(pair_sys):
+            references = [reference[sentence_i] for reference in pair_refs]
+            sentence_bleu_score = sentence_bleu(
+                sentence,
+                references,
+                lowercase=True,
+                tokenize=config.data.get("sacrebleu_tokenize", "13a"),
+            )
+            sentence_bleu_scores.append(sentence_bleu_score.score)
+        if len(sentence_bleu_scores) == 0:
+            other_scores["m-BLEU"] = 0
+        else:
+            other_scores["m-BLEU"] = sum(sentence_bleu_scores) / len(sentence_bleu_scores)
+
+    if "m-chrf3" in scorers:
+        sentence_chrf3_scores: List[float] = []
+        for sentence_i, sentence in enumerate(pair_sys):
+            references = [reference[sentence_i] for reference in pair_refs]
+            sentence_chrf3_score = sacrebleu.sentence_chrf(
+                sentence, references, char_order=6, beta=3, remove_whitespace=True
+            )
+            sentence_chrf3_scores.append(sentence_chrf3_score.score)
+        if len(sentence_chrf3_scores) == 0:
+            other_scores["m-chrf3"] = 0
+        else:
+            other_scores["m-chrf3"] = sum(sentence_chrf3_scores) / len(sentence_chrf3_scores)
+
+    if "m-chrf3+" in scorers:
+        sentence_chrfp_scores: List[float] = []
+        for sentence_i, sentence in enumerate(pair_sys):
+            references = [reference[sentence_i] for reference in pair_refs]
+            sentence_chrfp_score = sacrebleu.sentence_chrf(
+                sentence, references, char_order=6, beta=3, word_order=1, remove_whitespace=True, eps_smoothing=True
+            )
+            sentence_chrfp_scores.append(sentence_chrfp_score.score)
+        if len(sentence_chrfp_scores) == 0:
+            other_scores["m-chrf3+"] = 0
+        else:
+            other_scores["m-chrf3+"] = sum(sentence_chrfp_scores) / len(sentence_chrfp_scores)
+
+    if "m-chrf3++" in scorers:
+        sentence_chrfpp_scores: List[float] = []
+        for sentence_i, sentence in enumerate(pair_sys):
+            references = [reference[sentence_i] for reference in pair_refs]
+            sentence_chrfpp_score = sacrebleu.sentence_chrf(
+                sentence, references, char_order=6, beta=3, word_order=2, remove_whitespace=True, eps_smoothing=True
+            )
+            sentence_chrfpp_scores.append(sentence_chrfpp_score.score)
+        if len(sentence_chrfpp_scores) == 0:
+            other_scores["m-chrf3++"] = 0
+        else:
+            other_scores["m-chrf3++"] = sum(sentence_chrfpp_scores) / len(sentence_chrfpp_scores)
+
     if "meteor" in scorers:
         meteor_score = compute_meteor_score(trg_iso, pair_sys, pair_refs)
         if meteor_score is not None:
@@ -148,15 +223,21 @@ def score_pair(
         if pair_confs is not None:
             confidences = pair_confs
         else:
-            with open(config.exp_dir / predictions_conf_file_name, "r", encoding="utf-8") as f:
-                confidences = [float(line.split("\t")[0]) for line in list(f)[3::2]]
+            try:
+                with open(config.exp_dir / predictions_conf_file_name, "r", encoding="utf-8") as f:
+                    confidences = [float(line.split("\t")[0]) for line in list(f)[3::2]]
+            except FileNotFoundError as e:
+                raise FileNotFoundError(
+                    "Cannot use confidence as a scorer because the confidences file is missing. "
+                    "Include the --save-confidences option to generate the file and enable confidence scoring."
+                ) from e
         other_scores["confidence"] = gmean(confidences)
 
     return PairScore(book, src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores, draft_index)
 
 
 def score_individual_books(
-    book_dict: Dict[str, Tuple[List[str], List[List[str]]]],
+    book_dict: Dict[str, Tuple[List[str], List[List[str]], List[float]]],
     src_iso: str,
     trg_iso: str,
     predictions_detok_file_name: str,
@@ -199,7 +280,7 @@ def process_individual_books(
     conf_file_path: Path,
     select_rand_ref_line: bool,
     books: Dict[int, List[int]],
-) -> Dict[str, Tuple[List[str], List[List[str]]]]:
+) -> Dict[str, Tuple[List[str], List[List[str]], List[float]]]:
     # Output data structure
     book_dict: Dict[str, Tuple[List[str], List[List[str]], List[float]]] = {}
     with ExitStack() as stack:
@@ -263,10 +344,10 @@ def load_test_data(
     config: Config,
     books: Dict[int, List[int]],
     by_book: bool,
-) -> Tuple[List[str], List[List[str]], Dict[str, Tuple[List[str], List[List[str]]]]]:
+) -> Tuple[List[str], List[List[str]], Dict[str, Tuple[List[str], List[List[str]], List[float]]]]:
     sys: List[str] = []
     refs: List[List[str]] = []
-    book_dict: Dict[str, Tuple[List[str], List[List[str]]]] = {}
+    book_dict: Dict[str, Tuple[List[str], List[List[str]], List[float]]] = {}
     pred_file_path = config.exp_dir / pred_file_name
     conf_file_path = config.exp_dir / conf_file_name
     with ExitStack() as stack:
@@ -283,8 +364,8 @@ def load_test_data(
             else:
                 # use specified refs only
                 ref_file_paths = [p for p in ref_file_paths if config.is_ref_project(ref_projects, p)]
-        ref_files: List[IO] = []
-        vref_file: Optional[IO] = None
+        ref_files: List[TextIO] = []
+        vref_file: Optional[TextIO] = None
         vref_file_path = config.exp_dir / vref_file_name
         if len(books) > 0 and vref_file_path.is_file():
             vref_file = stack.enter_context(vref_file_path.open("r", encoding="utf-8"))
@@ -391,6 +472,7 @@ def test_checkpoint(
     scorers: Set[str],
     books: Dict[int, List[int]],
     produce_multiple_translations: bool = False,
+    save_confidences: bool = False,
 ) -> List[PairScore]:
     config.set_seed()
     vref_file_names: List[str] = []
@@ -447,6 +529,7 @@ def test_checkpoint(
             source_paths,
             translation_paths,
             produce_multiple_translations,
+            save_confidences,
             vref_paths,
             step if checkpoint_type is CheckpointType.OTHER else checkpoint_type,
         )
@@ -561,7 +644,7 @@ def test_checkpoint(
         ref_projects_suffix = "_".join(sorted(ref_projects))
         scores_file_root += f"-{ref_projects_suffix}"
     with (config.exp_dir / f"{scores_file_root}.csv").open("w", encoding="utf-8") as scores_file:
-        if scores is not None:
+        if len(scores) > 0:
             scores[0].writeHeader(scores_file)
         for results in scores:
             results.write(scores_file)
@@ -580,6 +663,7 @@ def test(
     books: List[str] = [],
     by_book: bool = False,
     produce_multiple_translations: bool = False,
+    save_confidences: bool = False,
 ):
     exp_name = experiment
     config = load_config(exp_name)
@@ -590,9 +674,11 @@ def test(
 
     books_nums = get_chapters(books)
 
+    if save_confidences and "confidence" not in scorers:
+        scorers.add("confidence")
     if len(scorers) == 0:
         scorers.add("bleu")
-    scorers.intersection_update(set(_SUPPORTED_SCORERS))
+    scorers.intersection_update(set(SUPPORTED_SCORERS))
 
     tokenizer = config.create_tokenizer()
     model = config.create_model()
@@ -612,6 +698,7 @@ def test(
             scorers,
             books_nums,
             produce_multiple_translations,
+            save_confidences,
         )
 
     if avg:
@@ -629,9 +716,10 @@ def test(
                 scorers,
                 books_nums,
                 produce_multiple_translations,
+                save_confidences,
             )
         except ValueError:
-            LOGGER.warn("No average checkpoint available.")
+            LOGGER.warning("No average checkpoint available.")
 
     best_step = 0
     if best and config.has_best_checkpoint:
@@ -650,6 +738,7 @@ def test(
                 scorers,
                 books_nums,
                 produce_multiple_translations,
+                save_confidences,
             )
 
     if last or (not best and checkpoint is None and not avg and config.model_dir.exists()):
@@ -667,6 +756,7 @@ def test(
                 scorers,
                 books_nums,
                 produce_multiple_translations,
+                save_confidences,
             )
 
     if not config.model_dir.exists():
@@ -682,6 +772,7 @@ def test(
             scorers,
             books_nums,
             produce_multiple_translations,
+            save_confidences,
         )
 
     for step in sorted(results.keys()):
@@ -731,9 +822,9 @@ def main() -> None:
         "--scorers",
         nargs="*",
         metavar="scorer",
-        choices=_SUPPORTED_SCORERS,
+        choices=SUPPORTED_SCORERS,
         default=[],
-        help=f"List of scorers - {_SUPPORTED_SCORERS}",
+        help=f"List of scorers - {SUPPORTED_SCORERS}",
     )
     parser.add_argument("--books", nargs="*", metavar="book", default=[], help="Books")
     parser.add_argument("--by-book", default=False, action="store_true", help="Score individual books")
@@ -743,7 +834,35 @@ def main() -> None:
         action="store_true",
         help="Produce multiple translations of each verse.",
     )
+    parser.add_argument(
+        "--save-confidences",
+        default=False,
+        action="store_true",
+        help="Generate file with verse confidences.",
+    )
+    parser.add_argument(
+        "--clearml-queue",
+        default=None,
+        type=str,
+        help="Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run "
+        + "it locally and register it with ClearML.",
+    )
+    parser.add_argument(
+        "--clearml-tag",
+        metavar="tag",
+        choices=TAGS_LIST,
+        default=None,
+        type=str,
+        help=f"Tag to add to the ClearML Task - {TAGS_LIST}",
+    )
     args = parser.parse_args()
+    experiment = args.experiment
+
+    if args.clearml_queue is not None:
+        clearml = SILClearML(experiment, args.clearml_queue, tag=args.clearml_tag)
+        experiment = clearml.name
+    else:
+        experiment = experiment.replace("\\", "/")
 
     get_git_revision_hash()
 
@@ -753,7 +872,7 @@ def main() -> None:
         books = args.books
 
     test(
-        args.experiment,
+        experiment,
         checkpoint=args.checkpoint,
         last=args.last,
         best=args.best,
@@ -764,6 +883,7 @@ def main() -> None:
         books=books,
         by_book=args.by_book,
         produce_multiple_translations=args.multiple_translations,
+        save_confidences=args.save_confidences,
     )
 
 

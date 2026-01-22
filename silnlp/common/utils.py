@@ -3,15 +3,17 @@ import os
 import random
 import subprocess
 from abc import ABC, abstractmethod
+from argparse import Namespace
 from enum import Enum, Flag, auto
 from inspect import getmembers
 from pathlib import Path, PurePath
 from types import FunctionType
-from typing import Any, List, Optional, Set, Type
+from typing import Any, List, Optional, Set, Type, cast
 
 import numpy as np
+import pandas as pd
 
-from ..common.environment import SIL_NLP_ENV
+from ..common.environment import SIL_NLP_ENV, SilNlpEnv
 
 LOGGER = logging.getLogger(__name__)
 
@@ -43,7 +45,7 @@ def print_table(rows):
     print()
 
 
-def show_attrs(cli_args, envs=SIL_NLP_ENV, actions=[]):
+def show_attrs(cli_args: Namespace, envs: SilNlpEnv = SIL_NLP_ENV, actions: List[str] = []) -> None:
 
     env_rows = [(k, v) for k, v in attrs(envs).items()]
     arg_rows = [(k, v) for k, v in cli_args.__dict__.items() if v is not None]
@@ -121,7 +123,7 @@ def check_dotnet() -> None:
                 stderr=subprocess.DEVNULL,
             )
             _is_dotnet_installed = True
-        except:
+        except Exception:
             _is_dotnet_installed = False
 
     if not _is_dotnet_installed:
@@ -130,7 +132,7 @@ def check_dotnet() -> None:
 
 class NoiseMethod(ABC):
     @abstractmethod
-    def __call__(self, tokens: list) -> list:
+    def __call__(self, tokens: list[str]) -> list[str]:
         pass
 
 
@@ -193,3 +195,21 @@ def create_noise_methods(params: List[dict]) -> List[NoiseMethod]:
             raise ValueError("Invalid noise type: %s" % noise_type)
         methods.append(noise_method_class(*args))
     return methods
+
+
+def _get_tags_str(tags: Optional[List[str]]) -> str:
+    tags_str = ""
+    if tags is not None and len(tags) > 0:
+        tags_str += " ".join(f"<{t}>" for t in tags) + " "
+    return tags_str
+
+
+def add_tags_to_sentence(tags: Optional[List[str]], sentence: str) -> str:
+    return _get_tags_str(tags) + sentence
+
+
+def add_tags_to_dataframe(tags: Optional[List[str]], df_sentences: pd.DataFrame) -> pd.DataFrame:
+    tags_str = _get_tags_str(tags)
+    if tags_str != "":
+        cast(Any, df_sentences).loc[:, "source"] = tags_str + df_sentences.loc[:, "source"]
+    return df_sentences

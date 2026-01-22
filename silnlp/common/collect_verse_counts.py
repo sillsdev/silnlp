@@ -82,9 +82,14 @@ def collect_verse_counts(
     output_path = output_folder if isinstance(output_folder, Path) else Path(output_folder)
 
     extract_files = set()
+    missing_files = []
     for file_pattern in file_patterns.split(";"):
         file_pattern = file_pattern.strip()
-        extract_files.update(input_path.glob(file_pattern))
+        matched = list(input_path.glob(file_pattern))
+        if not matched:
+            missing_files.append(input_path / file_pattern)
+        extract_files.update(matched)
+
     project_names = [f.stem for f in extract_files]
     projects_to_process = project_names
 
@@ -93,37 +98,54 @@ def collect_verse_counts(
 
     # Initialize the data frames and determine which files need to be processed
     verse_counts_path = SIL_NLP_ENV.mt_experiments_dir / "verse_counts" / "verse_counts.csv"
+    verse_counts_df = None
     if verse_counts_path.is_file():
-        verse_counts_df = pd.read_csv(verse_counts_path, index_col="file")
-        if recount:
-            verse_counts_df = verse_counts_df.drop(index=project_names, errors="ignore")
-        projects_to_process = list(set(project_names) - set(verse_counts_df.index))
-        verse_counts_df = verse_counts_df.reindex(set(verse_counts_df.index) | set(project_names))
-    else:
+        try:
+            verse_counts_df = pd.read_csv(verse_counts_path, index_col="file")
+            if recount:
+                verse_counts_df = verse_counts_df.drop(index=project_names, errors="ignore")
+            projects_to_process = list(set(project_names) - set(verse_counts_df.index))
+            verse_counts_df = verse_counts_df.reindex(set(verse_counts_df.index) | set(project_names))
+        except (PermissionError, OSError, IOError) as e:
+            LOGGER.warning(f"Cannot read {verse_counts_path}: {e}. Creating new dataframe.")
+            verse_counts_df = None
+
+    if verse_counts_df is None:
         verse_counts_df = pd.DataFrame(columns=["Books", "Total", "OT", "NT", "DT"] + OT_CANON + NT_CANON + DT_CANON)
         verse_counts_df["file"] = project_names
         verse_counts_df = verse_counts_df.set_index("file")
 
     verse_percentages_path = SIL_NLP_ENV.mt_experiments_dir / "verse_counts" / "verse_percentages.csv"
+    verse_percentages_df = None
     if verse_percentages_path.is_file():
-        verse_percentages_df = pd.read_csv(verse_percentages_path, index_col="file")
-        if recount:
-            verse_percentages_df = verse_percentages_df.drop(index=project_names, errors="ignore")
-        verse_percentages_df = verse_percentages_df.reindex(set(verse_percentages_df.index) | set(project_names))
-    else:
+        try:
+            verse_percentages_df = pd.read_csv(verse_percentages_path, index_col="file")
+            if recount:
+                verse_percentages_df = verse_percentages_df.drop(index=project_names, errors="ignore")
+            projects_to_process = list(set(project_names) - set(verse_percentages_df.index))
+            verse_percentages_df = verse_percentages_df.reindex(set(verse_percentages_df.index) | set(project_names))
+        except (PermissionError, OSError, IOError) as e:
+            LOGGER.warning(f"Cannot read {verse_percentages_path}: {e}. Creating new dataframe.")
+            verse_percentages_df = None
+    if verse_percentages_df is None:
         verse_percentages_df = pd.DataFrame(columns=["Total", "OT", "NT", "DT"] + OT_CANON + NT_CANON + DT_CANON)
         verse_percentages_df["file"] = project_names
         verse_percentages_df = verse_percentages_df.set_index("file")
 
     # Get counts for unprocessed files
     complete_verse_counts = get_complete_verse_counts()
+    small_files = []
     partially_complete_projects = []
-    for extract_file_name in tqdm(extract_files):
+    for extract_file_name in tqdm(sorted(extract_files)):
         project_name = extract_file_name.stem
-        if project_name not in projects_to_process:
-            LOGGER.info(f"Found verse counts for {project_name}")
+        # LOGGER.info(f"Processing {project_name}")
+        if extract_file_name.stat().st_size < 41_000:
+            small_files.append(extract_file_name)
+            LOGGER.info(f"Small file found for   {extract_file_name}")
             continue
-        LOGGER.info(f"Processing {project_name}")
+        if project_name not in projects_to_process:
+            LOGGER.info(f"Found verse counts for {extract_file_name}")
+            continue
 
         verse_counts = defaultdict(list)
         with (
@@ -215,8 +237,11 @@ def collect_verse_counts(
         verse_percentages_df.loc[project_names, "Total"] = 100 * round(
             verse_counts_df.loc[project_names, "Total"] / verse_counts_df.loc["complete", "Total"], 3
         )
-    verse_counts_df.loc[["complete"] + sorted(project_names)].astype(int).to_csv(output_path / "verse_counts.csv")
-    verse_percentages_df.loc[sorted(project_names)].to_csv(output_path / "verse_percentages.csv")
+    try:
+        verse_counts_df.loc[["complete"] + sorted(project_names)].astype(int).to_csv(output_path / "verse_counts.csv")
+        verse_percentages_df.loc[sorted(project_names)].to_csv(output_path / "verse_percentages.csv")
+    except Exception as e:
+        LOGGER.warning(f"Error saving verse counts or percentages: {e}")
 
     # Copy over chapter counts for partially complete books
     for project in project_names:
@@ -236,13 +261,27 @@ def collect_verse_counts(
                 partial_books_out_path.unlink(missing_ok=True)
             else:
                 df.to_csv(partial_books_out_path)
+    print("\n")
+    if small_files:
+        LOGGER.warning(f"Skipped {len(small_files)} files smaller than 41KB:")
+        for f in small_files:
+            LOGGER.warning(f"  {f.name}")
+    else:
+        LOGGER.info("No files smaller than 41KB were found.")
+    if missing_files:
+        LOGGER.warning(f"Skipped {len(missing_files)} missing files:")
+        for f in missing_files:
+            LOGGER.warning(f"  {f.name}")
+    else:
+        LOGGER.info("All files were found.")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Collect various counts from a corpus of Bible extracts")
     parser.add_argument(
         "folder",
-        help="An experiment folder (typically in MT/experiments) that contains a config.yml file. The results will be saved in this folder.",
+        help="An experiment folder (typically in MT/experiments) that contains a config.yml file."
+        " The results will be saved in this folder.",
     )
     parser.add_argument(
         "--input-folder", default=SIL_NLP_ENV.mt_scripture_dir, help="Folder with corpus of Bible extract files."
@@ -264,10 +303,8 @@ def main() -> None:
     # If the output folder doesn't exist locally, assume it's an experiment folder
     folder = args.folder.replace("\\", "/")
     if Path(folder).exists():
-        exp_name = None
         folder = Path(folder)
     else:
-        exp_name = folder
         folder = get_mt_exp_dir(folder)
 
     # If no files are listed and folder is an experiment, use the files listed in the config file
@@ -275,7 +312,8 @@ def main() -> None:
     if file_patterns == "":
         if not folder.exists():
             LOGGER.error(
-                f"Folder {folder} does not exist. Please provide an experiment folder, typically in MT/experiments, containing a config.yml file or a list of files with the --files argument."
+                f"Folder {folder} does not exist. Please provide an experiment folder, typically in MT/experiments,"
+                " containing a config.yml file or a list of files with the --files argument."
             )
             return
         else:

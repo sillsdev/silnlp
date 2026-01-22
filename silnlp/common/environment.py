@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import time
@@ -24,10 +25,11 @@ LOGGER = logging.getLogger(__name__)
 
 class SilNlpEnv:
     def __init__(self):
+        atexit.register(self.delete_path)
         atexit.register(check_transfers)
         self.root_dir = Path.home() / ".silnlp"
         self.assets_dir = Path(__file__).parent.parent / "assets"
-
+        self.path_to_delete: Optional[Path] = None
         self.set_data_dir()
 
     def set_data_dir(self, data_dir: Optional[Path] = None):
@@ -107,6 +109,13 @@ class SilNlpEnv:
 
         raise FileExistsError("No valid path exists")
 
+    def delete_path_on_exit(self, path: Union[str, Path]) -> None:
+        self.path_to_delete = pathify(path)
+
+    def delete_path(self) -> None:
+        if self.path_to_delete and self.path_to_delete.is_dir():
+            shutil.rmtree(self.path_to_delete)
+
 
 def check_transfers() -> None:
     # check if rclone is running or if CHECK_TRANSFERS is set
@@ -118,10 +127,10 @@ def check_transfers() -> None:
         return
     LOGGER.info("Checking rclone transfer progress.")
     time.sleep(60)  # wait for the latest poll interval
-    while True:
+    transfers_complete = False
+    for i in range(4):
         with open("/root/rclone_log.txt", "r", encoding="utf-8") as log_file:
             log_lines = log_file.readlines()
-        transfers_complete = False
         for line in reversed(log_lines):
             if "vfs cache: cleaned" in line:
                 transfers_complete = bool(re.match(r".*in use 0, to upload 0, uploading 0,.*", line))
@@ -132,8 +141,10 @@ def check_transfers() -> None:
             break
         else:
             LOGGER.info(line)
-            LOGGER.info("rclone transfers are still in progress. Waiting one minute.")
-        time.sleep(60)
+            LOGGER.info(f"rclone transfers are still in progress. Waiting {2**i} minutes.")
+        time.sleep(60 * (2**i))  # exponential backoff, max 8 minutes, total wait time 15 minutes
+    if not transfers_complete:
+        LOGGER.warning("rclone transfers could not be completed. Some data may be lost or corrupted.")
 
 
 def try_n_times(func: Callable, n=10):

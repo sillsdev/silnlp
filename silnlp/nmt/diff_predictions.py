@@ -17,7 +17,6 @@ from scipy.stats import gmean
 from tqdm import tqdm
 
 from ..common.corpus import load_corpus
-from ..common.environment import SIL_NLP_ENV
 from ..common.utils import get_git_revision_hash
 from .config import get_mt_exp_dir
 from .sp_utils import decode_sp, decode_sp_lines
@@ -558,10 +557,17 @@ def add_scores(df: pd.DataFrame, scorers: List[str], preserve_case: bool, tokeni
 
 def get_sequence_confidences(confidences_file: Path) -> List[float]:
     confidences = []
-    with open(confidences_file, "r") as f:
-        lines = f.readlines()
-        for i in range(3, len(lines), 2):
-            confidences.append(float(lines[i].split("\t")[0]))
+    try:
+        with open(confidences_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            for i in range(3, len(lines), 2):
+                confidences.append(float(lines[i].split("\t")[0]))
+    except FileNotFoundError as e:
+        raise FileNotFoundError(
+            "Cannot include confidence because the confidences file is missing. Include the --save-confidences "
+            "option when running test.py to generate the file and enable confidence scoring."
+        ) from e
+
     return confidences
 
 
@@ -622,7 +628,6 @@ def main() -> None:
     stats_offset = 5
 
     exp1_name = args.exp1
-    SIL_NLP_ENV.copy_experiment_from_bucket(exp1_name, no_checkpoints=True)
     exp1_dir = get_mt_exp_dir(exp1_name)
     exp1_type = get_experiment_type(str(exp1_dir))
     if exp1_type != "SMT" and exp1_type != "NMT":
@@ -761,8 +766,6 @@ def main() -> None:
     writer.close()
     #    os.remove(exp1_graph)
     print(f"Output is in {output_path}")
-
-    SIL_NLP_ENV.copy_experiment_to_bucket(exp1_name, patterns=("diff_predictions.*"), overwrite=True)
 
 
 if __name__ == "__main__":
