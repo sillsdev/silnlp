@@ -52,13 +52,15 @@ class BookScores:
         return self.scores.get(book)
 
 
-def estimate_quality(verse_test_scores_path: Path, confidence_files: List[ConfidenceFile]) -> None:
-    verse_test_scores_path = validate_inputs(verse_test_scores_path, confidence_files)
+def estimate_quality(verse_test_scores_path: Path, confidence_file_paths: List[Path]) -> None:
+    verse_test_scores_path, confidence_files = validate_inputs(verse_test_scores_path, confidence_file_paths)
     verse_scores, chapter_scores, book_scores = project_chrf3(verse_test_scores_path, confidence_files)
     compute_usable_proportions(verse_scores, chapter_scores, book_scores, confidence_files[0].parent)
 
 
-def validate_inputs(verse_test_scores_path: Path, confidence_files: List[Path]) -> None:
+def validate_inputs(
+    verse_test_scores_path: Path, confidence_file_paths: List[Path]
+) -> Tuple[Path, List[ConfidenceFile]]:
     if not verse_test_scores_path.exists():
         raise FileNotFoundError(f"Test data file {verse_test_scores_path} does not exist.")
     elif verse_test_scores_path.is_dir():
@@ -70,16 +72,19 @@ def validate_inputs(verse_test_scores_path: Path, confidence_files: List[Path]) 
             )
         verse_test_scores_path = test_files[0]
         LOGGER.info(f"Using test data file {verse_test_scores_path}.")
-    if len(confidence_files) == 0:
+
+    if len(confidence_file_paths) == 0:
         raise ValueError("At least one confidence file must be provided.")
-    if not all(cf.is_file() for cf in confidence_files):
-        missing_files = [str(cf) for cf in confidence_files if not cf.is_file()]
+    if not all(cf.is_file() for cf in confidence_file_paths):
+        missing_files = [str(cf) for cf in confidence_file_paths if not cf.is_file()]
         raise FileNotFoundError(f"The following confidence files do not exist: {', '.join(missing_files)}")
-    return verse_test_scores_path
+    confidence_files = [ConfidenceFile(cf) for cf in confidence_file_paths]
+
+    return verse_test_scores_path, confidence_files
 
 
 def project_chrf3(
-    verse_test_scores_path: Path, confidence_files: List[Path]
+    verse_test_scores_path: Path, confidence_files: List[ConfidenceFile]
 ) -> Tuple[List[VerseScore], ChapterScores, BookScores]:
     chrf3_scores, confidence_scores = extract_test_data(verse_test_scores_path)
     if len(chrf3_scores) != len(confidence_scores):
@@ -92,12 +97,11 @@ def project_chrf3(
     chapter_scores: ChapterScores = ChapterScores()
     book_scores: BookScores = BookScores()
     for confidence_file in confidence_files:
-        confidence_file = ConfidenceFile(confidence_file)
         file_scores = get_verse_scores(confidence_file, slope, intercept)
         book = file_scores[0].vref.book if file_scores else None
         verse_scores += file_scores
-        if confidence_file.with_suffix(".chapters.tsv").is_file():
-            with open(confidence_file.with_suffix(".chapters.tsv"), "r", encoding="utf-8") as chapter_file:
+        if confidence_file.get_chapters_path().is_file():
+            with open(confidence_file.get_chapters_path(), "r", encoding="utf-8") as chapter_file:
                 next(chapter_file)
                 for line in chapter_file:
                     cols = line.strip().split("\t")
@@ -106,8 +110,8 @@ def project_chrf3(
                     projected_chrf3 = slope * confidence + intercept
                     score = Score(confidence, projected_chrf3)
                     chapter_scores.add_score(book, chapter, score)
-    if (confidence_files[0].parent / "confidences.books.tsv").is_file():
-        with open(confidence_files[0].parent / "confidences.books.tsv", "r", encoding="utf-8") as book_file:
+    if confidence_files[0].get_books_path().is_file():
+        with open(confidence_files[0].get_books_path(), "r", encoding="utf-8") as book_file:
             next(book_file)
             for line in book_file:
                 cols = line.strip().split("\t")
@@ -147,14 +151,14 @@ def extract_test_data(verse_test_scores_path: Path) -> Tuple[List[float], List[f
     return chrf3_scores, confidence_scores
 
 
-def get_verse_scores(confidence_file_path: Path, slope: float, intercept: float) -> List[VerseScore]:
+def get_verse_scores(confidence_file: ConfidenceFile, slope: float, intercept: float) -> List[VerseScore]:
     current_book = ""
     current_chapter = 0
     current_verse = 0
     is_at_verse_reference = False
 
     vref_confidences: List[VerseScore] = []
-    with open(confidence_file_path, "r", encoding="utf-8") as f:
+    with open(confidence_file.get_path(), "r", encoding="utf-8") as f:
         for line in f:
             line = line.rstrip("\n")
             if line.lower().startswith("vref") or line.lower().startswith("sequence score"):
@@ -380,11 +384,7 @@ def main() -> None:
         for book_id in args.books:
             confidence_file_paths.extend(confidence_dir.glob(f"[0-9]*{book_id}{draft_suffix}.*{CONFIDENCE_SUFFIX}"))
 
-    confidence_files = []
-    for confidence_file_path in confidence_file_paths:
-        confidence_files.append(ConfidenceFile(confidence_file_path))
-
-    estimate_quality(get_mt_exp_dir(args.verse_test_scores_file), confidence_files)
+    estimate_quality(get_mt_exp_dir(args.verse_test_scores_file), confidence_file_paths)
 
 
 if __name__ == "__main__":
