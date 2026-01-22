@@ -63,7 +63,7 @@ class TranslationTask:
         verse_test_scores_path: Optional[Path] = None,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
         tags: Optional[List[str]] = None,
-    ) -> List[Path]:
+    ) -> None:
         book_nums = get_chapters(books)
         translator, config, step_str = self._init_translation_task(
             experiment_suffix=f"_{self.checkpoint}_{[book_number_to_id(book) for book in book_nums.keys()]}"
@@ -128,7 +128,7 @@ class TranslationTask:
                         tags,
                     )
                     if save_confidences:
-                        confidence_files.extend(output_path.parent.glob(f"{output_path.name}*{CONFIDENCE_SUFFIX}"))
+                        confidence_files.extend(output_path.parent.glob(f"{output_path.stem}*{CONFIDENCE_SUFFIX}"))
                 except Exception:
                     translation_failed.append(book)
                     LOGGER.exception(f"Was not able to translate {book}.")
@@ -154,7 +154,7 @@ class TranslationTask:
         quality_estimation: bool = False,
         verse_test_scores_path: Optional[Path] = None,
         tags: Optional[List[str]] = None,
-    ) -> List[Path]:
+    ) -> None:
         translator, config, _ = self._init_translation_task(experiment_suffix=f"_{self.checkpoint}_{src_prefix}")
         with translator:
             if src_iso is None:
@@ -197,7 +197,7 @@ class TranslationTask:
                     print(f"Translated {src_file_path.name} to {trg_file_path.name} in {((end-start)/60):.2f} minutes")
 
                     if save_confidences:
-                        confidence_files.extend(trg_file_path.parent.glob(f"{trg_file_path.name}*{CONFIDENCE_SUFFIX}"))
+                        confidence_files.extend(trg_file_path.parent.glob(f"{trg_file_path.stem}*{CONFIDENCE_SUFFIX}"))
 
         if quality_estimation:
             LOGGER.info("Running quality estimation...")
@@ -216,7 +216,7 @@ class TranslationTask:
         verse_test_scores_path: Optional[Path] = None,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
         tags: Optional[List[str]] = None,
-    ) -> List[Path]:
+    ) -> None:
         translator, config, step_str = self._init_translation_task(
             experiment_suffix=f"_{self.checkpoint}_{os.path.basename(src)}"
         )
@@ -301,7 +301,7 @@ class TranslationTask:
                     )
 
                 if save_confidences:
-                    confidence_files.extend(trg_file_path.parent.glob(f"{trg_file_path.name}*{CONFIDENCE_SUFFIX}"))
+                    confidence_files.extend(trg_file_path.parent.glob(f"{trg_file_path.stem}*{CONFIDENCE_SUFFIX}"))
 
         if quality_estimation:
             LOGGER.info("Running quality estimation...")
