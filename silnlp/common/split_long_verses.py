@@ -1,0 +1,139 @@
+import argparse
+import logging
+import textwrap
+from pathlib import Path
+
+from machine.corpora import UsfmTokenizer
+from machine.corpora import FileParatextProjectSettingsParser, UsfmFileText
+from machine.scripture import book_number_to_id, get_chapters
+
+from .paratext import get_project_dir
+from .collect_verse_counts import DT_CANON, NT_CANON, OT_CANON
+from .check_books import valid_canons, group_bible_books
+
+LOGGER = logging.getLogger(__package__ + ".split_long_verses")
+
+# TODO make valid_books a global in check_books.py and import from there.
+VALID_BOOKS = OT_CANON + NT_CANON + DT_CANON
+
+
+# To get tokens:
+def get_tokens(file, tokenizer=UsfmTokenizer()):
+    with open(file, 'r', encoding='utf-8') as f:
+        file_text = f.read()
+    tokens = list(tokenizer.tokenize(file_text))
+    return tokens
+
+
+def parse_book(project_dir: Path, book:str):
+    errors = []
+
+    settings = FileParatextProjectSettingsParser(project_dir).parse()
+    book = project_dir / settings.get_book_file_name(book)
+
+    if not book.is_file():
+        raise RuntimeError(f"Can't find file {book} for book {book}")
+
+    try:
+        file_text = UsfmFileText(
+            settings.stylesheet,
+            settings.encoding,
+            settings.get_book_id(book.name),
+            book,
+            settings.versification,
+            include_markers=True,
+            include_all_text=True,
+            project=settings.name,
+        )
+    except Exception as e:
+        errors.append(e)
+
+    if not errors:
+        LOGGER.info(f"{book} in file {book} parsed correctly and contains {file_text.count()} verses.")
+    else:
+        LOGGER.info(f"The following error occured while parsing {book} from file {book}.")
+        for error in errors:
+            error_str = " ".join([str(s) for s in error.args])
+            LOGGER.info(error_str)
+
+
+def main() -> None:
+
+    parser = argparse.ArgumentParser(
+        prog="check_books",
+        description="Checks sfm files for a project with the same parser as translate.py",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent(
+            """\
+             Books can include corpora NT OT or DT and individual books.
+             Old Testament books are :
+             GEN, EXO, LEV, NUM, DEU, JOS, JDG, RUT, 1SA, 2SA, 1KI, 2KI, 1CH, 2CH, EZR, NEH, EST, JOB, PSA, PRO, ECC,
+             SNG, ISA, JER, LAM, EZK, DAN, HOS, JOL, AMO, OBA, JON, MIC, NAM, HAB, ZEP, HAG, ZEC, MAL
+
+             New Testament books are :
+             MAT, MRK, LUK, JHN, ACT, ROM, 1CO, 2CO, GAL, EPH, PHP, COL, 1TH,
+             2TH, 1TI, 2TI, TIT, PHM, HEB, JAS, 1PE, 2PE, 1JN, 2JN, 3JN, JUD, REV
+
+             Deuterocanonical books are:
+             TOB, JDT, ESG, WIS, SIR, BAR, LJE, S3Y, SUS, BEL, 1MA,
+             2MA, 3MA, 4MA, 1ES, 2ES, MAN, PS2, ODA, PSS, EZA, JUB, ENO
+         """
+        ),
+    )
+
+    parser.add_argument("project", type=str, help="The name of the project folder.")
+    parser.add_argument(
+        "--books", metavar="books", nargs="+", default=[], help="The books to check; e.g., 'NT', 'OT', 'GEN EXO'"
+    )
+
+    # parser.print_help()
+    args = parser.parse_args()
+
+    project_dir = get_project_dir(args.project)
+    settings = FileParatextProjectSettingsParser(project_dir).parse()
+
+    sfm_files = [
+        file for file in project_dir.glob("*") if file.is_file() and file.suffix[1:].lower() in ["sfm", "usfm"]
+    ]
+    books_found = [settings.get_book_id(sfm_file.name) for sfm_file in sfm_files]
+
+    grouped_result = group_bible_books(books_found)
+    LOGGER.info(f"Found these books in the project_directory: {' '.join(grouped_result)}")
+
+    if not sfm_files:
+        LOGGER.info(f"No sfm files found in project folder: {project_dir}")
+    else:
+        books = args.books
+        canons_to_add = [canon for canon in books if canon in valid_canons]
+
+        books_to_check = [book for book in books if book in books_found]
+
+        OT_books_found = [book for book in OT_CANON if book in books_found]
+        NT_books_found = [book for book in NT_CANON if book in books_found]
+        DT_books_found = [book for book in DT_CANON if book in books_found]
+
+        for canon_to_add in canons_to_add:
+            if canon_to_add == "OT":
+                books_to_check.extend(OT_books_found)
+            if canon_to_add == "NT":
+                books_to_check.extend(NT_books_found)
+            if canon_to_add == "DT":
+                books_to_check.extend(DT_books_found)
+
+        LOGGER.info(f"All books to check are: {books_to_check}\n")
+
+        if not books_to_check:
+            LOGGER.info("No books were specified, will check all books.")
+            books_to_check = books_found
+        else:
+            LOGGER.info(f"Of the books specified these were found: {books_to_check}")
+
+        book_nums = get_chapters(books_to_check)
+        book_nums_to_check = [book_number_to_id(book) for book in book_nums.keys()]
+
+        for book_num_to_check in book_nums_to_check:
+            parse_book(project_dir, book_num_to_check)
+
+
+if __name__ == "__main__":
+    main()
