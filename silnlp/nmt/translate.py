@@ -60,7 +60,7 @@ class TranslationTask:
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
         quality_estimation: bool = False,
-        test_data_path: Optional[Path] = None,
+        verse_test_scores_path: Optional[Path] = None,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
         tags: Optional[List[str]] = None,
     ) -> List[Path]:
@@ -138,7 +138,7 @@ class TranslationTask:
 
         if quality_estimation:
             LOGGER.info("Running quality estimation...")
-            estimate_quality(test_data_path, confidence_files)
+            estimate_quality(verse_test_scores_path, confidence_files)
             LOGGER.info("Quality estimation completed.")
 
     def translate_text_files(
@@ -152,7 +152,7 @@ class TranslationTask:
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
         quality_estimation: bool = False,
-        test_data_path: Optional[Path] = None,
+        verse_test_scores_path: Optional[Path] = None,
         tags: Optional[List[str]] = None,
     ) -> List[Path]:
         translator, config, _ = self._init_translation_task(experiment_suffix=f"_{self.checkpoint}_{src_prefix}")
@@ -201,7 +201,7 @@ class TranslationTask:
 
         if quality_estimation:
             LOGGER.info("Running quality estimation...")
-            estimate_quality(test_data_path, confidence_files)
+            estimate_quality(verse_test_scores_path, confidence_files)
             LOGGER.info("Quality estimation completed.")
 
     def translate_files(
@@ -213,7 +213,7 @@ class TranslationTask:
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
         quality_estimation: bool = False,
-        test_data_path: Optional[Path] = None,
+        verse_test_scores_path: Optional[Path] = None,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
         tags: Optional[List[str]] = None,
     ) -> List[Path]:
@@ -305,7 +305,7 @@ class TranslationTask:
 
         if quality_estimation:
             LOGGER.info("Running quality estimation...")
-            estimate_quality(test_data_path, confidence_files)
+            estimate_quality(verse_test_scores_path, confidence_files)
             LOGGER.info("Quality estimation completed.")
 
     def _init_translation_task(self, experiment_suffix: str) -> Tuple[Translator, Config, str]:
@@ -459,10 +459,10 @@ def main() -> None:
         "--quality-estimation",
         default=False,
         action="store_true",
-        help="Run quality estimation after translation completes. Requires --save-confidences and --test-data-file.",
+        help="Run quality estimation after translation completes. Requires --save-confidences and --verse-test-scores-file.",
     )
     parser.add_argument(
-        "--test-data-file",
+        "--verse-test-scores-file",
         type=str,
         default="",
         help="The tsv file relative to MT/experiments containing the test data to determine line of best fit."
@@ -483,12 +483,12 @@ def main() -> None:
     if args.quality_estimation and not args.save_confidences:
         parser.error("--quality-estimation requires --save-confidences to be enabled.")
 
-    if args.quality_estimation and args.test_data_file is None:
-        parser.error("--quality-estimation requires --test-data-file to be specified.")
+    if args.quality_estimation and args.verse_test_scores_file is None:
+        parser.error("--quality-estimation requires --verse-test-scores-file to be specified.")
 
-    test_data_path = get_mt_exp_dir(args.test_data_file)
-    if not test_data_path.exists():
-        parser.error(f"The test data file {test_data_path} does not exist.")
+    verse_test_scores_path = get_mt_exp_dir(args.verse_test_scores_file)
+    if not verse_test_scores_path.exists():
+        parser.error(f"The verse test scores path {verse_test_scores_path} does not exist.")
 
     get_git_revision_hash()
 
@@ -515,7 +515,7 @@ def main() -> None:
             args.multiple_translations,
             args.save_confidences,
             args.quality_estimation,
-            test_data_path,
+            verse_test_scores_path,
             postprocess_handler,
         )
     elif args.src_prefix is not None:
@@ -539,7 +539,7 @@ def main() -> None:
             args.multiple_translations,
             args.save_confidences,
             args.quality_estimation,
-            test_data_path,
+            verse_test_scores_path,
         )
     elif args.src is not None:
         if args.debug:
@@ -556,7 +556,7 @@ def main() -> None:
             args.multiple_translations,
             args.save_confidences,
             args.quality_estimation,
-            test_data_path,
+            verse_test_scores_path,
             postprocess_handler,
         )
     else:

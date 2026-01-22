@@ -289,8 +289,8 @@ def write_pair_verse_scores(
                 )
             other_verse_scores: Dict[str, float] = {}
             if "chrf3" in scorers:
-                chrf3_verse_score = sacrebleu.sentence_chrf(
-                    pred, sentences, char_order=6, beta=3, remove_whitespace=True
+                chrf3_verse_score = sacrebleu.corpus_chrf(
+                    [pred], [sentences], char_order=6, beta=3, remove_whitespace=True
                 )
                 other_verse_scores["chrF3"] = chrf3_verse_score.score
 

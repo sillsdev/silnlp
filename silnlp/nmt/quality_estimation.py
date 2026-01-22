@@ -52,46 +52,47 @@ class BookScores:
         return self.scores.get(book)
 
 
-def estimate_quality(test_data_path: Path, confidence_files: List[Path]) -> None:
-    test_data_path = validate_inputs(test_data_path, confidence_files)
-    verse_scores, chapter_scores, book_scores = project_chrf3(test_data_path, confidence_files)
+def estimate_quality(verse_test_scores_path: Path, confidence_files: List[ConfidenceFile]) -> None:
+    verse_test_scores_path = validate_inputs(verse_test_scores_path, confidence_files)
+    verse_scores, chapter_scores, book_scores = project_chrf3(verse_test_scores_path, confidence_files)
     compute_usable_proportions(verse_scores, chapter_scores, book_scores, confidence_files[0].parent)
 
 
-def validate_inputs(test_data_path: Path, confidence_files: List[Path]) -> None:
-    if not test_data_path.exists():
-        raise FileNotFoundError(f"Test data file {test_data_path} does not exist.")
-    elif test_data_path.is_dir():
-        LOGGER.info(f"Searching for files with suffix {VERSE_SCORES_SUFFIX} in directory {test_data_path}.")
-        test_files = list(test_data_path.glob(f"*{VERSE_SCORES_SUFFIX}"))
+def validate_inputs(verse_test_scores_path: Path, confidence_files: List[Path]) -> None:
+    if not verse_test_scores_path.exists():
+        raise FileNotFoundError(f"Test data file {verse_test_scores_path} does not exist.")
+    elif verse_test_scores_path.is_dir():
+        LOGGER.info(f"Searching for files with suffix {VERSE_SCORES_SUFFIX} in directory {verse_test_scores_path}.")
+        test_files = list(verse_test_scores_path.glob(f"*{VERSE_SCORES_SUFFIX}"))
         if not test_files:
             raise ValueError(
-                f"No test data file with the {VERSE_SCORES_SUFFIX} suffix found in directory {test_data_path}."
+                f"No test data file with the {VERSE_SCORES_SUFFIX} suffix found in directory {verse_test_scores_path}."
             )
-        test_data_path = test_files[0]
-        LOGGER.info(f"Using test data file {test_data_path}.")
+        verse_test_scores_path = test_files[0]
+        LOGGER.info(f"Using test data file {verse_test_scores_path}.")
     if len(confidence_files) == 0:
         raise ValueError("At least one confidence file must be provided.")
     if not all(cf.is_file() for cf in confidence_files):
         missing_files = [str(cf) for cf in confidence_files if not cf.is_file()]
         raise FileNotFoundError(f"The following confidence files do not exist: {', '.join(missing_files)}")
-    return test_data_path
+    return verse_test_scores_path
 
 
 def project_chrf3(
-    test_data_path: Path, confidence_files: List[Path]
+    verse_test_scores_path: Path, confidence_files: List[Path]
 ) -> Tuple[List[VerseScore], ChapterScores, BookScores]:
-    chrf3_scores, confidence_scores = extract_test_data(test_data_path)
+    chrf3_scores, confidence_scores = extract_test_data(verse_test_scores_path)
     if len(chrf3_scores) != len(confidence_scores):
         raise ValueError(
             f"The number of chrF3 scores ({len(chrf3_scores)}) and confidence scores ({len(confidence_scores)}) "
-            f"in {test_data_path} do not match."
+            f"in {verse_test_scores_path} do not match."
         )
     slope, intercept = linregress(confidence_scores, chrf3_scores)[:2]
     verse_scores: List[VerseScore] = []
     chapter_scores: ChapterScores = ChapterScores()
     book_scores: BookScores = BookScores()
     for confidence_file in confidence_files:
+        confidence_file = ConfidenceFile(confidence_file)
         file_scores = get_verse_scores(confidence_file, slope, intercept)
         book = file_scores[0].vref.book if file_scores else None
         verse_scores += file_scores
@@ -118,17 +119,17 @@ def project_chrf3(
     return verse_scores, chapter_scores, book_scores
 
 
-def extract_test_data(test_data_path: Path) -> Tuple[List[float], List[float]]:
+def extract_test_data(verse_test_scores_path: Path) -> Tuple[List[float], List[float]]:
     chrf3_scores: List[float] = []
     confidence_scores: List[float] = []
-    with open(test_data_path, "r", encoding="utf-8") as f:
+    with open(verse_test_scores_path, "r", encoding="utf-8") as f:
         header = next(f).strip().lower().split("\t")
         try:
             chrf3_index = header.index("chrf3")
             confidence_index = header.index("confidence")
         except ValueError as e:
             raise ValueError(
-                f"Could not find 'chrF3' and/or 'confidence' columns in header of {test_data_path}: {header}"
+                f"Could not find 'chrF3' and/or 'confidence' columns in header of {verse_test_scores_path}: {header}"
             ) from e
         for line_num, line in enumerate(f, start=2):
             cols = line.strip().split("\t")
@@ -139,7 +140,7 @@ def extract_test_data(test_data_path: Path) -> Tuple[List[float], List[float]]:
                 confidence_scores.append(confidence)
             except (ValueError, IndexError) as e:
                 raise ValueError(
-                    f"Error parsing line {line_num} in {test_data_path}: {line.strip()}"
+                    f"Error parsing line {line_num} in {verse_test_scores_path}: {line.strip()}"
                     f" (chrF3 index: {chrf3_index}, confidence index: {confidence_index})"
                 ) from e
 
@@ -315,7 +316,7 @@ def calculate_usable_prob(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Estimate the quality of drafts created by an NMT model.")
     parser.add_argument(
-        "test_data_file",
+        "verse_test_scores_file",
         type=str,
         help="The tsv file relative to MT/experiments containing the test data to determine line of best fit."
         + "e.g. `project_folder/exp_folder/test.trg-predictions.detok.txt.5000.scores.tsv`",
@@ -383,7 +384,7 @@ def main() -> None:
     for confidence_file_path in confidence_file_paths:
         confidence_files.append(ConfidenceFile(confidence_file_path))
 
-    estimate_quality(get_mt_exp_dir(args.test_data_file), confidence_files)
+    estimate_quality(get_mt_exp_dir(args.verse_test_scores_file), confidence_files)
 
 
 if __name__ == "__main__":

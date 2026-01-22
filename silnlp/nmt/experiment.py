@@ -34,7 +34,7 @@ class SILExperiment:
     commit: Optional[str] = None
     clearml_tag: Optional[str] = None
     quality_estimation: bool = False
-    test_data_file: Optional[str] = None
+    verse_test_scores_file: Optional[str] = None
 
     def __post_init__(self):
         self.clearml = SILClearML(
@@ -98,6 +98,7 @@ class SILExperiment:
         postprocess_configs = translate_configs.get("postprocess", [])
         postprocess_handler = PostprocessHandler([PostprocessConfig(pc) for pc in postprocess_configs])
 
+        verse_test_scores_path = self.verse_test_scores_file or get_mt_exp_dir(self.name)
         for translate_config in translate_configs.get("translate", []):
             checkpoint: Union[str, int] = translate_config.get("checkpoint", "last") or "last"
             translator = TranslationTask(
@@ -123,7 +124,7 @@ class SILExperiment:
                     self.produce_multiple_translations,
                     self.save_confidences,
                     self.quality_estimation,
-                    get_mt_exp_dir(self.name),
+                    verse_test_scores_path,
                     postprocess_handler,
                     translate_config.get("tags"),
                 )
@@ -143,7 +144,7 @@ class SILExperiment:
                     self.produce_multiple_translations,
                     self.save_confidences,
                     self.quality_estimation,
-                    get_mt_exp_dir(self.name),
+                    verse_test_scores_path,
                     translate_config.get("tags"),
                 )
             elif translate_config.get("src"):
@@ -155,7 +156,7 @@ class SILExperiment:
                     self.produce_multiple_translations,
                     self.save_confidences,
                     self.quality_estimation,
-                    get_mt_exp_dir(self.name),
+                    verse_test_scores_path,
                     postprocess_handler,
                     translate_config.get("tags"),
                 )
@@ -217,10 +218,10 @@ def main() -> None:
         "--quality-estimation",
         default=False,
         action="store_true",
-        help="Run quality estimation after translation completes. Requires --save-confidences and --test-data-file",
+        help="Run quality estimation after translation completes. Requires --save-confidences and --verse-test-scores-file",
     )
     parser.add_argument(
-        "--test-data-file",
+        "--verse-test-scores-file",
         type=str,
         default=None,
         help="The tsv file relative to MT/experiments containing the test data to determine line of best fit."
@@ -260,9 +261,9 @@ def main() -> None:
     if args.quality_estimation and not args.save_confidences:
         parser.error("--quality-estimation requires --save-confidences to be enabled.")
 
-    if args.quality_estimation and args.translate and not args.test and args.test_data_file is None:
+    if args.quality_estimation and args.translate and not args.test and args.verse_test_scores_file is None:
         parser.error(
-            "--quality-estimation requires --test-data-file to be specified"
+            "--quality-estimation requires --verse-test-scores-file to be specified"
             " when running the translate step without the test step."
         )
 
@@ -296,7 +297,7 @@ def main() -> None:
         scorers=set(s.lower() for s in args.scorers),
         score_by_book=args.score_by_book,
         quality_estimation=args.quality_estimation,
-        test_data_file=args.test_data_file,
+        verse_test_scores_file=args.verse_test_scores_file,
     )
 
     if not args.save_checkpoints:

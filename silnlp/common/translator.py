@@ -174,17 +174,11 @@ class DraftGroup:
 
 class ConfidenceFile:
 
-    def __init__(self, path: Path, trg_file_path: Optional[Path] = None):
-        if trg_file_path is not None:
-            self._trg_file_path = trg_file_path
-        else:
-            self._trg_file_path = path.with_name(path.name.removesuffix(CONFIDENCE_SUFFIX))
+    def __init__(self, path: Path):
+        if not path.name.endswith(CONFIDENCE_SUFFIX):
+            raise ValueError(f"Confidence file path must end with {CONFIDENCE_SUFFIX}, got {path.name}")
         self.path = path
-
-    @classmethod
-    def from_trg_path(cls, trg_file_path: Path) -> "ConfidenceFile":
-        path = trg_file_path.with_suffix(f"{trg_file_path.suffix}{CONFIDENCE_SUFFIX}")
-        return cls(path, trg_file_path)
+        self._trg_draft_file_path = path.with_name(path.name.removesuffix(CONFIDENCE_SUFFIX))
 
     def get_path(self) -> Path:
         return self.path
@@ -221,7 +215,7 @@ class ConfidenceFile:
         if scripture_refs:
             col1_entry = scripture_refs[0].book
         else:
-            col1_entry = self._trg_file_path.stem
+            col1_entry = self._trg_draft_file_path.stem
 
         with book_confidences_path.open("a", encoding="utf-8", newline="\n") as book_confidences_file:
             if book_confidences_file.tell() == 0:
@@ -250,24 +244,25 @@ class ConfidenceFile:
             if file_confidences_file.tell() == 0:
                 file_confidences_file.write("File\tConfidence\n")
             file_confidences_file.write(
-                f"{self._trg_file_path.stem}\t{gmean(translated_draft.get_all_sequence_confidence_scores())}\n"
+                f"{self._trg_draft_file_path.stem}\t{gmean(translated_draft.get_all_sequence_confidence_scores())}\n"
             )
 
 
 def generate_confidence_files(
     translated_draft: TranslatedDraft,
-    trg_file_path: Path,
+    trg_draft_file_path: Path,
     scripture_refs: Optional[List[ScriptureRef]] = None,
 ) -> None:
     if not translated_draft.has_sequence_confidence_scores():
         LOGGER.warning(
-            f"{trg_file_path} was not translated with beam search, so confidence scores will not be calculated for this file."
+            f"{trg_draft_file_path} was not translated with beam search, "
+            f"so confidence scores will not be calculated for this file."
         )
         return
 
-    confidence_file = ConfidenceFile.from_trg_path(trg_file_path)
+    confidence_file = ConfidenceFile(trg_draft_file_path.with_suffix(CONFIDENCE_SUFFIX))
 
-    ext = trg_file_path.suffix.lower()
+    ext = trg_draft_file_path.suffix.lower()
     if ext in {".usfm", ".sfm"}:
         assert scripture_refs is not None
         confidence_file.generate_usfm_confidence_files(translated_draft, scripture_refs)
@@ -282,9 +277,9 @@ def generate_confidence_files(
 
 def generate_test_confidence_files(
     translated_draft: TranslatedDraft,
-    trg_file_path: Path,
+    trg_draft_file_path: Path,
 ) -> None:
-    confidence_file = ConfidenceFile.from_trg_path(trg_file_path)
+    confidence_file = ConfidenceFile(trg_draft_file_path.with_suffix(CONFIDENCE_SUFFIX))
     translated_draft.write_confidence_scores_to_file(confidence_file.get_path(), "Sequence Number")
 
 
@@ -533,7 +528,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
                     f.write(usfm_out)
 
             if save_confidences:
-                generate_confidence_files(translated_draft, trg_file_path, scripture_refs=scripture_refs)
+                generate_confidence_files(translated_draft, trg_draft_file_path, scripture_refs=scripture_refs)
 
     def translate_docx(
         self,
