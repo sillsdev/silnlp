@@ -11,9 +11,10 @@ from sympy import expand
 from .paratext import get_project_dir
 from .collect_verse_counts import DT_CANON, NT_CANON, OT_CANON
 from .check_books import group_bible_books
+VALID_CANONS = ["OT", "NT", "DT"]
 VALID_BOOKS = OT_CANON + NT_CANON + DT_CANON
 
-LOGGER = logging.getLogger(__package__ + ".split_long_verses")
+LOGGER = logging.getLogger(__package__ + ".split_verses_v2")
 
 # Mapping of paragraph markers to their split markers
 SPLIT_MARKER_MAP = {
@@ -23,7 +24,7 @@ SPLIT_MARKER_MAP = {
     'v': 'p',    # Splitting verses into paragraphs
 }
 
-SENTENCE_ENDINGS = ['.', '!', '?']
+SENTENCE_ENDINGS = ['.', '!', '?', '।']
 WORD_BREAKS = [' ', ',', ';', ':', '-']
 
 def get_split_marker(original_marker):
@@ -126,7 +127,7 @@ def split_text_optimally(text, max_length=250):
     return chunks
 
 
-def process_file(input_path, output_path, max_length, method='sentence'):
+def process_file(input_path, output_path, max_length, method='sentence', verbosity=0):
     """Process a single USFM file, splitting long paragraphs"""
     # Read and tokenize the file
     with open(input_path, 'r', encoding='utf-8') as f:
@@ -159,8 +160,9 @@ def process_file(input_path, output_path, max_length, method='sentence'):
             else:
                 print(f"Method {method} isn't one of the valid methods: sentence, optimal, recursive.")
                 exit(0)
-            for i, text_chunk in enumerate(text_chunks, 1):
-                print(i,len(text_chunk),text_chunk)
+            if verbosity >= 3:    
+                for i, text_chunk in enumerate(text_chunks, 1):
+                    print(i,len(text_chunk),text_chunk)
 
             # Add first chunk as TEXT
             new_tokens.append(UsfmToken(UsfmTokenType.TEXT, text=text_chunks[0]))
@@ -172,8 +174,9 @@ def process_file(input_path, output_path, max_length, method='sentence'):
             # Keep token as-is
             new_tokens.append(token)
     
-    if len(split_counter) > 0:    
-        print(f"Saving {output_path} after splitting lines. {split_counter}")
+    if len(split_counter) > 0:
+        if verbosity >= 2:
+            print(f"Saving {output_path} after splitting lines. {split_counter}")
         # Write tokens to output file
         with open(output_path, 'w', encoding='utf-8') as f:
             for i, token in enumerate(new_tokens):
@@ -185,17 +188,23 @@ def process_file(input_path, output_path, max_length, method='sentence'):
                     usfm_str = usfm_str.rstrip(' ')
                 f.write(usfm_str)
     else:
-        print(f"No changes were needed to for {input_path}")
+        if verbosity >= 2:
+            print(f"No changes were needed to for {input_path}")
 
 def main():
     parser = argparse.ArgumentParser(description='Split long paragraphs in USFM files')
     parser.add_argument('project', help='Paratext project name')
     parser.add_argument('--max', type=int, default=225, help='Maximum paragraph length.')
-    parser.add_argument('--books', help='Books to process (e.g., "MRK,LUK" or "NT")')
+    parser.add_argument("--books", metavar="books", nargs="+", default=[], help="The books to check; e.g., 'NT', 'OT', 'GEN EXO'")
     parser.add_argument('--method', default='sentence', help='Method used to split long paragraphs, must be one of sentence, optimal, recursive.')
+    parser.add_argument('-v', '--verbose', action='count', default=0, help="Increase verbosity level (e.g., -v, -vv, -vvv)")
 
     args = parser.parse_args()
     print(args)
+
+    # Set verbosity level
+    verbosity = args.verbose
+
 
     # Get project directory
     project_dir = get_project_dir(args.project)
@@ -204,18 +213,16 @@ def main():
     settings = FileParatextProjectSettingsParser(project_dir).parse()
     
     # Find all SFM/USFM files
-    sfm_files = [
-        file for file in project_dir.glob("*")
-        if file.is_file() and file.suffix[1:].lower() in ["sfm", "usfm"]
-    ]
+    sfm_files = [file for file in project_dir.glob("*") if file.is_file() and file.suffix[1:].lower() in ["sfm", "usfm"]]
+    books_found = [settings.get_book_id(sfm_file.name) for sfm_file in sfm_files]
     
     # Get book IDs for found files
     books_found = [settings.get_book_id(sfm_file.name) for sfm_file in sfm_files]
     books_to_process = []
 
     # Parse books argument
+    books = args.books
     if args.books:
-        books = args.books.replace(',', ' ').replace(';', ' ').split()
         if books:
             specified_books = expand_book_list(books)
             books_to_process = [book for book in specified_books if book in books_found]
@@ -226,19 +233,8 @@ def main():
         books_to_process = books_found
 
     if books_to_process:
-        print(f"Will process these books:\n{books_to_process}")
-
-    # Process each file
-    for sfm_file in sfm_files:
-        book_id = settings.get_book_id(sfm_file.name)
-        if book_id in books_to_process:
-
-            # Create output filename with _split suffix
-            output_path = sfm_file.parent / f"{sfm_file.stem}_split{sfm_file.suffix}"
-            print(f"Processing {sfm_file.name} -> {output_path.name}")
-            process_file(sfm_file, output_path, args.max, args.method)
-    
-    print(f"Done! Processed {len(books_to_process)} books.")
+        if verbosity >= 1:
+           print(f"Will process these books:\n{books_to_process}")
 
     #Create output directory
     output_dir = project_dir.parent / f"{project_dir.name}_split"
@@ -249,10 +245,13 @@ def main():
         book_id = settings.get_book_id(sfm_file.name)
         if book_id in books_to_process:
             output_path = output_dir / sfm_file.name
-            print(f"Processing {sfm_file.name} -> {output_path}")
-            process_file(sfm_file, output_path, args.max)
+            if verbosity >= 1:
+                print(f"Processing {sfm_file.name} -> {output_path}")
+            process_file(sfm_file, output_path, args.max, method=args.method, verbosity=verbosity)
 
     print(f"Done! Processed {len(books_to_process)} books to {output_dir}")
 
 if __name__ == '__main__':
     main()
+
+
