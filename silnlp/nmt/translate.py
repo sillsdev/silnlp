@@ -459,7 +459,7 @@ def main() -> None:
         "--quality-estimation",
         default=False,
         action="store_true",
-        help="Run quality estimation after translation completes. Requires --save-confidences and --verse-test-scores-file.",
+        help="Run quality estimation after each translation completes. Requires --save-confidences.",
     )
     parser.add_argument(
         "--verse-test-scores-file",
