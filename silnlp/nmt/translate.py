@@ -466,7 +466,8 @@ def main() -> None:
         type=str,
         default=None,
         help="The tsv file relative to MT/experiments containing the test data to determine line of best fit."
-        + "e.g. `project_folder/exp_folder/test.trg-predictions.detok.txt.5000.scores.tsv`",
+        + "e.g. `project_folder/exp_folder/test.trg-predictions.detok.txt.5000.scores.tsv`. If not provided, "
+        + "the experiment directory will be used to locate the test scores file.",
     )
     parser.add_argument(
         "--debug",
