@@ -34,7 +34,7 @@ class SILExperiment:
     commit: Optional[str] = None
     clearml_tag: Optional[str] = None
     quality_estimation: bool = False
-    verse_test_scores_file: Optional[str] = None
+    verse_test_scores_path: Optional[Path] = None
 
     def __post_init__(self):
         self.clearml = SILClearML(
@@ -98,7 +98,6 @@ class SILExperiment:
         postprocess_configs = translate_configs.get("postprocess", [])
         postprocess_handler = PostprocessHandler([PostprocessConfig(pc) for pc in postprocess_configs])
 
-        verse_test_scores_path = self.verse_test_scores_file or get_mt_exp_dir(self.name)
         for translate_config in translate_configs.get("translate", []):
             checkpoint: Union[str, int] = translate_config.get("checkpoint", "last") or "last"
             translator = TranslationTask(
@@ -124,7 +123,7 @@ class SILExperiment:
                     self.produce_multiple_translations,
                     self.save_confidences,
                     self.quality_estimation,
-                    verse_test_scores_path,
+                    self.verse_test_scores_path,
                     postprocess_handler,
                     translate_config.get("tags"),
                 )
@@ -261,11 +260,12 @@ def main() -> None:
     if args.quality_estimation and not args.save_confidences:
         parser.error("--quality-estimation requires --save-confidences to be enabled.")
 
-    if args.quality_estimation and args.translate and not args.test and args.verse_test_scores_file is None:
-        parser.error(
-            "--quality-estimation requires --verse-test-scores-file to be specified"
-            " when running the translate step without the test step."
-        )
+    if args.verse_test_scores_file is None:
+        verse_test_scores_path = get_mt_exp_dir(args.experiment)
+    else:
+        verse_test_scores_path = get_mt_exp_dir(args.verse_test_scores_file)
+        if not verse_test_scores_path.exists():
+            parser.error(f"The verse test scores path {verse_test_scores_path} does not exist.")
 
     if args.mt_dir is not None:
         SIL_NLP_ENV.set_machine_translation_dir(SIL_NLP_ENV.data_dir / args.mt_dir)
@@ -297,7 +297,7 @@ def main() -> None:
         scorers=set(s.lower() for s in args.scorers),
         score_by_book=args.score_by_book,
         quality_estimation=args.quality_estimation,
-        verse_test_scores_file=args.verse_test_scores_file,
+        verse_test_scores_path=verse_test_scores_path,
     )
 
     if not args.save_checkpoints:

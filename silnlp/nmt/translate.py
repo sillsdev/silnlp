@@ -464,7 +464,7 @@ def main() -> None:
     parser.add_argument(
         "--verse-test-scores-file",
         type=str,
-        default="",
+        default=None,
         help="The tsv file relative to MT/experiments containing the test data to determine line of best fit."
         + "e.g. `project_folder/exp_folder/test.trg-predictions.detok.txt.5000.scores.tsv`",
     )
@@ -483,12 +483,12 @@ def main() -> None:
     if args.quality_estimation and not args.save_confidences:
         parser.error("--quality-estimation requires --save-confidences to be enabled.")
 
-    if args.quality_estimation and args.verse_test_scores_file is None:
-        parser.error("--quality-estimation requires --verse-test-scores-file to be specified.")
-
-    verse_test_scores_path = get_mt_exp_dir(args.verse_test_scores_file)
-    if not verse_test_scores_path.exists():
-        parser.error(f"The verse test scores path {verse_test_scores_path} does not exist.")
+    if args.verse_test_scores_file is None:
+        verse_test_scores_path = get_mt_exp_dir(args.experiment)
+    else:
+        verse_test_scores_path = get_mt_exp_dir(args.verse_test_scores_file)
+        if not verse_test_scores_path.exists():
+            parser.error(f"The verse test scores path {verse_test_scores_path} does not exist.")
 
     get_git_revision_hash()
 

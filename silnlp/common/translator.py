@@ -531,8 +531,8 @@ class Translator(AbstractContextManager["Translator"], ABC):
                 ) as f:
                     f.write(usfm_out)
 
-            if save_confidences:
-                generate_confidence_files(translated_draft, trg_draft_file_path, scripture_refs=scripture_refs)
+                if save_confidences and config.get_postprocess_suffix() == "":
+                    generate_confidence_files(translated_draft, trg_draft_file_path, scripture_refs=scripture_refs)
 
     def translate_docx(
         self,
