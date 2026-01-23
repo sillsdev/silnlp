@@ -322,8 +322,8 @@ def main() -> None:
     parser.add_argument(
         "verse_test_scores_file",
         type=str,
-        help="The tsv file relative to MT/experiments containing the test data to determine line of best fit."
-        + "e.g. `project_folder/exp_folder/test.trg-predictions.detok.txt.5000.scores.tsv`",
+        help="The tsv file relative to MT/experiments containing the verse-level test scores to determine "
+        + "line of best fit, e.g., `project_folder/exp_folder/test.trg-predictions.detok.txt.5000.scores.tsv`. ",
     )
     parser.add_argument(
         "confidence_files",
