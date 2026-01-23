@@ -2,7 +2,6 @@ import argparse
 import logging
 import os
 import time
-from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Generator, Iterable, List, Optional, Tuple, Union
@@ -12,10 +11,11 @@ from machine.scripture import VerseRef, book_number_to_id, get_chapters
 from ..common.environment import SIL_NLP_ENV
 from ..common.paratext import book_file_name_digits, get_project_dir
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
-from ..common.translator import SentenceTranslationGroup, Translator
+from ..common.translator import CONFIDENCE_SUFFIX, SentenceTranslationGroup, Translator
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
-from .config import CheckpointType, Config, NMTModel
+from .config import CheckpointType, Config, NMTModel, get_mt_exp_dir
+from .quality_estimation import estimate_quality
 
 LOGGER = logging.getLogger((__package__ or "") + ".translate")
 
@@ -59,9 +59,11 @@ class TranslationTask:
         trg_iso: Optional[str],
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
+        quality_estimation: bool = False,
+        verse_test_scores_path: Optional[Path] = None,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
         tags: Optional[List[str]] = None,
-    ):
+    ) -> None:
         book_nums = get_chapters(books)
         translator, config, step_str = self._init_translation_task(
             experiment_suffix=f"_{self.checkpoint}_{[book_number_to_id(book) for book in book_nums.keys()]}"
@@ -105,6 +107,7 @@ class TranslationTask:
                 experiment_ckpt_str = f"{self.name}:base"
 
             translation_failed: List[str] = []
+            confidence_files: List[Path] = []
             for book_num, chapters in book_nums.items():
                 book = book_number_to_id(book_num)
                 try:
@@ -124,12 +127,19 @@ class TranslationTask:
                         config.corpus_pairs,
                         tags,
                     )
+                    if save_confidences:
+                        confidence_files.extend(output_path.parent.glob(f"{output_path.stem}*{CONFIDENCE_SUFFIX}"))
                 except Exception:
                     translation_failed.append(book)
                     LOGGER.exception(f"Was not able to translate {book}.")
 
             if len(translation_failed) > 0:
                 raise RuntimeError(f"Some books failed to translate: {' '.join(translation_failed)}")
+
+        if quality_estimation:
+            LOGGER.info("Running quality estimation...")
+            estimate_quality(verse_test_scores_path, confidence_files)
+            LOGGER.info("Quality estimation completed.")
 
     def translate_text_files(
         self,
@@ -141,6 +151,8 @@ class TranslationTask:
         trg_iso: Optional[str],
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
+        quality_estimation: bool = False,
+        verse_test_scores_path: Optional[Path] = None,
         tags: Optional[List[str]] = None,
     ) -> None:
         translator, config, _ = self._init_translation_task(experiment_suffix=f"_{self.checkpoint}_{src_prefix}")
@@ -158,6 +170,7 @@ class TranslationTask:
             if trg_iso == "":
                 LOGGER.warning("No language code was set for the target language")
 
+            confidence_files = []
             for i in range(start_seq, end_seq + 1):
                 file_num = f"{i:04d}"
                 src_file = f"{src_prefix}{file_num}.txt"
@@ -183,6 +196,14 @@ class TranslationTask:
                     end = time.time()
                     print(f"Translated {src_file_path.name} to {trg_file_path.name} in {((end-start)/60):.2f} minutes")
 
+                    if save_confidences:
+                        confidence_files.extend(trg_file_path.parent.glob(f"{trg_file_path.stem}*{CONFIDENCE_SUFFIX}"))
+
+        if quality_estimation:
+            LOGGER.info("Running quality estimation...")
+            estimate_quality(verse_test_scores_path, confidence_files)
+            LOGGER.info("Quality estimation completed.")
+
     def translate_files(
         self,
         src: str,
@@ -191,6 +212,8 @@ class TranslationTask:
         trg_iso: Optional[str],
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
+        quality_estimation: bool = False,
+        verse_test_scores_path: Optional[Path] = None,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
         tags: Optional[List[str]] = None,
     ) -> None:
@@ -228,6 +251,7 @@ class TranslationTask:
             else:
                 src_file_paths = list(p for p in src_path.rglob("*.*") if p.is_file())
 
+            confidence_files = []
             for src_file_path in src_file_paths:
                 if trg_path.is_dir():
                     if src_path.is_file():
@@ -275,6 +299,14 @@ class TranslationTask:
                         training_corpus_pairs=config.corpus_pairs,
                         tags=tags,
                     )
+
+                if save_confidences:
+                    confidence_files.extend(trg_file_path.parent.glob(f"{trg_file_path.stem}*{CONFIDENCE_SUFFIX}"))
+
+        if quality_estimation:
+            LOGGER.info("Running quality estimation...")
+            estimate_quality(verse_test_scores_path, confidence_files)
+            LOGGER.info("Quality estimation completed.")
 
     def _init_translation_task(self, experiment_suffix: str) -> Tuple[Translator, Config, str]:
         clearml = SILClearML(
@@ -424,6 +456,20 @@ def main() -> None:
         "--commit", type=str, default=None, help="The silnlp git commit id with which to run a remote job"
     )
     parser.add_argument(
+        "--quality-estimation",
+        default=False,
+        action="store_true",
+        help="Run quality estimation after translation completes. Requires --save-confidences.",
+    )
+    parser.add_argument(
+        "--verse-test-scores-file",
+        type=str,
+        default=None,
+        help="The tsv file relative to MT/experiments containing the verse-level test scores to determine "
+        + "line of best fit, e.g., `project_folder/exp_folder/test.trg-predictions.detok.txt.5000.scores.tsv`. "
+        + "If not provided, the experiment directory will be used to locate the test scores file.",
+    )
+    parser.add_argument(
         "--debug",
         default=False,
         action="store_true",
@@ -434,6 +480,16 @@ def main() -> None:
 
     if args.clearml_queue is not None and args.clearml_tag is None:
         parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
+
+    if args.quality_estimation and not args.save_confidences:
+        parser.error("--quality-estimation requires --save-confidences to be enabled.")
+
+    if args.verse_test_scores_file is None:
+        verse_test_scores_path = get_mt_exp_dir(args.experiment)
+    else:
+        verse_test_scores_path = get_mt_exp_dir(args.verse_test_scores_file)
+        if not verse_test_scores_path.exists():
+            parser.error(f"The verse test scores path {verse_test_scores_path} does not exist.")
 
     get_git_revision_hash()
 
@@ -459,6 +515,8 @@ def main() -> None:
             args.trg_iso,
             args.multiple_translations,
             args.save_confidences,
+            args.quality_estimation,
+            verse_test_scores_path,
             postprocess_handler,
         )
     elif args.src_prefix is not None:
@@ -481,6 +539,8 @@ def main() -> None:
             args.trg_iso,
             args.multiple_translations,
             args.save_confidences,
+            args.quality_estimation,
+            verse_test_scores_path,
         )
     elif args.src is not None:
         if args.debug:
@@ -496,6 +556,8 @@ def main() -> None:
             args.trg_iso,
             args.multiple_translations,
             args.save_confidences,
+            args.quality_estimation,
+            verse_test_scores_path,
             postprocess_handler,
         )
     else:
