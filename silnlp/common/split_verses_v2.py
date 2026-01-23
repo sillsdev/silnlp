@@ -1,5 +1,6 @@
 import argparse
 import logging
+import shutil
 from pathlib import Path
 
 from collections import Counter
@@ -26,6 +27,16 @@ SPLIT_MARKER_MAP = {
 
 SENTENCE_ENDINGS = ['.', '!', '?', '।']
 WORD_BREAKS = [' ', ',', ';', ':', '-']
+
+def copy_folder(source: Path, destination: Path):
+    """
+    Copies a source folder to a destination folder using pathlib and shutil.
+    """
+    if not source.is_dir():
+        raise FileNotFoundError(f"Source folder not found: {source}")
+
+    shutil.copytree(source, destination, dirs_exist_ok=True)
+    
 
 def get_split_marker(original_marker):
     """Get the marker to use for split text, default to 'p'"""
@@ -127,8 +138,11 @@ def split_text_optimally(text, max_length=250):
     return chunks
 
 
-def process_file(input_path, output_path, max_length, method='sentence', verbosity=0):
+def process_file(input_path, max_length, method='sentence', verbosity=0):
     """Process a single USFM file, splitting long paragraphs"""
+
+    output_path = input_path
+
     # Read and tokenize the file
     with open(input_path, 'r', encoding='utf-8') as f:
         usfm_text = f.read()
@@ -205,10 +219,16 @@ def main():
     # Set verbosity level
     verbosity = args.verbose
 
-
     # Get project directory
     project_dir = get_project_dir(args.project)
+    output_dir = project_dir.parent / f"{project_dir.name}_split"
     
+    # Copying the folder ensures that all necessary files are present.
+    copy_folder(project_dir, output_dir)
+   
+    # All processing now is within the copied folder.
+    project_dir = output_dir
+
     # Parse project settings to get book IDs
     settings = FileParatextProjectSettingsParser(project_dir).parse()
     
@@ -236,18 +256,14 @@ def main():
         if verbosity >= 1:
            print(f"Will process these books:\n{books_to_process}")
 
-    #Create output directory
-    output_dir = project_dir.parent / f"{project_dir.name}_split"
-    output_dir.mkdir(exist_ok=True)
-
     # Process each file
     for sfm_file in sfm_files:
         book_id = settings.get_book_id(sfm_file.name)
         if book_id in books_to_process:
             output_path = output_dir / sfm_file.name
             if verbosity >= 1:
-                print(f"Processing {sfm_file.name} -> {output_path}")
-            process_file(sfm_file, output_path, args.max, method=args.method, verbosity=verbosity)
+                print(f"Processing {sfm_file}")
+            process_file(sfm_file, args.max, method=args.method, verbosity=verbosity)
 
     print(f"Done! Processed {len(books_to_process)} books to {output_dir}")
 
