@@ -23,13 +23,14 @@ LOGGER = logging.getLogger((__package__ or "") + ".translate")
 
 def convert_usfm_to_vref(usfm_path: Path, vref_path: Path) -> None:
     corpus = UsfmFileTextCorpus(usfm_path.parent, file_pattern=usfm_path.name)
-    book_ids = {t.id for t in corpus.texts}
-    ref_corpus = create_versification_ref_corpus().filter_texts(lambda t: t.id in book_ids)
-    with vref_path.open("w", encoding="utf-8", newline="\n") as output_stream, extract_scripture_corpus(
-        corpus, ref_corpus
-    ) as output:
+    ref_corpus = create_versification_ref_corpus()
+    with (
+        vref_path.open("w", encoding="utf-8", newline="\n") as output_stream,
+        extract_scripture_corpus(corpus, ref_corpus) as output,
+    ):
         for line, _, _ in output:
             output_stream.write(line + "\n")
+
 
 class NMTTranslator(Translator):
     def __init__(self, model: NMTModel, checkpoint: Union[CheckpointType, str, int]) -> None:
@@ -144,11 +145,9 @@ class TranslationTask:
                                 if draft_path.exists():
                                     vref_path = draft_path.with_suffix(".txt")
                                     convert_usfm_to_vref(draft_path, vref_path)
-                                    draft_path.unlink()
                         elif output_path.exists():
                             vref_path = output_path.with_suffix(".txt")
                             convert_usfm_to_vref(output_path, vref_path)
-                            output_path.unlink()
                 except Exception:
                     translation_failed.append(book)
                     LOGGER.exception(f"Was not able to translate {book}.")
@@ -309,11 +308,9 @@ class TranslationTask:
                                 if draft_path.exists():
                                     vref_path = draft_path.with_suffix(".txt")
                                     convert_usfm_to_vref(draft_path, vref_path)
-                                    draft_path.unlink()
                         elif trg_file_path.exists():
                             vref_path = trg_file_path.with_suffix(".txt")
                             convert_usfm_to_vref(trg_file_path, vref_path)
-                            trg_file_path.unlink()
 
     def _init_translation_task(self, experiment_suffix: str) -> Tuple[Translator, Config, str]:
         clearml = SILClearML(
@@ -448,7 +445,7 @@ def main() -> None:
         "--export-to-vref",
         default=False,
         action="store_true",
-        help="Export the translated document in VREF format (text file aligned with vref.txt) instead of USFM.",
+        help="Export the translated document in VREF format (text file aligned with vref.txt) in addition to USFM.",
     )
     parser.add_argument(
         "--clearml-queue",
