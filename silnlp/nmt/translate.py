@@ -73,7 +73,7 @@ class TranslationTask:
         save_confidences: bool = False,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
         tags: Optional[List[str]] = None,
-        export_to_vref: bool = False,
+        vref: bool = False,
     ):
         book_nums = get_chapters(books)
         translator, config, step_str = self._init_translation_task(
@@ -137,7 +137,7 @@ class TranslationTask:
                         config.corpus_pairs,
                         tags,
                     )
-                    if export_to_vref:
+                    if vref:
                         if produce_multiple_translations:
                             num_drafts = config.infer.get("num_drafts", 1)
                             for i in range(1, num_drafts + 1):
@@ -217,7 +217,7 @@ class TranslationTask:
         save_confidences: bool = False,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
         tags: Optional[List[str]] = None,
-        export_to_vref: bool = False,
+        vref: bool = False,
     ) -> None:
         translator, config, step_str = self._init_translation_task(
             experiment_suffix=f"_{self.checkpoint}_{os.path.basename(src)}"
@@ -300,7 +300,7 @@ class TranslationTask:
                         training_corpus_pairs=config.corpus_pairs,
                         tags=tags,
                     )
-                    if export_to_vref:
+                    if vref:
                         if produce_multiple_translations:
                             num_drafts = config.infer.get("num_drafts", 1)
                             for i in range(1, num_drafts + 1):
@@ -442,7 +442,7 @@ def main() -> None:
         help="The quote convention for the target project. If not specified, it will be detected automatically.",
     )
     parser.add_argument(
-        "--export-to-vref",
+        "--vref",
         default=False,
         action="store_true",
         help="Export the translated document in VREF format (text file aligned with vref.txt) in addition to USFM.",
@@ -502,7 +502,7 @@ def main() -> None:
             args.multiple_translations,
             args.save_confidences,
             postprocess_handler,
-            export_to_vref=args.export_to_vref,
+            vref=args.vref,
         )
     elif args.src_prefix is not None:
         if args.debug:
@@ -540,7 +540,7 @@ def main() -> None:
             args.multiple_translations,
             args.save_confidences,
             postprocess_handler,
-            export_to_vref=args.export_to_vref,
+            vref=args.vref,
         )
     else:
         raise RuntimeError("A Scripture book, file, or file prefix must be specified.")
