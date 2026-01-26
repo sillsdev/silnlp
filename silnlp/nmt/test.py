@@ -238,7 +238,14 @@ def score_pair(
         other_scores["Confidence"] = gmean(confidences)
 
     write_pair_verse_scores(
-        pair_sys, pair_refs, trg_iso, predictions_detok_file_name, scorers, other_scores, config, confidences
+        pair_sys,
+        pair_refs,
+        trg_iso,
+        predictions_detok_file_name,
+        scorers,
+        other_scores,
+        config,
+        confidences if "confidence" in scorers else None,
     )
 
     return PairScore(book, src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores, draft_index)
@@ -252,7 +259,7 @@ def write_pair_verse_scores(
     scorers: Set[str],
     other_scores: Dict[str, float],
     config: Config,
-    confidences: List[float],
+    confidences: Optional[List[float]],
 ) -> None:
     scorers = scorers.intersection(SUPPORTED_SENTENCE_SCORERS)
     other_scores = {k: v for k, v in other_scores.items() if k.lower() in scorers}
@@ -325,7 +332,7 @@ def write_pair_verse_scores(
                 if ter_verse_score.score >= 0:
                     other_verse_scores["TER"] = ter_verse_score.score
 
-            if "confidence" in scorers:
+            if "confidence" in scorers and confidences is not None:
                 other_verse_scores["Confidence"] = confidences[index]
 
             scores_file.write(f"{index + 1}")
@@ -739,6 +746,8 @@ def test(
 
     if save_confidences and "confidence" not in scorers:
         scorers.add("confidence")
+    elif not save_confidences and "confidence" in scorers:
+        save_confidences = True
     if len(scorers) == 0:
         scorers.add("bleu")
     scorers.intersection_update(set(SUPPORTED_SCORERS))
