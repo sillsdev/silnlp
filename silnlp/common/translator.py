@@ -265,11 +265,11 @@ class Translator(AbstractContextManager["Translator"], ABC):
     @abstractmethod
     def translate(
         self,
-        sentences: Iterable[str],
-        src_iso: str,
-        trg_iso: str,
+        sentences: List[str],
+        src_isos: List[str],
+        trg_isos: List[str],
         produce_multiple_translations: bool = False,
-        vrefs: Optional[Iterable[VerseRef]] = None,
+        vrefs: Optional[List[VerseRef]] = None,
     ) -> Generator[SentenceTranslationGroup, None, None]:
         pass
 
@@ -286,8 +286,10 @@ class Translator(AbstractContextManager["Translator"], ABC):
     ) -> None:
 
         sentences = [add_tags_to_sentence(tags, sentence) for sentence in load_corpus(src_file_path)]
+        src_isos = [src_iso for s in sentences]
+        trg_isos = [trg_iso for s in sentences]
         sentence_translation_groups: List[SentenceTranslationGroup] = list(
-            self.translate(sentences, src_iso, trg_iso, produce_multiple_translations)
+            self.translate(sentences, src_isos, trg_isos, produce_multiple_translations)
         )
         draft_set = DraftGroup(sentence_translation_groups)
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
@@ -387,6 +389,8 @@ class Translator(AbstractContextManager["Translator"], ABC):
             src_file_text = UsfmFileText(stylesheet, "utf-8-sig", book_id, src_file_path, include_all_text=True)
 
         sentences = [re.sub(" +", " ", add_tags_to_sentence(tags, s.text.strip())) for s in src_file_text]
+        src_isos = [src_iso for s in src_file_text]
+        trg_isos = [trg_iso for s in src_file_text]
         scripture_refs: List[ScriptureRef] = [s.ref for s in src_file_text]
         vrefs: List[VerseRef] = [sr.verse_ref for sr in scripture_refs]
         LOGGER.info(f"File {src_file_path} parsed correctly.")
@@ -408,7 +412,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
                 empty_sents.append((i, scripture_refs.pop(i)))
 
         sentence_translation_groups: List[SentenceTranslationGroup] = list(
-            self.translate(sentences, src_iso, trg_iso, produce_multiple_translations, vrefs)
+            self.translate(sentences, src_isos, trg_isos, produce_multiple_translations, vrefs)
         )
         num_drafts = len(sentence_translation_groups[0])
 
@@ -539,14 +543,18 @@ class Translator(AbstractContextManager["Translator"], ABC):
 
         sentences: List[str] = []
         paras: List[int] = []
+        src_isos: List[str] = []
+        trg_isos: List[str] = []
 
         for i, paragraph in enumerate(doc.paragraphs):
             for sentence in tokenizer.tokenize(paragraph.text):
                 sentences.append(add_tags_to_sentence(tags, sentence))
+                src_isos.append(src_iso)
+                trg_isos.append(trg_iso)
                 paras.append(i)
 
         draft_set: DraftGroup = DraftGroup(
-            list(self.translate(sentences, src_iso, trg_iso, produce_multiple_translations))
+            list(self.translate(sentences, src_isos, trg_isos, produce_multiple_translations))
         )
 
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):

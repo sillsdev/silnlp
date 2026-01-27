@@ -27,14 +27,14 @@ class NMTTranslator(Translator):
 
     def translate(
         self,
-        sentences: Iterable[str],
-        src_iso: str,
-        trg_iso: str,
+        sentences: List[str],
+        src_isos: List[str],
+        trg_isos: List[str],
         produce_multiple_translations: bool = False,
         vrefs: Optional[Iterable[VerseRef]] = None,
     ) -> Generator[SentenceTranslationGroup, None, None]:
         yield from self._model.translate(
-            sentences, src_iso, trg_iso, produce_multiple_translations, vrefs, self._checkpoint
+            sentences, src_isos, trg_isos, produce_multiple_translations, vrefs, self._checkpoint
         )
 
     def __exit__(

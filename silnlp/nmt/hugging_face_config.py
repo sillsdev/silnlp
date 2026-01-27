@@ -1260,21 +1260,23 @@ class HuggingFaceNMTModel(NMTModel):
 
     def translate(
         self,
-        sentences: Iterable[str],
-        src_iso: str,
-        trg_iso: str,
+        sentences: List[str],
+        src_isos: List[str],
+        trg_isos: List[str],
         produce_multiple_translations: bool = False,
         vrefs: Optional[Iterable[VerseRef]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Generator[SentenceTranslationGroup, None, None]:
-        src_lang = self._config.data["lang_codes"].get(src_iso, src_iso)
-        trg_lang = self._config.data["lang_codes"].get(trg_iso, trg_iso)
-        inference_model_params = InferenceModelParams(ckpt, src_lang, trg_lang)
+        src_langs = [self._config.data["lang_codes"].get(src_iso, src_iso) for src_iso in src_isos]
+        trg_langs = [self._config.data["lang_codes"].get(trg_iso, trg_iso) for trg_iso in trg_isos]
+        inference_model_params = InferenceModelParams(ckpt, src_langs[0], trg_langs[0])
         tokenizer = self._config.get_tokenizer()
         if self._inference_model_params == inference_model_params and self._cached_inference_model is not None:
             model = self._cached_inference_model
         else:
-            model = self._cached_inference_model = self._create_inference_model(ckpt, tokenizer, src_lang, trg_lang)
+            model = self._cached_inference_model = self._create_inference_model(
+                ckpt, tokenizer, src_langs[0], trg_langs[0]
+            )
             self._inference_model_params = inference_model_params
         if model.config.max_length is not None and model.config.max_length < 512:
             model.config.max_length = 512
@@ -1287,8 +1289,8 @@ class HuggingFaceNMTModel(NMTModel):
         pipeline = SilTranslationPipeline(
             model=model,
             tokenizer=tokenizer,
-            src_lang=src_lang,
-            tgt_lang=trg_lang,
+            src_langs=src_langs,
+            tgt_langs=trg_langs,
             device=0,
         )
 
@@ -1940,6 +1942,21 @@ class CustomNormalizerWrapper:
 
 
 class SilTranslationPipeline(TranslationPipeline):
+    def __init__(
+        self,
+        model: PreTrainedModel,
+        tokenizer: PreTrainedTokenizer,
+        src_langs: List[str],
+        tgt_langs: List[str],
+        device: int,
+        decoder_lang_code_tokens: List[int] | None = None,
+    ):
+        super().__init__(model=model, tokenizer=tokenizer, src_lang=src_langs[0], tgt_lang=tgt_langs[0], device=device)
+        self.tgt_langs = np.array(
+            [tokenizer.convert_tokens_to_ids(trg_lang) for trg_lang in tgt_langs], dtype=np.float32
+        )
+        self.tgt_index = 0
+
     def _forward(self, model_inputs, **generate_kwargs):
         in_b, input_length = model_inputs["input_ids"].shape
 
@@ -1950,6 +1967,16 @@ class SilTranslationPipeline(TranslationPipeline):
         generate_kwargs["min_length"] = generate_kwargs.get("min_length", config.min_length)
         generate_kwargs["max_length"] = generate_kwargs.get("max_length", config.max_length)
         self.check_inputs(input_length, generate_kwargs["min_length"], generate_kwargs["max_length"])
+        generate_kwargs["decoder_input_ids"] = torch.cat(
+            (
+                torch.ones((in_b, 1), dtype=torch.long, device=model_inputs["input_ids"].device) * 2,
+                torch.unsqueeze(torch.from_numpy(self.tgt_langs[self.tgt_index : self.tgt_index + in_b]), 0).to(
+                    model_inputs["input_ids"].device
+                ),
+            ),
+            dim=1,
+        )
+        self.tgt_index += in_b
         output = self.model.generate(
             **model_inputs,
             **generate_kwargs,

@@ -81,11 +81,11 @@ class NMTModel(ABC):
     @abstractmethod
     def translate(
         self,
-        sentences: Iterable[str],
-        src_iso: str,
-        trg_iso: str,
+        sentences: List[str],
+        src_isos: List[str],
+        trg_isos: List[str],
         produce_multiple_translations: bool = False,
-        vrefs: Optional[Iterable[VerseRef]] = None,
+        vrefs: Optional[List[VerseRef]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Generator[SentenceTranslationGroup, None, None]: ...
 
