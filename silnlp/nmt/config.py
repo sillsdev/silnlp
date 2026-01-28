@@ -32,7 +32,7 @@ from ..common.corpus import (
     write_corpus,
 )
 from ..common.environment import SIL_NLP_ENV
-from ..common.translator import SentenceTranslationGroup
+from ..common.translator import SentenceTranslationGroup, TranslationInputSentence
 from ..common.utils import NoiseMethod, Side, add_tags_to_dataframe, add_tags_to_sentence, get_mt_exp_dir, set_seed
 from .augment import AugmentMethod
 from .corpora import (
@@ -71,6 +71,7 @@ class NMTModel(ABC):
     def translate_test_files(
         self,
         input_paths: List[Path],
+        test_gold_standard_paths: List[Path],
         translation_paths: List[Path],
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
@@ -81,11 +82,8 @@ class NMTModel(ABC):
     @abstractmethod
     def translate(
         self,
-        sentences: List[str],
-        src_isos: List[str],
-        trg_isos: List[str],
+        sentences: List[TranslationInputSentence],
         produce_multiple_translations: bool = False,
-        vrefs: Optional[List[VerseRef]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Generator[SentenceTranslationGroup, None, None]: ...
 

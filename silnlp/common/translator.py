@@ -3,11 +3,12 @@ import re
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from datetime import date
 from itertools import groupby
 from math import exp
 from pathlib import Path
-from typing import DefaultDict, Generator, Iterable, List, Optional, Tuple, cast
+from typing import DefaultDict, Generator, List, Optional, Tuple
 
 import docx
 import nltk
@@ -38,6 +39,15 @@ from .usfm_utils import PARAGRAPH_TYPE_EMBEDS
 LOGGER = logging.getLogger((__package__ or "") + ".translate")
 
 CONFIDENCE_SCORES_SUFFIX = ".confidences.tsv"
+
+
+@dataclass
+class TranslationInputSentence:
+    text: str
+    src_iso: str
+    trg_iso: str
+    scripture_ref: ScriptureRef | None = None
+    vref: VerseRef | None = None
 
 
 # A single translation of a single sentence
@@ -265,11 +275,8 @@ class Translator(AbstractContextManager["Translator"], ABC):
     @abstractmethod
     def translate(
         self,
-        sentences: List[str],
-        src_isos: List[str],
-        trg_isos: List[str],
+        sentences: List[TranslationInputSentence],
         produce_multiple_translations: bool = False,
-        vrefs: Optional[List[VerseRef]] = None,
     ) -> Generator[SentenceTranslationGroup, None, None]:
         pass
 
@@ -285,11 +292,12 @@ class Translator(AbstractContextManager["Translator"], ABC):
         tags: Optional[List[str]] = None,
     ) -> None:
 
-        sentences = [add_tags_to_sentence(tags, sentence) for sentence in load_corpus(src_file_path)]
-        src_isos = [src_iso for s in sentences]
-        trg_isos = [trg_iso for s in sentences]
+        translation_inputs = [
+            TranslationInputSentence(add_tags_to_sentence(tags, sentence), src_iso, trg_iso)
+            for sentence in load_corpus(src_file_path)
+        ]
         sentence_translation_groups: List[SentenceTranslationGroup] = list(
-            self.translate(sentences, src_isos, trg_isos, produce_multiple_translations)
+            self.translate(translation_inputs, produce_multiple_translations)
         )
         draft_set = DraftGroup(sentence_translation_groups)
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
@@ -388,39 +396,38 @@ class Translator(AbstractContextManager["Translator"], ABC):
 
             src_file_text = UsfmFileText(stylesheet, "utf-8-sig", book_id, src_file_path, include_all_text=True)
 
-        sentences = [re.sub(" +", " ", add_tags_to_sentence(tags, s.text.strip())) for s in src_file_text]
-        src_isos = [src_iso for s in src_file_text]
-        trg_isos = [trg_iso for s in src_file_text]
-        scripture_refs: List[ScriptureRef] = [s.ref for s in src_file_text]
-        vrefs: List[VerseRef] = [sr.verse_ref for sr in scripture_refs]
+        sentences = [
+            TranslationInputSentence(
+                re.sub(" +", " ", add_tags_to_sentence(tags, s.text.strip())), src_iso, trg_iso, s.ref, s.ref.verse_ref
+            )
+            for s in src_file_text
+        ]
         LOGGER.info(f"File {src_file_path} parsed correctly.")
 
         # Filter sentences
         for i in reversed(range(len(sentences))):
-            marker = scripture_refs[i].path[-1].name if len(scripture_refs[i].path) > 0 else ""
+            marker = sentences[i].scripture_ref.path[-1].name if len(sentences[i].scripture_ref.path) > 0 else ""
             if (
-                (len(chapters) > 0 and scripture_refs[i].chapter_num not in chapters)
+                (len(chapters) > 0 and sentences[i].scripture_ref.chapter_num not in chapters)
                 or marker in PARAGRAPH_TYPE_EMBEDS
                 or stylesheet.get_tag(marker).text_type == UsfmTextType.NOTE_TEXT
             ):
                 sentences.pop(i)
-                scripture_refs.pop(i)
         empty_sents: List[Tuple[int, ScriptureRef]] = []
         for i in reversed(range(len(sentences))):
-            if len(sentences[i].strip()) == 0:
+            if len(sentences[i].text.strip()) == 0:
+                empty_sents.append((i, sentences[i].scripture_ref))
                 sentences.pop(i)
-                empty_sents.append((i, scripture_refs.pop(i)))
 
         sentence_translation_groups: List[SentenceTranslationGroup] = list(
-            self.translate(sentences, src_isos, trg_isos, produce_multiple_translations, vrefs)
+            self.translate(sentences, produce_multiple_translations)
         )
         num_drafts = len(sentence_translation_groups[0])
 
         # Add empty sentences back in
         # Prevents pre-existing text from showing up in the sections of translated text
         for idx, vref in reversed(empty_sents):
-            sentences.insert(idx, "")
-            scripture_refs.insert(idx, vref)
+            sentences.insert(idx, TranslationInputSentence("", "", "", vref, vref.verse_ref))
             sentence_translation_groups.insert(idx, [SentenceTranslation("", [], [], None)] * num_drafts)
 
         text_behavior = (
@@ -429,13 +436,17 @@ class Translator(AbstractContextManager["Translator"], ABC):
 
         draft_set: DraftGroup = DraftGroup(sentence_translation_groups)
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
-            postprocess_handler.construct_rows(scripture_refs, sentences, translated_draft.get_all_translations())
+            postprocess_handler.construct_rows(
+                [s.scripture_ref for s in sentences if s.scripture_ref is not None],
+                [s.text for s in sentences],
+                translated_draft.get_all_translations(),
+            )
 
             for config in postprocess_handler.configs:
 
                 # Compile draft remarks
                 draft_src_str = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
-                draft_remark = f"This draft of {scripture_refs[0].book} was machine translated on {date.today()} from {draft_src_str} using model {experiment_ckpt_str}. It should be reviewed and edited carefully."
+                draft_remark = f"This draft of {sentences[0].scripture_ref.book} was machine translated on {date.today()} from {draft_src_str} using model {experiment_ckpt_str}. It should be reviewed and edited carefully."
                 postprocess_remark = config.get_postprocess_remark()
                 remarks = [draft_remark] + ([postprocess_remark] if postprocess_remark else [])
 
@@ -470,7 +481,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
                         usfm = f.read()
                     handler = UpdateUsfmParserHandler(
                         rows=config.rows,
-                        id_text=scripture_refs[0].book,
+                        id_text=sentences[0].scripture_ref.book,
                         text_behavior=text_behavior,
                         paragraph_behavior=config.get_paragraph_behavior(),
                         embed_behavior=config.get_embed_behavior(),
@@ -517,7 +528,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
                     translated_draft,
                     trg_file_path,
                     produce_multiple_translations=produce_multiple_translations,
-                    scripture_refs=scripture_refs,
+                    scripture_refs=[s.scripture_ref for s in sentences if s.scripture_ref is not None],
                     draft_index=draft_index,
                 )
 
@@ -541,21 +552,17 @@ class Translator(AbstractContextManager["Translator"], ABC):
         with src_file_path.open("rb") as file:
             doc = docx.Document(file)
 
-        sentences: List[str] = []
+        translation_inputs: List[TranslationInputSentence] = []
         paras: List[int] = []
-        src_isos: List[str] = []
-        trg_isos: List[str] = []
 
         for i, paragraph in enumerate(doc.paragraphs):
             for sentence in tokenizer.tokenize(paragraph.text):
-                sentences.append(add_tags_to_sentence(tags, sentence))
-                src_isos.append(src_iso)
-                trg_isos.append(trg_iso)
+                translation_inputs.append(
+                    TranslationInputSentence(add_tags_to_sentence(tags, sentence), src_iso, trg_iso)
+                )
                 paras.append(i)
 
-        draft_set: DraftGroup = DraftGroup(
-            list(self.translate(sentences, src_isos, trg_isos, produce_multiple_translations))
-        )
+        draft_set: DraftGroup = DraftGroup(list(self.translate(translation_inputs, produce_multiple_translations)))
 
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
             for para, group in groupby(zip(translated_draft.get_all_translations(), paras), key=lambda t: t[1]):

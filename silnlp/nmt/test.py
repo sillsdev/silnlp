@@ -478,6 +478,7 @@ def test_checkpoint(
     vref_file_names: List[str] = []
     source_file_names: List[str] = []
     translation_file_names: List[str] = []
+    gold_standard_detok_file_names: List[str] = []
     refs_patterns: List[str] = []
     translation_detok_file_names: List[str] = []
     translation_conf_file_names: List[str] = []
@@ -495,6 +496,7 @@ def test_checkpoint(
         refs_patterns.append("test.trg.detok*.txt")
         translation_detok_file_names.append(f"test.trg-predictions.detok.txt.{suffix_str}")
         translation_conf_file_names.append(f"test.trg-predictions.txt.{suffix_str}.confidences.tsv")
+        gold_standard_detok_file_names.append("test.trg.detok.txt")
     else:
         # test data is split into separate files
         for src_iso in sorted(config.test_src_isos):
@@ -510,14 +512,17 @@ def test_checkpoint(
                     refs_patterns.append(f"{prefix}.trg.detok*.txt")
                     translation_detok_file_names.append(f"{prefix}.trg-predictions.detok.txt.{suffix_str}")
                     translation_conf_file_names.append(f"{prefix}.trg-predictions.txt.{suffix_str}.confidences.tsv")
+                    gold_standard_detok_file_names.append(f"{prefix}.trg.detok.txt")
 
     checkpoint_name = "averaged checkpoint" if step == -1 else f"checkpoint {step}"
 
     source_paths: List[Path] = []
+    gold_standard_target_paths: List[Path] = []
     vref_paths: Optional[List[Path]] = [] if config.has_scripture_data else None
     translation_paths: List[Path] = []
     for i in range(len(translation_file_names)):
         predictions_path = config.exp_dir / translation_file_names[i]
+        gold_standard_target_paths.append(config.exp_dir / gold_standard_detok_file_names[i])
         if force_infer or not predictions_path.is_file():
             source_paths.append(config.exp_dir / source_file_names[i])
             translation_paths.append(predictions_path)
@@ -527,6 +532,7 @@ def test_checkpoint(
         LOGGER.info(f"Inferencing {checkpoint_name}")
         model.translate_test_files(
             source_paths,
+            gold_standard_target_paths,
             translation_paths,
             produce_multiple_translations,
             save_confidences,

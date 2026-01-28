@@ -2,17 +2,16 @@ import argparse
 import logging
 import os
 import time
-from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generator, Iterable, List, Optional, Tuple, Union
+from typing import Generator, List, Optional, Tuple, Union
 
-from machine.scripture import VerseRef, book_number_to_id, get_chapters
+from machine.scripture import book_number_to_id, get_chapters
 
 from ..common.environment import SIL_NLP_ENV
 from ..common.paratext import book_file_name_digits, get_project_dir
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
-from ..common.translator import SentenceTranslationGroup, Translator
+from ..common.translator import SentenceTranslationGroup, TranslationInputSentence, Translator
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
 from .config import CheckpointType, Config, NMTModel
@@ -27,15 +26,10 @@ class NMTTranslator(Translator):
 
     def translate(
         self,
-        sentences: List[str],
-        src_isos: List[str],
-        trg_isos: List[str],
+        sentences: List[TranslationInputSentence],
         produce_multiple_translations: bool = False,
-        vrefs: Optional[Iterable[VerseRef]] = None,
     ) -> Generator[SentenceTranslationGroup, None, None]:
-        yield from self._model.translate(
-            sentences, src_isos, trg_isos, produce_multiple_translations, vrefs, self._checkpoint
-        )
+        yield from self._model.translate(sentences, produce_multiple_translations, self._checkpoint)
 
     def __exit__(
         self, exc_type, exc_value, traceback  # pyright: ignore[reportUnknownParameterType, reportMissingParameterType]

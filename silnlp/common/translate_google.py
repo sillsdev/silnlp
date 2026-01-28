@@ -6,7 +6,7 @@ from google.cloud import translate_v2 as translate
 from machine.scripture import VerseRef, book_id_to_number
 
 from .paratext import book_file_name_digits
-from .translator import SentenceTranslation, SentenceTranslationGroup, Translator
+from .translator import SentenceTranslation, SentenceTranslationGroup, TranslationInputSentence, Translator
 from .utils import get_git_revision_hash, get_mt_exp_dir
 
 LOGGER = logging.getLogger((__package__ or "") + ".translate")
@@ -18,21 +18,18 @@ class GoogleTranslator(Translator):
 
     def translate(
         self,
-        sentences: Iterable[str],
-        src_iso: str,
-        trg_iso: str,
+        sentences: Iterable[TranslationInputSentence],
         produce_multiple_translations: bool = False,
-        vrefs: Optional[Iterable[VerseRef]] = None,
     ) -> Generator[SentenceTranslationGroup, None, None]:
         if produce_multiple_translations:
             LOGGER.warning("Google Translator does not support --multiple-translations")
 
         for sentence in sentences:
-            if len(sentence) == 0:
-                yield ""
+            if len(sentence.text) == 0:
+                yield [SentenceTranslation("", [], [], None)]
             else:
                 results = self._translate_client.translate(
-                    sentence, source_language=src_iso, target_language=trg_iso, format_="text"
+                    sentence.text, source_language=sentence.src_iso, target_language=sentence.trg_iso, format_="text"
                 )
                 translation: str = results["translatedText"]
                 yield [SentenceTranslation(translation, [], [], None)]
