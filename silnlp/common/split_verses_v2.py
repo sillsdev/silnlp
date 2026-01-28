@@ -272,7 +272,7 @@ def main():
 
     # Get project directory
     project_dir = get_project_dir(args.project)
-    output_dir = project_dir.parent / f"{project_dir.name}_split{args.max}_{args.method}"
+    output_dir = project_dir.parent / f"{project_dir.name}_split{args.max}_{args.methods}"
     
     # Copying the folder ensures that all necessary files are present.
     copy_folder(project_dir, output_dir)
