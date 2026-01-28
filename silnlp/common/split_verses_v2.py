@@ -27,6 +27,7 @@ SPLIT_MARKER_MAP = {
 
 SENTENCE_ENDINGS = ['.', '!', '?', '।']
 WORD_BREAKS = [' ', ',', ';', ':', '-']
+MAX_LENGTH = 200
 
 def copy_folder(source: Path, destination: Path):
     """
@@ -101,7 +102,55 @@ def split_into_sentences(text):
     return [s.strip() for s in sentences if s.strip()]
 
 
-def split_text_optimally(text, max_length=250):
+def split_text_balanced(text, max_length=MAX_LENGTH):
+    """Split text into balanced groups of sentences"""
+    if len(text) <= max_length:
+        return [text]
+    
+    # Split into sentences first
+    sentences = split_into_sentences(text)
+    
+    # Calculate total length
+    total_length = sum(len(s) for s in sentences)
+    
+    # Calculate optimal number of groups
+    import math
+    num_groups = math.ceil(total_length / max_length)
+    target_length = total_length / num_groups
+    
+    # Greedy grouping with target length
+    groups = []
+    current_group = []
+    current_length = 0
+    
+    for sentence in sentences:
+        sentence_len = len(sentence)
+        
+        # Check if adding this sentence would exceed max_length
+        if current_length + sentence_len > max_length:
+            # Save current group and start new one
+            if current_group:
+                groups.append(' '.join(current_group))
+            current_group = [sentence]
+            current_length = sentence_len
+        # Check if we should start a new group based on target
+        elif current_length > 0 and current_length >= target_length:
+            groups.append(' '.join(current_group))
+            current_group = [sentence]
+            current_length = sentence_len
+        else:
+            # Add to current group
+            current_group.append(sentence)
+            current_length += sentence_len
+    
+    # Add final group
+    if current_group:
+        groups.append(' '.join(current_group))
+    
+    return groups if groups else [text]
+
+
+def split_text_optimally(text, max_length=MAX_LENGTH):
     if len(text) <= max_length: return [text]
     
     sentence_positions = []
@@ -171,6 +220,8 @@ def process_file(input_path, max_length, method='sentence', verbosity=0):
                 text_chunks = split_text_optimally(token.text, max_length=max_length)
             elif method == 'recursive':
                 text_chunks = split_text_recursively(token.text, max_length=max_length)
+            elif method == 'balanced':
+                text_chunks = split_text_balanced(token.text, max_length=max_length)
             else:
                 print(f"Method {method} isn't one of the valid methods: sentence, optimal, recursive.")
                 exit(0)
@@ -210,7 +261,7 @@ def main():
     parser.add_argument('project', help='Paratext project name')
     parser.add_argument('--max', type=int, default=225, help='Maximum paragraph length.')
     parser.add_argument("--books", metavar="books", nargs="+", default=[], help="The books to check; e.g., 'NT', 'OT', 'GEN EXO'")
-    parser.add_argument('--method', default='sentence', help='Method used to split long paragraphs, must be one of sentence, optimal, recursive.')
+    parser.add_argument('--methods', nargs='+', default=['sentence'], help='Methods used to split long paragraphs, must be one of sentence, optimal, recursive, balanced.')
     parser.add_argument('-v', '--verbose', action='count', default=0, help="Increase verbosity level (e.g., -v, -vv, -vvv)")
 
     args = parser.parse_args()
@@ -221,7 +272,7 @@ def main():
 
     # Get project directory
     project_dir = get_project_dir(args.project)
-    output_dir = project_dir.parent / f"{project_dir.name}_split"
+    output_dir = project_dir.parent / f"{project_dir.name}_split{args.max}_{args.method}"
     
     # Copying the folder ensures that all necessary files are present.
     copy_folder(project_dir, output_dir)
@@ -257,13 +308,14 @@ def main():
            print(f"Will process these books:\n{books_to_process}")
 
     # Process each file
-    for sfm_file in sfm_files:
-        book_id = settings.get_book_id(sfm_file.name)
-        if book_id in books_to_process:
-            output_path = output_dir / sfm_file.name
-            if verbosity >= 1:
-                print(f"Processing {sfm_file}")
-            process_file(sfm_file, args.max, method=args.method, verbosity=verbosity)
+    for method in args.methods:
+        for sfm_file in sfm_files:
+            book_id = settings.get_book_id(sfm_file.name)
+            if book_id in books_to_process:
+                output_path = output_dir / sfm_file.name
+                if verbosity >= 1:
+                    print(f"Processing {sfm_file}")
+                process_file(sfm_file, args.max, method=method, verbosity=verbosity)
 
     print(f"Done! Processed {len(books_to_process)} books to {output_dir}")
 
