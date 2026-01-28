@@ -259,7 +259,7 @@ def process_file(input_path, max_length, method='sentence', verbosity=0):
 def main():
     parser = argparse.ArgumentParser(description='Split long paragraphs in USFM files')
     parser.add_argument('project', help='Paratext project name')
-    parser.add_argument('--max', type=int, default=225, help='Maximum paragraph length.')
+    parser.add_argument('--max', type=int, default=MAX_LENGTH, help='Maximum paragraph length.')
     parser.add_argument("--books", metavar="books", nargs="+", default=[], help="The books to check; e.g., 'NT', 'OT', 'GEN EXO'")
     parser.add_argument('--methods', nargs='+', default=['sentence'], help='Methods used to split long paragraphs, must be one of sentence, optimal, recursive, balanced.')
     parser.add_argument('-v', '--verbose', action='count', default=0, help="Increase verbosity level (e.g., -v, -vv, -vvv)")
