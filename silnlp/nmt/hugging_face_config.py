@@ -11,7 +11,7 @@ from enum import Enum
 from itertools import repeat
 from math import prod
 from pathlib import Path
-from typing import Any, Callable, Dict, Generator, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
+from typing import Any, Callable, Dict, Generator, Iterable, List, Optional, Set, Tuple, Union, cast
 
 import datasets.utils.logging as datasets_logging
 import evaluate
@@ -50,6 +50,7 @@ from transformers import (
     PreTrainedTokenizerFast,
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
+    SpecialTokensMixin,
     T5Tokenizer,
     T5TokenizerFast,
     TensorType,
@@ -73,7 +74,7 @@ from transformers.utils import (
 )
 from transformers.utils.logging import tqdm
 
-from ..common.corpus import Term, count_lines, get_terms
+from ..common.corpus import Term, get_terms
 from ..common.environment import SIL_NLP_ENV
 from ..common.translator import (
     DraftGroup,
@@ -884,16 +885,10 @@ class ModelOutputGroup:
 @dataclass
 class InferenceModelParams:
     checkpoint: Union[CheckpointType, str, int]
-    src_lang: str
-    trg_lang: str
 
     def __post_init__(self):
         if not isinstance(self.checkpoint, (CheckpointType, str, int)):
             raise ValueError("checkpoint must be a CheckpointType, string, or integer")
-        if not isinstance(self.src_lang, str):
-            raise ValueError("src_lang must be a string")
-        if not isinstance(self.trg_lang, str):
-            raise ValueError("trg_lang must be a string")
 
 
 class HuggingFaceNMTModel(NMTModel):
@@ -1178,7 +1173,7 @@ class HuggingFaceNMTModel(NMTModel):
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
         tokenizer = self._config.get_tokenizer()
-        model = self._create_inference_model(ckpt, tokenizer, self._config.test_src_lang, self._config.test_trg_lang)
+        model = self._create_inference_model(ckpt, tokenizer)
         pipeline = PretokenizedTranslationPipeline(
             model=model,
             tokenizer=tokenizer,
@@ -1195,10 +1190,12 @@ class HuggingFaceNMTModel(NMTModel):
                 src_file = stack.enter_context(input_path.open("r", encoding="utf-8-sig"))
                 sentences = [line.strip().split() for line in src_file]
                 src_isos = [sentence[0] for sentence in sentences]
-                sentences = [" ".join(sentence[1:]) for sentence in sentences]
 
-                gold_trg_file = stack.enter_context(test_gold_standard_path.open("r", encoding="utf-8-sig"))
-                trg_isos = [line.strip().split()[0] for line in gold_trg_file]
+                if not test_gold_standard_path.exists():
+                    trg_isos = [self._config.test_trg_lang for _ in sentences]
+                else:
+                    gold_trg_file = stack.enter_context(test_gold_standard_path.open("r", encoding="utf-8-sig"))
+                    trg_isos = [line.strip().split()[0] for line in gold_trg_file]
 
                 vrefs: Optional[Iterable[VerseRef]] = None
                 if vref_path is not None:
@@ -1206,7 +1203,12 @@ class HuggingFaceNMTModel(NMTModel):
                     vrefs = (VerseRef.from_string(line.strip(), ORIGINAL_VERSIFICATION) for line in vref_file)
 
                 translation_inputs = [
-                    TranslationInputSentence(src_iso, trg_iso, sentence, None, vref)
+                    TranslationInputSentence.Builder()
+                    .set_tokens(sentence)
+                    .set_src_iso(src_iso)
+                    .set_trg_iso(trg_iso)
+                    .set_verse_ref(vref)
+                    .build()
                     for src_iso, trg_iso, sentence, vref in zip(
                         src_isos, trg_isos, sentences, vrefs if vrefs is not None else repeat(None)
                     )
@@ -1271,16 +1273,12 @@ class HuggingFaceNMTModel(NMTModel):
         produce_multiple_translations: bool = False,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Generator[SentenceTranslationGroup, None, None]:
-        src_langs = [self._config.data["lang_codes"].get(s.src_iso, s.src_iso) for s in sentences]
-        trg_langs = [self._config.data["lang_codes"].get(s.trg_iso, s.trg_iso) for s in sentences]
-        inference_model_params = InferenceModelParams(ckpt, src_langs[0], trg_langs[0])
+        inference_model_params = InferenceModelParams(ckpt)
         tokenizer = self._config.get_tokenizer()
         if self._inference_model_params == inference_model_params and self._cached_inference_model is not None:
             model = self._cached_inference_model
         else:
-            model = self._cached_inference_model = self._create_inference_model(
-                ckpt, tokenizer, src_langs[0], trg_langs[0]
-            )
+            model = self._cached_inference_model = self._create_inference_model(ckpt, tokenizer)
             self._inference_model_params = inference_model_params
         if model.config.max_length is not None and model.config.max_length < 512:
             model.config.max_length = 512
@@ -1664,7 +1662,7 @@ class HuggingFaceNMTModel(NMTModel):
             [self._config.data["lang_codes"].get(s.trg_iso, s.trg_iso) for s in sentences],
         )
         translations = pipeline(
-            [s.text for s in sentences],
+            [s.tokens if s.has_tokens() else s.text for s in sentences],
             num_beams=num_beams,
             num_return_sequences=num_return_sequences,
             force_words_ids=force_words_ids,
@@ -1695,7 +1693,7 @@ class HuggingFaceNMTModel(NMTModel):
             [self._config.data["lang_codes"].get(s.trg_iso, s.trg_iso) for s in sentences],
         )
         translations = pipeline(
-            [s.text for s in sentences],
+            [s.tokens if s.has_tokens() else s.text for s in sentences],
             do_sample=True,
             temperature=temperature,
             num_return_sequences=num_return_sequences,
@@ -1729,7 +1727,7 @@ class HuggingFaceNMTModel(NMTModel):
             [self._config.data["lang_codes"].get(s.trg_iso, s.trg_iso) for s in sentences],
         )
         translations = pipeline(
-            [s.text for s in sentences],
+            [s.tokens if s.has_tokens() else s.text for s in sentences],
             num_beams=num_beams,
             num_beam_groups=num_beams,
             num_return_sequences=num_return_sequences,
@@ -1749,8 +1747,8 @@ class HuggingFaceNMTModel(NMTModel):
         self,
         ckpt: Union[CheckpointType, str, int],
         tokenizer: PreTrainedTokenizer,
-        src_lang: str,
-        trg_lang: str,
+        src_lang: str = "",
+        trg_lang: str = "",
     ) -> PreTrainedModel:
         if self._config.model_dir.exists():
             checkpoint_path, _ = self.get_checkpoint_path(ckpt)
@@ -1815,22 +1813,22 @@ class HuggingFaceNMTModel(NMTModel):
         if model.config.decoder_start_token_id is None:
             raise ValueError("Make sure that `config.decoder_start_token_id` is correctly defined")
 
-         if (
+        if (
             src_lang != ""
             and trg_lang != ""
             and isinstance(
                 tokenizer, (MBartTokenizer, MBartTokenizerFast, M2M100Tokenizer, NllbTokenizer, NllbTokenizerFast)
             )
-         ):
-         tokenizer.src_lang = src_lang
-         tokenizer.tgt_lang = trg_lang
+        ):
+            tokenizer.src_lang = src_lang
+            tokenizer.tgt_lang = trg_lang
 
-        # For multilingual translation models like mBART-50 and M2M100 we need to force the target language token
-        # as the first generated token.
-         forced_bos_token_id = tokenizer.convert_tokens_to_ids(trg_lang)
-         model.config.forced_bos_token_id = forced_bos_token_id
-         if model.generation_config is not None:
-            model.generation_config.forced_bos_token_id = forced_bos_token_id
+            # For multilingual translation models like mBART-50 and M2M100 we need to force the target language token
+            # as the first generated token.
+            forced_bos_token_id = tokenizer.convert_tokens_to_ids(trg_lang)
+            model.config.forced_bos_token_id = forced_bos_token_id
+            if model.generation_config is not None:
+                model.generation_config.forced_bos_token_id = forced_bos_token_id
 
         return model, tokenizer
 
@@ -1870,6 +1868,10 @@ class PunctuationNormalizingTokenizer(PreTrainedTokenizerFast):
 
     def set_src_lang(self, src_lang: str):
         self._wrapped_tokenizer.src_lang = src_lang
+
+    @SpecialTokensMixin.pad_token_id.getter
+    def pad_token_id(self) -> int | None:
+        return self._wrapped_tokenizer.pad_token_id
 
 
 class HuggingFaceTokenizer(Tokenizer):
@@ -1974,24 +1976,16 @@ class SilTranslationPipeline(Text2TextGenerationPipeline):
 
     def _parse_and_tokenize(self, *args, truncation):
         prefix = self.prefix if self.prefix is not None else ""
-        if isinstance(args[0], list):  # TODO: disallow this case
-            if self.tokenizer.pad_token_id is None:
-                raise ValueError("Please make sure that the tokenizer has a pad_token_id when using a batch input")
-            args = ([prefix + self.src_langs[self.src_index + i] + " " + arg for i, arg in enumerate(args[0])],)
-            self.tokenizer.src_lang = ""
-            self.src_index += len(args[0])
-            padding = True
+        if isinstance(args[0], list):
+            raise ValueError("SilTranslationPipeline does not support batch tokenization")
 
         elif isinstance(args[0], str):
             args = (prefix + args[0],)
             self.tokenizer.set_src_lang(self.src_langs[self.src_index])
             self.src_index += 1
-            padding = False
         else:
-            raise ValueError(
-                f" `args[0]`: {args[0]} have the wrong format. The should be either of type `str` or type `list`"
-            )
-        inputs = self.tokenizer(*args, padding=padding, truncation=truncation, return_tensors=self.framework)
+            raise ValueError("SilTranslationPipeline only supports string inputs for tokenization")
+        inputs = self.tokenizer(*args, padding=False, truncation=truncation, return_tensors=self.framework)
         # This is produced by tokenizers but is an invalid generate kwargs
         if "token_type_ids" in inputs:
             del inputs["token_type_ids"]
@@ -2009,7 +2003,8 @@ class SilTranslationPipeline(Text2TextGenerationPipeline):
         self.check_inputs(input_length, generate_kwargs["min_length"], generate_kwargs["max_length"])
         generate_kwargs["decoder_input_ids"] = torch.cat(
             (
-                torch.ones((in_b, 1), dtype=torch.long, device=model_inputs["input_ids"].device) * 2,
+                torch.ones((in_b, 1), dtype=torch.long, device=model_inputs["input_ids"].device)
+                * self.tokenizer.pad_token_id,
                 torch.unsqueeze(torch.from_numpy(self.tgt_langs[self.tgt_index : self.tgt_index + in_b]), 1).to(
                     model_inputs["input_ids"].device
                 ),

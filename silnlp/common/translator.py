@@ -43,11 +43,97 @@ CONFIDENCE_SCORES_SUFFIX = ".confidences.tsv"
 
 @dataclass
 class TranslationInputSentence:
-    text: str
-    src_iso: str
-    trg_iso: str
-    scripture_ref: ScriptureRef | None = None
-    vref: VerseRef | None = None
+    def __init__(
+        self,
+        text: str | None = None,
+        tokens: List[str] | None = None,
+        src_iso: str = "",
+        trg_iso: str = "",
+        scripture_ref: ScriptureRef | None = None,
+        vref: VerseRef | None = None,
+    ):
+        self._text = text
+        self._tokens = tokens
+        self._src_iso = src_iso
+        self._trg_iso = trg_iso
+        self._scripture_ref = scripture_ref
+        self._vref = vref
+
+    @property
+    def text(self) -> str | None:
+        return self._text
+
+    @property
+    def tokens(self) -> List[str] | None:
+        return self._tokens
+
+    @property
+    def src_iso(self) -> str:
+        return self._src_iso
+
+    @property
+    def trg_iso(self) -> str:
+        return self._trg_iso
+
+    @property
+    def scripture_ref(self) -> ScriptureRef | None:
+        return self._scripture_ref
+
+    @property
+    def vref(self) -> VerseRef | None:
+        return self._vref
+
+    def has_tokens(self) -> bool:
+        return self.tokens is not None
+
+    class Builder:
+        def __init__(self):
+            self._text = None
+            self._tokens = None
+            self._src_iso = None
+            self._trg_iso = None
+            self._scripture_ref = None
+            self._vref = None
+
+        def set_text(self, text: str) -> "TranslationInputSentence.Builder":
+            self._text = text
+            return self
+
+        def set_tokens(self, tokens: List[str]) -> "TranslationInputSentence.Builder":
+            self._tokens = tokens
+            return self
+
+        def set_src_iso(self, src_iso: str) -> "TranslationInputSentence.Builder":
+            self._src_iso = src_iso
+            return self
+
+        def set_trg_iso(self, trg_iso: str) -> "TranslationInputSentence.Builder":
+            self._trg_iso = trg_iso
+            return self
+
+        def set_scripture_ref(self, scripture_ref: ScriptureRef) -> "TranslationInputSentence.Builder":
+            self._scripture_ref = scripture_ref
+            return self
+
+        def set_verse_ref(self, vref: VerseRef) -> "TranslationInputSentence.Builder":
+            self._vref = vref
+            return self
+
+        def build(self) -> "TranslationInputSentence":
+            if self._text is None and self._tokens is None:
+                raise ValueError("TranslationInputSentence must have either text or tokens defined")
+            if self._src_iso is None:
+                raise ValueError("TranslationInputSentence must have a src_iso defined")
+            if self._trg_iso is None:
+                raise ValueError("TranslationInputSentence must have a trg_iso defined")
+            return TranslationInputSentence(
+                text=self._text,
+                tokens=self._tokens,
+                src_iso=self._src_iso,
+                trg_iso=self._trg_iso,
+                scripture_ref=self._scripture_ref,
+                vref=self._vref,
+            )
 
 
 # A single translation of a single sentence
@@ -293,7 +379,11 @@ class Translator(AbstractContextManager["Translator"], ABC):
     ) -> None:
 
         translation_inputs = [
-            TranslationInputSentence(add_tags_to_sentence(tags, sentence), src_iso, trg_iso)
+            TranslationInputSentence.Builder()
+            .set_text(add_tags_to_sentence(tags, sentence))
+            .set_src_iso(src_iso)
+            .set_trg_iso(trg_iso)
+            .build()
             for sentence in load_corpus(src_file_path)
         ]
         sentence_translation_groups: List[SentenceTranslationGroup] = list(
@@ -397,26 +487,37 @@ class Translator(AbstractContextManager["Translator"], ABC):
             src_file_text = UsfmFileText(stylesheet, "utf-8-sig", book_id, src_file_path, include_all_text=True)
 
         sentences = [
-            TranslationInputSentence(
-                re.sub(" +", " ", add_tags_to_sentence(tags, s.text.strip())), src_iso, trg_iso, s.ref, s.ref.verse_ref
-            )
+            TranslationInputSentence.Builder()
+            .set_text(re.sub(" +", " ", add_tags_to_sentence(tags, s.text.strip())))
+            .set_src_iso(src_iso)
+            .set_trg_iso(trg_iso)
+            .set_scripture_ref(s.ref)
+            .set_verse_ref(s.ref.verse_ref)
+            .build()
             for s in src_file_text
         ]
         LOGGER.info(f"File {src_file_path} parsed correctly.")
 
         # Filter sentences
         for i in reversed(range(len(sentences))):
-            marker = sentences[i].scripture_ref.path[-1].name if len(sentences[i].scripture_ref.path) > 0 else ""
+            sentence_scripture_ref = sentences[i].scripture_ref
+            if sentence_scripture_ref is None:
+                continue
+            marker = sentence_scripture_ref.path[-1].name if len(sentence_scripture_ref.path) > 0 else ""
             if (
-                (len(chapters) > 0 and sentences[i].scripture_ref.chapter_num not in chapters)
+                (len(chapters) > 0 and sentence_scripture_ref.chapter_num not in chapters)
                 or marker in PARAGRAPH_TYPE_EMBEDS
                 or stylesheet.get_tag(marker).text_type == UsfmTextType.NOTE_TEXT
             ):
                 sentences.pop(i)
         empty_sents: List[Tuple[int, ScriptureRef]] = []
         for i in reversed(range(len(sentences))):
-            if len(sentences[i].text.strip()) == 0:
-                empty_sents.append((i, sentences[i].scripture_ref))
+            sentence_scripture_ref = sentences[i].scripture_ref
+            if sentence_scripture_ref is None:
+                continue
+            sentence_text = sentences[i].text
+            if (sentence_text is None or len(sentence_text.strip()) == 0) and sentence_scripture_ref is not None:
+                empty_sents.append((i, sentence_scripture_ref))
                 sentences.pop(i)
 
         sentence_translation_groups: List[SentenceTranslationGroup] = list(
@@ -427,7 +528,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
         # Add empty sentences back in
         # Prevents pre-existing text from showing up in the sections of translated text
         for idx, vref in reversed(empty_sents):
-            sentences.insert(idx, TranslationInputSentence("", "", "", vref, vref.verse_ref))
+            sentences.insert(idx, TranslationInputSentence(None, None, "", "", vref, vref.verse_ref))
             sentence_translation_groups.insert(idx, [SentenceTranslation("", [], [], None)] * num_drafts)
 
         text_behavior = (
@@ -438,15 +539,17 @@ class Translator(AbstractContextManager["Translator"], ABC):
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
             postprocess_handler.construct_rows(
                 [s.scripture_ref for s in sentences if s.scripture_ref is not None],
-                [s.text for s in sentences],
+                [s.text or "" for s in sentences],
                 translated_draft.get_all_translations(),
             )
 
             for config in postprocess_handler.configs:
+                first_scripture_ref = sentences[0].scripture_ref
+                assert first_scripture_ref is not None
 
                 # Compile draft remarks
                 draft_src_str = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
-                draft_remark = f"This draft of {sentences[0].scripture_ref.book} was machine translated on {date.today()} from {draft_src_str} using model {experiment_ckpt_str}. It should be reviewed and edited carefully."
+                draft_remark = f"This draft of {first_scripture_ref.book} was machine translated on {date.today()} from {draft_src_str} using model {experiment_ckpt_str}. It should be reviewed and edited carefully."
                 postprocess_remark = config.get_postprocess_remark()
                 remarks = [draft_remark] + ([postprocess_remark] if postprocess_remark else [])
 
@@ -481,7 +584,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
                         usfm = f.read()
                     handler = UpdateUsfmParserHandler(
                         rows=config.rows,
-                        id_text=sentences[0].scripture_ref.book,
+                        id_text=first_scripture_ref.book,
                         text_behavior=text_behavior,
                         paragraph_behavior=config.get_paragraph_behavior(),
                         embed_behavior=config.get_embed_behavior(),
@@ -558,7 +661,11 @@ class Translator(AbstractContextManager["Translator"], ABC):
         for i, paragraph in enumerate(doc.paragraphs):
             for sentence in tokenizer.tokenize(paragraph.text):
                 translation_inputs.append(
-                    TranslationInputSentence(add_tags_to_sentence(tags, sentence), src_iso, trg_iso)
+                    TranslationInputSentence.Builder()
+                    .set_text(add_tags_to_sentence(tags, sentence))
+                    .set_src_iso(src_iso)
+                    .set_trg_iso(trg_iso)
+                    .build()
                 )
                 paras.append(i)
 

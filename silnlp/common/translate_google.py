@@ -25,7 +25,7 @@ class GoogleTranslator(Translator):
             LOGGER.warning("Google Translator does not support --multiple-translations")
 
         for sentence in sentences:
-            if len(sentence.text) == 0:
+            if sentence.text is None or len(sentence.text) == 0:
                 yield [SentenceTranslation("", [], [], None)]
             else:
                 results = self._translate_client.translate(

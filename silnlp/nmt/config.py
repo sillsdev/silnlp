@@ -632,12 +632,16 @@ class Config(ABC):
                 project = column[len("target_") :]
                 self._append_corpus(
                     self.test_trg_filename(src_iso, trg_iso, project),
+                    tokenizer.tokenize_all(Side.TARGET, pair_test[column]),
+                )
+                self._append_corpus(
+                    self.test_trg_detok_filename(src_iso, trg_iso, project),
                     tokenizer.normalize_all(Side.TARGET, pair_test[column]),
                 )
                 test_projects.remove(project)
             if self._has_multiple_test_projects(src_iso, trg_iso):
                 for project in test_projects:
-                    self._fill_corpus(self.test_trg_filename(src_iso, trg_iso, project), len(pair_test))
+                    self._fill_corpus(self.test_trg_detok_filename(src_iso, trg_iso, project), len(pair_test))
         LOGGER.info(f"train size: {train_count}," f" val size: {val_count}," f" test size: {test_count},")
         return train_count
 
@@ -1005,6 +1009,9 @@ class Config(ABC):
             val_trg_file = stack.enter_context(self._open_append(self.val_trg_filename()))
             test_src_file = stack.enter_context(self._open_append(self.test_src_filename(src_file.iso, trg_file.iso)))
             test_trg_file = stack.enter_context(self._open_append(self.test_trg_filename(src_file.iso, trg_file.iso)))
+            test_trg_detok_file = stack.enter_context(
+                self._open_append(self.test_trg_detok_filename(src_file.iso, trg_file.iso))
+            )
 
             train_vref_file: Optional[TextIO] = None
             val_vref_file: Optional[TextIO] = None
@@ -1024,7 +1031,7 @@ class Config(ABC):
                 if self._has_multiple_test_projects(src_file.iso, trg_file.iso):
                     test_trg_project_files = [
                         stack.enter_context(
-                            self._open_append(self.test_trg_filename(src_file.iso, trg_file.iso, project))
+                            self._open_append(self.test_trg_detok_filename(src_file.iso, trg_file.iso, project))
                         )
                         for project in test_projects
                         if project != BASIC_DATA_PROJECT
@@ -1051,7 +1058,8 @@ class Config(ABC):
 
                 if pair.is_test and (test_indices is None or index in test_indices):
                     test_src_file.write(tokenizer.tokenize(Side.SOURCE, src_sentence) + "\n")
-                    test_trg_file.write(tokenizer.normalize(Side.TARGET, trg_sentence) + "\n")
+                    test_trg_file.write(tokenizer.tokenize(Side.TARGET, trg_sentence) + "\n")
+                    test_trg_detok_file.write(tokenizer.normalize(Side.TARGET, trg_sentence) + "\n")
                     if test_vref_file is not None:
                         test_vref_file.write("\n")
                     for test_trg_project_file in test_trg_project_files:
@@ -1221,6 +1229,12 @@ class Config(ABC):
         return f"test.{src_iso}.{trg_iso}.vref.txt" if self._multiple_test_iso_pairs else "test.vref.txt"
 
     def test_trg_filename(self, src_iso: str, trg_iso: str, project: str = BASIC_DATA_PROJECT) -> str:
+        prefix = f"test.{src_iso}.{trg_iso}" if self._multiple_test_iso_pairs else "test"
+        has_multiple_test_projects = self._iso_pairs[(src_iso, trg_iso)].has_multiple_test_projects
+        suffix = f".{project}" if has_multiple_test_projects else ""
+        return f"{prefix}.trg{suffix}.txt"
+
+    def test_trg_detok_filename(self, src_iso: str, trg_iso: str, project: str = BASIC_DATA_PROJECT) -> str:
         prefix = f"test.{src_iso}.{trg_iso}" if self._multiple_test_iso_pairs else "test"
         has_multiple_test_projects = self._iso_pairs[(src_iso, trg_iso)].has_multiple_test_projects
         suffix = f".{project}" if has_multiple_test_projects else ""
