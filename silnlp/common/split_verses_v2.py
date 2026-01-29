@@ -47,7 +47,7 @@ def copy_folder(source: Path, destination: Path):
     
     return destination
 
-def show_token_structure(tokens, start=0, limit=20):
+def show_tokena(tokens, start=0, limit=20):
     "Display token structure with types, markers, and text"
     for idx,token in enumerate(tokens[start:start+limit], start):
         print(f"{idx if idx else 0:4d} | {token.type:25s} | {token.marker if token.marker else '':7} | {token.data if token.data else '':7s} | {token.text if token.text else ''}")
@@ -114,6 +114,35 @@ def split_long_sentence(sentence, max_len=MAX_LENGTH):
     left,right = ' '.join(words[:best_idx]),' '.join(words[best_idx:])
     return split_long_sentence(left, max_len) + split_long_sentence(right, max_len)
 
+def split_ef_fp_text(tokens, max_len=MAX_LENGTH):
+    "Split long TEXT after \\fp markers inside \\ef paragraphs into multiple \\ef...\\fp sequences"
+    new_tokens = []
+    in_ef = False
+    for i,token in enumerate(tokens):
+        if token.type == UsfmTokenType.PARAGRAPH:
+            in_ef = (token.marker == 'ef')
+            new_tokens.append(token)
+        elif token.type == UsfmTokenType.CHARACTER and token.marker == 'fp' and in_ef:
+            next_token = tokens[i+1] if i+1 < len(tokens) else None
+            if next_token and next_token.type == UsfmTokenType.TEXT and len(next_token.text or '') > max_len:
+                new_tokens.append(token)
+            else:
+                new_tokens.append(token)
+        elif token.type == UsfmTokenType.TEXT and in_ef and i > 0:
+            prev = tokens[i-1]
+            if prev.type == UsfmTokenType.CHARACTER and prev.marker == 'fp' and len(token.text or '') > max_len:
+                chunks = split_text_balanced(token.text, max_len)
+                new_tokens.append(UsfmToken(UsfmTokenType.TEXT, text=chunks[0]))
+                for chunk in chunks[1:]:
+                    new_tokens.append(UsfmToken(UsfmTokenType.PARAGRAPH, marker='ef'))
+                    new_tokens.append(UsfmToken(UsfmTokenType.CHARACTER, marker='fp'))
+                    new_tokens.append(UsfmToken(UsfmTokenType.TEXT, text=chunk))
+            else:
+                new_tokens.append(token)
+        else:
+            new_tokens.append(token)
+    return new_tokens
+
 
 def split_text_balanced(text, max_len=MAX_LENGTH):
     "Split text into balanced groups of sentences"
@@ -149,17 +178,13 @@ def split_text_balanced(text, max_len=MAX_LENGTH):
     return groups
 
 
-def process_file(tokenizer, input_path, max_len, method='balanced', verbosity=0):
-    """Process a single USFM file, splitting long paragraphs"""
-
+def process_file(tokenizer, input_path, max_len, method='balanced', verbosity=0, tokens=None):
+    "Process a single USFM file or tokens and splitting long paragraphs."
     output_path = input_path
-
-    # Read and tokenize the file
-    with open(input_path, 'r', encoding='utf-8') as f:
-        usfm_text = f.read()
-    
-    tokens = list(tokenizer.tokenize(usfm_text))
-    
+    if tokens is None:
+        with open(input_path, 'r', encoding='utf-8') as f: usfm_text = f.read()
+        tokens = list(tokenizer.tokenize(usfm_text))
+   
     # Process tokens, splitting long TEXT tokens
     new_tokens = []
     current_para_marker = None  # Track current paragraph marker
@@ -297,7 +322,7 @@ def main():
             usfm_text = f.read()
     
         tokens = list(tokenizer.tokenize(usfm_text))
-        show_token_structure(tokens, start=args.show_from, limit=args.show_limit)
+        show_tokena(tokens, start=args.show_from, limit=args.show_limit)
         exit()
 
     # for method in args.methods:
@@ -319,7 +344,11 @@ def main():
             sfm_file_out = output_dir / sfm_file.name
             if verbosity >= 1:
                 print(f"Processing {sfm_file}")
-                split_counter = process_file(tokenizer, sfm_file_out, args.max, method=method, verbosity=verbosity)
+                # Read and tokenize the file
+                with open(sfm_file, 'r', encoding='utf-8') as f: usfm_text = f.read()
+                tokens = list(tokenizer.tokenize(usfm_text))
+                ef_fp_split_tokens = split_ef_fp_text(tokens, max_len=MAX_LENGTH)
+                split_counter = process_file(tokenizer, sfm_file_out, args.max, method=method, verbosity=verbosity, tokens=ef_fp_split_tokens)
                 if verbosity >= 2:
                     if len(split_counter) > 0:
                         print(f"Saved {sfm_file_out} after splitting lines. {split_counter}")
