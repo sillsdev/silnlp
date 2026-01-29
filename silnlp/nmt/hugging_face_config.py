@@ -1222,9 +1222,7 @@ class HuggingFaceNMTModel(NMTModel):
                     if save_confidences:
                         generate_test_confidence_files(
                             translated_draft,
-                            translation_path,
-                            produce_multiple_translations=produce_multiple_translations,
-                            draft_index=draft_index,
+                            translation_draft_path,
                         )
 
     def _translate_test_sentences(
