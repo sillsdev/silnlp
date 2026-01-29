@@ -342,20 +342,21 @@ def main():
     # Process each file
         for sfm_file in sfm_files:
             sfm_file_out = output_dir / sfm_file.name
-            if verbosity >= 1:
-                print(f"Processing {sfm_file}")
-                # Read and tokenize the file
-                with open(sfm_file, 'r', encoding='utf-8') as f: usfm_text = f.read()
-                tokens = list(tokenizer.tokenize(usfm_text))
-                ef_fp_split_tokens = split_ef_fp_text(tokens, max_len=MAX_LENGTH)
-                split_counter = process_file(tokenizer, sfm_file_out, args.max, method=method, verbosity=verbosity, tokens=ef_fp_split_tokens)
-                if verbosity >= 2:
-                    if len(split_counter) > 0:
-                        print(f"Saved {sfm_file_out} after splitting lines. {split_counter}")
-                    else:
-                        print(f"No changes were needed to for {sfm_file_out}")        
-    if verbosity >= 1:
-        print(f"Done! Processed {len(sfm_files)} books to {output_dir}")
+            if verbosity >= 1: print(f"Processing {sfm_file}")
+
+            # Read and tokenize the file
+            with open(sfm_file, 'r', encoding='utf-8') as f: usfm_text = f.read()
+            tokens = list(tokenizer.tokenize(usfm_text))
+            ef_fp_split_tokens = split_ef_fp_text(tokens, max_len=args.max)
+            split_counter = process_file(tokenizer, sfm_file_out, args.max, method=method, verbosity=verbosity, tokens=ef_fp_split_tokens)
+            
+            if verbosity >= 2:
+                if len(split_counter) > 0:
+                    print(f"Saved {sfm_file_out} after splitting lines. {split_counter}")
+                else:
+                    print(f"No changes were needed to for {sfm_file_out}")        
+    
+    print(f"Done! Processed {len(sfm_files)} books to {output_dir}")
 
 if __name__ == '__main__':
     main()
