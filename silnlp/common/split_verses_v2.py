@@ -6,11 +6,9 @@ import time
 
 from collections import Counter
 from .environment import SIL_NLP_ENV
-from machine.corpora import UsfmTokenizer, UsfmToken, UsfmTokenType, UsfmStylesheet
+from machine.corpora import UsfmTokenizer, UsfmToken, UsfmTokenType
 from machine.corpora import FileParatextProjectSettingsParser, UsfmFileText
 from regex import P
-
-
 #from machine.scripture import book_number_to_id, get_chapters
 
 from .paratext import get_project_dir
@@ -46,11 +44,6 @@ def copy_folder(source: Path, destination: Path):
     time.sleep(2)
     
     return destination
-
-def show_tokena(tokens, start=0, limit=20):
-    "Display token structure with types, markers, and text"
-    for idx,token in enumerate(tokens[start:start+limit], start):
-        print(f"{idx if idx else 0:4d} | {token.type:25s} | {token.marker if token.marker else '':7} | {token.data if token.data else '':7s} | {token.text if token.text else ''}")
 
 
 def get_split_marker(original_marker):
@@ -114,35 +107,6 @@ def split_long_sentence(sentence, max_len=MAX_LENGTH):
     left,right = ' '.join(words[:best_idx]),' '.join(words[best_idx:])
     return split_long_sentence(left, max_len) + split_long_sentence(right, max_len)
 
-def split_ef_fp_text(tokens, max_len=MAX_LENGTH):
-    "Split long TEXT after \\fp markers inside \\ef paragraphs into multiple \\ef...\\fp sequences"
-    new_tokens = []
-    in_ef = False
-    for i,token in enumerate(tokens):
-        if token.type == UsfmTokenType.PARAGRAPH:
-            in_ef = (token.marker == 'ef')
-            new_tokens.append(token)
-        elif token.type == UsfmTokenType.CHARACTER and token.marker == 'fp' and in_ef:
-            next_token = tokens[i+1] if i+1 < len(tokens) else None
-            if next_token and next_token.type == UsfmTokenType.TEXT and len(next_token.text or '') > max_len:
-                new_tokens.append(token)
-            else:
-                new_tokens.append(token)
-        elif token.type == UsfmTokenType.TEXT and in_ef and i > 0:
-            prev = tokens[i-1]
-            if prev.type == UsfmTokenType.CHARACTER and prev.marker == 'fp' and len(token.text or '') > max_len:
-                chunks = split_text_balanced(token.text, max_len)
-                new_tokens.append(UsfmToken(UsfmTokenType.TEXT, text=chunks[0]))
-                for chunk in chunks[1:]:
-                    new_tokens.append(UsfmToken(UsfmTokenType.PARAGRAPH, marker='ef'))
-                    new_tokens.append(UsfmToken(UsfmTokenType.CHARACTER, marker='fp'))
-                    new_tokens.append(UsfmToken(UsfmTokenType.TEXT, text=chunk))
-            else:
-                new_tokens.append(token)
-        else:
-            new_tokens.append(token)
-    return new_tokens
-
 
 def split_text_balanced(text, max_len=MAX_LENGTH):
     "Split text into balanced groups of sentences"
@@ -178,13 +142,18 @@ def split_text_balanced(text, max_len=MAX_LENGTH):
     return groups
 
 
-def process_file(tokenizer, input_path, max_len, method='balanced', verbosity=0, tokens=None):
-    "Process a single USFM file or tokens and splitting long paragraphs."
+def process_file(input_path, max_len, method='balanced', verbosity=0):
+    """Process a single USFM file, splitting long paragraphs"""
+
     output_path = input_path
-    if tokens is None:
-        with open(input_path, 'r', encoding='utf-8') as f: usfm_text = f.read()
-        tokens = list(tokenizer.tokenize(usfm_text))
-   
+
+    # Read and tokenize the file
+    with open(input_path, 'r', encoding='utf-8') as f:
+        usfm_text = f.read()
+    
+    tokenizer = UsfmTokenizer()
+    tokens = list(tokenizer.tokenize(usfm_text))
+    
     # Process tokens, splitting long TEXT tokens
     new_tokens = []
     current_para_marker = None  # Track current paragraph marker
@@ -247,28 +216,6 @@ def process_file(tokenizer, input_path, max_len, method='balanced', verbosity=0,
 
     return split_counter
 
-
-def get_books_to_process(settings, project_dir, specified_books):
-
-    sfm_suffix = Path(settings.file_name_suffix).suffix.lower()[1:]
-    #print(f"suffix is {sfm_suffix}")
-
-    # Find all SFM/USFM files
-    sfm_files = [file for file in project_dir.glob("*") if file.is_file() and file.suffix[1:].lower() in ["sfm", "usfm", sfm_suffix]]
-
-    # Parse books argument
-    if specified_books:
-        book_list = expand_book_list(specified_books)  
-
-        # Get book IDs for found files
-        ids_of_books_found = [settings.get_book_id(sfm_file.name) for sfm_file in sfm_files] 
-        return [sfm_file for sfm_file in sfm_files if settings.get_book_id(sfm_file.name) in book_list]
-
-    # No books are specified or filtered,  return all of them.
-    else :
-        return sfm_files
-
-
 def main():
     parser = argparse.ArgumentParser(description='Split long paragraphs in USFM files')
     parser.add_argument('project', help='Paratext project name')
@@ -276,8 +223,6 @@ def main():
     parser.add_argument("--books", metavar="books", nargs="+", default=[], help="The books to check; e.g., 'NT', 'OT', 'GEN EXO'")
     parser.add_argument('--methods', nargs='+', default=['balanced'], help='Methods used to split long paragraphs, must be one of sentence, optimal, recursive, balanced.')
     parser.add_argument('-v', '--verbose', action='count', default=0, help="Increase verbosity level (e.g., -v, -vv, -vvv)")
-    parser.add_argument('--show_from', type=int, help="Show the tokens found at given token number. Set limit to change how many to show.")
-    parser.add_argument('--show_limit', default=25, help="Set the number of tokens to show, only has an effect when --show is used.")
 
     args = parser.parse_args()
     print(args)
@@ -300,30 +245,6 @@ def main():
         if project_dir.is_dir() and not settings_file.is_file():
             raise RuntimeError(f"No Settings.xml file was found in {project_dir}")
 
-    custom_sty_path = project_dir / "custom.sty"
-    if custom_sty_path.is_file():
-        stylesheet = UsfmStylesheet("usfm.sty", custom_sty_path)
-    else :
-        stylesheet = UsfmStylesheet("usfm.sty")
-    tokenizer = UsfmTokenizer(stylesheet)
-
-    # Parse project settings to get book IDs
-    settings = FileParatextProjectSettingsParser(project_dir).parse()
-
-    if args.show_from is not None:
-
-        books_to_process = get_books_to_process(settings, project_dir, args.books)
-        print(f"books_to_process are {books_to_process}")
-        print(f"book_to_process is {books_to_process[0]}")
-        # Only show tokens from one book.
-        
-        # Read and tokenize the file
-        with open(books_to_process[0], 'r', encoding='utf-8') as f:
-            usfm_text = f.read()
-    
-        tokens = list(tokenizer.tokenize(usfm_text))
-        show_tokena(tokens, start=args.show_from, limit=args.show_limit)
-        exit()
 
     # for method in args.methods:
     method=args.methods[0]
@@ -332,31 +253,48 @@ def main():
     
     # Copying the folder ensures that all necessary files are present.
     copy_folder(project_dir, output_dir)
-    
-    sfm_files = get_books_to_process(settings, output_dir, args.books)
 
-    if sfm_files:
+    # Parse project settings to get book IDs
+    settings = FileParatextProjectSettingsParser(output_dir).parse()
+    
+    # Find all SFM/USFM files
+    sfm_files = [file for file in output_dir.glob("*") if file.is_file() and file.suffix[1:].lower() in ["sfm", "usfm"]]
+            
+    # Get book IDs for found files
+    books_found = [settings.get_book_id(sfm_file.name) for sfm_file in sfm_files]
+    books_to_process = []
+
+    # Parse books argument
+    books = args.books
+    if args.books:
+        if books:
+            specified_books = expand_book_list(books)
+            books_to_process = [book for book in specified_books if book in books_found]
+            if not books_to_process:
+                print(f"None of the specified books: {specified_books} were found in the project folder: {output_dir}")
+    else:
+        print("No books specified, all books will be processed.")
+        books_to_process = books_found
+
+    if books_to_process:
         if verbosity >= 1:
-            print(f"Will process these books:\n{sfm_files}")
+            print(f"Will process these books:\n{books_to_process}")
 
     # Process each file
         for sfm_file in sfm_files:
-            sfm_file_out = output_dir / sfm_file.name
-            if verbosity >= 1: print(f"Processing {sfm_file}")
-
-            # Read and tokenize the file
-            with open(sfm_file, 'r', encoding='utf-8') as f: usfm_text = f.read()
-            tokens = list(tokenizer.tokenize(usfm_text))
-            ef_fp_split_tokens = split_ef_fp_text(tokens, max_len=args.max)
-            split_counter = process_file(tokenizer, sfm_file_out, args.max, method=method, verbosity=verbosity, tokens=ef_fp_split_tokens)
-            
-            if verbosity >= 2:
-                if len(split_counter) > 0:
-                    print(f"Saved {sfm_file_out} after splitting lines. {split_counter}")
-                else:
-                    print(f"No changes were needed to for {sfm_file_out}")        
-    
-    print(f"Done! Processed {len(sfm_files)} books to {output_dir}")
+            book_id = settings.get_book_id(sfm_file.name)
+            if book_id in books_to_process:
+                sfm_file_out = output_dir / sfm_file.name
+                if verbosity >= 1:
+                    print(f"Processing {sfm_file}")
+                    split_counter = process_file(sfm_file_out, args.max, method=method, verbosity=verbosity)
+                    if verbosity >= 2:
+                        if len(split_counter) > 0:
+                            print(f"Saved {sfm_file_out} after splitting lines. {split_counter}")
+                        else:
+                            print(f"No changes were needed to for {sfm_file_out}")        
+    if verbosity >= 1:
+        print(f"Done! Processed {len(books_to_process)} books to {output_dir}")
 
 if __name__ == '__main__':
     main()
