@@ -230,6 +230,10 @@ def _process_gloss_string(gloss_str: str) -> List[str]:
     return glosses
 
 def extract_term_renderings(project_dir: Path, corpus_filename: Path, output_dir: Path, extract_surface_forms: bool = True) -> int:
+    """    
+    :return: The number of term renderings extracted
+    :rtype: int
+    """
     settings = FileParatextProjectSettingsParser(project_dir).parse()
     list_type = settings.biblical_terms_list_type
     list_name = list_type
@@ -237,6 +241,7 @@ def extract_term_renderings(project_dir: Path, corpus_filename: Path, output_dir
         LOGGER.info("Project-specific key terms lists are not supported. Supported lists are \"Major\", \"All\", \"SilNt\", and \"Pt6\".")
         return 0
 
+    # If there is no TermRenderings.xml in the project, then there are no terms to extract; return early
     renderings_path = project_dir / "TermRenderings.xml"
     if not renderings_path.is_file():
         LOGGER.info(f"No \"TermRenderings.xml\" file in project \"{project_dir}\"")

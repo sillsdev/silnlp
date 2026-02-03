@@ -52,7 +52,7 @@ LOGGER = logging.getLogger((__package__ or "") + ".config")
 
 ALIGNMENT_SCORES_FILE = re.compile(r"([a-z]{2,3}-.+)_([a-z]{2,3}-.+)")
 
-
+SUPPORTED_GLOSS_ISOS = ["fr", "en", "id", "es", "pt"]
 class CheckpointType(Enum):
     LAST = auto()
     BEST = auto()
@@ -141,7 +141,7 @@ class Config(ABC):
                 self.src_projects.update(sf.project for sf in corpus_pair.src_files)
                 self.trg_projects.update(sf.project for sf in corpus_pair.trg_files)
                 if terms_config["include_glosses"]:
-                    for gloss_iso in ["fr", "en", "id", "es", "pt"]:
+                    for gloss_iso in SUPPORTED_GLOSS_ISOS:
                         if gloss_iso in pair_src_isos or gloss_iso == terms_config["include_glosses"]:
                             self.src_file_paths.update(get_terms_glosses_file_paths(corpus_pair.src_terms_files))
                         if gloss_iso in pair_trg_isos:
@@ -862,20 +862,20 @@ class Config(ABC):
         if terms_config["include_glosses"]:
             gloss_iso: Optional[str] = str(terms_config["include_glosses"]).lower()
             if gloss_iso == "true":
-                src_gloss_iso = list(self.src_isos.intersection(["en", "fr", "id", "es", "pt"]))
-                trg_gloss_iso = list(self.trg_isos.intersection(["en", "fr", "id", "es", "pt"]))
+                src_gloss_iso = list(self.src_isos.intersection(SUPPORTED_GLOSS_ISOS))
+                trg_gloss_iso = list(self.trg_isos.intersection(SUPPORTED_GLOSS_ISOS))
                 if src_gloss_iso:
                     gloss_iso = src_gloss_iso[0]
                 elif trg_gloss_iso:
                     gloss_iso = trg_gloss_iso[0]
                 else:
                     LOGGER.warning(
-                        "Glosses could not be included. No source or target language matches any of the supported gloss language codes: en, fr, id, es, pt."
+                        f"Glosses could not be included. No source or target language matches any of the supported gloss language codes: {', '.join(SUPPORTED_GLOSS_ISOS)}."
                     )
                     gloss_iso = None
-            elif gloss_iso not in ["en", "fr", "id", "es", "pt"]:
+            elif gloss_iso not in SUPPORTED_GLOSS_ISOS:
                 LOGGER.warning(
-                    f"Gloss language code, {gloss_iso}, does not match the supported gloss language codes: en, fr, id, es, pt."
+                    f"Gloss language code, {gloss_iso}, does not match the supported gloss language codes: {', '.join(SUPPORTED_GLOSS_ISOS)}."
                 )
                 gloss_iso = None
         else:
