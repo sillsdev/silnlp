@@ -1869,9 +1869,9 @@ class PunctuationNormalizingTokenizer(PreTrainedTokenizerFast):
     def set_src_lang(self, src_lang: str):
         self._wrapped_tokenizer.src_lang = src_lang
 
-    @SpecialTokensMixin.pad_token_id.getter
-    def pad_token_id(self) -> int | None:
-        return self._wrapped_tokenizer.pad_token_id
+    @SpecialTokensMixin.eos_token_id.getter
+    def eos_token_id(self) -> int | None:
+        return self._wrapped_tokenizer.eos_token_id
 
 
 class HuggingFaceTokenizer(Tokenizer):
@@ -2004,7 +2004,7 @@ class SilTranslationPipeline(Text2TextGenerationPipeline):
         generate_kwargs["decoder_input_ids"] = torch.cat(
             (
                 torch.ones((in_b, 1), dtype=torch.long, device=model_inputs["input_ids"].device)
-                * self.tokenizer.pad_token_id,
+                * self.tokenizer.eos_token_id,
                 torch.unsqueeze(torch.from_numpy(self.tgt_langs[self.tgt_index : self.tgt_index + in_b]), 1).to(
                     model_inputs["input_ids"].device
                 ),
