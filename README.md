@@ -96,7 +96,7 @@ The rest of these instructions are assumed to be done in a WSL/Linux terminal as
    * If you do not intend to use SILNLP with ClearML, MinIO, and/or B2, you can leave out the respective variables. If you need to generate ClearML credentials, see ClearML setup.
    * This file is sensitive, so do not save it within the silnlp repo to prevent accidentally including it in a commit.
 
-2. Navigate to the repo:
+3. Navigate to the repo:
       ```
       cd silnlp
       ```
