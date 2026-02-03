@@ -229,7 +229,7 @@ def _process_gloss_string(gloss_str: str) -> List[str]:
     glosses = unique_list([gloss.strip() for gloss in glosses if gloss.strip() != ""])
     return glosses
 
-def extract_term_renderings(project_dir: Path, corpus_filename: Path, output_dir: Path, extract_surface_forms: bool = True) -> int:
+def extract_term_renderings(project_dir: Path, corpus_filename: Path, output_dir: Path, extract_surface_forms: bool) -> int:
     """    
     :return: The number of term renderings extracted
     :rtype: int
