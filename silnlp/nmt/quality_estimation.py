@@ -211,17 +211,17 @@ class Thresholds(ABC):
 
 
 class BookThresholds(Thresholds):
-    GREEN_THRESHOLD = 0.687
+    GREEN_THRESHOLD = 0.745
     YELLOW_THRESHOLD = 0.62
 
 
 class ChapterThresholds(Thresholds):
-    GREEN_THRESHOLD = 0.687
+    GREEN_THRESHOLD = 0.745
     YELLOW_THRESHOLD = 0.62
 
 
 class VerseThresholds(Thresholds):
-    GREEN_THRESHOLD = 0.687
+    GREEN_THRESHOLD = 0.745
     YELLOW_THRESHOLD = 0.62
 
 
