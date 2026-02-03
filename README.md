@@ -39,7 +39,7 @@ Follow these steps if you plan to run silnlp on a Windows machine.
       ```
 
       * Follow any prompts wsl provides, such as entering a UNIX username and password, this can be anything you would like.
-      * To know that you are in wsl, the command line should be green with the following information <your_username>@<your_machine_name>:~$
+      * To know that you are in wsl, the command line should be green with the following information: <your_username>@<your_machine_name>:~$
       * To exit WSL, you can either close the command prompt or by running the "exit" command
       * To reenter WSL, you can open a command prompt and run the command "wsl ~"
       * To shutdown WSL when you are not using it, run the command "wsl --terminate Ubuntu-22.04"
@@ -78,12 +78,7 @@ The rest of these instructions are assumed to be done in a WSL/Linux terminal as
       git clone https://github.com/sillsdev/silnlp.git
       ```
 
-2. Navigate to the repo:
-      ```
-      cd silnlp
-      ```
-
-3. Create a env_vars.txt file with your credentials in this form (this can be done on Windows as well, but save the file at the silnlp repo, \\wsl.localhost\Ubuntu-22.04\root\silnlp):
+2. Create a env_vars.txt file with your credentials in this form in the root directoy (/root, or \\wsl.localhost\Ubuntu-22.04\root from Windows File Explorer):
    ```
    CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
    CLEARML_API_ACCESS_KEY=xxxxxxxxxxxxxxxx
@@ -99,10 +94,16 @@ The rest of these instructions are assumed to be done in a WSL/Linux terminal as
 
    * Include SIL_NLP_DATA_PATH="/silnlp" if you are not using MinIO or B2 and will be storing files locally.
    * If you do not intend to use SILNLP with ClearML, MinIO, and/or B2, you can leave out the respective variables. If you need to generate ClearML credentials, see ClearML setup.
+   * This file is sensitive, so do not save it within the silnlp repo to prevent accidentally including it in a commit.
+
+2. Navigate to the repo:
+      ```
+      cd silnlp
+      ```
 
 4. Set your environment variables by running the following command:
    ```
-   source ./setup_env_vars.sh env_vars.txt
+   source ./setup_env_vars.sh /root/env_vars.txt
    ```
 
 5. Download [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install#linux-2).
@@ -130,6 +131,10 @@ The rest of these instructions are assumed to be done in a WSL/Linux terminal as
       ```
       export PATH="/root/.local/bin:$PATH"
       ```
+   * Run the following command:
+      ```
+      echo "export PATH="/root/.local/bin:$PATH"" >> ~/.bashrc
+      ```
 
 9. Configure Poetry to use the active Python
    ```
@@ -146,6 +151,8 @@ The rest of these instructions are assumed to be done in a WSL/Linux terminal as
    apt update
 	source ./rclone_setup.sh minio
    ```
+
+   * To access the MinIO bucket, you will need VPN access. Reach out to a SILNLP dev team member for access.
 
 ## Setting Up and Running Experiments
 
