@@ -147,10 +147,10 @@ The rest of these instructions are assumed to be done in a WSL/Linux terminal as
    ```
 
 11. If using MinIO or B2, you will need to set up rclone by running the following commands:
-	```
-   apt update
-	source ./rclone_setup.sh minio
-   ```
+```
+apt update
+source ./rclone_setup.sh minio
+```
 
    * To access the MinIO bucket, you will need VPN access. Reach out to a SILNLP dev team member for access.
 
