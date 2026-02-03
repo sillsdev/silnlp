@@ -481,15 +481,18 @@ def main() -> None:
     if args.clearml_queue is not None and args.clearml_tag is None:
         parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
 
-    if args.quality_estimation and not args.save_confidences:
-        parser.error("--quality-estimation requires --save-confidences to be enabled.")
+    if args.quality_estimation:
+        if not args.save_confidences:
+            args.save_confidences = True
 
-    if args.verse_test_scores_file is None:
-        verse_test_scores_path = get_mt_exp_dir(args.experiment)
+        if args.verse_test_scores_file is None:
+            verse_test_scores_path = get_mt_exp_dir(args.experiment)
+        else:
+            verse_test_scores_path = get_mt_exp_dir(args.verse_test_scores_file)
+            if not verse_test_scores_path.exists():
+                parser.error(f"The verse test scores path {verse_test_scores_path} does not exist.")
     else:
-        verse_test_scores_path = get_mt_exp_dir(args.verse_test_scores_file)
-        if not verse_test_scores_path.exists():
-            parser.error(f"The verse test scores path {verse_test_scores_path} does not exist.")
+        verse_test_scores_path = None
 
     get_git_revision_hash()
 
