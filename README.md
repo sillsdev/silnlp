@@ -14,6 +14,7 @@ These are the main requirements for the SILNLP code to run on a local machine. S
 
 | Requirement           | Reason                                                            |
 | --------------------- | ----------------------------------------------------------------- |
+| Ubuntu-22.04          | Linux Distro that is officially supported                         |
 | GIT                   | to get the repo from [github](https://github.com/sillsdev/silnlp) |
 | Python                | to run the silnlp code                                            |
 | Poetry                | to manage all the Python packages and versions                    |
@@ -22,139 +23,145 @@ These are the main requirements for the SILNLP code to run on a local machine. S
 | CUDA Toolkit          | Required for the Machine learning with the GPU                    |
 | Environment variables | To tell SILNLP where to find the data, etc.                       |
 
-## Environment Setup
-Create file for environment variables
+## Using a local GPU
+If using a local GPU, install the corresponding [NVIDIA driver](https://www.nvidia.com/download/index.aspx)
    
-   Create a text file with the following content and edit as necessary:
+   On Ubuntu, the driver can alternatively be installed through the GUI by opening Software & Updates, navigating to Additional Drivers in the top menu, and selecting the newest NVIDIA driver with the labels proprietary and tested.
+
+   After installing the driver, reboot your system.
+
+## WSL Setup
+Follow these steps if you plan to run silnlp on a Windows machine.
+
+   1. Install Ubuntu-22.04 by running the following command: 
+      ```
+      wsl --install Ubuntu-22.04
+      ```
+
+      * Follow any prompts wsl provides, such as entering a UNIX username and password, this can be anything you would like.
+      * To know that you are in wsl, the command line should be green with the following information: <your_username>@<your_machine_name>:~$
+      * To exit WSL, you can either close the command prompt or by running the "exit" command
+      * To reenter WSL, you can open a command prompt and run the command "wsl ~"
+      * To shutdown WSL when you are not using it, run the command "wsl --terminate Ubuntu-22.04"
+
+   2. Exit WSL and run the following commands in a command prompt:
+
+      * Run this command to set root as the default user:
+         ```
+         ubuntu2204 config --default-user root
+         ```
+
+   3. Run this command to set Ubuntu-22.04 as your default distro:
+         ```
+         wsl -s Ubuntu-22.04
+         ```
+
+### Note on WSL Paths: 
+   * To access your Windows files from WSL:
+   The paths are the same except with /mnt/ appended to them and the drive letter is lowercased with no colon following. For example, the Windows path may be "C:/Users/username/Desktop/silnlp", inside WSL it is "/mnt/c/Users/username/Desktop/silnlp"
+
+   * To access WSL files from Windows, open File Explorer and either:
+      - Scroll down and choose Linux, then Ubuntu-22.04
+      - Or search "\\wsl.localhost\Ubuntu-22.04"
+
+The rest of these instructions are assumed to be done in a WSL/Linux terminal as the root user in /root (or ~ when logged in as root).
+
+### Note on IDEs with WSL
+   * [VS Code Instructions](https://code.visualstudio.com/docs/remote/wsl)
+   * [Pycharm Instructions](https://www.jetbrains.com/help/pycharm/using-wsl-as-a-remote-interpreter.html#create-wsl-interpreter)
+   * For other IDEs, go to their official site and look for WSL instructions or, if it does not exist, look for Linux installation instructions and install the IDE within WSL.
+
+## Environment Setup
+
+1. Clone the silnlp repo:
+      ```
+      git clone https://github.com/sillsdev/silnlp.git
+      ```
+
+2. Create a env_vars.txt file with your credentials in this form in the root directoy (/root, or \\wsl.localhost\Ubuntu-22.04\root from Windows File Explorer):
    ```
    CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
-   CLEARML_API_ACCESS_KEY=xxxxxxx
-   CLEARML_API_SECRET_KEY=xxxxxxx
+   CLEARML_API_ACCESS_KEY=xxxxxxxxxxxxxxxx
+   CLEARML_API_SECRET_KEY=xxxxxxxxxxxxxxxxxxx
    MINIO_ENDPOINT_URL=https://truenas.psonet.languagetechnology.org:9000
-   MINIO_ACCESS_KEY=xxxxxxxxx
-   MINIO_SECRET_KEY=xxxxxxx
+   MINIO_ENDPOINT_IP=xxxxxxxx
+   MINIO_ACCESS_KEY=xxxxxxxxxx
+   MINIO_SECRET_KEY=xxxxxxxxxxxxxx
    B2_ENDPOINT_URL=https://s3.us-east-005.backblazeb2.com
-   B2_KEY_ID=xxxxxxxx
-   B2_APPLICATION_KEY=xxxxxxxx
+   B2_KEY_ID=xxxxxxxxxxxxxxx
+   B2_APPLICATION_KEY=xxxxxxxxxxxxxxx
    ```
+
    * Include SIL_NLP_DATA_PATH="/silnlp" if you are not using MinIO or B2 and will be storing files locally.
-   * If you do not intend to use SILNLP with ClearML, MinIO, and/or B2, you can leave out the respective variables. If you need to generate ClearML credentials, see [ClearML setup](clear_ml_setup.md).
-   * Note that this does not give you direct access to a MinIO or B2 bucket from within the Docker container, it only allows you to run scripts referencing files in the bucket.
+   * If you do not intend to use SILNLP with ClearML, MinIO, and/or B2, you can leave out the respective variables. If you need to generate ClearML credentials, see ClearML setup.
+   * This file is sensitive, so do not save it within the silnlp repo to prevent accidentally including it in a commit.
 
-### Option 1: Docker
-1. If using a local GPU, install the corresponding [NVIDIA driver](https://www.nvidia.com/download/index.aspx)
-   
-   On Ubuntu, the driver can alternatively be installed through the GUI by opening Software & Updates, navigating to Additional Drivers in the top menu, and selecting the newest NVIDIA driver with the labels proprietary and tested.
+3. Navigate to the repo:
+      ```
+      cd silnlp
+      ```
 
-   After installing the driver, reboot your system.
-
-2. Download and install [Docker Desktop](https://www.docker.com/get-started/)
-   * If using Linux (not WSL), add your user to the docker group by using a terminal to run: `sudo usermod -aG docker $USER`
-   * Reboot after installing, confirm that all installation steps are complete before the next step.
-   
-   If using a local GPU, you'll also need to install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#installation) and configure Docker so that it can use the [NVIDIA Container Runtime](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#configuring-docker).
-
-3. Pull Docker image
-   
-   In a terminal, run:
+4. Set your environment variables by running the following command:
    ```
-   docker pull ghcr.io/sillsdev/silnlp:latest
-   ```
-   * For Windows, use CMD Prompt
-   * If there is an error like "request returned Internal Server Error for API route and version <url>, check if the server supports the requested API version" Check that the Docker Desktop installation steps are complete. Reopen CMD prompt and try again.
-
-4. Create Docker container based on the image
-   
-   If you're using a local GPU, then in a terminal, run:
-   ```
-   docker create -it --gpus all --name silnlp --device /dev/fuse --cap-add SYS_ADMIN --env-file path/to/env-vars-file --security-opt apparmor=path/to/docker-apparmor ghcr.io/sillsdev/silnlp:latest
-   ```
-   Otherwise, run:
-   ```
-   docker create -it --name silnlp --device /dev/fuse --cap-add SYS_ADMIN --env-file path/to/env-vars-file --security-opt apparmor=path/to/docker-apparmor ghcr.io/sillsdev/silnlp:latest
-   ```
-   If you do not intend to use SILNLP with ClearML, MinIO, and/or B2, you can exclude the --device, --cap-add, and --security-opt flags.
-
-   You will need to replace the placehoders "path/to/env-vars-file" and "path/to/docker-apparmor" with the respective real paths.
-   * The env-vars-file is the file you created at the beginning of the Environment Setup section.
-   * The docker-apparmor file is in the silnlp repo. You do not need to clone the entire repo, just download the docker-apparmor file.
-   
-   A docker container should be created. You should be able to see a container named 'silnlp' on the Containers page of Docker Desktop.
-
-6. Start container
-   
-   In a terminal, run:
-   ```
-      docker start silnlp
-      docker exec -it silnlp bash
+   source ./setup_env_vars.sh /root/env_vars.txt
    ```
 
-   * After this step, the terminal should change to say `root@xxxxx:~/silnlp#`, where `xxxxx` is a string of letters and numbers, instead of your current working directory. This is the command line for the docker container, and you're able to run SILNLP scripts from here.
-   * To leave the container, run `exit`, and to stop it, run `docker stop silnlp`. It can be started again by repeating step 6. Stopping the container will not erase any changes made in the container environment, but removing  it will.
+5. Download [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install#linux-2).
+   Follow the instructions under the Quickstart install section, follow the Linux instructions.
 
-7. (Optional) Mount the rclone bucket
-
-   While in the /root/silnlp directory (the default on startup), run the following command:
-
-   If you are using rclone to mount MinIO (This is the default option):
-   ```
-      source ./rclone_setup.sh minio
-   ```
-   If you are using rclone to mount Backblaze (Only used as a backup option):
-   ```
-      source ./rclone_setup.sh backblaze
-   ```
-
-   This will mount the specified bucket within the docker container. This command will need to be run every time the container is opened.
-
-### Option 2: Conda
-1. If using a local GPU, install the corresponding [NVIDIA driver](https://www.nvidia.com/download/index.aspx)
-   
-   On Ubuntu, the driver can alternatively be installed through the GUI by opening Software & Updates, navigating to Additional Drivers in the top menu, and selecting the newest NVIDIA driver with the labels proprietary and tested.
-
-   After installing the driver, reboot your system.
-
-2. Clone the silnlp repo
-  
-3. Install and initialize [Miniconda](https://docs.anaconda.com/miniconda/#quick-command-line-install)
-   * If using Windows, run the next steps in the Anaconda Prompt (miniconda3) program rather than the command prompt unless stated otherwise.
-
-4. Create the silnlp conda environment
-   * In a terminal, navigate to the silnlp repo. Then inside the repo, run:
+6. Create the silnlp conda environment
+   In a terminal run:
    ```
    conda env create --file "environment.yml"
    ```
+   
+   * Follow any prompts conda provides
 
-5. Activate the silnlp conda environment
-   * In a terminal, run:
+7. Activate the silnlp conda environment
    ```
-   conda activate silnlp
+	conda activate silnlp
    ```
+   * You will know the environment is active if the command line starts with "(silnlp)"
 
-6. Install [Poetry](https://python-poetry.org/docs/#installing-with-the-official-installer) with the official installer
-    * For Linux/macOS/WSL users, run:
-    ```
-    curl -sSL https://install.python-poetry.org | python3 - --version 1.7.1
-    ```
-   * For Windows users, in Powershell run:
-    ```
-    (Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing).Content | py - --version 1.7.1
-    ```
+8. Install Poetry with the official installer
+   ```
+	curl -sSL https://install.python-poetry.org | python3 - --version 1.7.1
+   ```
+   * Follow Poetry's instructions, namely run:
+      ```
+      export PATH="/root/.local/bin:$PATH"
+      ```
+   * Run the following command:
+      ```
+      echo "export PATH="/root/.local/bin:$PATH"" >> ~/.bashrc
+      ```
 
-8. Configure Poetry to use the active Python
-   * In a terminal, run:
+9. Configure Poetry to use the active Python
    ```
-   poetry config virtualenvs.prefer-active-python true
-   ```
-
-9. Install the Python packages for the silnlp repo
-   * In a terminal, run:
-   ```
-   poetry install
+	poetry config virtualenvs.prefer-active-python true
    ```
 
-10. If using MinIO or B2, you will need to set up rclone:
-   * Mount the bucket to your filesystem following the instructions under [Install and Configure Rclone](https://github.com/sillsdev/silnlp/blob/master/bucket_setup.md#install-and-configure-rclone).
+10. Install the Python packages for the silnlp repo
+   ```
+	poetry install
+   ```
+
+11. If using MinIO or B2, you will need to set up rclone by running the following commands:
+	```
+   apt update
+	source ./rclone_setup.sh minio
+   ```
+
+   * To access the MinIO bucket, you will need VPN access. Reach out to a SILNLP dev team member for access.
+
+## Setting Up and Running Experiments
+
+See the [wiki](../../wiki) for information on setting up and running experiments. The most important pages for getting started are the ones on [file structure](../../wiki/Folder-structure-and-file-naming-conventions), [model configuration](../../wiki/Configure-a-model), and [running experiments](../../wiki/NMT:-Usage). A lot of the instructions are specific to NMT, but are still helpful starting points for doing other things like [alignment](../../wiki/Alignment:-Usage).
+
+See [this](../../wiki/Using-the-Python-Debugger) page for information on using the VS code debugger.
+
+If you need to use a tool that is supported by SILNLP but is not installable as a Python library (which is probably the case if you get an error like "RuntimeError: eflomal is not installed."), follow the appropriate instructions [here](../../wiki/Installing-External-Libraries).
+
 
 ## Development Environment Setup
 
