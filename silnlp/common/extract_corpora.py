@@ -43,6 +43,7 @@ def main() -> None:
     parser.add_argument("--markers", default=False, action="store_true", help="Include USFM markers")
     parser.add_argument("--lemmas", default=False, action="store_true", help="Extract lemmas if available")
     parser.add_argument("--project-vrefs", default=False, action="store_true", help="Extract project verse refs")
+    parser.add_argument("--surface-forms", default=False, action="store_true", help="Extract surface forms for terms")
 
     parser.add_argument("--clearml", default=False, action="store_true", help="Register Extraction in ClearML")
 
@@ -72,6 +73,7 @@ def main() -> None:
         include_markers=args.markers,
         extract_lemmas=args.lemmas,
         extract_project_vrefs=args.project_vrefs,
+        extract_surface_forms=args.surface_forms
     )
     # Tell the user which projects couldn't be found.
     for project in projects:
@@ -86,6 +88,7 @@ def extract_corpora(
     include_markers=False,
     extract_lemmas=False,
     extract_project_vrefs=False,
+    extract_surface_forms=False
 ) -> None:
     # Process the projects that have data and tell the user.
     if len(projects) > 0:
@@ -110,7 +113,7 @@ def extract_corpora(
             LOGGER.info(f"# of Verses: {verse_count}")
             if verse_count != expected_verse_count:
                 LOGGER.error(f"The number of verses is {verse_count}, but should be {expected_verse_count}.")
-            terms_count = extract_term_renderings(project_dir, corpus_filename, SIL_NLP_ENV.mt_terms_dir)
+            terms_count = extract_term_renderings(project_dir, corpus_filename, SIL_NLP_ENV.mt_terms_dir,extract_surface_forms)
             LOGGER.info(f"# of Terms: {terms_count}")
             LOGGER.info("Done.")
     else:

@@ -283,6 +283,7 @@ def get_terms(terms_renderings_path: Path, iso: Optional[str] = None) -> Dict[st
         if metadata_line is None or len(metadata_line) == 0:
             continue
         term_id, cat, domain = metadata_line.split("\t", maxsplit=3)
+        term_id = f"{list_name}:{term_id}" # term is identified both by list type (e.g. Major, SilNt, etc.) and term id (e.g. Ἀδάμ)
         glosses = [] if glosses_line is None or len(glosses_line) == 0 else glosses_line.split("\t")
         renderings = [] if len(renderings_line) == 0 else renderings_line.split("\t")
         vrefs = (
