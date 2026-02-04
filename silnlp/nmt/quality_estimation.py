@@ -364,10 +364,6 @@ def main() -> None:
     if not confidence_dir.is_dir():
         raise ValueError(f"Confidence directory {confidence_dir} does not exist or is not a directory.")
 
-    # test providing confidence files but not directory
-    # test providing confidence files and directory
-    # test providing just verse test scores file (done)
-    # test providing verse test scores file and confidence dir (done)
     if using_auto_detect:
         LOGGER.info(f"Auto-detecting confidence files in directory {confidence_dir}")
         confidence_file_paths = list(confidence_dir.glob(f"*{CONFIDENCE_SUFFIX}"))
