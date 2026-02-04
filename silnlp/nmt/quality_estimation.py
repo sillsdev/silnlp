@@ -328,14 +328,14 @@ def main() -> None:
     parser.add_argument(
         "confidence_files",
         nargs="*",
-        type=Path,
+        type=str,
         help="Relative paths for the confidence files to process (relative to MT/experiments or --confidence-dir "
         + "if specified) e.g. 'project_folder/exp_folder/infer/5000/source/631JN.SFM.confidences.tsv' or "
         + "'631JN.SFM.confidences.tsv --confidence-dir project_folder/exp_folder/infer/5000/source'.",
     )
     parser.add_argument(
         "--confidence-dir",
-        type=Path,
+        type=str,
         default=None,
         help="Folder (relative to experiment MT/experiments) containing confidence files e.g. 'infer/5000/source/'.",
     )
@@ -353,24 +353,28 @@ def main() -> None:
 
     using_files = bool(args.confidence_files)
     using_books = bool(args.books)
+    using_auto_detect = not using_files and not using_books
 
     if using_files and using_books:
         raise ValueError("Specify either confidence_files or --books, not both.")
-    if not using_files and not using_books:
-        raise ValueError(
-            "You must specify either confidence_files or --books to indicate which confidence files to use."
-        )
 
-    confidence_dir = get_mt_exp_dir(args.confidence_dir or Path())
+    if (using_books or using_auto_detect) and args.confidence_dir is None:
+        raise ValueError("When using --books or auto-detecting confidence files, --confidence-dir must be specified.")
+    confidence_dir = get_mt_exp_dir(args.confidence_dir or "")
+    if not confidence_dir.is_dir():
+        raise ValueError(f"Confidence directory {confidence_dir} does not exist or is not a directory.")
 
-    if using_files:
+    # test providing confidence files but not directory
+    # test providing confidence files and directory
+    # test providing just verse test scores file (done)
+    # test providing verse test scores file and confidence dir (done)
+    if using_auto_detect:
+        LOGGER.info(f"Auto-detecting confidence files in directory {confidence_dir}")
+        confidence_file_paths = list(confidence_dir.glob(f"*{CONFIDENCE_SUFFIX}"))
+    elif using_files:
         if len(args.confidence_files) == 0:
             raise ValueError("Please provide at least one confidence file for the confidence_files argument.")
-        confidence_file_paths = [
-            confidence_dir / confidence_file if confidence_dir else confidence_file
-            for confidence_file in args.confidence_files
-        ]
-
+        confidence_file_paths = [confidence_dir / confidence_file for confidence_file in args.confidence_files]
     elif using_books:
         if len(args.books) == 0:
             raise ValueError("Please provide at least one book for the --books argument.")
