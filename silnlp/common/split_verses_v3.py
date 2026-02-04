@@ -43,7 +43,7 @@ def copy_folder(source: Path, destination: Path):
     return destination
 
 
-def show_tokena(tokens, start=0, limit=20):
+def show_tokens(tokens, start=0, limit=20):
     "Display token structure with types, markers, and text"
     for idx, token in enumerate(tokens[start : start + limit], start):
         print(
@@ -418,7 +418,7 @@ def main():
             usfm_text = f.read()
 
         tokens = list(tokenizer.tokenize(usfm_text))
-        show_tokena(tokens, start=args.show_from, limit=args.show_limit)
+        show_tokens(tokens, start=args.show_from, limit=args.show_limit)
         exit()
 
     output_dir = project_dir.parent / f"{project_dir.name}_split_paras_{args.max}"
