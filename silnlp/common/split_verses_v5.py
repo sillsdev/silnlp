@@ -133,7 +133,7 @@ def find_break_positions(text):
         i += 1
     return breaks
 
-
+#Mostly for testing
 def process_long_paragraphs(tokens, settings, max_len=200, start_idx=0):
     "Find first paragraph exceeding max_len from start_idx, split it, display results, return next index"
     for idx in range(start_idx, len(tokens)):
@@ -301,10 +301,17 @@ def get_sfm_files_to_process(settings, project_dir, specified_books):
     
 
 def get_tokens(settings, sfm_file):
-
-    # Read and tokenize the file
-    with open(sfm_file, "r", encoding="utf-8") as f: usfm_text = f.read()
+        
+    if not sfm_file.is_file():
+        raise RuntimeError(f"Could not find sfm_file: {sfm_file}")
     
+    # Read and tokenize the file
+    with open(sfm_file, "r", encoding="utf-8") as f:
+        usfm_text = f.read()
+
+    if not usfm_text:
+        raise RuntimeError(f"No text read from sfm_file: {sfm_file}")
+
     tokenizer = UsfmTokenizer(settings.stylesheet)
     return list(tokenizer.tokenize(usfm_text))
 
@@ -394,8 +401,8 @@ def process_tokens(tokens, max_len=200):
                 for chunk in text_chunks:
                     result.append(UsfmToken(type=UsfmTokenType.PARAGRAPH, marker=para_marker.marker))
                     result.append(UsfmToken(type=UsfmTokenType.TEXT, text=chunk))
-                    print(UsfmToken(type=UsfmTokenType.PARAGRAPH, marker=para_marker.marker))
-                    print(UsfmToken(type=UsfmTokenType.TEXT, text=chunk))
+                    #print(UsfmToken(type=UsfmTokenType.PARAGRAPH, marker=para_marker.marker))
+                    #print(UsfmToken(type=UsfmTokenType.TEXT, text=chunk))
             else:
                 result.extend(new_para)
         
@@ -467,23 +474,22 @@ def main():
         exit()
 
     output_dir = project_dir.parent / f"{project_dir.name}_split_{args.max}"
+    
 
     # Copying the folder ensures that all necessary files are present.
     copy_folder(project_dir, output_dir)
     
-    print(f"Will process these books:\n{sfm_files}")
     # Process each file
     for sfm_file in sfm_files:
+
         print(f"Processing sfm_file: {sfm_file}")
         tokens = get_tokens(settings, sfm_file)
         split_tokens = process_tokens(tokens, max_len=args.max)
-        print(f"sfm_file: {sfm_file}, type: {type(sfm_file)}")
-        exit()
-    
-    usfm_out = [token.to_usfm for token in split_tokens]
-    with open(sfm_file, 'w', encoding='utf-8') as f: f.writelines(usfm_out)      
+        usfm_out = [token.to_usfm(include_newlines=True).replace('\r\n', '\n') for token in split_tokens]
+        output_sfm_file = output_dir / sfm_file.name
+        with open(output_sfm_file, 'w', encoding='utf-8') as f: f.write(''.join(usfm_out))
                     
-    print(f"Done! Processed {len(sfm_file)} books in {output_dir}")
+    print(f"Done! Processed {len(sfm_files)} books in {output_dir}")
 
 
 if __name__ == "__main__":
