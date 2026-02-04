@@ -142,6 +142,19 @@ class TranslatedDraft:
                 chapter_confidence = gmean(confidences)
                 chapter_confidences_file.write(f"{chapter}\t{chapter_confidence}\n")
 
+    def append_book_confidence_score(self, book_confidences_path: Path, scripture_refs: List[ScriptureRef]) -> None:
+        book_confidences: List[float] = []
+        for sentence_num, vref in enumerate(scripture_refs):
+            vref_confidence: Optional[float] = self._sentence_translations[sentence_num].get_sequence_confidence_score()
+            if not vref.is_verse or vref_confidence is None:
+                continue
+            book_confidences.append(vref_confidence)
+
+        with book_confidences_path.open("a", encoding="utf-8", newline="\n") as book_confidences_file:
+            if book_confidences_file.tell() == 0:
+                book_confidences_file.write("Book\tConfidence\n")
+            book_confidences_file.write(f"{scripture_refs[0].book}\t{gmean(book_confidences)}\n")
+
     def get_all_sequence_confidence_scores(self) -> List[float]:
         return [
             scs for scs in [t.get_sequence_confidence_score() for t in self._sentence_translations] if scs is not None
@@ -202,26 +215,7 @@ class ConfidenceFile:
         translated_draft.write_confidence_scores_to_file(self.path, "VRef", scripture_refs)
         translated_draft.write_verse_confidence_scores_to_file(self.get_verses_path(), "VRef", scripture_refs)
         translated_draft.write_chapter_confidence_scores_to_file(self.get_chapters_path(), scripture_refs)
-        self._append_book_confidence_score(translated_draft, scripture_refs)
-
-    def _append_book_confidence_score(
-        self,
-        translated_draft: TranslatedDraft,
-        scripture_refs: List[ScriptureRef],
-    ) -> None:
-        book_confidences_path = self.get_books_path()
-        row1_col1_header = "Book"
-        if scripture_refs:
-            col1_entry = scripture_refs[0].book
-        else:
-            col1_entry = self._trg_draft_file_path.stem
-
-        with book_confidences_path.open("a", encoding="utf-8", newline="\n") as book_confidences_file:
-            if book_confidences_file.tell() == 0:
-                book_confidences_file.write(f"{row1_col1_header}\tConfidence\n")
-            book_confidences_file.write(
-                f"{col1_entry}\t{gmean(translated_draft.get_all_sequence_confidence_scores())}\n"
-            )
+        translated_draft.append_book_confidence_score(self.get_books_path(), scripture_refs)
 
     def generate_txt_confidence_files(
         self,

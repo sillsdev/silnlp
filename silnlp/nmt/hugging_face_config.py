@@ -82,7 +82,7 @@ from ..common.translator import (
     generate_test_confidence_files,
 )
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, get_mt_exp_dir, merge_dict
-from .config import CheckpointType, Config, NMTModel
+from .config import SUPPORTED_GLOSS_ISOS, CheckpointType, Config, NMTModel
 from .corpora import DataFile
 from .tokenizer import NullTokenizer, Tokenizer
 
@@ -730,20 +730,20 @@ class HuggingFaceConfig(Config):
             if terms_config["include_glosses"]:
                 gloss_iso: Optional[str] = str(terms_config["include_glosses"]).lower()
                 if gloss_iso == "true":
-                    src_gloss_iso = list(self.src_isos.intersection(["en", "fr", "id", "es"]))
-                    trg_gloss_iso = list(self.trg_isos.intersection(["en", "fr", "id", "es"]))
+                    src_gloss_iso = list(self.src_isos.intersection(SUPPORTED_GLOSS_ISOS))
+                    trg_gloss_iso = list(self.trg_isos.intersection(SUPPORTED_GLOSS_ISOS))
                     if src_gloss_iso:
                         gloss_iso = src_gloss_iso[0]
                     elif trg_gloss_iso:
                         gloss_iso = trg_gloss_iso[0]
                     else:
                         LOGGER.warning(
-                            "Glosses could not be included. No source or target language matches any of the supported gloss language codes: en, fr, id, es."
+                            f"Glosses could not be included. No source or target language matches any of the supported gloss language codes: {', '.join(SUPPORTED_GLOSS_ISOS)}."
                         )
                         gloss_iso = None
-                elif gloss_iso not in ["en", "fr", "id", "es"]:
+                elif gloss_iso not in SUPPORTED_GLOSS_ISOS:
                     LOGGER.warning(
-                        f"Gloss language code, {gloss_iso}, does not match the supported gloss language codes: en, fr, id, es."
+                        f"Gloss language code, {gloss_iso}, does not match the supported gloss language codes: {', '.join(SUPPORTED_GLOSS_ISOS)}."
                     )
                     gloss_iso = None
             else:
