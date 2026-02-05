@@ -1,10 +1,12 @@
-from pathlib import Path
 import textwrap
+from pathlib import Path
+
 from machine.corpora import FileParatextProjectSettingsParser
 
 from .collect_verse_counts import DT_CANON, NT_CANON, OT_CANON
+
 VALID_CANONS = ["OT", "NT", "DT"]
-VALID_BOOKS = OT_CANON + NT_CANON + DT_CANON + ['FRT', 'BAK', 'OTH', 'INT']
+VALID_BOOKS = OT_CANON + NT_CANON + DT_CANON + ["FRT", "BAK", "OTH", "INT"]
 
 
 def add_books_argument(parser):
@@ -13,13 +15,13 @@ def add_books_argument(parser):
         metavar="books",
         nargs="*",
         default=[],
-        help="Books to check or process (e.g., GEN EXO NT). Use NT, OT, DT for canons"
+        help="Books to check or process (e.g., GEN EXO NT). Use NT, OT, DT for canons",
     )
 
 
 def get_epilog():
     return textwrap.dedent(
-         """
+        """
              Books can include corpora NT OT or DT and individual books.
              Old Testament books are :
              GEN, EXO, LEV, NUM, DEU, JOS, JDG, RUT, 1SA, 2SA, 1KI, 2KI, 1CH, 2CH, EZR, NEH, EST, JOB, PSA, PRO, ECC,
@@ -33,7 +35,7 @@ def get_epilog():
              TOB, JDT, ESG, WIS, SIR, BAR, LJE, S3Y, SUS, BEL, 1MA,
              2MA, 3MA, 4MA, 1ES, 2ES, MAN, PS2, ODA, PSS, EZA, JUB, ENO
          """
-        )
+    )
 
 
 def expand_book_list(books):
@@ -61,7 +63,8 @@ def get_sfm_files_to_process(project_dir, books):
             sfm_files.append(sfm_file)
 
     return sfm_files
-    
+
+
 def group_bible_books(books_found):
     ot_books = set(OT_CANON)
     nt_books = set(NT_CANON)

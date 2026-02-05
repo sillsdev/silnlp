@@ -1,24 +1,21 @@
 import argparse
 import logging
-from math import exp
-import textwrap
 from pathlib import Path
 
 from machine.corpora import FileParatextProjectSettingsParser, UsfmFileText
-from machine.scripture import book_number_to_id, get_chapters
 
+from .book_args import VALID_BOOKS, add_books_argument, expand_book_list, get_epilog, get_sfm_files_to_process
 from .paratext import get_project_dir
-from .book_args import DT_CANON, NT_CANON, OT_CANON, VALID_CANONS, VALID_BOOKS, get_epilog, group_bible_books, add_books_argument, expand_book_list, get_sfm_files_to_process
-
 
 LOGGER = logging.getLogger(__package__ + ".check_books")
+
 
 def parse_book(project_dir: str, book_path: Path):
     errors = []
 
     settings = FileParatextProjectSettingsParser(project_dir).parse()
     LOGGER.info(f"Attempting to parse {book_path}.")
-    
+
     if not book_path.is_file():
         raise RuntimeError(f"Can't find {book_path}")
 
@@ -66,9 +63,9 @@ def main() -> None:
 
     if not args.books:
         LOGGER.info("No books were specified, will check all books.")
-        
+
     LOGGER.info(f"Will check these books: {books}\n")
-  
+
     for sfm_file in sfm_files:
         parse_book(project_dir, sfm_file)
 
