@@ -83,6 +83,7 @@ class SILClearML:
                     'sed -i -e "s#secret_access_key = x*#secret_access_key = $MINIO_SECRET_KEY#" ~/.config/rclone/rclone.conf',
                     'sed -i -e "s#endpoint = .*#endpoint = $MINIO_ENDPOINT_URL#" ~/.config/rclone/rclone.conf',
                     "rclone mount --daemon --no-check-certificate --log-file=/root/rclone_log.txt --log-level=DEBUG --vfs-cache-mode full --use-server-modtime miniosilnlp:nlp-research /root/M",
+                    "apt-get install --no-install-recommends -y ffmpeg",
                 ],
             )
             if self.commit:
