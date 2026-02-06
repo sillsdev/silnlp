@@ -11,6 +11,9 @@ from machine.corpora import FileParatextProjectSettingsParser, UsfmStylesheet, U
 from .collect_verse_counts import DT_CANON, NT_CANON, OT_CANON
 from .paratext import get_project_dir
 
+# TODO refactor to use book_args
+from .book_args import expand_book_list, get_sfm_files_to_process, get_epilog, add_books_argument
+
 LOGGER = logging.getLogger(__package__ + ".split_verses_v5")
 
 # from .check_books import group_bible_books
@@ -261,43 +264,43 @@ def process_long_paragraphs(tokens, settings, max_len=200, start_idx=0):
     return None
 
 
-def expand_book_list(books):
-    """Parse books argument and expand NT/OT/DT into full book lists"""
-    books_to_check = []
-    canons_to_add = [canon for canon in books if canon in ["NT", "OT", "DT"]]
-    for canon_to_add in canons_to_add:
-        if canon_to_add == "OT":
-            books_to_check += OT_CANON
-        if canon_to_add == "NT":
-            books_to_check += NT_CANON
-        if canon_to_add == "DT":
-            books_to_check += DT_CANON
-    books_to_check += [book for book in books if book in VALID_BOOKS]
-    return [book for book in VALID_BOOKS if book in set(books_to_check)]
+# def expand_book_list(books):
+#     """Parse books argument and expand NT/OT/DT into full book lists"""
+#     books_to_check = []
+#     canons_to_add = [canon for canon in books if canon in ["NT", "OT", "DT"]]
+#     for canon_to_add in canons_to_add:
+#         if canon_to_add == "OT":
+#             books_to_check += OT_CANON
+#         if canon_to_add == "NT":
+#             books_to_check += NT_CANON
+#         if canon_to_add == "DT":
+#             books_to_check += DT_CANON
+#     books_to_check += [book for book in books if book in VALID_BOOKS]
+#     return [book for book in VALID_BOOKS if book in set(books_to_check)]
 
 
-def get_sfm_files_to_process(settings, project_dir, specified_books):
-    sfm_suffix = Path(settings.file_name_suffix).suffix.lower()[1:]
-    # print(f"suffix is {sfm_suffix}")
+# def get_sfm_files_to_process(settings, project_dir, specified_books):
+#     sfm_suffix = Path(settings.file_name_suffix).suffix.lower()[1:]
+#     # print(f"suffix is {sfm_suffix}")
 
-    # Find all SFM/USFM files
-    sfm_files = [
-        file
-        for file in project_dir.glob("*")
-        if file.is_file() and file.suffix[1:].lower() in ["sfm", "usfm", sfm_suffix]
-    ]
+#     # Find all SFM/USFM files
+#     sfm_files = [
+#         file
+#         for file in project_dir.glob("*")
+#         if file.is_file() and file.suffix[1:].lower() in ["sfm", "usfm", sfm_suffix]
+#     ]
 
-    # Parse books argument
-    if specified_books:
-        book_list = expand_book_list(specified_books)
+#     # Parse books argument
+#     if specified_books:
+#         book_list = expand_book_list(specified_books)
 
-        # Get book IDs for found files
-        ids_of_books_found = [settings.get_book_id(sfm_file.name) for sfm_file in sfm_files]
-        return [sfm_file for sfm_file in sfm_files if settings.get_book_id(sfm_file.name) in book_list]
+#         # Get book IDs for found files
+#         ids_of_books_found = [settings.get_book_id(sfm_file.name) for sfm_file in sfm_files]
+#         return [sfm_file for sfm_file in sfm_files if settings.get_book_id(sfm_file.name) in book_list]
 
-    # No books are specified or filtered,  return all of them.
-    else:
-        return sfm_files
+#     # No books are specified or filtered,  return all of them.
+#     else:
+#         return sfm_files
     
 
 def get_tokens(settings, sfm_file):
@@ -316,54 +319,54 @@ def get_tokens(settings, sfm_file):
     return list(tokenizer.tokenize(usfm_text))
 
 
-def process_file(tokens, max_len=MAX_LENGTH):
-    "Process the tokens of a single USFM file and return the split tokens."
-    for idx in range(len(tokens)):
-        if tokens[idx].type != UsfmTokenType.PARAGRAPH: continue
+def process_file(settings, tokens, max_len=MAX_LENGTH):
+#     "Process the tokens of a single USFM file and return the split tokens."
+#     for idx in range(len(tokens)):
+#         if tokens[idx].type != UsfmTokenType.PARAGRAPH: continue
         
-        para = get_paragraph_tokens(tokens, idx)
-        para_text = get_paragraph_text(para)
-        if len(para_text) <= max_len: continue
+#         para = get_paragraph_tokens(tokens, idx)
+#         para_text = get_paragraph_text(para)
+#         if len(para_text) <= max_len: continue
         
-        print(f"Token {idx}: \\{tokens[idx].marker} has {len(para_text)} chars (max {max_len})\n")
-        print("ORIGINAL:")
-        show_tokens_header()
-        show_tokens(settings, para)
+#         print(f"Token {idx}: \\{tokens[idx].marker} has {len(para_text)} chars (max {max_len})\n")
+#         print("ORIGINAL:")
+#         show_tokens_header()
+#         show_tokens(settings, para)
         
-        # First try splitting at END markers
-        parts = get_paragraph_parts(para)
-        splits = optimal_grouping(parts, max_len)
-        new_paras = split_paragraph_tokens(para, parts, splits)
+#         # First try splitting at END markers
+#         parts = get_paragraph_parts(para)
+#         splits = optimal_grouping(parts, max_len)
+#         new_paras = split_paragraph_tokens(para, parts, splits)
         
-        # Check if any part still exceeds max_len and needs text splitting
-        final_paras = []
-        for new_para in new_paras:
-            text = get_paragraph_text(new_para)
-            if len(text) > max_len:
-                # Need to split the text itself
-                text_chunks = split_long_text(text, max_len)
-                print(f"\n(Splitting {len(text)} char text into {len(text_chunks)} chunks)")
-                for i, chunk in enumerate(text_chunks):
-                    final_paras.append((new_para[0], chunk))  # (para_marker, text_chunk)
-            else:
-                final_paras.append((new_para, None))  # keep as token list
+#         # Check if any part still exceeds max_len and needs text splitting
+#         final_paras = []
+#         for new_para in new_paras:
+#             text = get_paragraph_text(new_para)
+#             if len(text) > max_len:
+#                 # Need to split the text itself
+#                 text_chunks = split_long_text(text, max_len)
+#                 print(f"\n(Splitting {len(text)} char text into {len(text_chunks)} chunks)")
+#                 for i, chunk in enumerate(text_chunks):
+#                     final_paras.append((new_para[0], chunk))  # (para_marker, text_chunk)
+#             else:
+#                 final_paras.append((new_para, None))  # keep as token list
         
-        print(f"\nSPLIT INTO {len(final_paras)} PARAGRAPHS:")
-        for i, item in enumerate(final_paras):
-            if item[1] is None:  # token list
-                para_tokens = item[0]
-                text = get_paragraph_text(para_tokens)
-                print(f"\n--- Paragraph {i+1} ({len(text)} chars) ---")
-                show_tokens_header()
-                show_tokens(settings, para_tokens)
-            else:  # text chunk
-                marker, chunk = item
-                print(f"\n--- Paragraph {i+1} ({len(chunk)} chars) ---")
-                print(f"\\{marker.marker} {chunk}")
+#         print(f"\nSPLIT INTO {len(final_paras)} PARAGRAPHS:")
+#         for i, item in enumerate(final_paras):
+#             if item[1] is None:  # token list
+#                 para_tokens = item[0]
+#                 text = get_paragraph_text(para_tokens)
+#                 print(f"\n--- Paragraph {i+1} ({len(text)} chars) ---")
+#                 show_tokens_header()
+#                 show_tokens(settings, para_tokens)
+#             else:  # text chunk
+#                 marker, chunk = item
+#                 print(f"\n--- Paragraph {i+1} ({len(chunk)} chars) ---")
+#                 print(f"\\{marker.marker} {chunk}")
         
-        return idx + 1
+#         return idx + 1
     
-    print("No more long paragraphs found.")
+#     print("No more long paragraphs found.")
     return None
 
 
@@ -412,13 +415,16 @@ def process_tokens(tokens, max_len=200):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Split long paragraphs in USFM files")
-    parser.add_argument("project", type=str, help="Paratext project name - the files in this folder will be modified in place.")
-    parser.add_argument("--max", type=int, default=MAX_LENGTH, help="Maximum paragraph length.")
-    parser.add_argument(
-        "--books", metavar="books", nargs="+", default=[], help="The books to check; e.g., 'NT', 'OT', 'GEN EXO'"
+    parser = argparse.ArgumentParser(description="Split long paragraphs in USFM files",
+    formatter_class=argparse.RawDescriptionHelpFormatter,
+    epilog=get_epilog(),
     )
-    # parser.add_argument('--methods', nargs='+', default=['balanced'], help='Methods used to split long paragraphs, must be one of sentence, optimal, recursive, balanced.')
+    parser.add_argument("project", type=str, help="Paratext project name - the files in this folder will be modified in place.")
+    add_books_argument(parser)
+    parser.add_argument("--max", type=int, default=MAX_LENGTH, help="Maximum paragraph length.")
+    # parser.add_argument(
+    #     "--books", metavar="books", nargs="+", default=[], help="The books to check; e.g., 'NT', 'OT', 'GEN EXO'"
+    # )
     parser.add_argument(
         "--show-from",
         type=int,
@@ -432,6 +438,7 @@ def main():
         type=int,
         help="Show the tokens found at given token number and show the result after spliting, along with the next token number.",
     )
+
 
     args = parser.parse_args()
     print(args)
@@ -455,29 +462,28 @@ def main():
 
     # Parse project settings to get book IDs
     settings = FileParatextProjectSettingsParser(project_dir).parse()
-    sfm_files =  get_sfm_files_to_process(settings, project_dir, args.books)
+    books = expand_book_list(args.books)
+    sfm_files =  get_sfm_files_to_process(project_dir, books)
 
-    first_sfm_file = sfm_files[0]
     if args.show_from is not None:
         # Only SHOW tokens from the first book.
-        print(f"Showing {args.show_limit} tokens from {first_sfm_file} beginning at token {args.show_from}\n")
-        tokens = get_tokens(settings, first_sfm_file)
+        print(f"Showing {args.show_limit} tokens from {sfm_files[0]} beginning at token {args.show_from}\n")
+        tokens = get_tokens(settings, sfm_files[0])
         show_tokens_header()
         show_tokens(tokens, start=args.show_from, limit=args.show_limit)
         exit()
 
     if args.show_split is not None:
         search_from = args.show_split
-        print(f"Searching for next split after token {search_from} from {first_sfm_file}\n")
-        tokens = get_tokens(settings, first_sfm_file)
+        print(f"Searching for next split after token {search_from} from {sfm_files[0]}\n")
+        tokens = get_tokens(settings, sfm_files[0])
         process_long_paragraphs(tokens, settings, max_len=args.max, start_idx=search_from)
         exit()
 
     output_dir = project_dir.parent / f"{project_dir.name}_split_{args.max}"
     
-
     # Copying the folder ensures that all necessary files are present.
-    copy_folder(project_dir, output_dir)
+    shutil.copytree(project_dir, output_dir, dirs_exist_ok=True)
     
     # Process each file
     for sfm_file in sfm_files:
