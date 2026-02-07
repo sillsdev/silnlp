@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Tuple
 from machine.scripture import ALL_BOOK_IDS, VerseRef
 from scipy.stats import linregress
 
-from ..common.translator import CONFIDENCE_SUFFIX, ConfidenceFile
+from ..common.translator import CONFIDENCE_SUFFIX, ConfidenceFile, TxtConfidenceFile, UsfmConfidenceFile
 from .config import get_mt_exp_dir
 from .test import VERSE_SCORES_SUFFIX
 
@@ -23,6 +23,10 @@ CANONICAL_ORDER = {book: i for i, book in enumerate(ALL_BOOK_IDS)}
 class Score:
     confidence: float
     projected_chrf3: float
+
+
+class SequenceScore(Score):
+    sequence_num: str
 
 
 @dataclass
@@ -78,7 +82,20 @@ def validate_inputs(
     if not all(cf.is_file() for cf in confidence_file_paths):
         missing_files = [str(cf) for cf in confidence_file_paths if not cf.is_file()]
         raise FileNotFoundError(f"The following confidence files do not exist: {', '.join(missing_files)}")
-    confidence_files = [ConfidenceFile(cf) for cf in confidence_file_paths]
+
+    confidence_files: List[ConfidenceFile] = []
+    for cf in confidence_file_paths:
+        ext = ConfidenceFile.get_original_extension(cf).lower()
+        if ext in {".usfm", ".sfm"}:
+            confidence_files.append(UsfmConfidenceFile(cf))
+        elif ext == ".txt":
+            confidence_files.append(TxtConfidenceFile(cf))
+        else:
+            raise ValueError(
+                f"Could not determine confidence file type for {cf}. "
+                f"Expected suffixes include .usfm{CONFIDENCE_SUFFIX}, "
+                f".sfm{CONFIDENCE_SUFFIX}, or .txt{CONFIDENCE_SUFFIX}."
+            )
 
     return verse_test_scores_path, confidence_files
 
@@ -97,19 +114,20 @@ def project_chrf3(
     chapter_scores: ChapterScores = ChapterScores()
     book_scores: BookScores = BookScores()
     for confidence_file in confidence_files:
-        file_scores = get_verse_scores(confidence_file, slope, intercept)
-        book = file_scores[0].vref.book if file_scores else None
-        verse_scores += file_scores
-        if confidence_file.get_chapters_path().is_file():
-            with open(confidence_file.get_chapters_path(), "r", encoding="utf-8") as chapter_file:
-                next(chapter_file)
-                for line in chapter_file:
-                    cols = line.strip().split("\t")
-                    chapter = int(cols[0])
-                    confidence = float(cols[1])
-                    projected_chrf3 = slope * confidence + intercept
-                    score = Score(confidence, projected_chrf3)
-                    chapter_scores.add_score(book, chapter, score)
+        if isinstance(confidence_file, UsfmConfidenceFile):
+            file_scores = get_verse_scores(confidence_file, slope, intercept)
+            book = file_scores[0].vref.book if file_scores else None
+            verse_scores += file_scores
+            if confidence_file.get_chapters_path().is_file():
+                with open(confidence_file.get_chapters_path(), "r", encoding="utf-8") as chapter_file:
+                    next(chapter_file)
+                    for line in chapter_file:
+                        cols = line.strip().split("\t")
+                        chapter = int(cols[0])
+                        confidence = float(cols[1])
+                        projected_chrf3 = slope * confidence + intercept
+                        score = Score(confidence, projected_chrf3)
+                        chapter_scores.add_score(book, chapter, score)
     if confidence_files[0].get_books_path().is_file():
         with open(confidence_files[0].get_books_path(), "r", encoding="utf-8") as book_file:
             next(book_file)
@@ -151,39 +169,28 @@ def extract_test_data(verse_test_scores_path: Path) -> Tuple[List[float], List[f
     return chrf3_scores, confidence_scores
 
 
-def get_verse_scores(confidence_file: ConfidenceFile, slope: float, intercept: float) -> List[VerseScore]:
-    current_book = ""
-    current_chapter = 0
-    current_verse = 0
-    is_at_verse_reference = False
+def get_verse_scores(confidence_file: UsfmConfidenceFile, slope: float, intercept: float) -> List[VerseScore]:
+    confidences = confidence_file.get_verse_confidences()
+    verse_scores: List[VerseScore] = []
+    for vref, confidence in confidences:
+        projected_chrf3 = slope * confidence + intercept
+        verse_scores += [
+            VerseScore(
+                confidence,
+                projected_chrf3,
+                vref,
+            )
+        ]
+    return verse_scores
 
-    vref_confidences: List[VerseScore] = []
-    with open(confidence_file.get_path(), "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.rstrip("\n")
-            if line.lower().startswith("vref") or line.lower().startswith("sequence score"):
-                continue
 
-            match = re.match(r"^([0-9A-Z][A-Z]{2}) (\d+):(\d+)(/.*)?", line)
-            if match:
-                current_book = match.group(1)
-                current_chapter = int(match.group(2))
-                current_verse = int(match.group(3))
-                extra = match.group(4)
-                is_at_verse_reference = current_verse != 0 and not extra
-            elif is_at_verse_reference:
-                cols = line.split("\t")
-                if cols:
-                    confidence = float(cols[0])
-                    projected_chrf3 = slope * confidence + intercept
-                    vref_confidences += [
-                        VerseScore(
-                            confidence,
-                            projected_chrf3,
-                            VerseRef.from_string(f"{current_book} {current_chapter}:{current_verse}"),
-                        )
-                    ]
-    return vref_confidences
+def get_sequence_scores(confidence_file: TxtConfidenceFile, slope: float, intercept: float) -> List[SequenceScore]:
+    confidences = confidence_file.get_sequence_confidences()
+    sequence_scores: List[SequenceScore] = []
+    for sequence_num, confidence in confidences:
+        projected_chrf3 = slope * confidence + intercept
+        sequence_scores.append(SequenceScore(confidence, projected_chrf3, sequence_num))
+    return sequence_scores
 
 
 @dataclass

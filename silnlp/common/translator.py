@@ -7,7 +7,7 @@ from datetime import date
 from itertools import groupby
 from math import exp
 from pathlib import Path
-from typing import DefaultDict, Generator, Iterable, List, Optional, Tuple
+from typing import DefaultDict, Generator, Generic, Iterable, List, Optional, Tuple, TypeVar
 
 import docx
 import nltk
@@ -184,7 +184,10 @@ class DraftGroup:
         return [TranslatedDraft(sentences) for sentences in translated_draft_sentences]
 
 
-class ConfidenceFile:
+TVerseKey = TypeVar("TVerseKey")
+
+
+class ConfidenceFile(ABC, Generic[TVerseKey]):
 
     def __init__(self, path: Path):
         if not path.name.endswith(CONFIDENCE_SUFFIX):
@@ -198,40 +201,81 @@ class ConfidenceFile:
     def get_verses_path(self) -> Path:
         return self.path.with_suffix(".verses.tsv")
 
+    @staticmethod
+    def get_original_extension(confidence_file_path: Path) -> str:
+        return confidence_file_path.with_name(confidence_file_path.name.removesuffix(CONFIDENCE_SUFFIX)).suffix
+
+    @abstractmethod
+    def _parse_verse_key(self, raw_key: str) -> TVerseKey:
+        pass
+
+    def get_verse_confidences(self) -> List[Tuple[TVerseKey, float]]:
+        confidences: List[Tuple[TVerseKey, float]] = []
+        with open(self.get_verses_path(), "r", encoding="utf-8") as f:
+            headers = f.readline().strip().split("\t")
+            confidence_index = headers.index("Confidence")
+            for line in f:
+                cols = line.strip().split("\t")
+                vref_or_index = cols[0]
+                confidence = float(cols[confidence_index])
+                confidences.append((self._parse_verse_key(vref_or_index), confidence))
+        return confidences
+
+    @abstractmethod
+    def generate_confidence_files(
+        self,
+        translated_draft: TranslatedDraft,
+        scripture_refs: Optional[List[ScriptureRef]] = None,
+    ) -> None:
+        pass
+
+
+class UsfmConfidenceFile(ConfidenceFile[VerseRef]):
+
     def get_chapters_path(self) -> Path:
         return self.path.with_suffix(".chapters.tsv")
 
     def get_books_path(self) -> Path:
         return self.path.parent / "confidences.books.tsv"
 
-    def get_files_path(self, trg_prefix: str = "") -> Path:
-        return self.path.parent / f"{trg_prefix}confidences.files.tsv"
+    def _parse_verse_key(self, raw_key: str) -> VerseRef:
+        return VerseRef.from_string(raw_key)
 
-    def generate_usfm_confidence_files(
+    def generate_confidence_files(
         self,
         translated_draft: TranslatedDraft,
-        scripture_refs: List[ScriptureRef],
+        scripture_refs: Optional[List[ScriptureRef]] = None,
     ) -> None:
+        if scripture_refs is None:
+            raise ValueError("scripture_refs should not be None when generating confidence files for USFM/SFM files.")
         translated_draft.write_confidence_scores_to_file(self.path, "VRef", scripture_refs)
         translated_draft.write_verse_confidence_scores_to_file(self.get_verses_path(), "VRef", scripture_refs)
         translated_draft.write_chapter_confidence_scores_to_file(self.get_chapters_path(), scripture_refs)
         translated_draft.append_book_confidence_score(self.get_books_path(), scripture_refs)
 
-    def generate_txt_confidence_files(
+
+class TxtConfidenceFile(ConfidenceFile[str]):
+
+    def get_files_path(self) -> Path:
+        return self.path.parent / "confidences.files.tsv"
+
+    def _parse_verse_key(self, raw_key: str) -> str:
+        return raw_key
+
+    def generate_confidence_files(
         self,
         translated_draft: TranslatedDraft,
-        trg_prefix: str = "",
+        scripture_refs: Optional[List[ScriptureRef]] = None,
     ) -> None:
         translated_draft.write_confidence_scores_to_file(self.path, "Sequence Number")
         translated_draft.write_verse_confidence_scores_to_file(self.get_verses_path(), "Sequence Number")
-        self._append_file_confidence_score(translated_draft, trg_prefix)
+        self._append_file_confidence_score(translated_draft)
 
     def _append_file_confidence_score(
         self,
         translated_draft: TranslatedDraft,
-        trg_prefix: str = "",
     ) -> None:
-        file_confidences_path = self.get_files_path(trg_prefix)
+        file_confidences_path = self.get_files_path()
 
         with file_confidences_path.open("a", encoding="utf-8", newline="\n") as file_confidences_file:
             if file_confidences_file.tell() == 0:
@@ -239,6 +283,22 @@ class ConfidenceFile:
             file_confidences_file.write(
                 f"{self._trg_draft_file_path.stem}\t{gmean(translated_draft.get_all_sequence_confidence_scores())}\n"
             )
+
+
+class TestConfidenceFile(ConfidenceFile[str]):
+    def get_verses_path(self) -> Path:
+        # Use the verse-level scores file created by the test script
+        return self.path.with_suffix(".scores.tsv")
+
+    def _parse_verse_key(self, raw_key: str) -> str:
+        return raw_key
+
+    def generate_confidence_files(
+        self,
+        translated_draft: TranslatedDraft,
+        scripture_refs: Optional[List[ScriptureRef]] = None,
+    ) -> None:
+        translated_draft.write_confidence_scores_to_file(self.get_path(), "Sequence Number")
 
 
 def generate_confidence_files(
@@ -253,16 +313,14 @@ def generate_confidence_files(
         )
         return
 
-    confidence_file = ConfidenceFile(
-        trg_draft_file_path.with_suffix(f"{trg_draft_file_path.suffix}{CONFIDENCE_SUFFIX}")
-    )
-
     ext = trg_draft_file_path.suffix.lower()
+    confidence_path = trg_draft_file_path.with_suffix(f"{trg_draft_file_path.suffix}{CONFIDENCE_SUFFIX}")
     if ext in {".usfm", ".sfm"}:
-        assert scripture_refs is not None
-        confidence_file.generate_usfm_confidence_files(translated_draft, scripture_refs)
+        confidence_file = UsfmConfidenceFile(confidence_path)
+        confidence_file.generate_confidence_files(translated_draft, scripture_refs)
     elif ext == ".txt":
-        confidence_file.generate_txt_confidence_files(translated_draft)
+        confidence_file = TxtConfidenceFile(confidence_path)
+        confidence_file.generate_confidence_files(translated_draft)
     else:
         raise ValueError(
             f"Invalid trg file extension {ext} when using --save-confidences in the translate step."
@@ -274,10 +332,10 @@ def generate_test_confidence_files(
     translated_draft: TranslatedDraft,
     trg_draft_file_path: Path,
 ) -> None:
-    confidence_file = ConfidenceFile(
+    confidence_file = TestConfidenceFile(
         trg_draft_file_path.with_suffix(f"{trg_draft_file_path.suffix}{CONFIDENCE_SUFFIX}")
     )
-    translated_draft.write_confidence_scores_to_file(confidence_file.get_path(), "Sequence Number")
+    confidence_file.generate_confidence_files(translated_draft)
 
 
 class Translator(AbstractContextManager["Translator"], ABC):
@@ -305,6 +363,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
     ) -> None:
 
         sentences = [add_tags_to_sentence(tags, sentence) for sentence in load_corpus(src_file_path)]
+        print("translating text file")
         sentence_translation_groups: List[SentenceTranslationGroup] = list(
             self.translate(sentences, src_iso, trg_iso, produce_multiple_translations)
         )
