@@ -4,7 +4,6 @@ import logging
 import re
 import shutil
 import sys
-import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -446,6 +445,14 @@ def main() -> None:
         pwd = config.get("zip_password", None)
         project_name, local_project_path, copy_from = setup_local_project(project, args.copy_from, pwd, args.datestamp)
 
+        # Check if a project folder already exists in OnboardingProjects
+        onboarding_project_path = SIL_NLP_ENV.mt_experiments_dir / "OnboardingProjects" / project_name
+        if onboarding_project_path.exists() and not args.overwrite:
+            LOGGER.info(
+                f"Onboarding project folder '{onboarding_project_path}' already exists. Skipping onboarding for project '{project_name}'."
+            )
+            continue
+
         if not args.no_clean:
             LOGGER.info(f"Cleaning Paratext project: {project_name}.")
             process_single_project_for_cleaning(
@@ -483,6 +490,9 @@ def main() -> None:
         if args.align:
             align_config: dict = config.get("align", None)
             align_wrapper(project_name, align_config, args.overwrite)
+
+        # TODO: Add alignments
+        # TODO: Add a log file or log folder to store any outputs from the console
 
 
 if __name__ == "__main__":
