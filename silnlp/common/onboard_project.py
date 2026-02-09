@@ -4,7 +4,6 @@ import logging
 import re
 import shutil
 import sys
-import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +11,8 @@ from typing import Tuple
 
 import wildebeest.wb_analysis as wb_ana
 import yaml
+from machine.corpora.file_paratext_project_settings_parser import FileParatextProjectSettingsParser
+from machine.corpora.paratext_project_settings import ParatextProjectSettings
 
 from silnlp.common.clean_projects import process_single_project_for_cleaning
 
@@ -229,37 +230,13 @@ def check_for_project_errors(copy_from: Path | None, project: str) -> None:
         if not copy_from.exists():
             raise FileNotFoundError(f"The specified --copy-from path '{copy_from}' does not exist.")
         project_path = copy_from / project
-        settings_file = project_path / "Settings.xml"
-        if not project_path.exists():
-            raise FileNotFoundError(
-                f"The specified project folder '{project_path}' does not exist in the --copy-from path."
-            )
-        if not settings_file.exists():
-            raise FileNotFoundError(
-                f"The Settings.xml file was not found in the project folder '{project_path}'. Please ensure this is a valid Paratext project folder."
-            )
-        tree = ET.parse(settings_file)
-        root = tree.getroot()
 
-        translation_info = root.find(".//TranslationInfo")
-        if translation_info is not None and translation_info.text != "Standard::":
-            LOGGER.warning(
-                f"{project} is non-Standard and references another project, which may lead to incorrect versification. The project will default to English versification. Translation Info: '{translation_info.text}'."
-            )
+        settings_file_parser = FileParatextProjectSettingsParser(project_path)
+        project_settings: ParatextProjectSettings = settings_file_parser.parse()
 
-        naming_element = root.find(".//Naming")
-        pre_part, post_part, book_name_form = None, None, None
-        if naming_element is not None:
-            pre_part = naming_element.get("PrePart", "")
-            post_part = naming_element.get("PostPart", "")
-            book_name_form = naming_element.get("BookNameForm", "")
-        else:
-            pre_part = root.find(".//FileNamePrePart").text
-            post_part = root.find(".//FileNamePostPart").text
-            book_name_form = root.find(".//FileNameBookNameForm").text
-        book_part = re.sub(r"\d", "[0-9]", book_name_form)
-        book_part = re.sub(r"([A-Z])", r"[A-Z]", book_part)
-        pattern = f"{pre_part}.*{book_part}.*{post_part}"
+        file_name_form = re.sub(r"\d", "[0-9]", project_settings.file_name_form)
+        file_name_form = re.sub(r"([A-Z])", r"[A-Z]", file_name_form)
+        pattern = f"{project_settings.file_name_prefix}.*{file_name_form}.*{project_settings.file_name_suffix}$"
         matching_files = False
         for file in project_path.iterdir():
             if re.match(pattern, file.name):
@@ -379,6 +356,14 @@ def main() -> None:
         pwd = config.get("zip_password", None)
         project_name, local_project_path, copy_from = setup_local_project(project, args.copy_from, pwd, args.datestamp)
 
+        # Check if a project folder already exists in OnboardingProjects
+        onboarding_project_path = SIL_NLP_ENV.mt_experiments_dir / "OnboardingProjects" / project_name
+        if onboarding_project_path.exists() and not args.overwrite:
+            LOGGER.info(
+                f"Onboarding project folder '{onboarding_project_path}' already exists. Skipping onboarding for project '{project_name}'."
+            )
+            continue
+
         if not args.no_clean:
             LOGGER.info(f"Cleaning Paratext project: {project_name}.")
             process_single_project_for_cleaning(
@@ -421,6 +406,9 @@ def main() -> None:
             if not args.extract_corpora:
                 LOGGER.warning("--extract_corpora was not included. Stats requires the corpus to be extracted first.")
             calculate_tokenization_stats(project_name, config.get("stats", None), args.overwrite)
+
+        # TODO: Add alignments
+        # TODO: Add a log file or log folder to store any outputs from the console
 
 
 if __name__ == "__main__":
