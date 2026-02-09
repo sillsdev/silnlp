@@ -9,6 +9,7 @@ from clearml import Task
 SF_API_TOKEN = os.getenv("SF_API_TOKEN")
 UUID = str(uuid.uuid4())
 ONBOARDING_PATH = os.getenv("ONBOARDING_PATH")
+REPO_PATH = os.getenv("REPO_PATH")
 
 
 def add_comment(request_id: str, comment: str):
@@ -138,7 +139,7 @@ def process_request(request):
     subprocess.run(
         [
             "python",
-            "/workspaces/silnlp/scripts/automate_onboard_project.py",
+            f"{REPO_PATH}/scripts/automate_onboard_project.py",
             "--task-name",
             task_name,
             "--dir",
