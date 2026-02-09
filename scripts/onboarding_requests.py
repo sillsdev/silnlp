@@ -120,6 +120,7 @@ def download_project(SF_id: str, request_id: str):
 onboarding_requests = get_onboarding_requests()
 # TODO: Distinguish between projects and resources
 
+onboarded_projects = []
 if os.path.exists(f"{ONBOARDING_PATH}/onboarded_projects_log.txt"):
     with open(f"{ONBOARDING_PATH}/onboarded_projects_log.txt", "r") as f:
         onboarded_projects = f.read().splitlines()
