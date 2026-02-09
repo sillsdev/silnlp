@@ -129,7 +129,7 @@ if os.path.exists(f"{ONBOARDING_PATH}/onboarded_projects_log.txt"):
 for request in onboarding_requests:
     if request["id"] in onboarded_projects:
         print(f"Request {request['id']} has already been onboarded. Skipping.")
-        continue
+        onboarding_requests.remove(request)
 
 
 def process_request(request):
