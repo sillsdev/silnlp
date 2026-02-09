@@ -356,8 +356,7 @@ def main() -> None:
         pwd = config.get("zip_password", None)
         project_name, local_project_path, copy_from = setup_local_project(project, args.copy_from, pwd, args.datestamp)
 
-        # Check if a project folder already exists in OnboardingProjects
-        onboarding_project_path = SIL_NLP_ENV.mt_experiments_dir / "OnboardingProjects" / project_name
+        onboarding_project_path = SIL_NLP_ENV.mt_experiments_dir / "OnboardingRequests" / project_name
         if onboarding_project_path.exists() and not args.overwrite:
             LOGGER.info(
                 f"Onboarding project folder '{onboarding_project_path}' already exists. Skipping onboarding for project '{project_name}'."
