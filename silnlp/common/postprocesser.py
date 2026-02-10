@@ -194,7 +194,7 @@ class DenormalizeQuotationMarksPostprocessor:
         except ValueError as verr:
             raise NoDetectedQuoteConventionException([project_name]) from verr
 
-        if quote_convention_analysis is None:
+        if quote_convention_analysis is None or quote_convention_analysis.best_quote_convention is None:
             raise NoDetectedQuoteConventionException([project_name])
         LOGGER.info(
             f'Detected quote convention for project "{project_name}" is '
