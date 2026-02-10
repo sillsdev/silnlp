@@ -44,9 +44,9 @@ class ParagraphCollector:
         self.parser = UsfmParser(usfm_text, stylesheet=settings.stylesheet, versification=settings.versification)
         self.max_len = max_len
         self.result_tokens = []                  # Output: modified token stream
+        self.last_char_tags = []
         self.split_points = []
         self.state = self.parser.state
-        self.token = self.state.token
         self.current_para = []                   # Tokens in current paragraph
         self.current_text_len = 0                # Accumulated text length
         self.current_nonpara_marker = None       # Which CHAR marker we're in
@@ -56,10 +56,6 @@ class ParagraphCollector:
     
     @property
     def token(self): return self.state.token
-
-    @token.setter
-    def token(self, value):
-        self.token = value
 
     def process(self):
         "Main loop: iterate through all tokens, split as needed, return modified tokens."
@@ -95,28 +91,28 @@ class ParagraphCollector:
         text_len = len(self.token.text or '')
         if self.state.char_tags or self.state.note_tag:
             self.current_nonpara_len += text_len
+            self.last_char_tags = [UsfmToken(type=UsfmTokenType.CHARACTER, marker=c.marker) for c in self.state.char_tags]
         else:
             self.current_text_len += text_len
 
-        
+            
     def on_nonpara_marker(self):
-        """Check for repeated marker (implicit close = split point)."""
-        # Check if this marker is already open (repeated = implicit close = split point)
+        "Check for repeated marker (implicit close = split point)."
         if self.token.marker in [e.marker for e in self.state.stack]:
-            self.split_points.append((len(self.current_para), self.current_nonpara_len))
+            self.split_points.append((len(self.current_para), self.current_nonpara_len, list(self.state.char_tags)))
             self.current_nonpara_len = 0
         self.current_para.append(self.token)
         self.current_nonpara_marker = self.token.marker
 
     def on_end_marker(self):
-        """Potential split point when returning to para level."""
+        "Potential split point when returning to para level."
         self.current_para.append(self.token)
-        self.split_points.append((len(self.current_para), self.current_text_len + self.current_nonpara_len))
+        self.split_points.append((len(self.current_para), self.current_text_len + self.current_nonpara_len, list(self.state.char_tags)))
         self.current_nonpara_len = 0
         self.current_nonpara_marker = None
 
     def flush_paragraph(self):
-        """Apply splits to current_para, append to result_tokens."""
+        "Apply splits to current_para, append to result_tokens."
         if not self.current_para: return
         
         para_marker = self.current_para[0]
@@ -129,27 +125,38 @@ class ParagraphCollector:
             self.result_tokens.extend(self.current_para)
             return
         
-        # Need to split - use split_points with optimal_grouping
         if self.split_points:
-            splits = optimal_grouping(self.split_points, self.max_len)
-            new_paras = split_paragraph_tokens(self.current_para, self.split_points, splits)
-            for new_para in new_paras:
+            parts = [(idx, length) for idx, length, _ in self.split_points]
+            splits = optimal_grouping(parts, self.max_len)
+            new_paras = split_paragraph_tokens(self.current_para, parts, splits)
+            for j, new_para in enumerate(new_paras):
                 text = get_paragraph_text(new_para)
                 if len(text) > self.max_len:
-                    # Text-level splitting needed
+                    char_tags = self.split_points[splits[j-1]][2] if j > 0 and j-1 < len(splits) else []
                     chunks = split_long_text(text, self.max_len)
                     for chunk in chunks:
                         self.result_tokens.append(UsfmToken(type=UsfmTokenType.PARAGRAPH, marker=para_marker.marker))
+                        for ct in char_tags: self.result_tokens.append(UsfmToken(type=UsfmTokenType.CHARACTER, marker=ct.marker))
                         self.result_tokens.append(UsfmToken(type=UsfmTokenType.TEXT, text=chunk))
                 else:
                     self.result_tokens.extend(new_para)
         else:
-            # No split points, just split text directly
             text = get_paragraph_text(self.current_para)
             chunks = split_long_text(text, self.max_len)
             for chunk in chunks:
                 self.result_tokens.append(UsfmToken(type=UsfmTokenType.PARAGRAPH, marker=para_marker.marker))
                 self.result_tokens.append(UsfmToken(type=UsfmTokenType.TEXT, text=chunk))
+
+        text = get_paragraph_text(self.current_para)
+        self._emit_text_splits(para_marker, self.last_char_tags, text)
+
+    def _emit_text_splits(self, para_marker, char_tags, text):
+        chunks = split_long_text(text, self.max_len)
+        for chunk in chunks:
+            self.result_tokens.append(UsfmToken(type=UsfmTokenType.PARAGRAPH, marker=para_marker.marker))
+            self.result_tokens.extend(char_tags)
+            self.result_tokens.append(UsfmToken(type=UsfmTokenType.TEXT, text=chunk))
+
 
 
 def s(x): return x or ''
@@ -194,7 +201,8 @@ def explore_parser(usfm_text, settings):
         if s.stack: parts.append(f"stack:[{' '.join(e.marker for e in s.stack):10}]")
         if s.is_verse_text: parts.append("verse_text")
         if s.is_verse_para: parts.append("verse_para")
-        if s.verse_ref and str(s.verse_ref) != ":::": parts.append(f"ref:{str(s.verse_ref):13}")
+        if s.verse_ref and str(s.verse_ref) != ":::": parts.append(f"ref:{str(s.verse_ref):10}")
+        if t.text: parts.append(f"t.len: '{len(t.text) if t.text else '':4}")
         if t.text: parts.append(f"t.text: '{t.text[:40]}{'...' if len(t.text)>40 else t.text}'")
         
         print(" | ".join(parts), end='')
@@ -452,14 +460,39 @@ def process_tokens(tokens, max_len=200):
                 for chunk in text_chunks:
                     result.append(UsfmToken(type=UsfmTokenType.PARAGRAPH, marker=para_marker.marker))
                     result.append(UsfmToken(type=UsfmTokenType.TEXT, text=chunk))
-                    #print(UsfmToken(type=UsfmTokenType.PARAGRAPH, marker=para_marker.marker))
-                    #print(UsfmToken(type=UsfmTokenType.TEXT, text=chunk))
+                    print(UsfmToken(type=UsfmTokenType.PARAGRAPH, marker=para_marker.marker))
+                    print(UsfmToken(type=UsfmTokenType.TEXT, text=chunk))
             else:
                 result.extend(new_para)
         
         i += len(para)
     
     return result
+
+def find_long_text_tokens(usfm_text, settings, max_len=200):
+    "Find all TEXT tokens exceeding max_len, showing context"
+    parser = UsfmParser(usfm_text, stylesheet=settings.stylesheet, versification=settings.versification)
+    long_texts = []
+    output_tokens = []
+    while parser.process_token():
+        t = parser.state.token
+        if t.type == UsfmTokenType.TEXT and t.text and len(t.text) > max_len:
+            long_texts.append({
+                'index': parser.state.index,
+                'text_len': len(t.text),
+                'text': t.text,
+                'para_tag': parser.state.para_tag.marker if parser.state.para_tag else None,
+                'char_tags': [c.marker for c in parser.state.char_tags],
+                'note_tag': parser.state.note_tag.marker if parser.state.note_tag else None,
+            })
+            
+        else :
+            output_tokens.append(t)
+    return long_texts
+
+def process_usfm(usfm_text, settings, max_len=200):
+    "Process USFM text, splitting long paragraphs. Returns token list."
+    return ParagraphCollector(usfm_text, settings, max_len).process()
 
 
 def main():
@@ -470,9 +503,6 @@ def main():
     parser.add_argument("project", type=str, help="Paratext project name - the files in this folder will be modified in place.")
     add_books_argument(parser)
     parser.add_argument("--max", type=int, default=MAX_LENGTH, help="Maximum paragraph length.")
-    # parser.add_argument(
-    #     "--books", metavar="books", nargs="+", default=[], help="The books to check; e.g., 'NT', 'OT', 'GEN EXO'"
-    # )
     parser.add_argument(
         "--show-from",
         type=int,
@@ -512,40 +542,45 @@ def main():
     settings = FileParatextProjectSettingsParser(project_dir).parse()
     books = expand_book_list(args.books)
     sfm_files =  get_sfm_files_to_process(project_dir, books)
+    sfm_file = sfm_files[0]
     
     if args.show_from is not None:
         # Only SHOW tokens from the first book.
-        print(f"Showing {args.show_limit} tokens from {sfm_files[0]} beginning at token {args.show_from}\n")
-        tokens = get_tokens(settings, sfm_files[0])
+        print(f"Showing {args.show_limit} tokens from {sfm_file} beginning at token {args.show_from}\n")
+        tokens = get_tokens(settings, sfm_file)
         show_tokens_header()
         show_tokens(tokens, start=args.show_from, limit=args.show_limit)
         exit()
 
     if args.show_split is not None:
         search_from = args.show_split
-        print(f"Searching for next split after token {search_from} from {sfm_files[0]}\n")
-        tokens = get_tokens(settings, sfm_files[0])
+        print(f"Searching for next split after token {search_from} from {sfm_file}\n")
+        tokens = get_tokens(settings, sfm_file)
         process_long_paragraphs(tokens, settings, max_len=args.max, start_idx=search_from)
         exit()
+
+    with open(sfm_file, 'r', encoding='utf-8') as f: usfm_text = f.read()
+    # long_texts = find_long_text_tokens(usfm_text, settings, max_len=200)
+    # print(f"Found {len(long_texts)} text tokens > 200 chars")
+    # for lt in long_texts[:5]:
+    #     print(f"\nIndex {lt['index']}: {lt['text_len']} chars | para:{lt['para_tag']} char:{lt['char_tags']} note:{lt['note_tag']}")
+    #     print(f"  '{lt['text']}'")
 
     output_dir = project_dir.parent / f"{project_dir.name}_split_{args.max}"
     
     # Copying the folder ensures that all necessary files are present.
-    shutil.copytree(project_dir, output_dir, dirs_exist_ok=True)
+    # shutil.copytree(project_dir, output_dir, dirs_exist_ok=True)
     
-    # Process each file
-    for sfm_file in sfm_files:
-        with open(sfm_file, 'r', encoding='utf-8') as f: usfm_text = f.read()
-        print(f"Processing sfm_file: {sfm_file}")
-        parser = UsfmParser(usfm_text, stylesheet=settings.stylesheet, versification=settings.versification)
-        explore_parser(usfm_text=usfm_text, settings=settings)
-        exit()
-
-        tokens = get_tokens(settings, sfm_file)
-        split_tokens = process_tokens(tokens, max_len=args.max)
-        usfm_out = [token.to_usfm(include_newlines=True).replace('\r\n', '\n') for token in split_tokens]
-        output_sfm_file = output_dir / sfm_file.name
-        with open(output_sfm_file, 'w', encoding='utf-8') as f: f.write(''.join(usfm_out))
+    # Process each file (or first for testing)
+    with open(sfm_file, 'r', encoding='utf-8') as f: usfm_text = f.read()
+    print(f"Processing sfm_file: {sfm_file}")
+    #parser = UsfmParser(usfm_text, stylesheet=settings.stylesheet, versification=settings.versification)
+    #explore_parser(usfm_text=usfm_text, settings=settings)
+    
+    split_tokens = process_usfm(usfm_text, settings, max_len=200)
+    usfm_out = [token.to_usfm(include_newlines=True).replace('\r\n', '\n') for token in split_tokens]
+    output_sfm_file = output_dir / sfm_file.name
+    with open(output_sfm_file, 'w', encoding='utf-8') as f: f.write(''.join(usfm_out))
                     
     print(f"Done! Processed {len(sfm_files)} books in {output_dir}")
 

@@ -38,93 +38,65 @@ WORD_BREAKS = ' '
 
 
 class ParagraphCollector:
-    """Walks tokens via UsfmParser, collecting paragraphs and identifying split points."""
-    
     def __init__(self, usfm_text, settings, max_len=200):
         self.parser = UsfmParser(usfm_text, stylesheet=settings.stylesheet, versification=settings.versification)
         self.max_len = max_len
-        self.result_tokens = []                  # Output: modified token stream
-        self.last_char_tags = []
-        self.split_points = []
+        self.result_tokens = []
         self.state = self.parser.state
-        self.current_para = []                   # Tokens in current paragraph
-        self.current_text_len = 0                # Accumulated text length
-        self.current_nonpara_marker = None       # Which CHAR marker we're in
-        self.current_nonpara_len = 0             # Text length inside current CHAR marker
-        self.open_nonpara_markers = []           # Track repeated markers for implicit splits
-        self.exclude_markers = {'id', 'c', 'v'}  # Never split these
+        self.current_para = []
+        self.total_len = 0
+        self.segment_len = 0
+        self.split_points = []
+        self.exclude_markers = {'id', 'c', 'v'}
     
     @property
     def token(self): return self.state.token
 
     def process(self):
-        "Main loop: iterate through all tokens, split as needed, return modified tokens."
         while self.parser.process_token():
-            if self.token.type == UsfmTokenType.PARAGRAPH:
-                self.on_paragraph_start()
-            elif self.token.type == UsfmTokenType.TEXT:
-                self.on_text()
-            elif self.token.type in (UsfmTokenType.CHARACTER, UsfmTokenType.NOTE, UsfmTokenType.MILESTONE):
-                self.on_nonpara_marker()
-            elif self.token.type == UsfmTokenType.END:
-                self.on_end_marker()
-            else:
-                self.current_para.append(self.token)
-        
+            if self.token.type == UsfmTokenType.PARAGRAPH: self.on_paragraph_start()
+            elif self.token.type == UsfmTokenType.TEXT: self.on_text()
+            elif self.token.type in (UsfmTokenType.CHARACTER, UsfmTokenType.NOTE, UsfmTokenType.MILESTONE): self.on_nonpara_marker()
+            elif self.token.type == UsfmTokenType.END: self.on_end_marker()
+            else: self.current_para.append(self.token)
         self.flush_paragraph()
         return self.result_tokens
-    
 
     def on_paragraph_start(self):
         self.flush_paragraph()
         self.current_para = [self.token]
         self.split_points = []
-        self.current_text_len = 0
-        self.current_nonpara_len = 0
-        self.current_nonpara_marker = None
-        self.open_nonpara_markers = []
-
+        self.total_len = 0
+        self.segment_len = 0
 
     def on_text(self):
-        """Accumulate text length; check if split needed."""
         self.current_para.append(self.token)
         text_len = len(self.token.text or '')
-        if self.state.char_tags or self.state.note_tag:
-            self.current_nonpara_len += text_len
-            self.last_char_tags = [UsfmToken(type=UsfmTokenType.CHARACTER, marker=c.marker) for c in self.state.char_tags]
-        else:
-            self.current_text_len += text_len
+        self.total_len += text_len
+        self.segment_len += text_len
 
-            
     def on_nonpara_marker(self):
-        "Check for repeated marker (implicit close = split point)."
         if self.token.marker in [e.marker for e in self.state.stack]:
-            self.split_points.append((len(self.current_para), self.current_nonpara_len, list(self.state.char_tags)))
-            self.current_nonpara_len = 0
+            char_tags = [UsfmToken(type=UsfmTokenType.CHARACTER, marker=c.marker) for c in self.state.char_tags]
+            self.split_points.append((len(self.current_para), self.segment_len, char_tags))
+            self.segment_len = 0
         self.current_para.append(self.token)
-        self.current_nonpara_marker = self.token.marker
 
     def on_end_marker(self):
-        "Potential split point when returning to para level."
         self.current_para.append(self.token)
-        self.split_points.append((len(self.current_para), self.current_text_len + self.current_nonpara_len, list(self.state.char_tags)))
-        self.current_nonpara_len = 0
-        self.current_nonpara_marker = None
+        char_tags = [UsfmToken(type=UsfmTokenType.CHARACTER, marker=c.marker) for c in self.state.char_tags]
+        self.split_points.append((len(self.current_para), self.segment_len, char_tags))
+        self.segment_len = 0
 
     def flush_paragraph(self):
-        "Apply splits to current_para, append to result_tokens."
         if not self.current_para: return
-        
         para_marker = self.current_para[0]
         if para_marker.marker in self.exclude_markers:
             self.result_tokens.extend(self.current_para)
             return
-        
-        total_len = self.current_text_len + self.current_nonpara_len
-        if total_len <= self.max_len:
+        if self.total_len <= self.max_len:
             self.result_tokens.extend(self.current_para)
             return
-        
         if self.split_points:
             parts = [(idx, length) for idx, length, _ in self.split_points]
             splits = optimal_grouping(parts, self.max_len)
@@ -133,22 +105,12 @@ class ParagraphCollector:
                 text = get_paragraph_text(new_para)
                 if len(text) > self.max_len:
                     char_tags = self.split_points[splits[j-1]][2] if j > 0 and j-1 < len(splits) else []
-                    chunks = split_long_text(text, self.max_len)
-                    for chunk in chunks:
-                        self.result_tokens.append(UsfmToken(type=UsfmTokenType.PARAGRAPH, marker=para_marker.marker))
-                        for ct in char_tags: self.result_tokens.append(UsfmToken(type=UsfmTokenType.CHARACTER, marker=ct.marker))
-                        self.result_tokens.append(UsfmToken(type=UsfmTokenType.TEXT, text=chunk))
+                    self._emit_text_splits(para_marker, char_tags, text)
                 else:
                     self.result_tokens.extend(new_para)
         else:
             text = get_paragraph_text(self.current_para)
-            chunks = split_long_text(text, self.max_len)
-            for chunk in chunks:
-                self.result_tokens.append(UsfmToken(type=UsfmTokenType.PARAGRAPH, marker=para_marker.marker))
-                self.result_tokens.append(UsfmToken(type=UsfmTokenType.TEXT, text=chunk))
-
-        text = get_paragraph_text(self.current_para)
-        self._emit_text_splits(para_marker, self.last_char_tags, text)
+            self._emit_text_splits(para_marker, [], text)
 
     def _emit_text_splits(self, para_marker, char_tags, text):
         chunks = split_long_text(text, self.max_len)
