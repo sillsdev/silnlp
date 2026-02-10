@@ -102,6 +102,9 @@ class WordAlignments:
         self._target_tokens_by_source_token: Dict[int, List[int]] = self._create_source_to_target_alignment_lookup(
             aligned_pairs
         )
+        self._source_tokens_by_target_token: Dict[int, List[int]] = self._create_target_to_source_alignment_lookup(
+            aligned_pairs
+        )
         self._cached_crossed_alignments: Dict[tuple[int, int], int] = {}
 
     def _create_source_to_target_alignment_lookup(
@@ -112,17 +115,30 @@ class WordAlignments:
             target_tokens_by_source_token[aligned_word_pair.source_index].append(aligned_word_pair.target_index)
         return target_tokens_by_source_token
 
-    def get_aligned_words(self, source_word_index: int) -> List[int]:
+    def _create_target_to_source_alignment_lookup(
+        self, aligned_pairs: Collection[AlignedWordPair]
+    ) -> Dict[int, List[int]]:
+        source_tokens_by_target_token: Dict[int, List[int]] = defaultdict(list)
+        for aligned_word_pair in aligned_pairs:
+            source_tokens_by_target_token[aligned_word_pair.target_index].append(aligned_word_pair.source_index)
+        return source_tokens_by_target_token
+
+    def get_target_aligned_words(self, source_word_index: int) -> List[int]:
         return self._target_tokens_by_source_token.get(source_word_index) or []
+
+    def get_source_aligned_words(self, target_word_index: int) -> List[int]:
+        return self._source_tokens_by_target_token.get(target_word_index) or []
 
     def get_num_crossed_alignments(self, src_word_index: int, trg_word_index: int) -> int:
         if (src_word_index, trg_word_index) in self._cached_crossed_alignments:
             return self._cached_crossed_alignments[(src_word_index, trg_word_index)]
         num_crossings = 0
         for aligned_word_pair in self._aligned_pairs:
+            # By convention, a break at "word_index" is placed immediately before
+            # the word at words[word_index]
             if (
-                aligned_word_pair.source_index < src_word_index and aligned_word_pair.target_index > trg_word_index
-            ) or (aligned_word_pair.source_index > src_word_index and aligned_word_pair.target_index < trg_word_index):
+                aligned_word_pair.source_index < src_word_index and aligned_word_pair.target_index >= trg_word_index
+            ) or (aligned_word_pair.source_index >= src_word_index and aligned_word_pair.target_index < trg_word_index):
                 num_crossings += 1
         self._cached_crossed_alignments[(src_word_index, trg_word_index)] = num_crossings
         return num_crossings
@@ -196,7 +212,7 @@ class VerseSegmenter(ABC):
                 if current_verse_offset_index >= len(target_verse_offsets):
                     break
 
-            elif target_word_index == target_verse_offsets[current_verse_offset_index]:
+            elif target_word_index >= target_verse_offsets[current_verse_offset_index]:
                 verse_ref = references[current_verse_offset_index]
                 verse_text = self._target_text[current_verse_starting_char_index:current_verse_ending_char_index]
                 target_verses.append(Verse(verse_ref, verse_text))
@@ -243,49 +259,6 @@ class AbstractVerseSegmenterFactory:
     ) -> VerseSegmenter: ...
 
 
-# This class is used to enforce verse segmentations where the lengths of
-# the source and target verses are roughly proportional to one another.
-# If the word alignment matrix was exactly diagonal, minimizing the number
-# of crossed alignemtns would result in verses always have proportional
-# lengths. So this class models a diagonal alignment matrix whose number
-# of "crossed alignments" can be traded off against the crossed alignments
-# from the true word alignment matrix
-class DiagonalPseudoAlignments:
-    def __init__(self, src_num_words: int, trg_num_words: int):
-        self.src_num_words = src_num_words
-        self.trg_num_words = trg_num_words
-
-        # we assume that verse segment breaks will be added greedily, so
-        # between each consecutive pair of breaks is a roughly diagonal matrix
-        self.nearest_preceding_segment_break = [(0, 0) for _ in range(src_num_words + 1)]
-        self.nearest_trailing_segment_break = [(src_num_words, trg_num_words) for _ in range(src_num_words + 1)]
-
-    def add_segment_break(self, src_break_index: int, trg_break_index: int) -> None:
-        for src_index in reversed(range(0, src_break_index)):
-            if self.nearest_trailing_segment_break[src_index][0] < src_break_index:
-                break
-            self.nearest_trailing_segment_break[src_index] = (src_break_index, trg_break_index)
-
-        for src_index in range(src_break_index, len(self.nearest_preceding_segment_break)):
-            if self.nearest_preceding_segment_break[src_index][0] > src_break_index:
-                break
-            self.nearest_preceding_segment_break[src_index] = (src_break_index, trg_break_index)
-
-    def get_crossed_alignment_weight(self, src_index: int, trg_index: int) -> float:
-        matrix_src_width = (
-            self.nearest_trailing_segment_break[src_index][0] - self.nearest_preceding_segment_break[src_index][0]
-        )
-        matrix_trg_width = (
-            self.nearest_trailing_segment_break[src_index][1] - self.nearest_preceding_segment_break[src_index][1]
-        )
-
-        diagonal_src_index_projection = (
-            src_index - self.nearest_preceding_segment_break[src_index][0]
-        ) * matrix_trg_width / matrix_src_width + self.nearest_preceding_segment_break[src_index][0]
-        crossed_alignment_weight = abs(trg_index - diagonal_src_index_projection)
-        return crossed_alignment_weight
-
-
 class FewestCrossedAlignmentsVerseSegmenter(VerseSegmenter):
     def __init__(
         self,
@@ -305,8 +278,13 @@ class FewestCrossedAlignmentsVerseSegmenter(VerseSegmenter):
         self._nearest_preceding_segment_break = [(0, 0) for _ in range(num_src_tokens + 1)]
         self._nearest_trailing_segment_break = [(num_src_tokens, num_trg_tokens) for _ in range(num_src_tokens + 1)]
 
-        self._remaining_breaks_to_map: MutableSet[int] = set(self._source_verse_token_offsets)
-        self._target_verse_token_offsets: List[int] = [-1 for _ in self._source_verse_token_offsets]
+        self._remaining_breaks_to_map: MutableSet[int] = set(
+            [i for i in self._source_verse_token_offsets if i != self._source_verse_token_offsets[-1]]
+        )
+        self._target_verse_token_offsets: List[int] = [
+            -1 for i in self._source_verse_token_offsets if i != self._source_verse_token_offsets[-1]
+        ]
+        self._target_verse_token_offsets[-1] = num_trg_tokens + 1
 
         self._pseudoalignment_weight = psuedoalignment_weight
 
@@ -331,16 +309,14 @@ class FewestCrossedAlignmentsVerseSegmenter(VerseSegmenter):
         while len(self._remaining_breaks_to_map) > 0:
             lowest_crossed_alignment_weight = 1_000_000
             best_split_indices: List[Tuple[int, int]] = []
-            for src_break_offset in self._source_verse_token_offsets:
+            for src_break_offset in self._source_verse_token_offsets[:-1]:
+                if src_break_offset not in self._remaining_breaks_to_map:
+                    continue
                 for trg_break_offset in range(
-                    self._nearest_preceding_segment_break[src_break_offset][1],
-                    self._nearest_trailing_segment_break[src_break_offset][1],
+                    self._nearest_preceding_segment_break[src_break_offset][1] + 1,
+                    self._nearest_trailing_segment_break[src_break_offset][1] - 1,
                 ):
-                    crossed_alignments = self._calculate_crossed_alignment_weight(
-                        src_break_offset - 1, trg_break_offset
-                    )
-
-                    crossed_alignments += self._calculate_crossed_alignment_weight(src_break_offset, trg_break_offset)
+                    crossed_alignments = self._calculate_crossed_alignment_weight(src_break_offset, trg_break_offset)
 
                     if crossed_alignments == lowest_crossed_alignment_weight:
                         best_split_indices.append((src_break_offset, trg_break_offset))
@@ -353,22 +329,35 @@ class FewestCrossedAlignmentsVerseSegmenter(VerseSegmenter):
             else:
                 src_break_offset, trg_break_offset = best_split_indices[0]
                 if src_break_offset > 0 and not contains_letter(self._source_tokens[src_break_offset - 1]):
-                    aligned_words = self._word_alignments.get_aligned_words(src_break_offset - 1)
+                    aligned_words = self._word_alignments.get_target_aligned_words(src_break_offset - 1)
                     if (
                         len(aligned_words) == 1
                         and not contains_letter(self._target_tokens[aligned_words[0]])
                         and (src_break_offset, aligned_words[0]) in best_split_indices
                     ):
-                        self._add_trg_verse_break(src_break_offset, aligned_words[0])
+                        adjusted_trg_break_offset = aligned_words[0]
+                        source_aligned_words = self._word_alignments.get_source_aligned_words(
+                            adjusted_trg_break_offset + 1
+                        )
+                        while (
+                            len(source_aligned_words) == 0
+                            and adjusted_trg_break_offset + 1 < len(self._target_tokens)
+                            and self._target_tokens[adjusted_trg_break_offset + 1] == '"'
+                        ):
+                            adjusted_trg_break_offset += 1
+                            source_aligned_words = self._word_alignments.get_source_aligned_words(
+                                adjusted_trg_break_offset
+                            )
+                        self._add_trg_verse_break(src_break_offset, adjusted_trg_break_offset + 1)
                         continue
                 if not contains_letter(self._source_tokens[src_break_offset]):
-                    aligned_words = self._word_alignments.get_aligned_words(src_break_offset)
+                    aligned_words = self._word_alignments.get_target_aligned_words(src_break_offset)
                     if (
                         len(aligned_words) == 1
                         and not contains_letter(self._target_tokens[aligned_words[0]])
-                        and (src_break_offset, aligned_words[0]) in best_split_indices
+                        and (src_break_offset, aligned_words[0] + 1) in best_split_indices
                     ):
-                        self._add_trg_verse_break(src_break_offset, aligned_words[0])
+                        self._add_trg_verse_break(src_break_offset, aligned_words[0] + 1)
                         continue
 
             if len(best_split_indices) > 1:
@@ -463,7 +452,7 @@ class AdaptedMarkerPlacementVerseSegmenter(VerseSegmenter):
             # Only accept aligned pairs where both the src and trg token are punctuation
             hyp_tok = source_tokens[src_hyp]
             if len(hyp_tok) > 0 and not any(c.isalpha() for c in hyp_tok) and src_hyp < len(source_tokens):
-                aligned_trg_toks = word_alignments.get_aligned_words(src_hyp)
+                aligned_trg_toks = word_alignments.get_target_aligned_words(src_hyp)
                 # If aligning to a token that precedes that marker,
                 # the trg token predicted to be closest to the marker
                 # is the last token aligned to the src rather than the first
@@ -488,7 +477,7 @@ class AdaptedMarkerPlacementVerseSegmenter(VerseSegmenter):
             trg_hyp = -1
             while trg_hyp == -1 and src_hyp >= 0 and src_hyp < len(source_tokens):
                 checked.add(src_hyp)
-                aligned_trg_toks = word_alignments.get_aligned_words(src_hyp)
+                aligned_trg_toks = word_alignments.get_target_aligned_words(src_hyp)
                 if len(aligned_trg_toks) > 0:
                     # If aligning with a source token that precedes the marker,
                     # the target token predicted to be closest to the marker is the last aligned token rather than the first
@@ -864,7 +853,7 @@ def main() -> None:
     )
     src_segmented_passages = parallel_passages.get_source_segmented_passages()
 
-    verse_segmenter_factory = FewestCrossedAlignmentsVerseSegmenterFactory(pseudoalignment_weight=0.25)
+    verse_segmenter_factory = FewestCrossedAlignmentsVerseSegmenterFactory(pseudoalignment_weight=0.1)
     trg_segmented_passages = list(parallel_passages.segment_target_passages(verse_segmenter_factory))
 
     src_path = Path(args.target_passages).with_suffix(".src.txt")
