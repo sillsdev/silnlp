@@ -203,16 +203,10 @@ class VerseSegmenter(ABC):
         current_verse_ending_char_index = 0
         current_verse_offset_index = 0
         for target_word_index, target_word in enumerate(self._target_tokens):
-            if target_verse_offsets[current_verse_offset_index] == -1:
-                verse_ref = references[current_verse_offset_index]
-                target_verses.append(Verse(verse_ref, ""))
-
-                current_verse_starting_char_index = current_verse_ending_char_index
-                current_verse_offset_index += 1
-                if current_verse_offset_index >= len(target_verse_offsets):
-                    break
-
-            elif target_word_index >= target_verse_offsets[current_verse_offset_index]:
+            if (
+                target_verse_offsets[current_verse_offset_index] == -1
+                or target_word_index >= target_verse_offsets[current_verse_offset_index]
+            ):
                 verse_ref = references[current_verse_offset_index]
                 verse_text = self._target_text[current_verse_starting_char_index:current_verse_ending_char_index]
                 target_verses.append(Verse(verse_ref, verse_text))
@@ -268,6 +262,7 @@ class FewestCrossedAlignmentsVerseSegmenter(VerseSegmenter):
         source_verse_token_offsets: List[int],
         word_alignments: WordAlignments,
         psuedoalignment_weight: float,
+        psuedoalignment_exponent: float,
     ):
         super().__init__(source_tokens, target_tokens, target_text, source_verse_token_offsets, word_alignments)
         num_src_tokens = len(self._source_tokens)
@@ -287,6 +282,7 @@ class FewestCrossedAlignmentsVerseSegmenter(VerseSegmenter):
         self._target_verse_token_offsets[-1] = num_trg_tokens + 1
 
         self._pseudoalignment_weight = psuedoalignment_weight
+        self._pseudoalignment_exponent = psuedoalignment_exponent
 
     def _add_trg_verse_break(self, src_offset: int, trg_offset: int) -> None:
         self._remaining_breaks_to_map.remove(src_offset)
@@ -393,7 +389,7 @@ class FewestCrossedAlignmentsVerseSegmenter(VerseSegmenter):
             src_word_index - self._nearest_preceding_segment_break[src_word_index][0]
         ) * matrix_trg_width / matrix_src_width + self._nearest_preceding_segment_break[src_word_index][0]
         crossed_alignment_weight = abs(trg_word_index - diagonal_src_index_projection)
-        return crossed_alignment_weight
+        return crossed_alignment_weight**self._pseudoalignment_exponent
 
     def _combine_alignment_scores(
         self, actual_crossed_alignments: float, crossed_pseudoalignment_weight: float
@@ -404,8 +400,9 @@ class FewestCrossedAlignmentsVerseSegmenter(VerseSegmenter):
 
 
 class FewestCrossedAlignmentsVerseSegmenterFactory(AbstractVerseSegmenterFactory):
-    def __init__(self, pseudoalignment_weight: float):
+    def __init__(self, pseudoalignment_weight: float, pseudoalignment_exponent: float):
         self._pseudoalignment_weight = pseudoalignment_weight
+        self._pseudoalignment_exponent = pseudoalignment_exponent
 
     def create(
         self,
@@ -422,6 +419,7 @@ class FewestCrossedAlignmentsVerseSegmenterFactory(AbstractVerseSegmenterFactory
             source_verse_token_offsets,
             word_alignments,
             self._pseudoalignment_weight,
+            self._pseudoalignment_exponent,
         )
 
 
@@ -662,6 +660,12 @@ class EflomalAlignmentGenerator(AlignmentGenerator):
                 saved_alignments_file = self._target_passage_file.with_suffix(".alignments.txt")
                 shutil.copy(align_path, saved_alignments_file)
 
+                src_tokenized_file = self._target_passage_file.with_suffix(".src.tokenized.txt")
+                shutil.copy(src_path, src_tokenized_file)
+
+                trg_tokenized_file = self._target_passage_file.with_suffix(".trg.tokenized.txt")
+                shutil.copy(trg_path, trg_tokenized_file)
+
 
 class SavedAlignmentGenerator(AlignmentGenerator):
     def __init__(self, alignment_file: Path):
@@ -853,7 +857,9 @@ def main() -> None:
     )
     src_segmented_passages = parallel_passages.get_source_segmented_passages()
 
-    verse_segmenter_factory = FewestCrossedAlignmentsVerseSegmenterFactory(pseudoalignment_weight=0.1)
+    verse_segmenter_factory = FewestCrossedAlignmentsVerseSegmenterFactory(
+        pseudoalignment_weight=0.001, pseudoalignment_exponent=1.5
+    )
     trg_segmented_passages = list(parallel_passages.segment_target_passages(verse_segmenter_factory))
 
     src_path = Path(args.target_passages).with_suffix(".src.txt")
