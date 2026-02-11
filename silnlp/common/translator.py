@@ -265,7 +265,7 @@ class UsfmConfidenceFile(ConfidenceFile[VerseRef]):
 
     def write_chapter_confidence_scores_to_file(
         self, translated_draft: TranslatedDraft, scripture_refs: List[ScriptureRef]
-    ):
+    ) -> None:
         chapter_confidences: DefaultDict[int, List[float]] = defaultdict(list)
         for vref, confidence in zip(scripture_refs, translated_draft.get_all_sequence_confidence_scores()):
             if not vref.is_verse or confidence is None:
