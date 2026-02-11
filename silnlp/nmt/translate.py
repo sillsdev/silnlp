@@ -68,6 +68,7 @@ class TranslationTask:
         translator, config, step_str = self._init_translation_task(
             experiment_suffix=f"_{self.checkpoint}_{[book_number_to_id(book) for book in book_nums.keys()]}"
         )
+        confidence_files: List[Path] = []
         with translator:
             if src_project is None:
                 if len(config.src_projects) != 1:
@@ -107,7 +108,6 @@ class TranslationTask:
                 experiment_ckpt_str = f"{self.name}:base"
 
             translation_failed: List[str] = []
-            confidence_files: List[Path] = []
             for book_num, chapters in book_nums.items():
                 book = book_number_to_id(book_num)
                 try:
@@ -136,7 +136,7 @@ class TranslationTask:
             if len(translation_failed) > 0:
                 raise RuntimeError(f"Some books failed to translate: {' '.join(translation_failed)}")
 
-        if quality_estimation:
+        if quality_estimation and len(confidence_files) > 0:
             LOGGER.info("Running quality estimation...")
             estimate_quality(verse_test_scores_path, confidence_files)
             LOGGER.info("Quality estimation completed.")
@@ -156,6 +156,7 @@ class TranslationTask:
         tags: Optional[List[str]] = None,
     ) -> None:
         translator, config, _ = self._init_translation_task(experiment_suffix=f"_{self.checkpoint}_{src_prefix}")
+        confidence_files: List[Path] = []
         with translator:
             if src_iso is None:
                 src_iso = config.default_test_src_iso
@@ -170,7 +171,6 @@ class TranslationTask:
             if trg_iso == "":
                 LOGGER.warning("No language code was set for the target language")
 
-            confidence_files = []
             for i in range(start_seq, end_seq + 1):
                 file_num = f"{i:04d}"
                 src_file = f"{src_prefix}{file_num}.txt"
@@ -199,7 +199,7 @@ class TranslationTask:
                     if save_confidences:
                         confidence_files.extend(trg_file_path.parent.glob(f"{trg_file_path.stem}*{CONFIDENCE_SUFFIX}"))
 
-        if quality_estimation:
+        if quality_estimation and len(confidence_files) > 0:
             LOGGER.info("Running quality estimation...")
             estimate_quality(verse_test_scores_path, confidence_files)
             LOGGER.info("Quality estimation completed.")
@@ -220,6 +220,7 @@ class TranslationTask:
         translator, config, step_str = self._init_translation_task(
             experiment_suffix=f"_{self.checkpoint}_{os.path.basename(src)}"
         )
+        confidence_files: List[Path] = []
         with translator:
             if src_iso is None:
                 src_iso = config.default_test_src_iso
@@ -251,7 +252,6 @@ class TranslationTask:
             else:
                 src_file_paths = list(p for p in src_path.rglob("*.*") if p.is_file())
 
-            confidence_files = []
             for src_file_path in src_file_paths:
                 if trg_path.is_dir():
                     if src_path.is_file():
@@ -303,7 +303,7 @@ class TranslationTask:
                 if save_confidences:
                     confidence_files.extend(trg_file_path.parent.glob(f"{trg_file_path.stem}*{CONFIDENCE_SUFFIX}"))
 
-        if quality_estimation:
+        if quality_estimation and len(confidence_files) > 0:
             LOGGER.info("Running quality estimation...")
             estimate_quality(verse_test_scores_path, confidence_files)
             LOGGER.info("Quality estimation completed.")

@@ -304,7 +304,7 @@ def compute_usable_proportions(
         txt_file_totals = defaultdict(float)
         txt_file_counts = defaultdict(int)
         with open(output_dir / "usability_sequences.tsv", "w", encoding="utf-8", newline="\n") as sequence_file:
-            sequence_file.write("Sequence Number\tProjected chrF3\tUsability\tLabel\n")
+            sequence_file.write("Trg Draft File\tSequence Number\tProjected chrF3\tUsability\tLabel\n")
             for sequence_score in sequence_scores:
                 if sequence_score.projected_chrf3 is None:
                     LOGGER.warning(f"Sequence {sequence_score.sequence_num} does not have a projected chrf3. Skipping.")
@@ -317,7 +317,8 @@ def compute_usable_proportions(
                 txt_file_counts[sequence_score.trg_draft_file_stem] += 1
 
                 sequence_file.write(
-                    f"{sequence_score.sequence_num}\t{sequence_score.projected_chrf3:.2f}\t{prob:.3f}\t{label}\n"
+                    f"{sequence_score.trg_draft_file_stem}\t{sequence_score.sequence_num}\t"
+                    f"{sequence_score.projected_chrf3:.2f}\t{prob:.3f}\t{label}\n"
                 )
         compute_txt_file_usability(txt_file_scores, txt_file_totals, txt_file_counts, output_dir)
 
