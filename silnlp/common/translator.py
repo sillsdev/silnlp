@@ -178,16 +178,17 @@ class ConfidenceFile(ABC, Generic[TVerseKey]):
 
     @classmethod
     def _get_confidence_file_type(cls, confidence_file_path: Path) -> type["ConfidenceFile"]:
-        ext = cls.get_original_extension(confidence_file_path)
-        ext_lower = ext.lower()
-        if ext_lower in {".usfm", ".sfm"}:
+        ext = cls.get_original_extension(confidence_file_path).lower()
+        if ext in {".usfm", ".sfm"}:
             return UsfmConfidenceFile
-        elif ext_lower == ".txt":
+        if ext == ".txt":
             if confidence_file_path.name.startswith("test.trg-predictions"):
                 return TestConfidenceFile
             return TxtConfidenceFile
-        else:
-            raise ValueError(f"Invalid file extension {ext}. " f"Valid extensions are .usfm, .sfm, and .txt.")
+        raise ValueError(
+            f"Invalid trg draft file extension {ext} for confidence file. "
+            f"Valid extensions are .usfm, .sfm, and .txt."
+        )
 
     @classmethod
     def from_confidence_file_path(cls, confidence_file_path: Path) -> "ConfidenceFile":
@@ -214,29 +215,12 @@ class ConfidenceFile(ABC, Generic[TVerseKey]):
         return confidence_file_path.with_name(confidence_file_path.name.removesuffix(CONFIDENCE_SUFFIX)).suffix
 
     @abstractmethod
-    def _generate_confidence_files(
+    def generate_confidence_files(
         self,
         translated_draft: TranslatedDraft,
         scripture_refs: Optional[List[ScriptureRef]] = None,
     ) -> None:
         pass
-
-    @classmethod
-    def generate_confidence_files(
-        cls,
-        translated_draft: TranslatedDraft,
-        trg_draft_file_path: Path,
-        scripture_refs: Optional[List[ScriptureRef]] = None,
-    ) -> None:
-        if not translated_draft.has_sequence_confidence_scores():
-            LOGGER.warning(
-                f"{trg_draft_file_path} was not translated with beam search, "
-                f"so confidence scores will not be calculated for this file."
-            )
-            return
-
-        confidence_file = cls.from_draft_file_path(trg_draft_file_path)
-        confidence_file._generate_confidence_files(translated_draft, scripture_refs)
 
     @abstractmethod
     def _parse_verse_key(self, raw_key: str) -> TVerseKey:
@@ -267,7 +251,7 @@ class UsfmConfidenceFile(ConfidenceFile[VerseRef]):
     def _parse_verse_key(self, raw_key: str) -> VerseRef:
         return VerseRef.from_string(raw_key)
 
-    def _generate_confidence_files(
+    def generate_confidence_files(
         self,
         translated_draft: TranslatedDraft,
         scripture_refs: Optional[List[ScriptureRef]] = None,
@@ -349,7 +333,7 @@ class TxtConfidenceFile(ConfidenceFile[int]):
     def _parse_verse_key(self, raw_key: str) -> int:
         return int(raw_key)
 
-    def _generate_confidence_files(
+    def generate_confidence_files(
         self,
         translated_draft: TranslatedDraft,
         scripture_refs: Optional[List[ScriptureRef]] = None,
@@ -394,12 +378,28 @@ class TestConfidenceFile(ConfidenceFile[int]):
     def _parse_verse_key(self, raw_key: str) -> int:
         return int(raw_key)
 
-    def _generate_confidence_files(
+    def generate_confidence_files(
         self,
         translated_draft: TranslatedDraft,
         scripture_refs: Optional[List[ScriptureRef]] = None,
     ) -> None:
         translated_draft.write_confidence_scores_to_file(self._path)
+
+
+def generate_confidence_files(
+    translated_draft: TranslatedDraft,
+    trg_draft_file_path: Path,
+    scripture_refs: Optional[List[ScriptureRef]] = None,
+) -> None:
+    if not translated_draft.has_sequence_confidence_scores():
+        LOGGER.warning(
+            f"{trg_draft_file_path} was not translated with beam search, "
+            f"so confidence scores will not be calculated for this file."
+        )
+        return
+
+    confidence_file = ConfidenceFile.from_draft_file_path(trg_draft_file_path)
+    confidence_file.generate_confidence_files(translated_draft, scripture_refs)
 
 
 class Translator(AbstractContextManager["Translator"], ABC):
@@ -439,7 +439,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
             write_corpus(trg_draft_file_path, translated_draft.get_all_translations())
 
             if save_confidences:
-                ConfidenceFile.generate_confidence_files(
+                generate_confidence_files(
                     translated_draft,
                     trg_draft_file_path,
                 )

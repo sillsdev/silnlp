@@ -75,7 +75,7 @@ from transformers.utils.logging import tqdm
 
 from ..common.corpus import Term, count_lines, get_terms
 from ..common.environment import SIL_NLP_ENV
-from ..common.translator import ConfidenceFile, DraftGroup, SentenceTranslation, SentenceTranslationGroup
+from ..common.translator import DraftGroup, SentenceTranslation, SentenceTranslationGroup, generate_confidence_files
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, get_mt_exp_dir, merge_dict
 from .config import CheckpointType, Config, NMTModel
 from .corpora import DataFile
@@ -1215,7 +1215,7 @@ class HuggingFaceNMTModel(NMTModel):
                     out_file.write("\n".join(translated_draft.get_all_tokenized_translations()) + "\n")
 
                     if save_confidences:
-                        ConfidenceFile.generate_confidence_files(
+                        generate_confidence_files(
                             translated_draft,
                             translation_draft_path,
                         )
