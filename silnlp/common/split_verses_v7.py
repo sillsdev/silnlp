@@ -4,6 +4,7 @@ import shutil
 from collections import Counter
 from pathlib import Path
 
+from aiohttp import TraceDnsCacheHitParams
 from machine.corpora import FileParatextProjectSettingsParser, UsfmStylesheet, UsfmToken, UsfmTokenizer, UsfmTokenType, UsfmParser, UsfmElementType
 
 from .collect_verse_counts import DT_CANON, NT_CANON, OT_CANON
@@ -19,10 +20,15 @@ MAX_LENGTH = 200
 VALID_CANONS = ["OT", "NT", "DT"]
 VALID_BOOKS = OT_CANON + NT_CANON + DT_CANON
 
-
 SENTENCE_ENDS = '.!?'
 WORD_BREAKS = " ,;:-"
 CLOSE_QUOTES = '"\'"'
+
+ELEMENT_TO_TOKEN_TYPE = {
+    UsfmElementType.PARA: UsfmTokenType.PARAGRAPH,
+    UsfmElementType.NOTE: UsfmTokenType.NOTE,
+    UsfmElementType.CHAR: UsfmTokenType.CHARACTER,
+}
 
 def find_break_positions(text):
     "Return list of (position, is_sentence_break) for valid break points"
@@ -84,6 +90,36 @@ def split_text(text, max_len):
     return chunks
 
 
+# def split_text_token(parser, max_len):
+#     "Split long text into parts with the appropriate para/char markers"
+
+#     chunks = split_text(parser.state.token.text, max_len)
+#     if len(chunks) == 1: 
+#         print(f"Warning: text chunk passed to split_text_token was not longer than {max_len}:\n{parser.state.token.text}")
+#         return [parser.state.token]  # No change to this token.
+
+#     elif len(chunks) > 1:
+#         result = [UsfmToken(UsfmTokenType.TEXT, text=chunks[0])]
+#         if len(parser.state.stack) == 3 and parser.state.stack[0].type == UsfmElementType.PARA and parser.state.stack[1].type == UsfmElementType.NOTE and parser.state.stack[2].type == UsfmElementType.CHAR:
+#             for chunk in chunks[1:]:
+#                 result.append(UsfmToken(UsfmTokenType.PARAGRAPH, marker=parser.state.stack[0].marker))
+#                 result.append(UsfmToken(UsfmTokenType.NOTE, marker=parser.state.stack[1].marker))
+#                 result.append(UsfmToken(UsfmTokenType.CHARACTER, marker=parser.state.stack[2].marker))
+#                 result.append(UsfmToken(UsfmTokenType.TEXT, text=chunk))
+#         elif len(parser.state.stack) == 2 and parser.state.stack[0].type == UsfmElementType.PARA and parser.state.stack[1].type == UsfmElementType.CHAR:
+#             for chunk in chunks[1:]:
+#                 result.append(UsfmToken(UsfmTokenType.PARAGRAPH, marker=parser.state.stack[0].marker))
+#                 result.append(UsfmToken(UsfmTokenType.CHARACTER, marker=parser.state.stack[1].marker))
+#                 result.append(UsfmToken(UsfmTokenType.TEXT, text=chunk))
+#         elif len(parser.state.stack) == 1 and parser.state.stack[0].type == UsfmElementType.PARA:
+#             for chunk in chunks[1:]:
+#                 result.append(UsfmToken(UsfmTokenType.PARAGRAPH, marker=parser.state.stack[0].marker))
+#                 result.append(UsfmToken(UsfmTokenType.TEXT, text=chunk))
+#         else:
+#             print(f"Warning, don't know how to handle this parser.state.stack: {parser.state.stack} in split_text_token.")
+#     return result
+
+
 def split_text_token(parser, max_len):
     "Split long text into parts with the appropriate para/char markers"
 
@@ -91,19 +127,19 @@ def split_text_token(parser, max_len):
     if len(chunks) == 1: 
         print(f"Warning: text chunk passed to split_text_token was not longer than {max_len}:\n{parser.state.token.text}")
         return [parser.state.token]  # No change to this token.
-    elif len(chunks) > 1:
-        result = [UsfmToken(UsfmTokenType.TEXT, text=chunks[0])]
-        if len(parser.state.stack) == 2 and parser.state.stack[0].type == UsfmElementType.PARA and parser.state.stack[1].type == UsfmElementType.CHAR:
-            for chunk in chunks[1:]:
-                result.append(UsfmToken(UsfmTokenType.PARAGRAPH, marker=parser.state.stack[0].marker))
-                result.append(UsfmToken(UsfmTokenType.CHARACTER, marker=parser.state.stack[1].marker))
-                result.append(UsfmToken(UsfmTokenType.TEXT, text=chunk))
-        elif len(parser.state.stack) == 1 and parser.state.stack[0].type == UsfmElementType.PARA:
-            for chunk in chunks[1:]:
-                result.append(UsfmToken(UsfmTokenType.PARAGRAPH, marker=parser.state.stack[0].marker))
-                result.append(UsfmToken(UsfmTokenType.TEXT, text=chunk))
-        else:
-            print(f"Warning, don't know how to handle this parser.state.stack: {parser.state.stack} in split_text_token.")
+
+    stack = parser.state.stack
+    if not stack or stack[0].type != UsfmElementType.PARA:
+        print(f"Warning: expected PARA as first stack element, got: {stack}")
+        return [parser.state.token]
+
+    result = [UsfmToken(UsfmTokenType.TEXT, text=chunks[0])]
+    for chunk in chunks[1:]:
+        for elem in stack:
+            token_type = ELEMENT_TO_TOKEN_TYPE.get(elem.type)
+            if token_type: result.append(UsfmToken(token_type, marker=elem.marker))
+            else: print(f"Warning: unknown element type in stack: {elem.type}")
+        result.append(UsfmToken(UsfmTokenType.TEXT, text=chunk))
     return result
 
 
