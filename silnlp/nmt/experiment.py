@@ -97,10 +97,13 @@ class SILExperiment:
         postprocess_handler = PostprocessHandler([PostprocessConfig(pc) for pc in postprocess_configs])
 
         quality_estimation = translate_configs.get("quality_estimation", False)
-        if quality_estimation is True:
-            verse_test_scores_path = get_mt_exp_dir(self.config.exp_dir)
-        elif quality_estimation and quality_estimation.get("verse_test_scores_file"):
-            verse_test_scores_path = get_mt_exp_dir(quality_estimation["verse_test_scores_file"])
+
+        if quality_estimation:
+            verse_test_scores_path = get_mt_exp_dir(
+                quality_estimation.get("verse_test_scores_file")
+                if isinstance(quality_estimation, dict) and quality_estimation.get("verse_test_scores_file")
+                else self.config.exp_dir
+            )
         else:
             verse_test_scores_path = None
         if quality_estimation and not self.save_confidences:
