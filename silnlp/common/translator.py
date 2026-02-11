@@ -174,31 +174,32 @@ class ConfidenceFile(ABC, Generic[TVerseKey]):
         if not path.name.endswith(CONFIDENCE_SUFFIX):
             raise ValueError(f"Confidence file path must end with {CONFIDENCE_SUFFIX}, got {path.name}")
         self._path = path
-        self._trg_draft_file_path = path.with_name(path.name.removesuffix(CONFIDENCE_SUFFIX))
+        self._trg_draft_file_path = self._get_trg_draft_file_path_from_confidence_path(path)
 
     @classmethod
-    def _get_confidence_file_type(cls, confidence_file_path: Path) -> type["ConfidenceFile"]:
-        ext = cls.get_original_extension(confidence_file_path).lower()
+    def _get_confidence_file_type(cls, trg_draft_file_path: Path) -> type["ConfidenceFile"]:
+        if trg_draft_file_path.name.startswith("test.trg-predictions"):
+            return TestConfidenceFile
+        ext = trg_draft_file_path.suffix.lower()
         if ext in {".usfm", ".sfm"}:
             return UsfmConfidenceFile
         if ext == ".txt":
-            if confidence_file_path.name.startswith("test.trg-predictions"):
-                return TestConfidenceFile
             return TxtConfidenceFile
         raise ValueError(
-            f"Invalid trg draft file extension {ext} for confidence file. "
-            f"Valid extensions are .usfm, .sfm, and .txt."
+            f"No confidence file type corresponds to trg_draft_file_path {trg_draft_file_path}. "
+            f"Expected a trg_draft_file_path starting with 'test.trg-predictions' or ending with .usfm/.sfm/.txt."
         )
 
     @classmethod
     def from_confidence_file_path(cls, confidence_file_path: Path) -> "ConfidenceFile":
-        file_type = cls._get_confidence_file_type(confidence_file_path)
+        trg_draft_file_path = cls._get_trg_draft_file_path_from_confidence_path(confidence_file_path)
+        file_type = cls._get_confidence_file_type(trg_draft_file_path)
         return file_type(confidence_file_path)
 
     @classmethod
     def from_draft_file_path(cls, trg_draft_file_path: Path) -> "ConfidenceFile":
         confidence_file_path = trg_draft_file_path.with_suffix(f"{trg_draft_file_path.suffix}{CONFIDENCE_SUFFIX}")
-        file_type = cls._get_confidence_file_type(confidence_file_path)
+        file_type = cls._get_confidence_file_type(trg_draft_file_path)
         return file_type(confidence_file_path)
 
     def get_path(self) -> Path:
@@ -211,8 +212,8 @@ class ConfidenceFile(ABC, Generic[TVerseKey]):
         return self._trg_draft_file_path
 
     @staticmethod
-    def get_original_extension(confidence_file_path: Path) -> str:
-        return confidence_file_path.with_name(confidence_file_path.name.removesuffix(CONFIDENCE_SUFFIX)).suffix
+    def _get_trg_draft_file_path_from_confidence_path(confidence_file_path: Path) -> str:
+        return confidence_file_path.with_name(confidence_file_path.name.removesuffix(CONFIDENCE_SUFFIX))
 
     @abstractmethod
     def generate_confidence_files(
