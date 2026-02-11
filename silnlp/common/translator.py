@@ -212,7 +212,7 @@ class ConfidenceFile(ABC, Generic[TVerseKey]):
         return self._trg_draft_file_path
 
     @staticmethod
-    def _get_trg_draft_file_path_from_confidence_path(confidence_file_path: Path) -> str:
+    def _get_trg_draft_file_path_from_confidence_path(confidence_file_path: Path) -> Path:
         return confidence_file_path.with_name(confidence_file_path.name.removesuffix(CONFIDENCE_SUFFIX))
 
     @abstractmethod
