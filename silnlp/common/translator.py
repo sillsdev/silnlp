@@ -427,7 +427,6 @@ class Translator(AbstractContextManager["Translator"], ABC):
     ) -> None:
 
         sentences = [add_tags_to_sentence(tags, sentence) for sentence in load_corpus(src_file_path)]
-        print("translating text file")
         sentence_translation_groups: List[SentenceTranslationGroup] = list(
             self.translate(sentences, src_iso, trg_iso, produce_multiple_translations)
         )
