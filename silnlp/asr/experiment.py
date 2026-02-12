@@ -54,7 +54,7 @@ class DataCollatorCTCWithPadding:
         # different padding methods
         # split inputs and labels since they have to be of different lengths and need
         # different padding methods
-        input_features = [{"input_features": feature["input_features"]} for feature in features]
+        input_features = [{"input_values": feature["input_values"]} for feature in features]
         label_features = [{"input_ids": feature["labels"]} for feature in features]
 
         batch = self.processor.pad(
@@ -180,19 +180,30 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
         )
         processor = Wav2Vec2Processor(feature_extractor=feature_extractor, tokenizer=tokenizer)
 
-    def prepare_dataset(example):
-        audio = example["audio"]
+    if clearml.config.model.startswith("openai/whisper"):
+        def prepare_dataset(example):
+            audio = example["audio"]
 
-        example = processor(
-            audio=audio["array"],
-            sampling_rate=audio["sampling_rate"],
-            text=example["text"],
-        )
+            example = processor(
+                audio=audio["array"],
+                sampling_rate=audio["sampling_rate"],
+                text=example["text"],
+            )
 
-        # compute input length of audio sample in seconds
-        example["input_length"] = len(audio["array"]) / audio["sampling_rate"]
+            # compute input length of audio sample in seconds
+            example["input_length"] = len(audio["array"]) / audio["sampling_rate"]
 
-        return example
+            return example
+    else:
+        def prepare_dataset(batch):
+            audio = batch["audio"]
+
+            batch["input_values"] = processor(audio["array"], sampling_rate=audio["sampling_rate"]).input_values[0]
+            # batch["input_features"] = processor(audio["array"], sampling_rate=audio["sampling_rate"]).input_features[0]
+            batch["input_length"] = len(batch["input_values"])
+
+            batch["labels"] = processor(text=batch["text"]).input_ids
+            return batch
 
     dataset = dataset.map(prepare_dataset)
 
