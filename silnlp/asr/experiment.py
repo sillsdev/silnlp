@@ -54,7 +54,7 @@ class DataCollatorCTCWithPadding:
         # different padding methods
         # split inputs and labels since they have to be of different lengths and need
         # different padding methods
-        input_features = [{"input_values": feature["input_values"]} for feature in features]
+        input_features = [{"input_features": feature["input_features"]} for feature in features]
         label_features = [{"input_ids": feature["labels"]} for feature in features]
 
         batch = self.processor.pad(
@@ -156,7 +156,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
 
     dataset = dataset.cast_column("audio", Audio(sampling_rate=16000))
 
-    if len(characters_to_remove) > 0:
+    if len(characters_to_remove) > 0 and not clearml.config.model.startswith("openai/whisper"):
         chars_to_remove_regex = f"[{re.escape(characters_to_remove)}]"
 
         def remove_characters(batch):
@@ -222,8 +222,10 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
     cer_metric = evaluate.load("cer")
 
     def compute_metrics(pred):
-        pred_logits = pred.predictions
-        pred_ids = np.argmax(pred_logits, axis=-1)
+        pred_ids = pred.predictions
+        
+        if not clearml.config.model.startswith("openai/whisper"):
+            pred_ids = np.argmax(pred_ids, axis=-1)
 
         pred.label_ids[pred.label_ids == -100] = processor.tokenizer.pad_token_id
 
@@ -264,39 +266,75 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
         adapter_weights = model._get_adapters()
         for param in adapter_weights.values():
             param.requires_grad = True
+    
+    if clearml.config.model.startswith("openai/whisper"):
+        training_args = Seq2SeqTrainingArguments(
+            output_dir="./",
+            per_device_train_batch_size=16,
+            gradient_accumulation_steps=2,
+            learning_rate=1e-5,
+            lr_scheduler_type="constant_with_warmup",
+            warmup_steps=50,
+            max_steps=500,
+            gradient_checkpointing=True,
+            fp16=True,
+            fp16_full_eval=True,
+            eval_strategy="steps",
+            per_device_eval_batch_size=16,
+            predict_with_generate=True,
+            generation_max_length=225,
+            save_steps=500,
+            eval_steps=500,
+            logging_steps=25,
+            load_best_model_at_end=True,
+            metric_for_best_model="cer",
+            greater_is_better=False,
+        )
 
-    training_args = TrainingArguments(
-        group_by_length=True,
-        per_device_train_batch_size=16,
-        gradient_accumulation_steps=2,
-        learning_rate=3e-4,
-        lr_scheduler_type="constant_with_warmup",
-        warmup_steps=50,
-        max_steps=500,
-        gradient_checkpointing=True,
-        fp16=True,
-        fp16_full_eval=True,
-        eval_strategy="steps",
-        per_device_eval_batch_size=16,
-        save_steps=100,
-        eval_steps=100,
-        logging_steps=25,
-        load_best_model_at_end=True,
-        metric_for_best_model="cer",
-        greater_is_better=False,
-        push_to_hub=False,
-        output_dir="./",
-    )
+        model.generation_config.suppress_tokens = []
 
-    trainer = Trainer(
-        args=training_args,
-        model=model.to("cuda"),
-        train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
-        data_collator=data_collator,
-        compute_metrics=compute_metrics,
-        processing_class=processor,
-    )
+        trainer = Seq2SeqTrainer(
+            args=training_args,
+            model=model.to("cuda"),
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            data_collator=data_collator,
+            compute_metrics=compute_metrics,
+            processing_class=processor,
+        )
+    else:
+        training_args = TrainingArguments(
+            group_by_length=True,
+            per_device_train_batch_size=16,
+            gradient_accumulation_steps=2,
+            learning_rate=3e-4,
+            lr_scheduler_type="constant_with_warmup",
+            warmup_steps=50,
+            max_steps=500,
+            gradient_checkpointing=True,
+            fp16=True,
+            fp16_full_eval=True,
+            eval_strategy="steps",
+            per_device_eval_batch_size=16,
+            save_steps=100,
+            eval_steps=100,
+            logging_steps=25,
+            load_best_model_at_end=True,
+            metric_for_best_model="cer",
+            greater_is_better=False,
+            push_to_hub=False,
+            output_dir="./",
+        )
+
+        trainer = Trainer(
+            args=training_args,
+            model=model.to("cuda"),
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            data_collator=data_collator,
+            compute_metrics=compute_metrics,
+            processing_class=processor,
+        )
 
     trainer.train()
 
