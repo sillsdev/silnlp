@@ -9,7 +9,7 @@ import re
 import numpy as np
 import yaml #TODO cleanup imports
 
-from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML #TODO move clearml to separate module?
+from silnlp.nmt.clearml_connection import LOGGER, TAGS_LIST, SILClearML #TODO move clearml to separate module?
 
 from ..common.environment import SIL_NLP_ENV
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
@@ -24,7 +24,7 @@ import torch
 from datasets import Audio, Dataset
 from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments, WhisperForConditionalGeneration, WhisperProcessor, Wav2Vec2BertProcessor, Wav2Vec2Processor
 from transformers.models.whisper.english_normalizer import BasicTextNormalizer
-from transformers import AutoProcessor, AutoModel, AutoFeatureExtractor, AutoTokenizer
+from transformers import AutoProcessor, AutoModel, AutoFeatureExtractor, AutoTokenizer, Wav2Vec2CTCTokenizer
 
 @dataclass
 class DataCollatorCTCWithPadding:
@@ -136,6 +136,8 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
             batch["text"] = re.sub(chars_to_remove_regex, '', batch["text"]).lower()
             return batch
         dataset = dataset.map(remove_characters)
+    
+    LOGGER.log(f"Using model {clearml.config.model}")
 
     if clearml.config.model_prefix == "openai/whisper":
         processor = WhisperProcessor.from_pretrained(clearml.config.model, language=target_language, task="transcribe")
@@ -143,7 +145,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
         get_vocab(dataset, target_language)
 
         feature_extractor = AutoFeatureExtractor.from_pretrained(clearml.config.model)
-        tokenizer = AutoTokenizer.from_pretrained("./", unk_token="[UNK]", pad_token="[PAD]", word_delimiter_token="|", target_lang=target_language)
+        tokenizer = Wav2Vec2CTCTokenizer.from_pretrained("./", unk_token="[UNK]", pad_token="[PAD]", word_delimiter_token="|", target_lang=target_language)
         processor = AutoProcessor(feature_extractor=feature_extractor, tokenizer=tokenizer)
 
 
