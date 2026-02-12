@@ -146,7 +146,9 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
 
         feature_extractor = AutoFeatureExtractor.from_pretrained(clearml.config.model)
         tokenizer = Wav2Vec2CTCTokenizer.from_pretrained("./", unk_token="[UNK]", pad_token="[PAD]", word_delimiter_token="|", target_lang=target_language)
-        processor = AutoProcessor(feature_extractor=feature_extractor, tokenizer=tokenizer)
+        processor = AutoProcessor.from_pretrained(clearml.config.model)
+        processor.tokenizer = tokenizer
+        processor.feature_extractor = feature_extractor
 
 
     def prepare_dataset(example):
