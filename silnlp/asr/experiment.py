@@ -138,7 +138,6 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
         dataset = dataset.map(remove_characters)
     
     LOGGER.info(f"Using model {clearml.config.model}")
-    LOGGER.info(f"Using model with prefix {clearml.config.model_prefix}")
 
     if clearml.config.model.startswith("openai/whisper"):
         processor = WhisperProcessor.from_pretrained(clearml.config.model, language=target_language, task="transcribe")
@@ -213,7 +212,6 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
         # set language and task for generation and re-enable cache
         model.generate = partial(model.generate, language=target_language, task="transcribe", use_cache=True)
 
-        model.generation_config.suppress_tokens = []
     elif clearml.config.model.startswith("facebook/mms"):
         model.init_adapter_layers()
         model.freeze_base_model()
