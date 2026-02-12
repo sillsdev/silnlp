@@ -136,15 +136,6 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
             batch["text"] = re.sub(chars_to_remove_regex, '', batch["text"]).lower()
             return batch
         dataset = dataset.map(remove_characters)
-    
-    if max_input_length > 0:
-        def is_audio_in_length_range(length):
-            return length < max_input_length
-
-        dataset = dataset.filter(
-            is_audio_in_length_range,
-            input_columns=["input_length"],
-        )
 
     if clearml.config.model_prefix == "openai/whisper":
         processor = WhisperProcessor.from_pretrained(clearml.config.model, language=target_language, task="transcribe")
@@ -173,15 +164,14 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
 
     dataset = dataset.map(prepare_dataset)
 
+    if max_input_length > 0:
+        def is_audio_in_length_range(length):
+            return length < max_input_length
 
-    def is_audio_in_length_range(length):
-        return length < max_input_length
-
-
-    dataset = dataset.filter(
-        is_audio_in_length_range,
-        input_columns=["input_length"],
-    )
+        dataset = dataset.filter(
+            is_audio_in_length_range,
+            input_columns=["input_length"],
+        )
 
     split_dataset = dataset.train_test_split(test_size=test_size)
     train_dataset = split_dataset["train"]
