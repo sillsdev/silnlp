@@ -24,7 +24,7 @@ import torch
 from datasets import Audio, Dataset
 from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments, WhisperForConditionalGeneration, WhisperProcessor, Wav2Vec2BertProcessor, Wav2Vec2Processor
 from transformers.models.whisper.english_normalizer import BasicTextNormalizer
-from transformers import AutoProcessor, AutoModel, AutoFeatureExtractor, AutoTokenizer, Wav2Vec2CTCTokenizer
+from transformers import AutoProcessor, AutoModel, AutoFeatureExtractor, AutoTokenizer, Wav2Vec2CTCTokenizer, TrainingArguments
 
 @dataclass
 class DataCollatorCTCWithPadding:
@@ -138,6 +138,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
         dataset = dataset.map(remove_characters)
     
     LOGGER.info(f"Using model {clearml.config.model}")
+    LOGGER.info(f"Using model with prefix {clearml.config.model_preix}")
 
     if clearml.config.model_prefix == "openai/whisper":
         processor = WhisperProcessor.from_pretrained(clearml.config.model, language=target_language, task="transcribe")
@@ -222,7 +223,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
             param.requires_grad = True
 
 
-    training_args = Seq2SeqTrainingArguments(
+    training_args = TrainingArguments(
         group_by_length=True,
         per_device_train_batch_size=16,
         gradient_accumulation_steps=2,
@@ -235,8 +236,6 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
         fp16_full_eval=True,
         eval_strategy="steps",
         per_device_eval_batch_size=16,
-        predict_with_generate=True,
-        generation_max_length=225,
         save_steps=100,
         eval_steps=100,
         logging_steps=25,
