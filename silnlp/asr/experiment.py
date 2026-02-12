@@ -140,7 +140,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
     LOGGER.info(f"Using model {clearml.config.model}")
     LOGGER.info(f"Using model with prefix {clearml.config.model_prefix}")
 
-    if clearml.config.model_prefix == "openai/whisper":
+    if clearml.config.model.startswith("openai/whisper"):
         processor = WhisperProcessor.from_pretrained(clearml.config.model, language=target_language, task="transcribe")
     else:
         get_vocab(dataset, target_language)
@@ -182,7 +182,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
     train_dataset = split_dataset["train"]
     eval_dataset = split_dataset["test"]
 
-    if clearml.config.model_prefix == "openai/whisper":
+    if clearml.config.model.startswith("openai/whisper"):
         data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor)
     else:
         data_collator = DataCollatorCTCWithPadding(processor=processor, padding=True)
@@ -206,7 +206,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
 
     model = AutoModel.from_pretrained(clearml.config.model)
 
-    if clearml.config.model_prefix == "openai/whisper":
+    if clearml.config.model.startswith("openai/whisper"):
         # disable cache during training since it's incompatible with gradient checkpointing
         model.config.use_cache = False
 
@@ -214,7 +214,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
         model.generate = partial(model.generate, language=target_language, task="transcribe", use_cache=True)
 
         model.generation_config.suppress_tokens = []
-    elif clearml.config.model_prefix == "facebook/mms":
+    elif clearml.config.model.startswith("facebook/mms"):
         model.init_adapter_layers()
         model.freeze_base_model()
 
