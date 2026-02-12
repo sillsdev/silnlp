@@ -41,6 +41,7 @@ from transformers import (
     Trainer,
     Wav2Vec2FeatureExtractor,
     AutoModelForCTC,
+    SeamlessM4TFeatureExtractor
 )
 
 
@@ -175,7 +176,11 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
         tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(
             "./", unk_token="[UNK]", pad_token="[PAD]", word_delimiter_token="|", target_lang=target_language
         )
-        processor = AutoProcessor.from_pretrained(clearml.config.model, tokenizer=tokenizer)
+        if clearml.config.model.startswith("facebook/w2v-bert"):
+            feature_extractor = SeamlessM4TFeatureExtractor.from_pretrained(clearml.config.model)
+            processor = Wav2Vec2BertProcessor(feature_extractor=feature_extractor, tokenizer=tokenizer)
+        else:
+            processor = AutoProcessor.from_pretrained(clearml.config.model, tokenizer=tokenizer)
 
     if clearml.config.model.startswith("openai/whisper"):
 
