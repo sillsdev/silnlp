@@ -137,7 +137,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
             return batch
         dataset = dataset.map(remove_characters)
     
-    LOGGER.log(f"Using model {clearml.config.model}")
+    LOGGER.info(f"Using model {clearml.config.model}")
 
     if clearml.config.model_prefix == "openai/whisper":
         processor = WhisperProcessor.from_pretrained(clearml.config.model, language=target_language, task="transcribe")
