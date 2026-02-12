@@ -55,7 +55,7 @@ class DataCollatorCTCWithPadding:
         # different padding methods
         # split inputs and labels since they have to be of different lengths and need
         # different padding methods
-        input_features = [{"input_values": feature["input_values"]} for feature in features]
+        input_features = [{"input_values": feature["input_values"]} if 'input_values' in feature else {'input_features': feature['input_features']} for feature in features]
         label_features = [{"input_ids": feature["labels"]} for feature in features]
 
         batch = self.processor.pad(
@@ -203,7 +203,11 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
         def prepare_dataset(batch):
             audio = batch["audio"]
 
-            batch["input_values"] = processor(audio["array"], sampling_rate=audio["sampling_rate"]).input_values[0]
+            processed_audio = processor(audio["array"], sampling_rate=audio["sampling_rate"])
+            if hasattr(processed_audio, 'input_values'):
+                batch["input_values"] = processed_audio.input_values[0]
+            else:
+                batch["input_features"] = processed_audio.input_features[0]
             batch["input_length"] = len(audio["array"]) / audio["sampling_rate"]
 
             batch["labels"] = processor(text=batch["text"]).input_ids
