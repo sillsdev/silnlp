@@ -243,7 +243,7 @@ def check_for_project_errors(copy_from: Path | None, project: str) -> None:
         translation_info = root.find(".//TranslationInfo")
         if translation_info is not None and translation_info.text != "Standard::":
             LOGGER.warning(
-                f"{project} is non-Standard and references another project, which may lead to incorrect versification. Translation Info: '{translation_info.text}'."
+                f"{project} is non-Standard and references another project, which may lead to incorrect versification. The project will default to English. Translation Info: '{translation_info.text}'."
             )
 
         naming_element = root.find(".//Naming")
