@@ -24,7 +24,7 @@ import torch
 from datasets import Audio, Dataset
 from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments, WhisperForConditionalGeneration, WhisperProcessor, Wav2Vec2BertProcessor, Wav2Vec2Processor
 from transformers.models.whisper.english_normalizer import BasicTextNormalizer
-from transformers import AutoProcessor, AutoModel, AutoFeatureExtractor, AutoTokenizer, Wav2Vec2CTCTokenizer, TrainingArguments, Trainer, Wav2Vec2FeatureExtractor
+from transformers import AutoProcessor, AutoModel, AutoFeatureExtractor, AutoTokenizer, Wav2Vec2CTCTokenizer, TrainingArguments, Trainer, Wav2Vec2FeatureExtractor, AutoModelForCTC
 
 @dataclass
 class DataCollatorCTCWithPadding:
@@ -204,9 +204,12 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
         cer = 100 * cer_metric.compute(predictions=pred_str, references=label_str)
 
         return {"cer": cer}
+    
+    if clearml.config.model.startswith("openai/whisper"):
+        model = WhisperForConditionalGeneration.from_pretrained(clearml.config.model)
+    else:
+        model = AutoModelForCTC.from_pretrained(clearml.config.model)
 
-
-    model = AutoModel.from_pretrained(clearml.config.model)
 
     if clearml.config.model.startswith("openai/whisper"):
         # disable cache during training since it's incompatible with gradient checkpointing
@@ -222,6 +225,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
         adapter_weights = model._get_adapters()
         for param in adapter_weights.values():
             param.requires_grad = True
+
 
 
     training_args = TrainingArguments(
@@ -245,7 +249,6 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
         greater_is_better=False,
         push_to_hub=False,
         output_dir="./",
-        remove_unused_columns=False,
     )
 
     trainer = Trainer(
