@@ -34,7 +34,9 @@ class DataCollatorCTCWithPadding:
     def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
         # split inputs and labels since they have to be of different lengths and need
         # different padding methods
-        input_features = [{"input_features": feature["input_features"]} for feature in features]
+        # split inputs and labels since they have to be of different lengths and need
+        # different padding methods
+        input_features = [{"input_values": feature["input_values"]} for feature in features]
         label_features = [{"input_ids": feature["labels"]} for feature in features]
 
         batch = self.processor.pad(
@@ -242,7 +244,8 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
         metric_for_best_model="cer",
         greater_is_better=False,
         push_to_hub=False,
-        output_dir="./"
+        output_dir="./",
+        remove_unused_columns=False,
     )
 
     trainer = Trainer(
