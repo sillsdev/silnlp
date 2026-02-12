@@ -24,7 +24,7 @@ import torch
 from datasets import Audio, Dataset
 from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments, WhisperForConditionalGeneration, WhisperProcessor, Wav2Vec2BertProcessor, Wav2Vec2Processor
 from transformers.models.whisper.english_normalizer import BasicTextNormalizer
-from transformers import AutoProcessor, AutoModel, AutoFeatureExtractor, AutoTokenizer, Wav2Vec2CTCTokenizer, TrainingArguments, Trainer
+from transformers import AutoProcessor, AutoModel, AutoFeatureExtractor, AutoTokenizer, Wav2Vec2CTCTokenizer, TrainingArguments, Trainer, Wav2Vec2FeatureExtractor
 
 @dataclass
 class DataCollatorCTCWithPadding:
@@ -144,11 +144,9 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
     else:
         get_vocab(dataset, target_language)
 
-        feature_extractor = AutoFeatureExtractor.from_pretrained(clearml.config.model)
+        feature_extractor = Wav2Vec2FeatureExtractor(feature_size=1, sampling_rate=16000, padding_value=0.0, do_normalize=True, return_attention_mask=True)
         tokenizer = Wav2Vec2CTCTokenizer.from_pretrained("./", unk_token="[UNK]", pad_token="[PAD]", word_delimiter_token="|", target_lang=target_language)
-        processor = AutoProcessor.from_pretrained(clearml.config.model)
-        processor.tokenizer = tokenizer
-        processor.feature_extractor = feature_extractor
+        processor = Wav2Vec2Processor(feature_extractor=feature_extractor, tokenizer=tokenizer)
 
 
     def prepare_dataset(example):
@@ -176,6 +174,9 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
             is_audio_in_length_range,
             input_columns=["input_length"],
         )
+    
+    from pprint import pformat
+    LOGGER.info(pformat(dataset))
 
     split_dataset = dataset.train_test_split(test_size=test_size)
     train_dataset = split_dataset["train"]
