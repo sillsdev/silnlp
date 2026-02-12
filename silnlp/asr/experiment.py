@@ -24,7 +24,7 @@ import torch
 from datasets import Audio, Dataset
 from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments, WhisperForConditionalGeneration, WhisperProcessor, Wav2Vec2BertProcessor, Wav2Vec2Processor
 from transformers.models.whisper.english_normalizer import BasicTextNormalizer
-from transformers import AutoProcessor, AutoModel, AutoFeatureExtractor, AutoTokenizer, Wav2Vec2CTCTokenizer, TrainingArguments
+from transformers import AutoProcessor, AutoModel, AutoFeatureExtractor, AutoTokenizer, Wav2Vec2CTCTokenizer, TrainingArguments, Trainer
 
 @dataclass
 class DataCollatorCTCWithPadding:
@@ -243,9 +243,10 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
         metric_for_best_model="cer",
         greater_is_better=False,
         push_to_hub=False,
+        output_dir="./"
     )
 
-    trainer = Seq2SeqTrainer(
+    trainer = Trainer(
         args=training_args,
         model=model.to("cuda"),
         train_dataset=train_dataset,
