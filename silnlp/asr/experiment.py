@@ -106,7 +106,7 @@ class DataCollatorSpeechSeq2SeqWithPadding:
         return batch
 
 
-def get_vocab(dataset: Dataset, target_language: str):
+def write_vocab(dataset: Dataset, target_language: str):
     def extract_all_chars(batch):
         all_text = " ".join(batch["text"])
         vocab = list(set(all_text))
@@ -170,15 +170,15 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
     if clearml.config.model.startswith("openai/whisper"):
         processor = WhisperProcessor.from_pretrained(clearml.config.model, language=target_language, task="transcribe")
     else:
-        get_vocab(dataset, target_language)
+        write_vocab(dataset, target_language)
 
         tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(
             "./", unk_token="[UNK]", pad_token="[PAD]", word_delimiter_token="|", target_lang=target_language
         )
-        processor = AutoProcessor.from_pretrained(clearml.config.model)
-        processor.tokenizer = tokenizer
+        processor = AutoProcessor.from_pretrained(clearml.config.model, tokenizer=tokenizer)
 
     if clearml.config.model.startswith("openai/whisper"):
+
         def prepare_dataset(example):
             audio = example["audio"]
 
@@ -192,7 +192,9 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
             example["input_length"] = len(audio["array"]) / audio["sampling_rate"]
 
             return example
+
     else:
+
         def prepare_dataset(batch):
             audio = batch["audio"]
 
@@ -231,7 +233,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
 
     def compute_metrics(pred):
         pred_ids = pred.predictions
-        
+
         if not clearml.config.model.startswith("openai/whisper"):
             pred_ids = np.argmax(pred_ids, axis=-1)
 
@@ -274,7 +276,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
         adapter_weights = model._get_adapters()
         for param in adapter_weights.values():
             param.requires_grad = True
-    
+
     if clearml.config.model.startswith("openai/whisper"):
         training_args = Seq2SeqTrainingArguments(
             output_dir="./",
