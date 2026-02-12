@@ -7,9 +7,9 @@ import json
 import re
 
 import numpy as np
-import yaml #TODO cleanup imports
+import yaml  # TODO cleanup imports
 
-from silnlp.nmt.clearml_connection import LOGGER, TAGS_LIST, SILClearML #TODO move clearml to separate module?
+from silnlp.nmt.clearml_connection import LOGGER, TAGS_LIST, SILClearML  # TODO move clearml to separate module?
 
 from ..common.environment import SIL_NLP_ENV
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
@@ -22,9 +22,27 @@ import evaluate
 import pandas as pd
 import torch
 from datasets import Audio, Dataset
-from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments, WhisperForConditionalGeneration, WhisperProcessor, Wav2Vec2BertProcessor, Wav2Vec2Processor
+from transformers import (
+    Seq2SeqTrainer,
+    Seq2SeqTrainingArguments,
+    WhisperForConditionalGeneration,
+    WhisperProcessor,
+    Wav2Vec2BertProcessor,
+    Wav2Vec2Processor,
+)
 from transformers.models.whisper.english_normalizer import BasicTextNormalizer
-from transformers import AutoProcessor, AutoModel, AutoFeatureExtractor, AutoTokenizer, Wav2Vec2CTCTokenizer, TrainingArguments, Trainer, Wav2Vec2FeatureExtractor, AutoModelForCTC
+from transformers import (
+    AutoProcessor,
+    AutoModel,
+    AutoFeatureExtractor,
+    AutoTokenizer,
+    Wav2Vec2CTCTokenizer,
+    TrainingArguments,
+    Trainer,
+    Wav2Vec2FeatureExtractor,
+    AutoModelForCTC,
+)
+
 
 @dataclass
 class DataCollatorCTCWithPadding:
@@ -58,6 +76,7 @@ class DataCollatorCTCWithPadding:
 
         return batch
 
+
 @dataclass
 class DataCollatorSpeechSeq2SeqWithPadding:
     processor: WhisperProcessor
@@ -86,21 +105,26 @@ class DataCollatorSpeechSeq2SeqWithPadding:
 
         return batch
 
+
 def get_vocab(dataset: Dataset, target_language: str):
-        def extract_all_chars(batch):
-            all_text = " ".join(batch["text"])
-            vocab = list(set(all_text))
-            return {"vocab": [vocab], "all_text": [all_text]}
-        vocab = dataset.map(extract_all_chars, batched=True, batch_size=-1, keep_in_memory=True, remove_columns=dataset.column_names)
-        vocab_list = list(set(vocab["vocab"][0]))
-        vocab_dict = {v: k for k, v in enumerate(sorted(vocab_list))}
-        vocab_dict["|"] = vocab_dict[" "]
-        del vocab_dict[" "]
-        vocab_dict["[UNK]"] = len(vocab_dict)
-        vocab_dict["[PAD]"] = len(vocab_dict)
-        new_vocab_dict = {target_language: vocab_dict}
-        with open('vocab.json', 'w') as vocab_file:
-            json.dump(new_vocab_dict, vocab_file)
+    def extract_all_chars(batch):
+        all_text = " ".join(batch["text"])
+        vocab = list(set(all_text))
+        return {"vocab": [vocab], "all_text": [all_text]}
+
+    vocab = dataset.map(
+        extract_all_chars, batched=True, batch_size=-1, keep_in_memory=True, remove_columns=dataset.column_names
+    )
+    vocab_list = list(set(vocab["vocab"][0]))
+    vocab_dict = {v: k for k, v in enumerate(sorted(vocab_list))}
+    vocab_dict["|"] = vocab_dict[" "]
+    del vocab_dict[" "]
+    vocab_dict["[UNK]"] = len(vocab_dict)
+    vocab_dict["[PAD]"] = len(vocab_dict)
+    new_vocab_dict = {target_language: vocab_dict}
+    with open("vocab.json", "w") as vocab_file:
+        json.dump(new_vocab_dict, vocab_file)
+
 
 def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Optional[str]) -> None:
     clearml = SILClearML(
@@ -112,7 +136,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
         tag=clearml_tag,
     )
 
-    #TODO should be in config
+    # TODO should be in config
     max_input_length = 30.0
     test_size = 0.1
     target_language = "swahili"
@@ -133,12 +157,14 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
     dataset = dataset.cast_column("audio", Audio(sampling_rate=16000))
 
     if len(characters_to_remove) > 0:
-        chars_to_remove_regex = f'[{re.escape(characters_to_remove)}]'
+        chars_to_remove_regex = f"[{re.escape(characters_to_remove)}]"
+
         def remove_characters(batch):
-            batch["text"] = re.sub(chars_to_remove_regex, '', batch["text"]).lower()
+            batch["text"] = re.sub(chars_to_remove_regex, "", batch["text"]).lower()
             return batch
+
         dataset = dataset.map(remove_characters)
-    
+
     LOGGER.info(f"Using model {clearml.config.model}")
 
     if clearml.config.model.startswith("openai/whisper"):
@@ -146,10 +172,13 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
     else:
         get_vocab(dataset, target_language)
 
-        feature_extractor = Wav2Vec2FeatureExtractor(feature_size=1, sampling_rate=16000, padding_value=0.0, do_normalize=True, return_attention_mask=True)
-        tokenizer = Wav2Vec2CTCTokenizer.from_pretrained("./", unk_token="[UNK]", pad_token="[PAD]", word_delimiter_token="|", target_lang=target_language)
+        feature_extractor = Wav2Vec2FeatureExtractor(
+            feature_size=1, sampling_rate=16000, padding_value=0.0, do_normalize=True, return_attention_mask=True
+        )
+        tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(
+            "./", unk_token="[UNK]", pad_token="[PAD]", word_delimiter_token="|", target_lang=target_language
+        )
         processor = Wav2Vec2Processor(feature_extractor=feature_extractor, tokenizer=tokenizer)
-
 
     def prepare_dataset(example):
         audio = example["audio"]
@@ -165,10 +194,10 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
 
         return example
 
-
     dataset = dataset.map(prepare_dataset)
 
     if max_input_length > 0:
+
         def is_audio_in_length_range(length):
             return length < max_input_length
 
@@ -176,8 +205,9 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
             is_audio_in_length_range,
             input_columns=["input_length"],
         )
-    
+
     from pprint import pformat
+
     LOGGER.info(pformat(dataset))
 
     split_dataset = dataset.train_test_split(test_size=test_size)
@@ -204,12 +234,21 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
         cer = 100 * cer_metric.compute(predictions=pred_str, references=label_str)
 
         return {"cer": cer}
-    
+
     if clearml.config.model.startswith("openai/whisper"):
         model = WhisperForConditionalGeneration.from_pretrained(clearml.config.model)
     else:
-        model = AutoModelForCTC.from_pretrained(clearml.config.model)
-
+        model = AutoModelForCTC.from_pretrained(
+            clearml.config.model,
+            attention_dropout=0.0,
+            hidden_dropout=0.0,
+            feat_proj_dropout=0.0,
+            layerdrop=0.0,
+            ctc_loss_reduction="mean",
+            pad_token_id=processor.tokenizer.pad_token_id,
+            vocab_size=len(processor.tokenizer),
+            ignore_mismatched_sizes=True,
+        )
 
     if clearml.config.model.startswith("openai/whisper"):
         # disable cache during training since it's incompatible with gradient checkpointing
@@ -225,8 +264,6 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
         adapter_weights = model._get_adapters()
         for param in adapter_weights.values():
             param.requires_grad = True
-
-
 
     training_args = TrainingArguments(
         group_by_length=True,
@@ -264,7 +301,6 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
     trainer.train()
 
 
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run experiment - preprocess, train, and test")
     parser.add_argument("experiment", help="Experiment name")
@@ -291,9 +327,9 @@ def main() -> None:
 
     if args.clearml_queue is not None and args.clearml_tag is None:
         parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
-    
+
     run(args.experiment, args.clearml_queue, args.clearml_tag, args.commit)
-    
+
 
 if __name__ == "__main__":
     main()
