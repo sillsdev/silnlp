@@ -199,8 +199,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
             audio = batch["audio"]
 
             batch["input_values"] = processor(audio["array"], sampling_rate=audio["sampling_rate"]).input_values[0]
-            # batch["input_features"] = processor(audio["array"], sampling_rate=audio["sampling_rate"]).input_features[0]
-            batch["input_length"] = len(batch["input_values"])
+            batch["input_length"] = len(audio["array"]) / audio["sampling_rate"]
 
             batch["labels"] = processor(text=batch["text"]).input_ids
             return batch
