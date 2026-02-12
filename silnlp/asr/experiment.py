@@ -172,13 +172,11 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
     else:
         get_vocab(dataset, target_language)
 
-        feature_extractor = Wav2Vec2FeatureExtractor(
-            feature_size=1, sampling_rate=16000, padding_value=0.0, do_normalize=True, return_attention_mask=True
-        )
         tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(
             "./", unk_token="[UNK]", pad_token="[PAD]", word_delimiter_token="|", target_lang=target_language
         )
-        processor = Wav2Vec2Processor(feature_extractor=feature_extractor, tokenizer=tokenizer)
+        processor = AutoProcessor.from_pretrained(clearml.config.model)
+        processor.tokenizer = tokenizer
 
     if clearml.config.model.startswith("openai/whisper"):
         def prepare_dataset(example):
