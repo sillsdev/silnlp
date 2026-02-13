@@ -239,6 +239,13 @@ def check_for_project_errors(copy_from: Path | None, project: str) -> None:
             )
         tree = ET.parse(settings_file)
         root = tree.getroot()
+
+        translation_info = root.find(".//TranslationInfo")
+        if translation_info is not None and translation_info.text != "Standard::":
+            LOGGER.warning(
+                f"{project} is non-Standard and references another project, which may lead to incorrect versification. The project will default to English versification. Translation Info: '{translation_info.text}'."
+            )
+
         naming_element = root.find(".//Naming")
         pre_part, post_part, book_name_form = None, None, None
         if naming_element is not None:
