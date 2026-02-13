@@ -263,7 +263,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
                     "attn_implementation": "sdpa",
                 },
             },
-            clearml.config,
+            clearml.config.root,
         ),
         has_corpus_pairs=False
     )
