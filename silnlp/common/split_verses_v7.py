@@ -130,7 +130,7 @@ def split_text_token(parser, max_len):
 
     stack = parser.state.stack
     if not stack or stack[0].type != UsfmElementType.PARA:
-        print(f"Warning: expected PARA as first stack element, got: {stack}")
+        print(f"Warning: expected PARA as first stack element, got: {stack} with token: {parser.state.token} on line number {parser.state.token.line_number}")
         return [parser.state.token]
 
     result = [UsfmToken(UsfmTokenType.TEXT, text=chunks[0])]
@@ -141,6 +141,27 @@ def split_text_token(parser, max_len):
             else: print(f"Warning: unknown element type in stack: {elem.type}")
         result.append(UsfmToken(UsfmTokenType.TEXT, text=chunk))
     return result
+
+def strip_eol_spaces(string):
+    sample = string[:600]
+    print(f"sample string is : {sample}")
+    
+    print(f"\nString is a {type(string)}. Items look like this with _ in place of spaces:")
+    sample_view = sample.replace(' ','_').replace('\r', '\\r').replace('\n','\\n')
+    print(sample_view)
+    
+    print(f"\nString with ' \\n' replaced by '\\n' is:")
+    string_stripped = string.replace(' \n','\n')
+
+    print(f"\nAfter removing eol_spaces string is a {type(string_stripped)}. Items look like this with _ in place of spaces:")
+    new_sample_view = string_stripped[:600].replace(' ','_').replace('\r', '\\r').replace('\n','\\n')
+    print(new_sample_view)
+    print()
+    print(string_stripped[:600])
+
+    return string_stripped
+    
+    
 
 
 def main():
@@ -180,7 +201,7 @@ def main():
     output_dir = project_dir.parent / f"{project_dir.name}_split_{args.max}"
     
     # Copying the folder ensures that all necessary files are present.
-    shutil.copytree(project_dir, output_dir, dirs_exist_ok=True)
+    #shutil.copytree(project_dir, output_dir, dirs_exist_ok=True)
 
     # Test with one file:
 
@@ -200,20 +221,27 @@ def main():
                 output_tokens.append(parser.state.token)
 
         usfm_out = [token.to_usfm(include_newlines=True).replace('\r\n', '\n') for token in output_tokens]
+
+        usfm_str = ''.join(usfm_out).replace(' \n','\n')
+        usfm_stripped = usfm_str.replace(' \n','\n')
         
         output_sfm_file = output_dir / sfm_file.name
-        with open(output_sfm_file, 'w', encoding='utf-8') as f: f.write(''.join(usfm_out))
+        with open(output_sfm_file, 'w', encoding='utf-8') as f: f.write(usfm_stripped)
         
-        # with open(output_sfm_file, 'r', encoding='utf-8') as f: usfm_out_text = f.read()
-        # out_parser = UsfmParser(usfm_out_text, stylesheet=settings.stylesheet, versification=settings.versification)
-        # over_long_texts = Counter()
+        with open(output_sfm_file, 'r', encoding='utf-8') as f: usfm_out_text = f.read()
+        out_parser = UsfmParser(usfm_out_text, stylesheet=settings.stylesheet, versification=settings.versification)
+        over_long_texts = Counter()
 
-        # while out_parser.process_token():
-        #     token_len = parser.state.token.get_length()
-        #     if out_parser.state.token.type == UsfmTokenType.TEXT and  token_len > MAX_LENGTH:
-        #         over_long_texts.update(token_len)
-        # print(f"SFM output file {output_sfm_file} has the following long texts:")
-        # print(f"{over_long_texts}")
+        while out_parser.process_token():
+            token_len = parser.state.token.get_length()
+            if out_parser.state.token.type == UsfmTokenType.TEXT and  token_len > MAX_LENGTH:
+                over_long_texts.update([token_len])
+                print(f"SFM output file {output_sfm_file} has the following long texts:")
+                print(f"{over_long_texts}")
+                exit()
+
+        print(f"SFM output file {output_sfm_file} has the following long texts:")
+        print(f"{over_long_texts}")
                     
     print(f"Done! Processed {len(sfm_files)} books in {output_dir}")
 
