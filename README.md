@@ -73,12 +73,14 @@ The rest of these instructions are assumed to be done in a WSL/Linux terminal as
 
 ## Environment Setup
 
+   * All steps should be run from within a Linux/WSL terminal as the root user, starting from the root directory (/root or ~) unless otherwise specified.
+
 1. Clone the silnlp repo:
       ```
       git clone https://github.com/sillsdev/silnlp.git
       ```
 
-2. Create a env_vars.txt file with your credentials in this form in the root directoy (/root, or \\wsl.localhost\Ubuntu-22.04\root from Windows File Explorer):
+2. Create a env_vars.txt file with your credentials in this form in the root directory (/root, or \\wsl.localhost\Ubuntu-22.04\root from Windows File Explorer). This file may be created outside of WSL, but should be saved in the \\wsl.localhost\Ubuntu-22.04\root directory.:
    ```
    CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
    CLEARML_API_ACCESS_KEY=xxxxxxxxxxxxxxxx
