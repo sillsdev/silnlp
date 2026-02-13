@@ -280,7 +280,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
 
     dataset = dataset.cast_column("audio", Audio(sampling_rate=16000))
 
-    characters_to_remove = clearml.config.get("characters_to_remove", "")
+    characters_to_remove = clearml.config.data.get("characters_to_remove", "")
     if len(characters_to_remove) > 0 and not clearml.config.model.startswith("openai/whisper"):
         chars_to_remove_regex = f"[{re.escape(characters_to_remove)}]"
 
