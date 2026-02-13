@@ -110,7 +110,7 @@ class Config(ABC):
         if len(corpus_pairs) > 0:
             self.corpus_pairs = parse_corpus_pairs(corpus_pairs)
         else:
-            corpus_pairs = []
+            self.corpus_pairs = []
 
         terms_config: dict = data_config["terms"]
         self.src_isos: Set[str] = set()
