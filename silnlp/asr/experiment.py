@@ -235,14 +235,14 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
                     "per_device_eval_batch_size": 16,
                 },
                 "params": {
-                    "warmup_steps": 1000,
-                    "dropout": 0.1,
+                    "warmup_steps": 100,
                     "learning_rate": 0.0002,
                     "lr_scheduler_type": "constant_with_warmup",
                 },
             },
             clearml.config.root,
         ),
+        skip_defaults=True
     )
 
     dfs = []
