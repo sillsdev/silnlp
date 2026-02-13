@@ -100,12 +100,13 @@ class NMTModel(ABC):
 
 
 class Config(ABC):
-    def __init__(self, exp_dir: Path, config: dict) -> None:
+    def __init__(self, exp_dir: Path, config: dict, has_corpus_pairs: bool = True) -> None:
         self.exp_dir = exp_dir
         self.root = config
 
         data_config: dict = config["data"]
-        self.corpus_pairs = parse_corpus_pairs(data_config.get("corpus_pairs", []))
+        if has_corpus_pairs:
+            self.corpus_pairs = parse_corpus_pairs(data_config.get("corpus_pairs", []))
 
         terms_config: dict = data_config["terms"]
         self.src_isos: Set[str] = set()
