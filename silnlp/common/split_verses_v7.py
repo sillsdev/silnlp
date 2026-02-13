@@ -228,20 +228,19 @@ def main():
         output_sfm_file = output_dir / sfm_file.name
         with open(output_sfm_file, 'w', encoding='utf-8') as f: f.write(usfm_stripped)
         
-        with open(output_sfm_file, 'r', encoding='utf-8') as f: usfm_out_text = f.read()
-        out_parser = UsfmParser(usfm_out_text, stylesheet=settings.stylesheet, versification=settings.versification)
-        over_long_texts = Counter()
+        # with open(output_sfm_file, 'r', encoding='utf-8') as f: usfm_out_text = f.read()
+        # out_parser = UsfmParser(usfm_out_text, stylesheet=settings.stylesheet, versification=settings.versification)
+        # over_long_texts = dict()
+        # while out_parser.process_token():
+        #     token_len = parser.state.token.get_length()
+        #     if out_parser.state.token.type == UsfmTokenType.TEXT and  token_len > MAX_LENGTH:
+        #         over_long_texts[output_sfm_file] = {'lineno':parser.state.token.line_number, 'length':parser.state.token.get_length()}
+        #         print(f"SFM output file {output_sfm_file} has the following long texts:")
+        #         print(f"{over_long_texts}")
+        #         exit()
 
-        while out_parser.process_token():
-            token_len = parser.state.token.get_length()
-            if out_parser.state.token.type == UsfmTokenType.TEXT and  token_len > MAX_LENGTH:
-                over_long_texts.update([token_len])
-                print(f"SFM output file {output_sfm_file} has the following long texts:")
-                print(f"{over_long_texts}")
-                exit()
-
-        print(f"SFM output file {output_sfm_file} has the following long texts:")
-        print(f"{over_long_texts}")
+        # print(f"SFM output file {output_sfm_file} has the following long texts:")
+        # print(f"{over_long_texts}")
                     
     print(f"Done! Processed {len(sfm_files)} books in {output_dir}")
 
