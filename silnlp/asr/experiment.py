@@ -10,7 +10,8 @@ import numpy as np
 import yaml  # TODO cleanup imports
 
 from silnlp.nmt.clearml_connection import LOGGER, TAGS_LIST, SILClearML
-from silnlp.nmt.config import Config  # TODO move clearml to separate module?
+from silnlp.nmt.config import Config
+from silnlp.nmt.hugging_face_config import HuggingFaceConfig  # TODO move clearml to separate module?
 
 from ..common.environment import SIL_NLP_ENV
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
@@ -218,7 +219,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
     )
     exp_dir = get_mt_exp_dir(experiment_name)
 
-    clearml.config = Config(
+    clearml.config = HuggingFaceConfig(
         exp_dir,
         merge_dict(
             {
@@ -265,7 +266,6 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
             },
             clearml.config.root,
         ),
-        has_corpus_pairs=False
     )
 
     dfs = []
