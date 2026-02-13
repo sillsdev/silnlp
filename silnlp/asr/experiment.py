@@ -9,11 +9,12 @@ import re
 import numpy as np
 import yaml  # TODO cleanup imports
 
-from silnlp.nmt.clearml_connection import LOGGER, TAGS_LIST, SILClearML  # TODO move clearml to separate module?
+from silnlp.nmt.clearml_connection import LOGGER, TAGS_LIST, SILClearML
+from silnlp.nmt.config import Config  # TODO move clearml to separate module?
 
 from ..common.environment import SIL_NLP_ENV
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
-from ..common.utils import get_git_revision_hash, show_attrs
+from ..common.utils import get_git_revision_hash, get_mt_exp_dir, merge_dict, show_attrs
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, Dict, List, Union
@@ -41,8 +42,82 @@ from transformers import (
     Trainer,
     Wav2Vec2FeatureExtractor,
     AutoModelForCTC,
-    SeamlessM4TFeatureExtractor
+    SeamlessM4TFeatureExtractor,
+    HfArgumentParser,
 )
+
+TRAINING_ARGS_CONFIG_MAPPING = {
+    "train": {
+        "gradient_accumulation_steps",
+        "gradient_checkpointing",
+        "gradient_checkpointing_kwargs",
+        "group_by_length",
+        "log_level",
+        "logging_dir",
+        "logging_first_step",
+        "logging_nan_inf_filter",
+        "logging_steps",
+        "logging_strategy",
+        "max_steps",
+        "num_train_epochs",
+        "output_dir",
+        "per_device_train_batch_size",
+        "save_on_each_node",
+        "save_steps",
+        "save_strategy",
+        "save_total_limit",
+    },
+    "eval": {
+        "eval_accumulation_steps",
+        "eval_delay",
+        "eval_steps",
+        "eval_strategy",
+        "greater_is_better",
+        "include_inputs_for_metrics",
+        "load_best_model_at_end",
+        "metric_for_best_model",
+        "per_device_eval_batch_size",
+        "predict_with_generate",
+    },
+    "params": {
+        "adam_beta1",
+        "adam_beta2",
+        "adam_epsilon",
+        "full_determinism",
+        "generation_max_length",
+        "generation_num_beams",
+        "label_smoothing_factor",
+        "learning_rate",
+        "lr_scheduler_type",
+        "max_grad_norm",
+        "optim",
+        "warmup_ratio",
+        "warmup_steps",
+        "weight_decay",
+    },
+}
+
+
+def _create_seq2seq_training_arguments(config: Config) -> Seq2SeqTrainingArguments:
+    parser = HfArgumentParser(Seq2SeqTrainingArguments)
+    args: dict = {}
+    for section, params in TRAINING_ARGS_CONFIG_MAPPING.items():
+        section_config: dict = config.root[section]
+        for param in params:
+            if param in section_config:
+                args[param] = section_config[param]
+    return parser.parse_dict(args)[0]
+
+
+def _create_training_arguments(config: Config) -> TrainingArguments:
+    parser = HfArgumentParser(TrainingArguments)
+    args: dict = {}
+    for section, params in TRAINING_ARGS_CONFIG_MAPPING.items():
+        section_config: dict = config.root[section]
+        for param in params:
+            if param in section_config:
+                args[param] = section_config[param]
+    return parser.parse_dict(args)[0]
 
 
 @dataclass
@@ -55,7 +130,12 @@ class DataCollatorCTCWithPadding:
         # different padding methods
         # split inputs and labels since they have to be of different lengths and need
         # different padding methods
-        input_features = [{"input_values": feature["input_values"]} if 'input_values' in feature else {'input_features': feature['input_features']} for feature in features]
+        input_features = [
+            {"input_values": feature["input_values"]}
+            if "input_values" in feature
+            else {"input_features": feature["input_features"]}
+            for feature in features
+        ]
         label_features = [{"input_ids": feature["labels"]} for feature in features]
 
         batch = self.processor.pad(
@@ -136,20 +216,62 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
         commit=commit,
         tag=clearml_tag,
     )
+    exp_dir = get_mt_exp_dir(experiment_name)
 
-    # TODO should be in config
-    max_input_length = 30.0
-    test_size = 0.1
-    target_language = "swahili"
-    characters_to_remove = ',?.!-;"“%‘”�'
+    clearml.config = Config(
+        exp_dir,
+        merge_dict(
+            {
+                "data": {
+                    "test_size": 0.1,
+                    "asr_corpora": [
+                        "/root/M/MT/experiments/demo_ben/misc/w_test/data/senga_ground_truth_transcriptions/train-00000-of-00002.parquet",
+                        "/root/M/MT/experiments/demo_ben/misc/w_test/data/senga_ground_truth_transcriptions/train-00001-of-00002.parquet",
+                    ],
+                    "characters_to_remove": "",
+                    "max_input_length": 30.0,
+                },
+                "train": {
+                    "save_steps": 250,
+                    "per_device_train_batch_size": 16,
+                    "save_strategy": "steps",
+                    "save_total_limit": 2,
+                    "gradient_accumulation_steps": 4,
+                    "max_steps": 1000,
+                    "group_by_length": True,
+                    "output_dir": str(exp_dir / "run"),
+                },
+                "eval": {
+                    "eval_strategy": "steps",
+                    "eval_steps": 250,
+                    "early_stopping": None,
+                    "load_best_model_at_end": True,
+                    "metric_for_best_model": "cer",
+                    "per_device_eval_batch_size": 16,
+                    "multi_ref_eval": False,
+                    "predict_with_generate": True,
+                },
+                "params": {
+                    "optim": "adamw_torch",
+                    "label_smoothing_factor": 0.2,
+                    "warmup_steps": 1000,
+                    "dropout": 0.1,
+                    "attention_dropout": 0.1,
+                    "activation_dropout": 0.0,
+                    "learning_rate": 0.0002,
+                    "lr_scheduler_type": "cosine",
+                    "attn_implementation": "sdpa",
+                },
+            },
+            clearml.config,
+        ),
+    )
 
-    df1 = pd.read_parquet(
-        "/root/M/MT/experiments/demo_ben/misc/w_test/data/senga_ground_truth_transcriptions/train-00000-of-00002.parquet"
-    )
-    df2 = pd.read_parquet(
-        "/root/M/MT/experiments/demo_ben/misc/w_test/data/senga_ground_truth_transcriptions/train-00001-of-00002.parquet"
-    )
-    df = pd.concat([df1, df2], ignore_index=True)
+    dfs = []
+    for corpus_path in clearml.config.data["asr_corpora"]:
+        sub_df = pd.read_parquet(corpus_path)
+        dfs.append(sub_df)
+    df = pd.concat(dfs, ignore_index=True)
 
     dataset = Dataset.from_dict(
         {"text": [row["text"] for _, row in df.iterrows()], "audio": [row["audio"] for _, row in df.iterrows()]}
@@ -157,6 +279,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
 
     dataset = dataset.cast_column("audio", Audio(sampling_rate=16000))
 
+    characters_to_remove = clearml.config.get("characters_to_remove", "")
     if len(characters_to_remove) > 0 and not clearml.config.model.startswith("openai/whisper"):
         chars_to_remove_regex = f"[{re.escape(characters_to_remove)}]"
 
@@ -168,8 +291,12 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
 
     LOGGER.info(f"Using model {clearml.config.model}")
 
+    target_language = clearml.config["data"].get("target_language", "")
+
     if clearml.config.model.startswith("openai/whisper"):
-        processor = WhisperProcessor.from_pretrained(clearml.config.model, language=target_language, task="transcribe")
+        processor = WhisperProcessor.from_pretrained(
+            clearml.config.model, language=reference_language, task="transcribe"
+        )
     else:
         write_vocab(dataset, target_language)
 
@@ -204,7 +331,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
             audio = batch["audio"]
 
             processed_audio = processor(audio["array"], sampling_rate=audio["sampling_rate"])
-            if hasattr(processed_audio, 'input_values'):
+            if hasattr(processed_audio, "input_values"):
                 batch["input_values"] = processed_audio.input_values[0]
             else:
                 batch["input_features"] = processed_audio.input_features[0]
@@ -215,6 +342,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
 
     dataset = dataset.map(prepare_dataset)
 
+    max_input_length = clearml.config.data.get("max_input_length", 0)
     if max_input_length > 0:
 
         def is_audio_in_length_range(length):
@@ -229,6 +357,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
 
     LOGGER.info(pformat(dataset))
 
+    test_size = clearml.config.data.get("test_size", 0.1)
     split_dataset = dataset.train_test_split(test_size=test_size)
     train_dataset = split_dataset["train"]
     eval_dataset = split_dataset["test"]
@@ -271,44 +400,27 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
             ignore_mismatched_sizes=True,
         )
 
+    reference_language = clearml.config.data.get("reference_language", "")
+
     if clearml.config.model.startswith("openai/whisper"):
-        # disable cache during training since it's incompatible with gradient checkpointing
-        model.config.use_cache = False
 
         # set language and task for generation and re-enable cache
-        model.generate = partial(model.generate, language=target_language, task="transcribe", use_cache=True)
+        model.generate = partial(model.generate, language=reference_language, task="transcribe", use_cache=True)
 
     elif clearml.config.model.startswith("facebook/mms"):
         model.init_adapter_layers()
         model.freeze_base_model()
+
+        if reference_language != "":
+            processor.tokenizer.set_target_lang(reference_language)
+            model.load_adapter(reference_language)
 
         adapter_weights = model._get_adapters()
         for param in adapter_weights.values():
             param.requires_grad = True
 
     if clearml.config.model.startswith("openai/whisper"):
-        training_args = Seq2SeqTrainingArguments(
-            output_dir="./",
-            per_device_train_batch_size=16,
-            gradient_accumulation_steps=2,
-            learning_rate=1e-5,
-            lr_scheduler_type="constant_with_warmup",
-            warmup_steps=50,
-            max_steps=500,
-            gradient_checkpointing=True,
-            fp16=True,
-            fp16_full_eval=True,
-            eval_strategy="steps",
-            per_device_eval_batch_size=16,
-            predict_with_generate=True,
-            generation_max_length=225,
-            save_steps=100,
-            eval_steps=100,
-            logging_steps=25,
-            load_best_model_at_end=True,
-            metric_for_best_model="cer",
-            greater_is_better=False,
-        )
+        training_args = _create_seq2seq_training_arguments()
 
         model.generation_config.suppress_tokens = []
 
@@ -322,28 +434,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
             processing_class=processor,
         )
     else:
-        training_args = TrainingArguments(
-            group_by_length=True,
-            per_device_train_batch_size=16,
-            gradient_accumulation_steps=2,
-            learning_rate=3e-4,
-            lr_scheduler_type="constant_with_warmup",
-            warmup_steps=50,
-            max_steps=500,
-            gradient_checkpointing=True,
-            fp16=True,
-            fp16_full_eval=True,
-            eval_strategy="steps",
-            per_device_eval_batch_size=16,
-            save_steps=100,
-            eval_steps=100,
-            logging_steps=25,
-            load_best_model_at_end=True,
-            metric_for_best_model="cer",
-            greater_is_better=False,
-            push_to_hub=False,
-            output_dir="./",
-        )
+        training_args = _create_training_arguments(clearml.config)
 
         trainer = Trainer(
             args=training_args,
