@@ -73,12 +73,14 @@ The rest of these instructions are assumed to be done in a WSL/Linux terminal as
 
 ## Environment Setup
 
+   * All steps should be run from within a Linux/WSL terminal as the root user, starting from the root directory (/root or ~) unless otherwise specified.
+
 1. Clone the silnlp repo:
       ```
       git clone https://github.com/sillsdev/silnlp.git
       ```
 
-2. Create a env_vars.txt file with your credentials in this form in the root directoy (/root, or \\wsl.localhost\Ubuntu-22.04\root from Windows File Explorer):
+2. Create a env_vars.txt file with your credentials in this form in the root directory (/root, or \\wsl.localhost\Ubuntu-22.04\root from Windows File Explorer). This file may be created outside of WSL, but should be saved in the \\wsl.localhost\Ubuntu-22.04\root directory.:
    ```
    CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
    CLEARML_API_ACCESS_KEY=xxxxxxxxxxxxxxxx
@@ -97,11 +99,12 @@ The rest of these instructions are assumed to be done in a WSL/Linux terminal as
    * This file is sensitive, so do not save it within the silnlp repo to prevent accidentally including it in a commit.
 
 3. Navigate to the repo:
-      ```
-      cd silnlp
-      ```
+   ```
+   cd silnlp
+   ```
 
-4. Set your environment variables by running the following command:
+4. Set your environment variables:
+   In a terminal at the silnlp repo, run:
    ```
    source ./setup_env_vars.sh /root/env_vars.txt
    ```
@@ -110,7 +113,7 @@ The rest of these instructions are assumed to be done in a WSL/Linux terminal as
    Follow the instructions under the Quickstart install section, follow the Linux instructions.
 
 6. Create the silnlp conda environment
-   In a terminal run:
+   In a terminal at the silnlp repo, run:
    ```
    conda env create --file "environment.yml"
    ```
@@ -118,6 +121,7 @@ The rest of these instructions are assumed to be done in a WSL/Linux terminal as
    * Follow any prompts conda provides
 
 7. Activate the silnlp conda environment
+   In a terminal at the silnlp repo, run:
    ```
 	conda activate silnlp
    ```
@@ -142,17 +146,26 @@ The rest of these instructions are assumed to be done in a WSL/Linux terminal as
    ```
 
 10. Install the Python packages for the silnlp repo
+    In a terminal at the silnlp repo, run:
    ```
 	poetry install
    ```
 
-11. If using MinIO or B2, you will need to set up rclone by running the following commands:
-```
-apt update
-source ./rclone_setup.sh minio
-```
-
+## Bucket Setup
+1. For MinIO, enable your VPN. On Windows this should be done outside of WSL:
    * To access the MinIO bucket, you will need VPN access. Reach out to a SILNLP dev team member for access.
+
+2. In a terminal (WSL) at the silnlp repo, run the commands cooresponding to the bucket you are using:
+   MinIO:
+   ```
+   apt update
+   source ./rclone_setup.sh minio
+   ```
+   Backblaze B2:
+   ```
+   apt update
+   source ./rclone_setup.sh backblaze
+   ```
 
 ## Setting Up and Running Experiments
 
