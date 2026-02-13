@@ -78,7 +78,6 @@ TRAINING_ARGS_CONFIG_MAPPING = {
         "load_best_model_at_end",
         "metric_for_best_model",
         "per_device_eval_batch_size",
-        "predict_with_generate",
     },
     "params": {
         "adam_beta1",
@@ -249,8 +248,6 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
                     "load_best_model_at_end": True,
                     "metric_for_best_model": "cer",
                     "per_device_eval_batch_size": 16,
-                    "multi_ref_eval": False,
-                    "predict_with_generate": True,
                 },
                 "params": {
                     "optim": "adamw_torch",
@@ -421,6 +418,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
 
     if clearml.config.model.startswith("openai/whisper"):
         training_args = _create_seq2seq_training_arguments()
+        training_args.predict_with_generate = True
 
         model.generation_config.suppress_tokens = []
 
