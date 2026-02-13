@@ -413,7 +413,6 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
         model.freeze_base_model()
 
         if reference_language != "":
-            processor.tokenizer.set_target_lang(reference_language)
             model.load_adapter(reference_language)
 
         adapter_weights = model._get_adapters()
