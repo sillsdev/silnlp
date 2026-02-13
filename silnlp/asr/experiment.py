@@ -292,7 +292,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
 
     LOGGER.info(f"Using model {clearml.config.model}")
 
-    target_language = clearml.config["data"].get("target_language", "")
+    target_language = clearml.config.data.get("target_language", "")
 
     if clearml.config.model.startswith("openai/whisper"):
         processor = WhisperProcessor.from_pretrained(
