@@ -138,7 +138,7 @@ The rest of these instructions are assumed to be done in a WSL/Linux terminal as
       echo "export PATH="/root/.local/bin:$PATH"" >> ~/.bashrc
       ```
 
-9.  Configure Poetry to use the active Python
+9. Configure Poetry to use the active Python
    ```
 	poetry config virtualenvs.prefer-active-python true
    ```
