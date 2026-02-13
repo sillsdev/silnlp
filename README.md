@@ -109,9 +109,10 @@ The rest of these instructions are assumed to be done in a WSL/Linux terminal as
 5. Download [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install#linux-2).
    Follow the instructions under the Quickstart install section, follow the Linux instructions.
 
-6. Create the silnlp conda environment
+6. Now we need to create the silnlp conda environment. First move to the silnlp directory, so that the command can find the environment.yml file.
    In a terminal run:
    ```
+   cs silnlp
    conda env create --file "environment.yml"
    ```
    
