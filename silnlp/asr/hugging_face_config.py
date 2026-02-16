@@ -206,7 +206,7 @@ def create_seq2seq_training_arguments(config: HuggingFaceConfig) -> Seq2SeqTrain
                 "predict_with_generate": True
             },
         )
-    parser.parse_dict(args)[0]
+    return parser.parse_dict(args)[0]
 
 
 def create_training_arguments(config: HuggingFaceConfig) -> TrainingArguments:
