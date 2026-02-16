@@ -301,10 +301,13 @@ def setup_local_project(
         project_name = f"{project_name}_{datestamp}"
         LOGGER.info(f"Datestamping project. New project name: {project_name}")
 
-    # Rename local project folder to project_name if it exists
-    if local_project_path.exists() and local_project_path.name != project_name:
+        # Copy local project folder contents to a folder with the new name
+    if local_project_path and local_project_path.exists() and local_project_path.name != project_name:
         new_local_project_path = local_project_path.parent / project_name
-        local_project_path = local_project_path.rename(new_local_project_path)
+        if not new_local_project_path.exists():
+            new_local_project_path.mkdir(parents=True, exist_ok=True)
+        _copy_directory_to_paratext_project(local_project_path, new_local_project_path, overwrite=True)
+        local_project_path = new_local_project_path
 
     return project_name, local_project_path, copy_from
 
@@ -374,6 +377,13 @@ def main() -> None:
     for project in args.projects:
         pwd = config.get("zip_password", None)
         project_name, local_project_path, copy_from = setup_local_project(project, args.copy_from, pwd, args.datestamp)
+
+        onboarding_project_path = SIL_NLP_ENV.mt_experiments_dir / "OnboardingRequests" / project_name
+        if onboarding_project_path.exists() and not args.overwrite:
+            LOGGER.info(
+                f"Onboarding project folder '{onboarding_project_path}' already exists. Skipping onboarding for project '{project_name}'."
+            )
+            continue
 
         if not args.no_clean:
             LOGGER.info(f"Cleaning Paratext project: {project_name}.")
