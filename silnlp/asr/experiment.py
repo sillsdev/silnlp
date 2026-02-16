@@ -178,6 +178,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
     LOGGER.info(f"Using model {clearml.config.model}")
 
     target_language = clearml.config.data.get("target_language", "")
+    reference_language = clearml.config.data.get("reference_language", "")
 
     if clearml.config.model.startswith("openai/whisper"):
         processor = WhisperProcessor.from_pretrained(
@@ -283,8 +284,6 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
             vocab_size=len(processor.tokenizer),
             ignore_mismatched_sizes=True,
         )
-
-    reference_language = clearml.config.data.get("reference_language", "")
 
     if clearml.config.model.startswith("openai/whisper"):
 
