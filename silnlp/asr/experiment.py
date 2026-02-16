@@ -1,26 +1,18 @@
 import argparse
-import logging
-import os
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Optional, Set, Union
+from typing import Optional, Union
 import json
 import re
 
 import numpy as np
-import yaml  # TODO cleanup imports
 
 from silnlp.asr.hugging_face_config import create_seq2seq_training_arguments, create_training_arguments
 from silnlp.common.clearml_connection import LOGGER, TAGS_LIST, ClearMLExperimentType, SILClearML
-from silnlp.nmt.config import Config
-from silnlp.nmt.hugging_face_config import HuggingFaceConfig  # TODO move clearml to separate module?
 
 from ..common.environment import SIL_NLP_ENV
-from ..common.postprocesser import PostprocessConfig, PostprocessHandler
-from ..common.utils import get_asr_exp_dir, get_git_revision_hash, get_mt_exp_dir, merge_dict, show_attrs
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Dict, List, Union
+from typing import Dict, List, Union
 from pprint import pformat
 
 import evaluate
@@ -29,26 +21,20 @@ import torch
 from datasets import Audio, Dataset
 from transformers import (
     Seq2SeqTrainer,
-    Seq2SeqTrainingArguments,
     WhisperForConditionalGeneration,
     WhisperProcessor,
     Wav2Vec2BertProcessor,
     Wav2Vec2Processor,
 )
-from transformers.models.whisper.english_normalizer import BasicTextNormalizer
 from transformers import (
     AutoProcessor,
-    AutoModel,
-    AutoFeatureExtractor,
-    AutoTokenizer,
     Wav2Vec2CTCTokenizer,
-    TrainingArguments,
     Trainer,
-    Wav2Vec2FeatureExtractor,
     AutoModelForCTC,
     SeamlessM4TFeatureExtractor,
-    HfArgumentParser,
 )
+
+# Code in part adapted from https://huggingface.co/blog/mms_adapters, https://huggingface.co/blog/fine-tune-whisper
 
 
 @dataclass
@@ -166,7 +152,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
     dataset = dataset.cast_column("audio", Audio(sampling_rate=16000))
 
     characters_to_remove = clearml.config.data.get("characters_to_remove", "")
-    if len(characters_to_remove) > 0 and not clearml.config.model.startswith("openai/whisper"):
+    if len(characters_to_remove) > 0 and not clearml.config.model.startswith("openai/whisper"): #TODO should we create a model_prefix like with NMT?
         chars_to_remove_regex = f"[{re.escape(characters_to_remove)}]"
 
         def remove_characters(batch):
@@ -175,7 +161,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
 
         dataset = dataset.map(remove_characters)
 
-    LOGGER.info(f"Using model {clearml.config.model}")
+    LOGGER.info(f"Using model {clearml.config.model}") #TODO what should be logged?
 
     target_language = clearml.config.data.get("target_language", "")
     reference_language = clearml.config.data.get("reference_language", "")
@@ -229,7 +215,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
 
     dataset = dataset.map(prepare_dataset)
 
-    max_input_length = clearml.config.data.get("max_input_length", 0)
+    max_input_length = clearml.config.data.get("max_input_length", 0) #TODO leave default values to hugging_face_config class
     if max_input_length > 0:
 
         def is_audio_in_length_range(length):
@@ -247,6 +233,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
     train_dataset = split_dataset["train"]
     eval_dataset = split_dataset["test"]
 
+    data_collator: Union[DataCollatorSpeechSeq2SeqWithPadding, DataCollatorCTCWithPadding]
     if clearml.config.model.startswith("openai/whisper"):
         data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor)
     else:
@@ -355,7 +342,7 @@ def main() -> None:
     if args.clearml_queue is not None and args.clearml_tag is None:
         parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
 
-    run(args.experiment, args.clearml_queue, args.clearml_tag, args.commit)
+    run(args.experiment, args.clearml_queue, args.clearml_tag, args.commit) #TODO Move logic into separate train, test, etc. steps in a SILExperiment-equivalent class
 
 
 if __name__ == "__main__":

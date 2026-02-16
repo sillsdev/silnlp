@@ -1,89 +1,14 @@
-import gc
-import json
 import logging
-import os
-import re
-import shutil
-from contextlib import ExitStack
-from copy import deepcopy
-from dataclasses import dataclass
-from enum import Enum
-from itertools import repeat
-from math import prod
 from pathlib import Path
-from typing import Any, Callable, Dict, Generator, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
 
-import datasets.utils.logging as datasets_logging
-import evaluate
-import numpy as np
-import pandas as pd
-import torch
-import transformers.utils.logging as transformers_logging
-import yaml
-from accelerate.utils.memory import should_reduce_batch_size
-from datasets import Dataset
-from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
-from sacremoses import MosesPunctNormalizer
-from tokenizers import AddedToken, NormalizedString, Regex
-from tokenizers.implementations import SentencePieceBPETokenizer, SentencePieceUnigramTokenizer
-from tokenizers.normalizers import Normalizer
-from torch import Tensor, nn, optim
-from torch.utils.data import Sampler
 from transformers import (
-    AutoConfig,
-    AutoModelForSeq2SeqLM,
-    AutoTokenizer,
-    DataCollatorForSeq2Seq,
-    EarlyStoppingCallback,
-    EvalPrediction,
     HfArgumentParser,
-    M2M100ForConditionalGeneration,
-    M2M100Tokenizer,
-    MBart50Tokenizer,
-    MBartTokenizer,
-    MBartTokenizerFast,
-    NllbTokenizer,
-    NllbTokenizerFast,
-    PreTrainedModel,
-    PreTrainedTokenizer,
-    PreTrainedTokenizerBase,
-    PreTrainedTokenizerFast,
-    Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
-    T5Tokenizer,
-    T5TokenizerFast,
-    TensorType,
-    TrainerCallback,
-    TranslationPipeline,
     TrainingArguments,
-    set_seed,
 )
-from transformers.convert_slow_tokenizer import convert_slow_tokenizer
-from transformers.generation import BeamSearchEncoderDecoderOutput, GreedySearchEncoderDecoderOutput
-from transformers.modeling_utils import unwrap_model
-from transformers.tokenization_utils import BatchEncoding, TruncationStrategy
-from transformers.trainer import TRAINING_ARGS_NAME
-from transformers.trainer_utils import get_last_checkpoint
-from transformers.utils import (
-    SAFE_WEIGHTS_NAME,
-    WEIGHTS_NAME,
-    PaddingStrategy,
-    is_peft_available,
-    is_safetensors_available,
-    to_py_obj,
-)
-from transformers.utils.logging import tqdm
 
 from silnlp.common.utils import merge_dict
 
-from ..common.corpus import Term, count_lines, get_terms
-from ..common.environment import SIL_NLP_ENV
-from ..common.translator import (
-    DraftGroup,
-    SentenceTranslation,
-    SentenceTranslationGroup,
-    generate_test_confidence_files,
-)
 
 LOGGER = logging.getLogger(__name__)
 
