@@ -7,7 +7,7 @@ from typing import List
 
 import matplotlib.pyplot as plt
 
-from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML
+from silnlp.common.clearml_connection import TAGS_LIST, SILClearML
 
 from ..common.corpus import get_scripture_parallel_corpus, tokenize_corpus
 from .config import ALIGNERS

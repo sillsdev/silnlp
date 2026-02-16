@@ -1,18 +1,28 @@
 import logging
+from pathlib import Path
 import shutil
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Union
 
 import yaml
 
-from ..common.environment import SIL_NLP_ENV
-from .config import get_mt_exp_dir
-from .config_utils import create_config
+from silnlp.common.utils import get_asr_exp_dir
+
+from .environment import SIL_NLP_ENV
+from ..nmt.config import get_mt_exp_dir
+from .config_utils import create_nmt_config, create_asr_config
+from enum import Enum, auto
+from ..nmt.hugging_face_config import HuggingFaceConfig as NMTHuggingFaceConfig
+from ..asr.hugging_face_config import HuggingFaceConfig as ASRHuggingFaceConfig
+
 
 LOGGER = logging.getLogger(__name__)
 
 TAGS_LIST = ["research", "dev", "eitl", "onboarding"]
 
+class ClearMLExperimentType(Enum):
+    MT = auto()
+    ASR = auto()
 
 @dataclass
 class SILClearML:
@@ -25,6 +35,7 @@ class SILClearML:
     commit: Optional[str] = None
     tag: Optional[str] = None
     skip_config: bool = False
+    experiment_type: ClearMLExperimentType = ClearMLExperimentType.MT
 
     def __post_init__(self) -> None:
         self.name = self.name.replace("\\", "/")
@@ -124,16 +135,16 @@ class SILClearML:
 
     def _load_config(self) -> None:
         # if the project/experiment yaml file already exists, use it to re-read the config.  If not, write it.
-        exp_dir = get_mt_exp_dir(self.name)
+        exp_dir = self._get_exp_dir(self.name)
         if self.task is None:
             with (exp_dir / "config.yml").open("r", encoding="utf-8") as file:
                 config = yaml.safe_load(file)
             if config is None or len(config.keys()) == 0:
                 raise RuntimeError("Config file has no contents.")
-            self.config = create_config(exp_dir, config)
+            self.config = self._create_config(exp_dir, config)
             return
         # There is a ClearML task - lets' do more complex importing.
-        proj_dir = get_mt_exp_dir(self.clearml_project_folder)
+        proj_dir = self._get_exp_dir(self.clearml_project_folder)
         if (proj_dir / "config.yml").exists():
             # if there is no experiment yaml, copy the project one to it.
             if not (exp_dir / "config.yml").exists():
@@ -156,4 +167,21 @@ class SILClearML:
         exp_dir.mkdir(parents=True, exist_ok=True)
         with (exp_dir / "config.yml").open("w+", encoding="utf-8") as file:
             yaml.safe_dump(data=config, stream=file)
-        self.config = create_config(exp_dir, config)
+        self.config = self._create_config(exp_dir, config)
+
+    def _get_exp_dir(self, exp_name: str) -> Path:
+        if self.experiment_type == ClearMLExperimentType.MT:
+            return get_mt_exp_dir(exp_name)
+        elif self.experiment_type == ClearMLExperimentType.ASR:
+            return get_asr_exp_dir(exp_name)
+        else:
+            raise ValueError(f"ClearML experiment type {self.experiment_type} is not supported.")
+    
+    def _create_config(self, exp_name: str, config: dict) -> Union[NMTHuggingFaceConfig, ASRHuggingFaceConfig]:
+        if self.experiment_type == ClearMLExperimentType.MT:
+            return create_nmt_config(exp_name, config)
+        elif self.experiment_type == ClearMLExperimentType.ASR:
+            return create_asr_config(exp_name, config)
+        else:
+            raise ValueError(f"ClearML experiment type {self.experiment_type} is not supported.")
+        

@@ -9,7 +9,7 @@ from datasets import Audio, Dataset
 from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments, WhisperForConditionalGeneration, WhisperProcessor
 from transformers.models.whisper.english_normalizer import BasicTextNormalizer
 
-from silnlp.nmt.clearml_connection import SILClearML
+from silnlp.common.clearml_connection import SILClearML
 
 clearml = SILClearML(
     "demo_ben/misc/w_test",

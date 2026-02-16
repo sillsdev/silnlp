@@ -6,7 +6,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML
+from silnlp.common.clearml_connection import TAGS_LIST, SILClearML
 
 from .config import ALIGNERS, get_aligner, get_aligner_name, get_all_book_paths, load_config
 from .utils import get_experiment_dirs, get_experiment_name

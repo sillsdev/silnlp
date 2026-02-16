@@ -2,8 +2,8 @@ import argparse
 import logging
 
 from ..common.utils import get_git_revision_hash
-from .clearml_connection import TAGS_LIST, SILClearML
-from .config_utils import load_config
+from ..common.clearml_connection import TAGS_LIST, SILClearML
+from ..common.config_utils import load_config
 
 LOGGER = logging.getLogger((__package__ or "") + ".train")
 

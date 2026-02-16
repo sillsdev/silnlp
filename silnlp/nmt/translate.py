@@ -14,7 +14,7 @@ from ..common.paratext import book_file_name_digits, get_project_dir
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.translator import SentenceTranslationGroup, Translator
 from ..common.utils import get_git_revision_hash, show_attrs
-from .clearml_connection import TAGS_LIST, SILClearML
+from ..common.clearml_connection import TAGS_LIST, SILClearML
 from .config import CheckpointType, Config, NMTModel
 
 LOGGER = logging.getLogger((__package__ or "") + ".translate")

@@ -13,9 +13,9 @@ from scipy.stats import gmean
 
 from ..common.metrics import compute_meteor_score
 from ..common.utils import get_git_revision_hash
-from .clearml_connection import TAGS_LIST, SILClearML
+from ..common.clearml_connection import TAGS_LIST, SILClearML
 from .config import CheckpointType, Config, NMTModel
-from .config_utils import load_config
+from ..common.config_utils import load_config
 from .tokenizer import Tokenizer
 
 LOGGER = logging.getLogger((__package__ or "") + ".test")

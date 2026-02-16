@@ -9,7 +9,7 @@ from machine.corpora import AlignedWordPair, ParallelTextCorpus, ParallelTextRow
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_chapters
 from machine.tokenization import LatinWordTokenizer, WhitespaceTokenizer
 
-from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML
+from silnlp.common.clearml_connection import TAGS_LIST, SILClearML
 
 from ..common.corpus import get_mt_corpus_path, get_scripture_parallel_corpus, include_chapters
 from ..common.environment import SIL_NLP_ENV

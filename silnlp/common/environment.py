@@ -41,6 +41,7 @@ class SilNlpEnv:
         # Paratext directories
         self.set_paratext_dir()
         self.set_machine_translation_dir()
+        self.set_automatic_speech_recognition_dir()
         self.set_alignment_dir()
 
     def set_paratext_dir(self, pt_dir: Optional[Path] = None):
@@ -77,6 +78,21 @@ class SilNlpEnv:
             self.mt_scripture_dir = self.mt_dir / "scripture"
 
         self.mt_experiments_dir = self.mt_dir / "experiments"
+    
+    def set_automatic_speech_recognition_dir(self, asr_dir: Optional[Path] = None):
+        if asr_dir is not None:
+            self.asr_dir = pathify(asr_dir)
+        elif hasattr(self, "asr_dir"):
+            # it is already initialized
+            return
+        elif os.getenv("SIL_NLP_ASR_DIR"):
+            self.asr_dir = self.data_dir / os.getenv("SIL_NLP_ASR_DIR", "")
+        else:
+            self.asr_dir = self.data_dir / "ASR"
+
+        self.asr_corpora_dir = self.asr_dir / "corpora"
+        self.asr_experiments_dir = self.asr_dir / "experiments"
+
 
     def set_alignment_dir(self, align_dir: Optional[Path] = None):
         if align_dir is not None:

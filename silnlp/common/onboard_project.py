@@ -14,7 +14,7 @@ import yaml
 
 from silnlp.common.clean_projects import process_single_project_for_cleaning
 
-from ..nmt.config_utils import create_config
+from .config_utils import create_nmt_config
 from .collect_verse_counts import collect_verse_counts
 from .environment import SIL_NLP_ENV
 from .extract_corpora import extract_corpora
@@ -134,7 +134,7 @@ def calculate_tokenization_stats(project_name: str, stats_config: dict = None) -
             },
         }
 
-    config = create_config(exp_dir=stats_dir, config=stats_config)
+    config = create_nmt_config(exp_dir=stats_dir, config=stats_config)
 
     config.set_seed()
     config.preprocess(stats=True, force_align=True)

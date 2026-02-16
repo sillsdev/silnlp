@@ -77,6 +77,8 @@ def get_git_revision_hash() -> str:
 def get_mt_exp_dir(exp_name: str) -> Path:
     return SIL_NLP_ENV.mt_experiments_dir / exp_name
 
+def get_asr_exp_dir(exp_name: str) -> Path:
+    return SIL_NLP_ENV.asr_experiments_dir / exp_name
 
 def set_seed(seed: Any) -> None:
     os.environ["PYTHONHASHSEED"] = str(seed)

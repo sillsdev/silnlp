@@ -1,4 +1,5 @@
 import argparse
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,16 +10,18 @@ import re
 import numpy as np
 import yaml  # TODO cleanup imports
 
-from silnlp.nmt.clearml_connection import LOGGER, TAGS_LIST, SILClearML
+from silnlp.asr.hugging_face_config import create_seq2seq_training_arguments, create_training_arguments
+from silnlp.common.clearml_connection import LOGGER, TAGS_LIST, ClearMLExperimentType, SILClearML
 from silnlp.nmt.config import Config
 from silnlp.nmt.hugging_face_config import HuggingFaceConfig  # TODO move clearml to separate module?
 
 from ..common.environment import SIL_NLP_ENV
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
-from ..common.utils import get_git_revision_hash, get_mt_exp_dir, merge_dict, show_attrs
+from ..common.utils import get_asr_exp_dir, get_git_revision_hash, get_mt_exp_dir, merge_dict, show_attrs
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, Dict, List, Union
+from pprint import pformat
 
 import evaluate
 import pandas as pd
@@ -46,63 +49,6 @@ from transformers import (
     SeamlessM4TFeatureExtractor,
     HfArgumentParser,
 )
-
-TRAINING_ARGS_CONFIG_MAPPING = {
-    "train": {
-        "gradient_accumulation_steps",
-        "gradient_checkpointing",
-        "gradient_checkpointing_kwargs",
-        "group_by_length",
-        "log_level",
-        "logging_dir",
-        "logging_first_step",
-        "logging_nan_inf_filter",
-        "logging_steps",
-        "logging_strategy",
-        "max_steps",
-        "num_train_epochs",
-        "output_dir",
-        "per_device_train_batch_size",
-        "save_steps",
-        "save_strategy",
-        "save_total_limit",
-    },
-    "eval": {
-        "eval_steps",
-        "eval_strategy",
-        "greater_is_better",
-        "load_best_model_at_end",
-        "metric_for_best_model",
-        "per_device_eval_batch_size",
-    },
-    "params": {
-        "learning_rate",
-        "lr_scheduler_type",
-        "warmup_steps",
-    },
-}
-
-
-def _create_seq2seq_training_arguments(config: Config) -> Seq2SeqTrainingArguments:
-    parser = HfArgumentParser(Seq2SeqTrainingArguments)
-    args: dict = {}
-    for section, params in TRAINING_ARGS_CONFIG_MAPPING.items():
-        section_config: dict = config.root[section]
-        for param in params:
-            if param in section_config:
-                args[param] = section_config[param]
-    return parser.parse_dict(args)[0]
-
-
-def _create_training_arguments(config: Config) -> TrainingArguments:
-    parser = HfArgumentParser(TrainingArguments)
-    args: dict = {}
-    for section, params in TRAINING_ARGS_CONFIG_MAPPING.items():
-        section_config: dict = config.root[section]
-        for param in params:
-            if param in section_config:
-                args[param] = section_config[param]
-    return parser.parse_dict(args)[0]
 
 
 @dataclass
@@ -200,54 +146,16 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
         experiment_suffix="",
         commit=commit,
         tag=clearml_tag,
+        experiment_type=ClearMLExperimentType.ASR,
     )
-    exp_dir = get_mt_exp_dir(experiment_name)
 
-    clearml.config = HuggingFaceConfig(
-        exp_dir,
-        merge_dict(
-            {
-                "data": {
-                    "test_size": 0.1,
-                    "asr_corpora": [
-                        "/root/M/MT/experiments/demo_ben/misc/w_test/data/senga_ground_truth_transcriptions/train-00000-of-00002.parquet",
-                        "/root/M/MT/experiments/demo_ben/misc/w_test/data/senga_ground_truth_transcriptions/train-00001-of-00002.parquet",
-                    ],
-                    "characters_to_remove": "",
-                    "max_input_length": 30.0,
-                },
-                "train": {
-                    "save_steps": 250,
-                    "per_device_train_batch_size": 16,
-                    "save_strategy": "steps",
-                    "save_total_limit": 2,
-                    "gradient_accumulation_steps": 4,
-                    "max_steps": 1000,
-                    "group_by_length": True,
-                    "output_dir": str(exp_dir / "run"),
-                },
-                "eval": {
-                    "eval_strategy": "steps",
-                    "eval_steps": 250,
-                    "early_stopping": None,
-                    "load_best_model_at_end": True,
-                    "metric_for_best_model": "cer",
-                    "per_device_eval_batch_size": 16,
-                },
-                "params": {
-                    "warmup_steps": 100,
-                    "learning_rate": 0.0002,
-                    "lr_scheduler_type": "constant_with_warmup",
-                },
-            },
-            clearml.config.root,
-        ),
-        skip_defaults=True
+    LOGGER.info(
+        f"{pformat(clearml.config.root)}"
     )
 
     dfs = []
-    for corpus_path in clearml.config.data["asr_corpora"]:
-        sub_df = pd.read_parquet(corpus_path)
+    for corpus_path in clearml.config.data["corpora"]:
+        sub_df = pd.read_parquet(SIL_NLP_ENV.asr_corpora_dir / corpus_path)
         dfs.append(sub_df)
     df = pd.concat(dfs, ignore_index=True)
 
@@ -331,8 +239,6 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
             input_columns=["input_length"],
         )
 
-    from pprint import pformat
-
     LOGGER.info(pformat(dataset))
 
     test_size = clearml.config.data.get("test_size", 0.1)
@@ -394,7 +300,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
             param.requires_grad = True
 
     if clearml.config.model.startswith("openai/whisper"):
-        training_args = _create_seq2seq_training_arguments()
+        training_args = create_seq2seq_training_arguments()
         training_args.predict_with_generate = True
 
         model.generation_config.suppress_tokens = []
@@ -409,7 +315,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
             processing_class=processor,
         )
     else:
-        training_args = _create_training_arguments(clearml.config)
+        training_args = create_training_arguments(clearml.config)
 
         trainer = Trainer(
             args=training_args,

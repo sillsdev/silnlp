@@ -5,7 +5,7 @@ import pytest
 import sentencepiece as sp
 
 from silnlp.common.environment import SIL_NLP_ENV
-from silnlp.nmt.config_utils import load_config
+from silnlp.common.config_utils import load_config
 
 from . import helper
 

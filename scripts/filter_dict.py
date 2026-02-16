@@ -1,7 +1,7 @@
 import argparse
 import shutil
 
-from silnlp.nmt.config_utils import load_config
+from silnlp.common.config_utils import load_config
 
 _COMMON_TERMS = {"god", "lord", "yhwh", "yahweh", "jehovah", "jehovah god"}
 

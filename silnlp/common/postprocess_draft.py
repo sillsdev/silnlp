@@ -2,8 +2,8 @@ import argparse
 import logging
 from pathlib import Path
 
-from ..nmt.clearml_connection import TAGS_LIST, SILClearML
-from ..nmt.config_utils import load_config
+from .clearml_connection import TAGS_LIST, SILClearML
+from .config_utils import load_config
 from ..nmt.postprocess import postprocess_experiment
 from .postprocesser import PostprocessConfig, PostprocessHandler
 

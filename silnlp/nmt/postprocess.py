@@ -19,9 +19,9 @@ from ..common.postprocesser import (
 )
 from ..common.usfm_utils import PARAGRAPH_TYPE_EMBEDS
 from ..common.utils import get_git_revision_hash
-from .clearml_connection import TAGS_LIST, SILClearML
+from ..common.clearml_connection import TAGS_LIST, SILClearML
 from .config import Config
-from .config_utils import load_config
+from ..common.config_utils import load_config
 from .corpora import CorpusPair
 from .hugging_face_config import get_best_checkpoint
 
