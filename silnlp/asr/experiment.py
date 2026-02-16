@@ -1,14 +1,40 @@
 import argparse
+import json
 import logging
 import os
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Optional, Set, Union
-import json
 import re
+from dataclasses import dataclass
+from functools import partial
+from pathlib import Path
+from pprint import pformat
+from typing import Any, Dict, List, Optional, Set, Union
 
+import evaluate
 import numpy as np
+import pandas as pd
+import torch
 import yaml  # TODO cleanup imports
+from datasets import Audio, Dataset
+from transformers import (
+    AutoFeatureExtractor,
+    AutoModel,
+    AutoModelForCTC,
+    AutoProcessor,
+    AutoTokenizer,
+    HfArgumentParser,
+    SeamlessM4TFeatureExtractor,
+    Seq2SeqTrainer,
+    Seq2SeqTrainingArguments,
+    Trainer,
+    TrainingArguments,
+    Wav2Vec2BertProcessor,
+    Wav2Vec2CTCTokenizer,
+    Wav2Vec2FeatureExtractor,
+    Wav2Vec2Processor,
+    WhisperForConditionalGeneration,
+    WhisperProcessor,
+)
+from transformers.models.whisper.english_normalizer import BasicTextNormalizer
 
 from silnlp.asr.hugging_face_config import create_seq2seq_training_arguments, create_training_arguments
 from silnlp.common.clearml_connection import LOGGER, TAGS_LIST, ClearMLExperimentType, SILClearML
@@ -18,37 +44,6 @@ from silnlp.nmt.hugging_face_config import HuggingFaceConfig  # TODO move clearm
 from ..common.environment import SIL_NLP_ENV
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.utils import get_asr_exp_dir, get_git_revision_hash, get_mt_exp_dir, merge_dict, show_attrs
-from dataclasses import dataclass
-from functools import partial
-from typing import Any, Dict, List, Union
-from pprint import pformat
-
-import evaluate
-import pandas as pd
-import torch
-from datasets import Audio, Dataset
-from transformers import (
-    Seq2SeqTrainer,
-    Seq2SeqTrainingArguments,
-    WhisperForConditionalGeneration,
-    WhisperProcessor,
-    Wav2Vec2BertProcessor,
-    Wav2Vec2Processor,
-)
-from transformers.models.whisper.english_normalizer import BasicTextNormalizer
-from transformers import (
-    AutoProcessor,
-    AutoModel,
-    AutoFeatureExtractor,
-    AutoTokenizer,
-    Wav2Vec2CTCTokenizer,
-    TrainingArguments,
-    Trainer,
-    Wav2Vec2FeatureExtractor,
-    AutoModelForCTC,
-    SeamlessM4TFeatureExtractor,
-    HfArgumentParser,
-)
 
 
 @dataclass
@@ -62,9 +57,11 @@ class DataCollatorCTCWithPadding:
         # split inputs and labels since they have to be of different lengths and need
         # different padding methods
         input_features = [
-            {"input_values": feature["input_values"]}
-            if "input_values" in feature
-            else {"input_features": feature["input_features"]}
+            (
+                {"input_values": feature["input_values"]}
+                if "input_values" in feature
+                else {"input_features": feature["input_features"]}
+            )
             for feature in features
         ]
         label_features = [{"input_ids": feature["labels"]} for feature in features]
@@ -149,9 +146,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
         experiment_type=ClearMLExperimentType.ASR,
     )
 
-    LOGGER.info(
-        f"{pformat(clearml.config.root)}"
-    )
+    LOGGER.info(f"{pformat(clearml.config.root)}")
 
     dfs = []
     for corpus_path in clearml.config.data["corpora"]:
@@ -160,7 +155,14 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
     df = pd.concat(dfs, ignore_index=True)
 
     dataset = Dataset.from_dict(
-        {"text": [row["text"] for _, row in df.iterrows()], "audio": [row["audio"] for _, row in df.iterrows()]}
+        {
+            "text": [row["text"] for _, row in df.iterrows()],
+            "audio": [row["audio"] for _, row in df.iterrows()],
+            "start_chapter": [row["start_chapter"] for _, row in df.iterrows()],
+            "start_verse": [row["start_verse"] for _, row in df.iterrows()],
+            "end_chapter": [row["end_chapter"] for _, row in df.iterrows()],
+            "end_verse": [row["end_verse"] for _, row in df.iterrows()],
+        }
     )
 
     dataset = dataset.cast_column("audio", Audio(sampling_rate=16000))
@@ -242,10 +244,15 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
 
     LOGGER.info(pformat(dataset))
 
-    test_size = clearml.config.data.get("test_size", 0.1)
-    split_dataset = dataset.train_test_split(test_size=test_size)
-    train_dataset = split_dataset["train"]
-    eval_dataset = split_dataset["test"]
+    # Split dataset: test (chapters 11-16), validation (chapters 23-28), training (everything else)
+    eval_dataset = dataset.filter(lambda x: 23 <= x["start_chapter"] <= 28 if x["start_chapter"] is not None else False)
+    train_dataset = dataset.filter(
+        lambda x: (
+            not (11 <= x["start_chapter"] <= 16 or 23 <= x["start_chapter"] <= 28)
+            if x["start_chapter"] is not None
+            else True
+        )
+    )
 
     if clearml.config.model.startswith("openai/whisper"):
         data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor)
