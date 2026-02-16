@@ -136,10 +136,10 @@ class HuggingFaceConfig:
                 },
                 "train": {
                     "save_steps": 250,
-                    "per_device_train_batch_size": 16,
+                    "per_device_train_batch_size": 2,
                     "save_strategy": "steps",
                     "save_total_limit": 2,
-                    "gradient_accumulation_steps": 4,
+                    "gradient_accumulation_steps": 8,
                     "max_steps": 1000,
                     "group_by_length": True,
                     "output_dir": str(exp_dir / "run"),
@@ -150,7 +150,7 @@ class HuggingFaceConfig:
                     "early_stopping": None,
                     "load_best_model_at_end": True,
                     "metric_for_best_model": "cer",
-                    "per_device_eval_batch_size": 16,
+                    "per_device_eval_batch_size": 2,
                 },
                 "params": {
                     "warmup_steps": 100,
@@ -199,7 +199,13 @@ def create_seq2seq_training_arguments(config: HuggingFaceConfig) -> Seq2SeqTrain
         for param in params:
             if param in section_config:
                 args[param] = section_config[param]
-    return parser.parse_dict(args)[0]
+    merge_dict(
+            args,
+            {
+                "fp16": True,
+            },
+        )
+    parser.parse_dict(args)[0]
 
 
 def create_training_arguments(config: HuggingFaceConfig) -> TrainingArguments:
@@ -210,4 +216,10 @@ def create_training_arguments(config: HuggingFaceConfig) -> TrainingArguments:
         for param in params:
             if param in section_config:
                 args[param] = section_config[param]
+    merge_dict(
+        args,
+        {
+            "fp16": True,
+        },
+    )
     return parser.parse_dict(args)[0]

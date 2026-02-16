@@ -307,7 +307,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
 
         trainer = Seq2SeqTrainer(
             args=training_args,
-            model=model.to("cuda"),
+            model=model,
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
             data_collator=data_collator,
@@ -319,7 +319,7 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
 
         trainer = Trainer(
             args=training_args,
-            model=model.to("cuda"),
+            model=model,
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
             data_collator=data_collator,
