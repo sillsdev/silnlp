@@ -300,7 +300,6 @@ def run(experiment_name: str, clearml_queue: str, clearml_tag: str, commit: Opti
 
     if clearml.config.model.startswith("openai/whisper"):
         training_args = create_seq2seq_training_arguments(clearml.config)
-        training_args.predict_with_generate = True
 
         model.generation_config.suppress_tokens = []
 

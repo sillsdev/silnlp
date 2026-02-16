@@ -203,6 +203,7 @@ def create_seq2seq_training_arguments(config: HuggingFaceConfig) -> Seq2SeqTrain
             args,
             {
                 "fp16": True,
+                "predict_with_generate": True
             },
         )
     parser.parse_dict(args)[0]
