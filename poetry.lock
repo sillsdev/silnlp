@@ -5819,6 +5819,66 @@ files = [
 ]
 
 [[package]]
+name = "unicodedataplus"
+version = "16.0.0.post1"
+description = "Unicodedata with extensions for additional properties."
+optional = false
+python-versions = "*"
+files = [
+    {file = "unicodedataplus-16.0.0.post1-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:38c69b7ca90571042e2753af75d553e81872a8af165d81308952940be1676a4f"},
+    {file = "unicodedataplus-16.0.0.post1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:daaba246dae1cf11cb0637e0b1aab6c59be468da3c3289b2e2acc149a2a0ee25"},
+    {file = "unicodedataplus-16.0.0.post1-cp310-cp310-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:0693c34d0b5f0437dc0b4db1d47ec1a96b339c1a0c439d551faf6eea4c415a53"},
+    {file = "unicodedataplus-16.0.0.post1-cp310-cp310-musllinux_1_2_i686.whl", hash = "sha256:e392aaab5ddf35caffec5af19f458cf2e415e69cf835e1cf9d5c551bfa074862"},
+    {file = "unicodedataplus-16.0.0.post1-cp310-cp310-musllinux_1_2_x86_64.whl", hash = "sha256:d8a3697900283e918ecdc3dd3803769c3c82575435684dec90e194a2d0ecabc4"},
+    {file = "unicodedataplus-16.0.0.post1-cp310-cp310-win32.whl", hash = "sha256:df0afd4d371f22aba5e09d9fcf1a906cfbc1feb870422802a07e4dfc8ac0a3ff"},
+    {file = "unicodedataplus-16.0.0.post1-cp310-cp310-win_amd64.whl", hash = "sha256:bc96fa25a3c77db0912262e1e8b83e04a03895ea7be77dd2783893d7ff795e1a"},
+    {file = "unicodedataplus-16.0.0.post1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:48db5d343a6f2b651b1859274d86d3dd54ac94079216de856f1d01351c811c76"},
+    {file = "unicodedataplus-16.0.0.post1-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:342a5f730a092d90bcaf46fd514aeea920705950b243b2fb09d69a633d2ba17b"},
+    {file = "unicodedataplus-16.0.0.post1-cp311-cp311-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:87806228ec7b115b999d17676d4bb8de8b502a06360f77c212290001b84cebe8"},
+    {file = "unicodedataplus-16.0.0.post1-cp311-cp311-musllinux_1_2_i686.whl", hash = "sha256:41cdd789117f21721cdf5016b2af3325fb3d7689f2a4f8dfe3a1e30b59ef20c8"},
+    {file = "unicodedataplus-16.0.0.post1-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:476ed9d38ede93ce0f1ee2b58b2d588d4920890a36074a978f12a69f8488003c"},
+    {file = "unicodedataplus-16.0.0.post1-cp311-cp311-win32.whl", hash = "sha256:20e3b6ee31b10aa9b627e4c6365bcf49597f5da567bd24bd36dd547570665044"},
+    {file = "unicodedataplus-16.0.0.post1-cp311-cp311-win_amd64.whl", hash = "sha256:842519bdb4c9baeb0425d2d7910d5d568c69ef25cc37f08577096b00306cc088"},
+    {file = "unicodedataplus-16.0.0.post1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:a7137a6ad7a1c4fc8f702daa832aa647a555d8d5c9212b1c7484bd4cef420994"},
+    {file = "unicodedataplus-16.0.0.post1-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:06873b54ae983c4bc08ad2d92bfee264b600fbc05efce66f8ccf05a80743e2c2"},
+    {file = "unicodedataplus-16.0.0.post1-cp312-cp312-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:b5afed3758b7c8d5588568968d2ad1d4fd8ec377344b7307df9d348080a1922d"},
+    {file = "unicodedataplus-16.0.0.post1-cp312-cp312-musllinux_1_2_i686.whl", hash = "sha256:95d1a608fb7b87db602f88e5eeef42c14a9c9da336fc148f5ce248f53fb55261"},
+    {file = "unicodedataplus-16.0.0.post1-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:96c1cdf0643c71ffd8357580e2ce65ed7b6187b511354d25ce696cb464c8e889"},
+    {file = "unicodedataplus-16.0.0.post1-cp312-cp312-win32.whl", hash = "sha256:f697b5f43b71f07ccb8644d12a79478872d093ae9811279c384c214383586619"},
+    {file = "unicodedataplus-16.0.0.post1-cp312-cp312-win_amd64.whl", hash = "sha256:302d5a5bf38962627539cbee1114759103ddcec57bef6c94151885f48bf623a3"},
+    {file = "unicodedataplus-16.0.0.post1-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:8d8c45d347c970e22507918945a777636d40c2de5f281699eb0907f99961b530"},
+    {file = "unicodedataplus-16.0.0.post1-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:375a33b10f041897d550f4d40521884593c2c9d9bc310a748dc401a9189e5553"},
+    {file = "unicodedataplus-16.0.0.post1-cp313-cp313-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:84fafdf0b4774038a3f49966e5e80cc023dc58c318c2663ce06145877d7442fa"},
+    {file = "unicodedataplus-16.0.0.post1-cp313-cp313-musllinux_1_2_i686.whl", hash = "sha256:f09daf97ec4fd74a57eab51dbd53addac89b739fc6b1c7097250fb47798b94c6"},
+    {file = "unicodedataplus-16.0.0.post1-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:0731f60841cd39c71251270750717c4c3b077116fe34e284796f851b258c876e"},
+    {file = "unicodedataplus-16.0.0.post1-cp313-cp313-win32.whl", hash = "sha256:9ad94aee3b34ae61e0c4d122e3cfc9aa0d1c2c629ed0ecbcd6edf0c2d2684cd1"},
+    {file = "unicodedataplus-16.0.0.post1-cp313-cp313-win_amd64.whl", hash = "sha256:e32be0dc8ab6e17abff49ef2983e74e13fb0cb6ddb215dc8b988675b09a3e19d"},
+    {file = "unicodedataplus-16.0.0.post1-cp38-cp38-macosx_11_0_arm64.whl", hash = "sha256:13dd5075bc5b63146388ea6e0c70fe1aee51a00ffd03da59cd3a8f87fbb6d12a"},
+    {file = "unicodedataplus-16.0.0.post1-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:07f91ad02976b54518c3e9dc8ef7415abd58cd3ba71a16ccf39a7d52f3ab92b0"},
+    {file = "unicodedataplus-16.0.0.post1-cp38-cp38-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:2dad809dceaca6fa129f70a7eefca34863916d14114a06c42d23a61c8fba795a"},
+    {file = "unicodedataplus-16.0.0.post1-cp38-cp38-musllinux_1_2_i686.whl", hash = "sha256:62f0d15bc2f15873417995181d2b89366420b058014105897452691a3f98df76"},
+    {file = "unicodedataplus-16.0.0.post1-cp38-cp38-musllinux_1_2_x86_64.whl", hash = "sha256:6232a160c0cff55f72eda3161ed72a286b624dbaa262c8dc4337362376022688"},
+    {file = "unicodedataplus-16.0.0.post1-cp38-cp38-win32.whl", hash = "sha256:02e37c25ebab0a7f96add4bc95da1a93b3ec3c2d574968ab43db796dd9ca0136"},
+    {file = "unicodedataplus-16.0.0.post1-cp38-cp38-win_amd64.whl", hash = "sha256:27b90d832c11e9332f6140c82e9b7191016849d85da80f3010343837fee2e0ab"},
+    {file = "unicodedataplus-16.0.0.post1-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:134b0aa2fffc7896053e374e1d5acade4d2cccdb2861d63ebd57300a54b2b47a"},
+    {file = "unicodedataplus-16.0.0.post1-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:4d406d740bb9f34fefacb578df7395960424faa6bcf56d26e61b0ebc76b2423b"},
+    {file = "unicodedataplus-16.0.0.post1-cp39-cp39-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:2bdc23cc1c202cd936ec7734621659b68643d0ab5cd9c9f9c2fe1dc8bd774426"},
+    {file = "unicodedataplus-16.0.0.post1-cp39-cp39-musllinux_1_2_i686.whl", hash = "sha256:0f19e4a1d63c35ff3cf40344da93e7d935fb006d4963277697ec62a865ce1500"},
+    {file = "unicodedataplus-16.0.0.post1-cp39-cp39-musllinux_1_2_x86_64.whl", hash = "sha256:a19f8cd3128028e40516f7096a59a7d73afe6bfb87ff6efe2c7ddb8e3ef6ded7"},
+    {file = "unicodedataplus-16.0.0.post1-cp39-cp39-win32.whl", hash = "sha256:9b920a45f97f3c2db160b2a3d02073db60c0eaeb541964558daecbc9d254b755"},
+    {file = "unicodedataplus-16.0.0.post1-cp39-cp39-win_amd64.whl", hash = "sha256:1c9c8f3d52a6c4f3caa025ace49e6daa147eb5244388ebe96105db66b144f13d"},
+    {file = "unicodedataplus-16.0.0.post1-pp310-pypy310_pp73-macosx_11_0_arm64.whl", hash = "sha256:c838540263b0223d21cf1316445537728854da1cc0119654f089f0faab5d5cb8"},
+    {file = "unicodedataplus-16.0.0.post1-pp310-pypy310_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:5469e0abe8d552b3933cb5a2d7721537ca2fd9564baf4d93f5c5177e3c2217dd"},
+    {file = "unicodedataplus-16.0.0.post1-pp310-pypy310_pp73-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:25f94db841aa7e8ea5e08d501e5e66123eb7354359f2daf6c36479c9ef2f11fd"},
+    {file = "unicodedataplus-16.0.0.post1-pp310-pypy310_pp73-win_amd64.whl", hash = "sha256:31493aec78ea14609c1247d7ca732818543c0cbfaf716d8572ea552fa6a0820b"},
+    {file = "unicodedataplus-16.0.0.post1-pp39-pypy39_pp73-macosx_11_0_arm64.whl", hash = "sha256:71b0b33c056878e7a95154d494a8f1d0f8edb59a8c04b168ff71881e11fd90e4"},
+    {file = "unicodedataplus-16.0.0.post1-pp39-pypy39_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:281784a4b24847acafffa6d8307e679c291ea49c0ba70424f5126e05d08b69c8"},
+    {file = "unicodedataplus-16.0.0.post1-pp39-pypy39_pp73-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:56e7cee5bcabccfd7d5afb7f28edac0356ab0004e42c681c5274d279d60fcfcd"},
+    {file = "unicodedataplus-16.0.0.post1-pp39-pypy39_pp73-win_amd64.whl", hash = "sha256:e46345a4dafb2286ee212fc9c8d5389c0c97d7cb742c6d5d915fc7612d39ff5c"},
+    {file = "unicodedataplus-16.0.0.post1.tar.gz", hash = "sha256:f8cd342d91c73b512c229976a82aeb7e448517969d611433a9ea825dc62fed84"},
+]
+
+[[package]]
 name = "uritemplate"
 version = "4.1.1"
 description = "Implementation of RFC 6570 URI Templates"
@@ -6239,4 +6299,4 @@ eflomal = ["eflomal"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.11"
-content-hash = "59e38f40aca6365664ddc34017c32572d10cc6e24b6d64042b0bf1f8f2ffc373"
+content-hash = "b7ca4b3b9e22b854355552da5266cd8649afc5e4ddeb4ebd484594be0f6a0017"
