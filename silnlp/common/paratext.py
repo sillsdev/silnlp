@@ -2,7 +2,7 @@ import logging
 from contextlib import ExitStack
 from pathlib import Path
 from typing import Dict, List, Optional, Set, TextIO, Tuple
-import unicodedata
+import unicodedataplus
 from xml.sax.saxutils import escape
 
 import regex as re
@@ -268,7 +268,7 @@ def extract_term_renderings(project_dir: Path, corpus_filename: Path, output_dir
         ):
         for metadata_line in terms_metadata_file.readlines():
             id, _, _ = metadata_line.split("\t", maxsplit=3)
-            id = unicodedata.normalize('NFC', id)
+            id = unicodedataplus.normalize('NFC', id)
             key_term = key_terms.get(id, None)
             renderings = key_term.renderings if key_term else []
             if extract_surface_forms:
