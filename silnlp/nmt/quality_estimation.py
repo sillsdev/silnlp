@@ -436,22 +436,26 @@ def main() -> None:
     parser.add_argument(
         "verse_test_scores_file",
         type=str,
-        help="The tsv file relative to MT/experiments containing the verse-level test scores to determine "
-        + "line of best fit, e.g., `project_folder/exp_folder/test.trg-predictions.detok.txt.5000.scores.tsv`. ",
+        help="Path relative to MT/experiments to a verse-level test score file, which is used to find line of best fit "
+        + "for confidence and chrF3, e.g., project_folder/exp_folder/test.trg-predictions.detok.txt.5000.scores.tsv. "
+        + "If a directory is provided instead, the first *.scores.tsv match is used.",
     )
     parser.add_argument(
         "confidence_files",
         nargs="*",
         type=str,
-        help="Relative paths for the confidence files to process (relative to MT/experiments or --confidence-dir "
-        + "if specified) e.g. 'project_folder/exp_folder/infer/5000/source/631JN.SFM.confidences.tsv' or "
-        + "'631JN.SFM.confidences.tsv --confidence-dir project_folder/exp_folder/infer/5000/source'.",
+        help="Zero or more confidence file paths (.confidences.tsv suffix, e.g., "
+        + "project_folder/exp_folder/infer/5000/source/631JN.SFM.confidences.tsv'). Paths are relative to "
+        + "MT/experiments by default or to MT/experiments/--confidence-dir if --confidence-dir is specified. "
+        + "Ignored when --books is used. If zero paths are provided and --books is not specified, "
+        + "confidence files are auto detected in the --confidence-dir.",
     )
     parser.add_argument(
         "--confidence-dir",
         type=str,
         default=None,
-        help="Folder (relative to experiment MT/experiments) containing confidence files e.g. 'infer/5000/source/'.",
+        help="Directory relative to MT/experiments containing confidence files. "
+        + "Required when using --books or when auto-detecting confidence files.",
     )
     parser.add_argument(
         "--books",
@@ -461,7 +465,10 @@ def main() -> None:
         + "the confidence_files positional argument.",
     )
     parser.add_argument(
-        "--draft-index", type=int, default=None, help="If using --books with multiple drafts, specify the draft index."
+        "--draft-index",
+        type=int,
+        default=None,
+        help="If using --books with multiple drafts, optionally specify the draft index.",
     )
     args = parser.parse_args()
 
