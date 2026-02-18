@@ -63,8 +63,10 @@ Follow these steps if you plan to run silnlp on a Windows machine.
    * To access WSL files from Windows, open File Explorer and either:
       - Scroll down and choose Linux, then Ubuntu-22.04
       - Or search "\\wsl.localhost\Ubuntu-22.04"
-
-The rest of these instructions are assumed to be done in a WSL/Linux terminal as the root user in /root (or ~ when logged in as root).
+   
+   * Note that for silnlp on WSL forward slashes are required in paths. If you see an error like: `RuntimeError: Config file has no contents.` or any other error indicating a missing file or contents check that you have used `/` and not `\` in the command line arguments.
+     
+The rest of these instructions are to be carried out in a WSL/Linux terminal as the root user in /root (or ~ when logged in as root).
 
 ### Note on IDEs with WSL
    * [VS Code Instructions](https://code.visualstudio.com/docs/remote/wsl)
