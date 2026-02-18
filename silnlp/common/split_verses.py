@@ -1,11 +1,9 @@
 import argparse
 import logging
 import shutil
-from collections import Counter
 from pathlib import Path
 
-from aiohttp import TraceDnsCacheHitParams
-from machine.corpora import FileParatextProjectSettingsParser, UsfmStylesheet, UsfmToken, UsfmTokenizer, UsfmTokenType, UsfmParser, UsfmElementType
+from machine.corpora import FileParatextProjectSettingsParser, UsfmToken, UsfmTokenType, UsfmParser, UsfmElementType
 
 from .collect_verse_counts import DT_CANON, NT_CANON, OT_CANON
 from .paratext import get_project_dir
@@ -90,36 +88,6 @@ def split_text(text, max_len):
     return chunks
 
 
-# def split_text_token(parser, max_len):
-#     "Split long text into parts with the appropriate para/char markers"
-
-#     chunks = split_text(parser.state.token.text, max_len)
-#     if len(chunks) == 1: 
-#         print(f"Warning: text chunk passed to split_text_token was not longer than {max_len}:\n{parser.state.token.text}")
-#         return [parser.state.token]  # No change to this token.
-
-#     elif len(chunks) > 1:
-#         result = [UsfmToken(UsfmTokenType.TEXT, text=chunks[0])]
-#         if len(parser.state.stack) == 3 and parser.state.stack[0].type == UsfmElementType.PARA and parser.state.stack[1].type == UsfmElementType.NOTE and parser.state.stack[2].type == UsfmElementType.CHAR:
-#             for chunk in chunks[1:]:
-#                 result.append(UsfmToken(UsfmTokenType.PARAGRAPH, marker=parser.state.stack[0].marker))
-#                 result.append(UsfmToken(UsfmTokenType.NOTE, marker=parser.state.stack[1].marker))
-#                 result.append(UsfmToken(UsfmTokenType.CHARACTER, marker=parser.state.stack[2].marker))
-#                 result.append(UsfmToken(UsfmTokenType.TEXT, text=chunk))
-#         elif len(parser.state.stack) == 2 and parser.state.stack[0].type == UsfmElementType.PARA and parser.state.stack[1].type == UsfmElementType.CHAR:
-#             for chunk in chunks[1:]:
-#                 result.append(UsfmToken(UsfmTokenType.PARAGRAPH, marker=parser.state.stack[0].marker))
-#                 result.append(UsfmToken(UsfmTokenType.CHARACTER, marker=parser.state.stack[1].marker))
-#                 result.append(UsfmToken(UsfmTokenType.TEXT, text=chunk))
-#         elif len(parser.state.stack) == 1 and parser.state.stack[0].type == UsfmElementType.PARA:
-#             for chunk in chunks[1:]:
-#                 result.append(UsfmToken(UsfmTokenType.PARAGRAPH, marker=parser.state.stack[0].marker))
-#                 result.append(UsfmToken(UsfmTokenType.TEXT, text=chunk))
-#         else:
-#             print(f"Warning, don't know how to handle this parser.state.stack: {parser.state.stack} in split_text_token.")
-#     return result
-
-
 def split_text_token(parser, max_len):
     "Split long text into parts with the appropriate para/char markers"
 
@@ -142,26 +110,19 @@ def split_text_token(parser, max_len):
         result.append(UsfmToken(UsfmTokenType.TEXT, text=chunk))
     return result
 
-def strip_eol_spaces(string):
-    sample = string[:600]
-    print(f"sample string is : {sample}")
-    
-    print(f"\nString is a {type(string)}. Items look like this with _ in place of spaces:")
-    sample_view = sample.replace(' ','_').replace('\r', '\\r').replace('\n','\\n')
-    print(sample_view)
-    
-    print(f"\nString with ' \\n' replaced by '\\n' is:")
-    string_stripped = string.replace(' \n','\n')
 
-    print(f"\nAfter removing eol_spaces string is a {type(string_stripped)}. Items look like this with _ in place of spaces:")
-    new_sample_view = string_stripped[:600].replace(' ','_').replace('\r', '\\r').replace('\n','\\n')
-    print(new_sample_view)
-    print()
-    print(string_stripped[:600])
+def check_for_long_lines(settings, sfm_file, max_length):
+    
+    over_long_texts = dict()
 
-    return string_stripped
-    
-    
+    with open(sfm_file, 'r', encoding='utf-8') as f: usfm_out_text = f.read()
+    parser = UsfmParser(usfm_out_text, stylesheet=settings.stylesheet, versification=settings.versification)
+
+    while parser.process_token():
+        token_len = parser.state.token.get_length()
+        if parser.state.token.type == UsfmTokenType.TEXT and  token_len > max_length:
+            over_long_texts[f"{sfm_file}:{parser.state.token.line_number}"] = parser.state.token.get_length()
+    return over_long_texts
 
 
 def main():
@@ -201,9 +162,8 @@ def main():
     output_dir = project_dir.parent / f"{project_dir.name}_split_{args.max}"
     
     # Copying the folder ensures that all necessary files are present.
-    #shutil.copytree(project_dir, output_dir, dirs_exist_ok=True)
+    shutil.copytree(project_dir, output_dir, dirs_exist_ok=True)
 
-    # Test with one file:
 
     # Process each file
     for sfm_file in sfm_files:
@@ -227,20 +187,6 @@ def main():
         
         output_sfm_file = output_dir / sfm_file.name
         with open(output_sfm_file, 'w', encoding='utf-8') as f: f.write(usfm_stripped)
-        
-        # with open(output_sfm_file, 'r', encoding='utf-8') as f: usfm_out_text = f.read()
-        # out_parser = UsfmParser(usfm_out_text, stylesheet=settings.stylesheet, versification=settings.versification)
-        # over_long_texts = dict()
-        # while out_parser.process_token():
-        #     token_len = parser.state.token.get_length()
-        #     if out_parser.state.token.type == UsfmTokenType.TEXT and  token_len > MAX_LENGTH:
-        #         over_long_texts[output_sfm_file] = {'lineno':parser.state.token.line_number, 'length':parser.state.token.get_length()}
-        #         print(f"SFM output file {output_sfm_file} has the following long texts:")
-        #         print(f"{over_long_texts}")
-        #         exit()
-
-        # print(f"SFM output file {output_sfm_file} has the following long texts:")
-        # print(f"{over_long_texts}")
                     
     print(f"Done! Processed {len(sfm_files)} books in {output_dir}")
 
