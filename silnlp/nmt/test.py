@@ -49,6 +49,7 @@ SUPPORTED_SENTENCE_SCORERS = [
     "confidence",
 ]
 
+TEST_TRG_PREDICTIONS_PREFIX = "test.trg-predictions"
 VERSE_SCORES_SUFFIX = ".scores.tsv"
 
 
@@ -557,10 +558,10 @@ def test_checkpoint(
         # all test data is stored in a single file
         vref_file_names.append("test.vref.txt")
         source_file_names.append(features_file_name)
-        translation_file_names.append(f"test.trg-predictions.txt.{suffix_str}")
+        translation_file_names.append(f"{TEST_TRG_PREDICTIONS_PREFIX}.txt.{suffix_str}")
         refs_patterns.append("test.trg.detok*.txt")
-        translation_detok_file_names.append(f"test.trg-predictions.detok.txt.{suffix_str}")
-        translation_conf_file_names.append(f"test.trg-predictions.txt.{suffix_str}{CONFIDENCE_SUFFIX}")
+        translation_detok_file_names.append(f"{TEST_TRG_PREDICTIONS_PREFIX}.detok.txt.{suffix_str}")
+        translation_conf_file_names.append(f"{TEST_TRG_PREDICTIONS_PREFIX}.txt.{suffix_str}{CONFIDENCE_SUFFIX}")
     else:
         # test data is split into separate files
         for src_iso in sorted(config.test_src_isos):
