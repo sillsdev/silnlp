@@ -1,257 +1,252 @@
 import argparse
 import logging
+import shutil
+from collections import Counter
 from pathlib import Path
 
-from collections import Counter
-from machine.corpora import UsfmTokenizer, UsfmToken, UsfmTokenType
-from machine.corpora import FileParatextProjectSettingsParser, UsfmFileText
-from machine.scripture import book_number_to_id, get_chapters
-from sympy import expand
+from aiohttp import TraceDnsCacheHitParams
+from machine.corpora import FileParatextProjectSettingsParser, UsfmStylesheet, UsfmToken, UsfmTokenizer, UsfmTokenType, UsfmParser, UsfmElementType
 
-from .paratext import get_project_dir
 from .collect_verse_counts import DT_CANON, NT_CANON, OT_CANON
-from .check_books import group_bible_books
+from .paratext import get_project_dir
+
+from .book_args import expand_book_list, get_sfm_files_to_process, get_epilog, add_books_argument
+
+LOGGER = logging.getLogger(__package__ + ".split_verses_v7")
+
+MAX_LENGTH = 200
+
+# from .check_books import group_bible_books
+VALID_CANONS = ["OT", "NT", "DT"]
 VALID_BOOKS = OT_CANON + NT_CANON + DT_CANON
 
-LOGGER = logging.getLogger(__package__ + ".split_long_verses")
+SENTENCE_ENDS = '.!?'
+WORD_BREAKS = " ,;:-"
+CLOSE_QUOTES = '"\'"'
 
-# Mapping of paragraph markers to their split markers
-SPLIT_MARKER_MAP = {
-    'ip': 'ip',  # intro paragraphs stay as intro paragraphs
-    'm': 'p',    # continuation of m markers become regular paragraphs
-    'p': 'p',    # Splitting long paragraphs remain as paragraphs
-    'v': 'p',    # Splitting verses into paragraphs
+ELEMENT_TO_TOKEN_TYPE = {
+    UsfmElementType.PARA: UsfmTokenType.PARAGRAPH,
+    UsfmElementType.NOTE: UsfmTokenType.NOTE,
+    UsfmElementType.CHAR: UsfmTokenType.CHARACTER,
 }
 
-SENTENCE_ENDINGS = ['.', '!', '?', '।']
-WORD_BREAKS = [' ', ',', ';', ':', '-']
-
-def get_split_marker(original_marker):
-    """Get the marker to use for split text, default to 'p'"""
-    return SPLIT_MARKER_MAP.get(original_marker, 'p')
-
-
-def find_split_point(text, max_length=275, hard_max=325):
-    """Find a sentence or word break near max_length"""
-    if len(text) <= max_length:
-        return None
-    
-    # First try to find sentence ending before hard_max
-    for punct in SENTENCE_ENDINGS:
-        split_pos = text.rfind(punct, 0, hard_max)
-        if split_pos > 0:
-            return split_pos + 1
-    
-    # If not found, look for word break before max_length
-    for break_char in WORD_BREAKS:
-        split_pos = text.rfind(break_char, 0, max_length)
-        if split_pos > 0:
-            return split_pos + 1
-    
-    return None  # Can't split
+def find_break_positions(text):
+    "Return list of (position, is_sentence_break) for valid break points"
+    breaks = []
+    i = 0
+    while i < len(text):
+        if text[i] in SENTENCE_ENDS:
+            j = i + 1
+            while j < len(text) and text[j] in CLOSE_QUOTES: j += 1
+            if j < len(text) and text[j] in WORD_BREAKS:
+                breaks.append((j, True))  # sentence break
+        elif text[i] in WORD_BREAKS:
+            breaks.append((i, False))  # word break only
+        i += 1
+    return breaks
 
 
-def split_text_recursively(text, max_length=275):
-    """Recursively split text and return list of text chunks"""
-    if len(text) <= max_length:
-        return [text]
+def split_text(text, max_len):
+    "Split text into chunks under max_len, preferring sentence breaks over word breaks"
+    if len(text) <= max_len: return [text]
     
-    split_pos = find_split_point(text, max_length=max_length)
-    if split_pos is None:
-        return [text]  # Can't split, return as-is
+    breaks = find_break_positions(text)
+    sentence_breaks = [pos for pos, is_sentence in breaks if is_sentence]
+    word_breaks = [pos for pos, is_sentence in breaks if not is_sentence]
     
-    first_part = text[:split_pos]
-    rest = text[split_pos:]
+    # Calculate optimal number of chunks
+    num_chunks = (len(text) + max_len - 1) // max_len
+    target_len = len(text) // num_chunks
     
-    # Recursively split the rest
-    return [first_part] + split_text_recursively(rest, max_length)
-
-
-def expand_book_list(books):
-    """Parse books argument and expand NT/OT/DT into full book lists"""
-    books_to_check = []
-    canons_to_add = [canon for canon in books if canon in ["NT", "OT", "DT"]]
-    for canon_to_add in canons_to_add:
-        if canon_to_add == "OT": books_to_check += OT_CANON
-        if canon_to_add == "NT": books_to_check += NT_CANON
-        if canon_to_add == "DT": books_to_check += DT_CANON
-    books_to_check += [book for book in books if book in VALID_BOOKS]
-    return [book for book in VALID_BOOKS if book in set(books_to_check)]
-
-
-def split_into_sentences(text):
-    sentences,current = [],0
-    for i,char in enumerate(text):
-        if char in SENTENCE_ENDINGS and (i == len(text)-1 or text[i+1] == ' '):
-            sentences.append(text[current:i+1])
-            current = i+1
-    if current < len(text): sentences.append(text[current:])
-    return [s.strip() for s in sentences if s.strip()]
-
-
-def split_text_optimally(text, max_length=250):
-    if len(text) <= max_length: return [text]
-    
-    sentence_positions = []
-    for punct in SENTENCE_ENDINGS:
-        pos = 0
-        while True:
-            pos = text.find(punct, pos)
-            if pos == -1: break
-            sentence_positions.append(pos + 1)
-            pos += 1
-    
-    if not sentence_positions:
-        for break_char in WORD_BREAKS:
-            pos = 0
-            while True:
-                pos = text.find(break_char, pos)
-                if pos == -1: break
-                sentence_positions.append(pos + 1)
-                pos += 1
-    
-    if not sentence_positions: return [text]
-    
-    sentence_positions.sort()
-    chunks,current_start = [],0
-    
-    while current_start < len(text):
-        target = current_start + max_length
-        best_split = min([pos for pos in sentence_positions if pos > current_start and pos <= target + 50], 
-                        key=lambda p: abs(p - target), default=None)
-        if best_split is None: best_split = min([pos for pos in sentence_positions if pos > current_start], default=len(text))
-        chunks.append(text[current_start:best_split])
-        current_start = best_split
+    chunks, start = [], 0
+    while start < len(text):
+        if len(text) - start <= max_len:
+            chunks.append(text[start:])
+            break
+        
+        # Find best break near target position
+        target = start + target_len
+        best = None
+        
+        # Prefer sentence breaks
+        for pos in sentence_breaks:
+            if start < pos <= start + max_len:
+                if best is None or abs(pos - target) < abs(best - target):
+                    best = pos
+        
+        # Fall back to word breaks
+        if best is None:
+            for pos in word_breaks:
+                if start < pos <= start + max_len:
+                    if best is None or abs(pos - target) < abs(best - target):
+                        best = pos
+        
+        if best is None: best = start + max_len  # hard cut as last resort
+        
+        chunks.append(text[start:best])
+        start = best
+        while start < len(text) and text[start] in WORD_BREAKS: start += 1
     
     return chunks
 
 
-def process_file(input_path, output_path, max_length, method='sentence', verbosity=0):
-    """Process a single USFM file, splitting long paragraphs"""
-    # Read and tokenize the file
-    with open(input_path, 'r', encoding='utf-8') as f:
-        usfm_text = f.read()
-    
-    tokenizer = UsfmTokenizer()
-    tokens = list(tokenizer.tokenize(usfm_text))
-    
-    # Process tokens, splitting long TEXT tokens
-    new_tokens = []
-    current_para_marker = None  # Track current paragraph marker
-    split_counter = Counter()
+# def split_text_token(parser, max_len):
+#     "Split long text into parts with the appropriate para/char markers"
 
-    for token in tokens:
-        # Track paragraph markers
-        if token.type == UsfmTokenType.PARAGRAPH:
-            current_para_marker = token.marker
-            #print(current_para_marker)
-            new_tokens.append(token)
-        elif token.type == UsfmTokenType.TEXT and token.text and len(token.text) > max_length:
-            # Determine split marker based on current paragraph
-            split_marker = get_split_marker(current_para_marker)
-            split_counter[split_marker] += 1
-            if method == 'sentence':
-                text_chunks = split_into_sentences(token.text)
-            elif method == 'optimal':
-                text_chunks = split_text_optimally(token.text, max_length=max_length)
-            elif method == 'recursive':
-                text_chunks = split_text_recursively(token.text, max_length=max_length)
-            else:
-                print(f"Method {method} isn't one of the valid methods: sentence, optimal, recursive.")
-                exit(0)
-            if verbosity >= 3:    
-                for i, text_chunk in enumerate(text_chunks, 1):
-                    print(i,len(text_chunk),text_chunk)
+#     chunks = split_text(parser.state.token.text, max_len)
+#     if len(chunks) == 1: 
+#         print(f"Warning: text chunk passed to split_text_token was not longer than {max_len}:\n{parser.state.token.text}")
+#         return [parser.state.token]  # No change to this token.
 
-            # Add first chunk as TEXT
-            new_tokens.append(UsfmToken(UsfmTokenType.TEXT, text=text_chunks[0]))
-            # For each remaining chunk: add PARAGRAPH + TEXT
-            for text_chunk in text_chunks[1:]:
-                new_tokens.append(UsfmToken(UsfmTokenType.PARAGRAPH, marker=split_marker))
-                new_tokens.append(UsfmToken(UsfmTokenType.TEXT, text=text_chunk))
-        else:
-            # Keep token as-is
-            new_tokens.append(token)
+#     elif len(chunks) > 1:
+#         result = [UsfmToken(UsfmTokenType.TEXT, text=chunks[0])]
+#         if len(parser.state.stack) == 3 and parser.state.stack[0].type == UsfmElementType.PARA and parser.state.stack[1].type == UsfmElementType.NOTE and parser.state.stack[2].type == UsfmElementType.CHAR:
+#             for chunk in chunks[1:]:
+#                 result.append(UsfmToken(UsfmTokenType.PARAGRAPH, marker=parser.state.stack[0].marker))
+#                 result.append(UsfmToken(UsfmTokenType.NOTE, marker=parser.state.stack[1].marker))
+#                 result.append(UsfmToken(UsfmTokenType.CHARACTER, marker=parser.state.stack[2].marker))
+#                 result.append(UsfmToken(UsfmTokenType.TEXT, text=chunk))
+#         elif len(parser.state.stack) == 2 and parser.state.stack[0].type == UsfmElementType.PARA and parser.state.stack[1].type == UsfmElementType.CHAR:
+#             for chunk in chunks[1:]:
+#                 result.append(UsfmToken(UsfmTokenType.PARAGRAPH, marker=parser.state.stack[0].marker))
+#                 result.append(UsfmToken(UsfmTokenType.CHARACTER, marker=parser.state.stack[1].marker))
+#                 result.append(UsfmToken(UsfmTokenType.TEXT, text=chunk))
+#         elif len(parser.state.stack) == 1 and parser.state.stack[0].type == UsfmElementType.PARA:
+#             for chunk in chunks[1:]:
+#                 result.append(UsfmToken(UsfmTokenType.PARAGRAPH, marker=parser.state.stack[0].marker))
+#                 result.append(UsfmToken(UsfmTokenType.TEXT, text=chunk))
+#         else:
+#             print(f"Warning, don't know how to handle this parser.state.stack: {parser.state.stack} in split_text_token.")
+#     return result
+
+
+def split_text_token(parser, max_len):
+    "Split long text into parts with the appropriate para/char markers"
+
+    chunks = split_text(parser.state.token.text, max_len)
+    if len(chunks) == 1: 
+        print(f"Warning: text chunk passed to split_text_token was not longer than {max_len}:\n{parser.state.token.text}")
+        return [parser.state.token]  # No change to this token.
+
+    stack = parser.state.stack
+    if not stack or stack[0].type != UsfmElementType.PARA:
+        print(f"Warning: expected PARA as first stack element, got: {stack} with token: {parser.state.token} on line number {parser.state.token.line_number}")
+        return [parser.state.token]
+
+    result = [UsfmToken(UsfmTokenType.TEXT, text=chunks[0])]
+    for chunk in chunks[1:]:
+        for elem in stack:
+            token_type = ELEMENT_TO_TOKEN_TYPE.get(elem.type)
+            if token_type: result.append(UsfmToken(token_type, marker=elem.marker))
+            else: print(f"Warning: unknown element type in stack: {elem.type}")
+        result.append(UsfmToken(UsfmTokenType.TEXT, text=chunk))
+    return result
+
+def strip_eol_spaces(string):
+    sample = string[:600]
+    print(f"sample string is : {sample}")
     
-    if len(split_counter) > 0:
-        if verbosity >= 2:
-            print(f"Saving {output_path} after splitting lines. {split_counter}")
-        # Write tokens to output file
-        with open(output_path, 'w', encoding='utf-8') as f:
-            for i, token in enumerate(new_tokens):
-                # Add newline before PARAGRAPH markers (except first token)
-                if i > 0 and token.type in [UsfmTokenType.PARAGRAPH, UsfmTokenType.CHAPTER, UsfmTokenType.VERSE]:
-                    f.write('\n')
-                usfm_str = token.to_usfm()
-                if i < len(new_tokens) - 1 and new_tokens[i + 1].type in [UsfmTokenType.PARAGRAPH, UsfmTokenType.CHAPTER, UsfmTokenType.VERSE]:
-                    usfm_str = usfm_str.rstrip(' ')
-                f.write(usfm_str)
-    else:
-        if verbosity >= 2:
-            print(f"No changes were needed to for {input_path}")
+    print(f"\nString is a {type(string)}. Items look like this with _ in place of spaces:")
+    sample_view = sample.replace(' ','_').replace('\r', '\\r').replace('\n','\\n')
+    print(sample_view)
+    
+    print(f"\nString with ' \\n' replaced by '\\n' is:")
+    string_stripped = string.replace(' \n','\n')
+
+    print(f"\nAfter removing eol_spaces string is a {type(string_stripped)}. Items look like this with _ in place of spaces:")
+    new_sample_view = string_stripped[:600].replace(' ','_').replace('\r', '\\r').replace('\n','\\n')
+    print(new_sample_view)
+    print()
+    print(string_stripped[:600])
+
+    return string_stripped
+    
+    
+
 
 def main():
-    parser = argparse.ArgumentParser(description='Split long paragraphs in USFM files')
-    parser.add_argument('project', help='Paratext project name')
-    parser.add_argument('--max', type=int, default=225, help='Maximum paragraph length.')
-    parser.add_argument("--books", metavar="books", nargs="+", default=[], help="The books to check; e.g., 'NT', 'OT', 'GEN EXO'")
-    parser.add_argument('--method', default='sentence', help='Method used to split long paragraphs, must be one of sentence, optimal, recursive.')
-    parser.add_argument('-v', '--verbose', action='count', default=0, help="Increase verbosity level (e.g., -v, -vv, -vvv)")
+    parser = argparse.ArgumentParser(description="Split long paragraphs in USFM files",
+    formatter_class=argparse.RawDescriptionHelpFormatter,
+    epilog=get_epilog(),
+    )
+    parser.add_argument("project", type=str, help="Paratext project name - the files in this folder will be modified in place.")
+    add_books_argument(parser)
+    parser.add_argument("--max", type=int, default=MAX_LENGTH, help="Maximum paragraph length.")
 
     args = parser.parse_args()
     print(args)
 
-    # Set verbosity level
-    verbosity = args.verbose
-
     # Get project directory
-    project_dir = get_project_dir(args.project)
-    
+    project_dir = Path(args.project)
+
+    settings_file = project_dir / "Settings.xml"
+    if project_dir.is_dir() and settings_file.is_file():
+        print(f"Found {project_dir} with Settings.xml")
+
+    elif project_dir.is_dir() and not settings_file.is_file():
+        raise RuntimeError(f"No Settings.xml file was found in {project_dir}")
+
+    elif not project_dir.is_dir():
+        project_dir = get_project_dir(args.project)
+        settings_file = project_dir / "Settings.xml"
+        if project_dir.is_dir() and not settings_file.is_file():
+            raise RuntimeError(f"No Settings.xml file was found in {project_dir}")
+        
+
     # Parse project settings to get book IDs
     settings = FileParatextProjectSettingsParser(project_dir).parse()
+    books = expand_book_list(args.books)
+    sfm_files =  get_sfm_files_to_process(project_dir, books)
+
+    output_dir = project_dir.parent / f"{project_dir.name}_split_{args.max}"
     
-    # Find all SFM/USFM files
-    sfm_files = [
-        file for file in project_dir.glob("*")
-        if file.is_file() and file.suffix[1:].lower() in ["sfm", "usfm"]
-    ]
-    
-    # Get book IDs for found files
-    books_found = [settings.get_book_id(sfm_file.name) for sfm_file in sfm_files]
-    books_to_process = []
+    # Copying the folder ensures that all necessary files are present.
+    #shutil.copytree(project_dir, output_dir, dirs_exist_ok=True)
 
-    # Parse books argument
-    if args.books:
-        books = args.books.replace(',', ' ').replace(';', ' ').split()
-        if books:
-            specified_books = expand_book_list(books)
-            books_to_process = [book for book in specified_books if book in books_found]
-            if not books_to_process:
-                print(f"None of the specified books: {specified_books} were found in the project folder: {project_dir}")
-    else:
-        print("No books specified, all books will be processed.")
-        books_to_process = books_found
-
-    if books_to_process:
-        if verbosity >= 1:
-           print(f"Will process these books:\n{books_to_process}")
-
-    #Create output directory
-    output_dir = project_dir.parent / f"{project_dir.name}_split"
-    output_dir.mkdir(exist_ok=True)
+    # Test with one file:
 
     # Process each file
     for sfm_file in sfm_files:
-        book_id = settings.get_book_id(sfm_file.name)
-        if book_id in books_to_process:
-            output_path = output_dir / sfm_file.name
-            if verbosity >= 1:
-                print(f"Processing {sfm_file.name} -> {output_path}")
-            process_file(sfm_file, output_path, args.max, method=args.method, verbosity=verbosity)
+        
+        print(f"Processing sfm_file: {sfm_file}")
+        output_tokens = []
+        
+        with open(sfm_file, 'r', encoding='utf-8') as f: usfm_text = f.read()
+        parser = UsfmParser(usfm_text, stylesheet=settings.stylesheet, versification=settings.versification)
+        
+        while parser.process_token():
+            if parser.state.token.type == UsfmTokenType.TEXT and parser.state.token.get_length() > MAX_LENGTH:
+                output_tokens.extend(split_text_token(parser, max_len=args.max))
+            else:
+                output_tokens.append(parser.state.token)
 
-    print(f"Done! Processed {len(books_to_process)} books to {output_dir}")
+        usfm_out = [token.to_usfm(include_newlines=True).replace('\r\n', '\n') for token in output_tokens]
 
-if __name__ == '__main__':
+        usfm_str = ''.join(usfm_out).replace(' \n','\n')
+        usfm_stripped = usfm_str.replace(' \n','\n')
+        
+        output_sfm_file = output_dir / sfm_file.name
+        with open(output_sfm_file, 'w', encoding='utf-8') as f: f.write(usfm_stripped)
+        
+        # with open(output_sfm_file, 'r', encoding='utf-8') as f: usfm_out_text = f.read()
+        # out_parser = UsfmParser(usfm_out_text, stylesheet=settings.stylesheet, versification=settings.versification)
+        # over_long_texts = dict()
+        # while out_parser.process_token():
+        #     token_len = parser.state.token.get_length()
+        #     if out_parser.state.token.type == UsfmTokenType.TEXT and  token_len > MAX_LENGTH:
+        #         over_long_texts[output_sfm_file] = {'lineno':parser.state.token.line_number, 'length':parser.state.token.get_length()}
+        #         print(f"SFM output file {output_sfm_file} has the following long texts:")
+        #         print(f"{over_long_texts}")
+        #         exit()
+
+        # print(f"SFM output file {output_sfm_file} has the following long texts:")
+        # print(f"{over_long_texts}")
+                    
+    print(f"Done! Processed {len(sfm_files)} books in {output_dir}")
+
+
+if __name__ == "__main__":
     main()
+
 
 
