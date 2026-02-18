@@ -29,7 +29,7 @@ class VerseScore(Score):
     vref: VerseRef
 
     @classmethod
-    def get_scores_from_cf(
+    def get_scores_from_confidence_file(
         cls, confidence_file: UsfmConfidenceFile, slope: float, intercept: float
     ) -> List["VerseScore"]:
         verse_scores: List[VerseScore] = []
@@ -42,6 +42,9 @@ class VerseScore(Score):
 @dataclass
 class ChapterScores:
     scores: Dict[str, Dict[int, Score]] = field(default_factory=lambda: defaultdict(dict))
+    verse_usabilities: Dict[str, Dict[int, List[float]]] = field(
+        default_factory=lambda: defaultdict(lambda: defaultdict(list))
+    )
 
     def add_score(self, book: str, chapter: int, score: Score) -> None:
         self.scores[book][chapter] = score
@@ -49,7 +52,13 @@ class ChapterScores:
     def get_score(self, book: str, chapter: int) -> Optional[Score]:
         return self.scores.get(book, {}).get(chapter)
 
-    def add_scores_from_cf(
+    def append_verse_usability(self, book: str, chapter: int, usability: float) -> None:
+        self.verse_usabilities[book][chapter].append(usability)
+
+    def get_verse_usabilities(self, book: str, chapter: int) -> List[float]:
+        return self.verse_usabilities.get(book, {}).get(chapter, [])
+
+    def add_scores_from_confidence_file(
         self, book: str, confidence_file: UsfmConfidenceFile, slope: float, intercept: float
     ) -> None:
         for chapter, confidence in confidence_file.chapter_confidence_iterator():
@@ -61,6 +70,7 @@ class ChapterScores:
 @dataclass
 class BookScores:
     scores: Dict[str, Score] = field(default_factory=dict)
+    verse_usabilities: Dict[str, List[float]] = field(default_factory=lambda: defaultdict(list))
     seen_files: Set[Path] = field(default_factory=set)
 
     def add_score(self, book: str, score: Score) -> None:
@@ -69,7 +79,15 @@ class BookScores:
     def get_score(self, book: str) -> Optional[Score]:
         return self.scores.get(book)
 
-    def add_scores_from_cf(self, confidence_file: UsfmConfidenceFile, slope: float, intercept: float) -> None:
+    def append_verse_usability(self, book: str, usability: float) -> None:
+        self.verse_usabilities[book].append(usability)
+
+    def get_verse_usabilities(self, book: str) -> List[float]:
+        return self.verse_usabilities.get(book, [])
+
+    def add_scores_from_confidence_file(
+        self, confidence_file: UsfmConfidenceFile, slope: float, intercept: float
+    ) -> None:
         books_path = confidence_file.get_books_path()
         if books_path.is_file() and books_path not in self.seen_files:
             self.seen_files.add(books_path)
@@ -85,7 +103,7 @@ class SequenceScore(Score):
     trg_draft_file_stem: str
 
     @classmethod
-    def get_scores_from_cf(
+    def get_scores_from_confidence_file(
         cls, confidence_file: TxtConfidenceFile, slope: float, intercept: float
     ) -> List["SequenceScore"]:
         trg_draft_file_stem = confidence_file.get_trg_draft_file_path().stem
@@ -99,6 +117,7 @@ class SequenceScore(Score):
 @dataclass
 class TxtFileScores:
     scores: Dict[str, Score] = field(default_factory=dict)
+    sequence_usabilities: Dict[str, List[float]] = field(default_factory=lambda: defaultdict(list))
     seen_files: Set[Path] = field(default_factory=set)
 
     def add_score(self, trg_draft_file_stem: str, score: Score) -> None:
@@ -107,7 +126,15 @@ class TxtFileScores:
     def get_score(self, trg_draft_file_stem: str) -> Optional[Score]:
         return self.scores.get(trg_draft_file_stem)
 
-    def add_scores_from_cf(self, confidence_file: TxtConfidenceFile, slope: float, intercept: float) -> None:
+    def append_sequence_usability(self, trg_draft_file_stem: str, usability: float) -> None:
+        self.sequence_usabilities[trg_draft_file_stem].append(usability)
+
+    def get_sequence_usabilities(self, trg_draft_file_stem: str) -> List[float]:
+        return self.sequence_usabilities.get(trg_draft_file_stem, [])
+
+    def add_scores_from_confidence_file(
+        self, confidence_file: TxtConfidenceFile, slope: float, intercept: float
+    ) -> None:
         files_path = confidence_file.get_files_path()
         if files_path.is_file() and files_path not in self.seen_files:
             self.seen_files.add(files_path)
@@ -177,20 +204,22 @@ def project_chrf3(
     txt_file_scores: TxtFileScores = TxtFileScores()
     for confidence_file in confidence_files:
         if isinstance(confidence_file, UsfmConfidenceFile):
-            file_verse_scores = VerseScore.get_scores_from_cf(confidence_file, slope, intercept)
+            file_verse_scores = VerseScore.get_scores_from_confidence_file(confidence_file, slope, intercept)
             if not file_verse_scores:
                 LOGGER.warning(f"No verse scores found in confidence file {confidence_file.get_path()}. Skipping.")
                 continue
             verse_scores += file_verse_scores
-            chapter_scores.add_scores_from_cf(file_verse_scores[0].vref.book, confidence_file, slope, intercept)
-            book_scores.add_scores_from_cf(confidence_file, slope, intercept)
+            chapter_scores.add_scores_from_confidence_file(
+                file_verse_scores[0].vref.book, confidence_file, slope, intercept
+            )
+            book_scores.add_scores_from_confidence_file(confidence_file, slope, intercept)
         elif isinstance(confidence_file, TxtConfidenceFile):
-            file_sequence_scores = SequenceScore.get_scores_from_cf(confidence_file, slope, intercept)
+            file_sequence_scores = SequenceScore.get_scores_from_confidence_file(confidence_file, slope, intercept)
             if not file_sequence_scores:
                 LOGGER.warning(f"No sequence scores found in confidence file {confidence_file.get_path()}. Skipping.")
                 continue
             sequence_scores += file_sequence_scores
-            txt_file_scores.add_scores_from_cf(confidence_file, slope, intercept)
+            txt_file_scores.add_scores_from_confidence_file(confidence_file, slope, intercept)
     return verse_scores, chapter_scores, book_scores, sequence_scores, txt_file_scores
 
 
@@ -272,11 +301,6 @@ def compute_usable_proportions(
     usable_params, unusable_params = parse_parameters(output_dir / "usability_parameters.tsv")
 
     if verse_scores:
-        book_totals = defaultdict(float)
-        book_counts = defaultdict(int)
-        chapter_totals = defaultdict(lambda: defaultdict(float))
-        chapter_counts = defaultdict(lambda: defaultdict(int))
-
         with open(output_dir / "usability_verses.tsv", "w", encoding="utf-8", newline="\n") as verse_file:
             verse_file.write("Book\tChapter\tVerse\tProjected chrF3\tUsability\tLabel\n")
             for verse_score in verse_scores:
@@ -290,19 +314,15 @@ def compute_usable_proportions(
                 prob = calculate_usable_prob(verse_score.projected_chrf3, usable_params, unusable_params)
                 label = VerseThresholds.return_label(prob)
 
-                book_totals[vref.book] += prob
-                book_counts[vref.book] += 1
-                chapter_totals[vref.book][vref.chapter_num] += prob
-                chapter_counts[vref.book][vref.chapter_num] += 1
+                chapter_scores.append_verse_usability(vref.book, int(vref.chapter), prob)
+                book_scores.append_verse_usability(vref.book, prob)
 
                 verse_file.write(
                     f"{vref.book}\t{vref.chapter_num}\t{vref.verse_num}\t{verse_score.projected_chrf3:.2f}\t{prob:.3f}\t{label}\n"
                 )
-        compute_chapter_usability(chapter_scores, chapter_totals, chapter_counts, output_dir)
-        compute_book_usability(book_scores, book_totals, book_counts, output_dir)
+        compute_chapter_usability(chapter_scores, output_dir)
+        compute_book_usability(book_scores, output_dir)
     if sequence_scores:
-        txt_file_totals = defaultdict(float)
-        txt_file_counts = defaultdict(int)
         with open(output_dir / "usability_sequences.tsv", "w", encoding="utf-8", newline="\n") as sequence_file:
             sequence_file.write("Trg Draft File\tSequence Number\tProjected chrF3\tUsability\tLabel\n")
             for sequence_score in sequence_scores:
@@ -313,14 +333,13 @@ def compute_usable_proportions(
                 prob = calculate_usable_prob(sequence_score.projected_chrf3, usable_params, unusable_params)
                 label = VerseThresholds.return_label(prob)
 
-                txt_file_totals[sequence_score.trg_draft_file_stem] += prob
-                txt_file_counts[sequence_score.trg_draft_file_stem] += 1
+                txt_file_scores.append_sequence_usability(sequence_score.trg_draft_file_stem, prob)
 
                 sequence_file.write(
                     f"{sequence_score.trg_draft_file_stem}\t{sequence_score.sequence_num}\t"
                     f"{sequence_score.projected_chrf3:.2f}\t{prob:.3f}\t{label}\n"
                 )
-        compute_txt_file_usability(txt_file_scores, txt_file_totals, txt_file_counts, output_dir)
+        compute_txt_file_usability(txt_file_scores, output_dir)
 
 
 def parse_parameters(parameter_file: Path) -> Tuple[UsabilityParameters, UsabilityParameters]:
@@ -358,15 +377,14 @@ def calculate_usable_prob(
 
 def compute_chapter_usability(
     chapter_scores: ChapterScores,
-    chapter_totals: Dict[str, Dict[int, float]],
-    chapter_counts: Dict[str, Dict[int, int]],
     output_dir: Path,
 ) -> None:
     with open(output_dir / "usability_chapters.tsv", "w", encoding="utf-8", newline="\n") as chapter_file:
         chapter_file.write("Book\tChapter\tProjected chrF3\tUsability\tLabel\n")
-        for book in sorted(chapter_totals, key=lambda b: CANONICAL_ORDER[b]):
-            for chapter in sorted(chapter_totals[book]):
-                avg_prob = chapter_totals[book][chapter] / chapter_counts[book][chapter]
+        for book in sorted(chapter_scores.scores, key=lambda b: CANONICAL_ORDER[b]):
+            for chapter in sorted(chapter_scores.scores[book]):
+                chapter_usabilities = chapter_scores.get_verse_usabilities(book, chapter)
+                avg_prob = sum(chapter_usabilities) / len(chapter_usabilities)
                 label = ChapterThresholds.return_label(avg_prob)
                 if not chapter_scores.get_score(book, chapter):
                     LOGGER.warning(f"{book} {chapter} does not have a projected chrf3.")
@@ -378,15 +396,14 @@ def compute_chapter_usability(
 
 def compute_book_usability(
     book_scores: BookScores,
-    book_totals: Dict[str, float],
-    book_counts: Dict[str, int],
     output_dir: Path,
 ) -> None:
     with open(output_dir / "usability_books.tsv", "w", encoding="utf-8", newline="\n") as book_file:
         book_file.write("Book\tProjected chrF3\tUsability\tLabel\n")
-        for book in sorted(book_totals, key=lambda b: CANONICAL_ORDER[b]):
+        for book in sorted(book_scores.scores, key=lambda b: CANONICAL_ORDER[b]):
             # book/chapter usabilties are calculated from verse avg, not from book/chapter projected chrf3
-            avg_prob = book_totals[book] / book_counts[book]
+            book_usabilities = book_scores.get_verse_usabilities(book)
+            avg_prob = sum(book_usabilities) / len(book_usabilities)
             label = BookThresholds.return_label(avg_prob)
             if not book_scores.get_score(book):
                 LOGGER.warning(f"{book} does not have a projected chrf3.")
@@ -398,14 +415,13 @@ def compute_book_usability(
 
 def compute_txt_file_usability(
     txt_file_scores: TxtFileScores,
-    txt_file_totals: Dict[str, float],
-    txt_file_counts: Dict[str, int],
     output_dir: Path,
 ) -> None:
     with open(output_dir / "usability_txt_files.tsv", "w", encoding="utf-8", newline="\n") as txt_file:
         txt_file.write("Trg Draft File\tProjected chrF3\tUsability\tLabel\n")
-        for trg_draft_file_stem in sorted(txt_file_totals):
-            avg_prob = txt_file_totals[trg_draft_file_stem] / txt_file_counts[trg_draft_file_stem]
+        for trg_draft_file_stem in sorted(txt_file_scores.scores):
+            txt_file_usabilities = txt_file_scores.get_sequence_usabilities(trg_draft_file_stem)
+            avg_prob = sum(txt_file_usabilities) / len(txt_file_usabilities)
             label = BookThresholds.return_label(avg_prob)
             if not txt_file_scores.get_score(trg_draft_file_stem):
                 LOGGER.warning(f"{trg_draft_file_stem} does not have a projected chrf3.")
