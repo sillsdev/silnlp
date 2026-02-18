@@ -96,7 +96,7 @@ The rest of these instructions are assumed to be done in a WSL/Linux terminal as
    * If you do not intend to use SILNLP with ClearML, MinIO, and/or B2, you can leave out the respective variables. If you need to generate ClearML credentials, see ClearML setup.
    * This file is sensitive, so do not save it within the silnlp repo to prevent accidentally including it in a commit.
 
-3. Navigate to the repo:
+3. Navigate to the top level silnlp folder. Steps 4, 5, 6 and 7 need to have silnlp as the current working directory.
       ```
       cd silnlp
       ```
@@ -109,10 +109,9 @@ The rest of these instructions are assumed to be done in a WSL/Linux terminal as
 5. Download [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install#linux-2).
    Follow the instructions under the Quickstart install section, follow the Linux instructions.
 
-6. Now we need to create the silnlp conda environment. First move to the silnlp directory, so that the command can find the environment.yml file.
+6. Now we need to create the silnlp conda environment from within the silnlp directory which contains the environment.yml file.
    In a terminal run:
    ```
-   cs silnlp
    conda env create --file "environment.yml"
    ```
    
