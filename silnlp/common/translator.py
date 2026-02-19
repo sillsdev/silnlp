@@ -31,7 +31,7 @@ from silnlp.common.utils import add_tags_to_sentence
 from silnlp.nmt.corpora import CorpusPair
 
 from .corpus import load_corpus, write_corpus
-from .paratext import get_book_path, get_iso, get_project_dir
+from .paratext import get_book_path, get_iso, get_parent_project_dir, get_project_dir
 from .postprocesser import NoDetectedQuoteConventionException, PostprocessHandler, UnknownQuoteConventionException
 from .usfm_utils import PARAGRAPH_TYPE_EMBEDS
 
@@ -579,7 +579,11 @@ class Translator(AbstractContextManager["Translator"], ABC):
                 # no verses outside of the ones translated will be overwritten
                 if trg_project is not None or src_from_project:
                     project_dir = get_project_dir(trg_project if trg_project is not None else src_file_path.parent.name)
-                    dest_updater = FileParatextProjectTextUpdater(project_dir)
+                    parent_settings = None
+                    parent_project_dir = get_parent_project_dir(project_dir)
+                    if parent_project_dir is not None:
+                        parent_settings = FileParatextProjectSettingsParser(parent_project_dir).parse()
+                    dest_updater = FileParatextProjectTextUpdater(project_dir, parent_settings)
                     usfm_out = dest_updater.update_usfm(
                         book_id=src_file_text.id,
                         rows=config.rows,

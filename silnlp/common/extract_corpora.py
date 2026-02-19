@@ -1,6 +1,6 @@
 import argparse
 import logging
-from typing import List, Set
+from typing import List, Optional, Set
 
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books
 
@@ -40,6 +40,8 @@ def main() -> None:
     parser.add_argument(
         "--exclude", metavar="books", nargs="+", default=[], help="The books to exclude; e.g., 'NT', 'OT', 'GEN'"
     )
+    parser.add_argument("--parent-project", default=None, help="The parent Paratext project")
+    parser.add_argument("--versification-error-output-path", default="./versification_errors.txt", help="The path to which to write any USFM versification errors detected in the project")
     parser.add_argument("--markers", default=False, action="store_true", help="Include USFM markers")
     parser.add_argument("--lemmas", default=False, action="store_true", help="Extract lemmas if available")
     parser.add_argument("--project-vrefs", default=False, action="store_true", help="Extract project verse refs")
@@ -73,7 +75,9 @@ def main() -> None:
         include_markers=args.markers,
         extract_lemmas=args.lemmas,
         extract_project_vrefs=args.project_vrefs,
-        extract_surface_forms=args.surface_forms
+        extract_surface_forms=args.surface_forms,
+        parent_project=args.parent_project,
+        versification_error_output_path=args.versification_error_output_path
     )
     # Tell the user which projects couldn't be found.
     for project in projects:
@@ -88,7 +92,9 @@ def extract_corpora(
     include_markers=False,
     extract_lemmas=False,
     extract_project_vrefs=False,
-    extract_surface_forms=False
+    extract_surface_forms=False,
+    parent_project: Optional[str] = None,
+    versification_error_output_path: Optional[str] = None
 ) -> None:
     # Process the projects that have data and tell the user.
     if len(projects) > 0:
@@ -98,7 +104,7 @@ def extract_corpora(
         for project in projects:
             LOGGER.info(f"Extracting {project}...")
             project_dir = get_project_dir(project)
-            check_versification(project_dir)
+            check_versification(project_dir, versification_error_output_path)
             corpus_filename, verse_count = extract_project(
                 project_dir,
                 SIL_NLP_ENV.mt_scripture_dir,
@@ -107,6 +113,7 @@ def extract_corpora(
                 include_markers,
                 extract_lemmas,
                 extract_project_vrefs,
+                parent_project
             )
             LOGGER.info(f"Extracted corpus file: {corpus_filename}")
             # check if the number of lines in the file is correct (the same as vref.txt)

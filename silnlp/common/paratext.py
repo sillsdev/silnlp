@@ -10,12 +10,14 @@ from lxml import etree
 from machine.corpora import (
     DictionaryTextCorpus,
     FileParatextProjectSettingsParser,
+    FileParatextProjectVersificationErrorDetector,
     MemoryText,
     ParatextTextCorpus,
     Text,
     TextCorpus,
     TextRow,
     UsfmFileTextCorpus,
+    UsfmVersificationErrorType,
     create_versification_ref_corpus,
     extract_scripture_corpus,
     FileParatextProjectTermsParser
@@ -37,6 +39,20 @@ LOGGER = logging.getLogger(__name__)
 def get_project_dir(project: str) -> Path:
     return SIL_NLP_ENV.pt_projects_dir / project
 
+def get_parent_project_dir(project_dir: Path) -> Optional[Path]:
+    settings = FileParatextProjectSettingsParser(project_dir).parse()
+    if settings.has_parent:
+        for parent_project_path in SIL_NLP_ENV.pt_projects_dir.iterdir():
+            try:
+                parent_project_settings = FileParatextProjectSettingsParser(parent_project_path).parse()
+            except:
+                continue
+            if settings.is_daughter_project_of(parent_project_settings):
+                return parent_project_path
+        LOGGER.warning(
+            f"{settings.name} is a daughter project of {settings.parent_name}, but the parent project does not exist in the Paratext directory. The project versification will default to the English versification."
+        )
+    return None
 
 def get_iso(project_dir: Path) -> str:
     return FileParatextProjectSettingsParser(project_dir).parse().language_code
@@ -50,6 +66,7 @@ def extract_project(
     include_markers: bool = False,
     extract_lemmas: bool = False,
     output_project_vrefs: bool = False,
+    parent_project: Optional[str] = None
 ) -> Tuple[Path, int]:
     iso = get_iso(project_dir)
 
@@ -59,7 +76,13 @@ def extract_project(
     if extract_lemmas and ltg_dir.is_dir():
         project_corpus = get_lemma_text_corpus(project_dir)
     else:
-        project_corpus = ParatextTextCorpus(project_dir, include_markers=include_markers)
+        if parent_project is not None:
+            parent_project_dir = get_project_dir(parent_project)
+        else:
+            parent_project_dir = get_parent_project_dir(project_dir)
+            if parent_project_dir is not None:
+                LOGGER.info(f"Identified parent project {parent_project_dir.name}")
+        project_corpus = ParatextTextCorpus(project_dir, include_markers=include_markers, parent_project_dir=parent_project_dir)
 
     output_basename = f"{iso}-{project_dir.name}"
     if len(include_books) > 0 or len(exclude_books) > 0:
@@ -408,8 +431,13 @@ def detect_NT_versification(project_dir: str) -> Tuple[List[VersificationType], 
     return versification, key_last_verses
 
 
-def check_versification(project_dir: str) -> Tuple[bool, List[VersificationType]]:
-    settings = FileParatextProjectSettingsParser(project_dir).parse()
+def check_versification(project_dir: str, versification_error_output_path: str) -> Tuple[bool, List[VersificationType]]:
+    parent_settings = None
+    parent_project_dir = get_parent_project_dir(project_dir)
+    if parent_project_dir is not None:
+        parent_settings = FileParatextProjectSettingsParser(parent_project_dir).parse()
+    settings = FileParatextProjectSettingsParser(project_dir, parent_settings).parse()
+
 
     check_ot, check_nt, matching = False, False, False
 
@@ -473,6 +501,18 @@ def check_versification(project_dir: str) -> Tuple[bool, List[VersificationType]
                 f"respective chapter{'s' if len(key_verses)>=2 else ''}."
             )
             return (matching, detected_versification)
+
+    errors = FileParatextProjectVersificationErrorDetector(project_dir).get_usfm_versification_errors()
+    if len(errors) > 0:
+        LOGGER.warning(f"Detected {len(errors)} versification errors. See {versification_error_output_path} for more details.")
+        with open(versification_error_output_path, 'w') as f:
+            for error in errors:
+                if error.type == UsfmVersificationErrorType.INVALID_CHAPTER_NUMBER:
+                    f.write(f"Invalid chapter number error in project {error.project_name} at “{error.actual_verse_ref}”.\n")
+                elif error.type == UsfmVersificationErrorType.INVALID_VERSE_NUMBER:
+                    f.write(f"Invalid verse number error in project {error.project_name} at “{error.actual_verse_ref}”.\n")
+                else:
+                    f.write(f"USFM versification error in project {error.project_name}, expected verse “{error.expected_verse_ref}”, actual verse “{error.actual_verse_ref}”, mismatch type {error.type.name}.\n")
 
     matching = True
     return (matching, detected_versification)

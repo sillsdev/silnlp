@@ -5178,24 +5178,22 @@ type = ["importlib-metadata (>=7.0.2)", "jaraco.develop (>=7.21)", "mypy (==1.12
 
 [[package]]
 name = "sil-machine"
-version = "1.8.5"
+version = "1.8.6"
 description = "A natural language processing library that is focused on providing tools for resource-poor languages."
 optional = false
-python-versions = "<3.14,>=3.10"
-files = [
-    {file = "sil_machine-1.8.5-py3-none-any.whl", hash = "sha256:5f5a97c3de9c47d4050de1ca02f9c12ffe0dd8d45fd2327cc1e57bdfe5d46199"},
-    {file = "sil_machine-1.8.5.tar.gz", hash = "sha256:bc21a5a05f0cc743b650f79bbbc03c13040c03ebe08b2c66cb731e90e7c61d3d"},
-]
+python-versions = ">=3.10,<3.14"
+files = []
+develop = true
 
 [package.dependencies]
-boto3 = ">=1.19.41,<2.0.0"
-botocore = ">=1.35.41,<2.0.0"
-charset-normalizer = ">=2.1.1,<3.0.0"
-networkx = ">=3,<4"
-numpy = ">=2.2.6,<3.0.0"
+boto3 = "^1.19.41"
+botocore = "^1.35.41"
+charset-normalizer = "^2.1.1"
+networkx = "^3"
+numpy = "^2.2.6"
 regex = ">=2021.7.6"
-sil-thot = {version = ">=3.4.9,<4.0.0", optional = true, markers = "extra == \"thot\""}
-sortedcontainers = ">=2.4.0,<3.0.0"
+sil-thot = "^3.4.9"
+sortedcontainers = "^2.4.0"
 urllib3 = "<2"
 
 [package.extras]
@@ -5203,6 +5201,10 @@ huggingface = ["datasets (>=2.4.0,<3.0.0)", "sacremoses (>=0.0.53,<0.0.54)", "tr
 jobs = ["clearml[s3] (>=1.13.1,<2.0.0)", "dynaconf (>=3.2.5,<4.0.0)", "eflomal (>=2.0.0,<3.0.0)", "json-stream (>=1.3.0,<2.0.0)"]
 sentencepiece = ["sentencepiece (>=0.2.0,<0.3.0)"]
 thot = ["sil-thot (>=3.4.9,<4.0.0)"]
+
+[package.source]
+type = "directory"
+url = "../machine.py"
 
 [[package]]
 name = "sil-thot"
@@ -6239,4 +6241,4 @@ eflomal = ["eflomal"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.11"
-content-hash = "59e38f40aca6365664ddc34017c32572d10cc6e24b6d64042b0bf1f8f2ffc373"
+content-hash = "53ca29c3f88a021fab35533f34aa40b47e8abed6a0b68df74d5702c11b22fa1a"

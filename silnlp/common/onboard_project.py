@@ -12,6 +12,8 @@ from typing import Tuple
 import wildebeest.wb_analysis as wb_ana
 import yaml
 
+from machine.corpora import FileParatextProjectSettingsParser
+
 from silnlp.common.clean_projects import process_single_project_for_cleaning
 
 from ..nmt.config_utils import create_config
@@ -125,6 +127,8 @@ def extract_corpora_wrapper(project_name: str, extract_config: dict, overwrite=F
         extract_lemmas=extract_config.get("lemmas", False),
         extract_project_vrefs=extract_config.get("project-vrefs", False),
         extract_surface_forms=extract_config.get("surface-forms", False),
+        parent_project=extract_config.get("parent_project", None),
+        versification_error_output_path=SIL_NLP_ENV.mt_experiments_dir / "OnboardingRequests" / project_name / "versification_errors.txt"
     )
 
 
@@ -237,34 +241,18 @@ def check_for_project_errors(copy_from: Path | None, project: str) -> None:
             raise FileNotFoundError(
                 f"The Settings.xml file was not found in the project folder '{project_path}'. Please ensure this is a valid Paratext project folder."
             )
-        tree = ET.parse(settings_file)
-        root = tree.getroot()
+        
+        settings = FileParatextProjectSettingsParser(project_path).parse()
 
-        translation_info = root.find(".//TranslationInfo")
-        if translation_info is not None and translation_info.text != "Standard::":
+        if settings.translation_type != "Standard":
             LOGGER.warning(
-                f"{project} is non-Standard and references another project, which may lead to incorrect versification. The project will default to English versification. Translation Info: '{translation_info.text}'."
+                f"{project} is a non-Standard project. Type is '{settings.translation_type}'."
             )
 
-        naming_element = root.find(".//Naming")
-        pre_part, post_part, book_name_form = None, None, None
-        if naming_element is not None:
-            pre_part = naming_element.get("PrePart", "")
-            post_part = naming_element.get("PostPart", "")
-            book_name_form = naming_element.get("BookNameForm", "")
-        else:
-            pre_part = root.find(".//FileNamePrePart").text
-            post_part = root.find(".//FileNamePostPart").text
-            book_name_form = root.find(".//FileNameBookNameForm").text
-        book_part = re.sub(r"\d", "[0-9]", book_name_form)
+        book_part = re.sub(r"\d", "[0-9]", settings.file_name_form)
         book_part = re.sub(r"([A-Z])", r"[A-Z]", book_part)
-        pattern = f"{pre_part}.*{book_part}.*{post_part}"
-        matching_files = False
-        for file in project_path.iterdir():
-            if re.match(pattern, file.name):
-                matching_files = True
-                break
-        if not matching_files:
+        pattern = f"{settings.file_name_prefix}.*{book_part}.*{settings.file_name_suffix}"
+        if not any([re.match(pattern, file.name) for file in project_path.iterdir()]):
             raise ValueError(
                 f"{project_path} does not contain any files using the naming convention, '{pattern}', found in the Settings.xml file."
             )
