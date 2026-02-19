@@ -158,6 +158,7 @@ The rest of these instructions are to be carried out in a WSL/Linux terminal as 
    * To access the MinIO bucket, you will need VPN access. Reach out to a SILNLP dev team member for access.
 
 2. In a terminal (WSL) at the silnlp repo, run the commands cooresponding to the bucket you are using:
+
    MinIO:
    ```
    apt update
@@ -168,6 +169,8 @@ The rest of these instructions are to be carried out in a WSL/Linux terminal as 
    apt update
    source ./rclone_setup.sh backblaze
    ```
+
+* You will need to run the `source ./rclone_setup.sh minio` command each time you start your Linux environment. Every other step in these instructions should only be needed one time during initial setup.
 
 ## Setting Up and Running Experiments
 
