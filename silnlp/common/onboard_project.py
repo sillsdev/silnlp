@@ -2,6 +2,7 @@ import argparse
 import getpass
 import logging
 import re
+import shutil
 import sys
 import xml.etree.ElementTree as ET
 import zipfile
@@ -301,10 +302,13 @@ def setup_local_project(
         project_name = f"{project_name}_{datestamp}"
         LOGGER.info(f"Datestamping project. New project name: {project_name}")
 
-    # Rename local project folder to project_name if it exists
-    if local_project_path.exists() and local_project_path.name != project_name:
+        # Copy local project folder contents to a folder with the new name
+    if local_project_path and local_project_path.exists() and local_project_path.name != project_name:
         new_local_project_path = local_project_path.parent / project_name
-        local_project_path = local_project_path.rename(new_local_project_path)
+        if not new_local_project_path.exists():
+            new_local_project_path.mkdir(parents=True, exist_ok=True)
+        _copy_directory_to_paratext_project(local_project_path, new_local_project_path, overwrite=True)
+        local_project_path = new_local_project_path
 
     return project_name, local_project_path, copy_from
 
@@ -390,6 +394,8 @@ def main() -> None:
                 source_path = Path(source_path / project_name)
             paratext_project_dir: Path = create_paratext_project_folder_if_not_exists(project_name)
             copy_paratext_project_folder(source_path, paratext_project_dir, overwrite=args.overwrite)
+            if project_name != project:
+                shutil.rmtree(source_path)
 
         if args.extract_corpora:
             extract_config: dict = config.get("extract_corpora", {})
