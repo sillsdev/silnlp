@@ -2,6 +2,7 @@ import argparse
 import getpass
 import logging
 import re
+import shutil
 import sys
 import xml.etree.ElementTree as ET
 import zipfile
@@ -393,6 +394,8 @@ def main() -> None:
                 source_path = Path(source_path / project_name)
             paratext_project_dir: Path = create_paratext_project_folder_if_not_exists(project_name)
             copy_paratext_project_folder(source_path, paratext_project_dir, overwrite=args.overwrite)
+            if project_name != project:
+                shutil.rmtree(source_path)
 
         if args.extract_corpora:
             extract_config: dict = config.get("extract_corpora", {})
