@@ -42,7 +42,17 @@ def get_project_dir(project: str) -> Path:
 def get_parent_project_dir(project_dir: Path) -> Optional[Path]:
     settings = FileParatextProjectSettingsParser(project_dir).parse()
     if settings.has_parent:
+        for parent_project_path in SIL_NLP_ENV.pt_projects_dir.glob(f"*{settings.parent_name}*"):
+            try:
+                parent_project_settings = FileParatextProjectSettingsParser(parent_project_path).parse()
+            except:
+                continue
+            if settings.is_daughter_project_of(parent_project_settings):
+                return parent_project_path
         for parent_project_path in SIL_NLP_ENV.pt_projects_dir.iterdir():
+            if settings.parent_name in parent_project_path.name:
+                # We already checked these above
+                continue
             try:
                 parent_project_settings = FileParatextProjectSettingsParser(parent_project_path).parse()
             except:
