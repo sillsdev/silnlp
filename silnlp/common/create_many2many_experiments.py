@@ -117,7 +117,7 @@ def create_config2(mapping_type, src_list, trg, corpus_books, test_books):
                     "trg": trg,
                 },
                 {
-                    "type": "val,test",
+                    "type": "test",
                     "corpus_books": test_books,
                     "src": src_list[0],
                     "trg": trg,
@@ -127,9 +127,9 @@ def create_config2(mapping_type, src_list, trg, corpus_books, test_books):
             "seed": 111,
             "tokenizer": {"update_src": True, "update_trg": True},
         },
-       "eval": {"early_stopping": None, "eval_steps": 1000, 'eval_strategy': 'no'},
+       #"eval": {"early_stopping": None, "eval_steps": 1000, 'eval_strategy': 'no'},
        "model": "facebook/nllb-200-distilled-1.3B",
-       "train": {"max_steps": 7000, "save_steps": 5000, "save_strategy": "steps", "save_total_limit": 1},
+       #"train": {"max_steps": 7000, "save_steps": 5000, "save_strategy": "steps", "save_total_limit": 1},
     }
     return config
 
