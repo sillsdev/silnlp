@@ -11,10 +11,9 @@ from typing import Tuple
 
 import wildebeest.wb_analysis as wb_ana
 import yaml
+from machine.corpora import FileParatextProjectSettingsParser
 from machine.corpora.file_paratext_project_settings_parser import FileParatextProjectSettingsParser
 from machine.corpora.paratext_project_settings import ParatextProjectSettings
-
-from machine.corpora import FileParatextProjectSettingsParser
 
 from silnlp.common.clean_projects import process_single_project_for_cleaning
 
@@ -130,7 +129,10 @@ def extract_corpora_wrapper(project_name: str, extract_config: dict, overwrite=F
         extract_project_vrefs=extract_config.get("project-vrefs", False),
         extract_surface_forms=extract_config.get("surface-forms", False),
         parent_project=extract_config.get("parent_project", None),
-        versification_error_output_path=SIL_NLP_ENV.mt_experiments_dir / "OnboardingRequests" / project_name / "versification_errors.txt"
+        versification_error_output_path=SIL_NLP_ENV.mt_experiments_dir
+        / "OnboardingRequests"
+        / project_name
+        / "versification_errors.txt",
     )
 
 
@@ -234,19 +236,25 @@ def check_for_project_errors(copy_from: Path | None, project: str) -> None:
         if not copy_from.exists():
             raise FileNotFoundError(f"The specified --copy-from path '{copy_from}' does not exist.")
         project_path = copy_from / project
+        settings_file = project_path / "Settings.xml"
+        if not project_path.exists():
+            raise FileNotFoundError(
+                f"The specified project folder '{project_path}' does not exist in the --copy-from path."
+            )
+        if not settings_file.exists():
+            raise FileNotFoundError(
+                f"The Settings.xml file was not found in the project folder '{project_path}'. Please ensure this is a valid Paratext project folder."
+            )
 
-        settings_file_parser = FileParatextProjectSettingsParser(project_path)
-        project_settings: ParatextProjectSettings = settings_file_parser.parse()
+        settings = FileParatextProjectSettingsParser(project_path).parse()
 
-        file_name_form = re.sub(r"\d", "[0-9]", project_settings.file_name_form)
-        file_name_form = re.sub(r"([A-Z])", r"[A-Z]", file_name_form)
-        pattern = f"{project_settings.file_name_prefix}.*{file_name_form}.*{project_settings.file_name_suffix}$"
-        matching_files = False
-        for file in project_path.iterdir():
-            if re.match(pattern, file.name):
-                matching_files = True
-                break
-        if not matching_files:
+        if settings.translation_type != "Standard":
+            LOGGER.warning(f"{project} is a non-Standard project. Type is '{settings.translation_type}'.")
+
+        book_part = re.sub(r"\d", "[0-9]", settings.file_name_form)
+        book_part = re.sub(r"([A-Z])", r"[A-Z]", book_part)
+        pattern = f"{settings.file_name_prefix}.*{book_part}.*{settings.file_name_suffix}"
+        if not any([re.match(pattern, file.name) for file in project_path.iterdir()]):
             raise ValueError(
                 f"{project_path} does not contain any files using the naming convention, '{pattern}', found in the Settings.xml file."
             )
