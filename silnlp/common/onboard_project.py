@@ -141,7 +141,10 @@ def extract_corpora_wrapper(project_name: str, extract_config: dict, overwrite=F
         extract_project_vrefs=extract_config.get("project-vrefs", False),
         extract_surface_forms=extract_config.get("surface-forms", False),
         parent_project=extract_config.get("parent_project", None),
-        versification_error_output_path=versification_error_output_path,
+        versification_error_output_path=SIL_NLP_ENV.mt_experiments_dir
+        / "OnboardingRequests"
+        / project_name
+        / "versification_errors.txt",
     )
 
 
