@@ -14,6 +14,8 @@ import yaml
 from machine.corpora.file_paratext_project_settings_parser import FileParatextProjectSettingsParser
 from machine.corpora.paratext_project_settings import ParatextProjectSettings
 
+from machine.corpora import FileParatextProjectSettingsParser
+
 from silnlp.common.clean_projects import process_single_project_for_cleaning
 
 from ..nmt.config_utils import create_config
@@ -127,6 +129,8 @@ def extract_corpora_wrapper(project_name: str, extract_config: dict, overwrite=F
         extract_lemmas=extract_config.get("lemmas", False),
         extract_project_vrefs=extract_config.get("project-vrefs", False),
         extract_surface_forms=extract_config.get("surface-forms", False),
+        parent_project=extract_config.get("parent_project", None),
+        versification_error_output_path=SIL_NLP_ENV.mt_experiments_dir / "OnboardingRequests" / project_name / "versification_errors.txt"
     )
 
 
