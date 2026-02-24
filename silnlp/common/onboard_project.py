@@ -493,7 +493,6 @@ def main() -> None:
             align_config: dict = config.get("align", None)
             align_wrapper(project_name, align_config, args.overwrite)
 
-        # TODO: Add alignments
         # TODO: Add a log file or log folder to store any outputs from the console
 
 

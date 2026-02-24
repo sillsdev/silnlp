@@ -77,6 +77,7 @@ def get_project_metadata(onboarding_request: dict) -> Tuple[str, Dict[str, str]]
     ]
 
     for key in project_keys:
+        # TODO: Get project name from SF ID for the main project
         paratext_id = onboarding_request["submission"].get(key) if key == "projectId" else form_data.get(key)
         response = send_request(
             RequestType.GET,
