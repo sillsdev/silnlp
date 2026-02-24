@@ -418,7 +418,6 @@ def main() -> None:
                 LOGGER.warning("--extract_corpora was not included. Stats requires the corpus to be extracted first.")
             calculate_tokenization_stats(project_name, config.get("stats", None), args.overwrite)
 
-        # TODO: Add alignments
         # TODO: Add a log file or log folder to store any outputs from the console
 
 
