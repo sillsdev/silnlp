@@ -8,6 +8,9 @@ import yaml
 
 from silnlp.common.environment import SIL_NLP_ENV
 
+EXPERIMENTS_DIR = SIL_NLP_ENV.mt_experiments_dir
+SCRIPTURE_DIR = SIL_NLP_ENV.mt_scripture_dir
+
 LOGGER = logging.getLogger(__package__ + ".create_experiments")
 
 def extract_prefix(project_name):
@@ -95,6 +98,7 @@ def resolve_lang_code(project_name, two2three_map, script_map):
         
     return f"{three_letter}_{script}"
 
+
 def create_alignment_config(folder, rows):
     all_src = set()
     all_trg = set()
@@ -127,37 +131,51 @@ def create_alignment_config(folder, rows):
     LOGGER.info(f"Created alignment config: {align_dir / 'config.yml'}")
 
 
+def check_scripture_files(rows):
+    """Check that all Source 1, Source 2, and Target scripture files exist. Returns list of valid rows."""
+    valid, missing_any = [], False
+    for row in rows:
+        src1, src2, trg = row["Source 1"], row["Source 2"], row["Target"]
+        missing = [p for p in (src1, src2, trg) if not (SCRIPTURE_DIR / f"{p}.txt").is_file()]
+        if missing:
+            missing_any = True
+            lang = row["Target_language"]
+            LOGGER.warning(f"Skipping {lang}: missing scripture files: {', '.join(f'{m}.txt' for m in missing)}")
+        else: valid.append(row)
+    if not missing_any: LOGGER.info("All scripture files present.")
+    return valid
+
+
 def main():
     parser = argparse.ArgumentParser(description="Create NLLB experiment configurations with alignment and templates.")
     parser.add_argument("folder", help="Root experiment folder name (relative to mt_experiments_dir).")
     parser.add_argument("csv_file", help="Path to the input CSV file.")
-    parser.add_argument("--create_alignment_config", action="store_true", help="Create or update the Align/config.yml file.")
+    parser.add_argument("--create-alignment-config", action="store_true", help="Create or update the Align/config.yml file.")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing experiment configs.")
     parser.add_argument("--template", default="config.yml", help="Path to a template YAML file. Defaults to 'config.yml' in the folder.")
+    parser.add_argument("--check-files", action="store_true", help="Check that scripture files exist for all experiments and exit.")
 
     args = parser.parse_args()
         
-    main_folder = SIL_NLP_ENV.mt_experiments_dir / args.folder
+    main_folder = EXPERIMENTS_DIR / args.folder
     csv_file = main_folder / args.csv_file
-    config_template_file = main_folder / args.template
     two2three_file = main_folder / "two2three.csv"
     align_dir = main_folder / "Align"
     corpus_stats = align_dir / "corpus-stats.csv"
-
-    LOGGER.info(f"\nLooking for corpus-stats.csv in {align_dir}")
-
+    print(f"\nLooking in {main_folder} for files:\n{csv_file.is_file()}\t{csv_file.name}\n{two2three_file.is_file()}\t{two2three_file.name}")
+    print(f"And in {align_dir} for:\n{corpus_stats.is_file()}\t{corpus_stats.name}\n")
 
     if not csv_file.is_file():
         LOGGER.error(f"\nExperiment defining CSV file not found: {csv_file}")
         return 1
     
     if not align_dir.is_dir():
-        LOGGER.info(f"\nAlign dir {align_dir} doesn't exist, will create it and the alignment config.")
+        LOGGER.info(f"\nAlign dir {align_dir} doesn't exist, will create it.")
         align_dir.mkdir()
         args.create_alignment_config = True
 
-    if not corpus_stats.is_file():
-        LOGGER.info(f"\nCorpus Stats file: {corpus_stats} doesn't exist, will create the alignment config.")
+    if args.create_alignment_config or not corpus_stats.is_file():
+        LOGGER.info(f"\nWill create the alignment config: {corpus_stats}")
         args.create_alignment_config = True
     
     if not two2three_file.is_file():
@@ -167,8 +185,14 @@ def main():
     rows = []
     with open(csv_file, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
+        print(f"This is the reader: {reader}")
         for row in reader:
+            print(f"This is the row: {row}")
             rows.append(row)
+
+    if args.check_files:
+        check_scripture_files(rows)
+        return 0
 
     if args.create_alignment_config:
         create_alignment_config(main_folder, rows)
@@ -185,7 +209,8 @@ def main():
     with open(template_file, "r", encoding="utf-8") as f:
         template_data = yaml.safe_load(f)
 
-    for row in rows:
+    valid_rows = check_scripture_files(rows)
+    for row in valid_rows:
         language = row["Target_language"]
         src1 = row["Source 1"]
         src2 = row["Source 2"]
