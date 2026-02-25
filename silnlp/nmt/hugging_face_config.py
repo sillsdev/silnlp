@@ -875,7 +875,7 @@ class ModelOutputGroup:
         ]
 
     def convert_to_sentence_translation_group(self, tokenizer: PreTrainedTokenizer) -> SentenceTranslationGroup:
-        return list(
+        return SentenceTranslationGroup(
             [model_output.convert_to_sentence_translation(tokenizer) for model_output in self._get_model_outputs()]
         )
 

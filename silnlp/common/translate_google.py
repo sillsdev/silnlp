@@ -30,13 +30,13 @@ class GoogleTranslator(Translator):
 
         for sentence in sentences:
             if len(sentence) == 0:
-                yield ""
+                yield SentenceTranslationGroup([])
             else:
                 results = self._translate_client.translate(
                     sentence, source_language=src_iso, target_language=trg_iso, format_="text"
                 )
                 translation: str = results["translatedText"]
-                yield [SentenceTranslation(translation, [], [], None)]
+                yield SentenceTranslationGroup([SentenceTranslation(translation, [], [], None)])
 
 
 def main() -> None:

@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from machine.corpora import ScriptureRef
+from scipy.stats import gmean
 
 
 class SentenceTranslation:
@@ -17,6 +18,18 @@ class SentenceTranslation:
         self._tokens = tokens
         self._token_scores = token_scores
         self._sequence_score = sequence_score
+
+    @classmethod
+    def combine(cls, translations: List["SentenceTranslation"]) -> "SentenceTranslation":
+        combined_translation: str = " ".join([t.get_translation() for t in translations])
+        combined_tokens: List[str] = [token for t in translations for token in t._tokens]
+        combined_token_scores: List[float] = [ts for t in translations for ts in t._token_scores if ts is not None]
+        combined_sequence_score: Optional[float] = (
+            gmean([t._sequence_score for t in translations if t.has_sequence_confidence_score()])
+            if all(t.has_sequence_confidence_score() for t in translations)
+            else None
+        )
+        return cls(combined_translation, combined_tokens, combined_token_scores, combined_sequence_score)
 
     def get_translation(self) -> str:
         return self._translation
@@ -37,7 +50,25 @@ class SentenceTranslation:
         return "\t".join([str(exp(ts)) for ts in [self._sequence_score] + self._token_scores if ts is not None])
 
 
-SentenceTranslationGroup = List[SentenceTranslation]
+class SentenceTranslationGroup:
+    def __init__(self, translations: List[SentenceTranslation]):
+        self._translations = translations
+
+    @property
+    def num_drafts(self) -> int:
+        return len(self._translations)
+
+    @classmethod
+    def combine(cls, groups: List["SentenceTranslationGroup"]) -> "SentenceTranslationGroup":
+        combined_translations: List[SentenceTranslation] = []
+        num_drafts = groups[0].num_drafts
+        for n in range(num_drafts):
+            combined_translations.append(SentenceTranslation.combine([g._translations[n] for g in groups]))
+
+        return cls(combined_translations)
+
+    def __iter__(self):
+        return iter(self._translations)
 
 
 class TranslatedDraft:
@@ -111,7 +142,7 @@ class TranslatedDraft:
 class DraftGroup:
     def __init__(self, translation_groups: List[SentenceTranslationGroup]):
         self.translation_groups = translation_groups
-        self.num_drafts: int = len(self.translation_groups[0])
+        self.num_drafts: int = self.translation_groups[0].num_drafts
 
     def get_drafts(self) -> List[TranslatedDraft]:
         translated_draft_sentences: List[List[SentenceTranslation]] = [[] for _ in range(self.num_drafts)]

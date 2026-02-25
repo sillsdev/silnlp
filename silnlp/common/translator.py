@@ -398,7 +398,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
 
             src_file_text = UsfmFileText(stylesheet, "utf-8-sig", book_id, src_file_path, include_all_text=True)
 
-        sentences = UsfmTextRowCollection(src_file_text, stylesheet, chapters, tags)
+        sentences = UsfmTextRowCollection(src_file_text, src_iso, stylesheet, chapters, tags)
 
         # sentences = [re.sub(" +", " ", add_tags_to_sentence(tags, s.text.strip())) for s in src_file_text]
         # scripture_refs: List[ScriptureRef] = [s.ref for s in src_file_text]
@@ -421,7 +421,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
         #        sentences.pop(i)
         #        empty_sents.append((i, scripture_refs.pop(i)))
 
-        sentences_to_translate, vrefs = sentences.get_sentences_and_vrefs_for_translation()
+        sentences_to_translate, scripture_refs = sentences.get_sentences_and_vrefs_for_translation()
 
         sentence_translation_groups: List[SentenceTranslationGroup] = list(
             self.translate(
@@ -429,7 +429,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
                 src_iso,
                 trg_iso,
                 produce_multiple_translations,
-                vrefs,
+                [sr.verse_ref for sr in scripture_refs],
             )
         )
         # num_drafts = len(sentence_translation_groups[0])
@@ -538,9 +538,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
                     f.write(usfm_out)
 
                 if save_confidences and config.get_postprocess_suffix() == "":
-                    generate_confidence_files(
-                        translated_draft, trg_draft_file_path, scripture_refs=translated_text_rows.get_scripture_refs()
-                    )
+                    generate_confidence_files(translated_draft, trg_draft_file_path, scripture_refs=scripture_refs)
 
     def translate_docx(
         self,
