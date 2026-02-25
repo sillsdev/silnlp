@@ -12,6 +12,7 @@ import regex
 from machine.corpora import AlignedWordPair, FileParatextProjectSettingsParser, ScriptureRef, UsfmFileText
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
 from machine.tokenization import LatinWordTokenizer
+from numpy import exp, sqrt
 from pyparsing import Iterable
 
 from silnlp.common.environment import SIL_NLP_ENV
@@ -97,7 +98,9 @@ class PassageReader:
 
 
 class WordAlignments:
-    def __init__(self, aligned_pairs: Collection[AlignedWordPair]):
+    def __init__(self, src_length: int, trg_length: int, aligned_pairs: Collection[AlignedWordPair]):
+        self._src_length = src_length
+        self._trg_length = trg_length
         self._aligned_pairs = aligned_pairs
         self._target_tokens_by_source_token: Dict[int, List[int]] = self._create_source_to_target_alignment_lookup(
             aligned_pairs
@@ -105,7 +108,7 @@ class WordAlignments:
         self._source_tokens_by_target_token: Dict[int, List[int]] = self._create_target_to_source_alignment_lookup(
             aligned_pairs
         )
-        self._cached_crossed_alignments: Dict[tuple[int, int], int] = {}
+        self._cached_crossed_alignments: Dict[tuple[int, int, float], int] = {}
 
     def _create_source_to_target_alignment_lookup(
         self, aligned_pairs: Collection[AlignedWordPair]
@@ -129,9 +132,11 @@ class WordAlignments:
     def get_source_aligned_words(self, target_word_index: int) -> List[int]:
         return self._source_tokens_by_target_token.get(target_word_index) or []
 
-    def get_num_crossed_alignments(self, src_word_index: int, trg_word_index: int) -> int:
-        if (src_word_index, trg_word_index) in self._cached_crossed_alignments:
-            return self._cached_crossed_alignments[(src_word_index, trg_word_index)]
+    def get_num_crossed_alignments(
+        self, src_word_index: int, trg_word_index: int, off_diagonal_penalty: float = 0
+    ) -> int:
+        if (src_word_index, trg_word_index, off_diagonal_penalty) in self._cached_crossed_alignments:
+            return self._cached_crossed_alignments[(src_word_index, trg_word_index, off_diagonal_penalty)]
         num_crossings = 0
         for aligned_word_pair in self._aligned_pairs:
             # By convention, a break at "word_index" is placed immediately before
@@ -139,12 +144,35 @@ class WordAlignments:
             if (
                 aligned_word_pair.source_index < src_word_index and aligned_word_pair.target_index >= trg_word_index
             ) or (aligned_word_pair.source_index >= src_word_index and aligned_word_pair.target_index < trg_word_index):
-                num_crossings += 1
-        self._cached_crossed_alignments[(src_word_index, trg_word_index)] = num_crossings
+                num_crossings += 1 * (1 - off_diagonal_penalty) + off_diagonal_penalty * (
+                    1 - self._get_off_diagonal_probability(src_word_index, trg_word_index)
+                )
+
+        self._cached_crossed_alignments[(src_word_index, trg_word_index, off_diagonal_penalty)] = num_crossings
         return num_crossings
+
+    def _get_off_diagonal_probability(self, src_word_index: int, trg_word_index: int) -> float:
+        expected_trg_index = int(src_word_index * self._trg_length / self._src_length)
+        distance_from_diagonal = abs(trg_word_index - expected_trg_index)
+        return 15.17 / sqrt(2 * 3.14 * 35) * exp(-0.5 * (distance_from_diagonal) ** 2 / 35)
+
+
+class WordAlignmentsBuilder:
+    def __init__(self, src_length: int, trg_length: int):
+        self._src_length = src_length
+        self._trg_length = trg_length
+        self._aligned_pairs: List[AlignedWordPair] = []
+
+    def add_aligments(self, aligned_pairs: Collection[AlignedWordPair]) -> None:
+        self._aligned_pairs.extend(aligned_pairs)
+
+    def build(self) -> WordAlignments:
+        return WordAlignments(self._src_length, self._trg_length, self._aligned_pairs)
 
 
 class VerseSegmenter(ABC):
+    # The characters » and › are not in this list since they often
+    # start verses as quote continuers in Spanish
     PROHIBITED_VERSE_STARTING_CHARACTERS: Set[str] = {
         " ",
         ",",
@@ -156,8 +184,6 @@ class VerseSegmenter(ABC):
         ")",
         "]",
         "}",
-        "»",
-        "›",
         "”",
         "’",
     }
@@ -301,6 +327,10 @@ class FewestCrossedAlignmentsVerseSegmenter(VerseSegmenter):
             self._nearest_preceding_segment_break[src_index] = (src_offset, trg_offset)
 
     def predict_target_verse_token_offsets(self) -> List[int]:
+        # try to find smaller segments to break into
+        for break_index, src_break_offset in enumerate(self._source_verse_token_offsets[:-1]):
+            previous_src_break_offset = self._source_verse_token_offsets[break_index - 1] if break_index > 0 else 0
+
         # greedily select the best segment break
         while len(self._remaining_breaks_to_map) > 0:
             lowest_crossed_alignment_weight = 1_000_000
@@ -620,10 +650,12 @@ class ParallelPassageCollectionFactory:
 
     def create(self, source_project_name: str, target_passage_file: Path) -> "ParallelPassageCollection":
         if self._use_saved_alignments:
+            src_tokenized_file = target_passage_file.with_suffix(".src.tokenized.txt")
+            trg_tokenized_file = target_passage_file.with_suffix(".trg.tokenized.txt")
             alignment_file = target_passage_file.with_suffix(".alignments.txt")
             if not alignment_file.exists():
                 raise FileNotFoundError(f"Saved alignment file {alignment_file} not found")
-            saved_alignment_generator = SavedAlignmentGenerator(alignment_file)
+            saved_alignment_generator = SavedAlignmentGenerator(src_tokenized_file, trg_tokenized_file, alignment_file)
             return ParallelPassageCollection(source_project_name, target_passage_file, saved_alignment_generator)
         return ParallelPassageCollection(
             source_project_name,
@@ -644,16 +676,25 @@ class EflomalAlignmentGenerator(AlignmentGenerator):
         self._target_passage_file = target_passage_file
 
     def generate(self, source_passages: List[str], target_passages: List[str]) -> Generator[WordAlignments, None, None]:
+
         with TemporaryDirectory() as td:
             align_path = Path(td, "sym-align.txt")
             src_path = Path(td, "src_align.txt")
             trg_path = Path(td, "trg_align.txt")
             write_corpus(src_path, source_passages)
             write_corpus(trg_path, target_passages)
-            compute_alignment_scores(Path(td, "src_align.txt"), Path(td, "trg_align.txt"), "eflomal", align_path)
+            compute_alignment_scores(
+                Path(td, "src_align.txt"), Path(td, "trg_align.txt"), "eflomal", align_path, "grow-diag-final-and"
+            )
 
-            for line in load_corpus(align_path):
-                yield WordAlignments(AlignedWordPair.from_string(line))
+            for src_passage, trg_passage, alignment_line in zip(
+                source_passages, target_passages, load_corpus(align_path)
+            ):
+                currentWordAlignments: WordAlignmentsBuilder = WordAlignmentsBuilder(
+                    len(src_passage.split()), len(trg_passage.split())
+                )
+                currentWordAlignments.add_aligments(AlignedWordPair.from_string(alignment_line))
+                yield currentWordAlignments.build()
 
             if self._save_alignments:
                 assert self._target_passage_file is not None
@@ -668,12 +709,22 @@ class EflomalAlignmentGenerator(AlignmentGenerator):
 
 
 class SavedAlignmentGenerator(AlignmentGenerator):
-    def __init__(self, alignment_file: Path):
+    def __init__(self, src_tokenized_file: Path, trg_tokenized_file: Path, alignment_file: Path):
+        self._src_tokenized_file = src_tokenized_file
+        self._trg_tokenized_file = trg_tokenized_file
         self._alignment_file = alignment_file
 
     def generate(self, source_passages: List[str], target_passages: List[str]) -> Generator[WordAlignments, None, None]:
-        for alignment_line in load_corpus(self._alignment_file):
-            yield WordAlignments(AlignedWordPair.from_string(alignment_line))
+        for src_passage, trg_passage, alignment_line in zip(
+            load_corpus(self._src_tokenized_file),
+            load_corpus(self._trg_tokenized_file),
+            load_corpus(self._alignment_file),
+        ):
+            currentWordAlignments: WordAlignmentsBuilder = WordAlignmentsBuilder(
+                len(src_passage.split()), len(trg_passage.split())
+            )
+            currentWordAlignments.add_aligments(AlignedWordPair.from_string(alignment_line))
+            yield currentWordAlignments.build()
 
 
 VerseCollectorType = TypeVar("VerseCollectorType", bound=VerseCollector)
@@ -858,7 +909,7 @@ def main() -> None:
     src_segmented_passages = parallel_passages.get_source_segmented_passages()
 
     verse_segmenter_factory = FewestCrossedAlignmentsVerseSegmenterFactory(
-        pseudoalignment_weight=0.001, pseudoalignment_exponent=1.5
+        pseudoalignment_weight=0.0, pseudoalignment_exponent=2
     )
     trg_segmented_passages = list(parallel_passages.segment_target_passages(verse_segmenter_factory))
 
