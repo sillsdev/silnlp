@@ -5,10 +5,12 @@ import re
 from pathlib import Path
 
 import yaml
+import openpyxl
 
 from silnlp.common.environment import SIL_NLP_ENV
 
 from .script_utils import is_represented, predict_script_code
+from .utils import two2three_iso
 
 EXPERIMENTS_DIR = SIL_NLP_ENV.mt_experiments_dir
 SCRIPTURE_DIR = SIL_NLP_ENV.mt_scripture_dir
@@ -18,17 +20,54 @@ SCRIPT_CACHE_FILE = "scripts.csv"
 SAMPLE_SIZE = 3000  # bytes to read for script detection
 
 
-def get_or_update_script_cache(main_folder, rows, two2three_map):
-    """Read/update scripts.csv cache. Returns dict of filename -> lang_code."""
-    cache_file = main_folder / SCRIPT_CACHE_FILE
+def check_required_files(main_folder, workbook_file, template_config):
+    """Check that required files exist"""
+    print(f"Looking for the required files in the {main_folder} as follows:")
+    print(f"Exists | Filename               | Purpose")
+    print(f"{workbook_file.is_file()}   | {workbook_file.name:25}  | Define the experiments to be run.")
+    print(f"{template_config.is_file()}   | {template_config.name:25} | Define the config.yml for the experiments.")
+
+    if not workbook_file.is_file():
+        LOGGER.error(f"\nExperiment workbook not found: {workbook_file}")
+        return 1
+
+    if not template_config.is_file():
+        LOGGER.warning(
+            f"\n{template_config}, not found, create {template_config} and try again."
+        )
+        return 1
+    return 0
+
+
+def read_experiments_xlsx(workbook_path):
+    """Read the 'experiments' sheet from the workbook. Returns list of dicts."""
+    wb = openpyxl.load_workbook(workbook_path, read_only=True)
+    ws = wb["experiments"]
+    rows_iter = ws.iter_rows(values_only=True)
+    headers = [str(h).strip() for h in next(rows_iter)]
+    rows = []
+    for row in rows_iter:
+        row_dict = {headers[i]: (str(v).strip() if v is not None else "") for i, v in enumerate(row)}
+        rows.append(row_dict)
+    wb.close()
+    return rows
+
+
+def get_scripts(workbook_path, rows, two2three_map):
+    """Return dict of filename -> lang_code. Reads cached entries from the 'scripts'
+    sheet in the workbook, predicts scripts for any new filenames, and updates
+    the sheet if new entries were added."""
     cache = {}
 
-    # Read existing cache
-    if cache_file.is_file():
-        with open(cache_file, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                cache[row["filename"]] = {"iso": row["iso"], "lang_code": row["lang_code"]}
+    # Read existing cache from 'scripts' sheet if it exists
+    wb = openpyxl.load_workbook(workbook_path)
+    if "scripts" in wb.sheetnames:
+        ws = wb["scripts"]
+        rows_iter = ws.iter_rows(values_only=True)
+        headers = [str(h).strip() for h in next(rows_iter)]
+        for row in rows_iter:
+            d = {headers[i]: (str(v).strip() if v is not None else "") for i, v in enumerate(row)}
+            cache[d["filename"]] = {"iso": d["iso"], "lang_code": d["lang_code"]}
 
     # Collect all filenames needed
     needed = set()
@@ -49,7 +88,7 @@ def get_or_update_script_cache(main_folder, rows, two2three_map):
             text = filepath.read_text(encoding="utf-8-sig")[:SAMPLE_SIZE]
             script_code = predict_script_code(text)
             iso = extract_prefix(filename)
-            three_letter = two2three_map.get(iso, iso)  # fall through if already 3-letter
+            three_letter = two2three_map.get(iso, iso)
             lang_code = f"{three_letter}_{script_code}"
             cache[filename] = {"iso": iso, "lang_code": lang_code}
             LOGGER.info(f"Cached script for {filename}: {lang_code}")
@@ -59,12 +98,16 @@ def get_or_update_script_cache(main_folder, rows, two2three_map):
 
     # Write back if updated
     if updated:
-        with open(cache_file, "w", encoding="utf-8", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["filename", "iso", "lang_code"])
-            writer.writeheader()
-            for fn in sorted(cache):
-                writer.writerow({"filename": fn, "iso": cache[fn]["iso"], "lang_code": cache[fn]["lang_code"]})
-        LOGGER.info(f"Updated {cache_file} ({len(cache)} entries)")
+        if "scripts" in wb.sheetnames:
+            del wb["scripts"]
+        ws = wb.create_sheet("scripts")
+        ws.append(["filename", "iso", "lang_code"])
+        for fn in sorted(cache):
+            ws.append([fn, cache[fn]["iso"], cache[fn]["lang_code"]])
+        wb.save(workbook_path)
+        LOGGER.info(f"Updated scripts sheet in {workbook_path} ({len(cache)} entries)")
+    else:
+        wb.close()
 
     return {fn: cache[fn]["lang_code"] for fn in cache}
 
@@ -79,33 +122,12 @@ def extract_prefix(project_name):
     return project_name
 
 
-def read_two2three(folder):
-    """Read two2three.csv mapping."""
-    mapping_file = folder / "two2three.csv"
-    if not mapping_file.is_file():
-        # Try .tsv just in case
-        mapping_file = folder / "two2three.tsv"
-        if not mapping_file.is_file():
-            LOGGER.warning(f"Neither two2three.csv nor two2three.tsv found in {folder}")
-            return {}
-
-    mapping = {}
-    try:
-        content = mapping_file.read_text(encoding="utf-8")
-        lines = content.splitlines()
-
-        # If it's .tsv use \t, else use ,
-        delimiter = "\t" if mapping_file.suffix == ".tsv" else ","
-        reader = csv.reader(lines, delimiter=delimiter)
-        for row in reader:
-            if len(row) >= 2:
-                mapping[row[0].strip()] = row[1].strip()
-        LOGGER.info(f"Read {len(mapping)} mappings from {mapping_file}")
-    except Exception as e:
-        LOGGER.error(f"Error reading {mapping_file}: {e}")
-        raise
-
-    return mapping
+def resolve_lang_code(project_name, script_map):
+    """Look up the lang_code for a project from the script cache."""
+    lang_code = script_map.get(project_name)
+    if not lang_code:
+        raise RuntimeError(f"Could not find lang_code for {project_name} in scripts cache")
+    return lang_code
 
 
 def read_corpus_stats(stats_file):
@@ -142,20 +164,6 @@ def read_corpus_stats(stats_file):
         raise
 
     return script_mapping
-
-
-def resolve_lang_code(project_name, two2three_map, script_map):
-    prefix = extract_prefix(project_name)
-    if not prefix:
-        raise RuntimeError(f"Could not extract prefix from {project_name}")
-
-    three_letter = two2three_map.get(prefix, prefix)
-
-    script = script_map.get(project_name)
-    if not script:
-        raise RuntimeError(f"Could not find script for {project_name} in corpus-stats.csv")
-
-    return f"{three_letter}_{script}"
 
 
 def create_alignment_config(folder, rows):
@@ -212,7 +220,6 @@ def check_scripture_files(rows):
 def main():
     parser = argparse.ArgumentParser(description="Create NLLB experiment configurations with alignment and templates.")
     parser.add_argument("folder", help="Root experiment folder name (relative to mt_experiments_dir).")
-    parser.add_argument("csv_file", help="Path to the input CSV file.")
     parser.add_argument(
         "--create-alignment-config", action="store_true", help="Create or update the Align/config.yml file."
     )
@@ -225,41 +232,14 @@ def main():
     )
 
     args = parser.parse_args()
-
     main_folder = EXPERIMENTS_DIR / args.folder
-    csv_file = main_folder / args.csv_file
+    workbook_file = main_folder / "experiments.xlsx"
     two2three_file = main_folder / "two2three.csv"
-    align_dir = main_folder / "Align"
-    corpus_stats = align_dir / "corpus-stats.csv"
-    print(
-        f"\nLooking in {main_folder} for files:\n{csv_file.is_file()}\t{csv_file.name}\n{two2three_file.is_file()}\t{two2three_file.name}"
-    )
-    print(f"And in {align_dir} for:\n{corpus_stats.is_file()}\t{corpus_stats.name}\n")
+    template_config = main_folder / args.template
 
-    if not csv_file.is_file():
-        LOGGER.error(f"\nExperiment defining CSV file not found: {csv_file}")
-        return 1
 
-    if not align_dir.is_dir():
-        LOGGER.info(f"\nAlign dir {align_dir} doesn't exist, will create it.")
-        align_dir.mkdir()
-        args.create_alignment_config = True
-
-    if args.create_alignment_config or not corpus_stats.is_file():
-        LOGGER.info(f"\nWill create the alignment config: {corpus_stats}")
-        args.create_alignment_config = True
-
-    if not two2three_file.is_file():
-        LOGGER.warning(
-            f"\nReminder: Create {two2three_file} to show three letter equivalents of two letter iso codes and try again."
-        )
-        return 0
-
-    rows = []
-    with open(csv_file, "r", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            rows.append(row)
+    check_required_files(main_folder, workbook_file, template_config)
+    rows = read_experiments_xlsx(workbook_file)
 
     if args.check_files:
         check_scripture_files(rows)
@@ -269,18 +249,17 @@ def main():
         create_alignment_config(main_folder, rows)
 
     # Main experiment generation
-    two2three_map = read_two2three(main_folder)
-    script_map = get_or_update_script_cache(main_folder, valid_rows, two2three_map)
+    valid_rows = check_scripture_files(rows)
+    script_map = get_scripts(workbook_file, valid_rows, two2three_iso)
 
     if not script_map:
-        LOGGER.error(f"\nProblem reading {corpus-stats}. Could not create the script_map.")
+        LOGGER.error(f"\nCould not determine scripts for any projects.")
         return 1
 
-    template_file = main_folder / args.template if args.template else main_folder / "experiment_template.yml"
-    with open(template_file, "r", encoding="utf-8") as f:
+    
+    with open(template_config, "r", encoding="utf-8") as f:
         template_data = yaml.safe_load(f)
 
-    valid_rows = check_scripture_files(rows)
     for row in valid_rows:
         language = row["Target_language"]
         src1 = row["Source 1"]
@@ -317,7 +296,10 @@ def main():
 
             for proj in projects_to_resolve:
                 prefix = extract_prefix(proj)
-                lang_codes[prefix] = resolve_lang_code(proj, two2three_map, script_map)
+                lang_codes[prefix] = resolve_lang_code(proj, script_map)
+                
+                if not lang_codes[prefix]:
+                    raise RuntimeError(f"Could not find lang_code for {prefix} for {project_name}. Not present on scripts sheet in {workbook_file}.")
 
             # Special case: val,test pair uses only first source
             # The user example showed: src: tgl-TCB (not a list)
@@ -355,5 +337,4 @@ def main():
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
     main()
