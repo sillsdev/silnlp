@@ -15,14 +15,9 @@ from machine.corpora import (
     UsfmTokenType,
 )
 
-from silnlp.common.postprocesser import PostprocessHandler
-from silnlp.common.translation_data_structures import (
-    DraftGroup,
-    SentenceTranslation,
-    SentenceTranslationGroup,
-    TranslatedDraft,
-)
-from silnlp.common.utils import add_tags_to_sentence
+from .postprocesser import PostprocessHandler
+from .translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup, TranslatedDraft
+from .utils import NLTKSentenceTokenizer, add_tags_to_sentence
 
 # Marker "type" is as defined by the UsfmTokenType given to tokens by the UsfmTokenizer,
 # which mostly aligns with a marker's StyleType in the USFM stylesheet
@@ -69,23 +64,14 @@ class UsfmTextRowCollection:
     def _split_non_verse_rows_if_necessary(self) -> Dict[int, List[str]]:
         subdivided_row_texts: Dict[int, List[str]] = {}
         for i, row in enumerate(self._text_rows):
-            if row.ref.is_verse() and len(row.text) > 200:
+            if not row.ref.is_verse() and len(row.text) > 200:
                 split_sentences = self._split_sentences(row.text)
                 if len(split_sentences) > 0:
                     subdivided_row_texts[i] = split_sentences
         return subdivided_row_texts
 
     def _split_sentences(self, text) -> List[str]:
-        import nltk
-
-        nltk.download("punkt")
-        tokenizer: nltk.tokenize.PunktSentenceTokenizer
-        try:
-            src_lang = Lang(self._src_iso)
-            tokenizer = nltk.data.load(f"tokenizers/punkt/{src_lang.name.lower()}.pickle")
-        except Exception:
-            tokenizer = nltk.data.load("tokenizers/punkt/english.pickle")
-        return tokenizer.tokenize(text)
+        return NLTKSentenceTokenizer.for_iso(self._src_iso).tokenize(text)
 
     def get_sentences_and_vrefs_for_translation(self) -> Tuple[List[str], List[ScriptureRef]]:
         sentences, scripture_refs = self._match_all_sentences_with_scripture_refs()

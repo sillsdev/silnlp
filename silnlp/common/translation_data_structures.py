@@ -1,9 +1,9 @@
 from math import exp
 from pathlib import Path
+from statistics import gmean
 from typing import List, Optional
 
 from machine.corpora import ScriptureRef
-from scipy.stats import gmean
 
 
 class SentenceTranslation:
@@ -25,7 +25,7 @@ class SentenceTranslation:
         combined_tokens: List[str] = [token for t in translations for token in t._tokens]
         combined_token_scores: List[float] = [ts for t in translations for ts in t._token_scores if ts is not None]
         combined_sequence_score: Optional[float] = (
-            gmean([t._sequence_score for t in translations if t.has_sequence_confidence_score()])
+            mean([t._sequence_score for t in translations if t.has_sequence_confidence_score()])
             if all(t.has_sequence_confidence_score() for t in translations)
             else None
         )

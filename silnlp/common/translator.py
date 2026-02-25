@@ -8,8 +8,6 @@ from pathlib import Path
 from typing import DefaultDict, Dict, Generator, Generic, Iterable, List, Optional, Tuple, TypeVar
 
 import docx
-import nltk
-from iso639 import Lang
 from machine.corpora import (
     FileParatextProjectSettingsParser,
     FileParatextProjectTextUpdater,
@@ -32,6 +30,7 @@ from .paratext import get_book_path, get_iso, get_parent_project_dir, get_projec
 from .postprocesser import NoDetectedQuoteConventionException, PostprocessHandler, UnknownQuoteConventionException
 from .translation_data_structures import DraftGroup, SentenceTranslationGroup, TranslatedDraft
 from .usfm_utils import UsfmTextRowCollection
+from .utils import NLTKSentenceTokenizer
 
 LOGGER = logging.getLogger((__package__ or "") + ".translate")
 
@@ -549,14 +548,6 @@ class Translator(AbstractContextManager["Translator"], ABC):
         produce_multiple_translations: bool = False,
         tags: Optional[List[str]] = None,
     ) -> None:
-        nltk.download("punkt")
-        tokenizer: nltk.tokenize.PunktSentenceTokenizer
-        try:
-            src_lang = Lang(src_iso)
-            tokenizer = nltk.data.load(f"tokenizers/punkt/{src_lang.name.lower()}.pickle")
-        except Exception:
-            tokenizer = nltk.data.load("tokenizers/punkt/english.pickle")
-
         with src_file_path.open("rb") as file:
             doc = docx.Document(file)
 
@@ -564,7 +555,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
         paras: List[int] = []
 
         for i, paragraph in enumerate(doc.paragraphs):
-            for sentence in tokenizer.tokenize(paragraph.text):
+            for sentence in NLTKSentenceTokenizer.for_iso(src_iso).tokenize(paragraph.text):
                 sentences.append(add_tags_to_sentence(tags, sentence))
                 paras.append(i)
 

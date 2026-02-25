@@ -8,10 +8,12 @@ from enum import Enum, Flag, auto
 from inspect import getmembers
 from pathlib import Path, PurePath
 from types import FunctionType
-from typing import Any, List, Optional, Set, Type, cast
+from typing import Any, Dict, List, Optional, Set, Type, cast
 
+import nltk
 import numpy as np
 import pandas as pd
+from iso639 import Lang
 
 from ..common.environment import SIL_NLP_ENV, SilNlpEnv
 
@@ -213,3 +215,34 @@ def add_tags_to_dataframe(tags: Optional[List[str]], df_sentences: pd.DataFrame)
     if tags_str != "":
         cast(Any, df_sentences).loc[:, "source"] = tags_str + df_sentences.loc[:, "source"]
     return df_sentences
+
+
+class NLTKSentenceTokenizer:
+    _is_initialized = False
+    _instance_cache: Dict[str, "NLTKSentenceTokenizer"] = {}
+
+    @classmethod
+    def for_iso(cls, iso: str) -> "NLTKSentenceTokenizer":
+        if iso in cls._instance_cache:
+            return cls._instance_cache[iso]
+        nltk_tokenizer = cls(iso)
+        cls._instance_cache[iso] = nltk_tokenizer
+        return nltk_tokenizer
+
+    def __init__(self, iso: str):
+        if not self._is_initialized:
+            self._initialize()
+
+        self._tokenizer: nltk.tokenize.PunktSentenceTokenizer
+        try:
+            src_lang = Lang(iso)
+            self._tokenizer = nltk.data.load(f"tokenizers/punkt/{src_lang.name.lower()}.pickle")
+        except Exception:
+            self._tokenizer = nltk.data.load("tokenizers/punkt/english.pickle")
+
+    def _initialize(self) -> None:
+        nltk.download("punkt")
+        nltk.download("punkt_tab")
+
+    def tokenize(self, text: str) -> List[str]:
+        return self._tokenizer.tokenize(text)
