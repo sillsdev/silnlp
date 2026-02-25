@@ -33,7 +33,7 @@ from silnlp.nmt.corpora import CorpusPair
 from .corpus import load_corpus, write_corpus
 from .paratext import get_book_path, get_iso, get_parent_project_dir, get_project_dir
 from .postprocesser import NoDetectedQuoteConventionException, PostprocessHandler, UnknownQuoteConventionException
-from .usfm_utils import PARAGRAPH_TYPE_EMBEDS
+from .usfm_utils import PARAGRAPH_TYPE_EMBEDS, UsfmTextRowCollection
 
 LOGGER = logging.getLogger((__package__ or "") + ".translate")
 
@@ -525,46 +525,59 @@ class Translator(AbstractContextManager["Translator"], ABC):
 
             src_file_text = UsfmFileText(stylesheet, "utf-8-sig", book_id, src_file_path, include_all_text=True)
 
-        sentences = [re.sub(" +", " ", add_tags_to_sentence(tags, s.text.strip())) for s in src_file_text]
-        scripture_refs: List[ScriptureRef] = [s.ref for s in src_file_text]
-        vrefs: List[VerseRef] = [sr.verse_ref for sr in scripture_refs]
+        sentences = UsfmTextRowCollection(src_file_text, stylesheet, chapters, tags)
+
+        # sentences = [re.sub(" +", " ", add_tags_to_sentence(tags, s.text.strip())) for s in src_file_text]
+        # scripture_refs: List[ScriptureRef] = [s.ref for s in src_file_text]
+        # vrefs: List[VerseRef] = [sr.verse_ref for sr in scripture_refs]
         LOGGER.info(f"File {src_file_path} parsed correctly.")
 
         # Filter sentences
-        for i in reversed(range(len(sentences))):
-            marker = scripture_refs[i].path[-1].name if len(scripture_refs[i].path) > 0 else ""
-            if (
-                (len(chapters) > 0 and scripture_refs[i].chapter_num not in chapters)
-                or marker in PARAGRAPH_TYPE_EMBEDS
-                or stylesheet.get_tag(marker).text_type == UsfmTextType.NOTE_TEXT
-            ):
-                sentences.pop(i)
-                scripture_refs.pop(i)
-        empty_sents: List[Tuple[int, ScriptureRef]] = []
-        for i in reversed(range(len(sentences))):
-            if len(sentences[i].strip()) == 0:
-                sentences.pop(i)
-                empty_sents.append((i, scripture_refs.pop(i)))
+        # for i in reversed(range(len(sentences))):
+        #    marker = scripture_refs[i].path[-1].name if len(scripture_refs[i].path) > 0 else ""
+        #    if (
+        #        (len(chapters) > 0 and scripture_refs[i].chapter_num not in chapters)
+        #        or marker in PARAGRAPH_TYPE_EMBEDS
+        #        or stylesheet.get_tag(marker).text_type == UsfmTextType.NOTE_TEXT
+        #    ):
+        #        sentences.pop(i)
+        #        scripture_refs.pop(i)
+        # empty_sents: List[Tuple[int, ScriptureRef]] = []
+        # for i in reversed(range(len(sentences))):
+        #    if len(sentences[i].strip()) == 0:
+        #        sentences.pop(i)
+        #        empty_sents.append((i, scripture_refs.pop(i)))
+
+        sentences_to_translate, vrefs = sentences.get_sentences_and_vrefs_for_translation()
 
         sentence_translation_groups: List[SentenceTranslationGroup] = list(
-            self.translate(sentences, src_iso, trg_iso, produce_multiple_translations, vrefs)
+            self.translate(
+                sentences_to_translate,
+                src_iso,
+                trg_iso,
+                produce_multiple_translations,
+                vrefs,
+            )
         )
-        num_drafts = len(sentence_translation_groups[0])
+        # num_drafts = len(sentence_translation_groups[0])
 
         # Add empty sentences back in
         # Prevents pre-existing text from showing up in the sections of translated text
-        for idx, vref in reversed(empty_sents):
-            sentences.insert(idx, "")
-            scripture_refs.insert(idx, vref)
-            sentence_translation_groups.insert(idx, [SentenceTranslation("", [], [], None)] * num_drafts)
+        # for idx, vref in reversed(empty_sents):
+        #    sentences.insert(idx, "")
+        #    scripture_refs.insert(idx, vref)
+        #    sentence_translation_groups.insert(idx, [SentenceTranslation("", [], [], None)] * num_drafts)
 
         text_behavior = (
             UpdateUsfmTextBehavior.PREFER_NEW if trg_project is not None else UpdateUsfmTextBehavior.STRIP_EXISTING
         )
 
-        draft_set: DraftGroup = DraftGroup(sentence_translation_groups)
-        for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
-            postprocess_handler.construct_rows(scripture_refs, sentences, translated_draft.get_all_translations())
+        translated_text_rows = sentences.to_translated_text_row_collection(sentence_translation_groups)
+
+        # draft_set: DraftGroup = DraftGroup(sentence_translation_groups)
+        for draft_index, translated_draft in enumerate(translated_text_rows.get_translated_drafts(), 1):
+            # postprocess_handler.construct_rows(scripture_refs, sentences, translated_draft.get_all_translations())
+            translated_text_rows.construct_postprocessing_rows_for_draft_index(postprocess_handler, draft_index)
 
             for config in postprocess_handler.configs:
 
