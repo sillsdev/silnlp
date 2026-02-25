@@ -75,7 +75,8 @@ from transformers.utils.logging import tqdm
 
 from ..common.corpus import Term, count_lines, get_terms
 from ..common.environment import SIL_NLP_ENV
-from ..common.translator import DraftGroup, SentenceTranslation, SentenceTranslationGroup, generate_confidence_files
+from ..common.translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup
+from ..common.translator import generate_confidence_files
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, get_mt_exp_dir, merge_dict
 from .config import SUPPORTED_GLOSS_ISOS, CheckpointType, Config, NMTModel
 from .corpora import DataFile

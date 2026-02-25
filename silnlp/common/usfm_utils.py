@@ -16,7 +16,12 @@ from machine.corpora import (
 from machine.scripture import VerseRef
 
 from silnlp.common.postprocesser import PostprocessHandler
-from silnlp.common.translator import DraftGroup, SentenceTranslation, SentenceTranslationGroup, TranslatedDraft
+from silnlp.common.translation_data_structures import (
+    DraftGroup,
+    SentenceTranslation,
+    SentenceTranslationGroup,
+    TranslatedDraft,
+)
 from silnlp.common.utils import add_tags_to_sentence
 
 # Marker "type" is as defined by the UsfmTokenType given to tokens by the UsfmTokenizer,
