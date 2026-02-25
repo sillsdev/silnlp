@@ -57,7 +57,11 @@ class UsfmTextRowCollection:
     def _should_exclude_row(self, row: TextRow) -> bool:
         marker = row.ref.path[-1].name if len(row.ref.path) > 0 else ""
         if (
-            (self._selected_chapters is not None and row.ref.chapter_num not in self._selected_chapters)
+            (
+                self._selected_chapters is not None
+                and len(self._selected_chapters) > 0
+                and row.ref.chapter_num not in self._selected_chapters
+            )
             or marker in PARAGRAPH_TYPE_EMBEDS
             or self._stylesheet.get_tag(marker).text_type == UsfmTextType.NOTE_TEXT
         ):
