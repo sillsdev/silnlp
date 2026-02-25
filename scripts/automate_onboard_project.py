@@ -1,4 +1,3 @@
-# Add a command line argument for the task name so that we can create a new task for each onboarding request and track them separately in ClearML
 import argparse
 import os
 from pathlib import Path
@@ -75,7 +74,6 @@ try:
             onboard_projects_dir,
             "--extract-corpora",
             "--wildebeest",
-            "--extract-corpora",
             "--collect-verse-counts",
             "--datestamp",
             "--stats",
