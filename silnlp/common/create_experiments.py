@@ -220,9 +220,6 @@ def check_scripture_files(rows):
 def main():
     parser = argparse.ArgumentParser(description="Create NLLB experiment configurations with alignment and templates.")
     parser.add_argument("folder", help="Root experiment folder name (relative to mt_experiments_dir).")
-    parser.add_argument(
-        "--create-alignment-config", action="store_true", help="Create or update the Align/config.yml file."
-    )
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing experiment configs.")
     parser.add_argument(
         "--template", default="config.yml", help="Path to a template YAML file. Defaults to 'config.yml' in the folder."
@@ -244,9 +241,6 @@ def main():
     if args.check_files:
         check_scripture_files(rows)
         return 0
-
-    if args.create_alignment_config:
-        create_alignment_config(main_folder, rows)
 
     # Main experiment generation
     valid_rows = check_scripture_files(rows)
