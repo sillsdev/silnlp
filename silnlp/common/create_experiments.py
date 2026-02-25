@@ -217,6 +217,35 @@ def check_scripture_files(rows):
     return valid
 
 
+def create_config(mapping_type, src_list, trg, corpus_books, test_books):
+    config = {
+        "data": {
+            "corpus_pairs": [
+                {
+                    "type": "train",
+                    "corpus_books": corpus_books,
+                    "mapping": mapping_type,
+                    "src": src_list,
+                    "trg": trg,
+                },
+                {
+                    "type": "test",
+                    "corpus_books": test_books,
+                    "src": src_list[0],
+                    "trg": trg,
+                },
+            ],
+            "lang_codes": LANG_CODES,
+            "seed": 111,
+            "tokenizer": {"update_src": True, "update_trg": True},
+        },
+       #"eval": {"early_stopping": None, "eval_steps": 1000, 'eval_strategy': 'no'},
+       "model": "facebook/nllb-200-distilled-1.3B",
+       #"train": {"max_steps": 7000, "save_steps": 5000, "save_strategy": "steps", "save_total_limit": 1},
+    }
+    return config
+
+
 def main():
     parser = argparse.ArgumentParser(description="Create NLLB experiment configurations with alignment and templates.")
     parser.add_argument("folder", help="Root experiment folder name (relative to mt_experiments_dir).")
