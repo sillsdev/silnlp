@@ -135,7 +135,6 @@ def process_request(request):
             request["id"],
         ]
     )
-    # Get a clearml task by its name
     task: Task = Task.get_task(project_name="Onboarding", task_name=task_name, tags=["silnlp-auto-onboarding"])
     with open(f"{ONBOARDING_PATH}/onboarded_projects.log", "a") as f:
         f.write(f"{request['id']}\n")
