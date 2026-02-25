@@ -3,14 +3,6 @@ import csv
 import logging
 import re
 from pathlib import Path
-import unicodedataplus as ud
-
-# Get a mapping of aliases to full names for scripts
-# This requires querying the property_value_by_alias dictionary
-#script_data = ud.property_value_by_alias['script']
-#print(list(script_data.keys()))  # Prints all 4-letter codes
-#print(dir(ud))
-#exit()
 
 import yaml
 import openpyxl
@@ -22,10 +14,10 @@ from .utils import two2three_iso
 
 EXPERIMENTS_DIR = SIL_NLP_ENV.mt_experiments_dir
 SCRIPTURE_DIR = SIL_NLP_ENV.mt_scripture_dir
+SAMPLE_LINES = 100 
+MODEL = "facebook/nllb-200"
 
 LOGGER = logging.getLogger(__package__ + ".create_experiments")
-SAMPLE_SIZE = 5000  # bytes to read for script detection
-MODEL = "facebook/nllb-200"
 
 
 def read_experiments_xlsx(workbook_path):
@@ -42,18 +34,46 @@ def read_experiments_xlsx(workbook_path):
     return rows
 
 
-def update_sheet(wb,cache):
+def read_scripture(file, max_lines=SAMPLE_LINES):
+    "Read non-empty, non-range lines from a scripture file"
+    lines_to_skip = set(['', '<range>', '...'])
+    with open(file, 'r', encoding='utf-8') as file_in:
+        lines = [line.strip() for line in file_in if line.strip() not in lines_to_skip]
+        return ''.join(lines[:max_lines])
+
+
+def update_sheet(wb, workbook_path, cache):
+    """Write out the filename, filename_isocode, 3 letter isocode and script to the "scripts" sheet in the spreadsheet"""
+    HEADERS = ["filename", "filename_iso", "language_iso", "script"]
     if "scripts" in wb.sheetnames:
-        del wb["scripts"]
-    ws = wb.create_sheet("scripts")
-    ws.append(["filename", "iso", "lang_code"])
-    for fn in sorted(cache):
-        ws.append([fn, cache[fn]["iso"], cache[fn]["lang_code"]])
+        ws = wb["scripts"]
+        # Build a map of filename -> row number for existing entries
+        existing = {}
+        for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=False), start=2):
+            fn = str(row[0].value).strip() if row[0].value else ""
+            if fn:
+                existing[fn] = row_num
+
+        for fn in sorted(cache):
+            c = cache[fn]
+            vals = [fn, c["filename_iso"], c["language_iso"], c["script"]]
+            if fn in existing:
+                for col, val in enumerate(vals, start=1):
+                    ws.cell(row=existing[fn], column=col, value=val)
+            else:
+                ws.append(vals)
+    else:
+        ws = wb.create_sheet("scripts")
+        ws.append(HEADERS)
+        for fn in sorted(cache):
+            c = cache[fn]
+            ws.append([fn, c["filename_iso"], c["language_iso"], c["script"]])
+
     wb.save(workbook_path)
     LOGGER.info(f"Updated scripts sheet in {workbook_path} ({len(cache)} entries)")
 
 
-def get_scripts(workbook_path, rows, two2three_map):
+def get_scripts(workbook_path, rows, two2three_iso):
     """Return dict of filename -> lang_code. Reads cached entries from the 'scripts'
     sheet in the workbook, predicts scripts for any new filenames, and updates
     the sheet if new entries were added."""
@@ -64,10 +84,14 @@ def get_scripts(workbook_path, rows, two2three_map):
     if "scripts" in wb.sheetnames:
         ws = wb["scripts"]
         rows_iter = ws.iter_rows(values_only=True)
-        headers = [str(h).strip() for h in next(rows_iter)]
+        headers = [str(header).strip() for header in next(rows_iter)]
         for row in rows_iter:
             d = {headers[i]: (str(v).strip() if v is not None else "") for i, v in enumerate(row)}
-            cache[d["filename"]] = {"iso": d["iso"], "lang_code": d["lang_code"]}
+            cache[d["filename"]] = {
+                "filename_iso": d["filename_iso"],
+                "language_iso": d["language_iso"],
+                "script": d["script"],
+            }
 
     # Collect all filenames needed
     needed = set()
@@ -80,36 +104,38 @@ def get_scripts(workbook_path, rows, two2three_map):
     for filename in sorted(needed):
         if filename in cache:
             continue
-        filepath = SCRIPTURE_DIR / f"{filename}.txt"
-        if not filepath.is_file():
-            LOGGER.warning(f"Cannot cache script for {filename}: {filepath} not found")
+        file = SCRIPTURE_DIR / f"{filename}.txt"
+        if not file.is_file():
+            LOGGER.warning(f"Cannot cache script for {filename}: {file} not found")
             continue
-        try:
-            text = filepath.read_text(encoding="utf-8")[:SAMPLE_SIZE]
-            script_code = predict_script_code(text)
-            if not is_represented(script_code=script_code, model=MODEL):
-                if updated:
-                    update_sheet(wb,cache)
-                LOGGER.error(f"Script {script_code} found for {filepath} not known to the {MODEL} model.")
-                exit()
-                
-            iso = extract_prefix(filename)
-            three_letter = two2three_map.get(iso, iso)
-            lang_code = f"{three_letter}_{script_code}"
-            cache[filename] = {"iso": iso, "lang_code": lang_code}
-            LOGGER.info(f"Cached script for {filename}: {lang_code}")
-            updated = True
-        except Exception as e:
-            LOGGER.error(f"Error predicting script for {filename}: {e}")
+        
+        script_code = predict_script_code(read_scripture(file))
+        if not is_represented(script_code=script_code, model=MODEL):
+            if updated:
+                update_sheet(wb, workbook_path, cache)
+            LOGGER.error(f"Script {script_code} found for {file} is not known to the {MODEL} model.")
+
+        filename_iso = extract_prefix(filename)
+        language_iso = two2three_iso.get(filename_iso, filename_iso)
+        if not (len(language_iso) == 3 and language_iso.isalpha()):
+            LOGGER.warning(f"Skipping {filename}: language_iso '{language_iso}' is not a valid 3-letter code")
+            continue
+
+        cache[filename] = {
+            "filename_iso": filename_iso,
+            "language_iso": language_iso,
+            "script": script_code,
+        }
+        LOGGER.info(f"Cached script for {filename}: {language_iso}_{script_code}")
+        updated = True
 
     # Write back if updated
     if updated:
-        update_sheet(wb,cache)
+        update_sheet(wb, workbook_path, cache)
     else:
         wb.close()
 
-
-    return {fn: cache[fn]["lang_code"] for fn in cache}
+    return {fn: f"{cache[fn]['language_iso']}_{cache[fn]['script']}" for fn in cache}
 
 
 def extract_prefix(project_name):
@@ -219,7 +245,7 @@ def main():
     parser.add_argument(
         "--check-files", action="store_true", help="Check that scripture files exist for all experiments and exit."
     )
-    parser.add_argument("--make-experiments", action="store_true", help="Create experiment configs.")
+    parser.add_argument("--create", action="store_true", help="Create experiment configs.")
     parser.add_argument("--collect-results", action="store_true", help="Collect the results of the experiments.")
 
     args = parser.parse_args()
@@ -238,7 +264,7 @@ def main():
         LOGGER.error(f"\nCould not determine scripts for any projects.")
         return 1
 
-    if args.make_experiments:
+    if args.create:
         # Main experiment generation
 
         for row in valid_rows:
