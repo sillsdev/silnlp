@@ -44,12 +44,12 @@ class UsfmTextRowCollection:
         self._selected_chapters = selected_chapters
         self._tags = tags
 
-    def get_sentences_and_vrefs_for_translation(self) -> List[Tuple[str, VerseRef]]:
+    def get_sentences_and_vrefs_for_translation(self) -> Tuple[List[str], List[VerseRef]]:
         non_empty_rows = self._filter_rows()
         if self._tags is None:
-            return [(s.text.strip(), s.ref) for s in non_empty_rows]
+            return ([s.text.strip() for s in non_empty_rows], [s.ref for s in non_empty_rows])
         else:
-            return [(self._clean_and_tag_sentence(s.text), s.ref) for s in non_empty_rows]
+            return ([self._clean_and_tag_sentence(s.text) for s in non_empty_rows], [s.ref for s in non_empty_rows])
 
     def _filter_rows(self) -> List[TextRow]:
         return [s for s in self._text_rows if not self._should_exclude_row(s)]
@@ -70,11 +70,14 @@ class UsfmTextRowCollection:
         else:
             return re.sub(" +", " ", add_tags_to_sentence(self._tags, sentence.strip()))
 
+    def get_book(self) -> str:
+        return self._text_rows[0].ref.book
+
     def to_translated_text_row_collection(
         self, translated_sentences: List[SentenceTranslationGroup]
     ) -> "TranslatedTextRowCollection":
         translated_text_rows = []
-        num_drafts = len(translated_sentences[0])
+        num_drafts = len(translated_sentences[0]) if len(translated_sentences) > 0 else 1
         for text_row in self._text_rows:
             if self._should_exclude_row(text_row):
                 translated_sentence = [SentenceTranslation("", [], [], None)] * num_drafts
@@ -82,6 +85,11 @@ class UsfmTextRowCollection:
                 translated_sentence = translated_sentences.pop(0)
             translated_text_rows.append(
                 TranslatedTextRow(ref=text_row.ref, text=text_row.text, translated_sentence=translated_sentence)
+            )
+
+        if len(translated_text_rows) != len(self._text_rows):
+            raise ValueError(
+                f"The number of translated sentences ({len(translated_text_rows)}) does not match number of sentences in the document ({len(self._text_rows)})."
             )
 
         return TranslatedTextRowCollection(translated_text_rows)
@@ -111,8 +119,11 @@ class TranslatedTextRowCollection:
         postprocess_handler.construct_rows(
             [r.ref for r in self._rows],
             [r.text for r in self._rows],
-            self._draft_group.get_drafts()[draft_index].get_all_translations(),
+            self._draft_group.get_drafts()[draft_index - 1].get_all_translations(),
         )
+
+    def get_scripture_refs(self) -> List[ScriptureRef]:
+        return [r.ref for r in self._rows]
 
 
 def main() -> None:

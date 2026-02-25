@@ -456,7 +456,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
 
                 # Compile draft remarks
                 draft_src_str = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
-                draft_remark = f"This draft of {scripture_refs[0].book} was machine translated on {date.today()} from {draft_src_str} using model {experiment_ckpt_str}. It should be reviewed and edited carefully."
+                draft_remark = f"This draft of {sentences.get_book()} was machine translated on {date.today()} from {draft_src_str} using model {experiment_ckpt_str}. It should be reviewed and edited carefully."
                 postprocess_remark = config.get_postprocess_remark()
                 remarks = [draft_remark] + ([postprocess_remark] if postprocess_remark else [])
 
@@ -495,7 +495,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
                         usfm = f.read()
                     handler = UpdateUsfmParserHandler(
                         rows=config.rows,
-                        id_text=scripture_refs[0].book,
+                        id_text=sentences.get_book(),
                         text_behavior=text_behavior,
                         paragraph_behavior=config.get_paragraph_behavior(),
                         embed_behavior=config.get_embed_behavior(),
@@ -538,7 +538,9 @@ class Translator(AbstractContextManager["Translator"], ABC):
                     f.write(usfm_out)
 
                 if save_confidences and config.get_postprocess_suffix() == "":
-                    generate_confidence_files(translated_draft, trg_draft_file_path, scripture_refs=scripture_refs)
+                    generate_confidence_files(
+                        translated_draft, trg_draft_file_path, scripture_refs=translated_text_rows.get_scripture_refs()
+                    )
 
     def translate_docx(
         self,
