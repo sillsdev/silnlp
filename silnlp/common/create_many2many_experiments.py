@@ -186,13 +186,11 @@ def main():
     parser.add_argument("csv_file", help="Path to the CSV file.")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing experiment configuration files.")
     parser.add_argument("--create_alignment_config", action="store_true", help="Create or update the Align/config.yml file.")
-    parser.add_argument("--template", default="config.yml", help="Path to a template YAML file. Defaults to 'config.yml' in the folder.")
 
     args = parser.parse_args()
         
     exp_dir = SIL_NLP_ENV.mt_experiments_dir / args.folder
     csv_file = exp_dir / args.csv_file
-    config_template_file = exp_dir / args.template
     two2three_file = exp_dir / "two2three.csv"
     align_dir = exp_dir / "Align"
     corpus_stats = align_dir / "corpus-stats.csv"
@@ -228,9 +226,6 @@ def main():
 
     return create_experiments(exp_dir, csv_file, args.overwrite)
 
-    
-
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
     main()
