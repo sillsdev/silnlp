@@ -148,7 +148,7 @@ class DraftGroup:
         translated_draft_sentences: List[List[SentenceTranslation]] = [[] for _ in range(self.num_drafts)]
 
         for translation_group in self.translation_groups:
-            for draft_index in range(self.num_drafts):
-                translated_draft_sentences[draft_index].append(translation_group[draft_index])
+            for draft_index, sentence_translation in enumerate(translation_group):
+                translated_draft_sentences[draft_index].append(sentence_translation)
 
         return [TranslatedDraft(sentences) for sentences in translated_draft_sentences]

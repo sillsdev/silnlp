@@ -27,6 +27,8 @@ NON_NOTE_TYPE_EMBEDS = CHARACTER_TYPE_EMBEDS + PARAGRAPH_TYPE_EMBEDS
 
 
 class UsfmTextRowCollection:
+    _SENTENCE_SPLIT_LENGTH_THRESHOLD = 200
+
     def __init__(
         self,
         file_text: UsfmFileText,
@@ -64,7 +66,7 @@ class UsfmTextRowCollection:
     def _split_non_verse_rows_if_necessary(self) -> Dict[int, List[str]]:
         subdivided_row_texts: Dict[int, List[str]] = {}
         for i, row in enumerate(self._text_rows):
-            if not row.ref.is_verse() and len(row.text) > 200:
+            if not row.ref.is_verse and len(row.text) > self._SENTENCE_SPLIT_LENGTH_THRESHOLD:
                 split_sentences = self._split_sentences(row.text)
                 if len(split_sentences) > 0:
                     subdivided_row_texts[i] = split_sentences
