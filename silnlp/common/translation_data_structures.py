@@ -1,6 +1,6 @@
 from math import exp
 from pathlib import Path
-from statistics import gmean
+from statistics import mean
 from typing import List, Optional
 
 from machine.corpora import ScriptureRef
