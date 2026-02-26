@@ -115,7 +115,7 @@ def collect_verse_counts_wrapper(project_name: str, verse_counts_config: dict, o
 
 
 def get_extract_path(project_name: str) -> Path | None:
-    extract_paths = list(SIL_NLP_ENV.mt_scripture_dir.glob(f"*{project_name}*.txt"))
+    extract_paths = list(SIL_NLP_ENV.mt_scripture_dir.glob(f"*-{project_name}.txt"))
     if not extract_paths:
         return None
     return extract_paths[0]
