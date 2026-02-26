@@ -248,6 +248,58 @@ def count_lines_and_unique_lines(file):
         lines = f.readlines()
     return len(lines), len(set(lines))
 
+def get_line_counts(folder):
+    train_lines, unique_train_lines = count_lines_and_unique_lines(folder / "train.vref.txt")
+    test_lines, _ = count_lines_and_unique_lines(folder / "test.vref.txt")
+    return  train_lines, unique_train_lines, test_lines
+
+
+def get_tokenization_stats(folder):
+    """Read Mean Tokens/Verse and Mean Characters/Token for Source and Target
+    from tokenization_stats.csv. Returns dict with four keys, or empty dict if file missing."""
+    stats_file = folder / "tokenization_stats.csv"
+    if not stats_file.is_file():
+        LOGGER.warning(f"tokenization_stats.csv not found in {folder}")
+        return {}
+    with open(stats_file, "r", encoding="utf-8") as f:
+        reader = csv.reader(f, delimiter="\t")
+        next(reader)  # skip category header row
+        next(reader)  # skip column names row
+        result = {}
+        for row in reader:
+            if not row or not row[0].strip():
+                continue
+            side = row[0].strip()
+            if side == "Source":
+                result["src_mean_tokens_per_verse"] = float(row[5])
+                result["src_mean_chars_per_token"] = float(row[17])
+            elif side == "Target":
+                result["trg_mean_tokens_per_verse"] = float(row[5])
+                result["trg_mean_chars_per_token"] = float(row[17])
+    return result
+
+
+def get_scores(folder):
+    """Read scores-5000.csv. Returns list of dicts with keys: Book, BLEU, chrF3++.
+    One dict per row (per-book + ALL). Returns empty list if file missing."""
+    scores_file = folder / "scores-5000.csv"
+    if not scores_file.is_file():
+        LOGGER.warning(f"scores-5000.csv not found in {folder}")
+        return []
+    results = []
+    with open(scores_file, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        bleu_col = next((c for c in reader.fieldnames if c.lower() == "bleu"), None)
+        chrf_col = next((c for c in reader.fieldnames if "chrf" in c.lower()), None)
+        book_col = next((c for c in reader.fieldnames if c.lower() == "book"), None)
+        for row in reader:
+            results.append({
+                "Book": row[book_col].strip() if book_col else "",
+                "BLEU": float(row[bleu_col]) if bleu_col and row[bleu_col].strip() else None,
+                "chrF3++": float(row[chrf_col]) if chrf_col and row[chrf_col].strip() else None,
+            })
+    return results
+
 
 def main():
     parser = argparse.ArgumentParser(description="Create NLLB experiment configurations with alignment and templates.")
