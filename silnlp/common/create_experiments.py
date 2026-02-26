@@ -16,19 +16,29 @@ EXPERIMENTS_DIR = SIL_NLP_ENV.mt_experiments_dir
 SCRIPTURE_DIR = SIL_NLP_ENV.mt_scripture_dir
 SAMPLE_LINES = 100 
 MODEL = "facebook/nllb-200"
+RESULT_HEADERS = [
+    "Target_language", "Mapping", "Source 1", "Source 2", "Target",
+    "train_lines", "unique_train_lines", "test_lines",
+    "src_mean_chars_per_token", "trg_mean_chars_per_token",
+    "src_mean_tokens_per_verse", "trg_mean_tokens_per_verse",
+    "Book", "BLEU", "chrF3++",
+]
 
 LOGGER = logging.getLogger(__package__ + ".create_experiments")
 
 
-def read_experiments_xlsx(workbook_path):
-    """Read the 'experiments' sheet from the workbook. Returns list of dicts."""
-    wb = openpyxl.load_workbook(workbook_path, read_only=True)
+def read_experiments_xlsx(workbook_file):
+    """Read the 'experiments' sheet from the workbook. Stop at the first empty row. Returns a list of dicts."""
+    wb = openpyxl.load_workbook(workbook_file, read_only=True)
     ws = wb["experiments"]
     rows_iter = ws.iter_rows(values_only=True)
-    headers = [str(h).strip() for h in next(rows_iter)]
+    headers = [str(header).strip() for header in next(rows_iter)]
+    
     rows = []
     for row in rows_iter:
         row_dict = {headers[i]: (str(v).strip() if v is not None else "") for i, v in enumerate(row)}
+        if ''.join(row_dict.values()).strip() == '':
+            break
         rows.append(row_dict)
     wb.close()
     return rows
@@ -193,20 +203,15 @@ def create_alignment_config(folder, rows):
 
 def check_scripture_files(rows):
     """Check that all Source 1, Source 2, and Target scripture files exist. Returns list of valid rows."""
-    valid, missing_any = [], False
+    valid, any_missing = [], []
     for row in rows:
-        src1, src2, trg = row["Source 1"], row["Source 2"], row["Target"]
-        missing = [p for p in (src1, src2, trg) if not (SCRIPTURE_DIR / f"{p}.txt").is_file()]
+        lang, src1, src2, trg = row["Target_language"], row["Source 1"], row["Source 2"], row["Target"]
+        missing = [file for file in (src1, src2, trg) if not (SCRIPTURE_DIR / f"{file}.txt").is_file()]
         if missing:
-            missing_any = True
-            lang = row["Target_language"]
-            LOGGER.warning(f"Skipping {lang}: missing scripture files: {', '.join(f'{m}.txt' for m in missing)}")
-            exit()
+            any_missing.append({lang: missing})
         else:
             valid.append(row)
-    if not missing_any:
-        LOGGER.info("All scripture files present.")
-    return valid
+    return valid, any_missing
 
 
 def create_config(mapping_type, lang_codes, src_list, trg, corpus_books, test_books):
@@ -248,21 +253,13 @@ def count_lines_and_unique_lines(file):
         lines = f.readlines()
     return len(lines), len(set(lines))
 
-def get_line_counts(folder):
-    train_lines, unique_train_lines = count_lines_and_unique_lines(folder / "train.vref.txt")
-    test_lines, _ = count_lines_and_unique_lines(folder / "test.vref.txt")
-    return  train_lines, unique_train_lines, test_lines
 
-
-def get_tokenization_stats(folder):
+def get_tokenization_stats(stats_file):
     """Read Mean Tokens/Verse and Mean Characters/Token for Source and Target
     from tokenization_stats.csv. Returns dict with four keys, or empty dict if file missing."""
-    stats_file = folder / "tokenization_stats.csv"
-    if not stats_file.is_file():
-        LOGGER.warning(f"tokenization_stats.csv not found in {folder}")
-        return {}
+
     with open(stats_file, "r", encoding="utf-8") as f:
-        reader = csv.reader(f, delimiter="\t")
+        reader = csv.reader(f)
         next(reader)  # skip category header row
         next(reader)  # skip column names row
         result = {}
@@ -279,13 +276,9 @@ def get_tokenization_stats(folder):
     return result
 
 
-def get_scores(folder):
-    """Read scores-5000.csv. Returns list of dicts with keys: Book, BLEU, chrF3++.
+def get_scores(scores_file):
+    """Read scores file. Returns list of dicts with keys: Book, BLEU, chrF3++.
     One dict per row (per-book + ALL). Returns empty list if file missing."""
-    scores_file = folder / "scores-5000.csv"
-    if not scores_file.is_file():
-        LOGGER.warning(f"scores-5000.csv not found in {folder}")
-        return []
     results = []
     with open(scores_file, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -301,15 +294,66 @@ def get_scores(folder):
     return results
 
 
+def collect_results(main_folder, valid_rows, workbook_file):
+    """Collect results from all experiments and write to 'results' sheet."""
+    all_results = []
+    for row in valid_rows:
+        language = row["Target_language"]
+        src1, src2, trg = row["Source 1"], row["Source 2"], row["Target"]
+
+        for suffix, mapping in [("many", "many_to_many"), ("mixed", "mixed_src")]:
+            folder = main_folder / f"{language}_{suffix}"  
+            if not folder.is_dir():
+                LOGGER.warning(f"Folder not found: {folder}")
+                continue
+
+            train_vref_file, test_vref_file, stats_file, scores_file = (folder / file for file in ["train.vref.txt", "test.vref.txt", "tokenization_stats.csv", "scores-5000.csv", ])
+            preprocess_files = [stats_file, train_vref_file, test_vref_file]
+            missing_preprocess_files = [f for f in preprocess_files if not f.is_file()]
+            if missing_preprocess_files:
+                LOGGER.info(f"These preprocess files are missing, skipping this experiment. {missing_preprocess_files}")
+                continue
+
+            train_lines, unique_train_lines = count_lines_and_unique_lines(train_vref_file)
+            test_lines, _= count_lines_and_unique_lines(test_vref_file)
+            tok_stats = get_tokenization_stats(stats_file)
+            
+            if scores_file.is_file():
+                scores = get_scores(scores_file)
+            else:
+                scores = [{"Book": "", "BLEU": None, "chrF3++": None}]
+                LOGGER.warning(f"{scores_file} not found in {folder}")
+
+            for s in scores:
+                all_results.append([
+                    language, mapping, src1, src2, trg,
+                    train_lines, unique_train_lines, test_lines,
+                    tok_stats.get("src_mean_chars_per_token"),
+                    tok_stats.get("trg_mean_chars_per_token"),
+                    tok_stats.get("src_mean_tokens_per_verse"),
+                    tok_stats.get("trg_mean_tokens_per_verse"),
+                    s["Book"], s["BLEU"], s["chrF3++"],
+                ])
+            print(f"Found these results for {language}_{mapping} experiment.\n{all_results[-1]}")
+    # # Write to results sheet
+    wb = openpyxl.load_workbook(workbook_file)
+    if "results" in wb.sheetnames:
+        del wb["results"]
+    ws = wb.create_sheet("results")
+    ws.append(RESULT_HEADERS)
+    for r in all_results:
+        ws.append(r)
+    wb.save(workbook_file)
+    LOGGER.info(f"Wrote {len(all_results)} result rows to {workbook_file}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Create NLLB experiment configurations with alignment and templates.")
     parser.add_argument("folder", help="Root experiment folder name (relative to mt_experiments_dir).")
-    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing experiment configs.")
-    parser.add_argument(
-        "--check-files", action="store_true", help="Check that scripture files exist for all experiments and exit."
-    )
-    parser.add_argument("--create", action="store_true", help="Create experiment configs.")
-    parser.add_argument("--collect-results", action="store_true", help="Collect the results of the experiments.")
+    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing experiment configs or results.")
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--create", action="store_true", help="Create experiment configs.")
+    group.add_argument("--collect-results", action="store_true", help="Collect the results of the experiments.")
 
     args = parser.parse_args()
 
@@ -321,7 +365,20 @@ def main():
         return 1
 
     rows = read_experiments_xlsx(workbook_file)
-    valid_rows = check_scripture_files(rows)
+    LOGGER.info(f"Read {len(rows)} experiment definitions from the 'experiments' sheet in {workbook_file}")
+    valid_rows, any_missing = check_scripture_files(rows)
+
+    if valid_rows and not any_missing:
+        LOGGER.info(f"All the scripture files required for the {len(valid_rows)} experiments exist.")
+    else:
+        LOGGER.warning(f"The following files are missing for these experiments:")
+        for lang, missing in any_missing.items():
+            print(f"{lang}   : {missing}")
+
+        exit()
+
+
+    
     script_map = get_scripts(workbook_file, valid_rows, two2three_iso)
     if not script_map:
         LOGGER.error(f"\nCould not determine scripts for any projects.")
@@ -381,6 +438,8 @@ def main():
 
                 LOGGER.info(f"Created experiment config: {config_file}")
 
+    if args.collect_results:
+        collect_results(main_folder, valid_rows, workbook_file)
 
     return 0
 
