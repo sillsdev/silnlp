@@ -238,6 +238,17 @@ def create_config(mapping_type, lang_codes, src_list, trg, corpus_books, test_bo
     return config
 
 
+def count_lines_and_unique_lines(file):
+    """Count the total and number of unique lines in a file."""
+    if not file.is_file():
+        LOGGER.warning(f"Couldn't find train.vref file {file}")
+        return None, None
+    
+    with open(file, mode='r', encoding='utf-8') as f:
+        lines = f.readlines()
+    return len(lines), len(set(lines))
+
+
 def main():
     parser = argparse.ArgumentParser(description="Create NLLB experiment configurations with alignment and templates.")
     parser.add_argument("folder", help="Root experiment folder name (relative to mt_experiments_dir).")
@@ -285,11 +296,11 @@ def main():
                 if suffix != "single" and not src2:
                     continue
 
-                folder_name = f"{language}_{suffix}"
-                folder_path = main_folder / folder_name
-                folder_path.mkdir(exist_ok=True)
+                experiment_name = f"{language}_{suffix}"
+                experiment_folder = main_folder / experiment_name
+                experiment_folder.mkdir(exist_ok=True)
 
-                config_file = folder_path / "config.yml"
+                config_file = experiment_folder / "config.yml"
                 if config_file.is_file() and not args.overwrite:
                     LOGGER.info(f"Skipping existing config: {config_file}")
                     continue
