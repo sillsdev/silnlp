@@ -230,7 +230,7 @@ class NLTKSentenceTokenizer:
         return nltk_tokenizer
 
     def __init__(self, iso: str):
-        if not self._is_initialized:
+        if not NLTKSentenceTokenizer._is_initialized:
             self._initialize()
 
         self._tokenizer: nltk.tokenize.PunktSentenceTokenizer
@@ -243,6 +243,7 @@ class NLTKSentenceTokenizer:
     def _initialize(self) -> None:
         nltk.download("punkt")
         nltk.download("punkt_tab")
+        NLTKSentenceTokenizer._is_initialized = True
 
     def tokenize(self, text: str) -> List[str]:
         return self._tokenizer.tokenize(text)

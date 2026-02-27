@@ -30,7 +30,7 @@ class GoogleTranslator(Translator):
 
         for sentence in sentences:
             if len(sentence) == 0:
-                yield SentenceTranslationGroup([])
+                yield SentenceTranslationGroup([SentenceTranslation("", [], [], None)])
             else:
                 results = self._translate_client.translate(
                     sentence, source_language=src_iso, target_language=trg_iso, format_="text"
