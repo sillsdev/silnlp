@@ -497,7 +497,7 @@ def create_analysis_sheets(wb):
     # Group by (Target_language, Book, Mapping)
     data = {}
     for r in results:
-        key = (r["Target_language"], r["Book"])
+        key = (r["Target_language"], r["Series"], r["Book"])
         if key not in data:
             data[key] = {}
         data[key][r["Mapping"]] = r
