@@ -263,6 +263,7 @@ def create_config(mapping_type, lang_codes, src_list, trg, corpus_books, test_bo
 def write_config_file(row, overwrite):
 
     language = row["Target_language"]
+    language = row["Series"]
     src1 = row["Source 1"]
     src2 = row["Source 2"]
     trg = row["Target"]
@@ -270,16 +271,15 @@ def write_config_file(row, overwrite):
     test_books = row["test_books"]
 
     experiments = [
-        ("single", "one_to_one", [src1]),
+        #("single", "one_to_one", [src1]),
         ("mixed", "mixed_src", [src1, src2]),
         ("many", "many_to_many", [src1, src2]),
     ]
 
     for suffix, mapping_type, src_list in experiments:
-        if suffix != "single" and not src2:
-            continue
-
-        experiment_name = f"{language}_{suffix}"
+        # if suffix != "single" and not src2:
+        #     continue
+        experiment_name = f"{language}_{series}_{suffix}"
         experiment_folder = main_folder / experiment_name
         experiment_folder.mkdir(exist_ok=True)
 
@@ -377,16 +377,17 @@ def collect_results(wb, main_folder, valid_rows, workbook_file, overwrite):
     existing = {}
     if not overwrite and "results" in wb.sheetnames:
         for r in read_sheet(wb, "results"):
-            key = (r["Target_language"], r["Mapping"], r.get("Book", ""))
+            key = (r["Target_language"], r["Series"], r["Mapping"], r.get("Book", ""))
             existing[key] = r
 
     all_results = []
     for row in valid_rows:
         language = row["Target_language"]
+        series = row["Series"]
         src1, src2, trg = row["Source 1"], row["Source 2"], row["Target"]
 
         for suffix, mapping in [("many", "many_to_many"), ("mixed", "mixed_src"), ("single", "one_to_one")]:
-            folder = main_folder / f"{language}_{suffix}"
+            folder = main_folder / f"{language}_{series}_{suffix}"
             if not folder.is_dir():
                 LOGGER.warning(f"Folder not found: {folder}")
                 continue
@@ -449,6 +450,7 @@ def collect_results(wb, main_folder, valid_rows, workbook_file, overwrite):
                 all_results.append(
                     [
                         language,
+                        series,
                         mapping,
                         src1,
                         src2,
@@ -509,6 +511,7 @@ def create_analysis_sheets(wb):
 
     ANALYSIS_HEADERS = [
         "Target_language",
+        "Series",
         "BLEU_one_to_one",
         "BLEU_mixed_src",
         "BLEU_many_to_many",
@@ -786,7 +789,7 @@ def main():
     parser.add_argument("folder", help="Root experiment folder name (relative to mt_experiments_dir).")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing experiment configs or results.")
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--create", action="store_true", help="Create experiment configs.")
+    group.add_argument("--create", type=str, help="Create a series of experiment folders with their config.yml files.")
     group.add_argument("--collect-scripts", action="store_true", help="Update the scripts sheet.")
     group.add_argument("--collect-results", action="store_true", help="Collect the results of the experiments.")
     group.add_argument("--analyze", action="store_true", help="Analyse the results.")
@@ -813,6 +816,9 @@ def main():
 
     wb = openpyxl.load_workbook(workbook_file)
     rows = read_sheet(wb, "experiments")
+
+    if args.create:
+        series_rows = [row for row in rows if row["Series"] == args.create]
     LOGGER.info(f"Read {len(rows)} experiment definitions from the 'experiments' sheet in {workbook_file}")
     valid_rows, any_missing = check_scripture_files(rows)
 
