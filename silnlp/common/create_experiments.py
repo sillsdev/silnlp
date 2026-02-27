@@ -39,22 +39,17 @@ RESULT_HEADERS = [
 LOGGER = logging.getLogger(__package__ + ".create_experiments")
 
 
-def read_experiments_xlsx(workbook_file):
-    """Read the 'experiments' sheet from the workbook. Stop at the first empty row. Returns a list of dicts."""
-
-    is_locked(workbook_file)
-    wb = openpyxl.load_workbook(workbook_file, read_only=True)
-    ws = wb["experiments"]
+def read_sheet(wb, sheet_name):
+    """Read a sheet into a list of dicts, skipping empty rows."""
+    ws = wb[sheet_name]
     rows_iter = ws.iter_rows(values_only=True)
-    headers = [str(header).strip() for header in next(rows_iter)]
-
+    headers = [str(h).strip() for h in next(rows_iter)]
     rows = []
     for row in rows_iter:
-        row_dict = {headers[i]: (str(v).strip() if v is not None else "") for i, v in enumerate(row)}
-        if "".join(row_dict.values()).strip() == "":
+        d = {headers[i]: (row[i] if row[i] is not None else "") for i in range(len(headers))}
+        if not any(str(v).strip() for v in d.values()):
             break
-        rows.append(row_dict)
-    wb.close()
+        rows.append(d)
     return rows
 
 
@@ -441,7 +436,7 @@ def collect_results(main_folder, valid_rows, workbook_file):
     LOGGER.info(f"Wrote {len(all_results)} result rows to {workbook_file}")
 
 
-def create_analysis_sheets(workbook_file):
+def create_analysis_sheets(wb):
     """Read the 'results' sheet and create per-book analysis sheets with deltas."""
     wb = openpyxl.load_workbook(workbook_file)
     ws = wb["results"]
@@ -551,14 +546,20 @@ def create_analysis_sheets(workbook_file):
     LOGGER.info(f"Created analysis sheets for {len(books)} books in {workbook_file}")
 
 
-def create_summary_sheet(workbook_file):
+def create_summary_sheet(wb):
     """Create a 'summary' sheet with mean, median, +ve/−ve counts and Wilcoxon p-values
     for each book's BLEU and chrF3++ deltas, read from the analysis sheets."""
-    wb = openpyxl.load_workbook(workbook_file)
 
     SUMMARY_HEADERS = [
-        "Book", "Metric", "Delta", "Mean", "Median",
-        "Count +ve", "Count −ve", "n", "p-value",
+        "Book",
+        "Metric",
+        "Delta",
+        "Mean",
+        "Median",
+        "Count +ve",
+        "Count −ve",
+        "n",
+        "p-value",
     ]
 
     # Find all analysis sheets
@@ -585,8 +586,9 @@ def create_summary_sheet(workbook_file):
         all_rows = list(ws_in.iter_rows(min_row=2, values_only=True))
 
         for (metric, delta_type), col_idx in delta_cols.items():
-            values = [row[col_idx] for row in all_rows
-                      if row[col_idx] is not None and isinstance(row[col_idx], (int, float))]
+            values = [
+                row[col_idx] for row in all_rows if row[col_idx] is not None and isinstance(row[col_idx], (int, float))
+            ]
 
             n = len(values)
             if n == 0:
@@ -594,8 +596,11 @@ def create_summary_sheet(workbook_file):
                 continue
 
             mean = round(sum(values) / n, 4)
-            median = round(sorted(values)[n // 2], 4) if n % 2 == 1 else round(
-                (sorted(values)[n // 2 - 1] + sorted(values)[n // 2]) / 2, 4)
+            median = (
+                round(sorted(values)[n // 2], 4)
+                if n % 2 == 1
+                else round((sorted(values)[n // 2 - 1] + sorted(values)[n // 2]) / 2, 4)
+            )
             count_pos = sum(1 for v in values if v > 0)
             count_neg = sum(1 for v in values if v < 0)
 
@@ -618,9 +623,11 @@ def main():
     parser.add_argument("folder", help="Root experiment folder name (relative to mt_experiments_dir).")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing experiment configs or results.")
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--collect-scripts", action="store_true", help="Update the scripts sheet.")
     group.add_argument("--create", action="store_true", help="Create experiment configs.")
+    group.add_argument("--collect-scripts", action="store_true", help="Update the scripts sheet.")
     group.add_argument("--collect-results", action="store_true", help="Collect the results of the experiments.")
+    group.add_argument("--analyze", action="store_true", help="Analyse the results.")
+    group.add_argument("--collect-and-analyse", action="store_true", help="Collect results and run analysis.")
 
     args = parser.parse_args()
 
@@ -639,10 +646,10 @@ def main():
         print(
             f"Please close {workbook_file.name} in folder {workbook_file.parent} OR if it is closed, delete the lock file and try again."
         )
-        if not args.create:
-            return 1
+        return 1
 
-    rows = read_experiments_xlsx(workbook_file)
+    wb = openpyxl.load_workbook(workbook_file)
+    rows = read_sheet(wb, sheet="experiments")
     LOGGER.info(f"Read {len(rows)} experiment definitions from the 'experiments' sheet in {workbook_file}")
     valid_rows, any_missing = check_scripture_files(rows)
 
@@ -658,22 +665,22 @@ def main():
     script_map = get_scripts(workbook_file, valid_rows, two2three_iso)
     if not script_map:
         LOGGER.error(f"\nCould not determine scripts for any projects.")
-        return 1
+        exit(1)
     if args.collect_scripts:
-        return 0
+        exit(0)
 
     if args.create:
-        # Main experiment generation
-
         for row in valid_rows:
-            write_config_file(row,args.overwrite)
+            write_config_file(row, args.overwrite)
 
-    if args.collect_results:
+    if args.collect_results or args.collect_and_analyse:
         collect_results(main_folder, valid_rows, workbook_file)
-        create_analysis_sheets(workbook_file)
-        create_summary_sheet(workbook_file)
 
+    if args.analyse or args.collect_and_analyse:
+        create_analysis_sheets(wb)
+        create_summary_sheet(wb)
     return 0
+
 
 if __name__ == "__main__":
     main()
