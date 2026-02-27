@@ -356,15 +356,8 @@ def get_scores(scores_file):
     return results
 
 
-def collect_results(main_folder, valid_rows, workbook_file):
+def collect_results(wb, main_folder, valid_rows, workbook_file):
     """Collect results from all experiments and write to 'results' sheet."""
-    # Check for lock files and ask the user to close them.
-    if lockfile := is_locked(workbook_file):
-        print(f"Found lock file: {lockfile}")
-        print(
-            f"Please close {workbook_file.name} in folder {folder} OR if it is closed, delete the lock file and try again."
-        )
-        sys.exit(1)
 
     all_results = []
     for row in valid_rows:
@@ -425,7 +418,6 @@ def collect_results(main_folder, valid_rows, workbook_file):
             print(f"Found these results for {language}_{mapping} experiment.\n{all_results[-1]}")
 
     # # Write to results sheet
-    wb = openpyxl.load_workbook(workbook_file)
     if "results" in wb.sheetnames:
         del wb["results"]
     ws = wb.create_sheet("results")
@@ -436,20 +428,9 @@ def collect_results(main_folder, valid_rows, workbook_file):
     LOGGER.info(f"Wrote {len(all_results)} result rows to {workbook_file}")
 
 
-def create_analysis_sheets(wb):
+def create_analysis_sheets(wb, workbook_file):
     """Read the 'results' sheet and create per-book analysis sheets with deltas."""
-    wb = openpyxl.load_workbook(workbook_file)
-    ws = wb["results"]
-    rows_iter = ws.iter_rows(values_only=True)
-    headers = [str(h).strip() for h in next(rows_iter)]
-
-    # Read all result rows into list of dicts
-    results = []
-    for row in rows_iter:
-        d = {headers[i]: row[i] for i in range(len(headers))}
-        if not d.get("Target_language"):
-            continue
-        results.append(d)
+    results = read_sheet(wb, "results")
 
     # Group by (Target_language, Book, Mapping)
     data = {}
@@ -459,9 +440,9 @@ def create_analysis_sheets(wb):
             data[key] = {}
         data[key][r["Mapping"]] = r
 
-    # print(f"At this point in create_analysis_sheets data is:{data}")
     books = set(r["Book"] for r in results)
     books.discard(None)
+    books.discard('')
     print(f"At this point in create_analysis_sheets books = {books}")
 
     # Find all books
@@ -546,7 +527,7 @@ def create_analysis_sheets(wb):
     LOGGER.info(f"Created analysis sheets for {len(books)} books in {workbook_file}")
 
 
-def create_summary_sheet(wb):
+def create_summary_sheet(wb, workbook_file):
     """Create a 'summary' sheet with mean, median, +ve/−ve counts and Wilcoxon p-values
     for each book's BLEU and chrF3++ deltas, read from the analysis sheets."""
 
@@ -627,7 +608,7 @@ def main():
     group.add_argument("--collect-scripts", action="store_true", help="Update the scripts sheet.")
     group.add_argument("--collect-results", action="store_true", help="Collect the results of the experiments.")
     group.add_argument("--analyze", action="store_true", help="Analyse the results.")
-    group.add_argument("--collect-and-analyse", action="store_true", help="Collect results and run analysis.")
+    group.add_argument("--collect-and-analyze", action="store_true", help="Collect results and run analysis.")
 
     args = parser.parse_args()
 
@@ -649,7 +630,7 @@ def main():
         return 1
 
     wb = openpyxl.load_workbook(workbook_file)
-    rows = read_sheet(wb, sheet="experiments")
+    rows = read_sheet(wb, "experiments")
     LOGGER.info(f"Read {len(rows)} experiment definitions from the 'experiments' sheet in {workbook_file}")
     valid_rows, any_missing = check_scripture_files(rows)
 
@@ -673,12 +654,12 @@ def main():
         for row in valid_rows:
             write_config_file(row, args.overwrite)
 
-    if args.collect_results or args.collect_and_analyse:
+    if args.collect_results or args.collect_and_analyze:
         collect_results(main_folder, valid_rows, workbook_file)
 
-    if args.analyse or args.collect_and_analyse:
-        create_analysis_sheets(wb)
-        create_summary_sheet(wb)
+    if args.analyze or args.collect_and_analyze:
+        create_analysis_sheets(wb, workbook_file)
+        create_summary_sheet(wb, workbook_file)
     return 0
 
 
