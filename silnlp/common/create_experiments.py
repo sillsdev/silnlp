@@ -551,6 +551,68 @@ def create_analysis_sheets(workbook_file):
     LOGGER.info(f"Created analysis sheets for {len(books)} books in {workbook_file}")
 
 
+def create_summary_sheet(workbook_file):
+    """Create a 'summary' sheet with mean, median, +ve/−ve counts and Wilcoxon p-values
+    for each book's BLEU and chrF3++ deltas, read from the analysis sheets."""
+    wb = openpyxl.load_workbook(workbook_file)
+
+    SUMMARY_HEADERS = [
+        "Book", "Metric", "Delta", "Mean", "Median",
+        "Count +ve", "Count −ve", "n", "p-value",
+    ]
+
+    # Find all analysis sheets
+    analysis_sheets = sorted([s for s in wb.sheetnames if s.startswith("analysis_")])
+
+    if "summary" in wb.sheetnames:
+        del wb["summary"]
+    ws = wb.create_sheet("summary")
+    ws.append(SUMMARY_HEADERS)
+
+    # Column indices (0-based) in analysis sheets for the four delta columns
+    delta_cols = {
+        ("BLEU", "m2m_mix"): 11,
+        ("BLEU", "mix_o2o"): 12,
+        ("chrF3++", "m2m_mix"): 13,
+        ("chrF3++", "mix_o2o"): 14,
+    }
+
+    for sheet_name in analysis_sheets:
+        book = sheet_name.replace("analysis_", "")
+        ws_in = wb[sheet_name]
+
+        # Read all data rows (skip header)
+        all_rows = list(ws_in.iter_rows(min_row=2, values_only=True))
+
+        for (metric, delta_type), col_idx in delta_cols.items():
+            values = [row[col_idx] for row in all_rows
+                      if row[col_idx] is not None and isinstance(row[col_idx], (int, float))]
+
+            n = len(values)
+            if n == 0:
+                ws.append([book, metric, delta_type, None, None, None, None, 0, None])
+                continue
+
+            mean = round(sum(values) / n, 4)
+            median = round(sorted(values)[n // 2], 4) if n % 2 == 1 else round(
+                (sorted(values)[n // 2 - 1] + sorted(values)[n // 2]) / 2, 4)
+            count_pos = sum(1 for v in values if v > 0)
+            count_neg = sum(1 for v in values if v < 0)
+
+            # Wilcoxon requires at least 10 non-zero differences for a meaningful test
+            non_zero = [v for v in values if v != 0]
+            if len(non_zero) >= 10:
+                _, p_value = wilcoxon(non_zero)
+                p_value = round(p_value, 6)
+            else:
+                p_value = None
+
+            ws.append([book, metric, delta_type, mean, median, count_pos, count_neg, n, p_value])
+
+    wb.save(workbook_file)
+    LOGGER.info(f"Created summary sheet in {workbook_file}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Create NLLB experiment configurations with alignment and templates.")
     parser.add_argument("folder", help="Root experiment folder name (relative to mt_experiments_dir).")
@@ -609,9 +671,9 @@ def main():
     if args.collect_results:
         collect_results(main_folder, valid_rows, workbook_file)
         create_analysis_sheets(workbook_file)
+        create_summary_sheet(workbook_file)
 
     return 0
-
 
 if __name__ == "__main__":
     main()
