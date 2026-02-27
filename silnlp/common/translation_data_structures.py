@@ -243,7 +243,7 @@ class UsfmTextRowCollection:
 
     def _clean_and_tag_sentence(self, sentence: str) -> str:
         if self._tags is None:
-            return sentence.strip()
+            return re.sub(" +", " ", sentence.strip())
         else:
             return re.sub(" +", " ", add_tags_to_sentence(self._tags, sentence.strip()))
 
@@ -271,11 +271,6 @@ class UsfmTextRowCollection:
                 translated_sentence = sentence_translation_groups[current_translation_group_index]
                 current_translation_group_index += 1
             translated_text_rows.append(TranslatedTextRow(text_row.ref, text_row.text, translated_sentence))
-
-        if len(translated_text_rows) != len(self._text_rows):
-            raise ValueError(
-                f"The number of translated sentences ({len(translated_text_rows)}) does not match number of sentences in the document ({len(self._text_rows)})."
-            )
 
         return TranslatedTextRowCollection(translated_text_rows)
 

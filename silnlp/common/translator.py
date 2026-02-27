@@ -400,6 +400,10 @@ class Translator(AbstractContextManager["Translator"], ABC):
         LOGGER.info(f"File {src_file_path} parsed correctly.")
         sentences_to_translate, scripture_refs = sentences.get_sentences_and_vrefs_for_translation()
 
+        if len(sentences_to_translate) == 0:
+            LOGGER.warning(f"No sentences found to translate. Skipping translation for {book_id}.")
+            return
+
         sentence_translation_groups: List[SentenceTranslationGroup] = list(
             self.translate(
                 sentences_to_translate,
