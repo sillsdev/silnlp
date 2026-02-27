@@ -30,8 +30,12 @@ CURRENT_STYLE_OUTPUT_COLUMNS = [
     "book", "draft_index", "num_refs", "references", "sent_len", "spBLEU", "confidence"
 ]
 
-def check_for_lock_file(folder: Path, filename: str, file_type: str):
+def check_for_lock_file(file):
     """Check for lock files and ask the user to close them then exit."""
+    if not file.is_file():
+        print(f"File {file.name} not found when checking for lock file in {file.parent}")
+        
+    folder, filename, file_type = file.parent, file.name, file.suffix
 
     if file_type[0] == ".":
         file_type = file_type[1:]
@@ -147,8 +151,8 @@ def sort_dataframe(df, sort_by):
     return df.sort_values(by=sort_cols, ascending=sort_ascending, na_position='last')
 
 
-def write_to_excel(df, folder, output_filename):
-    output_file = folder / f"{output_filename}.xlsx"
+def write_to_excel(df, output_file):
+
     with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
         df.to_excel(writer, sheet_name='Scores', index=False)
     wb = openpyxl.load_workbook(output_file)
@@ -184,12 +188,13 @@ def main():
 
     folder = Path(args.folder)
     base_filename = f"{folder.name}_{args.output_filename}"
+    output_xlsx = folder / base_filename + "xlsx"
 
     if not folder.is_dir():
         folder = Path(SIL_NLP_ENV.mt_experiments_dir) / args.folder
 
     # Check for lock files and ask the user to close them.
-    check_for_lock_file(folder, base_filename, "xlsx")
+    check_for_lock_file(output_xlsx)
 
     # Aggregate the data from all the scores files.
     data = aggregate_scores(folder)
@@ -200,7 +205,7 @@ def main():
     sorted_df = sort_dataframe(clean_df, sort_by=[("Series", True), ("chrF3++", False), ("BLEU", False)])
 
     # Write the data to an excel file
-    write_to_excel(sorted_df, folder, base_filename)
+    write_to_excel(sorted_df, output_xlsx)
 
 
 if __name__ == "__main__":

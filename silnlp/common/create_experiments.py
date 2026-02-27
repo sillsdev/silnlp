@@ -8,7 +8,7 @@ import yaml
 import openpyxl
 
 from silnlp.common.environment import SIL_NLP_ENV
-
+from .combine_scores import check_for_lock_file
 from .script_utils import is_represented, predict_script_code
 from .utils import two2three_iso
 
@@ -29,6 +29,8 @@ LOGGER = logging.getLogger(__package__ + ".create_experiments")
 
 def read_experiments_xlsx(workbook_file):
     """Read the 'experiments' sheet from the workbook. Stop at the first empty row. Returns a list of dicts."""
+
+    check_for_lock_file(workbook_file)
     wb = openpyxl.load_workbook(workbook_file, read_only=True)
     ws = wb["experiments"]
     rows_iter = ws.iter_rows(values_only=True)
@@ -352,6 +354,7 @@ def main():
     parser.add_argument("folder", help="Root experiment folder name (relative to mt_experiments_dir).")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing experiment configs or results.")
     group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--collect-scripts", action="store_true", help="Update the scripts sheet.")
     group.add_argument("--create", action="store_true", help="Create experiment configs.")
     group.add_argument("--collect-results", action="store_true", help="Collect the results of the experiments.")
 
@@ -375,14 +378,13 @@ def main():
         for lang, missing in any_missing.items():
             print(f"{lang}   : {missing}")
 
-        exit()
+        return 1
 
-
-    
     script_map = get_scripts(workbook_file, valid_rows, two2three_iso)
     if not script_map:
         LOGGER.error(f"\nCould not determine scripts for any projects.")
         return 1
+    if args.collect_scripts: return 0
 
     if args.create:
         # Main experiment generation
