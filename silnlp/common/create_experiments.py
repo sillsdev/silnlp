@@ -260,10 +260,10 @@ def create_config(mapping_type, lang_codes, src_list, trg, corpus_books, test_bo
     return config
 
 
-def write_config_file(row, overwrite):
+def write_config_file(row, main_folder, overwrite):
 
     language = row["Target_language"]
-    language = row["Series"]
+    series = row["Series"]
     src1 = row["Source 1"]
     src2 = row["Source 2"]
     trg = row["Target"]
@@ -403,7 +403,7 @@ def collect_results(wb, main_folder, valid_rows, workbook_file, overwrite):
                 continue
 
             # Check what we already have for this experiment
-            sample_key = (language, mapping, "ALL")
+            sample_key = (language, series, mapping, "ALL")
             ex = existing.get(sample_key, {})
 
             # Group 1: config — always available from the row
@@ -535,11 +535,11 @@ def create_analysis_sheets(wb):
         ws_out = wb.create_sheet(sheet_name)
         ws_out.append(ANALYSIS_HEADERS)
 
-        # Get all languages that have data for this book
-        langs = sorted(set(lang for lang, bk in data if bk == book))
+        # Get all languages that have data for this series and book.
+        langs = sorted(set(lang for lang, series, bk in data if series series and bk == book ))
 
         for lang in langs:
-            mappings = data.get((lang, book), {})
+            mappings = data.get((lang, series book), {})
             m2m = mappings.get("many_to_many", {})
             mix = mappings.get("mixed_src", {})
             o2o = mappings.get("one_to_one", {})
@@ -818,7 +818,8 @@ def main():
     rows = read_sheet(wb, "experiments")
 
     if args.create:
-        series_rows = [row for row in rows if row["Series"] == args.create]
+        rows = [row for row in rows if row["Series"] == args.create]
+    
     LOGGER.info(f"Read {len(rows)} experiment definitions from the 'experiments' sheet in {workbook_file}")
     valid_rows, any_missing = check_scripture_files(rows)
 
@@ -840,7 +841,7 @@ def main():
 
     if args.create:
         for row in valid_rows:
-            write_config_file(row, args.overwrite)
+            write_config_file(row, main_folder, args.overwrite)
 
     if args.collect_results or args.collect_and_analyze:
         wb, results = collect_results(wb, main_folder, valid_rows, workbook_file, args.overwrite)
