@@ -535,11 +535,11 @@ def create_analysis_sheets(wb):
         ws_out = wb.create_sheet(sheet_name)
         ws_out.append(ANALYSIS_HEADERS)
 
-        # Get all languages that have data for this series and book.
-        langs = sorted(set(lang for lang, series, bk in data if series series and bk == book ))
+        # Get all (language, series) pairs that have data for this book.
+        lang_series = sorted(set((lang, ser) for lang, ser, bk in data if bk == book))
 
-        for lang in langs:
-            mappings = data.get((lang, series book), {})
+        for lang, series in lang_series:
+            mappings = data.get((lang, series, book), {})
             m2m = mappings.get("many_to_many", {})
             mix = mappings.get("mixed_src", {})
             o2o = mappings.get("one_to_one", {})
