@@ -4,9 +4,12 @@ import logging
 import re
 from pathlib import Path
 
+import matplotlib.pyplot as plt
+import numpy as np
 import openpyxl
 import yaml
-from scipy.stats import wilcoxon
+from openpyxl.chart import BarChart, Reference
+from scipy.stats import spearmanr, wilcoxon
 
 from silnlp.common.environment import SIL_NLP_ENV
 
@@ -92,7 +95,7 @@ def update_sheet(wb, workbook_path, cache):
     LOGGER.info(f"Updated scripts sheet in {workbook_path} ({len(cache)} entries)")
 
 
-def backup_workbook_file(wb, workbook_file):
+def backup_workbook(wb, workbook_file):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     backup_workbook_file = workbook_file.parent / f"experiments_bak_{timestamp}.xlsx"
     wb.save(backup_workbook_file)
@@ -363,9 +366,20 @@ def get_scores(scores_file):
 
 
 def collect_results(wb, main_folder, valid_rows, workbook_file, overwrite):
-    """Collect results from all experiments and write to 'results' sheet."""
+    """Collect results from all experiments and write to 'results' sheet.
+    If not overwrite, reads existing results and only fetches data for missing groups."""
     if overwrite:
-        backup_workbook_file(wb,workbook_file)
+        backup_workbook_file(wb, workbook_file)
+
+    count_cached, count_read = 0, 0
+
+    # Build index of existing results keyed by (Target_language, Mapping, Book)
+    existing = {}
+    if not overwrite and "results" in wb.sheetnames:
+        for r in read_sheet(wb, "results"):
+            key = (r["Target_language"], r["Mapping"], r.get("Book", ""))
+            existing[key] = r
+
     all_results = []
     for row in valid_rows:
         language = row["Target_language"]
@@ -379,12 +393,7 @@ def collect_results(wb, main_folder, valid_rows, workbook_file, overwrite):
 
             train_vref_file, test_vref_file, stats_file, scores_file = (
                 folder / file
-                for file in [
-                    "train.vref.txt",
-                    "test.vref.txt",
-                    "tokenization_stats.csv",
-                    "scores-5000.csv",
-                ]
+                for file in ["train.vref.txt", "test.vref.txt", "tokenization_stats.csv", "scores-5000.csv"]
             )
             preprocess_files = [stats_file, train_vref_file, test_vref_file]
             missing_preprocess_files = [f for f in preprocess_files if not f.is_file()]
@@ -392,15 +401,49 @@ def collect_results(wb, main_folder, valid_rows, workbook_file, overwrite):
                 LOGGER.info(f"These preprocess files are missing, skipping this experiment. {missing_preprocess_files}")
                 continue
 
-            train_lines, unique_train_lines = count_lines_and_unique_lines(train_vref_file)
-            test_lines, _ = count_lines_and_unique_lines(test_vref_file)
-            tok_stats = get_tokenization_stats(stats_file)
+            # Check what we already have for this experiment
+            sample_key = (language, mapping, "ALL")
+            ex = existing.get(sample_key, {})
 
-            if scores_file.is_file():
-                scores = get_scores(scores_file)
+            # Group 1: config — always available from the row
+            # Group 2: scores
+            need_scores = overwrite or not ex.get("BLEU")
+            # Group 3: vref line counts
+            need_lines = overwrite or not ex.get("train_lines")
+            # Group 4: tokenization stats
+            need_tok = overwrite or not ex.get("src_mean_chars_per_token")
+
+            if need_lines:
+                train_lines, unique_train_lines = count_lines_and_unique_lines(train_vref_file)
+                test_lines, _ = count_lines_and_unique_lines(test_vref_file)
             else:
-                scores = [{"Book": "", "BLEU": None, "chrF3++": None}]
-                LOGGER.warning(f"{scores_file} not found in {folder}")
+                train_lines = ex["train_lines"]
+                unique_train_lines = ex["unique_train_lines"]
+                test_lines = ex["test_lines"]
+
+            if need_tok:
+                tok_stats = get_tokenization_stats(stats_file)
+            else:
+                tok_stats = {
+                    "src_mean_chars_per_token": ex["src_mean_chars_per_token"],
+                    "trg_mean_chars_per_token": ex["trg_mean_chars_per_token"],
+                    "src_mean_tokens_per_verse": ex["src_mean_tokens_per_verse"],
+                    "trg_mean_tokens_per_verse": ex["trg_mean_tokens_per_verse"],
+                }
+
+            if need_scores:
+                if scores_file.is_file():
+                    scores = get_scores(scores_file)
+                else:
+                    scores = [{"Book": "", "BLEU": None, "chrF3++": None}]
+                    LOGGER.warning(f"{scores_file} not found in {folder}")
+            else:
+                # Reconstruct scores from existing rows
+                scores = [
+                    {"Book": r["Book"], "BLEU": r["BLEU"], "chrF3++": r["chrF3++"]}
+                    for k, r in existing.items()
+                    if k[0] == language and k[1] == mapping
+                ]
 
             for s in scores:
                 all_results.append(
@@ -422,20 +465,30 @@ def collect_results(wb, main_folder, valid_rows, workbook_file, overwrite):
                         s["chrF3++"],
                     ]
                 )
-            print(f"Found these results for {language}_{mapping} experiment.\n{all_results[-1]}")
+            if not need_scores and not need_lines and not need_tok:
+                count_cached += 1
+            else:
+                count_read += 1
+            # print(
+            #    f"Found results for {language}_{mapping} (scores:{'read' if need_scores else 'cached'} lines:{'read' if need_lines else 'cached'} tok:{'read' if need_tok else 'cached'})"
+            # )
 
-    # # Write to results sheet
+    print(
+        f"Found cached results for {count_cached} experiments and attempted to collect results for {count_read} experiments."
+    )
+
+    # Write to results sheet
     if "results" in wb.sheetnames:
         del wb["results"]
     ws = wb.create_sheet("results")
     ws.append(RESULT_HEADERS)
     for r in all_results:
         ws.append(r)
-    wb.save(workbook_file)
-    LOGGER.info(f"Wrote {len(all_results)} result rows to {workbook_file}")
+
+    return wb, all_results
 
 
-def create_analysis_sheets(wb, workbook_file):
+def create_analysis_sheets(wb):
     """Read the 'results' sheet and create per-book analysis sheets with deltas."""
     results = read_sheet(wb, "results")
 
@@ -449,8 +502,7 @@ def create_analysis_sheets(wb, workbook_file):
 
     books = set(r["Book"] for r in results)
     books.discard(None)
-    books.discard('')
-    print(f"At this point in create_analysis_sheets books = {books}")
+    books.discard("")
 
     # Find all books
     books = sorted(books)
@@ -530,11 +582,10 @@ def create_analysis_sheets(wb, workbook_file):
                 ]
             )
 
-    wb.save(workbook_file)
-    LOGGER.info(f"Created analysis sheets for {len(books)} books in {workbook_file}")
+    return wb
 
 
-def create_summary_sheet(wb, workbook_file):
+def create_summary_sheet(wb):
     """Create a 'summary' sheet with mean, median, +ve/−ve counts and Wilcoxon p-values
     for each book's BLEU and chrF3++ deltas, read from the analysis sheets."""
 
@@ -601,9 +652,133 @@ def create_summary_sheet(wb, workbook_file):
                 p_value = None
 
             ws.append([book, metric, delta_type, mean, median, count_pos, count_neg, n, p_value])
+    return wb
 
-    wb.save(workbook_file)
-    LOGGER.info(f"Created summary sheet in {workbook_file}")
+
+def create_correlation_sheet(wb):
+    "Compute Spearman correlations between score deltas and experiment variables per book."
+
+    analysis_sheets = sorted([s for s in wb.sheetnames if s.startswith("analysis_")])
+
+    headers = ["Book", "Metric", "Variable", "rho", "p-value", "n"]
+    if "correlations" in wb.sheetnames:
+        del wb["correlations"]
+    ws = wb.create_sheet("correlations")
+    ws.append(headers)
+
+    var_cols = ["train_lines", "ratio_chars_per_token", "ratio_tokens_per_verse", "diff_tokens_per_verse"]
+    delta_cols = dict(BLEU="BLEU_delta_m2m_mix", chrF3pp="chrF3++_delta_m2m_mix")
+
+    for sheet_name in analysis_sheets:
+        book = sheet_name.replace("analysis_", "")
+        rows = read_sheet(wb, sheet_name)
+        for metric, dcol in delta_cols.items():
+            for var in var_cols:
+                pairs = [
+                    (float(r[dcol]), float(r[var]))
+                    for r in rows
+                    if r.get(dcol) not in (None, "") and r.get(var) not in (None, "")
+                ]
+                if len(pairs) < 5:
+                    ws.append([book, metric, var, None, None, len(pairs)])
+                    continue
+                deltas, vals = zip(*pairs)
+                rho, p = spearmanr(deltas, vals)
+                ws.append([book, metric, var, round(rho, 4), round(p, 6), len(pairs)])
+    return wb
+
+
+def add_charts_to_workbook(wb):
+    rows = read_sheet(wb, "summary")
+    m2m = [r for r in rows if r["Delta"] == "m2m_mix"]
+
+    for metric in ["BLEU", "chrF3++"]:
+        data = [r for r in m2m if r["Metric"] == metric]
+        sheet_name = f"chart_{metric.replace('+', 'p')}"
+        if sheet_name in wb.sheetnames:
+            del wb[sheet_name]
+        ws = wb.create_sheet(sheet_name)
+        ws.append(["Book", "Mean Delta"])
+        for r in data:
+            ws.append([r["Book"], float(r["Mean"])])
+
+        chart = BarChart()
+        chart.type = "bar"
+        chart.title = f"{metric}: many_to_many − mixed_src"
+        chart.x_axis.title = "Mean Delta"
+        chart.y_axis.title = "Book"
+        chart.x_axis.crosses = "autoZero"
+        chart.style = 10
+        chart.width = 20
+        chart.height = max(8, len(data) * 1.5)
+        cats = Reference(ws, min_col=1, min_row=2, max_row=len(data) + 1)
+        vals = Reference(ws, min_col=2, min_row=1, max_row=len(data) + 1)
+        chart.add_data(vals, titles_from_data=True)
+        chart.set_categories(cats)
+        chart.shape = 4
+        ws.add_chart(chart, "D2")
+
+    return wb
+
+
+def plot_diverging_deltas(wb, output_folder=None):
+    rows = read_sheet(wb, "summary")
+
+    m2m = [r for r in rows if r["Delta"] == "m2m_mix"]
+
+    for metric in ["BLEU", "chrF3++"]:
+        data = [r for r in m2m if r["Metric"] == metric]
+        books = [r["Book"] for r in data]
+        means = [float(r["Mean"]) for r in data]
+        pvals = [r["p-value"] for r in data]
+        sig = [p is not None and p != "" and float(p) < 0.05 for p in pvals]
+        colors = ["#2ecc71" if s else "#95a5a6" for s in sig]
+
+        y = np.arange(len(books))
+        fig, ax = plt.subplots(figsize=(10, max(4, len(books) * 0.5)))
+        ax.barh(y, means, color=colors, edgecolor="white", height=0.6)
+        ax.axvline(0, color="black", linewidth=0.8)
+        ax.set_yticks(y)
+        ax.set_yticklabels(books)
+        ax.set_xlabel(f"{metric} delta (many_to_many − mixed_src)")
+        ax.set_title(f"{metric}: many_to_many vs mixed_src by book\n(green = p < 0.05)")
+        ax.invert_yaxis()
+        plt.tight_layout()
+        if output_folder:
+            plt.savefig(output_folder / f"delta_{metric.replace('+', 'p')}.png", dpi=150)
+        plt.show()
+
+
+def create_correlation_sheet(wb):
+    "Compute Spearman correlations between score deltas and experiment variables per book."
+    analysis_sheets = sorted([s for s in wb.sheetnames if s.startswith("analysis_")])
+
+    headers = ["Book", "Metric", "Variable", "rho", "p-value", "n"]
+    if "correlations" in wb.sheetnames:
+        del wb["correlations"]
+    ws = wb.create_sheet("correlations")
+    ws.append(headers)
+
+    var_cols = ["train_lines", "ratio_chars_per_token", "ratio_tokens_per_verse", "diff_tokens_per_verse"]
+    delta_cols = dict(BLEU="BLEU_delta_m2m_mix", chrF3pp="chrF3++_delta_m2m_mix")
+
+    for sheet_name in analysis_sheets:
+        book = sheet_name.replace("analysis_", "")
+        rows = read_sheet(wb, sheet_name)
+        for metric, dcol in delta_cols.items():
+            for var in var_cols:
+                pairs = [
+                    (float(r[dcol]), float(r[var]))
+                    for r in rows
+                    if r.get(dcol) not in (None, "") and r.get(var) not in (None, "")
+                ]
+                if len(pairs) < 5:
+                    ws.append([book, metric, var, None, None, len(pairs)])
+                    continue
+                deltas, vals = zip(*pairs)
+                rho, p = spearmanr(deltas, vals)
+                ws.append([book, metric, var, round(rho, 4), round(p, 6), len(pairs)])
+    return wb
 
 
 def main():
@@ -649,24 +824,38 @@ def main():
             print(f"{lang}   : {missing}")
 
         return 1
-
-    script_map = get_scripts(workbook_file, valid_rows, two2three_iso)
-    if not script_map:
-        LOGGER.error(f"\nCould not determine scripts for any projects.")
-        exit(1)
-    if args.collect_scripts:
-        exit(0)
+    if args.create or args.collect_scripts:
+        script_map = get_scripts(workbook_file, valid_rows, two2three_iso)
+        if not script_map:
+            LOGGER.error(f"\nCould not determine scripts for any projects.")
+            exit(1)
+        if args.collect_scripts:
+            exit(0)
 
     if args.create:
         for row in valid_rows:
             write_config_file(row, args.overwrite)
 
     if args.collect_results or args.collect_and_analyze:
-        collect_results(wb, main_folder, valid_rows, workbook_file, args.overwrite)
+        wb, results = collect_results(wb, main_folder, valid_rows, workbook_file, args.overwrite)
+        wb.save(workbook_file)
+        LOGGER.info(f"Wrote {len(results)} result rows to {workbook_file}")
 
     if args.analyze or args.collect_and_analyze:
-        create_analysis_sheets(wb, workbook_file)
-        create_summary_sheet(wb, workbook_file)
+        wb = create_analysis_sheets(wb)
+        wb.save(workbook_file)
+        LOGGER.info(f"Created analysis sheets for books in {workbook_file.name}")
+
+        wb = create_summary_sheet(wb)
+        wb = create_correlation_sheet(wb)
+        wb = add_charts_to_workbook(wb)
+        wb.save(workbook_file)
+        LOGGER.info(f"Updated summary sheet in {workbook_file.name}")
+        LOGGER.info(f"Created correlations sheet in {workbook_file}")
+        LOGGER.info(f"Added chart sheets to {workbook_file.name}")
+
+        plot_diverging_deltas(wb, output_folder=main_folder)
+
     return 0
 
 
