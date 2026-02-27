@@ -6,6 +6,7 @@ from pathlib import Path
 
 import openpyxl
 import yaml
+from scipy.stats import wilcoxon
 
 from silnlp.common.environment import SIL_NLP_ENV
 
@@ -255,6 +256,58 @@ def create_config(mapping_type, lang_codes, src_list, trg, corpus_books, test_bo
     return config
 
 
+def write_config_file(row, overwrite):
+
+    language = row["Target_language"]
+    src1 = row["Source 1"]
+    src2 = row["Source 2"]
+    trg = row["Target"]
+    corpus_books = row["corpus_books"]
+    test_books = row["test_books"]
+
+    experiments = [
+        ("single", "one_to_one", [src1]),
+        ("mixed", "mixed_src", [src1, src2]),
+        ("many", "many_to_many", [src1, src2]),
+    ]
+
+    for suffix, mapping_type, src_list in experiments:
+        if suffix != "single" and not src2:
+            continue
+
+        experiment_name = f"{language}_{suffix}"
+        experiment_folder = main_folder / experiment_name
+        experiment_folder.mkdir(exist_ok=True)
+
+        config_file = experiment_folder / "config.yml"
+        if config_file.is_file() and not overwrite:
+            LOGGER.info(f"Skipping existing config: {config_file}")
+            continue
+
+        # lang_codes
+        lang_codes = {}
+        # We need to resolve all prefixes: src1, trg, and src2 (if it exists)
+        projects_to_resolve = [src1, trg]
+        if src2:
+            projects_to_resolve.append(src2)
+
+        for proj in projects_to_resolve:
+            prefix = extract_prefix(proj)
+            lang_codes[prefix] = resolve_lang_code(proj, script_map)
+
+            if not lang_codes[prefix]:
+                raise RuntimeError(
+                    f"Could not find lang_code for {prefix} for {project_name}. Not present on scripts sheet in {workbook_file}."
+                )
+
+        config = create_config(mapping_type, lang_codes, src_list, trg, corpus_books, test_books)
+
+        with open(config_file, "w", encoding="utf-8") as cf:
+            yaml.dump(config, cf, default_flow_style=False, sort_keys=False)
+
+        LOGGER.info(f"Created experiment config: {config_file}")
+
+
 def count_lines_and_unique_lines(file):
     """Count the total and number of unique lines in a file."""
     if not file.is_file():
@@ -323,7 +376,7 @@ def collect_results(main_folder, valid_rows, workbook_file):
         language = row["Target_language"]
         src1, src2, trg = row["Source 1"], row["Source 2"], row["Target"]
 
-        for suffix, mapping in [("many", "many_to_many"), ("mixed", "mixed_src")]:
+        for suffix, mapping in [("many", "many_to_many"), ("mixed", "mixed_src"), ("single", "one_to_one")]:
             folder = main_folder / f"{language}_{suffix}"
             if not folder.is_dir():
                 LOGGER.warning(f"Folder not found: {folder}")
@@ -388,6 +441,116 @@ def collect_results(main_folder, valid_rows, workbook_file):
     LOGGER.info(f"Wrote {len(all_results)} result rows to {workbook_file}")
 
 
+def create_analysis_sheets(workbook_file):
+    """Read the 'results' sheet and create per-book analysis sheets with deltas."""
+    wb = openpyxl.load_workbook(workbook_file)
+    ws = wb["results"]
+    rows_iter = ws.iter_rows(values_only=True)
+    headers = [str(h).strip() for h in next(rows_iter)]
+
+    # Read all result rows into list of dicts
+    results = []
+    for row in rows_iter:
+        d = {headers[i]: row[i] for i in range(len(headers))}
+        if not d.get("Target_language"):
+            continue
+        results.append(d)
+
+    # Group by (Target_language, Book, Mapping)
+    data = {}
+    for r in results:
+        key = (r["Target_language"], r["Book"])
+        if key not in data:
+            data[key] = {}
+        data[key][r["Mapping"]] = r
+
+    # print(f"At this point in create_analysis_sheets data is:{data}")
+    books = set(r["Book"] for r in results)
+    books.discard(None)
+    print(f"At this point in create_analysis_sheets books = {books}")
+
+    # Find all books
+    books = sorted(books)
+
+    ANALYSIS_HEADERS = [
+        "Target_language",
+        "BLEU_one_to_one",
+        "BLEU_mixed_src",
+        "BLEU_many_to_many",
+        "chrF3++_one_to_one",
+        "chrF3++_mixed_src",
+        "chrF3++_many_to_many",
+        "train_lines",
+        "ratio_chars_per_token",
+        "ratio_tokens_per_verse",
+        "diff_tokens_per_verse",
+        "BLEU_delta_m2m_mix",
+        "BLEU_delta_mix_o2o",
+        "chrF3++_delta_m2m_mix",
+        "chrF3++_delta_mix_o2o",
+    ]
+
+    for book in books:
+        sheet_name = f"analysis_{book}"
+        if sheet_name in wb.sheetnames:
+            del wb[sheet_name]
+        ws_out = wb.create_sheet(sheet_name)
+        ws_out.append(ANALYSIS_HEADERS)
+
+        # Get all languages that have data for this book
+        langs = sorted(set(lang for lang, bk in data if bk == book))
+
+        for lang in langs:
+            mappings = data.get((lang, book), {})
+            m2m = mappings.get("many_to_many", {})
+            mix = mappings.get("mixed_src", {})
+            o2o = mappings.get("one_to_one", {})
+
+            bleu_m2m = m2m.get("BLEU")
+            bleu_mix = mix.get("BLEU")
+            bleu_o2o = o2o.get("BLEU")
+            chrf_m2m = m2m.get("chrF3++")
+            chrf_mix = mix.get("chrF3++")
+            chrf_o2o = o2o.get("chrF3++")
+
+            # Use many_to_many stats, fall back to mixed_src
+            stats = m2m or mix
+            src_cpt = stats.get("src_mean_chars_per_token")
+            trg_cpt = stats.get("trg_mean_chars_per_token")
+            src_tpv = stats.get("src_mean_tokens_per_verse")
+            trg_tpv = stats.get("trg_mean_tokens_per_verse")
+
+            ratio_cpt = src_cpt / trg_cpt if src_cpt and trg_cpt else None
+            ratio_tpv = src_tpv / trg_tpv if src_tpv and trg_tpv else None
+            diff_tpv = src_tpv - trg_tpv if src_tpv and trg_tpv else None
+
+            def delta(a, b):
+                return round(a - b, 4) if a is not None and b is not None else None
+
+            ws_out.append(
+                [
+                    lang,
+                    bleu_o2o,
+                    bleu_mix,
+                    bleu_m2m,
+                    chrf_o2o,
+                    chrf_mix,
+                    chrf_m2m,
+                    stats.get("train_lines"),
+                    round(ratio_cpt, 4) if ratio_cpt else None,
+                    round(ratio_tpv, 4) if ratio_tpv else None,
+                    round(diff_tpv, 4) if diff_tpv else None,
+                    delta(bleu_m2m, bleu_mix),
+                    delta(bleu_mix, bleu_o2o),
+                    delta(chrf_m2m, chrf_mix),
+                    delta(chrf_mix, chrf_o2o),
+                ]
+            )
+
+    wb.save(workbook_file)
+    LOGGER.info(f"Created analysis sheets for {len(books)} books in {workbook_file}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Create NLLB experiment configurations with alignment and templates.")
     parser.add_argument("folder", help="Root experiment folder name (relative to mt_experiments_dir).")
@@ -412,10 +575,10 @@ def main():
     if lockfile := is_locked(workbook_file):
         print(f"Found lock file: {lockfile}")
         print(
-            f"Please close {workbook_file.name} in folder {folder} OR if it is closed, delete the lock file and try again."
+            f"Please close {workbook_file.name} in folder {workbook_file.parent} OR if it is closed, delete the lock file and try again."
         )
         if not args.create:
-            sys.exit(1)
+            return 1
 
     rows = read_experiments_xlsx(workbook_file)
     LOGGER.info(f"Read {len(rows)} experiment definitions from the 'experiments' sheet in {workbook_file}")
@@ -441,60 +604,11 @@ def main():
         # Main experiment generation
 
         for row in valid_rows:
-            language = row["Target_language"]
-            src1 = row["Source 1"]
-            src2 = row["Source 2"]
-            trg = row["Target"]
-            corpus_books = row["corpus_books"]
-            test_books = row["test_books"]
-
-            experiments = [
-                ("single", "one_to_one", [src1]),
-                ("mixed", "mixed_src", [src1, src2]),
-                ("many", "many_to_many", [src1, src2]),
-            ]
-
-            for suffix, mapping_type, src_list in experiments:
-                if suffix != "single" and not src2:
-                    continue
-
-                experiment_name = f"{language}_{suffix}"
-                experiment_folder = main_folder / experiment_name
-                experiment_folder.mkdir(exist_ok=True)
-
-                config_file = experiment_folder / "config.yml"
-                if config_file.is_file() and not args.overwrite:
-                    LOGGER.info(f"Skipping existing config: {config_file}")
-                    continue
-
-                # lang_codes
-                lang_codes = {}
-                # We need to resolve all prefixes: src1, trg, and src2 (if it exists)
-                projects_to_resolve = [src1, trg]
-                if src2:
-                    projects_to_resolve.append(src2)
-
-                for proj in projects_to_resolve:
-                    prefix = extract_prefix(proj)
-                    lang_codes[prefix] = resolve_lang_code(proj, script_map)
-
-                    if not lang_codes[prefix]:
-                        raise RuntimeError(
-                            f"Could not find lang_code for {prefix} for {project_name}. Not present on scripts sheet in {workbook_file}."
-                        )
-
-                # Special case: val,test pair uses only first source
-                # The user example showed: src: tgl-TCB (not a list)
-
-                config = create_config(mapping_type, lang_codes, src_list, trg, corpus_books, test_books)
-
-                with open(config_file, "w", encoding="utf-8") as cf:
-                    yaml.dump(config, cf, default_flow_style=False, sort_keys=False)
-
-                LOGGER.info(f"Created experiment config: {config_file}")
+            write_config_file(row,args.overwrite)
 
     if args.collect_results:
         collect_results(main_folder, valid_rows, workbook_file)
+        create_analysis_sheets(workbook_file)
 
     return 0
 
