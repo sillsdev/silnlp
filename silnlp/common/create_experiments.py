@@ -23,6 +23,7 @@ SAMPLE_LINES = 100
 MODEL = "facebook/nllb-200"
 RESULT_HEADERS = [
     "Target_language",
+    "Series",
     "Mapping",
     "Source 1",
     "Source 2",
