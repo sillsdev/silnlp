@@ -92,6 +92,12 @@ def update_sheet(wb, workbook_path, cache):
     LOGGER.info(f"Updated scripts sheet in {workbook_path} ({len(cache)} entries)")
 
 
+def backup_workbook_file(wb, workbook_file):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    backup_workbook_file = workbook_file.parent / f"experiments_bak_{timestamp}.xlsx"
+    wb.save(backup_workbook_file)
+
+
 def get_scripts(workbook_path, rows, two2three_iso):
     """Return dict of filename -> lang_code. Reads cached entries from the 'scripts'
     sheet in the workbook, predicts scripts for any new filenames, and updates
@@ -356,9 +362,10 @@ def get_scores(scores_file):
     return results
 
 
-def collect_results(wb, main_folder, valid_rows, workbook_file):
+def collect_results(wb, main_folder, valid_rows, workbook_file, overwrite):
     """Collect results from all experiments and write to 'results' sheet."""
-
+    if overwrite:
+        backup_workbook_file(wb,workbook_file)
     all_results = []
     for row in valid_rows:
         language = row["Target_language"]
@@ -655,7 +662,7 @@ def main():
             write_config_file(row, args.overwrite)
 
     if args.collect_results or args.collect_and_analyze:
-        collect_results(main_folder, valid_rows, workbook_file)
+        collect_results(wb, main_folder, valid_rows, workbook_file, args.overwrite)
 
     if args.analyze or args.collect_and_analyze:
         create_analysis_sheets(wb, workbook_file)
