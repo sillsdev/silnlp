@@ -6,7 +6,8 @@ from google.cloud import translate_v2 as translate
 from machine.scripture import VerseRef, book_id_to_number
 
 from .paratext import book_file_name_digits
-from .translator import SentenceTranslation, SentenceTranslationGroup, Translator
+from .translation_data_structures import SentenceTranslation, SentenceTranslationGroup
+from .translator import Translator
 from .utils import get_git_revision_hash, get_mt_exp_dir
 
 LOGGER = logging.getLogger((__package__ or "") + ".translate")
@@ -29,13 +30,13 @@ class GoogleTranslator(Translator):
 
         for sentence in sentences:
             if len(sentence) == 0:
-                yield ""
+                yield SentenceTranslationGroup([SentenceTranslation("", [], [], None)])
             else:
                 results = self._translate_client.translate(
                     sentence, source_language=src_iso, target_language=trg_iso, format_="text"
                 )
                 translation: str = results["translatedText"]
-                yield [SentenceTranslation(translation, [], [], None)]
+                yield SentenceTranslationGroup([SentenceTranslation(translation, [], [], None)])
 
 
 def main() -> None:

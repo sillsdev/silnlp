@@ -1,17 +1,13 @@
 import logging
-import re
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from contextlib import AbstractContextManager
 from datetime import date
 from itertools import groupby
-from math import exp
 from pathlib import Path
 from typing import DefaultDict, Dict, Generator, Generic, Iterable, List, Optional, Tuple, TypeVar
 
 import docx
-import nltk
-from iso639 import Lang
 from machine.corpora import (
     FileParatextProjectSettingsParser,
     FileParatextProjectTextUpdater,
@@ -21,7 +17,6 @@ from machine.corpora import (
     UpdateUsfmTextBehavior,
     UsfmFileText,
     UsfmStylesheet,
-    UsfmTextType,
     parse_usfm,
 )
 from machine.scripture import VerseRef, is_book_id_valid
@@ -33,136 +28,12 @@ from silnlp.nmt.corpora import CorpusPair
 from .corpus import load_corpus, write_corpus
 from .paratext import get_book_path, get_iso, get_parent_project_dir, get_project_dir
 from .postprocesser import NoDetectedQuoteConventionException, PostprocessHandler, UnknownQuoteConventionException
-from .usfm_utils import PARAGRAPH_TYPE_EMBEDS
+from .translation_data_structures import DraftGroup, SentenceTranslationGroup, TranslatedDraft, UsfmTextRowCollection
+from .utils import NLTKSentenceTokenizer
 
 LOGGER = logging.getLogger((__package__ or "") + ".translate")
 
 CONFIDENCE_SUFFIX = ".confidences.tsv"
-
-
-# A single translation of a single sentence
-class SentenceTranslation:
-    def __init__(
-        self,
-        translation: str,
-        tokens: List[str],
-        token_scores: List[float],
-        sequence_score: Optional[float],
-    ):
-        self._translation = translation
-        self._tokens = tokens
-        self._token_scores = token_scores
-        self._sequence_score = sequence_score
-
-    def get_translation(self) -> str:
-        return self._translation
-
-    def has_sequence_confidence_score(self) -> bool:
-        return self._sequence_score is not None
-
-    def get_sequence_confidence_score(self) -> Optional[float]:
-        return exp(self._sequence_score) if self._sequence_score is not None else None
-
-    def join_tokens_for_test_file(self) -> str:
-        # The first token is skipped because it is always equal to decoder_start_token_id,
-        # because of the way Huggingface implements encoder-decoder models
-        return " ".join([token for token in self._tokens[1:] if token != "<pad>"])
-
-    def join_tokens_for_confidence_file(self) -> str:
-        return "\t".join(self._tokens)
-
-    def join_token_scores_for_confidence_file(self) -> str:
-        return "\t".join([str(exp(ts)) for ts in [self._sequence_score] + self._token_scores if ts is not None])
-
-
-# A group of multiple translations of a single sentence
-SentenceTranslationGroup = List[SentenceTranslation]
-
-
-# A class representing a single draft (one translation of each input sentence)
-class TranslatedDraft:
-    def __init__(self, sentence_translations: List[SentenceTranslation]):
-        self._sentence_translations = sentence_translations
-
-    def has_sequence_confidence_scores(self) -> bool:
-        return any([st.has_sequence_confidence_score() for st in self._sentence_translations])
-
-    def write_confidence_scores_to_file(
-        self,
-        confidences_path: Path,
-        scripture_refs: Optional[List[ScriptureRef]] = None,
-    ) -> None:
-        sequence_id_header = self._get_sequence_id_header_for_confidence_file(scripture_refs)
-        with confidences_path.open("w", encoding="utf-8", newline="\n") as confidences_file:
-            confidences_file.write("\t".join([f"{sequence_id_header}"] + [f"Token {i}" for i in range(200)]) + "\n")
-            confidences_file.write("\t".join(["Sequence Score"] + [f"Token Score {i}" for i in range(200)]) + "\n")
-            for sentence_num, sentence_translation in enumerate(self._sentence_translations):
-                if not sentence_translation.has_sequence_confidence_score():
-                    continue
-
-                if scripture_refs is not None:
-                    sequence_label = str(scripture_refs[sentence_num])
-                else:
-                    sequence_label = str(sentence_num + 1)
-                confidences_file.write(
-                    sequence_label + "\t" + sentence_translation.join_tokens_for_confidence_file() + "\n"
-                )
-                confidences_file.write(sentence_translation.join_token_scores_for_confidence_file() + "\n")
-
-    def write_verse_confidence_scores_to_file(
-        self, verse_confidences_path: Path, scripture_refs: Optional[List[ScriptureRef]] = None
-    ) -> None:
-        sequence_id_header = self._get_sequence_id_header_for_confidence_file(scripture_refs)
-        with verse_confidences_path.open("w", encoding="utf-8", newline="\n") as verse_confidences_file:
-            verse_confidences_file.write(f"{sequence_id_header}\tConfidence\n")
-            for sentence_num, confidence in enumerate(self.get_all_sequence_confidence_scores()):
-                if scripture_refs is not None:
-                    vref = scripture_refs[sentence_num]
-                    if not vref.is_verse:
-                        continue
-                    label = str(vref)
-                else:
-                    label = str(sentence_num + 1)
-                if confidence is not None:
-                    verse_confidences_file.write(f"{label}\t{confidence}\n")
-
-    @staticmethod
-    def _get_sequence_id_header_for_confidence_file(scripture_refs: Optional[List[ScriptureRef]] = None) -> str:
-        if scripture_refs is not None:
-            return "VRef"
-        return "Sequence Number"
-
-    def get_all_sequence_confidence_scores(self, exclude_none_type: bool = False) -> List[Optional[float]]:
-        if exclude_none_type:
-            return [
-                scs
-                for scs in [t.get_sequence_confidence_score() for t in self._sentence_translations]
-                if scs is not None
-            ]
-        return [st.get_sequence_confidence_score() for st in self._sentence_translations]
-
-    def get_all_translations(self) -> List[str]:
-        return [st.get_translation() for st in self._sentence_translations]
-
-    def get_all_tokenized_translations(self) -> List[str]:
-        return [st.join_tokens_for_test_file() for st in self._sentence_translations]
-
-
-# A wrapper around List[SentenceTranslationGroup] that allows upstream consumers to view a
-# list of translation groups as a collection of discrete drafts
-class DraftGroup:
-    def __init__(self, translation_groups: List[SentenceTranslationGroup]):
-        self.translation_groups = translation_groups
-        self.num_drafts: int = len(self.translation_groups[0])
-
-    def get_drafts(self) -> List[TranslatedDraft]:
-        translated_draft_sentences: List[List[SentenceTranslation]] = [[] for _ in range(self.num_drafts)]
-
-        for translation_group in self.translation_groups:
-            for draft_index in range(self.num_drafts):
-                translated_draft_sentences[draft_index].append(translation_group[draft_index])
-
-        return [TranslatedDraft(sentences) for sentences in translated_draft_sentences]
 
 
 TVerseKey = TypeVar("TVerseKey")
@@ -525,52 +396,38 @@ class Translator(AbstractContextManager["Translator"], ABC):
 
             src_file_text = UsfmFileText(stylesheet, "utf-8-sig", book_id, src_file_path, include_all_text=True)
 
-        sentences = [re.sub(" +", " ", add_tags_to_sentence(tags, s.text.strip())) for s in src_file_text]
-        scripture_refs: List[ScriptureRef] = [s.ref for s in src_file_text]
-        vrefs: List[VerseRef] = [sr.verse_ref for sr in scripture_refs]
+        sentences = UsfmTextRowCollection(src_file_text, src_iso, stylesheet, chapters, tags)
         LOGGER.info(f"File {src_file_path} parsed correctly.")
+        sentences_to_translate, scripture_refs = sentences.get_sentences_and_vrefs_for_translation()
 
-        # Filter sentences
-        for i in reversed(range(len(sentences))):
-            marker = scripture_refs[i].path[-1].name if len(scripture_refs[i].path) > 0 else ""
-            if (
-                (len(chapters) > 0 and scripture_refs[i].chapter_num not in chapters)
-                or marker in PARAGRAPH_TYPE_EMBEDS
-                or stylesheet.get_tag(marker).text_type == UsfmTextType.NOTE_TEXT
-            ):
-                sentences.pop(i)
-                scripture_refs.pop(i)
-        empty_sents: List[Tuple[int, ScriptureRef]] = []
-        for i in reversed(range(len(sentences))):
-            if len(sentences[i].strip()) == 0:
-                sentences.pop(i)
-                empty_sents.append((i, scripture_refs.pop(i)))
+        if len(sentences_to_translate) == 0:
+            LOGGER.warning(f"No sentences found to translate. Skipping translation for {book_id}.")
+            return
 
         sentence_translation_groups: List[SentenceTranslationGroup] = list(
-            self.translate(sentences, src_iso, trg_iso, produce_multiple_translations, vrefs)
+            self.translate(
+                sentences_to_translate,
+                src_iso,
+                trg_iso,
+                produce_multiple_translations,
+                [sr.verse_ref for sr in scripture_refs],
+            )
         )
-        num_drafts = len(sentence_translation_groups[0])
-
-        # Add empty sentences back in
-        # Prevents pre-existing text from showing up in the sections of translated text
-        for idx, vref in reversed(empty_sents):
-            sentences.insert(idx, "")
-            scripture_refs.insert(idx, vref)
-            sentence_translation_groups.insert(idx, [SentenceTranslation("", [], [], None)] * num_drafts)
 
         text_behavior = (
             UpdateUsfmTextBehavior.PREFER_NEW if trg_project is not None else UpdateUsfmTextBehavior.STRIP_EXISTING
         )
 
-        draft_set: DraftGroup = DraftGroup(sentence_translation_groups)
-        for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
-            postprocess_handler.construct_rows(scripture_refs, sentences, translated_draft.get_all_translations())
+        translated_text_rows = sentences.to_translated_text_row_collection(sentence_translation_groups)
+
+        for draft_index, translated_draft in enumerate(translated_text_rows.get_translated_drafts(), 1):
+            translated_text_rows.construct_postprocessing_rows_for_draft_index(postprocess_handler, draft_index)
 
             for config in postprocess_handler.configs:
 
                 # Compile draft remarks
                 draft_src_str = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
-                draft_remark = f"This draft of {scripture_refs[0].book} was machine translated on {date.today()} from {draft_src_str} using model {experiment_ckpt_str}. It should be reviewed and edited carefully."
+                draft_remark = f"This draft of {sentences.get_book()} was machine translated on {date.today()} from {draft_src_str} using model {experiment_ckpt_str}. It should be reviewed and edited carefully."
                 postprocess_remark = config.get_postprocess_remark()
                 remarks = [draft_remark] + ([postprocess_remark] if postprocess_remark else [])
 
@@ -609,7 +466,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
                         usfm = f.read()
                     handler = UpdateUsfmParserHandler(
                         rows=config.rows,
-                        id_text=scripture_refs[0].book,
+                        id_text=sentences.get_book(),
                         text_behavior=text_behavior,
                         paragraph_behavior=config.get_paragraph_behavior(),
                         embed_behavior=config.get_embed_behavior(),
@@ -663,14 +520,6 @@ class Translator(AbstractContextManager["Translator"], ABC):
         produce_multiple_translations: bool = False,
         tags: Optional[List[str]] = None,
     ) -> None:
-        nltk.download("punkt")
-        tokenizer: nltk.tokenize.PunktSentenceTokenizer
-        try:
-            src_lang = Lang(src_iso)
-            tokenizer = nltk.data.load(f"tokenizers/punkt/{src_lang.name.lower()}.pickle")
-        except Exception:
-            tokenizer = nltk.data.load("tokenizers/punkt/english.pickle")
-
         with src_file_path.open("rb") as file:
             doc = docx.Document(file)
 
@@ -678,7 +527,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
         paras: List[int] = []
 
         for i, paragraph in enumerate(doc.paragraphs):
-            for sentence in tokenizer.tokenize(paragraph.text):
+            for sentence in NLTKSentenceTokenizer.for_iso(src_iso).tokenize(paragraph.text):
                 sentences.append(add_tags_to_sentence(tags, sentence))
                 paras.append(i)
 
