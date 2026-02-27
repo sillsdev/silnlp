@@ -4,24 +4,35 @@ import logging
 import re
 from pathlib import Path
 
-import yaml
 import openpyxl
+import yaml
 
 from silnlp.common.environment import SIL_NLP_ENV
-from .combine_scores import check_for_lock_file
+
+from .combine_scores import is_locked
 from .script_utils import is_represented, predict_script_code
 from .utils import two2three_iso
 
 EXPERIMENTS_DIR = SIL_NLP_ENV.mt_experiments_dir
 SCRIPTURE_DIR = SIL_NLP_ENV.mt_scripture_dir
-SAMPLE_LINES = 100 
+SAMPLE_LINES = 100
 MODEL = "facebook/nllb-200"
 RESULT_HEADERS = [
-    "Target_language", "Mapping", "Source 1", "Source 2", "Target",
-    "train_lines", "unique_train_lines", "test_lines",
-    "src_mean_chars_per_token", "trg_mean_chars_per_token",
-    "src_mean_tokens_per_verse", "trg_mean_tokens_per_verse",
-    "Book", "BLEU", "chrF3++",
+    "Target_language",
+    "Mapping",
+    "Source 1",
+    "Source 2",
+    "Target",
+    "train_lines",
+    "unique_train_lines",
+    "test_lines",
+    "src_mean_chars_per_token",
+    "trg_mean_chars_per_token",
+    "src_mean_tokens_per_verse",
+    "trg_mean_tokens_per_verse",
+    "Book",
+    "BLEU",
+    "chrF3++",
 ]
 
 LOGGER = logging.getLogger(__package__ + ".create_experiments")
@@ -30,16 +41,16 @@ LOGGER = logging.getLogger(__package__ + ".create_experiments")
 def read_experiments_xlsx(workbook_file):
     """Read the 'experiments' sheet from the workbook. Stop at the first empty row. Returns a list of dicts."""
 
-    check_for_lock_file(workbook_file)
+    is_locked(workbook_file)
     wb = openpyxl.load_workbook(workbook_file, read_only=True)
     ws = wb["experiments"]
     rows_iter = ws.iter_rows(values_only=True)
     headers = [str(header).strip() for header in next(rows_iter)]
-    
+
     rows = []
     for row in rows_iter:
         row_dict = {headers[i]: (str(v).strip() if v is not None else "") for i, v in enumerate(row)}
-        if ''.join(row_dict.values()).strip() == '':
+        if "".join(row_dict.values()).strip() == "":
             break
         rows.append(row_dict)
     wb.close()
@@ -48,10 +59,10 @@ def read_experiments_xlsx(workbook_file):
 
 def read_scripture(file, max_lines=SAMPLE_LINES):
     "Read non-empty, non-range lines from a scripture file"
-    lines_to_skip = set(['', '<range>', '...'])
-    with open(file, 'r', encoding='utf-8') as file_in:
+    lines_to_skip = set(["", "<range>", "..."])
+    with open(file, "r", encoding="utf-8") as file_in:
         lines = [line.strip() for line in file_in if line.strip() not in lines_to_skip]
-        return ''.join(lines[:max_lines])
+        return "".join(lines[:max_lines])
 
 
 def update_sheet(wb, workbook_path, cache):
@@ -120,7 +131,7 @@ def get_scripts(workbook_path, rows, two2three_iso):
         if not file.is_file():
             LOGGER.warning(f"Cannot cache script for {filename}: {file} not found")
             continue
-        
+
         script_code = predict_script_code(read_scripture(file))
         if not is_represented(script_code=script_code, model=MODEL):
             if updated:
@@ -166,7 +177,6 @@ def resolve_lang_code(project_name, script_map):
     if not lang_code:
         raise RuntimeError(f"Could not find lang_code for {project_name} in scripts cache")
     return lang_code
-
 
 
 def create_alignment_config(folder, rows):
@@ -238,9 +248,9 @@ def create_config(mapping_type, lang_codes, src_list, trg, corpus_books, test_bo
             "seed": 111,
             "tokenizer": {"update_src": True, "update_trg": True},
         },
-       #"eval": {"early_stopping": None, "eval_steps": 1000, 'eval_strategy': 'no'},
-       "model": "facebook/nllb-200-distilled-1.3B",
-       #"train": {"max_steps": 7000, "save_steps": 5000, "save_strategy": "steps", "save_total_limit": 1},
+        # "eval": {"early_stopping": None, "eval_steps": 1000, 'eval_strategy': 'no'},
+        "model": "facebook/nllb-200-distilled-1.3B",
+        # "train": {"max_steps": 7000, "save_steps": 5000, "save_strategy": "steps", "save_total_limit": 1},
     }
     return config
 
@@ -250,8 +260,8 @@ def count_lines_and_unique_lines(file):
     if not file.is_file():
         LOGGER.warning(f"Couldn't find train.vref file {file}")
         return None, None
-    
-    with open(file, mode='r', encoding='utf-8') as f:
+
+    with open(file, mode="r", encoding="utf-8") as f:
         lines = f.readlines()
     return len(lines), len(set(lines))
 
@@ -288,28 +298,46 @@ def get_scores(scores_file):
         chrf_col = next((c for c in reader.fieldnames if "chrf" in c.lower()), None)
         book_col = next((c for c in reader.fieldnames if c.lower() == "book"), None)
         for row in reader:
-            results.append({
-                "Book": row[book_col].strip() if book_col else "",
-                "BLEU": float(row[bleu_col]) if bleu_col and row[bleu_col].strip() else None,
-                "chrF3++": float(row[chrf_col]) if chrf_col and row[chrf_col].strip() else None,
-            })
+            results.append(
+                {
+                    "Book": row[book_col].strip() if book_col else "",
+                    "BLEU": float(row[bleu_col]) if bleu_col and row[bleu_col].strip() else None,
+                    "chrF3++": float(row[chrf_col]) if chrf_col and row[chrf_col].strip() else None,
+                }
+            )
     return results
 
 
 def collect_results(main_folder, valid_rows, workbook_file):
     """Collect results from all experiments and write to 'results' sheet."""
+    # Check for lock files and ask the user to close them.
+    if lockfile := is_locked(workbook_file):
+        print(f"Found lock file: {lockfile}")
+        print(
+            f"Please close {workbook_file.name} in folder {folder} OR if it is closed, delete the lock file and try again."
+        )
+        sys.exit(1)
+
     all_results = []
     for row in valid_rows:
         language = row["Target_language"]
         src1, src2, trg = row["Source 1"], row["Source 2"], row["Target"]
 
         for suffix, mapping in [("many", "many_to_many"), ("mixed", "mixed_src")]:
-            folder = main_folder / f"{language}_{suffix}"  
+            folder = main_folder / f"{language}_{suffix}"
             if not folder.is_dir():
                 LOGGER.warning(f"Folder not found: {folder}")
                 continue
 
-            train_vref_file, test_vref_file, stats_file, scores_file = (folder / file for file in ["train.vref.txt", "test.vref.txt", "tokenization_stats.csv", "scores-5000.csv", ])
+            train_vref_file, test_vref_file, stats_file, scores_file = (
+                folder / file
+                for file in [
+                    "train.vref.txt",
+                    "test.vref.txt",
+                    "tokenization_stats.csv",
+                    "scores-5000.csv",
+                ]
+            )
             preprocess_files = [stats_file, train_vref_file, test_vref_file]
             missing_preprocess_files = [f for f in preprocess_files if not f.is_file()]
             if missing_preprocess_files:
@@ -317,9 +345,9 @@ def collect_results(main_folder, valid_rows, workbook_file):
                 continue
 
             train_lines, unique_train_lines = count_lines_and_unique_lines(train_vref_file)
-            test_lines, _= count_lines_and_unique_lines(test_vref_file)
+            test_lines, _ = count_lines_and_unique_lines(test_vref_file)
             tok_stats = get_tokenization_stats(stats_file)
-            
+
             if scores_file.is_file():
                 scores = get_scores(scores_file)
             else:
@@ -327,16 +355,27 @@ def collect_results(main_folder, valid_rows, workbook_file):
                 LOGGER.warning(f"{scores_file} not found in {folder}")
 
             for s in scores:
-                all_results.append([
-                    language, mapping, src1, src2, trg,
-                    train_lines, unique_train_lines, test_lines,
-                    tok_stats.get("src_mean_chars_per_token"),
-                    tok_stats.get("trg_mean_chars_per_token"),
-                    tok_stats.get("src_mean_tokens_per_verse"),
-                    tok_stats.get("trg_mean_tokens_per_verse"),
-                    s["Book"], s["BLEU"], s["chrF3++"],
-                ])
+                all_results.append(
+                    [
+                        language,
+                        mapping,
+                        src1,
+                        src2,
+                        trg,
+                        train_lines,
+                        unique_train_lines,
+                        test_lines,
+                        tok_stats.get("src_mean_chars_per_token"),
+                        tok_stats.get("trg_mean_chars_per_token"),
+                        tok_stats.get("src_mean_tokens_per_verse"),
+                        tok_stats.get("trg_mean_tokens_per_verse"),
+                        s["Book"],
+                        s["BLEU"],
+                        s["chrF3++"],
+                    ]
+                )
             print(f"Found these results for {language}_{mapping} experiment.\n{all_results[-1]}")
+
     # # Write to results sheet
     wb = openpyxl.load_workbook(workbook_file)
     if "results" in wb.sheetnames:
@@ -364,8 +403,19 @@ def main():
     workbook_file = main_folder / "experiments.xlsx"
 
     if not workbook_file.is_file():
-        LOGGER.error(f"\nExperiment workbook not found: {workbook_file}. This spreadsheet is required to define the experiments to be run.")
+        LOGGER.error(
+            f"\nExperiment workbook not found: {workbook_file}. This spreadsheet is required to define the experiments to be run."
+        )
         return 1
+
+    # Check for lock files and ask the user to close them.
+    if lockfile := is_locked(workbook_file):
+        print(f"Found lock file: {lockfile}")
+        print(
+            f"Please close {workbook_file.name} in folder {folder} OR if it is closed, delete the lock file and try again."
+        )
+        if not args.create:
+            sys.exit(1)
 
     rows = read_experiments_xlsx(workbook_file)
     LOGGER.info(f"Read {len(rows)} experiment definitions from the 'experiments' sheet in {workbook_file}")
@@ -384,7 +434,8 @@ def main():
     if not script_map:
         LOGGER.error(f"\nCould not determine scripts for any projects.")
         return 1
-    if args.collect_scripts: return 0
+    if args.collect_scripts:
+        return 0
 
     if args.create:
         # Main experiment generation
@@ -426,9 +477,11 @@ def main():
                 for proj in projects_to_resolve:
                     prefix = extract_prefix(proj)
                     lang_codes[prefix] = resolve_lang_code(proj, script_map)
-                    
+
                     if not lang_codes[prefix]:
-                        raise RuntimeError(f"Could not find lang_code for {prefix} for {project_name}. Not present on scripts sheet in {workbook_file}.")
+                        raise RuntimeError(
+                            f"Could not find lang_code for {prefix} for {project_name}. Not present on scripts sheet in {workbook_file}."
+                        )
 
                 # Special case: val,test pair uses only first source
                 # The user example showed: src: tgl-TCB (not a list)
