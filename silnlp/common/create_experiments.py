@@ -261,7 +261,7 @@ def create_config(mapping_type, lang_codes, src_list, trg, corpus_books, test_bo
     return config
 
 
-def write_config_file(row, main_folder, overwrite):
+def write_config_file(row, main_folder, script_map, overwrite):
 
     language = row["Target_language"]
     series = row["Series"]
@@ -472,9 +472,9 @@ def collect_results(wb, main_folder, valid_rows, workbook_file, overwrite):
                 count_cached += 1
             else:
                 count_read += 1
-            # print(
-            #    f"Found results for {language}_{mapping} (scores:{'read' if need_scores else 'cached'} lines:{'read' if need_lines else 'cached'} tok:{'read' if need_tok else 'cached'})"
-            # )
+            print(
+                f"Found results for {language}_{mapping} (scores:{'read' if need_scores else 'cached'} lines:{'read' if need_lines else 'cached'} tok:{'read' if need_tok else 'cached'})"
+            )
 
     print(
         f"Found cached results for {count_cached} experiments and attempted to collect results for {count_read} experiments."
@@ -790,7 +790,7 @@ def main():
     parser.add_argument("folder", help="Root experiment folder name (relative to mt_experiments_dir).")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing experiment configs or results.")
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--create", type=str, help="Create a series of experiment folders with their config.yml files.")
+    group.add_argument("--create", help="Create a series of experiment folders with their config.yml files.")
     group.add_argument("--collect-scripts", action="store_true", help="Update the scripts sheet.")
     group.add_argument("--collect-results", action="store_true", help="Collect the results of the experiments.")
     group.add_argument("--analyze", action="store_true", help="Analyse the results.")
@@ -842,7 +842,7 @@ def main():
 
     if args.create:
         for row in valid_rows:
-            write_config_file(row, main_folder, args.overwrite)
+            write_config_file(row, main_folder, script_map, args.overwrite)
 
     if args.collect_results or args.collect_and_analyze:
         wb, results = collect_results(wb, main_folder, valid_rows, workbook_file, args.overwrite)
