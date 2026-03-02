@@ -1,5 +1,6 @@
 import argparse
 import shutil
+import time
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Set
@@ -43,8 +44,7 @@ class Verse:
 
 class VerseCollector(VerseRange):
     @abstractmethod
-    def add_verse(self, verse: Verse) -> None:
-        ...
+    def add_verse(self, verse: Verse) -> None: ...
 
 
 @dataclass
@@ -173,8 +173,7 @@ class VerseSegmenter(ABC):
         target_tokens: List[str],
         source_verse_token_offsets: List[int],
         word_alignments: WordAlignments,
-    ) -> List[int]:
-        ...
+    ) -> List[int]: ...
 
     def segment_verses(
         self,
@@ -507,9 +506,15 @@ class ParallelPassageBuilder(VerseCollector):
 
 
 class ParallelPassageCollectionFactory:
-    def __init__(self, save_alignments: bool = False, use_saved_alignments: bool = False):
+    def __init__(
+        self,
+        save_alignments: bool = False,
+        use_saved_alignments: bool = False,
+        alignment_runs: int = 1,
+    ):
         self._save_alignments = save_alignments
         self._use_saved_alignments = use_saved_alignments
+        self._alignment_runs = max(1, alignment_runs)
 
     def create(self, source_project_name: str, target_passage_file: Path) -> "ParallelPassageCollection":
         if self._use_saved_alignments:
@@ -521,7 +526,11 @@ class ParallelPassageCollectionFactory:
         return ParallelPassageCollection(
             source_project_name,
             target_passage_file,
-            EflomalAlignmentGenerator(self._save_alignments, target_passage_file),
+            EflomalAlignmentGenerator(
+                self._save_alignments,
+                target_passage_file,
+                self._alignment_runs,
+            ),
         )
 
 
@@ -532,9 +541,15 @@ class AlignmentGenerator(ABC):
 
 
 class EflomalAlignmentGenerator(AlignmentGenerator):
-    def __init__(self, save_alignments: bool = False, target_passage_file: Optional[Path] = None):
+    def __init__(
+        self,
+        save_alignments: bool = False,
+        target_passage_file: Optional[Path] = None,
+        num_runs: int = 1,
+    ):
         self._save_alignments = save_alignments
         self._target_passage_file = target_passage_file
+        self._num_runs = max(1, num_runs)
 
     def generate(self, source_passages: List[str], target_passages: List[str]) -> Generator[WordAlignments, None, None]:
         with TemporaryDirectory() as td:
@@ -543,15 +558,107 @@ class EflomalAlignmentGenerator(AlignmentGenerator):
             trg_path = Path(td, "trg_align.txt")
             write_corpus(src_path, source_passages)
             write_corpus(trg_path, target_passages)
-            compute_alignment_scores(Path(td, "src_align.txt"), Path(td, "trg_align.txt"), "eflomal", align_path)
+            if self._num_runs == 1:
+                t0 = time.perf_counter()
+                compute_alignment_scores(
+                    Path(td, "src_align.txt"),
+                    Path(td, "trg_align.txt"),
+                    "eflomal",
+                    align_path,
+                )
+                elapsed = time.perf_counter() - t0
+                print(
+                    f"Alignment completed in {f'{int(elapsed // 60)}m {elapsed % 60:.2f}s' if elapsed >= 60 else f'{elapsed:.2f}s'}"
+                )
 
-            for line in load_corpus(align_path):
-                yield WordAlignments(AlignedWordPair.from_string(line))
+                for line in load_corpus(align_path):
+                    yield WordAlignments(AlignedWordPair.from_string(line))
+            else:
+                run_alignment_lines: List[List[str]] = []
+                all_runs_start = time.perf_counter()
+                for run_idx in range(self._num_runs):
+                    run_align_path = Path(td, f"sym-align.{run_idx}.txt")
+                    t0 = time.perf_counter()
+                    compute_alignment_scores(
+                        Path(td, "src_align.txt"),
+                        Path(td, "trg_align.txt"),
+                        "eflomal",
+                        run_align_path,
+                    )
+                    elapsed = time.perf_counter() - t0
+                    print(
+                        f"Alignment run {run_idx + 1}/{self._num_runs} completed in {f'{int(elapsed // 60)}m {elapsed % 60:.2f}s' if elapsed >= 60 else f'{elapsed:.2f}s'}"
+                    )
+                    current_run_lines = list(load_corpus(run_align_path))
+                    run_alignment_lines.append(current_run_lines)
+
+                    if self._save_alignments:
+                        assert self._target_passage_file is not None
+                        run_saved_alignments_file = self._target_passage_file.with_suffix(
+                            f".alignments.run{run_idx + 1}.txt"
+                        )
+                        with open(run_saved_alignments_file, "w", encoding="utf-8") as f:
+                            for line in current_run_lines:
+                                f.write(line + "\n")
+
+                elapsed = time.perf_counter() - all_runs_start
+                print(
+                    f"All {self._num_runs} alignment runs completed in {f'{int(elapsed // 60)}m {elapsed % 60:.2f}s' if elapsed >= 60 else f'{elapsed:.2f}s'}"
+                )
+
+                expected_rows = len(source_passages)
+                for run_idx, run_lines in enumerate(run_alignment_lines):
+                    if len(run_lines) != expected_rows:
+                        raise ValueError(
+                            f"Alignment run {run_idx + 1} produced {len(run_lines)} rows; " f"expected {expected_rows}."
+                        )
+
+                averaging_start = time.perf_counter()
+                assert self._target_passage_file is not None
+                debug_file_path = self._target_passage_file.with_suffix(".alignments.excluded.txt")
+                averaged_alignment_lines: List[str] = []
+                with open(debug_file_path, "w", encoding="utf-8") as debug_file:
+                    for row_idx in range(expected_rows):
+                        pair_counts: Dict[tuple[int, int], int] = defaultdict(int)
+                        for run_lines in run_alignment_lines:
+                            for pair in AlignedWordPair.from_string(run_lines[row_idx]):
+                                key = (pair.source_index, pair.target_index)
+                                pair_counts[key] += 1
+
+                        averaged_pairs = [pair for pair, count in pair_counts.items() if (count / self._num_runs) > 0.5]
+                        averaged_pairs.sort()
+                        averaged_line = " ".join(f"{src}-{trg}" for src, trg in averaged_pairs)
+                        averaged_alignment_lines.append(averaged_line)
+
+                        excluded = sorted(
+                            (pair, count) for pair, count in pair_counts.items() if (count / self._num_runs) <= 0.5
+                        )
+                        if excluded:
+                            excluded_str = ", ".join(
+                                f"{src}-{trg} ({count}/{self._num_runs} runs)" for (src, trg), count in excluded
+                            )
+                            debug_file.write(f"Row {row_idx}: excluded pairs: {excluded_str}\n")
+
+                        if len(averaged_pairs) == 0:
+                            yield WordAlignments([])
+                        else:
+                            yield WordAlignments(AlignedWordPair.from_string(averaged_line))
+
+                print(f"Excluded pairs debug info saved to {debug_file_path}")
+                elapsed = time.perf_counter() - averaging_start
+                print(
+                    f"Averaging completed in {f'{int(elapsed // 60)}m {elapsed % 60:.2f}s' if elapsed >= 60 else f'{elapsed:.2f}s'}"
+                )
 
             if self._save_alignments:
                 assert self._target_passage_file is not None
                 saved_alignments_file = self._target_passage_file.with_suffix(".alignments.txt")
-                shutil.copy(align_path, saved_alignments_file)
+                if self._num_runs == 1:
+                    shutil.copy(align_path, saved_alignments_file)
+                else:
+                    with open(saved_alignments_file, "w", encoding="utf-8") as f:
+                        for averaged_line in averaged_alignment_lines:
+                            f.write(averaged_line + "\n")
 
 
 class SavedAlignmentGenerator(AlignmentGenerator):
@@ -731,12 +838,20 @@ def main() -> None:
         default=None,
         action="store_true",
     )
+    parser.add_argument(
+        "--alignment-runs",
+        help="Number of times to run alignment and average the results",
+        default=1,
+        type=int,
+    )
     parser.add_argument("--vref", help="Output vref file for target verses", default=None, action="store_true")
     args = parser.parse_args()
 
-    parallel_passages = ParallelPassageCollectionFactory(args.save_alignments, args.use_saved_alignments).create(
-        args.source_project, Path(args.target_passages)
-    )
+    parallel_passages = ParallelPassageCollectionFactory(
+        args.save_alignments,
+        args.use_saved_alignments,
+        args.alignment_runs,
+    ).create(args.source_project, Path(args.target_passages))
     src_segmented_passages = parallel_passages.get_source_segmented_passages()
 
     verse_segmenter = FewestCrossedAlignmentsVerseSegmenter()
