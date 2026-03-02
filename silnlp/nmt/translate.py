@@ -24,14 +24,22 @@ LOGGER = logging.getLogger((__package__ or "") + ".translate")
 def convert_usfm_to_vref(usfm_path: Path, vref_path: Path) -> None:
     corpus = UsfmFileTextCorpus(usfm_path.parent, file_pattern=usfm_path.name)
     ref_corpus = create_versification_ref_corpus()
-    with (
-        vref_path.open("w", encoding="utf-8", newline="\n") as output_stream,
-        extract_scripture_corpus(corpus, ref_corpus) as output,
-    ):
-        for line, _, _ in output:
-            output_stream.write(line + "\n")
 
-
+    tmp_vref_path = vref_path.with_suffix(vref_path.suffix + ".tmp")
+    try:
+        with (
+            tmp_vref_path.open("w", encoding="utf-8", newline="\n") as output_stream,
+            extract_scripture_corpus(corpus, ref_corpus) as output,
+        ):
+            for line, _, _ in output:
+                output_stream.write(line + "\n")
+        os.replace(tmp_vref_path, vref_path)
+    except Exception:
+        try:
+            tmp_vref_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 class NMTTranslator(Translator):
     def __init__(self, model: NMTModel, checkpoint: Union[CheckpointType, str, int]) -> None:
         self._model: NMTModel = model
