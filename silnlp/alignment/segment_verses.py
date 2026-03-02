@@ -518,6 +518,17 @@ class ParallelPassageCollectionFactory:
 
     def create(self, source_project_name: str, target_passage_file: Path) -> "ParallelPassageCollection":
         if self._use_saved_alignments:
+            if self._alignment_runs > 1:
+                return ParallelPassageCollection(
+                    source_project_name,
+                    target_passage_file,
+                    EflomalAlignmentGenerator(
+                        self._save_alignments,
+                        target_passage_file,
+                        self._alignment_runs,
+                        use_saved_alignments=True,
+                    ),
+                )
             alignment_file = target_passage_file.with_suffix(".alignments.txt")
             if not alignment_file.exists():
                 raise FileNotFoundError(f"Saved alignment file {alignment_file} not found")
@@ -546,10 +557,12 @@ class EflomalAlignmentGenerator(AlignmentGenerator):
         save_alignments: bool = False,
         target_passage_file: Optional[Path] = None,
         num_runs: int = 1,
+        use_saved_alignments: bool = False,
     ):
         self._save_alignments = save_alignments
         self._target_passage_file = target_passage_file
         self._num_runs = max(1, num_runs)
+        self._use_saved_alignments = use_saved_alignments
 
     def generate(self, source_passages: List[str], target_passages: List[str]) -> Generator[WordAlignments, None, None]:
         with TemporaryDirectory() as td:
@@ -576,35 +589,52 @@ class EflomalAlignmentGenerator(AlignmentGenerator):
             else:
                 run_alignment_lines: List[List[str]] = []
                 all_runs_start = time.perf_counter()
+                ran_any = False
                 for run_idx in range(self._num_runs):
-                    run_align_path = Path(td, f"sym-align.{run_idx}.txt")
-                    t0 = time.perf_counter()
-                    compute_alignment_scores(
-                        Path(td, "src_align.txt"),
-                        Path(td, "trg_align.txt"),
-                        "eflomal",
-                        run_align_path,
+                    run_saved_alignments_file = (
+                        self._target_passage_file.with_suffix(f".alignments.run{run_idx + 1}.txt")
+                        if self._target_passage_file is not None
+                        else None
                     )
-                    elapsed = time.perf_counter() - t0
-                    print(
-                        f"Alignment run {run_idx + 1}/{self._num_runs} completed in {f'{int(elapsed // 60)}m {elapsed % 60:.2f}s' if elapsed >= 60 else f'{elapsed:.2f}s'}"
-                    )
-                    current_run_lines = list(load_corpus(run_align_path))
-                    run_alignment_lines.append(current_run_lines)
-
-                    if self._save_alignments:
-                        assert self._target_passage_file is not None
-                        run_saved_alignments_file = self._target_passage_file.with_suffix(
-                            f".alignments.run{run_idx + 1}.txt"
+                    if (
+                        self._use_saved_alignments
+                        and run_saved_alignments_file is not None
+                        and run_saved_alignments_file.exists()
+                    ):
+                        print(
+                            f"Loading saved alignments for run {run_idx + 1}/{self._num_runs} from {run_saved_alignments_file}"
                         )
-                        with open(run_saved_alignments_file, "w", encoding="utf-8") as f:
-                            for line in current_run_lines:
-                                f.write(line + "\n")
+                        current_run_lines = list(load_corpus(run_saved_alignments_file))
+                        run_alignment_lines.append(current_run_lines)
+                    else:
+                        ran_any = True
+                        run_align_path = Path(td, f"sym-align.{run_idx}.txt")
+                        t0 = time.perf_counter()
+                        compute_alignment_scores(
+                            Path(td, "src_align.txt"),
+                            Path(td, "trg_align.txt"),
+                            "eflomal",
+                            run_align_path,
+                        )
+                        elapsed = time.perf_counter() - t0
+                        print(
+                            f"Alignment run {run_idx + 1}/{self._num_runs} completed in {f'{int(elapsed // 60)}m {elapsed % 60:.2f}s' if elapsed >= 60 else f'{elapsed:.2f}s'}"
+                        )
+                        current_run_lines = list(load_corpus(run_align_path))
+                        run_alignment_lines.append(current_run_lines)
 
-                elapsed = time.perf_counter() - all_runs_start
-                print(
-                    f"All {self._num_runs} alignment runs completed in {f'{int(elapsed // 60)}m {elapsed % 60:.2f}s' if elapsed >= 60 else f'{elapsed:.2f}s'}"
-                )
+                        if (
+                            self._save_alignments or self._use_saved_alignments
+                        ) and run_saved_alignments_file is not None:
+                            with open(run_saved_alignments_file, "w", encoding="utf-8") as f:
+                                for line in current_run_lines:
+                                    f.write(line + "\n")
+
+                if ran_any:
+                    elapsed = time.perf_counter() - all_runs_start
+                    print(
+                        f"All {self._num_runs} alignment runs completed in {f'{int(elapsed // 60)}m {elapsed % 60:.2f}s' if elapsed >= 60 else f'{elapsed:.2f}s'}"
+                    )
 
                 expected_rows = len(source_passages)
                 for run_idx, run_lines in enumerate(run_alignment_lines):
