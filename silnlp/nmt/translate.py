@@ -32,6 +32,26 @@ def convert_usfm_to_vref(usfm_path: Path, vref_path: Path) -> None:
             output_stream.write(line + "\n")
 
 
+def export_vref_for_output(output_path: Path, produce_multiple_translations: bool, num_drafts: int = 1) -> None:
+    """Convert a translated USFM output file (or its per-draft siblings) to a vref .txt file.
+
+    When *produce_multiple_translations* is True the helper iterates over the
+    numbered draft files (``<stem>.<i><ext>``) up to *num_drafts* and converts
+    each one that exists.  Otherwise the single *output_path* is converted if
+    it exists.  The vref file is written next to the source file with the
+    suffix replaced by ``.vref.txt``.
+    """
+    if produce_multiple_translations:
+        for i in range(1, num_drafts + 1):
+            draft_path = output_path.with_suffix(f".{i}{output_path.suffix}")
+            if draft_path.exists():
+                vref_path = draft_path.with_suffix(".vref.txt")
+                convert_usfm_to_vref(draft_path, vref_path)
+    elif output_path.exists():
+        vref_path = output_path.with_suffix(".vref.txt")
+        convert_usfm_to_vref(output_path, vref_path)
+
+
 class NMTTranslator(Translator):
     def __init__(self, model: NMTModel, checkpoint: Union[CheckpointType, str, int]) -> None:
         self._model: NMTModel = model
@@ -138,16 +158,8 @@ class TranslationTask:
                         tags,
                     )
                     if vref:
-                        if produce_multiple_translations:
-                            num_drafts = config.infer.get("num_drafts", 1)
-                            for i in range(1, num_drafts + 1):
-                                draft_path = output_path.with_suffix(f".{i}{output_path.suffix}")
-                                if draft_path.exists():
-                                    vref_path = draft_path.with_suffix(".txt")
-                                    convert_usfm_to_vref(draft_path, vref_path)
-                        elif output_path.exists():
-                            vref_path = output_path.with_suffix(".txt")
-                            convert_usfm_to_vref(output_path, vref_path)
+                        num_drafts = config.infer.get("num_drafts", 1)
+                        export_vref_for_output(output_path, produce_multiple_translations, num_drafts)
                 except Exception:
                     translation_failed.append(book)
                     LOGGER.exception(f"Was not able to translate {book}.")
@@ -301,16 +313,8 @@ class TranslationTask:
                         tags=tags,
                     )
                     if vref:
-                        if produce_multiple_translations:
-                            num_drafts = config.infer.get("num_drafts", 1)
-                            for i in range(1, num_drafts + 1):
-                                draft_path = trg_file_path.with_suffix(f".{i}{trg_file_path.suffix}")
-                                if draft_path.exists():
-                                    vref_path = draft_path.with_suffix(".txt")
-                                    convert_usfm_to_vref(draft_path, vref_path)
-                        elif trg_file_path.exists():
-                            vref_path = trg_file_path.with_suffix(".txt")
-                            convert_usfm_to_vref(trg_file_path, vref_path)
+                        num_drafts = config.infer.get("num_drafts", 1)
+                        export_vref_for_output(trg_file_path, produce_multiple_translations, num_drafts)
 
     def _init_translation_task(self, experiment_suffix: str) -> Tuple[Translator, Config, str]:
         clearml = SILClearML(
