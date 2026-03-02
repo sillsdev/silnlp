@@ -456,7 +456,7 @@ def main() -> None:
             continue
 
         onboarding_project_path.mkdir(parents=True, exist_ok=True)
-        log_file = open(onboarding_project_path / "onboarding.log", "w", encoding="utf-8")
+        log_file = open(onboarding_project_path / f"{project_name}_onboarding.log", "w", encoding="utf-8")
         log_file.close()
         logging.basicConfig(
             level=logging.INFO,
@@ -505,8 +505,6 @@ def main() -> None:
         if args.align:
             align_config: dict = config.get("align", None)
             align_wrapper(project_name, align_config, args.overwrite)
-
-        # TODO: Add a log file or log folder to store any outputs from the console
 
 
 if __name__ == "__main__":
