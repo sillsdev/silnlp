@@ -16,9 +16,8 @@ from machine.corpora import FileParatextProjectSettingsParser
 from silnlp.common.clean_projects import process_single_project_for_cleaning
 from silnlp.nmt.config import Config
 
-from ..nmt.clearml_connection import TAGS_LIST, SILClearML
 from ..nmt.config_utils import create_config
-from .analyze import create_alignment_breakdown_file, create_summary_file, get_corpus_stats
+from .analyze import create_alignment_breakdown_file, get_corpus_stats
 from .collect_verse_counts import collect_verse_counts
 from .environment import SIL_NLP_ENV
 from .extract_corpora import extract_corpora
@@ -449,11 +448,25 @@ def main() -> None:
         project_name, local_project_path, copy_from = setup_local_project(project, args.copy_from, pwd, args.datestamp)
 
         onboarding_project_path = SIL_NLP_ENV.mt_experiments_dir / "OnboardingRequests" / project_name
+
         if onboarding_project_path.exists() and not args.overwrite:
             LOGGER.info(
                 f"Onboarding project folder '{onboarding_project_path}' already exists. Skipping onboarding for project '{project_name}'."
             )
             continue
+
+        onboarding_project_path.mkdir(parents=True, exist_ok=True)
+        log_file = open(onboarding_project_path / "onboarding.log", "w", encoding="utf-8")
+        log_file.close()
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            handlers=[
+                logging.StreamHandler(sys.stdout),
+                logging.FileHandler(log_file.name),
+            ],
+            force=True,
+        )
 
         if not args.no_clean:
             LOGGER.info(f"Cleaning Paratext project: {project_name}.")

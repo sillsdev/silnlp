@@ -23,7 +23,6 @@ try:
         task_name=args.task_name,
         tags=["silnlp-auto-onboarding"],
     )
-
     task.set_base_docker(
         docker_image="ghcr.io/sillsdev/silnlp:latest",
         docker_arguments=[
@@ -77,6 +76,8 @@ try:
             "--collect-verse-counts",
             "--datestamp",
             "--stats",
+            "--align",
+            "--overwrite",
         ]
         onboard_project.main()
     finally:
