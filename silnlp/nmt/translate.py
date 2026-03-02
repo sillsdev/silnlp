@@ -26,10 +26,10 @@ def export_vref_for_output(output_path: Path, produce_multiple_translations: boo
         for i in range(1, num_drafts + 1):
             draft_path = output_path.with_suffix(f".{i}{output_path.suffix}")
             if draft_path.exists():
-                vref_path = draft_path.with_suffix(".vref.txt")
+                vref_path = draft_path.with_suffix(".txt")
                 convert_usfm_to_vref(draft_path, vref_path)
     elif output_path.exists():
-        vref_path = output_path.with_suffix(".vref.txt")
+        vref_path = output_path.with_suffix(".txt")
         convert_usfm_to_vref(output_path, vref_path)
 
 
@@ -451,7 +451,7 @@ def main() -> None:
         "--vref",
         default=False,
         action="store_true",
-        help="Export the translated document in VREF format (text file aligned with vref.txt) in addition to USFM.",
+        help="Export the translated document in VREF format (original versification) in addition to USFM.",
     )
     parser.add_argument(
         "--clearml-queue",
