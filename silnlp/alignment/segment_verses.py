@@ -640,25 +640,23 @@ class EflomalAlignmentGenerator(AlignmentGenerator):
 
                 averaging_start = time.perf_counter()
                 assert self._target_passage_file is not None
-                debug_file_path = self._target_passage_file.with_suffix(".alignments.excluded.txt")
                 averaged_alignment_lines: List[str] = []
-                with open(debug_file_path, "w", encoding="utf-8") as debug_file:
-                    for row_idx in range(expected_rows):
-                        pair_counts: Dict[tuple[int, int], int] = defaultdict(int)
-                        for run_lines in run_alignment_lines:
-                            for pair in AlignedWordPair.from_string(run_lines[row_idx]):
-                                key = (pair.source_index, pair.target_index)
-                                pair_counts[key] += 1
+                for row_idx in range(expected_rows):
+                    pair_counts: Dict[tuple[int, int], int] = defaultdict(int)
+                    for run_lines in run_alignment_lines:
+                        for pair in AlignedWordPair.from_string(run_lines[row_idx]):
+                            key = (pair.source_index, pair.target_index)
+                            pair_counts[key] += 1
 
-                        averaged_pairs = [pair for pair, count in pair_counts.items() if (count / self._num_runs) > 0.5]
-                        averaged_pairs.sort()
-                        averaged_line = " ".join(f"{src}-{trg}" for src, trg in averaged_pairs)
-                        averaged_alignment_lines.append(averaged_line)
+                    averaged_pairs = [pair for pair, count in pair_counts.items() if (count / self._num_runs) > 0.5]
+                    averaged_pairs.sort()
+                    averaged_line = " ".join(f"{src}-{trg}" for src, trg in averaged_pairs)
+                    averaged_alignment_lines.append(averaged_line)
 
-                        if len(averaged_pairs) == 0:
-                            yield WordAlignments([])
-                        else:
-                            yield WordAlignments(AlignedWordPair.from_string(averaged_line))
+                    if len(averaged_pairs) == 0:
+                        yield WordAlignments([])
+                    else:
+                        yield WordAlignments(AlignedWordPair.from_string(averaged_line))
 
                 elapsed = time.perf_counter() - averaging_start
                 print(
