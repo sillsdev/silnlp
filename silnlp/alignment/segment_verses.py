@@ -506,12 +506,7 @@ class ParallelPassageBuilder(VerseCollector):
 
 
 class ParallelPassageCollectionFactory:
-    def __init__(
-        self,
-        save_alignments: bool = False,
-        use_saved_alignments: bool = False,
-        alignment_runs: int = 1,
-    ):
+    def __init__(self, save_alignments: bool = False, use_saved_alignments: bool = False, alignment_runs: int = 1):
         self._save_alignments = save_alignments
         self._use_saved_alignments = use_saved_alignments
         self._alignment_runs = max(1, alignment_runs)
@@ -660,21 +655,11 @@ class EflomalAlignmentGenerator(AlignmentGenerator):
                         averaged_line = " ".join(f"{src}-{trg}" for src, trg in averaged_pairs)
                         averaged_alignment_lines.append(averaged_line)
 
-                        excluded = sorted(
-                            (pair, count) for pair, count in pair_counts.items() if (count / self._num_runs) <= 0.5
-                        )
-                        if excluded:
-                            excluded_str = ", ".join(
-                                f"{src}-{trg} ({count}/{self._num_runs} runs)" for (src, trg), count in excluded
-                            )
-                            debug_file.write(f"Row {row_idx}: excluded pairs: {excluded_str}\n")
-
                         if len(averaged_pairs) == 0:
                             yield WordAlignments([])
                         else:
                             yield WordAlignments(AlignedWordPair.from_string(averaged_line))
 
-                print(f"Excluded pairs debug info saved to {debug_file_path}")
                 elapsed = time.perf_counter() - averaging_start
                 print(
                     f"Averaging completed in {f'{int(elapsed // 60)}m {elapsed % 60:.2f}s' if elapsed >= 60 else f'{elapsed:.2f}s'}"
