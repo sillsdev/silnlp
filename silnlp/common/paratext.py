@@ -523,7 +523,7 @@ def check_versification(project_dir: str, versification_error_output_path: str) 
     errors = FileParatextProjectVersificationErrorDetector(project_dir).get_usfm_versification_errors()
     if len(errors) > 0:
         LOGGER.warning(f"Detected {len(errors)} versification errors. See {versification_error_output_path} for more details.")
-        with open(versification_error_output_path, 'w') as f:
+        with open(versification_error_output_path, 'w', encoding='utf-8') as f:
             for error in errors:
                 if error.type == UsfmVersificationErrorType.INVALID_CHAPTER_NUMBER:
                     f.write(f"Invalid chapter number error in project {error.project_name} at “{error.actual_verse_ref}”.\n")
