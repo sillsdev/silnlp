@@ -75,14 +75,10 @@ from transformers.utils.logging import tqdm
 
 from ..common.corpus import Term, count_lines, get_terms
 from ..common.environment import SIL_NLP_ENV
-from ..common.translator import (
-    DraftGroup,
-    SentenceTranslation,
-    SentenceTranslationGroup,
-    generate_test_confidence_files,
-)
+from ..common.translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup
+from ..common.translator import generate_confidence_files
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, get_mt_exp_dir, merge_dict
-from .config import CheckpointType, Config, NMTModel
+from .config import SUPPORTED_GLOSS_ISOS, CheckpointType, Config, NMTModel
 from .corpora import DataFile
 from .tokenizer import NullTokenizer, Tokenizer
 
@@ -730,20 +726,20 @@ class HuggingFaceConfig(Config):
             if terms_config["include_glosses"]:
                 gloss_iso: Optional[str] = str(terms_config["include_glosses"]).lower()
                 if gloss_iso == "true":
-                    src_gloss_iso = list(self.src_isos.intersection(["en", "fr", "id", "es"]))
-                    trg_gloss_iso = list(self.trg_isos.intersection(["en", "fr", "id", "es"]))
+                    src_gloss_iso = list(self.src_isos.intersection(SUPPORTED_GLOSS_ISOS))
+                    trg_gloss_iso = list(self.trg_isos.intersection(SUPPORTED_GLOSS_ISOS))
                     if src_gloss_iso:
                         gloss_iso = src_gloss_iso[0]
                     elif trg_gloss_iso:
                         gloss_iso = trg_gloss_iso[0]
                     else:
                         LOGGER.warning(
-                            "Glosses could not be included. No source or target language matches any of the supported gloss language codes: en, fr, id, es."
+                            f"Glosses could not be included. No source or target language matches any of the supported gloss language codes: {', '.join(SUPPORTED_GLOSS_ISOS)}."
                         )
                         gloss_iso = None
-                elif gloss_iso not in ["en", "fr", "id", "es"]:
+                elif gloss_iso not in SUPPORTED_GLOSS_ISOS:
                     LOGGER.warning(
-                        f"Gloss language code, {gloss_iso}, does not match the supported gloss language codes: en, fr, id, es."
+                        f"Gloss language code, {gloss_iso}, does not match the supported gloss language codes: {', '.join(SUPPORTED_GLOSS_ISOS)}."
                     )
                     gloss_iso = None
             else:
@@ -879,7 +875,7 @@ class ModelOutputGroup:
         ]
 
     def convert_to_sentence_translation_group(self, tokenizer: PreTrainedTokenizer) -> SentenceTranslationGroup:
-        return list(
+        return SentenceTranslationGroup(
             [model_output.convert_to_sentence_translation(tokenizer) for model_output in self._get_model_outputs()]
         )
 
@@ -1220,11 +1216,9 @@ class HuggingFaceNMTModel(NMTModel):
                     out_file.write("\n".join(translated_draft.get_all_tokenized_translations()) + "\n")
 
                     if save_confidences:
-                        generate_test_confidence_files(
+                        generate_confidence_files(
                             translated_draft,
-                            translation_path,
-                            produce_multiple_translations=produce_multiple_translations,
-                            draft_index=draft_index,
+                            translation_draft_path,
                         )
 
     def _translate_test_sentences(
@@ -1957,43 +1951,40 @@ class SilTranslationPipeline(TranslationPipeline):
             return_dict_in_generate=True,
         )
 
-        if isinstance(output, BeamSearchEncoderDecoderOutput):
-            output_ids = output.sequences
-            beam_indices = output.beam_indices
-            scores = output.scores
-            sequences_scores = output.sequences_scores
-        elif isinstance(output, GreedySearchEncoderDecoderOutput):
-            output_ids = output.sequences
-            beam_indices = torch.zeros_like(output_ids)
-            assert output.scores is not None
-            scores = tuple(torch.nn.functional.log_softmax(logits, dim=-1) for logits in output.scores)
-            sequences_scores = None
-        else:
-            raise RuntimeError("Cannot postprocess the output of the model.")
-
-        assert beam_indices is not None and scores is not None
-        out_b = output_ids.shape[0]
-        num_beams = scores[0].shape[0] // in_b
-        n_sequences = out_b // in_b
-        start_index = 0
-        if self.model.config.decoder_start_token_id is not None:
-            start_index = 1
-        indices = torch.stack(
-            (
-                torch.arange(output_ids.shape[1] - start_index, device=output_ids.device).expand(in_b, n_sequences, -1),
-                torch.reshape(beam_indices[:, start_index:] % num_beams, (in_b, n_sequences, -1)),
-                torch.reshape(output_ids[:, start_index:], (in_b, n_sequences, -1)),
-            ),
-            dim=3,
+        output_ids = output.sequences
+        beam_indices = getattr(output, "beam_indices", None)
+        transition_scores = self.model.compute_transition_scores(
+            output_ids,
+            output.scores,
+            beam_indices,
+            normalize_logits=True,
         )
-        scores = torch.stack(scores, dim=0).reshape(len(scores), in_b, num_beams, -1).transpose(0, 1)
-        scores = torch_gather_nd(scores, indices, 1)
-        if self.model.config.decoder_start_token_id is not None:
-            scores = torch.cat((torch.zeros(scores.shape[0], scores.shape[1], 1, device=scores.device), scores), dim=2)
-        output_ids = output_ids.reshape(in_b, n_sequences, *output_ids.shape[1:])
+        sequences_scores = getattr(output, "sequences_scores", None)
+
+        out_b, seq_len = output_ids.shape
+        n_sequences = out_b // in_b
+
+        ts_len = transition_scores.shape[1]
+        if ts_len == seq_len:
+            token_logprobs = transition_scores
+        elif ts_len == seq_len - 1:
+            token_logprobs = torch.cat(
+                [
+                    torch.zeros(out_b, 1, device=transition_scores.device, dtype=transition_scores.dtype),
+                    transition_scores,
+                ],
+                dim=1,
+            )
+        else:
+            raise RuntimeError(
+                f"Unexpected transition_scores length {ts_len} for sequences length {seq_len}. "
+                "Cannot align token scores robustly."
+            )
+        output_ids = output_ids.reshape(in_b, n_sequences, seq_len)
+        token_logprobs = token_logprobs.reshape(in_b, n_sequences, seq_len)
         return {
             "output_ids": output_ids,
-            "scores": scores,
+            "scores": token_logprobs,
             "sequences_scores": sequences_scores,
         }
 

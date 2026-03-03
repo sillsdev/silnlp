@@ -1,0 +1,115 @@
+ben:
+- bn-SBCL
+- bn-BCU_2024
+- bn-BENCLBSI
+- ben-ben2017
+- bn-benirv
+- bn-BOVBSI
+- bn-IRVBen
+- bn-OBCV
+- bn-SBCL
+eng:
+- eng-BSB
+- en-CEVUS06
+- en-ESVUS16
+- eng-GNBDC
+- eng-GNTD
+- en-LSV
+- en-NASB
+- en-NET08
+- en-NIV11R
+- en-NIV84
+- en-NIrV
+- en-NLT07
+- eng-NRSV
+- eng-NRSV
+- en-WEB
+- en-NIV11
+- en-NLT07
+fra:
+- fra-TOB
+- fr-PDV
+- fr-FRC97
+- fr-FCR19DBL
+- fr-BDS
+- fra-LBS21
+- fr-LS1910
+guj:
+- gu-GERV
+- gu-guj
+- gu-GUJCL-BSI
+- gu-GUJOVBSI
+- gu-IRVGuj
+hin:
+- hi-HERV
+- hi-HINCLBSI
+- hi-hinirv
+- hi-HINOVBSI
+- hi-IEVHin
+- hi-IRVHin
+- hi-OHCV
+ind:
+- id-TBI
+- id-BIMK
+- ind-TSI
+- id-KSTZI
+- id-ILB
+kan:
+- kn-kanirv
+- kn-KANJVBSI
+- kn-KANOVBSI
+- kn-KCL-BSI
+- kn-OKCV
+mal:
+- ml-MALOVBSI
+- ml-IRVMAL
+- ml-OMCV
+npi:
+- npi-NNRV
+- npi-SNHB
+ory:
+- ory-IRVOry
+- ory-ODCLBSI
+- ory-ODIAOVBSI
+pes:
+- pes-NMV
+- pes-TPV
+- pes-PCB
+- pes-OPCB
+- pes-PRB
+spa:
+- es-BHTI
+- es-BLP
+- es-DHH83
+- es-DHH94
+- es-DHHE
+- es-LBLA
+- es-NBLA
+- es-NTV
+- es-NVI-S
+- es-PDT
+- spa-RV09
+- spa-RVR95
+- spa-RVR1960
+- es-TLA
+swh:
+- swh-ONEN
+- swh-NMM
+- swh-ONEN
+- swh-SRUV06
+- swh-SUV
+tam:
+- ta-OTCV
+- ta-TAOVBSI
+- ta-tamirv
+tel:
+- te-IRVTel
+- te-OTSA
+- te-TEL29OV
+- te-TELOV-BSI
+- te-TELUBSI
+urd:
+- urd-PBSU
+- ur-IRVUrd
+- ur-urdgvh
+- ur-URDGVU
