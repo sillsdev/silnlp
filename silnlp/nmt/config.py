@@ -32,7 +32,7 @@ from ..common.corpus import (
     write_corpus,
 )
 from ..common.environment import SIL_NLP_ENV
-from ..common.translator import SentenceTranslationGroup
+from ..common.translation_data_structures import SentenceTranslationGroup
 from ..common.utils import NoiseMethod, Side, add_tags_to_dataframe, add_tags_to_sentence, get_mt_exp_dir, set_seed
 from .augment import AugmentMethod
 from .corpora import (
@@ -53,6 +53,8 @@ LOGGER = logging.getLogger((__package__ or "") + ".config")
 ALIGNMENT_SCORES_FILE = re.compile(r"([a-z]{2,3}-.+)_([a-z]{2,3}-.+)")
 
 SUPPORTED_GLOSS_ISOS = ["fr", "en", "id", "es", "pt"]
+
+
 class CheckpointType(Enum):
     LAST = auto()
     BEST = auto()
