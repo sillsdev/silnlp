@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Generator, Iterable, List, Optional, Tuple, Union
 
+from machine.corpora import UsfmFileTextCorpus, create_versification_ref_corpus, extract_scripture_corpus
 from machine.scripture import VerseRef, book_number_to_id, get_chapters
 
 from ..common.environment import SIL_NLP_ENV
@@ -19,6 +20,39 @@ from .config import CheckpointType, Config, NMTModel, get_mt_exp_dir
 from .quality_estimation import estimate_quality
 
 LOGGER = logging.getLogger((__package__ or "") + ".translate")
+
+
+def export_vref_for_output(output_path: Path, produce_multiple_translations: bool, num_drafts: int = 1) -> None:
+    if produce_multiple_translations:
+        for i in range(1, num_drafts + 1):
+            draft_path = output_path.with_suffix(f".{i}{output_path.suffix}")
+            if draft_path.exists():
+                vref_path = draft_path.with_suffix(".txt")
+                convert_usfm_to_vref(draft_path, vref_path)
+    elif output_path.exists():
+        vref_path = output_path.with_suffix(".txt")
+        convert_usfm_to_vref(output_path, vref_path)
+
+
+def convert_usfm_to_vref(usfm_path: Path, vref_path: Path) -> None:
+    corpus = UsfmFileTextCorpus(usfm_path.parent, file_pattern=usfm_path.name)
+    ref_corpus = create_versification_ref_corpus()
+
+    tmp_vref_path = vref_path.with_suffix(vref_path.suffix + ".tmp")
+    try:
+        with (
+            tmp_vref_path.open("w", encoding="utf-8", newline="\n") as output_stream,
+            extract_scripture_corpus(corpus, ref_corpus) as output,
+        ):
+            for line, _, _ in output:
+                output_stream.write(line + "\n")
+        os.replace(tmp_vref_path, vref_path)
+    except Exception:
+        try:
+            tmp_vref_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 
 
 class NMTTranslator(Translator):
@@ -64,6 +98,7 @@ class TranslationTask:
         verse_test_scores_path: Optional[Path] = None,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
         tags: Optional[List[str]] = None,
+        vref: bool = False,
     ) -> None:
         book_nums = get_chapters(books)
         translator, config, step_str = self._init_translation_task(
@@ -128,6 +163,9 @@ class TranslationTask:
                         config.corpus_pairs,
                         tags,
                     )
+                    if vref:
+                        num_drafts = config.infer.get("num_drafts", 1)
+                        export_vref_for_output(output_path, produce_multiple_translations, num_drafts)
                     if save_confidences:
                         confidence_files.extend(output_path.parent.glob(f"{output_path.stem}*{CONFIDENCE_SUFFIX}"))
                 except Exception:
@@ -217,6 +255,7 @@ class TranslationTask:
         verse_test_scores_path: Optional[Path] = None,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
         tags: Optional[List[str]] = None,
+        vref: bool = False,
     ) -> None:
         translator, config, step_str = self._init_translation_task(
             experiment_suffix=f"_{self.checkpoint}_{os.path.basename(src)}"
@@ -300,6 +339,9 @@ class TranslationTask:
                         training_corpus_pairs=config.corpus_pairs,
                         tags=tags,
                     )
+                    if vref:
+                        num_drafts = config.infer.get("num_drafts", 1)
+                        export_vref_for_output(trg_file_path, produce_multiple_translations, num_drafts)
 
                 if save_confidences:
                     confidence_files.extend(trg_file_path.parent.glob(f"{trg_file_path.stem}*{CONFIDENCE_SUFFIX}"))
@@ -439,6 +481,12 @@ def main() -> None:
         help="The quote convention for the target project. If not specified, it will be detected automatically.",
     )
     parser.add_argument(
+        "--vref",
+        default=False,
+        action="store_true",
+        help="Export the translated document in VREF format (original versification) in addition to USFM.",
+    )
+    parser.add_argument(
         "--clearml-queue",
         default=None,
         type=str,
@@ -522,6 +570,7 @@ def main() -> None:
             args.quality_estimation,
             verse_test_scores_path,
             postprocess_handler,
+            vref=args.vref,
         )
     elif args.src_prefix is not None:
         if args.debug:
@@ -563,6 +612,7 @@ def main() -> None:
             args.quality_estimation,
             verse_test_scores_path,
             postprocess_handler,
+            vref=args.vref,
         )
     else:
         raise RuntimeError("A Scripture book, file, or file prefix must be specified.")
