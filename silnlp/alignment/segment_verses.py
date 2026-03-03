@@ -618,9 +618,7 @@ class EflomalAlignmentGenerator(AlignmentGenerator):
                         current_run_lines = list(load_corpus(run_align_path))
                         run_alignment_lines.append(current_run_lines)
 
-                        if (
-                            self._save_alignments or self._use_saved_alignments
-                        ) and run_saved_alignments_file is not None:
+                        if self._save_alignments and run_saved_alignments_file is not None:
                             with open(run_saved_alignments_file, "w", encoding="utf-8") as f:
                                 for line in current_run_lines:
                                     f.write(line + "\n")
@@ -853,12 +851,15 @@ def main() -> None:
     )
     parser.add_argument(
         "--alignment-runs",
-        help="Number of times to run alignment and average the results",
+        help="Number of times to run alignment and average the results (must be >= 1)",
         default=1,
         type=int,
     )
     parser.add_argument("--vref", help="Output vref file for target verses", default=None, action="store_true")
     args = parser.parse_args()
+
+    if args.alignment_runs < 1:
+        parser.error(f"--alignment-runs must be >= 1, got {args.alignment_runs}")
 
     parallel_passages = ParallelPassageCollectionFactory(
         args.save_alignments,
