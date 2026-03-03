@@ -3,6 +3,7 @@ import csv
 import logging
 import re
 from pathlib import Path
+from datetime import datetime
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -370,7 +371,7 @@ def collect_results(wb, main_folder, valid_rows, workbook_file, overwrite):
     """Collect results from all experiments and write to 'results' sheet.
     If not overwrite, reads existing results and only fetches data for missing groups."""
     if overwrite:
-        backup_workbook_file(wb, workbook_file)
+        backup_workbook(wb, workbook_file)
 
     count_cached, count_read = 0, 0
 
@@ -448,26 +449,24 @@ def collect_results(wb, main_folder, valid_rows, workbook_file, overwrite):
                 ]
 
             for s in scores:
-                all_results.append(
-                    [
-                        language,
-                        series,
-                        mapping,
-                        src1,
-                        src2,
-                        trg,
-                        train_lines,
-                        unique_train_lines,
-                        test_lines,
-                        tok_stats.get("src_mean_chars_per_token"),
-                        tok_stats.get("trg_mean_chars_per_token"),
-                        tok_stats.get("src_mean_tokens_per_verse"),
-                        tok_stats.get("trg_mean_tokens_per_verse"),
-                        s["Book"],
-                        s["BLEU"],
-                        s["chrF3++"],
-                    ]
-                )
+                all_results.append({
+                    "Target_language": language,
+                    "Series": series,
+                    "Mapping": mapping,
+                    "Source 1": src1,
+                    "Source 2": src2,
+                    "Target": trg,
+                    "train_lines": train_lines,
+                    "unique_train_lines": unique_train_lines,
+                    "test_lines": test_lines,
+                    "src_mean_chars_per_token": tok_stats.get("src_mean_chars_per_token"),
+                    "trg_mean_chars_per_token": tok_stats.get("trg_mean_chars_per_token"),
+                    "src_mean_tokens_per_verse": tok_stats.get("src_mean_tokens_per_verse"),
+                    "trg_mean_tokens_per_verse": tok_stats.get("trg_mean_tokens_per_verse"),
+                    "Book": s["Book"],
+                    "BLEU": s["BLEU"],
+                    "chrF3++": s["chrF3++"],
+                })
             if not need_scores and not need_lines and not need_tok:
                 count_cached += 1
             else:
@@ -486,7 +485,7 @@ def collect_results(wb, main_folder, valid_rows, workbook_file, overwrite):
     ws = wb.create_sheet("results")
     ws.append(RESULT_HEADERS)
     for r in all_results:
-        ws.append(r)
+        ws.append([r.get(h) for h in RESULT_HEADERS])
 
     return wb, all_results
 
@@ -569,6 +568,7 @@ def create_analysis_sheets(wb):
             ws_out.append(
                 [
                     lang,
+                    series,
                     bleu_o2o,
                     bleu_mix,
                     bleu_m2m,
@@ -613,24 +613,22 @@ def create_summary_sheet(wb):
     ws = wb.create_sheet("summary")
     ws.append(SUMMARY_HEADERS)
 
-    # Column indices (0-based) in analysis sheets for the four delta columns
+    # Column headers in analysis sheets must match these.
     delta_cols = {
-        ("BLEU", "m2m_mix"): 11,
-        ("BLEU", "mix_o2o"): 12,
-        ("chrF3++", "m2m_mix"): 13,
-        ("chrF3++", "mix_o2o"): 14,
+        ("BLEU", "m2m_mix"): "BLEU_delta_m2m_mix",
+        ("BLEU", "mix_o2o"): "BLEU_delta_mix_o2o",
+        ("chrF3++", "m2m_mix"): "chrF3++_delta_m2m_mix",
+        ("chrF3++", "mix_o2o"): "chrF3++_delta_mix_o2o",
     }
 
     for sheet_name in analysis_sheets:
         book = sheet_name.replace("analysis_", "")
-        ws_in = wb[sheet_name]
+        all_rows = read_sheet(wb, sheet_name)
 
-        # Read all data rows (skip header)
-        all_rows = list(ws_in.iter_rows(min_row=2, values_only=True))
-
-        for (metric, delta_type), col_idx in delta_cols.items():
+        for (metric, delta_type), col_name in delta_cols.items():
             values = [
-                row[col_idx] for row in all_rows if row[col_idx] is not None and isinstance(row[col_idx], (int, float))
+                float(row[col_name]) for row in all_rows
+                if row.get(col_name) not in (None, "") and isinstance(row[col_name], (int, float))
             ]
 
             n = len(values)
