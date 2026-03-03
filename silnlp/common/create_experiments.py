@@ -471,13 +471,13 @@ def collect_results(wb, main_folder, valid_rows, workbook_file, overwrite):
                 count_cached += 1
             else:
                 count_read += 1
-            print(
-                f"Found results for {language}_{mapping} (scores:{'read' if need_scores else 'cached'} lines:{'read' if need_lines else 'cached'} tok:{'read' if need_tok else 'cached'})"
-            )
+            # print(
+            #     f"Found results for {language}_{mapping} (scores:{'read' if need_scores else 'cached'} lines:{'read' if need_lines else 'cached'} tok:{'read' if need_tok else 'cached'})"
+            # )
 
-    print(
-        f"Found cached results for {count_cached} experiments and attempted to collect results for {count_read} experiments."
-    )
+    # print(
+    #     f"Found cached results for {count_cached} experiments and attempted to collect results for {count_read} experiments."
+    # )
 
     # Write to results sheet
     if "results" in wb.sheetnames:
@@ -786,6 +786,7 @@ def create_correlation_sheet(wb):
 def main():
     parser = argparse.ArgumentParser(description="Create NLLB experiment configurations with alignment and templates.")
     parser.add_argument("folder", help="Root experiment folder name (relative to mt_experiments_dir).")
+    parser.add_argument("--xlsxfile", default="All.xlsx", help="File name for the main spreadsheet.")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing experiment configs or results.")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--create", help="Create a series of experiment folders with their config.yml files.")
@@ -797,7 +798,7 @@ def main():
     args = parser.parse_args()
 
     main_folder = EXPERIMENTS_DIR / args.folder
-    workbook_file = main_folder / "experiments.xlsx"
+    workbook_file = main_folder / args.xlsxfile
 
     if not workbook_file.is_file():
         LOGGER.error(
@@ -853,12 +854,18 @@ def main():
         LOGGER.info(f"Created analysis sheets for books in {workbook_file.name}")
 
         wb = create_summary_sheet(wb)
-        wb = create_correlation_sheet(wb)
-        wb = add_charts_to_workbook(wb)
-        wb.save(workbook_file)
         LOGGER.info(f"Updated summary sheet in {workbook_file.name}")
+        
+        wb = create_correlation_sheet(wb)
         LOGGER.info(f"Created correlations sheet in {workbook_file}")
+        
+        wb = add_charts_to_workbook(wb)
         LOGGER.info(f"Added chart sheets to {workbook_file.name}")
+        
+        wb.save(workbook_file)
+        LOGGER.info(f"Saved Excel file to {workbook_file}")
+        
+        
 
         plot_diverging_deltas(wb, output_folder=main_folder)
 
