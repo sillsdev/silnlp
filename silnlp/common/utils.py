@@ -240,10 +240,11 @@ class NLTKSentenceTokenizer:
         except Exception:
             self._tokenizer = nltk.data.load("tokenizers/punkt/english.pickle")
 
-    def _initialize(self) -> None:
+    @classmethod
+    def _initialize(cls) -> None:
         nltk.download("punkt")
         nltk.download("punkt_tab")
-        NLTKSentenceTokenizer._is_initialized = True
+        cls._is_initialized = True
 
     def tokenize(self, text: str) -> List[str]:
         return self._tokenizer.tokenize(text)
