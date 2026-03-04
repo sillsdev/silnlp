@@ -859,15 +859,14 @@ def main():
         wb = create_correlation_sheet(wb)
         LOGGER.info(f"Created correlations sheet in {workbook_file}")
         
+        plot_diverging_deltas(wb, output_folder=main_folder)
         wb = add_charts_to_workbook(wb)
         LOGGER.info(f"Added chart sheets to {workbook_file.name}")
         
         wb.save(workbook_file)
         LOGGER.info(f"Saved Excel file to {workbook_file}")
         
-        
 
-        plot_diverging_deltas(wb, output_folder=main_folder)
 
     return 0
 
