@@ -387,9 +387,7 @@ def setup_local_project(
         project_name = project_name.replace("-", "_")
         LOGGER.info(f"New project name: '{project_name}'")
     if datestamp and not is_resource(project_name):
-        now = datetime.now()
-        datestamp = now.strftime("%Y_%m_%d")
-        project_name = f"{project_name}_{datestamp}"
+        project_name = append_datestamp(project_name)
         LOGGER.info(f"Datestamping project. New project name: {project_name}")
 
     if local_project_path and local_project_path.exists() and local_project_path.name != project_name:
@@ -400,6 +398,12 @@ def setup_local_project(
         local_project_path = new_local_project_path
 
     return project_name, local_project_path, copy_from
+
+
+def append_datestamp(project_name: str) -> str:
+    now = datetime.now()
+    datestamp = now.strftime("%Y_%m_%d")
+    return f"{project_name}_{datestamp}"
 
 
 def is_resource(project_name: str, copy_from: Path | None) -> bool:
@@ -441,9 +445,7 @@ def check_resource_hash(resource_name: str) -> bool:
 def update_resource(resource_name: str) -> None:
     old_resource_path = SIL_NLP_ENV.pt_projects_dir / resource_name
 
-    now = datetime.now()
-    datestamp = now.strftime("%Y_%m_%d")
-    new_resource_name = f"{old_resource_path.name}_{datestamp}"
+    new_resource_name = append_datestamp(old_resource_path.name)
     new_resource_path = old_resource_path.parent / new_resource_name
     old_resource_path.rename(new_resource_path)
 
