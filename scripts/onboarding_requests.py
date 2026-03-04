@@ -62,50 +62,53 @@ def get_onboarding_requests() -> list[dict]:
 
 def get_project_metadata(onboarding_request: dict) -> Tuple[str, Dict[str, str]]:
     request_metadata: Dict[str, str] = {}
-    project_name = ""
+    main_project_name = ""
     form_data = onboarding_request["submission"]["formData"]
     if form_data.get("partnerOrganization") != "none":
-        add_comment(
-            onboarding_request["id"], "This request is for a partner organization. Skipping automatic onboarding."
-        )
+        # add_comment(
+        #    onboarding_request["id"], "This request is for a partner organization. Skipping automatic onboarding."
+        # )
         return {}, ""
     project_keys = [
         "projectId",
         "sourceProjectA",
         "sourceProjectB",
+        "sourceProjectC",
         "draftingSourceProject",
     ]
 
     for key in project_keys:
-        # TODO: Get project name from SF ID for the main project
-        paratext_id = onboarding_request["submission"].get(key) if key == "projectId" else form_data.get(key)
+        id = onboarding_request["submission"].get(key) if key == "projectId" else form_data.get(key)
+        if not id:
+            continue
         response = send_request(
             RequestType.GET,
             ONBOARDING_REQUESTS_URL,
-            "getProjectMetadataByParatextId",
-            {"paratextId": paratext_id},
+            "getProjectMetadata",
+            {"scriptureForgeId": id} if key == "projectId" else {"paratextId": id},
         )
         metadata = response.json().get("result", {})
         print(f"Metadata for {key}: {metadata}")
         if key == "projectId":
-            project_name = metadata.get("projectShortName")
-        request_metadata[metadata.get("projectId")] = metadata.get("projectShortName")
+            main_project_name = metadata.get("shortName")
+        print(metadata)
+        request_metadata[metadata.get("id")] = (metadata.get("paratextID"), metadata.get("shortName"))
 
-    return request_metadata, project_name
+    return request_metadata, main_project_name
 
 
-def download_project(SF_id: str, request_id: str, project_short_name: str):
+def download_project(SF_id: str, main_project_name: str, project_short_name: str, paratext_id: str):
     project_url = f"{PROJECTS_URL}/{SF_id}/download"
     response = send_request(RequestType.GET, project_url, "getProjectDownloadLink", {"paratextId": SF_id})
-    os.makedirs(f"{ONBOARDING_PATH}/{request_id}", exist_ok=True)
-    with open(f"{ONBOARDING_PATH}/{request_id}/{project_short_name}.zip", "wb") as f:
+    os.makedirs(f"{ONBOARDING_PATH}/{main_project_name}_Request", exist_ok=True)
+    if len(paratext_id) == 16:
+        project_short_name = f"{project_short_name}_Resource"
+    with open(f"{ONBOARDING_PATH}/{main_project_name}_Request/{project_short_name}.zip", "wb") as f:
         f.write(response.content)
 
 
 onboarding_requests = get_onboarding_requests()
-# TODO: Distinguish between projects and resources
-# TODO: For resources, generate a hash and check if the hash on the bucket is the same, if so skip downloading it. Otherwise, rename the old version with a datestamp and download the new version. This will prevent unnecessary downloads and also keep a backup of old versions in case something goes wrong with the new version.
-
+print(onboarding_requests)
 onboarded_projects = []
 
 if not os.path.exists(f"{ONBOARDING_PATH}/onboarded_projects.log"):
@@ -120,19 +123,23 @@ for request in onboarding_requests:
 
 
 def process_request(request):
-    request_metadata, project_name = get_project_metadata(request)
-    for SF_id, project_short_name in request_metadata.items():
-        download_project(SF_id, request["id"], project_short_name)
-    task_name = f"Auto Onboarding - {project_name}"
+    request_metadata, main_project_name = get_project_metadata(request)
+    for SF_id, (paratext_id, project_short_name) in request_metadata.items():
+        download_project(SF_id, main_project_name, project_short_name, paratext_id)
+    task_name = f"Auto Onboarding - {main_project_name}"
     print(task_name)
+    align_isos = []
+    align_isos.append(request_metadata.get(request["submission"]["formData"].get("translationLanguageIsoCode"), ""))
+    align_isos.append(request_metadata.get(request["submission"]["formData"].get("backTranslationLanguageIsoCode"), ""))
     subprocess.run(
         [
             "python",
             f"{REPO_PATH}/scripts/automate_onboard_project.py",
-            "--task-name",
-            task_name,
+            main_project_name,
             "--dir",
-            request["id"],
+            f"{main_project_name}_Request",
+            "--align-isos",
+            *align_isos,
         ]
     )
     task: Task = Task.get_task(project_name="Onboarding", task_name=task_name, tags=["silnlp-auto-onboarding"])

@@ -6,14 +6,17 @@ from clearml import Task
 from clearml.backend_api.session.session import LoginError
 
 parser = argparse.ArgumentParser()
-parser.add_argument(
-    "--task-name", type=str, required=True, help="The name of the ClearML task to create for this onboarding request."
-)
+parser.add_argument("main-project", type=str, required=True, help="The name of the main Paratext project to onboard.")
 parser.add_argument(
     "--dir",
     type=str,
     required=True,
     help="The name of the directory in ONBOARDING_PATH to use as the source for onboarding.",
+)
+parser.add_argument(
+    "--align-isos",
+    nargs="+",
+    help="List of ISO codes to use for determining standard alignments to run.",
 )
 args = parser.parse_args()
 
@@ -66,8 +69,11 @@ try:
     old_argv = sys.argv
     onboard_projects_dir = f"/root/OnboardingProjects/{args.dir}"
     projects = os.listdir(onboard_projects_dir)
+    projects.remove(args.main_project)
     try:
         sys.argv = [
+            args.main_project,
+            "--projects",
             *projects,
             "--copy-from",
             onboard_projects_dir,
@@ -77,6 +83,7 @@ try:
             "--datestamp",
             "--stats",
             "--align",
+            *args.align_isos,
             "--overwrite",
         ]
         onboard_project.main()

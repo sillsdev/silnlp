@@ -1,6 +1,8 @@
 import argparse
 import getpass
+import hashlib
 import logging
+import os
 import re
 import shutil
 import sys
@@ -9,15 +11,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple
 
+import common.analyze as analyze
 import wildebeest.wb_analysis as wb_ana
 import yaml
 from machine.corpora import FileParatextProjectSettingsParser
 
 from silnlp.common.clean_projects import process_single_project_for_cleaning
+from silnlp.nmt.clearml_connection import TAGS_LIST
 from silnlp.nmt.config import Config
 
 from ..nmt.config_utils import create_config
-from .analyze import create_alignment_breakdown_file, get_corpus_stats
 from .collect_verse_counts import collect_verse_counts
 from .environment import SIL_NLP_ENV
 from .extract_corpora import extract_corpora
@@ -191,7 +194,7 @@ def get_extract_iso_code(extract_file: str) -> str:
     return iso_code
 
 
-def calculate_tokenization_stats(project_name: str, stats_config: dict = None, overwrite=False) -> None:
+def calculate_tokenization_stats(project_name: str, stats_config: dict, overwrite=False) -> None:
     stats_dir = SIL_NLP_ENV.mt_experiments_dir / "OnboardingRequests" / project_name / "stats"
 
     if stats_dir.exists() and not overwrite:
@@ -232,8 +235,16 @@ def calculate_tokenization_stats(project_name: str, stats_config: dict = None, o
     config.preprocess(stats=True, force_align=True)
 
 
-def align_wrapper(project_name: str, align_config: dict = None, overwrite=False) -> None:
-    align_output_dir = SIL_NLP_ENV.mt_experiments_dir / "OnboardingRequests" / project_name / "alignments"
+def align_wrapper(
+    project_name: str,
+    align_config: dict,
+    iso_codes: set[str],
+    clearml_queue: str,
+    clearml_tag: str,
+    overwrite=False,
+) -> None:
+    experiment_name = "OnboardingRequests" / project_name / "alignments"
+    align_output_dir = SIL_NLP_ENV.mt_experiments_dir / experiment_name
     if align_output_dir.exists() and not overwrite:
         LOGGER.info(f"Alignments output directory '{align_output_dir}' already exists. Skipping alignments.")
         return
@@ -246,16 +257,19 @@ def align_wrapper(project_name: str, align_config: dict = None, overwrite=False)
         return
 
     extract_file = extract_path.stem
-    iso_code = get_extract_iso_code(extract_file)
+    iso_codes.add(get_extract_iso_code(extract_file))
 
     with open("silnlp/assets/standard_alignments.yml", "r", encoding="utf-8") as f:
         standard_alignments = yaml.safe_load(f)
-        iso_standard_alignments = standard_alignments.get(iso_code, None)
-        if iso_standard_alignments is not None:
-            iso_standard_alignments = [alignment.strip() for alignment in iso_standard_alignments]
+        alignments = set()
+        for iso_code in iso_codes:
+            iso_standard_alignments = standard_alignments.get(iso_code, None)
+            if iso_standard_alignments is not None:
+                iso_standard_alignments = [alignment.strip() for alignment in iso_standard_alignments]
+                alignments.update(iso_standard_alignments)
     LOGGER.info(f"Running alignments on {extract_path}.")
     if align_config is None:
-        if iso_standard_alignments is None or len(iso_standard_alignments) == 0:
+        if alignments is None or len(alignments) == 0:
             LOGGER.error(f"No projects found to align with '{project_name}'. Skipping alignments.")
             return
         align_config = {
@@ -265,7 +279,7 @@ def align_wrapper(project_name: str, align_config: dict = None, overwrite=False)
                     {
                         "mapping": "many_to_many",
                         "src": extract_file,
-                        "trg": iso_standard_alignments,
+                        "trg": alignments,
                         "type": "train",
                     }
                 ],
@@ -287,8 +301,19 @@ def align_wrapper(project_name: str, align_config: dict = None, overwrite=False)
         SIL_NLP_ENV.mt_experiments_dir / "OnboardingRequests" / project_name / "verse_counts"
     )
     shutil.copytree(collect_verse_counts_directory, align_output_dir, dirs_exist_ok=True)
-    get_corpus_stats(align_config, align_output_dir, force_align=overwrite)
-    create_alignment_breakdown_file(align_config, deutero=False)
+    old_argv = sys.argv
+    try:
+        sys.argv = [
+            str(experiment_name),
+            "--create-summaries",
+            "--clearml-queue",
+            clearml_queue,
+            "--clearml-tag",
+            clearml_tag,
+        ]
+        analyze.main()
+    finally:
+        sys.argv = old_argv
 
 
 def get_config(config_path: str) -> dict:
@@ -356,7 +381,7 @@ def setup_local_project(
         LOGGER.info(f"Project name '{project_name}' contains hyphens. Replacing hyphens with underscores.")
         project_name = project_name.replace("-", "_")
         LOGGER.info(f"New project name: '{project_name}'")
-    if datestamp:
+    if datestamp and not is_resource(project_name):
         now = datetime.now()
         datestamp = now.strftime("%Y_%m_%d")
         project_name = f"{project_name}_{datestamp}"
@@ -373,14 +398,63 @@ def setup_local_project(
     return project_name, local_project_path, copy_from
 
 
+def is_resource(project_name: str, copy_from: Path | None) -> bool:
+    resource_hash_path = copy_from / project_name / ".resource_hash" if copy_from else None
+    return resource_hash_path.exists() if resource_hash_path else False
+
+
+def generate_resource_hash(resource_name: str) -> str:
+    resource_path = SIL_NLP_ENV.pt_projects_dir / resource_name
+    resource_hash = hashlib.sha256()
+    for root, dirs, files in os.walk(resource_path):
+        dirs.sort()
+        files.sort()
+        for file in files:
+            file_path = os.path.join(root, file)
+            resource_hash.update(file_path.encode())
+            with open(file_path, "rb") as f:
+                for chunk in iter(lambda: f.read(8192), b""):
+                    resource_hash.update(chunk)
+
+    resource_hash = resource_hash.hexdigest()
+    with open(resource_path / ".resource_hash", "w") as f:
+        f.write(resource_hash)
+    return resource_hash
+
+
+def check_resource_hash(resource_name: str) -> bool:
+    new_resource_hash = generate_resource_hash(resource_name)
+    old_resource_path = SIL_NLP_ENV.pt_projects_dir / resource_name
+    old_resource_hash_path = old_resource_path / ".resource_hash"
+    old_resource_hash = None
+    if old_resource_hash_path.exists():
+        old_resource_hash = old_resource_hash_path.read_text().strip()
+    return new_resource_hash == old_resource_hash
+
+
+def update_resource(resource_name: str) -> None:
+    old_resource_path = SIL_NLP_ENV.pt_projects_dir / resource_name
+
+    now = datetime.now()
+    datestamp = now.strftime("%Y_%m_%d")
+    new_resource_name = f"{old_resource_path.name}_{datestamp}"
+    new_resource_path = old_resource_path.parent / new_resource_name
+    old_resource_path.rename(new_resource_path)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Performs several steps to onboard a new project before training a model.",
     )
 
     parser.add_argument(
-        "projects",
-        help="Paratext project name(s). The project(s) will be stored on the bucket at Paratext/projects/<project>.",
+        "main-project",
+        help="The Main Paratext project name for onboarding. The project will be stored on the bucket at Paratext/projects/<project>.",
+        default=None,
+    )
+    parser.add_argument(
+        "--projects",
+        help="The Paratext project name(s) for onboarding. The project(s) will be stored on the bucket at Paratext/projects/<project>. Alignments will not be run for these projects.",
         nargs="+",
         default=None,
     )
@@ -431,9 +505,31 @@ def main() -> None:
         "--wildebeest", default=False, action="store_true", help="Run Wildebeest analysis on the extracted corpora."
     )
     parser.add_argument("--stats", default=False, action="store_true", help="Compute tokenization statistics")
-    parser.add_argument("--align", default=False, action="store_true", help="Run alignments after extracting corpora")
+    parser.add_argument("--align", default=None, nargs="+", type=str, help="List of iso codes to align with.")
+    parser.add_argument(
+        "--clearml-queue",
+        default=None,
+        type=str,
+        help="Only used with --align. Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run "
+        + "it locally and register it with ClearML.",
+    )
+    parser.add_argument(
+        "--clearml-tag",
+        metavar="tag",
+        choices=TAGS_LIST,
+        default=None,
+        type=str,
+        help=f"Only used with --align. Tag to add to the ClearML Task - {TAGS_LIST}",
+    )
 
     args = parser.parse_args()
+
+    if args.clearml_queue is not None:
+        if "cpu" not in args.clearml_queue:
+            LOGGER.warning("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
+            exit()
+        if args.clearml_tag is None:
+            parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
 
     if not args.extract_corpora:
         if args.collect_verse_counts or args.wildebeest or args.stats or args.align:
@@ -443,7 +539,9 @@ def main() -> None:
 
     config = get_config(args.config) if args.config else {}
 
-    for project in args.projects:
+    projects: list = args.projects if args.projects else []
+    projects.append(args.main_project)
+    for project in projects:
         pwd = config.get("zip_password", None)
         project_name, local_project_path, copy_from = setup_local_project(project, args.copy_from, pwd, args.datestamp)
 
@@ -474,6 +572,13 @@ def main() -> None:
                 local_project_path,
             )
 
+        if is_resource(project_name) and check_resource_hash(project_name):
+            LOGGER.info(f"Resource '{project_name}' is up to date. Skipping onboarding.")
+            continue
+        elif is_resource(project_name):
+            LOGGER.info(f"Resource '{project_name}' is outdated. Continuing onboarding to update resource.")
+            update_resource(project_name)
+
         if copy_from:
             LOGGER.info(
                 f"Copying project: {project_name} from {copy_from} to {SIL_NLP_ENV.pt_projects_dir}/{project_name}"
@@ -502,9 +607,11 @@ def main() -> None:
             stats_config: dict = config.get("stats", None)
             calculate_tokenization_stats(project_name, stats_config, args.overwrite)
 
-        if args.align:
+        if project == args.main_project and args.align:
             align_config: dict = config.get("align", None)
-            align_wrapper(project_name, align_config, args.overwrite)
+            align_wrapper(
+                project_name, align_config, set(args.align), args.clearml_queue, args.clearml_tag, args.overwrite
+            )
 
 
 if __name__ == "__main__":
