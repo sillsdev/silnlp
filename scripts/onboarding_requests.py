@@ -1,5 +1,6 @@
 import concurrent.futures
 import os
+import shutil
 import subprocess
 import uuid
 from enum import Enum
@@ -150,10 +151,11 @@ def process_request(request):
     try:
         task.wait_for_status()
         add_comment(request["id"], "Automatic onboarding was successful.")
-        # TODO: FIND A WAY TO DELETE THE DIRECTORY IN ONBOARDING_PATH AFTER ONBOARDING IS COMPLETE
     except RuntimeError as e:
         print(e)
         add_comment(request["id"], "Automatic onboarding failed.")
+    finally:
+        shutil.rmtree(f"{ONBOARDING_PATH}/{main_project_name}_Request")
 
 
 with concurrent.futures.ThreadPoolExecutor() as executor:

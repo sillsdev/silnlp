@@ -43,22 +43,22 @@ def create_paratext_project_folder_if_not_exists(project_name: str) -> Path:
     return pt_project_path
 
 
-def _copy_file_to_paratext_project(source_file: Path, target_file: Path, overwrite=False) -> None:
+def copy_file(source_file: Path, target_file: Path, overwrite=False) -> None:
     if target_file.exists() and not overwrite:
         LOGGER.info(f"File '{target_file}' already exists. Skipping.")
     else:
         target_file.write_bytes(source_file.read_bytes())
 
 
-def _copy_directory_to_paratext_project(source_dir: Path, target_dir: Path, overwrite=False) -> None:
+def copy_directory(source_dir: Path, target_dir: Path, overwrite=False) -> None:
     if not target_dir.exists():
         target_dir.mkdir()
     for sub_item in source_dir.iterdir():
         target_item = target_dir / sub_item.name
         if sub_item.is_dir():
-            _copy_directory_to_paratext_project(sub_item, target_item, overwrite)
+            copy_directory(sub_item, target_item, overwrite)
         else:
-            _copy_file_to_paratext_project(sub_item, target_item, overwrite)
+            copy_file(sub_item, target_item, overwrite)
 
 
 def copy_paratext_project_folder(source_dir: Path, project_name: str, overwrite=False) -> None:
@@ -71,9 +71,9 @@ def copy_paratext_project_folder(source_dir: Path, project_name: str, overwrite=
     for source_item in source_dir.iterdir():
         target_item = pt_project_path / source_item.name
         if source_item.is_dir():
-            _copy_directory_to_paratext_project(source_item, target_item, overwrite=overwrite)
+            copy_directory(source_item, target_item, overwrite=overwrite)
         else:
-            _copy_file_to_paratext_project(source_item, target_item, overwrite=overwrite)
+            copy_file(source_item, target_item, overwrite=overwrite)
 
 
 def collect_verse_counts_wrapper(project_name: str, verse_counts_config: dict, overwrite=False) -> None:
@@ -361,21 +361,26 @@ def setup_local_project(
 ) -> Tuple[str, Path | None, Path | None]:
     if project.endswith(".zip") or project.endswith(".p8z"):
         with zipfile.ZipFile(copy_from / project, "r") as zip_ref:
-            project = Path(project).stem
+            project_name = Path(project).stem
+            if project_name.endswith("_Resource"):
+                project_name = project_name.replace("_Resource", "")
             needs_password = any(zinfo.flag_bits & 0x1 for zinfo in zip_ref.infolist())
             if needs_password:
                 if zip_password:
                     pwd = zip_password
                 if not pwd:
-                    pwd = getpass.getpass(prompt=f"Enter password for {project}: ")
-                zip_ref.extractall(copy_from / project, pwd=pwd.encode())
+                    pwd = getpass.getpass(prompt=f"Enter password for {project_name}: ")
+                zip_ref.extractall(copy_from / project_name, pwd=pwd.encode())
             else:
-                zip_ref.extractall(copy_from / project)
+                zip_ref.extractall(copy_from / project_name)
+    if Path(project).stem.endswith("_Resource"):
+        resource_hash_path = copy_from / project_name / ".resource_hash" if copy_from else None
+        if resource_hash_path and not resource_hash_path.exists():
+            resource_hash_path.touch()
 
-    check_for_project_errors(copy_from, project)
+    check_for_project_errors(copy_from, project_name)
 
-    project_name = project
-    local_project_path = copy_from / project if copy_from else None
+    local_project_path = copy_from / project_name if copy_from else None
 
     if "-" in project_name:
         LOGGER.info(f"Project name '{project_name}' contains hyphens. Replacing hyphens with underscores.")
@@ -387,12 +392,11 @@ def setup_local_project(
         project_name = f"{project_name}_{datestamp}"
         LOGGER.info(f"Datestamping project. New project name: {project_name}")
 
-        # Copy local project folder contents to a folder with the new name
     if local_project_path and local_project_path.exists() and local_project_path.name != project_name:
         new_local_project_path = local_project_path.parent / project_name
         if not new_local_project_path.exists():
             new_local_project_path.mkdir(parents=True, exist_ok=True)
-        _copy_directory_to_paratext_project(local_project_path, new_local_project_path, overwrite=True)
+        copy_directory(local_project_path, new_local_project_path, overwrite=True)
         local_project_path = new_local_project_path
 
     return project_name, local_project_path, copy_from
@@ -410,6 +414,8 @@ def generate_resource_hash(resource_name: str) -> str:
         dirs.sort()
         files.sort()
         for file in files:
+            if file == ".resource_hash":
+                continue
             file_path = os.path.join(root, file)
             resource_hash.update(file_path.encode())
             with open(file_path, "rb") as f:
