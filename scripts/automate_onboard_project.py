@@ -1,6 +1,5 @@
 import argparse
 import os
-from pathlib import Path
 
 from clearml import Task
 from clearml.backend_api.session.session import LoginError
