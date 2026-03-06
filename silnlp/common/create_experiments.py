@@ -2,14 +2,17 @@ import argparse
 import csv
 import logging
 import re
-from pathlib import Path
 from datetime import datetime
+from io import BytesIO
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import openpyxl
 import yaml
 from openpyxl.chart import BarChart, Reference
+from openpyxl.drawing.image import Image as XlImage
+from openpyxl.utils import get_column_letter
 from scipy.stats import spearmanr, wilcoxon
 
 from silnlp.common.environment import SIL_NLP_ENV
@@ -66,8 +69,9 @@ def read_scripture(file, max_lines=SAMPLE_LINES):
         return "".join(lines[:max_lines])
 
 
-def update_sheet(wb, workbook_path, cache):
+def update_sheet(xlsxfile, cache):
     """Write out the filename, filename_isocode, 3 letter isocode and script to the "scripts" sheet in the spreadsheet"""
+    wb = openpyxl.load_workbook(xlsxfile)
     HEADERS = ["filename", "filename_iso", "language_iso", "script"]
     if "scripts" in wb.sheetnames:
         ws = wb["scripts"]
@@ -89,28 +93,35 @@ def update_sheet(wb, workbook_path, cache):
     else:
         ws = wb.create_sheet("scripts")
         ws.append(HEADERS)
+        ws.column_dimensions[get_column_letter(1)].width = 27
+        ws.column_dimensions[get_column_letter(2)].width = 12
+        ws.column_dimensions[get_column_letter(3)].width = 12
+        ws.column_dimensions[get_column_letter(4)].width = 6
+
         for fn in sorted(cache):
             c = cache[fn]
             ws.append([fn, c["filename_iso"], c["language_iso"], c["script"]])
 
-    wb.save(workbook_path)
-    LOGGER.info(f"Updated scripts sheet in {workbook_path} ({len(cache)} entries)")
+    wb.save(xlsxfile)
+    wb.close()
+    LOGGER.info(f"Updated scripts sheet in {xlsxfile} ({len(cache)} entries)")
 
 
-def backup_workbook(wb, workbook_file):
+def backup_workbook(wb, xlsxfile):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    backup_workbook_file = workbook_file.parent / f"experiments_bak_{timestamp}.xlsx"
-    wb.save(backup_workbook_file)
+    backup_xlsxfile = xlsxfile.parent / f"experiments_bak_{timestamp}.xlsx"
+    wb.save(backup_xlsxfile)
+    wb.close()
 
 
-def get_scripts(workbook_path, rows, two2three_iso):
+def get_scripts(xlsxfile, rows, two2three_iso):
     """Return dict of filename -> lang_code. Reads cached entries from the 'scripts'
     sheet in the workbook, predicts scripts for any new filenames, and updates
     the sheet if new entries were added."""
     cache = {}
 
     # Read existing cache from 'scripts' sheet if it exists
-    wb = openpyxl.load_workbook(workbook_path)
+    wb = openpyxl.load_workbook(xlsxfile)
     if "scripts" in wb.sheetnames:
         ws = wb["scripts"]
         rows_iter = ws.iter_rows(values_only=True)
@@ -142,7 +153,7 @@ def get_scripts(workbook_path, rows, two2three_iso):
         script_code = predict_script_code(read_scripture(file))
         if not is_represented(script_code=script_code, model=MODEL):
             if updated:
-                update_sheet(wb, workbook_path, cache)
+                update_sheet(wb, xlsxfile, cache)
             LOGGER.error(f"Script {script_code} found for {file} is not known to the {MODEL} model.")
 
         filename_iso = extract_prefix(filename)
@@ -161,7 +172,7 @@ def get_scripts(workbook_path, rows, two2three_iso):
 
     # Write back if updated
     if updated:
-        update_sheet(wb, workbook_path, cache)
+        update_sheet(wb, xlsxfile, cache)
     else:
         wb.close()
 
@@ -273,7 +284,7 @@ def write_config_file(row, main_folder, script_map, overwrite):
     test_books = row["test_books"]
 
     experiments = [
-        #("single", "one_to_one", [src1]),
+        ("single", "one_to_one", [src1]),
         ("mixed", "mixed_src", [src1, src2]),
         ("many", "many_to_many", [src1, src2]),
     ]
@@ -303,7 +314,7 @@ def write_config_file(row, main_folder, script_map, overwrite):
 
             if not lang_codes[prefix]:
                 raise RuntimeError(
-                    f"Could not find lang_code for {prefix} for {project_name}. Not present on scripts sheet in {workbook_file}."
+                    f"Could not find lang_code for {prefix} for {project_name}. Not present on scripts sheet in {xlsxfile}."
                 )
 
         config = create_config(mapping_type, lang_codes, src_list, trg, corpus_books, test_books)
@@ -367,16 +378,19 @@ def get_scores(scores_file):
     return results
 
 
-def collect_results(wb, main_folder, valid_rows, workbook_file, overwrite):
+def collect_results(xlsxfile, main_folder, valid_rows, overwrite):
     """Collect results from all experiments and write to 'results' sheet.
     If not overwrite, reads existing results and only fetches data for missing groups."""
+    
+    wb = openpyxl.load_workbook(xlsxfile)
     if overwrite:
-        backup_workbook(wb, workbook_file)
+        backup_workbook(wb, xlsxfile)
 
-    count_cached, count_read = 0, 0
-
+    
     # Build index of existing results keyed by (Target_language, Mapping, Book)
+    count_cached, count_read = 0, 0
     existing = {}
+
     if not overwrite and "results" in wb.sheetnames:
         for r in read_sheet(wb, "results"):
             key = (r["Target_language"], r["Series"], r["Mapping"], r.get("Book", ""))
@@ -445,7 +459,7 @@ def collect_results(wb, main_folder, valid_rows, workbook_file, overwrite):
                 scores = [
                     {"Book": r["Book"], "BLEU": r["BLEU"], "chrF3++": r["chrF3++"]}
                     for k, r in existing.items()
-                    if k[0] == language and k[1] == mapping
+                    if k[0] == language and k[1] == series and k[2] == mapping
                 ]
 
             for s in scores:
@@ -480,18 +494,40 @@ def collect_results(wb, main_folder, valid_rows, workbook_file, overwrite):
     # )
 
     # Write to results sheet
+
     if "results" in wb.sheetnames:
         del wb["results"]
     ws = wb.create_sheet("results")
     ws.append(RESULT_HEADERS)
+    ws.column_dimensions[get_column_letter(1)].width = 15
+    ws.column_dimensions[get_column_letter(2)].width = 7
+    ws.column_dimensions[get_column_letter(3)].width = 14
+    ws.column_dimensions[get_column_letter(4)].width = 21
+    ws.column_dimensions[get_column_letter(5)].width = 27
+    ws.column_dimensions[get_column_letter(6)].width = 26
+    ws.column_dimensions[get_column_letter(7)].width = 10
+    ws.column_dimensions[get_column_letter(8)].width = 10
+    ws.column_dimensions[get_column_letter(9)].width = 10
+    ws.column_dimensions[get_column_letter(10)].width = 10
+    ws.column_dimensions[get_column_letter(11)].width = 10
+    ws.column_dimensions[get_column_letter(12)].width = 10
+    ws.column_dimensions[get_column_letter(13)].width = 10
+    ws.column_dimensions[get_column_letter(14)].width = 8
+    ws.column_dimensions[get_column_letter(15)].width = 6
+    ws.column_dimensions[get_column_letter(16)].width = 9
+
     for r in all_results:
         ws.append([r.get(h) for h in RESULT_HEADERS])
 
-    return wb, all_results
+    wb.save(xlsxfile)
+    wb.close()
+
+    return all_results
 
 
-def create_analysis_sheets(wb):
+def create_analysis_sheets(xlsxfile):
     """Read the 'results' sheet and create per-book analysis sheets with deltas."""
+    wb = openpyxl.load_workbook(xlsxfile)
     results = read_sheet(wb, "results")
 
     # Group by (Target_language, Book, Mapping)
@@ -586,13 +622,16 @@ def create_analysis_sheets(wb):
                 ]
             )
 
-    return wb
+    wb.save(xlsxfile)
+    wb.close()
+
+    return 0
 
 
-def create_summary_sheet(wb):
+def create_summary_sheet(xlsxfile):
     """Create a 'summary' sheet with mean, median, +ve/−ve counts and Wilcoxon p-values
     for each book's BLEU and chrF3++ deltas, read from the analysis sheets."""
-
+    wb = openpyxl.load_workbook(xlsxfile)
     SUMMARY_HEADERS = [
         "Book",
         "Metric",
@@ -604,7 +643,7 @@ def create_summary_sheet(wb):
         "n",
         "p-value",
     ]
-
+    
     # Find all analysis sheets
     analysis_sheets = sorted([s for s in wb.sheetnames if s.startswith("analysis_")])
 
@@ -654,12 +693,16 @@ def create_summary_sheet(wb):
                 p_value = None
 
             ws.append([book, metric, delta_type, mean, median, count_pos, count_neg, n, p_value])
-    return wb
+
+    wb.save(xlsxfile)
+    wb.close()
+
+    return 0
 
 
 def create_correlation_sheet(wb):
     "Compute Spearman correlations between score deltas and experiment variables per book."
-
+    wb = openpyxl.load_workbook(xlsxfile)
     analysis_sheets = sorted([s for s in wb.sheetnames if s.startswith("analysis_")])
 
     headers = ["Book", "Metric", "Variable", "rho", "p-value", "n"]
@@ -687,43 +730,48 @@ def create_correlation_sheet(wb):
                 deltas, vals = zip(*pairs)
                 rho, p = spearmanr(deltas, vals)
                 ws.append([book, metric, var, round(rho, 4), round(p, 6), len(pairs)])
-    return wb
+    wb.save(xlsxfile)
+    wb.close()
+    return 0
 
 
-def add_charts_to_workbook(wb):
+def add_charts_to_workbook(xlsxfile, metric):
+    wb = openpyxl.load_workbook(xlsxfile)
     rows = read_sheet(wb, "summary")
     m2m = [r for r in rows if r["Delta"] == "m2m_mix"]
 
-    for metric in ["BLEU", "chrF3++"]:
-        data = [r for r in m2m if r["Metric"] == metric]
-        sheet_name = f"chart_{metric.replace('+', 'p')}"
-        if sheet_name in wb.sheetnames:
-            del wb[sheet_name]
-        ws = wb.create_sheet(sheet_name)
-        ws.append(["Book", "Mean Delta"])
-        for r in data:
-            ws.append([r["Book"], float(r["Mean"])])
+    data = [r for r in m2m if r["Metric"] == metric]
+    sheet_name = f"chart_{metric.replace('+', 'p')}"
+    if sheet_name in wb.sheetnames:
+        del wb[sheet_name]
+    ws = wb.create_sheet(sheet_name)
+    ws.append(["Book", "Mean Delta"])
+    for r in data:
+        ws.append([r["Book"], float(r["Mean"])])
 
-        chart = BarChart()
-        chart.type = "bar"
-        chart.title = f"{metric}: many_to_many − mixed_src"
-        chart.x_axis.title = "Mean Delta"
-        chart.y_axis.title = "Book"
-        chart.x_axis.crosses = "autoZero"
-        chart.style = 10
-        chart.width = 20
-        chart.height = max(8, len(data) * 1.5)
-        cats = Reference(ws, min_col=1, min_row=2, max_row=len(data) + 1)
-        vals = Reference(ws, min_col=2, min_row=1, max_row=len(data) + 1)
-        chart.add_data(vals, titles_from_data=True)
-        chart.set_categories(cats)
-        chart.shape = 4
-        ws.add_chart(chart, "D2")
+    chart = BarChart()
+    chart.type = "bar"
+    chart.title = f"{metric}: many_to_many − mixed_src"
+    chart.x_axis.title = "Mean Delta"
+    chart.y_axis.title = "Book"
+    chart.x_axis.crosses = "autoZero"
+    chart.style = 10
+    chart.width = 20
+    chart.height = max(8, len(data) * 1.5)
+    cats = Reference(ws, min_col=1, min_row=2, max_row=len(data) + 1)
+    vals = Reference(ws, min_col=2, min_row=1, max_row=len(data) + 1)
+    chart.add_data(vals, titles_from_data=True)
+    chart.set_categories(cats)
+    chart.shape = 4
+    ws.add_chart(chart, "D2")
+    add_matplot_to_sheet(wb, ws)
+    wb.save(xlsxfile)
+    wb.close()
 
-    return wb
+    return 0
 
 
-def plot_diverging_deltas(wb, output_folder=None):
+def add_matplot_to_sheet(wb, ws, output_cell="I3"):
     rows = read_sheet(wb, "summary")
 
     m2m = [r for r in rows if r["Delta"] == "m2m_mix"]
@@ -746,13 +794,21 @@ def plot_diverging_deltas(wb, output_folder=None):
         ax.set_title(f"{metric}: many_to_many vs mixed_src by book\n(green = p < 0.05)")
         ax.invert_yaxis()
         plt.tight_layout()
-        if output_folder:
-            plt.savefig(output_folder / f"delta_{metric.replace('+', 'p')}.png", dpi=150)
-        plt.show()
+        #if output_folder:
+        #    plt.savefig(output_folder / f"delta_{metric.replace('+', 'p')}.png", dpi=150)
+        #plt.show()
+
+        buf = BytesIO()
+        fig.savefig(buf, format="png", dpi=150)
+        buf.seek(0)
+        img = XlImage(buf)
+        ws.add_image(img, output_cell)
+    return 0
 
 
-def create_correlation_sheet(wb):
+def create_correlation_sheet(xlsxfile):
     "Compute Spearman correlations between score deltas and experiment variables per book."
+    wb = openpyxl.load_workbook(xlsxfile)
     analysis_sheets = sorted([s for s in wb.sheetnames if s.startswith("analysis_")])
 
     headers = ["Book", "Metric", "Variable", "rho", "p-value", "n"]
@@ -780,7 +836,11 @@ def create_correlation_sheet(wb):
                 deltas, vals = zip(*pairs)
                 rho, p = spearmanr(deltas, vals)
                 ws.append([book, metric, var, round(rho, 4), round(p, 6), len(pairs)])
-    return wb
+    wb.save(xlsxfile)
+    wb.close()
+
+    return 0
+
 
 
 def main():
@@ -798,29 +858,29 @@ def main():
     args = parser.parse_args()
 
     main_folder = EXPERIMENTS_DIR / args.folder
-    workbook_file = main_folder / args.xlsxfile
+    xlsxfile = main_folder / args.xlsxfile
 
-    if not workbook_file.is_file():
+    if not xlsxfile.is_file():
         LOGGER.error(
-            f"\nExperiment workbook not found: {workbook_file}. This spreadsheet is required to define the experiments to be run."
+            f"\nExperiment workbook not found: {xlsxfile}. This spreadsheet is required to define the experiments to be run."
         )
         return 1
 
     # Check for lock files and ask the user to close them.
-    if lockfile := is_locked(workbook_file):
+    if lockfile := is_locked(xlsxfile):
         print(f"Found lock file: {lockfile}")
         print(
-            f"Please close {workbook_file.name} in folder {workbook_file.parent} OR if it is closed, delete the lock file and try again."
+            f"Please close {xlsxfile.name} in folder {xlsxfile.parent} OR if it is closed, delete the lock file and try again."
         )
         return 1
-
-    wb = openpyxl.load_workbook(workbook_file)
+    wb = openpyxl.load_workbook(xlsxfile)
     rows = read_sheet(wb, "experiments")
+    wb.close()
 
     if args.create:
         rows = [row for row in rows if row["Series"] == args.create]
     
-    LOGGER.info(f"Read {len(rows)} experiment definitions from the 'experiments' sheet in {workbook_file}")
+    LOGGER.info(f"Read {len(rows)} experiment definitions from the 'experiments' sheet in {xlsxfile}")
     valid_rows, any_missing = check_scripture_files(rows)
 
     if valid_rows and not any_missing:
@@ -832,7 +892,7 @@ def main():
 
         return 1
     if args.create or args.collect_scripts:
-        script_map = get_scripts(workbook_file, valid_rows, two2three_iso)
+        script_map = get_scripts(xlsxfile, valid_rows, two2three_iso)
         if not script_map:
             LOGGER.error(f"\nCould not determine scripts for any projects.")
             exit(1)
@@ -844,30 +904,25 @@ def main():
             write_config_file(row, main_folder, script_map, args.overwrite)
 
     if args.collect_results or args.collect_and_analyze:
-        wb, results = collect_results(wb, main_folder, valid_rows, workbook_file, args.overwrite)
-        wb.save(workbook_file)
-        LOGGER.info(f"Wrote {len(results)} result rows to {workbook_file}")
+        results = collect_results(xlsxfile, main_folder, valid_rows, args.overwrite)
+        LOGGER.info(f"Wrote {len(results)} result rows to {xlsxfile}")
 
     if args.analyze or args.collect_and_analyze:
-        wb = create_analysis_sheets(wb)
-        wb.save(workbook_file)
-        LOGGER.info(f"Created analysis sheets for books in {workbook_file.name}")
+        create_analysis_sheets(xlsxfile)
+        
+        LOGGER.info(f"Created analysis sheets for books in {xlsxfile.name}")
 
-        wb = create_summary_sheet(wb)
-        LOGGER.info(f"Updated summary sheet in {workbook_file.name}")
+        create_summary_sheet(xlsxfile)
+        LOGGER.info(f"Updated summary sheet in {xlsxfile.name}")
         
-        wb = create_correlation_sheet(wb)
-        LOGGER.info(f"Created correlations sheet in {workbook_file}")
+        create_correlation_sheet(xlsxfile)
+        LOGGER.info(f"Created correlations sheet in {xlsxfile}")
         
-        plot_diverging_deltas(wb, output_folder=main_folder)
-        wb = add_charts_to_workbook(wb)
-        LOGGER.info(f"Added chart sheets to {workbook_file.name}")
+        for metric in ["BLEU", "chrF3++"]:
+            add_charts_to_workbook(xlsxfile, metric)
+            
+        LOGGER.info(f"Added chart sheets to {xlsxfile.name}")
         
-        wb.save(workbook_file)
-        LOGGER.info(f"Saved Excel file to {workbook_file}")
-        
-
-
     return 0
 
 
