@@ -264,7 +264,6 @@ def write_pair_verse_scores(
 ) -> None:
     scorers = scorers.intersection(SUPPORTED_SENTENCE_SCORERS)
     other_scores = {k: v for k, v in other_scores.items() if k.lower() in scorers}
-    other_verse_scores: Dict[str, float] = {}
 
     with open(
         config.exp_dir / (predictions_detok_file_name + VERSE_SCORES_SUFFIX), "w", encoding="utf-8", newline="\n"
@@ -284,6 +283,7 @@ def write_pair_verse_scores(
             header += "\tReference"
         header += "\n"
         scores_file.write(header)
+        spbleu_metric = sacrebleu.metrics.BLEU(tokenize="flores200", lowercase=True) if "spbleu" in scorers else None
         for index, pred in enumerate(pair_sys):
             sentences: List[str] = []
             for ref in pair_refs:
@@ -297,8 +297,8 @@ def write_pair_verse_scores(
                 )
             other_verse_scores: Dict[str, float] = {}
             if "chrf3" in scorers:
-                chrf3_verse_score = sacrebleu.corpus_chrf(
-                    [pred], [sentences], char_order=6, beta=3, remove_whitespace=True
+                chrf3_verse_score = sacrebleu.sentence_chrf(
+                    pred, sentences, char_order=6, beta=3, remove_whitespace=True
                 )
                 other_verse_scores["chrF3"] = chrf3_verse_score.score
 
@@ -314,13 +314,8 @@ def write_pair_verse_scores(
                 )
                 other_verse_scores["chrF3++"] = chrfpp_verse_score.score
 
-            if "spbleu" in scorers:
-                spbleu_verse_score = sacrebleu.sentence_bleu(
-                    pred,
-                    sentences,
-                    lowercase=True,
-                    tokenize="flores200",
-                )
+            if "spbleu" in scorers and spbleu_metric is not None:
+                spbleu_verse_score = spbleu_metric.sentence_score(pred, sentences)
                 other_verse_scores["spBLEU"] = spbleu_verse_score.score
 
             if "meteor" in scorers:
@@ -329,7 +324,7 @@ def write_pair_verse_scores(
                     other_verse_scores["METEOR"] = meteor_verse_score
 
             if "ter" in scorers:
-                ter_verse_score = sacrebleu.corpus_ter([pred], [sentences])
+                ter_verse_score = sacrebleu.sentence_ter(pred, sentences)
                 if ter_verse_score.score >= 0:
                     other_verse_scores["TER"] = ter_verse_score.score
 
