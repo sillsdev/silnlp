@@ -105,6 +105,7 @@ def update_sheet(xlsxfile, cache):
     wb.save(xlsxfile)
     wb.close()
     LOGGER.info(f"Updated scripts sheet in {xlsxfile} ({len(cache)} entries)")
+    return 0
 
 
 def backup_workbook(wb, xlsxfile):
@@ -153,7 +154,7 @@ def get_scripts(xlsxfile, rows, two2three_iso):
         script_code = predict_script_code(read_scripture(file))
         if not is_represented(script_code=script_code, model=MODEL):
             if updated:
-                update_sheet(wb, xlsxfile, cache)
+                update_sheet(xlsxfile, cache)
             LOGGER.error(f"Script {script_code} found for {file} is not known to the {MODEL} model.")
 
         filename_iso = extract_prefix(filename)
@@ -172,7 +173,7 @@ def get_scripts(xlsxfile, rows, two2three_iso):
 
     # Write back if updated
     if updated:
-        update_sheet(wb, xlsxfile, cache)
+        update_sheet(xlsxfile, cache)
     else:
         wb.close()
 
@@ -887,8 +888,9 @@ def main():
         LOGGER.info(f"All the scripture files required for the {len(valid_rows)} experiments exist.")
     else:
         LOGGER.warning(f"The following files are missing for these experiments:")
-        for lang, missing in any_missing.items():
-            print(f"{lang}   : {missing}")
+        for entry in any_missing:
+            for lang, missing in entry.items():
+                print(f"{lang}   : {missing}")
 
         return 1
     if args.create or args.collect_scripts:
