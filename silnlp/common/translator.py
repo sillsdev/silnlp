@@ -49,7 +49,7 @@ class ConfidenceFile(ABC, Generic[TVerseKey]):
 
     @classmethod
     def _get_confidence_file_type(cls, trg_draft_file_path: Path) -> type["ConfidenceFile"]:
-        if trg_draft_file_path.name.startswith("test.trg-predictions"):
+        if "trg-predictions" in trg_draft_file_path.name:
             return TestConfidenceFile
         ext = trg_draft_file_path.suffix.lower()
         if ext in {".usfm", ".sfm"}:
@@ -58,7 +58,7 @@ class ConfidenceFile(ABC, Generic[TVerseKey]):
             return TxtConfidenceFile
         raise ValueError(
             f"No confidence file type corresponds to trg_draft_file_path {trg_draft_file_path}. "
-            f"Expected a trg_draft_file_path starting with 'test.trg-predictions' or ending with .usfm/.sfm/.txt."
+            f"Expected a trg_draft_file_path containing 'trg-predictions' or ending with .usfm/.sfm/.txt."
         )
 
     @classmethod
