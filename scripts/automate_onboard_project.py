@@ -67,13 +67,13 @@ try:
 
     old_argv = sys.argv
     onboard_projects_dir = f"/root/OnboardingProjects/{args.dir}"
-    projects = os.listdir(onboard_projects_dir)
-    projects.remove(args.main_project)
+    ref_projects = os.listdir(onboard_projects_dir)
+    ref_projects.remove(args.main_project)
     try:
         sys.argv = [
             args.main_project,
-            "--projects",
-            *projects,
+            "--ref-projects",
+            *ref_projects,
             "--copy-from",
             onboard_projects_dir,
             "--extract-corpora",

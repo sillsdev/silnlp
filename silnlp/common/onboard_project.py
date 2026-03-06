@@ -461,8 +461,8 @@ def main() -> None:
         default=None,
     )
     parser.add_argument(
-        "--projects",
-        help="The Paratext project name(s) for onboarding. The project(s) will be stored on the bucket at Paratext/projects/<project>. Alignments will not be run for these projects.",
+        "--ref-projects",
+        help="The Reference Paratext project name(s) for onboarding the main project. The project(s) will be stored on the bucket at Paratext/projects/<project>. Alignments will not be run for these projects.",
         nargs="+",
         default=None,
     )
@@ -547,7 +547,7 @@ def main() -> None:
 
     config = get_config(args.config) if args.config else {}
 
-    projects: list = args.projects if args.projects else []
+    projects: list = args.ref_projects if args.ref_projects else []
     projects.append(args.main_project)
     for project in projects:
         pwd = config.get("zip_password", None)
