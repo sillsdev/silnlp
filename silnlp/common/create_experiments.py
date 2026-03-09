@@ -382,11 +382,9 @@ def get_scores(scores_file):
 def collect_results(xlsxfile, main_folder, valid_rows, overwrite):
     """Collect results from all experiments and write to 'results' sheet.
     If not overwrite, reads existing results and only fetches data for missing groups."""
-    
     wb = openpyxl.load_workbook(xlsxfile)
     if overwrite:
         backup_workbook(wb, xlsxfile)
-
     
     # Build index of existing results keyed by (Target_language, Mapping, Book)
     count_cached, count_read = 0, 0
@@ -405,8 +403,9 @@ def collect_results(xlsxfile, main_folder, valid_rows, overwrite):
 
         for suffix, mapping in [("many", "many_to_many"), ("mixed", "mixed_src"), ("single", "one_to_one")]:
             folder = main_folder / f"{language}_{series}_{suffix}"
+            experiment_rel = folder.relative_to(main_folder)  # For more readable messages.
             if not folder.is_dir():
-                LOGGER.warning(f"Folder not found: {folder}")
+                LOGGER.warning(f"Folder not found: {experiment_rel}")
                 continue
 
             train_vref_file, test_vref_file, stats_file, scores_file = (
@@ -416,7 +415,7 @@ def collect_results(xlsxfile, main_folder, valid_rows, overwrite):
             preprocess_files = [stats_file, train_vref_file, test_vref_file]
             missing_preprocess_files = [f for f in preprocess_files if not f.is_file()]
             if missing_preprocess_files:
-                LOGGER.info(f"These preprocess files are missing, skipping this experiment. {missing_preprocess_files}")
+                LOGGER.info(f"Skipping experiment {experiment_rel} because these preprocess files are missing: {missing_preprocess_files}")
                 continue
 
             # Check what we already have for this experiment
@@ -454,7 +453,13 @@ def collect_results(xlsxfile, main_folder, valid_rows, overwrite):
                     scores = get_scores(scores_file)
                 else:
                     scores = [{"Book": "", "BLEU": None, "chrF3++": None}]
-                    LOGGER.warning(f"{scores_file} not found in {folder}")
+                    model_file_4000 = folder / "run" / "checkpoint-4000" / "model-00002-of-00002.safetensors"
+                    model_file_5000 = folder / "run" / "checkpoint-5000" / "model-00002-of-00002.safetensors"
+
+                    if model_file_5000.is_file():
+                        LOGGER.warning(f"5000 step model exists for {experiment_rel}, but the file {scores_file.name} wasn't found.")
+                    elif model_file_4000.is_file():
+                        LOGGER.warning(f"No 5000 step model exists for {experiment_rel}. A 4000 step model exists, but the file {scores_file.name} wasn't found.")
             else:
                 # Reconstruct scores from existing rows
                 scores = [
@@ -860,6 +865,7 @@ def main():
 
     main_folder = EXPERIMENTS_DIR / args.folder
     xlsxfile = main_folder / args.xlsxfile
+    xlsxfile_rel = xlsxfile.relative_to(EXPERIMENTS_DIR)
 
     if not xlsxfile.is_file():
         LOGGER.error(
@@ -871,7 +877,7 @@ def main():
     if lockfile := is_locked(xlsxfile):
         print(f"Found lock file: {lockfile}")
         print(
-            f"Please close {xlsxfile.name} in folder {xlsxfile.parent} OR if it is closed, delete the lock file and try again."
+            f"Please close {xlsxfile_rel} OR if it is closed, delete the lock file and try again."
         )
         return 1
     wb = openpyxl.load_workbook(xlsxfile)
