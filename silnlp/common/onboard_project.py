@@ -17,6 +17,7 @@ from machine.corpora import FileParatextProjectSettingsParser
 
 import silnlp.common.analyze as analyze
 from silnlp.common.clean_projects import process_single_project_for_cleaning
+from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML
 from silnlp.nmt.config import Config
 
 from ..nmt.config_utils import create_config
@@ -312,7 +313,7 @@ class OnboardingProject:
             if resource_hash_path and not resource_hash_path.exists():
                 resource_hash_path.touch()
 
-        self.local_project_path = copy_from / self.project_name if copy_from else None
+        self.local_project_path = Path(copy_from) / self.project_name if copy_from else None
 
         self.check_for_project_errors()
         if "-" in self.project_name:
@@ -334,24 +335,15 @@ class OnboardingProject:
             copy_directory(self.local_project_path, new_local_project_path, overwrite=True)
             self.local_project_path = new_local_project_path
 
-    def setup_output(self) -> dict:
+    def setup_output(self) -> None:
         self.output_folder = Path(SIL_NLP_ENV.mt_experiments_dir / "OnboardingRequests" / self.project_name)
         self.output_folder.mkdir(parents=True, exist_ok=True)
         log_file = open(
             self.output_folder / f"{self.project_name}_onboarding.log",
-            "w",
+            "a",
             encoding="utf-8",
         )
         log_file.close()
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            handlers=[
-                logging.StreamHandler(sys.stdout),
-                logging.FileHandler(log_file.name),
-            ],
-            force=True,
-        )
 
     def is_resource(self) -> bool:
         resource_hash_path = Path(self.local_project_path / ".resource_hash")
@@ -411,40 +403,40 @@ class OnboardingRequest:
     def __init__(
         self,
         config: dict,
-        main_project: OnboardingProject,
-        reference_projects: List[OnboardingProject],
-        no_clean: bool,
-        copy_from: Path | None,
-        datestamp: bool,
-        overwrite: bool,
-        extract_corpora: bool,
-        collect_verse_counts: bool,
-        wildebeest: bool,
-        stats: bool,
-        align: bool,
     ):
         self.config = config
-        self.main_project = main_project
-        self.reference_projects = reference_projects
-        self.no_clean = no_clean
-        self.copy_from = copy_from
-        self.datestamp = datestamp
-        self.overwrite = overwrite
-        self.extract_corpora = extract_corpora
-        self.collect_verse_counts = collect_verse_counts
-        self.wildebeest = wildebeest
-        self.stats = stats
-        self.align = align
+        onboarding_config = config.get("onboarding", {})
+        self.overwrite = onboarding_config.get("overwrite", False)
+        main_project_name = onboarding_config.get("main_project", None)
+        self.main_project = OnboardingProject(project_name=main_project_name, overwrite=self.overwrite)
+        reference_project_names = onboarding_config.get("ref_projects", [])
+        for ref_project_name in reference_project_names:
+            reference_project = OnboardingProject(project_name=ref_project_name, overwrite=self.overwrite)
+            self.reference_projects.append(reference_project)
+        self.no_clean = onboarding_config.get("no_clean", False)
+        self.copy_from = onboarding_config.get("copy_from", None)
+        self.datestamp = onboarding_config.get("datestamp", False)
+        self.extract_corpora = onboarding_config.get("extract_corpora", False)
+        self.collect_verse_counts = onboarding_config.get("collect_verse_counts", False)
+        self.wildebeest = onboarding_config.get("wildebeest", False)
+        self.stats = onboarding_config.get("stats", False)
+        self.align = onboarding_config.get("align", False)
 
     def process_onboarding_request(self) -> None:
         LOGGER.info(f"Processing onboarding request for main project '{self.main_project.project_name}'")
-        self.onboard_project(self.main_project)
-        for project in self.reference_projects:
-            LOGGER.info(f"Onboarding reference project '{project.project_name}'")
+        for project in [self.main_project] + self.reference_projects:
+            if project == self.main_project:
+                LOGGER.info(f"Onboarding main project '{self.main_project.project_name}'")
+            else:
+                LOGGER.info(f"Onboarding reference project '{project.project_name}'")
+            set_logger(project.output_folder / f"{project.project_name}_onboarding.log")
             self.onboard_project(project)
+            close_logger()
 
         if self.align:
+            set_logger(self.main_project.output_folder / f"{self.main_project.project_name}_onboarding.log")
             self.align_main_project()
+            close_logger()
 
     def align_main_project(self) -> None:
         iso_codes = set()
@@ -454,12 +446,28 @@ class OnboardingRequest:
                 iso_codes.add(iso_code)
         self.main_project.align_wrapper(self.config.get("align", None), iso_codes)
 
-    def onboard_project(self, onboarding_project: OnboardingProject) -> None:
+    def prepare_and_upload_projects(self) -> None:
+        for project in [self.main_project] + self.reference_projects:
+            if project == self.main_project:
+                LOGGER.info(f"Preparing and Uploading main project '{self.main_project.project_name}'")
+            else:
+                LOGGER.info(f"Preparing and Uploading reference project '{project.project_name}'")
+            self.upload_project(project)
+        self.setup_project_outputs()
+
+        self.config["onboarding"]["main_project"] = self.main_project.project_name
+        self.config["onboarding"]["ref_projects"] = [project.project_name for project in self.reference_projects]
+        self.config["onboarding"]["copy_from"] = None
+        self.config["onboarding"]["datestamp"] = False
+        self.config["onboarding"]["no_clean"] = False
+
+        with open(self.get_config_path(), "w") as f:
+            yaml.dump(self.config, f)
+
+    def upload_project(self, onboarding_project: OnboardingProject) -> None:
         original_project_name = onboarding_project.project_name
         if self.copy_from:
             onboarding_project.setup_local_project(original_project_name, self.copy_from, self.datestamp)
-
-        onboarding_project.setup_output()
 
         if not self.no_clean:
             LOGGER.info(f"Cleaning Paratext project: {onboarding_project.project_name}.")
@@ -488,6 +496,8 @@ class OnboardingRequest:
             if onboarding_project.project_name != original_project_name:
                 shutil.rmtree(source_path)
 
+    def onboard_project(self, onboarding_project: OnboardingProject) -> None:
+        set_logger(onboarding_project.output_folder / f"{onboarding_project.project_name}_onboarding.log")
         if self.extract_corpora:
             onboarding_project.extract_corpora_wrapper(self.config.get("extract_corpora", {}))
 
@@ -499,6 +509,15 @@ class OnboardingRequest:
 
         if self.stats:
             onboarding_project.calculate_tokenization_stats(self.config.get("stats", None))
+
+        close_logger()
+
+    def get_config_path(self) -> Path:
+        return self.main_project.output_folder / "onboarding_config.yml"
+
+    def setup_project_outputs(self) -> None:
+        for project in [self.main_project] + self.reference_projects:
+            project.setup_output()
 
 
 def append_datestamp(project_name: str) -> str:
@@ -563,6 +582,25 @@ def get_config(config_path: str) -> dict:
             return yaml.safe_load(file)
     else:
         return {}
+
+
+def set_logger(log_file: Path) -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=[
+            logging.FileHandler(log_file, mode="a", encoding="utf-8"),
+        ],
+        force=True,
+    )
+
+
+def close_logger() -> None:
+    logger = logging.getLogger()
+    for handler in logger.handlers:
+        if isinstance(handler, logging.FileHandler):
+            handler.close()
+            logger.removeHandler(handler)
 
 
 def main() -> None:
@@ -634,8 +672,29 @@ def main() -> None:
         action="store_true",
         help="Run alignments between the main project and reference projects.",
     )
-
+    parser.add_argument(
+        "--clearml-queue",
+        default=None,
+        type=str,
+        help="Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run "
+        + "it locally and register it with ClearML.",
+    )
+    parser.add_argument(
+        "--clearml-tag",
+        metavar="tag",
+        choices=TAGS_LIST,
+        default=None,
+        type=str,
+        help=f"Tag to add to the ClearML Task - {TAGS_LIST}",
+    )
     args = parser.parse_args()
+
+    if args.clearml_queue is not None:
+        if "cpu" not in args.clearml_queue:
+            LOGGER.warning("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
+            exit()
+        if args.clearml_tag is None:
+            parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
 
     if not args.extract_corpora:
         if args.collect_verse_counts or args.wildebeest or args.stats or args.align:
@@ -643,29 +702,51 @@ def main() -> None:
     if not args.collect_verse_counts and (args.align or args.wildebeest):
         args.collect_verse_counts = True
 
-    config = get_config(args.config) if args.config else {}
+    if args.config:
+        config_file = Path(args.config)
+        if not config_file.exists():
+            raise FileNotFoundError(f"Config file '{config_file}' does not exist.")
+        with config_file.open("r", encoding="utf-8") as file:
+            config = yaml.safe_load(file)
+    else:
+        config = {}
 
-    reference_projects = args.ref_projects if args.ref_projects else []
-
-    onboarding_reference_projects = []
-    for project in reference_projects:
-        onboarding_reference_project = OnboardingProject(project_name=project, overwrite=args.overwrite)
-        onboarding_reference_projects.append(onboarding_reference_project)
+    if config.get("onboarding", None) is None:
+        config["onboarding"] = {
+            "main_project": args.main_project,
+            "ref_projects": args.ref_projects if args.ref_projects else [],
+            "copy_from": str(args.copy_from) if args.copy_from else None,
+            "datestamp": args.datestamp,
+            "overwrite": args.overwrite,
+            "extract_corpora": args.extract_corpora,
+            "collect_verse_counts": args.collect_verse_counts,
+            "wildebeest": args.wildebeest,
+            "stats": args.stats,
+            "align": args.align,
+        }
 
     onboarding_request = OnboardingRequest(
         config=config,
-        main_project=OnboardingProject(project_name=args.main_project, overwrite=args.overwrite),
-        reference_projects=onboarding_reference_projects,
-        no_clean=args.no_clean,
-        copy_from=args.copy_from,
-        datestamp=args.datestamp,
-        overwrite=args.overwrite,
-        extract_corpora=args.extract_corpora,
-        collect_verse_counts=args.collect_verse_counts,
-        wildebeest=args.wildebeest,
-        stats=args.stats,
-        align=args.align,
     )
+
+    if args.copy_from:
+        onboarding_request.prepare_and_upload_projects()
+    else:
+        onboarding_request.setup_project_outputs()
+
+    if args.clearml_queue is not None:
+        sys.argv = [
+            "",
+            onboarding_request.main_project.project_name,
+            "--config",
+            str(onboarding_request.get_config_path()),
+            "--clearml-queue",
+            args.clearml_queue,
+            "--clearml-tag",
+            args.clearml_tag,
+        ]
+        task_name = f"Onboarding - {onboarding_request.main_project.project_name}"
+        clearml = SILClearML(task_name, args.clearml_queue, tag=args.clearml_tag, skip_config=True)
 
     onboarding_request.process_onboarding_request()
 
