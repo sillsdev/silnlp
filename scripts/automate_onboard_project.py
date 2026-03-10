@@ -12,11 +12,6 @@ parser.add_argument(
     required=True,
     help="The name of the directory in ONBOARDING_PATH to use as the source for onboarding.",
 )
-parser.add_argument(
-    "--align-isos",
-    nargs="+",
-    help="List of ISO codes to use for determining standard alignments to run.",
-)
 args = parser.parse_args()
 
 try:
@@ -82,7 +77,6 @@ try:
             "--datestamp",
             "--stats",
             "--align",
-            *args.align_isos,
             "--overwrite",
         ]
         onboard_project.main()

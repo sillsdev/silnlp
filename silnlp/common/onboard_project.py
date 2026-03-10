@@ -11,13 +11,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 
-import common.analyze as analyze
 import wildebeest.wb_analysis as wb_ana
 import yaml
 from machine.corpora import FileParatextProjectSettingsParser
 
+import silnlp.common.analyze as analyze
 from silnlp.common.clean_projects import process_single_project_for_cleaning
-from silnlp.nmt.clearml_connection import TAGS_LIST
 from silnlp.nmt.config import Config
 
 from ..nmt.config_utils import create_config
@@ -31,38 +30,21 @@ LOGGER = logging.getLogger(__package__ + ".onboard_project")
 
 class OnboardingProject:
     project_name: str
-    local_project_path: Path | None
+    local_project_path: Path | None = None
     output_folder: Path
-    extract_file: Path | None
-    overwrite: bool
-    iso_code: str
+    extract_file: Path | None = None
+    overwrite: bool = False
+    iso_code: str = ""
 
     def __init__(self, project_name: str, overwrite: bool = False) -> None:
         self.project_name = project_name
-        self.output_folder = SIL_NLP_ENV.mt_experiments_dir / "OnboardingRequests" / self.project_name
-        self.output_folder.mkdir(parents=True, exist_ok=True)
-        log_file = open(
-            self.output_folder / f"{self.project_name}_onboarding.log",
-            "w",
-            encoding="utf-8",
-        )
-        log_file.close()
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            handlers=[
-                logging.StreamHandler(sys.stdout),
-                logging.FileHandler(log_file.name),
-            ],
-            force=True,
-        )
         self.overwrite = overwrite
 
     def collect_verse_counts_wrapper(self, verse_counts_config: dict) -> None:
         verse_counts_output_folder = Path(self.output_folder / "verse_counts")
         if verse_counts_output_folder.exists() and not self.overwrite:
             LOGGER.info(
-                f"Verse counts output folder '{verse_counts_output_folder}' already exists. Skipping verse counts collection."
+                f"Verse counts output folder '{str(verse_counts_output_folder)}' already exists. Skipping verse counts collection."
             )
             return
         if not verse_counts_output_folder.exists():
@@ -128,7 +110,7 @@ class OnboardingProject:
         wildebeest_output_dir = Path(self.output_folder / "wildebeest")
         if wildebeest_output_dir.exists() and not self.overwrite:
             LOGGER.info(
-                f"Wildebeest output directory '{wildebeest_output_dir}' already exists. Skipping Wildebeest analysis."
+                f"Wildebeest output directory '{str(wildebeest_output_dir)}' already exists. Skipping Wildebeest analysis."
             )
             return
         if not wildebeest_output_dir.exists():
@@ -163,10 +145,12 @@ class OnboardingProject:
     def get_extract_iso_code(self) -> str:
         if self.iso_code:
             return self.iso_code
-        extract_file = self.get_extract_path()
-        if extract_file is None:
+        extract_path = self.get_extract_path()
+        if extract_path is None:
             LOGGER.error(f"No extracted corpus found for project '{self.project_name}'. Cannot determine ISO code.")
             return ""
+
+        extract_file = extract_path.stem
         iso_code = extract_file.split("-")[0]
         if len(iso_code) == 2:
             iso_code = ALT_ISO.get_alternative(iso_code) if ALT_ISO.get_alternative(iso_code) else iso_code
@@ -177,7 +161,7 @@ class OnboardingProject:
         stats_dir = Path(self.output_folder / "stats")
 
         if stats_dir.exists() and not self.overwrite:
-            LOGGER.info(f"Stats directory '{stats_dir}' already exists. Skipping stats calculation.")
+            LOGGER.info(f"Stats directory '{str(stats_dir)}' already exists. Skipping stats calculation.")
             return
         if not stats_dir.exists():
             stats_dir.mkdir(parents=True, exist_ok=True)
@@ -217,13 +201,10 @@ class OnboardingProject:
         self,
         align_config: dict,
         iso_codes: set,
-        clearml_queue: str,
-        clearml_tag: str,
     ) -> None:
-        experiment_name = "OnboardingRequests" / self.project_name / "alignments"
         align_output_dir = Path(self.output_folder / "alignments")
         if align_output_dir.exists() and not self.overwrite:
-            LOGGER.info(f"Alignments output directory '{align_output_dir}' already exists. Skipping alignments.")
+            LOGGER.info(f"Alignments output directory '{str(align_output_dir)}' already exists. Skipping alignments.")
             return
         if not align_output_dir.exists():
             align_output_dir.mkdir(parents=True, exist_ok=True)
@@ -278,34 +259,26 @@ class OnboardingProject:
         shutil.copytree(collect_verse_counts_directory, align_output_dir, dirs_exist_ok=True)
         old_argv = sys.argv
         try:
+            experiment_name = f"OnboardingRequests/{self.project_name}/alignments"
             sys.argv = [
-                str(experiment_name),
                 "--create-summaries",
-                "--clearml-queue",
-                clearml_queue,
-                "--clearml-tag",
-                clearml_tag,
+                experiment_name,
             ]
             analyze.main()
         finally:
             sys.argv = old_argv
 
     def check_for_project_errors(self) -> None:
-        if self.copy_from:
-            if not self.copy_from.exists():
-                raise FileNotFoundError(f"The specified --copy-from path '{self.copy_from}' does not exist.")
-            project_path = self.copy_from / self.project_name
-            settings_file = project_path / "Settings.xml"
-            if not project_path.exists():
-                raise FileNotFoundError(
-                    f"The specified project folder '{project_path}' does not exist in the --copy-from path."
-                )
+        if self.local_project_path:
+            if not self.local_project_path.exists():
+                raise FileNotFoundError(f"The project folder '{self.local_project_path}' does not exist.")
+            settings_file = self.local_project_path / "Settings.xml"
             if not settings_file.exists():
                 raise FileNotFoundError(
-                    f"The Settings.xml file was not found in the project folder '{project_path}'. Please ensure this is a valid Paratext project folder."
+                    f"The Settings.xml file was not found in the project folder '{self.local_project_path}'. Please ensure this is a valid Paratext project folder."
                 )
 
-            settings = FileParatextProjectSettingsParser(project_path).parse()
+            settings = FileParatextProjectSettingsParser(self.local_project_path).parse()
 
             if settings.translation_type != "Standard":
                 LOGGER.warning(f"{self.project_name} is a non-Standard project. Type is '{settings.translation_type}'.")
@@ -313,9 +286,9 @@ class OnboardingProject:
             book_part = re.sub(r"\d", "[0-9]", settings.file_name_form)
             book_part = re.sub(r"([A-Z])", r"[A-Z]", book_part)
             pattern = f"{settings.file_name_prefix}.*{book_part}.*{settings.file_name_suffix}"
-            if not any([re.match(pattern, file.name) for file in project_path.iterdir()]):
+            if not any([re.match(pattern, file.name) for file in self.local_project_path.iterdir()]):
                 raise ValueError(
-                    f"{project_path} does not contain any files using the naming convention, '{pattern}', found in the Settings.xml file."
+                    f"{self.local_project_path} does not contain any files using the naming convention, '{pattern}', found in the Settings.xml file."
                 )
 
     def setup_local_project(self, project: str, copy_from: Path | None, datestamp: bool) -> None:
@@ -361,6 +334,25 @@ class OnboardingProject:
             copy_directory(self.local_project_path, new_local_project_path, overwrite=True)
             self.local_project_path = new_local_project_path
 
+    def setup_output(self) -> dict:
+        self.output_folder = Path(SIL_NLP_ENV.mt_experiments_dir / "OnboardingRequests" / self.project_name)
+        self.output_folder.mkdir(parents=True, exist_ok=True)
+        log_file = open(
+            self.output_folder / f"{self.project_name}_onboarding.log",
+            "w",
+            encoding="utf-8",
+        )
+        log_file.close()
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            handlers=[
+                logging.StreamHandler(sys.stdout),
+                logging.FileHandler(log_file.name),
+            ],
+            force=True,
+        )
+
     def is_resource(self) -> bool:
         resource_hash_path = Path(self.local_project_path / ".resource_hash")
         return resource_hash_path.exists()
@@ -404,19 +396,17 @@ class OnboardingProject:
 
 class OnboardingRequest:
     main_project: OnboardingProject
-    reference_projects: List[OnboardingProject]
-    config: dict
-    no_clean: bool
-    copy_from: Path | None
-    datestamp: bool
-    overwrite: bool
-    extract_corpora: bool
-    collect_verse_counts: bool
-    wildebeest: bool
-    stats: bool
-    align: bool
-    clearml_queue: str
-    clearml_tag: str
+    reference_projects: List[OnboardingProject] = []
+    config: dict = {}
+    no_clean: bool = False
+    copy_from: Path | None = None
+    datestamp: bool = False
+    overwrite: bool = False
+    extract_corpora: bool = False
+    collect_verse_counts: bool = False
+    wildebeest: bool = False
+    stats: bool = False
+    align: bool = False
 
     def __init__(
         self,
@@ -432,8 +422,6 @@ class OnboardingRequest:
         wildebeest: bool,
         stats: bool,
         align: bool,
-        clearml_queue: str,
-        clearml_tag: str,
     ):
         self.config = config
         self.main_project = main_project
@@ -447,29 +435,31 @@ class OnboardingRequest:
         self.wildebeest = wildebeest
         self.stats = stats
         self.align = align
-        self.clearml_queue = clearml_queue
-        self.clearml_tag = clearml_tag
 
     def process_onboarding_request(self) -> None:
+        LOGGER.info(f"Processing onboarding request for main project '{self.main_project.project_name}'")
         self.onboard_project(self.main_project)
         for project in self.reference_projects:
+            LOGGER.info(f"Onboarding reference project '{project.project_name}'")
             self.onboard_project(project)
 
         if self.align:
             self.align_main_project()
 
     def align_main_project(self) -> None:
-        align_config = self.config.get("align", None)
         iso_codes = set()
         for project in [self.main_project] + self.reference_projects:
             iso_code = project.get_extract_iso_code()
             if iso_code:
                 iso_codes.add(iso_code)
-        self.main_project.align_wrapper(self, align_config, iso_codes, self.clearml_queue, self.clearml_tag)
+        self.main_project.align_wrapper(self.config.get("align", None), iso_codes)
 
     def onboard_project(self, onboarding_project: OnboardingProject) -> None:
         original_project_name = onboarding_project.project_name
-        onboarding_project.setup_local_project(original_project_name, self.copy_from, self.datestamp)
+        if self.copy_from:
+            onboarding_project.setup_local_project(original_project_name, self.copy_from, self.datestamp)
+
+        onboarding_project.setup_output()
 
         if not self.no_clean:
             LOGGER.info(f"Cleaning Paratext project: {onboarding_project.project_name}.")
@@ -499,16 +489,16 @@ class OnboardingRequest:
                 shutil.rmtree(source_path)
 
         if self.extract_corpora:
-            onboarding_project.extract_corpora_wrapper()
+            onboarding_project.extract_corpora_wrapper(self.config.get("extract_corpora", {}))
 
         if self.collect_verse_counts:
-            onboarding_project.collect_verse_counts_wrapper()
+            onboarding_project.collect_verse_counts_wrapper(self.config.get("verse_counts", {}))
 
         if self.wildebeest:
-            onboarding_project.wildebeest_analysis_wrapper()
+            onboarding_project.wildebeest_analysis_wrapper(self.config.get("wildebeest", {}))
 
         if self.stats:
-            onboarding_project.calculate_tokenization_stats()
+            onboarding_project.calculate_tokenization_stats(self.config.get("stats", None))
 
 
 def append_datestamp(project_name: str) -> str:
@@ -581,7 +571,7 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "main-project",
+        "main_project",
         help="The Main Paratext project name for onboarding. The project will be stored on the bucket at Paratext/projects/<project>.",
         default=None,
     )
@@ -638,31 +628,14 @@ def main() -> None:
         "--wildebeest", default=False, action="store_true", help="Run Wildebeest analysis on the extracted corpora."
     )
     parser.add_argument("--stats", default=False, action="store_true", help="Compute tokenization statistics")
-    parser.add_argument("--align", default=None, nargs="+", type=str, help="List of iso codes to align with.")
     parser.add_argument(
-        "--clearml-queue",
-        default=None,
-        type=str,
-        help="Only used with --align. Run remotely on ClearML queue.  Default: None - don't register with ClearML.  The queue 'local' will run "
-        + "it locally and register it with ClearML.",
-    )
-    parser.add_argument(
-        "--clearml-tag",
-        metavar="tag",
-        choices=TAGS_LIST,
-        default=None,
-        type=str,
-        help=f"Only used with --align. Tag to add to the ClearML Task - {TAGS_LIST}",
+        "--align",
+        default=False,
+        action="store_true",
+        help="Run alignments between the main project and reference projects.",
     )
 
     args = parser.parse_args()
-
-    if args.clearml_queue is not None:
-        if "cpu" not in args.clearml_queue:
-            LOGGER.warning("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
-            exit()
-        if args.clearml_tag is None:
-            parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
 
     if not args.extract_corpora:
         if args.collect_verse_counts or args.wildebeest or args.stats or args.align:
@@ -683,6 +656,7 @@ def main() -> None:
         config=config,
         main_project=OnboardingProject(project_name=args.main_project, overwrite=args.overwrite),
         reference_projects=onboarding_reference_projects,
+        no_clean=args.no_clean,
         copy_from=args.copy_from,
         datestamp=args.datestamp,
         overwrite=args.overwrite,
@@ -691,8 +665,6 @@ def main() -> None:
         wildebeest=args.wildebeest,
         stats=args.stats,
         align=args.align,
-        clearml_queue=args.clearml_queue,
-        clearml_tag=args.clearml_tag,
     )
 
     onboarding_request.process_onboarding_request()

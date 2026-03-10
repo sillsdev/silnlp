@@ -129,9 +129,6 @@ def process_request(request):
         download_project(SF_id, main_project_name, project_short_name, paratext_id)
     task_name = f"Auto Onboarding - {main_project_name}"
     print(task_name)
-    align_isos = []
-    align_isos.append(request_metadata.get(request["submission"]["formData"].get("translationLanguageIsoCode"), ""))
-    align_isos.append(request_metadata.get(request["submission"]["formData"].get("backTranslationLanguageIsoCode"), ""))
     subprocess.run(
         [
             "python",
@@ -139,8 +136,6 @@ def process_request(request):
             main_project_name,
             "--dir",
             f"{main_project_name}_Request",
-            "--align-isos",
-            *align_isos,
         ]
     )
     task: Task = Task.get_task(project_name="Onboarding", task_name=task_name, tags=["silnlp-auto-onboarding"])
