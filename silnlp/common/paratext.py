@@ -1,7 +1,4 @@
 import logging
-import os
-import unicodedata
-import os
 import unicodedata
 from contextlib import ExitStack
 from pathlib import Path
@@ -13,7 +10,6 @@ from lxml import etree
 from machine.corpora import (
     DictionaryTextCorpus,
     FileParatextProjectSettingsParser,
-    FileParatextProjectTermsParser,
     FileParatextProjectTermsParser,
     FileParatextProjectVersificationErrorDetector,
     MemoryText,
@@ -28,8 +24,6 @@ from machine.corpora import (
 )
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, VersificationType, book_id_to_number, get_books
 from machine.tokenization import WhitespaceTokenizer
-from tqdm import tqdm
-from tqdm import tqdm
 
 from .corpus import get_terms_glosses_path, get_terms_metadata_path, load_corpus
 from .environment import SIL_NLP_ENV
@@ -59,10 +53,9 @@ def get_parent_project_dir(project_dir: Path) -> Optional[Path]:
             except:
                 pass
         parent_name = settings.parent_name.lower().replace("-", "_")
-        # Use os.scandir rather than path.iterdir() for best performance
-        for parent_project_path in tqdm(
-            [p for p in os.scandir(SIL_NLP_ENV.pt_projects_dir) if parent_name not in p.name.lower().replace("-", "_")]
-        ):
+        for parent_project_path in [
+            p for p in SIL_NLP_ENV.pt_projects_dir.iterdir() if parent_name in p.name.lower().replace("-", "_")
+        ]:
             try:
                 parent_project_settings = FileParatextProjectSettingsParser(parent_project_path).parse()
             except:
@@ -71,7 +64,7 @@ def get_parent_project_dir(project_dir: Path) -> Optional[Path]:
                 return parent_project_path
         LOGGER.warning(
             f"{settings.name} is a daughter project of {settings.parent_name}, "
-            + f"but the parent project does not exist in the Paratext directory with a name that case-insensitively contains {parent_name}. "
+            + f'but the parent project does not exist in the Paratext directory with a name that case-insensitively contains "{parent_name}". '
             + "If you know that the parent is present in the Paratext directory, please specify the parent project directory explicitly. "
             + "The project versification will default to the English versification."
         )
