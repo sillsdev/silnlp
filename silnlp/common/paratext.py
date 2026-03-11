@@ -1,8 +1,8 @@
 import logging
+import unicodedata
 from contextlib import ExitStack
 from pathlib import Path
 from typing import Dict, List, Optional, Set, TextIO, Tuple
-import unicodedata
 from xml.sax.saxutils import escape
 
 import regex as re
@@ -10,6 +10,7 @@ from lxml import etree
 from machine.corpora import (
     DictionaryTextCorpus,
     FileParatextProjectSettingsParser,
+    FileParatextProjectTermsParser,
     FileParatextProjectVersificationErrorDetector,
     MemoryText,
     ParatextTextCorpus,
@@ -20,7 +21,6 @@ from machine.corpora import (
     UsfmVersificationErrorType,
     create_versification_ref_corpus,
     extract_scripture_corpus,
-    FileParatextProjectTermsParser
 )
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, VersificationType, book_id_to_number, get_books
 from machine.tokenization import WhitespaceTokenizer
@@ -39,28 +39,23 @@ LOGGER = logging.getLogger(__name__)
 def get_project_dir(project: str) -> Path:
     return SIL_NLP_ENV.pt_projects_dir / project
 
+
 def get_parent_project_dir(project_dir: Path) -> Optional[Path]:
     settings = FileParatextProjectSettingsParser(project_dir).parse()
     if settings.has_parent:
+        LOGGER.info(f"Searching for parent project {settings.parent_name} in the Paratext directory...")
         parent_project_path = SIL_NLP_ENV.pt_projects_dir / settings.parent_name
         if parent_project_path.exists():
             try:
                 parent_project_settings = FileParatextProjectSettingsParser(parent_project_path).parse()
                 if settings.is_daughter_project_of(parent_project_settings):
-                    return parent_project_path 
+                    return parent_project_path
             except:
                 pass
-        for parent_project_path in SIL_NLP_ENV.pt_projects_dir.glob(f"*{settings.parent_name}*"):
-            try:
-                parent_project_settings = FileParatextProjectSettingsParser(parent_project_path).parse()
-            except:
-                continue
-            if settings.is_daughter_project_of(parent_project_settings):
-                return parent_project_path
-        for parent_project_path in SIL_NLP_ENV.pt_projects_dir.iterdir():
-            if settings.parent_name in parent_project_path.name:
-                # We already checked these above
-                continue
+        parent_name = settings.parent_name.lower().replace("-", "_")
+        for parent_project_path in [
+            p for p in SIL_NLP_ENV.pt_projects_dir.iterdir() if parent_name in p.name.lower().replace("-", "_")
+        ]:
             try:
                 parent_project_settings = FileParatextProjectSettingsParser(parent_project_path).parse()
             except:
@@ -68,9 +63,13 @@ def get_parent_project_dir(project_dir: Path) -> Optional[Path]:
             if settings.is_daughter_project_of(parent_project_settings):
                 return parent_project_path
         LOGGER.warning(
-            f"{settings.name} is a daughter project of {settings.parent_name}, but the parent project does not exist in the Paratext directory. The project versification will default to the English versification."
+            f"{settings.name} is a daughter project of {settings.parent_name}, "
+            + f'but the parent project does not exist in the Paratext directory with a name that case-insensitively contains "{parent_name}". '
+            + "If you know that the parent is present in the Paratext directory, please specify the parent project directory explicitly. "
+            + "The project versification will default to the English versification."
         )
     return None
+
 
 def get_iso(project_dir: Path) -> str:
     return FileParatextProjectSettingsParser(project_dir).parse().language_code
@@ -84,7 +83,7 @@ def extract_project(
     include_markers: bool = False,
     extract_lemmas: bool = False,
     output_project_vrefs: bool = False,
-    parent_project: Optional[str] = None
+    parent_project_dir: Optional[Path] = None,
 ) -> Tuple[Path, int]:
     iso = get_iso(project_dir)
 
@@ -94,13 +93,9 @@ def extract_project(
     if extract_lemmas and ltg_dir.is_dir():
         project_corpus = get_lemma_text_corpus(project_dir)
     else:
-        if parent_project is not None:
-            parent_project_dir = get_project_dir(parent_project)
-        else:
-            parent_project_dir = get_parent_project_dir(project_dir)
-            if parent_project_dir is not None:
-                LOGGER.info(f"Identified parent project {parent_project_dir.name}")
-        project_corpus = ParatextTextCorpus(project_dir, include_markers=include_markers, parent_project_dir=parent_project_dir)
+        project_corpus = ParatextTextCorpus(
+            project_dir, include_markers=include_markers, parent_project_dir=parent_project_dir
+        )
 
     output_basename = f"{iso}-{project_dir.name}"
     if len(include_books) > 0 or len(exclude_books) > 0:
@@ -270,8 +265,11 @@ def _process_gloss_string(gloss_str: str) -> List[str]:
     glosses = unique_list([gloss.strip() for gloss in glosses if gloss.strip() != ""])
     return glosses
 
-def extract_term_renderings(project_dir: Path, corpus_filename: Path, output_dir: Path, extract_surface_forms: bool) -> int:
-    """    
+
+def extract_term_renderings(
+    project_dir: Path, corpus_filename: Path, output_dir: Path, extract_surface_forms: bool
+) -> int:
+    """
     :return: The number of term renderings extracted
     :rtype: int
     """
@@ -279,13 +277,15 @@ def extract_term_renderings(project_dir: Path, corpus_filename: Path, output_dir
     list_type = settings.biblical_terms_list_type
     list_name = list_type
     if list_type == "Project":
-        LOGGER.info("Project-specific key terms lists are not supported. Supported lists are \"Major\", \"All\", \"SilNt\", and \"Pt6\".")
+        LOGGER.info(
+            'Project-specific key terms lists are not supported. Supported lists are "Major", "All", "SilNt", and "Pt6".'
+        )
         return 0
 
     # If there is no TermRenderings.xml in the project, then there are no terms to extract; return early
     renderings_path = project_dir / "TermRenderings.xml"
     if not renderings_path.is_file():
-        LOGGER.info(f"No \"TermRenderings.xml\" file in project \"{project_dir}\"")
+        LOGGER.info(f'No "TermRenderings.xml" file in project "{project_dir}"')
         return 0
 
     corpus: Dict[VerseRef, str] = {}
@@ -305,11 +305,11 @@ def extract_term_renderings(project_dir: Path, corpus_filename: Path, output_dir
     extracted_term_ids = set()
     with (
         terms_renderings_path.open("w", encoding="utf-8", newline="\n") as terms_renderings_file,
-        terms_metadata_path.open("r", encoding="utf-8", newline="\n") as terms_metadata_file
-        ):
+        terms_metadata_path.open("r", encoding="utf-8", newline="\n") as terms_metadata_file,
+    ):
         for metadata_line in terms_metadata_file.readlines():
             id, _, _ = metadata_line.split("\t", maxsplit=3)
-            id = unicodedata.normalize('NFC', id)
+            id = unicodedata.normalize("NFC", id)
             key_term = key_terms.get(id, None)
             renderings = key_term.renderings if key_term else []
             if extract_surface_forms:
@@ -321,24 +321,26 @@ def extract_term_renderings(project_dir: Path, corpus_filename: Path, output_dir
                 count += 1
     unextracted_term_ids = set(key_terms.keys()).difference(extracted_term_ids)
     if len(unextracted_term_ids) > 0:
-        LOGGER.info(f"The key terms with the following ids were not extracted because there was no corresponding id found in the metadata file: {', '.join(unextracted_term_ids)}.")
+        LOGGER.info(
+            f"The key terms with the following ids were not extracted because there was no corresponding id found in the metadata file: {', '.join(unextracted_term_ids)}."
+        )
     if count == 0:
         terms_renderings_path.unlink()
     return count
+
 
 def get_surface_forms(renderings: List[str], refs: List[VerseRef], corpus: Dict[VerseRef, str]) -> Set[str]:
     surface_forms: Set[str] = set()
     for rendering in renderings:
         if len(refs) > 0 and "*" in rendering:
-            regex = (
-                re.escape(rendering).replace("\\ \\*\\*\\ ", "(?:\\ \\w+)*\\ ").replace("\\*", "\\w*")
-            )
+            regex = re.escape(rendering).replace("\\ \\*\\*\\ ", "(?:\\ \\w+)*\\ ").replace("\\*", "\\w*")
             for ref in refs:
                 verse_str = corpus.get(ref, "")
                 for match in re.finditer(regex, verse_str):
                     surface_form = match.group()
                     surface_forms.add(surface_form)
     return surface_forms
+
 
 def book_file_name_digits(book_num: int) -> str:
     if book_num < 10:
@@ -449,13 +451,13 @@ def detect_NT_versification(project_dir: str) -> Tuple[List[VersificationType], 
     return versification, key_last_verses
 
 
-def check_versification(project_dir: str, versification_error_output_path: str) -> Tuple[bool, List[VersificationType]]:
+def check_versification(
+    project_dir: str, parent_project_dir: Optional[str], versification_error_output_path: str
+) -> Tuple[bool, List[VersificationType]]:
     parent_settings = None
-    parent_project_dir = get_parent_project_dir(project_dir)
     if parent_project_dir is not None:
         parent_settings = FileParatextProjectSettingsParser(parent_project_dir).parse()
     settings = FileParatextProjectSettingsParser(project_dir, parent_settings).parse()
-
 
     check_ot, check_nt, matching = False, False, False
 
@@ -522,15 +524,23 @@ def check_versification(project_dir: str, versification_error_output_path: str) 
 
     errors = FileParatextProjectVersificationErrorDetector(project_dir).get_usfm_versification_errors()
     if len(errors) > 0:
-        LOGGER.warning(f"Detected {len(errors)} versification errors. See {versification_error_output_path} for more details.")
-        with open(versification_error_output_path, 'w', encoding='utf-8') as f:
+        LOGGER.warning(
+            f"Detected {len(errors)} versification errors. See {versification_error_output_path} for more details."
+        )
+        with open(versification_error_output_path, "w", encoding="utf-8") as f:
             for error in errors:
                 if error.type == UsfmVersificationErrorType.INVALID_CHAPTER_NUMBER:
-                    f.write(f"Invalid chapter number error in project {error.project_name} at “{error.actual_verse_ref}”.\n")
+                    f.write(
+                        f"Invalid chapter number error in project {error.project_name} at “{error.actual_verse_ref}”.\n"
+                    )
                 elif error.type == UsfmVersificationErrorType.INVALID_VERSE_NUMBER:
-                    f.write(f"Invalid verse number error in project {error.project_name} at “{error.actual_verse_ref}”.\n")
+                    f.write(
+                        f"Invalid verse number error in project {error.project_name} at “{error.actual_verse_ref}”.\n"
+                    )
                 else:
-                    f.write(f"USFM versification error in project {error.project_name}, expected verse “{error.expected_verse_ref}”, actual verse “{error.actual_verse_ref}”, mismatch type {error.type.name}.\n")
+                    f.write(
+                        f"USFM versification error in project {error.project_name}, expected verse “{error.expected_verse_ref}”, actual verse “{error.actual_verse_ref}”, mismatch type {error.type.name}.\n"
+                    )
 
     matching = True
     return (matching, detected_versification)
