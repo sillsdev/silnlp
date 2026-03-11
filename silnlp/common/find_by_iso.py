@@ -167,7 +167,9 @@ def main():
     for file in files:
         logger.info(f"    - {file.stem}")
 
-    if not files:
+    if not files and args.no_related:
+        logger.info("\nCouldn't find any Scripture files in languages that are known to NLLB.")
+    elif not files:
         logger.info("\nCouldn't find any Scripture files in these languages.")
 
 if __name__ == "__main__":

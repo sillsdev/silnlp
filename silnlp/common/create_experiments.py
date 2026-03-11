@@ -267,9 +267,9 @@ def create_config(mapping_type, lang_codes, src_list, trg, corpus_books, test_bo
             "seed": 111,
             "tokenizer": {"update_src": True, "update_trg": True},
         },
-        # "eval": {"early_stopping": None, "eval_steps": 1000, 'eval_strategy': 'no'},
+        "eval": {"early_stopping": None, "eval_steps": 5000, 'eval_strategy': 'no'},
         "model": "facebook/nllb-200-distilled-1.3B",
-        # "train": {"max_steps": 7000, "save_steps": 5000, "save_strategy": "steps", "save_total_limit": 1},
+        "train": {"max_steps": 10000, "save_steps": 5000, "save_strategy": "steps", "save_total_limit": 2},
     }
     return config
 
@@ -855,7 +855,7 @@ def main():
     parser.add_argument("--xlsxfile", default="All.xlsx", help="File name for the main spreadsheet.")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing experiment configs or results.")
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--create", help="Create a series of experiment folders with their config.yml files.")
+    group.add_argument("--create-series", help="Create a series of experiment folders with their config.yml files. Specify the series to create.")
     group.add_argument("--collect-scripts", action="store_true", help="Update the scripts sheet.")
     group.add_argument("--collect-results", action="store_true", help="Collect the results of the experiments.")
     group.add_argument("--analyze", action="store_true", help="Analyse the results.")
@@ -882,10 +882,11 @@ def main():
         return 1
     wb = openpyxl.load_workbook(xlsxfile)
     rows = read_sheet(wb, "experiments")
+    print(f"Rows are: {rows}")
     wb.close()
 
-    if args.create:
-        rows = [row for row in rows if row["Series"] == args.create]
+    if args.create_series:
+        rows = [row for row in rows if row["Series"] == args.create_series]
     
     LOGGER.info(f"Read {len(rows)} experiment definitions from the 'experiments' sheet in {xlsxfile}")
     valid_rows, any_missing = check_scripture_files(rows)
@@ -899,7 +900,7 @@ def main():
                 print(f"{lang}   : {missing}")
 
         return 1
-    if args.create or args.collect_scripts:
+    if args.create_series or args.collect_scripts:
         script_map = get_scripts(xlsxfile, valid_rows, two2three_iso)
         if not script_map:
             LOGGER.error(f"\nCould not determine scripts for any projects.")
@@ -907,7 +908,7 @@ def main():
         if args.collect_scripts:
             exit(0)
 
-    if args.create:
+    if args.create_series:
         for row in valid_rows:
             write_config_file(row, main_folder, script_map, args.overwrite)
 
