@@ -1,8 +1,9 @@
 import logging
+import os
+import unicodedata
 from contextlib import ExitStack
 from pathlib import Path
 from typing import Dict, List, Optional, Set, TextIO, Tuple
-import unicodedata
 from xml.sax.saxutils import escape
 
 import regex as re
@@ -10,6 +11,7 @@ from lxml import etree
 from machine.corpora import (
     DictionaryTextCorpus,
     FileParatextProjectSettingsParser,
+    FileParatextProjectTermsParser,
     FileParatextProjectVersificationErrorDetector,
     MemoryText,
     ParatextTextCorpus,
@@ -20,10 +22,10 @@ from machine.corpora import (
     UsfmVersificationErrorType,
     create_versification_ref_corpus,
     extract_scripture_corpus,
-    FileParatextProjectTermsParser
 )
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, VersificationType, book_id_to_number, get_books
 from machine.tokenization import WhitespaceTokenizer
+from tqdm import tqdm
 
 from .corpus import get_terms_glosses_path, get_terms_metadata_path, load_corpus
 from .environment import SIL_NLP_ENV
@@ -42,6 +44,7 @@ def get_project_dir(project: str) -> Path:
 def get_parent_project_dir(project_dir: Path) -> Optional[Path]:
     settings = FileParatextProjectSettingsParser(project_dir).parse()
     if settings.has_parent:
+        LOGGER.info(f"Searching for parent project {settings.parent_name} in the Paratext directory...")
         parent_project_path = SIL_NLP_ENV.pt_projects_dir / settings.parent_name
         if parent_project_path.exists():
             try:
@@ -50,17 +53,9 @@ def get_parent_project_dir(project_dir: Path) -> Optional[Path]:
                     return parent_project_path 
             except:
                 pass
-        for parent_project_path in SIL_NLP_ENV.pt_projects_dir.glob(f"*{settings.parent_name}*"):
-            try:
-                parent_project_settings = FileParatextProjectSettingsParser(parent_project_path).parse()
-            except:
-                continue
-            if settings.is_daughter_project_of(parent_project_settings):
-                return parent_project_path
-        for parent_project_path in SIL_NLP_ENV.pt_projects_dir.iterdir():
-            if settings.parent_name in parent_project_path.name:
-                # We already checked these above
-                continue
+        parent_name = settings.parent_name.lower().replace('-', '_')
+        # Use os.scandir rather than path.iterdir() for best performance
+        for parent_project_path in tqdm([p for p in os.scandir(SIL_NLP_ENV.pt_projects_dir) if parent_name not in p.lower().replace('-','_')]):
             try:
                 parent_project_settings = FileParatextProjectSettingsParser(parent_project_path).parse()
             except:
@@ -68,7 +63,10 @@ def get_parent_project_dir(project_dir: Path) -> Optional[Path]:
             if settings.is_daughter_project_of(parent_project_settings):
                 return parent_project_path
         LOGGER.warning(
-            f"{settings.name} is a daughter project of {settings.parent_name}, but the parent project does not exist in the Paratext directory. The project versification will default to the English versification."
+            f"{settings.name} is a daughter project of {settings.parent_name}, "
+            + f"but the parent project does not exist in the Paratext directory with a name that case-insensitively contains {parent_name}. " 
+            + "If you know that the parent is present in the Paratext directory, please specify the parent project directory explicitly. " 
+            + "The project versification will default to the English versification."
         )
     return None
 
