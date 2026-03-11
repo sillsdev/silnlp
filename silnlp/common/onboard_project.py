@@ -399,6 +399,7 @@ class OnboardingRequest:
     wildebeest: bool = False
     stats: bool = False
     align: bool = False
+    align_isos: List[str] = []
 
     def __init__(
         self,
@@ -421,6 +422,7 @@ class OnboardingRequest:
         self.wildebeest = onboarding_config.get("wildebeest", False)
         self.stats = onboarding_config.get("stats", False)
         self.align = onboarding_config.get("align", False)
+        self.align_isos = onboarding_config.get("align_isos", [])
 
     def process_onboarding_request(self) -> None:
         LOGGER.info(f"Processing onboarding request for main project '{self.main_project.project_name}'")
@@ -440,6 +442,8 @@ class OnboardingRequest:
 
     def align_main_project(self) -> None:
         iso_codes = set()
+        if self.align_isos:
+            iso_codes.update(self.align_isos)
         for project in [self.main_project] + self.reference_projects:
             iso_code = project.get_extract_iso_code()
             if iso_code:
@@ -673,6 +677,12 @@ def main() -> None:
         help="Run alignments between the main project and reference projects.",
     )
     parser.add_argument(
+        "--align-isos",
+        default=None,
+        nargs="+",
+        help="List of ISO codes to use for determining standard alignment projects to include in the alignments step, along with the reference project isos.",
+    )
+    parser.add_argument(
         "--clearml-queue",
         default=None,
         type=str,
@@ -712,6 +722,8 @@ def main() -> None:
         config = {}
 
     if config.get("onboarding", None) is None:
+        if args.align_isos and not args.align:
+            args.align = True
         config["onboarding"] = {
             "main_project": args.main_project,
             "ref_projects": args.ref_projects if args.ref_projects else [],
@@ -723,6 +735,7 @@ def main() -> None:
             "wildebeest": args.wildebeest,
             "stats": args.stats,
             "align": args.align,
+            "align_isos": args.align_isos if args.align_isos else [],
         }
 
     onboarding_request = OnboardingRequest(
