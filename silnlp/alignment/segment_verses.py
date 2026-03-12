@@ -551,12 +551,11 @@ class AlignmentGenerator(ABC):
 
 
 class AlignmentAverager:
-    """Averages multiple sets of alignment lines, keeping pairs that appear in >50% of runs."""
-
     @staticmethod
     def average(run_alignment_lines: List[List[str]]) -> List[str]:
         num_runs = len(run_alignment_lines)
         averaged_lines: List[str] = []
+        t0 = time.perf_counter()
         for row_idx in range(len(run_alignment_lines[0])):
             pair_counts: Counter[tuple[int, int]] = Counter()
             for lines in run_alignment_lines:
@@ -565,6 +564,10 @@ class AlignmentAverager:
             averaged_pairs = [pair for pair, count in pair_counts.items() if (count / num_runs) > 0.5]
             averaged_pairs.sort()
             averaged_lines.append(" ".join(f"{src}-{trg}" for src, trg in averaged_pairs))
+        elapsed = time.perf_counter() - t0
+        print(
+            f"Averaging completed in {f'{int(elapsed // 60)}m {elapsed % 60:.2f}s' if elapsed >= 60 else f'{elapsed:.2f}s'}"
+        )
         return averaged_lines
 
 
@@ -642,12 +645,7 @@ class EflomalAlignmentGenerator(AlignmentGenerator):
                             f"Alignment run {run_idx + 1} produced {len(run_lines)} rows; " f"expected {expected_rows}."
                         )
 
-                averaging_start = time.perf_counter()
                 averaged_alignment_lines = AlignmentAverager.average(run_alignment_lines)
-                elapsed = time.perf_counter() - averaging_start
-                print(
-                    f"Averaging completed in {f'{int(elapsed // 60)}m {elapsed % 60:.2f}s' if elapsed >= 60 else f'{elapsed:.2f}s'}"
-                )
 
                 for averaged_line in averaged_alignment_lines:
                     yield WordAlignments([] if not averaged_line else AlignedWordPair.from_string(averaged_line))
@@ -676,12 +674,7 @@ class SavedAlignmentGenerator(AlignmentGenerator):
             for i, run_file in enumerate(self._run_files):
                 print(f"Loading saved alignments for run {i + 1}/{len(self._run_files)} from {run_file}")
                 run_alignment_lines.append(list(load_corpus(run_file)))
-            averaging_start = time.perf_counter()
             averaged_lines = AlignmentAverager.average(run_alignment_lines)
-            elapsed = time.perf_counter() - averaging_start
-            print(
-                f"Averaging completed in {f'{int(elapsed // 60)}m {elapsed % 60:.2f}s' if elapsed >= 60 else f'{elapsed:.2f}s'}"
-            )
             for line in averaged_lines:
                 yield WordAlignments([] if not line else AlignedWordPair.from_string(line))
         else:
