@@ -33,8 +33,6 @@ class SILExperiment:
     score_by_book: bool = False
     commit: Optional[str] = None
     clearml_tag: Optional[str] = None
-    quality_estimation: bool = False
-    verse_test_scores_path: Optional[Path] = None
 
     def __post_init__(self):
         self.clearml = SILClearML(
@@ -98,6 +96,19 @@ class SILExperiment:
         postprocess_configs = translate_configs.get("postprocess", [])
         postprocess_handler = PostprocessHandler([PostprocessConfig(pc) for pc in postprocess_configs])
 
+        quality_estimation = translate_configs.get("quality_estimation", False)
+
+        if quality_estimation:
+            verse_test_scores_path = get_mt_exp_dir(
+                quality_estimation.get("verse_test_scores_file")
+                if isinstance(quality_estimation, dict) and quality_estimation.get("verse_test_scores_file")
+                else self.config.exp_dir
+            )
+        else:
+            verse_test_scores_path = None
+        if quality_estimation and not self.save_confidences:
+            self.save_confidences = True
+
         for translate_config in translate_configs.get("translate", []):
             checkpoint: Union[str, int] = translate_config.get("checkpoint", "last") or "last"
             translator = TranslationTask(
@@ -122,8 +133,8 @@ class SILExperiment:
                     translate_config.get("trg_iso"),
                     self.produce_multiple_translations,
                     self.save_confidences,
-                    self.quality_estimation,
-                    self.verse_test_scores_path,
+                    bool(quality_estimation),
+                    verse_test_scores_path,
                     postprocess_handler,
                     translate_config.get("tags"),
                 )
@@ -142,7 +153,7 @@ class SILExperiment:
                     translate_config.get("trg_iso"),
                     self.produce_multiple_translations,
                     self.save_confidences,
-                    self.quality_estimation,
+                    bool(quality_estimation),
                     verse_test_scores_path,
                     translate_config.get("tags"),
                 )
@@ -154,7 +165,7 @@ class SILExperiment:
                     translate_config.get("trg_iso"),
                     self.produce_multiple_translations,
                     self.save_confidences,
-                    self.quality_estimation,
+                    bool(quality_estimation),
                     verse_test_scores_path,
                     postprocess_handler,
                     translate_config.get("tags"),
@@ -213,20 +224,6 @@ def main() -> None:
         help="Generate confidence files for test and/or translate step.",
     )
     parser.add_argument("--score-by-book", default=False, action="store_true", help="Score individual books")
-    parser.add_argument(
-        "--quality-estimation",
-        default=False,
-        action="store_true",
-        help="Run quality estimation after translation completes. Requires --translate and --save-confidences.",
-    )
-    parser.add_argument(
-        "--verse-test-scores-file",
-        type=str,
-        default=None,
-        help="The tsv file relative to MT/experiments containing the verse-level test scores to determine "
-        + "line of best fit, e.g., `project_folder/exp_folder/test.trg-predictions.detok.txt.5000.scores.tsv`. "
-        + "If not provided, the experiment directory will be used to locate the test scores file.",
-    )
     parser.add_argument("--mt-dir", default=None, type=str, help="The machine translation directory.")
     parser.add_argument(
         "--debug",
@@ -258,16 +255,6 @@ def main() -> None:
     if args.clearml_queue is not None and args.clearml_tag is None:
         parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
 
-    if args.quality_estimation and not args.save_confidences:
-        parser.error("--quality-estimation requires --save-confidences to be enabled.")
-
-    if args.verse_test_scores_file is None:
-        verse_test_scores_path = get_mt_exp_dir(args.experiment)
-    else:
-        verse_test_scores_path = get_mt_exp_dir(args.verse_test_scores_file)
-        if not verse_test_scores_path.exists():
-            parser.error(f"The verse test scores path {verse_test_scores_path} does not exist.")
-
     if args.mt_dir is not None:
         SIL_NLP_ENV.set_machine_translation_dir(SIL_NLP_ENV.data_dir / args.mt_dir)
 
@@ -297,8 +284,6 @@ def main() -> None:
         save_confidences=args.save_confidences,
         scorers=set(s.lower() for s in args.scorers),
         score_by_book=args.score_by_book,
-        quality_estimation=args.quality_estimation,
-        verse_test_scores_path=verse_test_scores_path,
     )
 
     if not args.save_checkpoints:

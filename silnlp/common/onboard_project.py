@@ -2,24 +2,28 @@ import argparse
 import getpass
 import logging
 import re
+import shutil
 import sys
 import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Tuple
+from typing import List, Tuple
 
 import wildebeest.wb_analysis as wb_ana
 import yaml
+from machine.corpora import FileParatextProjectSettingsParser
 
 from silnlp.common.clean_projects import process_single_project_for_cleaning
+from silnlp.nmt.config import Config
 
+from ..nmt.clearml_connection import TAGS_LIST, SILClearML
 from ..nmt.config_utils import create_config
+from .analyze import create_alignment_breakdown_file, create_summary_file, get_corpus_stats
 from .collect_verse_counts import collect_verse_counts
 from .environment import SIL_NLP_ENV
 from .extract_corpora import extract_corpora
-from .iso_info import NLLB_TAG_FROM_ISO
-from .iso_info import data as iso_data
+from .iso_info import ALT_ISO, NLLB_TAG_FROM_ISO
 
 LOGGER = logging.getLogger(__package__ + ".onboard_project")
 
@@ -110,13 +114,25 @@ def collect_verse_counts_wrapper(project_name: str, verse_counts_config: dict, o
     )
 
 
+def get_extract_path(project_name: str) -> Path | None:
+    extract_paths = list(SIL_NLP_ENV.mt_scripture_dir.glob(f"*-{project_name}.txt"))
+    if not extract_paths:
+        return None
+    return extract_paths[0]
+
+
 def extract_corpora_wrapper(project_name: str, extract_config: dict, overwrite=False) -> None:
-    extract_paths = list(SIL_NLP_ENV.mt_scripture_dir.glob(f"*{project_name}.txt"))
-    extract_path = extract_paths[0] if extract_paths else None
+    extract_path = get_extract_path(project_name)
     if extract_path is not None and not overwrite:
         LOGGER.info(f"Extracted corpus '{extract_path}' already exists. Skipping corpus extraction.")
         return
     LOGGER.info(f"Extracting corpora for project '{project_name}'")
+
+    versification_error_output_path = (
+        SIL_NLP_ENV.mt_experiments_dir / "OnboardingRequests" / project_name / "versification_errors.txt"
+    )
+    if not versification_error_output_path.exists():
+        versification_error_output_path.parent.mkdir(parents=True, exist_ok=True)
     extract_corpora(
         projects={project_name},
         books_to_include=extract_config.get("include", []),
@@ -125,6 +141,8 @@ def extract_corpora_wrapper(project_name: str, extract_config: dict, overwrite=F
         extract_lemmas=extract_config.get("lemmas", False),
         extract_project_vrefs=extract_config.get("project-vrefs", False),
         extract_surface_forms=extract_config.get("surface-forms", False),
+        parent_project=extract_config.get("parent_project", None),
+        versification_error_output_path=versification_error_output_path,
     )
 
 
@@ -138,9 +156,8 @@ def wildebeest_analysis_wrapper(project_name: str, wildebeest_config: dict, over
     if not wildebeest_output_dir.exists():
         wildebeest_output_dir.mkdir(parents=True, exist_ok=True)
 
-    try:
-        extract_path = list(SIL_NLP_ENV.mt_scripture_dir.glob(f"*{project_name}.txt"))[0]
-    except IndexError:
+    extract_path = get_extract_path(project_name)
+    if extract_path is None:
         LOGGER.error(f"No extracted corpus found for project '{project_name}'. Skipping Wildebeest analysis.")
         return
     LOGGER.info(f"Running Wildebeest analysis on {extract_path}.")
@@ -166,6 +183,13 @@ def wildebeest_analysis_wrapper(project_name: str, wildebeest_config: dict, over
         sys.argv = old_argv
 
 
+def get_extract_iso_code(extract_file: str) -> str:
+    iso_code = extract_file.split("-")[0]
+    if len(iso_code) == 2:
+        iso_code = ALT_ISO.get_alternative(iso_code) if ALT_ISO.get_alternative(iso_code) else iso_code
+    return iso_code
+
+
 def calculate_tokenization_stats(project_name: str, stats_config: dict = None, overwrite=False) -> None:
     stats_dir = SIL_NLP_ENV.mt_experiments_dir / "OnboardingRequests" / project_name / "stats"
 
@@ -175,20 +199,15 @@ def calculate_tokenization_stats(project_name: str, stats_config: dict = None, o
     if not stats_dir.exists():
         stats_dir.mkdir(parents=True, exist_ok=True)
 
-    try:
-        extract_path = list(SIL_NLP_ENV.mt_scripture_dir.glob(f"*{project_name}*.txt"))[0]
-    except IndexError:
+    extract_path = get_extract_path(project_name)
+    if extract_path is None:
         LOGGER.error(
             f"No extracted corpus found for project '{project_name}'. Skipping tokenization stats calculation."
         )
         return
     extract_file = extract_path.stem
 
-    iso_code = extract_file.split("-")[0]
-
-    iso_dict = {**{k: v for k, v in iso_data}, **{v: k for k, v in iso_data}}
-
-    iso_code = iso_dict.get(iso_code, iso_code)
+    iso_code = get_extract_iso_code(extract_file)
     nllb_tag = NLLB_TAG_FROM_ISO.get(iso_code, "eng_Latn")
 
     if stats_config is None:
@@ -210,6 +229,65 @@ def calculate_tokenization_stats(project_name: str, stats_config: dict = None, o
 
     config.set_seed()
     config.preprocess(stats=True, force_align=True)
+
+
+def align_wrapper(project_name: str, align_config: dict = None, overwrite=False) -> None:
+    align_output_dir = SIL_NLP_ENV.mt_experiments_dir / "OnboardingRequests" / project_name / "alignments"
+    if align_output_dir.exists() and not overwrite:
+        LOGGER.info(f"Alignments output directory '{align_output_dir}' already exists. Skipping alignments.")
+        return
+    if not align_output_dir.exists():
+        align_output_dir.mkdir(parents=True, exist_ok=True)
+
+    extract_path = get_extract_path(project_name)
+    if extract_path is None:
+        LOGGER.error(f"No extracted corpus found for project '{project_name}'. Skipping alignments.")
+        return
+
+    extract_file = extract_path.stem
+    iso_code = get_extract_iso_code(extract_file)
+
+    with open("silnlp/assets/standard_alignments.yml", "r", encoding="utf-8") as f:
+        standard_alignments = yaml.safe_load(f)
+        iso_standard_alignments = standard_alignments.get(iso_code, None)
+        if iso_standard_alignments is not None:
+            iso_standard_alignments = [alignment.strip() for alignment in iso_standard_alignments]
+    LOGGER.info(f"Running alignments on {extract_path}.")
+    if align_config is None:
+        if iso_standard_alignments is None or len(iso_standard_alignments) == 0:
+            LOGGER.error(f"No projects found to align with '{project_name}'. Skipping alignments.")
+            return
+        align_config = {
+            "data": {
+                "aligner": "eflomal",
+                "corpus_pairs": [
+                    {
+                        "mapping": "many_to_many",
+                        "src": extract_file,
+                        "trg": iso_standard_alignments,
+                        "type": "train",
+                    }
+                ],
+                "tokenize": False,
+            }
+        }
+    else:
+        alignment_projects: List[str] = align_config.get("data", {}).get("corpus_pairs", [])[0].get("trg", [])
+        if iso_standard_alignments:
+            for standard_alignment in iso_standard_alignments:
+                if standard_alignment not in alignment_projects:
+                    alignment_projects.append(standard_alignment)
+        align_config["data"]["corpus_pairs"][0]["trg"] = alignment_projects
+
+    with open(align_output_dir / "config.yml", "w", encoding="utf-8") as f:
+        yaml.dump(align_config, f, allow_unicode=True)
+    align_config: Config = create_config(exp_dir=align_output_dir, config=align_config)
+    collect_verse_counts_directory = (
+        SIL_NLP_ENV.mt_experiments_dir / "OnboardingRequests" / project_name / "verse_counts"
+    )
+    shutil.copytree(collect_verse_counts_directory, align_output_dir, dirs_exist_ok=True)
+    get_corpus_stats(align_config, align_output_dir, force_align=overwrite)
+    create_alignment_breakdown_file(align_config, deutero=False)
 
 
 def get_config(config_path: str) -> dict:
@@ -237,27 +315,16 @@ def check_for_project_errors(copy_from: Path | None, project: str) -> None:
             raise FileNotFoundError(
                 f"The Settings.xml file was not found in the project folder '{project_path}'. Please ensure this is a valid Paratext project folder."
             )
-        tree = ET.parse(settings_file)
-        root = tree.getroot()
-        naming_element = root.find(".//Naming")
-        pre_part, post_part, book_name_form = None, None, None
-        if naming_element is not None:
-            pre_part = naming_element.get("PrePart", "")
-            post_part = naming_element.get("PostPart", "")
-            book_name_form = naming_element.get("BookNameForm", "")
-        else:
-            pre_part = root.find(".//FileNamePrePart").text
-            post_part = root.find(".//FileNamePostPart").text
-            book_name_form = root.find(".//FileNameBookNameForm").text
-        book_part = re.sub(r"\d", "[0-9]", book_name_form)
+
+        settings = FileParatextProjectSettingsParser(project_path).parse()
+
+        if settings.translation_type != "Standard":
+            LOGGER.warning(f"{project} is a non-Standard project. Type is '{settings.translation_type}'.")
+
+        book_part = re.sub(r"\d", "[0-9]", settings.file_name_form)
         book_part = re.sub(r"([A-Z])", r"[A-Z]", book_part)
-        pattern = f"{pre_part}.*{book_part}.*{post_part}"
-        matching_files = False
-        for file in project_path.iterdir():
-            if re.match(pattern, file.name):
-                matching_files = True
-                break
-        if not matching_files:
+        pattern = f"{settings.file_name_prefix}.*{book_part}.*{settings.file_name_suffix}"
+        if not any([re.match(pattern, file.name) for file in project_path.iterdir()]):
             raise ValueError(
                 f"{project_path} does not contain any files using the naming convention, '{pattern}', found in the Settings.xml file."
             )
@@ -294,10 +361,13 @@ def setup_local_project(
         project_name = f"{project_name}_{datestamp}"
         LOGGER.info(f"Datestamping project. New project name: {project_name}")
 
-    # Rename local project folder to project_name if it exists
-    if local_project_path.exists() and local_project_path.name != project_name:
+        # Copy local project folder contents to a folder with the new name
+    if local_project_path and local_project_path.exists() and local_project_path.name != project_name:
         new_local_project_path = local_project_path.parent / project_name
-        local_project_path = local_project_path.rename(new_local_project_path)
+        if not new_local_project_path.exists():
+            new_local_project_path.mkdir(parents=True, exist_ok=True)
+        _copy_directory_to_paratext_project(local_project_path, new_local_project_path, overwrite=True)
+        local_project_path = new_local_project_path
 
     return project_name, local_project_path, copy_from
 
@@ -309,7 +379,7 @@ def main() -> None:
 
     parser.add_argument(
         "projects",
-        help="Paratext project name. The project will be stored on the bucket at Paratext/projects/<project>.",
+        help="Paratext project name(s). The project(s) will be stored on the bucket at Paratext/projects/<project>.",
         nargs="+",
         default=None,
     )
@@ -360,8 +430,16 @@ def main() -> None:
         "--wildebeest", default=False, action="store_true", help="Run Wildebeest analysis on the extracted corpora."
     )
     parser.add_argument("--stats", default=False, action="store_true", help="Compute tokenization statistics")
+    parser.add_argument("--align", default=False, action="store_true", help="Run alignments after extracting corpora")
 
     args = parser.parse_args()
+
+    if not args.extract_corpora:
+        if args.collect_verse_counts or args.wildebeest or args.stats or args.align:
+            args.extract_corpora = True
+    if not args.collect_verse_counts and (args.align or args.wildebeest):
+        args.collect_verse_counts = True
+
     config = get_config(args.config) if args.config else {}
 
     for project in args.projects:
@@ -383,31 +461,28 @@ def main() -> None:
                 source_path = Path(source_path / project_name)
             paratext_project_dir: Path = create_paratext_project_folder_if_not_exists(project_name)
             copy_paratext_project_folder(source_path, paratext_project_dir, overwrite=args.overwrite)
+            if project_name != project:
+                shutil.rmtree(source_path)
 
         if args.extract_corpora:
             extract_config: dict = config.get("extract_corpora", {})
             extract_corpora_wrapper(project_name, extract_config, args.overwrite)
 
         if args.collect_verse_counts:
-            if not args.extract_corpora:
-                LOGGER.warning(
-                    "--extract_corpora was not included. Collecting verse counts requires the corpus to be extracted first."
-                )
             LOGGER.info(f"Collecting verse counts from {project_name}.")
             collect_verse_counts_wrapper(project_name, config.get("verse_counts", {}), args.overwrite)
 
         if args.wildebeest:
-            if not args.extract_corpora:
-                LOGGER.warning(
-                    "--extract_corpora was not included. Wildebeest requires the corpus to be extracted first."
-                )
             wildebeest_config: dict = config.get("wildebeest", {})
             wildebeest_analysis_wrapper(project_name, wildebeest_config, args.overwrite)
 
         if args.stats:
-            if not args.extract_corpora:
-                LOGGER.warning("--extract_corpora was not included. Stats requires the corpus to be extracted first.")
-            calculate_tokenization_stats(project_name, config.get("stats", None), args.overwrite)
+            stats_config: dict = config.get("stats", None)
+            calculate_tokenization_stats(project_name, stats_config, args.overwrite)
+
+        if args.align:
+            align_config: dict = config.get("align", None)
+            align_wrapper(project_name, align_config, args.overwrite)
 
 
 if __name__ == "__main__":

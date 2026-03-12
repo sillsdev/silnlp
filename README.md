@@ -63,8 +63,10 @@ Follow these steps if you plan to run silnlp on a Windows machine.
    * To access WSL files from Windows, open File Explorer and either:
       - Scroll down and choose Linux, then Ubuntu-22.04
       - Or search "\\wsl.localhost\Ubuntu-22.04"
-
-The rest of these instructions are assumed to be done in a WSL/Linux terminal as the root user in /root (or ~ when logged in as root).
+   
+   * Note that for silnlp on WSL forward slashes are required in paths. If you see an error like: `RuntimeError: Config file has no contents.` or any other error indicating a missing file or contents check that you have used `/` and not `\` in the command line arguments.
+     
+The rest of these instructions are to be carried out in a WSL/Linux terminal as the root user in /root (or ~ when logged in as root).
 
 ### Note on IDEs with WSL
    * [VS Code Instructions](https://code.visualstudio.com/docs/remote/wsl)
@@ -73,12 +75,14 @@ The rest of these instructions are assumed to be done in a WSL/Linux terminal as
 
 ## Environment Setup
 
+   * All steps should be run from within a Linux/WSL terminal as the root user, starting from the root directory (/root or ~) unless otherwise specified.
+
 1. Clone the silnlp repo:
       ```
       git clone https://github.com/sillsdev/silnlp.git
       ```
 
-2. Create a env_vars.txt file with your credentials in this form in the root directoy (/root, or \\wsl.localhost\Ubuntu-22.04\root from Windows File Explorer):
+2. Create a env_vars.txt file with your credentials in this form in the root directory (/root, or \\wsl.localhost\Ubuntu-22.04\root from Windows File Explorer). This file may be created outside of WSL, but should be saved in the \\wsl.localhost\Ubuntu-22.04\root directory.:
    ```
    CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
    CLEARML_API_ACCESS_KEY=xxxxxxxxxxxxxxxx
@@ -96,12 +100,13 @@ The rest of these instructions are assumed to be done in a WSL/Linux terminal as
    * If you do not intend to use SILNLP with ClearML, MinIO, and/or B2, you can leave out the respective variables. If you need to generate ClearML credentials, see ClearML setup.
    * This file is sensitive, so do not save it within the silnlp repo to prevent accidentally including it in a commit.
 
-3. Navigate to the repo:
+3. Navigate to the top level silnlp folder. Steps 4, 5, 6 and 7 need to have silnlp as the current working directory.
       ```
       cd silnlp
       ```
 
-4. Set your environment variables by running the following command:
+4. Set your environment variables:
+   In a terminal at the silnlp repo, run:
    ```
    source ./setup_env_vars.sh /root/env_vars.txt
    ```
@@ -109,7 +114,7 @@ The rest of these instructions are assumed to be done in a WSL/Linux terminal as
 5. Download [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install#linux-2).
    Follow the instructions under the Quickstart install section, follow the Linux instructions.
 
-6. Create the silnlp conda environment
+6. Now we need to create the silnlp conda environment from within the silnlp directory which contains the environment.yml file.
    In a terminal run:
    ```
    conda env create --file "environment.yml"
@@ -118,6 +123,7 @@ The rest of these instructions are assumed to be done in a WSL/Linux terminal as
    * Follow any prompts conda provides
 
 7. Activate the silnlp conda environment
+   In a terminal at the silnlp repo, run:
    ```
 	conda activate silnlp
    ```
@@ -142,17 +148,29 @@ The rest of these instructions are assumed to be done in a WSL/Linux terminal as
    ```
 
 10. Install the Python packages for the silnlp repo
+    In a terminal at the silnlp repo, run:
    ```
 	poetry install
    ```
 
-11. If using MinIO or B2, you will need to set up rclone by running the following commands:
-```
-apt update
-source ./rclone_setup.sh minio
-```
-
+## Bucket Setup
+1. For MinIO, enable your VPN. On Windows this should be done outside of WSL:
    * To access the MinIO bucket, you will need VPN access. Reach out to a SILNLP dev team member for access.
+
+2. In a terminal (WSL) at the silnlp repo, run the commands cooresponding to the bucket you are using:
+
+   MinIO:
+   ```
+   apt update
+   source ./rclone_setup.sh minio
+   ```
+   Backblaze B2:
+   ```
+   apt update
+   source ./rclone_setup.sh backblaze
+   ```
+
+* You will need to run the `source ./rclone_setup.sh minio` command each time you start your Linux environment. Every other step in these instructions should only be needed one time during initial setup.
 
 ## Setting Up and Running Experiments
 
