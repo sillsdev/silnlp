@@ -238,16 +238,17 @@ def score_pair(
                 ) from e
         other_scores["Confidence"] = gmean(confidences)
 
-    write_pair_verse_scores(
-        pair_sys,
-        pair_refs,
-        trg_iso,
-        predictions_detok_file_name,
-        scorers,
-        other_scores,
-        config,
-        confidences if "confidence" in scorers else None,
-    )
+    if book == "ALL":
+        write_pair_verse_scores(
+            pair_sys,
+            pair_refs,
+            trg_iso,
+            predictions_detok_file_name,
+            scorers,
+            other_scores,
+            config,
+            confidences if "confidence" in scorers else None,
+        )
 
     return PairScore(book, src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores, draft_index)
 
