@@ -509,7 +509,7 @@ class ParallelPassageCollectionFactory:
     def __init__(self, save_alignments: bool = False, use_saved_alignments: bool = False, alignment_runs: int = 1):
         self._save_alignments = save_alignments
         self._use_saved_alignments = use_saved_alignments
-        self._alignment_runs = max(1, alignment_runs)
+        self._alignment_runs = alignment_runs
 
     def create(self, source_project_name: str, target_passage_file: Path) -> "ParallelPassageCollection":
         if self._use_saved_alignments:
@@ -530,9 +530,8 @@ class ParallelPassageCollectionFactory:
             alignment_file = target_passage_file.with_suffix(".alignments.txt")
             if not alignment_file.exists():
                 raise FileNotFoundError(f"Saved alignment file {alignment_file} not found")
-            return ParallelPassageCollection(
-                source_project_name, target_passage_file, SavedAlignmentGenerator(alignment_file)
-            )
+            saved_alignment_generator = SavedAlignmentGenerator(alignment_file)
+            return ParallelPassageCollection(source_project_name, target_passage_file, saved_alignment_generator)
         return ParallelPassageCollection(
             source_project_name,
             target_passage_file,
@@ -580,7 +579,7 @@ class EflomalAlignmentGenerator(AlignmentGenerator):
     ):
         self._save_alignments = save_alignments
         self._target_passage_file = target_passage_file
-        self._num_runs = max(1, num_runs)
+        self._num_runs = num_runs
 
     def generate(self, source_passages: List[str], target_passages: List[str]) -> Generator[WordAlignments, None, None]:
         with TemporaryDirectory() as td:
