@@ -269,13 +269,15 @@ def create_config(mapping_type, lang_codes, src_list, trg, corpus_books, test_bo
         },
         "eval": {"early_stopping": None, "eval_steps": 5000, 'eval_strategy': 'no'},
         "model": "facebook/nllb-200-distilled-1.3B",
-        "train": {"max_steps": 10000, "save_steps": 5000, "save_strategy": "steps", "save_total_limit": 2},
+        "train": {"auto_grad_acc": True,"max_steps": 10000, "save_steps": 5000, "save_strategy": "steps", "save_total_limit": 2},
     }
     return config
 
 
 def write_config_file(row, main_folder, script_map, overwrite):
-
+    """Write out the config files and return a list of the experiment folders"""
+    
+    experiment_folders = []
     language = row["Target_language"]
     series = row["Series"]
     src1 = row["Source 1"]
@@ -295,6 +297,7 @@ def write_config_file(row, main_folder, script_map, overwrite):
         #     continue
         experiment_name = f"{language}_{series}_{suffix}"
         experiment_folder = main_folder / experiment_name
+        experiment_folders.append(experiment_folder)
         experiment_folder.mkdir(exist_ok=True)
 
         config_file = experiment_folder / "config.yml"
@@ -324,6 +327,15 @@ def write_config_file(row, main_folder, script_map, overwrite):
             yaml.dump(config, cf, default_flow_style=False, sort_keys=False)
 
         LOGGER.info(f"Created experiment config: {config_file}")
+    return experiment_folders
+
+
+def series_command(relative_folder, experiments):
+    """Create the command that will preprocess and run the experiments."""
+    loop = f"for exp in {' '.join(experiments)}; do" 
+    prep = f"poetry run python -m silnlp.nmt.preprocess --stats {relative_folder}" + "/${exp}"
+    train= f"poetry run python -m silnlp.nmt.experiment --save-checkpoints --save-confidences --clearml-queue jobs_backlog --clearml-tag eitl --train --test --score-by-book {relative_folder}" + "/${exp}"
+    return loop + f"\n  echo {prep}\n  {prep}\n  echo {train}\n  {train}\ndone"
 
 
 def count_lines_and_unique_lines(file):
@@ -866,6 +878,7 @@ def main():
     main_folder = EXPERIMENTS_DIR / args.folder
     xlsxfile = main_folder / args.xlsxfile
     xlsxfile_rel = xlsxfile.relative_to(EXPERIMENTS_DIR)
+    relative_folder = xlsxfile_rel.parent
 
     if not xlsxfile.is_file():
         LOGGER.error(
@@ -882,11 +895,17 @@ def main():
         return 1
     wb = openpyxl.load_workbook(xlsxfile)
     rows = read_sheet(wb, "experiments")
-    print(f"Rows are: {rows}")
+    print(f"Rows are:")
+    for row in rows:
+        print(row)
     wb.close()
 
     if args.create_series:
         rows = [row for row in rows if row["Series"] == args.create_series]
+        #print(f"Rows filtered to series {args.create_series} are:")
+        #for row in rows:
+        #    print(row)
+        #exit()
     
     LOGGER.info(f"Read {len(rows)} experiment definitions from the 'experiments' sheet in {xlsxfile}")
     valid_rows, any_missing = check_scripture_files(rows)
@@ -909,8 +928,13 @@ def main():
             exit(0)
 
     if args.create_series:
+        experiment_folders = []
         for row in valid_rows:
-            write_config_file(row, main_folder, script_map, args.overwrite)
+            experiment_folders.extend(write_config_file(row, main_folder, script_map, args.overwrite))
+        
+        experiment_names = [experiment_folder.name for experiment_folder in experiment_folders]
+        print(f"Here is a command to preprocess and train the experiments:\n{series_command(relative_folder, experiment_names)}")
+
 
     if args.collect_results or args.collect_and_analyze:
         results = collect_results(xlsxfile, main_folder, valid_rows, args.overwrite)
