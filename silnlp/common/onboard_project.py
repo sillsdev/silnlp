@@ -15,7 +15,7 @@ import wildebeest.wb_analysis as wb_ana
 import yaml
 from machine.corpora import FileParatextProjectSettingsParser
 
-import silnlp.common.analyze as analyze
+from silnlp.common.analyze import analyze
 from silnlp.common.clean_projects import process_single_project_for_cleaning
 from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML
 from silnlp.nmt.config import Config
@@ -30,16 +30,14 @@ LOGGER = logging.getLogger(__package__ + ".onboard_project")
 
 
 class OnboardingProject:
-    project_name: str
-    local_project_path: Path | None = None
-    output_folder: Path
-    extract_file: Path | None = None
-    overwrite: bool = False
-    iso_code: str = ""
 
     def __init__(self, project_name: str, overwrite: bool = False) -> None:
-        self.project_name = project_name
-        self.overwrite = overwrite
+        self.project_name: str = project_name
+        self.local_project_path: Path | None = None
+        self.output_folder: Path | None = None
+        self.extract_file: Path | None = None
+        self.overwrite: bool = overwrite
+        self.iso_code: str = ""
 
     def collect_verse_counts_wrapper(self, verse_counts_config: dict) -> None:
         verse_counts_output_folder = Path(self.output_folder / "verse_counts")
@@ -158,7 +156,7 @@ class OnboardingProject:
         self.iso_code = iso_code
         return iso_code
 
-    def calculate_tokenization_stats(self, stats_config: dict) -> None:
+    def calculate_tokenization_stats(self, stats_config: dict, ref_project_extract_file_names: List[str]) -> None:
         stats_dir = Path(self.output_folder / "stats")
 
         if stats_dir.exists() and not self.overwrite:
@@ -183,7 +181,8 @@ class OnboardingProject:
                 "data": {
                     "corpus_pairs": [
                         {
-                            "src": extract_file,
+                            "mapping": "many_to_many",
+                            "src": ref_project_extract_file_names if ref_project_extract_file_names else [extract_file],
                             "trg": extract_file,
                             "type": "train",
                             "lang_codes": {iso_code: nllb_tag},
@@ -193,6 +192,8 @@ class OnboardingProject:
             }
 
         LOGGER.info(f"Calculating tokenization stats for project '{self.project_name}'")
+        with open(stats_dir / "config.yml", "w", encoding="utf-8") as f:
+            yaml.dump(stats_config, f, allow_unicode=True)
         config = create_config(exp_dir=stats_dir, config=stats_config)
 
         config.set_seed()
@@ -201,6 +202,7 @@ class OnboardingProject:
     def align_wrapper(
         self,
         align_config: dict,
+        ref_project_extract_file_names: List[str],
         iso_codes: set,
     ) -> None:
         align_output_dir = Path(self.output_folder / "alignments")
@@ -220,6 +222,7 @@ class OnboardingProject:
         with open("silnlp/assets/standard_alignments.yml", "r", encoding="utf-8") as f:
             standard_alignments = yaml.safe_load(f)
             alignments = set()
+            alignments.update(ref_project_extract_file_names)
             for iso_code in iso_codes:
                 iso_standard_alignments = standard_alignments.get(iso_code, None)
                 if iso_standard_alignments is not None:
@@ -238,7 +241,7 @@ class OnboardingProject:
                         {
                             "mapping": "many_to_many",
                             "src": extract_file,
-                            "trg": alignments,
+                            "trg": list(alignments),
                             "type": "train",
                         }
                     ],
@@ -246,11 +249,12 @@ class OnboardingProject:
                 }
             }
         else:
-            alignment_projects: List[str] = align_config.get("data", {}).get("corpus_pairs", [])[0].get("trg", [])
+            alignment_projects = set(align_config.get("data", {}).get("corpus_pairs", [])[0].get("trg", []))
+            alignment_projects.update(ref_project_extract_file_names)
             if iso_standard_alignments:
                 for standard_alignment in iso_standard_alignments:
                     if standard_alignment not in alignment_projects:
-                        alignment_projects.append(standard_alignment)
+                        alignment_projects.add(standard_alignment)
             align_config["data"]["corpus_pairs"][0]["trg"] = alignment_projects
 
         with open(align_output_dir / "config.yml", "w", encoding="utf-8") as f:
@@ -258,16 +262,8 @@ class OnboardingProject:
         align_config: Config = create_config(exp_dir=align_output_dir, config=align_config)
         collect_verse_counts_directory = Path(self.output_folder / "verse_counts")
         shutil.copytree(collect_verse_counts_directory, align_output_dir, dirs_exist_ok=True)
-        old_argv = sys.argv
-        try:
-            experiment_name = f"OnboardingRequests/{self.project_name}/alignments"
-            sys.argv = [
-                "--create-summaries",
-                experiment_name,
-            ]
-            analyze.main()
-        finally:
-            sys.argv = old_argv
+        exp_name = f"OnboardingRequests/{self.project_name}/alignments"
+        analyze(config=align_config, exp_name=exp_name, create_summaries=True)
 
     def check_for_project_errors(self) -> None:
         if self.local_project_path:
@@ -387,19 +383,6 @@ class OnboardingProject:
 
 
 class OnboardingRequest:
-    main_project: OnboardingProject
-    reference_projects: List[OnboardingProject] = []
-    config: dict = {}
-    no_clean: bool = False
-    copy_from: Path | None = None
-    datestamp: bool = False
-    overwrite: bool = False
-    extract_corpora: bool = False
-    collect_verse_counts: bool = False
-    wildebeest: bool = False
-    stats: bool = False
-    align: bool = False
-    align_isos: List[str] = []
 
     def __init__(
         self,
@@ -409,20 +392,23 @@ class OnboardingRequest:
         onboarding_config = config.get("onboarding", {})
         self.overwrite = onboarding_config.get("overwrite", False)
         main_project_name = onboarding_config.get("main_project", None)
-        self.main_project = OnboardingProject(project_name=main_project_name, overwrite=self.overwrite)
+        self.main_project: OnboardingProject = OnboardingProject(
+            project_name=main_project_name, overwrite=self.overwrite
+        )
         reference_project_names = onboarding_config.get("ref_projects", [])
+        self.reference_projects: List[OnboardingProject] = []
         for ref_project_name in reference_project_names:
             reference_project = OnboardingProject(project_name=ref_project_name, overwrite=self.overwrite)
             self.reference_projects.append(reference_project)
-        self.no_clean = onboarding_config.get("no_clean", False)
-        self.copy_from = onboarding_config.get("copy_from", None)
-        self.datestamp = onboarding_config.get("datestamp", False)
-        self.extract_corpora = onboarding_config.get("extract_corpora", False)
-        self.collect_verse_counts = onboarding_config.get("collect_verse_counts", False)
-        self.wildebeest = onboarding_config.get("wildebeest", False)
-        self.stats = onboarding_config.get("stats", False)
-        self.align = onboarding_config.get("align", False)
-        self.align_isos = onboarding_config.get("align_isos", [])
+        self.no_clean: bool = onboarding_config.get("no_clean", False)
+        self.copy_from: Path | None = onboarding_config.get("copy_from", None)
+        self.datestamp: bool = onboarding_config.get("datestamp", False)
+        self.extract_corpora: bool = onboarding_config.get("extract_corpora", False)
+        self.collect_verse_counts: bool = onboarding_config.get("collect_verse_counts", False)
+        self.wildebeest: bool = onboarding_config.get("wildebeest", False)
+        self.stats: bool = onboarding_config.get("stats", False)
+        self.align: bool = onboarding_config.get("align", False)
+        self.align_isos: List[str] = onboarding_config.get("align_isos", [])
 
     def process_onboarding_request(self) -> None:
         LOGGER.info(f"Processing onboarding request for main project '{self.main_project.project_name}'")
@@ -435,10 +421,16 @@ class OnboardingRequest:
             self.onboard_project(project)
             close_logger()
 
+        set_logger(self.main_project.output_folder / f"{self.main_project.project_name}_onboarding.log")
+        if self.stats:
+            self.main_project.calculate_tokenization_stats(
+                self.config.get("stats", None),
+                [ref_project.extract_file.stem for ref_project in self.reference_projects],
+            )
+
         if self.align:
-            set_logger(self.main_project.output_folder / f"{self.main_project.project_name}_onboarding.log")
             self.align_main_project()
-            close_logger()
+        close_logger()
 
     def align_main_project(self) -> None:
         iso_codes = set()
@@ -448,7 +440,11 @@ class OnboardingRequest:
             iso_code = project.get_extract_iso_code()
             if iso_code:
                 iso_codes.add(iso_code)
-        self.main_project.align_wrapper(self.config.get("align", None), iso_codes)
+        self.main_project.align_wrapper(
+            align_config=self.config.get("align", None),
+            ref_project_extract_file_names=[ref_project.extract_file.stem for ref_project in self.reference_projects],
+            iso_codes=iso_codes,
+        )
 
     def prepare_and_upload_projects(self) -> None:
         for project in [self.main_project] + self.reference_projects:
@@ -510,9 +506,6 @@ class OnboardingRequest:
 
         if self.wildebeest:
             onboarding_project.wildebeest_analysis_wrapper(self.config.get("wildebeest", {}))
-
-        if self.stats:
-            onboarding_project.calculate_tokenization_stats(self.config.get("stats", None))
 
         close_logger()
 

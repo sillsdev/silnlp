@@ -450,6 +450,36 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
             verse_sheet.freeze_panes(1, 2)
 
 
+def analyze(
+    config: Config, exp_name: str, recalculate: bool = False, deutero: bool = False, create_summaries: bool = False
+) -> None:
+    # Confirm that input file paths exist and make sure every corpus pair is many to many
+    data_files = set()
+    for pair in config.corpus_pairs:
+        data_files.update([f.path for f in pair.src_files] + [f.path for f in pair.trg_files])
+    for file in data_files:
+        if not file.is_file():
+            LOGGER.error(f"The source file {str(file)} does not exist")
+            return
+
+    file_patterns = ";".join([f.name for f in data_files])
+    collect_verse_counts(SIL_NLP_ENV.mt_scripture_dir, config.exp_dir, file_patterns, deutero, recalculate)
+
+    get_corpus_stats(config, exp_name, recalculate, deutero)
+
+    # Add stats about projects in extra alignment files in the experiment folder
+    extra_projects = get_extra_alignments(config, deutero)
+    all_projects = set(extra_projects) | set([f.name for f in data_files])
+    if len(all_projects) > len(data_files):
+        LOGGER.info("Adding verse counts for projects in extra alignment files")
+        collect_verse_counts(SIL_NLP_ENV.mt_scripture_dir, config.exp_dir, ";".join(all_projects), deutero, recalculate)
+
+    # Create summary outputs
+    if create_summaries:
+        create_alignment_breakdown_file(config, deutero)
+        create_summary_file(config)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Collect verse counts and compute alignment scores")
     parser.add_argument("experiment", help="Experiment name")
@@ -488,44 +518,17 @@ def main() -> None:
             parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
 
     clearml = SILClearML(args.experiment, args.clearml_queue, tag=args.clearml_tag)
-    exp_name = clearml.name
 
     config = clearml.config
     config.set_seed()
 
-    # Confirm that input file paths exist and make sure every corpus pair is many to many
-    data_files = set()
-    for pair in config.corpus_pairs:
-        data_files.update([f.path for f in pair.src_files] + [f.path for f in pair.trg_files])
-    for file in data_files:
-        if not file.is_file():
-            LOGGER.error(f"The source file {str(file)} does not exist")
-            return
-
-    file_patterns = ";".join([f.name for f in data_files])
-    collect_verse_counts(SIL_NLP_ENV.mt_scripture_dir, config.exp_dir, file_patterns, args.deutero, args.recalculate)
-
-    get_corpus_stats(config, exp_name, args.recalculate, args.deutero)
-
-    # Add stats about projects in extra alignment files in the experiment folder
-    extra_projects = get_extra_alignments(config, args.deutero)
-    all_projects = set(extra_projects) | set([f.name for f in data_files])
-    if len(all_projects) > len(data_files):
-        LOGGER.info("Adding verse counts for projects in extra alignment files")
-        collect_verse_counts(SIL_NLP_ENV.mt_scripture_dir, config.exp_dir, ";".join(all_projects), args.deutero)
-
-    # Create summary outputs
-    if args.create_summaries:
-        create_alignment_breakdown_file(config, args.deutero)
-        create_summary_file(config)
-
-    patterns = [
-        "verse_counts.csv",
-        "verse_percentages.csv",
-        "corpus-stats.csv",
-        "*_alignment_breakdown.xlsx",
-        "*_analysis.xlsx",
-    ]
+    analyze(
+        config=config,
+        exp_name=clearml.name,
+        recalculate=args.recalculate,
+        deutero=args.deutero,
+        create_summaries=args.create_summaries,
+    )
 
 
 if __name__ == "__main__":
