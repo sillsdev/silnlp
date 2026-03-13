@@ -538,7 +538,7 @@ def series_command(relative_folder, experiments):
     return loop + f"\n  echo {prep}\n  {prep}\n  echo {train}\n  {train}\ndone"
 
 
-def discover_experiments(xlsxfile, experiments_dir):
+def discover_experiments(xlsxfile, search_dir, experiments_dir):
     """Discover experiment folders with effective-config, infer folder, and scores files.
     Adds new entries to 'Discovered_Experiments' sheet, saving after each top-level folder.
     Tracks searched folders on 'Searched_Folders' sheet for restartability."""
@@ -563,7 +563,7 @@ def discover_experiments(xlsxfile, experiments_dir):
 
     # Get top-level folders, filtering by prefix and already-searched
     top_folders = sorted([
-        d for d in experiments_dir.iterdir()
+        d for d in search_dir.iterdir()
         if d.is_dir()
         and not any(d.name.lower().startswith(p) for p in SKIP_TLD_PREFIXES)
         and d.name not in searched
@@ -643,10 +643,15 @@ def discover_experiments(xlsxfile, experiments_dir):
                         skip_experiment = True
                         break
                     src = ";".join(src)
+                trg = cp.get("trg", "")
+                if trg is None:
+                    trg = ""
+                if isinstance(trg, list):
+                    trg = ";".join(s for s in trg if isinstance(s, str))
                 row[f"{prefix}.type"] = cp.get("type", "")
                 row[f"{prefix}.mapping"] = cp.get("mapping", "")
                 row[f"{prefix}.src"] = src
-                row[f"{prefix}.trg"] = cp.get("trg", "")
+                row[f"{prefix}.trg"] = trg
                 row[f"{prefix}.corpus_books"] = cp.get("corpus_books", "")
                 row[f"{prefix}.test_books"] = cp.get("test_books", "")
 
@@ -737,7 +742,7 @@ def main():
         if not search_folder.is_dir():
             LOGGER.error(f"\nCouldn't find the folder to search: {search_folder}.")
             return 1
-        discover_experiments(xlsxfile, search_folder)
+        discover_experiments(xlsxfile, search_folder, EXPERIMENTS_DIR)
         return 0
 
     wb = openpyxl.load_workbook(xlsxfile)
