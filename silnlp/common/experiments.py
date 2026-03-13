@@ -28,6 +28,17 @@ RESULT_HEADERS = [
     "chrF3",
 ]
 
+SKIP_TLD_PREFIXES = {"eil-", "ft-", "bt-", "opcap", "demo", "parent",
+                     "many", "tbta", "token", "update", "paragraph", "other",
+                     "names", "multi"}
+
+DISC_HEADERS = [
+    "experiment", "lang_codes",
+    "cp1.type", "cp1.mapping", "cp1.src", "cp1.trg", "cp1.corpus_books", "cp1.test_books",
+    "cp2.type", "cp2.mapping", "cp2.src", "cp2.trg", "cp2.corpus_books", "cp2.test_books",
+    "cp3.type", "cp3.mapping", "cp3.src", "cp3.trg", "cp3.corpus_books", "cp3.test_books",
+]
+
 METADATA_COLS = {"experiment", "language", "series", "id"}
 
 LOGGER = logging.getLogger(__package__ + ".experiments")
@@ -529,110 +540,169 @@ def series_command(relative_folder, experiments):
 
 def discover_experiments(xlsxfile, experiments_dir):
     """Discover experiment folders with effective-config, infer folder, and scores files.
-    Write results to a new xlsx workbook."""
+    Adds new entries to 'Discovered_Experiments' sheet, saving after each top-level folder.
+    Tracks searched folders on 'Searched_Folders' sheet for restartability."""
     SKIP_FOLDERS = {"align", "analyze", "analyse", "alignment", "alignments"}
     REQUIRED_MODEL = "facebook/nllb-200-distilled-1.3B"
     REQUIRED_SEED = 111
 
-    configs = sorted(experiments_dir.rglob("effective-config-*.yml"))
-    print(f"Found {len(configs)} effective-config files. Filtering...")
+    # Read existing state
+    wb = openpyxl.load_workbook(xlsxfile)
+    known = set()
+    if "Discovered_Experiments" in wb.sheetnames:
+        for r in read_sheet(wb, "Discovered_Experiments"):
+            known.add(r["experiment"])
 
-    rows = []
-    skipped = {"no_infer": 0, "no_scores": 0, "wrong_model": 0, "wrong_seed": 0,
-               "too_many_cp": 0, "bad_folder": 0, "parse_error": 0}
-
-    for i, config_path in enumerate(configs):
-        if (i + 1) % 500 == 0:
-            print(f"  Processed {i + 1}/{len(configs)} ({len(rows)} kept so far)")
-
-        folder = config_path.parent
-
-        # Skip excluded folder names
-        if any(part.lower() in SKIP_FOLDERS for part in folder.parts):
-            skipped["bad_folder"] += 1
-            continue
-
-        # Must have infer folder
-        if not (folder / "infer").is_dir():
-            skipped["no_infer"] += 1
-            continue
-
-        # Must have scores files
-        scores_files = sorted(folder.glob("scores-*.csv"))
-        if not scores_files:
-            skipped["no_scores"] += 1
-            continue
-
-        # Parse config
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = yaml.safe_load(f)
-        except Exception as e:
-            LOGGER.warning(f"Failed to parse {config_path}: {e}")
-            skipped["parse_error"] += 1
-            continue
-
-        # Filter model and seed
-        if config.get("model") != REQUIRED_MODEL:
-            skipped["wrong_model"] += 1
-            continue
-        data = config.get("data", {})
-        if data.get("seed") != REQUIRED_SEED:
-            skipped["wrong_seed"] += 1
-            continue
-
-        # Check corpus_pairs
-        corpus_pairs = data.get("corpus_pairs", [])
-        if len(corpus_pairs) > 3:
-            skipped["too_many_cp"] += 1
-            continue
-
-        # Build row
-        experiment = str(folder.relative_to(experiments_dir))
-        lang_codes = data.get("lang_codes", {})
-        lang_codes_str = ";".join(f"{k}:{v}" for k, v in sorted(lang_codes.items()))
-
-        row = {"experiment": experiment, "lang_codes": lang_codes_str}
-
-        for idx, cp in enumerate(corpus_pairs, start=1):
-            prefix = f"cp{idx}"
-            src = cp.get("src", "")
-            if isinstance(src, list):
-                src = ";".join(src)
-            row[f"{prefix}.type"] = cp.get("type", "")
-            row[f"{prefix}.mapping"] = cp.get("mapping", "")
-            row[f"{prefix}.src"] = src
-            row[f"{prefix}.trg"] = cp.get("trg", "")
-            row[f"{prefix}.corpus_books"] = cp.get("corpus_books", "")
-            row[f"{prefix}.test_books"] = cp.get("test_books", "")
-
-        rows.append(row)
-
-    # Collect all column headers from all rows
-    all_keys = []
-    seen = set()
-    for key in ["experiment", "lang_codes"]:
-        all_keys.append(key)
-        seen.add(key)
-    for row in rows:
-        for k in row:
-            if k not in seen:
-                all_keys.append(k)
-                seen.add(k)
-
-    # Write xlsx
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Discovered_Experiments"
-    ws.append(all_keys)
-    for row in rows:
-        ws.append([row.get(h, "") for h in all_keys])
-
-    wb.save(xlsxfile)
+    searched = set()
+    if "Searched_Folders" in wb.sheetnames:
+        for r in read_sheet(wb, "Searched_Folders"):
+            searched.add(r["folder"])
     wb.close()
 
-    print(f"\nDone. Kept {len(rows)} experiments, wrote to {xlsxfile}")
+    print(f"Already discovered: {len(known)} experiments in {len(searched)} searched folders")
+
+    # Get top-level folders, filtering by prefix and already-searched
+    top_folders = sorted([
+        d for d in experiments_dir.iterdir()
+        if d.is_dir()
+        and not any(d.name.lower().startswith(p) for p in SKIP_TLD_PREFIXES)
+        and d.name not in searched
+    ])
+    print(f"Found {len(top_folders)} top-level folders to search")
+
+    skipped = {"no_infer": 0, "no_scores": 0, "wrong_model": 0, "wrong_seed": 0,
+               "too_many_cp": 0, "bad_folder": 0, "parse_error": 0, "already_known": 0}
+    total_new = 0
+
+    for top_folder in top_folders:
+        configs = sorted(top_folder.rglob("effective-config-*.yml"))
+        if not configs:
+            # Record as searched even if no configs found
+            _record_searched_folder(xlsxfile, top_folder.name)
+            continue
+
+        new_rows = []
+        for config_path in configs:
+            folder = config_path.parent
+
+            experiment = str(folder.relative_to(experiments_dir))
+            if experiment in known:
+                skipped["already_known"] += 1
+                continue
+
+            if any(part.lower() in SKIP_FOLDERS for part in folder.parts):
+                skipped["bad_folder"] += 1
+                continue
+
+            if not (folder / "infer").is_dir():
+                skipped["no_infer"] += 1
+                continue
+
+            if not sorted(folder.glob("scores-*.csv")):
+                skipped["no_scores"] += 1
+                continue
+
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config = yaml.safe_load(f)
+            except Exception as e:
+                LOGGER.warning(f"Failed to parse {config_path}: {e}")
+                skipped["parse_error"] += 1
+                continue
+
+            if config.get("model") != REQUIRED_MODEL:
+                skipped["wrong_model"] += 1
+                continue
+
+            data = config.get("data", {})
+            if data.get("seed") != REQUIRED_SEED:
+                skipped["wrong_seed"] += 1
+                continue
+
+            corpus_pairs = data.get("corpus_pairs", [])
+            if len(corpus_pairs) > 3:
+                skipped["too_many_cp"] += 1
+                continue
+
+            lang_codes = data.get("lang_codes", {})
+            lang_codes_str = ";".join(f"{k}:{v}" for k, v in sorted(lang_codes.items()))
+
+            row = {h: "" for h in DISC_HEADERS}
+            row["experiment"] = experiment
+            row["lang_codes"] = lang_codes_str
+
+            skip_experiment = False
+            for idx, cp in enumerate(corpus_pairs, start=1):
+                prefix = f"cp{idx}"
+                src = cp.get("src", "")
+                if src is None:
+                    src = ""
+                if isinstance(src, list):
+                    if any(not isinstance(s, str) for s in src):
+                        skipped["parse_error"] += 1
+                        skip_experiment = True
+                        break
+                    src = ";".join(src)
+                row[f"{prefix}.type"] = cp.get("type", "")
+                row[f"{prefix}.mapping"] = cp.get("mapping", "")
+                row[f"{prefix}.src"] = src
+                row[f"{prefix}.trg"] = cp.get("trg", "")
+                row[f"{prefix}.corpus_books"] = cp.get("corpus_books", "")
+                row[f"{prefix}.test_books"] = cp.get("test_books", "")
+
+            if skip_experiment:
+                continue
+
+            new_rows.append(row)
+            known.add(experiment)
+
+        # Append new rows and record folder as searched
+        wb = openpyxl.load_workbook(xlsxfile)
+
+        if new_rows:
+            if "Discovered_Experiments" not in wb.sheetnames:
+                ws = wb.create_sheet("Discovered_Experiments")
+                ws.append(DISC_HEADERS)
+                ws.column_dimensions[get_column_letter(1)].width = 40
+                ws.column_dimensions[get_column_letter(2)].width = 30
+            else:
+                ws = wb["Discovered_Experiments"]
+            for row in new_rows:
+                ws.append([row.get(h, "") for h in DISC_HEADERS])
+
+        # Record this folder as searched
+        if "Searched_Folders" not in wb.sheetnames:
+            ws_sf = wb.create_sheet("Searched_Folders")
+            ws_sf.append(["folder", "searched_at"])
+            ws_sf.column_dimensions[get_column_letter(1)].width = 30
+            ws_sf.column_dimensions[get_column_letter(2)].width = 20
+        else:
+            ws_sf = wb["Searched_Folders"]
+        ws_sf.append([top_folder.name, datetime.now().strftime("%Y-%m-%d %H:%M")])
+
+        wb.save(xlsxfile)
+        wb.close()
+
+        total_new += len(new_rows)
+        print(f"  {top_folder.name}: +{len(new_rows)} experiments (total new: {total_new})")
+
+    print(f"\nDone. Added {total_new} new experiments to Discovered_Experiments sheet")
     print(f"Skipped: {skipped}")
+
+
+def _record_searched_folder(xlsxfile, folder_name):
+    """Record a folder as searched even if no experiments were found."""
+    wb = openpyxl.load_workbook(xlsxfile)
+    if "Searched_Folders" not in wb.sheetnames:
+        ws = wb.create_sheet("Searched_Folders")
+        ws.append(["folder", "searched_at"])
+        ws.column_dimensions[get_column_letter(1)].width = 30
+        ws.column_dimensions[get_column_letter(2)].width = 20
+    else:
+        ws = wb["Searched_Folders"]
+    ws.append([folder_name, datetime.now().strftime("%Y-%m-%d %H:%M")])
+    wb.save(xlsxfile)
+    wb.close()
 
 
 def main():
@@ -663,15 +733,12 @@ def main():
         return 1
 
     if args.discover:
-        # Folder to search 
         search_folder = EXPERIMENTS_DIR / args.discover
-        discover_xlsxfile = main_folder / "discovered_experiments.xlsx"
         if not search_folder.is_dir():
             LOGGER.error(f"\nCouldn't find the folder to search: {search_folder}.")
             return 1
-        else:
-            discover_experiments(discover_xlsxfile, search_folder)
-            return 0
+        discover_experiments(xlsxfile, search_folder)
+        return 0
 
     wb = openpyxl.load_workbook(xlsxfile)
     rows = read_sheet(wb, "Experiments")
