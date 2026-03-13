@@ -150,8 +150,10 @@ def get_scripture_filenames(row):
     return filenames
 
 
-def create_series(xlsxfile, series_name, valid_rows, script_map):
+def create_series(xlsxfile, main_folder, series_name, valid_rows, script_map, relative_folder):
     """Create experiment folders and config files for a series. Updates experiment column."""
+    experiment_names = []
+
     wb = openpyxl.load_workbook(xlsxfile)
     template = get_template_config(series_name, wb)
     if template is None:
@@ -173,14 +175,15 @@ def create_series(xlsxfile, series_name, valid_rows, script_map):
         experiment = str(row.get("experiment", "")).strip()
         if not experiment:
             experiment = f"{row['language']}_{row['series']}_{row['id']}"
-
-        folder = EXPERIMENTS_DIR / experiment
+        
+        experiment_names.append(experiment)
+        folder = main_folder / experiment
         folder.mkdir(parents=True, exist_ok=True)
 
         config = build_config(template, row, script_map)
         config_path = folder / "config.yml"
         with open(config_path, "w", encoding="utf-8") as f:
-            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+            yaml.dump(config, f, default_flow_style=False, sort_keys=True)
         LOGGER.info(f"Created {config_path}")
 
     # Update experiment column for rows that were empty
@@ -196,6 +199,8 @@ def create_series(xlsxfile, series_name, valid_rows, script_map):
     wb.save(xlsxfile)
     wb.close()
     LOGGER.info(f"Created {len(series_rows)} experiments for series '{series_name}'")
+    
+    print(f"\nHere is a command to preprocess and train the experiments:\n\n{series_command(relative_folder, experiment_names)}\n")
     return 0
 
 
@@ -363,7 +368,7 @@ def get_scripts(xlsxfile, rows, two2three_iso):
             }
     needed = set()
     for row in rows:
-        needed.update([row["Source 1"], row["Source 2"], row["Target"]])
+        needed.update(get_scripture_filenames(row))
     needed.discard("")
     updated = False
     for filename in sorted(needed):
@@ -514,6 +519,122 @@ def create_analysis_sheet(xlsxfile):
     wb.close()
 
 
+def series_command(relative_folder, experiments):
+    """Create the command that will preprocess and run the experiments."""
+    loop = f"for exp in {' '.join(experiments)}; do" 
+    prep = f"poetry run python -m silnlp.nmt.preprocess --stats {relative_folder}" + "/${exp}"
+    train= f"poetry run python -m silnlp.nmt.experiment --save-checkpoints --save-confidences --clearml-queue jobs_backlog --clearml-tag eitl --train --test --score-by-book {relative_folder}" + "/${exp}"
+    return loop + f"\n  echo {prep}\n  {prep}\n  echo {train}\n  {train}\ndone"
+
+
+def discover_experiments(xlsxfile, experiments_dir):
+    """Discover experiment folders with effective-config, infer folder, and scores files.
+    Write results to a new xlsx workbook."""
+    SKIP_FOLDERS = {"align", "analyze", "analyse", "alignment", "alignments"}
+    REQUIRED_MODEL = "facebook/nllb-200-distilled-1.3B"
+    REQUIRED_SEED = 111
+
+    configs = sorted(experiments_dir.rglob("effective-config-*.yml"))
+    print(f"Found {len(configs)} effective-config files. Filtering...")
+
+    rows = []
+    skipped = {"no_infer": 0, "no_scores": 0, "wrong_model": 0, "wrong_seed": 0,
+               "too_many_cp": 0, "bad_folder": 0, "parse_error": 0}
+
+    for i, config_path in enumerate(configs):
+        if (i + 1) % 500 == 0:
+            print(f"  Processed {i + 1}/{len(configs)} ({len(rows)} kept so far)")
+
+        folder = config_path.parent
+
+        # Skip excluded folder names
+        if any(part.lower() in SKIP_FOLDERS for part in folder.parts):
+            skipped["bad_folder"] += 1
+            continue
+
+        # Must have infer folder
+        if not (folder / "infer").is_dir():
+            skipped["no_infer"] += 1
+            continue
+
+        # Must have scores files
+        scores_files = sorted(folder.glob("scores-*.csv"))
+        if not scores_files:
+            skipped["no_scores"] += 1
+            continue
+
+        # Parse config
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = yaml.safe_load(f)
+        except Exception as e:
+            LOGGER.warning(f"Failed to parse {config_path}: {e}")
+            skipped["parse_error"] += 1
+            continue
+
+        # Filter model and seed
+        if config.get("model") != REQUIRED_MODEL:
+            skipped["wrong_model"] += 1
+            continue
+        data = config.get("data", {})
+        if data.get("seed") != REQUIRED_SEED:
+            skipped["wrong_seed"] += 1
+            continue
+
+        # Check corpus_pairs
+        corpus_pairs = data.get("corpus_pairs", [])
+        if len(corpus_pairs) > 3:
+            skipped["too_many_cp"] += 1
+            continue
+
+        # Build row
+        experiment = str(folder.relative_to(experiments_dir))
+        lang_codes = data.get("lang_codes", {})
+        lang_codes_str = ";".join(f"{k}:{v}" for k, v in sorted(lang_codes.items()))
+
+        row = {"experiment": experiment, "lang_codes": lang_codes_str}
+
+        for idx, cp in enumerate(corpus_pairs, start=1):
+            prefix = f"cp{idx}"
+            src = cp.get("src", "")
+            if isinstance(src, list):
+                src = ";".join(src)
+            row[f"{prefix}.type"] = cp.get("type", "")
+            row[f"{prefix}.mapping"] = cp.get("mapping", "")
+            row[f"{prefix}.src"] = src
+            row[f"{prefix}.trg"] = cp.get("trg", "")
+            row[f"{prefix}.corpus_books"] = cp.get("corpus_books", "")
+            row[f"{prefix}.test_books"] = cp.get("test_books", "")
+
+        rows.append(row)
+
+    # Collect all column headers from all rows
+    all_keys = []
+    seen = set()
+    for key in ["experiment", "lang_codes"]:
+        all_keys.append(key)
+        seen.add(key)
+    for row in rows:
+        for k in row:
+            if k not in seen:
+                all_keys.append(k)
+                seen.add(k)
+
+    # Write xlsx
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Discovered_Experiments"
+    ws.append(all_keys)
+    for row in rows:
+        ws.append([row.get(h, "") for h in all_keys])
+
+    wb.save(xlsxfile)
+    wb.close()
+
+    print(f"\nDone. Kept {len(rows)} experiments, wrote to {xlsxfile}")
+    print(f"Skipped: {skipped}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Manage NMT experiments.")
     parser.add_argument("folder", help="Root experiment folder name (relative to mt_experiments_dir).")
@@ -523,11 +644,14 @@ def main():
     group.add_argument("--collect-scripts", action="store_true", help="Update the scripts sheet.")
     group.add_argument("--create-series", type=str, metavar="SERIES", help="Create experiment configs for the named series.")
     group.add_argument("--collect-results", action="store_true", help="Collect the results of the experiments.")
+    group.add_argument("--discover", type=str, help="Discover existing config files and store the results.")
 
     args = parser.parse_args()
 
     main_folder = EXPERIMENTS_DIR / args.folder
     xlsxfile = main_folder / args.xlsxfile
+    xlsxfile_rel = xlsxfile.relative_to(EXPERIMENTS_DIR)
+    relative_folder = xlsxfile_rel.parent
 
     if not xlsxfile.is_file():
         LOGGER.error(f"\nExperiment workbook not found: {xlsxfile}.")
@@ -537,6 +661,17 @@ def main():
         print(f"Found lock file: {lockfile}")
         print(f"Please close {xlsxfile.name} or delete the lock file and try again.")
         return 1
+
+    if args.discover:
+        # Folder to search 
+        search_folder = EXPERIMENTS_DIR / args.discover
+        discover_xlsxfile = main_folder / "discovered_experiments.xlsx"
+        if not search_folder.is_dir():
+            LOGGER.error(f"\nCouldn't find the folder to search: {search_folder}.")
+            return 1
+        else:
+            discover_experiments(discover_xlsxfile, search_folder)
+            return 0
 
     wb = openpyxl.load_workbook(xlsxfile)
     rows = read_sheet(wb, "Experiments")
@@ -554,9 +689,6 @@ def main():
 
     LOGGER.info(f"All scripture files present for {len(valid_rows)} experiments.")
 
-    # Collect filenames for scripts from cp columns
-    all_filenames_rows = [{"Source 1": f, "Source 2": "", "Target": ""}
-                          for r in valid_rows for f in get_scripture_filenames(r)]
     script_map = get_scripts(xlsxfile, valid_rows, two2three_iso)
     if not script_map:
         LOGGER.error("Could not determine scripts for any projects.")
@@ -566,7 +698,7 @@ def main():
         return 0
 
     if args.create_series:
-        return create_series(xlsxfile, args.create_series, valid_rows, script_map)
+        return create_series(xlsxfile, main_folder, args.create_series, valid_rows, script_map, relative_folder)
 
     if args.collect_results:
         results = collect_results(xlsxfile, main_folder, valid_rows, args.overwrite)
@@ -577,3 +709,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
