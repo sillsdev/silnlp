@@ -156,7 +156,9 @@ class OnboardingProject:
         self.iso_code = iso_code
         return iso_code
 
-    def calculate_tokenization_stats(self, stats_config: dict, ref_project_extract_file_names: List[str]) -> None:
+    def calculate_tokenization_stats(
+        self, stats_config: dict, ref_project_extract_file_names: List[str], ref_isos: List[str]
+    ) -> None:
         stats_dir = Path(self.output_folder / "stats")
 
         if stats_dir.exists() and not self.overwrite:
@@ -173,8 +175,14 @@ class OnboardingProject:
             return
         extract_file = extract_path.stem
 
-        iso_code = self.get_extract_iso_code()
-        nllb_tag = NLLB_TAG_FROM_ISO.get(iso_code, "eng_Latn")
+        iso_codes = [self.get_extract_iso_code()] + ref_isos
+
+        lang_codes = {}
+
+        for iso in iso_codes:
+            nllb_tag = NLLB_TAG_FROM_ISO.get(iso, None)
+            if nllb_tag:
+                lang_codes[iso] = nllb_tag
 
         if stats_config is None:
             stats_config = {
@@ -185,7 +193,7 @@ class OnboardingProject:
                             "src": ref_project_extract_file_names if ref_project_extract_file_names else [extract_file],
                             "trg": extract_file,
                             "type": "train",
-                            "lang_codes": {iso_code: nllb_tag},
+                            "lang_codes": lang_codes,
                         }
                     ],
                 },
@@ -425,7 +433,8 @@ class OnboardingRequest:
         if self.stats:
             self.main_project.calculate_tokenization_stats(
                 self.config.get("stats", None),
-                [ref_project.extract_file.stem for ref_project in self.reference_projects],
+                [ref_project.get_extract_path().stem for ref_project in self.reference_projects],
+                [ref_project.get_extract_iso_code() for ref_project in self.reference_projects],
             )
 
         if self.align:
