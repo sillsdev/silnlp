@@ -566,7 +566,7 @@ def discover_experiments(xlsxfile, search_dir, experiments_dir):
         d for d in search_dir.iterdir()
         if d.is_dir()
         and not any(d.name.lower().startswith(p) for p in SKIP_TLD_PREFIXES)
-        and d.name not in searched
+        and str(d.relative_to(experiments_dir)) not in searched
     ])
     print(f"Found {len(top_folders)} top-level folders to search")
 
@@ -584,8 +584,7 @@ def discover_experiments(xlsxfile, search_dir, experiments_dir):
         new_rows = []
         for config_path in configs:
             folder = config_path.parent
-
-            experiment = str(folder.relative_to(experiments_dir))
+            experiment = str(top_folder.relative_to(experiments_dir))
             if experiment in known:
                 skipped["already_known"] += 1
                 continue
@@ -683,13 +682,13 @@ def discover_experiments(xlsxfile, search_dir, experiments_dir):
             ws_sf.column_dimensions[get_column_letter(2)].width = 20
         else:
             ws_sf = wb["Searched_Folders"]
-        ws_sf.append([top_folder.name, datetime.now().strftime("%Y-%m-%d %H:%M")])
+        ws_sf.append([str(top_folder.relative_to(experiments_dir)), datetime.now().strftime("%Y-%m-%d %H:%M")])
 
         wb.save(xlsxfile)
         wb.close()
 
         total_new += len(new_rows)
-        print(f"  {top_folder.name}: +{len(new_rows)} experiments (total new: {total_new})")
+        print(f"  {str(top_folder.relative_to(experiments_dir))}: +{len(new_rows)} experiments (total new: {total_new})")
 
     print(f"\nDone. Added {total_new} new experiments to Discovered_Experiments sheet")
     print(f"Skipped: {skipped}")
