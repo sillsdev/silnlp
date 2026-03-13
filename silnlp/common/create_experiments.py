@@ -413,6 +413,14 @@ def collect_results(xlsxfile, main_folder, valid_rows, overwrite):
         series = row["Series"]
         src1, src2, trg = row["Source 1"], row["Source 2"], row["Target"]
 
+        # TO DO Read Max_steps from the row info.
+        if series == "tenK":
+            max_steps = 10000
+        else:
+            max_steps = 5000
+            
+        scores_filename = f"scores-{max_steps}.csv"
+
         for suffix, mapping in [("many", "many_to_many"), ("mixed", "mixed_src"), ("single", "one_to_one")]:
             folder = main_folder / f"{language}_{series}_{suffix}"
             experiment_rel = folder.relative_to(main_folder)  # For more readable messages.
@@ -422,7 +430,7 @@ def collect_results(xlsxfile, main_folder, valid_rows, overwrite):
 
             train_vref_file, test_vref_file, stats_file, scores_file = (
                 folder / file
-                for file in ["train.vref.txt", "test.vref.txt", "tokenization_stats.csv", "scores-5000.csv"]
+                for file in ["train.vref.txt", "test.vref.txt", "tokenization_stats.csv", scores_filename]
             )
             preprocess_files = [stats_file, train_vref_file, test_vref_file]
             missing_preprocess_files = [f for f in preprocess_files if not f.is_file()]
@@ -464,14 +472,15 @@ def collect_results(xlsxfile, main_folder, valid_rows, overwrite):
                 if scores_file.is_file():
                     scores = get_scores(scores_file)
                 else:
-                    scores = [{"Book": "", "BLEU": None, "chrF3++": None}]
-                    model_file_4000 = folder / "run" / "checkpoint-4000" / "model-00002-of-00002.safetensors"
-                    model_file_5000 = folder / "run" / "checkpoint-5000" / "model-00002-of-00002.safetensors"
 
-                    if model_file_5000.is_file():
-                        LOGGER.warning(f"5000 step model exists for {experiment_rel}, but the file {scores_file.name} wasn't found.")
-                    elif model_file_4000.is_file():
-                        LOGGER.warning(f"No 5000 step model exists for {experiment_rel}. A 4000 step model exists, but the file {scores_file.name} wasn't found.")
+                    scores = [{"Book": "", "BLEU": None, "chrF3++": None}]
+                    model_folders = [f for f in (folder / "run").glob("checkpoint-*") if f.is_dir() and (f / "model-00002-of-00002.safetensors").is_file() ]
+                    #model_file_4000 = folder / "run" / "checkpoint-4000" / "model-00002-of-00002.safetensors"
+                    #model_file_5000 = folder / "run" / "checkpoint-5000" / "model-00002-of-00002.safetensors"
+                    #model_file_10000 = folder / "run" / "checkpoint-10000" / "model-00002-of-00002.safetensors"
+                    for model_folder in model_folders:                    
+                        LOGGER.info(f"For experiment: {experiment_rel} a model exists for {model_folder.name}, but scores were not found for this checkpoint.")
+                    
             else:
                 # Reconstruct scores from existing rows
                 scores = [
