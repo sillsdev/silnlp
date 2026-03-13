@@ -509,7 +509,9 @@ class Translator(AbstractContextManager["Translator"], ABC):
                     f.write(usfm_out)
 
                 if save_confidences and config.get_postprocess_suffix() == "":
-                    generate_confidence_files(translated_draft, trg_draft_file_path, scripture_refs=scripture_refs)
+                    generate_confidence_files(
+                        translated_draft, trg_draft_file_path, scripture_refs=translated_text_rows.get_scripture_refs()
+                    )
 
     def translate_docx(
         self,
