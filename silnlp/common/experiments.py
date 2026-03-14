@@ -33,10 +33,12 @@ SKIP_TLD_PREFIXES = {"eil-", "ft-", "bt-", "opcap", "demo", "parent",
                      "names", "multi"}
 
 DISC_HEADERS = [
-    "experiment", "lang_codes",
-    "cp1.type", "cp1.mapping", "cp1.src", "cp1.trg", "cp1.corpus_books", "cp1.test_books",
-    "cp2.type", "cp2.mapping", "cp2.src", "cp2.trg", "cp2.corpus_books", "cp2.test_books",
-    "cp3.type", "cp3.mapping", "cp3.src", "cp3.trg", "cp3.corpus_books", "cp3.test_books",
+    "experiment", "lang_codes", "cp_count",
+    "cp1.type", "cp1.mapping", "cp1.src1", "cp1.src2", "cp1.src_others", "cp1.trg", "cp1.corpus_books", "cp1.test_books",
+    "cp2.type", "cp2.mapping", "cp2.src1", "cp2.src2", "cp2.src_others", "cp2.trg", "cp2.corpus_books", "cp2.test_books",
+    "cp3.type",
+    "scores1.steps", "scores1.chrF3",
+    "scores2.steps", "scores2.chrF3",
 ]
 
 METADATA_COLS = {"experiment", "language", "series", "id"}
@@ -629,6 +631,7 @@ def discover_experiments(xlsxfile, search_dir, experiments_dir):
             row = {h: "" for h in DISC_HEADERS}
             row["experiment"] = experiment
             row["lang_codes"] = lang_codes_str
+            row["cp_count"] = len(corpus_pairs)
 
             skip_experiment = False
             for idx, cp in enumerate(corpus_pairs, start=1):
@@ -641,21 +644,51 @@ def discover_experiments(xlsxfile, search_dir, experiments_dir):
                         skipped["parse_error"] += 1
                         skip_experiment = True
                         break
-                    src = ";".join(src)
+                    src_list = src
+                elif src:
+                    src_list = [src]
+                else:
+                    src_list = []
+
                 trg = cp.get("trg", "")
                 if trg is None:
                     trg = ""
                 if isinstance(trg, list):
                     trg = ";".join(s for s in trg if isinstance(s, str))
+
+                if idx <= 2:
+                    row[f"{prefix}.src1"] = src_list[0] if len(src_list) >= 1 else ""
+                    row[f"{prefix}.src2"] = src_list[1] if len(src_list) >= 2 else ""
+                    row[f"{prefix}.src_others"] = ";".join(src_list[2:]) if len(src_list) > 2 else ""
+                    row[f"{prefix}.trg"] = trg
+                    row[f"{prefix}.mapping"] = cp.get("mapping", "")
+                    row[f"{prefix}.corpus_books"] = cp.get("corpus_books", "")
+                    row[f"{prefix}.test_books"] = cp.get("test_books", "")
                 row[f"{prefix}.type"] = cp.get("type", "")
-                row[f"{prefix}.mapping"] = cp.get("mapping", "")
-                row[f"{prefix}.src"] = src
-                row[f"{prefix}.trg"] = trg
-                row[f"{prefix}.corpus_books"] = cp.get("corpus_books", "")
-                row[f"{prefix}.test_books"] = cp.get("test_books", "")
 
             if skip_experiment:
                 continue
+
+            # Collect chrF3 scores
+            scores_files = sorted(folder.glob("scores-*.csv"))
+            score_entries = []
+            for sf in scores_files:
+                match = re.search(r"scores-(\d+)\.csv", sf.name)
+                if not match:
+                    continue
+                steps = int(match.group(1))
+                scores = get_scores(sf)
+                all_row = next((s for s in scores if s.get("Book") == "ALL"), None)
+                if all_row and all_row.get("chrF3") is not None:
+                    score_entries.append((steps, all_row["chrF3"]))
+
+            score_entries.sort(key=lambda x: x[0])
+            if len(score_entries) >= 1:
+                row["scores1_steps"] = score_entries[0][0]
+                row["scores1_chrF3"] = score_entries[0][1]
+            if len(score_entries) >= 2:
+                row["scores2_steps"] = score_entries[1][0]
+                row["scores2_chrF3"] = score_entries[1][1]
 
             new_rows.append(row)
             known.add(experiment)
