@@ -449,8 +449,8 @@ def get_scores(scores_file):
         for row in reader:
             results.append({
                 "Book": row[book_col].strip() if book_col else "",
-                "BLEU": float(row[bleu_col]) if bleu_col and row[bleu_col].strip() else None,
-                "chrF3": float(row[chrf_col]) if chrf_col and row[chrf_col].strip() else None,
+                "BLEU": float(row[bleu_col]) if bleu_col and row[chrf_col] and row[bleu_col].strip() else None,
+                "chrF3": float(row[chrf_col]) if chrf_col and row[chrf_col] and row[chrf_col].strip() else None,
             })
     return results
 
