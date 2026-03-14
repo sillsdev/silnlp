@@ -444,7 +444,7 @@ def get_scores(scores_file):
     with open(scores_file, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         bleu_col = next((c for c in reader.fieldnames if c.lower() == "bleu"), None)
-        chrf_col = next((c for c in reader.fieldnames if "chrf" in c.lower()), None)
+        chrf_col = next((c for c in reader.fieldnames if c.lower() == "chrf3" ), None)
         book_col = next((c for c in reader.fieldnames if c.lower() == "book"), None)
         for row in reader:
             results.append({
