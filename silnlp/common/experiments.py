@@ -584,7 +584,7 @@ def discover_experiments(xlsxfile, search_dir, experiments_dir):
         new_rows = []
         for config_path in configs:
             folder = config_path.parent
-            experiment = str(top_folder.relative_to(experiments_dir))
+            experiment = str(folder.relative_to(experiments_dir))
             if experiment in known:
                 skipped["already_known"] += 1
                 continue
