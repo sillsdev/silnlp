@@ -684,11 +684,11 @@ def discover_experiments(xlsxfile, search_dir, experiments_dir):
 
             score_entries.sort(key=lambda x: x[0])
             if len(score_entries) >= 1:
-                row["scores1_steps"] = score_entries[0][0]
-                row["scores1_chrF3"] = score_entries[0][1]
+                row["scores1.steps"] = score_entries[0][0]
+                row["scores1.chrF3"] = score_entries[0][1]
             if len(score_entries) >= 2:
-                row["scores2_steps"] = score_entries[1][0]
-                row["scores2_chrF3"] = score_entries[1][1]
+                row["scores2.steps"] = score_entries[1][0]
+                row["scores2.chrF3"] = score_entries[1][1]
 
             new_rows.append(row)
             known.add(experiment)
