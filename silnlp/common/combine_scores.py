@@ -45,8 +45,8 @@ COLUMNS_TO_HIDE = [
     "BLEU_brevity_penalty",
     "BLEU_total_sys_len",
     "BLEU_total_ref_len",
-    "chrF3",
     "chrF3+",
+    "chrF3++",
     "book",
     "draft_index",
     "num_refs",
@@ -248,19 +248,18 @@ def main():
     parser.add_argument(
         "--output_filename",
         type=str,
-        default="scores",
-        help="Filename suffix without the '.csv' or '.xlsx'. \
-            The folder name is added as a prefix to make it easier to distinguish scores files in search results.",
+        default="scores.xlsx",
+        help="Filename suffix, the folder name is added as a prefix to make it easier to distinguish scores files in search results.",
     )
     args = parser.parse_args()
 
     folder = Path(args.folder)
-    base_filename = f"{folder.name}_{args.output_filename}"
-    output_xlsx = folder / base_filename + "xlsx"
-
     if not folder.is_dir():
         folder = Path(SIL_NLP_ENV.mt_experiments_dir) / args.folder
-
+    
+    base_filename = f"{folder.name}_{args.output_filename}"
+    output_xlsx = folder / base_filename
+    
     # Check for lock files and ask the user to close them.
     if lockfile := is_locked(output_xlsx):
         print(f"Found lock file: {lockfile}")
