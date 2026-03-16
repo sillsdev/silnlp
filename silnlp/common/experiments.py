@@ -595,13 +595,13 @@ def discover_experiments(xlsxfile, search_dir, experiments_dir):
                 skipped["bad_folder"] += 1
                 continue
 
-            if not (folder / "infer").is_dir():
-                skipped["no_infer"] += 1
-                continue
+            # if not (folder / "infer").is_dir():
+            #     skipped["no_infer"] += 1
+            #     continue
 
-            if not sorted(folder.glob("scores-*.csv")):
-                skipped["no_scores"] += 1
-                continue
+            # if not sorted(folder.glob("scores-*.csv")):
+            #     skipped["no_scores"] += 1
+            #     continue
 
             try:
                 with open(config_path, "r", encoding="utf-8") as f:
