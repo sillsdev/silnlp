@@ -519,8 +519,22 @@ class ParallelPassageCollectionFactory:
                 ]
                 missing = [f for f in run_files if not f.exists()]
                 if missing:
-                    raise FileNotFoundError(
-                        f"Saved alignment run file(s) not found: {', '.join(str(f) for f in missing)}"
+                    existing = [f for f in run_files if f.exists()]
+                    print(
+                        f"Found {len(existing)}/{self._alignment_runs} saved alignment runs. "
+                        f"Running {len(missing)} missing run(s)."
+                    )
+                    preloaded = [list(load_corpus(f)) for f in existing]
+                    return ParallelPassageCollection(
+                        source_project_name,
+                        target_passage_file,
+                        EflomalAlignmentGenerator(
+                            self._save_alignments,
+                            target_passage_file,
+                            num_runs=len(missing),
+                            run_offset=len(existing),
+                            preloaded_runs=preloaded,
+                        ),
                     )
                 return ParallelPassageCollection(
                     source_project_name,
@@ -576,19 +590,24 @@ class EflomalAlignmentGenerator(AlignmentGenerator):
         save_alignments: bool = False,
         target_passage_file: Optional[Path] = None,
         num_runs: int = 1,
+        run_offset: int = 0,
+        preloaded_runs: Optional[List[List[str]]] = None,
     ):
         self._save_alignments = save_alignments
         self._target_passage_file = target_passage_file
         self._num_runs = num_runs
+        self._run_offset = run_offset
+        self._preloaded_runs = preloaded_runs or []
 
     def generate(self, source_passages: List[str], target_passages: List[str]) -> Generator[WordAlignments, None, None]:
+        total_runs = self._run_offset + self._num_runs
         with TemporaryDirectory() as td:
             align_path = Path(td, "sym-align.txt")
             src_path = Path(td, "src_align.txt")
             trg_path = Path(td, "trg_align.txt")
             write_corpus(src_path, source_passages)
             write_corpus(trg_path, target_passages)
-            if self._num_runs == 1:
+            if total_runs == 1:
                 t0 = time.perf_counter()
                 compute_alignment_scores(
                     Path(td, "src_align.txt"),
@@ -604,9 +623,11 @@ class EflomalAlignmentGenerator(AlignmentGenerator):
                 for line in load_corpus(align_path):
                     yield WordAlignments(AlignedWordPair.from_string(line))
             else:
-                run_alignment_lines: List[List[str]] = []
+                run_alignment_lines: List[List[str]] = list(self._preloaded_runs)
+
                 all_runs_start = time.perf_counter()
-                for run_idx in range(self._num_runs):
+                for i in range(self._num_runs):
+                    run_idx = self._run_offset + i
                     run_saved_alignments_file = (
                         self._target_passage_file.with_suffix(f".alignments.run{run_idx + 1}.txt")
                         if self._target_passage_file is not None
@@ -622,7 +643,7 @@ class EflomalAlignmentGenerator(AlignmentGenerator):
                     )
                     elapsed = time.perf_counter() - t0
                     print(
-                        f"Alignment run {run_idx + 1}/{self._num_runs} completed in {f'{int(elapsed // 60)}m {elapsed % 60:.2f}s' if elapsed >= 60 else f'{elapsed:.2f}s'}"
+                        f"Alignment run {run_idx + 1}/{total_runs} completed in {f'{int(elapsed // 60)}m {elapsed % 60:.2f}s' if elapsed >= 60 else f'{elapsed:.2f}s'}"
                     )
                     current_run_lines = list(load_corpus(run_align_path))
                     run_alignment_lines.append(current_run_lines)
@@ -652,7 +673,7 @@ class EflomalAlignmentGenerator(AlignmentGenerator):
             if self._save_alignments:
                 assert self._target_passage_file is not None
                 saved_alignments_file = self._target_passage_file.with_suffix(".alignments.txt")
-                if self._num_runs == 1:
+                if total_runs == 1:
                     shutil.copy(align_path, saved_alignments_file)
                 else:
                     with open(saved_alignments_file, "w", encoding="utf-8") as f:
