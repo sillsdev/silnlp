@@ -262,11 +262,6 @@ def main() -> None:
         show_attrs(cli_args=args)
         exit()
 
-    if not (args.preprocess or args.train or args.test):
-        args.preprocess = True
-        args.train = True
-        args.test = True
-
     exp = SILExperiment(
         name=args.experiment,
         make_stats=args.stats,
@@ -286,7 +281,7 @@ def main() -> None:
         score_by_book=args.score_by_book,
     )
 
-    if not args.save_checkpoints:
+    if args.train and not args.save_checkpoints:
         SIL_NLP_ENV.delete_path_on_exit(get_mt_exp_dir(args.experiment) / "run")
     exp.run()
 
