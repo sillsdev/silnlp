@@ -262,6 +262,11 @@ def main() -> None:
         show_attrs(cli_args=args)
         exit()
 
+    if not (args.preprocess or args.train or args.test or args.translate):
+        args.preprocess = True
+        args.train = True
+        args.test = True
+
     exp = SILExperiment(
         name=args.experiment,
         make_stats=args.stats,
