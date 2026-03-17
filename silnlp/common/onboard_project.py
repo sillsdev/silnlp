@@ -38,6 +38,7 @@ class OnboardingProject:
         self.extract_file: Path | None = None
         self.overwrite: bool = overwrite
         self.iso_code: str = ""
+        self.resource: bool | None = None
 
     def collect_verse_counts_wrapper(self, verse_counts_config: dict) -> None:
         verse_counts_output_folder = Path(self.output_folder / "verse_counts")
@@ -296,12 +297,10 @@ class OnboardingProject:
                     f"{self.local_project_path} does not contain any files using the naming convention, '{pattern}', found in the Settings.xml file."
                 )
 
-    def setup_local_project(self, project: str, copy_from: Path | None, datestamp: bool) -> None:
+    def setup_local_project(self, project: str, copy_from: Path, datestamp: bool) -> None:
         if project.endswith(".zip") or project.endswith(".p8z"):
-            with zipfile.ZipFile(copy_from / project, "r") as zip_ref:
+            with zipfile.ZipFile(copy_from / Path(project), "r") as zip_ref:
                 self.project_name = Path(project).stem
-                if self.project_name.endswith("_Resource"):
-                    self.project_name = self.project_name.replace("_Resource", "")
                 needs_password = any(zinfo.flag_bits & 0x1 for zinfo in zip_ref.infolist())
                 if needs_password:
                     zip_password = self.config.get("zip_password", None)
@@ -309,17 +308,20 @@ class OnboardingProject:
                         pwd = zip_password
                     if not pwd:
                         pwd = getpass.getpass(prompt=f"Enter password for {self.project_name}: ")
-                    zip_ref.extractall(copy_from / self.project_name, pwd=pwd.encode())
+                    zip_ref.extractall(copy_from / Path(self.project_name), pwd=pwd.encode())
                 else:
-                    zip_ref.extractall(copy_from / self.project_name)
-        if Path(project).stem.endswith("_Resource"):
-            resource_hash_path = copy_from / self.project_name / ".resource_hash" if copy_from else None
-            if resource_hash_path and not resource_hash_path.exists():
-                resource_hash_path.touch()
+                    zip_ref.extractall(copy_from / Path(self.project_name))
 
-        self.local_project_path = Path(copy_from) / self.project_name if copy_from else None
+        self.local_project_path = Path(copy_from) / Path(self.project_name) if copy_from else None
 
         self.check_for_project_errors()
+
+        if self.project_name.endswith("_Resource"):
+            resource_hash_path = copy_from / Path(f"{self.project_name}/.resource_hash") if copy_from else None
+            if resource_hash_path and not resource_hash_path.exists():
+                resource_hash_path.touch()
+            self.project_name = self.project_name.replace("_Resource", "")
+
         if "-" in self.project_name:
             LOGGER.info(f"Project name '{self.project_name}' contains hyphens. Replacing hyphens with underscores.")
             self.project_name = self.project_name.replace("-", "_")
@@ -350,8 +352,11 @@ class OnboardingProject:
         log_file.close()
 
     def is_resource(self) -> bool:
+        if self.resource is not None:
+            return self.resource
         resource_hash_path = Path(self.local_project_path / ".resource_hash")
-        return resource_hash_path.exists()
+        self.resource = resource_hash_path.exists()
+        return self.resource
 
     def generate_resource_hash(self) -> str:
         resource_path = SIL_NLP_ENV.pt_projects_dir / self.project_name
@@ -485,11 +490,11 @@ class OnboardingRequest:
             )
 
         if onboarding_project.is_resource() and onboarding_project.check_resource_hash():
-            LOGGER.info(f"Resource '{onboarding_project.project_name}' is up to date. Skipping onboarding.")
+            LOGGER.info(f"Resource '{onboarding_project.project_name}' is up to date. Skipping uploading.")
             return
         elif onboarding_project.is_resource():
             LOGGER.info(
-                f"Resource '{onboarding_project.project_name}' is outdated. Continuing onboarding to update resource."
+                f"Resource '{onboarding_project.project_name}' is outdated. Uploading new version of the resource."
             )
             onboarding_project.update_resource()
 
