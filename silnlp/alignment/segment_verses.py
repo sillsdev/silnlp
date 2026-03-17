@@ -453,6 +453,113 @@ class FewestCrossedAlignmentsVerseSegmenterFactory(AbstractVerseSegmenterFactory
         )
 
 
+class RecursiveSplittingVerseSegmenter(VerseSegmenter):
+    _MAX_WINDOW_SIZE = 5
+
+    def __init__(
+        self,
+        source_tokens: List[str],
+        target_tokens: List[str],
+        target_text: str,
+        source_verse_token_offsets: List[int],
+        word_alignments: WordAlignments,
+    ):
+        self._source_tokens = source_tokens
+        self._target_tokens = target_tokens
+        self._target_text = target_text
+        self._source_verse_token_offsets = source_verse_token_offsets
+        self._word_alignments = word_alignments
+
+    def predict_target_verse_token_offsets(self) -> List[int]:
+        self._split_into_minimal_segments()
+        return []
+
+    def _split_into_minimal_segments(self) -> None:
+        src_to_trg_length_ratio = len(self._source_tokens) / len(self._target_tokens)
+
+        previous_src_break_offset = 0
+        previous_trg_break_offset = 0
+
+        # try to find smaller segments to break into
+        for break_index, src_break_offset in enumerate(self._source_verse_token_offsets):
+            src_break_offset_search_start = self._source_verse_token_offsets[break_index - 1] if break_index > 0 else 0
+
+            best_src_split_index = -1
+            best_trg_split_index = -1
+            max_score = -1_000_000
+            for potential_src_split_index in range(src_break_offset_search_start + 1, src_break_offset):
+                for potential_trg_split_index in range(
+                    max(int(0.75 * src_to_trg_length_ratio * src_break_offset_search_start), previous_trg_break_offset),
+                    min(len(self._target_tokens) + 1, int(1.25 * src_to_trg_length_ratio * src_break_offset)),
+                ):
+                    score = self._score_potential_split(
+                        potential_src_split_index,
+                        potential_trg_split_index,
+                        src_break_offset_search_start,
+                        src_break_offset,
+                    )
+                    if score > max_score:
+                        max_score = score
+                        best_src_split_index = potential_src_split_index
+                        best_trg_split_index = potential_trg_split_index
+
+            if max_score > 0:
+                print(" ".join(self._source_tokens[previous_src_break_offset:best_src_split_index]))
+                print(" ".join(self._target_tokens[previous_trg_break_offset:best_trg_split_index]))
+                print("---")
+                previous_trg_break_offset = best_trg_split_index
+                previous_src_break_offset = best_src_split_index
+
+    def _score_potential_split(
+        self, potential_src_split_index: int, potential_trg_split_index: int, src_range_start: int, src_range_end: int
+    ) -> float:
+        # break ties with splits that closer to the middle of the range
+        score = -abs(potential_src_split_index - (src_range_end - src_range_start) / 2) * 0.01
+        num_crossed_alignments = self._word_alignments.get_num_crossed_alignments(
+            potential_src_split_index, potential_trg_split_index
+        )
+        score -= 20 * num_crossed_alignments
+
+        for window_size in range(1, self._MAX_WINDOW_SIZE + 1):
+            num_alignments_in_window = self._calculate_num_alignments_in_window(
+                potential_src_split_index, potential_trg_split_index, window_size
+            )
+            score += num_alignments_in_window
+
+        return score
+
+    def _calculate_num_alignments_in_window(
+        self, potential_src_split_index: int, potential_trg_split_index: int, window_size: int
+    ) -> int:
+        num_alignments_in_window = 0
+        for src_index in range(potential_src_split_index - window_size, potential_src_split_index + window_size + 1):
+            if src_index < 0 or src_index >= len(self._source_tokens):
+                continue
+            aligned_trg_indices = self._word_alignments.get_target_aligned_words(src_index)
+            for trg_index in aligned_trg_indices:
+                if potential_trg_split_index - window_size <= trg_index <= potential_trg_split_index + window_size:
+                    num_alignments_in_window += 1
+        return num_alignments_in_window
+
+
+class RecursiveSplittingVerseSegmenterFactory(AbstractVerseSegmenterFactory):
+    def create(
+        self,
+        source_tokens: List[str],
+        target_tokens: List[str],
+        target_text: str,
+        source_verse_token_offsets: List[int],
+        word_alignments: WordAlignments,
+    ) -> RecursiveSplittingVerseSegmenter:
+        return RecursiveSplittingVerseSegmenter(
+            source_tokens,
+            target_tokens,
+            target_text,
+            source_verse_token_offsets,
+            word_alignments,
+        )
+
+
 class AdaptedMarkerPlacementVerseSegmenter(VerseSegmenter):
     def predict_target_verse_token_offsets(self) -> List[int]:
         return [
@@ -908,10 +1015,12 @@ def main() -> None:
     )
     src_segmented_passages = parallel_passages.get_source_segmented_passages()
 
-    verse_segmenter_factory = FewestCrossedAlignmentsVerseSegmenterFactory(
-        pseudoalignment_weight=0.0, pseudoalignment_exponent=2
-    )
+    # verse_segmenter_factory = FewestCrossedAlignmentsVerseSegmenterFactory(
+    #    pseudoalignment_weight=0.0, pseudoalignment_exponent=2
+    # )
+    verse_segmenter_factory = RecursiveSplittingVerseSegmenterFactory()
     trg_segmented_passages = list(parallel_passages.segment_target_passages(verse_segmenter_factory))
+    exit(0)
 
     src_path = Path(args.target_passages).with_suffix(".src.txt")
     trg_path = Path(args.target_passages).with_suffix(".trg.txt")
