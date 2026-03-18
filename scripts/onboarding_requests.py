@@ -1,4 +1,5 @@
 import concurrent.futures
+from datetime import datetime
 import os
 import shutil
 import subprocess
@@ -6,6 +7,7 @@ import uuid
 from enum import Enum
 from pathlib import Path
 from typing import Dict, Tuple
+import logging
 
 import requests
 from clearml import Task
@@ -18,6 +20,19 @@ REPO_PATH = os.getenv("REPO_PATH")
 
 ONBOARDING_REQUESTS_URL = "https://qa.scriptureforge.org/command-api/onboarding-requests"
 PROJECTS_URL = "https://qa.scriptureforge.org/paratext-api/projects"
+
+LOGGER = logging.getLogger(__name__)
+now = datetime.now()
+datestamp = now.strftime("%Y_%m_%d")
+log_file = Path(ONBOARDING_PATH / f"onboarding_requests_{datestamp}.log")
+logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=[
+            logging.FileHandler(log_file, mode="a", encoding="utf-8"),
+        ],
+        force=True,
+    )
 
 
 class RequestType(Enum):
@@ -44,7 +59,7 @@ def send_request(type: RequestType, url: str, method: str, params: dict) -> dict
             raise ValueError("Invalid request type. Must be 'GET' or 'POST'.")
         return response
     except requests.exceptions.RequestException as e:
-        print(f"Error making request: {e}")
+        LOGGER.warning(f"Error making request: {e}")
         return {}
 
 
@@ -89,10 +104,8 @@ def get_project_metadata(onboarding_request: dict) -> Tuple[str, Dict[str, str]]
             {"scriptureForgeId": id} if key == "projectId" else {"paratextId": id},
         )
         metadata = response.json().get("result", {})
-        print(f"Metadata for {key}: {metadata}")
         if key == "projectId":
             main_project_name = metadata.get("shortName")
-        print(metadata)
         request_metadata[metadata.get("id")] = (metadata.get("paratextID"), metadata.get("shortName"))
 
     return request_metadata, main_project_name
@@ -109,7 +122,6 @@ def download_project(SF_id: str, main_project_name: str, project_short_name: str
 
 
 onboarding_requests = get_onboarding_requests()
-print(onboarding_requests)
 onboarded_projects = []
 
 if not os.path.exists(f"{ONBOARDING_PATH}/onboarded_projects.log"):
@@ -128,7 +140,6 @@ def process_request(request):
     for SF_id, (paratext_id, project_short_name) in request_metadata.items():
         download_project(SF_id, main_project_name, project_short_name, paratext_id)
     task_name = f"Auto Onboarding - {main_project_name}"
-    print(task_name)
     subprocess.run(
         [
             "python",
@@ -147,7 +158,7 @@ def process_request(request):
         task.wait_for_status()
         add_comment(request["id"], "Automatic onboarding was successful.")
     except RuntimeError as e:
-        print(e)
+        LOGGER.warningprint(e)
         add_comment(request["id"], "Automatic onboarding failed.")
     finally:
         shutil.rmtree(f"{ONBOARDING_PATH}/{main_project_name}_Request")
@@ -159,4 +170,4 @@ with concurrent.futures.ThreadPoolExecutor() as executor:
         try:
             future.result()
         except Exception as e:
-            print(f"Error processing request: {e}")
+            LOGGER.warning(f"Error processing request: {e}")
