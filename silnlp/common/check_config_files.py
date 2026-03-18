@@ -1,10 +1,12 @@
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+
 import yaml
-from .utils import get_mt_exp_dir
-from .environment import SIL_NLP_ENV
 from tqdm import tqdm
 
+from .environment import SIL_NLP_ENV
+from .utils import get_mt_exp_dir
 
 exp_dir = SIL_NLP_ENV.mt_experiments_dir
 scripture_dir = SIL_NLP_ENV.mt_scripture_dir
@@ -69,8 +71,10 @@ def main() -> None:
         show_files(f"There are {len(missing_files)} files missing:", missing_files)
         exit()
 
-    print(f"Checking that all {len(existing_files)} existing files can be read as UTF-8:")    
-    decode_error_files = [file for file in tqdm(existing_files) if not is_valid_encoding(file, encoding='utf-8')]
+    print(f"Checking that all {len(existing_files)} existing files can be read as UTF-8:")
+    with ThreadPoolExecutor() as ex:
+        futs = {ex.submit(is_valid_encoding, f): f for f in existing_files}
+        decode_error_files = [futs[fut] for fut in tqdm(as_completed(futs), total=len(futs)) if not fut.result()]
     
     if not decode_error_files:
         print(f"All {len(existing_files)} existing files can be decoded as UTF-8.")
