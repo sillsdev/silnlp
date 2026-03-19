@@ -271,7 +271,7 @@ class OnboardingProject:
         align_config: Config = create_config(exp_dir=align_output_dir, config=align_config)
         collect_verse_counts_directory = Path(self.output_folder / "verse_counts")
         shutil.copytree(collect_verse_counts_directory, align_output_dir, dirs_exist_ok=True)
-        exp_name = f"OnboardingRequests/{self.project_name}/alignments"
+        exp_name = f"{self.output_folder.stem}/{self.project_name}/alignments"
         analyze(config=align_config, exp_name=exp_name, create_summaries=True)
 
     def check_for_project_errors(self) -> None:
@@ -342,7 +342,7 @@ class OnboardingProject:
             self.local_project_path = new_local_project_path
 
     def setup_output(self) -> None:
-        self.output_folder = Path(SIL_NLP_ENV.mt_experiments_dir / "OnboardingRequests" / self.project_name)
+        self.output_folder = Path(SIL_NLP_ENV.mt_experiments_dir / "_OnboardingRequests" / self.project_name)
         self.output_folder.mkdir(parents=True, exist_ok=True)
         log_file = open(
             self.output_folder / f"{self.project_name}_onboarding.log",
