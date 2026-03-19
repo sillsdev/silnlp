@@ -1,5 +1,5 @@
 import concurrent.futures
-from datetime import datetime
+import logging
 import os
 import shutil
 import subprocess
@@ -7,7 +7,6 @@ import uuid
 from enum import Enum
 from pathlib import Path
 from typing import Dict, Tuple
-import logging
 
 import requests
 from clearml import Task
@@ -22,17 +21,6 @@ ONBOARDING_REQUESTS_URL = "https://qa.scriptureforge.org/command-api/onboarding-
 PROJECTS_URL = "https://qa.scriptureforge.org/paratext-api/projects"
 
 LOGGER = logging.getLogger(__name__)
-now = datetime.now()
-datestamp = now.strftime("%Y_%m_%d")
-log_file = Path(ONBOARDING_PATH / f"onboarding_requests_{datestamp}.log")
-logging.basicConfig(
-        level=logging.DEBUG,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.FileHandler(log_file, mode="a", encoding="utf-8"),
-        ],
-        force=True,
-    )
 
 
 class RequestType(Enum):
