@@ -303,7 +303,7 @@ class OnboardingProject:
                 self.project_name = Path(project).stem
                 needs_password = any(zinfo.flag_bits & 0x1 for zinfo in zip_ref.infolist())
                 if needs_password:
-                    zip_password = self.config.get("zip_password", None)
+                    zip_password = os.get_env("PT_ZIP_PASSWORD", None)
                     if zip_password:
                         pwd = zip_password
                     if not pwd:
