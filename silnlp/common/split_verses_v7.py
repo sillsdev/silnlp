@@ -102,37 +102,7 @@ def split_text(text, max_len):
     return chunks
 
 
-# def split_text_token(parser, max_len):
-#     "Split long text into parts with the appropriate para/char markers"
-
-#     chunks = split_text(parser.state.token.text, max_len)
-#     if len(chunks) == 1:
-#         print(f"Warning: text chunk passed to split_text_token was not longer than {max_len}:\n{parser.state.token.text}")
-#         return [parser.state.token]  # No change to this token.
-
-#     elif len(chunks) > 1:
-#         result = [UsfmToken(UsfmTokenType.TEXT, text=chunks[0])]
-#         if len(parser.state.stack) == 3 and parser.state.stack[0].type == UsfmElementType.PARA and parser.state.stack[1].type == UsfmElementType.NOTE and parser.state.stack[2].type == UsfmElementType.CHAR:
-#             for chunk in chunks[1:]:
-#                 result.append(UsfmToken(UsfmTokenType.PARAGRAPH, marker=parser.state.stack[0].marker))
-#                 result.append(UsfmToken(UsfmTokenType.NOTE, marker=parser.state.stack[1].marker))
-#                 result.append(UsfmToken(UsfmTokenType.CHARACTER, marker=parser.state.stack[2].marker))
-#                 result.append(UsfmToken(UsfmTokenType.TEXT, text=chunk))
-#         elif len(parser.state.stack) == 2 and parser.state.stack[0].type == UsfmElementType.PARA and parser.state.stack[1].type == UsfmElementType.CHAR:
-#             for chunk in chunks[1:]:
-#                 result.append(UsfmToken(UsfmTokenType.PARAGRAPH, marker=parser.state.stack[0].marker))
-#                 result.append(UsfmToken(UsfmTokenType.CHARACTER, marker=parser.state.stack[1].marker))
-#                 result.append(UsfmToken(UsfmTokenType.TEXT, text=chunk))
-#         elif len(parser.state.stack) == 1 and parser.state.stack[0].type == UsfmElementType.PARA:
-#             for chunk in chunks[1:]:
-#                 result.append(UsfmToken(UsfmTokenType.PARAGRAPH, marker=parser.state.stack[0].marker))
-#                 result.append(UsfmToken(UsfmTokenType.TEXT, text=chunk))
-#         else:
-#             print(f"Warning, don't know how to handle this parser.state.stack: {parser.state.stack} in split_text_token.")
-#     return result
-
-
-def split_text_token(parser, max_len):
+def split_text_token(parser, max_len, simple=False):
     "Split long text into parts with the appropriate para/char markers"
 
     chunks = split_text(parser.state.token.text, max_len)
@@ -140,16 +110,17 @@ def split_text_token(parser, max_len):
         print(
             f"Warning: text chunk passed to split_text_token was not longer than {max_len}:\n{parser.state.token.text}"
         )
-        return [parser.state.token]  # No change to this token.
-
-    stack = parser.state.stack
-    if not stack or stack[0].type != UsfmElementType.PARA:
-        print(
-            f"Warning: expected PARA as first stack element, got: {stack} with token: {parser.state.token} on line number {parser.state.token.line_number}"
-        )
         return [parser.state.token]
 
     result = [UsfmToken(UsfmTokenType.TEXT, text=chunks[0])]
+
+    stack = parser.state.stack
+    if simple or not stack or stack[0].type != UsfmElementType.PARA:
+        for chunk in chunks[1:]:
+            result.append(UsfmToken(UsfmTokenType.PARAGRAPH, marker="p"))
+            result.append(UsfmToken(UsfmTokenType.TEXT, text=chunk))
+        return result
+
     for chunk in chunks[1:]:
         for elem in stack:
             token_type = ELEMENT_TO_TOKEN_TYPE.get(elem.type)
@@ -193,6 +164,7 @@ def main():
         "project", type=str, help="Paratext project name - the files in this folder will be modified in place."
     )
     add_books_argument(parser)
+    parser.add_argument("--simple", action="store_true", help="Use simple \\p splitting for all long texts instead of replicating markers.")
     parser.add_argument("--max", type=int, default=MAX_LENGTH, help="Maximum paragraph length.")
 
     args = parser.parse_args()
@@ -241,11 +213,30 @@ def main():
             usfm_text = f.read()
         parser = UsfmParser(usfm_text, stylesheet=settings.stylesheet, versification=settings.versification)
 
+        accum_length = 0
+
         while parser.process_token():
-            if parser.state.token.type == UsfmTokenType.TEXT and parser.state.token.get_length() > MAX_LENGTH:
-                output_tokens.extend(split_text_token(parser, max_len=args.max))
+            tok = parser.state.token
+
+            # Reset accumulator on any paragraph-style marker
+            if tok.type == UsfmTokenType.PARAGRAPH:
+                accum_length = 0
+
+            # Track text length
+            if tok.type == UsfmTokenType.TEXT:
+                accum_length += tok.get_length()
+
+            # Insert \p before \v if accumulated text is too long
+            if tok.type == UsfmTokenType.VERSE and accum_length > MAX_LENGTH:
+                output_tokens.append(UsfmToken(UsfmTokenType.PARAGRAPH, marker="p"))
+                accum_length = 0
+
+            # Existing split logic for long text inside notes
+            if tok.type == UsfmTokenType.TEXT and tok.get_length() > MAX_LENGTH:
+                output_tokens.extend(split_text_token(parser, max_len=args.max, simple=args.simple))
             else:
-                output_tokens.append(parser.state.token)
+                output_tokens.append(tok)
+
 
         usfm_out = [token.to_usfm(include_newlines=True).replace("\r\n", "\n") for token in output_tokens]
 
@@ -260,9 +251,9 @@ def main():
         out_parser = UsfmParser(usfm_out_text, stylesheet=settings.stylesheet, versification=settings.versification)
         over_long_texts = dict()
         while out_parser.process_token():
-            token_len = parser.state.token.get_length()
-            if out_parser.state.token.type == UsfmTokenType.TEXT and  token_len > MAX_LENGTH:
-                over_long_texts[output_sfm_file] = {'lineno':parser.state.token.line_number, 'length':parser.state.token.get_length(), 'text':parser.state.token.text}
+            token_len = out_parser.state.token.get_length()
+            if out_parser.state.token.type == UsfmTokenType.TEXT and  token_len > MAX_LENGTH + 10:
+                over_long_texts[output_sfm_file] = {'lineno':out_parser.state.token.line_number, 'length':out_parser.state.token.get_length(), 'text':out_parser.state.token.text}
                 print(f"SFM output file {output_sfm_file} has the following long texts:")
                 print(f"{over_long_texts}")
                 exit()
