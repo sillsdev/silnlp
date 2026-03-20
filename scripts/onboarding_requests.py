@@ -1,4 +1,5 @@
 import concurrent.futures
+import json
 import logging
 import os
 import shutil
@@ -12,14 +13,33 @@ import requests
 from clearml import Task
 
 SF_API_TOKEN = os.getenv("SF_API_TOKEN")
+SF_AUTH_USER = os.getenv("SF_AUTH_USER")
+SF_AUTH_PWD = os.getenv("SF_AUTH_PWD")
 UUID = str(uuid.uuid4())
 ONBOARDING_PATH = os.getenv("ONBOARDING_PATH")
 os.makedirs(ONBOARDING_PATH, exist_ok=True)
 REPO_PATH = os.getenv("REPO_PATH")
 
-ONBOARDING_REQUESTS_URL = "https://qa.scriptureforge.org/command-api/onboarding-requests"
-PROJECTS_URL = "https://qa.scriptureforge.org/paratext-api/projects"
+ONBOARDING_REQUESTS_URL = "https://scriptureforge.org/command-api/onboarding-requests"
+PROJECTS_URL = "https://scriptureforge.org/paratext-api/projects"
+SF_AUTH_URL = "https://login.languagetechnology.org/oauth/token"
 
+payload = {
+    "username": SF_AUTH_USER,
+    "password": SF_AUTH_PWD,
+    "grant_type": "http://auth0.com/oauth/grant-type/password-realm",
+    "client_id": "tY2wXn40fsL5VsPM4uIHNtU6ZUEXGeFn",
+    "realm": "Username-Password-Authentication",
+    "audience": "https://scriptureforge.org/",
+    "scope": "openid profile email sf_data offline_access",
+}
+
+req = requests.post(
+    SF_AUTH_URL,
+    json=payload,
+    headers={"Content-Type": "application/json"},
+)
+SF_API_TOKEN = req.json().get("access_token")
 LOGGER = logging.getLogger(__name__)
 
 
@@ -85,13 +105,16 @@ def get_project_metadata(onboarding_request: dict) -> Tuple[str, Dict[str, str]]
         id = onboarding_request["submission"].get(key) if key == "projectId" else form_data.get(key)
         if not id:
             continue
-        response = send_request(
-            RequestType.GET,
-            ONBOARDING_REQUESTS_URL,
-            "getProjectMetadata",
-            {"scriptureForgeId": id} if key == "projectId" else {"paratextId": id},
+        metadata = (
+            send_request(
+                RequestType.GET,
+                ONBOARDING_REQUESTS_URL,
+                "getProjectMetadata",
+                {"scriptureForgeId": id} if key == "projectId" else {"paratextId": id},
+            )
+            .json()
+            .get("result", {})
         )
-        metadata = response.json().get("result", {})
         if key == "projectId":
             main_project_name = metadata.get("shortName")
         request_metadata[metadata.get("id")] = (metadata.get("paratextID"), metadata.get("shortName"))
@@ -103,7 +126,7 @@ def download_project(SF_id: str, main_project_name: str, project_short_name: str
     project_url = f"{PROJECTS_URL}/{SF_id}/download"
     response = send_request(RequestType.GET, project_url, "getProjectDownloadLink", {"paratextId": SF_id})
     os.makedirs(f"{ONBOARDING_PATH}/{main_project_name}_Request", exist_ok=True)
-    if len(paratext_id) == 16:
+    if paratext_id and len(paratext_id) == 16:
         project_short_name = f"{project_short_name}_Resource"
     with open(f"{ONBOARDING_PATH}/{main_project_name}_Request/{project_short_name}.zip", "wb") as f:
         f.write(response.content)
