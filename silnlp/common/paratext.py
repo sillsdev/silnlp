@@ -3,10 +3,7 @@ import unicodedata
 from contextlib import ExitStack
 from pathlib import Path
 from typing import Dict, List, Optional, Set, TextIO, Tuple
-<<<<<<< HEAD
 import unicodedataplus
-=======
->>>>>>> master
 from xml.sax.saxutils import escape
 
 import regex as re
@@ -313,11 +310,7 @@ def extract_term_renderings(
     ):
         for metadata_line in terms_metadata_file.readlines():
             id, _, _ = metadata_line.split("\t", maxsplit=3)
-<<<<<<< HEAD
             id = unicodedataplus.normalize('NFC', id)
-=======
-            id = unicodedata.normalize("NFC", id)
->>>>>>> master
             key_term = key_terms.get(id, None)
             renderings = key_term.renderings if key_term else []
             if extract_surface_forms:
