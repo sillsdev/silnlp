@@ -443,8 +443,10 @@ class HuggingFaceConfig(Config):
     def has_best_checkpoint(self) -> bool:
         return has_best_checkpoint(self.model_dir)
 
-    def create_model(self, mixed_precision: bool = True, num_devices: int = 1) -> NMTModel:
-        return HuggingFaceNMTModel(self, mixed_precision, num_devices)
+    def create_model(
+        self, mixed_precision: bool = True, num_devices: int = 1, clearml_queue: Optional[str] = None
+    ) -> NMTModel:
+        return HuggingFaceNMTModel(self, mixed_precision, num_devices, clearml_queue)
 
     def create_tokenizer(self) -> Tokenizer:
         if not self.data["tokenize"]:
@@ -896,7 +898,9 @@ class InferenceModelParams:
 
 
 class HuggingFaceNMTModel(NMTModel):
-    def __init__(self, config: HuggingFaceConfig, mixed_precision: bool, num_devices: int) -> None:
+    def __init__(
+        self, config: HuggingFaceConfig, mixed_precision: bool, num_devices: int, clearml_queue: Optional[str] = None
+    ) -> None:
         self._config = config
         self._mixed_precision = mixed_precision
         set_seed(self._config.data["seed"])
@@ -905,6 +909,7 @@ class HuggingFaceNMTModel(NMTModel):
         self._num_devices = num_devices
         self._cached_inference_model: Optional[PreTrainedModel] = None
         self._inference_model_params: Optional[InferenceModelParams] = None
+        self._clearml_queue = clearml_queue
 
     def train(self) -> None:
         training_args = self._create_training_arguments()
@@ -1357,6 +1362,8 @@ class HuggingFaceNMTModel(NMTModel):
         )
         if self._config.train["use_lora"] and "learning_rate" not in args.keys():
             args["learning_rate"] = 3e-4
+        if self._clearml_queue is None:
+            args["report_to"] = "none"
         return parser.parse_dict(args)[0]
 
     def _get_dictionary(self) -> Dict[VerseRef, Set[str]]:

@@ -731,6 +731,7 @@ def test(
     by_book: bool = False,
     produce_multiple_translations: bool = False,
     save_confidences: bool = False,
+    clearml_queue: Optional[str] = None,
 ):
     exp_name = experiment
     config = load_config(exp_name)
@@ -750,7 +751,7 @@ def test(
     scorers.intersection_update(set(SUPPORTED_SCORERS))
 
     tokenizer = config.create_tokenizer()
-    model = config.create_model()
+    model = config.create_model(clearml_queue=clearml_queue)
     results: Dict[int, List[PairScore]] = {}
     step: int
     if checkpoint is not None:
@@ -953,6 +954,7 @@ def main() -> None:
         by_book=args.by_book,
         produce_multiple_translations=args.multiple_translations,
         save_confidences=args.save_confidences,
+        clearml_queue=args.clearml_queue,
     )
 
 
