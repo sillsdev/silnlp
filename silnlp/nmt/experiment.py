@@ -71,7 +71,7 @@ class SILExperiment:
 
     def train(self):
         os.system("nvidia-smi")
-        model = self.config.create_model(self.mixed_precision, self.num_devices)
+        model = self.config.create_model(self.mixed_precision, self.num_devices, self.clearml_queue)
         model.save_effective_config(self.config.exp_dir / f"effective-config-{self.rev_hash}.yml")
         print(f"=== Training ({self.name}) ===")
         model.train()
