@@ -46,7 +46,7 @@ def main() -> None:
     for exp_name in experiments:
         config = load_config(exp_name)
         config.set_seed()
-        model = config.create_model(not args.disable_mixed_precision, args.num_devices)
+        model = config.create_model(not args.disable_mixed_precision, args.num_devices, args.clearml_queue)
         model.save_effective_config(config.exp_dir / f"effective-config-{rev_hash}.yml")
 
         LOGGER.info(f"Training {exp_name}")
