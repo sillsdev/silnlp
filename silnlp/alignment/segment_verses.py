@@ -519,6 +519,14 @@ class ParallelPassageCollectionFactory:
                 ]
                 missing = [f for f in run_files if not f.exists()]
                 if missing:
+                    first_missing_idx = next(i for i, f in enumerate(run_files) if not f.exists())
+                    files_after_gap = [f for f in run_files[first_missing_idx + 1 :] if f.exists()]
+                    if files_after_gap:
+                        raise FileNotFoundError(
+                            f"Saved alignment run file(s) not found: {', '.join(str(f) for f in missing)}. "
+                            f"Remove or rename the later run file(s) before retrying: "
+                            f"{', '.join(str(f) for f in files_after_gap)}"
+                        )
                     existing = [f for f in run_files if f.exists()]
                     print(
                         f"Found {len(existing)}/{self._alignment_runs} saved alignment runs. "
