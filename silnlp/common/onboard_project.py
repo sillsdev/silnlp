@@ -785,7 +785,7 @@ def main() -> None:
             args.clearml_tag,
             *project_names,
         ]
-        task_name = f"Onboarding - {onboarding_request.main_project.project_name}"
+        task_name = f"Onboarding - {', '.join([req.main_project.project_name for req in onboarding_requests])}"
         clearml = SILClearML(task_name, args.clearml_queue, tag=args.clearml_tag, skip_config=True)
 
     for onboarding_request in onboarding_requests:
