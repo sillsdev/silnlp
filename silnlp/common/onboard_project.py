@@ -344,8 +344,9 @@ class OnboardingProject:
     def setup_output(self) -> None:
         self.output_folder = Path(SIL_NLP_ENV.mt_experiments_dir / "_OnboardingRequests" / self.project_name)
         self.output_folder.mkdir(parents=True, exist_ok=True)
+        self.log_file_path = self.output_folder / f"{self.project_name}_onboarding.log"
         log_file = open(
-            self.output_folder / f"{self.project_name}_onboarding.log",
+            self.log_file_path,
             "a",
             encoding="utf-8",
         )
@@ -430,11 +431,11 @@ class OnboardingRequest:
                 LOGGER.info(f"Onboarding main project '{self.main_project.project_name}'")
             else:
                 LOGGER.info(f"Onboarding reference project '{project.project_name}'")
-            set_logger(project.output_folder / f"{project.project_name}_onboarding.log")
+            set_logger(project.log_file_path)
             self.onboard_project(project)
             close_logger()
 
-        set_logger(self.main_project.output_folder / f"{self.main_project.project_name}_onboarding.log")
+        set_logger(self.main_project.log_file_path)
         if self.stats:
             self.main_project.calculate_tokenization_stats(
                 self.config.get("stats", None),
@@ -511,7 +512,7 @@ class OnboardingRequest:
                 shutil.rmtree(source_path)
 
     def onboard_project(self, onboarding_project: OnboardingProject) -> None:
-        set_logger(onboarding_project.output_folder / f"{onboarding_project.project_name}_onboarding.log")
+        set_logger(onboarding_project.log_file_path)
         if self.extract_corpora:
             onboarding_project.extract_corpora_wrapper(self.config.get("extract_corpora", {}))
 
@@ -620,13 +621,14 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "main_project",
-        help="The Main Paratext project name for onboarding. The project will be stored on the bucket at Paratext/projects/<project>.",
+        "main_projects",
+        help="The Main Paratext project name(s) for onboarding. The project(s) will be stored on the bucket at Paratext/projects/<project>.",
+        nargs="+",
         default=None,
     )
     parser.add_argument(
         "--ref-projects",
-        help="The Reference Paratext project name(s) for onboarding the main project. The project(s) will be stored on the bucket at Paratext/projects/<project>. Alignments will not be run for these projects.",
+        help="The Reference Paratext project name(s) for onboarding the main project(s). The project(s) will be stored on the bucket at Paratext/projects/<project>.",
         nargs="+",
         default=None,
     )
@@ -640,8 +642,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--config",
-        help="Path to a configuration file in YAML format. This is used to configure the onboarding process.",
+        help="Path(s) to a configuration file in YAML format. This is used to configure the onboarding process.",
         default=None,
+        nargs="+",
         type=Path,
     )
     parser.add_argument(
@@ -676,7 +679,12 @@ def main() -> None:
     parser.add_argument(
         "--wildebeest", default=False, action="store_true", help="Run Wildebeest analysis on the extracted corpora."
     )
-    parser.add_argument("--stats", default=False, action="store_true", help="Compute tokenization statistics")
+    parser.add_argument(
+        "--stats",
+        default=False,
+        action="store_true",
+        help="Compute tokenization statistics on the main project and reference projects.",
+    )
     parser.add_argument(
         "--align",
         default=False,
@@ -719,56 +727,69 @@ def main() -> None:
     if not args.collect_verse_counts and (args.align or args.wildebeest):
         args.collect_verse_counts = True
 
+    if args.config and len(args.main_projects) != len(args.config):
+        parser.errror("Number of config paths does not match number of main projects.")
+
+    project_configs = {}
     if args.config:
-        config_file = Path(args.config)
-        if not config_file.exists():
-            raise FileNotFoundError(f"Config file '{config_file}' does not exist.")
-        with config_file.open("r", encoding="utf-8") as file:
-            config = yaml.safe_load(file)
-    else:
-        config = {}
+        for i, main_project in enumerate(args.main_projects):
+            project_configs[main_project] = args.config[i]
 
-    if config.get("onboarding", None) is None:
-        if args.align_isos and not args.align:
-            args.align = True
-        config["onboarding"] = {
-            "main_project": args.main_project,
-            "ref_projects": args.ref_projects if args.ref_projects else [],
-            "copy_from": str(args.copy_from) if args.copy_from else None,
-            "datestamp": args.datestamp,
-            "overwrite": args.overwrite,
-            "extract_corpora": args.extract_corpora,
-            "collect_verse_counts": args.collect_verse_counts,
-            "wildebeest": args.wildebeest,
-            "stats": args.stats,
-            "align": args.align,
-            "align_isos": args.align_isos if args.align_isos else [],
-        }
+    onboarding_requests = []
+    for main_project in args.main_projects:
+        if args.config:
+            config_file = Path(project_configs[main_project])
+            if not config_file.exists():
+                raise FileNotFoundError(f"Config file '{config_file}' does not exist.")
+            with config_file.open("r", encoding="utf-8") as file:
+                config = yaml.safe_load(file)
+        else:
+            config = {}
+        if config.get("onboarding", None) is None:
+            if args.align_isos and not args.align:
+                args.align = True
+            config["onboarding"] = {
+                "main_project": main_project,
+                "ref_projects": args.ref_projects if args.ref_projects else [],
+                "copy_from": str(args.copy_from) if args.copy_from else None,
+                "datestamp": args.datestamp,
+                "overwrite": args.overwrite,
+                "extract_corpora": args.extract_corpora,
+                "collect_verse_counts": args.collect_verse_counts,
+                "wildebeest": args.wildebeest,
+                "stats": args.stats,
+                "align": args.align,
+                "align_isos": args.align_isos if args.align_isos else [],
+            }
 
-    onboarding_request = OnboardingRequest(
-        config=config,
-    )
+        onboarding_request = OnboardingRequest(
+            config=config,
+        )
+        onboarding_requests.append(onboarding_request)
 
-    if args.copy_from:
-        onboarding_request.prepare_and_upload_projects()
-    else:
-        onboarding_request.setup_project_outputs()
+        if args.copy_from:
+            onboarding_request.prepare_and_upload_projects()
+        else:
+            onboarding_request.setup_project_outputs()
 
     if args.clearml_queue is not None:
+        project_names = [onboarding_request.main_project.project_name for onboarding_request in onboarding_requests]
+        config_paths = [str(onboarding_request.get_config_path()) for onboarding_request in onboarding_requests]
         sys.argv = [
             "",
-            onboarding_request.main_project.project_name,
             "--config",
-            str(onboarding_request.get_config_path()),
+            *config_paths,
             "--clearml-queue",
             args.clearml_queue,
             "--clearml-tag",
             args.clearml_tag,
+            *project_names,
         ]
-        task_name = f"Onboarding - {onboarding_request.main_project.project_name}"
+        task_name = f"Onboarding - {', '.join([req.main_project.project_name for req in onboarding_requests])}"
         clearml = SILClearML(task_name, args.clearml_queue, tag=args.clearml_tag, skip_config=True)
 
-    onboarding_request.process_onboarding_request()
+    for onboarding_request in onboarding_requests:
+        onboarding_request.process_onboarding_request()
 
 
 if __name__ == "__main__":
