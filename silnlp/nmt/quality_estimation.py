@@ -1,4 +1,5 @@
 import argparse
+import json
 import logging
 from abc import ABC
 from collections import defaultdict
@@ -196,7 +197,18 @@ def project_chrf3(
             f"The number of chrF3 scores ({len(chrf3_scores)}) and confidence scores ({len(confidence_scores)}) "
             f"in {verse_test_scores_path} do not match."
         )
+
     slope, intercept = linregress(confidence_scores, chrf3_scores)[:2]
+    slope = round(slope, 4)
+    intercept = round(intercept, 4)
+    linregress_data = {"version": "0.1", "slope": slope, "intercept": intercept}
+    LOGGER.info(f"Linear regression data:\n{json.dumps(linregress_data, indent=2)}")
+    output_dir = confidence_files[0].get_path().parent
+    output_file = output_dir / "linregress.json"
+    with open(output_file, "w", encoding="utf-8") as f:
+        LOGGER.info(f"Saving linear regression data to {output_file}")
+        json.dump(linregress_data, f, indent=2)
+
     verse_scores: List[VerseScore] = []
     chapter_scores: ChapterScores = ChapterScores()
     book_scores: BookScores = BookScores()
