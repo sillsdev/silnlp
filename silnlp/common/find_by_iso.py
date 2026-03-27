@@ -111,22 +111,15 @@ def get_equivalent_isocodes(iso_codes: List[str]) -> Set[str]:
     return {code for iso_code in iso_codes for code in (iso_code, ALT_ISO.get_alternative(iso_code)) if code}
 
 
-def resolve_config_path(config_folder: Path) -> Path:
-    """Resolve config folder path relative to experiments directory if not absolute."""
-    if not config_folder.is_absolute():
-        return SIL_NLP_ENV.mt_experiments_dir / config_folder
-    return config_folder
-
-
 def create_alignment_config(source_files: List[Path], target_files: List[str]) -> dict:
     """Create the alignment configuration dictionary."""
     config = {
         "data": {
-            "aligner": "fast_align",
+            "aligner": "eflomal",
             "corpus_pairs": [
                 {
                     "type": "train",
-                    "src": [get_stem_name(f) for f in source_files],
+                    "src": source_files,
                     "trg": target_files,
                     "mapping": "many_to_many",
                     "test_size": 0,
@@ -154,8 +147,9 @@ def resolve_config_file(output_path: str) -> Path:
 
     if folder_part.is_absolute():
         config_folder = folder_part
-        if config_folder.parent == Path(config_folder.anchor):
-            raise argparse.ArgumentTypeError(f"Absolute path '{output_path}' is too shallow. Will not create folders in root.")
+        if not config_folder.parent.exists():
+            raise argparse.ArgumentTypeError(
+                f"Parent directory does not exist: {config_folder.parent}")
         try: config_folder.mkdir(parents=False, exist_ok=True)
         except FileNotFoundError:
             raise argparse.ArgumentTypeError(f"Parent directory does not exist: {config_folder.parent}")
@@ -191,7 +185,7 @@ def main():
         help="Only list scriptures in the specified languages and not in related languages",
     )
     parser.add_argument("--targets", nargs="+", help="List of target files in format <iso_code>-<project_name>")
-    parser.add_argument("--config-folder", help=f"Existing folder, or folder relative to the Experiments folder: {SIL_NLP_ENV.mt_experiments_dir}")
+    parser.add_argument("--config-folder", type=resolve_config_file, help=f"Existing folder, or folder relative to the Experiments folder: {SIL_NLP_ENV.mt_experiments_dir}")
 
     args = parser.parse_args()
 
@@ -247,14 +241,19 @@ def main():
         logger.error("\nCouldn't find any Scripture files.")
         return
 
-    # Use target files from command line or file patterns from inputs
+    # Use target files from command line or file patterns from inputs 
     target_files = args.targets if args.targets else file_patterns
+    targets = sorted([target_file for target_file in set(target_files)])
+
+    # Filter out targets from the source list keep only unique source and targets.
+    sources = [get_stem_name(f) for f in source_files if get_stem_name(f) not in target_files]
+    sources = sorted([source for source in set(sources)])
 
     # Create and output configuration
-    config = create_alignment_config(source_files, target_files)
+    config = create_alignment_config(sources, targets)
 
     if args.config_folder:
-        config_file = resolve_config_file(args.config_folder)
+        config_file = args.config_folder
         with open(config_file, "w") as f:
             yaml.dump(config, f, default_flow_style=False, sort_keys=False)
         logger.info(f"\nCreated alignment configuration in: {config_file}")
@@ -262,12 +261,12 @@ def main():
         logger.info("\nAlignment configuration:")
         logger.info(yaml.dump(config, default_flow_style=False, sort_keys=False))
 
-    logger.info(f"\nSource files found: {len(source_files)}")
-    for file in source_files:
-        logger.info(f"    - {get_stem_name(file)}")
-    logger.info(f"\nTarget files: {len(target_files)}")
-    for file in target_files:
-        logger.info(f"    - {file}")
+    logger.info(f"\nSource files found: {len(sources)}")
+    for source in sources:
+        logger.info(f"    - {source}")
+    logger.info(f"\nTarget files: {len(targets)}")
+    for target in targets:
+        logger.info(f"    - {target}")
 
 
 if __name__ == "__main__":
