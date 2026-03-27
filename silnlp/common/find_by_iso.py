@@ -139,19 +139,41 @@ def create_alignment_config(source_files: List[Path], target_files: List[str]) -
     return config
 
 
-def write_or_print_config(config: dict, config_folder: Path = None):
+def write_or_print_config(config: dict, config_file: Path = None):
     """Write config to file or print to terminal."""
-    if config_folder:
-        config_folder = Path(config_folder)
-        if not config_folder.is_absolute():
-            config_folder = SIL_NLP_ENV.mt_experiments_dir / config_folder
-        config_folder.mkdir(parents=True, exist_ok=True)
-        config_path = config_folder / "config.yml"
+    if config_file:
+        config_file = Path(config_file)
         with open(config_path, "w") as f:
             yaml.dump(config, f, default_flow_style=False, sort_keys=False)
         return str(config_path)
     else:
         return yaml.dump(config, default_flow_style=False, sort_keys=False)
+
+
+def config_path(output_path: str) -> Path:
+    output_folder = Path(output_path)
+    
+    if output_folder.is_absolute():
+        target = output_folder
+        if target.parent == target.anchor:
+            raise argparse.ArgumentTypeError(f"Absolute path '{p}' is too shallow. Will not create folders in root or experiments.")
+    else:
+        if len(output_folder.parts) < 2:
+            raise argparse.ArgumentTypeError(
+                f"Relative path '{output_folder}' must include a subfolder inside Experiments (e.g. typically: 'country/analyze' or 'country/language/analyze')."
+            )
+        target = (SIL_NLP_ENV.mt_experiments_dir / output_folder).resolve()
+    try:
+        target.parent.mkdir(parents=False, exist_ok=True)
+    except PermissionError:
+        raise argparse.ArgumentTypeError(f"Permission denied creating directory: {target.parent}")
+
+    return target
+
+
+
+    p = Path(output_path)
+    return p if p.is_absolute() else SIL_NLP_ENV.mt_experiments_dir / p
 
 
 def main():
@@ -173,13 +195,8 @@ def main():
         action="store_true",
         help="Only list scriptures in the specified languages and not in related languages",
     )
-    parser.add_argument("--output", type=Path, help="Output to the specified file.")
-    parser.add_argument("--target-files", nargs="+", help="List of target files in format <iso_code>-<project_name>")
-    parser.add_argument(
-        "--config-folder",
-        type=Path,
-        help="Folder to write the config.yml file (absolute or relative to mt_experiments_dir)",
-    )
+    parser.add_argument("--targets", nargs="+", help="List of target files in format <iso_code>-<project_name>")
+    parser.add_argument("--config-folder", type=config_path, help=f"Existing folder, or folder relative to the Experiments folder: {SIL_NLP_ENV.mt_experiments_dir}")
 
     args = parser.parse_args()
 
@@ -188,14 +205,9 @@ def main():
     logger.setLevel(logging.INFO)
     formatter = logging.Formatter("%(message)s")
 
-    if args.output:
-        file_handler = logging.FileHandler(args.output)
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
-    else:
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setFormatter(formatter)
-        logger.addHandler(console_handler)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
 
     # Split inputs into ISO codes and file patterns
     iso_codes, file_patterns = split_input_list(args.inputs)
@@ -241,7 +253,7 @@ def main():
         return
 
     # Use target files from command line or file patterns from inputs
-    target_files = args.target_files if args.target_files else file_patterns
+    target_files = args.targets if args.targets else file_patterns
 
     # Create and output configuration
     config = create_alignment_config(source_files, target_files)
