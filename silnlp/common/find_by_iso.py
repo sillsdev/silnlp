@@ -139,41 +139,36 @@ def create_alignment_config(source_files: List[Path], target_files: List[str]) -
     return config
 
 
-def write_or_print_config(config: dict, config_file: Path = None):
-    """Write config to file or print to terminal.""" 
-    if config_file:
-        config_file = Path(config_file)
-        with open(config_path, "w") as f:
-            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-        return str(config_path)
+def resolve_config_file(output_path: str) -> Path:
+    "Resolve config folder/file path, creating the config folder if needed."
+    path = Path(output_path)
+    if path.suffix:
+        config_file_name = path.name
+        folder_part = path.parent
+        if config_file_name != 'config.yml':
+            resp = input(f"Warning: filename '{config_file_name}' is not 'config.yml'. Use 'config.yml' instead? [Y/n] ")
+            if resp.strip().lower() != 'n': config_file_name = 'config.yml'
     else:
-        return yaml.dump(config, default_flow_style=False, sort_keys=False)
+        config_file_name = 'config.yml'
+        folder_part = path
 
-
-def config_path(output_path: str) -> Path:
-    output_folder = Path(output_path)
-    
-    if output_folder.is_absolute():
-        target = output_folder
-        if target.parent == target.anchor:
-            raise argparse.ArgumentTypeError(f"Absolute path '{p}' is too shallow. Will not create folders in root or experiments.")
+    if folder_part.is_absolute():
+        config_folder = folder_part
+        if config_folder.parent == Path(config_folder.anchor):
+            raise argparse.ArgumentTypeError(f"Absolute path '{output_path}' is too shallow. Will not create folders in root.")
+        try: config_folder.mkdir(parents=False, exist_ok=True)
+        except FileNotFoundError:
+            raise argparse.ArgumentTypeError(f"Parent directory does not exist: {config_folder.parent}")
     else:
-        if len(output_folder.parts) < 2:
+        if len(folder_part.parts) < 2:
             raise argparse.ArgumentTypeError(
-                f"Relative path '{output_folder}' must include a subfolder inside Experiments (e.g. typically: 'country/analyze' or 'country/language/analyze')."
-            )
-        target = (SIL_NLP_ENV.mt_experiments_dir / output_folder).resolve()
-    try:
-        target.parent.mkdir(parents=False, exist_ok=True)
-    except PermissionError:
-        raise argparse.ArgumentTypeError(f"Permission denied creating directory: {target.parent}")
+                f"Relative path '{folder_part}' must include a subfolder inside Experiments (e.g. 'country/analyze').")
+        config_folder = (SIL_NLP_ENV.mt_experiments_dir / folder_part).resolve()
+        try: config_folder.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            raise argparse.ArgumentTypeError(f"Permission denied creating directory: {config_folder}")
 
-    return target
-
-
-
-    p = Path(output_path)
-    return p if p.is_absolute() else SIL_NLP_ENV.mt_experiments_dir / p
+    return config_folder / config_file_name
 
 
 def main():
@@ -196,7 +191,7 @@ def main():
         help="Only list scriptures in the specified languages and not in related languages",
     )
     parser.add_argument("--targets", nargs="+", help="List of target files in format <iso_code>-<project_name>")
-    parser.add_argument("--config-folder", type=config_path, help=f"Existing folder, or folder relative to the Experiments folder: {SIL_NLP_ENV.mt_experiments_dir}")
+    parser.add_argument("--config-folder", help=f"Existing folder, or folder relative to the Experiments folder: {SIL_NLP_ENV.mt_experiments_dir}")
 
     args = parser.parse_args()
 
@@ -257,13 +252,15 @@ def main():
 
     # Create and output configuration
     config = create_alignment_config(source_files, target_files)
-    result = write_or_print_config(config, args.config_folder)
 
     if args.config_folder:
-        logger.info(f"\nCreated alignment configuration in: {result}")
+        config_file = resolve_config_file(args.config_folder)
+        with open(config_file, "w") as f:
+            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+        logger.info(f"\nCreated alignment configuration in: {config_file}")
     else:
         logger.info("\nAlignment configuration:")
-        logger.info(result)
+        logger.info(yaml.dump(config, default_flow_style=False, sort_keys=False))
 
     logger.info(f"\nSource files found: {len(source_files)}")
     for file in source_files:
