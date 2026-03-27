@@ -140,7 +140,7 @@ def create_alignment_config(source_files: List[Path], target_files: List[str]) -
 
 
 def write_or_print_config(config: dict, config_file: Path = None):
-    """Write config to file or print to terminal."""
+    """Write config to file or print to terminal.""" 
     if config_file:
         config_file = Path(config_file)
         with open(config_path, "w") as f:
