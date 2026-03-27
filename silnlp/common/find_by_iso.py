@@ -147,12 +147,12 @@ def resolve_config_file(output_path: str) -> Path:
 
     if folder_part.is_absolute():
         config_folder = folder_part
-        if not config_folder.parent.exists():
+        if not config_folder.parent.is_dir():
             raise argparse.ArgumentTypeError(
                 f"Parent directory does not exist: {config_folder.parent}")
-        try: config_folder.mkdir(parents=False, exist_ok=True)
-        except FileNotFoundError:
-            raise argparse.ArgumentTypeError(f"Parent directory does not exist: {config_folder.parent}")
+        try: config_folder.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            raise argparse.ArgumentTypeError(f"Permission denied creating directory: {config_folder}")
     else:
         if len(folder_part.parts) < 2:
             raise argparse.ArgumentTypeError(
