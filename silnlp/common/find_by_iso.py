@@ -79,8 +79,6 @@ def find_related_isocodes(
     for iso_code in iso_codes:
         if iso_code in language_data:
             lang_info = language_data[iso_code]
-            #            logger.info(f"{iso_code}: {lang_info['Name']}, {lang_info['Country']}, {lang_info['Family']}")
-
             iso_set.update(country_data.get(lang_info["Country"], []))
             iso_set.update(family_data.get(lang_info["Family"], []))
 
@@ -189,7 +187,6 @@ def main():
 
     args = parser.parse_args()
 
-    # Setup logging
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.INFO)
     formatter = logging.Formatter("%(message)s")
@@ -198,12 +195,10 @@ def main():
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
-    # Split inputs into ISO codes and file patterns
     iso_codes, file_patterns = split_input_list(args.inputs)
 
     source_files = []
     if iso_codes:
-        # Load language data and process ISO codes
         language_data, country_data, family_data = load_language_data(LANGUAGE_FAMILY_FILE)
         if not language_data:
             logging.error("Failed to load language data.")
@@ -224,11 +219,9 @@ def main():
             else:
                 logger.info(f"\nFound {len(codes_to_find)} specified or related languages:\n{codes_to_find}")
 
-        # Get all possible codes and find matching files
         all_possible_codes = get_equivalent_isocodes(codes_to_find)
         source_files.extend(get_files_by_iso(all_possible_codes, args.scripture_dir))
 
-    # Add files from file patterns
     if file_patterns:
         pattern_files = [args.scripture_dir / f"{pattern}.txt" for pattern in file_patterns]
         existing_files = [f for f in pattern_files if f.exists()]
@@ -241,15 +234,10 @@ def main():
         logger.error("\nCouldn't find any Scripture files.")
         return
 
-    # Use target files from command line or file patterns from inputs 
     target_files = args.targets if args.targets else file_patterns
     targets = sorted([target_file for target_file in set(target_files)])
-
-    # Filter out targets from the source list keep only unique source and targets.
     sources = [get_stem_name(f) for f in source_files if get_stem_name(f) not in target_files]
     sources = sorted([source for source in set(sources)])
-
-    # Create and output configuration
     config = create_alignment_config(sources, targets)
 
     if args.config_folder:
