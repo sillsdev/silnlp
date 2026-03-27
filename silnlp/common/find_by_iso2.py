@@ -1,14 +1,13 @@
 import argparse
 import json
 import logging
-import sys
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
-
+from typing import Dict, List, Set, Tuple, Union
+import sys
 import yaml
 
 from .environment import SIL_NLP_ENV
-from .iso_info import ALT_ISO, NLLB_ISO_SET
+from .iso_info import NLLB_ISO_SET, ALT_ISO
 
 IsoCode = str
 IsoCodeList = List[IsoCode]
@@ -16,11 +15,9 @@ IsoCodeSet = Set[IsoCode]
 
 LANGUAGE_FAMILY_FILE = SIL_NLP_ENV.assets_dir / "languageFamilies.json"
 
-
 def is_file_pattern(input_str: str) -> bool:
     """Check if the input string contains a hyphen, indicating it's a filename pattern."""
-    return "-" in input_str
-
+    return '-' in input_str
 
 def split_input_list(input_list: List[str]) -> Tuple[List[str], List[str]]:
     """Split input list into ISO codes and file patterns."""
@@ -32,7 +29,6 @@ def split_input_list(input_list: List[str]) -> Tuple[List[str], List[str]]:
         else:
             iso_codes.append(item)
     return iso_codes, files
-
 
 def get_stem_name(file_path: Path) -> str:
     """Get the stem name without path or extension."""
@@ -79,7 +75,7 @@ def find_related_isocodes(
     for iso_code in iso_codes:
         if iso_code in language_data:
             lang_info = language_data[iso_code]
-            #            logger.info(f"{iso_code}: {lang_info['Name']}, {lang_info['Country']}, {lang_info['Family']}")
+#            logger.info(f"{iso_code}: {lang_info['Name']}, {lang_info['Country']}, {lang_info['Family']}")
 
             iso_set.update(country_data.get(lang_info["Country"], []))
             iso_set.update(family_data.get(lang_info["Family"], []))
@@ -89,9 +85,9 @@ def find_related_isocodes(
 
 def get_files_by_iso(isocodes: IsoCodeList, scripture_dir: Path) -> List[Path]:
     return [
-        file for file in scripture_dir.glob("*.txt") if any(file.stem.startswith(isocode + "-") for isocode in isocodes)
+        file for file in scripture_dir.glob('*.txt')
+        if any(file.stem.startswith(isocode + '-') for isocode in isocodes)
     ]
-
 
 def split_files_by_projects(files: List[Path], projects_dir: Path) -> Tuple[Dict[Path, Path], Dict[Path, Path]]:
     existing_projects = {}
@@ -110,34 +106,29 @@ def split_files_by_projects(files: List[Path], projects_dir: Path) -> Tuple[Dict
 def get_equivalent_isocodes(iso_codes: List[str]) -> Set[str]:
     return {code for iso_code in iso_codes for code in (iso_code, ALT_ISO.get_alternative(iso_code)) if code}
 
-
 def resolve_config_path(config_folder: Path) -> Path:
     """Resolve config folder path relative to experiments directory if not absolute."""
     if not config_folder.is_absolute():
         return SIL_NLP_ENV.mt_experiments_dir / config_folder
     return config_folder
 
-
 def create_alignment_config(source_files: List[Path], target_files: List[str]) -> dict:
     """Create the alignment configuration dictionary."""
     config = {
-        "data": {
-            "aligner": "fast_align",
-            "corpus_pairs": [
-                {
-                    "type": "train",
-                    "src": [get_stem_name(f) for f in source_files],
-                    "trg": target_files,
-                    "mapping": "many_to_many",
-                    "test_size": 0,
-                    "val_size": 0,
-                }
-            ],
-            "tokenize": False,
+        'data': {
+            'aligner': 'fast_align',
+            'corpus_pairs': [{
+                'type': 'train',
+                'src': [get_stem_name(f) for f in source_files],
+                'trg': target_files,
+                'mapping': 'many_to_many',
+                'test_size': 0,
+                'val_size': 0
+            }],
+            'tokenize': False
         }
     }
     return config
-
 
 def write_or_print_config(config: dict, config_folder: Path = None):
     """Write config to file or print to terminal."""
@@ -146,47 +137,36 @@ def write_or_print_config(config: dict, config_folder: Path = None):
         if not config_folder.is_absolute():
             config_folder = SIL_NLP_ENV.mt_experiments_dir / config_folder
         config_folder.mkdir(parents=True, exist_ok=True)
-        config_path = config_folder / "config.yml"
-        with open(config_path, "w") as f:
+        config_path = config_folder / 'config.yml'
+        with open(config_path, 'w') as f:
             yaml.dump(config, f, default_flow_style=False, sort_keys=False)
         return str(config_path)
     else:
         return yaml.dump(config, default_flow_style=False, sort_keys=False)
 
-
 def main():
     parser = argparse.ArgumentParser(description="Find related ISO language codes and create alignment config.")
-    parser.add_argument("inputs", nargs="+", help="ISO codes or file patterns (e.g., 'fra' or 'en-NIV')")
-    parser.add_argument(
-        "--scripture-dir",
-        type=Path,
-        default=Path(SIL_NLP_ENV.mt_scripture_dir),
-        help="Directory containing scripture files",
-    )
-    parser.add_argument(
-        "--all-related",
-        action="store_true",
-        help="List all related scriptures without filtering to those that are part of NLLB",
-    )
-    parser.add_argument(
-        "--no-related",
-        action="store_true",
-        help="Only list scriptures in the specified languages and not in related languages",
-    )
+    parser.add_argument("inputs", nargs="+", 
+                       help="ISO codes or file patterns (e.g., 'fra' or 'en-NIV')")
+    parser.add_argument("--scripture-dir", type=Path, 
+                       default=Path(SIL_NLP_ENV.mt_scripture_dir), 
+                       help="Directory containing scripture files")
+    parser.add_argument("--all-related", action='store_true', 
+                       help="List all related scriptures without filtering to those that are part of NLLB")
+    parser.add_argument("--no-related", action='store_true', 
+                       help="Only list scriptures in the specified languages and not in related languages")
     parser.add_argument("--output", type=Path, help="Output to the specified file.")
-    parser.add_argument("--target-files", nargs="+", help="List of target files in format <iso_code>-<project_name>")
-    parser.add_argument(
-        "--config-folder",
-        type=Path,
-        help="Folder to write the config.yml file (absolute or relative to mt_experiments_dir)",
-    )
+    parser.add_argument("--target-files", nargs="+",
+                       help="List of target files in format <iso_code>-<project_name>")
+    parser.add_argument("--config-folder", type=Path,
+                       help="Folder to write the config.yml file (absolute or relative to mt_experiments_dir)")
 
     args = parser.parse_args()
 
     # Setup logging
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.INFO)
-    formatter = logging.Formatter("%(message)s")
+    formatter = logging.Formatter('%(message)s')
 
     if args.output:
         file_handler = logging.FileHandler(args.output)
@@ -199,7 +179,7 @@ def main():
 
     # Split inputs into ISO codes and file patterns
     iso_codes, file_patterns = split_input_list(args.inputs)
-
+    
     source_files = []
     if iso_codes:
         # Load language data and process ISO codes
@@ -209,7 +189,7 @@ def main():
             return
 
         iso_codes = get_equivalent_isocodes(iso_codes)
-
+        
         if args.no_related:
             codes_to_find = list(iso_codes)
             logger.info(f"\nConsidering only the specified iso codes and their equivalents: {codes_to_find}")
@@ -246,7 +226,7 @@ def main():
     # Create and output configuration
     config = create_alignment_config(source_files, target_files)
     result = write_or_print_config(config, args.config_folder)
-
+    
     if args.config_folder:
         logger.info(f"\nCreated alignment configuration in: {result}")
     else:
@@ -259,7 +239,6 @@ def main():
     logger.info(f"\nTarget files: {len(target_files)}")
     for file in target_files:
         logger.info(f"    - {file}")
-
 
 if __name__ == "__main__":
     main()
