@@ -15,6 +15,7 @@ from clearml import Task
 SF_API_TOKEN = os.getenv("SF_API_TOKEN")
 SF_AUTH_USER = os.getenv("SF_AUTH_USER")
 SF_AUTH_PWD = os.getenv("SF_AUTH_PWD")
+SF_CLIENT_ID = os.getenv("SF_CLIENT_ID")
 UUID = str(uuid.uuid4())
 ONBOARDING_PATH = os.getenv("ONBOARDING_PATH")
 os.makedirs(ONBOARDING_PATH, exist_ok=True)
@@ -28,7 +29,7 @@ payload = {
     "username": SF_AUTH_USER,
     "password": SF_AUTH_PWD,
     "grant_type": "http://auth0.com/oauth/grant-type/password-realm",
-    "client_id": "tY2wXn40fsL5VsPM4uIHNtU6ZUEXGeFn",
+    "client_id": SF_CLIENT_ID,
     "realm": "Username-Password-Authentication",
     "audience": "https://scriptureforge.org/",
     "scope": "openid profile email sf_data offline_access",
