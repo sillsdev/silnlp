@@ -1,5 +1,6 @@
 import argparse
 import logging
+from pathlib import Path
 from typing import List, Optional, Set
 
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books
@@ -105,7 +106,7 @@ def extract_corpora(
     extract_surface_forms=False,
     parent_project: Optional[str] = None,
     versification_error_output_path: Optional[str] = None,
-) -> None:
+) -> Path | None:
     # Process the projects that have data and tell the user.
     if len(projects) > 0:
         expected_verse_count = get_expected_verse_count(books_to_include, books_to_exclude)
@@ -133,14 +134,16 @@ def extract_corpora(
             # check if the number of lines in the file is correct (the same as vref.txt)
             LOGGER.info(f"# of Verses: {verse_count}")
             if verse_count != expected_verse_count:
-                LOGGER.error(f"The number of verses is {verse_count}, but should be {expected_verse_count}.")
+                LOGGER.warning(f"The number of verses is {verse_count}, but should be {expected_verse_count}.")
             terms_count = extract_term_renderings(
                 project_dir, corpus_filename, SIL_NLP_ENV.mt_terms_dir, extract_surface_forms
             )
             LOGGER.info(f"# of Terms: {terms_count}")
             LOGGER.info("Done.")
+            return corpus_filename
     else:
         LOGGER.warning(f"Couldn't find any data to process for any project in {SIL_NLP_ENV.pt_projects_dir}.")
+        return None
 
 
 if __name__ == "__main__":
