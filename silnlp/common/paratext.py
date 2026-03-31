@@ -144,7 +144,15 @@ def extract_project(
                 output_stream.write(line + "\n")
                 if output_vref_stream is not None:
                     output_vref_stream.write(("" if project_vref is None else str(project_vref)) + "\n")
-                segment_count += 1
+                stripped_line = line.strip()
+                if len(stripped_line) > 0 and stripped_line != "<range>" and stripped_line != "...":
+                    segment_count += 1
+        if segment_count == 0:
+            if output_filename.is_file():
+                output_filename.unlink()
+            if output_vref_filename.is_file():
+                output_vref_filename.unlink()
+            return None, segment_count
         return output_filename, segment_count
     except Exception:
         if output_filename.is_file():

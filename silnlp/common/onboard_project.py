@@ -94,7 +94,7 @@ class OnboardingProject:
         versification_error_output_path = Path(self.output_folder / "versification_errors.txt")
         if not versification_error_output_path.exists():
             versification_error_output_path.parent.mkdir(parents=True, exist_ok=True)
-        extract_corpora(
+        extract_path = extract_corpora(
             projects={self.project_name},
             books_to_include=extract_config.get("include", []),
             books_to_exclude=extract_config.get("exclude", []),
@@ -105,6 +105,7 @@ class OnboardingProject:
             parent_project=extract_config.get("parent_project", None),
             versification_error_output_path=versification_error_output_path,
         )
+        self.extract_file = extract_path
 
     def wildebeest_analysis_wrapper(self, wildebeest_config: dict) -> None:
         wildebeest_output_dir = Path(self.output_folder / "wildebeest")
@@ -436,10 +437,22 @@ class OnboardingRequest:
             close_logger()
 
         set_logger(self.main_project.log_file_path)
+
+        if self.main_project.get_extract_path() is None and (self.stats or self.align):
+            LOGGER.error(
+                f"Main Project, {self.main_project.project_name}, has no extract file. Skipping stats and alignments."
+            )
+            close_logger()
+            return
+
         if self.stats:
             self.main_project.calculate_tokenization_stats(
                 self.config.get("stats", None),
-                [ref_project.get_extract_path().stem for ref_project in self.reference_projects],
+                [
+                    ref_project.get_extract_path().stem
+                    for ref_project in self.reference_projects
+                    if ref_project.get_extract_path() is not None
+                ],
                 [ref_project.get_extract_iso_code() for ref_project in self.reference_projects],
             )
 
@@ -515,6 +528,11 @@ class OnboardingRequest:
         set_logger(onboarding_project.log_file_path)
         if self.extract_corpora:
             onboarding_project.extract_corpora_wrapper(self.config.get("extract_corpora", {}))
+            if onboarding_project.get_extract_path() is None:
+                LOGGER.error(
+                    f"No extract file was created for {onboarding_project.project_name}. Stopping onboarding of this project."
+                )
+                return
 
         if self.collect_verse_counts:
             onboarding_project.collect_verse_counts_wrapper(self.config.get("verse_counts", {}))

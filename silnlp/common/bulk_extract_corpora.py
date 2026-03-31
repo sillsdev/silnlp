@@ -15,8 +15,18 @@ from ..common.environment import SIL_NLP_ENV
 from .paratext import extract_project, extract_term_renderings
 
 
-def extract_directory_or_bundle(args: Tuple[Path, Path, Optional[Path], bytes, bool, int, bool]) -> Tuple[str, Optional[str]]:
-    input_path, corpus_output_path, terms_output_path, password, output_project_vrefs, expected_verse_count, extract_surface_forms = args
+def extract_directory_or_bundle(
+    args: Tuple[Path, Path, Optional[Path], bytes, bool, int, bool],
+) -> Tuple[str, Optional[str]]:
+    (
+        input_path,
+        corpus_output_path,
+        terms_output_path,
+        password,
+        output_project_vrefs,
+        expected_verse_count,
+        extract_surface_forms,
+    ) = args
     project = input_path.stem
     try:
         if input_path.suffix == ".p8z":
