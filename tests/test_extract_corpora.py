@@ -21,7 +21,7 @@ def test_extract_corpora():
     pp_subdirs = [folder for folder in SIL_NLP_ENV.pt_projects_dir.glob("*/")]
     for project in pp_subdirs:
         corpus_filename = extract_project(project, SIL_NLP_ENV.mt_scripture_dir)
-        extract_term_renderings(project, corpus_filename, SIL_NLP_ENV.mt_terms_dir)
+        extract_term_renderings(project, corpus_filename, SIL_NLP_ENV.mt_terms_dir, extract_surface_forms=True)
 
     helper.compare_folders(truth_folder=scr_truth_dir, computed_folder=SIL_NLP_ENV.mt_scripture_dir)
 

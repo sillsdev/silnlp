@@ -12,11 +12,11 @@ from typing import Any, Iterable, List, Optional
 import matplotlib.pyplot as plt
 import pandas as pd
 import sacrebleu
-from sacrebleu.metrics.bleu import BLEU, BLEUScore
 from scipy.stats import gmean
 from tqdm import tqdm
 
 from ..common.corpus import load_corpus
+from ..common.translator import CONFIDENCE_SUFFIX
 from ..common.utils import get_git_revision_hash
 from .config import get_mt_exp_dir
 from .sp_utils import decode_sp, decode_sp_lines
@@ -53,30 +53,6 @@ DICT_SRC = "Source"
 DICT_TRG = "Target"
 
 _SUPPORTED_SCORERS = {BLEU_SCORE, SPBLEU_SCORE, CHRF3_SCORE, CHRF3P_SCORE, CHRF3PP_SCORE, TER_SCORE}
-
-
-def sentence_bleu(
-    hypothesis: str,
-    references: List[str],
-    smooth_method: str = "exp",
-    smooth_value: Optional[float] = None,
-    lowercase: bool = False,
-    tokenize="13a",
-    use_effective_order: bool = True,
-) -> BLEUScore:
-    """
-    Substitute for the sacrebleu version of sentence_bleu, which uses settings that aren't consistent with
-    the values we use for corpus_bleu, and isn't fully parameterized
-    """
-    metric = BLEU(
-        smooth_method=smooth_method,
-        smooth_value=smooth_value,
-        force=False,
-        lowercase=lowercase,
-        tokenize=tokenize,
-        effective_order=use_effective_order,
-    )
-    return metric.sentence_score(hypothesis, references)
 
 
 def extract_chapter(chapter_num):
@@ -503,7 +479,7 @@ def add_scores(df: pd.DataFrame, scorers: List[str], preserve_case: bool, tokeni
         scorer = scorer.lower()
         if scorer == BLEU_SCORE.lower():
             for index, row in tqdm(df.iterrows(), desc="Calculating BLEU scores ..."):
-                bleu = sentence_bleu(
+                bleu = sacrebleu.sentence_bleu(
                     row[PREDICTION], [row[TRG_SENTENCE]], lowercase=not preserve_case, tokenize=tokenize
                 )
                 scores.append(bleu.score)
@@ -700,7 +676,7 @@ def main() -> None:
         prediction_col = "E"
         if args.confidence:
             df[CONFIDENCE] = get_sequence_confidences(
-                os.path.join(exp1_dir, f"test.trg-predictions.txt.{exp1_step}.confidences.tsv")
+                os.path.join(exp1_dir, f"test.trg-predictions.txt.{exp1_step}{CONFIDENCE_SUFFIX}")
             )
 
     if args.chapter_score:

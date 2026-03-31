@@ -71,7 +71,7 @@ class SILExperiment:
 
     def train(self):
         os.system("nvidia-smi")
-        model = self.config.create_model(self.mixed_precision, self.num_devices)
+        model = self.config.create_model(self.mixed_precision, self.num_devices, self.clearml_queue)
         model.save_effective_config(self.config.exp_dir / f"effective-config-{self.rev_hash}.yml")
         print(f"=== Training ({self.name}) ===")
         model.train()
@@ -95,6 +95,19 @@ class SILExperiment:
 
         postprocess_configs = translate_configs.get("postprocess", [])
         postprocess_handler = PostprocessHandler([PostprocessConfig(pc) for pc in postprocess_configs])
+
+        quality_estimation = translate_configs.get("quality_estimation", False)
+
+        if quality_estimation:
+            verse_test_scores_path = get_mt_exp_dir(
+                quality_estimation.get("verse_test_scores_file")
+                if isinstance(quality_estimation, dict) and quality_estimation.get("verse_test_scores_file")
+                else self.config.exp_dir
+            )
+        else:
+            verse_test_scores_path = None
+        if quality_estimation and not self.save_confidences:
+            self.save_confidences = True
 
         for translate_config in translate_configs.get("translate", []):
             checkpoint: Union[str, int] = translate_config.get("checkpoint", "last") or "last"
@@ -120,6 +133,8 @@ class SILExperiment:
                     translate_config.get("trg_iso"),
                     self.produce_multiple_translations,
                     self.save_confidences,
+                    bool(quality_estimation),
+                    verse_test_scores_path,
                     postprocess_handler,
                     translate_config.get("tags"),
                 )
@@ -138,6 +153,8 @@ class SILExperiment:
                     translate_config.get("trg_iso"),
                     self.produce_multiple_translations,
                     self.save_confidences,
+                    bool(quality_estimation),
+                    verse_test_scores_path,
                     translate_config.get("tags"),
                 )
             elif translate_config.get("src"):
@@ -148,6 +165,8 @@ class SILExperiment:
                     translate_config.get("trg_iso"),
                     self.produce_multiple_translations,
                     self.save_confidences,
+                    bool(quality_estimation),
+                    verse_test_scores_path,
                     postprocess_handler,
                     translate_config.get("tags"),
                 )
@@ -219,7 +238,6 @@ def main() -> None:
         choices=SUPPORTED_SCORERS,
         default=[
             "bleu",
-            "sentencebleu",
             "chrf3",
             "chrf3+",
             "chrf3++",
@@ -244,7 +262,7 @@ def main() -> None:
         show_attrs(cli_args=args)
         exit()
 
-    if not (args.preprocess or args.train or args.test):
+    if not (args.preprocess or args.train or args.test or args.translate):
         args.preprocess = True
         args.train = True
         args.test = True
@@ -268,7 +286,7 @@ def main() -> None:
         score_by_book=args.score_by_book,
     )
 
-    if not args.save_checkpoints:
+    if args.train and not args.save_checkpoints:
         SIL_NLP_ENV.delete_path_on_exit(get_mt_exp_dir(args.experiment) / "run")
     exp.run()
 

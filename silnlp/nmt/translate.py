@@ -2,22 +2,57 @@ import argparse
 import logging
 import os
 import time
-from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Generator, Iterable, List, Optional, Tuple, Union
 
+from machine.corpora import UsfmFileTextCorpus, create_versification_ref_corpus, extract_scripture_corpus
 from machine.scripture import VerseRef, book_number_to_id, get_chapters
 
 from ..common.environment import SIL_NLP_ENV
 from ..common.paratext import book_file_name_digits, get_project_dir
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
-from ..common.translator import SentenceTranslationGroup, Translator
+from ..common.translation_data_structures import SentenceTranslationGroup
+from ..common.translator import CONFIDENCE_SUFFIX, Translator
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
-from .config import CheckpointType, Config, NMTModel
+from .config import CheckpointType, Config, NMTModel, get_mt_exp_dir
+from .quality_estimation import estimate_quality
 
 LOGGER = logging.getLogger((__package__ or "") + ".translate")
+
+
+def export_vref_for_output(output_path: Path, produce_multiple_translations: bool, num_drafts: int = 1) -> None:
+    if produce_multiple_translations:
+        for i in range(1, num_drafts + 1):
+            draft_path = output_path.with_suffix(f".{i}{output_path.suffix}")
+            if draft_path.exists():
+                vref_path = draft_path.with_suffix(".txt")
+                convert_usfm_to_vref(draft_path, vref_path)
+    elif output_path.exists():
+        vref_path = output_path.with_suffix(".txt")
+        convert_usfm_to_vref(output_path, vref_path)
+
+
+def convert_usfm_to_vref(usfm_path: Path, vref_path: Path) -> None:
+    corpus = UsfmFileTextCorpus(usfm_path.parent, file_pattern=usfm_path.name)
+    ref_corpus = create_versification_ref_corpus()
+
+    tmp_vref_path = vref_path.with_suffix(vref_path.suffix + ".tmp")
+    try:
+        with (
+            tmp_vref_path.open("w", encoding="utf-8", newline="\n") as output_stream,
+            extract_scripture_corpus(corpus, ref_corpus) as output,
+        ):
+            for line, _, _ in output:
+                output_stream.write(line + "\n")
+        os.replace(tmp_vref_path, vref_path)
+    except Exception:
+        try:
+            tmp_vref_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 
 
 class NMTTranslator(Translator):
@@ -59,13 +94,17 @@ class TranslationTask:
         trg_iso: Optional[str],
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
+        quality_estimation: bool = False,
+        verse_test_scores_path: Optional[Path] = None,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
         tags: Optional[List[str]] = None,
-    ):
+        vref: bool = False,
+    ) -> None:
         book_nums = get_chapters(books)
         translator, config, step_str = self._init_translation_task(
             experiment_suffix=f"_{self.checkpoint}_{[book_number_to_id(book) for book in book_nums.keys()]}"
         )
+        confidence_files: List[Path] = []
         with translator:
             if src_project is None:
                 if len(config.src_projects) != 1:
@@ -124,12 +163,22 @@ class TranslationTask:
                         config.corpus_pairs,
                         tags,
                     )
+                    if vref:
+                        num_drafts = config.infer.get("num_drafts", 1)
+                        export_vref_for_output(output_path, produce_multiple_translations, num_drafts)
+                    if save_confidences:
+                        confidence_files.extend(output_path.parent.glob(f"{output_path.stem}*{CONFIDENCE_SUFFIX}"))
                 except Exception:
                     translation_failed.append(book)
                     LOGGER.exception(f"Was not able to translate {book}.")
 
             if len(translation_failed) > 0:
                 raise RuntimeError(f"Some books failed to translate: {' '.join(translation_failed)}")
+
+        if quality_estimation and len(confidence_files) > 0:
+            LOGGER.info("Running quality estimation...")
+            estimate_quality(verse_test_scores_path, confidence_files)
+            LOGGER.info("Quality estimation completed.")
 
     def translate_text_files(
         self,
@@ -141,9 +190,12 @@ class TranslationTask:
         trg_iso: Optional[str],
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
+        quality_estimation: bool = False,
+        verse_test_scores_path: Optional[Path] = None,
         tags: Optional[List[str]] = None,
     ) -> None:
         translator, config, _ = self._init_translation_task(experiment_suffix=f"_{self.checkpoint}_{src_prefix}")
+        confidence_files: List[Path] = []
         with translator:
             if src_iso is None:
                 src_iso = config.default_test_src_iso
@@ -183,6 +235,14 @@ class TranslationTask:
                     end = time.time()
                     print(f"Translated {src_file_path.name} to {trg_file_path.name} in {((end-start)/60):.2f} minutes")
 
+                    if save_confidences:
+                        confidence_files.extend(trg_file_path.parent.glob(f"{trg_file_path.stem}*{CONFIDENCE_SUFFIX}"))
+
+        if quality_estimation and len(confidence_files) > 0:
+            LOGGER.info("Running quality estimation...")
+            estimate_quality(verse_test_scores_path, confidence_files)
+            LOGGER.info("Quality estimation completed.")
+
     def translate_files(
         self,
         src: str,
@@ -191,12 +251,16 @@ class TranslationTask:
         trg_iso: Optional[str],
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
+        quality_estimation: bool = False,
+        verse_test_scores_path: Optional[Path] = None,
         postprocess_handler: PostprocessHandler = PostprocessHandler(),
         tags: Optional[List[str]] = None,
+        vref: bool = False,
     ) -> None:
         translator, config, step_str = self._init_translation_task(
             experiment_suffix=f"_{self.checkpoint}_{os.path.basename(src)}"
         )
+        confidence_files: List[Path] = []
         with translator:
             if src_iso is None:
                 src_iso = config.default_test_src_iso
@@ -275,6 +339,17 @@ class TranslationTask:
                         training_corpus_pairs=config.corpus_pairs,
                         tags=tags,
                     )
+                    if vref:
+                        num_drafts = config.infer.get("num_drafts", 1)
+                        export_vref_for_output(trg_file_path, produce_multiple_translations, num_drafts)
+
+                if save_confidences:
+                    confidence_files.extend(trg_file_path.parent.glob(f"{trg_file_path.stem}*{CONFIDENCE_SUFFIX}"))
+
+        if quality_estimation and len(confidence_files) > 0:
+            LOGGER.info("Running quality estimation...")
+            estimate_quality(verse_test_scores_path, confidence_files)
+            LOGGER.info("Quality estimation completed.")
 
     def _init_translation_task(self, experiment_suffix: str) -> Tuple[Translator, Config, str]:
         clearml = SILClearML(
@@ -406,6 +481,12 @@ def main() -> None:
         help="The quote convention for the target project. If not specified, it will be detected automatically.",
     )
     parser.add_argument(
+        "--vref",
+        default=False,
+        action="store_true",
+        help="Export the translated document in VREF format (original versification) in addition to USFM.",
+    )
+    parser.add_argument(
         "--clearml-queue",
         default=None,
         type=str,
@@ -424,6 +505,20 @@ def main() -> None:
         "--commit", type=str, default=None, help="The silnlp git commit id with which to run a remote job"
     )
     parser.add_argument(
+        "--quality-estimation",
+        default=False,
+        action="store_true",
+        help="Run quality estimation after translation completes. Requires --save-confidences.",
+    )
+    parser.add_argument(
+        "--verse-test-scores-file",
+        type=str,
+        default=None,
+        help="The tsv file relative to MT/experiments containing the verse-level test scores to determine "
+        + "line of best fit, e.g., `project_folder/exp_folder/test.trg-predictions.detok.txt.5000.scores.tsv`. "
+        + "If not provided, the experiment directory will be used to locate the test scores file.",
+    )
+    parser.add_argument(
         "--debug",
         default=False,
         action="store_true",
@@ -434,6 +529,19 @@ def main() -> None:
 
     if args.clearml_queue is not None and args.clearml_tag is None:
         parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
+
+    if args.quality_estimation:
+        if not args.save_confidences:
+            args.save_confidences = True
+
+        if args.verse_test_scores_file is None:
+            verse_test_scores_path = get_mt_exp_dir(args.experiment)
+        else:
+            verse_test_scores_path = get_mt_exp_dir(args.verse_test_scores_file)
+            if not verse_test_scores_path.exists():
+                parser.error(f"The verse test scores path {verse_test_scores_path} does not exist.")
+    else:
+        verse_test_scores_path = None
 
     get_git_revision_hash()
 
@@ -459,7 +567,10 @@ def main() -> None:
             args.trg_iso,
             args.multiple_translations,
             args.save_confidences,
+            args.quality_estimation,
+            verse_test_scores_path,
             postprocess_handler,
+            vref=args.vref,
         )
     elif args.src_prefix is not None:
         if args.debug:
@@ -481,6 +592,8 @@ def main() -> None:
             args.trg_iso,
             args.multiple_translations,
             args.save_confidences,
+            args.quality_estimation,
+            verse_test_scores_path,
         )
     elif args.src is not None:
         if args.debug:
@@ -496,7 +609,10 @@ def main() -> None:
             args.trg_iso,
             args.multiple_translations,
             args.save_confidences,
+            args.quality_estimation,
+            verse_test_scores_path,
             postprocess_handler,
+            vref=args.vref,
         )
     else:
         raise RuntimeError("A Scripture book, file, or file prefix must be specified.")
