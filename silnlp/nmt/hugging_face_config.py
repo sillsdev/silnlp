@@ -1791,8 +1791,7 @@ class HuggingFaceNMTModel(NMTModel):
             model = model.to_bettertransformer()
         if model_name == self._config.model and len(tokenizer) != model.get_input_embeddings().weight.size(dim=0):
             model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if self._mixed_precision else None)
-        if self._config.model_prefix == "google/madlad400" or model_name == self._config.model:
-            model, tokenizer = self._configure_model(model, tokenizer, src_lang, trg_lang)
+        model, tokenizer = self._configure_model(model, tokenizer, src_lang, trg_lang)
 
         return model
 
