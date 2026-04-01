@@ -1182,19 +1182,14 @@ class HuggingFaceNMTModel(NMTModel):
     ) -> None:
         tokenizer = self._config.get_tokenizer()
         model = self._create_inference_model(ckpt, tokenizer, self._config.test_src_lang, self._config.test_trg_lang)
-        pipeline = PretokenizedTranslationPipeline(
-            model=model,
-            tokenizer=tokenizer,
-            src_lang=self._config.test_src_lang,
-            tgt_lang=self._config.test_trg_lang,
-            device=0,
-        )
-        pipeline.model = torch.compile(pipeline.model)
+
         for input_path, translation_path, vref_path in zip(
             input_paths,
             translation_paths,
             cast(Iterable[Optional[Path]], repeat(None) if vref_paths is None else vref_paths),
         ):
+            pipeline = self._create_pipeline_for_test_file(input_path, model, tokenizer)
+
             length = count_lines(input_path)
             with ExitStack() as stack:
                 src_file = stack.enter_context(input_path.open("r", encoding="utf-8-sig"))
@@ -1225,6 +1220,28 @@ class HuggingFaceNMTModel(NMTModel):
                             translated_draft,
                             translation_draft_path,
                         )
+
+    def _create_pipeline_for_test_file(
+        self, input_path: Path, model: PreTrainedModel, tokenizer: PreTrainedTokenizer
+    ) -> "PretokenizedTranslationPipeline":
+        iso_specified_file_pattern = re.compile(r"^test\.([a-z]{2,3})\.([a-z]{2,3})\..*")
+        if iso_specified_file_pattern.match(input_path.name):
+            src_iso, trg_iso = iso_specified_file_pattern.match(input_path.name).groups()
+            src_lang = self._config.data["lang_codes"].get(src_iso, src_iso)
+            trg_lang = self._config.data["lang_codes"].get(trg_iso, trg_iso)
+        else:
+            src_lang = self._config.test_src_lang
+            trg_lang = self._config.test_trg_lang
+
+        pipeline = PretokenizedTranslationPipeline(
+            model=model,
+            tokenizer=tokenizer,
+            src_lang=src_lang,
+            tgt_lang=trg_lang,
+            device=0,
+        )
+        pipeline.model = torch.compile(pipeline.model)
+        return pipeline
 
     def _translate_test_sentences(
         self,
