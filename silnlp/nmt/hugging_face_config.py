@@ -1970,6 +1970,7 @@ class SilTranslationPipeline(TranslationPipeline):
         output = self.model.generate(
             **model_inputs,
             **generate_kwargs,
+            generation_config=config,
             output_scores=True,
             return_dict_in_generate=True,
         )
