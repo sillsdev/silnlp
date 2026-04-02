@@ -1,5 +1,4 @@
 import concurrent.futures
-import json
 import logging
 import os
 import shutil
@@ -18,6 +17,7 @@ SF_AUTH_PWD = os.getenv("SF_AUTH_PWD")
 SF_CLIENT_ID = os.getenv("SF_CLIENT_ID")
 UUID = str(uuid.uuid4())
 ONBOARDING_PATH = os.getenv("ONBOARDING_PATH")
+ONBOARDING_LOG_PATH = f"{ONBOARDING_PATH}/onboarded_projects.log"
 os.makedirs(ONBOARDING_PATH, exist_ok=True)
 REPO_PATH = os.getenv("REPO_PATH")
 
@@ -85,7 +85,7 @@ def get_onboarding_requests() -> list[dict]:
     return send_request(RequestType.POST, ONBOARDING_REQUESTS_URL, "getAllRequests", {}).json().get("result", {})
 
 
-def get_project_metadata(onboarding_request: dict) -> Tuple[str, Dict[str, str]]:
+def get_project_metadata(onboarding_request: dict) -> Tuple[Dict[str, str], str]:
     request_metadata: Dict[str, str] = {}
     main_project_name = ""
     form_data = onboarding_request["submission"]["formData"]
@@ -123,7 +123,7 @@ def get_project_metadata(onboarding_request: dict) -> Tuple[str, Dict[str, str]]
     return request_metadata, main_project_name
 
 
-def download_project(SF_id: str, main_project_name: str, project_short_name: str, paratext_id: str):
+def download_project(SF_id: str, main_project_name: str, project_short_name: str, paratext_id: str) -> None:
     project_url = f"{PROJECTS_URL}/{SF_id}/download"
     response = send_request(RequestType.GET, project_url, "getProjectDownloadLink", {"paratextId": SF_id})
     os.makedirs(f"{ONBOARDING_PATH}/{main_project_name}_Request", exist_ok=True)
@@ -131,20 +131,6 @@ def download_project(SF_id: str, main_project_name: str, project_short_name: str
         project_short_name = f"{project_short_name}_Resource"
     with open(f"{ONBOARDING_PATH}/{main_project_name}_Request/{project_short_name}.zip", "wb") as f:
         f.write(response.content)
-
-
-onboarding_requests = get_onboarding_requests()
-onboarded_projects = []
-
-if not os.path.exists(f"{ONBOARDING_PATH}/onboarded_projects.log"):
-    Path(f"{ONBOARDING_PATH}/onboarded_projects.log").touch()
-
-with open(f"{ONBOARDING_PATH}/onboarded_projects.log", "r") as f:
-    onboarded_projects = f.read().splitlines()
-
-for request in onboarding_requests:
-    if request["id"] in onboarded_projects:
-        onboarding_requests.remove(request)
 
 
 def process_request(request):
@@ -162,7 +148,7 @@ def process_request(request):
         ]
     )
     task: Task = Task.get_task(project_name="Onboarding", task_name=task_name, tags=["silnlp-auto-onboarding"])
-    with open(f"{ONBOARDING_PATH}/onboarded_projects.log", "a") as f:
+    with open(ONBOARDING_LOG_PATH, "a") as f:
         f.write(f"{request['id']}\n")
     add_comment(request["id"], f"This request is being automatically onboarded. ClearML task: {task.name}")
 
@@ -170,16 +156,40 @@ def process_request(request):
         task.wait_for_status()
         add_comment(request["id"], "Automatic onboarding was successful.")
     except RuntimeError as e:
-        LOGGER.warningprint(e)
+        LOGGER.warning(e)
         add_comment(request["id"], "Automatic onboarding failed.")
     finally:
-        shutil.rmtree(f"{ONBOARDING_PATH}/{main_project_name}_Request")
+        safe_main_project_name = main_project_name.replace("/", "_").replace("\\", "_")
+        base_path = Path(ONBOARDING_PATH).resolve()
+        target_path = (base_path / f"{safe_main_project_name}_Request").resolve()
+        if not str(target_path).startswith(str(base_path) + os.sep):
+            LOGGER.warning("Refusing to delete path outside ONBOARDING_PATH: %s", target_path)
+        elif target_path.exists():
+            shutil.rmtree(target_path)
 
 
-with concurrent.futures.ThreadPoolExecutor() as executor:
-    futures = [executor.submit(process_request, request) for request in onboarding_requests]
-    for future in concurrent.futures.as_completed(futures):
-        try:
-            future.result()
-        except Exception as e:
-            LOGGER.warning(f"Error processing request: {e}")
+def main():
+    onboarding_requests = get_onboarding_requests()
+    onboarded_projects = []
+
+    if not os.path.exists(ONBOARDING_LOG_PATH):
+        Path(ONBOARDING_LOG_PATH).touch()
+
+    with open(ONBOARDING_LOG_PATH, "r") as f:
+        onboarded_projects = f.read().splitlines()
+
+    for request in onboarding_requests:
+        if request["id"] in onboarded_projects:
+            onboarding_requests.remove(request)
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = [executor.submit(process_request, request) for request in onboarding_requests]
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                LOGGER.warning(f"Error processing request: {e}")
+
+
+if __name__ == "__main__":
+    main()
