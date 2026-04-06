@@ -82,7 +82,8 @@ def add_comment(request_id: str, comment: str):
 
 
 def get_onboarding_requests() -> list[dict]:
-    return send_request(RequestType.POST, ONBOARDING_REQUESTS_URL, "getAllRequests", {}).json().get("result", {})
+    all_requests = send_request(RequestType.GET, ONBOARDING_REQUESTS_URL, "getAllRequests", {}).json().get("result", [])
+    return [request for request in all_requests if request["status"] == "new"] if all_requests else []
 
 
 def get_project_metadata(onboarding_request: dict) -> Tuple[Dict[str, str], str]:
@@ -172,6 +173,9 @@ def process_request(request):
 
 def main():
     onboarding_requests = get_onboarding_requests()
+    if not onboarding_requests:
+        LOGGER.info("No new onboarding requests found.")
+        return
     onboarded_projects = []
 
     if not os.path.exists(ONBOARDING_LOG_PATH):
