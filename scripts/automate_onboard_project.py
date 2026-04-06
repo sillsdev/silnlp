@@ -61,7 +61,7 @@ try:
     )
     task = setup_base_docker(
         task,
-        f"-v {os.getenv('ONBOARDING_PATH')}/{args.dir}:/root/OnboardingProjects/{args.dir}",
+        f"{os.getenv('ONBOARDING_PATH')}/{args.dir}:/root/OnboardingProjects/{args.dir}",
     )
 
     task.execute_remotely(queue_name="jobs_backlog.cpu_only")
