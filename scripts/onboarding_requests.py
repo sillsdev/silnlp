@@ -1,7 +1,6 @@
 import concurrent.futures
 import logging
 import os
-import shutil
 import subprocess
 import uuid
 from enum import Enum
@@ -18,6 +17,7 @@ SF_CLIENT_ID = os.getenv("SF_CLIENT_ID")
 UUID = str(uuid.uuid4())
 ONBOARDING_PATH = os.getenv("ONBOARDING_PATH")
 ONBOARDING_LOG_PATH = f"{ONBOARDING_PATH}/onboarded_projects.log"
+ONBOARDING_CLEANUP_PATH = f"{ONBOARDING_PATH}/paths_to_cleanup.txt"
 os.makedirs(ONBOARDING_PATH, exist_ok=True)
 REPO_PATH = os.getenv("REPO_PATH")
 
@@ -153,6 +153,8 @@ def process_request(request):
     task: Task = Task.get_task(project_name="Onboarding", task_name=task_name, tags=["silnlp-auto-onboarding"])
     with open(ONBOARDING_LOG_PATH, "a") as f:
         f.write(f"{request['id']}\n")
+    with open(ONBOARDING_CLEANUP_PATH, "a") as f:
+        f.write(f"{ONBOARDING_PATH}/{main_project_name}_Request\n")
     add_comment(request["id"], f"This request is being automatically onboarded. ClearML task: {task.name}")
 
     try:
@@ -161,14 +163,6 @@ def process_request(request):
     except RuntimeError as e:
         LOGGER.warning(e)
         add_comment(request["id"], "Automatic onboarding failed.")
-    finally:
-        safe_main_project_name = main_project_name.replace("/", "_").replace("\\", "_")
-        base_path = Path(ONBOARDING_PATH).resolve()
-        target_path = (base_path / f"{safe_main_project_name}_Request").resolve()
-        if not str(target_path).startswith(str(base_path) + os.sep):
-            LOGGER.warning("Refusing to delete path outside ONBOARDING_PATH: %s", target_path)
-        elif target_path.exists():
-            shutil.rmtree(target_path)
 
 
 def main():
@@ -180,6 +174,8 @@ def main():
 
     if not os.path.exists(ONBOARDING_LOG_PATH):
         Path(ONBOARDING_LOG_PATH).touch()
+    if not os.path.exists(ONBOARDING_CLEANUP_PATH):
+        Path(ONBOARDING_CLEANUP_PATH).touch()
 
     with open(ONBOARDING_LOG_PATH, "r") as f:
         onboarded_projects = f.read().splitlines()
