@@ -11,6 +11,7 @@ parser.add_argument(
     type=str,
     help="The name of the directory in ONBOARDING_PATH to use as the source for onboarding.",
 )
+parser.add_argument("--task-name", type=str, help="The name of the ClearML task to create for this onboarding process.")
 args = parser.parse_args()
 
 

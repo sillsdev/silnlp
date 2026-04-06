@@ -145,6 +145,8 @@ def process_request(request):
             main_project_name,
             "--dir",
             f"{main_project_name}_Request",
+            "--task-name",
+            task_name,
         ]
     )
     task: Task = Task.get_task(project_name="Onboarding", task_name=task_name, tags=["silnlp-auto-onboarding"])
