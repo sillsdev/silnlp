@@ -17,7 +17,7 @@ SF_CLIENT_ID = os.getenv("SF_CLIENT_ID")
 UUID = str(uuid.uuid4())
 ONBOARDING_PATH = os.getenv("ONBOARDING_PATH")
 ONBOARDING_LOG_PATH = f"{ONBOARDING_PATH}/onboarded_projects.log"
-ONBOARDING_CLEANUP_PATH = f"{ONBOARDING_PATH}/paths_to_cleanup.txt"
+ONBOARDING_CLEANUP_PATH = f"{ONBOARDING_PATH}/paths_to_delete.txt"
 os.makedirs(ONBOARDING_PATH, exist_ok=True)
 REPO_PATH = os.getenv("REPO_PATH")
 
