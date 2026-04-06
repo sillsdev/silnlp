@@ -68,7 +68,7 @@ try:
 
     import sys
 
-    from silnlp.common import onboard_project
+    from silnlp.common.onboard_project import main as onboard_project
 
     old_argv = sys.argv
     onboard_projects_dir = f"/root/OnboardingProjects/{args.dir}"
@@ -89,7 +89,7 @@ try:
             "--align",
             "--overwrite",
         ]
-        onboard_project.main()
+        onboard_project()
     finally:
         sys.argv = old_argv
 except LoginError as e:
