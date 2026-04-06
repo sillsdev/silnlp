@@ -73,7 +73,7 @@ try:
     old_argv = sys.argv
     onboard_projects_dir = f"/root/OnboardingProjects/{args.dir}"
     ref_projects = os.listdir(onboard_projects_dir)
-    ref_projects.remove(f"{args.project}.zip")
+    ref_projects.remove(args.project)
     try:
         sys.argv = [
             args.project,
