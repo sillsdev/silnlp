@@ -66,6 +66,7 @@ try:
     ref_projects.remove(args.project)
     try:
         sys.argv = [
+            "",
             args.project,
             "--ref-projects",
             *ref_projects,
