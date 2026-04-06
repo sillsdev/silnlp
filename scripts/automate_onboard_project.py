@@ -5,7 +5,7 @@ from clearml import Task
 from clearml.backend_api.session.session import LoginError
 
 parser = argparse.ArgumentParser()
-parser.add_argument("main-project", type=str, help="The name of the main Paratext project to onboard.")
+parser.add_argument("project", type=str, help="The name of the main Paratext project to onboard.")
 parser.add_argument(
     "--dir",
     type=str,
@@ -73,10 +73,10 @@ try:
     old_argv = sys.argv
     onboard_projects_dir = f"/root/OnboardingProjects/{args.dir}"
     ref_projects = os.listdir(onboard_projects_dir)
-    ref_projects.remove(args.main_project)
+    ref_projects.remove(args.project)
     try:
         sys.argv = [
-            args.main_project,
+            args.project,
             "--ref-projects",
             *ref_projects,
             "--copy-from",
