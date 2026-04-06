@@ -14,8 +14,12 @@ parser.add_argument(
 parser.add_argument("--task-name", type=str, help="The name of the ClearML task to create for this onboarding process.")
 args = parser.parse_args()
 
-
-def setup_base_docker(task: Task, volume_path: str = None) -> Task:
+try:
+    task: Task = Task.init(
+        project_name="Onboarding",
+        task_name=args.task_name,
+        tags=["silnlp-auto-onboarding"],
+    )
     task.set_base_docker(
         docker_image="ghcr.io/sillsdev/silnlp:latest",
         docker_arguments=[
@@ -25,7 +29,7 @@ def setup_base_docker(task: Task, volume_path: str = None) -> Task:
             "--security-opt apparmor=docker-apparmor",
             "--env CHECK_TRANSFERS=1",
             "--env SIL_NLP_DATA_PATH=/root/M",
-            f"-v {volume_path}" if volume_path else "",
+            f"{os.getenv('ONBOARDING_PATH')}/{args.dir}:/root/OnboardingProjects/{args.dir}",
         ],
         docker_setup_bash_script=[
             "apt install -y python3-venv",
@@ -48,20 +52,6 @@ def setup_base_docker(task: Task, volume_path: str = None) -> Task:
             'sed -i -e "s#endpoint = .*#endpoint = $MINIO_ENDPOINT_URL#" ~/.config/rclone/rclone.conf',
             "rclone mount --daemon --no-check-certificate --log-file=/root/rclone_log.txt --log-level=DEBUG --vfs-cache-mode full --vfs-cache-max-size 15G --use-server-modtime miniosilnlp:nlp-research /root/M",
         ],
-    )
-
-    return task
-
-
-try:
-    task: Task = Task.init(
-        project_name="Onboarding",
-        task_name=args.task_name,
-        tags=["silnlp-auto-onboarding"],
-    )
-    task = setup_base_docker(
-        task,
-        f"{os.getenv('ONBOARDING_PATH')}/{args.dir}:/root/OnboardingProjects/{args.dir}",
     )
 
     task.execute_remotely(queue_name="jobs_backlog.cpu_only")
