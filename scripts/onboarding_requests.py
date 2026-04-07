@@ -127,6 +127,12 @@ def get_project_metadata(onboarding_request: dict) -> Tuple[Dict[str, str], str]
 def download_project(SF_id: str, main_project_name: str, project_short_name: str, paratext_id: str) -> None:
     project_url = f"{PROJECTS_URL}/{SF_id}/download"
     response = send_request(RequestType.GET, project_url, "getProjectDownloadLink", {"paratextId": SF_id})
+    if response.status_code != 200:
+        add_comment(
+            SF_id,
+            f"Failed to get download project {project_short_name}. Skipping onboarding for this project. Error: {response.text}",
+        )
+        return
     os.makedirs(f"{ONBOARDING_PATH}/{main_project_name}_Request", exist_ok=True)
     if paratext_id and len(paratext_id) == 16:
         project_short_name = f"{project_short_name}_Resource"
