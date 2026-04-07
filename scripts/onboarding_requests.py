@@ -130,9 +130,11 @@ def download_project(
     project_url = f"{PROJECTS_URL}/{SF_id}/download"
     response = send_request(RequestType.GET, project_url, "getProjectDownloadLink", {"paratextId": SF_id})
     if response.status_code != 200:
+        if main_project_name == project_short_name:
+            raise RuntimeError(f"Failed to download main project. Error: {response.text}")
         add_comment(
             request_id,
-            f"Failed to get download project {project_short_name}. Skipping onboarding for this project. Error: {response.text}",
+            f"Failed to download Reference project: {project_short_name}. Skipping onboarding for this project. Error: {response.text}",
         )
         return
     os.makedirs(f"{ONBOARDING_PATH}/{main_project_name}_Request", exist_ok=True)
@@ -143,37 +145,41 @@ def download_project(
 
 
 def process_request(request):
-    request_metadata, main_project_name = get_project_metadata(request)
-    for SF_id, (paratext_id, project_short_name) in request_metadata.items():
-        download_project(request[id], SF_id, main_project_name, project_short_name, paratext_id)
-    task_name = f"Auto Onboarding - {main_project_name}"
-    subprocess.run(
-        [
-            "python",
-            f"{REPO_PATH}/scripts/automate_onboard_project.py",
-            f"{main_project_name}.zip",
-            "--dir",
-            f"{main_project_name}_Request",
-            "--task-name",
-            task_name,
-        ]
-    )
-    task: Task = Task.get_task(project_name="Onboarding", task_name=task_name, tags=["silnlp-auto-onboarding"])
-    with open(ONBOARDING_LOG_PATH, "a") as f:
-        f.write(f"{request['id']}\n")
-    with open(ONBOARDING_CLEANUP_PATH, "a") as f:
-        f.write(f"{ONBOARDING_PATH}/{main_project_name}_Request\n")
+    try:
+        request_metadata, main_project_name = get_project_metadata(request)
+        for SF_id, (paratext_id, project_short_name) in request_metadata.items():
+            download_project(request["id"], SF_id, main_project_name, project_short_name, paratext_id)
+        task_name = f"Auto Onboarding - {main_project_name}"
+        subprocess.run(
+            [
+                "python",
+                f"{REPO_PATH}/scripts/automate_onboard_project.py",
+                f"{main_project_name}.zip",
+                "--dir",
+                f"{main_project_name}_Request",
+                "--task-name",
+                task_name,
+            ]
+        )
+        task: Task = Task.get_task(project_name="Onboarding", task_name=task_name, tags=["silnlp-auto-onboarding"])
+        with open(ONBOARDING_LOG_PATH, "a") as f:
+            f.write(f"{request['id']}\n")
+        with open(ONBOARDING_CLEANUP_PATH, "a") as f:
+            f.write(f"{ONBOARDING_PATH}/{main_project_name}_Request\n")
+    except Exception as e:
+        LOGGER.warning(f"Error processing onboarding request {request['id']}: {e}")
+        add_comment(request["id"], f"Error processing this onboarding request: {e}")
+
     add_comment(
         request["id"],
         f"This request is being automatically onboarded. ClearML task: {task.name}. Link: {task.get_output_log_web_page()}",
     )
-
     try:
         task.wait_for_status()
-        add_comment(request["id"], "Automatic onboarding was successful.")
-    except RuntimeError as e:
+        add_comment(request["id"], "Automatic onboarding was successful. See ClearML task for details.")
+    except Exception as e:
         LOGGER.warning(e)
-        add_comment(request["id"], "Automatic onboarding failed.")
+        add_comment(request["id"], "Automatic onboarding failed. See ClearML task for details.")
 
 
 def main():
