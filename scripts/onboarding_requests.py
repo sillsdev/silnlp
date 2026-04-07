@@ -155,7 +155,10 @@ def process_request(request):
         f.write(f"{request['id']}\n")
     with open(ONBOARDING_CLEANUP_PATH, "a") as f:
         f.write(f"{ONBOARDING_PATH}/{main_project_name}_Request\n")
-    add_comment(request["id"], f"This request is being automatically onboarded. ClearML task: {task.name}")
+    add_comment(
+        request["id"],
+        f"This request is being automatically onboarded. ClearML task: {task.name}. Link: {task.get_output_log_web_page()}",
+    )
 
     try:
         task.wait_for_status()
