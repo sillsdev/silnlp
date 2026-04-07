@@ -124,12 +124,14 @@ def get_project_metadata(onboarding_request: dict) -> Tuple[Dict[str, str], str]
     return request_metadata, main_project_name
 
 
-def download_project(SF_id: str, main_project_name: str, project_short_name: str, paratext_id: str) -> None:
+def download_project(
+    request_id: str, SF_id: str, main_project_name: str, project_short_name: str, paratext_id: str
+) -> None:
     project_url = f"{PROJECTS_URL}/{SF_id}/download"
     response = send_request(RequestType.GET, project_url, "getProjectDownloadLink", {"paratextId": SF_id})
     if response.status_code != 200:
         add_comment(
-            SF_id,
+            request_id,
             f"Failed to get download project {project_short_name}. Skipping onboarding for this project. Error: {response.text}",
         )
         return
@@ -143,7 +145,7 @@ def download_project(SF_id: str, main_project_name: str, project_short_name: str
 def process_request(request):
     request_metadata, main_project_name = get_project_metadata(request)
     for SF_id, (paratext_id, project_short_name) in request_metadata.items():
-        download_project(SF_id, main_project_name, project_short_name, paratext_id)
+        download_project(request[id], SF_id, main_project_name, project_short_name, paratext_id)
     task_name = f"Auto Onboarding - {main_project_name}"
     subprocess.run(
         [
