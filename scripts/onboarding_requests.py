@@ -148,6 +148,8 @@ def process_request(request):
     try:
         add_comment(request["id"], "Processing this onboarding request...")
         request_metadata, main_project_name = get_project_metadata(request)
+        if not request_metadata:
+            return
         for SF_id, (paratext_id, project_short_name) in request_metadata.items():
             download_project(request["id"], SF_id, main_project_name, project_short_name, paratext_id)
         task_name = f"Auto Onboarding - {main_project_name}"
@@ -170,6 +172,7 @@ def process_request(request):
     except Exception as e:
         LOGGER.warning(f"Error processing onboarding request {request['id']}: {e}")
         add_comment(request["id"], f"Error processing this onboarding request: {e}")
+        return
 
     add_comment(
         request["id"],
