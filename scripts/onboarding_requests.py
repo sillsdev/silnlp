@@ -146,6 +146,7 @@ def download_project(
 
 def process_request(request):
     try:
+        add_comment(request["id"], "Processing this onboarding request...")
         request_metadata, main_project_name = get_project_metadata(request)
         for SF_id, (paratext_id, project_short_name) in request_metadata.items():
             download_project(request["id"], SF_id, main_project_name, project_short_name, paratext_id)
