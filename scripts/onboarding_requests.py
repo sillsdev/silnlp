@@ -10,7 +10,6 @@ from typing import Dict, Tuple
 import requests
 from clearml import Task
 
-SF_API_TOKEN = os.getenv("SF_API_TOKEN")
 SF_AUTH_USER = os.getenv("SF_AUTH_USER")
 SF_AUTH_PWD = os.getenv("SF_AUTH_PWD")
 SF_CLIENT_ID = os.getenv("SF_CLIENT_ID")
