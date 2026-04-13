@@ -1,3 +1,7 @@
+default:
+- eng-BSB
+- eng-NIV11R
+- en-NLT07
 ben:
 - bn-SBCL
 - bn-BCU_2024
@@ -9,7 +13,6 @@ ben:
 - bn-OBCV
 - bn-SBCL
 eng:
-- eng-BSB
 - en-CEVUS06
 - en-ESVUS16
 - eng-GNBDC
@@ -17,15 +20,10 @@ eng:
 - en-LSV
 - en-NASB
 - en-NET08
-- en-NIV11R
 - en-NIV84
 - en-NIrV
-- en-NLT07
-- eng-NRSV
 - eng-NRSV
 - en-WEB
-- en-NIV11
-- en-NLT07
 fra:
 - fra-TOB
 - fr-PDV
@@ -113,3 +111,7 @@ urd:
 - ur-IRVUrd
 - ur-urdgvh
 - ur-URDGVU
+vie:
+- vi-BPT
+- vi-OVCB
+- VIE2010

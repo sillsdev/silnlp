@@ -31,49 +31,14 @@ LOGGER = logging.getLogger(__package__ + ".onboard_project")
 
 class OnboardingProject:
 
-    def __init__(self, project_name: str, overwrite: bool = False) -> None:
+    def __init__(self, project_name: str, overwrite: bool) -> None:
         self.project_name: str = project_name
         self.local_project_path: Path | None = None
         self.output_folder: Path | None = None
         self.extract_file: Path | None = None
-        self.overwrite: bool = overwrite
         self.iso_code: str = ""
         self.resource: bool | None = None
-
-    def collect_verse_counts_wrapper(self, verse_counts_config: dict) -> None:
-        verse_counts_output_folder = Path(self.output_folder / "verse_counts")
-        if verse_counts_output_folder.exists() and not self.overwrite:
-            LOGGER.info(
-                f"Verse counts output folder '{str(verse_counts_output_folder)}' already exists. Skipping verse counts collection."
-            )
-            return
-        if not verse_counts_output_folder.exists():
-            verse_counts_output_folder.mkdir(parents=True, exist_ok=True)
-
-        input_folder = verse_counts_config.get("input_folder", SIL_NLP_ENV.mt_scripture_dir)
-
-        file_patterns = verse_counts_config.get("files", f"*{self.project_name}*.txt")
-
-        input_folder_path = Path(input_folder)
-        if not input_folder_path.exists():
-            LOGGER.error(f"Input folder '{input_folder_path}' does not exist. Skipping verse counts collection.")
-            return
-
-        matched_files = list(input_folder_path.glob(file_patterns))
-        if not matched_files:
-            LOGGER.error(
-                f"No files matching pattern '{file_patterns}' found in '{input_folder_path}'. Skipping verse counts collection."
-            )
-            return
-
-        LOGGER.info(f"Collecting verse counts for project '{self.project_name}'")
-        collect_verse_counts(
-            input_folder=input_folder_path,
-            output_folder=verse_counts_output_folder,
-            file_patterns=file_patterns,
-            deutero=verse_counts_config.get("deutero", False),
-            recount=verse_counts_config.get("recount", False),
-        )
+        self.overwrite: bool = overwrite
 
     def get_extract_path(self) -> Path | None:
         if self.extract_file is not None:
@@ -91,9 +56,7 @@ class OnboardingProject:
             return
         LOGGER.info(f"Extracting corpora for project '{self.project_name}'")
 
-        versification_error_output_path = Path(self.output_folder / "versification_errors.txt")
-        if not versification_error_output_path.exists():
-            versification_error_output_path.parent.mkdir(parents=True, exist_ok=True)
+        versification_error_output_path = Path(self.output_folder / f"{self.project_name}_versification_errors.txt")
         extract_path = extract_corpora(
             projects={self.project_name},
             books_to_include=extract_config.get("include", []),
@@ -108,15 +71,6 @@ class OnboardingProject:
         self.extract_file = extract_path
 
     def wildebeest_analysis_wrapper(self, wildebeest_config: dict) -> None:
-        wildebeest_output_dir = Path(self.output_folder / "wildebeest")
-        if wildebeest_output_dir.exists() and not self.overwrite:
-            LOGGER.info(
-                f"Wildebeest output directory '{str(wildebeest_output_dir)}' already exists. Skipping Wildebeest analysis."
-            )
-            return
-        if not wildebeest_output_dir.exists():
-            wildebeest_output_dir.mkdir(parents=True, exist_ok=True)
-
         extract_path = self.get_extract_path()
         if extract_path is None:
             LOGGER.error(f"No extracted corpus found for project '{self.project_name}'. Skipping Wildebeest analysis.")
@@ -129,9 +83,9 @@ class OnboardingProject:
                 "-i",
                 str(extract_path),
                 "-j",
-                f"{wildebeest_output_dir}/{self.project_name}_wildebeest_report.json",
+                f"{self.output_folder}/{self.project_name}_wildebeest_report.json",
                 "-o",
-                f"{wildebeest_output_dir}/{self.project_name}_wildebeest_report.txt",
+                f"{self.output_folder}/{self.project_name}_wildebeest_report.txt",
                 "-x",
                 str(wildebeest_config.get("max_examples", 500)),
                 "-n",
@@ -233,6 +187,7 @@ class OnboardingProject:
             standard_alignments = yaml.safe_load(f)
             alignments = set()
             alignments.update(ref_project_extract_file_names)
+            iso_codes.add("default")
             for iso_code in iso_codes:
                 iso_standard_alignments = standard_alignments.get(iso_code, None)
                 if iso_standard_alignments is not None:
@@ -270,8 +225,6 @@ class OnboardingProject:
         with open(align_output_dir / "config.yml", "w", encoding="utf-8") as f:
             yaml.dump(align_config, f, allow_unicode=True)
         align_config: Config = create_config(exp_dir=align_output_dir, config=align_config)
-        collect_verse_counts_directory = Path(self.output_folder / "verse_counts")
-        shutil.copytree(collect_verse_counts_directory, align_output_dir, dirs_exist_ok=True)
         exp_name = f"{self.output_folder.stem}/{self.project_name}/alignments"
         analyze(config=align_config, exp_name=exp_name, create_summaries=True)
 
@@ -342,17 +295,6 @@ class OnboardingProject:
             copy_directory(self.local_project_path, new_local_project_path, overwrite=True)
             self.local_project_path = new_local_project_path
 
-    def setup_output(self) -> None:
-        self.output_folder = Path(SIL_NLP_ENV.mt_experiments_dir / "_OnboardingRequests" / self.project_name)
-        self.output_folder.mkdir(parents=True, exist_ok=True)
-        self.log_file_path = self.output_folder / f"{self.project_name}_onboarding.log"
-        log_file = open(
-            self.log_file_path,
-            "a",
-            encoding="utf-8",
-        )
-        log_file.close()
-
     def is_resource(self) -> bool:
         if self.resource is not None:
             return self.resource
@@ -396,6 +338,9 @@ class OnboardingProject:
         new_resource_path = old_resource_path.parent / new_resource_name
         old_resource_path.rename(new_resource_path)
 
+    def set_output_folder(self, output_folder: Path) -> None:
+        self.output_folder = output_folder
+
 
 class OnboardingRequest:
 
@@ -424,6 +369,7 @@ class OnboardingRequest:
         self.stats: bool = onboarding_config.get("stats", False)
         self.align: bool = onboarding_config.get("align", False)
         self.align_isos: List[str] = onboarding_config.get("align_isos", [])
+        self.output_folder: Path = Path(onboarding_config.get("output_folder", None))
 
     def process_onboarding_request(self) -> None:
         LOGGER.info(f"Processing onboarding request for main project '{self.main_project.project_name}'")
@@ -432,17 +378,14 @@ class OnboardingRequest:
                 LOGGER.info(f"Onboarding main project '{self.main_project.project_name}'")
             else:
                 LOGGER.info(f"Onboarding reference project '{project.project_name}'")
-            set_logger(project.log_file_path)
             self.onboard_project(project)
-            close_logger()
 
-        set_logger(self.main_project.log_file_path)
+        self.collect_verse_counts_wrapper(self.config.get("verse_counts", {}))
 
         if self.main_project.get_extract_path() is None and (self.stats or self.align):
             LOGGER.error(
                 f"Main Project, {self.main_project.project_name}, has no extract file. Skipping stats and alignments."
             )
-            close_logger()
             return
 
         if self.stats:
@@ -458,7 +401,6 @@ class OnboardingRequest:
 
         if self.align:
             self.align_main_project()
-        close_logger()
 
     def align_main_project(self) -> None:
         iso_codes = set()
@@ -470,7 +412,11 @@ class OnboardingRequest:
                 iso_codes.add(iso_code)
         self.main_project.align_wrapper(
             align_config=self.config.get("align", None),
-            ref_project_extract_file_names=[ref_project.extract_file.stem for ref_project in self.reference_projects],
+            ref_project_extract_file_names=[
+                ref_project.get_extract_path().stem
+                for ref_project in self.reference_projects
+                if ref_project.get_extract_path() is not None
+            ],
             iso_codes=iso_codes,
         )
 
@@ -481,13 +427,15 @@ class OnboardingRequest:
             else:
                 LOGGER.info(f"Preparing and Uploading reference project '{project.project_name}'")
             self.upload_project(project)
-        self.setup_project_outputs()
+
+        self.setup_output()
 
         self.config["onboarding"]["main_project"] = self.main_project.project_name
         self.config["onboarding"]["ref_projects"] = [project.project_name for project in self.reference_projects]
         self.config["onboarding"]["copy_from"] = None
         self.config["onboarding"]["datestamp"] = False
         self.config["onboarding"]["no_clean"] = False
+        self.config["onboarding"]["output_folder"] = str(self.output_folder)
 
         with open(self.get_config_path(), "w") as f:
             yaml.dump(self.config, f)
@@ -525,7 +473,6 @@ class OnboardingRequest:
                 shutil.rmtree(source_path)
 
     def onboard_project(self, onboarding_project: OnboardingProject) -> None:
-        set_logger(onboarding_project.log_file_path)
         if self.extract_corpora:
             onboarding_project.extract_corpora_wrapper(self.config.get("extract_corpora", {}))
             if onboarding_project.get_extract_path() is None:
@@ -534,20 +481,55 @@ class OnboardingRequest:
                 )
                 return
 
-        if self.collect_verse_counts:
-            onboarding_project.collect_verse_counts_wrapper(self.config.get("verse_counts", {}))
-
         if self.wildebeest:
             onboarding_project.wildebeest_analysis_wrapper(self.config.get("wildebeest", {}))
 
-        close_logger()
+    def collect_verse_counts_wrapper(self, verse_counts_config: dict) -> None:
+        input_folder = verse_counts_config.get("input_folder", SIL_NLP_ENV.mt_scripture_dir)
+
+        file_patterns = verse_counts_config.get("files", None)
+        if file_patterns is None:
+            file_patterns = [
+                project.get_extract_path().name
+                for project in [self.main_project] + self.reference_projects
+                if project.get_extract_path() is not None
+            ]
+            file_patterns = ";".join(file_patterns) if file_patterns else None
+
+        input_folder_path = Path(input_folder)
+        if not input_folder_path.exists():
+            LOGGER.error(f"Input folder '{input_folder_path}' does not exist. Skipping verse counts collection.")
+            return
+
+        project_names = ", ".join([project.project_name for project in [self.main_project] + self.reference_projects])
+        LOGGER.info(f"Collecting verse counts for project(s) {project_names}")
+        collect_verse_counts(
+            input_folder=input_folder_path,
+            output_folder=self.output_folder,
+            file_patterns=file_patterns,
+            deutero=verse_counts_config.get("deutero", False),
+            recount=verse_counts_config.get("recount", False),
+        )
 
     def get_config_path(self) -> Path:
         return self.main_project.output_folder / "onboarding_config.yml"
 
-    def setup_project_outputs(self) -> None:
+    def setup_output(self) -> None:
+        self.output_folder = Path(
+            SIL_NLP_ENV.mt_experiments_dir / "_OnboardingRequests" / f"{self.main_project.project_name}_Request"
+        )
+        self.output_folder.mkdir(parents=True, exist_ok=True)
         for project in [self.main_project] + self.reference_projects:
-            project.setup_output()
+            project.set_output_folder(self.output_folder)
+
+        self.log_file_path = self.output_folder / "onboarding.log"
+        log_file = open(
+            self.log_file_path,
+            "a",
+            encoding="utf-8",
+        )
+        log_file.close()
+        set_logger(self.log_file_path)
 
 
 def append_datestamp(project_name: str) -> str:
@@ -623,14 +605,6 @@ def set_logger(log_file: Path) -> None:
         ],
         force=True,
     )
-
-
-def close_logger() -> None:
-    logger = logging.getLogger()
-    for handler in logger.handlers:
-        if isinstance(handler, logging.FileHandler):
-            handler.close()
-            logger.removeHandler(handler)
 
 
 def main() -> None:
@@ -778,6 +752,7 @@ def main() -> None:
                 "stats": args.stats,
                 "align": args.align,
                 "align_isos": args.align_isos if args.align_isos else [],
+                "output_folder": None,
             }
 
         onboarding_request = OnboardingRequest(
@@ -787,8 +762,6 @@ def main() -> None:
 
         if args.copy_from:
             onboarding_request.prepare_and_upload_projects()
-        else:
-            onboarding_request.setup_project_outputs()
 
     if args.clearml_queue is not None:
         project_names = [onboarding_request.main_project.project_name for onboarding_request in onboarding_requests]
