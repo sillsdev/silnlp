@@ -423,6 +423,7 @@ class OnboardingRequest:
 
     def prepare_and_upload_projects(self) -> None:
         if not self.copy_from:
+            self.setup_output()
             return
         for project in [self.main_project] + self.reference_projects:
             if project == self.main_project:
