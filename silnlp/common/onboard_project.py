@@ -387,6 +387,7 @@ class OnboardingRequest:
             LOGGER.error(
                 f"Main Project, {self.main_project.project_name}, has no extract file. Skipping stats and alignments."
             )
+            close_logger()
             return
 
         if self.stats:
