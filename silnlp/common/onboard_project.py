@@ -369,7 +369,8 @@ class OnboardingRequest:
         self.stats: bool = onboarding_config.get("stats", False)
         self.align: bool = onboarding_config.get("align", False)
         self.align_isos: List[str] = onboarding_config.get("align_isos", [])
-        self.output_folder: Path = Path(onboarding_config.get("output_folder", None))
+        output_folder = onboarding_config.get("output_folder", None)
+        self.output_folder: Path | None = Path(output_folder) if output_folder else None
 
     def process_onboarding_request(self) -> None:
         LOGGER.info(f"Processing onboarding request for main project '{self.main_project.project_name}'")
