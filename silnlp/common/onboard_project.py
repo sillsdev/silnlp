@@ -403,6 +403,8 @@ class OnboardingRequest:
         if self.align:
             self.align_main_project()
 
+        close_logger()
+
     def align_main_project(self) -> None:
         iso_codes = set()
         if self.align_isos:
@@ -609,6 +611,14 @@ def set_logger(log_file: Path) -> None:
         ],
         force=True,
     )
+
+
+def close_logger() -> None:
+    logger = logging.getLogger()
+    for handler in logger.handlers:
+        if isinstance(handler, logging.FileHandler):
+            handler.close()
+            logger.removeHandler(handler)
 
 
 def main() -> None:
