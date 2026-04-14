@@ -373,6 +373,8 @@ class OnboardingRequest:
         self.output_folder: Path | None = Path(output_folder) if output_folder else None
 
     def process_onboarding_request(self) -> None:
+        if self.copy_from:
+            self.prepare_and_upload_projects()
         LOGGER.info(f"Processing onboarding request for main project '{self.main_project.project_name}'")
         for project in [self.main_project] + self.reference_projects:
             if project == self.main_project:
@@ -760,9 +762,6 @@ def main() -> None:
             config=config,
         )
         onboarding_requests.append(onboarding_request)
-
-        if args.copy_from:
-            onboarding_request.prepare_and_upload_projects()
 
     if args.clearml_queue is not None:
         project_names = [onboarding_request.main_project.project_name for onboarding_request in onboarding_requests]
