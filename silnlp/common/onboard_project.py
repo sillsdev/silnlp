@@ -82,8 +82,6 @@ class OnboardingProject:
                 "wb_ana",
                 "-i",
                 str(extract_path),
-                "-j",
-                f"{self.output_folder}/{self.project_name}_wildebeest_report.json",
                 "-o",
                 f"{self.output_folder}/{self.project_name}_wildebeest_report.txt",
                 "-x",
