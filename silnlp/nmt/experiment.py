@@ -10,7 +10,7 @@ from ..common.environment import SIL_NLP_ENV
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
-from .config import Config, get_mt_exp_dir
+from .config import Config, NMTModel, get_mt_exp_dir
 from .test import SUPPORTED_SCORERS, test
 from .translate import TranslationTask
 
@@ -18,6 +18,8 @@ from .translate import TranslationTask
 @dataclass
 class SILExperiment:
     name: str
+    config: Config
+    model: NMTModel
     make_stats: bool = False
     force_align: bool = False
     mixed_precision: bool = True
@@ -35,14 +37,6 @@ class SILExperiment:
     clearml_tag: Optional[str] = None
 
     def __post_init__(self):
-        self.clearml = SILClearML(
-            self.name,
-            self.clearml_queue,
-            commit=self.commit,
-            tag=self.clearml_tag,
-        )
-        self.name: str = self.clearml.name
-        self.config: Config = self.clearml.config
         self.rev_hash = get_git_revision_hash()
         self.config.set_seed()
 
@@ -71,10 +65,9 @@ class SILExperiment:
 
     def train(self):
         os.system("nvidia-smi")
-        model = self.config.create_model(self.mixed_precision, self.num_devices, self.clearml_queue)
-        model.save_effective_config(self.config.exp_dir / f"effective-config-{self.rev_hash}.yml")
+        self.model.save_effective_config(self.config.exp_dir / f"effective-config-{self.rev_hash}.yml")
         print(f"=== Training ({self.name}) ===")
-        model.train()
+        self.model.train()
         print("Training completed")
 
     def test(self):
@@ -267,8 +260,22 @@ def main() -> None:
         args.train = True
         args.test = True
 
+    clearml = SILClearML(
+        args.experiment,
+        args.clearml_queue,
+        commit=args.commit,
+        tag=args.clearml_tag,
+    )
+    model = clearml.config.create_model(
+        mixed_precision=not args.disable_mixed_precision,
+        num_devices=args.num_devices,
+        clearml_queue=args.clearml_queue,
+    )
+
     exp = SILExperiment(
-        name=args.experiment,
+        name=clearml.name,
+        config=clearml.config,
+        model=model,
         make_stats=args.stats,
         force_align=args.force_align,
         mixed_precision=not args.disable_mixed_precision,
