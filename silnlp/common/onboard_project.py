@@ -56,7 +56,7 @@ class OnboardingProject:
             return
         LOGGER.info(f"Extracting corpora for project '{self.project_name}'")
 
-        versification_error_output_path = Path(self.output_folder / f"{self.project_name}_versification_errors.txt")
+        versification_error_output_path = Path(self.output_folder / f"versification_errors_{self.project_name}.txt")
         extract_path = extract_corpora(
             projects={self.project_name},
             books_to_include=extract_config.get("include", []),
@@ -83,7 +83,7 @@ class OnboardingProject:
                 "-i",
                 str(extract_path),
                 "-o",
-                f"{self.output_folder}/{self.project_name}_wildebeest_report.txt",
+                f"{self.output_folder}/wildebeest_{self.project_name}.txt",
                 "-x",
                 str(wildebeest_config.get("max_examples", 500)),
                 "-n",
@@ -160,6 +160,16 @@ class OnboardingProject:
 
         config.set_seed()
         config.preprocess(stats=True, force_align=True)
+        # Copy tokenization_stats.csv and tokenization_stats.xlsx to output folder with project name in file name
+        tokenization_stats_csv = stats_dir / "tokenization_stats.csv"
+        tokenization_stats_xlsx = stats_dir / "tokenization_stats.xlsx"
+        if tokenization_stats_csv.exists():
+            shutil.move(str(tokenization_stats_csv), str(self.output_folder / "tokenization_stats.csv"))
+        if tokenization_stats_xlsx.exists():
+            shutil.move(
+                str(tokenization_stats_xlsx),
+                str(self.output_folder / "tokenization_stats.xlsx"),
+            )
 
     def align_wrapper(
         self,
@@ -225,6 +235,12 @@ class OnboardingProject:
         align_config: Config = create_config(exp_dir=align_output_dir, config=align_config)
         exp_name = f"{self.output_folder.stem}/{self.project_name}/alignments"
         analyze(config=align_config, exp_name=exp_name, create_summaries=True)
+        corpus_stats_csv = align_output_dir / "corpus_stats.csv"
+        if corpus_stats_csv.exists():
+            shutil.move(
+                str(corpus_stats_csv),
+                str(self.output_folder / "corpus_stats.csv"),
+            )
 
     def check_for_project_errors(self) -> None:
         if self.local_project_path:
