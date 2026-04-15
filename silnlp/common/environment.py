@@ -128,7 +128,7 @@ def check_transfers() -> None:
     LOGGER.info("Checking rclone transfer progress.")
     time.sleep(60)  # wait for the latest poll interval
     transfers_complete = False
-    for i in range(4):
+    for i in range(3):
         with open("/root/rclone_log.txt", "r", encoding="utf-8") as log_file:
             log_lines = log_file.readlines()
         for line in reversed(log_lines):
@@ -142,7 +142,7 @@ def check_transfers() -> None:
         else:
             LOGGER.info(line)
             LOGGER.info(f"rclone transfers are still in progress. Waiting {2**i} minutes.")
-        time.sleep(60 * (2**i))  # exponential backoff, max 8 minutes, total wait time 15 minutes
+        time.sleep(60 * (2**i))  # exponential backoff, max 4 minutes, total wait time 8 minutes
     if not transfers_complete:
         LOGGER.warning("rclone transfers could not be completed. Some data may be lost or corrupted.")
 
