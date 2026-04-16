@@ -7,6 +7,8 @@ import yaml
 from clearml import Task
 from clearml.backend_api.session.session import LoginError
 
+from silnlp.common.environment import SIL_NLP_ENV, SilNlpEnv
+
 from .config import get_mt_exp_dir
 from .config_utils import create_config
 
@@ -26,6 +28,7 @@ class SILClearML:
     commit: Optional[str] = None
     tag: Optional[str] = None
     skip_config: bool = False
+    environment: SilNlpEnv = SIL_NLP_ENV
 
     def __post_init__(self) -> None:
         self.name = self.name.replace("\\", "/")
@@ -90,7 +93,7 @@ class SILClearML:
 
     def _load_config(self) -> None:
         # if the project/experiment yaml file already exists, use it to re-read the config.  If not, write it.
-        exp_dir = get_mt_exp_dir(self.name)
+        exp_dir = self.environment.get_mt_exp_dir(self.name)
         if self.task is None:
             with (exp_dir / "config.yml").open("r", encoding="utf-8") as file:
                 config = yaml.safe_load(file)
@@ -99,7 +102,7 @@ class SILClearML:
             self.config = create_config(exp_dir, config)
             return
         # There is a ClearML task - lets' do more complex importing.
-        proj_dir = get_mt_exp_dir(self.clearml_project_folder)
+        proj_dir = self.environment.get_mt_exp_dir(self.clearml_project_folder)
         if (proj_dir / "config.yml").exists():
             # if there is no experiment yaml, copy the project one to it.
             if not (exp_dir / "config.yml").exists():

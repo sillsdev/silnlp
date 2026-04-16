@@ -9,7 +9,7 @@ from typing import Generator, Iterable, List, Optional, Tuple, Union
 from machine.corpora import UsfmFileTextCorpus, create_versification_ref_corpus, extract_scripture_corpus
 from machine.scripture import VerseRef, book_number_to_id, get_chapters
 
-from ..common.environment import SIL_NLP_ENV
+from ..common.environment import SIL_NLP_ENV, SilNlpEnv
 from ..common.paratext import book_file_name_digits, get_project_dir
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.translation_data_structures import SentenceTranslationGroup
@@ -85,6 +85,7 @@ class TranslationTask:
     clearml_queue: Optional[str] = None
     commit: Optional[str] = None
     clearml_tag: Optional[str] = None
+    environment: SilNlpEnv = SIL_NLP_ENV
 
     def translate_books(
         self,
@@ -213,12 +214,12 @@ class TranslationTask:
             for i in range(start_seq, end_seq + 1):
                 file_num = f"{i:04d}"
                 src_file = f"{src_prefix}{file_num}.txt"
-                src_file_path = Path(SIL_NLP_ENV.mt_experiments_dir / self.name / src_file)
+                src_file_path = Path(self.environment.mt_experiments_dir / self.name / src_file)
                 if not src_file_path.exists():
                     raise FileNotFoundError("Cannot find source: " + src_file)
 
                 trg_file = f"{trg_prefix}{file_num}.txt"
-                trg_file_path = Path(SIL_NLP_ENV.mt_experiments_dir / self.name / trg_file)
+                trg_file_path = Path(self.environment.mt_experiments_dir / self.name / trg_file)
 
                 if src_file_path.is_file() and not trg_file_path.is_file():
                     start = time.time()
@@ -275,12 +276,12 @@ class TranslationTask:
             if trg_iso == "":
                 LOGGER.warning("No language code was set for the target language")
 
-            src_path = Path(SIL_NLP_ENV.mt_experiments_dir / self.name / src)
+            src_path = Path(self.environment.mt_experiments_dir / self.name / src)
             if not src_path.exists():
                 raise FileNotFoundError(f"Cannot find source: {src} in {self.name}")
 
             if trg is not None:
-                trg_path = Path(SIL_NLP_ENV.mt_experiments_dir / self.name / trg)
+                trg_path = Path(self.environment.mt_experiments_dir / self.name / trg)
             else:
                 trg_path = config.exp_dir / "infer" / step_str
                 if not config.model_dir.exists():
@@ -359,6 +360,7 @@ class TranslationTask:
             experiment_suffix=experiment_suffix,
             commit=self.commit,
             tag=self.clearml_tag,
+            environment=self.environment,
         )
         self.name = clearml.name
 

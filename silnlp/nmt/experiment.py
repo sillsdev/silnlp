@@ -6,7 +6,7 @@ from typing import Optional, Set, Union
 
 import yaml
 
-from ..common.environment import SIL_NLP_ENV
+from ..common.environment import SIL_NLP_ENV, SilNlpEnv
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
@@ -20,6 +20,7 @@ class SILExperiment:
     name: str
     config: Config
     model: NMTModel
+    environment: SilNlpEnv = SIL_NLP_ENV
     make_stats: bool = False
     force_align: bool = False
     mixed_precision: bool = True
@@ -55,7 +56,7 @@ class SILExperiment:
 
     def preprocess(self):
         # Do some basic checks before starting the experiment
-        exp_dir = Path(get_mt_exp_dir(self.name))
+        exp_dir = Path(self.environment.get_mt_exp_dir(self.name))
         if not exp_dir.exists():
             raise RuntimeError(f"ERROR: Experiment folder {exp_dir} does not exist.")
         config_file = Path(exp_dir, "config.yml")
@@ -92,7 +93,7 @@ class SILExperiment:
         quality_estimation = translate_configs.get("quality_estimation", False)
 
         if quality_estimation:
-            verse_test_scores_path = get_mt_exp_dir(
+            verse_test_scores_path = self.environment.get_mt_exp_dir(
                 quality_estimation.get("verse_test_scores_file")
                 if isinstance(quality_estimation, dict) and quality_estimation.get("verse_test_scores_file")
                 else self.config.exp_dir
@@ -108,6 +109,7 @@ class SILExperiment:
                 name=self.name,
                 checkpoint=checkpoint,
                 commit=self.commit,
+                environment=self.environment,
             )
 
             if not postprocess_configs:
@@ -248,8 +250,9 @@ def main() -> None:
     if args.clearml_queue is not None and args.clearml_tag is None:
         parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
 
+    environment = SilNlpEnv()
     if args.mt_dir is not None:
-        SIL_NLP_ENV.set_machine_translation_dir(SIL_NLP_ENV.data_dir / args.mt_dir)
+        environment.set_machine_translation_dir(environment.data_dir / args.mt_dir)
 
     if args.debug:
         show_attrs(cli_args=args)
@@ -294,7 +297,7 @@ def main() -> None:
     )
 
     if args.train and not args.save_checkpoints:
-        SIL_NLP_ENV.delete_path_on_exit(get_mt_exp_dir(args.experiment) / "run")
+        environment.delete_path_on_exit(environment.get_mt_exp_dir(args.experiment) / "run")
     exp.run()
 
 
