@@ -387,6 +387,7 @@ class OnboardingRequest:
         self.output_folder: Path | None = Path(output_folder) if output_folder else None
 
     def process_onboarding_request(self) -> None:
+        self.create_log_file()
         LOGGER.info(f"Processing onboarding request for main project '{self.main_project.project_name}'")
         for project in [self.main_project] + self.reference_projects:
             if project == self.main_project:
@@ -544,13 +545,10 @@ class OnboardingRequest:
         for project in [self.main_project] + self.reference_projects:
             project.set_output_folder(self.output_folder)
 
+    def create_log_file(self) -> None:
         self.log_file_path = self.output_folder / "onboarding.log"
-        log_file = open(
-            self.log_file_path,
-            "a",
-            encoding="utf-8",
-        )
-        log_file.close()
+        if not self.log_file_path.exists():
+            self.log_file_path.touch()
         set_logger(self.log_file_path)
 
 
