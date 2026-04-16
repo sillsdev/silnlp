@@ -395,13 +395,14 @@ class OnboardingRequest:
                 LOGGER.info(f"Onboarding reference project '{project.project_name}'")
             self.onboard_project(project)
 
-        self.collect_verse_counts_wrapper(self.config.get("verse_counts", {}))
+        if self.collect_verse_counts:
+            self.collect_verse_counts_wrapper(self.config.get("verse_counts", {}))
 
         if self.main_project.get_extract_path() is None and (self.stats or self.align):
             LOGGER.error(
                 f"Main Project, {self.main_project.project_name}, has no extract file. Skipping stats and alignments."
             )
-            close_logger()
+            close_logger(self.log_file_path)
             return
 
         if self.stats:
@@ -418,7 +419,7 @@ class OnboardingRequest:
         if self.align:
             self.align_main_project()
 
-        close_logger()
+        close_logger(self.log_file_path)
 
     def align_main_project(self) -> None:
         iso_codes = set()
@@ -628,10 +629,10 @@ def set_logger(log_file: Path) -> None:
     )
 
 
-def close_logger() -> None:
+def close_logger(log_file: Path) -> None:
     logger = logging.getLogger()
-    for handler in logger.handlers:
-        if isinstance(handler, logging.FileHandler):
+    for handler in logger.handlers[:]:
+        if isinstance(handler, logging.FileHandler) and handler.baseFilename == str(log_file.absolute()):
             handler.close()
             logger.removeHandler(handler)
 
