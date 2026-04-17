@@ -7,9 +7,10 @@ import re
 import shutil
 import sys
 import zipfile
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import Iterator, List
 
 import wildebeest.wb_analysis as wb_ana
 import yaml
@@ -160,7 +161,7 @@ class OnboardingProject:
 
         config.set_seed()
         config.preprocess(stats=True, force_align=True)
-        # Copy tokenization_stats.csv and tokenization_stats.xlsx to output folder with project name in file name
+
         tokenization_stats_csv = stats_dir / "tokenization_stats.csv"
         tokenization_stats_xlsx = stats_dir / "tokenization_stats.xlsx"
         if tokenization_stats_csv.exists():
@@ -387,40 +388,37 @@ class OnboardingRequest:
         self.output_folder: Path | None = Path(output_folder) if output_folder else None
 
     def process_onboarding_request(self) -> None:
-        self.create_log_file()
-        LOGGER.info(f"Processing onboarding request for main project '{self.main_project.project_name}'")
-        for project in [self.main_project] + self.reference_projects:
-            if project == self.main_project:
-                LOGGER.info(f"Onboarding main project '{self.main_project.project_name}'")
-            else:
-                LOGGER.info(f"Onboarding reference project '{project.project_name}'")
-            self.onboard_project(project)
+        with self.create_log_file():
+            LOGGER.info(f"Processing onboarding request for main project '{self.main_project.project_name}'")
+            for project in [self.main_project] + self.reference_projects:
+                if project == self.main_project:
+                    LOGGER.info(f"Onboarding main project '{self.main_project.project_name}'")
+                else:
+                    LOGGER.info(f"Onboarding reference project '{project.project_name}'")
+                self.onboard_project(project)
 
-        if self.collect_verse_counts:
-            self.collect_verse_counts_wrapper(self.config.get("verse_counts", {}))
+            if self.collect_verse_counts:
+                self.collect_verse_counts_wrapper(self.config.get("verse_counts", {}))
 
-        if self.main_project.get_extract_path() is None and (self.stats or self.align):
-            LOGGER.error(
-                f"Main Project, {self.main_project.project_name}, has no extract file. Skipping stats and alignments."
-            )
-            close_logger(self.log_file_path)
-            return
+            if self.main_project.get_extract_path() is None and (self.stats or self.align):
+                LOGGER.error(
+                    f"Main Project, {self.main_project.project_name}, has no extract file. Skipping stats and alignments."
+                )
+                return
 
-        if self.stats:
-            self.main_project.calculate_tokenization_stats(
-                self.config.get("stats", None),
-                [
-                    ref_project.get_extract_path().stem
-                    for ref_project in self.reference_projects
-                    if ref_project.get_extract_path() is not None
-                ],
-                [ref_project.get_extract_iso_code() for ref_project in self.reference_projects],
-            )
+            if self.stats:
+                self.main_project.calculate_tokenization_stats(
+                    self.config.get("stats", None),
+                    [
+                        ref_project.get_extract_path().stem
+                        for ref_project in self.reference_projects
+                        if ref_project.get_extract_path() is not None
+                    ],
+                    [ref_project.get_extract_iso_code() for ref_project in self.reference_projects],
+                )
 
-        if self.align:
-            self.align_main_project()
-
-        close_logger(self.log_file_path)
+            if self.align:
+                self.align_main_project()
 
     def align_main_project(self) -> None:
         iso_codes = set()
@@ -545,11 +543,16 @@ class OnboardingRequest:
         for project in [self.main_project] + self.reference_projects:
             project.set_output_folder(self.output_folder)
 
-    def create_log_file(self) -> None:
-        self.log_file_path = self.output_folder / "onboarding.log"
-        if not self.log_file_path.exists():
-            self.log_file_path.touch()
-        set_logger(self.log_file_path)
+    @contextmanager
+    def create_log_file(self) -> Iterator[None]:
+        log_file_path = self.output_folder / "onboarding.log"
+        if not log_file_path.exists():
+            log_file_path.touch()
+        set_logger(log_file_path)
+        try:
+            yield
+        finally:
+            close_logger(log_file_path)
 
 
 def append_datestamp(project_name: str) -> str:
