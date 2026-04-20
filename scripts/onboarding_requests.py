@@ -10,6 +10,8 @@ from typing import Dict, Tuple
 import requests
 from clearml import Task
 
+from silnlp.onboarding_utils import rename_project
+
 SF_AUTH_USER = os.getenv("SF_AUTH_USER")
 SF_AUTH_PWD = os.getenv("SF_AUTH_PWD")
 SF_CLIENT_ID = os.getenv("SF_CLIENT_ID")
@@ -17,6 +19,7 @@ UUID = str(uuid.uuid4())
 ONBOARDING_PATH = os.getenv("ONBOARDING_PATH")
 ONBOARDING_LOG_PATH = f"{ONBOARDING_PATH}/onboarded_projects.log"
 ONBOARDING_CLEANUP_PATH = f"{ONBOARDING_PATH}/paths_to_delete.txt"
+ONBOARDING_REQUESTS_BUCKET_DIR = "MT/experiments/_OnboardingRequests"
 os.makedirs(ONBOARDING_PATH, exist_ok=True)
 REPO_PATH = os.getenv("REPO_PATH")
 
@@ -133,7 +136,7 @@ def download_project(
             raise RuntimeError(f"Failed to download main project. Error: {response.text}")
         add_comment(
             request_id,
-            f"Failed to download Reference project: {project_short_name}. Skipping onboarding for this project. Error: {response.text}",
+            f"Failed to download Reference project: {project_short_name}. Skipping onboarding for this project.\nError: {response.text}",
         )
         return
     os.makedirs(f"{ONBOARDING_PATH}/{main_project_name}_Request", exist_ok=True)
@@ -169,14 +172,16 @@ def process_request(request):
         with open(ONBOARDING_CLEANUP_PATH, "a") as f:
             f.write(f"{ONBOARDING_PATH}/{main_project_name}_Request\n")
     except Exception as e:
-        LOGGER.warning(f"Error processing onboarding request {request['id']}: {e}")
-        add_comment(request["id"], f"Error processing this onboarding request: {e}")
+        LOGGER.warning(f"Error processing onboarding request {request['id']}:\n{e}")
+        add_comment(request["id"], f"Error processing this onboarding request:\n{e}")
         return
 
     add_comment(
         request["id"],
-        f"This request is being automatically onboarded. ClearML task: {task.name}. Link: {task.get_output_log_web_page()}",
+        f"This request is being automatically onboarded.\nClearML task: {task.name}.\nLink: {task.get_output_log_web_page()}",
     )
+    adjusted_name = rename_project(main_project_name, True, ONBOARDING_PATH / f"{main_project_name}_Request")
+    add_comment(request["id"], f"Results will be stored in {ONBOARDING_REQUESTS_BUCKET_DIR}/{adjusted_name}")
     try:
         task.wait_for_status()
         add_comment(request["id"], "Automatic onboarding was successful. See ClearML task for details.")
@@ -210,7 +215,8 @@ def main():
             try:
                 future.result()
             except Exception as e:
-                LOGGER.warning(f"Error processing request: {e}")
+                LOGGER.warning(f"Error processing request:\n{e}")
+                add_comment(request["id"], f"Error processing this onboarding request:\n{e}")
 
 
 if __name__ == "__main__":
