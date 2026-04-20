@@ -247,7 +247,7 @@ def collect_verse_counts(
     for project in project_names:
         cache_path = partial_books_path / f"{project}.csv"
         if cache_path.is_file():
-            partial_books_out_path = output_path / f"{project}_detailed_percentages.csv"
+            partial_books_out_path = output_path / f"detailed_percentages_{project}.csv"
             df = pd.read_csv(cache_path, index_col="book")
 
             if project in projects_to_process and project not in partially_complete_projects:
