@@ -121,7 +121,7 @@ def get_project_metadata(onboarding_request: dict) -> Tuple[Dict[str, str], str]
         )
         if key == "projectId":
             main_project_name = metadata.get("shortName")
-        request_metadata[metadata.get("id")] = (metadata.get("paratextID"), metadata.get("shortName"))
+        request_metadata[metadata.get("id")] = (metadata.get("paratextId"), metadata.get("shortName"))
 
     return request_metadata, main_project_name
 
@@ -180,7 +180,7 @@ def process_request(request):
         request["id"],
         f"This request is being automatically onboarded.\nClearML task: {task.name}.\nLink: {task.get_output_log_web_page()}",
     )
-    adjusted_name = rename_project(main_project_name, True, ONBOARDING_PATH / f"{main_project_name}_Request")
+    adjusted_name = rename_project(main_project_name, True, Path(f"{ONBOARDING_PATH}/{main_project_name}_Request"))
     add_comment(request["id"], f"Results will be stored in {ONBOARDING_REQUESTS_BUCKET_DIR}/{adjusted_name}")
     try:
         task.wait_for_status()

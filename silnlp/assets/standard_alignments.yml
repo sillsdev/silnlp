@@ -3,7 +3,7 @@ default:
 - eng-NIV11R
 - en-NLT07
 - fr-BDS
-- es-NVI-S
+- es-NVI_S
 ben:
 - bn-SBCL
 - bn-BCU_2024
