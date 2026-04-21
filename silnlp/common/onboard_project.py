@@ -17,9 +17,9 @@ from machine.corpora import FileParatextProjectSettingsParser
 
 from silnlp.common.analyze import analyze
 from silnlp.common.clean_projects import process_single_project_for_cleaning
+from silnlp.common.onboarding_utils import append_datestamp, copy_directory, copy_file, copy_project, rename_project
 from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML
 from silnlp.nmt.config import Config
-from silnlp.onboarding_utils import append_datestamp, copy_directory, copy_file, copy_project, rename_project
 
 from ..nmt.config_utils import create_config
 from .collect_verse_counts import collect_verse_counts

@@ -10,7 +10,7 @@ from typing import Dict, Tuple
 import requests
 from clearml import Task
 
-from silnlp.onboarding_utils import rename_project
+from silnlp.common.onboarding_utils import rename_project
 
 SF_AUTH_USER = os.getenv("SF_AUTH_USER")
 SF_AUTH_PWD = os.getenv("SF_AUTH_PWD")
