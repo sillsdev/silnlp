@@ -2,6 +2,8 @@ default:
 - eng-BSB
 - eng-NIV11R
 - en-NLT07
+- fr-BDS
+- es-NVI-S
 ben:
 - bn-SBCL
 - bn-BCU_2024
@@ -27,9 +29,10 @@ eng:
 fra:
 - fra-TOB
 - fr-PDV
+- fr-PDV2017
 - fr-FRC97
+- fr-FC97
 - fr-FCR19DBL
-- fr-BDS
 - fra-LBS21
 - fr-LS1910
 guj:
@@ -84,7 +87,6 @@ spa:
 - es-LBLA
 - es-NBLA
 - es-NTV
-- es-NVI-S
 - es-PDT
 - spa-RV09
 - spa-RVR95
