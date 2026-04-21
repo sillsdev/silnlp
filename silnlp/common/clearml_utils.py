@@ -35,4 +35,4 @@ def setup_base_docker(task: Task, volume_arg: str = None) -> Task:
             "rclone mount --daemon --no-check-certificate --log-file=/root/rclone_log.txt --log-level=DEBUG --vfs-cache-mode full --vfs-cache-max-size 15G --use-server-modtime miniosilnlp:nlp-research /root/M",
         ],
     )
-    return
+    return task
