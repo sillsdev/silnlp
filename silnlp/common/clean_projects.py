@@ -80,6 +80,7 @@ FILES_TO_KEEP_BY_NAME = {
     "canons.xml",
     "lexicon.xml",
     "termrenderings.xml",
+    ".resource_hash",
 }
 
 EXTENSIONS_TO_KEEP = {
