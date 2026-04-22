@@ -134,7 +134,9 @@ def extract_corpora(
             # check if the number of lines in the file is correct (the same as vref.txt)
             LOGGER.info(f"# of Verses: {verse_count}")
             if verse_count != expected_verse_count:
-                LOGGER.warning(f"The number of verses is {verse_count}, but should be {expected_verse_count}.")
+                LOGGER.info(
+                    f"The number of completed verses is {verse_count} (out of the expected {expected_verse_count})."
+                )
             terms_count = extract_term_renderings(
                 project_dir, corpus_filename, SIL_NLP_ENV.mt_terms_dir, extract_surface_forms
             )
