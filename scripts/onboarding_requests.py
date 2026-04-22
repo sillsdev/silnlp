@@ -3,14 +3,13 @@ import logging
 import os
 import subprocess
 import uuid
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Dict, Tuple
 
 import requests
 from clearml import Task
-
-from silnlp.common.onboarding_utils import rename_project
 
 SF_AUTH_USER = os.getenv("SF_AUTH_USER")
 SF_AUTH_PWD = os.getenv("SF_AUTH_PWD")
@@ -144,6 +143,27 @@ def download_project(
         project_short_name = f"{project_short_name}_Resource"
     with open(f"{ONBOARDING_PATH}/{main_project_name}_Request/{project_short_name}.zip", "wb") as f:
         f.write(response.content)
+
+
+def append_datestamp(project_name: str) -> str:
+    now = datetime.now()
+    datestamp = now.strftime("%Y_%m_%d")
+    return f"{project_name}_{datestamp}"
+
+
+def rename_project(project_name: str, datestamp: bool, copy_from: Path | None) -> str:
+    is_resource = False
+    if project_name.endswith("_Resource"):
+        is_resource = True
+        resource_hash_path = copy_from / Path(f"{project_name}/.resource_hash") if copy_from else None
+        if resource_hash_path and not resource_hash_path.exists():
+            resource_hash_path.touch()
+        project_name = project_name.replace("_Resource", "")
+    if "-" in project_name:
+        project_name = project_name.replace("-", "_")
+    if datestamp and not is_resource:
+        project_name = append_datestamp(project_name)
+    return project_name
 
 
 def process_request(request):
