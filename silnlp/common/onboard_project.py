@@ -17,9 +17,9 @@ from machine.corpora import FileParatextProjectSettingsParser
 
 from silnlp.common.analyze import analyze
 from silnlp.common.clean_projects import process_single_project_for_cleaning
-from silnlp.common.onboarding_utils import append_datestamp, copy_directory, copy_file, copy_project, rename_project
 from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML
 from silnlp.nmt.config import Config
+from silnlp.scripts.onboarding_requests import append_datestamp, rename_project
 
 from ..nmt.config_utils import create_config
 from .collect_verse_counts import collect_verse_counts
@@ -593,6 +593,34 @@ def close_logger(log_file: Path) -> None:
         if isinstance(handler, logging.FileHandler) and handler.baseFilename == str(log_file.absolute()):
             handler.close()
             logger.removeHandler(handler)
+
+
+def copy_project(project_name: str, local_project_path: Path) -> Path:
+    if local_project_path and local_project_path.exists() and local_project_path.name != project_name:
+        new_local_project_path = local_project_path.parent / project_name
+        if not new_local_project_path.exists():
+            new_local_project_path.mkdir(parents=True, exist_ok=True)
+        copy_directory(local_project_path, new_local_project_path, overwrite=True)
+        local_project_path = new_local_project_path
+
+    return local_project_path
+
+
+def copy_file(source_file: Path, target_file: Path, overwrite=False) -> None:
+    if target_file.exists() and not overwrite:
+        return
+    target_file.write_bytes(source_file.read_bytes())
+
+
+def copy_directory(source_dir: Path, target_dir: Path, overwrite=False) -> None:
+    if not target_dir.exists():
+        target_dir.mkdir()
+    for sub_item in source_dir.iterdir():
+        target_item = target_dir / sub_item.name
+        if sub_item.is_dir():
+            copy_directory(sub_item, target_item, overwrite)
+        else:
+            copy_file(sub_item, target_item, overwrite)
 
 
 def main() -> None:

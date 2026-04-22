@@ -7,7 +7,7 @@ import yaml
 from clearml import Task
 from clearml.backend_api.session.session import LoginError
 
-from silnlp.common.clearml_utils import setup_base_docker
+from silnlp.scripts.automate_onboard_project import setup_base_docker
 
 from .config import get_mt_exp_dir
 from .config_utils import create_config
