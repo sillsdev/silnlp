@@ -1,4 +1,5 @@
 import argparse
+import datetime
 import getpass
 import hashlib
 import logging
@@ -19,7 +20,6 @@ from silnlp.common.analyze import analyze
 from silnlp.common.clean_projects import process_single_project_for_cleaning
 from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML
 from silnlp.nmt.config import Config
-from silnlp.scripts.onboarding_requests import append_datestamp, rename_project
 
 from ..nmt.config_utils import create_config
 from .collect_verse_counts import collect_verse_counts
@@ -621,6 +621,27 @@ def copy_directory(source_dir: Path, target_dir: Path, overwrite=False) -> None:
             copy_directory(sub_item, target_item, overwrite)
         else:
             copy_file(sub_item, target_item, overwrite)
+
+
+def append_datestamp(project_name: str) -> str:
+    now = datetime.now()
+    datestamp = now.strftime("%Y_%m_%d")
+    return f"{project_name}_{datestamp}"
+
+
+def rename_project(project_name: str, datestamp: bool, copy_from: Path | None) -> str:
+    is_resource = False
+    if project_name.endswith("_Resource"):
+        is_resource = True
+        resource_hash_path = copy_from / Path(f"{project_name}/.resource_hash") if copy_from else None
+        if resource_hash_path and not resource_hash_path.exists():
+            resource_hash_path.touch()
+        project_name = project_name.replace("_Resource", "")
+    if "-" in project_name:
+        project_name = project_name.replace("-", "_")
+    if datestamp and not is_resource:
+        project_name = append_datestamp(project_name)
+    return project_name
 
 
 def main() -> None:
