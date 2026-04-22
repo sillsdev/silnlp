@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import List, Tuple
 
-from .utils import contains_letter
+from .utils import contains_letter, starts_with_capital_letter
 from .word_alignments import WordAlignments
 
 
@@ -65,9 +65,9 @@ class ManualBreakScorer(BreakScorer):
         # give a bonus for a split that is right next to capital letters
         if (
             src_break_offset < len(self._source_tokens) - 1
-            and not contains_letter(self._source_tokens[src_break_offset + 1])
+            and starts_with_capital_letter(self._source_tokens[src_break_offset + 1])
             and trg_break_offset < len(self._target_tokens) - 1
-            and not contains_letter(self._target_tokens[trg_break_offset + 1])
+            and starts_with_capital_letter(self._target_tokens[trg_break_offset + 1])
         ):
             score += 5
 

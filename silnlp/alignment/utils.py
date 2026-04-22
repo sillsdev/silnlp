@@ -1,6 +1,5 @@
 import logging
 import tempfile
-from itertools import zip_longest
 from pathlib import Path, PurePath
 from statistics import mean
 from typing import List, Optional, Set
