@@ -1,5 +1,4 @@
 import argparse
-import datetime
 import getpass
 import hashlib
 import logging
@@ -9,6 +8,7 @@ import shutil
 import sys
 import zipfile
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Iterator, List
 
