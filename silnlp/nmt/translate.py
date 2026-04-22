@@ -85,6 +85,7 @@ class TranslationTask:
     clearml_queue: Optional[str] = None
     commit: Optional[str] = None
     clearml_tag: Optional[str] = None
+    model: Optional[NMTModel] = None
     environment: SilNlpEnv = SIL_NLP_ENV
 
     def translate_books(
@@ -366,7 +367,7 @@ class TranslationTask:
 
         clearml.config.set_seed()
 
-        model = clearml.config.create_model()
+        model = self.model if self.model is not None else clearml.config.create_model()
         translator = NMTTranslator(model, self.checkpoint)
         if clearml.config.model_dir.exists():
             _, step = model.get_checkpoint_path(self.checkpoint)

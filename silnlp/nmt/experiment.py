@@ -36,6 +36,7 @@ class SILExperiment:
     score_by_book: bool = False
     commit: Optional[str] = None
     clearml_tag: Optional[str] = None
+    force_infer: bool = False
 
     def __post_init__(self):
         self.rev_hash = get_git_revision_hash()
@@ -74,13 +75,16 @@ class SILExperiment:
     def test(self):
         assert self.scorers is not None
         test(
-            experiment=self.name,
+            config=self.config,
             last=self.config.model_dir.exists(),
             best=self.config.model_dir.exists(),
             by_book=self.score_by_book,
             scorers=self.scorers,
             produce_multiple_translations=self.produce_multiple_translations,
             save_confidences=self.save_confidences,
+            model=self.model,
+            clearml_queue=self.clearml_queue,
+            force_infer=self.force_infer,
         )
 
     def translate(self):
@@ -109,6 +113,7 @@ class SILExperiment:
                 name=self.name,
                 checkpoint=checkpoint,
                 commit=self.commit,
+                model=self.model,
                 environment=self.environment,
             )
 
@@ -219,6 +224,12 @@ def main() -> None:
         help="Generate confidence files for test and/or translate step.",
     )
     parser.add_argument("--score-by-book", default=False, action="store_true", help="Score individual books")
+    parser.add_argument(
+        "--force-infer",
+        default=False,
+        action="store_true",
+        help="Force inferencing for test step even if files already exist",
+    )
     parser.add_argument("--mt-dir", default=None, type=str, help="The machine translation directory.")
     parser.add_argument(
         "--debug",
@@ -294,6 +305,7 @@ def main() -> None:
         save_confidences=args.save_confidences,
         scorers=set(s.lower() for s in args.scorers),
         score_by_book=args.score_by_book,
+        force_infer=args.force_infer,
     )
 
     if args.train and not args.save_checkpoints:
