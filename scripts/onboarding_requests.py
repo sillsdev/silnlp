@@ -171,6 +171,8 @@ def process_request(request):
         add_comment(request["id"], "Processing this onboarding request...")
         request_metadata, main_project_name = get_project_metadata(request)
         if not request_metadata:
+            with open(ONBOARDING_LOG_PATH, "a") as f:
+                f.write(f"{request['id']}\n")
             return
         for SF_id, (paratext_id, project_short_name) in request_metadata.items():
             download_project(request["id"], SF_id, main_project_name, project_short_name, paratext_id)
