@@ -88,7 +88,11 @@ def add_alignment_scores(corpus: pd.DataFrame, aligner_id: str = "fast_align") -
 
 
 def compute_alignment_scores(
-    src_input_path: Path, trg_input_path: Path, aligner_id: str = "fast_align", sym_align_path: Path = None
+    src_input_path: Path,
+    trg_input_path: Path,
+    aligner_id: str = "fast_align",
+    sym_align_path: Path = None,
+    sym_heuristic: str = "grow-diag-final-and",
 ) -> List[float]:
     # Check for alignable pairs
     src_sents = list(load_corpus(src_input_path))
@@ -110,9 +114,9 @@ def compute_alignment_scores(
             sym_align_path = temp_dir / "sym-align.txt"
         aligner.train(src_tok_output_path, trg_tok_output_path)
         if isinstance(aligner, MachineAligner):
-            aligner.align(sym_align_path, export_probabilities=True)
+            aligner.align(sym_align_path, sym_heuristic=sym_heuristic, export_probabilities=True)
         else:
-            aligner.align(sym_align_path)
+            aligner.align(sym_align_path, sym_heuristic=sym_heuristic)
 
         direct_lexicon = aligner.get_direct_lexicon(include_special_tokens=True)
         if aligner.has_inverse_model:

@@ -62,8 +62,9 @@ def assign_verses_to_passages(project_name: str, passage_file: Path) -> List[Pas
             SIL_NLP_ENV.pt_projects_dir / project_name / settings.get_book_file_name(passage.start_ref.book),
         )
         for row in usfm_text:
-            if isinstance(row.ref, ScriptureRef) and passage.is_ref_in_range(row.ref.verse_ref):
-                passage.verses.append(row.text)
+            verses = passage.verses
+            if isinstance(row.ref, ScriptureRef) and passage.is_ref_in_range(row.ref.verse_ref) and verses is not None:
+                verses.append(row.text)
     return passages
 
 
