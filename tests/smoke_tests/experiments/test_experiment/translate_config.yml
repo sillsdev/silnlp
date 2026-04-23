@@ -1,0 +1,7 @@
+translate:
+- books: 3JN
+  checkpoint: last
+  src_project: BSB
+postprocess:
+  - paragraph_behavior: place
+    denormalize_quotation_marks: true

@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import shutil
+from abc import ABC, abstractmethod
 from contextlib import ExitStack
 from copy import deepcopy
 from dataclasses import dataclass
@@ -308,6 +309,57 @@ def get_parent_model_name(parent_exp: str) -> str:
     return str(parent_model)
 
 
+class PreTrainedModelProvider(ABC):
+    @abstractmethod
+    def create_model_for_training(
+        self, model_name: str, model_config: Any, device_map: dict[str, int]
+    ) -> PreTrainedModel: ...
+
+    @abstractmethod
+    def create_model_for_inference(self, model_name: str) -> PreTrainedModel: ...
+
+
+class PreTrainedModelProviderFactory(ABC):
+    @abstractmethod
+    def create_pretrained_model_provider(
+        self, config: "HuggingFaceConfig", mixed_precision: bool = False
+    ) -> PreTrainedModelProvider: ...
+
+
+class FilePreTrainedModelProvider(PreTrainedModelProvider):
+    def __init__(self, attention_implementation: str, dtype: bool | str = "auto") -> None:
+        super().__init__()
+        self._dtype = dtype
+        self._attention_implementation = attention_implementation
+
+    def create_model_for_training(
+        self, model_name: str, model_config: Any, device_map: dict[str, int]
+    ) -> PreTrainedModel:
+        model = cast(
+            PreTrainedModel,
+            AutoModelForSeq2SeqLM.from_pretrained(model_name, config=model_config, device_map=device_map),
+        )
+        return model
+
+    def create_model_for_inference(self, model_name: str) -> PreTrainedModel:
+        return AutoModelForSeq2SeqLM.from_pretrained(
+            model_name,
+            torch_dtype=self._dtype,
+            attn_implementation=self._attention_implementation,
+        )
+
+
+class FilePreTrainedModelProviderFactory(PreTrainedModelProviderFactory):
+    def create_pretrained_model_provider(
+        self, config: "HuggingFaceConfig", mixed_precision: bool = False
+    ) -> PreTrainedModelProvider:
+        attention_implementation = config.params.get("attn_implementation", "sdpa")
+        dtype = torch.bfloat16 if config.model_prefix in SUPPORTED_T5_MODELS else torch.float16
+        if not mixed_precision:
+            dtype = "auto"
+        return FilePreTrainedModelProvider(attention_implementation, dtype)
+
+
 class HuggingFaceConfig(Config):
     def __init__(self, exp_dir: Path, config: dict) -> None:
         config = merge_dict(
@@ -444,9 +496,13 @@ class HuggingFaceConfig(Config):
         return has_best_checkpoint(self.model_dir)
 
     def create_model(
-        self, mixed_precision: bool = True, num_devices: int = 1, clearml_queue: Optional[str] = None
+        self,
+        mixed_precision: bool = True,
+        num_devices: int = 1,
+        clearml_queue: Optional[str] = None,
+        pretrained_model_provider_factory: PreTrainedModelProviderFactory = FilePreTrainedModelProviderFactory(),
     ) -> NMTModel:
-        return HuggingFaceNMTModel(self, mixed_precision, num_devices, clearml_queue)
+        return HuggingFaceNMTModel(self, mixed_precision, num_devices, clearml_queue, pretrained_model_provider_factory)
 
     def create_tokenizer(self) -> Tokenizer:
         if not self.data["tokenize"]:
@@ -899,7 +955,12 @@ class InferenceModelParams:
 
 class HuggingFaceNMTModel(NMTModel):
     def __init__(
-        self, config: HuggingFaceConfig, mixed_precision: bool, num_devices: int, clearml_queue: Optional[str] = None
+        self,
+        config: HuggingFaceConfig,
+        mixed_precision: bool,
+        num_devices: int,
+        clearml_queue: Optional[str] = None,
+        pretrained_model_provider_factory: PreTrainedModelProviderFactory = FilePreTrainedModelProviderFactory(),
     ) -> None:
         self._config = config
         self._mixed_precision = mixed_precision
@@ -910,6 +971,9 @@ class HuggingFaceNMTModel(NMTModel):
         self._cached_inference_model: Optional[PreTrainedModel] = None
         self._inference_model_params: Optional[InferenceModelParams] = None
         self._clearml_queue = clearml_queue
+        self._pretrained_model_provider = pretrained_model_provider_factory.create_pretrained_model_provider(
+            config, mixed_precision
+        )
 
     def train(self) -> None:
         training_args = self._create_training_arguments()
@@ -947,9 +1011,8 @@ class HuggingFaceNMTModel(NMTModel):
             }
         else:
             device_map = None
-        model = cast(
-            PreTrainedModel,
-            AutoModelForSeq2SeqLM.from_pretrained(self._config.model, config=model_config, device_map=device_map),
+        model = self._pretrained_model_provider.create_model_for_training(
+            self._config.model, model_config, device_map=device_map
         )
         if self._config.train.get("better_transformer"):
             model = model.to_bettertransformer()
@@ -1765,11 +1828,7 @@ class HuggingFaceNMTModel(NMTModel):
             base_model = self._create_tied_embedding_weights(base_model)
             model = PeftModel.from_pretrained(base_model, model_name)
         else:
-            model: PreTrainedModel = AutoModelForSeq2SeqLM.from_pretrained(
-                model_name,
-                torch_dtype=dtype if self._mixed_precision else "auto",
-                attn_implementation=self._config.params["attn_implementation"],
-            )
+            model: PreTrainedModel = self._pretrained_model_provider.create_model_for_inference(model_name)
         if self._config.infer.get("better_transformer"):
             model = model.to_bettertransformer()
         if model_name == self._config.model and len(tokenizer) != model.get_input_embeddings().weight.size(dim=0):

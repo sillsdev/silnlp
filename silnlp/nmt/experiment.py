@@ -6,11 +6,11 @@ from typing import Optional, Set, Union
 
 import yaml
 
-from ..common.environment import SIL_NLP_ENV
+from ..common.environment import SIL_NLP_ENV, SilNlpEnv
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
-from .config import Config, get_mt_exp_dir
+from .config import Config, NMTModel, get_mt_exp_dir
 from .test import SUPPORTED_SCORERS, test
 from .translate import TranslationTask
 
@@ -18,6 +18,9 @@ from .translate import TranslationTask
 @dataclass
 class SILExperiment:
     name: str
+    config: Config
+    model: NMTModel
+    environment: SilNlpEnv = SIL_NLP_ENV
     make_stats: bool = False
     force_align: bool = False
     mixed_precision: bool = True
@@ -33,16 +36,9 @@ class SILExperiment:
     score_by_book: bool = False
     commit: Optional[str] = None
     clearml_tag: Optional[str] = None
+    force_infer: bool = False
 
     def __post_init__(self):
-        self.clearml = SILClearML(
-            self.name,
-            self.clearml_queue,
-            commit=self.commit,
-            tag=self.clearml_tag,
-        )
-        self.name: str = self.clearml.name
-        self.config: Config = self.clearml.config
         self.rev_hash = get_git_revision_hash()
         self.config.set_seed()
 
@@ -61,7 +57,7 @@ class SILExperiment:
 
     def preprocess(self):
         # Do some basic checks before starting the experiment
-        exp_dir = Path(get_mt_exp_dir(self.name))
+        exp_dir = Path(self.environment.get_mt_exp_dir(self.name))
         if not exp_dir.exists():
             raise RuntimeError(f"ERROR: Experiment folder {exp_dir} does not exist.")
         config_file = Path(exp_dir, "config.yml")
@@ -71,22 +67,24 @@ class SILExperiment:
 
     def train(self):
         os.system("nvidia-smi")
-        model = self.config.create_model(self.mixed_precision, self.num_devices, self.clearml_queue)
-        model.save_effective_config(self.config.exp_dir / f"effective-config-{self.rev_hash}.yml")
+        self.model.save_effective_config(self.config.exp_dir / f"effective-config-{self.rev_hash}.yml")
         print(f"=== Training ({self.name}) ===")
-        model.train()
+        self.model.train()
         print("Training completed")
 
     def test(self):
         assert self.scorers is not None
         test(
-            experiment=self.name,
+            config=self.config,
             last=self.config.model_dir.exists(),
             best=self.config.model_dir.exists(),
             by_book=self.score_by_book,
             scorers=self.scorers,
             produce_multiple_translations=self.produce_multiple_translations,
             save_confidences=self.save_confidences,
+            model=self.model,
+            clearml_queue=self.clearml_queue,
+            force_infer=self.force_infer,
         )
 
     def translate(self):
@@ -99,7 +97,7 @@ class SILExperiment:
         quality_estimation = translate_configs.get("quality_estimation", False)
 
         if quality_estimation:
-            verse_test_scores_path = get_mt_exp_dir(
+            verse_test_scores_path = self.environment.get_mt_exp_dir(
                 quality_estimation.get("verse_test_scores_file")
                 if isinstance(quality_estimation, dict) and quality_estimation.get("verse_test_scores_file")
                 else self.config.exp_dir
@@ -115,6 +113,8 @@ class SILExperiment:
                 name=self.name,
                 checkpoint=checkpoint,
                 commit=self.commit,
+                model=self.model,
+                environment=self.environment,
             )
 
             if not postprocess_configs:
@@ -224,6 +224,12 @@ def main() -> None:
         help="Generate confidence files for test and/or translate step.",
     )
     parser.add_argument("--score-by-book", default=False, action="store_true", help="Score individual books")
+    parser.add_argument(
+        "--force-infer",
+        default=False,
+        action="store_true",
+        help="Force inferencing for test step even if files already exist",
+    )
     parser.add_argument("--mt-dir", default=None, type=str, help="The machine translation directory.")
     parser.add_argument(
         "--debug",
@@ -255,8 +261,9 @@ def main() -> None:
     if args.clearml_queue is not None and args.clearml_tag is None:
         parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
 
+    environment = SilNlpEnv()
     if args.mt_dir is not None:
-        SIL_NLP_ENV.set_machine_translation_dir(SIL_NLP_ENV.data_dir / args.mt_dir)
+        environment.set_machine_translation_dir(environment.data_dir / args.mt_dir)
 
     if args.debug:
         show_attrs(cli_args=args)
@@ -267,8 +274,22 @@ def main() -> None:
         args.train = True
         args.test = True
 
+    clearml = SILClearML(
+        args.experiment,
+        args.clearml_queue,
+        commit=args.commit,
+        tag=args.clearml_tag,
+    )
+    model = clearml.config.create_model(
+        mixed_precision=not args.disable_mixed_precision,
+        num_devices=args.num_devices,
+        clearml_queue=args.clearml_queue,
+    )
+
     exp = SILExperiment(
-        name=args.experiment,
+        name=clearml.name,
+        config=clearml.config,
+        model=model,
         make_stats=args.stats,
         force_align=args.force_align,
         mixed_precision=not args.disable_mixed_precision,
@@ -284,10 +305,11 @@ def main() -> None:
         save_confidences=args.save_confidences,
         scorers=set(s.lower() for s in args.scorers),
         score_by_book=args.score_by_book,
+        force_infer=args.force_infer,
     )
 
     if args.train and not args.save_checkpoints:
-        SIL_NLP_ENV.delete_path_on_exit(get_mt_exp_dir(args.experiment) / "run")
+        environment.delete_path_on_exit(environment.get_mt_exp_dir(args.experiment) / "run")
     exp.run()
 
 

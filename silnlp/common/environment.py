@@ -109,6 +109,9 @@ class SilNlpEnv:
 
         raise FileExistsError("No valid path exists")
 
+    def get_mt_exp_dir(self, exp_name: str) -> Path:
+        return self.mt_experiments_dir / exp_name
+
     def delete_path_on_exit(self, path: Union[str, Path]) -> None:
         self.path_to_delete = pathify(path)
 
