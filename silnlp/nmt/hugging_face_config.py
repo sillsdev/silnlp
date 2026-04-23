@@ -1941,6 +1941,21 @@ class CustomNormalizerWrapper:
 
 
 class SilTranslationPipeline(TranslationPipeline):
+    def check_model_type(self, supported_models):
+        # torch.compile wraps the model in OptimizedModule (torch._dynamo.eval_frame.OptimizedModule).
+        # The original model is accessible via the _orig_mod attribute.
+        # Temporarily swap to the original model so that the parent's class-name check succeeds.
+        orig_mod = getattr(self.model, "_orig_mod", None)
+        if orig_mod is not None:
+            compiled_model = self.model
+            self.model = orig_mod
+            try:
+                super().check_model_type(supported_models)
+            finally:
+                self.model = compiled_model
+        else:
+            super().check_model_type(supported_models)
+
     def _forward(self, model_inputs, **generate_kwargs):
         in_b, input_length = model_inputs["input_ids"].shape
 
