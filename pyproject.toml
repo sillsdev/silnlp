@@ -72,7 +72,7 @@ ctranslate2 = "^3.5.1"
 libclang = "14.0.6"
 sil-machine = {extras = ["thot"], version = "1.8.7"}
 datasets = "^2.7.1"
-torch = {version = "^2.4", source = "torch"}
+torch = {version = "^2.6", source = "torch"}
 sacremoses = "^0.0.53"
 evaluate = "^0.3.0"
 python-docx = "^0.8.11"
@@ -120,6 +120,6 @@ eflomal = ["eflomal"]
 
 [[tool.poetry.source]]
 name = "torch"
-url = "https://download.pytorch.org/whl/cu121"
+url = "https://download.pytorch.org/whl/cu124"
 priority = "explicit"
 
