@@ -6,7 +6,10 @@ import re
 import shutil
 from contextlib import ExitStack
 from copy import deepcopy
-from dataclasses import asdict as dataclass_asdict, dataclass, fields as dataclass_fields, is_dataclass
+from dataclasses import asdict as dataclass_asdict
+from dataclasses import dataclass
+from dataclasses import fields as dataclass_fields
+from dataclasses import is_dataclass
 from enum import Enum
 from itertools import repeat
 from math import prod
@@ -2118,7 +2121,9 @@ class SilClearMLCallback(ClearMLCallback):
             if not field.init or field.name.endswith("_token"):
                 continue
             value = getattr(training_args, field.name)
-            as_dict[field.name] = dataclass_asdict(value) if is_dataclass(value) and not isinstance(value, type) else value
+            as_dict[field.name] = (
+                dataclass_asdict(value) if is_dataclass(value) and not isinstance(value, type) else value
+            )
         flat_dict = {str(k): v for k, v in self._clearml.utilities.proxy_object.flatten_dictionary(as_dict).items()}
         self._clearml_task._arguments.copy_from_dict(flat_dict, prefix=prefix)
 
@@ -2159,8 +2164,11 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         self._better_transformer = better_transformer
         self._auto_grac_acc = auto_grad_acc
         self.model_prefix = model_prefix
-        # Replace the default ClearMLCallback with SilClearMLCallback, which properly
-        # serializes non-builtin types (e.g. AcceleratorConfig) to avoid ClearML warnings.
+        self._update_clearml_callback()
+
+    # Replace the default ClearMLCallback with SilClearMLCallback, which properly
+    # serializes non-builtin types (e.g. AcceleratorConfig) to avoid ClearML warnings.
+    def _update_clearml_callback(self):
         if self.pop_callback(ClearMLCallback) is not None:
             self.add_callback(SilClearMLCallback())
 
