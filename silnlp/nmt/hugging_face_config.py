@@ -2113,16 +2113,12 @@ class SilClearMLCallback(ClearMLCallback):
     """
 
     def _copy_training_args_as_hparams(self, training_args, prefix):
-        as_dict = {
-            field.name: (
-                dataclass_asdict(getattr(training_args, field.name))
-                if is_dataclass(getattr(training_args, field.name))
-                and not isinstance(getattr(training_args, field.name), type)
-                else getattr(training_args, field.name)
-            )
-            for field in dataclass_fields(training_args)
-            if field.init and not field.name.endswith("_token")
-        }
+        as_dict = {}
+        for field in dataclass_fields(training_args):
+            if not field.init or field.name.endswith("_token"):
+                continue
+            value = getattr(training_args, field.name)
+            as_dict[field.name] = dataclass_asdict(value) if is_dataclass(value) and not isinstance(value, type) else value
         flat_dict = {str(k): v for k, v in self._clearml.utilities.proxy_object.flatten_dictionary(as_dict).items()}
         self._clearml_task._arguments.copy_from_dict(flat_dict, prefix=prefix)
 
