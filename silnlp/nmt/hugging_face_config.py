@@ -6,7 +6,7 @@ import re
 import shutil
 from contextlib import ExitStack
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import asdict as dataclass_asdict, dataclass, fields as dataclass_fields, is_dataclass
 from enum import Enum
 from itertools import repeat
 from math import prod
@@ -89,6 +89,8 @@ if is_peft_available():
     from peft import LoraConfig, PeftModel, TaskType, get_peft_model
 else:
     LoraConfig, PeftModel, TaskType, get_peft_model = None, None, None, None
+
+from transformers.integrations import ClearMLCallback
 
 LOGGER = logging.getLogger(__name__)
 
@@ -2102,6 +2104,29 @@ class DataCollatorForSeq2SeqNoising:
         return self._data_collator(features, return_tensors)
 
 
+class SilClearMLCallback(ClearMLCallback):
+    """Extends ClearMLCallback to handle non-builtin types in training arguments.
+
+    The HuggingFace ClearMLCallback logs a warning when TrainingArguments contains
+    non-builtin fields (e.g. AcceleratorConfig). This subclass converts any dataclass
+    instances to plain dicts before passing them to ClearML so the warning is avoided.
+    """
+
+    def _copy_training_args_as_hparams(self, training_args, prefix):
+        as_dict = {
+            field.name: (
+                dataclass_asdict(getattr(training_args, field.name))
+                if is_dataclass(getattr(training_args, field.name))
+                and not isinstance(getattr(training_args, field.name), type)
+                else getattr(training_args, field.name)
+            )
+            for field in dataclass_fields(training_args)
+            if field.init and not field.name.endswith("_token")
+        }
+        flat_dict = {str(k): v for k, v in self._clearml.utilities.proxy_object.flatten_dictionary(as_dict).items()}
+        self._clearml_task._arguments.copy_from_dict(flat_dict, prefix=prefix)
+
+
 class SilSeq2SeqTrainer(Seq2SeqTrainer):
     def __init__(
         self,
@@ -2138,6 +2163,10 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         self._better_transformer = better_transformer
         self._auto_grac_acc = auto_grad_acc
         self.model_prefix = model_prefix
+        # Replace the default ClearMLCallback with SilClearMLCallback, which properly
+        # serializes non-builtin types (e.g. AcceleratorConfig) to avoid ClearML warnings.
+        if self.pop_callback(ClearMLCallback) is not None:
+            self.add_callback(SilClearMLCallback())
 
     def _get_train_sampler(self) -> Optional[Sampler]:
         if self._sequential_sampling:
