@@ -4,7 +4,6 @@ import logging
 import os
 import re
 import shutil
-import warnings
 from contextlib import ExitStack
 from copy import deepcopy
 from dataclasses import dataclass
@@ -913,16 +912,6 @@ class HuggingFaceNMTModel(NMTModel):
         self._clearml_queue = clearml_queue
 
     def train(self) -> None:
-        # Suppress FutureWarning from torch.utils.checkpoint about the deprecated
-        # torch.cpu.amp.autocast API. This is a PyTorch-internal issue that has no
-        # user-actionable fix in silnlp.
-        warnings.filterwarnings(
-            "ignore",
-            message=r"`torch\.cpu\.amp\.autocast\(args\.\.\.\)` is deprecated",
-            category=FutureWarning,
-            module="torch",
-        )
-
         training_args = self._create_training_arguments()
 
         if training_args.should_log:
