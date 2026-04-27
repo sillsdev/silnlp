@@ -1275,8 +1275,13 @@ class HuggingFaceNMTModel(NMTModel):
         else:
             model = self._cached_inference_model = self._create_inference_model(ckpt, tokenizer, src_lang, trg_lang)
             self._inference_model_params = inference_model_params
-        if model.config.max_length is not None and model.config.max_length < 512:
-            model.config.max_length = 512
+        if (
+            hasattr(model, "generation_config")
+            and model.generation_config is not None
+            and model.generation_config.max_length is not None
+            and model.generation_config.max_length < 512
+        ):
+            model.generation_config.max_length = 512
 
         # The tokenizer isn't wrapped until after calling _create_inference_model,
         # because the tokenizer's input/output language codes are set there
@@ -1796,7 +1801,6 @@ class HuggingFaceNMTModel(NMTModel):
         if self._config.model_prefix == "google/madlad400":
             model.config.decoder_start_token_id = tokenizer.pad_token_id
             model.generation_config.decoder_start_token_id = tokenizer.pad_token_id
-            model.config.max_length = 256
             model.generation_config.max_new_tokens = 256
             tokenizer.tgt_lang = trg_lang
 
@@ -1819,6 +1823,18 @@ class HuggingFaceNMTModel(NMTModel):
             model.config.forced_bos_token_id = forced_bos_token_id
             if model.generation_config is not None:
                 model.generation_config.forced_bos_token_id = forced_bos_token_id
+
+        # Move max_length from model.config to generation_config to avoid warnings when saving checkpoints.
+        # The pre-trained model config may include max_length as a generation parameter, which transformers
+        # will warn about and automatically move to generation_config when saving.
+        if (
+            hasattr(model, "generation_config")
+            and model.generation_config is not None
+            and hasattr(model.config, "max_length")
+            and model.config.max_length is not None
+        ):
+            model.generation_config.max_length = model.config.max_length
+            model.config.max_length = None
 
         return model, tokenizer
 
