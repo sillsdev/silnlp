@@ -10,7 +10,7 @@ from ..common.environment import SIL_NLP_ENV, SilNlpEnv
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
-from .config import Config, NMTModel, get_mt_exp_dir
+from .config import Config, NMTModel
 from .test import SUPPORTED_SCORERS, test
 from .translate import TranslationTask
 

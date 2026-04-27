@@ -3,11 +3,10 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
 import time
-from pathlib import Path, PurePath
+from pathlib import Path
 from platform import system, uname
-from typing import Callable, Iterable, List, Optional, Sequence, Union
+from typing import Callable, List, Optional, Union
 
 from dotenv import load_dotenv
 
