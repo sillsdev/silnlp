@@ -193,17 +193,18 @@ def process_request(request):
             f.write(f"{request['id']}\n")
         with open(ONBOARDING_CLEANUP_PATH, "a") as f:
             f.write(f"{ONBOARDING_PATH}/{main_project_name}_Request\n")
+
+        add_comment(
+            request["id"],
+            f"This request is being automatically onboarded.\nClearML task: {task_name}.\nLink: {task.get_output_log_web_page()}",
+        )
+        adjusted_name = rename_project(main_project_name, True, Path(f"{ONBOARDING_PATH}/{main_project_name}_Request"))
+        add_comment(request["id"], f"Results will be stored in {ONBOARDING_REQUESTS_BUCKET_DIR}/{adjusted_name}")
     except Exception as e:
         LOGGER.warning(f"Error processing onboarding request {request['id']}:\n{e}")
         add_comment(request["id"], f"Error processing this onboarding request:\n{e}")
         return
 
-    add_comment(
-        request["id"],
-        f"This request is being automatically onboarded.\nClearML task: {task_name}.\nLink: {task.get_output_log_web_page()}",
-    )
-    adjusted_name = rename_project(main_project_name, True, Path(f"{ONBOARDING_PATH}/{main_project_name}_Request"))
-    add_comment(request["id"], f"Results will be stored in {ONBOARDING_REQUESTS_BUCKET_DIR}/{adjusted_name}")
     try:
         task.wait_for_status()
         add_comment(request["id"], "Automatic onboarding was successful. See ClearML task for details.")
@@ -226,19 +227,17 @@ def main():
 
     with open(ONBOARDING_LOG_PATH, "r") as f:
         onboarded_projects = f.read().splitlines()
+        onboarded_projects = [project_id.strip() for project_id in onboarded_projects]
 
-    for request in onboarding_requests:
-        if request["id"] in onboarded_projects:
-            onboarding_requests.remove(request)
+    requests_to_process = [request for request in onboarding_requests if request["id"] not in onboarded_projects]
 
     with concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = [executor.submit(process_request, request) for request in onboarding_requests]
+        futures = [executor.submit(process_request, request) for request in requests_to_process]
         for future in concurrent.futures.as_completed(futures):
             try:
                 future.result()
             except Exception as e:
                 LOGGER.warning(f"Error processing request:\n{e}")
-                add_comment(request["id"], f"Error processing this onboarding request:\n{e}")
 
 
 if __name__ == "__main__":
