@@ -25,7 +25,17 @@ EXPERIMENTS_DIR = SIL_NLP_ENV.mt_experiments_dir
 SCRIPTURE_DIR = SIL_NLP_ENV.mt_scripture_dir
 SAMPLE_LINES = 100
 MODEL = "facebook/nllb-200"
-RESULT_HEADERS = [
+METRIC_CLI_TO_CSV = {
+    "bleu": "BLEU",
+    "chrf3": "chrF3",
+    "chrf3+": "chrF3+",
+    "chrf3++": "chrF3++",
+    "spbleu": "spBLEU",
+    "confidence": "Confidence",
+}
+ALL_METRIC_COLS = list(METRIC_CLI_TO_CSV.values())
+
+FIXED_RESULT_HEADERS = [
     "Target_language",
     "Series",
     "Mapping",
@@ -40,9 +50,8 @@ RESULT_HEADERS = [
     "src_mean_tokens_per_verse",
     "trg_mean_tokens_per_verse",
     "Book",
-    "BLEU",
-    "chrF3++",
 ]
+RESULT_HEADERS = FIXED_RESULT_HEADERS + ALL_METRIC_COLS
 
 LOGGER = logging.getLogger(__package__ + ".create_experiments")
 
@@ -372,28 +381,30 @@ def get_tokenization_stats(stats_file):
 
 
 def get_scores(scores_file):
-    """Read scores file. Returns list of dicts with keys: Book, BLEU, chrF3++.
-    One dict per row (per-book + ALL). Returns empty list if file missing."""
+    """Read scores file. Returns list of dicts with keys: Book + all ALL_METRIC_COLS.
+    Missing columns produce None for every row; missing/non-numeric cells produce None."""
     results = []
     with open(scores_file, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
-        bleu_col = next((c for c in reader.fieldnames if c.lower() == "bleu"), None)
-        chrf_col = next((c for c in reader.fieldnames if "chrf" in c.lower()), None)
         book_col = next((c for c in reader.fieldnames if c.lower() == "book"), None)
+        col_map = {csv_col: next((c for c in reader.fieldnames if c == csv_col), None) for csv_col in ALL_METRIC_COLS}
         for row in reader:
-            results.append(
-                {
-                    "Book": row[book_col].strip() if book_col else "",
-                    "BLEU": float(row[bleu_col]) if bleu_col and row[bleu_col].strip() else None,
-                    "chrF3++": float(row[chrf_col]) if chrf_col and row[chrf_col].strip() else None,
-                }
-            )
+            entry = {"Book": row[book_col].strip() if book_col else ""}
+            for csv_col, actual_col in col_map.items():
+                try:
+                    entry[csv_col] = float(row[actual_col]) if actual_col and row[actual_col].strip() else None
+                except (ValueError, KeyError):
+                    entry[csv_col] = None
+            results.append(entry)
     return results
 
 
-def collect_results(xlsxfile, main_folder, valid_rows, overwrite):
+def collect_results(xlsxfile, main_folder, valid_rows, overwrite, metric_cols=None):
     """Collect results from all experiments and write to 'results' sheet.
-    If not overwrite, reads existing results and only fetches data for missing groups."""
+    If not overwrite, reads existing results and only fetches data for missing groups.
+    metric_cols: list of CSV column names to show (others hidden); defaults to all."""
+    if metric_cols is None:
+        metric_cols = ALL_METRIC_COLS
     wb = openpyxl.load_workbook(xlsxfile)
     if overwrite:
         backup_workbook(wb, xlsxfile)
@@ -444,7 +455,8 @@ def collect_results(xlsxfile, main_folder, valid_rows, overwrite):
 
             # Group 1: config — always available from the row
             # Group 2: scores
-            need_scores = overwrite or not ex.get("BLEU")
+            scoreable_metrics = [c for c in ALL_METRIC_COLS if c != "Confidence"]
+            need_scores = overwrite or any(ex.get(col) in (None, "") for col in scoreable_metrics)
             # Group 3: vref line counts
             need_lines = overwrite or not ex.get("train_lines")
             # Group 4: tokenization stats
@@ -473,7 +485,7 @@ def collect_results(xlsxfile, main_folder, valid_rows, overwrite):
                     scores = get_scores(scores_file)
                 else:
 
-                    scores = [{"Book": "", "BLEU": None, "chrF3++": None}]
+                    scores = [{"Book": "", **{col: None for col in ALL_METRIC_COLS}}]
                     model_folders = [f for f in (folder / "run").glob("checkpoint-*") if f.is_dir() and (f / "model-00002-of-00002.safetensors").is_file() ]
                     #model_file_4000 = folder / "run" / "checkpoint-4000" / "model-00002-of-00002.safetensors"
                     #model_file_5000 = folder / "run" / "checkpoint-5000" / "model-00002-of-00002.safetensors"
@@ -484,7 +496,7 @@ def collect_results(xlsxfile, main_folder, valid_rows, overwrite):
             else:
                 # Reconstruct scores from existing rows
                 scores = [
-                    {"Book": r["Book"], "BLEU": r["BLEU"], "chrF3++": r["chrF3++"]}
+                    {"Book": r["Book"], **{col: r.get(col) for col in ALL_METRIC_COLS}}
                     for k, r in existing.items()
                     if k[0] == language and k[1] == series and k[2] == mapping
                 ]
@@ -505,8 +517,7 @@ def collect_results(xlsxfile, main_folder, valid_rows, overwrite):
                     "src_mean_tokens_per_verse": tok_stats.get("src_mean_tokens_per_verse"),
                     "trg_mean_tokens_per_verse": tok_stats.get("trg_mean_tokens_per_verse"),
                     "Book": s["Book"],
-                    "BLEU": s["BLEU"],
-                    "chrF3++": s["chrF3++"],
+                    **{col: s.get(col) for col in ALL_METRIC_COLS},
                 })
             if not need_scores and not need_lines and not need_tok:
                 count_cached += 1
@@ -526,22 +537,13 @@ def collect_results(xlsxfile, main_folder, valid_rows, overwrite):
         del wb["results"]
     ws = wb.create_sheet("results")
     ws.append(RESULT_HEADERS)
-    ws.column_dimensions[get_column_letter(1)].width = 15
-    ws.column_dimensions[get_column_letter(2)].width = 7
-    ws.column_dimensions[get_column_letter(3)].width = 14
-    ws.column_dimensions[get_column_letter(4)].width = 21
-    ws.column_dimensions[get_column_letter(5)].width = 27
-    ws.column_dimensions[get_column_letter(6)].width = 26
-    ws.column_dimensions[get_column_letter(7)].width = 10
-    ws.column_dimensions[get_column_letter(8)].width = 10
-    ws.column_dimensions[get_column_letter(9)].width = 10
-    ws.column_dimensions[get_column_letter(10)].width = 10
-    ws.column_dimensions[get_column_letter(11)].width = 10
-    ws.column_dimensions[get_column_letter(12)].width = 10
-    ws.column_dimensions[get_column_letter(13)].width = 10
-    ws.column_dimensions[get_column_letter(14)].width = 8
-    ws.column_dimensions[get_column_letter(15)].width = 6
-    ws.column_dimensions[get_column_letter(16)].width = 9
+    fixed_widths = [15, 7, 14, 21, 27, 26, 10, 10, 10, 10, 10, 10, 10, 8]
+    for i, w in enumerate(fixed_widths, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    for i, col in enumerate(ALL_METRIC_COLS, start=len(FIXED_RESULT_HEADERS) + 1):
+        ws.column_dimensions[get_column_letter(i)].width = 10
+        if col not in metric_cols:
+            ws.column_dimensions[get_column_letter(i)].hidden = True
 
     for r in all_results:
         ws.append([r.get(h) for h in RESULT_HEADERS])
@@ -552,12 +554,14 @@ def collect_results(xlsxfile, main_folder, valid_rows, overwrite):
     return all_results
 
 
-def create_analysis_sheets(xlsxfile):
+def create_analysis_sheets(xlsxfile, metric_cols=None):
     """Read the 'results' sheet and create per-book analysis sheets with deltas."""
+    if metric_cols is None:
+        metric_cols = ALL_METRIC_COLS
     wb = openpyxl.load_workbook(xlsxfile)
     results = read_sheet(wb, "results")
 
-    # Group by (Target_language, Book, Mapping)
+    # Group by (Target_language, Series, Book, Mapping)
     data = {}
     for r in results:
         key = (r["Target_language"], r["Series"], r["Book"])
@@ -568,28 +572,17 @@ def create_analysis_sheets(xlsxfile):
     books = set(r["Book"] for r in results)
     books.discard(None)
     books.discard("")
-
-    # Find all books
     books = sorted(books)
 
-    ANALYSIS_HEADERS = [
-        "Target_language",
-        "Series",
-        "BLEU_one_to_one",
-        "BLEU_mixed_src",
-        "BLEU_many_to_many",
-        "chrF3++_one_to_one",
-        "chrF3++_mixed_src",
-        "chrF3++_many_to_many",
-        "train_lines",
-        "ratio_chars_per_token",
-        "ratio_tokens_per_verse",
-        "diff_tokens_per_verse",
-        "BLEU_delta_m2m_mix",
-        "BLEU_delta_mix_o2o",
-        "chrF3++_delta_m2m_mix",
-        "chrF3++_delta_mix_o2o",
-    ]
+    mappings_order = ["one_to_one", "mixed_src", "many_to_many"]
+    per_metric_cols = [f"{m}_{s}" for m in metric_cols for s in mappings_order]
+    delta_cols = [f"{m}_delta_{d}" for m in metric_cols for d in ("m2m_mix", "mix_o2o")]
+    ANALYSIS_HEADERS = (
+        ["Target_language", "Series"]
+        + per_metric_cols
+        + ["train_lines", "ratio_chars_per_token", "ratio_tokens_per_verse", "diff_tokens_per_verse"]
+        + delta_cols
+    )
 
     for book in books:
         sheet_name = f"analysis_{book}"
@@ -598,7 +591,6 @@ def create_analysis_sheets(xlsxfile):
         ws_out = wb.create_sheet(sheet_name)
         ws_out.append(ANALYSIS_HEADERS)
 
-        # Get all (language, series) pairs that have data for this book.
         lang_series = sorted(set((lang, ser) for lang, ser, bk in data if bk == book))
 
         for lang, series in lang_series:
@@ -606,15 +598,8 @@ def create_analysis_sheets(xlsxfile):
             m2m = mappings.get("many_to_many", {})
             mix = mappings.get("mixed_src", {})
             o2o = mappings.get("one_to_one", {})
+            mapping_data = {"one_to_one": o2o, "mixed_src": mix, "many_to_many": m2m}
 
-            bleu_m2m = m2m.get("BLEU")
-            bleu_mix = mix.get("BLEU")
-            bleu_o2o = o2o.get("BLEU")
-            chrf_m2m = m2m.get("chrF3++")
-            chrf_mix = mix.get("chrF3++")
-            chrf_o2o = o2o.get("chrF3++")
-
-            # Use many_to_many stats, fall back to mixed_src
             stats = m2m or mix
             src_cpt = stats.get("src_mean_chars_per_token")
             trg_cpt = stats.get("trg_mean_chars_per_token")
@@ -626,27 +611,28 @@ def create_analysis_sheets(xlsxfile):
             diff_tpv = src_tpv - trg_tpv if src_tpv and trg_tpv else None
 
             def delta(a, b):
-                return round(a - b, 4) if a is not None and b is not None else None
+                return round(float(a) - float(b), 4) if a not in (None, "") and b not in (None, "") else None
+
+            per_metric_vals = [mapping_data[s].get(m) for m in metric_cols for s in mappings_order]
+            delta_vals = [
+                v
+                for m in metric_cols
+                for v in (
+                    delta(m2m.get(m), mix.get(m)),
+                    delta(mix.get(m), o2o.get(m)),
+                )
+            ]
 
             ws_out.append(
-                [
-                    lang,
-                    series,
-                    bleu_o2o,
-                    bleu_mix,
-                    bleu_m2m,
-                    chrf_o2o,
-                    chrf_mix,
-                    chrf_m2m,
+                [lang, series]
+                + per_metric_vals
+                + [
                     stats.get("train_lines"),
                     round(ratio_cpt, 4) if ratio_cpt else None,
                     round(ratio_tpv, 4) if ratio_tpv else None,
                     round(diff_tpv, 4) if diff_tpv else None,
-                    delta(bleu_m2m, bleu_mix),
-                    delta(bleu_mix, bleu_o2o),
-                    delta(chrf_m2m, chrf_mix),
-                    delta(chrf_mix, chrf_o2o),
                 ]
+                + delta_vals
             )
 
     wb.save(xlsxfile)
@@ -655,23 +641,14 @@ def create_analysis_sheets(xlsxfile):
     return 0
 
 
-def create_summary_sheet(xlsxfile):
+def create_summary_sheet(xlsxfile, metric_cols=None):
     """Create a 'summary' sheet with mean, median, +ve/−ve counts and Wilcoxon p-values
-    for each book's BLEU and chrF3++ deltas, read from the analysis sheets."""
+    for each book's metric deltas, read from the analysis sheets."""
+    if metric_cols is None:
+        metric_cols = ALL_METRIC_COLS
     wb = openpyxl.load_workbook(xlsxfile)
-    SUMMARY_HEADERS = [
-        "Book",
-        "Metric",
-        "Delta",
-        "Mean",
-        "Median",
-        "Count +ve",
-        "Count −ve",
-        "n",
-        "p-value",
-    ]
-    
-    # Find all analysis sheets
+    SUMMARY_HEADERS = ["Book", "Metric", "Delta", "Mean", "Median", "Count +ve", "Count −ve", "n", "p-value"]
+
     analysis_sheets = sorted([s for s in wb.sheetnames if s.startswith("analysis_")])
 
     if "summary" in wb.sheetnames:
@@ -679,12 +656,10 @@ def create_summary_sheet(xlsxfile):
     ws = wb.create_sheet("summary")
     ws.append(SUMMARY_HEADERS)
 
-    # Column headers in analysis sheets must match these.
     delta_cols = {
-        ("BLEU", "m2m_mix"): "BLEU_delta_m2m_mix",
-        ("BLEU", "mix_o2o"): "BLEU_delta_mix_o2o",
-        ("chrF3++", "m2m_mix"): "chrF3++_delta_m2m_mix",
-        ("chrF3++", "mix_o2o"): "chrF3++_delta_mix_o2o",
+        (m, delta_type): f"{m}_delta_{delta_type}"
+        for m in metric_cols
+        for delta_type in ("m2m_mix", "mix_o2o")
     }
 
     for sheet_name in analysis_sheets:
@@ -711,7 +686,6 @@ def create_summary_sheet(xlsxfile):
             count_pos = sum(1 for v in values if v > 0)
             count_neg = sum(1 for v in values if v < 0)
 
-            # Wilcoxon requires at least 10 non-zero differences for a meaningful test
             non_zero = [v for v in values if v != 0]
             if len(non_zero) >= 10:
                 _, p_value = wilcoxon(non_zero)
@@ -727,41 +701,6 @@ def create_summary_sheet(xlsxfile):
     return 0
 
 
-def create_correlation_sheet(wb):
-    "Compute Spearman correlations between score deltas and experiment variables per book."
-    wb = openpyxl.load_workbook(xlsxfile)
-    analysis_sheets = sorted([s for s in wb.sheetnames if s.startswith("analysis_")])
-
-    headers = ["Book", "Metric", "Variable", "rho", "p-value", "n"]
-    if "correlations" in wb.sheetnames:
-        del wb["correlations"]
-    ws = wb.create_sheet("correlations")
-    ws.append(headers)
-
-    var_cols = ["train_lines", "ratio_chars_per_token", "ratio_tokens_per_verse", "diff_tokens_per_verse"]
-    delta_cols = dict(BLEU="BLEU_delta_m2m_mix", chrF3pp="chrF3++_delta_m2m_mix")
-
-    for sheet_name in analysis_sheets:
-        book = sheet_name.replace("analysis_", "")
-        rows = read_sheet(wb, sheet_name)
-        for metric, dcol in delta_cols.items():
-            for var in var_cols:
-                pairs = [
-                    (float(r[dcol]), float(r[var]))
-                    for r in rows
-                    if r.get(dcol) not in (None, "") and r.get(var) not in (None, "")
-                ]
-                if len(pairs) < 5:
-                    ws.append([book, metric, var, None, None, len(pairs)])
-                    continue
-                deltas, vals = zip(*pairs)
-                rho, p = spearmanr(deltas, vals)
-                ws.append([book, metric, var, round(rho, 4), round(p, 6), len(pairs)])
-    wb.save(xlsxfile)
-    wb.close()
-    return 0
-
-
 def add_charts_to_workbook(xlsxfile, metric):
     wb = openpyxl.load_workbook(xlsxfile)
     rows = read_sheet(wb, "summary")
@@ -773,7 +712,8 @@ def add_charts_to_workbook(xlsxfile, metric):
         del wb[sheet_name]
     ws = wb.create_sheet(sheet_name)
     ws.append(["Book", "Mean Delta"])
-    for r in data:
+    chart_data = [r for r in data if r.get("Mean") not in (None, "")]
+    for r in chart_data:
         ws.append([r["Book"], float(r["Mean"])])
 
     chart = BarChart()
@@ -784,57 +724,54 @@ def add_charts_to_workbook(xlsxfile, metric):
     chart.x_axis.crosses = "autoZero"
     chart.style = 10
     chart.width = 20
-    chart.height = max(8, len(data) * 1.5)
-    cats = Reference(ws, min_col=1, min_row=2, max_row=len(data) + 1)
-    vals = Reference(ws, min_col=2, min_row=1, max_row=len(data) + 1)
+    chart.height = max(8, len(chart_data) * 1.5)
+    cats = Reference(ws, min_col=1, min_row=2, max_row=len(chart_data) + 1)
+    vals = Reference(ws, min_col=2, min_row=1, max_row=len(chart_data) + 1)
     chart.add_data(vals, titles_from_data=True)
     chart.set_categories(cats)
     chart.shape = 4
     ws.add_chart(chart, "D2")
-    add_matplot_to_sheet(wb, ws)
+    add_matplot_to_sheet(wb, ws, metric)
     wb.save(xlsxfile)
     wb.close()
 
     return 0
 
 
-def add_matplot_to_sheet(wb, ws, output_cell="I3"):
+def add_matplot_to_sheet(wb, ws, metric, output_cell="I3"):
     rows = read_sheet(wb, "summary")
-
     m2m = [r for r in rows if r["Delta"] == "m2m_mix"]
 
-    for metric in ["BLEU", "chrF3++"]:
-        data = [r for r in m2m if r["Metric"] == metric]
-        books = [r["Book"] for r in data]
-        means = [float(r["Mean"]) for r in data]
-        pvals = [r["p-value"] for r in data]
-        sig = [p is not None and p != "" and float(p) < 0.05 for p in pvals]
-        colors = ["#2ecc71" if s else "#95a5a6" for s in sig]
+    data = [r for r in m2m if r["Metric"] == metric and r.get("Mean") not in (None, "")]
+    books = [r["Book"] for r in data]
+    means = [float(r["Mean"]) for r in data]
+    pvals = [r["p-value"] for r in data]
+    sig = [p is not None and p != "" and float(p) < 0.05 for p in pvals]
+    colors = ["#2ecc71" if s else "#95a5a6" for s in sig]
 
-        y = np.arange(len(books))
-        fig, ax = plt.subplots(figsize=(10, max(4, len(books) * 0.5)))
-        ax.barh(y, means, color=colors, edgecolor="white", height=0.6)
-        ax.axvline(0, color="black", linewidth=0.8)
-        ax.set_yticks(y)
-        ax.set_yticklabels(books)
-        ax.set_xlabel(f"{metric} delta (many_to_many − mixed_src)")
-        ax.set_title(f"{metric}: many_to_many vs mixed_src by book\n(green = p < 0.05)")
-        ax.invert_yaxis()
-        plt.tight_layout()
-        #if output_folder:
-        #    plt.savefig(output_folder / f"delta_{metric.replace('+', 'p')}.png", dpi=150)
-        #plt.show()
+    y = np.arange(len(books))
+    fig, ax = plt.subplots(figsize=(10, max(4, len(books) * 0.5)))
+    ax.barh(y, means, color=colors, edgecolor="white", height=0.6)
+    ax.axvline(0, color="black", linewidth=0.8)
+    ax.set_yticks(y)
+    ax.set_yticklabels(books)
+    ax.set_xlabel(f"{metric} delta (many_to_many − mixed_src)")
+    ax.set_title(f"{metric}: many_to_many vs mixed_src by book\n(green = p < 0.05)")
+    ax.invert_yaxis()
+    plt.tight_layout()
 
-        buf = BytesIO()
-        fig.savefig(buf, format="png", dpi=150)
-        buf.seek(0)
-        img = XlImage(buf)
-        ws.add_image(img, output_cell)
+    buf = BytesIO()
+    fig.savefig(buf, format="png", dpi=150)
+    buf.seek(0)
+    img = XlImage(buf)
+    ws.add_image(img, output_cell)
     return 0
 
 
-def create_correlation_sheet(xlsxfile):
+def create_correlation_sheet(xlsxfile, metric_cols=None):
     "Compute Spearman correlations between score deltas and experiment variables per book."
+    if metric_cols is None:
+        metric_cols = ALL_METRIC_COLS
     wb = openpyxl.load_workbook(xlsxfile)
     analysis_sheets = sorted([s for s in wb.sheetnames if s.startswith("analysis_")])
 
@@ -845,7 +782,7 @@ def create_correlation_sheet(xlsxfile):
     ws.append(headers)
 
     var_cols = ["train_lines", "ratio_chars_per_token", "ratio_tokens_per_verse", "diff_tokens_per_verse"]
-    delta_cols = dict(BLEU="BLEU_delta_m2m_mix", chrF3pp="chrF3++_delta_m2m_mix")
+    delta_cols = {m: f"{m}_delta_m2m_mix" for m in metric_cols}
 
     for sheet_name in analysis_sheets:
         book = sheet_name.replace("analysis_", "")
@@ -856,6 +793,7 @@ def create_correlation_sheet(xlsxfile):
                     (float(r[dcol]), float(r[var]))
                     for r in rows
                     if r.get(dcol) not in (None, "") and r.get(var) not in (None, "")
+                    and isinstance(r[dcol], (int, float)) and isinstance(r[var], (int, float))
                 ]
                 if len(pairs) < 5:
                     ws.append([book, metric, var, None, None, len(pairs)])
@@ -875,6 +813,14 @@ def main():
     parser.add_argument("folder", help="Root experiment folder name (relative to mt_experiments_dir).")
     parser.add_argument("--xlsxfile", default="All.xlsx", help="File name for the main spreadsheet.")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing experiment configs or results.")
+    parser.add_argument(
+        "--metrics",
+        nargs="+",
+        default=["bleu", "chrf3"],
+        choices=list(METRIC_CLI_TO_CSV.keys()),
+        metavar="METRIC",
+        help=f"Metrics to use for analysis and to show in results sheet. Choices: {', '.join(METRIC_CLI_TO_CSV.keys())}. Default: bleu chrf3.",
+    )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--create-series", help="Create a series of experiment folders with their config.yml files. Specify the series to create.")
     group.add_argument("--collect-scripts", action="store_true", help="Update the scripts sheet.")
@@ -884,6 +830,7 @@ def main():
 
     args = parser.parse_args()
 
+    metric_cols = [METRIC_CLI_TO_CSV[m] for m in args.metrics]
     main_folder = EXPERIMENTS_DIR / args.folder
     xlsxfile = main_folder / args.xlsxfile
     xlsxfile_rel = xlsxfile.relative_to(EXPERIMENTS_DIR)
@@ -946,25 +893,25 @@ def main():
 
 
     if args.collect_results or args.collect_and_analyze:
-        results = collect_results(xlsxfile, main_folder, valid_rows, args.overwrite)
+        results = collect_results(xlsxfile, main_folder, valid_rows, args.overwrite, metric_cols)
         LOGGER.info(f"Wrote {len(results)} result rows to {xlsxfile}")
 
     if args.analyze or args.collect_and_analyze:
-        create_analysis_sheets(xlsxfile)
-        
+        create_analysis_sheets(xlsxfile, metric_cols)
+
         LOGGER.info(f"Created analysis sheets for books in {xlsxfile.name}")
 
-        create_summary_sheet(xlsxfile)
+        create_summary_sheet(xlsxfile, metric_cols)
         LOGGER.info(f"Updated summary sheet in {xlsxfile.name}")
-        
-        create_correlation_sheet(xlsxfile)
+
+        create_correlation_sheet(xlsxfile, metric_cols)
         LOGGER.info(f"Created correlations sheet in {xlsxfile}")
-        
-        for metric in ["BLEU", "chrF3++"]:
-            add_charts_to_workbook(xlsxfile, metric)
+
+        for metric_col in metric_cols:
+            add_charts_to_workbook(xlsxfile, metric_col)
             
         LOGGER.info(f"Added chart sheets to {xlsxfile.name}")
-        
+
     return 0
 
 
