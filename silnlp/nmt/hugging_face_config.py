@@ -1117,7 +1117,7 @@ class HuggingFaceNMTModel(NMTModel):
             data_collator,
             train_dataset,
             eval_dataset,
-            tokenizer,
+            processing_class=tokenizer,
             compute_metrics=None if metric_name in DEFAULT_METRICS else compute_metrics,
             sequential_sampling=self._config.train.get("sequential_sampling", False),
             better_transformer=self._config.train.get("better_transformer", False),
@@ -2110,7 +2110,7 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         data_collator: Optional[Any] = None,
         train_dataset: Optional[Dataset] = None,
         eval_dataset: Optional[Union[Dataset, Dict[str, Dataset]]] = None,
-        tokenizer: Optional[PreTrainedTokenizerBase] = None,
+        processing_class: Optional[PreTrainedTokenizerBase] = None,
         model_init: Optional[Callable[[], PreTrainedModel]] = None,
         compute_metrics: Optional[Callable[[EvalPrediction], Dict]] = None,
         callbacks: Optional[List[TrainerCallback]] = None,
@@ -2127,12 +2127,12 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
             data_collator,
             train_dataset,
             eval_dataset,
-            tokenizer,
-            model_init,
-            compute_metrics,
-            callbacks,
-            optimizers,
-            preprocess_logits_for_metrics,
+            processing_class=processing_class,
+            model_init=model_init,
+            compute_metrics=compute_metrics,
+            callbacks=callbacks,
+            optimizers=optimizers,
+            preprocess_logits_for_metrics=preprocess_logits_for_metrics,
         )
         self._sequential_sampling = sequential_sampling
         self._better_transformer = better_transformer
@@ -2210,8 +2210,8 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
             )
             if self._better_transformer:
                 self.model = self.model.to_bettertransformer()
-        if self.tokenizer is not None:
-            self.tokenizer.save_pretrained(output_dir)
+        if self.processing_class is not None:
+            self.processing_class.save_pretrained(output_dir)
 
         # Good practice: save your training arguments together with the trained model
         torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
