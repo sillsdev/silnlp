@@ -102,6 +102,7 @@ def get_project_metadata(onboarding_request: dict) -> Tuple[Dict[str, str], str]
         "sourceProjectB",
         "sourceProjectC",
         "draftingSourceProject",
+        "backTranslationProject",
     ]
 
     for key in project_keys:
