@@ -334,7 +334,7 @@ def write_pair_verse_scores(
             if "confidence" in scorers and confidences is not None:
                 other_verse_scores["Confidence"] = confidences[index]
 
-            row: List = [index + 1]
+            row: List = [f"{index + 1}"]
 
             if "bleu" in scorers:
                 row += [
