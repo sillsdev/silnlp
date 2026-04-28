@@ -1,4 +1,5 @@
 import argparse
+import csv
 import logging
 import random
 from contextlib import ExitStack
@@ -267,23 +268,24 @@ def write_pair_verse_scores(
     other_scores = {k: v for k, v in other_scores.items() if k.lower() in scorers}
 
     with open(
-        config.exp_dir / (predictions_detok_file_name + VERSE_SCORES_SUFFIX), "w", encoding="utf-8", newline="\n"
+        config.exp_dir / (predictions_detok_file_name + VERSE_SCORES_SUFFIX), "w", encoding="utf-8", newline=""
     ) as scores_file:
-        header = (
-            "Verse"
-            + (
-                "\tBLEU\tBLEU_1gram_prec\tBLEU_2gram_prec\tBLEU_3gram_prec\tBLEU_4gram_prec\tBLEU_brevity_penalty"
-                if "bleu" in scorers
-                else ""
-            )
-            + ("\t" if len(other_scores) > 0 else "")
-            + "\t".join(other_scores.keys())
-            + "\tPrediction"
-        )
-        for ref in pair_refs:
-            header += "\tReference"
-        header += "\n"
-        scores_file.write(header)
+        writer = csv.writer(scores_file, delimiter="\t")
+        header = ["Verse"]
+        if "bleu" in scorers:
+            header += [
+                "BLEU",
+                "BLEU_1gram_prec",
+                "BLEU_2gram_prec",
+                "BLEU_3gram_prec",
+                "BLEU_4gram_prec",
+                "BLEU_brevity_penalty",
+            ]
+        header += list(other_scores.keys())
+        header.append("Prediction")
+        for _ in pair_refs:
+            header.append("Reference")
+        writer.writerow(header)
         spbleu_metric = sacrebleu.metrics.BLEU(tokenize="flores200", lowercase=True) if "spbleu" in scorers else None
         for index, pred in enumerate(pair_sys):
             sentences: List[str] = []
@@ -332,23 +334,27 @@ def write_pair_verse_scores(
             if "confidence" in scorers and confidences is not None:
                 other_verse_scores["Confidence"] = confidences[index]
 
-            scores_file.write(f"{index + 1}")
+            row: List = [index + 1]
 
             if "bleu" in scorers:
-                scores_file.write(
-                    f"\t{bleu_verse_score.score:.2f}\t{bleu_verse_score.precisions[0]:.2f}\t{bleu_verse_score.precisions[1]:.2f}\t"
-                    f"{bleu_verse_score.precisions[2]:.2f}\t{bleu_verse_score.precisions[3]:.2f}\t{bleu_verse_score.bp:.3f}"
-                )
+                row += [
+                    f"{bleu_verse_score.score:.2f}",
+                    f"{bleu_verse_score.precisions[0]:.2f}",
+                    f"{bleu_verse_score.precisions[1]:.2f}",
+                    f"{bleu_verse_score.precisions[2]:.2f}",
+                    f"{bleu_verse_score.precisions[3]:.2f}",
+                    f"{bleu_verse_score.bp:.3f}",
+                ]
             for scorer, val in other_verse_scores.items():
                 if scorer.lower() == "confidence":
-                    scores_file.write(f"\t{val:.8f}")
+                    row.append(f"{val:.8f}")
                 else:
-                    scores_file.write(f"\t{val:.2f}")
+                    row.append(f"{val:.2f}")
 
-            scores_file.write("\t" + pred.strip())
+            row.append(pred.rstrip("\n"))
             for sentence in sentences:
-                scores_file.write("\t" + sentence.strip())
-            scores_file.write("\n")
+                row.append(sentence.rstrip("\n"))
+            writer.writerow(row)
 
 
 def score_individual_books(
@@ -412,7 +418,7 @@ def process_individual_books(
         for lines in zip(pred_file, vref_file, conf_list, *ref_files):
             # Get file lines
             pred_line = lines[0].strip()
-            detok_pred = tokenizer.detokenize(pred_line).strip()
+            detok_pred = tokenizer.detokenize(pred_line)
             vref = lines[1].strip()
             confidence = lines[2]
             # Get book
@@ -434,7 +440,7 @@ def process_individual_books(
             if select_rand_ref_line:
                 ref_lines: List[str] = [line.strip() for line in lines[3:] if len(line.strip()) > 0]
                 ref_index = random.randint(0, len(ref_lines) - 1)
-                ref_line = ref_lines[ref_index]
+                ref_line = ref_lines[ref_index + 3].strip()
                 if len(book_refs) == 0:
                     book_refs.append([])
                 book_refs[0].append(ref_line)
@@ -494,7 +500,7 @@ def load_test_data(
                     if vref.book_num not in books:
                         continue
             pred_line = lines[0].strip()
-            detok_pred_line = tokenizer.detokenize(pred_line).strip()
+            detok_pred_line = tokenizer.detokenize(pred_line)
             sys.append(detok_pred_line)
             if select_rand_ref_line:
                 ref_lines: List[str] = [line.strip() for line in lines[1:] if len(line.strip()) > 0]
