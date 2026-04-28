@@ -583,6 +583,7 @@ class HuggingFaceConfig(Config):
             for file_path in file_paths:
                 occurrence_lines: List[int] = []
                 total_count = 0
+                lines_truncated = False
                 try:
                     with file_path.open("r", encoding="utf-8-sig") as f:
                         for line_num, line in enumerate(f, 1):
@@ -591,15 +592,20 @@ class HuggingFaceConfig(Config):
                                 total_count += line_count
                                 if len(occurrence_lines) < _MAX_LOGGED_OCCURRENCE_LINES:
                                     occurrence_lines.append(line_num)
+                                else:
+                                    lines_truncated = True
                 except OSError:
                     continue
 
                 if total_count > 0:
+                    lines_str = str(occurrence_lines)
+                    if lines_truncated:
+                        lines_str += f" (showing first {_MAX_LOGGED_OCCURRENCE_LINES} of more)"
                     LOGGER.info(
                         "    File: %s  Occurrences: %d  Lines: %s",
                         file_path.name,
                         total_count,
-                        occurrence_lines,
+                        lines_str,
                     )
 
     def _build_vocabs(self, stats: bool = False) -> None:
