@@ -345,9 +345,9 @@ def write_pair_verse_scores(
                 else:
                     scores_file.write(f"\t{val:.2f}")
 
-            scores_file.write("\t" + pred.rstrip("\n"))
+            scores_file.write("\t" + pred.strip())
             for sentence in sentences:
-                scores_file.write("\t" + sentence.rstrip("\n"))
+                scores_file.write("\t" + sentence.strip())
             scores_file.write("\n")
 
 
@@ -412,7 +412,7 @@ def process_individual_books(
         for lines in zip(pred_file, vref_file, conf_list, *ref_files):
             # Get file lines
             pred_line = lines[0].strip()
-            detok_pred = tokenizer.detokenize(pred_line)
+            detok_pred = tokenizer.detokenize(pred_line).strip()
             vref = lines[1].strip()
             confidence = lines[2]
             # Get book
@@ -434,7 +434,7 @@ def process_individual_books(
             if select_rand_ref_line:
                 ref_lines: List[str] = [line.strip() for line in lines[3:] if len(line.strip()) > 0]
                 ref_index = random.randint(0, len(ref_lines) - 1)
-                ref_line = ref_lines[ref_index + 3].strip()
+                ref_line = ref_lines[ref_index]
                 if len(book_refs) == 0:
                     book_refs.append([])
                 book_refs[0].append(ref_line)
@@ -494,7 +494,7 @@ def load_test_data(
                     if vref.book_num not in books:
                         continue
             pred_line = lines[0].strip()
-            detok_pred_line = tokenizer.detokenize(pred_line)
+            detok_pred_line = tokenizer.detokenize(pred_line).strip()
             sys.append(detok_pred_line)
             if select_rand_ref_line:
                 ref_lines: List[str] = [line.strip() for line in lines[1:] if len(line.strip()) > 0]
