@@ -156,7 +156,7 @@ class TranslationTask:
                         trg_iso,
                         produce_multiple_translations,
                         save_confidences,
-                        chapters,
+                        chapters if chapters else None,
                         trg_project,
                         postprocess_handler,
                         experiment_ckpt_str,
