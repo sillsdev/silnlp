@@ -951,6 +951,12 @@ class HuggingFaceNMTModel(NMTModel):
             PreTrainedModel,
             AutoModelForSeq2SeqLM.from_pretrained(self._config.model, config=model_config, device_map=device_map),
         )
+
+        # NLLB models incorrectly set max_length in the model config instead of the generation config
+        if self._config.model_prefix == "facebook/nllb-200" and model.generation_config is not None:
+            model.generation_config.max_length = model.config.max_length
+            model.config.max_length = None
+
         if self._config.train.get("better_transformer"):
             model = model.to_bettertransformer()
         tokenizer = self._config.get_tokenizer()
@@ -1774,11 +1780,6 @@ class HuggingFaceNMTModel(NMTModel):
             model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if self._mixed_precision else None)
         if self._config.model_prefix == "google/madlad400" or model_name == self._config.model:
             model, tokenizer = self._configure_model(model, tokenizer, src_lang, trg_lang)
-
-        # NLLB models incorrectly set max_length in the model config instead of the generation config
-        if self._config.model_prefix == "facebook/nllb-200" and model.generation_config is not None:
-            model.generation_config.max_length = model.config.max_length
-            model.config.max_length = None
 
         if model.generation_config is not None and (
             model.generation_config.max_length is None or model.generation_config.max_length < 512
