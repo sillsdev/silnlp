@@ -336,7 +336,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
         trg_iso: str,
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
-        chapters: List[int] = [],
+        chapters: Optional[List[int]] = None,
         trg_project: Optional[str] = None,
         postprocess_handler: Optional[PostprocessHandler] = None,
         experiment_ckpt_str: str = "",
@@ -372,7 +372,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
         trg_iso: str,
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
-        chapters: List[int] = [],
+        chapters: Optional[List[int]] = None,
         trg_project: Optional[str] = None,
         postprocess_handler: Optional[PostprocessHandler] = None,
         experiment_ckpt_str: str = "",
@@ -440,10 +440,21 @@ class Translator(AbstractContextManager["Translator"], ABC):
             for config in postprocess_handler.configs:
 
                 # Compile draft remarks
-                draft_src_str = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
-                draft_remark = f"This draft of {sentences.get_book()} was machine translated on {date.today()} from {draft_src_str} using model {experiment_ckpt_str}. It should be reviewed and edited carefully."
+                remarks: List[Tuple[int, str]] = []
                 postprocess_remark = config.get_postprocess_remark()
-                remarks = [draft_remark] + ([postprocess_remark] if postprocess_remark else [])
+                draft_src_str = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
+                chapters_for_remarks = (
+                    chapters if chapters else sorted({sr.verse_ref.chapter_num for sr in scripture_refs})
+                )
+                for chapter_num in chapters_for_remarks:
+                    draft_remark = (
+                        f"This draft of {sentences.get_book()} {chapter_num} was machine translated on "
+                        f"{date.today()} from {draft_src_str} using model {experiment_ckpt_str}. It should be "
+                        f"reviewed and edited carefully."
+                    )
+                    remarks.append((chapter_num, draft_remark))
+                    if postprocess_remark:
+                        remarks.append((chapter_num, postprocess_remark))
 
                 # Insert translation into the USFM structure of an existing project
                 # If the target project is not the same as the translated file's original project,
@@ -460,6 +471,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
                     usfm_out = dest_updater.update_usfm(
                         book_id=src_file_text.id,
                         rows=config.rows,
+                        chapters=chapters,
                         text_behavior=text_behavior,
                         paragraph_behavior=config.get_paragraph_behavior(),
                         embed_behavior=config.get_embed_behavior(),
