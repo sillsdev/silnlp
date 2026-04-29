@@ -1,3 +1,4 @@
+import argparse
 import concurrent.futures
 import logging
 import os
@@ -11,38 +12,54 @@ from typing import Dict, Tuple
 import requests
 from clearml import Task
 
-SF_AUTH_USER = os.getenv("SF_AUTH_USER")
-SF_AUTH_PWD = os.getenv("SF_AUTH_PWD")
-SF_CLIENT_ID = os.getenv("SF_CLIENT_ID")
-UUID = str(uuid.uuid4())
-ONBOARDING_PATH = os.getenv("ONBOARDING_PATH")
-ONBOARDING_LOG_PATH = f"{ONBOARDING_PATH}/onboarded_projects.log"
-ONBOARDING_CLEANUP_PATH = f"{ONBOARDING_PATH}/paths_to_delete.txt"
-ONBOARDING_REQUESTS_BUCKET_DIR = "MT/experiments/_OnboardingRequests"
-os.makedirs(ONBOARDING_PATH, exist_ok=True)
-REPO_PATH = os.getenv("REPO_PATH")
 
-ONBOARDING_REQUESTS_URL = "https://scriptureforge.org/command-api/onboarding-requests"
-PROJECTS_URL = "https://scriptureforge.org/paratext-api/projects"
-SF_AUTH_URL = "https://login.languagetechnology.org/oauth/token"
+def setup_environment(qa: bool):
+    global SF_AUTH_PWD, SF_CLIENT_ID, ONBOARDING_PATH, ONBOARDING_LOG_PATH, ONBOARDING_CLEANUP_PATH, ONBOARDING_REQUESTS_URL, PROJECTS_URL, SF_AUTH_URL
+    if qa:
+        ONBOARDING_REQUESTS_URL = "https://scriptureforge.org/command-api/onboarding-requests"
+        PROJECTS_URL = "https://scriptureforge.org/paratext-api/projects"
+        SF_AUTH_URL = "https://login.languagetechnology.org/oauth/token"
+        SF_AUTH_PWD = os.getenv("SF_AUTH_PWD")
+        SF_CLIENT_ID = os.getenv("SF_CLIENT_ID")
+        ONBOARDING_PATH = os.getenv("ONBOARDING_PATH")
+        ONBOARDING_LOG_PATH = f"{ONBOARDING_PATH}/onboarded_projects.log"
+        ONBOARDING_CLEANUP_PATH = f"{ONBOARDING_PATH}/paths_to_delete.txt"
+    else:
+        ONBOARDING_REQUESTS_URL = "https://qa.scriptureforge.org/command-api/onboarding-requests"
+        PROJECTS_URL = "https://qa.scriptureforge.org/paratext-api/projects"
+        SF_AUTH_URL = "https://dev-sillsdev.auth0.com/oauth/token"
+        SF_AUTH_PWD = os.getenv("SF_QA_AUTH_PWD")
+        SF_CLIENT_ID = os.getenv("SF_QA_CLIENT_ID")
+        ONBOARDING_PATH = os.getenv("QA_ONBOARDING_PATH")
+        ONBOARDING_LOG_PATH = f"{ONBOARDING_PATH}/onboarded_projects.log"
+        ONBOARDING_CLEANUP_PATH = f"{ONBOARDING_PATH}/paths_to_delete.txt"
 
-payload = {
-    "username": SF_AUTH_USER,
-    "password": SF_AUTH_PWD,
-    "grant_type": "http://auth0.com/oauth/grant-type/password-realm",
-    "client_id": SF_CLIENT_ID,
-    "realm": "Username-Password-Authentication",
-    "audience": "https://scriptureforge.org/",
-    "scope": "openid profile email sf_data offline_access",
-}
+    global ONBOARDING_REQUESTS_BUCKET_DIR, REPO_PATH, SF_API_TOKEN, LOGGER, UUID
 
-req = requests.post(
-    SF_AUTH_URL,
-    json=payload,
-    headers={"Content-Type": "application/json"},
-)
-SF_API_TOKEN = req.json().get("access_token")
-LOGGER = logging.getLogger(__name__)
+    ONBOARDING_REQUESTS_BUCKET_DIR = "MT/experiments/_OnboardingRequests"
+    REPO_PATH = os.getenv("REPO_PATH")
+    os.makedirs(ONBOARDING_PATH, exist_ok=True)
+
+    SF_AUTH_USER = os.getenv("SF_AUTH_USER")
+    UUID = str(uuid.uuid4())
+    payload = {
+        "username": SF_AUTH_USER,
+        "password": SF_AUTH_PWD,
+        "grant_type": "http://auth0.com/oauth/grant-type/password-realm",
+        "client_id": SF_CLIENT_ID,
+        "realm": "Username-Password-Authentication",
+        "audience": "https://scriptureforge.org/",
+        "scope": "openid profile email sf_data offline_access",
+    }
+
+    req = requests.post(
+        SF_AUTH_URL,
+        json=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    SF_API_TOKEN = req.json().get("access_token")
+
+    LOGGER = logging.getLogger(__name__)
 
 
 class RequestType(Enum):
@@ -215,6 +232,12 @@ def process_request(request):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Process onboarding requests.")
+    parser.add_argument("--qa", action="store_true", help="Run on SF QA")
+    args = parser.parse_args()
+
+    setup_environment(args.qa)
+
     onboarding_requests = get_onboarding_requests()
     if not onboarding_requests:
         LOGGER.info("No new onboarding requests found.")
