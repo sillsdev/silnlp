@@ -50,8 +50,8 @@ def _count_file_occurrences(
     """Scan file_path for matches of pattern and return occurrence statistics.
 
     Returns:
-        total_count: number of matches found (up to and including the line where
-            max_lines is reached; scanning stops after that line for efficiency).
+        total_count: number of lines that contain at least one match (scanning stops
+            after max_lines matching lines are found, for efficiency).
         occurrence_lines: 1-based line numbers of the first max_lines matching lines.
         truncated: True when the file contained more matching lines than max_lines.
     """
@@ -59,11 +59,10 @@ def _count_file_occurrences(
     total_count = 0
     truncated = False
     try:
-        with file_path.open("r", encoding="utf-8-sig") as f:
+        with file_path.open("r", encoding="utf-8") as f:
             for line_num, line in enumerate(f, 1):
-                matches = len(pattern.findall(line))
-                if matches > 0:
-                    total_count += matches
+                if pattern.search(line):
+                    total_count += 1
                     if len(occurrence_lines) < max_lines:
                         occurrence_lines.append(line_num)
                     else:

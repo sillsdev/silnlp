@@ -463,8 +463,10 @@ class HuggingFaceConfig(Config):
         self,
         missing_tokens: List[str],
         trained_tokenizers: Optional[List[Union[SentencePieceBPETokenizer, SentencePieceUnigramTokenizer]]] = None,
+        file_paths: Optional[List[Path]] = None,
     ) -> None:
         assert self._tokenizer is not None
+        TokenOccurrenceLogger(file_paths or []).log(missing_tokens)
         self._tokenizer.save_pretrained(str(self.exp_dir))
         with open(self.exp_dir / "tokenizer.json", "r+", encoding="utf-8") as file:
             data = json.load(file)
@@ -529,7 +531,6 @@ class HuggingFaceConfig(Config):
         sp_tokenizer = self._train_sp_tokenizer(files, vocab_size)
         sp_keys, tok_keys = sp_tokenizer.get_vocab().keys(), self._tokenizer.get_vocab().keys()
         missing_tokens = sorted(list(set(sp_keys) - set(tok_keys)))
-        TokenOccurrenceLogger(list(file_paths)).log(missing_tokens)
         return missing_tokens, sp_tokenizer
 
     def _find_missing_characters(self, corpus: List[Path]) -> List[str]:
@@ -546,7 +547,6 @@ class HuggingFaceConfig(Config):
 
         charset = set(filter(None, {char.strip() for char in charset}))
         missing_characters = sorted(list(charset - vocab))
-        TokenOccurrenceLogger(corpus).log(missing_characters)
         return missing_characters
 
     def _build_vocabs(self, stats: bool = False) -> None:
@@ -598,7 +598,11 @@ class HuggingFaceConfig(Config):
                     missing_tokens = src_missing_tokens + trg_missing_tokens
 
             if missing_tokens:
-                self._add_tokens(missing_tokens, trained_tokenizers)
+                corpus_file_paths = (
+                    (list(self.src_file_paths) if tok_dict.get("update_src") else [])
+                    + (list(self.trg_file_paths) if tok_dict.get("update_trg") else [])
+                )
+                self._add_tokens(missing_tokens, trained_tokenizers, corpus_file_paths)
 
             if tok_dict.get("share_vocab") and tok_dict.get("update_src") and tok_dict.get("update_trg"):
                 # TODO: Calculate representative split of tokens for shared vocab case
