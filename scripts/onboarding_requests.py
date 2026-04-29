@@ -15,7 +15,7 @@ from clearml import Task
 
 def setup_environment(qa: bool):
     global SF_AUTH_PWD, SF_CLIENT_ID, ONBOARDING_PATH, ONBOARDING_LOG_PATH, ONBOARDING_CLEANUP_PATH, ONBOARDING_REQUESTS_URL, PROJECTS_URL, SF_AUTH_URL
-    if qa:
+    if not qa:
         ONBOARDING_REQUESTS_URL = "https://scriptureforge.org/command-api/onboarding-requests"
         PROJECTS_URL = "https://scriptureforge.org/paratext-api/projects"
         SF_AUTH_URL = "https://login.languagetechnology.org/oauth/token"
