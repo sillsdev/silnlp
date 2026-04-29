@@ -1182,13 +1182,14 @@ class HuggingFaceNMTModel(NMTModel):
     ) -> None:
         tokenizer = self._config.get_tokenizer()
         model = self._create_inference_model(ckpt, tokenizer, self._config.test_src_lang, self._config.test_trg_lang)
+        compiled_model = cast(PreTrainedModel, torch.compile(model))
 
         for input_path, translation_path, vref_path in zip(
             input_paths,
             translation_paths,
             cast(Iterable[Optional[Path]], repeat(None) if vref_paths is None else vref_paths),
         ):
-            pipeline = self._create_pipeline_for_test_file(input_path, model, tokenizer)
+            pipeline = self._create_pipeline_for_test_file(input_path, model, compiled_model, tokenizer)
 
             length = count_lines(input_path)
             with ExitStack() as stack:
@@ -1222,7 +1223,7 @@ class HuggingFaceNMTModel(NMTModel):
                         )
 
     def _create_pipeline_for_test_file(
-        self, input_path: Path, model: PreTrainedModel, tokenizer: PreTrainedTokenizer
+        self, input_path: Path, model: PreTrainedModel, compiled_model: PreTrainedModel, tokenizer: PreTrainedTokenizer
     ) -> "PretokenizedTranslationPipeline":
         iso_specified_file_pattern = re.compile(r"^test\.([a-z]{2,3})\.([a-z]{2,3})\..*")
         if iso_specified_file_pattern.match(input_path.name):
@@ -1240,7 +1241,7 @@ class HuggingFaceNMTModel(NMTModel):
             tgt_lang=trg_lang,
             device=0,
         )
-        pipeline.model = torch.compile(pipeline.model)
+        pipeline.model = compiled_model
         return pipeline
 
     def _translate_test_sentences(
