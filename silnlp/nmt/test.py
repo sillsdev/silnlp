@@ -725,7 +725,7 @@ def test_checkpoint(
 
 
 def test(
-    experiment: str,
+    config: Config,
     checkpoint: Optional[str] = None,
     last: bool = False,
     avg: bool = False,
@@ -738,10 +738,8 @@ def test(
     produce_multiple_translations: bool = False,
     save_confidences: bool = False,
     clearml_queue: Optional[str] = None,
+    model: Optional[NMTModel] = None,
 ):
-    exp_name = experiment
-    config = load_config(exp_name)
-
     if not any(config.exp_dir.glob("test*.src.txt")):
         LOGGER.info("No test dataset.")
         return
@@ -757,7 +755,8 @@ def test(
     scorers.intersection_update(set(SUPPORTED_SCORERS))
 
     tokenizer = config.create_tokenizer()
-    model = config.create_model(clearml_queue=clearml_queue)
+    if model is None:
+        model = config.create_model(clearml_queue=clearml_queue)
     results: Dict[int, List[PairScore]] = {}
     step: int
     if checkpoint is not None:
@@ -947,8 +946,10 @@ def main() -> None:
     else:
         books = args.books
 
+    config = load_config(experiment)
+
     test(
-        experiment,
+        config=config,
         checkpoint=args.checkpoint,
         last=args.last,
         best=args.best,

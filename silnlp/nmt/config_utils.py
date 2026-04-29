@@ -16,5 +16,13 @@ def load_config(exp_name: str) -> Config:
     return create_config(exp_dir, config)
 
 
+def load_config_from_exp_dir(exp_dir: Path) -> Config:
+    config_path = exp_dir / "config.yml"
+
+    with config_path.open("r", encoding="utf-8") as file:
+        config: dict = yaml.safe_load(file)
+    return create_config(exp_dir, config)
+
+
 def create_config(exp_dir: Path, config: dict) -> Config:
     return HuggingFaceConfig(exp_dir, config)

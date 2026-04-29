@@ -76,6 +76,7 @@ def get_git_revision_hash() -> str:
     return git_hash
 
 
+# This function is in the process of being refactored to be part of the SilNlpEnv class
 def get_mt_exp_dir(exp_name: str) -> Path:
     return SIL_NLP_ENV.mt_experiments_dir / exp_name
 
