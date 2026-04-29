@@ -9,7 +9,7 @@ parser.add_argument("project", type=str, help="The name of the main Paratext pro
 parser.add_argument(
     "--dir",
     type=str,
-    help="The name of the directory in ONBOARDING_PATH to use as the source for onboarding.",
+    help="The name of the directory to use as the source for onboarding.",
 )
 parser.add_argument("--task-name", type=str, help="The name of the ClearML task to create for this onboarding process.")
 args = parser.parse_args()
@@ -29,7 +29,7 @@ try:
             "--security-opt apparmor=docker-apparmor",
             "--env CHECK_TRANSFERS=1",
             "--env SIL_NLP_DATA_PATH=/root/M",
-            f"-v {os.getenv('ONBOARDING_PATH')}/{args.dir}:/root/OnboardingProjects/{args.dir}",
+            f"-v {args.dir}:/root/OnboardingProjects/{args.dir}",
         ],
         docker_setup_bash_script=[
             "apt install -y python3-venv",

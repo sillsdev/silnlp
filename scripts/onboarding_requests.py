@@ -201,7 +201,7 @@ def process_request(request):
                 f"{REPO_PATH}/scripts/automate_onboard_project.py",
                 f"{main_project_name}.zip",
                 "--dir",
-                f"{main_project_name}_Request",
+                f"{ONBOARDING_PATH}/{main_project_name}_Request",
                 "--task-name",
                 task_name,
             ]
