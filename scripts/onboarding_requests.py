@@ -1,3 +1,4 @@
+import argparse
 import concurrent.futures
 import logging
 import os
@@ -11,38 +12,72 @@ from typing import Dict, Tuple
 import requests
 from clearml import Task
 
-SF_AUTH_USER = os.getenv("SF_AUTH_USER")
-SF_AUTH_PWD = os.getenv("SF_AUTH_PWD")
-SF_CLIENT_ID = os.getenv("SF_CLIENT_ID")
-UUID = str(uuid.uuid4())
-ONBOARDING_PATH = os.getenv("ONBOARDING_PATH")
-ONBOARDING_LOG_PATH = f"{ONBOARDING_PATH}/onboarded_projects.log"
-ONBOARDING_CLEANUP_PATH = f"{ONBOARDING_PATH}/paths_to_delete.txt"
-ONBOARDING_REQUESTS_BUCKET_DIR = "MT/experiments/_OnboardingRequests"
-os.makedirs(ONBOARDING_PATH, exist_ok=True)
-REPO_PATH = os.getenv("REPO_PATH")
-
-ONBOARDING_REQUESTS_URL = "https://scriptureforge.org/command-api/onboarding-requests"
-PROJECTS_URL = "https://scriptureforge.org/paratext-api/projects"
-SF_AUTH_URL = "https://login.languagetechnology.org/oauth/token"
-
-payload = {
-    "username": SF_AUTH_USER,
-    "password": SF_AUTH_PWD,
-    "grant_type": "http://auth0.com/oauth/grant-type/password-realm",
-    "client_id": SF_CLIENT_ID,
-    "realm": "Username-Password-Authentication",
-    "audience": "https://scriptureforge.org/",
-    "scope": "openid profile email sf_data offline_access",
-}
-
-req = requests.post(
-    SF_AUTH_URL,
-    json=payload,
-    headers={"Content-Type": "application/json"},
-)
-SF_API_TOKEN = req.json().get("access_token")
 LOGGER = logging.getLogger(__name__)
+
+
+class OnboardingEnvironment:
+    SF_AUTH_PWD: str = None
+    SF_CLIENT_ID: str = None
+    ONBOARDING_PATH: Path = None
+    ONBOARDING_LOG_PATH: Path = None
+    ONBOARDING_CLEANUP_PATH: Path = None
+    ONBOARDING_REQUESTS_URL: str = None
+    PROJECTS_URL: str = None
+    SF_AUTH_URL: str = None
+    ONBOARDING_REQUESTS_BUCKET_DIR: str = None
+    REPO_PATH: Path = None
+    SF_API_TOKEN: str = None
+    UUID: str = None
+
+    @classmethod
+    def create_production_environment(cls):
+        cls.ONBOARDING_REQUESTS_URL = "https://scriptureforge.org/command-api/onboarding-requests"
+        cls.PROJECTS_URL = "https://scriptureforge.org/paratext-api/projects"
+        cls.SF_AUTH_URL = "https://login.languagetechnology.org/oauth/token"
+        cls.SF_AUTH_PWD = os.getenv("SF_AUTH_PWD")
+        cls.SF_CLIENT_ID = os.getenv("SF_CLIENT_ID")
+        cls.ONBOARDING_PATH = Path(os.getenv("ONBOARDING_PATH"))
+        cls.setup_environment()
+
+    @classmethod
+    def create_qa_environment(cls):
+        cls.ONBOARDING_REQUESTS_URL = "https://qa.scriptureforge.org/command-api/onboarding-requests"
+        cls.PROJECTS_URL = "https://qa.scriptureforge.org/paratext-api/projects"
+        cls.SF_AUTH_URL = "https://dev-sillsdev.auth0.com/oauth/token"
+        cls.SF_AUTH_PWD = os.getenv("SF_QA_AUTH_PWD")
+        cls.SF_CLIENT_ID = os.getenv("SF_QA_CLIENT_ID")
+        cls.ONBOARDING_PATH = Path(os.getenv("QA_ONBOARDING_PATH"))
+        cls.setup_environment()
+
+    @classmethod
+    def setup_environment(cls):
+        cls.ONBOARDING_PATH.mkdir(parents=True, exist_ok=True)
+        cls.ONBOARDING_LOG_PATH = cls.ONBOARDING_PATH / "onboarded_projects.log"
+        cls.ONBOARDING_CLEANUP_PATH = cls.ONBOARDING_PATH / "paths_to_delete.txt"
+        cls.ONBOARDING_LOG_PATH.touch()
+        cls.ONBOARDING_CLEANUP_PATH.touch()
+        cls.ONBOARDING_REQUESTS_BUCKET_DIR = "MT/experiments/_OnboardingRequests"
+        cls.REPO_PATH = Path(os.getenv("REPO_PATH"))
+        os.makedirs(cls.ONBOARDING_PATH, exist_ok=True)
+
+        cls.SF_AUTH_USER = os.getenv("SF_AUTH_USER")
+        cls.UUID = str(uuid.uuid4())
+        payload = {
+            "username": cls.SF_AUTH_USER,
+            "password": cls.SF_AUTH_PWD,
+            "grant_type": "http://auth0.com/oauth/grant-type/password-realm",
+            "client_id": cls.SF_CLIENT_ID,
+            "realm": "Username-Password-Authentication",
+            "audience": "https://scriptureforge.org/",
+            "scope": "openid profile email sf_data offline_access",
+        }
+
+        req = requests.post(
+            cls.SF_AUTH_URL,
+            json=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        cls.SF_API_TOKEN = req.json().get("access_token")
 
 
 class RequestType(Enum):
@@ -51,13 +86,13 @@ class RequestType(Enum):
 
 
 def send_request(type: RequestType, url: str, method: str, params: dict) -> dict:
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {SF_API_TOKEN}"}
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {OnboardingEnvironment.SF_API_TOKEN}"}
     json_data = {
         "body": {
             "jsonrpc": "2.0",
             "method": method,
             "params": params,
-            "id": UUID,
+            "id": OnboardingEnvironment.UUID,
         }
     }
     try:
@@ -76,14 +111,18 @@ def send_request(type: RequestType, url: str, method: str, params: dict) -> dict
 def add_comment(request_id: str, comment: str):
     send_request(
         RequestType.POST,
-        ONBOARDING_REQUESTS_URL,
+        OnboardingEnvironment.ONBOARDING_REQUESTS_URL,
         "addComment",
         {"requestId": request_id, "commentText": comment},
     )
 
 
 def get_onboarding_requests() -> list[dict]:
-    all_requests = send_request(RequestType.GET, ONBOARDING_REQUESTS_URL, "getAllRequests", {}).json().get("result", [])
+    all_requests = (
+        send_request(RequestType.GET, OnboardingEnvironment.ONBOARDING_REQUESTS_URL, "getAllRequests", {})
+        .json()
+        .get("result", [])
+    )
     return [request for request in all_requests if request["status"] == "new"] if all_requests else []
 
 
@@ -112,7 +151,7 @@ def get_project_metadata(onboarding_request: dict) -> Tuple[Dict[str, str], str]
         metadata = (
             send_request(
                 RequestType.GET,
-                ONBOARDING_REQUESTS_URL,
+                OnboardingEnvironment.ONBOARDING_REQUESTS_URL,
                 "getProjectMetadata",
                 {"scriptureForgeId": id} if key == "projectId" else {"paratextId": id},
             )
@@ -129,7 +168,7 @@ def get_project_metadata(onboarding_request: dict) -> Tuple[Dict[str, str], str]
 def download_project(
     request_id: str, SF_id: str, main_project_name: str, project_short_name: str, paratext_id: str
 ) -> None:
-    project_url = f"{PROJECTS_URL}/{SF_id}/download"
+    project_url = f"{OnboardingEnvironment.PROJECTS_URL}/{SF_id}/download"
     response = send_request(RequestType.GET, project_url, "getProjectDownloadLink", {"paratextId": SF_id})
     if response.status_code != 200:
         if main_project_name == project_short_name:
@@ -139,10 +178,12 @@ def download_project(
             f"Failed to download Reference project: {project_short_name}. Skipping onboarding for this project.\nError: {response.text}",
         )
         return
-    os.makedirs(f"{ONBOARDING_PATH}/{main_project_name}_Request", exist_ok=True)
+    os.makedirs(f"{OnboardingEnvironment.ONBOARDING_PATH}/{main_project_name}_Request", exist_ok=True)
     if paratext_id and len(paratext_id) == 16:
         project_short_name = f"{project_short_name}_Resource"
-    with open(f"{ONBOARDING_PATH}/{main_project_name}_Request/{project_short_name}.zip", "wb") as f:
+    with open(
+        f"{OnboardingEnvironment.ONBOARDING_PATH}/{main_project_name}_Request/{project_short_name}.zip", "wb"
+    ) as f:
         f.write(response.content)
 
 
@@ -172,7 +213,7 @@ def process_request(request):
         add_comment(request["id"], "Processing this onboarding request...")
         request_metadata, main_project_name = get_project_metadata(request)
         if not request_metadata:
-            with open(ONBOARDING_LOG_PATH, "a") as f:
+            with open(OnboardingEnvironment.ONBOARDING_LOG_PATH, "a") as f:
                 f.write(f"{request['id']}\n")
             return
         for SF_id, (paratext_id, project_short_name) in request_metadata.items():
@@ -181,26 +222,31 @@ def process_request(request):
         subprocess.run(
             [
                 "/usr/bin/python3",
-                f"{REPO_PATH}/scripts/automate_onboard_project.py",
+                f"{OnboardingEnvironment.REPO_PATH}/scripts/automate_onboard_project.py",
                 f"{main_project_name}.zip",
                 "--dir",
-                f"{main_project_name}_Request",
+                f"{OnboardingEnvironment.ONBOARDING_PATH}/{main_project_name}_Request",
                 "--task-name",
                 task_name,
             ]
         )
         task: Task = Task.get_task(project_name="Onboarding", task_name=task_name, tags=["silnlp-auto-onboarding"])
-        with open(ONBOARDING_LOG_PATH, "a") as f:
+        with open(OnboardingEnvironment.ONBOARDING_LOG_PATH, "a") as f:
             f.write(f"{request['id']}\n")
-        with open(ONBOARDING_CLEANUP_PATH, "a") as f:
-            f.write(f"{ONBOARDING_PATH}/{main_project_name}_Request\n")
+        with open(OnboardingEnvironment.ONBOARDING_CLEANUP_PATH, "a") as f:
+            f.write(f"{OnboardingEnvironment.ONBOARDING_PATH}/{main_project_name}_Request\n")
 
         add_comment(
             request["id"],
             f"This request is being automatically onboarded.\nClearML task: {task_name}.\nLink: {task.get_output_log_web_page()}",
         )
-        adjusted_name = rename_project(main_project_name, True, Path(f"{ONBOARDING_PATH}/{main_project_name}_Request"))
-        add_comment(request["id"], f"Results will be stored in {ONBOARDING_REQUESTS_BUCKET_DIR}/{adjusted_name}")
+        adjusted_name = rename_project(
+            main_project_name, True, Path(f"{OnboardingEnvironment.ONBOARDING_PATH}/{main_project_name}_Request")
+        )
+        add_comment(
+            request["id"],
+            f"Results will be stored in {OnboardingEnvironment.ONBOARDING_REQUESTS_BUCKET_DIR}/{adjusted_name}",
+        )
     except Exception as e:
         LOGGER.warning(f"Error processing onboarding request {request['id']}:\n{e}")
         add_comment(request["id"], f"Error processing this onboarding request:\n{e}")
@@ -215,18 +261,21 @@ def process_request(request):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Process onboarding requests.")
+    parser.add_argument("--qa", action="store_true", help="Run on SF QA")
+    args = parser.parse_args()
+
+    if args.qa:
+        OnboardingEnvironment.create_qa_environment()
+    else:
+        OnboardingEnvironment.create_production_environment()
     onboarding_requests = get_onboarding_requests()
     if not onboarding_requests:
         LOGGER.info("No new onboarding requests found.")
         return
     onboarded_projects = []
 
-    if not os.path.exists(ONBOARDING_LOG_PATH):
-        Path(ONBOARDING_LOG_PATH).touch()
-    if not os.path.exists(ONBOARDING_CLEANUP_PATH):
-        Path(ONBOARDING_CLEANUP_PATH).touch()
-
-    with open(ONBOARDING_LOG_PATH, "r") as f:
+    with open(OnboardingEnvironment.ONBOARDING_LOG_PATH, "r") as f:
         onboarded_projects = f.read().splitlines()
         onboarded_projects = [project_id.strip() for project_id in onboarded_projects]
 
