@@ -4,7 +4,6 @@ import logging
 import os
 import re
 import shutil
-import unicodedata
 from contextlib import ExitStack
 from copy import deepcopy
 from dataclasses import dataclass
@@ -81,6 +80,7 @@ from ..common.translator import generate_confidence_files
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, get_mt_exp_dir, merge_dict
 from .config import SUPPORTED_GLOSS_ISOS, CheckpointType, Config, NMTModel
 from .corpora import DataFile
+from .token_occurrence_logger import TokenOccurrenceLogger
 from .tokenizer import NullTokenizer, Tokenizer
 
 if is_safetensors_available():
@@ -92,8 +92,6 @@ else:
     LoraConfig, PeftModel, TaskType, get_peft_model = None, None, None, None
 
 LOGGER = logging.getLogger(__name__)
-
-_MAX_LOGGED_OCCURRENCE_LINES = 10  # Maximum number of line numbers to log per token per corpus file
 
 
 def prepare_decoder_input_ids_from_labels(self: M2M100ForConditionalGeneration, labels: Tensor) -> Tensor:
@@ -531,7 +529,7 @@ class HuggingFaceConfig(Config):
         sp_tokenizer = self._train_sp_tokenizer(files, vocab_size)
         sp_keys, tok_keys = sp_tokenizer.get_vocab().keys(), self._tokenizer.get_vocab().keys()
         missing_tokens = sorted(list(set(sp_keys) - set(tok_keys)))
-        self._log_missing_tokens(list(file_paths), missing_tokens)
+        TokenOccurrenceLogger(list(file_paths)).log(missing_tokens)
         return missing_tokens, sp_tokenizer
 
     def _find_missing_characters(self, corpus: List[Path]) -> List[str]:
@@ -548,65 +546,8 @@ class HuggingFaceConfig(Config):
 
         charset = set(filter(None, {char.strip() for char in charset}))
         missing_characters = sorted(list(charset - vocab))
-        self._log_missing_tokens(corpus, missing_characters)
+        TokenOccurrenceLogger(corpus).log(missing_characters)
         return missing_characters
-
-    def _log_missing_tokens(self, file_paths: List[Path], missing_tokens: List[str]) -> None:
-        """Log details about tokens that will be added to the tokenizer.
-
-        For each token, logs its Unicode code point(s) and name(s), then for each corpus
-        file logs the total occurrence count and up to _MAX_LOGGED_OCCURRENCE_LINES line
-        numbers where the token appears.
-        """
-        if not missing_tokens:
-            LOGGER.info("No new tokens to add to the tokenizer.")
-            return
-
-        LOGGER.info("Adding %d new token(s) to the tokenizer:", len(missing_tokens))
-        for token in missing_tokens:
-            unicode_details = []
-            for char in token:
-                cp = ord(char)
-                try:
-                    name = unicodedata.name(char)
-                except ValueError:
-                    name = "UNKNOWN"
-                unicode_details.append(f"U+{cp:04X} {name}")
-            LOGGER.info("  Token: %s  Unicode: [%s]", repr(token), "; ".join(unicode_details))
-
-            # The SentencePiece word-boundary prefix ▁ (U+2581) is not present in
-            # raw corpus text, so strip it before searching for the token.
-            search_token = token.replace("\u2581", " ").strip()
-            if not search_token:
-                continue
-
-            for file_path in file_paths:
-                occurrence_lines: List[int] = []
-                total_count = 0
-                lines_truncated = False
-                try:
-                    with file_path.open("r", encoding="utf-8-sig") as f:
-                        for line_num, line in enumerate(f, 1):
-                            line_count = line.count(search_token)
-                            if line_count > 0:
-                                total_count += line_count
-                                if len(occurrence_lines) < _MAX_LOGGED_OCCURRENCE_LINES:
-                                    occurrence_lines.append(line_num)
-                                else:
-                                    lines_truncated = True
-                except OSError:
-                    continue
-
-                if total_count > 0:
-                    lines_str = str(occurrence_lines)
-                    if lines_truncated:
-                        lines_str += f" (showing first {_MAX_LOGGED_OCCURRENCE_LINES} of more)"
-                    LOGGER.info(
-                        "    File: %s  Occurrences: %d  Lines: %s",
-                        file_path.name,
-                        total_count,
-                        lines_str,
-                    )
 
     def _build_vocabs(self, stats: bool = False) -> None:
         tok_dict = self.data.get("tokenizer")
