@@ -2216,6 +2216,26 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         # Good practice: save your training arguments together with the trained model
         torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
 
+    def _pad_tensors_to_max_len(self, tensor, max_length):
+        if self.processing_class is not None and hasattr(self.processing_class, "pad_token_id"):
+            # If PAD token is not defined at least EOS token has to be defined
+            pad_token_id = (
+                self.processing_class.pad_token_id
+                if self.processing_class.pad_token_id is not None
+                else self.processing_class.eos_token_id
+            )
+        else:
+            if self.model.config.pad_token_id is not None:
+                pad_token_id = self.model.config.pad_token_id
+            else:
+                raise ValueError("Pad_token_id must be set in the configuration of the model, in order to pad tensors")
+
+        padded_tensor = pad_token_id * torch.ones(
+            (tensor.shape[0], max_length), dtype=tensor.dtype, device=tensor.device
+        )
+        padded_tensor[:, : tensor.shape[-1]] = tensor
+        return padded_tensor
+
 
 def find_executable_batch_size(function: callable = None, starting_batch_size: int = 64, accelerator=None):
     batch_size = starting_batch_size
