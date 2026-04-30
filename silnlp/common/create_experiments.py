@@ -10,7 +10,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import openpyxl
 import yaml
-from openpyxl.chart import BarChart, Reference
 from openpyxl.drawing.image import Image as XlImage
 from openpyxl.utils import get_column_letter
 from scipy.stats import spearmanr, wilcoxon
@@ -34,6 +33,13 @@ METRIC_CLI_TO_CSV = {
     "confidence": "Confidence",
 }
 ALL_METRIC_COLS = list(METRIC_CLI_TO_CSV.values())
+
+DELTA_TYPES = ["m2m_mix", "mix_o2o", "m2m_o2o"]
+DELTA_DISPLAY = {
+    "m2m_mix": "many_to_many − mixed_src",
+    "mix_o2o": "mixed_src − one_to_one",
+    "m2m_o2o": "many_to_many − one_to_one",
+}
 
 FIXED_RESULT_HEADERS = [
     "Target_language",
@@ -576,7 +582,7 @@ def create_analysis_sheets(xlsxfile, metric_cols=None):
 
     mappings_order = ["one_to_one", "mixed_src", "many_to_many"]
     per_metric_cols = [f"{m}_{s}" for m in metric_cols for s in mappings_order]
-    delta_cols = [f"{m}_delta_{d}" for m in metric_cols for d in ("m2m_mix", "mix_o2o")]
+    delta_cols = [f"{m}_delta_{d}" for m in metric_cols for d in DELTA_TYPES]
     ANALYSIS_HEADERS = (
         ["Target_language", "Series"]
         + per_metric_cols
@@ -620,6 +626,7 @@ def create_analysis_sheets(xlsxfile, metric_cols=None):
                 for v in (
                     delta(m2m.get(m), mix.get(m)),
                     delta(mix.get(m), o2o.get(m)),
+                    delta(m2m.get(m), o2o.get(m)),
                 )
             ]
 
@@ -659,7 +666,7 @@ def create_summary_sheet(xlsxfile, metric_cols=None):
     delta_cols = {
         (m, delta_type): f"{m}_delta_{delta_type}"
         for m in metric_cols
-        for delta_type in ("m2m_mix", "mix_o2o")
+        for delta_type in DELTA_TYPES
     }
 
     for sheet_name in analysis_sheets:
@@ -703,65 +710,74 @@ def create_summary_sheet(xlsxfile, metric_cols=None):
 
 def add_charts_to_workbook(xlsxfile, metric):
     wb = openpyxl.load_workbook(xlsxfile)
-    rows = read_sheet(wb, "summary")
-    m2m = [r for r in rows if r["Delta"] == "m2m_mix"]
+    all_summary_rows = read_sheet(wb, "summary")
 
-    data = [r for r in m2m if r["Metric"] == metric]
     sheet_name = f"chart_{metric.replace('+', 'p')}"
     if sheet_name in wb.sheetnames:
         del wb[sheet_name]
     ws = wb.create_sheet(sheet_name)
-    ws.append(["Book", "Mean Delta"])
-    chart_data = [r for r in data if r.get("Mean") not in (None, "")]
-    for r in chart_data:
-        ws.append([r["Book"], float(r["Mean"])])
 
-    chart = BarChart()
-    chart.type = "bar"
-    chart.title = f"{metric}: many_to_many − mixed_src"
-    chart.x_axis.title = "Mean Delta"
-    chart.y_axis.title = "Book"
-    chart.x_axis.crosses = "autoZero"
-    chart.style = 10
-    chart.width = 20
-    chart.height = max(8, len(chart_data) * 1.5)
-    cats = Reference(ws, min_col=1, min_row=2, max_row=len(chart_data) + 1)
-    vals = Reference(ws, min_col=2, min_row=1, max_row=len(chart_data) + 1)
-    chart.add_data(vals, titles_from_data=True)
-    chart.set_categories(cats)
-    chart.shape = 4
-    ws.add_chart(chart, "D2")
-    add_matplot_to_sheet(wb, ws, metric)
+    # Collect data for each delta type and estimate section height
+    delta_data = {
+        dt: [
+            r for r in all_summary_rows
+            if r["Metric"] == metric and r["Delta"] == dt and r.get("Mean") not in (None, "")
+        ]
+        for dt in DELTA_TYPES
+    }
+    n_books = max((len(d) for d in delta_data.values()), default=0)
+    chart_height_inches = min(max(4, n_books * 0.4), 10)
+    # Approximate chart height in rows: inches * 150dpi / ~20px per row
+    section_height = max(int(chart_height_inches * 150 / 20) + 5, n_books + 6)
+
+    for i, delta_type in enumerate(DELTA_TYPES):
+        start_row = i * section_height + 1
+        data = delta_data[delta_type]
+
+        ws.cell(row=start_row, column=1, value=f"{metric}: {DELTA_DISPLAY[delta_type]}")
+        ws.cell(row=start_row + 1, column=1, value="Book")
+        ws.cell(row=start_row + 1, column=2, value="Mean Delta")
+        for j, r in enumerate(data):
+            ws.cell(row=start_row + 2 + j, column=1, value=r["Book"])
+            ws.cell(row=start_row + 2 + j, column=2, value=float(r["Mean"]))
+
+        add_matplot_to_sheet(wb, ws, metric, delta_type, f"D{start_row}")
+
     wb.save(xlsxfile)
     wb.close()
-
     return 0
 
 
-def add_matplot_to_sheet(wb, ws, metric, output_cell="I3"):
+def add_matplot_to_sheet(wb, ws, metric, delta_type, output_cell="D1"):
     rows = read_sheet(wb, "summary")
-    m2m = [r for r in rows if r["Delta"] == "m2m_mix"]
+    data = [
+        r for r in rows
+        if r["Metric"] == metric and r["Delta"] == delta_type and r.get("Mean") not in (None, "")
+    ]
+    if not data:
+        return 0
 
-    data = [r for r in m2m if r["Metric"] == metric and r.get("Mean") not in (None, "")]
     books = [r["Book"] for r in data]
     means = [float(r["Mean"]) for r in data]
     pvals = [r["p-value"] for r in data]
     sig = [p is not None and p != "" and float(p) < 0.05 for p in pvals]
     colors = ["#2ecc71" if s else "#95a5a6" for s in sig]
 
+    chart_height = min(max(4, len(books) * 0.4), 10)
     y = np.arange(len(books))
-    fig, ax = plt.subplots(figsize=(10, max(4, len(books) * 0.5)))
+    fig, ax = plt.subplots(figsize=(10, chart_height))
     ax.barh(y, means, color=colors, edgecolor="white", height=0.6)
     ax.axvline(0, color="black", linewidth=0.8)
     ax.set_yticks(y)
     ax.set_yticklabels(books)
-    ax.set_xlabel(f"{metric} delta (many_to_many − mixed_src)")
-    ax.set_title(f"{metric}: many_to_many vs mixed_src by book\n(green = p < 0.05)")
+    ax.set_xlabel(f"{metric} delta ({DELTA_DISPLAY[delta_type]})")
+    ax.set_title(f"{metric}: {DELTA_DISPLAY[delta_type]} by book\n(green = p < 0.05)")
     ax.invert_yaxis()
     plt.tight_layout()
 
     buf = BytesIO()
     fig.savefig(buf, format="png", dpi=150)
+    plt.close(fig)
     buf.seek(0)
     img = XlImage(buf)
     ws.add_image(img, output_cell)
@@ -811,7 +827,7 @@ def create_correlation_sheet(xlsxfile, metric_cols=None):
 def main():
     parser = argparse.ArgumentParser(description="Create NLLB experiment configurations with alignment and templates.")
     parser.add_argument("folder", help="Root experiment folder name (relative to mt_experiments_dir).")
-    parser.add_argument("--xlsxfile", default="All.xlsx", help="File name for the main spreadsheet.")
+    parser.add_argument("--xlsxfile", default="experiments.xlsx", help="File name for the main spreadsheet.")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing experiment configs or results.")
     parser.add_argument(
         "--metrics",
