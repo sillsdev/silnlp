@@ -9,8 +9,7 @@ from clearml.backend_api.session.session import LoginError
 
 from silnlp.common.environment import SIL_NLP_ENV, SilNlpEnv
 
-from .config import get_mt_exp_dir
-from .config_utils import create_config
+from silnlp.nmt.config_utils import create_config
 
 LOGGER = logging.getLogger(__name__)
 
