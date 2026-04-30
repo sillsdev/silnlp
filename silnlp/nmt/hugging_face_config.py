@@ -81,6 +81,7 @@ from ..common.translator import generate_confidence_files
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, get_mt_exp_dir, merge_dict
 from .config import SUPPORTED_GLOSS_ISOS, CheckpointType, Config, NMTModel
 from .corpora import DataFile
+from .token_occurrence_logger import TokenOccurrenceLogger
 from .tokenizer import NullTokenizer, Tokenizer
 
 if is_safetensors_available():
@@ -584,6 +585,7 @@ class HuggingFaceConfig(Config):
         sp_tokenizer = self._train_sp_tokenizer(files, vocab_size)
         sp_keys, tok_keys = sp_tokenizer.get_vocab().keys(), self._tokenizer.get_vocab().keys()
         missing_tokens = sorted(list(set(sp_keys) - set(tok_keys)))
+        TokenOccurrenceLogger(list(file_paths)).log(missing_tokens)
         return missing_tokens, sp_tokenizer
 
     def _find_missing_characters(self, corpus: List[Path]) -> List[str]:
@@ -600,6 +602,7 @@ class HuggingFaceConfig(Config):
 
         charset = set(filter(None, {char.strip() for char in charset}))
         missing_characters = sorted(list(charset - vocab))
+        TokenOccurrenceLogger(corpus).log(missing_characters)
         return missing_characters
 
     def _build_vocabs(self, stats: bool = False) -> None:
