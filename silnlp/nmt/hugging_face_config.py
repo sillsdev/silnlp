@@ -1831,6 +1831,16 @@ class PunctuationNormalizingTokenizer(PreTrainedTokenizerFast):
         self._mpn.substitutions = [(re.compile(r), sub) for r, sub in self._mpn.substitutions]
         self._pad_token = tokenizer.pad_token
 
+    def __getattr__(self, name: str):
+        # Delegate attribute access to the wrapped tokenizer for any attributes
+        # not found on this instance (e.g. pad_token_id, model_max_length, etc.)
+        if name == "_wrapped_tokenizer":
+            raise AttributeError(name)
+        try:
+            return getattr(self._wrapped_tokenizer, name)
+        except AttributeError:
+            raise AttributeError(f"{self.__class__.__name__} has no attribute {name}")
+
     def __call__(
         self,
         text: Union[str, List[str], List[List[str]]] = None,
