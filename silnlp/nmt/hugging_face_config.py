@@ -1856,8 +1856,6 @@ class HuggingFaceNMTModel(NMTModel):
             model: PreTrainedModel = self._pretrained_model_provider.create_model_for_inference(model_name)
         if self._config.infer.get("better_transformer"):
             model = model.to_bettertransformer()
-        if model_name == self._config.model and len(tokenizer) != model.get_input_embeddings().weight.size(dim=0):
-            model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if self._mixed_precision else None)
         model, tokenizer = self._configure_model(model, tokenizer, src_lang, trg_lang)
 
         if model.generation_config is not None and (
@@ -1906,6 +1904,13 @@ class HuggingFaceNMTModel(NMTModel):
             forced_bos_token_id = tokenizer.convert_tokens_to_ids(trg_lang)
             if model.generation_config is not None:
                 model.generation_config.forced_bos_token_id = forced_bos_token_id
+
+        if len(tokenizer) != model.get_input_embeddings().weight.size(dim=0):
+            LOGGER.warning(
+                f"Tokenizer vocab size ({len(tokenizer)}) does not match model's input embedding vocab size "
+                f"({model.get_input_embeddings().weight.size(dim=0)}). Resizing model embeddings."
+            )
+            model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8 if self._mixed_precision else None)
 
         return model, tokenizer
 
