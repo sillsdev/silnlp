@@ -60,8 +60,6 @@ class OnboardingProject:
         versification_error_output_path = Path(self.output_folder / f"versification_errors_{self.project_name}.txt")
         extract_path = extract_corpora(
             projects={self.project_name},
-            books_to_include=extract_config.get("include", []),
-            books_to_exclude=extract_config.get("exclude", []),
             include_markers=extract_config.get("markers", False),
             extract_lemmas=extract_config.get("lemmas", False),
             extract_project_vrefs=extract_config.get("project-vrefs", False),

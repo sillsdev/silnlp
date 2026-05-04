@@ -18,35 +18,9 @@ from .paratext import (
 LOGGER = logging.getLogger(__package__ + ".extract_corpora")
 
 
-def get_expected_verse_count(include: List[str], exclude: List[str]) -> int:
-    include_books_set = get_books(include) if len(include) > 0 else None
-    exclude_books_set = get_books(exclude) if len(exclude) > 0 else None
-
-    def filter_lines(verse_ref_str: str) -> bool:
-        if include_books_set is None and exclude_books_set is None:
-            return True
-
-        vref = VerseRef.from_string(verse_ref_str.strip(), ORIGINAL_VERSIFICATION)
-        if exclude_books_set is not None and vref.book_num in exclude_books_set:
-            return False
-
-        if include_books_set is not None and vref.book_num in include_books_set:
-            return True
-
-        return include_books_set is None
-
-    return count_lines(SIL_NLP_ENV.assets_dir / "vref.txt", filter_lines)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Extracts text corpora from Paratext projects")
     parser.add_argument("projects", nargs="+", metavar="name", help="Paratext project")
-    parser.add_argument(
-        "--include", metavar="books", nargs="+", default=[], help="The books to include; e.g., 'NT', 'OT', 'GEN'"
-    )
-    parser.add_argument(
-        "--exclude", metavar="books", nargs="+", default=[], help="The books to exclude; e.g., 'NT', 'OT', 'GEN'"
-    )
     parser.add_argument("--parent-project", default=None, help="The parent Paratext project")
     parser.add_argument(
         "--versification-error-output-path",
@@ -81,8 +55,6 @@ def main() -> None:
             projects_found.add(project)
     extract_corpora(
         projects=projects_found,
-        books_to_include=args.include,
-        books_to_exclude=args.exclude,
         include_markers=args.markers,
         extract_lemmas=args.lemmas,
         extract_project_vrefs=args.project_vrefs,
@@ -98,8 +70,6 @@ def main() -> None:
 
 def extract_corpora(
     projects: Set[str],
-    books_to_include=[],
-    books_to_exclude=[],
     include_markers=False,
     extract_lemmas=False,
     extract_project_vrefs=False,
@@ -109,7 +79,7 @@ def extract_corpora(
 ) -> Path | None:
     # Process the projects that have data and tell the user.
     if len(projects) > 0:
-        expected_verse_count = get_expected_verse_count(books_to_include, books_to_exclude)
+        expected_verse_count = count_lines(SIL_NLP_ENV.assets_dir / "vref.txt", True)
         SIL_NLP_ENV.mt_scripture_dir.mkdir(exist_ok=True, parents=True)
         SIL_NLP_ENV.mt_terms_dir.mkdir(exist_ok=True, parents=True)
         for project in projects:
@@ -123,8 +93,6 @@ def extract_corpora(
             corpus_filename, verse_count = extract_project(
                 project_dir,
                 SIL_NLP_ENV.mt_scripture_dir,
-                books_to_include,
-                books_to_exclude,
                 include_markers,
                 extract_lemmas,
                 extract_project_vrefs,
