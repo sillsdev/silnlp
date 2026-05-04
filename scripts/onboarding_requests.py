@@ -131,10 +131,7 @@ def get_project_metadata(onboarding_request: dict) -> Tuple[Dict[str, str], str]
     main_project_name = ""
     form_data = onboarding_request["submission"]["formData"]
     if form_data.get("partnerOrganization") != "none":
-        add_comment(
-            onboarding_request["id"], "This request is for a partner organization. Skipping automatic onboarding."
-        )
-        return {}, ""
+        add_comment(onboarding_request["id"], "This request is for a partner organization.")
     project_keys = [
         "projectId",
         "sourceProjectA",
