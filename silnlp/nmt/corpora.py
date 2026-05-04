@@ -8,7 +8,6 @@ from machine.scripture import get_chapters
 from ..common.corpus import get_mt_corpus_path, get_terms_glosses_path, get_terms_list, get_terms_renderings_path
 from ..common.environment import SIL_NLP_ENV
 from ..common.utils import NoiseMethod, create_noise_methods, is_set
-from .augment import AugmentMethod, create_augment_methods
 
 
 class DataFileType(Flag):
@@ -56,7 +55,6 @@ class CorpusPair:
     trg_files: List[DataFile]
     type: DataFileType
     src_noise: List[NoiseMethod]
-    augmentations: List[AugmentMethod]
     tags: List[str]
     size: Union[float, int]
     test_size: Optional[Union[float, int]]
@@ -159,7 +157,6 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
             tags = [tag.strip() for tag in tags.split(",")]
 
         src_noise = create_noise_methods(pair.get("src_noise", []))
-        augmentations = create_augment_methods(pair.get("augment", []))
 
         if "size" not in pair:
             pair["size"] = 1.0
@@ -205,7 +202,6 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
                 trg_files,
                 type,
                 src_noise,
-                augmentations,
                 tags,
                 size,
                 test_size,
