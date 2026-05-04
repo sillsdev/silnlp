@@ -78,8 +78,6 @@ def get_iso(project_dir: Path) -> str:
 def extract_project(
     project_dir: Path,
     output_dir: Path,
-    include_books: List[str] = [],
-    exclude_books: List[str] = [],
     include_markers: bool = False,
     extract_lemmas: bool = False,
     output_project_vrefs: bool = False,
@@ -98,31 +96,6 @@ def extract_project(
         )
 
     output_basename = f"{iso}-{project_dir.name}"
-    if len(include_books) > 0 or len(exclude_books) > 0:
-        output_basename += "_"
-        include_books_set: Optional[Set[int]] = None
-        if len(include_books) > 0:
-            include_books_set = get_books(include_books)
-            for text in include_books:
-                output_basename += f"+{text}"
-        exclude_books_set: Optional[Set[int]] = None
-        if len(exclude_books) > 0:
-            exclude_books_set = get_books(exclude_books)
-            for text in exclude_books:
-                output_basename += f"-{text}"
-
-        def filter_corpus(text: Text) -> bool:
-            book_num = book_id_to_number(text.id)
-            if exclude_books_set is not None and book_num in exclude_books_set:
-                return False
-
-            if include_books_set is not None and book_num in include_books_set:
-                return True
-
-            return include_books_set is None
-
-        ref_corpus = ref_corpus.filter_texts(filter_corpus)
-        project_corpus = project_corpus.filter_texts(filter_corpus)
 
     if include_markers:
         output_basename += "-m"
