@@ -12,7 +12,6 @@ from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_number_to_i
 from sacrebleu.metrics import BLEUScore
 from scipy.stats import gmean
 
-from ..common.metrics import compute_meteor_score
 from ..common.translator import CONFIDENCE_SUFFIX
 from ..common.utils import get_git_revision_hash
 from .clearml_connection import TAGS_LIST, SILClearML
@@ -34,7 +33,6 @@ SUPPORTED_SCORERS = [
     "m-chrf3",
     "m-chrf3+",
     "m-chrf3++",
-    "meteor",
     "ter",
     "confidence",
 ]
@@ -45,7 +43,6 @@ SUPPORTED_SENTENCE_SCORERS = [
     "chrf3+",
     "chrf3++",
     "spbleu",
-    "meteor",
     "ter",
     "confidence",
 ]
@@ -215,11 +212,6 @@ def score_pair(
         else:
             other_scores["m-chrf3++"] = sum(sentence_chrfpp_scores) / len(sentence_chrfpp_scores)
 
-    if "meteor" in scorers:
-        meteor_score = compute_meteor_score(trg_iso, pair_sys, pair_refs)
-        if meteor_score is not None:
-            other_scores["METEOR"] = meteor_score
-
     if "ter" in scorers:
         ter_score = sacrebleu.corpus_ter(pair_sys, pair_refs)
         if ter_score.score >= 0:
@@ -320,11 +312,6 @@ def write_pair_verse_scores(
             if "spbleu" in scorers and spbleu_metric is not None:
                 spbleu_verse_score = spbleu_metric.sentence_score(pred, sentences)
                 other_verse_scores["spBLEU"] = spbleu_verse_score.score
-
-            if "meteor" in scorers:
-                meteor_verse_score = compute_meteor_score(trg_iso, [pred], [sentences])
-                if meteor_verse_score is not None:
-                    other_verse_scores["METEOR"] = meteor_verse_score
 
             if "ter" in scorers:
                 ter_verse_score = sacrebleu.sentence_ter(pred, sentences)
