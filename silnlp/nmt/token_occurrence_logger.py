@@ -44,9 +44,7 @@ def _build_search_pattern(token: str) -> Optional[re.Pattern]:
     return re.compile(escaped)
 
 
-def _count_file_occurrences(
-    file_path: Path, pattern: re.Pattern, max_lines: int
-) -> Tuple[int, List[int], bool]:
+def _count_file_occurrences(file_path: Path, pattern: re.Pattern, max_lines: int) -> Tuple[int, List[int], bool]:
     """Scan file_path for matches of pattern and return occurrence statistics.
 
     Returns:
@@ -83,9 +81,23 @@ class TokenOccurrenceLogger:
       ``max_lines`` 1-based line numbers where the token was found
     """
 
-    def __init__(self, file_paths: List[Path], max_lines: int = _MAX_LOGGED_OCCURRENCE_LINES) -> None:
+    def __init__(
+        self, file_paths: List[Path], output_path: Path, max_lines: int = _MAX_LOGGED_OCCURRENCE_LINES
+    ) -> None:
         self._file_paths = file_paths
+        self._output_path = output_path / "token_occurrence.log"
         self._max_lines = max_lines
+
+        self._output_path.parent.mkdir(parents=True, exist_ok=True)
+        self._output_path.touch(exist_ok=True)
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            handlers=[
+                logging.FileHandler(self._output_path, mode="a", encoding="utf-8"),
+            ],
+            force=True,
+        )
 
     def log(self, missing_tokens: List[str]) -> None:
         """Log details for each token in missing_tokens."""
@@ -104,9 +116,7 @@ class TokenOccurrenceLogger:
             self._log_file_occurrences(file_path, pattern)
 
     def _log_file_occurrences(self, file_path: Path, pattern: re.Pattern) -> None:
-        total_count, occurrence_lines, truncated = _count_file_occurrences(
-            file_path, pattern, self._max_lines
-        )
+        total_count, occurrence_lines, truncated = _count_file_occurrences(file_path, pattern, self._max_lines)
         if total_count > 0:
             lines_str = str(occurrence_lines)
             if truncated:
