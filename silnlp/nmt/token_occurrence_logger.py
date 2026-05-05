@@ -90,7 +90,6 @@ class TokenOccurrenceLogger:
 
         self._output_file.parent.mkdir(parents=True, exist_ok=True)
         self._output_file.touch(exist_ok=True)
-        self._log_message(f"Initialized TokenOccurrenceLogger.")
 
     def log(self, missing_tokens: List[str]) -> None:
         """Log details for each token in missing_tokens."""
