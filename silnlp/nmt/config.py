@@ -34,7 +34,6 @@ from ..common.corpus import (
 from ..common.environment import SIL_NLP_ENV
 from ..common.translation_data_structures import SentenceTranslationGroup
 from ..common.utils import NoiseMethod, Side, add_tags_to_dataframe, add_tags_to_sentence, get_mt_exp_dir, set_seed
-from .augment import AugmentMethod
 from .corpora import (
     BASIC_DATA_PROJECT,
     CorpusPair,
@@ -604,7 +603,7 @@ class Config(ABC):
         train_count = 0
         if train is not None and len(train) > 0:
             train_count = self._write_train(
-                tokenizer, train, pair.mapping == DataFileMapping.MIXED_SRC, project_isos, pair.augmentations
+                tokenizer, train, pair.mapping == DataFileMapping.MIXED_SRC, project_isos
             )
 
         val_count = 0
@@ -755,7 +754,6 @@ class Config(ABC):
         train: pd.DataFrame,
         mixed_src: bool,
         project_isos: Dict[str, str],
-        augmentations: List[AugmentMethod],
     ) -> int:
         train_count = 0
         train.fillna("", inplace=True)
@@ -787,15 +785,6 @@ class Config(ABC):
                 train_src_detok_file.write(src_sentence + "\n")
                 train_trg_detok_file.write(trg_sentence + "\n")
                 train_count += 1
-
-                src_augments, trg_augments = self._augment_sentence(
-                    augmentations, src_sentence, trg_sentence, tokenizer
-                )
-                for src_augment, trg_augment in zip(src_augments, trg_augments):
-                    train_src_file.write(src_augment + "\n")
-                    train_trg_file.write(trg_augment + "\n")
-                    train_vref_file.write(str(vref) + "\n")
-                    train_count += 1
         return train_count
 
     def _write_terms(
@@ -1081,7 +1070,6 @@ class Config(ABC):
                         noised_src_sentence,
                         trg_sentence,
                         pair.is_lexical_data,
-                        pair.augmentations,
                     )
                     if self.mirror:
                         tokenizer.set_src_lang(trg_file.iso)
@@ -1096,7 +1084,6 @@ class Config(ABC):
                             mirror_src_sentence,
                             mirror_trg_sentence,
                             pair.is_lexical_data,
-                            pair.augmentations,
                         )
                         tokenizer.set_src_lang(src_file.iso)
                         tokenizer.set_trg_lang(trg_file.iso)
@@ -1136,7 +1123,6 @@ class Config(ABC):
         src_sentence: str,
         trg_sentence: str,
         is_lexical: bool,
-        augmentations: List[AugmentMethod],
     ) -> int:
         src_variants = [tokenizer.tokenize(Side.SOURCE, src_sentence, add_dummy_prefix=True)]
         trg_variants = [tokenizer.tokenize(Side.TARGET, trg_sentence, add_dummy_prefix=True)]
@@ -1144,10 +1130,6 @@ class Config(ABC):
         if is_lexical:
             src_variants.append(tokenizer.tokenize(Side.SOURCE, src_sentence, add_dummy_prefix=False))
             trg_variants.append(tokenizer.tokenize(Side.TARGET, trg_sentence, add_dummy_prefix=False))
-
-        src_augments, trg_augments = self._augment_sentence(augmentations, src_sentence, trg_sentence, tokenizer)
-        src_variants.extend(src_augments)
-        trg_variants.extend(trg_augments)
 
         for src_variant, trg_variant in zip(src_variants, trg_variants):
             src_file.write(src_variant + "\n")
@@ -1163,17 +1145,6 @@ class Config(ABC):
         for noise_method in src_noise:
             tokens = noise_method(tokens)
         return " ".join(tokens)
-
-    def _augment_sentence(
-        self, methods: List[AugmentMethod], src: str, trg: str, tokenizer: Tokenizer
-    ) -> Tuple[List[str], List[str]]:
-        src_augments: List[str] = []
-        trg_augments: List[str] = []
-        for method in methods:
-            src_delta, trg_delta = method.augment_sentence(src, trg, tokenizer)
-            src_augments.extend(src_delta)
-            trg_augments.extend(trg_delta)
-        return src_augments, trg_augments
 
     def _get_val_ref_count(self, src_iso: str, trg_iso: str) -> int:
         if self.root["eval"]["multi_ref_eval"]:
