@@ -261,9 +261,10 @@ def main() -> None:
     if args.clearml_queue is not None and args.clearml_tag is None:
         parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
 
-    environment = SilNlpEnv()
     if args.mt_dir is not None:
-        environment.set_machine_translation_dir(environment.data_dir / args.mt_dir)
+        environment = SilNlpEnv.create_environment_with_mt_dir(Path(args.mt_dir))
+    else:
+        environment = SilNlpEnv.create_standard_environment()
 
     if args.debug:
         show_attrs(cli_args=args)

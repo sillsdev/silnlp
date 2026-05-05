@@ -37,9 +37,7 @@ def set_up_environment() -> SilNlpEnv:
     # active connection to the MinIO bucket and use file from the "Scripture" and "Paratext" directories.
     # The experiments used in the tests are stored in the repository, to avoid having them accidentally
     # changed or deleted
-    environment = SilNlpEnv()
-    environment.set_machine_translation_dir(TEST_MT_DIR)
-    return environment
+    return SilNlpEnv.create_environment_with_mt_dir(TEST_MT_DIR)
 
 
 def clean_experiment_directory(experiment_directory: Path):
