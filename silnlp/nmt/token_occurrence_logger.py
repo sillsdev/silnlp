@@ -88,27 +88,20 @@ class TokenOccurrenceLogger:
         self._output_path = output_path / "token_occurrence.log"
         self._max_lines = max_lines
 
-        self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._output_path.touch(exist_ok=True)
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            handlers=[
-                logging.FileHandler(self._output_path, mode="a", encoding="utf-8"),
-            ],
-            force=True,
-        )
+        self._output_file.parent.mkdir(parents=True, exist_ok=True)
+        self._output_file.touch(exist_ok=True)
+        self._log_message(f"Initialized TokenOccurrenceLogger.")
 
     def log(self, missing_tokens: List[str]) -> None:
         """Log details for each token in missing_tokens."""
         if not missing_tokens:
             return
-        LOGGER.info("Adding %d new token(s) to the tokenizer:", len(missing_tokens))
+        self._log_message(f"\nLogging occurrence details for {len(missing_tokens)} missing tokens...")
         for token in missing_tokens:
             self._log_token(token)
 
     def _log_token(self, token: str) -> None:
-        LOGGER.info("  Token: %s  Unicode: [%s]", repr(token), _get_unicode_details(token))
+        self._log_message(f"\nToken: {repr(token)}\nUnicode: [{_get_unicode_details(token)}]\n")
         pattern = _build_search_pattern(token)
         if pattern is None:
             return
@@ -121,9 +114,9 @@ class TokenOccurrenceLogger:
             lines_str = str(occurrence_lines)
             if truncated:
                 lines_str += f" (showing first {self._max_lines} of more)"
-            LOGGER.info(
-                "    File: %s  Occurrences: %d  Lines: %s",
-                file_path.name,
-                total_count,
-                lines_str,
-            )
+            self._log_message(f"  File: {file_path.name}\n  Occurrences: {total_count}\n  Lines: {lines_str}\n")
+
+    def _log_message(self, message: str) -> None:
+        LOGGER.info(message)
+        with open(self._output_file, "a", encoding="utf-8") as f:
+            f.write(message + "\n")
