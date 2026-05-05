@@ -1907,7 +1907,7 @@ class HuggingFaceNMTModel(NMTModel):
             if model.generation_config is not None:
                 model.generation_config.forced_bos_token_id = forced_bos_token_id
 
-        if len(tokenizer) != model.get_input_embeddings().weight.size(dim=0):
+        if len(tokenizer) > model.get_input_embeddings().weight.size(dim=0):
             raise ValueError(
                 f"Tokenizer vocab size ({len(tokenizer)}) does not match the model's embedding vocab size "
                 f"({model.get_input_embeddings().weight.size(dim=0)}). Ensure you are using the correct "
