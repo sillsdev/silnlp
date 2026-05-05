@@ -79,7 +79,7 @@ def extract_corpora(
 ) -> Path | None:
     # Process the projects that have data and tell the user.
     if len(projects) > 0:
-        expected_verse_count = count_lines(SIL_NLP_ENV.assets_dir / "vref.txt", True)
+        expected_verse_count = count_lines(SIL_NLP_ENV.assets_dir / "vref.txt")
         SIL_NLP_ENV.mt_scripture_dir.mkdir(exist_ok=True, parents=True)
         SIL_NLP_ENV.mt_terms_dir.mkdir(exist_ok=True, parents=True)
         for project in projects:
