@@ -44,9 +44,7 @@ def _build_search_pattern(token: str) -> Optional[re.Pattern]:
     return re.compile(escaped)
 
 
-def _count_file_occurrences(
-    file_path: Path, pattern: re.Pattern, max_lines: int
-) -> Tuple[int, List[int], bool]:
+def _count_file_occurrences(file_path: Path, pattern: re.Pattern, max_lines: int) -> Tuple[int, List[int], bool]:
     """Scan file_path for matches of pattern and return occurrence statistics.
 
     Returns:
@@ -68,7 +66,6 @@ def _count_file_occurrences(
                         occurrence_lines.append(line_num)
                     else:
                         truncated = True
-                        break
     except OSError:
         pass
     return total_count, occurrence_lines, truncated
@@ -104,9 +101,7 @@ class TokenOccurrenceLogger:
             self._log_file_occurrences(file_path, pattern)
 
     def _log_file_occurrences(self, file_path: Path, pattern: re.Pattern) -> None:
-        total_count, occurrence_lines, truncated = _count_file_occurrences(
-            file_path, pattern, self._max_lines
-        )
+        total_count, occurrence_lines, truncated = _count_file_occurrences(file_path, pattern, self._max_lines)
         if total_count > 0:
             lines_str = str(occurrence_lines)
             if truncated:
