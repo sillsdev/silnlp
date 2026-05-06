@@ -443,12 +443,22 @@ class OnboardingRequest:
         if not self.copy_from:
             self.setup_output()
             return
+        reference_projects_to_remove = []
         for project in [self.main_project] + self.reference_projects:
             if project == self.main_project:
                 LOGGER.info(f"Preparing and Uploading main project '{self.main_project.project_name}'")
             else:
                 LOGGER.info(f"Preparing and Uploading reference project '{project.project_name}'")
-            self.upload_project(project)
+            try:
+                self.upload_project(project)
+            except Exception as e:
+                if project != self.main_project:
+                    LOGGER.error(f"Error occurred while uploading reference project '{project.project_name}': {e}")
+                    LOGGER.error(f"Continuing with onboarding without reference project '{project.project_name}'.")
+                    reference_projects_to_remove.append(project)
+
+        for project in reference_projects_to_remove:
+            self.reference_projects.remove(project)
 
         self.setup_output()
 
