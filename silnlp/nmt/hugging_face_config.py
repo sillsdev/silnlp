@@ -585,7 +585,8 @@ class HuggingFaceConfig(Config):
         sp_tokenizer = self._train_sp_tokenizer(files, vocab_size)
         sp_keys, tok_keys = sp_tokenizer.get_vocab().keys(), self._tokenizer.get_vocab().keys()
         missing_tokens = sorted(list(set(sp_keys) - set(tok_keys)))
-        TokenOccurrenceLogger(list(file_paths), self.exp_dir).log(missing_tokens)
+        with TokenOccurrenceLogger(list(file_paths), self.exp_dir) as token_occurrence_logger:
+            token_occurrence_logger.log(missing_tokens)
         return missing_tokens, sp_tokenizer
 
     def _find_missing_characters(self, corpus: List[Path]) -> List[str]:
@@ -602,7 +603,8 @@ class HuggingFaceConfig(Config):
 
         charset = set(filter(None, {char.strip() for char in charset}))
         missing_characters = sorted(list(charset - vocab))
-        TokenOccurrenceLogger(corpus, self.exp_dir).log(missing_characters)
+        with TokenOccurrenceLogger(corpus, self.exp_dir) as token_occurrence_logger:
+            token_occurrence_logger.log(missing_characters)
         return missing_characters
 
     def _build_vocabs(self, stats: bool = False) -> None:

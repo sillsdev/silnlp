@@ -2,7 +2,7 @@ import logging
 import re
 import unicodedata
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, IO
 
 LOGGER = logging.getLogger(__name__)
 
@@ -79,6 +79,10 @@ class TokenOccurrenceLogger:
     - the token (repr) and the Unicode code point/name for every character it contains
     - for each corpus file: the total occurrence count and up to
       ``max_lines`` 1-based line numbers where the token was found
+
+    Use as a context manager to keep the log file open during logging operations:
+        with TokenOccurrenceLogger(file_paths, output_path) as logger:
+            logger.log(missing_tokens)
     """
 
     def __init__(
@@ -87,9 +91,21 @@ class TokenOccurrenceLogger:
         self._file_paths = file_paths
         self._output_path = output_path / "token_occurrence.log"
         self._max_lines = max_lines
+        self._file: Optional[IO] = None
 
-        self._output_file.parent.mkdir(parents=True, exist_ok=True)
-        self._output_file.touch(exist_ok=True)
+        self._output_path.parent.mkdir(parents=True, exist_ok=True)
+        self._output_path.touch(exist_ok=True)
+
+    def __enter__(self) -> "TokenOccurrenceLogger":
+        """Open the log file for writing when entering the context."""
+        self._file = open(self._output_path, "a", encoding="utf-8")
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Close the log file when exiting the context."""
+        if self._file:
+            self._file.close()
+            self._file = None
 
     def log(self, missing_tokens: List[str]) -> None:
         """Log details for each token in missing_tokens."""
@@ -116,6 +132,10 @@ class TokenOccurrenceLogger:
             self._log_message(f"  File: {file_path.name}\n  Occurrences: {total_count}\n  Lines: {lines_str}\n")
 
     def _log_message(self, message: str) -> None:
+        """Log a message to both the logger and the file.
+
+        The log file must be open when this is called (i.e., within a context manager).
+        """
         LOGGER.info(message)
-        with open(self._output_file, "a", encoding="utf-8") as f:
-            f.write(message + "\n")
+        if self._file:
+            self._file.write(message + "\n")
