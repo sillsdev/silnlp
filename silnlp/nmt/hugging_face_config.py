@@ -1039,7 +1039,7 @@ class HuggingFaceNMTModel(NMTModel):
             embeddings = model.get_input_embeddings()
             embeddings.weight.data[old_num_tokens:, :] = unk_embedding
             model.tie_weights()
-        elif len(tokenizer) != old_num_tokens:
+        elif len(tokenizer) > old_num_tokens:
             model.resize_token_embeddings(
                 len(tokenizer), pad_to_multiple_of=8 if training_args.fp16 or training_args.bf16 else None
             )
