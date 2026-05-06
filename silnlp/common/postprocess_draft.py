@@ -2,6 +2,7 @@ import argparse
 import logging
 from pathlib import Path
 
+from ..common.environment import SilNlpEnv
 from ..nmt.clearml_connection import TAGS_LIST, SILClearML
 from ..nmt.config_utils import load_config
 from ..nmt.postprocess import postprocess_experiment
@@ -78,28 +79,32 @@ def main() -> None:
         parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
 
     experiment = args.experiment
+    environment = SilNlpEnv.create_standard_environment()
+
     args.output_folder = Path(args.output_folder.replace("\\", "/")) if args.output_folder else None
-    postprocess_config = PostprocessConfig(vars(args))
+    postprocess_config = PostprocessConfig(vars(args), environment)
 
     if args.clearml_queue is not None:
         if "cpu" not in args.clearml_queue:
             raise ValueError("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
-        clearml = SILClearML(experiment, args.clearml_queue, tag=args.clearml_tag)
+        clearml = SILClearML(experiment, args.clearml_queue, tag=args.clearml_tag, environment=environment)
         experiment = clearml.name
         config = clearml.config
     else:
         experiment = experiment.replace("\\", "/")
-        config = load_config(experiment)
+        config = load_config(experiment, environment)
 
     if not (config.exp_dir / "translate_config.yml").exists():
         raise ValueError("Experiment translate_config.yml not found.")
 
     if postprocess_config.is_base_config():
         LOGGER.info("No postprocessing options used. Applying postprocessing requests from translate config.")
-        postprocess_experiment(config, out_dir=args.output_folder)
+        postprocess_experiment(config, out_dir=args.output_folder, environment=environment)
     else:
-        postprocess_handler = PostprocessHandler([postprocess_config], include_base=False)
-        postprocess_experiment(config, postprocess_handler=postprocess_handler, out_dir=args.output_folder)
+        postprocess_handler = PostprocessHandler([postprocess_config], include_base=False, environment=environment)
+        postprocess_experiment(
+            config, postprocess_handler=postprocess_handler, out_dir=args.output_folder, environment=environment
+        )
 
 
 if __name__ == "__main__":

@@ -1,18 +1,15 @@
 import argparse
 import logging
 from pathlib import Path
-from typing import List, Optional, Set
-
-from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books
+from typing import Optional, Set
 
 from ..common.corpus import count_lines
-from ..common.environment import SIL_NLP_ENV
+from ..common.environment import SilNlpEnv
 from .paratext import (
     check_versification,
     extract_project,
     extract_term_renderings,
     get_parent_project_dir,
-    get_project_dir,
 )
 
 LOGGER = logging.getLogger(__package__ + ".extract_corpora")
@@ -36,6 +33,7 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    environment = SilNlpEnv.create_standard_environment()
     projects: Set[str] = set(args.projects)
 
     if args.clearml:
@@ -50,7 +48,7 @@ def main() -> None:
     # Which projects have data we can find?
     projects_found: Set[str] = set()
     for project in projects:
-        project_path = SIL_NLP_ENV.pt_projects_dir / project
+        project_path = environment.pt_projects_dir / project
         if project_path.is_dir():
             projects_found.add(project)
     extract_corpora(
@@ -61,11 +59,12 @@ def main() -> None:
         extract_surface_forms=args.surface_forms,
         parent_project=args.parent_project,
         versification_error_output_path=args.versification_error_output_path,
+        environment=environment,
     )
     # Tell the user which projects couldn't be found.
     for project in projects:
         if project not in projects_found:
-            LOGGER.warning(f"Couldn't find project {project} in {SIL_NLP_ENV.pt_projects_dir}.")
+            LOGGER.warning(f"Couldn't find project {project} in {environment.pt_projects_dir}.")
 
 
 def extract_corpora(
@@ -76,23 +75,24 @@ def extract_corpora(
     extract_surface_forms=False,
     parent_project: Optional[str] = None,
     versification_error_output_path: Optional[str] = None,
+    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
 ) -> Path | None:
     # Process the projects that have data and tell the user.
     if len(projects) > 0:
-        expected_verse_count = count_lines(SIL_NLP_ENV.assets_dir / "vref.txt", True)
-        SIL_NLP_ENV.mt_scripture_dir.mkdir(exist_ok=True, parents=True)
-        SIL_NLP_ENV.mt_terms_dir.mkdir(exist_ok=True, parents=True)
+        expected_verse_count = count_lines(environment.assets_dir / "vref.txt", True)
+        environment.mt_scripture_dir.mkdir(exist_ok=True, parents=True)
+        environment.mt_terms_dir.mkdir(exist_ok=True, parents=True)
         for project in projects:
             LOGGER.info(f"Extracting {project}...")
-            project_dir = get_project_dir(project)
-            parent_project_dir = get_parent_project_dir(project_dir)
+            project_dir = environment.get_paratext_project_dir(project)
+            parent_project_dir = get_parent_project_dir(project_dir, environment)
             if parent_project_dir is not None:
                 LOGGER.info(f"Identified parent project {parent_project_dir.name}.")
 
-            check_versification(project_dir, parent_project_dir, versification_error_output_path)
+            check_versification(project_dir, parent_project_dir, versification_error_output_path, environment)
             corpus_filename, verse_count = extract_project(
                 project_dir,
-                SIL_NLP_ENV.mt_scripture_dir,
+                environment.mt_scripture_dir,
                 include_markers,
                 extract_lemmas,
                 extract_project_vrefs,
@@ -106,13 +106,13 @@ def extract_corpora(
                     f"The number of completed verses is {verse_count} (out of the expected {expected_verse_count})."
                 )
             terms_count = extract_term_renderings(
-                project_dir, corpus_filename, SIL_NLP_ENV.mt_terms_dir, extract_surface_forms
+                project_dir, corpus_filename, environment.mt_terms_dir, extract_surface_forms, environment
             )
             LOGGER.info(f"# of Terms: {terms_count}")
             LOGGER.info("Done.")
             return corpus_filename
     else:
-        LOGGER.warning(f"Couldn't find any data to process for any project in {SIL_NLP_ENV.pt_projects_dir}.")
+        LOGGER.warning(f"Couldn't find any data to process for any project in {environment.pt_projects_dir}.")
         return None
 
 

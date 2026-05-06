@@ -11,8 +11,8 @@ import Levenshtein
 import pandas as pd
 
 from ..common.corpus import load_corpus
+from ..common.environment import SilNlpEnv
 from ..common.utils import get_git_revision_hash
-from .config import get_mt_exp_dir
 from .sp_utils import decode_sp
 
 logging.basicConfig()
@@ -20,7 +20,7 @@ logging.basicConfig()
 # Add the em-dash
 all_punctuation = string.punctuation + "\u2014"
 # Add smart quotes
-all_punctuation = all_punctuation + "\u2018" + "\u2019" + "\u201C" + "\u201D"
+all_punctuation = all_punctuation + "\u2018" + "\u2019" + "\u201c" + "\u201d"
 # Add Danda (0964) and Double Danda (0965) for Devanagari scripts
 all_punctuation = all_punctuation + "\u0964" + "\u0965"
 
@@ -236,7 +236,9 @@ def main() -> None:
     print("Git commit:", get_git_revision_hash())
 
     exp_name = args.experiment
-    exp_dir = get_mt_exp_dir(exp_name)
+    environment = SilNlpEnv.create_standard_environment()
+
+    exp_dir = environment.get_mt_exp_dir(exp_name)
     out_file = os.path.join(exp_dir, "word_counts.xlsx")
 
     pd.set_option("max_columns", None)

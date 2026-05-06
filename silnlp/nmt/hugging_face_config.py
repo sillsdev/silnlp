@@ -75,10 +75,10 @@ from transformers.utils import (
 from transformers.utils.logging import tqdm
 
 from ..common.corpus import Term, count_lines, get_terms
-from ..common.environment import SIL_NLP_ENV
+from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup
 from ..common.translator import generate_confidence_files
-from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, get_mt_exp_dir, merge_dict
+from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
 from .config import SUPPORTED_GLOSS_ISOS, CheckpointType, Config, NMTModel
 from .corpora import DataFile
 from .token_occurrence_logger import TokenOccurrenceLogger
@@ -291,8 +291,8 @@ def get_model_prefix(model: str) -> str:
     return ""
 
 
-def get_parent_model_prefix(parent_exp: str) -> str:
-    parent_dir = Path(get_mt_exp_dir(parent_exp))
+def get_parent_model_prefix(parent_exp: str, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()) -> str:
+    parent_dir = environment.get_mt_exp_dir(parent_exp)
     with (parent_dir / "config.yml").open("r", encoding="utf-8") as file:
         parent_configs = yaml.safe_load(file)
     parent_base_model = parent_configs.get("model")
@@ -300,8 +300,8 @@ def get_parent_model_prefix(parent_exp: str) -> str:
     return parent_model_prefix
 
 
-def get_parent_model_name(parent_exp: str) -> str:
-    parent_dir = Path(get_mt_exp_dir(parent_exp))
+def get_parent_model_name(parent_exp: str, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()) -> str:
+    parent_dir = environment.get_mt_exp_dir(parent_exp)
     parent_model_dir = parent_dir / "run"
     parent_model = get_parent_last_checkpoint(parent_model_dir)
     if has_best_checkpoint(parent_model_dir):
@@ -362,7 +362,10 @@ class FilePreTrainedModelProviderFactory(PreTrainedModelProviderFactory):
 
 
 class HuggingFaceConfig(Config):
-    def __init__(self, exp_dir: Path, config: dict) -> None:
+    def __init__(
+        self, exp_dir: Path, config: dict, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
+    ) -> None:
+        self.environment = environment
         config = merge_dict(
             {
                 "data": {
@@ -443,15 +446,15 @@ class HuggingFaceConfig(Config):
 
         if "parent" in config["data"]:
             parent = config["data"]["parent"]
-            parent_model_name = get_parent_model_name(parent)
-            parent_model_prefix = get_parent_model_prefix(parent)
+            parent_model_name = get_parent_model_name(parent, environment)
+            parent_model_prefix = get_parent_model_prefix(parent, environment)
             if parent_model_prefix != self.model_prefix:
                 LOGGER.error("The parent model and the config model are not in the same type.")
                 raise ValueError(f"Unmatched model prefix {parent_model_prefix} and {self.model_prefix}")
             config["model"] = parent_model_name
             self.model_prefix = parent_model_prefix
 
-        super().__init__(exp_dir, config)
+        super().__init__(exp_dir, config, environment)
 
         if self.model_prefix == "google/madlad400":
             self.train["max_source_length"] = 256
@@ -615,7 +618,7 @@ class HuggingFaceConfig(Config):
         if tok_dict and (tok_dict.get("update_src") or tok_dict.get("update_trg")):
             if (
                 tok_dict.get("trained_tokens")
-                and (SIL_NLP_ENV.assets_dir / "tokenizers" / self.model_prefix / "tokenizer_config.json").is_file()
+                and (self.environment.assets_dir / "tokenizers" / self.model_prefix / "tokenizer_config.json").is_file()
             ):
                 if not tok_dict.get("share_vocab") and tok_dict.get("update_src") and tok_dict.get("update_trg"):
                     src_missing_tokens, src_trained_tokenizer = self._create_trained_tokens(
@@ -737,12 +740,12 @@ class HuggingFaceConfig(Config):
                 ).is_file():
                     model_name_or_path = str(self.exp_dir)
                 elif (tok_dict and (tok_dict.get("update_src") or tok_dict.get("update_trg"))) and (
-                    SIL_NLP_ENV.assets_dir / "tokenizers" / self.model_prefix / "tokenizer_config.json"
+                    self.environment.assets_dir / "tokenizers" / self.model_prefix / "tokenizer_config.json"
                 ).is_file():
-                    model_name_or_path = str(SIL_NLP_ENV.assets_dir / "tokenizers" / self.model_prefix)
+                    model_name_or_path = str(self.environment.assets_dir / "tokenizers" / self.model_prefix)
                 elif self.has_parent:
                     parent_exp = self.data["parent"]
-                    parent_dir = Path(get_mt_exp_dir(parent_exp))
+                    parent_dir = self._environment.get_mt_exp_dir(parent_exp)
                     model_name_or_path = str(parent_dir)
                 else:
                     model_name_or_path = self.model
@@ -756,7 +759,7 @@ class HuggingFaceConfig(Config):
                 model_name_or_path = str(self.exp_dir)
             elif self.has_parent:
                 parent_exp = self.data["parent"]
-                parent_dir = Path(get_mt_exp_dir(parent_exp))
+                parent_dir = self._environment.get_mt_exp_dir(parent_exp)
                 model_name_or_path = str(parent_dir)
             else:
                 model_name_or_path = self.model
@@ -808,7 +811,9 @@ class HuggingFaceConfig(Config):
 
             all_trg_terms: List[Tuple[DataFile, Dict[str, Term], List[str]]] = []
             for trg_terms_file, tags in trg_terms_files:
-                all_trg_terms.append((trg_terms_file, get_terms(trg_terms_file.path, iso=gloss_iso), tags))
+                all_trg_terms.append(
+                    (trg_terms_file, get_terms(trg_terms_file.path, iso=gloss_iso, environment=self._environment), tags)
+                )
             for trg_terms_file, trg_terms, tags in all_trg_terms:
                 tokenizer.set_trg_lang(trg_terms_file.iso)
                 for trg_term in trg_terms.values():
@@ -832,7 +837,13 @@ class HuggingFaceConfig(Config):
             if gloss_iso is not None:
                 all_src_terms: List[Tuple[DataFile, Dict[str, Term], List[str]]] = []
                 for src_terms_file, tags in src_terms_files:
-                    all_src_terms.append((src_terms_file, get_terms(src_terms_file.path, iso=gloss_iso), tags))
+                    all_src_terms.append(
+                        (
+                            src_terms_file,
+                            get_terms(src_terms_file.path, iso=gloss_iso, environment=self._environment),
+                            tags,
+                        )
+                    )
                 tokenizer.set_trg_lang(gloss_iso)
                 for src_term_file, src_terms, tags in all_src_terms:
                     for src_term in src_terms.values():

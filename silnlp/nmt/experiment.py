@@ -6,7 +6,7 @@ from typing import Optional, Set, Union
 
 import yaml
 
-from ..common.environment import SIL_NLP_ENV, SilNlpEnv
+from ..common.environment import SilNlpEnv
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
@@ -20,7 +20,7 @@ class SILExperiment:
     name: str
     config: Config
     model: NMTModel
-    environment: SilNlpEnv = SIL_NLP_ENV
+    environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
     make_stats: bool = False
     force_align: bool = False
     mixed_precision: bool = True
@@ -92,7 +92,9 @@ class SILExperiment:
             translate_configs = yaml.safe_load(file)
 
         postprocess_configs = translate_configs.get("postprocess", [])
-        postprocess_handler = PostprocessHandler([PostprocessConfig(pc) for pc in postprocess_configs])
+        postprocess_handler = PostprocessHandler(
+            [PostprocessConfig(pc, self.environment) for pc in postprocess_configs], environment=self.environment
+        )
 
         quality_estimation = translate_configs.get("quality_estimation", False)
 
@@ -118,7 +120,7 @@ class SILExperiment:
             )
 
             if not postprocess_configs:
-                postprocess_handler = PostprocessHandler([])
+                postprocess_handler = PostprocessHandler([], environment=self.environment)
 
             if "tags" in translate_config and isinstance(translate_config["tags"], list):
                 translate_config["tags"] = ",".join(translate_config["tags"])
@@ -267,7 +269,7 @@ def main() -> None:
         environment = SilNlpEnv.create_standard_environment()
 
     if args.debug:
-        show_attrs(cli_args=args)
+        show_attrs(cli_args=args, envs=environment)
         exit()
 
     if not (args.preprocess or args.train or args.test or args.translate):
@@ -280,6 +282,7 @@ def main() -> None:
         args.clearml_queue,
         commit=args.commit,
         tag=args.clearml_tag,
+        environment=environment,
     )
     model = clearml.config.create_model(
         mixed_precision=not args.disable_mixed_precision,
@@ -291,6 +294,7 @@ def main() -> None:
         name=clearml.name,
         config=clearml.config,
         model=model,
+        environment=environment,
         make_stats=args.stats,
         force_align=args.force_align,
         mixed_precision=not args.disable_mixed_precision,

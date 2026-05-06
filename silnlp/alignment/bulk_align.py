@@ -5,11 +5,10 @@ import os
 from pathlib import Path
 from typing import List
 
-import matplotlib.pyplot as plt
-
 from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML
 
-from ..common.corpus import get_scripture_parallel_corpus, tokenize_corpus
+from ..common.corpus import get_scripture_parallel_corpus
+from ..common.environment import SilNlpEnv
 from .config import ALIGNERS
 from .utils import compute_alignment_scores
 
@@ -17,10 +16,22 @@ LOGGER = logging.getLogger(__name__)
 
 
 def align_worker(kwargs):
-    return align_set(**kwargs)
+    return align_set(
+        src_input_path=kwargs["src_input_path"],
+        trg_input_path=kwargs["trg_input_path"],
+        output_dir=kwargs["output_dir"],
+        aligner=kwargs["aligner"],
+        environment=kwargs["environment"],
+    )
 
 
-def align_set(src_input_path: Path, trg_input_path: Path, output_dir: Path, aligner: str = "fast_align"):
+def align_set(
+    src_input_path: Path,
+    trg_input_path: Path,
+    output_dir: Path,
+    aligner: str = "fast_align",
+    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+):
     if not src_input_path.exists():
         raise FileExistsError(f"The source file does not exist:{src_input_path}")
     if not trg_input_path.exists():
@@ -30,7 +41,7 @@ def align_set(src_input_path: Path, trg_input_path: Path, output_dir: Path, alig
 
     src_synced_path = output_dir / src_input_path.name
     trg_synced_path = output_dir / trg_input_path.name
-    pcorp_df = get_scripture_parallel_corpus(src_input_path, trg_input_path)
+    pcorp_df = get_scripture_parallel_corpus(src_input_path, trg_input_path, environment=environment)
     with src_synced_path.open("w+", encoding="utf-8") as source_file:
         source_file.write("\n".join(sentence for sentence in pcorp_df["source"]))
     with trg_synced_path.open("w+", encoding="utf-8") as target_file:
@@ -47,7 +58,12 @@ def align_set(src_input_path: Path, trg_input_path: Path, output_dir: Path, alig
 
 
 def process_alignments(
-    src_path: Path, trg_paths: List[Path], output_dir: Path, aligner: str = "fast_align", multiprocess: bool = False
+    src_path: Path,
+    trg_paths: List[Path],
+    output_dir: Path,
+    aligner: str = "fast_align",
+    multiprocess: bool = False,
+    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
 ):
     output_dir.mkdir(exist_ok=True)
     if multiprocess:
@@ -59,7 +75,13 @@ def process_alignments(
                 LOGGER.info("Already aligned: " + trg_path.stem)
             else:
                 all_kwargs.append(
-                    {"src_input_path": src_path, "trg_input_path": trg_path, "output_dir": f_dir, "aligner": aligner}
+                    {
+                        "src_input_path": src_path,
+                        "trg_input_path": trg_path,
+                        "output_dir": f_dir,
+                        "aligner": aligner,
+                        "environment": environment,
+                    }
                 )
         cpu_num = multiprocessing.cpu_count() // 2
         pool = multiprocessing.Pool(cpu_num)
@@ -74,7 +96,13 @@ def process_alignments(
             if (f_dir / "alignment.scores.txt").exists():
                 LOGGER.info("Already aligned: " + trg_path.stem)
             else:
-                align_set(src_input_path=src_path, trg_input_path=trg_path, output_dir=f_dir, aligner=aligner)
+                align_set(
+                    src_input_path=src_path,
+                    trg_input_path=trg_path,
+                    output_dir=f_dir,
+                    aligner=aligner,
+                    environment=environment,
+                )
 
 
 def main() -> None:
@@ -108,6 +136,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    environment = SilNlpEnv.create_standard_environment()
     output_dir = args.output_dir
 
     if args.clearml_queue is not None:
@@ -119,7 +148,13 @@ def main() -> None:
         if args.clearml_queue.lower() not in ("local", "locally") and (args.aligner.startswith("dotnet")):
             LOGGER.error("The .NET aligners cannot be used on remote ClearML queues.")
             exit()
-        clearml = SILClearML(output_dir, args.clearml_queue, tag=args.clearml_tag, skip_config=True)
+        clearml = SILClearML(
+            output_dir,
+            args.clearml_queue,
+            tag=args.clearml_tag,
+            skip_config=True,
+            environment=environment,
+        )
         output_dir = clearml.name
 
     if args.aligner not in ALIGNERS.keys():
@@ -139,6 +174,7 @@ def main() -> None:
         output_dir=Path(output_dir) / (args.aligner + "_" + src_basename),
         aligner=args.aligner,
         multiprocess=args.multiprocess,
+        environment=environment,
     )
 
 

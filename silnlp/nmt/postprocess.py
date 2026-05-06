@@ -10,7 +10,8 @@ from machine.corpora import FileParatextProjectSettingsParser, ScriptureRef, Usf
 from machine.scripture import book_number_to_id, get_chapters
 from transformers.trainer_utils import get_last_checkpoint
 
-from ..common.paratext import book_file_name_digits, get_book_path, get_project_dir
+from ..common.environment import SilNlpEnv
+from ..common.paratext import book_file_name_digits, get_book_path
 from ..common.postprocesser import (
     NoDetectedQuoteConventionException,
     PostprocessConfig,
@@ -73,7 +74,9 @@ class DraftMetadata:
 
 
 # Get the paths of all drafts that would be produced by an experiment's translate config and that exist
-def get_draft_paths_from_exp(config: Config) -> List[DraftMetadata]:
+def get_draft_paths_from_exp(
+    config: Config, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
+) -> List[DraftMetadata]:
     with (config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as translate_config_file:
         translate_requests = yaml.safe_load(translate_config_file).get("translate", [])
 
@@ -93,7 +96,7 @@ def get_draft_paths_from_exp(config: Config) -> List[DraftMetadata]:
         for book_num in book_nums:
             book = book_number_to_id(book_num)
 
-            src_path = get_book_path(src_project, book)
+            src_path = get_book_path(src_project, book, environment)
             draft_path = (
                 config.exp_dir / "infer" / step_str / src_project / f"{book_file_name_digits(book_num)}{book}.SFM"
             )
@@ -122,11 +125,12 @@ def postprocess_draft(
     book: Optional[str] = None,
     out_dir: Optional[Path] = None,
     training_corpus_pairs: Optional[List[CorpusPair]] = None,
+    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
 ) -> None:
     if training_corpus_pairs is None:
         training_corpus_pairs = []
 
-    if str(draft_metadata.source_path).startswith(str(get_project_dir(""))):
+    if str(draft_metadata.source_path).startswith(str(environment.get_paratext_project_dir(""))):
         settings = FileParatextProjectSettingsParser(draft_metadata.source_path.parent).parse()
         stylesheet = settings.stylesheet
         encoding = settings.encoding
@@ -194,16 +198,19 @@ def postprocess_draft(
 
 
 def postprocess_experiment(
-    config: Config, postprocess_handler: Optional[PostprocessHandler] = None, out_dir: Optional[Path] = None
+    config: Config,
+    postprocess_handler: Optional[PostprocessHandler] = None,
+    out_dir: Optional[Path] = None,
+    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
 ) -> None:
-    draft_metadata_list = get_draft_paths_from_exp(config)
+    draft_metadata_list = get_draft_paths_from_exp(config, environment)
 
     with (config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as file:
         translate_config = yaml.safe_load(file)
-        postprocess_configs = [PostprocessConfig(pc) for pc in translate_config.get("postprocess", [])]
+        postprocess_configs = [PostprocessConfig(pc, environment) for pc in translate_config.get("postprocess", [])]
 
     if postprocess_handler is None:
-        postprocess_handler = PostprocessHandler(postprocess_configs, include_base=False)
+        postprocess_handler = PostprocessHandler(postprocess_configs, include_base=False, environment=environment)
 
     for draft_metadata in draft_metadata_list:
         if postprocess_configs:
@@ -212,6 +219,7 @@ def postprocess_experiment(
                 postprocess_handler,
                 out_dir=out_dir,
                 training_corpus_pairs=config.corpus_pairs,
+                environment=environment,
             )
 
 
@@ -242,14 +250,16 @@ def main() -> None:
 
     get_git_revision_hash()
 
+    environment = SilNlpEnv.create_standard_environment()
+
     if args.clearml_queue is not None:
-        clearml = SILClearML(args.experiment, args.clearml_queue)
+        clearml = SILClearML(args.experiment, args.clearml_queue, environment=environment)
         config = clearml.config
     else:
-        config = load_config(args.experiment.replace("\\", "/"))
+        config = load_config(args.experiment.replace("\\", "/"), environment)
     config.set_seed()
 
-    postprocess_experiment(config)
+    postprocess_experiment(config, environment=environment)
 
 
 if __name__ == "__main__":

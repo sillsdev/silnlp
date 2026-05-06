@@ -9,14 +9,14 @@ from typing import Generator, Iterable, List, Optional, Tuple, Union
 from machine.corpora import UsfmFileTextCorpus, create_versification_ref_corpus, extract_scripture_corpus
 from machine.scripture import VerseRef, book_number_to_id, get_chapters
 
-from ..common.environment import SIL_NLP_ENV, SilNlpEnv
-from ..common.paratext import book_file_name_digits, get_project_dir
+from ..common.environment import SilNlpEnv
+from ..common.paratext import book_file_name_digits
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.translation_data_structures import SentenceTranslationGroup
 from ..common.translator import CONFIDENCE_SUFFIX, Translator
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
-from .config import CheckpointType, Config, NMTModel, get_mt_exp_dir
+from .config import CheckpointType, Config, NMTModel
 from .quality_estimation import estimate_quality
 
 LOGGER = logging.getLogger((__package__ or "") + ".translate")
@@ -56,9 +56,15 @@ def convert_usfm_to_vref(usfm_path: Path, vref_path: Path) -> None:
 
 
 class NMTTranslator(Translator):
-    def __init__(self, model: NMTModel, checkpoint: Union[CheckpointType, str, int]) -> None:
+    def __init__(
+        self,
+        model: NMTModel,
+        checkpoint: Union[CheckpointType, str, int],
+        environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+    ) -> None:
         self._model: NMTModel = model
         self._checkpoint = checkpoint
+        super().__init__(environment)
 
     def translate(
         self,
@@ -86,7 +92,7 @@ class TranslationTask:
     commit: Optional[str] = None
     clearml_tag: Optional[str] = None
     model: Optional[NMTModel] = None
-    environment: SilNlpEnv = SIL_NLP_ENV
+    environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
 
     def translate_books(
         self,
@@ -98,7 +104,7 @@ class TranslationTask:
         save_confidences: bool = False,
         quality_estimation: bool = False,
         verse_test_scores_path: Optional[Path] = None,
-        postprocess_handler: PostprocessHandler = PostprocessHandler(),
+        postprocess_handler: Optional[PostprocessHandler] = None,
         tags: Optional[List[str]] = None,
         vref: bool = False,
     ) -> None:
@@ -113,13 +119,13 @@ class TranslationTask:
                     raise RuntimeError("A source project must be specified.")
                 src_project = next(iter(config.src_projects))
 
-            src_project_dir = get_project_dir(src_project)
+            src_project_dir = self.environment.get_paratext_project_dir(src_project)
             if not src_project_dir.is_dir():
                 raise FileNotFoundError(f"Source project {src_project} not found in projects folder {src_project_dir}")
 
             if any(len(book_nums[book]) > 0 for book in book_nums) and trg_project is not None:
 
-                trg_project_dir = get_project_dir(trg_project)
+                trg_project_dir = self.environment.get_paratext_project_dir(trg_project)
                 if not trg_project_dir.is_dir():
                     raise FileNotFoundError(
                         f"Target project {trg_project} not found in projects folder {trg_project_dir}"
@@ -255,7 +261,7 @@ class TranslationTask:
         save_confidences: bool = False,
         quality_estimation: bool = False,
         verse_test_scores_path: Optional[Path] = None,
-        postprocess_handler: PostprocessHandler = PostprocessHandler(),
+        postprocess_handler: Optional[PostprocessHandler] = None,
         tags: Optional[List[str]] = None,
         vref: bool = False,
     ) -> None:
@@ -368,7 +374,7 @@ class TranslationTask:
         clearml.config.set_seed()
 
         model = self.model if self.model is not None else clearml.config.create_model()
-        translator = NMTTranslator(model, self.checkpoint)
+        translator = NMTTranslator(model, self.checkpoint, self.environment)
         if clearml.config.model_dir.exists():
             _, step = model.get_checkpoint_path(self.checkpoint)
             step_str = "avg" if step == -1 else str(step)
@@ -529,6 +535,7 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+    environment = SilNlpEnv.create_standard_environment()
 
     if args.clearml_queue is not None and args.clearml_tag is None:
         parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
@@ -538,9 +545,9 @@ def main() -> None:
             args.save_confidences = True
 
         if args.verse_test_scores_file is None:
-            verse_test_scores_path = get_mt_exp_dir(args.experiment)
+            verse_test_scores_path = environment.get_mt_exp_dir(args.experiment)
         else:
-            verse_test_scores_path = get_mt_exp_dir(args.verse_test_scores_file)
+            verse_test_scores_path = environment.get_mt_exp_dir(args.verse_test_scores_file)
             if not verse_test_scores_path.exists():
                 parser.error(f"The verse test scores path {verse_test_scores_path} does not exist.")
     else:
@@ -555,13 +562,18 @@ def main() -> None:
         clearml_queue=args.clearml_queue,
         commit=args.commit,
         clearml_tag=args.clearml_tag,
+        environment=environment,
     )
 
-    postprocess_handler = PostprocessHandler([PostprocessConfig(vars(args))])
+    postprocess_handler = PostprocessHandler([PostprocessConfig(vars(args), environment)], environment=environment)
 
     if len(args.books) > 0:
         if args.debug:
-            show_attrs(cli_args=args, actions=[f"Will attempt to translate books {args.books} into {args.trg_iso}"])
+            show_attrs(
+                cli_args=args,
+                envs=environment,
+                actions=[f"Will attempt to translate books {args.books} into {args.trg_iso}"],
+            )
             exit()
         translator.translate_books(
             ";".join(args.books),
@@ -579,6 +591,7 @@ def main() -> None:
         if args.debug:
             show_attrs(
                 cli_args=args,
+                envs=environment,
                 actions=[f"Will attempt to translate matching files from {args.src_iso} into {args.trg_iso}."],
             )
             exit()
@@ -602,6 +615,7 @@ def main() -> None:
         if args.debug:
             show_attrs(
                 cli_args=args,
+                envs=environment,
                 actions=[f"Will attempt to translate {args.src} from {args.src_iso} into {args.trg_iso}."],
             )
             exit()

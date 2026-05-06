@@ -14,7 +14,8 @@ from machine.tokenization import (
 )
 from machine.translation.thot import ThotWordAlignmentModelType
 
-from ..common.utils import get_git_revision_hash, get_mt_exp_dir, merge_dict
+from ..common.environment import SilNlpEnv
+from ..common.utils import get_git_revision_hash, merge_dict
 
 LOGGER = logging.getLogger(__package__ + ".config")
 
@@ -29,8 +30,8 @@ _BASE_CONFIG: dict = {
 _SUPPORTED_TOKENIZERS = {"whitespace", "latin", "zwsp"}
 
 
-def load_config(exp_name: str) -> dict:
-    exp_dir = get_mt_exp_dir(exp_name)
+def load_config(exp_name: str, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()) -> dict:
+    exp_dir = environment.get_mt_exp_dir(exp_name)
     config_path = exp_dir / "config.yml"
 
     config = _BASE_CONFIG.copy()
@@ -92,7 +93,8 @@ def main() -> None:
 
     get_git_revision_hash()
 
-    exp_dir = get_mt_exp_dir(args.experiment)
+    environment = SilNlpEnv.create_standard_environment()
+    exp_dir = environment.get_mt_exp_dir(args.experiment)
     config_path = exp_dir / "config.yml"
     if config_path.is_file() and not args.force:
         LOGGER.warn(

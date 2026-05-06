@@ -11,8 +11,8 @@ from typing import Dict, List, Optional, Set, Tuple
 from machine.scripture import ALL_BOOK_IDS, VerseRef
 from scipy.stats import linregress
 
+from ..common.environment import SilNlpEnv
 from ..common.translator import CONFIDENCE_SUFFIX, ConfidenceFile, TxtConfidenceFile, UsfmConfidenceFile
-from .config import get_mt_exp_dir
 from .test import VERSE_SCORES_SUFFIX
 
 LOGGER = logging.getLogger(__package__ + ".quality_estimation")
@@ -484,6 +484,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    environment = SilNlpEnv.create_standard_environment()
+
     using_files = bool(args.confidence_files)
     using_books = bool(args.books)
     using_auto_detect = not using_files and not using_books
@@ -493,7 +495,7 @@ def main() -> None:
 
     if (using_books or using_auto_detect) and args.confidence_dir is None:
         raise ValueError("When using --books or auto-detecting confidence files, --confidence-dir must be specified.")
-    confidence_dir = get_mt_exp_dir(args.confidence_dir or "")
+    confidence_dir = environment.get_mt_exp_dir(args.confidence_dir or "")
     if not confidence_dir.is_dir():
         raise ValueError(f"Confidence directory {confidence_dir} does not exist or is not a directory.")
 
@@ -517,7 +519,7 @@ def main() -> None:
         for book_id in args.books:
             confidence_file_paths.extend(confidence_dir.glob(f"[0-9]*{book_id}{draft_suffix}.*{CONFIDENCE_SUFFIX}"))
 
-    estimate_quality(get_mt_exp_dir(args.verse_test_scores_file), confidence_file_paths)
+    estimate_quality(environment.get_mt_exp_dir(args.verse_test_scores_file), confidence_file_paths)
 
 
 if __name__ == "__main__":

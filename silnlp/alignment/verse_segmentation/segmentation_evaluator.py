@@ -1,17 +1,21 @@
 from pathlib import Path
 from typing import List
 
+from ...common.environment import SilNlpEnv
 from .paratext_project_reader import ParatextProjectReader
 from .passage import Passage, PassageReader, SegmentedPassage, SegmentedPassageBuilder
 
 
 class ReferenceVerseSegmentationReader:
+    def __init__(self, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()):
+        self._environment = environment
+
     def read_passages(self, target_project_name: str, target_passage_file: Path):
         passages = PassageReader(target_passage_file).get_passages()
         return self._read_segmented_passages(passages, target_project_name)
 
     def _read_segmented_passages(self, passages: List[Passage], target_project_name: str) -> List[SegmentedPassage]:
-        paratext_project_reader = ParatextProjectReader(target_project_name)
+        paratext_project_reader = ParatextProjectReader(target_project_name, self._environment)
         segmented_passage_builders: List[SegmentedPassageBuilder] = [
             SegmentedPassageBuilder(p.start_ref, p.end_ref) for p in passages
         ]

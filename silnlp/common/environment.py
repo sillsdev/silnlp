@@ -4,7 +4,7 @@ import re
 import shutil
 import subprocess
 import time
-from pathlib import Path
+from pathlib import Path, PurePath
 from platform import system, uname
 from typing import Callable, List, Optional
 
@@ -25,23 +25,19 @@ LOGGER = logging.getLogger(__name__)
 class SilNlpEnv:
     def __init__(
         self,
-        data_dir: Optional[Path] = None,
-        pt_dir: Optional[Path] = None,
         mt_dir: Optional[Path] = None,
-        align_dir: Optional[Path] = None,
+        mt_experiments_dir: Optional[Path] = None,
     ):
         atexit.register(self.delete_path)
         atexit.register(check_transfers)
         self.path_to_delete: Optional[Path] = None
-        self._data_dir = self._resolve_data_dir(data_dir)
-        self._pt_dir = self._resolve_paratext_dir(pt_dir)
+        self._data_dir = self._resolve_data_dir()
+        self._pt_dir = self._resolve_paratext_dir()
         self._mt_dir = self._resolve_mt_dir(mt_dir)
-        self._align_dir = self._resolve_align_dir(align_dir)
+        self._mt_experiments_dir = self._resolve_mt_experiments_dir(mt_experiments_dir)
+        self._align_dir = self._resolve_align_dir()
 
-    def _resolve_data_dir(self, data_dir: Optional[Path] = None) -> Path:
-        if data_dir is not None:
-            return data_dir
-
+    def _resolve_data_dir(self) -> Path:
         sil_nlp_data_path = os.getenv("SIL_NLP_DATA_PATH", default="")
         if sil_nlp_data_path != "":
             temp_path = Path(sil_nlp_data_path)
@@ -56,14 +52,21 @@ class SilNlpEnv:
 
         raise FileExistsError("No valid path exists")
 
-    def _resolve_paratext_dir(self, pt_dir: Optional[Path] = None) -> Path:
-        return self._resolve_relative_or_absolute_path(pt_dir, env_var_dir="SIL_NLP_PT_DIR", default_subdir="Paratext")
+    def _resolve_paratext_dir(self) -> Path:
+        return self._data_dir / "Paratext"
 
     def _resolve_mt_dir(self, mt_dir: Optional[Path] = None) -> Path:
         return self._resolve_relative_or_absolute_path(mt_dir, env_var_dir="SIL_NLP_MT_DIR", default_subdir="MT")
 
-    def _resolve_align_dir(self, align_dir: Optional[Path] = None) -> Path:
-        return self._resolve_relative_or_absolute_path(align_dir, env_var_dir=None, default_subdir="Alignment")
+    def _resolve_mt_experiments_dir(self, mt_experiments_dir: Optional[Path] = None) -> Path:
+        if mt_experiments_dir is not None:
+            if mt_experiments_dir.is_absolute():
+                return mt_experiments_dir
+            return self._data_dir / mt_experiments_dir
+        return self._mt_dir / "experiments"
+
+    def _resolve_align_dir(self) -> Path:
+        return self._data_dir / "Alignment"
 
     def _resolve_relative_or_absolute_path(
         self, custom_dir: Optional[Path], env_var_dir: Optional[str], default_subdir: str
@@ -125,7 +128,7 @@ class SilNlpEnv:
 
     @property
     def mt_experiments_dir(self) -> Path:
-        return self.mt_dir / "experiments"
+        return self._mt_experiments_dir
 
     @property
     def align_dir(self) -> Path:
@@ -139,37 +142,43 @@ class SilNlpEnv:
     def align_experiments_dir(self) -> Path:
         return self.align_dir / "experiments"
 
+    def get_mt_corpus_path(self, corpus: str) -> Path:
+        corpus_path = self.mt_corpora_dir / f"{corpus}.txt"
+        if corpus_path.is_file():
+            return corpus_path
+        return self.mt_scripture_dir / f"{corpus}.txt"
+
     @staticmethod
     def create_standard_environment() -> "SilNlpEnv":
         return SilNlpEnv()
-
-    @staticmethod
-    def create_environment_with_data_dir(data_dir: Path) -> "SilNlpEnv":
-        return SilNlpEnv(data_dir=data_dir)
-
-    @staticmethod
-    def create_environment_with_paratext_dir(pt_dir: Path) -> "SilNlpEnv":
-        return SilNlpEnv(pt_dir=pt_dir)
 
     @staticmethod
     def create_environment_with_mt_dir(mt_dir: Path) -> "SilNlpEnv":
         return SilNlpEnv(mt_dir=mt_dir)
 
     @staticmethod
-    def create_environment_with_align_dir(align_dir: Path) -> "SilNlpEnv":
-        return SilNlpEnv(align_dir=align_dir)
-
-    @staticmethod
-    def create_environment_with_custom_directories(
-        data_dir: Optional[Path] = None,
-        pt_dir: Optional[Path] = None,
-        mt_dir: Optional[Path] = None,
-        align_dir: Optional[Path] = None,
-    ) -> "SilNlpEnv":
-        return SilNlpEnv(data_dir=data_dir, pt_dir=pt_dir, mt_dir=mt_dir, align_dir=align_dir)
+    def create_environment_with_mt_experiments_dir(mt_experiments_dir: Path) -> "SilNlpEnv":
+        return SilNlpEnv(mt_experiments_dir=mt_experiments_dir)
 
     def get_mt_exp_dir(self, exp_name: str) -> Path:
         return self.mt_experiments_dir / exp_name
+
+    def get_paratext_project_dir(self, project: str) -> Path:
+        return self.pt_projects_dir / project
+
+    def get_scripture_path(self, iso: str, project: str) -> Path:
+        return self.mt_scripture_dir / f"{iso}-{project}.txt"
+
+    def get_align_experiment_name(self, exp_dir: Path) -> str:
+        return exp_dir.as_posix()[len(self.align_experiments_dir.as_posix()) + 1 :]
+
+    def get_align_experiment_dirs(self, exp_pattern: str) -> List[Path]:
+        exp_dirs: List[Path] = []
+        for path in self.align_experiments_dir.glob(str(PurePath(exp_pattern) / "**" / "config.yml")):
+            dir = path.parent
+            if len(list(dir.rglob("config.yml"))) == 1:
+                exp_dirs.append(dir)
+        return exp_dirs
 
     def delete_path_on_exit(self, path: Path) -> None:
         self.path_to_delete = path
@@ -243,6 +252,3 @@ def get_env_path(name: str, default: str = ".") -> str:
     if is_wsl() and (re.match(r"^[a-zA-Z]:", path) is not None or "\\" in path):
         return wsl_path(Path(path))
     return path
-
-
-SIL_NLP_ENV = SilNlpEnv()

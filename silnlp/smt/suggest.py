@@ -16,8 +16,8 @@ from machine.translation import (
 from machine.translation.thot import ThotSmtModel, ThotWordAlignmentModelType
 
 from ..common.corpus import get_scripture_parallel_corpus
-from ..common.environment import SIL_NLP_ENV
-from ..common.utils import get_git_revision_hash, get_mt_exp_dir
+from ..common.environment import SilNlpEnv
+from ..common.utils import get_git_revision_hash
 from .config import create_word_detokenizer, create_word_tokenizer, load_config
 
 LOGGER = logging.getLogger(__package__ + ".suggest")
@@ -35,6 +35,7 @@ def suggest(
     trace: Optional[str],
     approve_aligned: bool,
     quiet: bool,
+    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
 ):
     action_count = 0
     char_count = 0
@@ -66,7 +67,7 @@ def suggest(
         LOGGER.info("Suggesting...")
     start = time.time()
 
-    corpus_df = get_scripture_parallel_corpus(src, trg)
+    corpus_df = get_scripture_parallel_corpus(src, trg, environment=environment)
     corpus = ParallelTextCorpus.from_pandas(corpus_df, None, "vref", "source", "target", None)
     corpus = corpus.tokenize(source_tokenizer, target_tokenizer)
     corpus = corpus.escape_spaces()
@@ -286,8 +287,10 @@ def main() -> None:
     get_git_revision_hash()
 
     exp_name = args.experiment
-    exp_dir = get_mt_exp_dir(exp_name)
-    config = load_config(exp_name)
+    environment = SilNlpEnv.create_standard_environment()
+
+    exp_dir = environment.get_mt_exp_dir(exp_name)
+    config = load_config(exp_name, environment)
 
     engine_dir = exp_dir / f"engine{os.sep}"
     src_file_path = exp_dir / "test.src.txt"
@@ -305,6 +308,7 @@ def main() -> None:
         args.trace,
         args.approve_aligned,
         args.quiet,
+        environment=environment,
     )
 
 

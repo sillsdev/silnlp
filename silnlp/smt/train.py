@@ -9,8 +9,9 @@ from machine.translation.thot import ThotSmtModelTrainer, ThotWordAlignmentModel
 from machine.utils import Phase, PhasedProgressReporter, ProgressStatus
 from tqdm import tqdm
 
-from ..common.environment import SIL_NLP_ENV
-from ..common.utils import get_git_revision_hash, get_mt_exp_dir
+from silnlp.common.environment import SilNlpEnv
+
+from ..common.utils import get_git_revision_hash
 from .config import create_word_tokenizer, get_thot_word_alignment_type, load_config
 
 LOGGER = logging.getLogger(__package__ + ".train")
@@ -54,9 +55,9 @@ def create_thot_smt_config_file(config_file_path: Path, model_type: ThotWordAlig
     config_file_path.write_text(config, encoding="utf-8")
 
 
-def train(exp_name: str) -> None:
-    exp_dir = get_mt_exp_dir(exp_name)
-    config = load_config(exp_name)
+def train(exp_name: str, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()) -> None:
+    exp_dir = environment.get_mt_exp_dir(exp_name)
+    config = load_config(exp_name, environment)
 
     src_file_path = exp_dir / "train.src.txt"
     trg_file_path = exp_dir / "train.trg.txt"
@@ -113,9 +114,11 @@ def main() -> None:
 
     get_git_revision_hash()
 
+    environment = SilNlpEnv.create_standard_environment()
+
     for exp_name in args.experiments:
         LOGGER.info(f"Training {exp_name}")
-        train(exp_name)
+        train(exp_name, environment)
         LOGGER.info(f"Finished training {exp_name}")
 
 

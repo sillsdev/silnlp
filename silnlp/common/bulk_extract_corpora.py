@@ -9,14 +9,15 @@ from zipfile import ZipFile
 
 from tqdm.contrib.concurrent import process_map
 
-logging.disable(logging.CRITICAL)
 from ..common.corpus import count_lines, write_corpus
-from ..common.environment import SIL_NLP_ENV
+from ..common.environment import SilNlpEnv
 from .paratext import extract_project, extract_term_renderings
+
+logging.disable(logging.CRITICAL)
 
 
 def extract_directory_or_bundle(
-    args: Tuple[Path, Path, Optional[Path], bytes, bool, int, bool],
+    args: Tuple[Path, Path, Optional[Path], bytes, bool, int, bool, SilNlpEnv],
 ) -> Tuple[str, Optional[str]]:
     (
         input_path,
@@ -26,6 +27,7 @@ def extract_directory_or_bundle(
         output_project_vrefs,
         expected_verse_count,
         extract_surface_forms,
+        environment,
     ) = args
     project = input_path.stem
     try:
@@ -38,14 +40,24 @@ def extract_directory_or_bundle(
                 corpus_path, verse_count = extract_project(
                     project_dir, corpus_output_path, output_project_vrefs=output_project_vrefs
                 )
-                if terms_output_path is not None:
-                    extract_term_renderings(project_dir, corpus_path, terms_output_path, extract_surface_forms)
+                extract_term_renderings(
+                    project_dir,
+                    corpus_path,
+                    terms_output_path,
+                    extract_surface_forms,
+                    environment,
+                )
         else:
             corpus_path, verse_count = extract_project(
                 input_path, corpus_output_path, output_project_vrefs=output_project_vrefs
             )
-            if terms_output_path is not None:
-                extract_term_renderings(input_path, corpus_path, terms_output_path, extract_surface_forms)
+            extract_term_renderings(
+                input_path,
+                corpus_path,
+                terms_output_path,
+                extract_surface_forms,
+                environment,
+            )
 
         if verse_count != expected_verse_count:
             corpus_path.unlink()
@@ -76,9 +88,20 @@ def main() -> None:
     password = bytes(args.password, "utf-8")
     output_project_vrefs: bool = args.project_vrefs
 
-    expected_verse_count = count_lines(SIL_NLP_ENV.assets_dir / "vref.txt")
+    environment = SilNlpEnv.create_standard_environment()
+
+    expected_verse_count = count_lines(environment.assets_dir / "vref.txt")
     work = [
-        (p, corpus_output, terms_output, password, output_project_vrefs, expected_verse_count, args.surface_forms)
+        (
+            p,
+            corpus_output,
+            terms_output,
+            password,
+            output_project_vrefs,
+            expected_verse_count,
+            args.surface_forms,
+            environment,
+        )
         for p in chain(input.glob("*.p8z"), (p for p in input.iterdir() if p.is_dir()))
     ]
     print(f"Extracting {len(work)} projects...")

@@ -6,22 +6,22 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
-from ..common.environment import SIL_NLP_ENV
+from ..common.environment import SilNlpEnv
 from .config_utils import load_config
 
 
-def get_corpus_path(project: str) -> Path:
-    return SIL_NLP_ENV.mt_scripture_dir / f"{project}.txt"
+def get_corpus_path(project: str, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()) -> Path:
+    return environment.mt_scripture_dir / f"{project}.txt"
 
 
-def computeSimilarity(projects: List[str]) -> None:
+def computeSimilarity(projects: List[str], environment: SilNlpEnv = SilNlpEnv.create_standard_environment()) -> None:
     charSets = list()
     projects.sort()
     resourceDf = pd.DataFrame(columns=["CharCount", "Mean"])
     resourceDf.reindex(projects)
 
     for project in projects:
-        with open(get_corpus_path(project), "r", encoding="utf-8") as f:
+        with open(get_corpus_path(project, environment), "r", encoding="utf-8") as f:
             text = f.read()
         thisCharSet = list()
         for i in range(len(text)):
@@ -92,7 +92,8 @@ def main() -> None:
     args = parser.parse_args()
 
     exp_name = args.experiment
-    config = load_config(exp_name)
+    environment = SilNlpEnv.create_standard_environment()
+    config = load_config(exp_name, environment)
 
     projects: Set[str] = set()
     for pair in config.corpus_pairs:
@@ -102,7 +103,7 @@ def main() -> None:
             for trg_file in pair.trg_files:
                 projects.add(f"{trg_file.iso}-{trg_file.project}")
 
-    computeSimilarity(list(projects))
+    computeSimilarity(list(projects), environment)
 
 
 if __name__ == "__main__":

@@ -10,8 +10,7 @@ from machine.scripture import ALL_BOOK_IDS, book_id_to_number, is_nt, is_ot
 from tqdm import tqdm
 
 from ..nmt.hugging_face_config import HuggingFaceConfig
-from .environment import SIL_NLP_ENV
-from .utils import get_mt_exp_dir
+from .environment import SilNlpEnv
 
 LOGGER = logging.getLogger(__package__ + ".collect_verse_counts")
 
@@ -44,14 +43,14 @@ DT_CANON = [
 ]
 
 
-def get_complete_verse_counts() -> Dict[str, Counter]:
-    complete_counts_path = SIL_NLP_ENV.mt_experiments_dir / "verse_counts" / "complete_counts.csv"
+def get_complete_verse_counts(environment: SilNlpEnv = SilNlpEnv.create_standard_environment()) -> Dict[str, Counter]:
+    complete_counts_path = environment.mt_experiments_dir / "verse_counts" / "complete_counts.csv"
     if complete_counts_path.is_file():
         df = pd.read_csv(complete_counts_path, index_col="book").rename(columns=lambda x: int(x))
         return {book: Counter(dict(counts.dropna())) for book, counts in df.iterrows()}
 
     verse_counts = defaultdict(list)
-    with open(SIL_NLP_ENV.assets_dir / "vref.txt", "r", encoding="utf-8") as vref_file:
+    with open(environment.assets_dir / "vref.txt", "r", encoding="utf-8") as vref_file:
         for vref in vref_file:
             cur_book = vref.split(" ")[0]
             cur_chapter = int(vref.split(" ")[1].split(":")[0].strip())
@@ -77,6 +76,7 @@ def collect_verse_counts(
     file_patterns: str,
     deutero: bool = False,
     recount: bool = False,
+    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
 ) -> None:
     input_path = input_folder if isinstance(input_folder, Path) else Path(input_folder)
     output_path = output_folder if isinstance(output_folder, Path) else Path(output_folder)
@@ -93,11 +93,11 @@ def collect_verse_counts(
     project_names = [f.stem for f in extract_files]
     projects_to_process = project_names
 
-    partial_books_path = SIL_NLP_ENV.mt_experiments_dir / "verse_counts" / "partially_complete_books"
+    partial_books_path = environment.mt_experiments_dir / "verse_counts" / "partially_complete_books"
     partial_books_path.mkdir(exist_ok=True, parents=True)
 
     # Initialize the data frames and determine which files need to be processed
-    verse_counts_path = SIL_NLP_ENV.mt_experiments_dir / "verse_counts" / "verse_counts.csv"
+    verse_counts_path = environment.mt_experiments_dir / "verse_counts" / "verse_counts.csv"
     verse_counts_df = None
     if verse_counts_path.is_file():
         try:
@@ -115,7 +115,7 @@ def collect_verse_counts(
         verse_counts_df["file"] = project_names
         verse_counts_df = verse_counts_df.set_index("file")
 
-    verse_percentages_path = SIL_NLP_ENV.mt_experiments_dir / "verse_counts" / "verse_percentages.csv"
+    verse_percentages_path = environment.mt_experiments_dir / "verse_counts" / "verse_percentages.csv"
     verse_percentages_df = None
     if verse_percentages_path.is_file():
         try:
@@ -133,7 +133,7 @@ def collect_verse_counts(
         verse_percentages_df = verse_percentages_df.set_index("file")
 
     # Get counts for unprocessed files
-    complete_verse_counts = get_complete_verse_counts()
+    complete_verse_counts = get_complete_verse_counts(environment)
     small_files = []
     partially_complete_projects = []
     for extract_file_name in tqdm(sorted(extract_files)):
@@ -149,7 +149,7 @@ def collect_verse_counts(
 
         verse_counts = defaultdict(list)
         with (
-            open(SIL_NLP_ENV.assets_dir / "vref.txt", "r", encoding="utf-8") as vref_file,
+            open(environment.assets_dir / "vref.txt", "r", encoding="utf-8") as vref_file,
             extract_file_name.open("r", encoding="utf-8") as extract_file,
         ):
             cur_book = None
@@ -283,9 +283,7 @@ def main() -> None:
         help="An experiment folder (typically in MT/experiments) that contains a config.yml file."
         " The results will be saved in this folder.",
     )
-    parser.add_argument(
-        "--input-folder", default=SIL_NLP_ENV.mt_scripture_dir, help="Folder with corpus of Bible extract files."
-    )
+    parser.add_argument("--input-folder", default=None, help="Folder with corpus of Bible extract files.")
     parser.add_argument(
         "--files",
         default="",
@@ -300,12 +298,14 @@ def main() -> None:
     parser.add_argument("--recount", default=False, action="store_true", help="Force recount of verse counts")
     args = parser.parse_args()
 
+    environment = SilNlpEnv.create_standard_environment()
+
     # If the output folder doesn't exist locally, assume it's an experiment folder
     folder = args.folder.replace("\\", "/")
     if Path(folder).exists():
         folder = Path(folder)
     else:
-        folder = get_mt_exp_dir(folder)
+        folder = environment.get_mt_exp_dir(folder)
 
     # If no files are listed and folder is an experiment, use the files listed in the config file
     file_patterns = args.files
@@ -324,13 +324,17 @@ def main() -> None:
         if config is None or len(config.keys()) == 0:
             LOGGER.error("Config file has no contents.")
             return
-        config = HuggingFaceConfig(folder, config)
+        config = HuggingFaceConfig(folder, config, environment)
         files: Set[Path] = set()
         for pair in config.corpus_pairs:
             files.update([f.path for f in pair.src_files] + [f.path for f in pair.trg_files])
         file_patterns = ";".join([f.name for f in files])
 
-    collect_verse_counts(args.input_folder, folder, file_patterns, args.deutero, args.recount)
+    input_folder = args.input_folder
+    if input_folder is None:
+        input_folder = environment.mt_scripture_dir
+
+    collect_verse_counts(input_folder, folder, file_patterns, args.deutero, args.recount, environment=environment)
 
 
 if __name__ == "__main__":

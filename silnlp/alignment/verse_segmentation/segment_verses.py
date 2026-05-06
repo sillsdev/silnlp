@@ -4,7 +4,7 @@ from typing import Dict, List
 
 from machine.scripture import ORIGINAL_VERSIFICATION
 
-from silnlp.common.environment import SIL_NLP_ENV
+from silnlp.common.environment import SilNlpEnv
 
 from .alignment_generators import (
     EflomalAlignmentGeneratorFactory,
@@ -19,9 +19,12 @@ from .verse_offset_predictors import ScoringFunctionVerseOffsetPredictorFactory
 
 
 def evaluate_against_reference(
-    project_to_compare_against: str, target_passages_path: Path, trg_segmented_passages: List[SegmentedPassage]
+    project_to_compare_against: str,
+    target_passages_path: Path,
+    trg_segmented_passages: List[SegmentedPassage],
+    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
 ) -> None:
-    reference_segmentations = ReferenceVerseSegmentationReader().read_passages(
+    reference_segmentations = ReferenceVerseSegmentationReader(environment).read_passages(
         project_to_compare_against, target_passages_path
     )
 
@@ -42,6 +45,7 @@ def write_results_to_file(
     src_segmented_passages: List[SegmentedPassage],
     trg_segmented_passages: List[SegmentedPassage],
     write_vrefs_file: bool,
+    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
 ) -> None:
     src_path = target_passages_path.with_suffix(".src.txt")
     trg_path = target_passages_path.with_suffix(".trg.txt")
@@ -52,7 +56,7 @@ def write_results_to_file(
 
     if write_vrefs_file:
         vref_path = target_passages_path.with_suffix(".vref.txt")
-        template_vref_path = SIL_NLP_ENV.assets_dir / "vref.txt"
+        template_vref_path = environment.assets_dir / "vref.txt"
 
         verse_map: Dict[str, str] = {
             str(verse.reference.to_versification(ORIGINAL_VERSIFICATION)): verse.text
@@ -106,6 +110,8 @@ def main() -> None:
     parser.add_argument("--vref", help="Output vref file for target verses", default=None, action="store_true")
     args = parser.parse_args()
 
+    environment = SilNlpEnv.create_standard_environment()
+
     # There is currently only one option for a break scorer, but more may be added in the future
     break_scorer_factory = ManualBreakScorerFactory()
 
@@ -126,6 +132,7 @@ def main() -> None:
             break_scorer_factory,
             save_alignments=args.save_alignments,
             subdivide_passages=args.recursive,
+            environment=environment,
         ).create(args.source_project, Path(args.target_passages))
     src_segmented_passages = parallel_passages.get_source_segmented_passages()
 
@@ -141,10 +148,13 @@ def main() -> None:
         src_segmented_passages,
         trg_segmented_passages,
         write_vrefs_file=args.vref is not None,
+        environment=environment,
     )
 
     if args.compare_against is not None:
-        evaluate_against_reference(args.compare_against, Path(args.target_passages), trg_segmented_passages)
+        evaluate_against_reference(
+            args.compare_against, Path(args.target_passages), trg_segmented_passages, environment=environment
+        )
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@ import argparse
 import logging
 import os
 
-from ..common.utils import get_mt_exp_dir
+from ..common.environment import SilNlpEnv
 
 logging.basicConfig()
 
@@ -13,8 +13,9 @@ def main() -> None:
     parser.add_argument("exp2", type=str, help="Experiment 2 folder")
     args = parser.parse_args()
 
-    exp1_dir = get_mt_exp_dir(args.exp1)
-    exp2_dir = get_mt_exp_dir(args.exp2)
+    environment = SilNlpEnv.create_standard_environment()
+    exp1_dir = environment.get_mt_exp_dir(args.exp1)
+    exp2_dir = environment.get_mt_exp_dir(args.exp2)
 
     exp1_src_vocab = set(line.strip() for line in open(os.path.join(exp1_dir, "src-onmt.vocab"), "r", encoding="utf-8"))
     exp2_src_vocab = set(line.strip() for line in open(os.path.join(exp2_dir, "src-onmt.vocab"), "r", encoding="utf-8"))

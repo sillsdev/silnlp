@@ -52,6 +52,8 @@ from logging import Logger
 from pathlib import Path
 from typing import List, Optional
 
+from silnlp.common.environment import SilNlpEnv
+
 logger = logging.getLogger(__package__ + ".extract_xri")
 repair_logger = logging.getLogger(logger.name + ".repair")
 clean_logger = logging.getLogger(logger.name + ".clean")
@@ -386,14 +388,18 @@ def write_output_file(filepath: Path, sentences: List[str]) -> None:
             f.write(f"{sentence}\n")
 
 
-def create_extract_files(cli_input: CliInput, sentence_pairs: List[SentencePair]) -> None:
+def create_extract_files(
+    cli_input: CliInput,
+    sentence_pairs: List[SentencePair],
+    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+) -> None:
     logger.info("Creating extract files")
     if cli_input.output is None:
-        logger.info("No output directory specified, defaulting to SIL_NLP_ENV.mt_corpora_dir")
+        logger.info(
+            f"No output directory specified, defaulting to {environment.mt_corpora_dir} with unique subdirectory"
+        )
         unique_dir = f"{cli_input.source_iso}-{cli_input.target_iso}-{cli_input.dataset_descriptor}-{time.strftime('%Y%m%d-%H%M%S')}"
-        from ..common.environment import SIL_NLP_ENV
-
-        output_dir = SIL_NLP_ENV.mt_corpora_dir / unique_dir
+        output_dir = environment.mt_corpora_dir / unique_dir
     else:
         logger.info("Using specified output directory")
         output_dir = Path(cli_input.output)
@@ -432,14 +438,14 @@ def create_extract_files(cli_input: CliInput, sentence_pairs: List[SentencePair]
     create_source_target_files(test_sentences, "test")
 
 
-def run(cli_input: CliInput) -> None:
+def run(cli_input: CliInput, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()) -> None:
     if cli_input.log_level is not None:
         log_level = getattr(logging, cli_input.log_level.upper())
         for log in all_loggers:
             log.setLevel(log_level)
     logger.info("Starting script")
     sentence_pairs = load_sentence_pairs(cli_input.input_file_path)
-    create_extract_files(cli_input, sentence_pairs)
+    create_extract_files(cli_input, sentence_pairs, environment)
     logger.info("Completed script")
 
 
@@ -466,7 +472,8 @@ def main() -> None:
         output=args.output,
         log_level=args.log_level,
     )
-    run(cli_input)
+    environment = SilNlpEnv.create_standard_environment()
+    run(cli_input, environment)
 
 
 if __name__ == "__main__":

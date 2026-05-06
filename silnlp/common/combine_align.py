@@ -1,44 +1,242 @@
 import argparse
-import yaml
 from pathlib import Path
+
 import regex as re
-from .environment import SIL_NLP_ENV
+import yaml
+
+from .environment import SilNlpEnv
 
 # A hardcoded list of major language ISO codes from the Flores-200 benchmark.
 # This list can be modified as needed.
 MAJOR_LANGS = {
-    'en', 'eng', 'de', 'deu', 'es', 'spa', 'fr', 'fra', 'ru', 'rus', 'zh', 'zho',
-    'ar', 'ara', 'hi', 'hin', 'ja', 'jpn', 'ko', 'kor', 'bn', 'ben', 'pt', 'por',
-    'id', 'ind', 'it', 'ita', 'nl', 'nld', 'pl', 'pol', 'ro', 'ron', 'tr', 'tur',
-    'vi', 'vie', 'th', 'tha', 'fa', 'fas', 'he', 'heb', 'uk', 'ukr', 'el', 'ell',
-    'sv', 'swe', 'fi', 'fin', 'hu', 'hun', 'cs', 'ces', 'da', 'dan', 'bg', 'bul',
-    'sr', 'srp', 'sk', 'slk', 'sl', 'slv', 'et', 'est', 'lv', 'lav', 'lt', 'lit',
-    'is', 'isl', 'hr', 'hrv', 'bs', 'bos', 'mk', 'mkd', 'sq', 'sqi', 'ga', 'gle',
-    'cy', 'cym', 'mt', 'mlt', 'ca', 'cat', 'eu', 'eus', 'gl', 'glg', 'gd', 'gla',
-    'sco', 'wa', 'wln', 'fy', 'fry', 'li', 'lim', 'oc', 'oci', 'ast', 'be', 'bel',
-    'ka', 'kat', 'am', 'amh', 'ti', 'tir', 'ha', 'hau', 'ig', 'ibo', 'yo', 'yor',
-    'lg', 'lug', 'sw', 'swa', 'ln', 'lin', 'bm', 'bam', 'ff', 'ful', 'so', 'som',
-    'om', 'orm', 'st', 'sot', 'ts', 'tso', 'xh', 'xho', 'zu', 'zul', 'ss', 'ssw',
-    'af', 'afr', 'tn', 'tsn', 'kg', 'kon', 'mg', 'mlg', 'sn', 'sna', 'co', 'cos',
-    'frp', 'fur', 'gag', 'gn', 'grn', 'hif', 'ilo', 'kbp', 'km', 'khm', 'ky', 'kir',
-    'lmo', 'lus', 'ml', 'mal', 'mr', 'mar', 'my', 'mya', 'nb', 'nob', 'ne', 'nep',
-    'nqo', 'ny', 'nya', 'or', 'ori', 'pap', 'pms', 'ps', 'pus', 'rm', 'roh', 'sat',
-    'scn', 'sd', 'snd', 'si', 'sin', 'su', 'sun', 'tg', 'tgk', 'tk', 'tuk', 'ur',
-    'urd', 'uz', 'uzb', 'vec', 'war', 'yi', 'yid', 'yue'
+    "en",
+    "eng",
+    "de",
+    "deu",
+    "es",
+    "spa",
+    "fr",
+    "fra",
+    "ru",
+    "rus",
+    "zh",
+    "zho",
+    "ar",
+    "ara",
+    "hi",
+    "hin",
+    "ja",
+    "jpn",
+    "ko",
+    "kor",
+    "bn",
+    "ben",
+    "pt",
+    "por",
+    "id",
+    "ind",
+    "it",
+    "ita",
+    "nl",
+    "nld",
+    "pl",
+    "pol",
+    "ro",
+    "ron",
+    "tr",
+    "tur",
+    "vi",
+    "vie",
+    "th",
+    "tha",
+    "fa",
+    "fas",
+    "he",
+    "heb",
+    "uk",
+    "ukr",
+    "el",
+    "ell",
+    "sv",
+    "swe",
+    "fi",
+    "fin",
+    "hu",
+    "hun",
+    "cs",
+    "ces",
+    "da",
+    "dan",
+    "bg",
+    "bul",
+    "sr",
+    "srp",
+    "sk",
+    "slk",
+    "sl",
+    "slv",
+    "et",
+    "est",
+    "lv",
+    "lav",
+    "lt",
+    "lit",
+    "is",
+    "isl",
+    "hr",
+    "hrv",
+    "bs",
+    "bos",
+    "mk",
+    "mkd",
+    "sq",
+    "sqi",
+    "ga",
+    "gle",
+    "cy",
+    "cym",
+    "mt",
+    "mlt",
+    "ca",
+    "cat",
+    "eu",
+    "eus",
+    "gl",
+    "glg",
+    "gd",
+    "gla",
+    "sco",
+    "wa",
+    "wln",
+    "fy",
+    "fry",
+    "li",
+    "lim",
+    "oc",
+    "oci",
+    "ast",
+    "be",
+    "bel",
+    "ka",
+    "kat",
+    "am",
+    "amh",
+    "ti",
+    "tir",
+    "ha",
+    "hau",
+    "ig",
+    "ibo",
+    "yo",
+    "yor",
+    "lg",
+    "lug",
+    "sw",
+    "swa",
+    "ln",
+    "lin",
+    "bm",
+    "bam",
+    "ff",
+    "ful",
+    "so",
+    "som",
+    "om",
+    "orm",
+    "st",
+    "sot",
+    "ts",
+    "tso",
+    "xh",
+    "xho",
+    "zu",
+    "zul",
+    "ss",
+    "ssw",
+    "af",
+    "afr",
+    "tn",
+    "tsn",
+    "kg",
+    "kon",
+    "mg",
+    "mlg",
+    "sn",
+    "sna",
+    "co",
+    "cos",
+    "frp",
+    "fur",
+    "gag",
+    "gn",
+    "grn",
+    "hif",
+    "ilo",
+    "kbp",
+    "km",
+    "khm",
+    "ky",
+    "kir",
+    "lmo",
+    "lus",
+    "ml",
+    "mal",
+    "mr",
+    "mar",
+    "my",
+    "mya",
+    "nb",
+    "nob",
+    "ne",
+    "nep",
+    "nqo",
+    "ny",
+    "nya",
+    "or",
+    "ori",
+    "pap",
+    "pms",
+    "ps",
+    "pus",
+    "rm",
+    "roh",
+    "sat",
+    "scn",
+    "sd",
+    "snd",
+    "si",
+    "sin",
+    "su",
+    "sun",
+    "tg",
+    "tgk",
+    "tk",
+    "tuk",
+    "ur",
+    "urd",
+    "uz",
+    "uzb",
+    "vec",
+    "war",
+    "yi",
+    "yid",
+    "yue",
 }
 
 # List of keywords to exclude from filenames
 EXCLUDED_KEYWORDS = ["XRI", "AI"]
+
 
 def extract_lang_code(corpus_name):
     """
     Extracts a 2 or 3 letter ISO code from a corpus name that follows the
     <iso>-<filename> format. Returns the ISO code or None if the format is invalid.
     """
-    match = re.match(r'^[a-z]{2,3}-', corpus_name)
+    match = re.match(r"^[a-z]{2,3}-", corpus_name)
     if match:
         return match.group(0)[:-1]
     return None
+
 
 def combine_config_files(root_folder: Path, output_filename: str = "config.yml"):
     """
@@ -50,55 +248,52 @@ def combine_config_files(root_folder: Path, output_filename: str = "config.yml")
 
     # Dictionary to hold corpus names, grouped by language code, with dates
     corpus_by_lang = {}
-    
+
     # Initialize a base config with defaults
     global_config = {
-        'data': {
-            'aligner': 'eflomal',
-            'corpus_pairs': [{
-                'type': 'train',
-                'src': [],
-                'trg': [],
-                'mapping': 'many_to_many',
-                'test_size': 0,
-                'val_size': 0
-            }]
+        "data": {
+            "aligner": "eflomal",
+            "corpus_pairs": [
+                {"type": "train", "src": [], "trg": [], "mapping": "many_to_many", "test_size": 0, "val_size": 0}
+            ],
         }
     }
-    
+
     found_first_config = False
 
     # Find all config.yml files in subdirectories
-    for config_file in root_folder.rglob('**/config.yml'):
+    for config_file in root_folder.rglob("**/config.yml"):
         parent_dir_name = config_file.parent.name
-        
+
         # Check if the parent directory name starts with one of the specified prefixes
-        if not (parent_dir_name.lower().startswith('align') or 
-                parent_dir_name.lower().startswith('analyze') or 
-                parent_dir_name.lower().startswith('analyse')):
+        if not (
+            parent_dir_name.lower().startswith("align")
+            or parent_dir_name.lower().startswith("analyze")
+            or parent_dir_name.lower().startswith("analyse")
+        ):
             continue
-        
+
         print(f"Found config file: {config_file}")
-        
+
         try:
-            with open(config_file, 'r') as f:
+            with open(config_file, "r") as f:
                 config = yaml.safe_load(f)
 
-            if not found_first_config and 'data' in config and 'tokenize' in config['data']:
-                global_config['data']['tokenize'] = config['data']['tokenize']
+            if not found_first_config and "data" in config and "tokenize" in config["data"]:
+                global_config["data"]["tokenize"] = config["data"]["tokenize"]
                 found_first_config = True
 
-            if 'data' in config and 'corpus_pairs' in config['data']:
-                for pair in config['data']['corpus_pairs']:
+            if "data" in config and "corpus_pairs" in config["data"]:
+                for pair in config["data"]["corpus_pairs"]:
                     # Handle cases where 'src' or 'trg' are single strings, not lists
-                    src_items = pair.get('src', [])
+                    src_items = pair.get("src", [])
                     if isinstance(src_items, str):
                         src_items = [src_items]
-                    
-                    trg_items = pair.get('trg', [])
+
+                    trg_items = pair.get("trg", [])
                     if isinstance(trg_items, str):
                         trg_items = [trg_items]
-                    
+
                     all_corpora = set(src_items).union(set(trg_items))
 
                     for corpus in all_corpora:
@@ -110,9 +305,11 @@ def combine_config_files(root_folder: Path, output_filename: str = "config.yml")
                         lang_code = extract_lang_code(corpus)
                         if lang_code:
                             # Extract date from filename if present
-                            date_match = re.search(r'_(\d{4}_\d{2}_\d{2})', corpus)
-                            date_str = date_match.group(1) if date_match else "0000_00_00" # Use a default date for files without one
-                            
+                            date_match = re.search(r"_(\d{4}_\d{2}_\d{2})", corpus)
+                            date_str = (
+                                date_match.group(1) if date_match else "0000_00_00"
+                            )  # Use a default date for files without one
+
                             if lang_code not in corpus_by_lang:
                                 corpus_by_lang[lang_code] = []
                             corpus_by_lang[lang_code].append((date_str, corpus))
@@ -121,7 +318,7 @@ def combine_config_files(root_folder: Path, output_filename: str = "config.yml")
 
         except Exception as e:
             print(f"Error processing {config_file}: {e}")
-    
+
     # Filter for the most recent file for each language
     final_corpora = set()
     for lang_code, corpus_list in corpus_by_lang.items():
@@ -142,21 +339,23 @@ def combine_config_files(root_folder: Path, output_filename: str = "config.yml")
 
     # The new 'src' list is the sorted combination of major and minor languages
     # The new 'trg' list is the sorted list of minor languages
-    global_config['data']['corpus_pairs'][0]['src'] = sorted(list(major_corpora)) + sorted(list(minor_corpora))
-    global_config['data']['corpus_pairs'][0]['trg'] = sorted(list(minor_corpora))
+    global_config["data"]["corpus_pairs"][0]["src"] = sorted(list(major_corpora)) + sorted(list(minor_corpora))
+    global_config["data"]["corpus_pairs"][0]["trg"] = sorted(list(minor_corpora))
 
     # Write the combined config to a new file in the root folder
-    output_path = root_folder / 'combined_config.yml'
+    output_path = root_folder / "combined_config.yml"
     try:
-        with open(output_path, 'w') as f:
+        with open(output_path, "w") as f:
             yaml.dump(global_config, f, sort_keys=False)
         print(f"\nSuccessfully wrote combined configuration to: {output_path}")
     except Exception as e:
         print(f"Failed to write the combined config file: {e}")
 
-def update_config(folder: Path):
-    import sys
+
+def update_config(folder: Path, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()):
     import datetime
+    import sys
+
     config_path = folder / "config.yml"
     if not config_path.is_file():
         print(f"Error: config.yml not found in {folder}")
@@ -180,7 +379,7 @@ def update_config(folder: Path):
             return None
         prefix = m.group(1)
         candidates = []
-        for file in SIL_NLP_ENV.mt_scripture_dir.glob(f"{prefix}_????_??_??.*"):
+        for file in environment.mt_scripture_dir.glob(f"{prefix}_????_??_??.*"):
             # Extract date from filename
             file_stem = file.stem
             m2 = re.match(rf"^{re.escape(prefix)}_(\d{{4}}_\d{{2}}_\d{{2}})$", file_stem)
@@ -222,38 +421,34 @@ def update_config(folder: Path):
         print("No updates made to config.yml. Restoring original.")
         backup_path.replace(config_path)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description='Combine multiple config.yml files into one or update config.yml with latest file stems.'
+        description="Combine multiple config.yml files into one or update config.yml with latest file stems."
     )
     group = parser.add_mutually_exclusive_group(required=False)
     group.add_argument(
-        '--update-config',
-        action='store_true',
-        help='Update config.yml in the given folder with latest file stems.'
+        "--update-config", action="store_true", help="Update config.yml in the given folder with latest file stems."
     )
     group.add_argument(
-        '--output_filename',
+        "--output_filename",
         type=str,
         default=None,
-        help='Output filename for the combined file. The default is config.yml.'
+        help="Output filename for the combined file. The default is config.yml.",
     )
-    parser.add_argument(
-        'folder',
-        type=str,
-        help='The root folder to search for config.yml files or to update config.'
-    )
+    parser.add_argument("folder", type=str, help="The root folder to search for config.yml files or to update config.")
 
     args = parser.parse_args()
+    environment = SilNlpEnv.create_standard_environment()
     folder = Path(args.folder)
 
     if not folder.is_dir():
-        folder = Path(SIL_NLP_ENV.mt_experiments_dir) / args.folder    
+        folder = Path(environment.mt_experiments_dir) / args.folder
 
     if not folder.is_dir():
         print(f"Error: Couldn't find {args.folder} or {folder}.")
     elif args.update_config:
-        update_config(folder)
+        update_config(folder, environment)
     else:
         output_filename = args.output_filename or "config.yml"
         combine_config_files(folder, output_filename)

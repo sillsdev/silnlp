@@ -1,6 +1,7 @@
 import argparse
 import shutil
 
+from silnlp.common.environment import SilNlpEnv
 from silnlp.nmt.config_utils import load_config
 
 _COMMON_TERMS = {"god", "lord", "yhwh", "yahweh", "jehovah", "jehovah god"}
@@ -11,8 +12,9 @@ def main() -> None:
     parser.add_argument("experiment", help="Experiment name")
 
     args = parser.parse_args()
+    environment = SilNlpEnv.create_standard_environment()
 
-    config = load_config(args.experiment)
+    config = load_config(args.experiment, environment)
     tokenizer = config.create_tokenizer()
     src_file_path = config.exp_dir / "dict.src.txt"
     orig_src_file_path = config.exp_dir / "dict.src.txt.orig"
@@ -28,15 +30,14 @@ def main() -> None:
     if not orig_vref_file_path.is_file():
         shutil.copy(vref_file_path, orig_vref_file_path)
 
-    with orig_src_file_path.open("r", encoding="utf-8-sig") as orig_src_file, orig_trg_file_path.open(
-        "r", encoding="utf-8-sig"
-    ) as orig_trg_file, orig_vref_file_path.open("r", encoding="utf-8-sig") as orig_vref_file, src_file_path.open(
-        "w", encoding="utf-8"
-    ) as src_file, trg_file_path.open(
-        "w", encoding="utf-8"
-    ) as trg_file, vref_file_path.open(
-        "w", encoding="utf-8"
-    ) as vref_file:
+    with (
+        orig_src_file_path.open("r", encoding="utf-8-sig") as orig_src_file,
+        orig_trg_file_path.open("r", encoding="utf-8-sig") as orig_trg_file,
+        orig_vref_file_path.open("r", encoding="utf-8-sig") as orig_vref_file,
+        src_file_path.open("w", encoding="utf-8") as src_file,
+        trg_file_path.open("w", encoding="utf-8") as trg_file,
+        vref_file_path.open("w", encoding="utf-8") as vref_file,
+    ):
         for src, trg, vref in zip(orig_src_file, orig_trg_file, orig_vref_file):
             src = src.strip()
             trg = trg.strip()

@@ -23,7 +23,7 @@ from silnlp.nmt.config import Config
 
 from ..nmt.config_utils import create_config
 from .collect_verse_counts import collect_verse_counts
-from .environment import SIL_NLP_ENV
+from .environment import SilNlpEnv
 from .extract_corpora import extract_corpora
 from .iso_info import ALT_ISO, NLLB_TAG_FROM_ISO
 
@@ -32,7 +32,9 @@ LOGGER = logging.getLogger(__package__ + ".onboard_project")
 
 class OnboardingProject:
 
-    def __init__(self, project_name: str, overwrite: bool) -> None:
+    def __init__(
+        self, project_name: str, overwrite: bool, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
+    ) -> None:
         self.project_name: str = project_name
         self.local_project_path: Path | None = None
         self.output_folder: Path | None = None
@@ -40,11 +42,12 @@ class OnboardingProject:
         self.iso_code: str = ""
         self.resource: bool | None = None
         self.overwrite: bool = overwrite
+        self.environment: SilNlpEnv = environment
 
     def get_extract_path(self) -> Path | None:
         if self.extract_file is not None:
             return self.extract_file
-        extract_paths = list(SIL_NLP_ENV.mt_scripture_dir.glob(f"*-{self.project_name}.txt"))
+        extract_paths = list(self.environment.mt_scripture_dir.glob(f"*-{self.project_name}.txt"))
         if not extract_paths:
             return None
         self.extract_file = extract_paths[0]
@@ -66,6 +69,7 @@ class OnboardingProject:
             extract_surface_forms=extract_config.get("surface-forms", False),
             parent_project=extract_config.get("parent_project", None),
             versification_error_output_path=versification_error_output_path,
+            environment=self.environment,
         )
         self.extract_file = extract_path
 
@@ -155,7 +159,7 @@ class OnboardingProject:
         LOGGER.info(f"Calculating tokenization stats for project '{self.project_name}'")
         with open(stats_dir / "config.yml", "w", encoding="utf-8") as f:
             yaml.dump(stats_config, f, allow_unicode=True)
-        config = create_config(exp_dir=stats_dir, config=stats_config)
+        config = create_config(exp_dir=stats_dir, config=stats_config, environment=self.environment)
 
         config.set_seed()
         config.preprocess(stats=True, force_align=True)
@@ -231,9 +235,11 @@ class OnboardingProject:
 
         with open(align_output_dir / "config.yml", "w", encoding="utf-8") as f:
             yaml.dump(align_config, f, allow_unicode=True)
-        align_config: Config = create_config(exp_dir=align_output_dir, config=align_config)
+        align_config: Config = create_config(
+            exp_dir=align_output_dir, config=align_config, environment=self.environment
+        )
         exp_name = f"{self.output_folder.stem}/{self.project_name}/alignments"
-        analyze(config=align_config, exp_name=exp_name, create_summaries=True)
+        analyze(config=align_config, exp_name=exp_name, create_summaries=True, environment=self.environment)
         corpus_stats_csv = align_output_dir / "corpus_stats.csv"
         if corpus_stats_csv.exists():
             shutil.move(
@@ -297,7 +303,7 @@ class OnboardingProject:
         return self.resource
 
     def generate_resource_hash(self) -> str:
-        resource_path = SIL_NLP_ENV.pt_projects_dir / self.project_name
+        resource_path = self.environment.pt_projects_dir / self.project_name
         resource_hash = hashlib.sha256()
         for root, dirs, files in os.walk(resource_path):
             dirs.sort()
@@ -318,7 +324,7 @@ class OnboardingProject:
 
     def check_resource_hash(self) -> bool:
         new_resource_hash = self.generate_resource_hash()
-        old_resource_path = SIL_NLP_ENV.pt_projects_dir / self.project_name
+        old_resource_path = self.environment.pt_projects_dir / self.project_name
         old_resource_hash_path = old_resource_path / ".resource_hash"
         old_resource_hash = None
         if old_resource_hash_path.exists():
@@ -326,7 +332,7 @@ class OnboardingProject:
         return new_resource_hash == old_resource_hash
 
     def update_resource(self) -> None:
-        old_resource_path = SIL_NLP_ENV.pt_projects_dir / self.project_name
+        old_resource_path = self.environment.pt_projects_dir / self.project_name
 
         new_resource_name = append_datestamp(old_resource_path.name)
         new_resource_path = old_resource_path.parent / new_resource_name
@@ -341,18 +347,22 @@ class OnboardingRequest:
     def __init__(
         self,
         config: dict,
+        environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
     ):
         self.config = config
+        self.environment = environment
         onboarding_config = config.get("onboarding", {})
         self.overwrite = onboarding_config.get("overwrite", False)
         main_project_name = onboarding_config.get("main_project", None)
         self.main_project: OnboardingProject = OnboardingProject(
-            project_name=main_project_name, overwrite=self.overwrite
+            project_name=main_project_name, overwrite=self.overwrite, environment=self.environment
         )
         reference_project_names = onboarding_config.get("ref_projects", [])
         self.reference_projects: List[OnboardingProject] = []
         for ref_project_name in reference_project_names:
-            reference_project = OnboardingProject(project_name=ref_project_name, overwrite=self.overwrite)
+            reference_project = OnboardingProject(
+                project_name=ref_project_name, overwrite=self.overwrite, environment=self.environment
+            )
             self.reference_projects.append(reference_project)
         self.no_clean: bool = onboarding_config.get("no_clean", False)
         self.copy_from: Path | None = onboarding_config.get("copy_from", None)
@@ -462,13 +472,17 @@ class OnboardingRequest:
 
         if self.copy_from:
             LOGGER.info(
-                f"Copying project: {onboarding_project.project_name} from {self.copy_from} to {SIL_NLP_ENV.pt_projects_dir}/{onboarding_project.project_name}"
+                f"Copying project: {onboarding_project.project_name} from {self.copy_from} to {self.environment.pt_projects_dir}/{onboarding_project.project_name}"
             )
             source_path = Path(self.copy_from)
             if source_path.name != onboarding_project.project_name:
                 source_path = Path(source_path / onboarding_project.project_name)
-            paratext_project_dir: Path = create_paratext_project_folder_if_not_exists(onboarding_project.project_name)
-            copy_paratext_project_folder(source_path, paratext_project_dir, overwrite=self.overwrite)
+            paratext_project_dir: Path = create_paratext_project_folder_if_not_exists(
+                onboarding_project.project_name, self.environment
+            )
+            copy_paratext_project_folder(
+                source_path, paratext_project_dir, overwrite=self.overwrite, environment=self.environment
+            )
             if onboarding_project.project_name != original_project_name:
                 shutil.rmtree(source_path)
 
@@ -485,7 +499,7 @@ class OnboardingRequest:
             onboarding_project.wildebeest_analysis_wrapper(self.config.get("wildebeest", {}))
 
     def collect_verse_counts_wrapper(self, verse_counts_config: dict) -> None:
-        input_folder = verse_counts_config.get("input_folder", SIL_NLP_ENV.mt_scripture_dir)
+        input_folder = verse_counts_config.get("input_folder", self.environment.mt_scripture_dir)
 
         file_patterns = verse_counts_config.get("files", None)
         if file_patterns is None:
@@ -509,6 +523,7 @@ class OnboardingRequest:
             file_patterns=file_patterns,
             deutero=verse_counts_config.get("deutero", False),
             recount=verse_counts_config.get("recount", False),
+            environment=self.environment,
         )
 
     def get_config_path(self) -> Path:
@@ -516,7 +531,7 @@ class OnboardingRequest:
 
     def setup_output(self) -> None:
         self.output_folder = Path(
-            SIL_NLP_ENV.mt_experiments_dir / "_OnboardingRequests" / f"{self.main_project.project_name}_Request"
+            self.environment.mt_experiments_dir / "_OnboardingRequests" / f"{self.main_project.project_name}_Request"
         )
         self.output_folder.mkdir(parents=True, exist_ok=True)
         for project in [self.main_project] + self.reference_projects:
@@ -534,12 +549,10 @@ class OnboardingRequest:
             close_logger(log_file_path)
 
 
-def get_paratext_project_dir(project: str) -> Path:
-    return SIL_NLP_ENV.pt_projects_dir / project
-
-
-def create_paratext_project_folder_if_not_exists(project_name: str) -> Path:
-    pt_project_path = get_paratext_project_dir(project_name)
+def create_paratext_project_folder_if_not_exists(
+    project_name: str, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
+) -> Path:
+    pt_project_path = environment.get_paratext_project_dir(project_name)
     if pt_project_path.exists():
         LOGGER.info(f"Paratext project folder '{pt_project_path}' already exists.")
     else:
@@ -548,8 +561,13 @@ def create_paratext_project_folder_if_not_exists(project_name: str) -> Path:
     return pt_project_path
 
 
-def copy_paratext_project_folder(source_dir: Path, project_name: str, overwrite=False) -> None:
-    pt_project_path = get_paratext_project_dir(project_name)
+def copy_paratext_project_folder(
+    source_dir: Path,
+    project_name: str,
+    overwrite=False,
+    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+) -> None:
+    pt_project_path = environment.get_paratext_project_dir(project_name)
 
     if not any(source_dir.iterdir()):
         LOGGER.warning(f"Source directory '{source_dir}' is empty.")
@@ -741,6 +759,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    environment = SilNlpEnv.create_standard_environment()
+
     if args.clearml_queue is not None:
         if "cpu" not in args.clearml_queue:
             LOGGER.warning("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
@@ -755,7 +775,7 @@ def main() -> None:
         args.collect_verse_counts = True
 
     if args.config and len(args.main_projects) != len(args.config):
-        parser.errror("Number of config paths does not match number of main projects.")
+        parser.error("Number of config paths does not match number of main projects.")
 
     project_configs = {}
     if args.config:
@@ -790,9 +810,7 @@ def main() -> None:
                 "output_folder": None,
             }
 
-        onboarding_request = OnboardingRequest(
-            config=config,
-        )
+        onboarding_request = OnboardingRequest(config=config, environment=environment)
         onboarding_request.prepare_and_upload_projects()
         onboarding_requests.append(onboarding_request)
 
@@ -810,7 +828,13 @@ def main() -> None:
             *project_names,
         ]
         task_name = f"Onboarding - {', '.join([req.main_project.project_name for req in onboarding_requests])}"
-        clearml = SILClearML(task_name, args.clearml_queue, tag=args.clearml_tag, skip_config=True)
+        clearml = SILClearML(
+            task_name,
+            args.clearml_queue,
+            tag=args.clearml_tag,
+            skip_config=True,
+            environment=environment,
+        )
 
     for onboarding_request in onboarding_requests:
         onboarding_request.process_onboarding_request()

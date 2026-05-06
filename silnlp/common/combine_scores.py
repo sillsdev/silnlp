@@ -3,32 +3,74 @@ import csv
 import sys
 from collections import defaultdict
 from pathlib import Path
-import openpyxl
 
+import openpyxl
 import pandas as pd
 
-from ..common.environment import SIL_NLP_ENV
+from ..common.environment import SilNlpEnv
 
 # Columns for current style detection and transformation (match actual input files)
 CURRENT_STYLE_COLUMNS = [
-    "Series", "Experiment", "Steps", "book", "draft_index", "src_iso", "trg_iso", "num_refs", "references", "sent_len",
-    "BLEU", "BLEU_1gram_prec", "BLEU_2gram_prec", "BLEU_3gram_prec", "BLEU_4gram_prec",
-    "BLEU_brevity_penalty", "BLEU_total_sys_len", "BLEU_total_ref_len",
-    "chrF3", "chrF3+", "chrF3++", "spBLEU", "confidence"
+    "Series",
+    "Experiment",
+    "Steps",
+    "book",
+    "draft_index",
+    "src_iso",
+    "trg_iso",
+    "num_refs",
+    "references",
+    "sent_len",
+    "BLEU",
+    "BLEU_1gram_prec",
+    "BLEU_2gram_prec",
+    "BLEU_3gram_prec",
+    "BLEU_4gram_prec",
+    "BLEU_brevity_penalty",
+    "BLEU_total_sys_len",
+    "BLEU_total_ref_len",
+    "chrF3",
+    "chrF3+",
+    "chrF3++",
+    "spBLEU",
+    "confidence",
 ]
 
 # Columns to hide in Excel output
 COLUMNS_TO_HIDE = [
-    "BLEU_1gram_prec", "BLEU_2gram_prec", "BLEU_3gram_prec", "BLEU_4gram_prec", "BLEU_brevity_penalty",
-    "BLEU_total_sys_len", "BLEU_total_ref_len", "chrF3", "chrF3+",
-    "book", "draft_index", "num_refs", "references", "sent_len", "spBLEU", "confidence"
+    "BLEU_1gram_prec",
+    "BLEU_2gram_prec",
+    "BLEU_3gram_prec",
+    "BLEU_4gram_prec",
+    "BLEU_brevity_penalty",
+    "BLEU_total_sys_len",
+    "BLEU_total_ref_len",
+    "chrF3",
+    "chrF3+",
+    "book",
+    "draft_index",
+    "num_refs",
+    "references",
+    "sent_len",
+    "spBLEU",
+    "confidence",
 ]
 
 # Final column order for current style
 CURRENT_STYLE_OUTPUT_COLUMNS = [
-    "src_iso", "trg_iso", "BLEU", "chrF3++",
-    "book", "draft_index", "num_refs", "references", "sent_len", "spBLEU", "confidence"
+    "src_iso",
+    "trg_iso",
+    "BLEU",
+    "chrF3++",
+    "book",
+    "draft_index",
+    "num_refs",
+    "references",
+    "sent_len",
+    "spBLEU",
+    "confidence",
 ]
+
 
 def check_for_lock_file(folder: Path, filename: str, file_type: str):
     """Check for lock files and ask the user to close them then exit."""
@@ -76,7 +118,7 @@ def aggregate_scores(folder):
     csv_files = list(folder.rglob("*/scores-*.csv"))
     for csv_file in csv_files:
         print(csv_file)
-    if not csv_files :
+    if not csv_files:
         print(f"No scores csv files were found in folder {folder.resolve()}")
         sys.exit(0)
 
@@ -114,15 +156,36 @@ def aggregate_scores(folder):
 
 def clean_dataframe(df):
     cleaned_df = df.copy()
-    cleaned_df = cleaned_df[~((cleaned_df['trg_iso'] == 'ALL') & (cleaned_df['chrF3++'].isna() | (cleaned_df['chrF3++'] == '')))]
-    numeric_cols = ['BLEU', 'BLEU_1gram_prec', 'BLEU_2gram_prec', 'BLEU_3gram_prec', 'BLEU_4gram_prec', 'BLEU_brevity_penalty', 'BLEU_total_sys_len', 'BLEU_total_ref_len', 'chrF3', 'chrF3+', 'chrF3++', 'spBLEU', 'confidence', 'num_refs', 'sent_len', 'draft_index']
+    cleaned_df = cleaned_df[
+        ~((cleaned_df["trg_iso"] == "ALL") & (cleaned_df["chrF3++"].isna() | (cleaned_df["chrF3++"] == "")))
+    ]
+    numeric_cols = [
+        "BLEU",
+        "BLEU_1gram_prec",
+        "BLEU_2gram_prec",
+        "BLEU_3gram_prec",
+        "BLEU_4gram_prec",
+        "BLEU_brevity_penalty",
+        "BLEU_total_sys_len",
+        "BLEU_total_ref_len",
+        "chrF3",
+        "chrF3+",
+        "chrF3++",
+        "spBLEU",
+        "confidence",
+        "num_refs",
+        "sent_len",
+        "draft_index",
+    ]
     for col in numeric_cols:
-        if col in cleaned_df.columns: cleaned_df[col] = pd.to_numeric(cleaned_df[col], errors='coerce')
-    string_cols = ['Series', 'Experiment', 'Steps', 'book', 'src_iso', 'trg_iso', 'references']
+        if col in cleaned_df.columns:
+            cleaned_df[col] = pd.to_numeric(cleaned_df[col], errors="coerce")
+    string_cols = ["Series", "Experiment", "Steps", "book", "src_iso", "trg_iso", "references"]
     for col in string_cols:
-        if col in cleaned_df.columns: cleaned_df[col] = cleaned_df[col].astype(str).str.strip()
+        if col in cleaned_df.columns:
+            cleaned_df[col] = cleaned_df[col].astype(str).str.strip()
     return cleaned_df
-    
+
 
 def merge_all_data(data_by_header):
     all_dfs = []
@@ -144,27 +207,31 @@ def merge_all_data(data_by_header):
 def sort_dataframe(df, sort_by):
     sort_cols = [col for col, _ in sort_by]
     sort_ascending = [asc for _, asc in sort_by]
-    return df.sort_values(by=sort_cols, ascending=sort_ascending, na_position='last')
+    return df.sort_values(by=sort_cols, ascending=sort_ascending, na_position="last")
 
 
 def write_to_excel(df, folder, output_filename):
     output_file = folder / f"{output_filename}.xlsx"
-    with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-        df.to_excel(writer, sheet_name='Scores', index=False)
+    with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="Scores", index=False)
     wb = openpyxl.load_workbook(output_file)
-    ws = wb['Scores']
+    ws = wb["Scores"]
     header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True))
     for col_idx, col_name in enumerate(header_row, 1):
         col_letter = openpyxl.utils.get_column_letter(col_idx)
-        if col_name in COLUMNS_TO_HIDE: ws.column_dimensions[col_letter].hidden = True
+        if col_name in COLUMNS_TO_HIDE:
+            ws.column_dimensions[col_letter].hidden = True
         else:
             max_length = len(str(col_name)) if col_name else 0
             for cell in ws[col_letter]:
-                if cell.row == 1: continue
+                if cell.row == 1:
+                    continue
                 try:
                     cell_length = len(str(cell.value)) if cell.value is not None else 0
-                    if cell_length > max_length: max_length = cell_length
-                except Exception: pass
+                    if cell_length > max_length:
+                        max_length = cell_length
+                except Exception:
+                    pass
             ws.column_dimensions[col_letter].width = max_length + 2
     wb.save(output_file)
     print(f"Wrote scores to {output_file}")
@@ -182,11 +249,12 @@ def main():
     )
     args = parser.parse_args()
 
+    environment = SilNlpEnv.create_standard_environment()
     folder = Path(args.folder)
     base_filename = f"{folder.name}_{args.output_filename}"
 
     if not folder.is_dir():
-        folder = Path(SIL_NLP_ENV.mt_experiments_dir) / args.folder
+        folder = Path(environment.mt_experiments_dir) / args.folder
 
     # Check for lock files and ask the user to close them.
     check_for_lock_file(folder, base_filename, "xlsx")

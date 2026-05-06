@@ -12,6 +12,7 @@ from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, book_number_to_i
 from sacrebleu.metrics import BLEUScore
 from scipy.stats import gmean
 
+from ..common.environment import SilNlpEnv
 from ..common.translator import CONFIDENCE_SUFFIX
 from ..common.utils import get_git_revision_hash
 from .clearml_connection import TAGS_LIST, SILClearML
@@ -919,9 +920,10 @@ def main() -> None:
     )
     args = parser.parse_args()
     experiment = args.experiment
+    environment = SilNlpEnv.create_standard_environment()
 
     if args.clearml_queue is not None:
-        clearml = SILClearML(experiment, args.clearml_queue, tag=args.clearml_tag)
+        clearml = SILClearML(experiment, args.clearml_queue, tag=args.clearml_tag, environment=environment)
         experiment = clearml.name
     else:
         experiment = experiment.replace("\\", "/")
@@ -933,7 +935,7 @@ def main() -> None:
     else:
         books = args.books
 
-    config = load_config(experiment)
+    config = load_config(experiment, environment)
 
     test(
         config=config,

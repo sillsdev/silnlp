@@ -1,9 +1,10 @@
+from pathlib import Path
 from typing import Dict, Set
 
 import pandas as pd
 from machine.scripture import ALL_BOOK_IDS, book_id_to_number
 
-from ..common.environment import SIL_NLP_ENV
+from ..common.environment import SilNlpEnv
 from .config import get_all_book_paths
 
 ALIGNERS = [
@@ -51,10 +52,9 @@ TRANSLATIONS = [
     "nrt",
 ]
 TESTAMENTS = ["nt", "ot", "nt+ot"]
-EXP_DIR = SIL_NLP_ENV.align_experiments_dir / "pab-nlp"
 
 
-def aggregate_testament_results() -> None:
+def aggregate_testament_results(exp_dir: Path) -> None:
     for testament in TESTAMENTS:
         data: Dict[str, pd.DataFrame] = {}
         available_books: Set[str] = set()
@@ -102,7 +102,7 @@ def aggregate_testament_results() -> None:
                             output_file.write("\n")
 
 
-def aggregate_book_results() -> None:
+def aggregate_book_results(exp_dir: Path) -> None:
     for testament in TESTAMENTS:
         if testament == "nt+ot":
             continue
@@ -146,8 +146,12 @@ def aggregate_book_results() -> None:
 
 
 def main() -> None:
-    aggregate_testament_results()
-    aggregate_book_results()
+
+    environment = SilNlpEnv.create_standard_environment()
+    exp_dir = environment.align_experiments_dir / "pab-nlp"
+
+    aggregate_testament_results(exp_dir)
+    aggregate_book_results(exp_dir)
 
 
 if __name__ == "__main__":
