@@ -162,12 +162,18 @@ class OnboardingProject:
 
         tokenization_stats_csv = stats_dir / "tokenization_stats.csv"
         tokenization_stats_xlsx = stats_dir / "tokenization_stats.xlsx"
+        token_occurrence_log = stats_dir / "token_occurrence.log"
         if tokenization_stats_csv.exists():
             shutil.move(str(tokenization_stats_csv), str(self.output_folder / "tokenization_stats.csv"))
         if tokenization_stats_xlsx.exists():
             shutil.move(
                 str(tokenization_stats_xlsx),
                 str(self.output_folder / "tokenization_stats.xlsx"),
+            )
+        if token_occurrence_log.exists():
+            shutil.move(
+                str(token_occurrence_log),
+                str(self.output_folder / "token_occurrence.log"),
             )
 
     def align_wrapper(
