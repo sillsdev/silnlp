@@ -107,9 +107,7 @@ class IsoPairInfo:
         return len(self.test_projects) > 0 or self.has_basic_test_data
 
 
-def parse_corpus_pairs(
-    corpus_pairs: List[dict], environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
-) -> List[CorpusPair]:
+def parse_corpus_pairs(corpus_pairs: List[dict], environment: SilNlpEnv) -> List[CorpusPair]:
     pairs: List[CorpusPair] = []
     for pair in corpus_pairs:
         if "type" not in pair:
@@ -228,9 +226,7 @@ def parse_corpus_pairs(
     return pairs
 
 
-def get_terms_files(
-    files: List[DataFile], environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
-) -> List[DataFile]:
+def get_terms_files(files: List[DataFile], environment: SilNlpEnv) -> List[DataFile]:
     terms_files: List[DataFile] = []
     for file in files:
         terms_path = get_terms_renderings_path(file.iso, file.project, environment)
@@ -240,9 +236,7 @@ def get_terms_files(
     return terms_files
 
 
-def get_terms_glosses_file_paths(
-    terms_files: List[DataFile], environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
-) -> Set[Path]:
+def get_terms_glosses_file_paths(terms_files: List[DataFile], environment: SilNlpEnv) -> Set[Path]:
     glosses_file_paths: Set[Path] = set()
     for terms_file in terms_files:
         list_name = get_terms_list(terms_file.path)

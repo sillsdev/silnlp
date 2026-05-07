@@ -96,7 +96,7 @@ def get_stemmer(stemmer_config: Union[dict, str]) -> Stemmer:
     return stemmer_cls(**kwargs)
 
 
-def load_config(exp_dir: Path, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()) -> dict:
+def load_config(exp_dir: Path, environment: SilNlpEnv) -> dict:
     config: dict = {}
     while exp_dir != environment.align_experiments_dir:
         config_path = exp_dir / "config.yml"

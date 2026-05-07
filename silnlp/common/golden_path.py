@@ -52,7 +52,7 @@ def preprocess(
     trg_paths: List[Path],
     book_nums: List[int],
     preprocess_dir: Path,
-    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+    environment: SilNlpEnv,
 ) -> List[Path]:
     from .corpus import get_scripture_parallel_corpus
 

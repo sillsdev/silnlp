@@ -115,9 +115,7 @@ class MemoryParallelTextCorpus(ParallelTextCorpus):
         yield from self._rows
 
 
-def load_gold_alignment(
-    corpus_name: str, use_src_lemma: bool, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
-) -> ParallelTextCorpus:
+def load_gold_alignment(corpus_name: str, use_src_lemma: bool, environment: SilNlpEnv) -> ParallelTextCorpus:
     corpus_path = environment.align_gold_dir / (corpus_name + ".alignment.json")
     verses: List[dict]
     with corpus_path.open("r", encoding="utf-8") as f:

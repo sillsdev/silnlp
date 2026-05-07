@@ -291,7 +291,7 @@ def get_model_prefix(model: str) -> str:
     return ""
 
 
-def get_parent_model_prefix(parent_exp: str, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()) -> str:
+def get_parent_model_prefix(parent_exp: str, environment: SilNlpEnv) -> str:
     parent_dir = environment.get_mt_exp_dir(parent_exp)
     with (parent_dir / "config.yml").open("r", encoding="utf-8") as file:
         parent_configs = yaml.safe_load(file)
@@ -300,7 +300,7 @@ def get_parent_model_prefix(parent_exp: str, environment: SilNlpEnv = SilNlpEnv.
     return parent_model_prefix
 
 
-def get_parent_model_name(parent_exp: str, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()) -> str:
+def get_parent_model_name(parent_exp: str, environment: SilNlpEnv) -> str:
     parent_dir = environment.get_mt_exp_dir(parent_exp)
     parent_model_dir = parent_dir / "run"
     parent_model = get_parent_last_checkpoint(parent_model_dir)
@@ -362,9 +362,7 @@ class FilePreTrainedModelProviderFactory(PreTrainedModelProviderFactory):
 
 
 class HuggingFaceConfig(Config):
-    def __init__(
-        self, exp_dir: Path, config: dict, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
-    ) -> None:
+    def __init__(self, exp_dir: Path, config: dict, environment: SilNlpEnv) -> None:
         self.environment = environment
         config = merge_dict(
             {

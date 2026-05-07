@@ -7,7 +7,7 @@ from .passage import Passage, PassageReader, SegmentedPassage, SegmentedPassageB
 
 
 class ReferenceVerseSegmentationReader:
-    def __init__(self, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()):
+    def __init__(self, environment: SilNlpEnv):
         self._environment = environment
 
     def read_passages(self, target_project_name: str, target_passage_file: Path):

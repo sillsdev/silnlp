@@ -10,11 +10,11 @@ from ..common.environment import SilNlpEnv
 from .config_utils import load_config
 
 
-def get_corpus_path(project: str, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()) -> Path:
+def get_corpus_path(project: str, environment: SilNlpEnv) -> Path:
     return environment.mt_scripture_dir / f"{project}.txt"
 
 
-def computeSimilarity(projects: List[str], environment: SilNlpEnv = SilNlpEnv.create_standard_environment()) -> None:
+def computeSimilarity(projects: List[str], environment: SilNlpEnv) -> None:
     charSets = list()
     projects.sort()
     resourceDf = pd.DataFrame(columns=["CharCount", "Mean"])

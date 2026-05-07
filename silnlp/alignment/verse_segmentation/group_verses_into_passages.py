@@ -49,9 +49,7 @@ class PassageReader:
         return self._passages
 
 
-def assign_verses_to_passages(
-    project_name: str, passage_file: Path, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
-) -> List[Passage]:
+def assign_verses_to_passages(project_name: str, passage_file: Path, environment: SilNlpEnv) -> List[Passage]:
     passages = PassageReader(passage_file).get_passages()
     settings = FileParatextProjectSettingsParser(environment.pt_projects_dir / project_name).parse()
     stylesheet = settings.stylesheet

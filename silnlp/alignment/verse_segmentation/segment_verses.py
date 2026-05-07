@@ -22,7 +22,7 @@ def evaluate_against_reference(
     project_to_compare_against: str,
     target_passages_path: Path,
     trg_segmented_passages: List[SegmentedPassage],
-    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+    environment: SilNlpEnv,
 ) -> None:
     reference_segmentations = ReferenceVerseSegmentationReader(environment).read_passages(
         project_to_compare_against, target_passages_path
@@ -45,7 +45,7 @@ def write_results_to_file(
     src_segmented_passages: List[SegmentedPassage],
     trg_segmented_passages: List[SegmentedPassage],
     write_vrefs_file: bool,
-    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+    environment: SilNlpEnv,
 ) -> None:
     src_path = target_passages_path.with_suffix(".src.txt")
     trg_path = target_passages_path.with_suffix(".trg.txt")

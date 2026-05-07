@@ -352,7 +352,7 @@ def combine_config_files(root_folder: Path, output_filename: str = "config.yml")
         print(f"Failed to write the combined config file: {e}")
 
 
-def update_config(folder: Path, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()):
+def update_config(folder: Path, environment: SilNlpEnv):
     import datetime
     import sys
 

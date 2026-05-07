@@ -27,9 +27,7 @@ def parse_lang(lang: str) -> Tuple[str, str]:
     return lang[:index], lang[index + 1 :]
 
 
-def get_test_indices(
-    config: dict, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
-) -> Optional[Set[int]]:
+def get_test_indices(config: dict, environment: SilNlpEnv) -> Optional[Set[int]]:
     exp_name = config.get("use_test_set_from")
     if exp_name is None:
         return None

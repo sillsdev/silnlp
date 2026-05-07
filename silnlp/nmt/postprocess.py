@@ -74,9 +74,7 @@ class DraftMetadata:
 
 
 # Get the paths of all drafts that would be produced by an experiment's translate config and that exist
-def get_draft_paths_from_exp(
-    config: Config, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
-) -> List[DraftMetadata]:
+def get_draft_paths_from_exp(config: Config, environment: SilNlpEnv) -> List[DraftMetadata]:
     with (config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as translate_config_file:
         translate_requests = yaml.safe_load(translate_config_file).get("translate", [])
 

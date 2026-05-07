@@ -43,7 +43,7 @@ DT_CANON = [
 ]
 
 
-def get_complete_verse_counts(environment: SilNlpEnv = SilNlpEnv.create_standard_environment()) -> Dict[str, Counter]:
+def get_complete_verse_counts(environment: SilNlpEnv) -> Dict[str, Counter]:
     complete_counts_path = environment.mt_experiments_dir / "verse_counts" / "complete_counts.csv"
     if complete_counts_path.is_file():
         df = pd.read_csv(complete_counts_path, index_col="book").rename(columns=lambda x: int(x))

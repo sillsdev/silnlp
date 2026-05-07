@@ -391,7 +391,7 @@ def write_output_file(filepath: Path, sentences: List[str]) -> None:
 def create_extract_files(
     cli_input: CliInput,
     sentence_pairs: List[SentencePair],
-    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+    environment: SilNlpEnv,
 ) -> None:
     logger.info("Creating extract files")
     if cli_input.output is None:
@@ -438,7 +438,7 @@ def create_extract_files(
     create_source_target_files(test_sentences, "test")
 
 
-def run(cli_input: CliInput, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()) -> None:
+def run(cli_input: CliInput, environment: SilNlpEnv) -> None:
     if cli_input.log_level is not None:
         log_level = getattr(logging, cli_input.log_level.upper())
         for log in all_loggers:

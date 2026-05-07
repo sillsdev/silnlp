@@ -101,9 +101,7 @@ class NMTModel(ABC):
 
 
 class Config(ABC):
-    def __init__(
-        self, exp_dir: Path, config: dict, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
-    ) -> None:
+    def __init__(self, exp_dir: Path, config: dict, environment: SilNlpEnv) -> None:
         self.exp_dir = exp_dir
         self._environment = environment
         self.root = config

@@ -11,7 +11,7 @@ VerseCollectorType = TypeVar("VerseCollectorType", bound=VerseCollector)
 
 
 class ParatextProjectReader:
-    def __init__(self, project_name: str, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()):
+    def __init__(self, project_name: str, environment: SilNlpEnv):
         self._project_name = project_name
         self._environment = environment
 

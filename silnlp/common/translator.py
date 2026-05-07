@@ -276,7 +276,7 @@ def generate_confidence_files(
 
 
 class Translator(AbstractContextManager["Translator"], ABC):
-    def __init__(self, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()):
+    def __init__(self, environment: SilNlpEnv):
         self._environment = environment
 
     @abstractmethod

@@ -55,7 +55,7 @@ def create_thot_smt_config_file(config_file_path: Path, model_type: ThotWordAlig
     config_file_path.write_text(config, encoding="utf-8")
 
 
-def train(exp_name: str, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()) -> None:
+def train(exp_name: str, environment: SilNlpEnv) -> None:
     exp_dir = environment.get_mt_exp_dir(exp_name)
     config = load_config(exp_name, environment)
 

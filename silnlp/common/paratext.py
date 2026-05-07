@@ -36,9 +36,7 @@ _NON_LETTER_PATTERN = re.compile(r"([^\p{L}\p{M}]*)[\p{L}\p{M}]+([^\p{L}\p{M}]*)
 LOGGER = logging.getLogger(__name__)
 
 
-def get_parent_project_dir(
-    project_dir: Path, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
-) -> Optional[Path]:
+def get_parent_project_dir(project_dir: Path, environment: SilNlpEnv) -> Optional[Path]:
     settings = FileParatextProjectSettingsParser(project_dir).parse()
     if settings.has_parent:
         LOGGER.info(f"Searching for parent project {settings.parent_name} in the Paratext directory...")
@@ -204,9 +202,7 @@ def clean_term(term_str: str) -> str:
     return " ".join(term_str.split())
 
 
-def extract_major_terms_per_language(
-    iso: str, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
-) -> None:
+def extract_major_terms_per_language(iso: str, environment: SilNlpEnv) -> None:
     # extract Biblical Terms for the langauage
     terms_xml_path = environment.pt_terms_dir / f"BiblicalTerms{iso.capitalize()}.xml"
     with terms_xml_path.open("rb") as terms_file:
@@ -252,7 +248,7 @@ def extract_term_renderings(
     corpus_filename: Path,
     terms_output_dir: Optional[Path],
     extract_surface_forms: bool,
-    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+    environment: SilNlpEnv,
 ) -> int:
     """
     :return: The number of term renderings extracted
@@ -343,7 +339,7 @@ def book_file_name_digits(book_num: int) -> str:
     return f"C{book_num - 120}"
 
 
-def get_book_path(project: str, book: str, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()) -> Path:
+def get_book_path(project: str, book: str, environment: SilNlpEnv) -> Path:
     project_dir = environment.get_paratext_project_dir(project)
     settings = FileParatextProjectSettingsParser(project_dir).parse()
     book_file_name = settings.get_book_file_name(book)
@@ -351,9 +347,7 @@ def get_book_path(project: str, book: str, environment: SilNlpEnv = SilNlpEnv.cr
     return environment.pt_projects_dir / project / book_file_name
 
 
-def get_last_verse(
-    project_dir: str, book: str, chapter: int, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
-) -> int:
+def get_last_verse(project_dir: str, book: str, chapter: int, environment: SilNlpEnv) -> int:
     last_verse = "0"
     book_path = get_book_path(project_dir, book, environment)
     try:
@@ -378,9 +372,7 @@ def get_last_verse(
 
 # OT versification detection algorithm from:
 # https://github.com/BibleNLP/ebible/blob/main/code/notebooks/eBible%20-%20Extract%20projects.ipynb
-def detect_OT_versification(
-    project_dir: str, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
-) -> Tuple[VersificationType, List[str]]:
+def detect_OT_versification(project_dir: str, environment: SilNlpEnv) -> Tuple[VersificationType, List[str]]:
     dan_3 = get_last_verse(project_dir, "DAN", 3, environment)
     dan_5 = get_last_verse(project_dir, "DAN", 5, environment)
     dan_13 = get_last_verse(project_dir, "DAN", 13, environment)
@@ -416,9 +408,7 @@ def detect_OT_versification(
 
 # NT versification detection algorithm from:
 # https://github.com/BibleNLP/ebible/blob/main/code/notebooks/eBible%20-%20Extract%20projects.ipynb
-def detect_NT_versification(
-    project_dir: str, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
-) -> Tuple[List[VersificationType], List[str]]:
+def detect_NT_versification(project_dir: str, environment: SilNlpEnv) -> Tuple[List[VersificationType], List[str]]:
     jhn_6 = get_last_verse(project_dir, "JHN", 6, environment)
     act_19 = get_last_verse(project_dir, "ACT", 19, environment)
     rom_16 = get_last_verse(project_dir, "ROM", 16, environment)
@@ -448,7 +438,7 @@ def check_versification(
     project_dir: str,
     parent_project_dir: Optional[str],
     versification_error_output_path: str,
-    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+    environment: SilNlpEnv,
 ) -> Tuple[bool, List[VersificationType]]:
 
     parent_settings = None

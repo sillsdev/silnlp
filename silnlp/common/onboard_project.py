@@ -32,9 +32,7 @@ LOGGER = logging.getLogger(__package__ + ".onboard_project")
 
 class OnboardingProject:
 
-    def __init__(
-        self, project_name: str, overwrite: bool, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
-    ) -> None:
+    def __init__(self, project_name: str, overwrite: bool, environment: SilNlpEnv) -> None:
         self.project_name: str = project_name
         self.local_project_path: Path | None = None
         self.output_folder: Path | None = None
@@ -347,7 +345,7 @@ class OnboardingRequest:
     def __init__(
         self,
         config: dict,
-        environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+        environment: SilNlpEnv,
     ):
         self.config = config
         self.environment = environment
@@ -549,9 +547,7 @@ class OnboardingRequest:
             close_logger(log_file_path)
 
 
-def create_paratext_project_folder_if_not_exists(
-    project_name: str, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
-) -> Path:
+def create_paratext_project_folder_if_not_exists(project_name: str, environment: SilNlpEnv) -> Path:
     pt_project_path = environment.get_paratext_project_dir(project_name)
     if pt_project_path.exists():
         LOGGER.info(f"Paratext project folder '{pt_project_path}' already exists.")

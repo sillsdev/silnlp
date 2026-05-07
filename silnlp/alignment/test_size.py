@@ -50,7 +50,7 @@ def compute_similarity(
     base_metrics: List[float],
     books: Set[int],
     test_size: int,
-    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+    environment: SilNlpEnv,
 ) -> Tuple[float, float]:
     metrics: List[float] = []
     for exp_dir in experiments:

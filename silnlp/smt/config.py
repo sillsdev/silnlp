@@ -30,7 +30,7 @@ _BASE_CONFIG: dict = {
 _SUPPORTED_TOKENIZERS = {"whitespace", "latin", "zwsp"}
 
 
-def load_config(exp_name: str, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()) -> dict:
+def load_config(exp_name: str, environment: SilNlpEnv) -> dict:
     exp_dir = environment.get_mt_exp_dir(exp_name)
     config_path = exp_dir / "config.yml"
 

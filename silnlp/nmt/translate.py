@@ -60,7 +60,7 @@ class NMTTranslator(Translator):
         self,
         model: NMTModel,
         checkpoint: Union[CheckpointType, str, int],
-        environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+        environment: SilNlpEnv,
     ) -> None:
         self._model: NMTModel = model
         self._checkpoint = checkpoint

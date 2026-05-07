@@ -20,7 +20,7 @@ class SILExperiment:
     name: str
     config: Config
     model: NMTModel
-    environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
+    environment: SilNlpEnv
     make_stats: bool = False
     force_align: bool = False
     mixed_precision: bool = True

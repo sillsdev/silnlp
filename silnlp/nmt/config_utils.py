@@ -7,7 +7,7 @@ from .config import Config
 from .hugging_face_config import HuggingFaceConfig
 
 
-def load_config(exp_name: str, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()) -> Config:
+def load_config(exp_name: str, environment: SilNlpEnv) -> Config:
     exp_dir = environment.get_mt_exp_dir(exp_name)
     config_path = exp_dir / "config.yml"
 
@@ -16,7 +16,7 @@ def load_config(exp_name: str, environment: SilNlpEnv = SilNlpEnv.create_standar
     return create_config(exp_dir, config, environment)
 
 
-def load_config_from_exp_dir(exp_dir: Path, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()) -> Config:
+def load_config_from_exp_dir(exp_dir: Path, environment: SilNlpEnv) -> Config:
     config_path = exp_dir / "config.yml"
 
     with config_path.open("r", encoding="utf-8") as file:
@@ -24,7 +24,5 @@ def load_config_from_exp_dir(exp_dir: Path, environment: SilNlpEnv = SilNlpEnv.c
     return create_config(exp_dir, config, environment)
 
 
-def create_config(
-    exp_dir: Path, config: dict, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
-) -> Config:
+def create_config(exp_dir: Path, config: dict, environment: SilNlpEnv) -> Config:
     return HuggingFaceConfig(exp_dir, config, environment)

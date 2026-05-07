@@ -217,9 +217,7 @@ def get_terms_metadata_path(
     return mt_terms_dir / f"{list_name}-metadata.txt"
 
 
-def get_terms_glosses_path(
-    list_name: str, iso: str, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
-) -> Path:
+def get_terms_glosses_path(list_name: str, iso: str, environment: SilNlpEnv) -> Path:
     iso = iso.lower()
     gl_path = environment.assets_dir / f"{iso}-{list_name}-glosses.txt"
     if gl_path.is_file():
@@ -228,16 +226,14 @@ def get_terms_glosses_path(
     return gl_path
 
 
-def get_terms_vrefs_path(list_name: str, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()) -> Path:
+def get_terms_vrefs_path(list_name: str, environment: SilNlpEnv) -> Path:
     md_path = environment.assets_dir / f"{list_name}-vrefs.txt"
     if md_path.is_file():
         return md_path
     return environment.mt_terms_dir / f"{list_name}-vrefs.txt"
 
 
-def get_terms_renderings_path(
-    iso: str, project: str, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
-) -> Optional[Path]:
+def get_terms_renderings_path(iso: str, project: str, environment: SilNlpEnv) -> Optional[Path]:
     matches = list(environment.mt_terms_dir.glob(f"{iso}-{project}-*-renderings.txt"))
     if len(matches) == 0:
         return None
