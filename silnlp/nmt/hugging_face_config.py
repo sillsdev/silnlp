@@ -1832,14 +1832,18 @@ class PunctuationNormalizingTokenizer(PreTrainedTokenizerFast):
         self._pad_token = tokenizer.pad_token
 
     def __getattr__(self, name: str):
-        # Delegate attribute access to the wrapped tokenizer for any attributes
-        # not found on this instance (e.g. pad_token_id, model_max_length, etc.)
-        if name == "_wrapped_tokenizer":
-            raise AttributeError(name)
-        try:
-            return getattr(self._wrapped_tokenizer, name)
-        except AttributeError:
-            raise AttributeError(f"{self.__class__.__name__} has no attribute {name}")
+        # Delegate all attribute access to wrapped tokenizer
+        return getattr(self._wrapped_tokenizer, name)
+
+    def _normalize_text(self, text: Union[str, List[str], List[List[str]]]) -> Union[str, List[str], List[List[str]]]:
+        # Normalize the text parameter
+        if isinstance(text, str):
+            return self._mpn.normalize(text)
+        if isinstance(text, (list, tuple)) and len(text) > 0:
+            if isinstance(text[0], (list, tuple)) and len(text[0]) > 0:
+                return [[self._mpn.normalize(item) for item in row] for row in text]
+            return [self._mpn.normalize(item) for item in text]
+        return text
 
     def __call__(
         self,
@@ -1852,19 +1856,10 @@ class PunctuationNormalizingTokenizer(PreTrainedTokenizerFast):
         if text is None:
             raise ValueError('"text" input to PunctuationNormalizingTokenizer cannot be None')
 
-        if isinstance(text, str):
-            text = self._mpn.normalize(text)
-        elif isinstance(text, (list, tuple)) and len(text) > 0:
-            if isinstance(text[0], (list, tuple)) and len(text[0]) > 0:
-                text = [[self._mpn.normalize(item) for item in row] for row in text]
-            text = [self._mpn.normalize(item) for item in text]
-        return self._wrapped_tokenizer(text, **kwargs)
+        return self._wrapped_tokenizer(self._normalize_text(text), **kwargs)
 
-    def token_to_id(self, token: str) -> int:
-        return self._wrapped_tokenizer.token_to_id(token)
-
-    def decode(self, *args, **kwargs):
-        return self._wrapped_tokenizer.decode(*args, **kwargs)
+    def _build_translation_inputs(self, text, *args, **kwargs):
+        return self._wrapped_tokenizer._build_translation_inputs(self._normalize_text(text), *args, **kwargs)
 
 
 class HuggingFaceTokenizer(Tokenizer):
