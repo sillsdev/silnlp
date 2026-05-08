@@ -35,7 +35,7 @@ def suggest(
     trace: Optional[str],
     approve_aligned: bool,
     quiet: bool,
-    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+    environment: SilNlpEnv,
 ):
     action_count = 0
     char_count = 0

@@ -42,7 +42,6 @@ class SilNlpEnv:
         if sil_nlp_data_path != "":
             temp_path = Path(sil_nlp_data_path)
             if temp_path.is_dir():
-                LOGGER.info(f"Using workspace: {sil_nlp_data_path} as per environment variable SIL_NLP_DATA_PATH.")
                 return Path(sil_nlp_data_path)
 
             LOGGER.warning(
