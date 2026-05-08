@@ -138,25 +138,6 @@ class SILExperiment:
                     postprocess_handler,
                     translate_config.get("tags"),
                 )
-            elif translate_config.get("src_prefix"):
-                if translate_config.get("trg_prefix") is None:
-                    raise RuntimeError("A target file prefix must be specified.")
-                if translate_config.get("start_seq") is None or translate_config.get("end_seq") is None:
-                    raise RuntimeError("Start and end sequence numbers must be specified.")
-
-                translator.translate_text_files(
-                    translate_config.get("src_prefix"),
-                    translate_config.get("trg_prefix"),
-                    translate_config.get("start_seq"),
-                    translate_config.get("end_seq"),
-                    translate_config.get("src_iso"),
-                    translate_config.get("trg_iso"),
-                    self.produce_multiple_translations,
-                    self.save_confidences,
-                    bool(quality_estimation),
-                    verse_test_scores_path,
-                    translate_config.get("tags"),
-                )
             elif translate_config.get("src"):
                 translator.translate_files(
                     translate_config.get("src"),
@@ -171,7 +152,7 @@ class SILExperiment:
                     translate_config.get("tags"),
                 )
             else:
-                raise RuntimeError("A Scripture book, file, or file prefix must be specified for translation.")
+                raise RuntimeError("A Scripture book or file must be specified for translation.")
 
 
 def main() -> None:
