@@ -1832,11 +1832,9 @@ class PunctuationNormalizingTokenizer(PreTrainedTokenizerFast):
         self._pad_token = tokenizer.pad_token
 
     def __getattr__(self, name: str):
-        # Delegate all attribute access to wrapped tokenizer
         return getattr(self._wrapped_tokenizer, name)
 
     def _normalize_text(self, text: Union[str, List[str], List[List[str]]]) -> Union[str, List[str], List[List[str]]]:
-        # Normalize the text parameter
         if isinstance(text, str):
             return self._mpn.normalize(text)
         if isinstance(text, (list, tuple)) and len(text) > 0:
