@@ -70,7 +70,7 @@ class SilNlpEnv:
     def _resolve_relative_or_absolute_path(
         self, custom_dir: Optional[Path], env_var_dir: Optional[str], default_subdir: str
     ) -> Path:
-        # Explicit paths have precedence over environment variables.
+        # Precedence order: 1. custom_dir, 2. env_var_dir, 3. default_subdir
         if custom_dir is not None:
             if custom_dir.is_absolute():
                 return custom_dir
