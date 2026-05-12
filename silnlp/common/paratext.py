@@ -82,7 +82,7 @@ def extract_project(
     extract_lemmas: bool = False,
     output_project_vrefs: bool = False,
     parent_project_dir: Optional[Path] = None,
-) -> Tuple[Path, int]:
+) -> Tuple[Path, int, int]:
     iso = get_iso(project_dir)
 
     ref_corpus: TextCorpus = create_versification_ref_corpus()
@@ -105,7 +105,8 @@ def extract_project(
     output_vref_filename = output_dir / f"{output_basename}.vref.txt"
 
     try:
-        segment_count = 0
+        verse_count = 0
+        line_count = 0
         with ExitStack() as stack:
             output_stream = stack.enter_context(output_filename.open("w", encoding="utf-8", newline="\n"))
             output = stack.enter_context(extract_scripture_corpus(project_corpus, ref_corpus))
@@ -118,15 +119,17 @@ def extract_project(
                 if output_vref_stream is not None:
                     output_vref_stream.write(("" if project_vref is None else str(project_vref)) + "\n")
                 stripped_line = line.strip()
-                if len(stripped_line) > 0 and stripped_line != "<range>" and stripped_line != "...":
-                    segment_count += 1
-        if segment_count == 0:
+                if stripped_line != "<range>":
+                    line_count += 1
+                    if len(stripped_line) > 0 and stripped_line != "...":
+                        verse_count += 1
+        if verse_count == 0:
             if output_filename.is_file():
                 output_filename.unlink()
             if output_vref_filename.is_file():
                 output_vref_filename.unlink()
-            return None, segment_count
-        return output_filename, segment_count
+            return None, verse_count, line_count
+        return output_filename, verse_count, line_count
     except Exception:
         if output_filename.is_file():
             output_filename.unlink()
