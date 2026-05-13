@@ -90,7 +90,7 @@ def extract_corpora(
                 LOGGER.info(f"Identified parent project {parent_project_dir.name}.")
 
             check_versification(project_dir, parent_project_dir, versification_error_output_path)
-            corpus_filename, verse_count = extract_project(
+            corpus_filename, verse_count, line_count = extract_project(
                 project_dir,
                 SIL_NLP_ENV.mt_scripture_dir,
                 include_markers,
@@ -101,9 +101,14 @@ def extract_corpora(
             LOGGER.info(f"Extracted corpus file: {corpus_filename}")
             # check if the number of lines in the file is correct (the same as vref.txt)
             LOGGER.info(f"# of Verses: {verse_count}")
+            LOGGER.info(f"# of Lines: {line_count}")
             if verse_count != expected_verse_count:
                 LOGGER.info(
                     f"The number of completed verses is {verse_count} (out of the expected {expected_verse_count})."
+                )
+            if line_count > expected_verse_count:
+                LOGGER.warning(
+                    f"The number of lines in the corpus file is {line_count}, which is greater than the expected {expected_verse_count}."
                 )
             terms_count = extract_term_renderings(
                 project_dir, corpus_filename, SIL_NLP_ENV.mt_terms_dir, extract_surface_forms
