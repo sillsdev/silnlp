@@ -124,7 +124,8 @@ class UsfmConfidenceFile(ConfidenceFile[VerseRef]):
     def get_books_path(self) -> Path:
         return self._path.parent / "confidences.books.tsv"
 
-    def _load_book_confidences(self) -> Dict[str, float]:
+    @property
+    def book_confidences(self) -> Dict[str, float]:
         if self._book_confidences is None:
             self._book_confidences = {}
             if self.get_books_path().is_file():
@@ -183,13 +184,11 @@ class UsfmConfidenceFile(ConfidenceFile[VerseRef]):
                 continue
             book_confidences.append(confidence)
 
-        self._load_book_confidences()
-
         current_book = scripture_refs[0].book
-        self._book_confidences[current_book] = gmean(book_confidences)
+        self.book_confidences[current_book] = gmean(book_confidences)
         with self.get_books_path().open("w", encoding="utf-8", newline="\n") as book_confidences_file:
             book_confidences_file.write("Book\tConfidence\n")
-            for book, confidence in self._book_confidences.items():
+            for book, confidence in self.book_confidences.items():
                 book_confidences_file.write(f"{book}\t{confidence}\n")
 
     def _book_confidence_iterator(self) -> Generator[Tuple[str, float], None, None]:
@@ -203,7 +202,7 @@ class UsfmConfidenceFile(ConfidenceFile[VerseRef]):
                 yield (book, confidence)
 
     def get_book_confidence(self, book: str) -> Optional[float]:
-        return self._load_book_confidences().get(book)
+        return self.book_confidences.get(book)
 
 
 class TxtConfidenceFile(ConfidenceFile[int]):
