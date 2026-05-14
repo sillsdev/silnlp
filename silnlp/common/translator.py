@@ -196,6 +196,14 @@ class UsfmConfidenceFile(ConfidenceFile[VerseRef]):
     def get_book_confidences(self) -> List[Tuple[str, float]]:
         return list(self.book_confidence_iterator())
 
+    def get_book_confidence(self, book: str) -> Optional[float]:
+        if not self.get_books_path().is_file():
+            return None
+        for file_book, confidence in self.book_confidence_iterator():
+            if file_book == book:
+                return confidence
+        return None
+
 
 class TxtConfidenceFile(ConfidenceFile[int]):
 

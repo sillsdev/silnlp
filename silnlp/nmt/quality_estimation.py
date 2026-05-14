@@ -88,14 +88,10 @@ class BookScores:
     def add_scores_from_confidence_file(
         self, book: str, confidence_file: UsfmConfidenceFile, slope: float, intercept: float
     ) -> None:
-        books_path = confidence_file.get_books_path()
-        if books_path.is_file():
-            for file_book, confidence in confidence_file.book_confidence_iterator():
-                if file_book == book:
-                    projected_chrf3 = slope * confidence + intercept
-                    score = Score(confidence, projected_chrf3)
-                    self.add_score(book, score)
-                    break
+        confidence = confidence_file.get_book_confidence(book)
+        if confidence is not None:
+            projected_chrf3 = slope * confidence + intercept
+            self.add_score(book, Score(confidence, projected_chrf3))
 
 
 @dataclass
@@ -224,7 +220,9 @@ def project_chrf3(
             chapter_scores.add_scores_from_confidence_file(
                 file_verse_scores[0].vref.book, confidence_file, slope, intercept
             )
-            book_scores.add_scores_from_confidence_file(file_verse_scores[0].vref.book, confidence_file, slope, intercept)
+            book_scores.add_scores_from_confidence_file(
+                file_verse_scores[0].vref.book, confidence_file, slope, intercept
+            )
         elif isinstance(confidence_file, TxtConfidenceFile):
             file_sequence_scores = SequenceScore.get_scores_from_confidence_file(confidence_file, slope, intercept)
             if not file_sequence_scores:
@@ -397,7 +395,9 @@ def compute_chapter_usability(
             for chapter in sorted(chapter_scores.scores[book]):
                 chapter_usabilities = chapter_scores.get_verse_usabilities(book, chapter)
                 if not chapter_usabilities:
-                    LOGGER.warning(f"{book} {chapter} has no verse usabilities. Skipping chapter usability calculation.")
+                    LOGGER.warning(
+                        f"{book} {chapter} has no verse usabilities. Skipping chapter usability calculation."
+                    )
                     continue
                 avg_prob = sum(chapter_usabilities) / len(chapter_usabilities)
                 label = ChapterThresholds.return_label(avg_prob)
