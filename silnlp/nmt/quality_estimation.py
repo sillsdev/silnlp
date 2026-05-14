@@ -72,7 +72,6 @@ class ChapterScores:
 class BookScores:
     scores: Dict[str, Score] = field(default_factory=dict)
     verse_usabilities: Dict[str, List[float]] = field(default_factory=lambda: defaultdict(list))
-    seen_files: Set[Path] = field(default_factory=set)
 
     def add_score(self, book: str, score: Score) -> None:
         self.scores[book] = score
@@ -87,15 +86,12 @@ class BookScores:
         return self.verse_usabilities.get(book, [])
 
     def add_scores_from_confidence_file(
-        self, confidence_file: UsfmConfidenceFile, slope: float, intercept: float
+        self, book: str, confidence_file: UsfmConfidenceFile, slope: float, intercept: float
     ) -> None:
-        books_path = confidence_file.get_books_path()
-        if books_path.is_file() and books_path not in self.seen_files:
-            self.seen_files.add(books_path)
-            for book, confidence in confidence_file.book_confidence_iterator():
-                projected_chrf3 = slope * confidence + intercept
-                score = Score(confidence, projected_chrf3)
-                self.add_score(book, score)
+        confidence = confidence_file.get_book_confidence(book)
+        if confidence is not None:
+            projected_chrf3 = slope * confidence + intercept
+            self.add_score(book, Score(confidence, projected_chrf3))
 
 
 @dataclass
@@ -224,7 +220,9 @@ def project_chrf3(
             chapter_scores.add_scores_from_confidence_file(
                 file_verse_scores[0].vref.book, confidence_file, slope, intercept
             )
-            book_scores.add_scores_from_confidence_file(confidence_file, slope, intercept)
+            book_scores.add_scores_from_confidence_file(
+                file_verse_scores[0].vref.book, confidence_file, slope, intercept
+            )
         elif isinstance(confidence_file, TxtConfidenceFile):
             file_sequence_scores = SequenceScore.get_scores_from_confidence_file(confidence_file, slope, intercept)
             if not file_sequence_scores:
@@ -396,6 +394,11 @@ def compute_chapter_usability(
         for book in sorted(chapter_scores.scores, key=lambda b: CANONICAL_ORDER[b]):
             for chapter in sorted(chapter_scores.scores[book]):
                 chapter_usabilities = chapter_scores.get_verse_usabilities(book, chapter)
+                if not chapter_usabilities:
+                    LOGGER.warning(
+                        f"{book} {chapter} has no verse usabilities. Skipping chapter usability calculation."
+                    )
+                    continue
                 avg_prob = sum(chapter_usabilities) / len(chapter_usabilities)
                 label = ChapterThresholds.return_label(avg_prob)
                 if not chapter_scores.get_score(book, chapter):
@@ -415,6 +418,9 @@ def compute_book_usability(
         for book in sorted(book_scores.scores, key=lambda b: CANONICAL_ORDER[b]):
             # book/chapter usabilties are calculated from verse avg, not from book/chapter projected chrf3
             book_usabilities = book_scores.get_verse_usabilities(book)
+            if not book_usabilities:
+                LOGGER.warning(f"{book} has no verse usabilities. Skipping book usability calculation.")
+                continue
             avg_prob = sum(book_usabilities) / len(book_usabilities)
             label = BookThresholds.return_label(avg_prob)
             if not book_scores.get_score(book):
