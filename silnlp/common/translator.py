@@ -183,13 +183,13 @@ class UsfmConfidenceFile(ConfidenceFile[VerseRef]):
                 continue
             book_confidences.append(confidence)
 
-        book_confidences_dict = self._load_book_confidences()
+        self._load_book_confidences()
 
         current_book = scripture_refs[0].book
-        book_confidences_dict[current_book] = gmean(book_confidences)
+        self._book_confidences[current_book] = gmean(book_confidences)
         with self.get_books_path().open("w", encoding="utf-8", newline="\n") as book_confidences_file:
             book_confidences_file.write("Book\tConfidence\n")
-            for book, confidence in book_confidences_dict.items():
+            for book, confidence in self._book_confidences.items():
                 book_confidences_file.write(f"{book}\t{confidence}\n")
 
     def _book_confidence_iterator(self) -> Generator[Tuple[str, float], None, None]:
