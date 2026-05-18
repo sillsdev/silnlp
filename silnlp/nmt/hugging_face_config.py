@@ -882,7 +882,7 @@ def batch_sentences(
     vrefs: Optional[Iterable[VerseRef]],
     batch_size: int,
     dictionary: Dict[VerseRef, Set[str]],
-) -> Iterable[Tuple[List[TSent], Optional[List[List[List[str]]]]]]:
+) -> Iterable[List[TSent]]:
     batch: List[TSent] = []
     for sentence, vref in zip(sentences, repeat(None) if vrefs is None else vrefs):
         terms: Set[str] = set()
@@ -891,17 +891,16 @@ def batch_sentences(
                 terms.update(dictionary.get(vr, set()))
         if len(terms) > 0:
             if len(batch) > 0:
-                yield batch, None
+                yield batch
                 batch = []
-            force_words = [[term.split() for term in term.split("\t")] for term in terms]
-            yield [sentence], force_words
+            yield [sentence]
         else:
             batch.append(sentence)
             if len(batch) == batch_size:
-                yield batch, None
+                yield batch
                 batch = []
     if len(batch) > 0:
-        yield batch, None
+        yield batch
 
 
 @dataclass
@@ -1619,19 +1618,20 @@ class HuggingFaceNMTModel(NMTModel):
                 produce_multiple_translations=produce_multiple_translations,
             )
         else:
-            for batch, force_words in batch_sentences(sentences, vrefs, batch_size, dictionary):
-                if force_words is None:
-                    force_words_ids = None
-                else:
-                    force_words_ids = [[tokenizer.convert_tokens_to_ids(v) for v in vs] for vs in force_words]
-                    force_words_ids = prune_sublists(force_words_ids)
+            for batch in batch_sentences(sentences, vrefs, batch_size, dictionary):
+                yield from self._translate_sentence_helper(
+                    pipeline,
+                    batch,
+                    batch_size,
+                    return_tensors,
+                    produce_multiple_translations=produce_multiple_translations,
+                )
 
                 yield from self._translate_sentence_helper(
                     pipeline,
                     batch,
                     batch_size,
                     return_tensors,
-                    force_words_ids,
                     produce_multiple_translations=produce_multiple_translations,
                 )
 
@@ -1641,7 +1641,6 @@ class HuggingFaceNMTModel(NMTModel):
         sentences: Iterable[TSent],
         batch_size: int,
         return_tensors: bool,
-        force_words_ids: List[List[List[int]]] = None,
         produce_multiple_translations: bool = False,
     ) -> Iterable[ModelOutputGroup]:
 
@@ -1658,7 +1657,6 @@ class HuggingFaceNMTModel(NMTModel):
                     batch_size,
                     return_tensors,
                     num_return_sequences=1,
-                    force_words_ids=force_words_ids,
                 )
 
                 sampling_results: List[dict] = self._translate_with_sampling(
@@ -1667,7 +1665,6 @@ class HuggingFaceNMTModel(NMTModel):
                     batch_size,
                     return_tensors,
                     num_return_sequences=num_drafts - 1,
-                    force_words_ids=force_words_ids,
                 )
 
                 # concatenate the beam search results with the sampling results
@@ -1685,7 +1682,6 @@ class HuggingFaceNMTModel(NMTModel):
                         batch_size,
                         return_tensors,
                         num_return_sequences=num_drafts,
-                        force_words_ids=force_words_ids,
                     )
                 ]
 
@@ -1698,7 +1694,6 @@ class HuggingFaceNMTModel(NMTModel):
                         batch_size,
                         return_tensors,
                         num_return_sequences=num_drafts,
-                        force_words_ids=force_words_ids,
                     )
                 ]
 
@@ -1711,7 +1706,6 @@ class HuggingFaceNMTModel(NMTModel):
                         batch_size,
                         return_tensors,
                         num_return_sequences=num_drafts,
-                        force_words_ids=force_words_ids,
                     )
                 ]
             else:
@@ -1726,7 +1720,6 @@ class HuggingFaceNMTModel(NMTModel):
                     batch_size,
                     return_tensors,
                     num_return_sequences=1,
-                    force_words_ids=force_words_ids,
                 )
             ]
 
@@ -1743,7 +1736,6 @@ class HuggingFaceNMTModel(NMTModel):
         batch_size: int,
         return_tensors: bool,
         num_return_sequences: int = 1,
-        force_words_ids: List[List[List[int]]] = None,
     ) -> List[List[dict]]:
         num_beams: Optional[int] = self._config.infer.get("num_beams")
         if num_beams is None:
@@ -1753,7 +1745,6 @@ class HuggingFaceNMTModel(NMTModel):
             sentences,
             num_beams=num_beams,
             num_return_sequences=num_return_sequences,
-            force_words_ids=force_words_ids,
             batch_size=batch_size,
             return_text=not return_tensors,
             return_tensors=return_tensors,
@@ -1771,7 +1762,6 @@ class HuggingFaceNMTModel(NMTModel):
         batch_size: int,
         return_tensors: bool,
         num_return_sequences: int = 1,
-        force_words_ids: List[List[List[int]]] = None,
     ) -> List[List[dict]]:
 
         temperature: Optional[int] = self._config.infer.get("temperature")
@@ -1781,7 +1771,6 @@ class HuggingFaceNMTModel(NMTModel):
             do_sample=True,
             temperature=temperature,
             num_return_sequences=num_return_sequences,
-            force_words_ids=force_words_ids,
             batch_size=batch_size,
             return_text=not return_tensors,
             return_tensors=return_tensors,
@@ -1799,7 +1788,6 @@ class HuggingFaceNMTModel(NMTModel):
         batch_size: int,
         return_tensors: bool,
         num_return_sequences: int = 1,
-        force_words_ids: List[List[List[int]]] = None,
     ) -> List[List[dict]]:
         num_beams: Optional[int] = self._config.infer.get("num_beams")
         if num_beams is None:
@@ -1812,7 +1800,6 @@ class HuggingFaceNMTModel(NMTModel):
             num_beam_groups=num_beams,
             num_return_sequences=num_return_sequences,
             diversity_penalty=diversity_penalty,
-            force_words_ids=force_words_ids,
             batch_size=batch_size,
             return_text=not return_tensors,
             return_tensors=return_tensors,
