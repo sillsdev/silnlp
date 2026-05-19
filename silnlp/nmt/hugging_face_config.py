@@ -1191,7 +1191,7 @@ class HuggingFaceNMTModel(NMTModel):
             data_collator,
             train_dataset,
             eval_dataset,
-            tokenizer,
+            processing_class=tokenizer,
             compute_metrics=None if metric_name in DEFAULT_METRICS else compute_metrics,
             sequential_sampling=self._config.train.get("sequential_sampling", False),
             better_transformer=self._config.train.get("better_transformer", False),
@@ -1925,7 +1925,19 @@ class PunctuationNormalizingTokenizer(PreTrainedTokenizerFast):
         self._tokenizer = tokenizer._tokenizer
         self._mpn = MosesPunctNormalizer()
         self._mpn.substitutions = [(re.compile(r), sub) for r, sub in self._mpn.substitutions]
-        self._pad_token = tokenizer._pad_token
+        self._pad_token = tokenizer.pad_token
+
+    def __getattr__(self, name: str):
+        return getattr(self._wrapped_tokenizer, name)
+
+    def _normalize_text(self, text: Union[str, List[str], List[List[str]]]) -> Union[str, List[str], List[List[str]]]:
+        if isinstance(text, str):
+            return self._mpn.normalize(text)
+        if isinstance(text, (list, tuple)) and len(text) > 0:
+            if isinstance(text[0], (list, tuple)) and len(text[0]) > 0:
+                return [[self._mpn.normalize(item) for item in row] for row in text]
+            return [self._mpn.normalize(item) for item in text]
+        return text
 
     def __call__(
         self,
@@ -1938,19 +1950,10 @@ class PunctuationNormalizingTokenizer(PreTrainedTokenizerFast):
         if text is None:
             raise ValueError('"text" input to PunctuationNormalizingTokenizer cannot be None')
 
-        if isinstance(text, str):
-            text = self._mpn.normalize(text)
-        elif isinstance(text, (list, tuple)) and len(text) > 0:
-            if isinstance(text[0], (list, tuple)) and len(text[0]) > 0:
-                text = [[self._mpn.normalize(item) for item in row] for row in text]
-            text = [self._mpn.normalize(item) for item in text]
-        return self._wrapped_tokenizer(text, **kwargs)
+        return self._wrapped_tokenizer(self._normalize_text(text), **kwargs)
 
-    def token_to_id(self, token: str) -> int:
-        return self._wrapped_tokenizer.token_to_id(token)
-
-    def decode(self, *args, **kwargs):
-        return self._wrapped_tokenizer.decode(*args, **kwargs)
+    def _build_translation_inputs(self, text, *args, **kwargs):
+        return self._wrapped_tokenizer._build_translation_inputs(self._normalize_text(text), *args, **kwargs)
 
 
 class HuggingFaceTokenizer(Tokenizer):
@@ -2207,7 +2210,7 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         data_collator: Optional[Any] = None,
         train_dataset: Optional[Dataset] = None,
         eval_dataset: Optional[Union[Dataset, Dict[str, Dataset]]] = None,
-        tokenizer: Optional[PreTrainedTokenizerBase] = None,
+        processing_class: Optional[PreTrainedTokenizerBase] = None,
         model_init: Optional[Callable[[], PreTrainedModel]] = None,
         compute_metrics: Optional[Callable[[EvalPrediction], Dict]] = None,
         callbacks: Optional[List[TrainerCallback]] = None,
@@ -2219,17 +2222,17 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         model_prefix: Optional[str] = None,
     ):
         super().__init__(
-            model,
-            args,
-            data_collator,
-            train_dataset,
-            eval_dataset,
-            tokenizer,
-            model_init,
-            compute_metrics,
-            callbacks,
-            optimizers,
-            preprocess_logits_for_metrics,
+            model=model,
+            args=args,
+            data_collator=data_collator,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            processing_class=processing_class,
+            model_init=model_init,
+            compute_metrics=compute_metrics,
+            callbacks=callbacks,
+            optimizers=optimizers,
+            preprocess_logits_for_metrics=preprocess_logits_for_metrics,
         )
         self._sequential_sampling = sequential_sampling
         self._better_transformer = better_transformer
@@ -2307,8 +2310,8 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
             )
             if self._better_transformer:
                 self.model = self.model.to_bettertransformer()
-        if self.tokenizer is not None:
-            self.tokenizer.save_pretrained(output_dir)
+        if self.processing_class is not None:
+            self.processing_class.save_pretrained(output_dir)
 
         # Good practice: save your training arguments together with the trained model
         torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
