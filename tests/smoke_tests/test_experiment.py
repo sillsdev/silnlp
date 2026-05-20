@@ -34,19 +34,22 @@ def test_experiment_full_pipeline():
 
 
 def test_translate_sentences_uses_tensor_batch_size_cap():
-    model = cast(HuggingFaceNMTModel, HuggingFaceNMTModel.__new__(HuggingFaceNMTModel))
+    model = cast(HuggingFaceNMTModel, Mock(spec=HuggingFaceNMTModel))
     model._config = cast(HuggingFaceConfig, Mock(infer={"infer_batch_size": 16, "infer_batch_size_with_tensors": 2}))
     model._get_dictionary = Mock(return_value={})
     captured_batch_size = {}
 
-    def fake_translate_sentence_helper(*args, **kwargs):
-        captured_batch_size["value"] = args[2]
+    def fake_translate_sentence_helper(
+        pipeline, sentences, batch_size, return_tensors, force_words_ids=None, produce_multiple_translations=False
+    ):
+        captured_batch_size["value"] = batch_size
         return iter(())
 
     model._translate_sentence_helper = fake_translate_sentence_helper
 
     list(
-        model._translate_sentences(
+        HuggingFaceNMTModel._translate_sentences(
+            model,
             tokenizer=Mock(),
             pipeline=Mock(),
             sentences=[["token"]],
