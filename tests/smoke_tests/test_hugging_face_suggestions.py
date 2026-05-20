@@ -7,6 +7,11 @@ os.environ.setdefault("SIL_NLP_DATA_PATH", "/home/runner/work/silnlp/silnlp/test
 
 from silnlp.nmt.hugging_face_config import HuggingFaceNMTModel, PartialWordPrefixConstraint, SilTranslationPipeline
 
+# Approximately log(0.98): used to represent a high-confidence suggestion token.
+HIGH_CONFIDENCE_LOG_PROB = -0.0202
+# Approximately log(0.2): used to represent a low-confidence suggestion token.
+LOW_CONFIDENCE_LOG_PROB = -1.6094
+
 
 class FakeConstraintTokenizer:
     eos_token_id = 99
@@ -144,7 +149,7 @@ def test_suggest_translation_returns_remaining_characters_for_partial_word(monke
                     "translation_text": "crab",
                     "translation_token_ids": [0, 3, 18, 1, 2, tokenizer.eos_token_id],
                     "token_scores": torch.tensor(
-                        [0.0, torch.log(torch.tensor(0.98)).item(), 0.0, 0.0, 0.0, 0.0], dtype=torch.float32
+                        [0.0, HIGH_CONFIDENCE_LOG_PROB, 0.0, 0.0, 0.0, 0.0], dtype=torch.float32
                     ),
                 }
             ]
@@ -176,9 +181,7 @@ def test_suggest_translation_returns_none_for_low_confidence_next_word(monkeypat
                 {
                     "translation_text": "hello world",
                     "translation_token_ids": [0] + _encode(tokenizer, "hello world") + [tokenizer.eos_token_id],
-                    "token_scores": torch.tensor(
-                        [0.0] * 7 + [torch.log(torch.tensor(0.2)).item()] * 5, dtype=torch.float32
-                    ),
+                    "token_scores": torch.tensor([0.0] * 7 + [LOW_CONFIDENCE_LOG_PROB] * 5, dtype=torch.float32),
                 }
             ]
 

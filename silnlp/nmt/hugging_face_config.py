@@ -1449,9 +1449,9 @@ class HuggingFaceNMTModel(NMTModel):
         if decoder_input_ids is not None:
             generate_kwargs["decoder_input_ids"] = decoder_input_ids
         if len(partial_word) > 0:
-            prompt_length = 0 if decoder_input_ids is None else decoder_input_ids.shape[1]
+            decoder_input_length = 0 if decoder_input_ids is None else decoder_input_ids.shape[1]
             generate_kwargs["prefix_allowed_tokens_fn"] = PartialWordPrefixConstraint(
-                tokenizer, prompt_length, partial_word
+                tokenizer, decoder_input_length, partial_word
             )
 
         outputs = pipeline([source_sentence], **generate_kwargs)
@@ -1474,11 +1474,15 @@ class HuggingFaceNMTModel(NMTModel):
         return suggestion
 
     def _split_partial_translation(self, partial_translation: str) -> Tuple[str, str]:
-        if len(partial_translation) == 0 or partial_translation[-1].isspace():
+        stripped_translation = partial_translation.rstrip()
+        if len(stripped_translation) != len(partial_translation):
             return partial_translation, ""
-        match = re.match(r"^(.*?)(\S+)$", partial_translation, re.DOTALL)
+        if len(stripped_translation) == 0:
+            return partial_translation, ""
+
+        match = re.match(r"^(.*?)(\S+)$", stripped_translation, re.DOTALL)
         if match is None:
-            return "", partial_translation
+            return "", stripped_translation
         return match.group(1), match.group(2)
 
     def _build_decoder_input_ids(
@@ -1515,6 +1519,7 @@ class HuggingFaceNMTModel(NMTModel):
             return None
 
         if partial_translation.endswith(" "):
+            # When the user has completed the current word, only suggest the next word.
             remaining = remaining.lstrip()
             if len(remaining) == 0:
                 return None
@@ -1552,7 +1557,7 @@ class HuggingFaceNMTModel(NMTModel):
             overlap_start = max(prefix_end, len(previous_text))
             overlap_end = min(suggestion_end, len(current_text))
             if overlap_end > overlap_start:
-                relevant_token_probs.append(float(np.exp(float(token_score))))
+                relevant_token_probs.append(float(np.exp(token_score)))
 
             previous_text = current_text
             if len(current_text) >= suggestion_end:
