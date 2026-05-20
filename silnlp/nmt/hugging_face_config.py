@@ -1610,6 +1610,37 @@ class HuggingFaceNMTModel(NMTModel):
     def _flatten_tokenized_translations(self, pipeline_output) -> List[dict]:
         return [[i if isinstance(i, dict) else i[0] for i in translation] for translation in pipeline_output]
 
+    def _get_translation_batch(
+        self,
+        sentences: List[TSent],
+        force_words_ids: Optional[List[List[List[int]]]],
+        index: int,
+        current_batch_size: int,
+    ) -> Tuple[int, List[TSent], Optional[List[List[List[int]]]]]:
+        current_batch_size = min(current_batch_size, len(sentences) - index)
+        batch_sentences = sentences[index : index + current_batch_size]
+        batch_force_words_ids = force_words_ids[index : index + current_batch_size] if force_words_ids is not None else None
+        return current_batch_size, batch_sentences, batch_force_words_ids
+
+    def _normalize_batch_translations(self, batch_translations, num_return_sequences: int) -> List[List[dict]]:
+        if num_return_sequences == 1:
+            batch_translations = [[t] for t in batch_translations]
+        return self._flatten_tokenized_translations(batch_translations)
+
+    def _handle_translation_oom(self, error: RuntimeError, current_batch_size: int, method_name: str) -> int:
+        if not _should_reduce_batch_size(error) or current_batch_size <= 1:
+            raise error
+        next_batch_size = current_batch_size // 2
+        LOGGER.warning(
+            "OOM during %s translation inference; reducing batch size to %d and retrying current batch.",
+            method_name,
+            next_batch_size,
+        )
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        return next_batch_size
+
     def _translate_with_beam_search(
         self,
         pipeline: TranslationPipeline,
@@ -1623,14 +1654,16 @@ class HuggingFaceNMTModel(NMTModel):
         if num_beams is None:
             num_beams = self._config.params.get("generation_num_beams")
 
+        sentences = list(sentences)
         current_batch_size = batch_size
         translations: List[List[dict]] = []
         index = 0
         while index < len(sentences):
-            current_batch_size = min(current_batch_size, len(sentences) - index)
-            batch_sentences = sentences[index : index + current_batch_size]
-            batch_force_words_ids = (
-                force_words_ids[index : index + current_batch_size] if force_words_ids is not None else None
+            current_batch_size, batch_sentences, batch_force_words_ids = self._get_translation_batch(
+                sentences,
+                force_words_ids,
+                index,
+                current_batch_size,
             )
             try:
                 batch_translations = pipeline(
@@ -1642,21 +1675,10 @@ class HuggingFaceNMTModel(NMTModel):
                     return_text=not return_tensors,
                     return_tensors=return_tensors,
                 )
-                if num_return_sequences == 1:
-                    batch_translations = [[t] for t in batch_translations]
-                translations.extend(self._flatten_tokenized_translations(batch_translations))
+                translations.extend(self._normalize_batch_translations(batch_translations, num_return_sequences))
                 index += current_batch_size
             except RuntimeError as e:
-                if not _should_reduce_batch_size(e) or current_batch_size <= 1:
-                    raise
-                current_batch_size //= 2
-                LOGGER.warning(
-                    "OOM during beam-search translation inference; reducing batch size to %d and retrying current batch.",
-                    current_batch_size,
-                )
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                current_batch_size = self._handle_translation_oom(e, current_batch_size, "beam-search")
 
         return translations
 
@@ -1672,14 +1694,16 @@ class HuggingFaceNMTModel(NMTModel):
 
         temperature: Optional[int] = self._config.infer.get("temperature")
 
+        sentences = list(sentences)
         current_batch_size = batch_size
         translations: List[List[dict]] = []
         index = 0
         while index < len(sentences):
-            current_batch_size = min(current_batch_size, len(sentences) - index)
-            batch_sentences = sentences[index : index + current_batch_size]
-            batch_force_words_ids = (
-                force_words_ids[index : index + current_batch_size] if force_words_ids is not None else None
+            current_batch_size, batch_sentences, batch_force_words_ids = self._get_translation_batch(
+                sentences,
+                force_words_ids,
+                index,
+                current_batch_size,
             )
             try:
                 batch_translations = pipeline(
@@ -1692,21 +1716,10 @@ class HuggingFaceNMTModel(NMTModel):
                     return_text=not return_tensors,
                     return_tensors=return_tensors,
                 )
-                if num_return_sequences == 1:
-                    batch_translations = [[t] for t in batch_translations]
-                translations.extend(self._flatten_tokenized_translations(batch_translations))
+                translations.extend(self._normalize_batch_translations(batch_translations, num_return_sequences))
                 index += current_batch_size
             except RuntimeError as e:
-                if not _should_reduce_batch_size(e) or current_batch_size <= 1:
-                    raise
-                current_batch_size //= 2
-                LOGGER.warning(
-                    "OOM during sampling translation inference; reducing batch size to %d and retrying current batch.",
-                    current_batch_size,
-                )
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                current_batch_size = self._handle_translation_oom(e, current_batch_size, "sampling")
 
         return translations
 
@@ -1724,14 +1737,16 @@ class HuggingFaceNMTModel(NMTModel):
             num_beams = self._config.params.get("generation_num_beams")
         diversity_penalty: Optional[float] = self._config.infer.get("diversity_penalty")
 
+        sentences = list(sentences)
         current_batch_size = batch_size
         translations: List[List[dict]] = []
         index = 0
         while index < len(sentences):
-            current_batch_size = min(current_batch_size, len(sentences) - index)
-            batch_sentences = sentences[index : index + current_batch_size]
-            batch_force_words_ids = (
-                force_words_ids[index : index + current_batch_size] if force_words_ids is not None else None
+            current_batch_size, batch_sentences, batch_force_words_ids = self._get_translation_batch(
+                sentences,
+                force_words_ids,
+                index,
+                current_batch_size,
             )
             try:
                 batch_translations = pipeline(
@@ -1745,21 +1760,10 @@ class HuggingFaceNMTModel(NMTModel):
                     return_text=not return_tensors,
                     return_tensors=return_tensors,
                 )
-                if num_return_sequences == 1:
-                    batch_translations = [[t] for t in batch_translations]
-                translations.extend(self._flatten_tokenized_translations(batch_translations))
+                translations.extend(self._normalize_batch_translations(batch_translations, num_return_sequences))
                 index += current_batch_size
             except RuntimeError as e:
-                if not _should_reduce_batch_size(e) or current_batch_size <= 1:
-                    raise
-                current_batch_size //= 2
-                LOGGER.warning(
-                    "OOM during diverse-beam translation inference; reducing batch size to %d and retrying current batch.",
-                    current_batch_size,
-                )
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                current_batch_size = self._handle_translation_oom(e, current_batch_size, "diverse-beam")
 
         return translations
 
