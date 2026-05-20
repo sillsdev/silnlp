@@ -38,12 +38,12 @@ def test_translate_sentences_uses_tensor_batch_size_cap():
     model = cast(HuggingFaceNMTModel, Mock(spec=HuggingFaceNMTModel))
     model._config = cast(HuggingFaceConfig, Mock(infer={"infer_batch_size": 16, "infer_batch_size_with_tensors": 2}))
     model._get_dictionary = Mock(return_value={})
-    captured_batch_size = {}
+    captured_sub_batch_size = {}
 
     def fake_translate_sentence_helper(
-        pipeline, sentences, batch_size, return_tensors, force_words_ids=None, produce_multiple_translations=False
+        pipeline, sentences, return_tensors, force_words_ids=None, produce_multiple_translations=False
     ):
-        captured_batch_size["value"] = batch_size
+        captured_sub_batch_size["value"] = len(sentences)
         return iter(())
 
     model._translate_sentence_helper = fake_translate_sentence_helper
@@ -59,31 +59,40 @@ def test_translate_sentences_uses_tensor_batch_size_cap():
         )
     )
 
-    assert captured_batch_size["value"] == 2
+    assert captured_sub_batch_size["value"] == 1
 
 
-def test_translate_with_beam_search_retries_with_smaller_batch():
+def test_translate_sentences_retries_with_smaller_batch():
     model = cast(HuggingFaceNMTModel, Mock(spec=HuggingFaceNMTModel))
-    model._config = cast(HuggingFaceConfig, Mock(infer={"num_beams": 2}, params={}))
-    call_batch_sizes: list[int] = []
+    model._config = cast(
+        HuggingFaceConfig, Mock(infer={"infer_batch_size": 4, "num_beams": 2}, params={})
+    )
+    model._get_dictionary = Mock(return_value={})
+    call_sub_batch_sizes: list[int] = []
 
-    def fake_pipeline(batch_sentences, batch_size, **kwargs):
-        call_batch_sizes.append(batch_size)
-        if batch_size > 2:
+    def fake_translate_sentence_helper(
+        pipeline, sentences, return_tensors, force_words_ids=None, produce_multiple_translations=False
+    ):
+        call_sub_batch_sizes.append(len(sentences))
+        if len(sentences) > 2:
             raise RuntimeError(OOM_ERROR_MESSAGE)
-        return [{"translation_text": str(sentence[0])} for sentence in batch_sentences]
+        return iter(())
 
-    sentences = [["a"], ["b"], ["c"], ["d"]]
-    translated = HuggingFaceNMTModel._translate_with_beam_search(
-        model,
-        fake_pipeline,
-        sentences,
-        batch_size=4,
-        return_tensors=False,
+    model._translate_sentence_helper = fake_translate_sentence_helper
+
+    list(
+        HuggingFaceNMTModel._translate_sentences(
+            model,
+            tokenizer=Mock(),
+            pipeline=Mock(),
+            sentences=[["a"], ["b"], ["c"], ["d"]],
+            vrefs=None,
+            return_tensors=False,
+        )
     )
 
-    assert [translation[0]["translation_text"] for translation in translated] == ["a", "b", "c", "d"]
-    assert call_batch_sizes == [4, 2, 2]
+    # First call is batch-of-4 (OOM), then two calls of batch-of-2 succeed
+    assert call_sub_batch_sizes == [4, 2, 2]
 
 
 def set_up_environment() -> SilNlpEnv:
