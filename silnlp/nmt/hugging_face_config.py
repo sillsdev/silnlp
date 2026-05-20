@@ -1641,6 +1641,7 @@ class HuggingFaceNMTModel(NMTModel):
         batch_size: int,
         force_words_ids: Optional[List[List[List[int]]]] = None,
     ) -> List[List[dict]]:
+        """Translate input sentences and reduce batch size on OOM until the current batch succeeds."""
         current_batch_size = batch_size
         translated_sentences: List[List[dict]] = []
         index = 0
@@ -1654,7 +1655,7 @@ class HuggingFaceNMTModel(NMTModel):
             try:
                 translated_sentences.extend(translate(batch_sentences, current_batch_size, batch_force_words_ids))
                 index += current_batch_size
-            except Exception as e:
+            except (RuntimeError, torch.OutOfMemoryError) as e:
                 if not _should_reduce_batch_size(e) or current_batch_size <= 1:
                     raise
                 current_batch_size //= 2

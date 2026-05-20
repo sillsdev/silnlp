@@ -17,6 +17,7 @@ from tests.smoke_tests.mock_pretrained_model import (
 
 TEST_MT_DIR = Path(__file__).parent
 EXPERIMENT_NAME = "test_experiment"
+OOM_ERROR_MESSAGE = "CUDA out of memory. Tried to allocate 7.00 GiB."
 
 
 def test_experiment_full_pipeline():
@@ -68,7 +69,7 @@ def test_translate_with_adaptive_batch_size_retries_with_smaller_batch():
     def fake_translate(batch_sentences, batch_size, batch_force_words_ids):
         call_batch_sizes.append(batch_size)
         if batch_size > 2:
-            raise RuntimeError("CUDA out of memory. Tried to allocate 7.00 GiB.")
+            raise RuntimeError(OOM_ERROR_MESSAGE)
         return [[{"translation_text": str(sentence[0])}] for sentence in batch_sentences]
 
     sentences = [["a"], ["b"], ["c"], ["d"]]
