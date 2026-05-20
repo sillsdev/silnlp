@@ -1520,7 +1520,6 @@ class HuggingFaceNMTModel(NMTModel):
         force_words_ids: List[List[List[int]]] = None,
         produce_multiple_translations: bool = False,
     ) -> Iterable[ModelOutputGroup]:
-        sentences = list(sentences)
         num_drafts = self.get_num_drafts()
         if produce_multiple_translations and num_drafts > 1:
             multiple_translations_method: str = self._config.infer.get("multiple_translations_method")
