@@ -1644,7 +1644,9 @@ class HuggingFaceNMTModel(NMTModel):
         """Translate sentences in batches, reducing batch size and retrying when OOM occurs.
 
         Args:
-            translate: Translation callback that accepts a sentence batch, batch size, and optional force words IDs.
+            translate: Translation callback with signature
+                ``(batch_sentences: List[TSent], batch_size: int, batch_force_words_ids: Optional[List[List[List[int]]]])``
+                ``-> List[List[dict]]``.
             sentences: Input sentences to translate.
             batch_size: Initial batch size to use.
             force_words_ids: Optional force words IDs aligned with ``sentences``.
@@ -1665,7 +1667,7 @@ class HuggingFaceNMTModel(NMTModel):
             try:
                 translated_sentences.extend(translate(batch_sentences, current_batch_size, batch_force_words_ids))
                 index += current_batch_size
-            except (RuntimeError, torch.OutOfMemoryError) as e:
+            except RuntimeError as e:
                 if not _should_reduce_batch_size(e) or current_batch_size <= 1:
                     raise
                 current_batch_size //= 2
