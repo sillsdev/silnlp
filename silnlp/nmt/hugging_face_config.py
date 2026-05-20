@@ -1623,7 +1623,6 @@ class HuggingFaceNMTModel(NMTModel):
         if num_beams is None:
             num_beams = self._config.params.get("generation_num_beams")
 
-        sentences = list(sentences)
         current_batch_size = batch_size
         translations: List[List[dict]] = []
         index = 0
@@ -1673,7 +1672,6 @@ class HuggingFaceNMTModel(NMTModel):
 
         temperature: Optional[int] = self._config.infer.get("temperature")
 
-        sentences = list(sentences)
         current_batch_size = batch_size
         translations: List[List[dict]] = []
         index = 0
@@ -1726,7 +1724,6 @@ class HuggingFaceNMTModel(NMTModel):
             num_beams = self._config.params.get("generation_num_beams")
         diversity_penalty: Optional[float] = self._config.infer.get("diversity_penalty")
 
-        sentences = list(sentences)
         current_batch_size = batch_size
         translations: List[List[dict]] = []
         index = 0

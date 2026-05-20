@@ -71,7 +71,7 @@ def test_translate_with_beam_search_retries_with_smaller_batch():
         call_batch_sizes.append(batch_size)
         if batch_size > 2:
             raise RuntimeError(OOM_ERROR_MESSAGE)
-        return [[{"translation_text": str(sentence[0])}] for sentence in batch_sentences]
+        return [{"translation_text": str(sentence[0])} for sentence in batch_sentences]
 
     sentences = [["a"], ["b"], ["c"], ["d"]]
     translated = HuggingFaceNMTModel._translate_with_beam_search(
