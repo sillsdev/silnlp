@@ -1,9 +1,10 @@
 import os
+from pathlib import Path
 from types import SimpleNamespace
 
 import torch
 
-os.environ.setdefault("SIL_NLP_DATA_PATH", "/home/runner/work/silnlp/silnlp/tests")
+os.environ.setdefault("SIL_NLP_DATA_PATH", str(Path(__file__).resolve().parents[1]))
 
 from silnlp.nmt.hugging_face_config import HuggingFaceNMTModel, PartialWordPrefixConstraint, SilTranslationPipeline
 

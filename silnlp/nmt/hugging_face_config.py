@@ -86,6 +86,7 @@ if is_safetensors_available():
     import safetensors.torch
 
 LOGGER = logging.getLogger(__name__)
+PARTIAL_WORD_PREFIX_CACHE_SIZE = 4096
 
 
 def prepare_decoder_input_ids_from_labels(self: M2M100ForConditionalGeneration, labels: Tensor) -> Tensor:
@@ -966,7 +967,7 @@ class PartialWordPrefixConstraint:
             return [self._eos_token_id]
         return allowed_token_ids
 
-    @lru_cache(maxsize=4096)
+    @lru_cache(maxsize=PARTIAL_WORD_PREFIX_CACHE_SIZE)
     def _decode(self, token_ids: Tuple[int, ...]) -> str:
         return self._tokenizer.decode(token_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)
 
@@ -1427,12 +1428,16 @@ class HuggingFaceNMTModel(NMTModel):
         max_new_tokens: int = 10,
     ) -> Optional[str]:
         model, tokenizer, src_lang, trg_lang = self._get_inference_components(src_iso, trg_iso, ckpt)
+        pipeline_device = 0 if model.device.type == "cuda" else -1
+        num_beams = self._config.infer.get("num_beams")
+        if num_beams is None:
+            num_beams = self._config.params.get("generation_num_beams")
         pipeline = SilTranslationPipeline(
             model=model,
             tokenizer=tokenizer,
             src_lang=src_lang,
             tgt_lang=trg_lang,
-            device=0,
+            device=pipeline_device,
         )
 
         prefix, partial_word = self._split_partial_translation(partial_translation)
@@ -1441,7 +1446,7 @@ class HuggingFaceNMTModel(NMTModel):
             "batch_size": 1,
             "clean_up_tokenization_spaces": False,
             "max_new_tokens": max_new_tokens,
-            "num_beams": self._config.infer.get("num_beams") or self._config.params.get("generation_num_beams"),
+            "num_beams": num_beams,
             "num_return_sequences": 1,
             "return_tensors": False,
             "return_text": True,
@@ -1503,7 +1508,7 @@ class HuggingFaceNMTModel(NMTModel):
         if decoder_start_token_id is None and model.generation_config is not None:
             decoder_start_token_id = model.generation_config.decoder_start_token_id
         if decoder_start_token_id is None:
-            raise ValueError("Make sure that `config.decoder_start_token_id` is correctly defined")
+            raise ValueError("decoder_start_token_id must be defined in either model.config or model.generation_config")
 
         if prefix_ids.shape[1] == 0 or prefix_ids[0, 0].item() != decoder_start_token_id:
             decoder_start = torch.tensor([[decoder_start_token_id]], dtype=prefix_ids.dtype)
