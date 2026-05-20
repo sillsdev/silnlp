@@ -1,13 +1,14 @@
 import shutil
 from pathlib import Path
 from typing import cast
+from unittest.mock import Mock
 
 import torch
 
 from silnlp.common.environment import SilNlpEnv
 from silnlp.nmt.config_utils import load_config_from_exp_dir
 from silnlp.nmt.experiment import SILExperiment
-from silnlp.nmt.hugging_face_config import HuggingFaceConfig
+from silnlp.nmt.hugging_face_config import HuggingFaceConfig, HuggingFaceNMTModel
 from tests.smoke_tests.mock_pretrained_model import (
     MockModelOutput,
     MockPreTrainedModelProviderFactory,
@@ -30,6 +31,31 @@ def test_experiment_full_pipeline():
     check_translate_step(environment)
 
     clean_experiment_directory(environment.get_mt_exp_dir(EXPERIMENT_NAME))
+
+
+def test_translate_sentences_uses_tensor_batch_size_cap():
+    model = cast(HuggingFaceNMTModel, HuggingFaceNMTModel.__new__(HuggingFaceNMTModel))
+    model._config = cast(HuggingFaceConfig, Mock(infer={"infer_batch_size": 16, "infer_batch_size_with_tensors": 2}))
+    model._get_dictionary = Mock(return_value={})
+    captured_batch_size = {}
+
+    def fake_translate_sentence_helper(*args, **kwargs):
+        captured_batch_size["value"] = args[2]
+        return iter(())
+
+    model._translate_sentence_helper = fake_translate_sentence_helper
+
+    list(
+        model._translate_sentences(
+            tokenizer=Mock(),
+            pipeline=Mock(),
+            sentences=[["token"]],
+            vrefs=None,
+            return_tensors=True,
+        )
+    )
+
+    assert captured_batch_size["value"] == 2
 
 
 def set_up_environment() -> SilNlpEnv:

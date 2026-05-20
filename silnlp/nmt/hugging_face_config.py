@@ -396,6 +396,7 @@ class HuggingFaceConfig(Config):
                 },
                 "infer": {
                     "infer_batch_size": 16,
+                    "infer_batch_size_with_tensors": 1,
                     "num_beams": 2,
                     "num_drafts": 3,
                     "multiple_translations_method": "hybrid",
@@ -1489,6 +1490,9 @@ class HuggingFaceNMTModel(NMTModel):
         return_tensors: bool = False,
     ) -> Iterable[ModelOutputGroup]:
         batch_size: int = self._config.infer["infer_batch_size"]
+        if return_tensors:
+            batch_size_with_tensors = max(1, int(self._config.infer.get("infer_batch_size_with_tensors", 1)))
+            batch_size = min(batch_size, batch_size_with_tensors)
 
         dictionary = self._get_dictionary()
         if vrefs is None or len(dictionary) == 0:
