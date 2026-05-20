@@ -164,12 +164,18 @@ class OnboardingProject:
 
         tokenization_stats_csv = stats_dir / "tokenization_stats.csv"
         tokenization_stats_xlsx = stats_dir / "tokenization_stats.xlsx"
+        token_occurrence_log = stats_dir / "token_occurrence.log"
         if tokenization_stats_csv.exists():
             shutil.move(str(tokenization_stats_csv), str(self.output_folder / "tokenization_stats.csv"))
         if tokenization_stats_xlsx.exists():
             shutil.move(
                 str(tokenization_stats_xlsx),
                 str(self.output_folder / "tokenization_stats.xlsx"),
+            )
+        if token_occurrence_log.exists():
+            shutil.move(
+                str(token_occurrence_log),
+                str(self.output_folder / "token_occurrence.log"),
             )
 
     def align_wrapper(
@@ -287,7 +293,7 @@ class OnboardingProject:
 
         self.check_for_project_errors()
 
-        self.project_name = rename_project(project_name=self.project_name, datestamp=datestamp, copy_from=copy_from)
+        self.project_name = self.rename_project(project_name=self.project_name, datestamp=datestamp)
 
         self.local_project_path = copy_project(
             project_name=self.project_name, local_project_path=self.local_project_path
@@ -300,8 +306,11 @@ class OnboardingProject:
         self.resource = resource_hash_path.exists()
         return self.resource
 
-    def generate_resource_hash(self) -> str:
-        resource_path = self.environment.pt_projects_dir / self.project_name
+    def generate_resource_hash(self, resource_path: Path) -> str:
+        resource_hash_path = resource_path / ".resource_hash"
+        if resource_hash_path.exists():
+            with open(resource_hash_path, "r") as f:
+                return f.read().strip()
         resource_hash = hashlib.sha256()
         for root, dirs, files in os.walk(resource_path):
             dirs.sort()
@@ -316,28 +325,49 @@ class OnboardingProject:
                         resource_hash.update(chunk)
 
         resource_hash = resource_hash.hexdigest()
-        with open(resource_path / ".resource_hash", "w") as f:
+        resource_hash_path = resource_path / ".resource_hash"
+        resource_hash_path.parent.touch(exist_ok=True)
+        with open(resource_hash_path, "w") as f:
             f.write(resource_hash)
         return resource_hash
 
     def check_resource_hash(self) -> bool:
-        new_resource_hash = self.generate_resource_hash()
+        if self.local_project_path is None:
+            return False
+        new_resource_hash = self.generate_resource_hash(self.local_project_path)
         old_resource_path = self.environment.pt_projects_dir / self.project_name
-        old_resource_hash_path = old_resource_path / ".resource_hash"
-        old_resource_hash = None
-        if old_resource_hash_path.exists():
-            old_resource_hash = old_resource_hash_path.read_text().strip()
+        if not old_resource_path.exists():
+            return False
+        old_resource_hash = self.generate_resource_hash(old_resource_path)
         return new_resource_hash == old_resource_hash
 
     def update_resource(self) -> None:
         old_resource_path = self.environment.pt_projects_dir / self.project_name
-
-        new_resource_name = append_datestamp(old_resource_path.name)
-        new_resource_path = old_resource_path.parent / new_resource_name
+        if not old_resource_path.exists():
+            LOGGER.info(
+                f"Resource '{self.project_name}' does not exist in the Paratext projects directory. Uploading new resource."
+            )
+            return
+        datestamped_resource_name = append_datestamp(old_resource_path.name)
+        new_resource_path = old_resource_path.parent / datestamped_resource_name
+        LOGGER.info(
+            f"Resource '{self.project_name}' is outdated, updating resource in the Paratext projects directory. The old version will be renamed to {datestamped_resource_name}."
+        )
         old_resource_path.rename(new_resource_path)
 
     def set_output_folder(self, output_folder: Path) -> None:
         self.output_folder = output_folder
+
+    def rename_project(self, project_name: str, datestamp: bool) -> str:
+        self.resource = False
+        if project_name.endswith("_Resource"):
+            self.resource = True
+            project_name = project_name.replace("_Resource", "")
+        if "-" in project_name:
+            project_name = project_name.replace("-", "_")
+        if datestamp and not self.resource:
+            project_name = append_datestamp(project_name)
+        return project_name
 
 
 class OnboardingRequest:
@@ -429,12 +459,22 @@ class OnboardingRequest:
         if not self.copy_from:
             self.setup_output()
             return
+        reference_projects_to_remove = []
         for project in [self.main_project] + self.reference_projects:
             if project == self.main_project:
                 LOGGER.info(f"Preparing and Uploading main project '{self.main_project.project_name}'")
             else:
                 LOGGER.info(f"Preparing and Uploading reference project '{project.project_name}'")
-            self.upload_project(project)
+            try:
+                self.upload_project(project)
+            except Exception as e:
+                if project != self.main_project:
+                    LOGGER.error(f"Error occurred while uploading reference project '{project.project_name}': {e}")
+                    LOGGER.error(f"Continuing with onboarding without reference project '{project.project_name}'.")
+                    reference_projects_to_remove.append(project)
+
+        for project in reference_projects_to_remove:
+            self.reference_projects.remove(project)
 
         self.setup_output()
 
@@ -463,9 +503,6 @@ class OnboardingRequest:
             LOGGER.info(f"Resource '{onboarding_project.project_name}' is up to date. Skipping uploading.")
             return
         elif onboarding_project.is_resource():
-            LOGGER.info(
-                f"Resource '{onboarding_project.project_name}' is outdated. Uploading new version of the resource."
-            )
             onboarding_project.update_resource()
 
         if self.copy_from:
@@ -639,21 +676,6 @@ def append_datestamp(project_name: str) -> str:
     now = datetime.now()
     datestamp = now.strftime("%Y_%m_%d")
     return f"{project_name}_{datestamp}"
-
-
-def rename_project(project_name: str, datestamp: bool, copy_from: Path | None) -> str:
-    is_resource = False
-    if project_name.endswith("_Resource"):
-        is_resource = True
-        resource_hash_path = copy_from / Path(f"{project_name}/.resource_hash") if copy_from else None
-        if resource_hash_path and not resource_hash_path.exists():
-            resource_hash_path.touch()
-        project_name = project_name.replace("_Resource", "")
-    if "-" in project_name:
-        project_name = project_name.replace("-", "_")
-    if datestamp and not is_resource:
-        project_name = append_datestamp(project_name)
-    return project_name
 
 
 def main() -> None:

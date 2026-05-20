@@ -115,11 +115,24 @@ class ConfidenceFile(ABC, Generic[TVerseKey]):
 
 class UsfmConfidenceFile(ConfidenceFile[VerseRef]):
 
+    def __init__(self, path: Path):
+        super().__init__(path)
+        self._book_confidences_cache: Optional[Dict[str, float]] = None
+
     def get_chapters_path(self) -> Path:
         return self._path.with_suffix(".chapters.tsv")
 
     def get_books_path(self) -> Path:
         return self._path.parent / "confidences.books.tsv"
+
+    @property
+    def _book_confidences(self) -> Dict[str, float]:
+        if self._book_confidences_cache is None:
+            self._book_confidences_cache = {}
+            if self.get_books_path().is_file():
+                for book, confidence in self._book_confidence_iterator():
+                    self._book_confidences_cache[book] = confidence
+        return self._book_confidences_cache
 
     def _parse_verse_key(self, raw_key: str) -> VerseRef:
         return VerseRef.from_string(raw_key)
@@ -172,19 +185,14 @@ class UsfmConfidenceFile(ConfidenceFile[VerseRef]):
                 continue
             book_confidences.append(confidence)
 
-        existing_books: Dict[str, float] = {}
-        if self.get_books_path().exists():
-            for book, confidence in self.book_confidence_iterator():
-                existing_books[book] = confidence
-
         current_book = scripture_refs[0].book
-        existing_books[current_book] = gmean(book_confidences)
+        self._book_confidences[current_book] = gmean(book_confidences)
         with self.get_books_path().open("w", encoding="utf-8", newline="\n") as book_confidences_file:
             book_confidences_file.write("Book\tConfidence\n")
-            for book, confidence in existing_books.items():
+            for book, confidence in self._book_confidences.items():
                 book_confidences_file.write(f"{book}\t{confidence}\n")
 
-    def book_confidence_iterator(self) -> Generator[Tuple[str, float], None, None]:
+    def _book_confidence_iterator(self) -> Generator[Tuple[str, float], None, None]:
         with open(self.get_books_path(), "r", encoding="utf-8") as f:
             headers = f.readline().strip().split("\t")
             confidence_index = headers.index("Confidence")
@@ -194,8 +202,8 @@ class UsfmConfidenceFile(ConfidenceFile[VerseRef]):
                 confidence = float(cols[confidence_index])
                 yield (book, confidence)
 
-    def get_book_confidences(self) -> List[Tuple[str, float]]:
-        return list(self.book_confidence_iterator())
+    def get_book_confidence(self, book: str) -> Optional[float]:
+        return self._book_confidences.get(book)
 
 
 class TxtConfidenceFile(ConfidenceFile[int]):

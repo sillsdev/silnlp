@@ -37,7 +37,7 @@ def extract_directory_or_bundle(
                 with ZipFile(input_path, "r") as bundle_file:
                     bundle_file.extractall(project_dir, pwd=password)
 
-                corpus_path, verse_count = extract_project(
+                corpus_path, verse_count, line_count = extract_project(
                     project_dir, corpus_output_path, output_project_vrefs=output_project_vrefs
                 )
                 extract_term_renderings(
@@ -48,7 +48,7 @@ def extract_directory_or_bundle(
                     environment,
                 )
         else:
-            corpus_path, verse_count = extract_project(
+            corpus_path, verse_count, line_count = extract_project(
                 input_path, corpus_output_path, output_project_vrefs=output_project_vrefs
             )
             extract_term_renderings(

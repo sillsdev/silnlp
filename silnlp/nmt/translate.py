@@ -1,7 +1,6 @@
 import argparse
 import logging
 import os
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Generator, Iterable, List, Optional, Tuple, Union
@@ -188,69 +187,6 @@ class TranslationTask:
             estimate_quality(verse_test_scores_path, confidence_files)
             LOGGER.info("Quality estimation completed.")
 
-    def translate_text_files(
-        self,
-        src_prefix: str,
-        trg_prefix: str,
-        start_seq: int,
-        end_seq: int,
-        src_iso: Optional[str],
-        trg_iso: Optional[str],
-        produce_multiple_translations: bool = False,
-        save_confidences: bool = False,
-        quality_estimation: bool = False,
-        verse_test_scores_path: Optional[Path] = None,
-        tags: Optional[List[str]] = None,
-    ) -> None:
-        translator, config, _ = self._init_translation_task(experiment_suffix=f"_{self.checkpoint}_{src_prefix}")
-        confidence_files: List[Path] = []
-        with translator:
-            if src_iso is None:
-                src_iso = config.default_test_src_iso
-                if src_iso == "" and len(config.src_iso) > 0:
-                    src_iso = next(iter(config.src_iso))
-            if src_iso == "":
-                LOGGER.warning("No language code was set for the source language")
-            if trg_iso is None:
-                trg_iso = config.default_test_trg_iso
-                if trg_iso == "" and len(config.trg_isos) > 0:
-                    trg_iso = next(iter(config.trg_isos))
-            if trg_iso == "":
-                LOGGER.warning("No language code was set for the target language")
-
-            for i in range(start_seq, end_seq + 1):
-                file_num = f"{i:04d}"
-                src_file = f"{src_prefix}{file_num}.txt"
-                src_file_path = Path(self.environment.mt_experiments_dir / self.name / src_file)
-                if not src_file_path.exists():
-                    raise FileNotFoundError("Cannot find source: " + src_file)
-
-                trg_file = f"{trg_prefix}{file_num}.txt"
-                trg_file_path = Path(self.environment.mt_experiments_dir / self.name / trg_file)
-
-                if src_file_path.is_file() and not trg_file_path.is_file():
-                    start = time.time()
-                    translator.translate_text(
-                        src_file_path,
-                        trg_file_path,
-                        src_iso,
-                        trg_iso,
-                        produce_multiple_translations,
-                        save_confidences,
-                        trg_prefix,
-                        tags,
-                    )
-                    end = time.time()
-                    print(f"Translated {src_file_path.name} to {trg_file_path.name} in {((end-start)/60):.2f} minutes")
-
-                    if save_confidences:
-                        confidence_files.extend(trg_file_path.parent.glob(f"{trg_file_path.stem}*{CONFIDENCE_SUFFIX}"))
-
-        if quality_estimation and len(confidence_files) > 0:
-            LOGGER.info("Running quality estimation...")
-            estimate_quality(verse_test_scores_path, confidence_files)
-            LOGGER.info("Quality estimation completed.")
-
     def translate_files(
         self,
         src: str,
@@ -399,20 +335,6 @@ def main() -> None:
         type=str,
         help="Target file name, must relative to the experiment directory",
     )
-    parser.add_argument(
-        "--src-prefix",
-        default=None,
-        type=str,
-        help="Source file prefix (e.g., de-news2019-), must be in the experiment directory",
-    )
-    parser.add_argument(
-        "--trg-prefix",
-        default=None,
-        type=str,
-        help="Target file prefix (e.g., en-news2019-), must be relative to the experiment directory",
-    )
-    parser.add_argument("--start-seq", default=None, type=int, help="Starting file sequence #")
-    parser.add_argument("--end-seq", default=None, type=int, help="Ending file sequence #")
     parser.add_argument("--src-project", default=None, type=str, help="The source project to translate")
     parser.add_argument(
         "--trg-project",
@@ -439,8 +361,7 @@ def main() -> None:
         "--save-confidences",
         default=False,
         action="store_true",
-        help="Generate files for verse, chapter, and book confidences if translating from .usfm or .sfm files. "
-        "Or generate them for sequence and trg file confidences if translating from .txt files.",
+        help="Generate files for verse, chapter, and book confidences if translating from .usfm or .sfm files.",
     )
     parser.add_argument(
         "--paragraph-behavior",
@@ -587,30 +508,6 @@ def main() -> None:
             postprocess_handler,
             vref=args.vref,
         )
-    elif args.src_prefix is not None:
-        if args.debug:
-            show_attrs(
-                cli_args=args,
-                envs=environment,
-                actions=[f"Will attempt to translate matching files from {args.src_iso} into {args.trg_iso}."],
-            )
-            exit()
-        if args.trg_prefix is None:
-            raise RuntimeError("A target file prefix must be specified.")
-        if args.start_seq is None or args.end_seq is None:
-            raise RuntimeError("Start and end sequence numbers must be specified.")
-        translator.translate_text_files(
-            args.src_prefix,
-            args.trg_prefix,
-            args.start_seq,
-            args.end_seq,
-            args.src_iso,
-            args.trg_iso,
-            args.multiple_translations,
-            args.save_confidences,
-            args.quality_estimation,
-            verse_test_scores_path,
-        )
     elif args.src is not None:
         if args.debug:
             show_attrs(
@@ -632,7 +529,7 @@ def main() -> None:
             vref=args.vref,
         )
     else:
-        raise RuntimeError("A Scripture book, file, or file prefix must be specified.")
+        raise RuntimeError("A Scripture book or file must be specified.")
 
 
 if __name__ == "__main__":
