@@ -1491,7 +1491,7 @@ class HuggingFaceNMTModel(NMTModel):
     ) -> Iterable[ModelOutputGroup]:
         batch_size: int = self._config.infer["infer_batch_size"]
         if return_tensors:
-            batch_size_with_tensors = int(self._config.infer.get("infer_batch_size_with_tensors", 1))
+            batch_size_with_tensors = self._config.infer.get("infer_batch_size_with_tensors", 1)
             batch_size = min(batch_size, batch_size_with_tensors)
 
         dictionary = self._get_dictionary()
