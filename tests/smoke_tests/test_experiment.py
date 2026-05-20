@@ -62,22 +62,24 @@ def test_translate_sentences_uses_tensor_batch_size_cap():
     assert captured_batch_size["value"] == 2
 
 
-def test_translate_with_adaptive_batch_size_retries_with_smaller_batch():
+def test_translate_with_beam_search_retries_with_smaller_batch():
     model = cast(HuggingFaceNMTModel, Mock(spec=HuggingFaceNMTModel))
+    model._config = cast(HuggingFaceConfig, Mock(infer={"num_beams": 2}, params={}))
     call_batch_sizes: list[int] = []
 
-    def fake_translate(batch_sentences, batch_size, batch_force_words_ids):
+    def fake_pipeline(batch_sentences, batch_size, **kwargs):
         call_batch_sizes.append(batch_size)
         if batch_size > 2:
             raise RuntimeError(OOM_ERROR_MESSAGE)
         return [[{"translation_text": str(sentence[0])}] for sentence in batch_sentences]
 
     sentences = [["a"], ["b"], ["c"], ["d"]]
-    translated = HuggingFaceNMTModel._translate_with_adaptive_batch_size(
+    translated = HuggingFaceNMTModel._translate_with_beam_search(
         model,
-        fake_translate,
+        fake_pipeline,
         sentences,
         batch_size=4,
+        return_tensors=False,
     )
 
     assert [translation[0]["translation_text"] for translation in translated] == ["a", "b", "c", "d"]
