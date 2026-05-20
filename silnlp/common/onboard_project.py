@@ -326,7 +326,7 @@ class OnboardingProject:
 
         resource_hash = resource_hash.hexdigest()
         resource_hash_path = resource_path / ".resource_hash"
-        resource_hash_path.parent.touch(exist_ok=True)
+        resource_hash_path.parent.mkdir(parents=True, exist_ok=True)
         with open(resource_hash_path, "w") as f:
             f.write(resource_hash)
         return resource_hash
