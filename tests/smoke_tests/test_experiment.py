@@ -61,6 +61,28 @@ def test_translate_sentences_uses_tensor_batch_size_cap():
     assert captured_batch_size["value"] == 2
 
 
+def test_translate_with_adaptive_batch_size_retries_with_smaller_batch():
+    model = cast(HuggingFaceNMTModel, Mock(spec=HuggingFaceNMTModel))
+    call_batch_sizes: list[int] = []
+
+    def fake_translate(batch_sentences, batch_size, batch_force_words_ids):
+        call_batch_sizes.append(batch_size)
+        if batch_size > 2:
+            raise RuntimeError("CUDA out of memory. Tried to allocate 7.00 GiB.")
+        return [[{"translation_text": str(sentence[0])}] for sentence in batch_sentences]
+
+    sentences = [["a"], ["b"], ["c"], ["d"]]
+    translated = HuggingFaceNMTModel._translate_with_adaptive_batch_size(
+        model,
+        fake_translate,
+        sentences,
+        batch_size=4,
+    )
+
+    assert [translation[0]["translation_text"] for translation in translated] == ["a", "b", "c", "d"]
+    assert call_batch_sizes == [4, 2, 2]
+
+
 def set_up_environment() -> SilNlpEnv:
     # To avoid keeping large numbers of files in the repository, the tests assume that there is an
     # active connection to the MinIO bucket and use file from the "Scripture" and "Paratext" directories.
