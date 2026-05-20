@@ -166,10 +166,10 @@ class TranslationScorer:
             return None
         # Strip SentencePiece (▁) or BPE (Ġ) word-initial markers
         if token.startswith("▁"):
-            stripped = token[len("▁") :]
+            stripped = token.removeprefix("▁")
             return stripped if stripped else None
         if token.startswith("Ġ"):
-            stripped = token[len("Ġ") :]
+            stripped = token.removeprefix("Ġ")
             return stripped if stripped else None
         # Strip BERT-style continuation marker
         if token.startswith("##"):
@@ -219,11 +219,11 @@ class TranslationScorer:
 
             # Append the token's characters to the current word (strip the word-initial marker)
             if token.startswith("▁"):
-                current_word_chars += token[len("▁") :]
+                current_word_chars += token.removeprefix("▁")
             elif token.startswith("Ġ"):
-                current_word_chars += token[len("Ġ") :]
+                current_word_chars += token.removeprefix("Ġ")
             elif token.startswith("##"):
-                current_word_chars += token[len("##") :]
+                current_word_chars += token.removeprefix("##")
             else:
                 current_word_chars += token
 
