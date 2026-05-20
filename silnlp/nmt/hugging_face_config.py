@@ -8,6 +8,7 @@ from contextlib import ExitStack
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
+from functools import lru_cache
 from itertools import repeat
 from math import prod
 from pathlib import Path
@@ -937,6 +938,39 @@ class InferenceModelParams:
             raise ValueError("trg_lang must be a string")
 
 
+class PartialWordPrefixConstraint:
+    def __init__(self, tokenizer: PreTrainedTokenizer, prompt_length: int, partial_word: str) -> None:
+        self._tokenizer = tokenizer
+        self._prompt_length = prompt_length
+        self._partial_word = partial_word
+        self._token_ids = sorted(set(tokenizer.get_vocab().values()))
+        self._eos_token_id = tokenizer.eos_token_id
+
+    def __call__(self, batch_id: int, input_ids: torch.Tensor) -> List[int]:
+        del batch_id
+
+        generated_ids = tuple(cast(List[int], input_ids[self._prompt_length :].tolist()))
+        generated_text = self._decode(generated_ids)
+        if generated_text.startswith(self._partial_word):
+            return self._token_ids
+
+        allowed_token_ids: List[int] = []
+        for token_id in self._token_ids:
+            candidate_text = self._decode(generated_ids + (token_id,))
+            if candidate_text == generated_text:
+                continue
+            if self._partial_word.startswith(candidate_text) or candidate_text.startswith(self._partial_word):
+                allowed_token_ids.append(token_id)
+
+        if len(allowed_token_ids) == 0 and self._eos_token_id is not None:
+            return [self._eos_token_id]
+        return allowed_token_ids
+
+    @lru_cache(maxsize=4096)
+    def _decode(self, token_ids: Tuple[int, ...]) -> str:
+        return self._tokenizer.decode(token_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)
+
+
 class HuggingFaceNMTModel(NMTModel):
     def __init__(
         self,
@@ -1322,15 +1356,12 @@ class HuggingFaceNMTModel(NMTModel):
         num_drafts = self._config.infer.get("num_drafts", 1)
         return num_drafts
 
-    def translate(
+    def _get_inference_components(
         self,
-        sentences: Iterable[str],
         src_iso: str,
         trg_iso: str,
-        produce_multiple_translations: bool = False,
-        vrefs: Optional[Iterable[VerseRef]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
-    ) -> Generator[SentenceTranslationGroup, None, None]:
+    ) -> Tuple[PreTrainedModel, PreTrainedTokenizer, str, str]:
         src_lang = self._config.data["lang_codes"].get(src_iso, src_iso)
         trg_lang = self._config.data["lang_codes"].get(trg_iso, trg_iso)
         inference_model_params = InferenceModelParams(ckpt, src_lang, trg_lang)
@@ -1346,6 +1377,18 @@ class HuggingFaceNMTModel(NMTModel):
         if isinstance(tokenizer, (NllbTokenizer, NllbTokenizerFast)):
             tokenizer = PunctuationNormalizingTokenizer(tokenizer)
 
+        return model, tokenizer, src_lang, trg_lang
+
+    def translate(
+        self,
+        sentences: Iterable[str],
+        src_iso: str,
+        trg_iso: str,
+        produce_multiple_translations: bool = False,
+        vrefs: Optional[Iterable[VerseRef]] = None,
+        ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
+    ) -> Generator[SentenceTranslationGroup, None, None]:
+        model, tokenizer, src_lang, trg_lang = self._get_inference_components(src_iso, trg_iso, ckpt)
         pipeline = SilTranslationPipeline(
             model=model,
             tokenizer=tokenizer,
@@ -1372,6 +1415,152 @@ class HuggingFaceNMTModel(NMTModel):
             unit="ex",
         ):
             yield model_output_group.convert_to_sentence_translation_group(tokenizer)
+
+    def suggest_translation(
+        self,
+        source_sentence: str,
+        partial_translation: str,
+        src_iso: str,
+        trg_iso: str,
+        confidence_threshold: float = 0.5,
+        ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
+        max_new_tokens: int = 10,
+    ) -> Optional[str]:
+        model, tokenizer, src_lang, trg_lang = self._get_inference_components(src_iso, trg_iso, ckpt)
+        pipeline = SilTranslationPipeline(
+            model=model,
+            tokenizer=tokenizer,
+            src_lang=src_lang,
+            tgt_lang=trg_lang,
+            device=0,
+        )
+
+        prefix, partial_word = self._split_partial_translation(partial_translation)
+        decoder_input_ids = self._build_decoder_input_ids(tokenizer, model, prefix)
+        generate_kwargs: Dict[str, Any] = {
+            "batch_size": 1,
+            "clean_up_tokenization_spaces": False,
+            "max_new_tokens": max_new_tokens,
+            "num_beams": self._config.infer.get("num_beams") or self._config.params.get("generation_num_beams"),
+            "num_return_sequences": 1,
+            "return_tensors": False,
+            "return_text": True,
+        }
+        if decoder_input_ids is not None:
+            generate_kwargs["decoder_input_ids"] = decoder_input_ids
+        if len(partial_word) > 0:
+            prompt_length = 0 if decoder_input_ids is None else decoder_input_ids.shape[1]
+            generate_kwargs["prefix_allowed_tokens_fn"] = PartialWordPrefixConstraint(
+                tokenizer, prompt_length, partial_word
+            )
+
+        outputs = pipeline([source_sentence], **generate_kwargs)
+        if len(outputs) == 0:
+            return None
+
+        suggestion = self._extract_suggestion_text(partial_translation, outputs[0]["translation_text"])
+        if suggestion is None:
+            return None
+
+        confidence = self._get_suggestion_confidence(
+            tokenizer,
+            outputs[0]["translation_token_ids"],
+            outputs[0]["token_scores"],
+            partial_translation,
+            suggestion,
+        )
+        if confidence < confidence_threshold:
+            return None
+        return suggestion
+
+    def _split_partial_translation(self, partial_translation: str) -> Tuple[str, str]:
+        if len(partial_translation) == 0 or partial_translation[-1].isspace():
+            return partial_translation, ""
+        match = re.match(r"^(.*?)(\S+)$", partial_translation, re.DOTALL)
+        if match is None:
+            return "", partial_translation
+        return match.group(1), match.group(2)
+
+    def _build_decoder_input_ids(
+        self, tokenizer: PreTrainedTokenizer, model: PreTrainedModel, prefix: str
+    ) -> Optional[torch.LongTensor]:
+        if len(prefix) == 0:
+            return None
+
+        prefix_ids = tokenizer(text_target=prefix, add_special_tokens=True, return_tensors="pt")["input_ids"]
+        if (
+            tokenizer.eos_token_id is not None
+            and prefix_ids.shape[1] > 0
+            and prefix_ids[0, -1].item() == tokenizer.eos_token_id
+        ):
+            prefix_ids = prefix_ids[:, :-1]
+
+        decoder_start_token_id = model.config.decoder_start_token_id
+        if decoder_start_token_id is None and model.generation_config is not None:
+            decoder_start_token_id = model.generation_config.decoder_start_token_id
+        if decoder_start_token_id is None:
+            raise ValueError("Make sure that `config.decoder_start_token_id` is correctly defined")
+
+        if prefix_ids.shape[1] == 0 or prefix_ids[0, 0].item() != decoder_start_token_id:
+            decoder_start = torch.tensor([[decoder_start_token_id]], dtype=prefix_ids.dtype)
+            prefix_ids = torch.cat([decoder_start, prefix_ids], dim=1)
+        return cast(torch.LongTensor, prefix_ids.to(model.device))
+
+    def _extract_suggestion_text(self, partial_translation: str, generated_translation: str) -> Optional[str]:
+        if not generated_translation.startswith(partial_translation):
+            return None
+
+        remaining = generated_translation[len(partial_translation) :]
+        if len(remaining) == 0:
+            return None
+
+        if partial_translation.endswith(" "):
+            remaining = remaining.lstrip()
+            if len(remaining) == 0:
+                return None
+
+        whitespace_match = re.search(r"\s", remaining)
+        if whitespace_match is None:
+            return remaining
+        if whitespace_match.start() == 0:
+            return None
+        return remaining[: whitespace_match.start()]
+
+    def _get_suggestion_confidence(
+        self,
+        tokenizer: PreTrainedTokenizer,
+        translation_token_ids: List[int],
+        token_scores: Union[List[float], torch.Tensor],
+        partial_translation: str,
+        suggestion: str,
+    ) -> float:
+        suggestion_end = len(partial_translation) + len(suggestion)
+        prefix_end = len(partial_translation)
+        if isinstance(token_scores, torch.Tensor):
+            token_scores = cast(List[float], token_scores.tolist())
+
+        relevant_token_probs: List[float] = []
+        current_ids: List[int] = []
+        previous_text = ""
+        for token_id, token_score in zip(translation_token_ids, token_scores):
+            current_ids.append(token_id)
+            current_text = tokenizer.decode(current_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)
+            if len(current_text) <= len(previous_text):
+                previous_text = current_text
+                continue
+
+            overlap_start = max(prefix_end, len(previous_text))
+            overlap_end = min(suggestion_end, len(current_text))
+            if overlap_end > overlap_start:
+                relevant_token_probs.append(float(np.exp(float(token_score))))
+
+            previous_text = current_text
+            if len(current_text) >= suggestion_end:
+                break
+
+        if len(relevant_token_probs) == 0:
+            return 0.0
+        return min(relevant_token_probs)
 
     def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
         step: Optional[int] = None
@@ -1935,12 +2124,13 @@ class SilTranslationPipeline(TranslationPipeline):
         n_sequences = out_b // in_b
 
         ts_len = transition_scores.shape[1]
-        if ts_len == seq_len:
+        prompt_len = seq_len - ts_len
+        if prompt_len == 0:
             token_logprobs = transition_scores
-        elif ts_len == seq_len - 1:
+        elif prompt_len > 0:
             token_logprobs = torch.cat(
                 [
-                    torch.zeros(out_b, 1, device=transition_scores.device, dtype=transition_scores.dtype),
+                    torch.zeros(out_b, prompt_len, device=transition_scores.device, dtype=transition_scores.dtype),
                     transition_scores,
                 ],
                 dim=1,

@@ -91,6 +91,18 @@ class NMTModel(ABC):
     ) -> Generator[SentenceTranslationGroup, None, None]: ...
 
     @abstractmethod
+    def suggest_translation(
+        self,
+        source_sentence: str,
+        partial_translation: str,
+        src_iso: str,
+        trg_iso: str,
+        confidence_threshold: float = 0.5,
+        ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
+        max_new_tokens: int = 10,
+    ) -> Optional[str]: ...
+
+    @abstractmethod
     def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]: ...
 
     @abstractmethod
