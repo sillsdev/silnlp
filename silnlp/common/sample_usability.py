@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from machine.scripture import ALL_BOOK_IDS
 
-from ..nmt.config import get_mt_exp_dir
+from ..common.environment import SilNlpEnv
 from ..nmt.quality_estimation import CANONICAL_ORDER
 
 LOGGER = logging.getLogger(__package__ + ".sample_usability")
@@ -138,6 +138,8 @@ def main():
     )
     args = parser.parse_args()
 
+    environment = SilNlpEnv.create_standard_environment()
+
     sample_size = args.sample_size
     random_seed = args.random_seed
     books = args.books
@@ -153,7 +155,7 @@ def main():
         if invalid_books:
             raise ValueError(f"Invalid book ID(s): {', '.join(invalid_books)}")
 
-    usability_verses_file = get_mt_exp_dir(args.usability_verses_file)
+    usability_verses_file = environment.get_mt_exp_dir(args.usability_verses_file)
     if not usability_verses_file.exists():
         raise FileNotFoundError(f"The usability verses file {usability_verses_file} does not exist.")
     stratified_sample(usability_verses_file, args.sample_size, args.random_seed, args.books)

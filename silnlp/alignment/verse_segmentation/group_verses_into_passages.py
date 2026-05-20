@@ -6,7 +6,7 @@ from machine.corpora import FileParatextProjectSettingsParser, ScriptureRef, Usf
 from machine.scripture import VerseRef
 
 from silnlp.common.corpus import load_corpus
-from silnlp.common.environment import SIL_NLP_ENV
+from silnlp.common.environment import SilNlpEnv
 
 
 class Passage:
@@ -49,9 +49,9 @@ class PassageReader:
         return self._passages
 
 
-def assign_verses_to_passages(project_name: str, passage_file: Path) -> List[Passage]:
+def assign_verses_to_passages(project_name: str, passage_file: Path, environment: SilNlpEnv) -> List[Passage]:
     passages = PassageReader(passage_file).get_passages()
-    settings = FileParatextProjectSettingsParser(SIL_NLP_ENV.pt_projects_dir / project_name).parse()
+    settings = FileParatextProjectSettingsParser(environment.pt_projects_dir / project_name).parse()
     stylesheet = settings.stylesheet
     encoding = settings.encoding
     for passage in passages:
@@ -59,7 +59,7 @@ def assign_verses_to_passages(project_name: str, passage_file: Path) -> List[Pas
             stylesheet,
             encoding,
             passage.start_ref.book,
-            SIL_NLP_ENV.pt_projects_dir / project_name / settings.get_book_file_name(passage.start_ref.book),
+            environment.pt_projects_dir / project_name / settings.get_book_file_name(passage.start_ref.book),
         )
         for row in usfm_text:
             verses = passage.verses
@@ -81,7 +81,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    passages = assign_verses_to_passages(args.project, Path(args.input_passages))
+    environment = SilNlpEnv.create_standard_environment()
+    passages = assign_verses_to_passages(args.project, Path(args.input_passages), environment)
     with open(Path(args.output_passages), "w", encoding="utf-8") as out_file:
         for passage in passages:
             out_file.write(

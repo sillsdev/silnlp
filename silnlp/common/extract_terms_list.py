@@ -1,6 +1,6 @@
 import argparse
 
-from .environment import SIL_NLP_ENV
+from .environment import SilNlpEnv
 from .paratext import extract_terms_list
 
 
@@ -9,9 +9,11 @@ def main() -> None:
     parser.add_argument("list", type=str, help="Biblical Terms list")
     args = parser.parse_args()
 
-    SIL_NLP_ENV.mt_terms_dir.mkdir(exist_ok=True, parents=True)
+    environment = SilNlpEnv.create_standard_environment()
 
-    extract_terms_list(args.list, SIL_NLP_ENV.mt_terms_dir)
+    environment.mt_terms_dir.mkdir(exist_ok=True, parents=True)
+
+    extract_terms_list(args.list, environment.mt_terms_dir)
 
 
 if __name__ == "__main__":

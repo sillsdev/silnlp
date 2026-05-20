@@ -11,7 +11,7 @@ import logging
 
 import matplotlib.pyplot as plt
 
-from ..common.utils import get_mt_exp_dir
+from ..common.environment import SilNlpEnv
 
 logging.basicConfig()
 
@@ -24,7 +24,8 @@ def main() -> None:
 
     exp_name = args.experiment
 
-    exp_dir = get_mt_exp_dir(exp_name)
+    environment = SilNlpEnv.create_standard_environment()
+    exp_dir = environment.get_mt_exp_dir(exp_name)
     data = []
     with open(exp_dir / args.filename, "r+", encoding="utf-8") as f:
         for line in f:

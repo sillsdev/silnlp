@@ -10,7 +10,7 @@ from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
 from machine.tokenization import LatinWordTokenizer
 from sklearn.model_selection import train_test_split
 
-from .environment import SIL_NLP_ENV
+from .environment import SilNlpEnv
 
 
 def write_corpus(corpus_path: Path, sentences: Iterable[str], append: bool = False) -> None:
@@ -34,14 +34,17 @@ def tokenize_corpus(input_path: Path, output_path: Path) -> None:
 
 
 def get_scripture_parallel_corpus(
-    src_file_path: Path, trg_file_path: Path, remove_empty_sentences: bool = True
+    src_file_path: Path,
+    trg_file_path: Path,
+    remove_empty_sentences: bool = True,
+    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
 ) -> pd.DataFrame:
     vrefs: List[VerseRef] = []
     src_sentences: List[str] = []
     trg_sentences: List[str] = []
     indices: List[int] = []
     with (
-        (SIL_NLP_ENV.assets_dir / "vref.txt").open("r", encoding="utf-8") as vref_file,
+        (environment.assets_dir / "vref.txt").open("r", encoding="utf-8") as vref_file,
         src_file_path.open("r", encoding="utf-8") as src_file,
         trg_file_path.open("r", encoding="utf-8") as trg_file,
     ):
@@ -115,13 +118,6 @@ def get_scripture_parallel_corpus(
     return pd.DataFrame(data, index=indices)
 
 
-def get_mt_corpus_path(corpus: str) -> Path:
-    corpus_path = SIL_NLP_ENV.mt_corpora_dir / f"{corpus}.txt"
-    if corpus_path.is_file():
-        return corpus_path
-    return SIL_NLP_ENV.mt_scripture_dir / f"{corpus}.txt"
-
-
 def split_parallel_corpus(
     corpus: pd.DataFrame, split_size: Union[float, int], split_indices: Optional[Set[int]] = None
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -174,10 +170,6 @@ def split_corpus(
     return set(random.sample(population, split_size))
 
 
-def get_scripture_path(iso: str, project: str) -> Path:
-    return SIL_NLP_ENV.mt_scripture_dir / f"{iso}-{project}.txt"
-
-
 def parse_scripture_path(data_file_path: Path) -> Tuple[str, str]:
     file_name = data_file_path.stem
     parts = file_name.split("-")
@@ -212,31 +204,37 @@ def exclude_chapters(corpus: pd.DataFrame, books: dict) -> pd.DataFrame:
     ].copy()
 
 
-def get_terms_metadata_path(list_name: str, mt_terms_dir: Path = SIL_NLP_ENV.mt_terms_dir) -> Path:
-    md_path = SIL_NLP_ENV.assets_dir / f"{list_name}-metadata.txt"
+def get_terms_metadata_path(
+    list_name: str,
+    mt_terms_dir: Optional[Path] = None,
+    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+) -> Path:
+    md_path = environment.assets_dir / f"{list_name}-metadata.txt"
     if md_path.is_file():
         return md_path
+    if mt_terms_dir is None:
+        mt_terms_dir = environment.mt_terms_dir
     return mt_terms_dir / f"{list_name}-metadata.txt"
 
 
-def get_terms_glosses_path(list_name: str, iso: str, mt_terms_dir: Path = SIL_NLP_ENV.mt_terms_dir) -> Path:
+def get_terms_glosses_path(list_name: str, iso: str, environment: SilNlpEnv) -> Path:
     iso = iso.lower()
-    gl_path = SIL_NLP_ENV.assets_dir / f"{iso}-{list_name}-glosses.txt"
+    gl_path = environment.assets_dir / f"{iso}-{list_name}-glosses.txt"
     if gl_path.is_file():
         return gl_path
-    gl_path = mt_terms_dir / f"{iso}-{list_name}-glosses.txt"
+    gl_path = environment.mt_terms_dir / f"{iso}-{list_name}-glosses.txt"
     return gl_path
 
 
-def get_terms_vrefs_path(list_name: str, mt_terms_dir: Path = SIL_NLP_ENV.mt_terms_dir) -> Path:
-    md_path = SIL_NLP_ENV.assets_dir / f"{list_name}-vrefs.txt"
+def get_terms_vrefs_path(list_name: str, environment: SilNlpEnv) -> Path:
+    md_path = environment.assets_dir / f"{list_name}-vrefs.txt"
     if md_path.is_file():
         return md_path
-    return mt_terms_dir / f"{list_name}-vrefs.txt"
+    return environment.mt_terms_dir / f"{list_name}-vrefs.txt"
 
 
-def get_terms_renderings_path(iso: str, project: str, mt_terms_dir: Path = SIL_NLP_ENV.mt_terms_dir) -> Optional[Path]:
-    matches = list(mt_terms_dir.glob(f"{iso}-{project}-*-renderings.txt"))
+def get_terms_renderings_path(iso: str, project: str, environment: SilNlpEnv) -> Optional[Path]:
+    matches = list(environment.mt_terms_dir.glob(f"{iso}-{project}-*-renderings.txt"))
     if len(matches) == 0:
         return None
     assert len(matches) == 1
@@ -264,17 +262,21 @@ class Term:
     vrefs: Set[VerseRef]
 
 
-def get_terms(terms_renderings_path: Path, iso: Optional[str] = None) -> Dict[str, Term]:
+def get_terms(
+    terms_renderings_path: Path,
+    iso: Optional[str] = None,
+    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+) -> Dict[str, Term]:
     list_name = get_terms_list(terms_renderings_path)
-    terms_metadata_path = get_terms_metadata_path(list_name)
-    terms_vrefs_path = get_terms_vrefs_path(list_name)
+    terms_metadata_path = get_terms_metadata_path(list_name, environment=environment)
+    terms_vrefs_path = get_terms_vrefs_path(list_name, environment=environment)
     terms: Dict[str, Term] = {}
     terms_metadata = load_corpus(terms_metadata_path)
     terms_renderings = load_corpus(terms_renderings_path)
     terms_vrefs = load_corpus(terms_vrefs_path) if terms_vrefs_path.is_file() else iter([])
     terms_glosses = iter([])
     if iso is not None:
-        terms_glosses_path = get_terms_glosses_path(list_name, iso=iso)
+        terms_glosses_path = get_terms_glosses_path(list_name, iso=iso, environment=environment)
         if terms_glosses_path.is_file():
             terms_glosses = load_corpus(terms_glosses_path)
     for metadata_line, glosses_line, renderings_line, vrefs_line in itertools.zip_longest(
@@ -283,7 +285,7 @@ def get_terms(terms_renderings_path: Path, iso: Optional[str] = None) -> Dict[st
         if metadata_line is None or len(metadata_line) == 0:
             continue
         term_id, cat, domain = metadata_line.split("\t", maxsplit=3)
-        term_id = f"{list_name}:{term_id}" # term is identified both by list type (e.g. Major, SilNt, etc.) and term id (e.g. Ἀδάμ)
+        term_id = f"{list_name}:{term_id}"  # term is identified both by list type (e.g. Major, SilNt, etc.) and term id (e.g. Ἀδάμ)
         glosses = [] if glosses_line is None or len(glosses_line) == 0 else glosses_line.split("\t")
         renderings = [] if len(renderings_line) == 0 else renderings_line.split("\t")
         vrefs = (

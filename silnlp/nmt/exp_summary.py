@@ -9,7 +9,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from .config import get_mt_exp_dir
+from ..common.environment import SilNlpEnv
 
 
 def read_group_results(
@@ -301,11 +301,13 @@ def main() -> None:
 
     chap_num = 0
 
+    environment = SilNlpEnv.create_standard_environment()
+
     multi_group_exp_name = args.exp
-    multi_group_exp_dir = get_mt_exp_dir(multi_group_exp_name) if multi_group_exp_name else None
+    multi_group_exp_dir = environment.get_mt_exp_dir(multi_group_exp_name) if multi_group_exp_name else None
 
     single_group_exp_name = args.baseline
-    single_group_exp_dir = get_mt_exp_dir(single_group_exp_name) if single_group_exp_name else None
+    single_group_exp_dir = environment.get_mt_exp_dir(single_group_exp_name) if single_group_exp_name else None
 
     result_file_name = "+".join(all_books)
     result_dir = multi_group_exp_dir if multi_group_exp_dir else single_group_exp_dir

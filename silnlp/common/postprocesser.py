@@ -27,12 +27,11 @@ from machine.punctuation_analysis import (
 from machine.tokenization import LatinWordTokenizer
 from machine.translation import WordAlignmentMatrix
 
-from silnlp.common.paratext import get_project_dir
-from silnlp.nmt.corpora import CorpusPair
-
 from ..alignment.eflomal import to_word_alignment_matrix
 from ..alignment.utils import compute_alignment_scores
+from ..nmt.corpora import CorpusPair
 from .corpus import load_corpus, write_corpus
+from .environment import SilNlpEnv
 
 LOGGER = logging.getLogger((__package__ or "") + ".translate")
 
@@ -152,7 +151,9 @@ class DenormalizeQuotationMarksPostprocessor:
         target_quote_convention_name: str | None,
         target_project_name: str | None = None,
         include_chapters: Optional[Dict[int, List[int]]] = None,
+        environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
     ):
+        self._environment = environment
         self._target_quote_convention = self._get_target_quote_convention(
             target_quote_convention_name, target_project_name, include_chapters
         )
@@ -187,7 +188,9 @@ class DenormalizeQuotationMarksPostprocessor:
         quote_convention_detector = QuoteConventionDetector()
 
         try:
-            quote_convention_detector = FileParatextProjectQuoteConventionDetector(get_project_dir(project_name))
+            quote_convention_detector = FileParatextProjectQuoteConventionDetector(
+                self._environment.get_paratext_project_dir(project_name)
+            )
             quote_convention_analysis = quote_convention_detector.get_quote_convention_analysis(
                 include_chapters=include_chapters
             )
@@ -295,8 +298,9 @@ class DenormalizeQuotationMarksPostprocessor:
 
 
 class PostprocessConfig:
-    def __init__(self, config: dict = {}) -> None:
+    def __init__(self, config: dict = {}, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()) -> None:
         self._config = {}
+        self._environment = environment
         for option, default in POSTPROCESS_DEFAULTS.items():
             self._config[option] = config.get(option, default)
 
@@ -376,7 +380,10 @@ class PostprocessConfig:
 
             try:
                 return DenormalizeQuotationMarksPostprocessor(
-                    self._config["target_quote_convention"], training_target_project_name, include_chapters
+                    self._config["target_quote_convention"],
+                    training_target_project_name,
+                    include_chapters,
+                    self._environment,
                 )
             except NoDetectedQuoteConventionException:
                 LOGGER.warning("No quote convention was detected for project %s" % training_target_project_name)
@@ -417,11 +424,16 @@ class PostprocessConfig:
 
 
 class PostprocessHandler:
-    def __init__(self, configs: Optional[List[PostprocessConfig]] = None, include_base: bool = True) -> None:
+    def __init__(
+        self,
+        configs: Optional[List[PostprocessConfig]] = None,
+        include_base: bool = True,
+        environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+    ) -> None:
         if configs is None:
             configs = []
 
-        self.configs = ([PostprocessConfig()] if include_base else []) + configs
+        self.configs = ([PostprocessConfig({}, environment)] if include_base else []) + configs
 
     # NOTE: Row metadata may need to be created/recreated at different times
     # For example, the marker placement metadata needs to be recreated for each new draft because it uses text alignment,

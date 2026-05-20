@@ -37,9 +37,7 @@ def set_up_environment() -> SilNlpEnv:
     # active connection to the MinIO bucket and use file from the "Scripture" and "Paratext" directories.
     # The experiments used in the tests are stored in the repository, to avoid having them accidentally
     # changed or deleted
-    environment = SilNlpEnv()
-    environment.set_machine_translation_dir(TEST_MT_DIR)
-    return environment
+    return SilNlpEnv.create_environment_with_mt_experiments_dir(TEST_MT_DIR / "experiments")
 
 
 def clean_experiment_directory(experiment_directory: Path):
@@ -77,7 +75,7 @@ def create_experiment_with_mock_pretrained_model(environment: SilNlpEnv) -> tupl
         [mock_test_outputs, mock_translate_outputs], model_stats
     )
 
-    hugging_face_config = load_config_from_exp_dir(environment.get_mt_exp_dir(EXPERIMENT_NAME))
+    hugging_face_config = load_config_from_exp_dir(environment.get_mt_exp_dir(EXPERIMENT_NAME), environment)
 
     # This cast is a temporary fix
     # In the long term, the create_model method should be refactored so that it doesn't include parameters

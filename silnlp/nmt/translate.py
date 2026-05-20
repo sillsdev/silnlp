@@ -1,7 +1,6 @@
 import argparse
 import logging
 import os
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Generator, Iterable, List, Optional, Tuple, Union
@@ -9,14 +8,14 @@ from typing import Generator, Iterable, List, Optional, Tuple, Union
 from machine.corpora import UsfmFileTextCorpus, create_versification_ref_corpus, extract_scripture_corpus
 from machine.scripture import VerseRef, book_number_to_id, get_chapters
 
-from ..common.environment import SIL_NLP_ENV, SilNlpEnv
-from ..common.paratext import book_file_name_digits, get_project_dir
+from ..common.environment import SilNlpEnv
+from ..common.paratext import book_file_name_digits
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.translation_data_structures import SentenceTranslationGroup
 from ..common.translator import CONFIDENCE_SUFFIX, Translator
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
-from .config import CheckpointType, Config, NMTModel, get_mt_exp_dir
+from .config import CheckpointType, Config, NMTModel
 from .quality_estimation import estimate_quality
 
 LOGGER = logging.getLogger((__package__ or "") + ".translate")
@@ -56,9 +55,15 @@ def convert_usfm_to_vref(usfm_path: Path, vref_path: Path) -> None:
 
 
 class NMTTranslator(Translator):
-    def __init__(self, model: NMTModel, checkpoint: Union[CheckpointType, str, int]) -> None:
+    def __init__(
+        self,
+        model: NMTModel,
+        checkpoint: Union[CheckpointType, str, int],
+        environment: SilNlpEnv,
+    ) -> None:
         self._model: NMTModel = model
         self._checkpoint = checkpoint
+        super().__init__(environment)
 
     def translate(
         self,
@@ -86,7 +91,7 @@ class TranslationTask:
     commit: Optional[str] = None
     clearml_tag: Optional[str] = None
     model: Optional[NMTModel] = None
-    environment: SilNlpEnv = SIL_NLP_ENV
+    environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
 
     def translate_books(
         self,
@@ -98,7 +103,7 @@ class TranslationTask:
         save_confidences: bool = False,
         quality_estimation: bool = False,
         verse_test_scores_path: Optional[Path] = None,
-        postprocess_handler: PostprocessHandler = PostprocessHandler(),
+        postprocess_handler: Optional[PostprocessHandler] = None,
         tags: Optional[List[str]] = None,
         vref: bool = False,
     ) -> None:
@@ -113,13 +118,13 @@ class TranslationTask:
                     raise RuntimeError("A source project must be specified.")
                 src_project = next(iter(config.src_projects))
 
-            src_project_dir = get_project_dir(src_project)
+            src_project_dir = self.environment.get_paratext_project_dir(src_project)
             if not src_project_dir.is_dir():
                 raise FileNotFoundError(f"Source project {src_project} not found in projects folder {src_project_dir}")
 
             if any(len(book_nums[book]) > 0 for book in book_nums) and trg_project is not None:
 
-                trg_project_dir = get_project_dir(trg_project)
+                trg_project_dir = self.environment.get_paratext_project_dir(trg_project)
                 if not trg_project_dir.is_dir():
                     raise FileNotFoundError(
                         f"Target project {trg_project} not found in projects folder {trg_project_dir}"
@@ -182,69 +187,6 @@ class TranslationTask:
             estimate_quality(verse_test_scores_path, confidence_files)
             LOGGER.info("Quality estimation completed.")
 
-    def translate_text_files(
-        self,
-        src_prefix: str,
-        trg_prefix: str,
-        start_seq: int,
-        end_seq: int,
-        src_iso: Optional[str],
-        trg_iso: Optional[str],
-        produce_multiple_translations: bool = False,
-        save_confidences: bool = False,
-        quality_estimation: bool = False,
-        verse_test_scores_path: Optional[Path] = None,
-        tags: Optional[List[str]] = None,
-    ) -> None:
-        translator, config, _ = self._init_translation_task(experiment_suffix=f"_{self.checkpoint}_{src_prefix}")
-        confidence_files: List[Path] = []
-        with translator:
-            if src_iso is None:
-                src_iso = config.default_test_src_iso
-                if src_iso == "" and len(config.src_iso) > 0:
-                    src_iso = next(iter(config.src_iso))
-            if src_iso == "":
-                LOGGER.warning("No language code was set for the source language")
-            if trg_iso is None:
-                trg_iso = config.default_test_trg_iso
-                if trg_iso == "" and len(config.trg_isos) > 0:
-                    trg_iso = next(iter(config.trg_isos))
-            if trg_iso == "":
-                LOGGER.warning("No language code was set for the target language")
-
-            for i in range(start_seq, end_seq + 1):
-                file_num = f"{i:04d}"
-                src_file = f"{src_prefix}{file_num}.txt"
-                src_file_path = Path(self.environment.mt_experiments_dir / self.name / src_file)
-                if not src_file_path.exists():
-                    raise FileNotFoundError("Cannot find source: " + src_file)
-
-                trg_file = f"{trg_prefix}{file_num}.txt"
-                trg_file_path = Path(self.environment.mt_experiments_dir / self.name / trg_file)
-
-                if src_file_path.is_file() and not trg_file_path.is_file():
-                    start = time.time()
-                    translator.translate_text(
-                        src_file_path,
-                        trg_file_path,
-                        src_iso,
-                        trg_iso,
-                        produce_multiple_translations,
-                        save_confidences,
-                        trg_prefix,
-                        tags,
-                    )
-                    end = time.time()
-                    print(f"Translated {src_file_path.name} to {trg_file_path.name} in {((end-start)/60):.2f} minutes")
-
-                    if save_confidences:
-                        confidence_files.extend(trg_file_path.parent.glob(f"{trg_file_path.stem}*{CONFIDENCE_SUFFIX}"))
-
-        if quality_estimation and len(confidence_files) > 0:
-            LOGGER.info("Running quality estimation...")
-            estimate_quality(verse_test_scores_path, confidence_files)
-            LOGGER.info("Quality estimation completed.")
-
     def translate_files(
         self,
         src: str,
@@ -255,7 +197,7 @@ class TranslationTask:
         save_confidences: bool = False,
         quality_estimation: bool = False,
         verse_test_scores_path: Optional[Path] = None,
-        postprocess_handler: PostprocessHandler = PostprocessHandler(),
+        postprocess_handler: Optional[PostprocessHandler] = None,
         tags: Optional[List[str]] = None,
         vref: bool = False,
     ) -> None:
@@ -368,7 +310,7 @@ class TranslationTask:
         clearml.config.set_seed()
 
         model = self.model if self.model is not None else clearml.config.create_model()
-        translator = NMTTranslator(model, self.checkpoint)
+        translator = NMTTranslator(model, self.checkpoint, self.environment)
         if clearml.config.model_dir.exists():
             _, step = model.get_checkpoint_path(self.checkpoint)
             step_str = "avg" if step == -1 else str(step)
@@ -393,20 +335,6 @@ def main() -> None:
         type=str,
         help="Target file name, must relative to the experiment directory",
     )
-    parser.add_argument(
-        "--src-prefix",
-        default=None,
-        type=str,
-        help="Source file prefix (e.g., de-news2019-), must be in the experiment directory",
-    )
-    parser.add_argument(
-        "--trg-prefix",
-        default=None,
-        type=str,
-        help="Target file prefix (e.g., en-news2019-), must be relative to the experiment directory",
-    )
-    parser.add_argument("--start-seq", default=None, type=int, help="Starting file sequence #")
-    parser.add_argument("--end-seq", default=None, type=int, help="Ending file sequence #")
     parser.add_argument("--src-project", default=None, type=str, help="The source project to translate")
     parser.add_argument(
         "--trg-project",
@@ -433,8 +361,7 @@ def main() -> None:
         "--save-confidences",
         default=False,
         action="store_true",
-        help="Generate files for verse, chapter, and book confidences if translating from .usfm or .sfm files. "
-        "Or generate them for sequence and trg file confidences if translating from .txt files.",
+        help="Generate files for verse, chapter, and book confidences if translating from .usfm or .sfm files.",
     )
     parser.add_argument(
         "--paragraph-behavior",
@@ -529,6 +456,7 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+    environment = SilNlpEnv.create_standard_environment()
 
     if args.clearml_queue is not None and args.clearml_tag is None:
         parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
@@ -538,9 +466,9 @@ def main() -> None:
             args.save_confidences = True
 
         if args.verse_test_scores_file is None:
-            verse_test_scores_path = get_mt_exp_dir(args.experiment)
+            verse_test_scores_path = environment.get_mt_exp_dir(args.experiment)
         else:
-            verse_test_scores_path = get_mt_exp_dir(args.verse_test_scores_file)
+            verse_test_scores_path = environment.get_mt_exp_dir(args.verse_test_scores_file)
             if not verse_test_scores_path.exists():
                 parser.error(f"The verse test scores path {verse_test_scores_path} does not exist.")
     else:
@@ -555,13 +483,18 @@ def main() -> None:
         clearml_queue=args.clearml_queue,
         commit=args.commit,
         clearml_tag=args.clearml_tag,
+        environment=environment,
     )
 
-    postprocess_handler = PostprocessHandler([PostprocessConfig(vars(args))])
+    postprocess_handler = PostprocessHandler([PostprocessConfig(vars(args), environment)], environment=environment)
 
     if len(args.books) > 0:
         if args.debug:
-            show_attrs(cli_args=args, actions=[f"Will attempt to translate books {args.books} into {args.trg_iso}"])
+            show_attrs(
+                cli_args=args,
+                envs=environment,
+                actions=[f"Will attempt to translate books {args.books} into {args.trg_iso}"],
+            )
             exit()
         translator.translate_books(
             ";".join(args.books),
@@ -575,33 +508,11 @@ def main() -> None:
             postprocess_handler,
             vref=args.vref,
         )
-    elif args.src_prefix is not None:
-        if args.debug:
-            show_attrs(
-                cli_args=args,
-                actions=[f"Will attempt to translate matching files from {args.src_iso} into {args.trg_iso}."],
-            )
-            exit()
-        if args.trg_prefix is None:
-            raise RuntimeError("A target file prefix must be specified.")
-        if args.start_seq is None or args.end_seq is None:
-            raise RuntimeError("Start and end sequence numbers must be specified.")
-        translator.translate_text_files(
-            args.src_prefix,
-            args.trg_prefix,
-            args.start_seq,
-            args.end_seq,
-            args.src_iso,
-            args.trg_iso,
-            args.multiple_translations,
-            args.save_confidences,
-            args.quality_estimation,
-            verse_test_scores_path,
-        )
     elif args.src is not None:
         if args.debug:
             show_attrs(
                 cli_args=args,
+                envs=environment,
                 actions=[f"Will attempt to translate {args.src} from {args.src_iso} into {args.trg_iso}."],
             )
             exit()
@@ -618,7 +529,7 @@ def main() -> None:
             vref=args.vref,
         )
     else:
-        raise RuntimeError("A Scripture book, file, or file prefix must be specified.")
+        raise RuntimeError("A Scripture book or file must be specified.")
 
 
 if __name__ == "__main__":

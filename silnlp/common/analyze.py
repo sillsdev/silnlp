@@ -13,8 +13,8 @@ from ..alignment.utils import add_alignment_scores
 from ..nmt.clearml_connection import TAGS_LIST, SILClearML
 from ..nmt.config import Config, get_data_file_pairs
 from .collect_verse_counts import DT_CANON, NT_CANON, OT_CANON, collect_verse_counts
-from .corpus import filter_parallel_corpus, get_mt_corpus_path, get_scripture_parallel_corpus, include_chapters
-from .environment import SIL_NLP_ENV
+from .corpus import filter_parallel_corpus, get_scripture_parallel_corpus, include_chapters
+from .environment import SilNlpEnv
 from .script_utils import is_represented, predict_script_code
 from .utils import get_git_revision_hash
 
@@ -23,7 +23,13 @@ LOGGER = logging.getLogger(__package__ + ".analyze")
 ALIGNMENT_SCORES_FILE = re.compile(r"([a-z]{2,3}-.+)_([a-z]{2,3}-.+)")
 
 
-def get_corpus_stats(config: Config, exp_name: str, force_align: bool = False, deutero: bool = False) -> None:
+def get_corpus_stats(
+    config: Config,
+    exp_name: str,
+    force_align: bool = False,
+    deutero: bool = False,
+    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+) -> None:
     stats_path = config.exp_dir / "corpus-stats.csv"
     if stats_path.is_file() and not force_align:
         stats_df = pd.read_csv(stats_path, dtype=str, keep_default_na=False, index_col=["src_project", "trg_project"])
@@ -66,7 +72,7 @@ def get_corpus_stats(config: Config, exp_name: str, force_align: bool = False, d
         project_pair = (source, target)
         if project_pair not in stats_df.index:
             # Get corpus and filter by book/chapter configurations
-            corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path, False)
+            corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path, False, environment=environment)
             if not deutero:
                 corpus = corpus.loc[[is_ot_nt(vref.book_num) for vref in corpus["vref"]]]
             if len(corpus_books) > 0:
@@ -141,7 +147,9 @@ def get_corpus_stats(config: Config, exp_name: str, force_align: bool = False, d
     stats_df.sort_values("filtered_align_score", ascending=False).to_csv(stats_path)
 
 
-def get_extra_alignments(config: Config, deutero: bool = False) -> List[str]:
+def get_extra_alignments(
+    config: Config, deutero: bool = False, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
+) -> List[str]:
     stats_path = config.exp_dir / "corpus-stats.csv"
     if stats_path.is_file():
         stats_df = pd.read_csv(stats_path, dtype=str, keep_default_na=False, index_col=["src_project", "trg_project"])
@@ -177,15 +185,15 @@ def get_extra_alignments(config: Config, deutero: bool = False) -> List[str]:
 
         if project_pair not in stats_df.index and project_pair not in stats_df.swaplevel().index:
             LOGGER.info(f"Extra alignment file found: {filepath.name}")
-            src_path = get_mt_corpus_path(project_pair[0])
+            src_path = environment.get_mt_corpus_path(project_pair[0])
             if src_path.is_file():
                 extra_projects.append(src_path.name)
-            trg_path = get_mt_corpus_path(project_pair[1])
+            trg_path = environment.get_mt_corpus_path(project_pair[1])
             if trg_path.is_file():
                 extra_projects.append(trg_path.name)
 
             if src_path.is_file() and trg_path.is_file():
-                corpus = get_scripture_parallel_corpus(src_path, trg_path, False)
+                corpus = get_scripture_parallel_corpus(src_path, trg_path, False, environment=environment)
                 if not deutero:
                     corpus = corpus.loc[[is_ot_nt(vref.book_num) for vref in corpus["vref"]]]
                 pair_count = len(corpus.index)
@@ -224,10 +232,10 @@ def get_extra_alignments(config: Config, deutero: bool = False) -> List[str]:
                 trg_script_in_model,
             ]
         elif project_pair in stats_df.index and len(stats_df.loc[project_pair, "filtered_align_score"]) == 0:
-            src_path = get_mt_corpus_path(project_pair[0])
+            src_path = environment.get_mt_corpus_path(project_pair[0])
             if src_path.is_file():
                 extra_projects.append(src_path.name)
-            trg_path = get_mt_corpus_path(project_pair[1])
+            trg_path = environment.get_mt_corpus_path(project_pair[1])
             if trg_path.is_file():
                 extra_projects.append(trg_path.name)
     stats_df.sort_values("filtered_align_score", ascending=False).to_csv(stats_path)
@@ -449,7 +457,12 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
 
 
 def analyze(
-    config: Config, exp_name: str, recalculate: bool = False, deutero: bool = False, create_summaries: bool = False
+    config: Config,
+    exp_name: str,
+    recalculate: bool = False,
+    deutero: bool = False,
+    create_summaries: bool = False,
+    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
 ) -> None:
     # Confirm that input file paths exist and make sure every corpus pair is many to many
     data_files = set()
@@ -461,16 +474,25 @@ def analyze(
             return
 
     file_patterns = ";".join([f.name for f in data_files])
-    collect_verse_counts(SIL_NLP_ENV.mt_scripture_dir, config.exp_dir, file_patterns, deutero, recalculate)
+    collect_verse_counts(
+        environment.mt_scripture_dir, config.exp_dir, file_patterns, deutero, recalculate, environment=environment
+    )
 
-    get_corpus_stats(config, exp_name, recalculate, deutero)
+    get_corpus_stats(config, exp_name, recalculate, deutero, environment)
 
     # Add stats about projects in extra alignment files in the experiment folder
-    extra_projects = get_extra_alignments(config, deutero)
+    extra_projects = get_extra_alignments(config, deutero, environment)
     all_projects = set(extra_projects) | set([f.name for f in data_files])
     if len(all_projects) > len(data_files):
         LOGGER.info("Adding verse counts for projects in extra alignment files")
-        collect_verse_counts(SIL_NLP_ENV.mt_scripture_dir, config.exp_dir, ";".join(all_projects), deutero, recalculate)
+        collect_verse_counts(
+            environment.mt_scripture_dir,
+            config.exp_dir,
+            ";".join(all_projects),
+            deutero,
+            recalculate,
+            environment=environment,
+        )
 
     # Create summary outputs
     if create_summaries:
@@ -515,17 +537,18 @@ def main() -> None:
         if args.clearml_tag is None:
             parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
 
-    clearml = SILClearML(args.experiment, args.clearml_queue, tag=args.clearml_tag)
+    environment = SilNlpEnv.create_standard_environment()
+    clearml = SILClearML(args.experiment, args.clearml_queue, tag=args.clearml_tag, environment=environment)
 
     config = clearml.config
     config.set_seed()
-
     analyze(
         config=config,
         exp_name=clearml.name,
         recalculate=args.recalculate,
         deutero=args.deutero,
         create_summaries=args.create_summaries,
+        environment=environment,
     )
 
 

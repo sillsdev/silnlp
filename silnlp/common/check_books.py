@@ -6,8 +6,8 @@ from pathlib import Path
 from machine.corpora import FileParatextProjectSettingsParser, UsfmFileText
 from machine.scripture import book_number_to_id, get_chapters
 
-from ..common.paratext import get_project_dir
 from .collect_verse_counts import DT_CANON, NT_CANON, OT_CANON
+from .environment import SilNlpEnv
 
 LOGGER = logging.getLogger(__package__ + ".check_books")
 
@@ -83,8 +83,7 @@ def main() -> None:
         prog="check_books",
         description="Checks sfm files for a project with the same parser as translate.py",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=textwrap.dedent(
-            """\
+        epilog=textwrap.dedent("""\
              Books can include corpora NT OT or DT and individual books.
              Old Testament books are :
              GEN, EXO, LEV, NUM, DEU, JOS, JDG, RUT, 1SA, 2SA, 1KI, 2KI, 1CH, 2CH, EZR, NEH, EST, JOB, PSA, PRO, ECC,
@@ -97,8 +96,7 @@ def main() -> None:
              Deuterocanonical books are:
              TOB, JDT, ESG, WIS, SIR, BAR, LJE, S3Y, SUS, BEL, 1MA,
              2MA, 3MA, 4MA, 1ES, 2ES, MAN, PS2, ODA, PSS, EZA, JUB, ENO
-         """
-        ),
+         """),
     )
 
     parser.add_argument("project", type=str, help="The name of the project folder.")
@@ -109,7 +107,8 @@ def main() -> None:
     # parser.print_help()
     args = parser.parse_args()
 
-    project_dir = get_project_dir(args.project)
+    environment = SilNlpEnv.create_standard_environment()
+    project_dir = environment.get_paratext_project_dir(args.project)
     settings = FileParatextProjectSettingsParser(project_dir).parse()
 
     sfm_files = [

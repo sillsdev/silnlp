@@ -6,7 +6,7 @@ from typing import Optional, Set, Union
 
 import yaml
 
-from ..common.environment import SIL_NLP_ENV, SilNlpEnv
+from ..common.environment import SilNlpEnv
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
@@ -20,7 +20,7 @@ class SILExperiment:
     name: str
     config: Config
     model: NMTModel
-    environment: SilNlpEnv = SIL_NLP_ENV
+    environment: SilNlpEnv
     make_stats: bool = False
     force_align: bool = False
     mixed_precision: bool = True
@@ -92,7 +92,9 @@ class SILExperiment:
             translate_configs = yaml.safe_load(file)
 
         postprocess_configs = translate_configs.get("postprocess", [])
-        postprocess_handler = PostprocessHandler([PostprocessConfig(pc) for pc in postprocess_configs])
+        postprocess_handler = PostprocessHandler(
+            [PostprocessConfig(pc, self.environment) for pc in postprocess_configs], environment=self.environment
+        )
 
         quality_estimation = translate_configs.get("quality_estimation", False)
 
@@ -118,7 +120,7 @@ class SILExperiment:
             )
 
             if not postprocess_configs:
-                postprocess_handler = PostprocessHandler([])
+                postprocess_handler = PostprocessHandler([], environment=self.environment)
 
             if "tags" in translate_config and isinstance(translate_config["tags"], list):
                 translate_config["tags"] = ",".join(translate_config["tags"])
@@ -138,25 +140,6 @@ class SILExperiment:
                     postprocess_handler,
                     translate_config.get("tags"),
                 )
-            elif translate_config.get("src_prefix"):
-                if translate_config.get("trg_prefix") is None:
-                    raise RuntimeError("A target file prefix must be specified.")
-                if translate_config.get("start_seq") is None or translate_config.get("end_seq") is None:
-                    raise RuntimeError("Start and end sequence numbers must be specified.")
-
-                translator.translate_text_files(
-                    translate_config.get("src_prefix"),
-                    translate_config.get("trg_prefix"),
-                    translate_config.get("start_seq"),
-                    translate_config.get("end_seq"),
-                    translate_config.get("src_iso"),
-                    translate_config.get("trg_iso"),
-                    self.produce_multiple_translations,
-                    self.save_confidences,
-                    bool(quality_estimation),
-                    verse_test_scores_path,
-                    translate_config.get("tags"),
-                )
             elif translate_config.get("src"):
                 translator.translate_files(
                     translate_config.get("src"),
@@ -171,7 +154,7 @@ class SILExperiment:
                     translate_config.get("tags"),
                 )
             else:
-                raise RuntimeError("A Scripture book, file, or file prefix must be specified for translation.")
+                raise RuntimeError("A Scripture book or file must be specified for translation.")
 
 
 def main() -> None:
@@ -261,12 +244,13 @@ def main() -> None:
     if args.clearml_queue is not None and args.clearml_tag is None:
         parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
 
-    environment = SilNlpEnv()
     if args.mt_dir is not None:
-        environment.set_machine_translation_dir(environment.data_dir / args.mt_dir)
+        environment = SilNlpEnv.create_environment_with_mt_dir(Path(args.mt_dir))
+    else:
+        environment = SilNlpEnv.create_standard_environment()
 
     if args.debug:
-        show_attrs(cli_args=args)
+        show_attrs(cli_args=args, envs=environment)
         exit()
 
     if not (args.preprocess or args.train or args.test or args.translate):
@@ -279,6 +263,7 @@ def main() -> None:
         args.clearml_queue,
         commit=args.commit,
         tag=args.clearml_tag,
+        environment=environment,
     )
     model = clearml.config.create_model(
         mixed_precision=not args.disable_mixed_precision,
@@ -290,6 +275,7 @@ def main() -> None:
         name=clearml.name,
         config=clearml.config,
         model=model,
+        environment=environment,
         make_stats=args.stats,
         force_align=args.force_align,
         mixed_precision=not args.disable_mixed_precision,
