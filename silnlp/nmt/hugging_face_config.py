@@ -396,7 +396,6 @@ class HuggingFaceConfig(Config):
                 },
                 "infer": {
                     "infer_batch_size": 16,
-                    "infer_batch_size_with_tensors": 16,
                     "num_beams": 2,
                     "num_drafts": 3,
                     "multiple_translations_method": "hybrid",
@@ -1490,9 +1489,6 @@ class HuggingFaceNMTModel(NMTModel):
         return_tensors: bool = False,
     ) -> Iterable[ModelOutputGroup]:
         batch_size: int = self._config.infer["infer_batch_size"]
-        if return_tensors:
-            batch_size_with_tensors = self._config.infer.get("infer_batch_size_with_tensors", batch_size)
-            batch_size = min(batch_size, batch_size_with_tensors)
 
         dictionary = self._get_dictionary()
         current_batch_size = batch_size
@@ -1512,7 +1508,7 @@ class HuggingFaceNMTModel(NMTModel):
                     force_words_ids[index : index + effective_size] if force_words_ids is not None else None
                 )
                 try:
-                    yield from self._translate_sentence_helper(
+                    yield from self._translate_batch(
                         pipeline,
                         sub_batch,
                         return_tensors,
@@ -1532,10 +1528,10 @@ class HuggingFaceNMTModel(NMTModel):
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
 
-    def _translate_sentence_helper(
+    def _translate_batch(
         self,
         pipeline: TranslationPipeline,
-        sentences: List[TSent],
+        batch: List[TSent],
         return_tensors: bool,
         force_words_ids: List[List[List[int]]] = None,
         produce_multiple_translations: bool = False,
@@ -1547,7 +1543,7 @@ class HuggingFaceNMTModel(NMTModel):
             if multiple_translations_method == "hybrid":
                 beam_search_results: List[dict] = self._translate_with_beam_search(
                     pipeline,
-                    sentences,
+                    batch,
                     return_tensors,
                     num_return_sequences=1,
                     force_words_ids=force_words_ids,
@@ -1555,7 +1551,7 @@ class HuggingFaceNMTModel(NMTModel):
 
                 sampling_results: List[dict] = self._translate_with_sampling(
                     pipeline,
-                    sentences,
+                    batch,
                     return_tensors,
                     num_return_sequences=num_drafts - 1,
                     force_words_ids=force_words_ids,
@@ -1572,7 +1568,7 @@ class HuggingFaceNMTModel(NMTModel):
                     ModelOutputGroup(result)
                     for result in self._translate_with_sampling(
                         pipeline,
-                        sentences,
+                        batch,
                         return_tensors,
                         num_return_sequences=num_drafts,
                         force_words_ids=force_words_ids,
@@ -1584,7 +1580,7 @@ class HuggingFaceNMTModel(NMTModel):
                     ModelOutputGroup(result)
                     for result in self._translate_with_beam_search(
                         pipeline,
-                        sentences,
+                        batch,
                         return_tensors,
                         num_return_sequences=num_drafts,
                         force_words_ids=force_words_ids,
@@ -1596,7 +1592,7 @@ class HuggingFaceNMTModel(NMTModel):
                     ModelOutputGroup(result)
                     for result in self._translate_with_diverse_beam_search(
                         pipeline,
-                        sentences,
+                        batch,
                         return_tensors,
                         num_return_sequences=num_drafts,
                         force_words_ids=force_words_ids,
@@ -1610,7 +1606,7 @@ class HuggingFaceNMTModel(NMTModel):
                 ModelOutputGroup([translated_sentence[0]])
                 for translated_sentence in self._translate_with_beam_search(
                     pipeline,
-                    sentences,
+                    batch,
                     return_tensors,
                     num_return_sequences=1,
                     force_words_ids=force_words_ids,
@@ -1631,7 +1627,7 @@ class HuggingFaceNMTModel(NMTModel):
     def _translate_with_beam_search(
         self,
         pipeline: TranslationPipeline,
-        sentences: List[TSent],
+        batch: List[TSent],
         return_tensors: bool,
         num_return_sequences: int = 1,
         force_words_ids: List[List[List[int]]] = None,
@@ -1641,11 +1637,10 @@ class HuggingFaceNMTModel(NMTModel):
             num_beams = self._config.params.get("generation_num_beams")
 
         batch_translations = pipeline(
-            sentences,
+            batch,
             num_beams=num_beams,
             num_return_sequences=num_return_sequences,
             force_words_ids=force_words_ids,
-            batch_size=len(sentences),
             return_text=not return_tensors,
             return_tensors=return_tensors,
         )
@@ -1654,7 +1649,7 @@ class HuggingFaceNMTModel(NMTModel):
     def _translate_with_sampling(
         self,
         pipeline: TranslationPipeline,
-        sentences: List[TSent],
+        batch: List[TSent],
         return_tensors: bool,
         num_return_sequences: int = 1,
         force_words_ids: List[List[List[int]]] = None,
@@ -1662,12 +1657,11 @@ class HuggingFaceNMTModel(NMTModel):
         temperature: Optional[int] = self._config.infer.get("temperature")
 
         batch_translations = pipeline(
-            sentences,
+            batch,
             do_sample=True,
             temperature=temperature,
             num_return_sequences=num_return_sequences,
             force_words_ids=force_words_ids,
-            batch_size=len(sentences),
             return_text=not return_tensors,
             return_tensors=return_tensors,
         )
@@ -1676,7 +1670,7 @@ class HuggingFaceNMTModel(NMTModel):
     def _translate_with_diverse_beam_search(
         self,
         pipeline: TranslationPipeline,
-        sentences: List[TSent],
+        batch: List[TSent],
         return_tensors: bool,
         num_return_sequences: int = 1,
         force_words_ids: List[List[List[int]]] = None,
@@ -1687,13 +1681,12 @@ class HuggingFaceNMTModel(NMTModel):
         diversity_penalty: Optional[float] = self._config.infer.get("diversity_penalty")
 
         batch_translations = pipeline(
-            sentences,
+            batch,
             num_beams=num_beams,
             num_beam_groups=num_beams,
             num_return_sequences=num_return_sequences,
             diversity_penalty=diversity_penalty,
             force_words_ids=force_words_ids,
-            batch_size=len(sentences),
             return_text=not return_tensors,
             return_tensors=return_tensors,
         )

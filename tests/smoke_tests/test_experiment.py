@@ -34,32 +34,32 @@ def test_experiment_full_pipeline():
     clean_experiment_directory(environment.get_mt_exp_dir(EXPERIMENT_NAME))
 
 
-def test_translate_sentences_uses_tensor_batch_size_cap():
+def test_translate_sentences_does_not_cap_batch_size_with_tensors():
     model = cast(HuggingFaceNMTModel, Mock(spec=HuggingFaceNMTModel))
-    model._config = cast(HuggingFaceConfig, Mock(infer={"infer_batch_size": 16, "infer_batch_size_with_tensors": 2}))
+    model._config = cast(HuggingFaceConfig, Mock(infer={"infer_batch_size": 4}))
     model._get_dictionary = Mock(return_value={})
     captured_sub_batch_size = {}
 
-    def fake_translate_sentence_helper(
-        pipeline, sentences, return_tensors, force_words_ids=None, produce_multiple_translations=False
+    def fake_translate_batch(
+        pipeline, batch, return_tensors, force_words_ids=None, produce_multiple_translations=False
     ):
-        captured_sub_batch_size["value"] = len(sentences)
+        captured_sub_batch_size["value"] = len(batch)
         return iter(())
 
-    model._translate_sentence_helper = fake_translate_sentence_helper
+    model._translate_batch = fake_translate_batch
 
     list(
         HuggingFaceNMTModel._translate_sentences(
             model,
             tokenizer=Mock(),
             pipeline=Mock(),
-            sentences=[["token"]],
+            sentences=[["a"], ["b"], ["c"], ["d"]],
             vrefs=None,
             return_tensors=True,
         )
     )
 
-    assert captured_sub_batch_size["value"] == 1
+    assert captured_sub_batch_size["value"] == 4
 
 
 def test_translate_sentences_retries_with_smaller_batch():
@@ -70,15 +70,15 @@ def test_translate_sentences_retries_with_smaller_batch():
     model._get_dictionary = Mock(return_value={})
     call_sub_batch_sizes: list[int] = []
 
-    def fake_translate_sentence_helper(
-        pipeline, sentences, return_tensors, force_words_ids=None, produce_multiple_translations=False
+    def fake_translate_batch(
+        pipeline, batch, return_tensors, force_words_ids=None, produce_multiple_translations=False
     ):
-        call_sub_batch_sizes.append(len(sentences))
-        if len(sentences) > 2:
+        call_sub_batch_sizes.append(len(batch))
+        if len(batch) > 2:
             raise RuntimeError(OOM_ERROR_MESSAGE)
         return iter(())
 
-    model._translate_sentence_helper = fake_translate_sentence_helper
+    model._translate_batch = fake_translate_batch
 
     list(
         HuggingFaceNMTModel._translate_sentences(
