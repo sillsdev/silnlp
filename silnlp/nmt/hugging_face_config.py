@@ -1641,7 +1641,17 @@ class HuggingFaceNMTModel(NMTModel):
         batch_size: int,
         force_words_ids: Optional[List[List[List[int]]]] = None,
     ) -> List[List[dict]]:
-        """Translate input sentences and reduce batch size on OOM until the current batch succeeds."""
+        """Translate sentences in batches, reducing batch size and retrying when OOM occurs.
+
+        Args:
+            translate: Translation callback that accepts a sentence batch, batch size, and optional force words IDs.
+            sentences: Input sentences to translate.
+            batch_size: Initial batch size to use.
+            force_words_ids: Optional force words IDs aligned with ``sentences``.
+
+        Returns:
+            A list of translated outputs aligned with the input sentences.
+        """
         current_batch_size = batch_size
         translated_sentences: List[List[dict]] = []
         index = 0
