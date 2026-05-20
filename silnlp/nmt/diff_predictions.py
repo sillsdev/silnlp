@@ -16,9 +16,9 @@ from scipy.stats import gmean
 from tqdm import tqdm
 
 from ..common.corpus import load_corpus
+from ..common.environment import SilNlpEnv
 from ..common.translator import CONFIDENCE_SUFFIX
 from ..common.utils import get_git_revision_hash
-from .config import get_mt_exp_dir
 from .sp_utils import decode_sp, decode_sp_lines
 
 logging.basicConfig()
@@ -603,8 +603,10 @@ def main() -> None:
 
     stats_offset = 5
 
+    environment = SilNlpEnv.create_standard_environment()
+
     exp1_name = args.exp1
-    exp1_dir = get_mt_exp_dir(exp1_name)
+    exp1_dir = environment.get_mt_exp_dir(exp1_name)
     exp1_type = get_experiment_type(str(exp1_dir))
     if exp1_type != "SMT" and exp1_type != "NMT":
         print("Can't determine experiment type!")

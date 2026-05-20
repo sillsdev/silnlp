@@ -16,6 +16,8 @@ from machine.translation import SymmetrizationHeuristic
 from machine.translation.thot import ThotSymmetrizedWordAlignmentModel, create_thot_symmetrized_word_alignment_model
 from tqdm import tqdm
 
+from silnlp.common.environment import SilNlpEnv
+
 LOGGER = logging.getLogger(__package__ + ".golden_path")
 
 
@@ -45,14 +47,20 @@ def preprocess_verse(tokenizer: LatinWordTokenizer, verse: str) -> str:
     return " ".join(lowercase(nfc_normalize(escape_spaces(tokenizer.tokenize(verse)))))
 
 
-def preprocess(src_path: Path, trg_paths: List[Path], book_nums: List[int], preprocess_dir: Path) -> List[Path]:
+def preprocess(
+    src_path: Path,
+    trg_paths: List[Path],
+    book_nums: List[int],
+    preprocess_dir: Path,
+    environment: SilNlpEnv,
+) -> List[Path]:
     from .corpus import get_scripture_parallel_corpus
 
     tokenizer = LatinWordTokenizer()
     corpora: List[Path] = []
     books = {book_number_to_id(book_num) for book_num in book_nums}
     for trg_path in trg_paths:
-        df = get_scripture_parallel_corpus(src_path, trg_path)
+        df = get_scripture_parallel_corpus(src_path, trg_path, environment=environment)
         df = df.rename(columns={"vref": "ref"})
         df["text"] = df["ref"].map(lambda vref: vref.book)
         df = df[df["text"].isin(books)]
@@ -88,9 +96,11 @@ def compute_log_prob(args: Tuple[int, int, List[Path], Set[int], int, str]) -> T
 
         verse_scores: List[float] = []
         book_length = 0.0
-        with corpus.filter(lambda row: book_id_to_number(row.text_id) == next_book_num).tokenize(
-            WhitespaceTokenizer()
-        ).batch(1024) as batches:
+        with (
+            corpus.filter(lambda row: book_id_to_number(row.text_id) == next_book_num)
+            .tokenize(WhitespaceTokenizer())
+            .batch(1024) as batches
+        ):
             for batch in batches:
                 alignments = model.align_batch(batch)
                 for row, alignment in zip(batch, alignments):
@@ -207,7 +217,6 @@ def beam_search(
 
 
 def main() -> None:
-    from .corpus import get_mt_corpus_path
 
     parser = argparse.ArgumentParser(description="Compute the golden path for a Bible translation")
     parser.add_argument("--corpora", nargs="+", metavar="corpus", help="Corpora")
@@ -220,18 +229,21 @@ def main() -> None:
     parser.add_argument("--aligner", type=str, default="fast_align", help="Aligner")
     args = parser.parse_args()
 
-    src_path = get_mt_corpus_path(args.ref_corpus)
-    trg_paths = [get_mt_corpus_path(c) for c in args.corpora]
+    environment = SilNlpEnv.create_standard_environment()
+
+    src_path = environment.get_mt_corpus_path(args.ref_corpus)
+    trg_paths = [environment.get_mt_corpus_path(c) for c in args.corpora]
     book_nums = get_books(args.books)
     start_book_nums = get_books(args.start_books)
     book_nums.extend(book_num for book_num in start_book_nums if book_num not in book_nums)
 
-    with TemporaryDirectory() as temp_dir, ProcessPoolExecutor(
-        max_workers=args.max_workers, initializer=disable_logging
-    ) as executor:
+    with (
+        TemporaryDirectory() as temp_dir,
+        ProcessPoolExecutor(max_workers=args.max_workers, initializer=disable_logging) as executor,
+    ):
         preprocess_dir = Path(temp_dir)
         start = time()
-        corpus_paths = preprocess(src_path, trg_paths, book_nums, preprocess_dir)
+        corpus_paths = preprocess(src_path, trg_paths, book_nums, preprocess_dir, environment=environment)
         paths, scores = beam_search(
             corpus_paths, args.beam_width, book_nums, start_book_nums, args.length_penalty, executor, args.aligner
         )

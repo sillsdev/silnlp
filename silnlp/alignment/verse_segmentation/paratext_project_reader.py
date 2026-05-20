@@ -3,7 +3,7 @@ from typing import List, TypeVar
 
 from machine.corpora import FileParatextProjectSettingsParser, ScriptureRef, UsfmFileText
 
-from silnlp.common.environment import SIL_NLP_ENV
+from silnlp.common.environment import SilNlpEnv
 
 from .passage import Verse, VerseCollector
 
@@ -11,11 +11,12 @@ VerseCollectorType = TypeVar("VerseCollectorType", bound=VerseCollector)
 
 
 class ParatextProjectReader:
-    def __init__(self, project_name: str):
+    def __init__(self, project_name: str, environment: SilNlpEnv):
         self._project_name = project_name
+        self._environment = environment
 
     def collect_verses(self, verse_collectors: List[VerseCollectorType]) -> List[VerseCollectorType]:
-        settings = FileParatextProjectSettingsParser(SIL_NLP_ENV.pt_projects_dir / self._project_name).parse()
+        settings = FileParatextProjectSettingsParser(self._environment.pt_projects_dir / self._project_name).parse()
         stylesheet = settings.stylesheet
         encoding = settings.encoding
         for book in self._get_all_required_books(verse_collectors):
@@ -23,7 +24,7 @@ class ParatextProjectReader:
                 stylesheet,
                 encoding,
                 book,
-                SIL_NLP_ENV.pt_projects_dir / self._project_name / settings.get_book_file_name(book),
+                self._environment.pt_projects_dir / self._project_name / settings.get_book_file_name(book),
             )
             for row in usfm_text:
                 for verse_collector in verse_collectors:

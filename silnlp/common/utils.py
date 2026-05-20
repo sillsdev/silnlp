@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 from iso639 import Lang
 
-from ..common.environment import SIL_NLP_ENV, SilNlpEnv
+from ..common.environment import SilNlpEnv
 
 LOGGER = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ def print_table(rows):
     print()
 
 
-def show_attrs(cli_args: Namespace, envs: SilNlpEnv = SIL_NLP_ENV, actions: List[str] = []) -> None:
+def show_attrs(cli_args: Namespace, envs: SilNlpEnv, actions: List[str] = []) -> None:
 
     env_rows = [(k, v) for k, v in attrs(envs).items()]
     arg_rows = [(k, v) for k, v in cli_args.__dict__.items() if v is not None]
@@ -74,11 +74,6 @@ def get_git_revision_hash() -> str:
     ).strip()
     LOGGER.info("Git commit: " + git_hash)
     return git_hash
-
-
-# This function is in the process of being refactored to be part of the SilNlpEnv class
-def get_mt_exp_dir(exp_name: str) -> Path:
-    return SIL_NLP_ENV.mt_experiments_dir / exp_name
 
 
 def set_seed(seed: Any) -> None:

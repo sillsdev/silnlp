@@ -11,13 +11,12 @@ from machine.tokenization import LatinWordTokenizer, WhitespaceTokenizer
 
 from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML
 
-from ..common.corpus import get_mt_corpus_path, get_scripture_parallel_corpus, include_chapters
-from ..common.environment import SIL_NLP_ENV
+from ..common.corpus import get_scripture_parallel_corpus, include_chapters
+from ..common.environment import SilNlpEnv
 from ..common.stemmer import Stemmer
 from ..common.utils import set_seed
 from .config import get_all_book_paths, get_stemmer, load_config
 from .lexicon import Lexicon
-from .utils import get_experiment_dirs, get_experiment_name
 
 LOGGER = logging.getLogger(__package__ + ".preprocess")
 
@@ -116,8 +115,8 @@ class MemoryParallelTextCorpus(ParallelTextCorpus):
         yield from self._rows
 
 
-def load_gold_alignment(corpus_name: str, use_src_lemma: bool) -> ParallelTextCorpus:
-    corpus_path = SIL_NLP_ENV.align_gold_dir / (corpus_name + ".alignment.json")
+def load_gold_alignment(corpus_name: str, use_src_lemma: bool, environment: SilNlpEnv) -> ParallelTextCorpus:
+    corpus_path = environment.align_gold_dir / (corpus_name + ".alignment.json")
     verses: List[dict]
     with corpus_path.open("r", encoding="utf-8") as f:
         verses = json.load(f)
@@ -158,6 +157,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    environment = SilNlpEnv.create_standard_environment()
     experiments = args.experiments
 
     if args.clearml_queue is not None:
@@ -166,30 +166,36 @@ def main() -> None:
             exit()
         if args.clearml_tag is None:
             parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
-        clearml = SILClearML(experiments, args.clearml_queue, tag=args.clearml_tag, skip_config=True)
+        clearml = SILClearML(
+            experiments,
+            args.clearml_queue,
+            tag=args.clearml_tag,
+            skip_config=True,
+            environment=environment,
+        )
         experiments = clearml.name
 
-    for exp_dir in get_experiment_dirs(experiments):
-        exp_name = get_experiment_name(exp_dir)
+    for exp_dir in environment.get_align_experiment_dirs(experiments):
+        exp_name = environment.get_align_experiment_name(exp_dir)
         LOGGER.info(f"Preprocessing {exp_name}")
-        config = load_config(exp_dir)
+        config = load_config(exp_dir, environment)
 
         set_seed(config["seed"])
 
         corpus_name: Optional[str] = config.get("corpus", config.get("gold"))
         has_gold_alignments = False
         if corpus_name is not None:
-            corpus = load_gold_alignment(corpus_name, config["use_src_lemma"])
+            corpus = load_gold_alignment(corpus_name, config["use_src_lemma"], environment)
             is_scripture = True
             has_gold_alignments = True
         else:
-            src_file_path = get_mt_corpus_path(config["src"])
-            trg_file_path = get_mt_corpus_path(config["trg"])
+            src_file_path = environment.get_mt_corpus_path(config["src"])
+            trg_file_path = environment.get_mt_corpus_path(config["trg"])
             if (
-                src_file_path.parent == SIL_NLP_ENV.mt_scripture_dir
-                or trg_file_path.parent == SIL_NLP_ENV.mt_scripture_dir
+                src_file_path.parent == environment.mt_scripture_dir
+                or trg_file_path.parent == environment.mt_scripture_dir
             ):
-                corpus = get_scripture_parallel_corpus(src_file_path, trg_file_path)
+                corpus = get_scripture_parallel_corpus(src_file_path, trg_file_path, environment=environment)
                 corpus_books = get_chapters(config.get("corpus_books", []))
                 if len(corpus_books) > 0:
                     corpus = include_chapters(corpus, corpus_books)

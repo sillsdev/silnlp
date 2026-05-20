@@ -7,7 +7,7 @@ import pandas as pd
 from machine.scripture import ALL_BOOK_IDS, VerseRef, book_id_to_number, get_books, is_ot_nt
 from nltk.translate.api import Alignment
 
-from ..common.environment import SIL_NLP_ENV
+from ..common.environment import SilNlpEnv
 from ..common.utils import set_seed
 from .config import get_all_book_paths, load_config
 from .lexicon import Lexicon
@@ -18,7 +18,6 @@ from .metrics import (
     load_all_lexicons,
     load_vrefs,
 )
-from .utils import get_experiment_dirs, get_experiment_name
 
 LOGGER = logging.getLogger(__package__ + ".test")
 
@@ -117,6 +116,8 @@ def main() -> None:
     parser.add_argument("--by-book", default=False, action="store_true", help="Score individual books")
     args = parser.parse_args()
 
+    environment = SilNlpEnv.create_standard_environment()
+
     books = get_books(args.books)
     test_size: Optional[int] = args.test_size
     if test_size is not None:
@@ -124,9 +125,9 @@ def main() -> None:
 
     combine_pattern: str = args.combine_pattern
     combinations: Dict[Path, List[str]] = {}
-    for exp_dir in get_experiment_dirs(args.experiments):
-        exp_name = get_experiment_name(exp_dir)
-        config = load_config(exp_dir)
+    for exp_dir in environment.get_align_experiment_dirs(args.experiments):
+        exp_name = environment.get_align_experiment_name(exp_dir)
+        config = load_config(exp_dir, environment)
         set_seed(config["seed"])
         if config["by_book"]:
             for book, book_exp_dir in get_all_book_paths(exp_dir):
@@ -138,7 +139,7 @@ def main() -> None:
             test([exp_dir], args.by_book, books, test_size, exp_dir)
         if (
             args.experiments != exp_name
-            and exp_dir.parent != SIL_NLP_ENV.align_experiments_dir
+            and exp_dir.parent != environment.align_experiments_dir
             and exp_dir.match(combine_pattern)
         ):
             combination = combinations.get(exp_dir.parent)
@@ -148,7 +149,7 @@ def main() -> None:
             combination.append(exp_dir.name)
 
     for parent_dir, combination in combinations.items():
-        exp_name = get_experiment_name(parent_dir) + "/" + "+".join(combination)
+        exp_name = environment.get_align_experiment_name(parent_dir) + "/" + "+".join(combination)
         LOGGER.info(f"Computing combined metrics for {exp_name}")
         exp_dirs = [parent_dir / name for name in combination]
         test(exp_dirs, args.by_book, books, None, parent_dir)

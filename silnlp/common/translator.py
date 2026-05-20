@@ -26,7 +26,8 @@ from silnlp.common.utils import add_tags_to_sentence
 from silnlp.nmt.corpora import CorpusPair
 
 from .corpus import load_corpus, write_corpus
-from .paratext import get_book_path, get_iso, get_parent_project_dir, get_project_dir
+from .environment import SilNlpEnv
+from .paratext import get_book_path, get_iso, get_parent_project_dir
 from .postprocesser import NoDetectedQuoteConventionException, PostprocessHandler, UnknownQuoteConventionException
 from .translation_data_structures import DraftGroup, SentenceTranslationGroup, TranslatedDraft, UsfmTextRowCollection
 from .utils import NLTKSentenceTokenizer
@@ -283,6 +284,9 @@ def generate_confidence_files(
 
 
 class Translator(AbstractContextManager["Translator"], ABC):
+    def __init__(self, environment: SilNlpEnv):
+        self._environment = environment
+
     @abstractmethod
     def translate(
         self,
@@ -334,12 +338,12 @@ class Translator(AbstractContextManager["Translator"], ABC):
         save_confidences: bool = False,
         chapters: List[int] = [],
         trg_project: Optional[str] = None,
-        postprocess_handler: PostprocessHandler = PostprocessHandler(),
+        postprocess_handler: Optional[PostprocessHandler] = None,
         experiment_ckpt_str: str = "",
         training_corpus_pairs: List[CorpusPair] = [],
         tags: Optional[List[str]] = None,
     ) -> None:
-        book_path = get_book_path(src_project, book)
+        book_path = get_book_path(src_project, book, self._environment)
         if not book_path.is_file():
             raise RuntimeError(f"Can't find file {book_path} for book {book}")
         else:
@@ -348,7 +352,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
         self.translate_usfm(
             book_path,
             output_path,
-            get_iso(get_project_dir(src_project)),
+            get_iso(self._environment.get_paratext_project_dir(src_project)),
             trg_iso,
             produce_multiple_translations,
             save_confidences,
@@ -370,7 +374,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
         save_confidences: bool = False,
         chapters: List[int] = [],
         trg_project: Optional[str] = None,
-        postprocess_handler: PostprocessHandler = PostprocessHandler(),
+        postprocess_handler: Optional[PostprocessHandler] = None,
         experiment_ckpt_str: str = "",
         training_corpus_pairs: List[CorpusPair] = [],
         tags: Optional[List[str]] = None,
@@ -379,7 +383,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
         src_from_project = False
         src_settings: Optional[ParatextProjectSettings] = None
         stylesheet = UsfmStylesheet("usfm.sty")
-        if str(src_file_path).startswith(str(get_project_dir(""))):
+        if str(src_file_path).startswith(str(self._environment.get_paratext_project_dir(""))):
             src_from_project = True
             src_settings = FileParatextProjectSettingsParser(src_file_path.parent).parse()
             stylesheet = src_settings.stylesheet
@@ -428,6 +432,8 @@ class Translator(AbstractContextManager["Translator"], ABC):
 
         translated_text_rows = sentences.to_translated_text_row_collection(sentence_translation_groups)
 
+        if postprocess_handler is None:
+            postprocess_handler = PostprocessHandler(environment=self._environment)
         for draft_index, translated_draft in enumerate(translated_text_rows.get_translated_drafts(), 1):
             translated_text_rows.construct_postprocessing_rows_for_draft_index(postprocess_handler, draft_index)
 
@@ -443,9 +449,11 @@ class Translator(AbstractContextManager["Translator"], ABC):
                 # If the target project is not the same as the translated file's original project,
                 # no verses outside of the ones translated will be overwritten
                 if trg_project is not None or src_from_project:
-                    project_dir = get_project_dir(trg_project if trg_project is not None else src_file_path.parent.name)
+                    project_dir = self._environment.get_paratext_project_dir(
+                        trg_project if trg_project is not None else src_file_path.parent.name
+                    )
                     parent_settings = None
-                    parent_project_dir = get_parent_project_dir(project_dir)
+                    parent_project_dir = get_parent_project_dir(project_dir, environment=self._environment)
                     if parent_project_dir is not None:
                         parent_settings = FileParatextProjectSettingsParser(parent_project_dir).parse()
                     dest_updater = FileParatextProjectTextUpdater(project_dir, parent_settings)

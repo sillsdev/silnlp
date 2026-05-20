@@ -28,7 +28,7 @@ from clowder.consts import (
 )
 from clowder.investigation import Investigation
 from clowder.status import Status
-from silnlp.common.environment import SIL_NLP_ENV
+from silnlp.common.environment import SilNlpEnv
 
 
 class DuplicateInvestigationException(Exception):
@@ -63,6 +63,7 @@ class ClowderMeta:
 class ClowderEnvironment:
     def __init__(self):
         self.meta = ClowderMeta(os.environ.get("CLOWDER_META"))
+        self.sil_nlp_environment = SilNlpEnv.create_standard_environment()
         self.INVESTIGATIONS_GDRIVE_FOLDER = self.root
         try:
             self.GOOGLE_CREDENTIALS_FILE = os.environ.get(
@@ -80,7 +81,7 @@ class ClowderEnvironment:
             raise MissingConfigurationFileError(
                 "No Google credentials file found in .clowder directory. Please copy your credentials file into the .clowder directory."
             )
-        self.EXPERIMENTS_FOLDER = SIL_NLP_ENV.mt_experiments_dir / "clowder"
+        self.EXPERIMENTS_FOLDER = self.sil_nlp_environment.mt_experiments_dir / "clowder"
         self._setup_google_drive()
         self.gc = gspread.service_account(filename=Path(self.GOOGLE_CREDENTIALS_FILE))
 

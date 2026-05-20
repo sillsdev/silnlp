@@ -31,9 +31,9 @@ from ..common.corpus import (
     split_parallel_corpus,
     write_corpus,
 )
-from ..common.environment import SIL_NLP_ENV
+from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import SentenceTranslationGroup
-from ..common.utils import NoiseMethod, Side, add_tags_to_dataframe, add_tags_to_sentence, get_mt_exp_dir, set_seed
+from ..common.utils import NoiseMethod, Side, add_tags_to_dataframe, add_tags_to_sentence, set_seed
 from .corpora import (
     BASIC_DATA_PROJECT,
     CorpusPair,
@@ -101,12 +101,13 @@ class NMTModel(ABC):
 
 
 class Config(ABC):
-    def __init__(self, exp_dir: Path, config: dict) -> None:
+    def __init__(self, exp_dir: Path, config: dict, environment: SilNlpEnv) -> None:
         self.exp_dir = exp_dir
+        self._environment = environment
         self.root = config
 
         data_config: dict = config["data"]
-        self.corpus_pairs = parse_corpus_pairs(data_config.get("corpus_pairs", []))
+        self.corpus_pairs = parse_corpus_pairs(data_config.get("corpus_pairs", []), self._environment)
 
         terms_config: dict = data_config["terms"]
         self.src_isos: Set[str] = set()
@@ -144,9 +145,13 @@ class Config(ABC):
                 if terms_config["include_glosses"]:
                     for gloss_iso in SUPPORTED_GLOSS_ISOS:
                         if gloss_iso in pair_src_isos or gloss_iso == terms_config["include_glosses"]:
-                            self.src_file_paths.update(get_terms_glosses_file_paths(corpus_pair.src_terms_files))
+                            self.src_file_paths.update(
+                                get_terms_glosses_file_paths(corpus_pair.src_terms_files, environment=self._environment)
+                            )
                         if gloss_iso in pair_trg_isos:
-                            self.trg_file_paths.update(get_terms_glosses_file_paths(corpus_pair.trg_terms_files))
+                            self.trg_file_paths.update(
+                                get_terms_glosses_file_paths(corpus_pair.trg_terms_files, environment=self._environment)
+                            )
             self._tags.update(f"<{tag}>" for tag in corpus_pair.tags)
 
             for src_file in corpus_pair.src_files:
@@ -471,7 +476,7 @@ class Config(ABC):
         for src_file, trg_file in get_data_file_pairs(pair):
             project_isos[src_file.project] = src_file.iso
             project_isos[trg_file.project] = trg_file.iso
-            corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path)
+            corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path, environment=self._environment)
             if len(pair.src_noise) > 0:
                 corpus["source"] = [self._noise(pair.src_noise, x) for x in corpus["source"]]
 
@@ -602,9 +607,7 @@ class Config(ABC):
 
         train_count = 0
         if train is not None and len(train) > 0:
-            train_count = self._write_train(
-                tokenizer, train, pair.mapping == DataFileMapping.MIXED_SRC, project_isos
-            )
+            train_count = self._write_train(tokenizer, train, pair.mapping == DataFileMapping.MIXED_SRC, project_isos)
 
         val_count = 0
         if len(val) > 0:
@@ -648,11 +651,11 @@ class Config(ABC):
 
     def _populate_pair_test_indices(self, exp_name: str, pair_test_indices: Dict[Tuple[str, str], Set[int]]) -> None:
         vrefs: Dict[str, int] = {}
-        for i, vref_str in enumerate(load_corpus(SIL_NLP_ENV.assets_dir / "vref.txt")):
+        for i, vref_str in enumerate(load_corpus(self._environment.assets_dir / "vref.txt")):
             if vref_str != "":
                 vrefs[vref_str] = i
 
-        exp_dir = get_mt_exp_dir(exp_name)
+        exp_dir = self._environment.get_mt_exp_dir(exp_name)
         vref_paths: List[Path] = list(exp_dir.glob("test*.vref.txt"))
         if len(vref_paths) == 0:
             if Path.samefile(exp_dir, self.exp_dir):
@@ -876,11 +879,15 @@ class Config(ABC):
 
         all_src_terms: List[Tuple[DataFile, Dict[str, Term], List[str]]] = []
         for src_terms_file, tags in src_terms_files:
-            all_src_terms.append((src_terms_file, get_terms(src_terms_file.path, iso=gloss_iso), tags))
+            all_src_terms.append(
+                (src_terms_file, get_terms(src_terms_file.path, iso=gloss_iso, environment=self._environment), tags)
+            )
 
         all_trg_terms: List[Tuple[DataFile, Dict[str, Term], List[str]]] = []
         for trg_terms_file, tags in trg_terms_files:
-            all_trg_terms.append((trg_terms_file, get_terms(trg_terms_file.path, iso=gloss_iso), tags))
+            all_trg_terms.append(
+                (trg_terms_file, get_terms(trg_terms_file.path, iso=gloss_iso, environment=self._environment), tags)
+            )
 
         for src_terms_file, src_terms, tags in all_src_terms:
             for trg_terms_file, trg_terms, _ in all_trg_terms:

@@ -19,6 +19,7 @@ from scipy.spatial.distance import squareform
 from sortedcontainers import SortedSet
 
 from ..common.corpus import get_scripture_parallel_corpus
+from ..common.environment import SilNlpEnv
 from .config import get_aligner
 from .utils import compute_alignment_score
 
@@ -44,9 +45,11 @@ def compute_similarity_score(corpus: pd.DataFrame, aligner_id: str) -> float:
         inverse_lexicon = aligner.get_inverse_lexicon(include_special_tokens=True)
 
         scores: List[float] = []
-        with src_tok_output_path.open("r", encoding="utf-8") as src_tok_output_file, trg_tok_output_path.open(
-            "r", encoding="utf-8"
-        ) as trg_tok_output_file, sym_align_path.open("r", encoding="utf-8") as sym_align_file:
+        with (
+            src_tok_output_path.open("r", encoding="utf-8") as src_tok_output_file,
+            trg_tok_output_path.open("r", encoding="utf-8") as trg_tok_output_file,
+            sym_align_path.open("r", encoding="utf-8") as sym_align_file,
+        ):
             for src_sentence, trg_sentence, alignment in zip(src_tok_output_file, trg_tok_output_file, sym_align_file):
                 src_sentence = src_sentence.strip()
                 trg_sentence = trg_sentence.strip()
@@ -82,6 +85,8 @@ def main() -> None:
     )
     parser.add_argument("--threshold", type=float, default=1.0, help="Similarity threshold")
     args = parser.parse_args()
+
+    environment = SilNlpEnv.create_standard_environment()
 
     corpus_path = Path(args.corpus)
 
@@ -159,7 +164,9 @@ def main() -> None:
                     if recompute or score is None:
                         LOGGER.info(f"Processing {project1} <-> {project2} ({pair_num}/{total_pair_count})")
                         corpus = get_scripture_parallel_corpus(
-                            corpus_path / (project1 + ".txt"), corpus_path / (project2 + ".txt")
+                            corpus_path / (project1 + ".txt"),
+                            corpus_path / (project2 + ".txt"),
+                            environment=environment,
                         )
                         score = compute_similarity_score(corpus, args.aligner)
                         trans_scores[frozenset([project1, project2])] = score

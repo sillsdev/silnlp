@@ -5,8 +5,8 @@ from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
 
 from machine.scripture import get_chapters
 
-from ..common.corpus import get_mt_corpus_path, get_terms_glosses_path, get_terms_list, get_terms_renderings_path
-from ..common.environment import SIL_NLP_ENV
+from ..common.corpus import get_terms_glosses_path, get_terms_list, get_terms_renderings_path
+from ..common.environment import SilNlpEnv
 from ..common.utils import NoiseMethod, create_noise_methods, is_set
 
 
@@ -33,6 +33,7 @@ class DataFile:
     iso: str = field(init=False)
     project: str = field(init=False)
     include_test: bool = True
+    environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
 
     def __post_init__(self):
         file_name = self.path.stem
@@ -41,7 +42,7 @@ class DataFile:
             raise RuntimeError(f"The filename {file_name} needs to be of the format <iso>-<project>")
         self.iso = parts[0]
         self.project = (
-            parts[1] if str(self.path.parent).startswith(str(SIL_NLP_ENV.mt_scripture_dir)) else BASIC_DATA_PROJECT
+            parts[1] if str(self.path.parent).startswith(str(self.environment.mt_scripture_dir)) else BASIC_DATA_PROJECT
         )
 
     @property
@@ -106,7 +107,7 @@ class IsoPairInfo:
         return len(self.test_projects) > 0 or self.has_basic_test_data
 
 
-def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
+def parse_corpus_pairs(corpus_pairs: List[dict], environment: SilNlpEnv) -> List[CorpusPair]:
     pairs: List[CorpusPair] = []
     for pair in corpus_pairs:
         if "type" not in pair:
@@ -132,9 +133,9 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
             src = src.split(",")
         for file in src:
             if isinstance(file, str):
-                src_files.append(DataFile(get_mt_corpus_path(file.strip())))
+                src_files.append(DataFile(environment.get_mt_corpus_path(file.strip()), environment=environment))
             else:
-                src_files.append(DataFile(get_mt_corpus_path(file.pop("name"))))
+                src_files.append(DataFile(environment.get_mt_corpus_path(file.pop("name")), environment=environment))
                 for k, v in file.items():
                     setattr(src_files[-1], k, v)
         trg: Union[str, List[Union[dict, str]]] = pair["trg"]
@@ -143,9 +144,9 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
             trg = trg.split(",")
         for file in trg:
             if isinstance(file, str):
-                trg_files.append(DataFile(get_mt_corpus_path(file.strip())))
+                trg_files.append(DataFile(environment.get_mt_corpus_path(file.strip()), environment=environment))
             else:
-                trg_files.append(DataFile(get_mt_corpus_path(file.pop("name"))))
+                trg_files.append(DataFile(environment.get_mt_corpus_path(file.pop("name")), environment=environment))
                 for k, v in file.items():
                     setattr(trg_files[-1], k, v)
         is_scripture = src_files[0].is_scripture
@@ -179,8 +180,12 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
         test_books = get_chapters(pair.get("test_books", []))
         use_test_set_from: str = pair.get("use_test_set_from", "")
 
-        src_terms_files = get_terms_files(src_files) if is_set(type, DataFileType.TRAIN) else []
-        trg_terms_files = get_terms_files(trg_files) if is_set(type, DataFileType.TRAIN) else []
+        src_terms_files = (
+            get_terms_files(src_files, environment=environment) if is_set(type, DataFileType.TRAIN) else []
+        )
+        trg_terms_files = (
+            get_terms_files(trg_files, environment=environment) if is_set(type, DataFileType.TRAIN) else []
+        )
 
         if "lexical" not in pair:
             pair["lexical"] = is_set(type, DataFileType.DICT)
@@ -221,21 +226,21 @@ def parse_corpus_pairs(corpus_pairs: List[dict]) -> List[CorpusPair]:
     return pairs
 
 
-def get_terms_files(files: List[DataFile]) -> List[DataFile]:
+def get_terms_files(files: List[DataFile], environment: SilNlpEnv) -> List[DataFile]:
     terms_files: List[DataFile] = []
     for file in files:
-        terms_path = get_terms_renderings_path(file.iso, file.project)
+        terms_path = get_terms_renderings_path(file.iso, file.project, environment)
         if terms_path is None:
             continue
-        terms_files.append(DataFile(terms_path))
+        terms_files.append(DataFile(terms_path, environment=environment))
     return terms_files
 
 
-def get_terms_glosses_file_paths(terms_files: List[DataFile]) -> Set[Path]:
+def get_terms_glosses_file_paths(terms_files: List[DataFile], environment: SilNlpEnv) -> Set[Path]:
     glosses_file_paths: Set[Path] = set()
     for terms_file in terms_files:
         list_name = get_terms_list(terms_file.path)
-        glosses_path = get_terms_glosses_path(list_name, iso=terms_file.iso)
+        glosses_path = get_terms_glosses_path(list_name, iso=terms_file.iso, environment=environment)
         if glosses_path.is_file():
             glosses_file_paths.add(glosses_path)
     return glosses_file_paths

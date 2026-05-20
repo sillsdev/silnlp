@@ -1,6 +1,7 @@
 import argparse
 import logging
 
+from ..common.environment import SilNlpEnv
 from ..common.utils import get_git_revision_hash
 from .config_utils import load_config
 
@@ -19,7 +20,8 @@ def main() -> None:
     get_git_revision_hash()
 
     exp_name = args.experiment
-    config = load_config(exp_name)
+    environment = SilNlpEnv.create_standard_environment()
+    config = load_config(exp_name, environment)
 
     config.set_seed()
     config.preprocess(args.stats, args.force_align)
