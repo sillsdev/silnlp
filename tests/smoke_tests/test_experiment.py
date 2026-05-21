@@ -1,13 +1,14 @@
 import shutil
 from pathlib import Path
 from typing import cast
+from unittest.mock import Mock
 
 import torch
 
 from silnlp.common.environment import SilNlpEnv
 from silnlp.nmt.config_utils import load_config_from_exp_dir
 from silnlp.nmt.experiment import SILExperiment
-from silnlp.nmt.hugging_face_config import HuggingFaceConfig
+from silnlp.nmt.hugging_face_config import HuggingFaceConfig, HuggingFaceNMTModel
 from tests.smoke_tests.mock_pretrained_model import (
     MockModelOutput,
     MockPreTrainedModelProviderFactory,
@@ -16,6 +17,7 @@ from tests.smoke_tests.mock_pretrained_model import (
 
 TEST_MT_DIR = Path(__file__).parent
 EXPERIMENT_NAME = "test_experiment"
+OOM_ERROR_MESSAGE = "CUDA out of memory. Tried to allocate 7.00 GiB."
 
 
 def test_experiment_full_pipeline():
@@ -30,6 +32,67 @@ def test_experiment_full_pipeline():
     check_translate_step(environment)
 
     clean_experiment_directory(environment.get_mt_exp_dir(EXPERIMENT_NAME))
+
+
+def test_translate_sentences_does_not_cap_batch_size_with_tensors():
+    model = cast(HuggingFaceNMTModel, Mock(spec=HuggingFaceNMTModel))
+    model._config = cast(HuggingFaceConfig, Mock(infer={"infer_batch_size": 4}))
+    model._get_dictionary = Mock(return_value={})
+    captured_sub_batch_size = {}
+
+    def fake_translate_batch(
+        pipeline, batch, return_tensors, force_words_ids=None, produce_multiple_translations=False
+    ):
+        captured_sub_batch_size["value"] = len(batch)
+        return iter(())
+
+    model._translate_batch = fake_translate_batch
+
+    list(
+        HuggingFaceNMTModel._translate_sentences(
+            model,
+            tokenizer=Mock(),
+            pipeline=Mock(),
+            sentences=[["a"], ["b"], ["c"], ["d"]],
+            vrefs=None,
+            return_tensors=True,
+        )
+    )
+
+    assert captured_sub_batch_size["value"] == 4
+
+
+def test_translate_sentences_retries_with_smaller_batch():
+    model = cast(HuggingFaceNMTModel, Mock(spec=HuggingFaceNMTModel))
+    model._config = cast(
+        HuggingFaceConfig, Mock(infer={"infer_batch_size": 4, "num_beams": 2}, params={})
+    )
+    model._get_dictionary = Mock(return_value={})
+    call_sub_batch_sizes: list[int] = []
+
+    def fake_translate_batch(
+        pipeline, batch, return_tensors, force_words_ids=None, produce_multiple_translations=False
+    ):
+        call_sub_batch_sizes.append(len(batch))
+        if len(batch) > 2:
+            raise RuntimeError(OOM_ERROR_MESSAGE)
+        return iter(())
+
+    model._translate_batch = fake_translate_batch
+
+    list(
+        HuggingFaceNMTModel._translate_sentences(
+            model,
+            tokenizer=Mock(),
+            pipeline=Mock(),
+            sentences=[["a"], ["b"], ["c"], ["d"]],
+            vrefs=None,
+            return_tensors=False,
+        )
+    )
+
+    # First call is batch-of-4 (OOM), then two calls of batch-of-2 succeed
+    assert call_sub_batch_sizes == [4, 2, 2]
 
 
 def set_up_environment() -> SilNlpEnv:
