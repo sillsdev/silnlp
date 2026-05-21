@@ -29,7 +29,6 @@ class SilNlpEnv:
         mt_experiments_dir: Optional[Path] = None,
     ):
         atexit.register(self.delete_path)
-        atexit.register(check_transfers)
         self.path_to_delete: Optional[Path] = None
         self._data_dir = self._resolve_data_dir()
         self._pt_dir = self._resolve_paratext_dir()
@@ -185,8 +184,10 @@ class SilNlpEnv:
     def delete_path(self) -> None:
         if self.path_to_delete and self.path_to_delete.is_dir():
             shutil.rmtree(self.path_to_delete)
+            self.path_to_delete = None
 
 
+@atexit.register
 def check_transfers() -> None:
     # check if rclone is running or if CHECK_TRANSFERS is set
     if (
@@ -210,7 +211,7 @@ def check_transfers() -> None:
         if transfers_complete:
             LOGGER.info(last_logged_line)
             LOGGER.info("rclone transfers are complete.")
-            break
+            return
         else:
             LOGGER.info(last_logged_line)
             LOGGER.info(f"rclone transfers are still in progress. Waiting another minute. Attempt {i+1} of 7.")
