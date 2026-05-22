@@ -1517,14 +1517,6 @@ class HuggingFaceNMTModel(NMTModel):
                     produce_multiple_translations=produce_multiple_translations,
                 )
 
-                yield from self._translate_sentence_helper(
-                    pipeline,
-                    batch,
-                    batch_size,
-                    return_tensors,
-                    produce_multiple_translations=produce_multiple_translations,
-                )
-
     def _translate_sentence_helper(
         self,
         pipeline: TranslationPipeline,
