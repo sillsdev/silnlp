@@ -1211,6 +1211,8 @@ class HuggingFaceNMTModel(NMTModel):
                     if delete_checkpoint_tokenizer:
                         delete_tokenizer(child)
 
+        _clear_cache_and_collect_garbage()
+
     def save_effective_config(self, path: Path) -> None:
         training_args = self._create_training_arguments()
         config = deepcopy(self._config.root)
@@ -2180,8 +2182,7 @@ def find_executable_batch_size(function: callable = None, starting_batch_size: i
 
     def decorator(*args, **kwargs):
         nonlocal batch_size
-        gc.collect()
-        torch.cuda.empty_cache()
+        _clear_cache_and_collect_garbage()
 
         while True:
             if batch_size == 0:
@@ -2190,8 +2191,7 @@ def find_executable_batch_size(function: callable = None, starting_batch_size: i
                 return function(batch_size, *args, **kwargs)
             except Exception as e:
                 if _should_reduce_batch_size(e):
-                    gc.collect()
-                    torch.cuda.empty_cache()
+                    _clear_cache_and_collect_garbage()
                     batch_size //= 2
                     accelerator.gradient_accumulation_steps = accelerator.gradient_accumulation_steps * 2
                     kwargs["args"].gradient_accumulation_steps = accelerator.gradient_accumulation_steps
@@ -2208,3 +2208,9 @@ def _should_reduce_batch_size(exception: Exception) -> bool:
     if 'NVML_SUCCESS == r INTERNAL ASSERT FAILED at "../c10/cuda/CUDACachingAllocator.cpp"' in str(exception):
         return True
     return False
+
+
+def _clear_cache_and_collect_garbage():
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
