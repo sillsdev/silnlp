@@ -75,7 +75,6 @@ class NMTModel(ABC):
         translation_paths: List[Path],
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
-        vref_paths: Optional[List[Path]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None: ...
 
@@ -86,7 +85,6 @@ class NMTModel(ABC):
         src_iso: str,
         trg_iso: str,
         produce_multiple_translations: bool = False,
-        vrefs: Optional[Iterable[VerseRef]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Generator[SentenceTranslationGroup, None, None]: ...
 

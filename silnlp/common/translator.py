@@ -294,7 +294,6 @@ class Translator(AbstractContextManager["Translator"], ABC):
         src_iso: str,
         trg_iso: str,
         produce_multiple_translations: bool = False,
-        vrefs: Optional[Iterable[VerseRef]] = None,
     ) -> Generator[SentenceTranslationGroup, None, None]:
         pass
 
@@ -410,7 +409,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
 
         sentences = UsfmTextRowCollection(src_file_text, src_iso, stylesheet, chapters, tags)
         LOGGER.info(f"File {src_file_path} parsed correctly.")
-        sentences_to_translate, scripture_refs = sentences.get_sentences_and_vrefs_for_translation()
+        sentences_to_translate = sentences.get_sentences_for_translation()
 
         if len(sentences_to_translate) == 0:
             LOGGER.warning(f"No sentences found to translate. Skipping translation for {book_id}.")
@@ -422,7 +421,6 @@ class Translator(AbstractContextManager["Translator"], ABC):
                 src_iso,
                 trg_iso,
                 produce_multiple_translations,
-                [sr.verse_ref for sr in scripture_refs],
             )
         )
 

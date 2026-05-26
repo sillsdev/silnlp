@@ -71,11 +71,8 @@ class NMTTranslator(Translator):
         src_iso: str,
         trg_iso: str,
         produce_multiple_translations: bool = False,
-        vrefs: Optional[Iterable[VerseRef]] = None,
     ) -> Generator[SentenceTranslationGroup, None, None]:
-        yield from self._model.translate(
-            sentences, src_iso, trg_iso, produce_multiple_translations, vrefs, self._checkpoint
-        )
+        yield from self._model.translate(sentences, src_iso, trg_iso, produce_multiple_translations, self._checkpoint)
 
     def __exit__(
         self, exc_type, exc_value, traceback  # pyright: ignore[reportUnknownParameterType, reportMissingParameterType]
