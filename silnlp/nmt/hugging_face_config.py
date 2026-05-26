@@ -867,26 +867,14 @@ TSent = TypeVar("TSent")
 
 def batch_sentences(
     sentences: Iterable[TSent],
-    vrefs: Optional[Iterable[VerseRef]],
     batch_size: int,
-    dictionary: Dict[VerseRef, Set[str]],
 ) -> Iterable[List[TSent]]:
     batch: List[TSent] = []
-    for sentence, vref in zip(sentences, repeat(None) if vrefs is None else vrefs):
-        terms: Set[str] = set()
-        if vref is not None:
-            for vr in vref.all_verses():
-                terms.update(dictionary.get(vr, set()))
-        if len(terms) > 0:
-            if len(batch) > 0:
-                yield batch
-                batch = []
-            yield [sentence]
-        else:
-            batch.append(sentence)
-            if len(batch) == batch_size:
-                yield batch
-                batch = []
+    for sentence in sentences:
+        batch.append(sentence)
+        if len(batch) == batch_size:
+            yield batch
+            batch = []
     if len(batch) > 0:
         yield batch
 
@@ -1232,17 +1220,15 @@ class HuggingFaceNMTModel(NMTModel):
         translation_paths: List[Path],
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
-        vref_paths: Optional[List[Path]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
         tokenizer = self._config.get_tokenizer()
         model = self._create_inference_model(ckpt, tokenizer, self._config.test_src_lang, self._config.test_trg_lang)
         compiled_model = cast(PreTrainedModel, torch.compile(model))
 
-        for input_path, translation_path, vref_path in zip(
+        for input_path, translation_path in zip(
             input_paths,
             translation_paths,
-            cast(Iterable[Optional[Path]], repeat(None) if vref_paths is None else vref_paths),
         ):
             pipeline = self._create_pipeline_for_test_file(input_path, model, compiled_model, tokenizer)
 
@@ -1250,13 +1236,9 @@ class HuggingFaceNMTModel(NMTModel):
             with ExitStack() as stack:
                 src_file = stack.enter_context(input_path.open("r", encoding="utf-8-sig"))
                 sentences = (line.strip().split() for line in src_file)
-                vrefs: Optional[Iterable[VerseRef]] = None
-                if vref_path is not None:
-                    vref_file = stack.enter_context(vref_path.open("r", encoding="utf-8-sig"))
-                    vrefs = (VerseRef.from_string(line.strip(), ORIGINAL_VERSIFICATION) for line in vref_file)
                 sentence_translation_groups: List[SentenceTranslationGroup] = list(
                     self._translate_test_sentences(
-                        tokenizer, pipeline, sentences, vrefs, length, produce_multiple_translations
+                        tokenizer, pipeline, sentences, length, produce_multiple_translations
                     )
                 )
                 draft_group = DraftGroup(sentence_translation_groups)
@@ -1304,7 +1286,6 @@ class HuggingFaceNMTModel(NMTModel):
         tokenizer: PreTrainedTokenizer,
         pipeline: TranslationPipeline,
         sentences: Iterable[List[str]],
-        vrefs: Iterable[VerseRef],
         length: int,
         produce_multiple_translations: bool = False,
     ) -> Iterable[SentenceTranslationGroup]:
@@ -1318,9 +1299,7 @@ class HuggingFaceNMTModel(NMTModel):
             )
 
         for model_output_group in tqdm(
-            self._translate_sentences(
-                tokenizer, pipeline, sentences, vrefs, produce_multiple_translations, return_tensors=True
-            ),
+            self._translate_sentences(pipeline, sentences, produce_multiple_translations, return_tensors=True),
             total=length,
             unit="ex",
         ):
@@ -1336,7 +1315,6 @@ class HuggingFaceNMTModel(NMTModel):
         src_iso: str,
         trg_iso: str,
         produce_multiple_translations: bool = False,
-        vrefs: Optional[Iterable[VerseRef]] = None,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Generator[SentenceTranslationGroup, None, None]:
         src_lang = self._config.data["lang_codes"].get(src_iso, src_iso)
@@ -1375,7 +1353,7 @@ class HuggingFaceNMTModel(NMTModel):
         if not isinstance(sentences, list):
             sentences = list(sentences)
         for model_output_group in tqdm(
-            self._translate_sentences(tokenizer, pipeline, sentences, vrefs, produce_multiple_translations),
+            self._translate_sentences(pipeline, sentences, produce_multiple_translations),
             total=len(sentences),
             unit="ex",
         ):
@@ -1435,37 +1413,6 @@ class HuggingFaceNMTModel(NMTModel):
             args["report_to"] = "none"
         return parser.parse_dict(args)[0]
 
-    def _get_dictionary(self) -> Dict[VerseRef, Set[str]]:
-        if self._dictionary is not None:
-            return self._dictionary
-
-        self._dictionary = {}
-
-        dict_trg_path = self._config.exp_dir / self._config.dict_trg_filename()
-        dict_vref_path = self._config.exp_dir / self._config.dict_vref_filename()
-
-        if not dict_trg_path.is_file() or not dict_vref_path.is_file():
-            return self._dictionary
-
-        with (
-            dict_trg_path.open("r", encoding="utf-8-sig") as trg_file,
-            dict_vref_path.open("r", encoding="utf-8-sig") as dict_file,
-        ):
-            for trg_line, vref_line in zip(trg_file, dict_file):
-                vref_line = vref_line.strip()
-                if vref_line == "":
-                    continue
-                vref_strs = vref_line.split("\t")
-                for vref_str in vref_strs:
-                    verse_ref = VerseRef.from_string(vref_str, ORIGINAL_VERSIFICATION)
-                    terms = self._dictionary.get(verse_ref)
-                    if terms is None:
-                        terms = set()
-                        self._dictionary[verse_ref] = terms
-                    terms.add(trg_line.strip())
-
-        return self._dictionary
-
     # Untie full embedding modules and instead tie embedding weights
     def _create_tied_embedding_weights(self, model: PreTrainedModel) -> PreTrainedModel:
         encoder_embeddings = torch.nn.Embedding(
@@ -1489,33 +1436,21 @@ class HuggingFaceNMTModel(NMTModel):
 
     def _translate_sentences(
         self,
-        tokenizer: PreTrainedTokenizer,
         pipeline: TranslationPipeline,
         sentences: Iterable[TSent],
-        vrefs: Optional[Iterable[VerseRef]],
         produce_multiple_translations: bool = False,
         return_tensors: bool = False,
     ) -> Iterable[ModelOutputGroup]:
         batch_size: int = self._config.infer["infer_batch_size"]
 
-        dictionary = self._get_dictionary()
-        if vrefs is None or len(dictionary) == 0:
+        for batch in batch_sentences(sentences, batch_size):
             yield from self._translate_sentence_helper(
                 pipeline,
-                sentences,
+                batch,
                 batch_size,
                 return_tensors,
                 produce_multiple_translations=produce_multiple_translations,
             )
-        else:
-            for batch in batch_sentences(sentences, vrefs, batch_size, dictionary):
-                yield from self._translate_sentence_helper(
-                    pipeline,
-                    batch,
-                    batch_size,
-                    return_tensors,
-                    produce_multiple_translations=produce_multiple_translations,
-                )
 
     def _translate_sentence_helper(
         self,

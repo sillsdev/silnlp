@@ -571,15 +571,12 @@ def test_checkpoint(
     checkpoint_name = "averaged checkpoint" if step == -1 else f"checkpoint {step}"
 
     source_paths: List[Path] = []
-    vref_paths: Optional[List[Path]] = [] if config.has_scripture_data else None
     translation_paths: List[Path] = []
     for i in range(len(translation_file_names)):
         predictions_path = config.exp_dir / translation_file_names[i]
         if force_infer or not predictions_path.is_file():
             source_paths.append(config.exp_dir / source_file_names[i])
             translation_paths.append(predictions_path)
-            if vref_paths is not None:
-                vref_paths.append(config.exp_dir / vref_file_names[i])
     if len(translation_paths) > 0:
         LOGGER.info(f"Inferencing {checkpoint_name}")
         model.translate_test_files(
@@ -587,7 +584,6 @@ def test_checkpoint(
             translation_paths,
             produce_multiple_translations,
             save_confidences,
-            vref_paths,
             step if checkpoint_type is CheckpointType.OTHER else checkpoint_type,
         )
 

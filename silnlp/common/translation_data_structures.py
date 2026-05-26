@@ -2,7 +2,7 @@ import re
 from math import exp
 from pathlib import Path
 from statistics import mean
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set
 
 from attr import dataclass
 from machine.corpora import ScriptureRef, TextRow, UsfmFileText, UsfmStylesheet, UsfmTextType
@@ -220,26 +220,23 @@ class UsfmTextRowCollection:
     def _split_sentences(self, text) -> List[str]:
         return NLTKSentenceTokenizer.for_iso(self._src_iso).tokenize(text)
 
-    def get_sentences_and_vrefs_for_translation(self) -> Tuple[List[str], List[ScriptureRef]]:
-        sentences, scripture_refs = self._match_all_sentences_with_scripture_refs()
-        return ([self._clean_and_tag_sentence(s) for s in sentences], scripture_refs)
+    def get_sentences_for_translation(self) -> List[str]:
+        sentences = self._match_all_sentences()
+        return [self._clean_and_tag_sentence(s) for s in sentences]
 
     def _filter_out_empty_rows(self) -> List[TextRow]:
         return [s for i, s in enumerate(self._text_rows) if i not in self._empty_row_indices]
 
-    def _match_all_sentences_with_scripture_refs(self) -> Tuple[List[str], List[ScriptureRef]]:
+    def _match_all_sentences(self) -> List[str]:
         sentences: List[str] = []
-        scripture_refs: List[ScriptureRef] = []
         for i, row in enumerate(self._text_rows):
             if i in self._empty_row_indices:
                 continue
             elif i in self._subdivided_row_texts:
                 sentences.extend(self._subdivided_row_texts[i])
-                scripture_refs.extend([row.ref] * len(self._subdivided_row_texts[i]))
             else:
                 sentences.append(row.text)
-                scripture_refs.append(row.ref)
-        return sentences, scripture_refs
+        return sentences
 
     def _clean_and_tag_sentence(self, sentence: str) -> str:
         if self._tags is None:
