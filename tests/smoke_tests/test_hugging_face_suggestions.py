@@ -133,14 +133,18 @@ def test_translation_pipeline_forward_pads_prompt_token_scores() -> None:
     assert torch.equal(output["scores"][0, 0, 3:], transition_scores[0])
 
 
-def test_suggest_translation_returns_remaining_characters_for_partial_word(monkeypatch) -> None:
+def test_suggestion_translation_returns_remaining_characters_for_partial_word(monkeypatch) -> None:
     tokenizer = FakeSuggestionTokenizer()
     model = _create_model()
     captured_kwargs: dict = {}
+    created_pipeline_count = 0
 
     class FakePipeline:
         def __init__(self, *args, **kwargs):
-            del args, kwargs
+            nonlocal created_pipeline_count
+            del args
+            self.model = kwargs["model"]
+            created_pipeline_count += 1
 
         def __call__(self, sentences, **kwargs):
             del sentences
@@ -160,20 +164,23 @@ def test_suggest_translation_returns_remaining_characters_for_partial_word(monke
         model, "_get_inference_components", lambda *args, **kwargs: (FakeModel(), tokenizer, "en", "en")
     )
 
-    suggestion = model.suggest_translation("source", "cra", "en", "en", confidence_threshold=0.95)
+    suggester = model.create_translation_suggester("source", "en", "en", confidence_threshold=0.95)
+    suggestion = suggester.suggestion_translation("cra")
 
     assert suggestion == "b"
     assert isinstance(captured_kwargs["prefix_allowed_tokens_fn"], PartialWordPrefixConstraint)
+    assert created_pipeline_count == 1
 
 
-def test_suggest_translation_returns_none_for_low_confidence_next_word(monkeypatch) -> None:
+def test_suggestion_translation_returns_none_for_low_confidence_next_word(monkeypatch) -> None:
     tokenizer = FakeSuggestionTokenizer()
     model = _create_model()
     captured_kwargs: dict = {}
 
     class FakePipeline:
         def __init__(self, *args, **kwargs):
-            del args, kwargs
+            del args
+            self.model = kwargs["model"]
 
         def __call__(self, sentences, **kwargs):
             del sentences
@@ -191,7 +198,8 @@ def test_suggest_translation_returns_none_for_low_confidence_next_word(monkeypat
         model, "_get_inference_components", lambda *args, **kwargs: (FakeModel(), tokenizer, "en", "en")
     )
 
-    suggestion = model.suggest_translation("source", "hello ", "en", "en", confidence_threshold=0.5)
+    suggester = model.create_translation_suggester("source", "en", "en", confidence_threshold=0.5)
+    suggestion = suggester.suggestion_translation("hello ")
 
     assert suggestion is None
     assert "prefix_allowed_tokens_fn" not in captured_kwargs

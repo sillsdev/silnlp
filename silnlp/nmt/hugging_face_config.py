@@ -77,7 +77,7 @@ from ..common.environment import SIL_NLP_ENV
 from ..common.translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup
 from ..common.translator import generate_confidence_files
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, get_mt_exp_dir, merge_dict
-from .config import SUPPORTED_GLOSS_ISOS, CheckpointType, Config, NMTModel
+from .config import SUPPORTED_GLOSS_ISOS, CheckpointType, Config, NMTModel, TranslationSuggester
 from .corpora import DataFile
 from .token_occurrence_logger import TokenOccurrenceLogger
 from .tokenizer import NullTokenizer, Tokenizer
@@ -972,6 +972,65 @@ class PartialWordPrefixConstraint:
         return self._tokenizer.decode(token_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)
 
 
+class HuggingFaceTranslationSuggester(TranslationSuggester):
+    def __init__(
+        self,
+        model: "HuggingFaceNMTModel",
+        pipeline: "SilTranslationPipeline",
+        tokenizer: PreTrainedTokenizer,
+        source_sentence: str,
+        confidence_threshold: float,
+        max_new_tokens: int,
+        num_beams: Optional[int],
+    ) -> None:
+        self._model = model
+        self._pipeline = pipeline
+        self._tokenizer = tokenizer
+        self._source_sentence = source_sentence
+        self._confidence_threshold = confidence_threshold
+        self._max_new_tokens = max_new_tokens
+        self._num_beams = num_beams
+
+    def suggestion_translation(self, partial_translation: str) -> Optional[str]:
+        prefix, partial_word = self._model._split_partial_translation(partial_translation)
+        decoder_input_ids = self._model._build_decoder_input_ids(self._tokenizer, self._pipeline.model, prefix)
+        generate_kwargs: Dict[str, Any] = {
+            "batch_size": 1,
+            "clean_up_tokenization_spaces": False,
+            "max_new_tokens": self._max_new_tokens,
+            "num_beams": self._num_beams,
+            "num_return_sequences": 1,
+            "return_tensors": False,
+            "return_text": True,
+        }
+        if decoder_input_ids is not None:
+            generate_kwargs["decoder_input_ids"] = decoder_input_ids
+        if len(partial_word) > 0:
+            decoder_input_length = 0 if decoder_input_ids is None else decoder_input_ids.shape[1]
+            generate_kwargs["prefix_allowed_tokens_fn"] = PartialWordPrefixConstraint(
+                self._tokenizer, decoder_input_length, partial_word
+            )
+
+        outputs = self._pipeline([self._source_sentence], **generate_kwargs)
+        if len(outputs) == 0:
+            return None
+
+        suggestion = self._model._extract_suggestion_text(partial_translation, outputs[0]["translation_text"])
+        if suggestion is None:
+            return None
+
+        confidence = self._model._get_suggestion_confidence(
+            self._tokenizer,
+            outputs[0]["translation_token_ids"],
+            outputs[0]["token_scores"],
+            partial_translation,
+            suggestion,
+        )
+        if confidence < self._confidence_threshold:
+            return None
+        return suggestion
+
+
 class HuggingFaceNMTModel(NMTModel):
     def __init__(
         self,
@@ -1417,16 +1476,15 @@ class HuggingFaceNMTModel(NMTModel):
         ):
             yield model_output_group.convert_to_sentence_translation_group(tokenizer)
 
-    def suggest_translation(
+    def create_translation_suggester(
         self,
         source_sentence: str,
-        partial_translation: str,
         src_iso: str,
         trg_iso: str,
         confidence_threshold: float = 0.5,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
         max_new_tokens: int = 10,
-    ) -> Optional[str]:
+    ) -> TranslationSuggester:
         model, tokenizer, src_lang, trg_lang = self._get_inference_components(src_iso, trg_iso, ckpt)
         pipeline_device = 0 if model.device.type == "cuda" else -1
         num_beams = self._config.infer.get("num_beams")
@@ -1439,44 +1497,9 @@ class HuggingFaceNMTModel(NMTModel):
             tgt_lang=trg_lang,
             device=pipeline_device,
         )
-
-        prefix, partial_word = self._split_partial_translation(partial_translation)
-        decoder_input_ids = self._build_decoder_input_ids(tokenizer, model, prefix)
-        generate_kwargs: Dict[str, Any] = {
-            "batch_size": 1,
-            "clean_up_tokenization_spaces": False,
-            "max_new_tokens": max_new_tokens,
-            "num_beams": num_beams,
-            "num_return_sequences": 1,
-            "return_tensors": False,
-            "return_text": True,
-        }
-        if decoder_input_ids is not None:
-            generate_kwargs["decoder_input_ids"] = decoder_input_ids
-        if len(partial_word) > 0:
-            decoder_input_length = 0 if decoder_input_ids is None else decoder_input_ids.shape[1]
-            generate_kwargs["prefix_allowed_tokens_fn"] = PartialWordPrefixConstraint(
-                tokenizer, decoder_input_length, partial_word
-            )
-
-        outputs = pipeline([source_sentence], **generate_kwargs)
-        if len(outputs) == 0:
-            return None
-
-        suggestion = self._extract_suggestion_text(partial_translation, outputs[0]["translation_text"])
-        if suggestion is None:
-            return None
-
-        confidence = self._get_suggestion_confidence(
-            tokenizer,
-            outputs[0]["translation_token_ids"],
-            outputs[0]["token_scores"],
-            partial_translation,
-            suggestion,
+        return HuggingFaceTranslationSuggester(
+            self, pipeline, tokenizer, source_sentence, confidence_threshold, max_new_tokens, num_beams
         )
-        if confidence < confidence_threshold:
-            return None
-        return suggestion
 
     def _split_partial_translation(self, partial_translation: str) -> Tuple[str, str]:
         stripped_translation = partial_translation.rstrip()
