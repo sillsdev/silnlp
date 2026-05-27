@@ -3,44 +3,59 @@ import logging
 from typing import Optional
 
 from .config_utils import load_config
-from .translation_scorer import DEFAULT_LOW_PROB_THRESHOLD, DEFAULT_TOP_K_SUGGESTIONS, ScoredTranslation
+from .translation_scorer import DEFAULT_LOW_PROB_THRESHOLD, DEFAULT_TOP_K_SUGGESTIONS, PhraseScore, ScoredTranslation
 
 LOGGER = logging.getLogger(__name__)
 
 
+def _format_suggestions(phrase_score: PhraseScore) -> str:
+    if not phrase_score.suggestions:
+        return ""
+    return "; ".join(
+        f"{suggestion.phrase} (ctx/word={suggestion.normalized_log_prob:.4f}, Δ={suggestion.improvement:.4f})"
+        for suggestion in phrase_score.suggestions
+    )
+
+
 def format_scored_translation(scored: ScoredTranslation) -> str:
     """Format a ScoredTranslation as a human-readable string."""
-    lines = []
-    lines.append(f"Source:      {scored.source}")
-    lines.append(f"Translation: {scored.translation}")
-    lines.append(f"Overall log-probability: {scored.sequence_log_prob:.4f}")
-    lines.append("")
+    lines = [
+        f"Source:      {scored.source}",
+        f"Translation: {scored.translation}",
+        f"Sequence log-probability: {scored.sequence_log_prob:.4f}",
+        "",
+        "Word-level contextual scores:",
+    ]
 
-    # Per-word table
-    col_word = max(len(w.word) for w in scored.word_scores) if scored.word_scores else 10
-    col_word = max(col_word, 4)
-    header = f"  {'Word':<{col_word}}  {'Log Prob':>10}  {'Prob':>10}  Suggestions"
+    col_word = max((len(score.word) for score in scored.word_scores), default=4)
+    header = (
+        f"  {'Word':<{col_word}}  {'Forward':>10}  {'Right Ctx':>10}  {'Ctx/Word':>10}  Suggestions"
+    )
     lines.append(header)
     lines.append("  " + "-" * (len(header) - 2))
-    for ws in scored.word_scores:
-        flag = "* " if ws.is_low_probability else "  "
-        suggestions_str = ", ".join(ws.suggestions) if ws.suggestions else ""
+    for score in scored.word_scores:
+        flag = "* " if score.is_low_probability else "  "
+        suggestion_text = ", ".join(suggestion.phrase for suggestion in score.suggestions)
         lines.append(
-            f"{flag}{ws.word:<{col_word}}  {ws.log_prob:>10.4f}  {ws.prob:>10.6f}  {suggestions_str}"
+            f"{flag}{score.word:<{col_word}}  {score.forward_log_prob:>10.4f}  "
+            f"{score.right_context_log_prob:>10.4f}  {score.normalized_log_prob:>10.4f}  {suggestion_text}"
         )
 
     lines.append("")
-    low_prob = scored.low_probability_words
-    if low_prob:
-        lines.append("Low-probability words and suggested alternatives:")
-        for ws in low_prob:
-            if ws.suggestions:
-                suggestions_str = ", ".join(f"'{s}'" for s in ws.suggestions)
-                lines.append(f"  '{ws.word}'  (log prob {ws.log_prob:.4f})  →  {suggestions_str}")
-            else:
-                lines.append(f"  '{ws.word}'  (log prob {ws.log_prob:.4f})  →  (no suggestions available)")
+    lines.append("Low-probability phrases:")
+    low_phrases = scored.low_probability_phrases
+    if not low_phrases:
+        lines.append("  None")
     else:
-        lines.append("No low-probability words found.")
+        for score in low_phrases:
+            lines.append(
+                f"  '{score.phrase}' [{score.span_start}:{score.span_end}] "
+                f"forward={score.forward_log_prob:.4f}, right_ctx={score.right_context_log_prob:.4f}, "
+                f"ctx/word={score.normalized_log_prob:.4f}"
+            )
+            suggestions = _format_suggestions(score)
+            if suggestions:
+                lines.append(f"    Suggestions: {suggestions}")
 
     return "\n".join(lines)
 
@@ -55,24 +70,6 @@ def score_translation(
     low_prob_threshold: float = DEFAULT_LOW_PROB_THRESHOLD,
     top_k_suggestions: int = DEFAULT_TOP_K_SUGGESTIONS,
 ) -> ScoredTranslation:
-    """Score a translation against a source sentence using a trained NMT model.
-
-    Loads the experiment's model, runs forced decoding on the translation, and returns
-    a ScoredTranslation with per-word probabilities and suggestions for flagged words.
-
-    Args:
-        experiment: Name of the experiment (relative to the MT experiments directory).
-        source: The source sentence to score against.
-        translation: The translation to evaluate.
-        src_iso: Source language ISO code. Defaults to the experiment's test source.
-        trg_iso: Target language ISO code. Defaults to the experiment's test target.
-        checkpoint: Checkpoint to load ("last", "best", "avg", or a step number).
-        low_prob_threshold: Log-probability threshold for flagging low-probability words.
-        top_k_suggestions: Number of alternative suggestions per flagged word.
-
-    Returns:
-        A ScoredTranslation with per-word scores and suggestions.
-    """
     config = load_config(experiment)
     model = config.create_model()
 
@@ -93,8 +90,8 @@ def score_translation(
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Score a translation by computing the model's token-level conditional probabilities. "
-            "Low-probability words are flagged and paired with suggested alternatives from the model."
+            "Score a translation by computing contextual phrase probabilities. "
+            "Low-probability words and phrases are flagged and paired with rescored replacement suggestions."
         )
     )
     parser.add_argument("experiment", help="Experiment name")
@@ -113,7 +110,7 @@ def main() -> None:
         type=float,
         default=DEFAULT_LOW_PROB_THRESHOLD,
         help=(
-            f"Log-probability threshold below which a word is considered low-probability "
+            f"Threshold on contextual log-probability per word for flagging low-probability spans "
             f"(default: {DEFAULT_LOW_PROB_THRESHOLD})"
         ),
     )
@@ -121,7 +118,7 @@ def main() -> None:
         "--top-k-suggestions",
         type=int,
         default=DEFAULT_TOP_K_SUGGESTIONS,
-        help=f"Number of alternative suggestions per low-probability word (default: {DEFAULT_TOP_K_SUGGESTIONS})",
+        help=f"Number of replacement suggestions per flagged span (default: {DEFAULT_TOP_K_SUGGESTIONS})",
     )
 
     args = parser.parse_args()

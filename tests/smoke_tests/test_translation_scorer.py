@@ -1,230 +1,138 @@
-"""Tests for the TranslationScorer class and related data structures."""
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import patch
 
-import torch
-
-from silnlp.nmt.translation_scorer import (
-    DEFAULT_LOW_PROB_THRESHOLD,
-    DEFAULT_TOP_K_SUGGESTIONS,
-    ScoredTranslation,
-    TokenScore,
-    TranslationScorer,
-    WordScore,
-)
-
-_TINY_MODEL_NAME = "hf-internal-testing/tiny-random-nllb"
+from silnlp.nmt.translation_scorer import PhraseScore, SequenceScore, TokenScore, TranslationScorer, WordSpan
 
 
-def _make_mock_model_and_tokenizer():
-    """Create a mock model and tokenizer for testing."""
-    from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
-    from transformers.modeling_outputs import Seq2SeqLMOutput
-
-    tokenizer = AutoTokenizer.from_pretrained(_TINY_MODEL_NAME)
-    tokenizer.src_lang = "eng_Latn"
-    tokenizer.tgt_lang = "fra_Latn"
-
-    # Create a minimal mock model that returns deterministic logits
-    model = MagicMock()
-    vocab_size = len(tokenizer)
-
-    # Return logits shaped [1, seq_len, vocab_size] with deterministic values
-    def mock_forward(input_ids=None, attention_mask=None, labels=None, **kwargs):
-        seq_len = labels.shape[1] if labels is not None else 1
-        logits = torch.zeros(1, seq_len, vocab_size)
-        # Make the first token of the vocabulary highly probable except at position 0
-        logits[:, :, 0] = -10.0
-        logits[:, :, 1] = -1.0  # slightly low probability
-        return Seq2SeqLMOutput(logits=logits)
-
-    model.side_effect = None
-    model.__call__ = MagicMock(side_effect=mock_forward)
-    model.parameters = MagicMock(return_value=iter([torch.zeros(1)]))
-    model.eval = MagicMock()
-    model.generation_config = MagicMock()
-    model.generation_config.forced_bos_token_id = tokenizer.convert_tokens_to_ids("fra_Latn")
-    model.config = MagicMock()
-    model.config.forced_bos_token_id = None
-
-    return model, tokenizer
+class FakeTokenizer:
+    all_special_ids = [0, 1, 2]
+    eos_token_id = 1
+    bos_token_id = 2
 
 
-class TestTokenScore:
-    def test_prob_property(self):
-        ts = TokenScore(token="▁hello", log_prob=-1.0)
-        assert abs(ts.prob - 0.3679) < 1e-3
+class FakeModel:
+    def __init__(self):
+        self.generation_config = SimpleNamespace(forced_bos_token_id=2)
+        self.config = SimpleNamespace(forced_bos_token_id=None, decoder_start_token_id=2)
 
-    def test_zero_log_prob(self):
-        ts = TokenScore(token="▁hello", log_prob=0.0)
-        assert ts.prob == 1.0
-
-
-class TestWordScore:
-    def test_log_prob_is_sum_of_token_log_probs(self):
-        ws = WordScore(
-            word="hello",
-            tokens=[
-                TokenScore(token="▁hel", log_prob=-0.5),
-                TokenScore(token="lo", log_prob=-0.3),
-            ],
-        )
-        assert abs(ws.log_prob - (-0.8)) < 1e-6
-
-    def test_is_low_probability_default_threshold(self):
-        low = WordScore(word="low", tokens=[TokenScore(token="▁low", log_prob=-5.0)])
-        high = WordScore(word="high", tokens=[TokenScore(token="▁high", log_prob=-1.0)])
-        assert low.is_low_probability
-        assert not high.is_low_probability
-
-    def test_is_low_probability_custom_threshold(self):
-        ws = WordScore(
-            word="test",
-            tokens=[TokenScore(token="▁test", log_prob=-2.0)],
-            low_prob_threshold=-1.0,
-        )
-        assert ws.is_low_probability
+    def eval(self):
+        return None
 
 
-class TestScoredTranslation:
-    def test_sequence_log_prob(self):
-        st = ScoredTranslation(
-            source="hello",
-            translation="bonjour",
-            word_scores=[
-                WordScore(word="bonjour", tokens=[TokenScore(token="▁bonjour", log_prob=-0.5)]),
-            ],
-        )
-        assert abs(st.sequence_log_prob - (-0.5)) < 1e-6
-
-    def test_low_probability_words(self):
-        st = ScoredTranslation(
-            source="hello world",
-            translation="bonjour monde",
-            word_scores=[
-                WordScore(word="bonjour", tokens=[TokenScore(token="▁bonjour", log_prob=-1.0)]),
-                WordScore(word="monde", tokens=[TokenScore(token="▁monde", log_prob=-5.0)]),
-            ],
-        )
-        low = st.low_probability_words
-        assert len(low) == 1
-        assert low[0].word == "monde"
+def build_sequence(text: str, word_log_probs: list[float]) -> SequenceScore:
+    words = text.split() if text else []
+    return SequenceScore(
+        text=text,
+        label_ids=list(range(10, 10 + len(words))),
+        tokens=[f"▁{word}" for word in words],
+        token_log_probs=word_log_probs,
+        words=[WordSpan(word, index, index + 1) for index, word in enumerate(words)],
+    )
 
 
-class TestTranslationScorer:
-    def test_score_returns_scored_translation(self):
-        model, tokenizer = _make_mock_model_and_tokenizer()
-        scorer = TranslationScorer(model, tokenizer)
-        result = scorer.score("hello world", "bonjour monde")
-        assert isinstance(result, ScoredTranslation)
-        assert result.source == "hello world"
-        assert result.translation == "bonjour monde"
-        assert isinstance(result.word_scores, list)
-        assert len(result.word_scores) > 0
-
-    def test_each_word_score_has_tokens(self):
-        model, tokenizer = _make_mock_model_and_tokenizer()
-        scorer = TranslationScorer(model, tokenizer)
-        result = scorer.score("hello world", "bonjour monde")
-        for ws in result.word_scores:
-            assert isinstance(ws, WordScore)
-            assert len(ws.tokens) > 0
-            for ts in ws.tokens:
-                assert isinstance(ts, TokenScore)
-
-    def test_low_prob_words_get_suggestions(self):
-        model, tokenizer = _make_mock_model_and_tokenizer()
-        # Use a threshold of 0.0 so all words are flagged as low-probability
-        scorer = TranslationScorer(model, tokenizer, low_prob_threshold=0.0)
-        result = scorer.score("hello world", "bonjour monde")
-        for ws in result.word_scores:
-            assert ws.is_low_probability
-            # Every flagged word should have suggestions (up to top_k)
-            assert len(ws.suggestions) <= DEFAULT_TOP_K_SUGGESTIONS
-
-    def test_custom_top_k(self):
-        model, tokenizer = _make_mock_model_and_tokenizer()
-        scorer = TranslationScorer(model, tokenizer, low_prob_threshold=0.0, top_k_suggestions=2)
-        result = scorer.score("hello", "bonjour")
-        for ws in result.word_scores:
-            assert len(ws.suggestions) <= 2
-
-    def test_forced_bos_prepended_to_labels(self):
-        """Verify that forced_bos_token_id is prepended to labels when not already present."""
-        model, tokenizer = _make_mock_model_and_tokenizer()
-        scorer = TranslationScorer(model, tokenizer)
-
-        # Capture the labels passed to the model
-        captured_labels = []
-        original_call = model.__call__.side_effect
-
-        def capturing_call(**kwargs):
-            captured_labels.append(kwargs.get("labels"))
-            return original_call(**kwargs)
-
-        model.__call__.side_effect = capturing_call
-        scorer.score("hello", "bonjour")
-
-        assert len(captured_labels) == 1
-        labels = captured_labels[0]
-        # The first token should be the forced BOS (language code)
-        forced_bos = tokenizer.convert_tokens_to_ids("fra_Latn")
-        assert labels[0, 0].item() == forced_bos
+def make_scorer(**kwargs) -> TranslationScorer:
+    return TranslationScorer(FakeModel(), FakeTokenizer(), min_suggestion_improvement=0.0, **kwargs)
 
 
-class TestWordGrouping:
-    def test_sentencepiece_tokens_grouped_correctly(self):
-        """Test that SentencePiece tokens (▁ prefix) are grouped into words."""
-        model, tokenizer = _make_mock_model_and_tokenizer()
-        scorer = TranslationScorer(model, tokenizer)
+def test_contextual_word_scoring_uses_right_context_delta():
+    scorer = make_scorer(low_prob_threshold=-3.0, max_phrase_words=2)
+    scores = {
+        "bleu maison vite": build_sequence("bleu maison vite", [-1.0, -5.0, -0.5]),
+        "maison vite": build_sequence("maison vite", [-0.5, -0.5]),
+        "bleu vite": build_sequence("bleu vite", [-1.0, -0.2]),
+        "vite": build_sequence("vite", [-0.2]),
+    }
 
-        # Mock _group_tokens_into_words directly to test grouping logic
-        tokens = ["▁hello", "▁world", "!"]
-        token_log_probs = [-1.0, -2.0, -0.5]
-        label_ids = [101, 102, 103]  # fake IDs, not in special_token_ids
-        top_k_ids = [[1, 2, 3, 4, 5, 6]] * 3
+    with (
+        patch.object(scorer, "_encode_source", return_value={}),
+        patch.object(scorer, "_score_translation_text", side_effect=lambda _ctx, text, _cache: scores[text]),
+        patch.object(scorer, "_generate_candidate_phrases", return_value=[]),
+    ):
+        result = scorer.score("blue house quickly", "bleu maison vite")
 
-        # Temporarily clear special token IDs to prevent any skipping
-        scorer._special_token_ids = set()
-        words = scorer._group_tokens_into_words(tokens, token_log_probs, top_k_ids, label_ids)
+    bleu = next(word for word in result.word_scores if word.word == "bleu")
+    maison = next(word for word in result.word_scores if word.word == "maison")
 
-        # "hello" is one word, "world" + "!" are two words
-        # "!" does not start with ▁, so it continues "world" → "world!"
-        assert len(words) == 2
-        assert words[0].word == "hello"
-        assert words[1].word == "world!"
+    assert bleu.forward_log_prob == -1.0
+    assert bleu.right_context_log_prob == -4.5
+    assert bleu.contextual_log_prob == -5.5
+    assert bleu.is_low_probability
+    assert maison.contextual_log_prob < maison.forward_log_prob
 
-    def test_continuation_tokens_merged(self):
-        """Test that tokens without ▁ are merged with the previous word."""
-        model, tokenizer = _make_mock_model_and_tokenizer()
-        scorer = TranslationScorer(model, tokenizer)
-        scorer._special_token_ids = set()
 
-        tokens = ["▁walk", "ing"]
-        token_log_probs = [-0.5, -0.3]
-        label_ids = [101, 102]
-        top_k_ids = [[1, 2, 3, 4, 5, 6]] * 2
+def test_phrase_scores_are_length_normalized_for_variable_length_phrases():
+    scorer = make_scorer(low_prob_threshold=-3.0, max_phrase_words=3)
+    scores = {
+        "bleu maison vite": build_sequence("bleu maison vite", [-1.0, -5.0, -0.5]),
+        "maison vite": build_sequence("maison vite", [-0.5, -0.5]),
+        "bleu vite": build_sequence("bleu vite", [-1.0, -0.2]),
+        "vite": build_sequence("vite", [-0.2]),
+        "bleu maison": build_sequence("bleu maison", [-1.0, -0.3]),
+    }
 
-        words = scorer._group_tokens_into_words(tokens, token_log_probs, top_k_ids, label_ids)
-        assert len(words) == 1
-        assert words[0].word == "walking"
-        assert len(words[0].tokens) == 2
+    with (
+        patch.object(scorer, "_encode_source", return_value={}),
+        patch.object(scorer, "_score_translation_text", side_effect=lambda _ctx, text, _cache: scores[text]),
+        patch.object(scorer, "_generate_candidate_phrases", return_value=[]),
+    ):
+        result = scorer.score("blue house quickly", "bleu maison vite")
 
-    def test_special_tokens_skipped(self):
-        """Special tokens (EOS, BOS, lang codes) should not appear as words."""
-        model, tokenizer = _make_mock_model_and_tokenizer()
-        scorer = TranslationScorer(model, tokenizer)
+    phrase = next(score for score in result.phrase_scores if score.phrase == "bleu maison")
+    assert isinstance(phrase, PhraseScore)
+    assert phrase.forward_log_prob == -6.0
+    assert phrase.right_context_log_prob == -0.3
+    assert phrase.contextual_log_prob == -6.3
+    assert phrase.normalized_log_prob == -3.15
+    assert phrase.is_low_probability
 
-        # Get some real special token IDs
-        eos_id = tokenizer.eos_token_id
-        special_ids = {eos_id}
-        scorer._special_token_ids = special_ids
 
-        tokens = ["▁hello", tokenizer.eos_token]
-        token_log_probs = [-1.0, 0.0]
-        label_ids = [101, eos_id]
-        top_k_ids = [[1, 2, 3, 4, 5, 6]] * 2
+def test_replacement_suggestions_are_rescored_with_right_context_and_can_change_length():
+    scorer = make_scorer(low_prob_threshold=-3.0, top_k_suggestions=3, max_phrase_words=2)
+    scores = {
+        "bleu maison vite": build_sequence("bleu maison vite", [-1.0, -5.0, -0.5]),
+        "maison vite": build_sequence("maison vite", [-0.5, -0.5]),
+        "blue maison vite": build_sequence("blue maison vite", [-0.8, -0.2, -0.5]),
+        "blue house maison vite": build_sequence("blue house maison vite", [-0.7, -0.3, -0.3, -0.4]),
+        "azure maison vite": build_sequence("azure maison vite", [-1.5, -0.6, -0.8]),
+        "bleu vite": build_sequence("bleu vite", [-1.0, -0.2]),
+        "blue vite": build_sequence("blue vite", [-0.7, -0.2]),
+        "blue house vite": build_sequence("blue house vite", [-0.7, -0.4, -0.1]),
+        "azure vite": build_sequence("azure vite", [-1.3, -0.3]),
+        "vite": build_sequence("vite", [-0.2]),
+    }
 
-        words = scorer._group_tokens_into_words(tokens, token_log_probs, top_k_ids, label_ids)
-        # EOS token should be skipped; only "hello" remains
-        assert len(words) == 1
-        assert words[0].word == "hello"
+    with (
+        patch.object(scorer, "_encode_source", return_value={}),
+        patch.object(scorer, "_score_translation_text", side_effect=lambda _ctx, text, _cache: scores[text]),
+        patch.object(scorer, "_generate_candidate_phrases", return_value=["blue", "blue house", "azure"]),
+    ):
+        result = scorer.score("blue house quickly", "bleu maison vite")
+
+    bleu = next(word for word in result.word_scores if word.word == "bleu")
+    phrase = next(score for score in result.phrase_scores if score.phrase == "bleu maison")
+
+    assert [suggestion.phrase for suggestion in bleu.suggestions] == ["blue house", "blue", "azure"]
+    assert bleu.suggestions[0].normalized_log_prob > bleu.suggestions[1].normalized_log_prob
+    assert bleu.suggestions[0].improvement > 0
+
+    assert [suggestion.phrase for suggestion in phrase.suggestions] == ["blue house", "blue", "azure"]
+    assert phrase.suggestions[0].phrase == "blue house"
+    assert phrase.suggestions[0].normalized_log_prob > phrase.normalized_log_prob
+
+
+def test_sequence_log_probability_still_tracks_forward_sentence_score():
+    scorer = make_scorer(low_prob_threshold=-10.0, max_phrase_words=1)
+    scores = {
+        "bleu maison": build_sequence("bleu maison", [-1.0, -2.0]),
+        "maison": build_sequence("maison", [-0.5]),
+    }
+
+    with (
+        patch.object(scorer, "_encode_source", return_value={}),
+        patch.object(scorer, "_score_translation_text", side_effect=lambda _ctx, text, _cache: scores[text]),
+        patch.object(scorer, "_generate_candidate_phrases", return_value=[]),
+    ):
+        result = scorer.score("blue house", "bleu maison")
+
+    assert result.sequence_log_prob == -3.0
+    assert all(isinstance(token, TokenScore) for word in result.word_scores for token in word.tokens)
