@@ -39,6 +39,7 @@ silnlp-nmt-preprocess = "silnlp.nmt.preprocess:main"
 silnlp-nmt-train = "silnlp.nmt.train:main"
 silnlp-nmt-test = "silnlp.nmt.test:main"
 silnlp-nmt-translate = "silnlp.nmt.translate:main"
+silnlp-nmt-score-webapp = "silnlp.nmt.translation_scorer_webapp:main"
 
 silnlp-alignment-preprocess = "silnlp.alignment.preprocess:main"
 silnlp-alignment-align = "silnlp.alignment.align:main"
@@ -122,4 +123,3 @@ eflomal = ["eflomal"]
 name = "torch"
 url = "https://download.pytorch.org/whl/cu121"
 priority = "explicit"
-
