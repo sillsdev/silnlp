@@ -442,7 +442,9 @@ class Translator(AbstractContextManager["Translator"], ABC):
                 postprocess_remark = config.get_postprocess_remark()
                 draft_src_str = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
                 chapters_for_remarks = (
-                    chapters if chapters else sorted({sr.verse_ref.chapter_num for sr in scripture_refs})
+                    chapters
+                    if chapters
+                    else sorted({sr.verse_ref.chapter_num for sr in translated_text_rows.get_scripture_refs()})
                 )
                 for chapter_num in chapters_for_remarks:
                     draft_remark = (
