@@ -12,8 +12,6 @@ from typing import Any
 import torch
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
-from silnlp.common.iso_info import NLLB_TAGS
-
 LOGGER = logging.getLogger(__name__)
 MODEL_NAME = "facebook/nllb-200-distilled-600M"
 
@@ -23,6 +21,7 @@ class SuggestionService:
     model: Any
     tokenizer: Any
     device: torch.device
+    language_codes: list[str]
 
     @classmethod
     def create(cls, model_name: str = MODEL_NAME) -> "SuggestionService":
@@ -31,8 +30,9 @@ class SuggestionService:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model.to(device)
         model.eval()
+        language_codes = sorted(tokenizer.lang_code_to_id)
         LOGGER.info("Loaded %s on %s", model_name, device)
-        return cls(model=model, tokenizer=tokenizer, device=device)
+        return cls(model=model, tokenizer=tokenizer, device=device, language_codes=language_codes)
 
     def suggest(self, source_text: str, partial_translation: str, src_lang: str, tgt_lang: str) -> str:
         if not source_text.strip():
@@ -71,10 +71,14 @@ def _remaining_completion(partial_translation: str, full_translation: str) -> st
     return ""
 
 
-def _html_page(default_src_lang: str, default_tgt_lang: str) -> str:
-    options = "\n".join(
-        f'<option value="{escape(code)}" {"selected" if code in {default_src_lang, default_tgt_lang} else ""}>{escape(code)}</option>'
-        for code in NLLB_TAGS
+def _html_page(default_src_lang: str, default_tgt_lang: str, language_codes: list[str]) -> str:
+    src_options = "\n".join(
+        f'<option value="{escape(code)}" {"selected" if code == default_src_lang else ""}>{escape(code)}</option>'
+        for code in language_codes
+    )
+    tgt_options = "\n".join(
+        f'<option value="{escape(code)}" {"selected" if code == default_tgt_lang else ""}>{escape(code)}</option>'
+        for code in language_codes
     )
 
     return f"""<!doctype html>
@@ -97,11 +101,11 @@ def _html_page(default_src_lang: str, default_tgt_lang: str) -> str:
   <div class=\"toolbar\">
     <div class=\"pane\">
       <label for=\"srcLang\">Source language code</label>
-      <select id=\"srcLang\">{options}</select>
+      <select id=\"srcLang\">{src_options}</select>
     </div>
     <div class=\"pane\">
       <label for=\"tgtLang\">Target language code</label>
-      <select id=\"tgtLang\">{options}</select>
+      <select id=\"tgtLang\">{tgt_options}</select>
     </div>
   </div>
   <div class=\"columns\">
@@ -191,6 +195,7 @@ class NllbDemoHandler(BaseHTTPRequestHandler):
     service: SuggestionService
     default_src_lang: str
     default_tgt_lang: str
+    language_codes: set[str]
 
     def _set_headers(self, status: HTTPStatus, content_type: str) -> None:
         self.send_response(status)
@@ -203,7 +208,7 @@ class NllbDemoHandler(BaseHTTPRequestHandler):
             self.wfile.write(b"Not found")
             return
 
-        html = _html_page(self.default_src_lang, self.default_tgt_lang)
+        html = _html_page(self.default_src_lang, self.default_tgt_lang, sorted(self.language_codes))
         self._set_headers(HTTPStatus.OK, "text/html; charset=utf-8")
         self.wfile.write(html.encode("utf-8"))
 
@@ -223,7 +228,7 @@ class NllbDemoHandler(BaseHTTPRequestHandler):
             src_lang = str(payload.get("src_lang", self.default_src_lang))
             tgt_lang = str(payload.get("tgt_lang", self.default_tgt_lang))
 
-            if src_lang not in NLLB_TAGS or tgt_lang not in NLLB_TAGS:
+            if src_lang not in self.language_codes or tgt_lang not in self.language_codes:
                 raise ValueError("Unsupported language code")
 
             suggestion = self.service.suggest(source_text, partial_translation, src_lang, tgt_lang)
@@ -244,16 +249,18 @@ def main() -> None:
     parser.add_argument("--tgt-lang", default="fra_Latn")
     args = parser.parse_args()
 
-    if args.src_lang not in NLLB_TAGS or args.tgt_lang not in NLLB_TAGS:
-        raise ValueError("--src-lang and --tgt-lang must be valid NLLB language tags")
-
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     service = SuggestionService.create(MODEL_NAME)
+    language_codes = set(service.language_codes)
+
+    if args.src_lang not in language_codes or args.tgt_lang not in language_codes:
+        raise ValueError("--src-lang and --tgt-lang must be valid NLLB language tags for the selected model")
 
     NllbDemoHandler.service = service
     NllbDemoHandler.default_src_lang = args.src_lang
     NllbDemoHandler.default_tgt_lang = args.tgt_lang
+    NllbDemoHandler.language_codes = language_codes
 
     server = ThreadingHTTPServer((args.host, args.port), NllbDemoHandler)
     LOGGER.info("Starting server at http://%s:%d", args.host, args.port)

@@ -7,6 +7,19 @@ SIL NLP provides a set of pipelines for performing experiments on various NLP ta
 - Neural Machine Translation
 - Statistical Machine Translation
 - Word Alignment
+
+## NLLB suggestion web prototype
+
+Run the prototype app with:
+
+```
+python -m silnlp.nmt.nllb_web_demo --host 127.0.0.1 --port 8000 --src-lang eng_Latn --tgt-lang fra_Latn
+```
+
+This loads the `facebook/nllb-200-distilled-600M` model and serves a browser UI with:
+- source and target language dropdowns containing all language codes supported by the NLLB 600M model
+- a source textbox on the left and translation textbox on the right
+- server-side suggestions as the target text is typed, accepted with `Tab`
 ---
 
 ## SILNLP Prerequisites
