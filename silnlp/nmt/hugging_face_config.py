@@ -978,7 +978,6 @@ class HuggingFaceTranslationSuggester(TranslationSuggester):
         model: "HuggingFaceNMTModel",
         pipeline: "SilTranslationPipeline",
         tokenizer: PreTrainedTokenizer,
-        source_sentence: str,
         confidence_threshold: float,
         max_new_tokens: int,
         num_beams: Optional[int],
@@ -986,12 +985,11 @@ class HuggingFaceTranslationSuggester(TranslationSuggester):
         self._model = model
         self._pipeline = pipeline
         self._tokenizer = tokenizer
-        self._source_sentence = source_sentence
         self._confidence_threshold = confidence_threshold
         self._max_new_tokens = max_new_tokens
         self._num_beams = num_beams
 
-    def suggestion_translation(self, partial_translation: str) -> Optional[str]:
+    def suggestion_translation(self, source_sentence: str, partial_translation: str) -> Optional[str]:
         prefix, partial_word = self._model._split_partial_translation(partial_translation)
         decoder_input_ids = self._model._build_decoder_input_ids(self._tokenizer, self._pipeline.model, prefix)
         generate_kwargs: Dict[str, Any] = {
@@ -1011,7 +1009,7 @@ class HuggingFaceTranslationSuggester(TranslationSuggester):
                 self._tokenizer, decoder_input_length, partial_word
             )
 
-        outputs = self._pipeline([self._source_sentence], **generate_kwargs)
+        outputs = self._pipeline([source_sentence], **generate_kwargs)
         if len(outputs) == 0:
             return None
 
@@ -1478,7 +1476,6 @@ class HuggingFaceNMTModel(NMTModel):
 
     def create_translation_suggester(
         self,
-        source_sentence: str,
         src_iso: str,
         trg_iso: str,
         confidence_threshold: float = 0.5,
@@ -1498,7 +1495,7 @@ class HuggingFaceNMTModel(NMTModel):
             device=pipeline_device,
         )
         return HuggingFaceTranslationSuggester(
-            self, pipeline, tokenizer, source_sentence, confidence_threshold, max_new_tokens, num_beams
+            self, pipeline, tokenizer, confidence_threshold, max_new_tokens, num_beams
         )
 
     def _split_partial_translation(self, partial_translation: str) -> Tuple[str, str]:

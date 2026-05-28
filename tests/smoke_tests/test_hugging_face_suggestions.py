@@ -164,8 +164,8 @@ def test_suggestion_translation_returns_remaining_characters_for_partial_word(mo
         model, "_get_inference_components", lambda *args, **kwargs: (FakeModel(), tokenizer, "en", "en")
     )
 
-    suggester = model.create_translation_suggester("source", "en", "en", confidence_threshold=0.95)
-    suggestion = suggester.suggestion_translation("cra")
+    suggester = model.create_translation_suggester("en", "en", confidence_threshold=0.95)
+    suggestion = suggester.suggestion_translation("source", "cra")
 
     assert suggestion == "b"
     assert isinstance(captured_kwargs["prefix_allowed_tokens_fn"], PartialWordPrefixConstraint)
@@ -198,8 +198,8 @@ def test_suggestion_translation_returns_none_for_low_confidence_next_word(monkey
         model, "_get_inference_components", lambda *args, **kwargs: (FakeModel(), tokenizer, "en", "en")
     )
 
-    suggester = model.create_translation_suggester("source", "en", "en", confidence_threshold=0.5)
-    suggestion = suggester.suggestion_translation("hello ")
+    suggester = model.create_translation_suggester("en", "en", confidence_threshold=0.5)
+    suggestion = suggester.suggestion_translation("source", "hello ")
 
     assert suggestion is None
     assert "prefix_allowed_tokens_fn" not in captured_kwargs

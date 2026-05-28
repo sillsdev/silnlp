@@ -93,7 +93,6 @@ class NMTModel(ABC):
     @abstractmethod
     def create_translation_suggester(
         self,
-        source_sentence: str,
         src_iso: str,
         trg_iso: str,
         confidence_threshold: float = 0.5,
@@ -113,7 +112,7 @@ class NMTModel(ABC):
 
 class TranslationSuggester(ABC):
     @abstractmethod
-    def suggestion_translation(self, partial_translation: str) -> Optional[str]: ...
+    def suggestion_translation(self, source_sentence: str, partial_translation: str) -> Optional[str]: ...
 
 
 class Config(ABC):
