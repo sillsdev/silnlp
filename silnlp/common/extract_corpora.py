@@ -107,7 +107,7 @@ def extract_corpora(
                     f"The number of completed verses is {verse_count} (out of the expected {expected_verse_count})."
                 )
             if line_count != expected_verse_count:
-                LOGGER.error(
+                raise ValueError(
                     f"The number of lines in the corpus file is {line_count}, which is not equal to the expected {expected_verse_count}."
                 )
             terms_count = extract_term_renderings(
