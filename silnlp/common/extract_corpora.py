@@ -106,9 +106,9 @@ def extract_corpora(
                 LOGGER.info(
                     f"The number of completed verses is {verse_count} (out of the expected {expected_verse_count})."
                 )
-            if line_count > expected_verse_count:
-                LOGGER.warning(
-                    f"The number of lines in the corpus file is {line_count}, which is greater than the expected {expected_verse_count}."
+            if line_count != expected_verse_count:
+                LOGGER.error(
+                    f"The number of lines in the corpus file is {line_count}, which is not equal to the expected {expected_verse_count}."
                 )
             terms_count = extract_term_renderings(
                 project_dir, corpus_filename, environment.mt_terms_dir, extract_surface_forms, environment
