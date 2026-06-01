@@ -1,4 +1,5 @@
 import gc
+import gzip
 import json
 import logging
 import os
@@ -8,7 +9,6 @@ from contextlib import ExitStack
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
-from functools import lru_cache
 from itertools import repeat
 from math import prod
 from pathlib import Path
@@ -59,6 +59,7 @@ from transformers import (
     set_seed,
 )
 from transformers.convert_slow_tokenizer import convert_slow_tokenizer
+from transformers.generation.logits_process import LogitsProcessor, LogitsProcessorList
 from transformers.modeling_utils import unwrap_model
 from transformers.tokenization_utils import BatchEncoding, TruncationStrategy
 from transformers.trainer import TRAINING_ARGS_NAME
@@ -86,7 +87,79 @@ if is_safetensors_available():
     import safetensors.torch
 
 LOGGER = logging.getLogger(__name__)
-PARTIAL_WORD_PREFIX_CACHE_SIZE = 4096
+PARTIAL_WORD_TOKEN_CONSTRAINT_ARTIFACT = "partial_word_first_step_allowed_token_ids.json.gz"
+
+# (allowed_by_partial_word, prefix_to_token_ids, text_to_token_ids)
+ConstraintIndexes = Tuple[
+    Optional[Dict[str, List[int]]],
+    Optional[Dict[str, List[int]]],
+    Optional[Dict[str, List[int]]],
+]
+
+
+def load_partial_word_constraint_indexes(tokenizer: "PreTrainedTokenizer") -> ConstraintIndexes:
+    """Load the pre-computed partial-word constraint artifact for *tokenizer*.
+
+    This is the same data that ``PartialWordConstraintLogitsProcessor`` loads on
+    first use, exposed here so callers can load it once and pass the result in via
+    the ``preloaded_constraint_indexes`` constructor argument, avoiding repeated
+    disk I/O per request.
+    """
+    name_or_path = getattr(tokenizer, "name_or_path", "")
+    workspace_root = Path(__file__).resolve().parents[2]
+
+    candidate_dirs: List[Path] = [
+        SIL_NLP_ENV.assets_dir / "nllb-200",
+        SIL_NLP_ENV.assets_dir / "tokenizers" / "facebook" / "nllb-200",
+    ]
+
+    if len(name_or_path) > 0:
+        tokenizer_path = Path(name_or_path)
+        candidate_dirs.append(tokenizer_path)
+        if not tokenizer_path.is_absolute():
+            candidate_dirs.append(Path.cwd() / tokenizer_path)
+            candidate_dirs.append(workspace_root / tokenizer_path)
+
+    seen_dirs: Set[Path] = set()
+    unique_candidate_dirs: List[Path] = []
+    for candidate_dir in candidate_dirs:
+        if candidate_dir not in seen_dirs:
+            seen_dirs.add(candidate_dir)
+            unique_candidate_dirs.append(candidate_dir)
+
+    for candidate_dir in unique_candidate_dirs:
+        artifact_path = candidate_dir / PARTIAL_WORD_TOKEN_CONSTRAINT_ARTIFACT
+        if not artifact_path.is_file():
+            continue
+
+        try:
+            with gzip.open(artifact_path, "rt", encoding="utf-8") as file:
+                data = json.load(file)
+
+            if isinstance(data, dict):
+                allowed_by_partial = data.get("allowed_token_ids_by_partial_word")
+                prefix_to_token_ids = data.get("prefix_to_token_ids")
+                text_to_token_ids = data.get("text_to_token_ids")
+
+                LOGGER.info("Loaded partial-word constraint artifact from %s", artifact_path)
+                return (
+                    cast(Optional[Dict[str, List[int]]], allowed_by_partial) if isinstance(allowed_by_partial, dict) else None,
+                    cast(Optional[Dict[str, List[int]]], prefix_to_token_ids) if isinstance(prefix_to_token_ids, dict) else None,
+                    cast(Optional[Dict[str, List[int]]], text_to_token_ids) if isinstance(text_to_token_ids, dict) else None,
+                )
+        except (OSError, json.JSONDecodeError) as e:
+            LOGGER.warning(
+                "Failed to load artifact from %s: %s. Falling back to runtime computation.",
+                artifact_path,
+                e,
+            )
+            return None, None, None
+
+    LOGGER.warning(
+        "Artifact file not found. Tried: %s. Falling back to runtime computation.",
+        ", ".join(str(d / PARTIAL_WORD_TOKEN_CONSTRAINT_ARTIFACT) for d in unique_candidate_dirs),
+    )
+    return None, None, None
 
 
 def prepare_decoder_input_ids_from_labels(self: M2M100ForConditionalGeneration, labels: Tensor) -> Tensor:
@@ -939,37 +1012,177 @@ class InferenceModelParams:
             raise ValueError("trg_lang must be a string")
 
 
-class PartialWordPrefixConstraint:
-    def __init__(self, tokenizer: PreTrainedTokenizer, prompt_length: int, partial_word: str) -> None:
+class PartialWordConstraintLogitsProcessor(LogitsProcessor):
+    """Constrains generation across multiple steps until the partial word is matched.
+
+    The processor tracks which prefix of the user's partial word has already been
+    generated and constrains each next-token step to tokens that can still produce
+    a completion that starts with that partial word.
+    """
+
+    def __init__(
+        self,
+        tokenizer: PreTrainedTokenizer,
+        prompt_length: int,
+        partial_word: str,
+        preloaded_constraint_indexes: Optional[ConstraintIndexes] = None,
+    ) -> None:
         self._tokenizer = tokenizer
         self._prompt_length = prompt_length
-        self._partial_word = partial_word
-        self._token_ids = sorted(set(tokenizer.get_vocab().values()))
         self._eos_token_id = tokenizer.eos_token_id
+        self._all_special_ids = set(tokenizer.all_special_ids)
+        self._normalized_partial_word = self._normalize_partial_word(partial_word)
+        self._matched_prefix_len = 0
+        self._processed_generated_len = 0
+        self._constraints_complete = len(self._normalized_partial_word) == 0
+        self._warned_non_greedy = False
+        self._allowed_token_ids_cache: Dict[str, List[int]] = {}
 
-    def __call__(self, batch_id: int, input_ids: torch.Tensor) -> List[int]:
-        del batch_id
+        if preloaded_constraint_indexes is not None:
+            (
+                self._allowed_token_ids_by_partial_word,
+                self._prefix_to_token_ids,
+                self._text_to_token_ids,
+            ) = preloaded_constraint_indexes
+        else:
+            (
+                self._allowed_token_ids_by_partial_word,
+                self._prefix_to_token_ids,
+                self._text_to_token_ids,
+            ) = self._load_constraint_indexes()
 
-        generated_ids = tuple(cast(List[int], input_ids[self._prompt_length :].tolist()))
-        generated_text = self._decode(generated_ids)
-        if generated_text.startswith(self._partial_word):
-            return self._token_ids
+        # Backward-compatible fallback when only the old artifact schema is available.
+        if self._prefix_to_token_ids is None or self._text_to_token_ids is None:
+            self._text_to_token_ids, self._prefix_to_token_ids = self._build_runtime_constraint_indexes()
 
-        allowed_token_ids: List[int] = []
-        for token_id in self._token_ids:
-            candidate_text = self._decode(generated_ids + (token_id,))
-            if candidate_text == generated_text:
-                continue
-            if self._partial_word.startswith(candidate_text) or candidate_text.startswith(self._partial_word):
-                allowed_token_ids.append(token_id)
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
+        if self._constraints_complete:
+            return scores
 
-        if len(allowed_token_ids) == 0 and self._eos_token_id is not None:
-            return [self._eos_token_id]
-        return allowed_token_ids
+        # This processor assumes greedy search (single hypothesis).
+        if input_ids.shape[0] != 1:
+            if not self._warned_non_greedy:
+                LOGGER.warning("PartialWordConstraintLogitsProcessor expects greedy decoding (batch size 1).")
+                self._warned_non_greedy = True
+            return scores
 
-    @lru_cache(maxsize=PARTIAL_WORD_PREFIX_CACHE_SIZE)
-    def _decode(self, token_ids: Tuple[int, ...]) -> str:
-        return self._tokenizer.decode(token_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)
+        generated_ids = input_ids[0, self._prompt_length :]
+        generated_length = int(generated_ids.shape[0])
+        if generated_length < self._processed_generated_len:
+            self._matched_prefix_len = 0
+            self._processed_generated_len = 0
+
+        if generated_length > self._processed_generated_len:
+            new_token_ids = generated_ids[self._processed_generated_len :].tolist()
+            for token_id in new_token_ids:
+                next_prefix_len = self._transition(self._matched_prefix_len, int(token_id))
+                if next_prefix_len is None:
+                    # Should not happen if previous step was constrained; fail open.
+                    self._constraints_complete = True
+                    return scores
+                self._matched_prefix_len = next_prefix_len
+                if self._matched_prefix_len >= len(self._normalized_partial_word):
+                    self._constraints_complete = True
+                    self._processed_generated_len = generated_length
+                    return scores
+            self._processed_generated_len = generated_length
+
+        remaining = self._normalized_partial_word[self._matched_prefix_len :]
+        allowed_token_ids = self._lookup_or_compute_allowed_token_ids(remaining)
+
+        if len(allowed_token_ids) == 0:
+            if self._eos_token_id is not None:
+                mask = torch.full_like(scores, float("-inf"))
+                mask[:, self._eos_token_id] = 0.0
+                return scores + mask
+            return scores
+
+        mask = torch.full_like(scores, float("-inf"))
+        mask[:, torch.tensor(allowed_token_ids, dtype=torch.long, device=scores.device)] = 0.0
+        return scores + mask
+
+    def _load_constraint_indexes(self) -> ConstraintIndexes:
+        return load_partial_word_constraint_indexes(self._tokenizer)
+
+    def _build_runtime_constraint_indexes(self) -> Tuple[Dict[str, List[int]], Dict[str, List[int]]]:
+        text_to_token_ids: Dict[str, List[int]] = {}
+        prefix_to_token_ids: Dict[str, List[int]] = {}
+
+        for token_id in sorted(set(self._tokenizer.get_vocab().values())):
+            for token_text in self._get_token_prefix_variants(token_id):
+                token_ids = text_to_token_ids.setdefault(token_text, [])
+                token_ids.append(token_id)
+                for i in range(1, len(token_text) + 1):
+                    prefix = token_text[:i]
+                    prefixed_ids = prefix_to_token_ids.setdefault(prefix, [])
+                    prefixed_ids.append(token_id)
+
+        return text_to_token_ids, prefix_to_token_ids
+
+    def _lookup_or_compute_allowed_token_ids(self, remaining_partial_word: str) -> List[int]:
+        cached = self._allowed_token_ids_cache.get(remaining_partial_word)
+        if cached is not None:
+            return cached
+
+        if self._allowed_token_ids_by_partial_word is not None:
+            artifact_allowed = self._allowed_token_ids_by_partial_word.get(remaining_partial_word)
+            if artifact_allowed is not None and len(artifact_allowed) > 0:
+                self._allowed_token_ids_cache[remaining_partial_word] = artifact_allowed
+                return artifact_allowed
+
+        allowed = self._compute_allowed_token_ids(remaining_partial_word)
+        self._allowed_token_ids_cache[remaining_partial_word] = allowed
+        return allowed
+
+    def _compute_allowed_token_ids(self, remaining_partial_word: str) -> List[int]:
+        if len(remaining_partial_word) == 0:
+            return []
+
+        allowed_ids: Set[int] = set()
+        if self._prefix_to_token_ids is not None:
+            allowed_ids.update(self._prefix_to_token_ids.get(remaining_partial_word, []))
+        if self._text_to_token_ids is not None:
+            for i in range(1, len(remaining_partial_word) + 1):
+                allowed_ids.update(self._text_to_token_ids.get(remaining_partial_word[:i], []))
+        return sorted(allowed_ids)
+
+    def _transition(self, matched_prefix_len: int, token_id: int) -> Optional[int]:
+        remaining = self._normalized_partial_word[matched_prefix_len:]
+        if len(remaining) == 0:
+            return matched_prefix_len
+
+        for candidate_text in self._get_token_prefix_variants(token_id):
+            if remaining.startswith(candidate_text):
+                return matched_prefix_len + len(candidate_text)
+            if candidate_text.startswith(remaining):
+                return len(self._normalized_partial_word)
+        return None
+
+    def _get_token_prefix_variants(self, token_id: int) -> Set[str]:
+        if token_id in self._all_special_ids:
+            return set()
+
+        token = self._tokenizer.convert_ids_to_tokens(token_id)
+        if token is None or len(token) == 0:
+            return set()
+
+        return {token}
+
+    def _normalize_partial_word(self, partial_word: str) -> str:
+        # With SentencePiece tokenizers, leading spaces are represented with U+2581.
+        if partial_word.startswith(" "):
+            stripped = partial_word.lstrip(" ")
+            return "\u2581" + stripped
+        return partial_word
+
+
+def _suggestion_token_starts_word(added_text: str, token_str: Optional[str]) -> bool:
+    # SentencePiece marks the start of a word with U+2581, which decodes to a regular
+    # space; some tokenizers also emit whitespace as standalone tokens. Either way, a
+    # leading space in the decoded text (or the raw token) signals the start of a new word.
+    if added_text.startswith((" ", "▁")):
+        return True
+    return token_str is not None and token_str.startswith("▁")
 
 
 class HuggingFaceTranslationSuggester(TranslationSuggester):
@@ -981,6 +1194,7 @@ class HuggingFaceTranslationSuggester(TranslationSuggester):
         confidence_threshold: float,
         max_new_tokens: int,
         num_beams: Optional[int],
+        constraint_indexes: Optional[ConstraintIndexes] = None,
     ) -> None:
         self._model = model
         self._pipeline = pipeline
@@ -988,15 +1202,17 @@ class HuggingFaceTranslationSuggester(TranslationSuggester):
         self._confidence_threshold = confidence_threshold
         self._max_new_tokens = max_new_tokens
         self._num_beams = num_beams
+        self._constraint_indexes = constraint_indexes
 
     def suggestion_translation(self, source_sentence: str, partial_translation: str) -> Optional[str]:
-        prefix, partial_word = self._model._split_partial_translation(partial_translation)
+        prefix, partial_word = self._model._split_partial_translation(self._tokenizer, partial_translation)
         decoder_input_ids = self._model._build_decoder_input_ids(self._tokenizer, self._pipeline.model, prefix)
         generate_kwargs: Dict[str, Any] = {
             "batch_size": 1,
             "clean_up_tokenization_spaces": False,
+            "do_sample": False,
             "max_new_tokens": self._max_new_tokens,
-            "num_beams": self._num_beams,
+            "num_beams": 1,
             "num_return_sequences": 1,
             "return_tensors": False,
             "return_text": True,
@@ -1005,28 +1221,21 @@ class HuggingFaceTranslationSuggester(TranslationSuggester):
             generate_kwargs["decoder_input_ids"] = decoder_input_ids
         if len(partial_word) > 0:
             decoder_input_length = 0 if decoder_input_ids is None else decoder_input_ids.shape[1]
-            generate_kwargs["prefix_allowed_tokens_fn"] = PartialWordPrefixConstraint(
-                self._tokenizer, decoder_input_length, partial_word
+            generate_kwargs["logits_processor"] = LogitsProcessorList(
+                [PartialWordConstraintLogitsProcessor(self._tokenizer, decoder_input_length, partial_word, self._constraint_indexes)]
             )
 
         outputs = self._pipeline([source_sentence], **generate_kwargs)
         if len(outputs) == 0:
             return None
 
-        suggestion = self._model._extract_suggestion_text(partial_translation, outputs[0]["translation_text"])
-        if suggestion is None:
-            return None
-
-        confidence = self._model._get_suggestion_confidence(
+        return self._model._extract_suggestion_text(
             self._tokenizer,
+            partial_translation,
             outputs[0]["translation_token_ids"],
             outputs[0]["token_scores"],
-            partial_translation,
-            suggestion,
+            self._confidence_threshold,
         )
-        if confidence < self._confidence_threshold:
-            return None
-        return suggestion
 
 
 class HuggingFaceNMTModel(NMTModel):
@@ -1498,17 +1707,32 @@ class HuggingFaceNMTModel(NMTModel):
             self, pipeline, tokenizer, confidence_threshold, max_new_tokens, num_beams
         )
 
-    def _split_partial_translation(self, partial_translation: str) -> Tuple[str, str]:
-        stripped_translation = partial_translation.rstrip()
-        if len(stripped_translation) != len(partial_translation):
-            return partial_translation, ""
-        if len(stripped_translation) == 0:
-            return partial_translation, ""
+    def _split_partial_translation(self, tokenizer: PreTrainedTokenizer, partial_translation: str) -> Tuple[str, str]:
+        del tokenizer
 
-        match = re.match(r"^(.*?)(\S+)$", stripped_translation, re.DOTALL)
-        if match is None:
-            return "", stripped_translation
-        return match.group(1), match.group(2)
+        if len(partial_translation) == 0:
+            return "", ""
+
+        if partial_translation[-1].isspace():
+            trailing_whitespace_start = len(partial_translation) - 1
+            while trailing_whitespace_start > 0 and partial_translation[trailing_whitespace_start - 1].isspace():
+                trailing_whitespace_start -= 1
+            return partial_translation[:trailing_whitespace_start], partial_translation[trailing_whitespace_start:]
+
+        first_non_whitespace_in_suffix = len(partial_translation) - 1
+        while first_non_whitespace_in_suffix >= 0 and not partial_translation[first_non_whitespace_in_suffix].isspace():
+            first_non_whitespace_in_suffix -= 1
+
+        if first_non_whitespace_in_suffix < 0:
+            return "", partial_translation
+
+        # Keep the contiguous whitespace that leads into the current word as part
+        # of the partial word to align with SentencePiece metaspace behavior.
+        partial_word_start = first_non_whitespace_in_suffix
+        while partial_word_start > 0 and partial_translation[partial_word_start - 1].isspace():
+            partial_word_start -= 1
+
+        return partial_translation[:partial_word_start], partial_translation[partial_word_start:]
 
     def _build_decoder_input_ids(
         self, tokenizer: PreTrainedTokenizer, model: PreTrainedModel, prefix: str
@@ -1535,62 +1759,91 @@ class HuggingFaceNMTModel(NMTModel):
             prefix_ids = torch.cat([decoder_start, prefix_ids], dim=1)
         return cast(torch.LongTensor, prefix_ids.to(model.device))
 
-    def _extract_suggestion_text(self, partial_translation: str, generated_translation: str) -> Optional[str]:
-        if not generated_translation.startswith(partial_translation):
-            return None
-
-        remaining = generated_translation[len(partial_translation) :]
-        if len(remaining) == 0:
-            return None
-
-        if partial_translation.endswith(" "):
-            # When the user has completed the current word, only suggest the next word.
-            remaining = remaining.lstrip()
-            if len(remaining) == 0:
-                return None
-
-        whitespace_match = re.search(r"\s", remaining)
-        if whitespace_match is None:
-            return remaining
-        if whitespace_match.start() == 0:
-            return None
-        return remaining[: whitespace_match.start()]
-
-    def _get_suggestion_confidence(
+    def _extract_suggestion_text(
         self,
         tokenizer: PreTrainedTokenizer,
+        partial_translation: str,
         translation_token_ids: List[int],
         token_scores: Union[List[float], torch.Tensor],
-        partial_translation: str,
-        suggestion: str,
-    ) -> float:
-        suggestion_end = len(partial_translation) + len(suggestion)
-        prefix_end = len(partial_translation)
+        confidence_threshold: float,
+    ) -> Optional[str]:
         if isinstance(token_scores, torch.Tensor):
             token_scores = cast(List[float], token_scores.tolist())
 
-        relevant_token_probs: List[float] = []
-        current_ids: List[int] = []
+        # Walk the generated tokens, decoding incrementally so each token can be lined up
+        # with the text it contributes. We keep the tokens that fall after the text the
+        # user has already typed (the suggestion region), recording for each one the text
+        # it adds, its log-probability, and whether it begins a new word. With
+        # SentencePiece, a new word is marked by a leading space (U+2581), so a token that
+        # starts a fresh word tells us the previous word is complete.
+        prefix_len = len(partial_translation)
+        suggestion_tokens: List[Tuple[str, float, bool]] = []
         previous_text = ""
+        current_ids: List[int] = []
         for token_id, token_score in zip(translation_token_ids, token_scores):
             current_ids.append(token_id)
             current_text = tokenizer.decode(current_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)
             if len(current_text) <= len(previous_text):
+                # Special tokens (e.g. the decoder start token or EOS) add no text.
                 previous_text = current_text
                 continue
 
-            overlap_start = max(prefix_end, len(previous_text))
-            overlap_end = min(suggestion_end, len(current_text))
-            if overlap_end > overlap_start:
-                relevant_token_probs.append(float(np.exp(token_score)))
-
+            if len(current_text) > prefix_len:
+                suggestion_start = max(prefix_len, len(previous_text))
+                suggestion_part = current_text[suggestion_start:]
+                added_text = current_text[len(previous_text) :]
+                token_str = tokenizer.convert_ids_to_tokens(token_id)
+                starts_word = _suggestion_token_starts_word(added_text, token_str)
+                suggestion_tokens.append((suggestion_part, float(token_score), starts_word))
             previous_text = current_text
-            if len(current_text) >= suggestion_end:
-                break
 
-        if len(relevant_token_probs) == 0:
-            return 0.0
-        return min(relevant_token_probs)
+        if not previous_text.startswith(partial_translation) or len(suggestion_tokens) == 0:
+            return None
+
+        ended_with_eos = (
+            tokenizer.eos_token_id is not None
+            and len(translation_token_ids) > 0
+            and translation_token_ids[-1] == tokenizer.eos_token_id
+        )
+
+        # The joint probability of an n-token phrase must clear confidence_threshold ** n,
+        # i.e. each token must on average be at least as confident as the threshold. In log
+        # space this is sum(log p_i) >= n * log(threshold). A threshold of 0 disables the
+        # check and accepts the longest phrase that ends on a word boundary.
+        log_threshold = float(np.log(confidence_threshold)) if confidence_threshold > 0 else float("-inf")
+
+        best_suggestion: Optional[str] = None
+        accumulated = ""
+        joint_log_prob = 0.0
+        num_tokens = 0
+        stopped = False
+        for suggestion_part, token_log_prob, starts_word in suggestion_tokens:
+            if starts_word and num_tokens > 0:
+                # A new word is beginning, so the phrase accumulated so far ends on a word
+                # boundary. Keep extending only while the phrase stays confident enough.
+                if joint_log_prob >= num_tokens * log_threshold:
+                    best_suggestion = accumulated
+                else:
+                    stopped = True
+                    break
+            accumulated += suggestion_part
+            joint_log_prob += token_log_prob
+            num_tokens += 1
+
+        if not stopped and ended_with_eos and num_tokens > 0:
+            # EOS means the model considers the sentence complete, so the final word also
+            # ends on a word boundary.
+            if joint_log_prob >= num_tokens * log_threshold:
+                best_suggestion = accumulated
+
+        if best_suggestion is None:
+            return None
+        if partial_translation.endswith(" "):
+            # The user already typed the separating space, so never lead with whitespace.
+            best_suggestion = best_suggestion.lstrip()
+        if len(best_suggestion) == 0:
+            return None
+        return best_suggestion
 
     def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
         step: Optional[int] = None
