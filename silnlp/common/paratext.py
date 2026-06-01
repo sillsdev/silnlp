@@ -114,11 +114,10 @@ def extract_project(
                 output_stream.write(line + "\n")
                 if output_vref_stream is not None:
                     output_vref_stream.write(("" if project_vref is None else str(project_vref)) + "\n")
+                line_count += 1
                 stripped_line = line.strip()
-                if stripped_line != "<range>":
-                    line_count += 1
-                    if len(stripped_line) > 0 and stripped_line != "...":
-                        verse_count += 1
+                if stripped_line != "<range>" and len(stripped_line) > 0 and stripped_line != "...":
+                    verse_count += 1
         if verse_count == 0:
             if output_filename.is_file():
                 output_filename.unlink()
