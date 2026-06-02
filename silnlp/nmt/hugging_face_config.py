@@ -1836,50 +1836,53 @@ class SilTranslationPipeline(TranslationPipeline):
         generate_kwargs["min_length"] = generate_kwargs.get("min_length", config.min_length)
         generate_kwargs["max_length"] = generate_kwargs.get("max_length", config.max_length)
         self.check_inputs(input_length, generate_kwargs["min_length"], generate_kwargs["max_length"])
-        output = self.model.generate(
-            **model_inputs,
-            **generate_kwargs,
-            generation_config=config,
-            output_scores=True,
-            return_dict_in_generate=True,
-        )
 
-        output_ids = output.sequences
-        beam_indices = getattr(output, "beam_indices", None)
-        transition_scores = self.model.compute_transition_scores(
-            output_ids,
-            output.scores,
-            beam_indices,
-            normalize_logits=True,
-        )
-        sequences_scores = getattr(output, "sequences_scores", None)
-
-        out_b, seq_len = output_ids.shape
-        n_sequences = out_b // in_b
-
-        ts_len = transition_scores.shape[1]
-        if ts_len == seq_len:
-            token_logprobs = transition_scores
-        elif ts_len == seq_len - 1:
-            token_logprobs = torch.cat(
-                [
-                    torch.zeros(out_b, 1, device=transition_scores.device, dtype=transition_scores.dtype),
-                    transition_scores,
-                ],
-                dim=1,
+        with torch.no_grad():
+            output = self.model.generate(
+                **model_inputs,
+                **generate_kwargs,
+                generation_config=config,
+                output_scores=True,
+                return_dict_in_generate=True,
             )
-        else:
-            raise RuntimeError(
-                f"Unexpected transition_scores length {ts_len} for sequences length {seq_len}. "
-                "Cannot align token scores robustly."
+
+            output_ids = output.sequences
+            beam_indices = getattr(output, "beam_indices", None)
+            transition_scores = self.model.compute_transition_scores(
+                output_ids,
+                output.scores,
+                beam_indices,
+                normalize_logits=True,
             )
-        output_ids = output_ids.reshape(in_b, n_sequences, seq_len)
-        token_logprobs = token_logprobs.reshape(in_b, n_sequences, seq_len)
-        return {
-            "output_ids": output_ids,
-            "scores": token_logprobs,
-            "sequences_scores": sequences_scores,
-        }
+            del output.scores
+            sequences_scores = getattr(output, "sequences_scores", None)
+
+            out_b, seq_len = output_ids.shape
+            n_sequences = out_b // in_b
+
+            ts_len = transition_scores.shape[1]
+            if ts_len == seq_len:
+                token_logprobs = transition_scores
+            elif ts_len == seq_len - 1:
+                token_logprobs = torch.cat(
+                    [
+                        torch.zeros(out_b, 1, device=transition_scores.device, dtype=transition_scores.dtype),
+                        transition_scores,
+                    ],
+                    dim=1,
+                )
+            else:
+                raise RuntimeError(
+                    f"Unexpected transition_scores length {ts_len} for sequences length {seq_len}. "
+                    "Cannot align token scores robustly."
+                )
+            output_ids = output_ids.reshape(in_b, n_sequences, seq_len)
+            token_logprobs = token_logprobs.reshape(in_b, n_sequences, seq_len)
+            return {
+                "output_ids": output_ids,
+                "scores": token_logprobs,
+                "sequences_scores": sequences_scores,
+            }
 
     def postprocess(self, model_outputs, return_type=None, clean_up_tokenization_spaces=False):
         if self.tokenizer is None:
