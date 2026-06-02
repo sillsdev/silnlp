@@ -1844,11 +1844,12 @@ class SilTranslationPipeline(TranslationPipeline):
             return_dict_in_generate=True,
         )
 
-        output_ids = output.sequences
-        beam_indices = getattr(output, "beam_indices", None)
+        output_ids = output.sequences.to("cpu")
+        output_scores = tuple(score.to("cpu") for score in output.scores)
+        beam_indices = output.beam_indices.to("cpu") if "beam_indices" in output else None
         transition_scores = self.model.compute_transition_scores(
             output_ids,
-            output.scores,
+            output_scores,
             beam_indices,
             normalize_logits=True,
         )
