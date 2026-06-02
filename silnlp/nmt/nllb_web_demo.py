@@ -51,7 +51,13 @@ class SuggestionService:
         language_codes = sorted(NLLB_TAGS)
         constraint_indexes = load_partial_word_constraint_indexes(tokenizer)
         LOGGER.info("Loaded %s on %s", model_name, device)
-        return cls(model=model, tokenizer=tokenizer, device=device, language_codes=language_codes, constraint_indexes=constraint_indexes)
+        return cls(
+            model=model,
+            tokenizer=tokenizer,
+            device=device,
+            language_codes=language_codes,
+            constraint_indexes=constraint_indexes,
+        )
 
     def _get_suggester(self, src_lang: str, tgt_lang: str) -> TranslationSuggester:
         key = (src_lang, tgt_lang)
@@ -195,8 +201,8 @@ def _html_page(default_src_lang: str, default_tgt_lang: str, language_codes: lis
     </div>
   </div>
   <div class="threshold-row">
-    <label for="confidenceThreshold">Confidence threshold: <strong id="thresholdValue">0.25</strong></label>
-    <input type="range" id="confidenceThreshold" min="0" max="1" step="0.05" value="0.25" />
+    <label for="confidenceThreshold">Confidence threshold: <strong id="thresholdValue">0.7</strong></label>
+    <input type="range" id="confidenceThreshold" min="0" max="1" step="0.05" value="0.7" />
   </div>
   <div class=\"columns\">
     <div class=\"pane\">
