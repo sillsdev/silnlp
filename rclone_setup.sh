@@ -1,7 +1,15 @@
 #!/bin/bash
-apt-get install --no-install-recommends -y fuse3 rclone
+curl https://rclone.org/install.sh | bash
 mkdir -p /root/.config/rclone
 cp scripts/rclone/rclone.conf /root/.config/rclone/
+
+echo "Stopping any existing rclone or fusermount processes..."
+pkill -f "rclone mount" || true
+fusermount -uz /root/M || true
+fusermount -uz /root/B || true
+pkill -f "fusermount" || true
+sleep 2
+
 BUCKET_TYPE=$1
 if [ "$BUCKET_TYPE" = "minio" ]; then
     export SIL_NLP_DATA_PATH="/root/M"
@@ -10,7 +18,7 @@ if [ "$BUCKET_TYPE" = "minio" ]; then
     sed -i -e "s#secret_access_key = x*#secret_access_key = $MINIO_SECRET_KEY#" /root/.config/rclone/rclone.conf
 
     echo "Mounting MinIO bucket..."
-    rclone mount --daemon --log-file=rclone_log.txt --log-level=DEBUG  --vfs-cache-mode full --use-server-modtime miniosilnlp:nlp-research ~/M
+    rclone mount --daemon --log-file=rclone_log.txt --log-file-max-size 10M --log-file-max-age 1d --log-level=DEBUG  --vfs-cache-mode full --use-server-modtime miniosilnlp:nlp-research ~/M
     echo "Done"
 elif [ "$BUCKET_TYPE" = "backblaze" ]; then
     export SIL_NLP_DATA_PATH="/root/B"
@@ -19,6 +27,6 @@ elif [ "$BUCKET_TYPE" = "backblaze" ]; then
     sed -i -e "s#key = x*#key = $B2_APPLICATION_KEY#" /root/.config/rclone/rclone.conf
 
     echo "Mounting Backblaze bucket..."
-    rclone mount --daemon --log-file=rclone_log.txt --log-level=DEBUG  --vfs-cache-mode full --use-server-modtime b2silnlp:silnlp ~/B
+    rclone mount --daemon --log-file=rclone_log.txt --log-file-max-size 10M --log-file-max-age 1d --log-level=DEBUG  --vfs-cache-mode full --use-server-modtime b2silnlp:silnlp ~/B
     echo "Done"
 fi
