@@ -16,6 +16,7 @@ from machine.corpora import (
 )
 from machine.punctuation_analysis import (
     STANDARD_QUOTE_CONVENTIONS,
+    Chapter,
     FileParatextProjectQuoteConventionDetector,
     QuotationMarkDenormalizationFirstPass,
     QuotationMarkDenormalizationUsfmUpdateBlockHandler,
@@ -243,7 +244,7 @@ class DenormalizeQuotationMarksPostprocessor:
         return chapter_strategies
 
     @staticmethod
-    def _get_chapter_number(chapter) -> Optional[int]:
+    def _get_chapter_number(chapter: Chapter) -> Optional[int]:
         for verse in chapter.verses:
             for text_segment in verse.text_segments:
                 if text_segment.chapter is not None:
