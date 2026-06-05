@@ -52,7 +52,7 @@ POSTPROCESS_SUFFIX_CHARS = {
 
 class PlaceMarkersPostprocessor:
     _BEHAVIOR_DESCRIPTION_MAP = {
-        UpdateUsfmMarkerBehavior.PRESERVE: " have positions preserved.",
+        UpdateUsfmMarkerBehavior.PRESERVE: " were preserved.",
         UpdateUsfmMarkerBehavior.STRIP: " were removed.",
     }
 
@@ -75,7 +75,7 @@ class PlaceMarkersPostprocessor:
             UpdateUsfmMarkerBehavior.PRESERVE: [],
             UpdateUsfmMarkerBehavior.STRIP: [],
         }
-        behavior_map[self._paragraph_behavior].append("paragraph markers")
+        behavior_map[self._paragraph_behavior].append("paragraph break positions")
         behavior_map[self._embed_behavior].append("embed markers")
         behavior_map[self._style_behavior].append("style markers")
 
@@ -85,6 +85,9 @@ class PlaceMarkersPostprocessor:
             if len(items) > 0
         ]
         return " ".join(remark_sentences)
+
+    def create_paragraph_remark(self) -> str:
+        return self._create_remark_sentence_for_behavior(self._paragraph_behavior, ["paragraph break positions"])
 
     def _create_remark_sentence_for_behavior(self, behavior: UpdateUsfmMarkerBehavior, items: List[str]) -> str:
         return self._format_group_of_items_for_remark(items) + self._BEHAVIOR_DESCRIPTION_MAP[behavior]
@@ -136,14 +139,10 @@ class NoDetectedQuoteConventionException(Exception):
 
 
 class DenormalizeQuotationMarksPostprocessor:
-    _NO_CHAPTERS_REMARK_SENTENCE = "Quotation marks were not denormalized in any chapters due to errors."
-    _ALL_CHAPTERS_REMARK_SENTENCE = "Quotation marks in all chapters were automatically denormalized."
-    _DENORMALIZED_CHAPTERS_REMARK_SENTENCE = (
-        "Quotation marks in the following chapters have been automatically denormalized after translation: "
+    _DENORMALIZED_CHAPTER_REMARK_SENTENCE = (
+        "Quotation marks have been adjusted automatically to match the rest of the project."
     )
-    _SKIPPED_CHAPTERS_REMARK_SENTENCE = (
-        "Quotation marks in the following chapters could not be successfully denormalized: "
-    )
+    _SKIPPED_CHAPTER_REMARK_SENTENCE = "Quotation marks could not be successfully denormalized."
     _project_convention_cache: Dict[str, QuoteConvention] = {}
 
     def __init__(
@@ -222,76 +221,67 @@ class DenormalizeQuotationMarksPostprocessor:
         quotation_mark_update_first_pass = QuotationMarkDenormalizationFirstPass(self._target_quote_convention)
 
         parse_usfm(usfm, quotation_mark_update_first_pass)
-        return quotation_mark_update_first_pass.find_best_chapter_strategies()
 
-    def _create_remark(self, best_chapter_strategies: List[QuotationMarkUpdateStrategy]) -> str:
-        processed_chapters: List[int] = [
-            chapter_num
-            for chapter_num, strategy in enumerate(best_chapter_strategies, 1)
-            if strategy != QuotationMarkUpdateStrategy.SKIP
-        ]
-        skipped_chapters: List[int] = [
-            chapter_num
-            for chapter_num, strategy in enumerate(best_chapter_strategies, 1)
-            if strategy == QuotationMarkUpdateStrategy.SKIP
-        ]
+        # sil-machine's get_chapters() currently mislabels chapter numbers, temp workaround until machine.py is fixed
+        strategy_by_chapter: Dict[int, QuotationMarkUpdateStrategy] = {}
+        for chapter, (_, strategy) in zip(
+            quotation_mark_update_first_pass.get_chapters(),
+            quotation_mark_update_first_pass.find_best_chapter_strategies(),
+        ):
+            chapter_num = self._get_chapter_number(chapter)
+            if chapter_num is None:
+                LOGGER.warning(
+                    "Could not determine a chapter's number while denormalizing quotation marks; skipping it."
+                )
+                continue
+            strategy_by_chapter[chapter_num] = strategy
 
-        return self._create_remark_from_processed_and_skipped_chapters(processed_chapters, skipped_chapters)
+        chapter_strategies = [QuotationMarkUpdateStrategy.APPLY_FULL] * max(strategy_by_chapter, default=0)
+        for chapter_num, strategy in strategy_by_chapter.items():
+            chapter_strategies[chapter_num - 1] = strategy
+        return chapter_strategies
 
-    def _create_remark_from_processed_and_skipped_chapters(
-        self, processed_chapters: List[int], skipped_chapters: List[int]
-    ) -> str:
-        if len(processed_chapters) == 0:
-            return self._NO_CHAPTERS_REMARK_SENTENCE
-        if len(skipped_chapters) == 0:
-            return self._ALL_CHAPTERS_REMARK_SENTENCE
-        return (
-            self._DENORMALIZED_CHAPTERS_REMARK_SENTENCE
-            + self.join_items_for_remark(self._create_ranges_from_consecutive_chapter_numbers(processed_chapters))
-            + ". "
-            + self._SKIPPED_CHAPTERS_REMARK_SENTENCE
-            + self.join_items_for_remark(self._create_ranges_from_consecutive_chapter_numbers(skipped_chapters))
-            + "."
-        )
+    @staticmethod
+    def _get_chapter_number(chapter) -> Optional[int]:
+        for verse in chapter.verses:
+            for text_segment in verse.text_segments:
+                if text_segment.chapter is not None:
+                    return text_segment.chapter
+        return None
 
-    def _create_ranges_from_consecutive_chapter_numbers(self, chapters: List[int]) -> List[str]:
-        joined_chapters: List[str] = []
-        start = chapters[0]
-        end = chapters[0]
+    def _create_chapter_remarks(self, chapter_strategies: List[QuotationMarkUpdateStrategy]) -> Dict[int, str]:
+        return {
+            chapter_num: (
+                self._SKIPPED_CHAPTER_REMARK_SENTENCE
+                if strategy == QuotationMarkUpdateStrategy.SKIP
+                else self._DENORMALIZED_CHAPTER_REMARK_SENTENCE
+            )
+            for chapter_num, strategy in enumerate(chapter_strategies, 1)
+        }
 
-        for chapter in chapters[1:]:
-            if chapter == end + 1:
-                end = chapter
-            else:
-                if start == end:
-                    joined_chapters.append(str(start))
-                else:
-                    joined_chapters.append(f"{start}-{end}")
-                start = chapter
-                end = chapter
-
-        if start == end:
-            joined_chapters.append(str(start))
-        else:
-            joined_chapters.append(f"{start}-{end}")
-
-        return joined_chapters
-
-    def join_items_for_remark(self, items: List[str]) -> str:
-        if len(items) == 1:
-            return items[0]
-        elif len(items) == 2:
-            return f"{items[0]} and {items[1]}"
-        return f"{', '.join(items[:-1])}, and {items[-1]}"
+    def _merge_remarks(
+        self,
+        remarks: Optional[List[Tuple[int, str]]],
+        chapter_strategies: List[QuotationMarkUpdateStrategy],
+    ) -> List[Tuple[int, str]]:
+        if not remarks:
+            return []
+        chapter_remarks = self._create_chapter_remarks(chapter_strategies)
+        merged: List[Tuple[int, str]] = []
+        for chapter_num, remark in remarks:
+            quotation_remark = chapter_remarks.get(chapter_num)
+            merged.append((chapter_num, f"{remark} {quotation_remark}" if quotation_remark else remark))
+        return merged
 
     def postprocess_usfm(
         self,
         usfm: str,
+        remarks: Optional[List[Tuple[int, str]]] = None,
     ) -> str:
         best_chapter_strategies = self._get_best_chapter_strategies(usfm)
         handler = UpdateUsfmParserHandler(
             update_block_handlers=self._create_update_block_handlers(best_chapter_strategies),
-            remarks=[self._create_remark(best_chapter_strategies)],
+            remarks=self._merge_remarks(remarks, best_chapter_strategies),
         )
         parse_usfm(usfm, handler)
         return handler.get_usfm()
@@ -339,15 +329,10 @@ class PostprocessConfig:
 
         return suffix if len(suffix) > 1 else ""
 
-    def get_postprocess_remark(self) -> Optional[str]:
-        used = []
-        for option, default in POSTPROCESS_DEFAULTS.items():
-            if self._config[option] != default:
-                used.append(option)
-                if isinstance(default, str):
-                    used[-1] += f":{self._config[option]}"
-
-        return f"Post-processing options used: {' '.join(used)}" if len(used) > 0 else None
+    def get_paragraph_placement_remark(self) -> Optional[str]:
+        if self._config["paragraph_behavior"] != "place":
+            return None
+        return self.create_place_markers_postprocessor().create_paragraph_remark()
 
     def is_base_config(self) -> bool:
         return self._config == POSTPROCESS_DEFAULTS
