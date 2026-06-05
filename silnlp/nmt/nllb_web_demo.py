@@ -136,227 +136,587 @@ def _html_page(default_src_lang: str, default_tgt_lang: str, language_codes: lis
     )
 
     return f"""<!doctype html>
-<html>
+<html lang="en">
 <head>
-  <meta charset=\"utf-8\" />
-  <title>NLLB Suggestion Prototype</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Translation Suggestions · NLLB</title>
   <style>
-    body {{ font-family: sans-serif; margin: 24px; }}
-    .toolbar {{ display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }}
-    .pane {{ display: flex; flex-direction: column; gap: 8px; }}
-    .threshold-row {{ display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }}
-    .threshold-row label {{ white-space: nowrap; }}
-    .threshold-row input[type=range] {{ flex: 1; }}
-    .columns {{ display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }}
-    textarea {{ width: 100%; min-height: 240px; font-size: 16px; padding: 10px; box-sizing: border-box; }}
-    select {{ width: 100%; padding: 8px; font-size: 14px; }}
-    .suggestion-editor {{ position: relative; }}
-    #ghostText,
-    #targetText {{
-      font-family: sans-serif;
-      font-size: 16px;
-      line-height: 1.4;
-      padding: 10px;
-      border: 1px solid #767676;
-      border-radius: 2px;
-      min-height: 240px;
-      box-sizing: border-box;
-      width: 100%;
-      white-space: pre-wrap;
-      word-wrap: break-word;
+    *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+
+    :root {{
+      --blue: #1a73e8;
+      --blue-light: #e8f0fe;
+      --surface: #ffffff;
+      --bg: #f0f4f9;
+      --border: #e0e0e0;
+      --text: #202124;
+      --muted: #5f6368;
+      --hint: #bdc1c6;
+      --radius: 12px;
+      --font: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --mono: "SF Mono", "Roboto Mono", Menlo, Consolas, monospace;
+      --shadow: 0 1px 3px rgba(0,0,0,.1), 0 4px 12px rgba(0,0,0,.06);
     }}
-    #ghostText {{
-      position: absolute;
+
+    body {{
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }}
+
+    header {{
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      height: 60px;
+      display: flex;
+      align-items: center;
+      padding: 0 24px;
+      gap: 12px;
+      position: sticky;
       top: 0;
-      left: 0;
-      color: #111;
-      background: #fff;
+      z-index: 100;
+    }}
+
+    .header-icon {{
+      width: 34px;
+      height: 34px;
+      background: var(--blue);
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      flex-shrink: 0;
+    }}
+
+    header h1 {{
+      font-size: 16px;
+      font-weight: 500;
+      letter-spacing: -.01em;
+    }}
+
+    .spacer {{ flex: 1; }}
+
+    .spinner {{
+      width: 18px;
+      height: 18px;
+      border: 2.5px solid var(--border);
+      border-top-color: var(--blue);
+      border-radius: 50%;
+      animation: spin .65s linear infinite;
+      opacity: 0;
+      transition: opacity .2s;
+      flex-shrink: 0;
+    }}
+
+    .spinner.active {{ opacity: 1; }}
+
+    @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+
+    main {{
+      max-width: 1080px;
+      margin: 28px auto;
+      padding: 0 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }}
+
+    .card {{
+      background: var(--surface);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }}
+
+    .lang-bar {{
+      display: grid;
+      grid-template-columns: 1fr 52px 1fr;
+      align-items: center;
+      border-bottom: 1px solid var(--border);
+      height: 52px;
+    }}
+
+    .lang-picker {{
+      display: flex;
+      align-items: center;
+      padding: 0 18px;
+      gap: 8px;
+      height: 100%;
+    }}
+
+    .lang-badge {{
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .07em;
+      color: var(--muted);
+      flex-shrink: 0;
+    }}
+
+    select.lang-select {{
+      flex: 1;
+      border: none;
+      background: transparent;
+      font-family: var(--font);
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text);
+      cursor: pointer;
+      appearance: none;
+      outline: none;
+      padding: 6px 8px;
+      border-radius: 6px;
+      min-width: 0;
+      transition: background .12s;
+    }}
+
+    select.lang-select:hover {{ background: #f5f5f5; }}
+    select.lang-select:focus {{ background: var(--blue-light); color: var(--blue); }}
+
+    .swap-btn {{
+      margin: auto;
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      cursor: pointer;
+      color: var(--muted);
+      transition: background .12s, transform .25s cubic-bezier(.4,0,.2,1);
+    }}
+
+    .swap-btn:hover {{
+      background: #f5f5f5;
+      transform: rotate(180deg);
+    }}
+
+    .panels {{
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+    }}
+
+    .panel {{
+      display: flex;
+      flex-direction: column;
+      padding: 20px 20px 14px;
+      min-height: 280px;
+      position: relative;
+    }}
+
+    .panel + .panel {{ border-left: 1px solid var(--border); }}
+
+    .editor-font {{
+      font-family: var(--font);
+      font-size: 18px;
+      line-height: 1.65;
+    }}
+
+    textarea.source-area {{
+      background: transparent;
+      border: none;
+      outline: none;
+      resize: none;
+      width: 100%;
+      flex: 1;
+      padding: 0;
+      min-height: 200px;
+      color: var(--text);
+    }}
+
+    textarea.source-area::placeholder {{ color: var(--hint); }}
+
+    .clear-btn {{
+      display: none;
+      position: absolute;
+      top: 18px;
+      right: 16px;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #e8eaed;
+      border: none;
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 12px;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+      transition: background .12s;
+    }}
+
+    .clear-btn.visible {{ display: flex; }}
+    .clear-btn:hover {{ background: #dadce0; }}
+
+    .ghost-wrapper {{
+      position: relative;
+      flex: 1;
+      display: flex;
+    }}
+
+    .ghost-layer {{
+      position: absolute;
+      inset: 0;
       pointer-events: none;
       overflow: hidden;
       z-index: 1;
+      color: var(--text);
+      white-space: pre-wrap;
+      word-wrap: break-word;
     }}
-    #ghostText .hint {{ color: #a0a0a0; }}
-    #ghostText .placeholder {{ color: #9a9a9a; }}
-    #targetText {{
+
+    .ghost-layer .hint {{ color: var(--hint); }}
+    .ghost-layer .placeholder {{ color: var(--hint); }}
+
+    textarea.target-area {{
       position: relative;
-      background: transparent;
-      color: transparent;
-      caret-color: #111;
-      overflow: auto;
-      resize: vertical;
       z-index: 2;
+      color: transparent;
+      caret-color: var(--text);
+      overflow: auto;
+      flex: 1;
+      min-height: 200px;
+      width: 100%;
+      background: transparent;
+      border: none;
+      outline: none;
+      resize: none;
+      padding: 0;
+    }}
+
+    .panel-footer {{
+      display: flex;
+      align-items: center;
+      margin-top: 10px;
+      min-height: 22px;
+    }}
+
+    .char-count {{
+      font-size: 12px;
+      color: var(--hint);
+      margin-left: auto;
+    }}
+
+    .tab-hint {{
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
+      color: var(--muted);
+      opacity: 0;
+      transition: opacity .18s;
+    }}
+
+    .tab-hint.visible {{ opacity: 1; }}
+
+    .tab-hint kbd {{
+      background: #f5f5f5;
+      border: 1px solid #d0d0d0;
+      border-bottom-width: 2px;
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 11px;
+      font-family: var(--mono);
+      color: var(--text);
+    }}
+
+    .settings-card {{
+      background: var(--surface);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }}
+
+    .settings-label {{
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--muted);
+      flex-shrink: 0;
+    }}
+
+    input[type=range] {{
+      flex: 1;
+      accent-color: var(--blue);
+      cursor: pointer;
+    }}
+
+    .badge {{
+      background: var(--blue);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 12px;
+      min-width: 46px;
+      text-align: center;
+      flex-shrink: 0;
+    }}
+
+    @media (max-width: 640px) {{
+      .panels {{ grid-template-columns: 1fr; }}
+      .panel + .panel {{ border-left: none; border-top: 1px solid var(--border); }}
+      .lang-bar {{ grid-template-columns: 1fr 44px 1fr; }}
     }}
   </style>
 </head>
 <body>
-  <h2>NLLB 600M Translation Suggestion Prototype</h2>
-  <div class=\"toolbar\">
-    <div class=\"pane\">
-      <label for=\"srcLang\">Source language code</label>
-      <select id=\"srcLang\">{src_options}</select>
-    </div>
-    <div class=\"pane\">
-      <label for=\"tgtLang\">Target language code</label>
-      <select id=\"tgtLang\">{tgt_options}</select>
-    </div>
+
+<header>
+  <div class="header-icon">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
+      <path d="M12.87 15.07l-2.54-2.51.03-.03c1.74-1.94 2.98-4.17 3.71-6.53H17V4h-7V2H8v2H1v1.99h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z"/>
+    </svg>
   </div>
-  <div class="threshold-row">
-    <label for="confidenceThreshold">Confidence threshold: <strong id="thresholdValue">0.7</strong></label>
-    <input type="range" id="confidenceThreshold" min="0" max="1" step="0.05" value="0.7" />
-  </div>
-  <div class=\"columns\">
-    <div class=\"pane\">
-      <label for=\"sourceText\">Source sentence</label>
-      <textarea id=\"sourceText\" placeholder=\"Paste source sentence...\"></textarea>
+  <h1>NLLB Translation Suggestions</h1>
+  <span class="spacer"></span>
+  <div id="spinner" class="spinner"></div>
+</header>
+
+<main>
+  <div class="card">
+    <div class="lang-bar">
+      <div class="lang-picker">
+        <span class="lang-badge">From</span>
+        <select id="srcLang" class="lang-select">{src_options}</select>
+      </div>
+      <button id="swapBtn" class="swap-btn" title="Swap languages">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z"/>
+        </svg>
+      </button>
+      <div class="lang-picker">
+        <span class="lang-badge">To</span>
+        <select id="tgtLang" class="lang-select">{tgt_options}</select>
+      </div>
     </div>
-    <div class=\"pane\">
-      <label for=\"targetText\">Translation</label>
-      <div class="suggestion-editor">
-        <div id="ghostText" aria-hidden="true"></div>
-        <textarea id=\"targetText\" placeholder=\"Type translation...\"></textarea>
+
+    <div class="panels">
+      <div class="panel">
+        <textarea id="sourceText" class="editor-font source-area" placeholder="Enter text to translate…"></textarea>
+        <button id="clearBtn" class="clear-btn" title="Clear">&#x2715;</button>
+        <div class="panel-footer">
+          <span id="charCount" class="char-count"></span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="ghost-wrapper">
+          <div id="ghostText" class="editor-font ghost-layer" aria-hidden="true"></div>
+          <textarea id="targetText" class="editor-font target-area" spellcheck="false"></textarea>
+        </div>
+        <div class="panel-footer">
+          <div id="tabHint" class="tab-hint">
+            Press <kbd>Tab</kbd> to accept suggestion
+          </div>
+        </div>
       </div>
     </div>
   </div>
 
-  <script>
-    const sourceText = document.getElementById('sourceText');
-    const targetText = document.getElementById('targetText');
-    const srcLang = document.getElementById('srcLang');
-    const tgtLang = document.getElementById('tgtLang');
-    const ghostText = document.getElementById('ghostText');
-    const confidenceThreshold = document.getElementById('confidenceThreshold');
-    const thresholdValue = document.getElementById('thresholdValue');
-    let pendingSuggestion = '';
-    let debounceHandle = null;
-    let requestSequence = 0;
+  <div class="settings-card">
+    <span class="settings-label">Confidence threshold</span>
+    <input type="range" id="confidenceThreshold" min="0" max="1" step="0.05" value="0.7" />
+    <span id="thresholdValue" class="badge">0.70</span>
+  </div>
+</main>
 
-    srcLang.value = {json.dumps(default_src_lang)};
-    tgtLang.value = {json.dumps(default_tgt_lang)};
+<script>
+  const sourceText = document.getElementById('sourceText');
+  const targetText = document.getElementById('targetText');
+  const srcLang    = document.getElementById('srcLang');
+  const tgtLang    = document.getElementById('tgtLang');
+  const ghostText  = document.getElementById('ghostText');
+  const confidenceThreshold = document.getElementById('confidenceThreshold');
+  const thresholdValue = document.getElementById('thresholdValue');
+  const spinner    = document.getElementById('spinner');
+  const clearBtn   = document.getElementById('clearBtn');
+  const charCount  = document.getElementById('charCount');
+  const tabHint    = document.getElementById('tabHint');
+  const swapBtn    = document.getElementById('swapBtn');
 
-    function escapeHtml(value) {{
-      return value
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;');
+  let pendingSuggestion = '';
+  let debounceHandle = null;
+  let requestSequence = 0;
+  let activeRequests = 0;
+
+  srcLang.value = {json.dumps(default_src_lang)};
+  tgtLang.value = {json.dumps(default_tgt_lang)};
+
+  function setLoading(on) {{
+    activeRequests = Math.max(0, activeRequests + (on ? 1 : -1));
+    spinner.classList.toggle('active', activeRequests > 0);
+  }}
+
+  function updateClearBtn() {{
+    clearBtn.classList.toggle('visible', sourceText.value.length > 0);
+  }}
+
+  function updateCharCount() {{
+    const n = sourceText.value.length;
+    charCount.textContent = n > 0 ? n + ' chars' : '';
+  }}
+
+  function escapeHtml(value) {{
+    return value
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;');
+  }}
+
+  function isCaretAtEnd() {{
+    return (
+      targetText.selectionStart === targetText.value.length &&
+      targetText.selectionEnd   === targetText.value.length
+    );
+  }}
+
+  function shouldShowSuggestion() {{
+    return document.activeElement === targetText && isCaretAtEnd() && !!pendingSuggestion;
+  }}
+
+  function renderGhostText() {{
+    const show = shouldShowSuggestion();
+    if (!targetText.value && !show) {{
+      ghostText.innerHTML = '<span class="placeholder">Type translation…</span>';
+    }} else {{
+      ghostText.innerHTML =
+        escapeHtml(targetText.value) +
+        (show ? '<span class="hint">' + escapeHtml(pendingSuggestion) + '</span>' : '');
+    }}
+    tabHint.classList.toggle('visible', show);
+    syncGhostScroll();
+  }}
+
+  function syncGhostScroll() {{
+    ghostText.scrollTop  = targetText.scrollTop;
+    ghostText.scrollLeft = targetText.scrollLeft;
+  }}
+
+  async function requestSuggestion() {{
+    const requestId = ++requestSequence;
+    const payload = {{
+      source_text: sourceText.value,
+      partial_translation: targetText.value,
+      src_lang: srcLang.value,
+      tgt_lang: tgtLang.value,
+      confidence_threshold: parseFloat(confidenceThreshold.value)
+    }};
+
+    if (!payload.source_text.trim() || !isCaretAtEnd()) {{
+      pendingSuggestion = '';
+      renderGhostText();
+      return;
     }}
 
-    function isCaretAtEnd() {{
-      return (
-        targetText.selectionStart === targetText.value.length &&
-        targetText.selectionEnd === targetText.value.length
-      );
-    }}
-
-    function shouldShowSuggestion() {{
-      return document.activeElement === targetText && isCaretAtEnd() && !!pendingSuggestion;
-    }}
-
-    function renderGhostText() {{
-      if (!targetText.value && !pendingSuggestion) {{
-        ghostText.innerHTML = '<span class="placeholder">Type translation...</span>';
-      }} else {{
-        const suggestionText = shouldShowSuggestion() ? pendingSuggestion : '';
-        ghostText.innerHTML = `${{escapeHtml(targetText.value)}}<span class="hint">${{escapeHtml(suggestionText)}}</span>`;
-      }}
-      syncGhostScroll();
-    }}
-
-    function syncGhostScroll() {{
-      ghostText.scrollTop = targetText.scrollTop;
-      ghostText.scrollLeft = targetText.scrollLeft;
-    }}
-
-    async function requestSuggestion() {{
-      const requestId = ++requestSequence;
-      const payload = {{
-        source_text: sourceText.value,
-        partial_translation: targetText.value,
-        src_lang: srcLang.value,
-        tgt_lang: tgtLang.value,
-        confidence_threshold: parseFloat(confidenceThreshold.value)
-      }};
-
-      if (!payload.source_text.trim() || !isCaretAtEnd()) {{
-        pendingSuggestion = '';
-        renderGhostText();
-        return;
-      }}
-
+    setLoading(true);
+    try {{
       const response = await fetch('/api/suggest', {{
         method: 'POST',
         headers: {{ 'Content-Type': 'application/json' }},
         body: JSON.stringify(payload)
       }});
-      if (!response.ok) {{
-        if (requestId !== requestSequence) {{
-          return;
-        }}
-        pendingSuggestion = '';
-        renderGhostText();
-        return;
-      }}
-      const data = await response.json();
-      if (requestId !== requestSequence) {{
-        return;
-      }}
-      pendingSuggestion = data.suggestion || '';
-      renderGhostText();
-    }}
-
-    function debounceSuggest() {{
-      if (debounceHandle) clearTimeout(debounceHandle);
-      debounceHandle = setTimeout(() => {{
-        requestSuggestion().catch(() => {{
-          pendingSuggestion = '';
-          renderGhostText();
-        }});
-      }}, 300);
-    }}
-
-    function handleTargetInput() {{
-      // Invalidate current completion immediately on any manual edit.
-      if (pendingSuggestion) {{
+      if (requestId !== requestSequence) return;
+      if (response.ok) {{
+        const data = await response.json();
+        if (requestId !== requestSequence) return;
+        pendingSuggestion = data.suggestion || '';
+      }} else {{
         pendingSuggestion = '';
       }}
-      renderGhostText();
-      debounceSuggest();
+    }} catch (_) {{
+      if (requestId === requestSequence) pendingSuggestion = '';
+    }} finally {{
+      setLoading(false);
     }}
-
-    targetText.addEventListener('keydown', (event) => {{
-      if (event.key === 'Tab' && pendingSuggestion && isCaretAtEnd()) {{
-        event.preventDefault();
-        targetText.value += pendingSuggestion;
-        pendingSuggestion = '';
-        renderGhostText();
-        debounceSuggest();
-      }}
-    }});
-
-    function handleCaretMovement() {{
-      if (!isCaretAtEnd() && pendingSuggestion) {{
-        pendingSuggestion = '';
-      }}
-      renderGhostText();
-    }}
-
-    confidenceThreshold.addEventListener('input', () => {{
-      thresholdValue.textContent = parseFloat(confidenceThreshold.value).toFixed(2);
-      debounceSuggest();
-    }});
-
-    sourceText.addEventListener('input', debounceSuggest);
-    targetText.addEventListener('input', handleTargetInput);
-    targetText.addEventListener('click', handleCaretMovement);
-    targetText.addEventListener('keyup', handleCaretMovement);
-    targetText.addEventListener('select', handleCaretMovement);
-    targetText.addEventListener('focus', renderGhostText);
-    targetText.addEventListener('blur', renderGhostText);
-    targetText.addEventListener('scroll', syncGhostScroll);
-    srcLang.addEventListener('change', debounceSuggest);
-    tgtLang.addEventListener('change', debounceSuggest);
-
     renderGhostText();
-  </script>
+  }}
+
+  function debounceSuggest() {{
+    if (debounceHandle) clearTimeout(debounceHandle);
+    debounceHandle = setTimeout(() => {{
+      requestSuggestion().catch(() => {{
+        pendingSuggestion = '';
+        setLoading(false);
+        renderGhostText();
+      }});
+    }}, 300);
+  }}
+
+  function handleTargetInput() {{
+    pendingSuggestion = '';
+    renderGhostText();
+    debounceSuggest();
+  }}
+
+  targetText.addEventListener('keydown', (e) => {{
+    if (e.key === 'Tab' && pendingSuggestion && isCaretAtEnd()) {{
+      e.preventDefault();
+      targetText.value += pendingSuggestion;
+      pendingSuggestion = '';
+      renderGhostText();
+      debounceSuggest();
+    }}
+  }});
+
+  function handleCaretMovement() {{
+    if (!isCaretAtEnd() && pendingSuggestion) pendingSuggestion = '';
+    renderGhostText();
+  }}
+
+  confidenceThreshold.addEventListener('input', () => {{
+    thresholdValue.textContent = parseFloat(confidenceThreshold.value).toFixed(2);
+    debounceSuggest();
+  }});
+
+  sourceText.addEventListener('input', () => {{
+    updateClearBtn();
+    updateCharCount();
+    debounceSuggest();
+  }});
+
+  clearBtn.addEventListener('click', () => {{
+    sourceText.value = '';
+    pendingSuggestion = '';
+    updateClearBtn();
+    updateCharCount();
+    renderGhostText();
+    sourceText.focus();
+  }});
+
+  swapBtn.addEventListener('click', () => {{
+    const tmpLang = srcLang.value;
+    srcLang.value = tgtLang.value;
+    tgtLang.value = tmpLang;
+    const tmpText = sourceText.value;
+    sourceText.value = targetText.value;
+    targetText.value = tmpText;
+    pendingSuggestion = '';
+    updateClearBtn();
+    updateCharCount();
+    renderGhostText();
+    debounceSuggest();
+  }});
+
+  targetText.addEventListener('input',  handleTargetInput);
+  targetText.addEventListener('click',  handleCaretMovement);
+  targetText.addEventListener('keyup',  handleCaretMovement);
+  targetText.addEventListener('select', handleCaretMovement);
+  targetText.addEventListener('focus',  renderGhostText);
+  targetText.addEventListener('blur',   renderGhostText);
+  targetText.addEventListener('scroll', syncGhostScroll);
+  srcLang.addEventListener('change', debounceSuggest);
+  tgtLang.addEventListener('change', debounceSuggest);
+
+  updateClearBtn();
+  updateCharCount();
+  renderGhostText();
+</script>
 </body>
 </html>
 """
