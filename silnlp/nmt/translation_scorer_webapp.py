@@ -146,22 +146,30 @@ class NllbScoringService:
         model.eval()
         self._tokenizer = tokenizer
         self._model = model
+        LOGGER.info("Model loaded successfully")
 
     def _configure_languages(self, source_lang: str, target_lang: str) -> None:
         assert self._tokenizer is not None
         assert self._model is not None
 
-        if source_lang not in self._tokenizer.lang_code_to_id:
+        def _lang_id(lang: str) -> int:
+            return self._tokenizer.convert_tokens_to_ids(lang)  # type: ignore[union-attr]
+
+        if _lang_id(source_lang) == self._tokenizer.unk_token_id:
             raise ValueError(f"Unsupported source language: {source_lang}")
-        if target_lang not in self._tokenizer.lang_code_to_id:
+        if _lang_id(target_lang) == self._tokenizer.unk_token_id:
             raise ValueError(f"Unsupported target language: {target_lang}")
 
         self._tokenizer.src_lang = source_lang
         self._tokenizer.tgt_lang = target_lang
-        forced_bos_token_id = self._tokenizer.lang_code_to_id[target_lang]
+        forced_bos_token_id = _lang_id(target_lang)
         self._model.config.forced_bos_token_id = forced_bos_token_id
         if getattr(self._model, "generation_config", None) is not None:
             self._model.generation_config.forced_bos_token_id = forced_bos_token_id
+
+    def warmup(self) -> None:
+        with self._lock:
+            self._ensure_model()
 
     def score(self, source: str, translation: str, source_lang: str, target_lang: str) -> Dict[str, Any]:
         source = source.strip()
@@ -464,6 +472,8 @@ def main() -> None:
         low_prob_threshold=args.low_prob_threshold,
         top_k_suggestions=args.top_k_suggestions,
     )
+
+    TranslationScorerHttpHandler.scorer_service.warmup()
 
     server = ThreadingHTTPServer((args.host, args.port), TranslationScorerHttpHandler)
     LOGGER.info("Serving translation scorer prototype at http://%s:%s", args.host, args.port)

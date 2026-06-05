@@ -214,7 +214,9 @@ class TranslationScorer:
         base = self._score_translation_text(source_context, translation, cache)
 
         phrase_scores = self._build_phrase_scores(source_context, base, cache)
-        word_scores = [self._to_word_score(phrase_score) for phrase_score in phrase_scores if phrase_score.word_count == 1]
+        word_scores = [
+            self._to_word_score(phrase_score) for phrase_score in phrase_scores if phrase_score.word_count == 1
+        ]
         multi_word_phrase_scores = [phrase_score for phrase_score in phrase_scores if phrase_score.word_count > 1]
 
         return ScoredTranslation(
@@ -273,7 +275,9 @@ class TranslationScorer:
 
         return phrase_scores
 
-    def _create_span_word_scores(self, base: SequenceScore, start: int, end: int, right_context_log_prob: float) -> List[WordScore]:
+    def _create_span_word_scores(
+        self, base: SequenceScore, start: int, end: int, right_context_log_prob: float
+    ) -> List[WordScore]:
         span = base.words[start:end]
         span_forward = base.word_forward_log_prob(start, end)
         span_contextual = span_forward + right_context_log_prob
@@ -292,7 +296,9 @@ class TranslationScorer:
                     tokens=tokens,
                     forward_log_prob=word_forward,
                     right_context_log_prob=span_share,
-                    contextual_log_prob=(span_contextual / word_count if word_count > 1 else word_forward + right_context_log_prob),
+                    contextual_log_prob=(
+                        span_contextual / word_count if word_count > 1 else word_forward + right_context_log_prob
+                    ),
                     span_start=index,
                     span_end=index + 1,
                     low_prob_threshold=self._low_prob_threshold,
@@ -339,7 +345,11 @@ class TranslationScorer:
 
         for candidate_phrase in candidate_phrases:
             normalized_candidate = candidate_phrase.strip()
-            if normalized_candidate == "" or normalized_candidate == phrase_score.phrase or normalized_candidate in seen:
+            if (
+                normalized_candidate == ""
+                or normalized_candidate == phrase_score.phrase
+                or normalized_candidate in seen
+            ):
                 continue
             seen.add(normalized_candidate)
             candidate_words = normalized_candidate.split()
@@ -443,7 +453,8 @@ class TranslationScorer:
     def _prepare_target_labels(self, translation: str) -> torch.Tensor:
         target_encoding = self._tokenizer(text_target=translation, return_tensors="pt", truncation=True)
         labels = target_encoding["input_ids"]
-        forced_bos_token_id = self._get_forced_bos_token_id()
+        # forced_bos_token_id = self._get_forced_bos_token_id()
+        forced_bos_token_id = 2
         if forced_bos_token_id is not None and (labels.shape[1] == 0 or labels[0, 0].item() != forced_bos_token_id):
             forced_bos = torch.tensor([[forced_bos_token_id]], dtype=labels.dtype)
             labels = torch.cat([forced_bos, labels], dim=1)
