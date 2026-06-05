@@ -166,7 +166,8 @@ class DenormalizeQuotationMarksPostprocessor:
         if convention_name is None or convention_name == "detect":
             if project_name is None:
                 raise ValueError(
-                    "The experiment's config.yml must exist and specify a target project name, since an explicit target quote convention name was not provided."
+                    "The experiment's config.yml must exist and specify a target project name, "
+                    "since an explicit target quote convention name was not provided."
                 )
             return self._detect_quote_convention(project_name, include_chapters)
         return self._get_named_quote_convention(convention_name)
@@ -329,8 +330,8 @@ class PostprocessConfig:
 
         return suffix if len(suffix) > 1 else ""
 
-    def get_paragraph_placement_remark(self) -> Optional[str]:
-        if self._config["paragraph_behavior"] != "place":
+    def get_paragraph_marker_remark(self) -> Optional[str]:
+        if self._config["paragraph_behavior"] not in ("place", "strip"):
             return None
         return self.create_place_markers_postprocessor().create_paragraph_remark()
 
@@ -385,15 +386,18 @@ class PostprocessConfig:
         if self.is_quote_convention_detection_required():
             if len(training_corpus_pairs) > 1:
                 LOGGER.warning(
-                    "The experiment has multiple corpus pairs. Quotation mark denormalization is unlikely to work correctly in this scenario."
+                    "The experiment has multiple corpus pairs. "
+                    "Quotation mark denormalization is unlikely to work correctly in this scenario."
                 )
             if len(training_corpus_pairs) > 0 and len(training_corpus_pairs[0].src_files) > 1:
                 LOGGER.warning(
-                    "The experiment has multiple source projects. Quotation mark denormalization is unlikely to work correctly in this scenario."
+                    "The experiment has multiple source projects. "
+                    "Quotation mark denormalization is unlikely to work correctly in this scenario."
                 )
             if len(training_corpus_pairs) > 0 and len(training_corpus_pairs[0].trg_files) > 1:
                 LOGGER.warning(
-                    "The experiment has multiple target projects. Quotation mark denormalization is unlikely to work correctly in this scenario."
+                    "The experiment has multiple target projects. "
+                    "Quotation mark denormalization is unlikely to work correctly in this scenario."
                 )
 
             if len(training_corpus_pairs) > 0 and len(training_corpus_pairs[0].trg_files) > 0:
@@ -421,9 +425,9 @@ class PostprocessHandler:
         self.configs = ([PostprocessConfig({}, environment)] if include_base else []) + configs
 
     # NOTE: Row metadata may need to be created/recreated at different times
-    # For example, the marker placement metadata needs to be recreated for each new draft because it uses text alignment,
-    # but other metadata may only need to be created once overall, or once per source project.
-    # This may change what part of the process we want this function to be called at
+    # For example, the marker placement metadata needs to be recreated for each new draft
+    # because it uses text alignment, but other metadata may only need to be created once overall,
+    # or once per source project. This may change what part of the process we want this function to be called at
     def construct_rows(self, refs: List[ScriptureRef], source: List[str], translation: List[str]) -> None:
         for config in self.configs:
             config.rows = [UpdateUsfmRow([ref], t, {}) for ref, t in zip(refs, translation)]

@@ -439,7 +439,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
 
                 # Compile draft remarks
                 remarks: List[Tuple[int, str]] = []
-                paragraph_remark = config.get_paragraph_placement_remark()
+                paragraph_remark = config.get_paragraph_marker_remark()
                 generated_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
                 draft_src_str = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
                 chapters_for_remarks = (
