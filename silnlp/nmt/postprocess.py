@@ -2,11 +2,20 @@ import argparse
 import logging
 import re
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import yaml
 from attr import dataclass
-from machine.corpora import FileParatextProjectSettingsParser, ScriptureRef, UsfmFileText, UsfmStylesheet, UsfmTextType
+from machine.corpora import (
+    FileParatextProjectSettingsParser,
+    ScriptureRef,
+    UsfmFileText,
+    UsfmStylesheet,
+    UsfmTextType,
+    UsfmToken,
+    UsfmTokenizer,
+    UsfmTokenType,
+)
 from machine.scripture import book_number_to_id, get_chapters
 from transformers.trainer_utils import get_last_checkpoint
 
@@ -29,6 +38,26 @@ from .hugging_face_config import get_best_checkpoint
 LOGGER = logging.getLogger(__package__ + ".postprocess")
 
 
+# Replicating machine.py's filter_tokens_by_chapter function here since it's not currently public
+def filter_tokens_by_chapter(tokens: List[UsfmToken], chapters: List[int]) -> List[UsfmToken]:
+    filtered: List[UsfmToken] = []
+    in_chapter = False
+    in_id_marker = False
+    for index, token in enumerate(tokens):
+        if index == 0 and token.marker == "id":
+            in_id_marker = True
+            if 1 in chapters:
+                in_chapter = True
+        elif in_id_marker and token.marker is not None and token.marker != "id":
+            in_id_marker = False
+        elif token.type == UsfmTokenType.CHAPTER:
+            data = str(token.data).strip() if token.data is not None else ""
+            in_chapter = data.isdigit() and int(data) in chapters
+        if in_id_marker or in_chapter:
+            filtered.append(token)
+    return filtered
+
+
 @dataclass
 class Sentence:
     text: str
@@ -38,12 +67,12 @@ class Sentence:
 @dataclass
 class DraftSentences:
     sentences: List[Sentence]
-    remarks: List[str]
+    remarks: List[Tuple[int, str]]
 
 
 # Takes the path to a USFM file and the relevant info to parse it
 # and returns the text of all non-embed sentences and their respective references,
-# along with any remarks (\rem) that were inserted at the beginning of the file
+# along with any remarks (\rem), paired with the chapter they appear in (0 for book-level remarks)
 def get_sentences(
     book_path: Path, stylesheet: UsfmStylesheet, encoding: str, book: str, chapters: List[int] = []
 ) -> DraftSentences:
@@ -51,8 +80,8 @@ def get_sentences(
 
     for sent in UsfmFileText(stylesheet, encoding, book, book_path, include_all_text=True):
         marker = sent.ref.path[-1].name if len(sent.ref.path) > 0 else ""
-        if marker == "rem" and len(draft_sentences.sentences) == 0:
-            draft_sentences.remarks.append(sent.text)
+        if marker == "rem":
+            draft_sentences.remarks.append((sent.ref.chapter_num, sent.text))
             continue
         if (
             marker in PARAGRAPH_TYPE_EMBEDS
@@ -137,37 +166,52 @@ def postprocess_draft(
         stylesheet = UsfmStylesheet("usfm.sty")
         encoding = "utf-8-sig"
 
-    src_sentences = get_sentences(draft_metadata.source_path, stylesheet, encoding, book)
     draft_sentences = get_sentences(draft_metadata.draft_path, stylesheet, encoding, book)
+    draft_chapters = sorted({sentence.ref.chapter_num for sentence in draft_sentences.sentences})
+    src_sentences = get_sentences(draft_metadata.source_path, stylesheet, encoding, book, draft_chapters)
 
     # Verify reference parity
     if len(src_sentences.sentences) != len(draft_sentences.sentences):
         LOGGER.warning(
-            f"Can't process {draft_metadata.source_path} and {draft_metadata.draft_path}: Unequal number of verses/references"
+            f"Can't process {draft_metadata.source_path} and {draft_metadata.draft_path}: "
+            f"Unequal number of verses/references"
         )
         return
     for src_sentence, draft_sentence in zip(src_sentences.sentences, draft_sentences.sentences):
         if src_sentence.ref.to_relaxed() != draft_sentence.ref.to_relaxed():
             LOGGER.warning(
-                f"Can't process {draft_metadata.source_path} and {draft_metadata.draft_path}: Mismatched ref, {src_sentence.ref} != {draft_sentence.ref}. Files must have the exact same USFM structure"
+                f"Can't process {draft_metadata.source_path} and {draft_metadata.draft_path}: "
+                f"Mismatched ref, {src_sentence.ref} != {draft_sentence.ref}. "
+                f"Files must have the exact same USFM structure"
             )
             return
 
-    if any(config.is_marker_placement_required() for config in postprocess_handler.configs):
+    source_usfm = None
+    if any(config.is_marker_processing_required() for config in postprocess_handler.configs):
         postprocess_handler.construct_rows(
             [s.ref for s in src_sentences.sentences],
             [s.text for s in src_sentences.sentences],
             [s.text for s in draft_sentences.sentences],
         )
 
-    with draft_metadata.source_path.open(encoding=encoding) as f:
-        source_usfm = f.read()
+        with draft_metadata.source_path.open(encoding=encoding) as f:
+            source_usfm = f.read()
+        if draft_chapters:
+            tokenizer = UsfmTokenizer(stylesheet)
+            source_usfm = tokenizer.detokenize(
+                filter_tokens_by_chapter(tokenizer.tokenize(source_usfm), draft_chapters)
+            )
 
     for config in postprocess_handler.configs:
-        if config.is_marker_placement_required():
+        paragraph_remark = config.get_paragraph_marker_remark()
+        remarks = [
+            (chapter_num, f"{text} {paragraph_remark}" if paragraph_remark else text)
+            for chapter_num, text in draft_sentences.remarks
+        ]
+        if config.is_marker_processing_required():
             place_markers_postprocessor = config.create_place_markers_postprocessor()
             target_usfm = place_markers_postprocessor.postprocess_usfm(
-                source_usfm, config.rows, draft_sentences.remarks
+                source_usfm, config.rows, remarks, stylesheet=stylesheet
             )
         else:
             with draft_metadata.draft_path.open(encoding=encoding) as f:
@@ -178,7 +222,9 @@ def postprocess_draft(
                 quotation_denormalization_postprocessor = config.create_denormalize_quotation_marks_postprocessor(
                     training_corpus_pairs,
                 )
-                target_usfm = quotation_denormalization_postprocessor.postprocess_usfm(target_usfm)
+                target_usfm = quotation_denormalization_postprocessor.postprocess_usfm(
+                    target_usfm, stylesheet=stylesheet
+                )
             except (UnknownQuoteConventionException, NoDetectedQuoteConventionException) as e:
                 LOGGER.warning(str(e) + " Skipping quotation mark denormalization.")
                 continue

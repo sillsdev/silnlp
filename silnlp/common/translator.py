@@ -481,9 +481,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
                             if config.is_marker_placement_required()
                             else None
                         ),
-                        # Defer remarks to the quotation denormalization step so they can be merged into a single
-                        # \rem per chapter; otherwise write them here.
-                        remarks=None if config.is_quotation_mark_denormalization_required() else remarks,
+                        remarks=remarks,
                         compare_segments=True,
                     )
 
@@ -517,7 +515,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
                             config.create_denormalize_quotation_marks_postprocessor(training_corpus_pairs)
                         )
                         usfm_out = quotation_denormalization_postprocessor.postprocess_usfm(
-                            usfm_out, remarks if (trg_project is not None or src_from_project) else None
+                            usfm_out, stylesheet=stylesheet
                         )
                     except (UnknownQuoteConventionException, NoDetectedQuoteConventionException) as e:
                         LOGGER.warning(str(e) + " Skipping quotation mark denormalization.")

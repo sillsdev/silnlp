@@ -11,6 +11,10 @@ from machine.corpora import (
     UpdateUsfmParserHandler,
     UpdateUsfmRow,
     UpdateUsfmTextBehavior,
+    UsfmStylesheet,
+    UsfmToken,
+    UsfmTokenizer,
+    UsfmTokenType,
     UsfmUpdateBlockHandler,
     parse_usfm,
 )
@@ -71,22 +75,6 @@ class PlaceMarkersPostprocessor:
     def get_update_block_handlers(self) -> Sequence[UsfmUpdateBlockHandler]:
         return self._update_block_handlers
 
-    def _create_remark(self) -> str:
-        behavior_map: Dict[UpdateUsfmMarkerBehavior, List[str]] = {
-            UpdateUsfmMarkerBehavior.PRESERVE: [],
-            UpdateUsfmMarkerBehavior.STRIP: [],
-        }
-        behavior_map[self._paragraph_behavior].append("paragraph break positions")
-        behavior_map[self._embed_behavior].append("embed markers")
-        behavior_map[self._style_behavior].append("style markers")
-
-        remark_sentences = [
-            self._create_remark_sentence_for_behavior(behavior, items)
-            for behavior, items in behavior_map.items()
-            if len(items) > 0
-        ]
-        return " ".join(remark_sentences)
-
     def create_paragraph_remark(self) -> str:
         return self._create_remark_sentence_for_behavior(self._paragraph_behavior, ["paragraph break positions"])
 
@@ -104,11 +92,9 @@ class PlaceMarkersPostprocessor:
         self,
         usfm: str,
         rows: List[UpdateUsfmRow],
-        remarks: Optional[List[str]] = None,
+        remarks: Optional[List[Tuple[int, str]]] = None,
+        stylesheet: str | UsfmStylesheet = "usfm.sty",
     ) -> str:
-        if remarks is None:
-            remarks = []
-
         handler = UpdateUsfmParserHandler(
             rows=rows,
             text_behavior=UpdateUsfmTextBehavior.STRIP_EXISTING,
@@ -116,10 +102,10 @@ class PlaceMarkersPostprocessor:
             embed_behavior=self._embed_behavior,
             style_behavior=self._style_behavior,
             update_block_handlers=self._update_block_handlers,
-            remarks=remarks + [self._create_remark()],
+            remarks=remarks or [],
         )
-        parse_usfm(usfm, handler)
-        return handler.get_usfm()
+        parse_usfm(usfm, handler, stylesheet)
+        return handler.get_usfm(stylesheet)
 
 
 class UnknownQuoteConventionException(Exception):
@@ -219,10 +205,10 @@ class DenormalizeQuotationMarksPostprocessor:
             )
         ]
 
-    def _get_best_chapter_strategies(self, usfm: str) -> List[QuotationMarkUpdateStrategy]:
+    def _get_best_chapter_strategies(self, usfm: str, stylesheet: UsfmStylesheet) -> List[QuotationMarkUpdateStrategy]:
         quotation_mark_update_first_pass = QuotationMarkDenormalizationFirstPass(self._target_quote_convention)
 
-        parse_usfm(usfm, quotation_mark_update_first_pass)
+        parse_usfm(usfm, quotation_mark_update_first_pass, stylesheet)
 
         # sil-machine's get_chapters() currently mislabels chapter numbers, temp workaround until machine.py is fixed
         strategy_by_chapter: Dict[int, QuotationMarkUpdateStrategy] = {}
@@ -261,32 +247,54 @@ class DenormalizeQuotationMarksPostprocessor:
             for chapter_num, strategy in enumerate(chapter_strategies, 1)
         }
 
-    def _merge_remarks(
-        self,
-        remarks: Optional[List[Tuple[int, str]]],
-        chapter_strategies: List[QuotationMarkUpdateStrategy],
-    ) -> List[Tuple[int, str]]:
-        if not remarks:
-            return []
-        chapter_remarks = self._create_chapter_remarks(chapter_strategies)
-        merged: List[Tuple[int, str]] = []
-        for chapter_num, remark in remarks:
-            quotation_remark = chapter_remarks.get(chapter_num)
-            merged.append((chapter_num, f"{remark} {quotation_remark}" if quotation_remark else remark))
-        return merged
+    @staticmethod
+    def _append_sentences_to_last_rem(tokens: List[UsfmToken], chapter_sentences: Dict[int, str]) -> None:
+        # Append each chapter's quotation sentence to the last \rem in that chapter (the draft remark, which is
+        # always inserted after any pre-existing rems). The machine handler can't merge into an existing \rem, so
+        # this is done at the token level. Chapters with no \rem (and book-level chapter 0) are left untouched.
+        last_rem_index_by_chapter: Dict[int, int] = {}
+        current_chapter = 0
+        for index, token in enumerate(tokens):
+            if token.type == UsfmTokenType.CHAPTER:
+                data = str(token.data).strip() if token.data is not None else ""
+                if data.isdigit():
+                    current_chapter = int(data)
+            elif token.type == UsfmTokenType.PARAGRAPH and token.marker == "rem":
+                last_rem_index_by_chapter[current_chapter] = index
 
-    def postprocess_usfm(
-        self,
-        usfm: str,
-        remarks: Optional[List[Tuple[int, str]]] = None,
-    ) -> str:
-        best_chapter_strategies = self._get_best_chapter_strategies(usfm)
+        # Apply deepest index first so inserting a TEXT token can't shift an earlier chapter's recorded index.
+        for chapter_num in sorted(last_rem_index_by_chapter, reverse=True):
+            if chapter_num == 0:
+                continue
+            sentence = chapter_sentences.get(chapter_num)
+            if not sentence:
+                continue
+            next_index = last_rem_index_by_chapter[chapter_num] + 1
+            if next_index < len(tokens) and tokens[next_index].type == UsfmTokenType.TEXT:
+                existing_text = tokens[next_index].text or ""
+                separator = "" if existing_text == "" or existing_text.endswith(" ") else " "
+                tokens[next_index].text = existing_text + separator + sentence
+            else:
+                tokens.insert(next_index, UsfmToken(UsfmTokenType.TEXT, text=sentence))
+
+    def postprocess_usfm(self, usfm: str, stylesheet: str | UsfmStylesheet = "usfm.sty") -> str:
+        # The draft \rem is written by the draft-building step (translator's update_usfm, or the existing draft
+        # file); this step only denormalizes the quotation marks and appends its note to that existing \rem.
+        if isinstance(stylesheet, str):
+            stylesheet = UsfmStylesheet(stylesheet)
+
+        best_chapter_strategies = self._get_best_chapter_strategies(usfm, stylesheet)
+        chapter_sentences = self._create_chapter_remarks(best_chapter_strategies)
+
         handler = UpdateUsfmParserHandler(
             update_block_handlers=self._create_update_block_handlers(best_chapter_strategies),
-            remarks=self._merge_remarks(remarks, best_chapter_strategies),
         )
-        parse_usfm(usfm, handler)
-        return handler.get_usfm()
+        parse_usfm(usfm, handler, stylesheet)
+
+        tokenizer = UsfmTokenizer(stylesheet)
+        out_tokens = tokenizer.tokenize(handler.get_usfm(stylesheet))
+        self._append_sentences_to_last_rem(out_tokens, chapter_sentences)
+        return tokenizer.detokenize(out_tokens)
 
 
 class PostprocessConfig:
@@ -341,6 +349,13 @@ class PostprocessConfig:
 
     def is_marker_placement_required(self) -> bool:
         return self._config["paragraph_behavior"] == "place" or self._config["include_style_markers"]
+
+    def is_marker_processing_required(self) -> bool:
+        return (
+            self._config["paragraph_behavior"] != "end"
+            or self._config["include_style_markers"]
+            or self._config["include_embeds"]
+        )
 
     def is_quotation_mark_denormalization_required(self) -> bool:
         return self._config["denormalize_quotation_marks"]
