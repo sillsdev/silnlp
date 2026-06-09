@@ -1437,7 +1437,7 @@ class HuggingFaceNMTModel(NMTModel):
         Returns:
             A ScoredTranslation with per-word scores and suggestions.
         """
-        from .translation_scorer import ScoredTranslation, TranslationScorer
+        from .translation_scorer import AbsoluteThresholdAnomalyDetector, TranslationScorer
 
         src_lang = self._config.data["lang_codes"].get(src_iso, src_iso)
         trg_lang = self._config.data["lang_codes"].get(trg_iso, trg_iso)
@@ -1452,7 +1452,12 @@ class HuggingFaceNMTModel(NMTModel):
         if isinstance(tokenizer, (NllbTokenizer, NllbTokenizerFast)):
             tokenizer = PunctuationNormalizingTokenizer(tokenizer)
 
-        scorer = TranslationScorer(model, tokenizer, low_prob_threshold, top_k_suggestions)
+        scorer = TranslationScorer(
+            model,
+            tokenizer,
+            anomaly_detector=AbsoluteThresholdAnomalyDetector(low_prob_threshold),
+            top_k_suggestions=top_k_suggestions,
+        )
         return scorer.score(source, translation)
 
     def _create_training_arguments(self) -> Seq2SeqTrainingArguments:

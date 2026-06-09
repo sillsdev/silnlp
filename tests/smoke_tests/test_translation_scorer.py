@@ -1,7 +1,19 @@
 from types import SimpleNamespace
+from typing import List, Union
 from unittest.mock import patch
 
-from silnlp.nmt.translation_scorer import PhraseScore, SequenceScore, TokenScore, TranslationScorer, WordSpan
+import torch
+
+from silnlp.nmt.translation_scorer import (
+    AbsoluteThresholdAnomalyDetector,
+    ReplacementSuggestion,
+    SpanScorer,
+    SuggestionScorer,
+    TargetSequenceProbabilities,
+    TranslationScorer,
+    WordTokenSpan,
+    ZScoreAnomalyDetector,
+)
 
 
 class FakeTokenizer:
@@ -15,124 +27,160 @@ class FakeModel:
         self.generation_config = SimpleNamespace(forced_bos_token_id=2)
         self.config = SimpleNamespace(forced_bos_token_id=None, decoder_start_token_id=2)
 
+    def parameters(self):
+        return iter([torch.zeros(1)])
+
     def eval(self):
         return None
 
 
-def build_sequence(text: str, word_log_probs: list[float]) -> SequenceScore:
+def build_sequence(text: str, word_log_probs: List[Union[float, List[float]]]) -> TargetSequenceProbabilities:
+    """Build a TargetSequenceProbabilities. A word's entry may be a single log-prob
+    (one subword token) or a list of log-probs (a multi-token word)."""
     words = text.split() if text else []
-    return SequenceScore(
-        text=text,
-        label_ids=list(range(10, 10 + len(words))),
-        tokens=[f"▁{word}" for word in words],
-        token_log_probs=word_log_probs,
-        words=[WordSpan(word, index, index + 1) for index, word in enumerate(words)],
-    )
+    tokens: List[str] = []
+    token_log_probs: List[float] = []
+    spans: List[WordTokenSpan] = []
+    index = 0
+    for word, entry in zip(words, word_log_probs):
+        sub_log_probs = entry if isinstance(entry, list) else [entry]
+        start = index
+        for sub in sub_log_probs:
+            tokens.append(f"▁{word}")
+            token_log_probs.append(sub)
+            index += 1
+        spans.append(WordTokenSpan(word, start, index))
+    return TargetSequenceProbabilities(text=text, tokens=tokens, token_log_probs=token_log_probs, words=spans)
 
 
 def make_scorer(**kwargs) -> TranslationScorer:
-    return TranslationScorer(FakeModel(), FakeTokenizer(), min_suggestion_improvement=0.0, **kwargs)
+    return TranslationScorer(FakeModel(), FakeTokenizer(), **kwargs)
 
 
-def test_contextual_word_scoring_uses_right_context_delta():
-    scorer = make_scorer(low_prob_threshold=-3.0, max_phrase_words=2)
-    scores = {
+# --- TargetSequenceProbabilities -------------------------------------------
+
+
+def test_sequence_normalizes_by_token_count_not_word_count():
+    # "rare" is one word but three subword tokens; "the" is one word, one token.
+    sequence = build_sequence("the rare", [-0.5, [-2.0, -2.0, -2.0]])
+    assert sequence.log_prob(0, 2) == -6.5
+    assert sequence.token_count(0, 2) == 4
+    assert sequence.mean_token_log_prob == -6.5 / 4
+
+
+# --- SpanScorer ------------------------------------------------------------
+
+
+def test_span_score_uses_mean_per_token_and_windowed_right_context():
+    base = build_sequence("bleu maison vite", [-1.0, -5.0, -0.5])
+    scorer = SpanScorer(right_context_window=5)
+
+    maison = scorer.score(base, 1, 2)
+    assert maison.forward_log_prob == -5.0
+    assert maison.token_count == 1
+    assert maison.mean_token_log_prob == -5.0
+    # Right context is the per-token mean of the following words (just "vite"), not a ratio.
+    assert maison.right_context_log_prob == -0.5
+
+    last = scorer.score(base, 2, 3)
+    assert last.right_context_log_prob == 0.0  # no following words
+
+
+# --- Anomaly detectors -----------------------------------------------------
+
+
+def test_absolute_threshold_is_constant():
+    detector = AbsoluteThresholdAnomalyDetector(-3.0)
+    assert detector.threshold([-1.0, -2.0, -10.0]) == -3.0
+
+
+def test_zscore_threshold_is_relative_to_sentence_spread():
+    detector = ZScoreAnomalyDetector(z=1.0)
+    values = [-1.0, -1.0, -1.0, -4.0]
+    # mean = -1.75, pstdev = 1.299..., threshold = mean - 1*std
+    threshold = detector.threshold(values)
+    assert -3.1 < threshold < -3.0
+    assert values[-1] < threshold  # the outlier is flagged
+    assert values[0] > threshold  # the typical token is not
+
+
+def test_zscore_flags_nothing_when_sentence_is_uniform_or_too_short():
+    detector = ZScoreAnomalyDetector(z=1.5)
+    assert detector.threshold([-1.0, -1.0, -1.0]) == float("-inf")
+    assert detector.threshold([-1.0]) == float("-inf")
+
+
+# --- SuggestionScorer ------------------------------------------------------
+
+
+def test_suggestions_ranked_by_per_token_improvement_and_filtered():
+    base = build_sequence("bleu maison vite", [-1.0, -5.0, -0.5])  # mean = -6.5/3
+    span = SpanScorer().score(base, 1, 2)  # "maison"
+    variants = {
+        "bleu chien vite": build_sequence("bleu chien vite", [-1.0, -0.2, -0.5]),  # much better
+        "bleu chat vite": build_sequence("bleu chat vite", [-1.0, -0.8, -0.5]),  # better
+        "bleu maison vite": base,  # unchanged -> zero improvement, filtered
+    }
+    decoder = SimpleNamespace(score_target=lambda text: variants[text])
+    scorer = SuggestionScorer(decoder, min_improvement=0.05, top_k=5)
+
+    # "chien" and "chat" improve; the duplicate and the original-equal candidate are dropped.
+    suggestions = scorer.score(base, span, ["chien", "chat", "chien", "maison"])
+
+    assert [suggestion.phrase for suggestion in suggestions] == ["chien", "chat"]
+    assert suggestions[0].improvement > suggestions[1].improvement
+    assert all(isinstance(suggestion, ReplacementSuggestion) for suggestion in suggestions)
+
+
+def test_suggestions_below_min_improvement_are_dropped():
+    base = build_sequence("bleu maison vite", [-1.0, -5.0, -0.5])
+    span = SpanScorer().score(base, 1, 2)
+    variants = {"bleu chat vite": build_sequence("bleu chat vite", [-1.0, -4.9, -0.5])}
+    decoder = SimpleNamespace(score_target=lambda text: variants[text])
+    scorer = SuggestionScorer(decoder, min_improvement=0.5, top_k=5)
+
+    assert scorer.score(base, span, ["chat"]) == []
+
+
+# --- TranslationScorer end-to-end ------------------------------------------
+
+
+def test_score_flags_low_probability_word_and_attaches_suggestions():
+    scorer = make_scorer(anomaly_detector=AbsoluteThresholdAnomalyDetector(-3.0), max_phrase_words=2)
+    sequences = {
         "bleu maison vite": build_sequence("bleu maison vite", [-1.0, -5.0, -0.5]),
-        "maison vite": build_sequence("maison vite", [-0.5, -0.5]),
-        "bleu vite": build_sequence("bleu vite", [-1.0, -0.2]),
-        "vite": build_sequence("vite", [-0.2]),
+        "bleu chien vite": build_sequence("bleu chien vite", [-1.0, -0.2, -0.5]),
     }
 
     with (
-        patch.object(scorer, "_encode_source", return_value={}),
-        patch.object(scorer, "_score_translation_text", side_effect=lambda _ctx, text, _cache: scores[text]),
-        patch.object(scorer, "_generate_candidate_phrases", return_value=[]),
+        patch.object(scorer._decoder, "set_source", return_value=None),
+        patch.object(scorer._decoder, "score_target", side_effect=lambda text: sequences[text]),
+        # score_targets_batch is used for variant scoring; score_target for base scoring.
+        patch.object(scorer._decoder, "score_targets_batch", side_effect=lambda texts: [sequences[t] for t in texts]),
+        # generate_batch replaces per-span generate calls.
+        patch.object(scorer._candidate_generator, "generate_batch", side_effect=lambda prefixes: [["chien"]] * len(prefixes)),
     ):
         result = scorer.score("blue house quickly", "bleu maison vite")
 
-    bleu = next(word for word in result.word_scores if word.word == "bleu")
-    maison = next(word for word in result.word_scores if word.word == "maison")
+    flagged = result.flagged_words
+    assert [span.text for span in flagged] == ["maison"]
+    assert [suggestion.phrase for suggestion in flagged[0].suggestions] == ["chien"]
+    assert flagged[0].suggestions[0].improvement > 0
+    # The whole-sentence aggregate is a plain forward log probability (<= 0).
+    assert result.total_log_prob == -6.5
+    assert result.mean_token_log_prob == -6.5 / 3
 
-    assert bleu.forward_log_prob == -1.0
-    assert bleu.right_context_log_prob == -4.5
-    assert bleu.contextual_log_prob == -5.5
-    assert bleu.is_low_probability
-    assert maison.contextual_log_prob < maison.forward_log_prob
 
-
-def test_phrase_scores_are_length_normalized_for_variable_length_phrases():
-    scorer = make_scorer(low_prob_threshold=-3.0, max_phrase_words=3)
-    scores = {
-        "bleu maison vite": build_sequence("bleu maison vite", [-1.0, -5.0, -0.5]),
-        "maison vite": build_sequence("maison vite", [-0.5, -0.5]),
-        "bleu vite": build_sequence("bleu vite", [-1.0, -0.2]),
-        "vite": build_sequence("vite", [-0.2]),
-        "bleu maison": build_sequence("bleu maison", [-1.0, -0.3]),
-    }
+def test_score_does_not_flag_when_all_words_are_plausible():
+    scorer = make_scorer(anomaly_detector=AbsoluteThresholdAnomalyDetector(-3.0), max_phrase_words=2)
+    sequences = {"bleu maison": build_sequence("bleu maison", [-1.0, -2.0])}
 
     with (
-        patch.object(scorer, "_encode_source", return_value={}),
-        patch.object(scorer, "_score_translation_text", side_effect=lambda _ctx, text, _cache: scores[text]),
-        patch.object(scorer, "_generate_candidate_phrases", return_value=[]),
-    ):
-        result = scorer.score("blue house quickly", "bleu maison vite")
-
-    phrase = next(score for score in result.phrase_scores if score.phrase == "bleu maison")
-    assert isinstance(phrase, PhraseScore)
-    assert phrase.forward_log_prob == -6.0
-    assert phrase.right_context_log_prob == -0.3
-    assert phrase.contextual_log_prob == -6.3
-    assert phrase.normalized_log_prob == -3.15
-    assert phrase.is_low_probability
-
-
-def test_replacement_suggestions_are_rescored_with_right_context_and_can_change_length():
-    scorer = make_scorer(low_prob_threshold=-3.0, top_k_suggestions=3, max_phrase_words=2)
-    scores = {
-        "bleu maison vite": build_sequence("bleu maison vite", [-1.0, -5.0, -0.5]),
-        "maison vite": build_sequence("maison vite", [-0.5, -0.5]),
-        "blue maison vite": build_sequence("blue maison vite", [-0.8, -0.2, -0.5]),
-        "blue house maison vite": build_sequence("blue house maison vite", [-0.7, -0.3, -0.3, -0.4]),
-        "azure maison vite": build_sequence("azure maison vite", [-1.5, -0.6, -0.8]),
-        "bleu vite": build_sequence("bleu vite", [-1.0, -0.2]),
-        "blue vite": build_sequence("blue vite", [-0.7, -0.2]),
-        "blue house vite": build_sequence("blue house vite", [-0.7, -0.4, -0.1]),
-        "azure vite": build_sequence("azure vite", [-1.3, -0.3]),
-        "vite": build_sequence("vite", [-0.2]),
-    }
-
-    with (
-        patch.object(scorer, "_encode_source", return_value={}),
-        patch.object(scorer, "_score_translation_text", side_effect=lambda _ctx, text, _cache: scores[text]),
-        patch.object(scorer, "_generate_candidate_phrases", return_value=["blue", "blue house", "azure"]),
-    ):
-        result = scorer.score("blue house quickly", "bleu maison vite")
-
-    bleu = next(word for word in result.word_scores if word.word == "bleu")
-    phrase = next(score for score in result.phrase_scores if score.phrase == "bleu maison")
-
-    assert [suggestion.phrase for suggestion in bleu.suggestions] == ["blue house", "blue", "azure"]
-    assert bleu.suggestions[0].normalized_log_prob > bleu.suggestions[1].normalized_log_prob
-    assert bleu.suggestions[0].improvement > 0
-
-    assert [suggestion.phrase for suggestion in phrase.suggestions] == ["blue house", "blue", "azure"]
-    assert phrase.suggestions[0].phrase == "blue house"
-    assert phrase.suggestions[0].normalized_log_prob > phrase.normalized_log_prob
-
-
-def test_sequence_log_probability_still_tracks_forward_sentence_score():
-    scorer = make_scorer(low_prob_threshold=-10.0, max_phrase_words=1)
-    scores = {
-        "bleu maison": build_sequence("bleu maison", [-1.0, -2.0]),
-        "maison": build_sequence("maison", [-0.5]),
-    }
-
-    with (
-        patch.object(scorer, "_encode_source", return_value={}),
-        patch.object(scorer, "_score_translation_text", side_effect=lambda _ctx, text, _cache: scores[text]),
-        patch.object(scorer, "_generate_candidate_phrases", return_value=[]),
+        patch.object(scorer._decoder, "set_source", return_value=None),
+        patch.object(scorer._decoder, "score_target", side_effect=lambda text: sequences[text]),
     ):
         result = scorer.score("blue house", "bleu maison")
 
-    assert result.sequence_log_prob == -3.0
-    assert all(isinstance(token, TokenScore) for word in result.word_scores for token in word.tokens)
+    # Nothing flagged → generate_batch and score_targets_batch are never called.
+    assert result.flagged_words == []
+    assert result.flagged_phrases == []
