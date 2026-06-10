@@ -203,13 +203,12 @@ def postprocess_draft(
             )
 
     for config in postprocess_handler.configs:
-        paragraph_remark = config.get_paragraph_marker_remark()
-        remarks = [
-            (chapter_num, f"{text} {paragraph_remark}" if paragraph_remark else text)
-            for chapter_num, text in draft_sentences.remarks
-        ]
         if config.is_marker_processing_required():
             place_markers_postprocessor = config.create_place_markers_postprocessor()
+            remarks = [
+                (chapter_num, place_markers_postprocessor.replace_paragraph_marker_remark(text))
+                for chapter_num, text in draft_sentences.remarks
+            ]
             target_usfm = place_markers_postprocessor.postprocess_usfm(
                 source_usfm, config.rows, remarks, stylesheet=stylesheet
             )

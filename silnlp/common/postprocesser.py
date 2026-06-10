@@ -56,18 +56,22 @@ POSTPROCESS_SUFFIX_CHARS = {
 
 
 class PlaceMarkersPostprocessor:
-    _BEHAVIOR_DESCRIPTION_MAP = {
-        UpdateUsfmMarkerBehavior.PRESERVE: " were preserved.",
-        UpdateUsfmMarkerBehavior.STRIP: " were removed.",
+    _PARAGRAPH_MARKER_REMARKS = {
+        "end": "Paragraph break positions were moved to the end of the verse.",
+        "place": "Paragraph break positions were preserved.",
+        "strip": "Paragraph breaks were removed.",
     }
 
     def __init__(
         self,
-        paragraph_behavior: UpdateUsfmMarkerBehavior,
+        paragraph_behavior: str,
         embed_behavior: UpdateUsfmMarkerBehavior,
         style_behavior: UpdateUsfmMarkerBehavior,
     ):
         self._paragraph_behavior = paragraph_behavior
+        self._paragraph_marker_behavior = (
+            UpdateUsfmMarkerBehavior.STRIP if paragraph_behavior == "strip" else UpdateUsfmMarkerBehavior.PRESERVE
+        )
         self._embed_behavior = embed_behavior
         self._style_behavior = style_behavior
         self._update_block_handlers = [PlaceMarkersUsfmUpdateBlockHandler()]
@@ -75,18 +79,15 @@ class PlaceMarkersPostprocessor:
     def get_update_block_handlers(self) -> Sequence[UsfmUpdateBlockHandler]:
         return self._update_block_handlers
 
-    def create_paragraph_remark(self) -> str:
-        return self._create_remark_sentence_for_behavior(self._paragraph_behavior, ["paragraph break positions"])
+    def get_paragraph_marker_remark(self) -> Optional[str]:
+        return self._PARAGRAPH_MARKER_REMARKS.get(self._paragraph_behavior)
 
-    def _create_remark_sentence_for_behavior(self, behavior: UpdateUsfmMarkerBehavior, items: List[str]) -> str:
-        return self._format_group_of_items_for_remark(items) + self._BEHAVIOR_DESCRIPTION_MAP[behavior]
-
-    def _format_group_of_items_for_remark(self, items: List[str]) -> str:
-        if len(items) == 1:
-            return items[0].capitalize()
-        elif len(items) == 2:
-            return f"{items[0].capitalize()} and {items[1]}"
-        return f"{items[0].capitalize()}, {', '.join(items[1:-1])}, and {items[-1]}"
+    def replace_paragraph_marker_remark(self, remark: str) -> str:
+        for sentence in self._PARAGRAPH_MARKER_REMARKS.values():
+            remark = remark.replace(f" {sentence}", "").replace(sentence, "")
+        remark = remark.strip()
+        paragraph_remark = self.get_paragraph_marker_remark()
+        return f"{remark} {paragraph_remark}".strip() if paragraph_remark else remark
 
     def postprocess_usfm(
         self,
@@ -98,7 +99,7 @@ class PlaceMarkersPostprocessor:
         handler = UpdateUsfmParserHandler(
             rows=rows,
             text_behavior=UpdateUsfmTextBehavior.STRIP_EXISTING,
-            paragraph_behavior=self._paragraph_behavior,
+            paragraph_behavior=self._paragraph_marker_behavior,
             embed_behavior=self._embed_behavior,
             style_behavior=self._style_behavior,
             update_block_handlers=self._update_block_handlers,
@@ -330,9 +331,7 @@ class PostprocessConfig:
         return suffix if len(suffix) > 1 else ""
 
     def get_paragraph_marker_remark(self) -> Optional[str]:
-        if self._config["paragraph_behavior"] not in ("place", "strip"):
-            return None
-        return self.create_place_markers_postprocessor().create_paragraph_remark()
+        return self.create_place_markers_postprocessor().get_paragraph_marker_remark()
 
     def is_base_config(self) -> bool:
         return self._config == POSTPROCESS_DEFAULTS
@@ -357,7 +356,7 @@ class PostprocessConfig:
 
     def create_place_markers_postprocessor(self) -> PlaceMarkersPostprocessor:
         return PlaceMarkersPostprocessor(
-            paragraph_behavior=self.get_paragraph_behavior(),
+            paragraph_behavior=self._config["paragraph_behavior"],
             embed_behavior=self.get_embed_behavior(),
             style_behavior=self.get_style_behavior(),
         )
