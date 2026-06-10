@@ -129,7 +129,6 @@ class DenormalizeQuotationMarksPostprocessor:
     _DENORMALIZED_CHAPTER_REMARK_SENTENCE = (
         "Quotation marks have been adjusted automatically to match the rest of the project."
     )
-    _SKIPPED_CHAPTER_REMARK_SENTENCE = "Quotation marks could not be successfully denormalized."
     _project_convention_cache: Dict[str, QuoteConvention] = {}
 
     def __init__(
@@ -239,12 +238,9 @@ class DenormalizeQuotationMarksPostprocessor:
 
     def _create_chapter_remarks(self, chapter_strategies: List[QuotationMarkUpdateStrategy]) -> Dict[int, str]:
         return {
-            chapter_num: (
-                self._SKIPPED_CHAPTER_REMARK_SENTENCE
-                if strategy == QuotationMarkUpdateStrategy.SKIP
-                else self._DENORMALIZED_CHAPTER_REMARK_SENTENCE
-            )
+            chapter_num: self._DENORMALIZED_CHAPTER_REMARK_SENTENCE
             for chapter_num, strategy in enumerate(chapter_strategies, 1)
+            if strategy != QuotationMarkUpdateStrategy.SKIP
         }
 
     @staticmethod
