@@ -205,9 +205,11 @@ def postprocess_draft(
     for config in postprocess_handler.configs:
         if config.is_marker_processing_required():
             place_markers_postprocessor = config.create_place_markers_postprocessor()
+            source_remark_texts = {text.strip() for _, text in src_sentences.remarks}
             remarks = [
                 (chapter_num, place_markers_postprocessor.replace_paragraph_marker_remark(text))
                 for chapter_num, text in draft_sentences.remarks
+                if text.strip() not in source_remark_texts
             ]
             target_usfm = place_markers_postprocessor.postprocess_usfm(
                 source_usfm, config.rows, remarks, stylesheet=stylesheet
