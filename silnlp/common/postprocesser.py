@@ -245,9 +245,6 @@ class DenormalizeQuotationMarksPostprocessor:
 
     @staticmethod
     def _append_sentences_to_last_rem(tokens: List[UsfmToken], chapter_sentences: Dict[int, str]) -> None:
-        # Append each chapter's quotation sentence to the last \rem in that chapter (the draft remark, which is
-        # always inserted after any pre-existing rems). The machine handler can't merge into an existing \rem, so
-        # this is done at the token level. Chapters with no \rem (and book-level chapter 0) are left untouched.
         last_rem_index_by_chapter: Dict[int, int] = {}
         current_chapter = 0
         for index, token in enumerate(tokens):
@@ -258,7 +255,6 @@ class DenormalizeQuotationMarksPostprocessor:
             elif token.type == UsfmTokenType.PARAGRAPH and token.marker == "rem":
                 last_rem_index_by_chapter[current_chapter] = index
 
-        # Apply deepest index first so inserting a TEXT token can't shift an earlier chapter's recorded index.
         for chapter_num in sorted(last_rem_index_by_chapter, reverse=True):
             if chapter_num == 0:
                 continue
@@ -274,8 +270,6 @@ class DenormalizeQuotationMarksPostprocessor:
                 tokens.insert(next_index, UsfmToken(UsfmTokenType.TEXT, text=sentence))
 
     def postprocess_usfm(self, usfm: str, stylesheet: str | UsfmStylesheet = "usfm.sty") -> str:
-        # The draft \rem is written by the draft-building step (translator's update_usfm, or the existing draft
-        # file); this step only denormalizes the quotation marks and appends its note to that existing \rem.
         if isinstance(stylesheet, str):
             stylesheet = UsfmStylesheet(stylesheet)
 
