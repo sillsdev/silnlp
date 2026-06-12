@@ -166,9 +166,11 @@ def postprocess_draft(
         stylesheet = UsfmStylesheet("usfm.sty")
         encoding = "utf-8-sig"
 
-    draft_sentences = get_sentences(draft_metadata.draft_path, stylesheet, encoding, book)
-    draft_chapters = sorted({sentence.ref.chapter_num for sentence in draft_sentences.sentences})
-    src_sentences = get_sentences(draft_metadata.source_path, stylesheet, encoding, book, draft_chapters)
+    draft_sentences: DraftSentences = get_sentences(draft_metadata.draft_path, stylesheet, encoding, book)
+    draft_chapters: List[int] = sorted({sentence.ref.chapter_num for sentence in draft_sentences.sentences})
+    src_sentences: DraftSentences = get_sentences(
+        draft_metadata.source_path, stylesheet, encoding, book, draft_chapters
+    )
 
     # Verify reference parity
     if len(src_sentences.sentences) != len(draft_sentences.sentences):

@@ -83,6 +83,8 @@ class PlaceMarkersPostprocessor:
         return self._PARAGRAPH_MARKER_REMARKS.get(self._paragraph_behavior)
 
     def replace_paragraph_marker_remark(self, remark: str) -> str:
+        if not any(sentence in remark for sentence in self._PARAGRAPH_MARKER_REMARKS.values()):
+            return remark
         for sentence in self._PARAGRAPH_MARKER_REMARKS.values():
             remark = remark.replace(f" {sentence}", "").replace(sentence, "")
         remark = remark.strip()
@@ -245,7 +247,7 @@ class DenormalizeQuotationMarksPostprocessor:
         }
 
     @staticmethod
-    def _append_sentences_to_last_rem(tokens: List[UsfmToken], chapter_sentences: Dict[int, str]) -> None:
+    def _append_sentences_to_last_rem(tokens: List[UsfmToken], chapter_quotation_remarks: Dict[int, str]) -> None:
         last_rem_index_by_chapter: Dict[int, int] = {}
         current_chapter = 0
         for index, token in enumerate(tokens):
@@ -259,23 +261,23 @@ class DenormalizeQuotationMarksPostprocessor:
         for chapter_num in sorted(last_rem_index_by_chapter, reverse=True):
             if chapter_num == 0:
                 continue
-            sentence = chapter_sentences.get(chapter_num)
-            if not sentence:
+            quotation_remark = chapter_quotation_remarks.get(chapter_num)
+            if not quotation_remark:
                 continue
             next_index = last_rem_index_by_chapter[chapter_num] + 1
             if next_index < len(tokens) and tokens[next_index].type == UsfmTokenType.TEXT:
                 existing_text = tokens[next_index].text or ""
                 separator = "" if existing_text == "" or existing_text.endswith(" ") else " "
-                tokens[next_index].text = existing_text + separator + sentence
+                tokens[next_index].text = existing_text + separator + quotation_remark
             else:
-                tokens.insert(next_index, UsfmToken(UsfmTokenType.TEXT, text=sentence))
+                tokens.insert(next_index, UsfmToken(UsfmTokenType.TEXT, text=quotation_remark))
 
     def postprocess_usfm(self, usfm: str, stylesheet: str | UsfmStylesheet = "usfm.sty") -> str:
         if isinstance(stylesheet, str):
             stylesheet = UsfmStylesheet(stylesheet)
 
         best_chapter_strategies = self._get_best_chapter_strategies(usfm, stylesheet)
-        chapter_sentences = self._create_chapter_remarks(best_chapter_strategies)
+        chapter_quotation_remarks = self._create_chapter_remarks(best_chapter_strategies)
 
         handler = UpdateUsfmParserHandler(
             update_block_handlers=self._create_update_block_handlers(best_chapter_strategies),
@@ -284,7 +286,7 @@ class DenormalizeQuotationMarksPostprocessor:
 
         tokenizer = UsfmTokenizer(stylesheet)
         out_tokens = tokenizer.tokenize(handler.get_usfm(stylesheet))
-        self._append_sentences_to_last_rem(out_tokens, chapter_sentences)
+        self._append_sentences_to_last_rem(out_tokens, chapter_quotation_remarks)
         return tokenizer.detokenize(out_tokens)
 
 
