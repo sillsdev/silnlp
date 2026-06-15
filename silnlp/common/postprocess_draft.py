@@ -49,7 +49,8 @@ def main() -> None:
         "--denormalize-quotation-marks",
         default=False,
         action="store_true",
-        help="For files in USFM format, attempt to change the draft's quotation marks to match the target project's quote convention",
+        help="For files in USFM format, attempt to change the draft's quotation marks to match "
+        + "the target project's quote convention",
     )
     parser.add_argument(
         "--target-quote-convention",
