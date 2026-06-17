@@ -1,4 +1,6 @@
 import argparse
+import csv
+import pandas as pd
 import getpass
 import hashlib
 import logging
@@ -19,15 +21,62 @@ from machine.corpora import FileParatextProjectSettingsParser
 from silnlp.common.analyze import analyze
 from silnlp.common.clean_projects import process_single_project_for_cleaning
 from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML
-from silnlp.nmt.config import Config
+from silnlp.nmt.config import SUPPORTED_GLOSS_ISOS, Config
 
 from ..nmt.config_utils import create_config
 from .collect_verse_counts import collect_verse_counts
 from .environment import SilNlpEnv
 from .extract_corpora import extract_corpora
-from .iso_info import ALT_ISO, NLLB_TAG_FROM_ISO
+from .iso_info import ALT_ISO, NLLB_SCRIPT_SET, NLLB_TAG_FROM_ISO
 
 LOGGER = logging.getLogger(__package__ + ".onboard_project")
+
+
+class OnboardingReport:
+
+    def __init__(self) -> None:
+        self.name_on_bucket: str = ""
+        self.short_name: str = ""
+        self.name: str = ""
+        self.iso_code: str = ""
+        self.lang_in_nllb: bool = False
+        self.script: str = ""
+        self.script_in_nllb: bool = False
+        self.versification: List[int] = []
+        self.versification_error_count: int = 0
+        self.verse_count: int = 0
+        self.alignment: str = ""
+        self.key_terms_type: str = ""
+        self.key_terms_count: int = 0
+        self.key_terms_glosses_exist: bool = False
+        self.mean_tokens_per_verse: float = 0.0
+        self.mean_char_per_token: float = 0.0
+        self.num_added_tokens: int = 0
+        self.num_verses_truncated: int = 0
+
+    def generate_dict(self) -> dict:
+        return {
+            "Name on Bucket": self.name_on_bucket,
+            "Short Name": self.short_name,
+            "Name": self.name,
+            "ISO Code": self.iso_code,
+            "Language": self.language,
+            "Language in NLLB": "yes" if self.lang_in_nllb else "no",
+            "Script": self.script,
+            "Script in NLLB": "yes" if self.script_in_nllb else "no",
+            "Normalization": self.normalization,
+            "Versification": ";".join(str(v) for v in self.versification),
+            "Versification Error Count": self.versification_error_count if self.versification_error_count else "",
+            "Verse Count": self.verse_count,
+            "Alignment with Main": self.alignment,
+            "Key Terms Type": self.key_terms_type,
+            "Key Terms Count": self.key_terms_count,
+            "Key Terms Glosses Exist": "yes" if self.key_terms_glosses_exist else "no",
+            "Mean Tokens Per Verse": f"{self.mean_tokens_per_verse:.2f}" if self.mean_tokens_per_verse else "",
+            "Mean Char Per Token": f"{self.mean_char_per_token:.3f}" if self.mean_char_per_token else "",
+            "Number of Added Tokens": self.num_added_tokens,
+            "Number of Verses Truncated": self.num_verses_truncated,
+        }
 
 
 class OnboardingProject:
@@ -41,6 +90,7 @@ class OnboardingProject:
         self.resource: bool | None = None
         self.overwrite: bool = overwrite
         self.environment: SilNlpEnv = environment
+        self.report: OnboardingReport = OnboardingReport()
 
     def get_extract_path(self) -> Path | None:
         if self.extract_file is not None:
@@ -59,7 +109,7 @@ class OnboardingProject:
         LOGGER.info(f"Extracting corpora for project '{self.project_name}'")
 
         versification_error_output_path = Path(self.output_folder / f"versification_errors_{self.project_name}.txt")
-        extract_path = extract_corpora(
+        extract_path, detected_versification, versification_error_count, terms_count = extract_corpora(
             projects={self.project_name},
             include_markers=extract_config.get("markers", False),
             extract_lemmas=extract_config.get("lemmas", False),
@@ -70,6 +120,10 @@ class OnboardingProject:
             environment=self.environment,
         )
         self.extract_file = extract_path
+
+        self.report.versification = detected_versification
+        self.report.versification_error_count = versification_error_count
+        self.report.key_terms_count = terms_count
 
     def wildebeest_analysis_wrapper(self, wildebeest_config: dict) -> None:
         extract_path = self.get_extract_path()
@@ -244,11 +298,11 @@ class OnboardingProject:
         )
         exp_name = f"{self.output_folder.stem}/{self.project_name}/alignments"
         analyze(config=align_config, exp_name=exp_name, create_summaries=True, environment=self.environment)
-        corpus_stats_csv = align_output_dir / "corpus_stats.csv"
+        corpus_stats_csv = align_output_dir / "corpus-stats.csv"
         if corpus_stats_csv.exists():
             shutil.move(
                 str(corpus_stats_csv),
-                str(self.output_folder / "corpus_stats.csv"),
+                str(self.output_folder / "corpus-stats.csv"),
             )
 
     def check_for_project_errors(self) -> None:
@@ -369,6 +423,54 @@ class OnboardingProject:
             project_name = append_datestamp(project_name)
         return project_name
 
+    def generate_report(self) -> dict:
+        self.report.name_on_bucket = self.project_name
+
+        stats_df = pd.read_csv(self.output_folder / "tokenization_stats.csv", header=[0, 1])
+
+        target_stats = stats_df[stats_df[(" ", "Translation Side")] == "Target"]
+
+        self.report.mean_tokens_per_verse = target_stats[("Tokens/Verse", "Mean")].values[0]
+        self.report.mean_char_per_token = target_stats[("Characters/Token", "Mean")].values[0]
+        self.report.num_added_tokens = target_stats[(" ", "Num Tokens Added to Vocab")].values[0]
+        self.report.num_verses_truncated = target_stats[("Tokens/Verse", "Num Verses >= 200 Tokens")].values[0]
+
+        verse_counts_df = pd.read_csv(self.output_folder / "verse_counts.csv")
+
+        extract_verse_counts = verse_counts_df[verse_counts_df["file"] == self.extract_file.stem]
+
+        self.report.verse_count = extract_verse_counts["Total"].values[0]
+
+        settings = FileParatextProjectSettingsParser(self.environment.pt_projects_dir / self.project_name).parse()
+
+        self.report.name = settings.full_name
+        self.report.short_name = settings.name
+        self.report.iso_code = settings.language_code
+        self.report.key_terms_glosses_exist = (
+            self.report.iso_code in SUPPORTED_GLOSS_ISOS
+            or ALT_ISO.get_alternative(self.report.iso_code) in SUPPORTED_GLOSS_ISOS
+        )
+        self.report.key_terms_type = settings.biblical_terms_list_type
+
+        corpus_stats_csv = self.output_folder / "corpus-stats.csv"
+        if corpus_stats_csv.exists():
+            corpus_stats_df = pd.read_csv(corpus_stats_csv)
+            alignment_row = corpus_stats_df[corpus_stats_df["trg_project"] == self.extract_file.stem]
+            if not alignment_row.empty:
+                self.report.alignment = alignment_row["align_score"].values[0]
+                self.report.script = alignment_row["trg_script"].values[0]
+            else:
+                alignment_row = corpus_stats_df[corpus_stats_df["src_project"] == self.extract_file.stem].head(1)
+                if not alignment_row.empty:
+                    self.report.script = alignment_row["src_script"].values[0]
+
+        nllb_tag = NLLB_TAG_FROM_ISO.get(self.report.iso_code, None)
+        self.report.lang_in_nllb = nllb_tag is not None
+        self.report.script = nllb_tag.split("_")[1] if nllb_tag and self.report.script == "" else self.report.script
+        self.report.script_in_nllb = self.report.script in NLLB_SCRIPT_SET
+
+        return self.report.generate_dict()
+
 
 class OnboardingRequest:
 
@@ -437,6 +539,8 @@ class OnboardingRequest:
             if self.align:
                 self.align_main_project()
 
+            self.create_report()
+
     def align_main_project(self) -> None:
         iso_codes = set()
         if self.align_isos:
@@ -472,6 +576,10 @@ class OnboardingRequest:
                     LOGGER.error(f"Error occurred while uploading reference project '{project.project_name}': {e}")
                     LOGGER.error(f"Continuing with onboarding without reference project '{project.project_name}'.")
                     reference_projects_to_remove.append(project)
+                else:
+                    LOGGER.error(f"Error occurred while uploading main project '{project.project_name}': {e}")
+                    LOGGER.error("Main project upload failed. Stopping onboarding process.")
+                    raise e
 
         for project in reference_projects_to_remove:
             self.reference_projects.remove(project)
@@ -582,6 +690,22 @@ class OnboardingRequest:
             yield
         finally:
             close_logger(log_file_path)
+
+    def create_report(self) -> None:
+        LOGGER.info("Creating onboarding report.")
+        report_path = self.output_folder / "onboarding_report.csv"
+        with report_path.open("w", newline="") as f:
+            writer = csv.writer(f)
+            projects = [self.main_project] + self.reference_projects
+
+            project_types = ["Request Project" if p == self.main_project else "Reference Project" for p in projects]
+            writer.writerow(["Project Type"] + project_types)
+
+            formatted_reports = [p.generate_report() for p in projects]
+
+            for metric_name in formatted_reports[0].keys():
+                row = [metric_name] + [report.get(metric_name, "") for report in formatted_reports]
+                writer.writerow(row)
 
 
 def create_paratext_project_folder_if_not_exists(project_name: str, environment: SilNlpEnv) -> Path:
