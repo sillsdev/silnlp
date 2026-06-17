@@ -441,7 +441,7 @@ def check_versification(
     parent_project_dir: Optional[str],
     versification_error_output_path: str,
     environment: SilNlpEnv,
-) -> Tuple[bool, List[VersificationType]]:
+) -> Tuple[bool, List[VersificationType], int]:
 
     parent_settings = None
     if parent_project_dir is not None:
@@ -463,13 +463,13 @@ def check_versification(
         ot_versification, key_ot_verses = detect_OT_versification(project_dir, environment)
         if ot_versification == VersificationType.UNKNOWN:
             LOGGER.warning(f"Unknown versification detected for {project_dir}.")
-            return (matching, [ot_versification])
+            return (matching, [ot_versification], 0)
     if check_nt:
         nt_versification: List[VersificationType]
         nt_versification, key_nt_verses = detect_NT_versification(project_dir, environment)
         if nt_versification[0] == VersificationType.UNKNOWN:
             LOGGER.warning(f"Unknown versification detected for {project_dir}.")
-            return (matching, nt_versification)
+            return (matching, nt_versification, 0)
 
     detected_versification: List[VersificationType] = [VersificationType.UNKNOWN]
     if check_ot and check_nt:
@@ -480,7 +480,7 @@ def check_versification(
                 f"The detected versifications were based on {', '.join(key_ot_verses + key_nt_verses)} "
                 "being the last verse of their respective chapters."
             )
-            return (matching, [ot_versification] + nt_versification)
+            return (matching, [ot_versification] + nt_versification, 0)
         detected_versification = [ot_versification]
         key_verses = key_ot_verses + key_nt_verses
     elif not check_ot and check_nt:
@@ -495,7 +495,7 @@ def check_versification(
             "Versification detection for the OT requires the book of Daniel. "
             "Versification detection for the NT requires the books of John, Acts, and Romans."
         )
-        return (matching, detected_versification)
+        return (matching, detected_versification, 0)
 
     if settings.versification.type not in detected_versification:
         if not (
@@ -509,7 +509,7 @@ def check_versification(
                 f"being the last verse of {'their' if len(key_verses)>=2 else 'its'} "
                 f"respective chapter{'s' if len(key_verses)>=2 else ''}."
             )
-            return (matching, detected_versification)
+            return (matching, detected_versification, 0)
 
     errors = FileParatextProjectVersificationErrorDetector(project_dir).get_usfm_versification_errors()
     if len(errors) > 0:
@@ -532,4 +532,4 @@ def check_versification(
                     )
 
     matching = True
-    return (matching, detected_versification)
+    return (matching, detected_versification, len(errors))
