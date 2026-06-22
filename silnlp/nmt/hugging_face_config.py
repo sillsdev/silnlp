@@ -319,7 +319,7 @@ class FilePreTrainedModelProvider(PreTrainedModelProvider):
     ) -> PreTrainedModel:
         model = cast(
             PreTrainedModel,
-            AutoModelForSeq2SeqLM.from_pretrained(model_name, config=model_config, device_map=device_map),
+            AutoModelForSeq2SeqLM.from_pretrained(model_name, config=model_config, device_map=device_map, token=False),
         )
         return model
 
@@ -328,6 +328,7 @@ class FilePreTrainedModelProvider(PreTrainedModelProvider):
             model_name,
             torch_dtype=self._dtype,
             attn_implementation=self._attention_implementation,
+            token=False,
         )
 
 
@@ -532,7 +533,7 @@ class HuggingFaceConfig(Config):
             file.seek(0)
             json.dump(data, file, ensure_ascii=False, indent=4)
             file.truncate()
-        self._tokenizer = AutoTokenizer.from_pretrained(str(self.exp_dir), use_fast=True)
+        self._tokenizer = AutoTokenizer.from_pretrained(str(self.exp_dir), use_fast=True, token=False)
         return
 
     def _train_sp_tokenizer(self, files, vocab_size) -> Union[SentencePieceBPETokenizer, SentencePieceUnigramTokenizer]:
@@ -701,12 +702,12 @@ class HuggingFaceConfig(Config):
                 and not (self.exp_dir / "tokenizer_config.json").is_file()
             ):
                 if self.model_prefix == "facebook/nllb-200":
-                    self._tokenizer = NllbTokenizer.from_pretrained(str(self.exp_dir))
+                    self._tokenizer = NllbTokenizer.from_pretrained(str(self.exp_dir), token=False)
                     self._tokenizer = convert_slow_tokenizer(self._tokenizer)
                     self._tokenizer = NllbTokenizerFast(tokenizer_object=self._tokenizer)
                     self._tokenizer.save_pretrained(str(self.exp_dir))
                 elif self.model_prefix == "google/madlad400":
-                    self._tokenizer = T5Tokenizer.from_pretrained(str(self.exp_dir))
+                    self._tokenizer = T5Tokenizer.from_pretrained(str(self.exp_dir), token=False)
                     self._tokenizer = convert_slow_tokenizer(self._tokenizer)
                     self._tokenizer = T5TokenizerFast(tokenizer_object=self._tokenizer)
                     self._tokenizer.add_special_tokens(
@@ -728,7 +729,7 @@ class HuggingFaceConfig(Config):
                     model_name_or_path = str(parent_dir)
                 else:
                     model_name_or_path = self.model
-                self._tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True)
+                self._tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True, token=False)
             self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
         return self._tokenizer
 
@@ -743,7 +744,7 @@ class HuggingFaceConfig(Config):
             else:
                 model_name_or_path = self.model
 
-            self._tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True)
+            self._tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True, token=False)
             self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
         return self._tokenizer
 
@@ -978,6 +979,7 @@ class HuggingFaceNMTModel(NMTModel):
             id2label={},
             num_labels=0,
             attn_implementation=self._config.params["attn_implementation"],
+            token=False,
         )
         if self._num_devices == 2 and self._config.model_prefix == "facebook/nllb-200":
             device_map = {
