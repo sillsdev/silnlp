@@ -34,14 +34,17 @@ LOGGER = logging.getLogger(__package__ + ".onboard_project")
 
 class OnboardingReport:
 
-    def __init__(self) -> None:
+    def __init__(self, project_type: str) -> None:
+        self.project_type: str = project_type
         self.name_on_bucket: str = ""
         self.short_name: str = ""
         self.name: str = ""
         self.iso_code: str = ""
+        self.language: str = ""
         self.lang_in_nllb: bool = False
         self.script: str = ""
         self.script_in_nllb: bool = False
+        self.normalization: str = ""
         self.versification: List[int] = []
         self.versification_error_count: int = 0
         self.verse_count: int = 0
@@ -56,6 +59,7 @@ class OnboardingReport:
 
     def generate_dict(self) -> dict:
         return {
+            "Project Type": self.project_type,
             "Name on Bucket": self.name_on_bucket,
             "Short Name": self.short_name,
             "Name": self.name,
@@ -81,7 +85,7 @@ class OnboardingReport:
 
 class OnboardingProject:
 
-    def __init__(self, project_name: str, overwrite: bool, environment: SilNlpEnv) -> None:
+    def __init__(self, project_name: str, project_type: str, overwrite: bool, environment: SilNlpEnv) -> None:
         self.project_name: str = project_name
         self.local_project_path: Path | None = None
         self.output_folder: Path | None = None
@@ -90,7 +94,7 @@ class OnboardingProject:
         self.resource: bool | None = None
         self.overwrite: bool = overwrite
         self.environment: SilNlpEnv = environment
-        self.report: OnboardingReport = OnboardingReport()
+        self.report: OnboardingReport = OnboardingReport(project_type)
 
     def get_extract_path(self) -> Path | None:
         if self.extract_file is not None:
@@ -485,13 +489,19 @@ class OnboardingRequest:
         self.overwrite = onboarding_config.get("overwrite", False)
         main_project_name = onboarding_config.get("main_project", None)
         self.main_project: OnboardingProject = OnboardingProject(
-            project_name=main_project_name, overwrite=self.overwrite, environment=self.environment
+            project_name=main_project_name,
+            project_type="Request Project",
+            overwrite=self.overwrite,
+            environment=self.environment,
         )
         reference_project_names = onboarding_config.get("ref_projects", [])
         self.reference_projects: List[OnboardingProject] = []
         for ref_project_name in reference_project_names:
             reference_project = OnboardingProject(
-                project_name=ref_project_name, overwrite=self.overwrite, environment=self.environment
+                project_name=ref_project_name,
+                project_type="Reference Project",
+                overwrite=self.overwrite,
+                environment=self.environment,
             )
             self.reference_projects.append(reference_project)
         self.no_clean: bool = onboarding_config.get("no_clean", False)
@@ -694,18 +704,12 @@ class OnboardingRequest:
     def create_report(self) -> None:
         LOGGER.info("Creating onboarding report.")
         report_path = self.output_folder / "onboarding_report.csv"
-        with report_path.open("w", newline="") as f:
-            writer = csv.writer(f)
-            projects = [self.main_project] + self.reference_projects
 
-            project_types = ["Request Project" if p == self.main_project else "Reference Project" for p in projects]
-            writer.writerow(["Project Type"] + project_types)
+        projects = [self.main_project] + self.reference_projects
+        formatted_reports = [p.generate_report() for p in projects]
 
-            formatted_reports = [p.generate_report() for p in projects]
-
-            for metric_name in formatted_reports[0].keys():
-                row = [metric_name] + [report.get(metric_name, "") for report in formatted_reports]
-                writer.writerow(row)
+        report_df = pd.DataFrame(formatted_reports)
+        report_df.to_csv(report_path, index=False)
 
 
 def create_paratext_project_folder_if_not_exists(project_name: str, environment: SilNlpEnv) -> Path:
