@@ -1,5 +1,4 @@
 import argparse
-import csv
 import pandas as pd
 import getpass
 import hashlib
@@ -12,11 +11,13 @@ import zipfile
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+from enum import Enum
 from typing import Iterator, List
 
 import wildebeest.wb_analysis as wb_ana
 import yaml
 from machine.corpora import FileParatextProjectSettingsParser
+from machine.scripture.canon import book_number_to_id, book_id_to_number
 
 from silnlp.common.analyze import analyze
 from silnlp.common.clean_projects import process_single_project_for_cleaning
@@ -32,10 +33,17 @@ from .iso_info import ALT_ISO, NLLB_SCRIPT_SET, NLLB_TAG_FROM_ISO
 LOGGER = logging.getLogger(__package__ + ".onboard_project")
 
 
+class ProjectType(Enum):
+    MAIN = "Main"
+    BT = "Back Translation"
+    DRAFT_SOURCE = "Draft Source"
+    REFERENCE = "Reference"
+
+
 class OnboardingReport:
 
-    def __init__(self, project_type: str) -> None:
-        self.project_type: str = project_type
+    def __init__(self, project_type: ProjectType) -> None:
+        self.project_type: ProjectType = project_type
         self.name_on_bucket: str = ""
         self.short_name: str = ""
         self.name: str = ""
@@ -59,7 +67,7 @@ class OnboardingReport:
 
     def generate_dict(self) -> dict:
         return {
-            "Project Type": self.project_type,
+            "Project Type": self.project_type.value,
             "Name on Bucket": self.name_on_bucket,
             "Short Name": self.short_name,
             "Name": self.name,
@@ -85,7 +93,7 @@ class OnboardingReport:
 
 class OnboardingProject:
 
-    def __init__(self, project_name: str, project_type: str, overwrite: bool, environment: SilNlpEnv) -> None:
+    def __init__(self, project_name: str, project_type: ProjectType, overwrite: bool, environment: SilNlpEnv) -> None:
         self.project_name: str = project_name
         self.local_project_path: Path | None = None
         self.output_folder: Path | None = None
@@ -95,6 +103,7 @@ class OnboardingProject:
         self.overwrite: bool = overwrite
         self.environment: SilNlpEnv = environment
         self.report: OnboardingReport = OnboardingReport(project_type)
+        self.completed_books: List[str] = []
 
     def get_extract_path(self) -> Path | None:
         if self.extract_file is not None:
@@ -430,35 +439,51 @@ class OnboardingProject:
     def generate_report(self) -> dict:
         self.report.name_on_bucket = self.project_name
 
-        stats_df = pd.read_csv(self.output_folder / "tokenization_stats.csv", header=[0, 1])
+        stats_file = self.output_folder / "tokenization_stats.csv"
+        if stats_file.exists():
+            stats_df = pd.read_csv(stats_file, header=[0, 1])
+            target_stats = stats_df[stats_df[(" ", "Translation Side")] == "Target"]
 
-        target_stats = stats_df[stats_df[(" ", "Translation Side")] == "Target"]
+            self.report.mean_tokens_per_verse = target_stats[("Tokens/Verse", "Mean")].values[0]
+            self.report.mean_char_per_token = target_stats[("Characters/Token", "Mean")].values[0]
+            self.report.num_added_tokens = target_stats[(" ", "Num Tokens Added to Vocab")].values[0]
+            self.report.num_verses_truncated = target_stats[("Tokens/Verse", "Num Verses >= 200 Tokens")].values[0]
 
-        self.report.mean_tokens_per_verse = target_stats[("Tokens/Verse", "Mean")].values[0]
-        self.report.mean_char_per_token = target_stats[("Characters/Token", "Mean")].values[0]
-        self.report.num_added_tokens = target_stats[(" ", "Num Tokens Added to Vocab")].values[0]
-        self.report.num_verses_truncated = target_stats[("Tokens/Verse", "Num Verses >= 200 Tokens")].values[0]
+        verse_counts_file = self.output_folder / "verse_counts.csv"
+        if Path(verse_counts_file).exists():
+            verse_counts_df = pd.read_csv(verse_counts_file)
 
-        verse_counts_df = pd.read_csv(self.output_folder / "verse_counts.csv")
+            extract_verse_counts = verse_counts_df[verse_counts_df["file"] == self.extract_file.stem]
 
-        extract_verse_counts = verse_counts_df[verse_counts_df["file"] == self.extract_file.stem]
+            self.report.verse_count = extract_verse_counts["Total"].values[0]
 
-        self.report.verse_count = extract_verse_counts["Total"].values[0]
+        verse_percentages_file = self.output_folder / "verse_percentages.csv"
+        if Path(verse_percentages_file).exists():
+            verse_percentages_df = pd.read_csv(verse_percentages_file)
 
-        settings = FileParatextProjectSettingsParser(self.environment.pt_projects_dir / self.project_name).parse()
+            extract_verse_percentages = verse_percentages_df[verse_percentages_df["file"] == self.extract_file.stem]
 
-        self.report.name = settings.full_name
-        self.report.short_name = settings.name
-        self.report.iso_code = settings.language_code
-        self.report.key_terms_glosses_exist = (
-            self.report.iso_code in SUPPORTED_GLOSS_ISOS
-            or ALT_ISO.get_alternative(self.report.iso_code) in SUPPORTED_GLOSS_ISOS
-        )
-        self.report.key_terms_type = settings.biblical_terms_list_type
+            self.completed_books = sorted(
+                [book for book in extract_verse_percentages.columns if extract_verse_percentages[book].iloc[0] == 100],
+                key=book_id_to_number,
+            )
 
-        corpus_stats_csv = self.output_folder / "corpus-stats.csv"
-        if corpus_stats_csv.exists():
-            corpus_stats_df = pd.read_csv(corpus_stats_csv)
+        settings_file = self.environment.pt_projects_dir / self.project_name
+        if settings_file.exists():
+            settings = FileParatextProjectSettingsParser(self.environment.pt_projects_dir / self.project_name).parse()
+
+            self.report.name = settings.full_name
+            self.report.short_name = settings.name
+            self.report.iso_code = settings.language_code
+            self.report.key_terms_glosses_exist = (
+                self.report.iso_code in SUPPORTED_GLOSS_ISOS
+                or ALT_ISO.get_alternative(self.report.iso_code) in SUPPORTED_GLOSS_ISOS
+            )
+            self.report.key_terms_type = settings.biblical_terms_list_type
+
+        corpus_stats_file = self.output_folder / "corpus-stats.csv"
+        if Path(corpus_stats_file).exists():
+            corpus_stats_df = pd.read_csv(corpus_stats_file)
             alignment_row = corpus_stats_df[corpus_stats_df["trg_project"] == self.extract_file.stem]
             if not alignment_row.empty:
                 self.report.alignment = alignment_row["align_score"].values[0]
@@ -490,20 +515,45 @@ class OnboardingRequest:
         main_project_name = onboarding_config.get("main_project", None)
         self.main_project: OnboardingProject = OnboardingProject(
             project_name=main_project_name,
-            project_type="Request Project",
+            project_type=ProjectType.MAIN,
             overwrite=self.overwrite,
             environment=self.environment,
         )
-        reference_project_names = onboarding_config.get("ref_projects", [])
         self.reference_projects: List[OnboardingProject] = []
+        draft_source_project_name = onboarding_config.get("draft_source", None)
+        if draft_source_project_name:
+            self.reference_projects.append(
+                OnboardingProject(
+                    project_name=draft_source_project_name,
+                    project_type=ProjectType.DRAFT_SOURCE,
+                    overwrite=self.overwrite,
+                    environment=self.environment,
+                )
+            )
+        bt_project_name = onboarding_config.get("bt_project", None)
+        if bt_project_name:
+            self.reference_projects.append(
+                OnboardingProject(
+                    project_name=bt_project_name,
+                    project_type=ProjectType.BT,
+                    overwrite=self.overwrite,
+                    environment=self.environment,
+                )
+            )
+        reference_project_names = onboarding_config.get("ref_projects", [])
         for ref_project_name in reference_project_names:
             reference_project = OnboardingProject(
                 project_name=ref_project_name,
-                project_type="Reference Project",
+                project_type=ProjectType.REFERENCE,
                 overwrite=self.overwrite,
                 environment=self.environment,
             )
             self.reference_projects.append(reference_project)
+
+        self.completed_books: List[str] = [
+            book_number_to_id(book) for book in sorted(onboarding_config.get("completed_books", []))
+        ]
+        self.planned_books: List[str] = [book_number_to_id(book) for book in onboarding_config.get("planned_books", [])]
         self.no_clean: bool = onboarding_config.get("no_clean", False)
         self.copy_from: Path | None = onboarding_config.get("copy_from", None)
         self.datestamp: bool = onboarding_config.get("datestamp", False)
@@ -701,6 +751,26 @@ class OnboardingRequest:
         finally:
             close_logger(log_file_path)
 
+    def _add_report_note(
+        self,
+        project_type: str,
+        mask: pd.Series,
+        note_text: str,
+    ) -> None:
+        notes_column = f"Notes/Flags for {project_type}"
+        self.report_df.loc[mask, notes_column] = note_text
+
+    def _check_for_flags(self):
+        for project_type in self.report_df["Project Type"].unique():
+            self.report_df[f"Notes/Flags for {project_type}"] = ""
+
+        for project_type in self.report_df["Project Type"].unique():
+            self._add_report_note(
+                project_type,
+                (self.report_df["Project Type"] == project_type) & (self.report_df["Normalization"] != "NFC"),
+                "Normalization is not NFC",
+            )
+
     def create_report(self) -> None:
         LOGGER.info("Creating onboarding report.")
         report_path = self.output_folder / "onboarding_report.csv"
@@ -708,8 +778,33 @@ class OnboardingRequest:
         projects = [self.main_project] + self.reference_projects
         formatted_reports = [p.generate_report() for p in projects]
 
-        report_df = pd.DataFrame(formatted_reports)
-        report_df.to_csv(report_path, index=False)
+        self.report_df = pd.DataFrame(formatted_reports)
+
+        self.report_df.at[ProjectType.MAIN.value, "Books for Training"] = self.completed_books
+        self.report_df.at[ProjectType.MAIN.value, "Books to Translate"] = self.planned_books
+        self.report_df.at[ProjectType.MAIN.value, "Books Missing/Incomplete"] = [
+            book for book in self.completed_books if book not in self.main_project.completed_books
+        ]
+        self.report_df.at[ProjectType.MAIN.value, "Extra Books"] = [
+            book for book in self.main_project.completed_books if book not in self.completed_books
+        ]
+
+        for project in self.reference_projects:
+            books_missing = [
+                book for book in self.completed_books + self.planned_books if book not in project.completed_books
+            ]
+            extra_books = [
+                book for book in project.completed_books if book not in self.completed_books + self.planned_books
+            ]
+            self.report_df.at[project.project_name, "Books for Training"] = "yes" if len(books_missing) == 0 else "no"
+            self.report_df.at[project.project_name, "Books to Translate"] = "yes" if len(books_missing) == 0 else "no"
+            self.report_df.at[project.project_name, "Books Missing/Incomplete"] = books_missing
+            self.report_df.at[project.project_name, "Extra Books"] = extra_books
+
+        self._check_for_flags()
+
+        self.report_df = self.report_df.T
+        self.report_df.to_csv(report_path, index=False)
 
 
 def create_paratext_project_folder_if_not_exists(project_name: str, environment: SilNlpEnv) -> Path:
@@ -818,8 +913,18 @@ def main() -> None:
         default=None,
     )
     parser.add_argument(
+        "--draft-source",
+        help="The Drafting Source Paratext project name for onboarding the Main Project(s). The project will be stored on the bucket at Paratext/projects/<project>.",
+        default=None,
+    )
+    parser.add_argument(
+        "--bt-project",
+        help="The Back Translation Paratext project name for onboarding the Main Project(s). The project will be stored on the bucket at Paratext/projects/<project>.",
+        default=None,
+    )
+    parser.add_argument(
         "--ref-projects",
-        help="The Reference Paratext project name(s) for onboarding the main project(s). The project(s) will be stored on the bucket at Paratext/projects/<project>.",
+        help="The Reference Paratext project name(s) for onboarding the Main Pproject(s). The project(s) will be stored on the bucket at Paratext/projects/<project>.",
         nargs="+",
         default=None,
     )
@@ -874,13 +979,13 @@ def main() -> None:
         "--stats",
         default=False,
         action="store_true",
-        help="Compute tokenization statistics on the main project and reference projects.",
+        help="Compute tokenization statistics on the Main Project and reference projects.",
     )
     parser.add_argument(
         "--align",
         default=False,
         action="store_true",
-        help="Run alignments between the main project and reference projects.",
+        help="Run alignments between the Main Project and reference projects.",
     )
     parser.add_argument(
         "--align-isos",
@@ -921,7 +1026,7 @@ def main() -> None:
         args.collect_verse_counts = True
 
     if args.config and len(args.main_projects) != len(args.config):
-        parser.error("Number of config paths does not match number of main projects.")
+        parser.error("Number of config paths does not match number of Main Projects.")
 
     project_configs = {}
     if args.config:
@@ -943,6 +1048,8 @@ def main() -> None:
                 args.align = True
             config["onboarding"] = {
                 "main_project": main_project,
+                "draft_source": args.draft_source if args.draft_source else None,
+                "bt_project": args.bt if args.bt_project else None,
                 "ref_projects": args.ref_projects if args.ref_projects else [],
                 "copy_from": str(args.copy_from) if args.copy_from else None,
                 "datestamp": args.datestamp,

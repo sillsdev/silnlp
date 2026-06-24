@@ -7,9 +7,9 @@ import uuid
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import List
 
-import requests
+from requests import Response, post, get
 from clearml import Task
 
 LOGGER = logging.getLogger(__name__)
@@ -72,7 +72,7 @@ class OnboardingEnvironment:
             "scope": "openid profile email sf_data offline_access",
         }
 
-        req = requests.post(
+        req = post(
             cls.SF_AUTH_URL,
             json=payload,
             headers={"Content-Type": "application/json"},
@@ -80,12 +80,106 @@ class OnboardingEnvironment:
         cls.SF_API_TOKEN = req.json().get("access_token")
 
 
+class OnboardingProject:
+    def __init__(
+        self,
+        SF_id: str = "",
+        paratext_id: str = "",
+        short_name: str = "",
+        language_name: str = "",
+        language_code: str = "",
+    ):
+        self.SF_id: str = SF_id
+        self.paratext_id: str = paratext_id
+        self.short_name: str = short_name
+        self.language_name: str = language_name
+        self.language_code: str = language_code
+        self.set_project_metadata()
+
+    def set_project_metadata(self):
+        metadata = (
+            send_request(
+                RequestType.GET,
+                OnboardingEnvironment.ONBOARDING_REQUESTS_URL,
+                "getProjectMetadata",
+                {"scriptureForgeId": self.SF_id} if self.SF_id else {"paratextId": self.paratext_id},
+            )
+            .json()
+            .get("result", {})
+        )
+        self.SF_id = metadata.get("SF_id")
+        self.paratext_id = metadata.get("paratextId")
+        self.short_name = metadata.get("shortName")
+
+    def download_project(self, download_path: Path) -> bool:
+        project_url = f"{OnboardingEnvironment.PROJECTS_URL}/{self.SF_id}/download"
+        response = send_request(RequestType.GET, project_url, "getProjectDownloadLink", {"paratextId": self.SF_id})
+        if response.status_code != 200:
+            return False
+        if self.paratext_id and len(self.paratext_id) == 16:
+            self.short_name = f"{self.short_name}_Resource"
+        with open(f"{download_path}/{self.short_name}.zip", "wb") as f:
+            f.write(response.content)
+        return True
+
+
+class OnboardingRequest:
+    def __init__(self, request_dict: dict):
+        self.id: str = request_dict.get("id")
+        form_data: dict = request_dict["submission"]["formData"]
+        self.main_project: OnboardingProject = OnboardingProject(
+            SF_id=request_dict["submission"]["projectId"],
+            language_name=form_data.get("translationLanguageName", ""),
+            language_code=form_data.get("translationLanguageIsoCode", ""),
+        )
+        self.partner_org: str = form_data.get("partnerOrganization")
+        if self.partner_org != "none":
+            display_message("This request is for a partner organization.", MessageType.INFO, self.id)
+        self.completed_books: str = form_data.get("completedBooks")
+        self.planned_books: str = form_data.get("nextBooksToDraft")
+        self.draft_source: OnboardingProject = (
+            OnboardingProject(paratext_id=form_data.get("draftingSourceProject"))
+            if form_data.get("draftingSourceProject")
+            else None
+        )
+        self.bt_project: OnboardingProject = (
+            OnboardingProject(
+                paratext_id=form_data.get("backTranslationProject"),
+                language_name=form_data.get("backTranslationLanguageName", ""),
+                language_code=form_data.get("backTranslationLanguageIsoCode", ""),
+            )
+            if form_data.get("backTranslationProject")
+            else None
+        )
+        self.reference_projects: List[OnboardingProject] = []
+        for key in ["sourceProjectA", "sourceProjectB", "sourceProjectC"]:
+            if key in form_data:
+                self.reference_projects.append(OnboardingProject(paratext_id=form_data[key]))
+
+    def download_projects(self) -> None:
+        download_path = OnboardingEnvironment.ONBOARDING_PATH / Path(f"{self.main_project.short_name}_Request")
+        os.makedirs(download_path, exist_ok=True)
+        if not self.main_project.download_project(download_path, main_project=True):
+            raise Exception(f"Failed to download main project {self.main_project.short_name}")
+        for project in [self.draft_source, self.bt_project] + self.reference_projects:
+            if project is not None:
+                try:
+                    if not project.download_project(download_path):
+                        display_message(
+                            f"Failed to download project {project.short_name}", MessageType.WARNING, self.id
+                        )
+                except Exception as e:
+                    display_message(
+                        f"Failed to download project {project.short_name}. Error: {e}", MessageType.WARNING, self.id
+                    )
+
+
 class RequestType(Enum):
     POST = "POST"
     GET = "GET"
 
 
-def send_request(type: RequestType, url: str, method: str, params: dict) -> dict:
+def send_request(type: RequestType, url: str, method: str, params: dict) -> Response:
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {OnboardingEnvironment.SF_API_TOKEN}"}
     json_data = {
         "body": {
@@ -95,17 +189,13 @@ def send_request(type: RequestType, url: str, method: str, params: dict) -> dict
             "id": OnboardingEnvironment.UUID,
         }
     }
-    try:
-        if type == RequestType.POST:
-            response = requests.post(url, headers=headers, json=json_data)
-        elif type == RequestType.GET:
-            response = requests.get(url, headers=headers, json=json_data)
-        else:
-            raise ValueError("Invalid request type. Must be 'GET' or 'POST'.")
-        return response
-    except requests.exceptions.RequestException as e:
-        LOGGER.warning(f"Error making request: {e}")
-        return {}
+    if type == RequestType.POST:
+        response = post(url, headers=headers, json=json_data)
+    elif type == RequestType.GET:
+        response = get(url, headers=headers, json=json_data)
+    else:
+        raise ValueError("Invalid request type. Must be 'GET' or 'POST'.")
+    return response
 
 
 def add_comment(request_id: str, comment: str):
@@ -117,71 +207,13 @@ def add_comment(request_id: str, comment: str):
     )
 
 
-def get_onboarding_requests() -> list[dict]:
+def get_onboarding_requests() -> List[dict]:
     all_requests = (
         send_request(RequestType.GET, OnboardingEnvironment.ONBOARDING_REQUESTS_URL, "getAllRequests", {})
         .json()
         .get("result", [])
     )
     return [request for request in all_requests if request["status"] == "new"] if all_requests else []
-
-
-def get_project_metadata(onboarding_request: dict) -> Tuple[Dict[str, str], str]:
-    request_metadata: Dict[str, str] = {}
-    main_project_name = ""
-    form_data = onboarding_request["submission"]["formData"]
-    if form_data.get("partnerOrganization") != "none":
-        add_comment(onboarding_request["id"], "This request is for a partner organization.")
-    project_keys = [
-        "projectId",
-        "sourceProjectA",
-        "sourceProjectB",
-        "sourceProjectC",
-        "draftingSourceProject",
-        "backTranslationProject",
-    ]
-
-    for key in project_keys:
-        id = onboarding_request["submission"].get(key) if key == "projectId" else form_data.get(key)
-        if not id:
-            continue
-        metadata = (
-            send_request(
-                RequestType.GET,
-                OnboardingEnvironment.ONBOARDING_REQUESTS_URL,
-                "getProjectMetadata",
-                {"scriptureForgeId": id} if key == "projectId" else {"paratextId": id},
-            )
-            .json()
-            .get("result", {})
-        )
-        if key == "projectId":
-            main_project_name = metadata.get("shortName")
-        request_metadata[metadata.get("id")] = (metadata.get("paratextId"), metadata.get("shortName"))
-
-    return request_metadata, main_project_name
-
-
-def download_project(
-    request_id: str, SF_id: str, main_project_name: str, project_short_name: str, paratext_id: str
-) -> None:
-    project_url = f"{OnboardingEnvironment.PROJECTS_URL}/{SF_id}/download"
-    response = send_request(RequestType.GET, project_url, "getProjectDownloadLink", {"paratextId": SF_id})
-    if response.status_code != 200:
-        if main_project_name == project_short_name:
-            raise RuntimeError(f"Failed to download main project. Error: {response.text}")
-        add_comment(
-            request_id,
-            f"Failed to download Reference project: {project_short_name}. Skipping onboarding for this project.\nError: {response.text}",
-        )
-        return
-    os.makedirs(f"{OnboardingEnvironment.ONBOARDING_PATH}/{main_project_name}_Request", exist_ok=True)
-    if paratext_id and len(paratext_id) == 16:
-        project_short_name = f"{project_short_name}_Resource"
-    with open(
-        f"{OnboardingEnvironment.ONBOARDING_PATH}/{main_project_name}_Request/{project_short_name}.zip", "wb"
-    ) as f:
-        f.write(response.content)
 
 
 def append_datestamp(project_name: str) -> str:
@@ -202,54 +234,95 @@ def rename_project(project_name: str, datestamp: bool) -> str:
     return project_name
 
 
-def process_request(request):
+def process_request(request_dict: dict):
     try:
-        add_comment(request["id"], "Processing this onboarding request...")
-        request_metadata, main_project_name = get_project_metadata(request)
-        if not request_metadata:
-            with open(OnboardingEnvironment.ONBOARDING_LOG_PATH, "a") as f:
-                f.write(f"{request['id']}\n")
-            return
-        for SF_id, (paratext_id, project_short_name) in request_metadata.items():
-            download_project(request["id"], SF_id, main_project_name, project_short_name, paratext_id)
-        task_name = f"Auto Onboarding - {main_project_name}"
-        subprocess.run(
+        display_message("Processing this onboarding request...", MessageType.INFO, request_dict["id"])
+        with open(OnboardingEnvironment.ONBOARDING_LOG_PATH, "a") as f:
+            f.write(f"{request_dict['id']}\n")
+
+        request = OnboardingRequest(request_dict)
+        request.download_projects()
+
+        task_name = f"Auto Onboarding - {request.main_project.short_name}"
+        args = [
+            "/usr/bin/python3",
+            f"{OnboardingEnvironment.REPO_PATH}/scripts/automate_onboard_project.py",
+            f"{request.main_project.short_name}.zip",
+        ]
+        if request.draft_source.short_name:
+            args.extend(["--draft-source", request.draft_source.short_name])
+        if request.bt_project.short_name:
+            args.extend(["--bt-project", request.bt_project.short_name])
+        if request.reference_projects:
+            args.extend(
+                [
+                    "--reference-projects",
+                    *[ref_project.short_name for ref_project in request.reference_projects],
+                ]
+            )
+
+        args.extend(
             [
-                "/usr/bin/python3",
-                f"{OnboardingEnvironment.REPO_PATH}/scripts/automate_onboard_project.py",
-                f"{main_project_name}.zip",
+                "--completed-books",
+                *request.completed_books,
+                "--planned-books",
+                *request.planned_books,
                 "--dir",
-                f"{OnboardingEnvironment.ONBOARDING_PATH}/{main_project_name}_Request",
+                f"{OnboardingEnvironment.ONBOARDING_PATH}/{request.main_project.short_name}_Request",
                 "--task-name",
                 task_name,
             ]
         )
+        subprocess.run(args)
         task: Task = Task.get_task(project_name="Onboarding", task_name=task_name, tags=["silnlp-auto-onboarding"])
         with open(OnboardingEnvironment.ONBOARDING_LOG_PATH, "a") as f:
-            f.write(f"{request['id']}\n")
+            f.write(f"{request.id}\n")
         with open(OnboardingEnvironment.ONBOARDING_CLEANUP_PATH, "a") as f:
-            f.write(f"{OnboardingEnvironment.ONBOARDING_PATH}/{main_project_name}_Request\n")
+            f.write(f"{OnboardingEnvironment.ONBOARDING_PATH}/{request.main_project.short_name}_Request\n")
 
-        add_comment(
-            request["id"],
+        display_message(
             f"This request is being automatically onboarded.\nClearML task: {task_name}.\nLink: {task.get_output_log_web_page()}",
+            MessageType.INFO,
+            request.id,
         )
-        adjusted_name = rename_project(main_project_name, True)
-        add_comment(
-            request["id"],
+        adjusted_name = rename_project(request.main_project.short_name, True)
+        display_message(
             f"Results will be stored in {OnboardingEnvironment.ONBOARDING_REQUESTS_BUCKET_DIR}/{adjusted_name}",
+            MessageType.INFO,
+            request.id,
         )
     except Exception as e:
-        LOGGER.warning(f"Error processing onboarding request {request['id']}:\n{e}")
-        add_comment(request["id"], f"Error processing this onboarding request:\n{e}")
+        display_message(f"Error processing onboarding request {request.id}:\n{e}", MessageType.ERROR, request.id)
         return
 
     try:
         task.wait_for_status()
-        add_comment(request["id"], "Automatic onboarding was successful. See ClearML task for details.")
+        display_message(
+            "Automatic onboarding was successful. See ClearML task for details.", MessageType.INFO, request.id
+        )
     except Exception as e:
-        LOGGER.warning(e)
-        add_comment(request["id"], "Automatic onboarding failed. See ClearML task for details.")
+        display_message(
+            f"Automatic onboarding failed. See ClearML task for details.\n {e}", MessageType.ERROR, request.id
+        )
+
+
+class MessageType(Enum):
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
+
+
+def display_message(message: str, message_type: MessageType, request_id: str = None):
+    if message_type == MessageType.INFO:
+        LOGGER.info(message)
+    elif message_type == MessageType.WARNING:
+        LOGGER.warning(message)
+        message = f"WARNING: {message}"
+    elif message_type == MessageType.ERROR:
+        LOGGER.error(message)
+        message = f"ERROR: {message}"
+    if request_id:
+        add_comment(request_id, message)
 
 
 def main():
@@ -263,7 +336,7 @@ def main():
         OnboardingEnvironment.create_production_environment()
     onboarding_requests = get_onboarding_requests()
     if not onboarding_requests:
-        LOGGER.info("No new onboarding requests found.")
+        display_message("No new onboarding requests found.", MessageType.INFO)
         return
     onboarded_projects = []
 
@@ -279,7 +352,7 @@ def main():
             try:
                 future.result()
             except Exception as e:
-                LOGGER.warning(f"Error processing request:\n{e}")
+                display_message(f"Error processing request:\n{e}", MessageType.ERROR)
 
 
 if __name__ == "__main__":
