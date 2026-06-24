@@ -1,11 +1,28 @@
 import argparse
-import os
+import yaml
 
 from clearml import Task
 from clearml.backend_api.session.session import LoginError
 
 parser = argparse.ArgumentParser()
-parser.add_argument("project", type=str, help="The name of the main Paratext project to onboard.")
+parser.add_argument("project", type=str, help="The name of the Main Paratext project to onboard.")
+parser.add_argument(
+    "--draft-source",
+    type=str,
+    help="The name of the Drafting Source Paratext project to onboard.",
+)
+parser.add_argument(
+    "--bt-project",
+    type=str,
+    help="The name of the Back Translation Paratext project to onboard.",
+)
+parser.add_argument(
+    "--ref-projects",
+    nargs="+",
+    help="The names of the Reference Paratext projects to onboard.",
+)
+parser.add_argument("--completed-books", nargs="+", help="The ids of books that have been completed.")
+parser.add_argument("--next-books", nargs="+", help="The ids of books planned for translation")
 parser.add_argument(
     "--dir",
     type=str,
@@ -62,24 +79,26 @@ try:
 
     old_argv = sys.argv
     onboard_projects_dir = f"/root/OnboardingProjects/{args.dir}"
-    ref_projects = os.listdir(onboard_projects_dir)
-    ref_projects.remove(args.project)
+    onboarding_config = {}
+    onboarding_config["onboarding"] = {
+        "main_project": args.project,
+        "draft_source": args.draft_source if args.draft_source else None,
+        "bt_project": args.bt_project if args.bt_project else None,
+        "ref_projects": args.ref_projects if args.ref_projects else [],
+        "completed_books": args.completed_books if args.completed_books else [],
+        "planned_books": args.planned_books if args.planned_bookes else [],
+        "copy_from": str(onboard_projects_dir),
+        "datestamp": True,
+        "overwrite": True,
+        "extract_corpora": True,
+        "collect_verse_counts": True,
+        "wildebeest": True,
+        "stats": True,
+        "align": True,
+    }
+    yaml.dump(onboarding_config, open(f"{onboard_projects_dir}/config.yml", "w"))
     try:
-        sys.argv = [
-            "",
-            args.project,
-            "--ref-projects",
-            *ref_projects,
-            "--copy-from",
-            onboard_projects_dir,
-            "--extract-corpora",
-            "--wildebeest",
-            "--collect-verse-counts",
-            "--datestamp",
-            "--stats",
-            "--align",
-            "--overwrite",
-        ]
+        sys.argv = ["", args.project, "--config" "", f"{onboard_projects_dir}/config.yml"]
         onboard_project()
     finally:
         sys.argv = old_argv
