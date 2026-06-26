@@ -325,8 +325,7 @@ def display_message(message: str, message_type: MessageType, request_id: str = N
         LOGGER.error(message)
         message = f"ERROR: {message}"
     if request_id:
-        print(message)
-        # add_comment(request_id, message)
+        add_comment(request_id, message)
 
 
 def main():
