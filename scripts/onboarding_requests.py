@@ -107,7 +107,7 @@ class OnboardingProject:
             .json()
             .get("result", {})
         )
-        self.SF_id = metadata.get("SF_id")
+        self.SF_id = metadata.get("id")
         self.paratext_id = metadata.get("paratextId")
         self.short_name = metadata.get("shortName")
 
@@ -153,13 +153,16 @@ class OnboardingRequest:
         )
         self.reference_projects: List[OnboardingProject] = []
         for key in ["sourceProjectA", "sourceProjectB", "sourceProjectC"]:
-            if key in form_data:
+
+            if key in form_data and not form_data[key] in [
+                p.paratext_id for p in [self.draft_source, self.bt_project] if p is not None
+            ]:
                 self.reference_projects.append(OnboardingProject(paratext_id=form_data[key]))
 
     def download_projects(self) -> None:
         download_path = OnboardingEnvironment.ONBOARDING_PATH / Path(f"{self.main_project.short_name}_Request")
         os.makedirs(download_path, exist_ok=True)
-        if not self.main_project.download_project(download_path, main_project=True):
+        if not self.main_project.download_project(download_path):
             raise Exception(f"Failed to download main project {self.main_project.short_name}")
         for project in [self.draft_source, self.bt_project] + self.reference_projects:
             if project is not None:
@@ -249,9 +252,9 @@ def process_request(request_dict: dict):
             f"{OnboardingEnvironment.REPO_PATH}/scripts/automate_onboard_project.py",
             f"{request.main_project.short_name}.zip",
         ]
-        if request.draft_source.short_name:
+        if request.draft_source:
             args.extend(["--draft-source", request.draft_source.short_name])
-        if request.bt_project.short_name:
+        if request.bt_project:
             args.extend(["--bt-project", request.bt_project.short_name])
         if request.reference_projects:
             args.extend(
@@ -264,9 +267,9 @@ def process_request(request_dict: dict):
         args.extend(
             [
                 "--completed-books",
-                *request.completed_books,
+                *[str(book) for book in request.completed_books],
                 "--planned-books",
-                *request.planned_books,
+                *[str(book) for book in request.planned_books],
                 "--dir",
                 f"{OnboardingEnvironment.ONBOARDING_PATH}/{request.main_project.short_name}_Request",
                 "--task-name",
@@ -322,7 +325,8 @@ def display_message(message: str, message_type: MessageType, request_id: str = N
         LOGGER.error(message)
         message = f"ERROR: {message}"
     if request_id:
-        add_comment(request_id, message)
+        print(message)
+        # add_comment(request_id, message)
 
 
 def main():
@@ -340,11 +344,13 @@ def main():
         return
     onboarded_projects = []
 
-    with open(OnboardingEnvironment.ONBOARDING_LOG_PATH, "r") as f:
-        onboarded_projects = f.read().splitlines()
-        onboarded_projects = [project_id.strip() for project_id in onboarded_projects]
+    # with open(OnboardingEnvironment.ONBOARDING_LOG_PATH, "r") as f:
+    #    onboarded_projects = f.read().splitlines()
+    #    onboarded_projects = [project_id.strip() for project_id in onboarded_projects]
 
     requests_to_process = [request for request in onboarding_requests if request["id"] not in onboarded_projects]
+
+    requests_to_process = requests_to_process[0:1]
 
     with concurrent.futures.ThreadPoolExecutor() as executor:
         futures = [executor.submit(process_request, request) for request in requests_to_process]
