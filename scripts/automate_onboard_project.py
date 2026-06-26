@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 
 from clearml import Task
 from clearml.backend_api.session.session import LoginError
@@ -45,7 +46,7 @@ try:
             "--security-opt apparmor=docker-apparmor",
             "--env CHECK_TRANSFERS=1",
             "--env SIL_NLP_DATA_PATH=/root/M",
-            f"-v {args.dir}:/root/OnboardingProjects/{args.dir}",
+            f"-v {args.dir}:/root/OnboardingProjects/{Path(args.dir).name}",
         ],
         docker_setup_bash_script=[
             "apt install -y python3-venv",
