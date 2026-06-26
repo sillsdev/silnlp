@@ -481,7 +481,7 @@ class OnboardingProject:
             )
             self.report.key_terms_type = settings.biblical_terms_list_type
 
-            self.report.normalization = settings.normalization
+            self.report.normalization = settings.normalization_form
             self.report.language = settings.language
 
         corpus_stats_file = self.output_folder / "corpus-stats.csv"
