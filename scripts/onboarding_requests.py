@@ -259,7 +259,7 @@ def process_request(request_dict: dict):
         if request.reference_projects:
             args.extend(
                 [
-                    "--reference-projects",
+                    "--ref-projects",
                     *[ref_project.short_name for ref_project in request.reference_projects],
                 ]
             )
