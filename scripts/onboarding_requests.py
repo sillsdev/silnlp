@@ -253,14 +253,14 @@ def process_request(request_dict: dict):
             f"{request.main_project.short_name}.zip",
         ]
         if request.draft_source:
-            args.extend(["--draft-source", request.draft_source.short_name])
+            args.extend(["--draft-source", f"{request.draft_source.short_name}.zip"])
         if request.bt_project:
-            args.extend(["--bt-project", request.bt_project.short_name])
+            args.extend(["--bt-project", f"{request.bt_project.short_name}.zip"])
         if request.reference_projects:
             args.extend(
                 [
                     "--ref-projects",
-                    *[ref_project.short_name for ref_project in request.reference_projects],
+                    *[f"{ref_project.short_name}.zip" for ref_project in request.reference_projects],
                 ]
             )
 
