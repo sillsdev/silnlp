@@ -481,6 +481,9 @@ class OnboardingProject:
             )
             self.report.key_terms_type = settings.biblical_terms_list_type
 
+            self.report.normalization = settings.normalization
+            self.report.language = settings.language
+
         corpus_stats_file = self.output_folder / "corpus-stats.csv"
         if Path(corpus_stats_file).exists():
             corpus_stats_df = pd.read_csv(corpus_stats_file)
@@ -520,8 +523,9 @@ class OnboardingRequest:
             environment=self.environment,
         )
         self.reference_projects: List[OnboardingProject] = []
+
         draft_source_project_name = onboarding_config.get("draft_source", None)
-        if draft_source_project_name:
+        if draft_source_project_name is not None:
             self.reference_projects.append(
                 OnboardingProject(
                     project_name=draft_source_project_name,
@@ -530,8 +534,9 @@ class OnboardingRequest:
                     environment=self.environment,
                 )
             )
+
         bt_project_name = onboarding_config.get("bt_project", None)
-        if bt_project_name:
+        if bt_project_name is not None:
             self.reference_projects.append(
                 OnboardingProject(
                     project_name=bt_project_name,
@@ -540,6 +545,7 @@ class OnboardingRequest:
                     environment=self.environment,
                 )
             )
+
         reference_project_names = onboarding_config.get("ref_projects", [])
         for ref_project_name in reference_project_names:
             reference_project = OnboardingProject(
@@ -551,9 +557,11 @@ class OnboardingRequest:
             self.reference_projects.append(reference_project)
 
         self.completed_books: List[str] = [
-            book_number_to_id(book) for book in sorted(onboarding_config.get("completed_books", []))
+            book_number_to_id(int(book)) for book in sorted(onboarding_config.get("completed_books", []))
         ]
-        self.planned_books: List[str] = [book_number_to_id(book) for book in onboarding_config.get("planned_books", [])]
+        self.planned_books: List[str] = [
+            book_number_to_id(int(book)) for book in onboarding_config.get("planned_books", [])
+        ]
         self.no_clean: bool = onboarding_config.get("no_clean", False)
         self.copy_from: Path | None = onboarding_config.get("copy_from", None)
         self.datestamp: bool = onboarding_config.get("datestamp", False)
@@ -652,6 +660,18 @@ class OnboardingRequest:
         self.config["onboarding"]["datestamp"] = False
         self.config["onboarding"]["no_clean"] = False
         self.config["onboarding"]["output_folder"] = str(self.output_folder)
+
+        if self.config["onboarding"]["draft_source"]:
+            for ref_project in self.reference_projects:
+                if ref_project.report.project_type == ProjectType.DRAFT_SOURCE:
+                    self.config["onboarding"]["draft_source"] = ref_project.project_name
+                    break
+
+        if self.config["onboarding"]["bt_project"]:
+            for ref_project in self.reference_projects:
+                if ref_project.report.project_type == ProjectType.BT:
+                    self.config["onboarding"]["bt_project"] = ref_project.project_name
+                    break
 
         with open(self.get_config_path(), "w") as f:
             yaml.dump(self.config, f)
@@ -780,14 +800,18 @@ class OnboardingRequest:
 
         self.report_df = pd.DataFrame(formatted_reports)
 
-        self.report_df.at[ProjectType.MAIN.value, "Books for Training"] = self.completed_books
-        self.report_df.at[ProjectType.MAIN.value, "Books to Translate"] = self.planned_books
-        self.report_df.at[ProjectType.MAIN.value, "Books Missing/Incomplete"] = [
-            book for book in self.completed_books if book not in self.main_project.completed_books
-        ]
-        self.report_df.at[ProjectType.MAIN.value, "Extra Books"] = [
-            book for book in self.main_project.completed_books if book not in self.completed_books
-        ]
+        self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Books for Training"] = ";".join(
+            self.completed_books
+        )
+        self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Books to Translate"] = ";".join(
+            self.planned_books
+        )
+        self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Books Missing/Incomplete"] = (
+            ";".join([book for book in self.completed_books if book not in self.main_project.completed_books])
+        )
+        self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Extra Books"] = ";".join(
+            [book for book in self.main_project.completed_books if book not in self.completed_books]
+        )
 
         for project in self.reference_projects:
             books_missing = [
@@ -796,15 +820,23 @@ class OnboardingRequest:
             extra_books = [
                 book for book in project.completed_books if book not in self.completed_books + self.planned_books
             ]
-            self.report_df.at[project.project_name, "Books for Training"] = "yes" if len(books_missing) == 0 else "no"
-            self.report_df.at[project.project_name, "Books to Translate"] = "yes" if len(books_missing) == 0 else "no"
-            self.report_df.at[project.project_name, "Books Missing/Incomplete"] = books_missing
-            self.report_df.at[project.project_name, "Extra Books"] = extra_books
+            self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Books for Training"] = (
+                "yes" if len(books_missing) == 0 else "no"
+            )
+            self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Books to Translate"] = (
+                "yes" if len(books_missing) == 0 else "no"
+            )
+            self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Books Missing/Incomplete"] = (
+                ";".join(books_missing)
+            )
+            self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Extra Books"] = ";".join(
+                extra_books
+            )
 
         self._check_for_flags()
-
-        self.report_df = self.report_df.T
-        self.report_df.to_csv(report_path, index=False)
+        self.report_df.set_index("Project Type").T.reset_index().rename(columns={"index": "Project Type"}).to_csv(
+            report_path, index=False
+        )
 
 
 def create_paratext_project_folder_if_not_exists(project_name: str, environment: SilNlpEnv) -> Path:
@@ -993,6 +1025,8 @@ def main() -> None:
         nargs="+",
         help="List of ISO codes to use for determining standard alignment projects to include in the alignments step, along with the reference project isos.",
     )
+    parser.add_argument("--completed-books", nargs="+", help="The ids of books that have been completed.")
+    parser.add_argument("--planned-books", nargs="+", help="The ids of books planned for translation.")
     parser.add_argument(
         "--clearml-queue",
         default=None,
@@ -1049,7 +1083,7 @@ def main() -> None:
             config["onboarding"] = {
                 "main_project": main_project,
                 "draft_source": args.draft_source if args.draft_source else None,
-                "bt_project": args.bt if args.bt_project else None,
+                "bt_project": args.bt_project if args.bt_project else None,
                 "ref_projects": args.ref_projects if args.ref_projects else [],
                 "copy_from": str(args.copy_from) if args.copy_from else None,
                 "datestamp": args.datestamp,
@@ -1061,6 +1095,8 @@ def main() -> None:
                 "align": args.align,
                 "align_isos": args.align_isos if args.align_isos else [],
                 "output_folder": None,
+                "completed_books": args.completed_books if args.completed_books else [],
+                "planned_books": args.planned_books if args.planned_books else [],
             }
 
         onboarding_request = OnboardingRequest(config=config, environment=environment)

@@ -375,6 +375,12 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
             .pivot(index=["book", "chapter"], columns="verse", values="score")
             .loc[existing_books]
         )
+
+        if verse_df.empty:
+            alignment_by_verse[project_pair] = None
+            book_orders[project_pair] = None
+            continue
+
         verse_df = verse_df[sort_verse_nums(verse_df.columns)]
 
         # Get average alignment scores at the chapter and book level and make df for chapter alignment scores
@@ -436,6 +442,8 @@ def create_alignment_breakdown_file(config: Config, deutero: bool) -> None:
         sheet_names = {}
         for i, project_pair in enumerate(tqdm(alignment_by_book.index)):
             # Add book order info to corpus_books sheet
+            if book_orders[project_pair] is None:
+                continue
             book_orders[project_pair].to_excel(writer, sheet_name="corpus_books", startrow=i * 6)
             book_order_sheet.set_row(i * 6 + 1, None, round4_format)
             book_order_sheet.set_row(i * 6 + 2, None, int_format)
@@ -496,8 +504,11 @@ def analyze(
 
     # Create summary outputs
     if create_summaries:
-        create_alignment_breakdown_file(config, deutero)
-        create_summary_file(config)
+        try:
+            create_alignment_breakdown_file(config, deutero)
+            create_summary_file(config)
+        except Exception as e:
+            LOGGER.error(f"Error creating summary files: {e}")
 
 
 def main() -> None:
