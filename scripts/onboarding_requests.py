@@ -344,9 +344,9 @@ def main():
         return
     onboarded_projects = []
 
-    # with open(OnboardingEnvironment.ONBOARDING_LOG_PATH, "r") as f:
-    #    onboarded_projects = f.read().splitlines()
-    #    onboarded_projects = [project_id.strip() for project_id in onboarded_projects]
+    with open(OnboardingEnvironment.ONBOARDING_LOG_PATH, "r") as f:
+        onboarded_projects = f.read().splitlines()
+        onboarded_projects = [project_id.strip() for project_id in onboarded_projects]
 
     requests_to_process = [request for request in onboarding_requests if request["id"] not in onboarded_projects]
 
