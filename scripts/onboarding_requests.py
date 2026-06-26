@@ -350,8 +350,6 @@ def main():
 
     requests_to_process = [request for request in onboarding_requests if request["id"] not in onboarded_projects]
 
-    requests_to_process = requests_to_process[0:1]
-
     with concurrent.futures.ThreadPoolExecutor() as executor:
         futures = [executor.submit(process_request, request) for request in requests_to_process]
         for future in concurrent.futures.as_completed(futures):
