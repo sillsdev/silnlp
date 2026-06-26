@@ -46,7 +46,7 @@ try:
             "--security-opt apparmor=docker-apparmor",
             "--env CHECK_TRANSFERS=1",
             "--env SIL_NLP_DATA_PATH=/root/M",
-            f"-v {args.dir}:/root/OnboardingProjects/{Path(args.dir).name}",
+            f"-v {args.dir}:/root/OnboardingProjects/{args.dir}",
         ],
         docker_setup_bash_script=[
             "apt install -y python3-venv",
