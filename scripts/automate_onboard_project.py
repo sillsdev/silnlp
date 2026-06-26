@@ -117,7 +117,7 @@ try:
         if len(args.planned_books) > 0:
             onboarding_args.extend(["--planned-books", *args.planned_books])
 
-        sys.argv = args
+        sys.argv = onboarding_args
         onboard_project()
     finally:
         sys.argv = old_argv
