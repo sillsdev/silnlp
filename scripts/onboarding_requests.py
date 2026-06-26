@@ -118,7 +118,7 @@ class OnboardingProject:
             return False
         if self.paratext_id and len(self.paratext_id) == 16:
             self.short_name = f"{self.short_name}_Resource"
-        with open(f"{download_path}/{self.short_name}.zip", "wb") as f:
+        with open(f"{download_path}/{self.short_name}_Test.zip", "wb") as f:
             f.write(response.content)
         return True
 
@@ -160,7 +160,7 @@ class OnboardingRequest:
                 self.reference_projects.append(OnboardingProject(paratext_id=form_data[key]))
 
     def download_projects(self) -> None:
-        download_path = OnboardingEnvironment.ONBOARDING_PATH / Path(f"{self.main_project.short_name}_Request")
+        download_path = OnboardingEnvironment.ONBOARDING_PATH / Path(f"{self.main_project.short_name}_Test_Request")
         os.makedirs(download_path, exist_ok=True)
         if not self.main_project.download_project(download_path):
             raise Exception(f"Failed to download main project {self.main_project.short_name}")
@@ -246,21 +246,21 @@ def process_request(request_dict: dict):
         request = OnboardingRequest(request_dict)
         request.download_projects()
 
-        task_name = f"Auto Onboarding - {request.main_project.short_name}"
+        task_name = f"Auto Onboarding - {request.main_project.short_name}_Test"
         args = [
             "/usr/bin/python3",
             f"{OnboardingEnvironment.REPO_PATH}/scripts/automate_onboard_project.py",
-            f"{request.main_project.short_name}.zip",
+            f"{request.main_project.short_name}_Test.zip",
         ]
         if request.draft_source:
-            args.extend(["--draft-source", f"{request.draft_source.short_name}.zip"])
+            args.extend(["--draft-source", f"{request.draft_source.short_name}_Test.zip"])
         if request.bt_project:
-            args.extend(["--bt-project", f"{request.bt_project.short_name}.zip"])
+            args.extend(["--bt-project", f"{request.bt_project.short_name}_Test.zip"])
         if request.reference_projects:
             args.extend(
                 [
                     "--ref-projects",
-                    *[f"{ref_project.short_name}.zip" for ref_project in request.reference_projects],
+                    *[f"{ref_project.short_name}_Test.zip" for ref_project in request.reference_projects],
                 ]
             )
 
@@ -271,7 +271,7 @@ def process_request(request_dict: dict):
                 "--planned-books",
                 *[str(book) for book in request.planned_books],
                 "--dir",
-                f"{OnboardingEnvironment.ONBOARDING_PATH}/{request.main_project.short_name}_Request",
+                f"{OnboardingEnvironment.ONBOARDING_PATH}/{request.main_project.short_name}_Test_Request",
                 "--task-name",
                 task_name,
             ]
@@ -281,14 +281,14 @@ def process_request(request_dict: dict):
         with open(OnboardingEnvironment.ONBOARDING_LOG_PATH, "a") as f:
             f.write(f"{request.id}\n")
         with open(OnboardingEnvironment.ONBOARDING_CLEANUP_PATH, "a") as f:
-            f.write(f"{OnboardingEnvironment.ONBOARDING_PATH}/{request.main_project.short_name}_Request\n")
+            f.write(f"{OnboardingEnvironment.ONBOARDING_PATH}/{request.main_project.short_name}_Test_Request\n")
 
         display_message(
             f"This request is being automatically onboarded.\nClearML task: {task_name}.\nLink: {task.get_output_log_web_page()}",
             MessageType.INFO,
             request.id,
         )
-        adjusted_name = rename_project(request.main_project.short_name, True)
+        adjusted_name = rename_project(f"{request.main_project.short_name}_Test", True)
         display_message(
             f"Results will be stored in {OnboardingEnvironment.ONBOARDING_REQUESTS_BUCKET_DIR}/{adjusted_name}",
             MessageType.INFO,
@@ -325,7 +325,8 @@ def display_message(message: str, message_type: MessageType, request_id: str = N
         LOGGER.error(message)
         message = f"ERROR: {message}"
     if request_id:
-        add_comment(request_id, message)
+        print(message)
+        # add_comment(request_id, message)
 
 
 def main():
@@ -343,11 +344,13 @@ def main():
         return
     onboarded_projects = []
 
-    with open(OnboardingEnvironment.ONBOARDING_LOG_PATH, "r") as f:
-        onboarded_projects = f.read().splitlines()
-        onboarded_projects = [project_id.strip() for project_id in onboarded_projects]
+    # with open(OnboardingEnvironment.ONBOARDING_LOG_PATH, "r") as f:
+    #    onboarded_projects = f.read().splitlines()
+    #    onboarded_projects = [project_id.strip() for project_id in onboarded_projects]
 
     requests_to_process = [request for request in onboarding_requests if request["id"] not in onboarded_projects]
+
+    requests_to_process = requests_to_process[:1]
 
     with concurrent.futures.ThreadPoolExecutor() as executor:
         futures = [executor.submit(process_request, request) for request in requests_to_process]
