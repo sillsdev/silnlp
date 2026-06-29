@@ -295,7 +295,9 @@ def process_request(request_dict: dict):
             request.id,
         )
     except Exception as e:
-        display_message(f"Error processing onboarding request {request.id}:\n{e}", MessageType.ERROR, request.id)
+        display_message(
+            f"Error processing onboarding request {request_dict['id']}:\n{e}", MessageType.ERROR, request_dict["id"]
+        )
         return
 
     try:
