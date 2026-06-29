@@ -20,7 +20,6 @@ from machine.corpora import (
 )
 from machine.punctuation_analysis import (
     STANDARD_QUOTE_CONVENTIONS,
-    Chapter,
     FileParatextProjectQuoteConventionDetector,
     QuotationMarkDenormalizationFirstPass,
     QuotationMarkDenormalizationUsfmUpdateBlockHandler,
@@ -209,35 +208,14 @@ class DenormalizeQuotationMarksPostprocessor:
 
     def _get_best_chapter_strategies(self, usfm: str, stylesheet: UsfmStylesheet) -> List[QuotationMarkUpdateStrategy]:
         quotation_mark_update_first_pass = QuotationMarkDenormalizationFirstPass(self._target_quote_convention)
-
         parse_usfm(usfm, quotation_mark_update_first_pass, stylesheet)
 
-        # sil-machine's get_chapters() currently mislabels chapter numbers, temp workaround until machine.py is fixed
-        strategy_by_chapter: Dict[int, QuotationMarkUpdateStrategy] = {}
-        for chapter, (_, strategy) in zip(
-            quotation_mark_update_first_pass.get_chapters(),
-            quotation_mark_update_first_pass.find_best_chapter_strategies(),
-        ):
-            chapter_num = self._get_chapter_number(chapter)
-            if chapter_num is None:
-                LOGGER.warning(
-                    "Could not determine a chapter's number while denormalizing quotation marks; skipping it."
-                )
-                continue
-            strategy_by_chapter[chapter_num] = strategy
-
-        chapter_strategies = [QuotationMarkUpdateStrategy.APPLY_FULL] * max(strategy_by_chapter, default=0)
-        for chapter_num, strategy in strategy_by_chapter.items():
-            chapter_strategies[chapter_num - 1] = strategy
-        return chapter_strategies
-
-    @staticmethod
-    def _get_chapter_number(chapter: Chapter) -> Optional[int]:
-        for verse in chapter.verses:
-            for text_segment in verse.text_segments:
-                if text_segment.chapter is not None:
-                    return text_segment.chapter
-        return None
+        chapter_strategies = quotation_mark_update_first_pass.find_best_chapter_strategies()
+        max_chapter = max((n for n, _ in chapter_strategies), default=0)
+        padded_chapter_strategies = [QuotationMarkUpdateStrategy.APPLY_FULL] * max_chapter
+        for chapter_num, strategy in chapter_strategies:
+            padded_chapter_strategies[chapter_num - 1] = strategy
+        return padded_chapter_strategies
 
     def _create_chapter_remarks(self, chapter_strategies: List[QuotationMarkUpdateStrategy]) -> Dict[int, str]:
         return {
