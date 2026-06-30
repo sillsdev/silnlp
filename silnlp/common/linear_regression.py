@@ -58,7 +58,7 @@ def perform_weighted_linear_regression(
     point_weighting_scheme: PointWeightingScheme = UniformPointWeightingScheme(),
 ) -> LinearRegressionResult:
     weights = point_weighting_scheme.weight_points(x, y)
-    sigmas = [1 / np.sqrt(w) if w > 0 else 0 for w in weights]
+    sigmas = [1 / np.sqrt(w) if w > 0 else np.inf for w in weights]
     popt, _ = curve_fit(linear_model, x, y, sigma=sigmas, absolute_sigma=True)
     slope, intercept = popt
     slope = round(slope, 4)
