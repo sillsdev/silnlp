@@ -72,13 +72,9 @@ class BootstrapSampler:
         self.y = y
 
     def sample(self, num_samples: int) -> Tuple[List[float], List[float]]:
-        n = len(self.x)
-        sampled_x = []
-        sampled_y = []
-        for _ in range(num_samples):
-            indices = np.random.choice(n, size=n, replace=True)
-            sampled_x.extend([self.x[i] for i in indices])
-            sampled_y.extend([self.y[i] for i in indices])
+        indices = np.random.choice(num_samples, size=len(self.x), replace=True)
+        sampled_x = [self.x[i] for i in indices]
+        sampled_y = [self.y[i] for i in indices]
         return sampled_x, sampled_y
 
 
