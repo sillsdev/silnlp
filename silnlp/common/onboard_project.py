@@ -464,7 +464,7 @@ class OnboardingProject:
             extract_verse_percentages = verse_percentages_df[verse_percentages_df["file"] == self.extract_file.stem]
 
             self.completed_books = sorted(
-                [book for book in extract_verse_percentages.columns if extract_verse_percentages[book].iloc[0] == 100],
+                [book for book in extract_verse_percentages.columns if extract_verse_percentages[book].iloc[0] == 100 and not book in ["NT", "OT", "Total"]],
                 key=book_id_to_number,
             )
 
@@ -771,26 +771,6 @@ class OnboardingRequest:
         finally:
             close_logger(log_file_path)
 
-    def _add_report_note(
-        self,
-        project_type: str,
-        mask: pd.Series,
-        note_text: str,
-    ) -> None:
-        notes_column = f"Notes/Flags for {project_type}"
-        self.report_df.loc[mask, notes_column] = note_text
-
-    def _check_for_flags(self):
-        for project_type in self.report_df["Project Type"].unique():
-            self.report_df[f"Notes/Flags for {project_type}"] = ""
-
-        for project_type in self.report_df["Project Type"].unique():
-            self._add_report_note(
-                project_type,
-                (self.report_df["Project Type"] == project_type) & (self.report_df["Normalization"] != "NFC"),
-                "Normalization is not NFC",
-            )
-
     def create_report(self) -> None:
         LOGGER.info("Creating onboarding report.")
         report_path = self.output_folder / "onboarding_report.csv"
@@ -833,7 +813,6 @@ class OnboardingRequest:
                 extra_books
             )
 
-        self._check_for_flags()
         self.report_df.set_index("Project Type").T.reset_index().rename(columns={"index": "Project Type"}).to_csv(
             report_path, index=False
         )
