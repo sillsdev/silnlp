@@ -27,7 +27,7 @@ from silnlp.nmt.config import SUPPORTED_GLOSS_ISOS, Config
 from ..nmt.config_utils import create_config
 from .collect_verse_counts import collect_verse_counts
 from .environment import SilNlpEnv
-from .extract_corpora import extract_corpora
+from .extract_corpora import ExtractOutput, extract_corpora
 from .iso_info import ALT_ISO, NLLB_SCRIPT_SET, NLLB_TAG_FROM_ISO
 
 LOGGER = logging.getLogger(__package__ + ".onboard_project")
@@ -122,7 +122,7 @@ class OnboardingProject:
         LOGGER.info(f"Extracting corpora for project '{self.project_name}'")
 
         versification_error_output_path = Path(self.output_folder / f"versification_errors_{self.project_name}.txt")
-        extract_path, detected_versification, versification_error_count, terms_count = extract_corpora(
+        extract_output: ExtractOutput = extract_corpora(
             projects={self.project_name},
             include_markers=extract_config.get("markers", False),
             extract_lemmas=extract_config.get("lemmas", False),
@@ -132,11 +132,11 @@ class OnboardingProject:
             versification_error_output_path=versification_error_output_path,
             environment=self.environment,
         )
-        self.extract_file = extract_path
+        self.extract_file = extract_output.corpus_filename
 
-        self.report.versification = detected_versification
-        self.report.versification_error_count = versification_error_count
-        self.report.key_terms_count = terms_count
+        self.report.versification = extract_output.check_versification_output.detected_versification
+        self.report.versification_error_count = extract_output.check_versification_output.versification_error_count
+        self.report.key_terms_count = extract_output.terms_count
 
     def wildebeest_analysis_wrapper(self, wildebeest_config: dict) -> None:
         extract_path = self.get_extract_path()
@@ -464,7 +464,11 @@ class OnboardingProject:
             extract_verse_percentages = verse_percentages_df[verse_percentages_df["file"] == self.extract_file.stem]
 
             self.completed_books = sorted(
-                [book for book in extract_verse_percentages.columns if extract_verse_percentages[book].iloc[0] == 100 and not book in ["NT", "OT", "Total"]],
+                [
+                    book
+                    for book in extract_verse_percentages.columns
+                    if extract_verse_percentages[book].iloc[0] == 100 and not book in ["NT", "OT", "Total"]
+                ],
                 key=book_id_to_number,
             )
 
