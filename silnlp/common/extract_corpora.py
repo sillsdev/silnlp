@@ -6,6 +6,7 @@ from typing import Optional, Set
 from ..common.corpus import count_lines
 from ..common.environment import SilNlpEnv
 from .paratext import (
+    CheckVersificationOutput,
     check_versification,
     extract_project,
     extract_term_renderings,
@@ -13,6 +14,18 @@ from .paratext import (
 )
 
 LOGGER = logging.getLogger(__package__ + ".extract_corpora")
+
+
+class ExtractOutput:
+    def __init__(
+        self,
+        check_versification_output: CheckVersificationOutput,
+        corpus_filename: Optional[Path],
+        terms_count: int,
+    ):
+        self.corpus_filename = corpus_filename
+        self.check_versification_output = check_versification_output
+        self.terms_count = terms_count
 
 
 def main() -> None:
@@ -76,7 +89,7 @@ def extract_corpora(
     parent_project: Optional[str] = None,
     versification_error_output_path: Optional[str] = None,
     environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
-) -> Path | None:
+) -> ExtractOutput:
     # Process the projects that have data and tell the user.
     if len(projects) > 0:
         expected_verse_count = count_lines(environment.assets_dir / "vref.txt")
@@ -85,11 +98,17 @@ def extract_corpora(
         for project in projects:
             LOGGER.info(f"Extracting {project}...")
             project_dir = environment.get_paratext_project_dir(project)
-            parent_project_dir = get_parent_project_dir(project_dir, environment)
+
+            if parent_project is None:
+                parent_project_dir = get_parent_project_dir(project_dir, environment)
+            else:
+                parent_project_dir = environment.get_paratext_project_dir(parent_project)
             if parent_project_dir is not None:
                 LOGGER.info(f"Identified parent project {parent_project_dir.name}.")
 
-            check_versification(project_dir, parent_project_dir, versification_error_output_path, environment)
+            check_versification_output: CheckVersificationOutput = check_versification(
+                project_dir, parent_project_dir, versification_error_output_path, environment
+            )
             corpus_filename, verse_count, line_count = extract_project(
                 project_dir,
                 environment.mt_scripture_dir,
@@ -115,10 +134,10 @@ def extract_corpora(
             )
             LOGGER.info(f"# of Terms: {terms_count}")
             LOGGER.info("Done.")
-            return corpus_filename
+            return ExtractOutput(corpus_filename, check_versification_output, terms_count)
     else:
         LOGGER.warning(f"Couldn't find any data to process for any project in {environment.pt_projects_dir}.")
-        return None
+        return ExtractOutput(None, None, 0)
 
 
 if __name__ == "__main__":
