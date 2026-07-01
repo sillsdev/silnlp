@@ -467,7 +467,7 @@ class OnboardingProject:
                 [
                     book
                     for book in extract_verse_percentages.columns
-                    if extract_verse_percentages[book].iloc[0] == 100 and not book in ["NT", "OT", "Total"]
+                    if extract_verse_percentages[book].iloc[0] == 100 and book not in ["NT", "OT", "Total"]
                 ],
                 key=book_id_to_number,
             )
