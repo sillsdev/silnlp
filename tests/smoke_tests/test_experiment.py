@@ -7,7 +7,7 @@ import torch
 from silnlp.common.environment import SilNlpEnv
 from silnlp.nmt.config_utils import load_config_from_exp_dir
 from silnlp.nmt.experiment import SILExperiment
-from silnlp.nmt.hugging_face_config import HuggingFaceConfig
+from silnlp.nmt.seq2seq_config import Seq2SeqConfig
 from tests.smoke_tests.mock_pretrained_model import (
     MockModelOutput,
     MockPreTrainedModelProviderFactory,
@@ -75,17 +75,17 @@ def create_experiment_with_mock_pretrained_model(environment: SilNlpEnv) -> tupl
         [mock_test_outputs, mock_translate_outputs], model_stats
     )
 
-    hugging_face_config = load_config_from_exp_dir(environment.get_mt_exp_dir(EXPERIMENT_NAME), environment)
+    config = load_config_from_exp_dir(environment.get_mt_exp_dir(EXPERIMENT_NAME), environment)
 
     # This cast is a temporary fix
     # In the long term, the create_model method should be refactored so that it doesn't include parameters
     # that are not common to all possible implementations (e.g. mixed_precision)
-    hugging_face_config = cast(HuggingFaceConfig, hugging_face_config)
-    model = hugging_face_config.create_model(pretrained_model_provider_factory=mock_pretrained_model_provider_factory)
+    config = cast(Seq2SeqConfig, config)
+    model = config.create_model(pretrained_model_provider_factory=mock_pretrained_model_provider_factory)
 
     experiment = SILExperiment(
         name=EXPERIMENT_NAME,
-        config=hugging_face_config,
+        config=config,
         model=model,
         environment=environment,
         run_prep=True,

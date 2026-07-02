@@ -7,7 +7,7 @@ from transformers import AutoModelForSeq2SeqLM, PretrainedConfig, PreTrainedMode
 from transformers.generation.utils import GenerateBeamEncoderDecoderOutput
 from transformers.modeling_outputs import Seq2SeqLMOutput
 
-from silnlp.nmt.hugging_face_config import HuggingFaceConfig, PreTrainedModelProvider, PreTrainedModelProviderFactory
+from silnlp.nmt.seq2seq_config import PreTrainedModelProvider, PreTrainedModelProviderFactory, Seq2SeqConfig
 
 _TINY_MODEL_NAME = "hf-internal-testing/tiny-random-nllb"
 
@@ -119,6 +119,6 @@ class MockPreTrainedModelProviderFactory(PreTrainedModelProviderFactory):
         return self._model_stats
 
     def create_pretrained_model_provider(
-        self, config: HuggingFaceConfig, mixed_precision: bool = False
+        self, config: Seq2SeqConfig, mixed_precision: bool = False
     ) -> PreTrainedModelProvider:
         return MockPretrainedModelProvider(iter(self._mock_outputs), self._model_stats)
