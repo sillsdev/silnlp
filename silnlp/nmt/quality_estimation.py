@@ -1,5 +1,4 @@
 import argparse
-import json
 import logging
 from abc import ABC
 from collections import defaultdict
@@ -9,9 +8,9 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 from machine.scripture import ALL_BOOK_IDS, VerseRef
-from scipy.stats import linregress
 
 from ..common.environment import SilNlpEnv
+from ..common.linear_regression import perform_enhanced_linear_regression
 from ..common.translator import CONFIDENCE_SUFFIX, ConfidenceFile, TxtConfidenceFile, UsfmConfidenceFile
 from .test import VERSE_SCORES_SUFFIX
 
@@ -194,16 +193,15 @@ def project_chrf3(
             f"in {verse_test_scores_path} do not match."
         )
 
-    slope, intercept = linregress(confidence_scores, chrf3_scores)[:2]
-    slope = round(slope, 4)
-    intercept = round(intercept, 4)
-    linregress_data = {"version": "0.1", "slope": slope, "intercept": intercept}
-    LOGGER.info(f"Linear regression data:\n{json.dumps(linregress_data, indent=2)}")
+    linear_regression_result = perform_enhanced_linear_regression(confidence_scores, chrf3_scores)
+    slope = linear_regression_result.slope
+    intercept = linear_regression_result.intercept
+    LOGGER.info(f"Linear regression data:\n{linear_regression_result.toJSON()}")
     output_dir = confidence_files[0].get_path().parent
     output_file = output_dir / "linregress.json"
     with open(output_file, "w", encoding="utf-8") as f:
         LOGGER.info(f"Saving linear regression data to {output_file}")
-        json.dump(linregress_data, f, indent=2)
+        f.write(linear_regression_result.toJSON())
 
     verse_scores: List[VerseScore] = []
     chapter_scores: ChapterScores = ChapterScores()
@@ -286,18 +284,18 @@ class Thresholds(ABC):
 
 
 class BookThresholds(Thresholds):
-    GREEN_THRESHOLD = 0.745
-    YELLOW_THRESHOLD = 0.62
+    GREEN_THRESHOLD = 0.776
+    YELLOW_THRESHOLD = 0.681
 
 
 class ChapterThresholds(Thresholds):
-    GREEN_THRESHOLD = 0.745
-    YELLOW_THRESHOLD = 0.62
+    GREEN_THRESHOLD = 0.776
+    YELLOW_THRESHOLD = 0.681
 
 
 class VerseThresholds(Thresholds):
-    GREEN_THRESHOLD = 0.745
-    YELLOW_THRESHOLD = 0.62
+    GREEN_THRESHOLD = 0.776
+    YELLOW_THRESHOLD = 0.681
 
 
 def compute_usable_proportions(
