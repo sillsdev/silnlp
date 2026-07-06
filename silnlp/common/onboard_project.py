@@ -16,7 +16,7 @@ from typing import Iterator, List
 
 import wildebeest.wb_analysis as wb_ana
 import yaml
-from machine.corpora import FileParatextProjectSettingsParser
+from machine.corpora import FileParatextProjectSettingsParser, ParatextProjectSettings
 from machine.scripture.canon import book_number_to_id, book_id_to_number
 
 from silnlp.common.analyze import analyze
@@ -40,57 +40,6 @@ class ProjectType(Enum):
     REFERENCE = "Reference"
 
 
-class OnboardingReport:
-
-    def __init__(self, project_type: ProjectType) -> None:
-        self.project_type: ProjectType = project_type
-        self.name_on_bucket: str = ""
-        self.short_name: str = ""
-        self.name: str = ""
-        self.iso_code: str = ""
-        self.language: str = ""
-        self.lang_in_nllb: bool = False
-        self.script: str = ""
-        self.script_in_nllb: bool = False
-        self.normalization: str = ""
-        self.versification: List[int] = []
-        self.versification_error_count: int = 0
-        self.verse_count: int = 0
-        self.alignment: str = ""
-        self.key_terms_type: str = ""
-        self.key_terms_count: int = 0
-        self.key_terms_glosses_exist: bool = False
-        self.mean_tokens_per_verse: float = 0.0
-        self.mean_char_per_token: float = 0.0
-        self.num_added_tokens: int = 0
-        self.num_verses_truncated: int = 0
-
-    def generate_dict(self) -> dict:
-        return {
-            "Project Type": self.project_type.value,
-            "Name on Bucket": self.name_on_bucket,
-            "Short Name": self.short_name,
-            "Name": self.name,
-            "ISO Code": self.iso_code,
-            "Language": self.language,
-            "Language in NLLB": "yes" if self.lang_in_nllb else "no",
-            "Script": self.script,
-            "Script in NLLB": "yes" if self.script_in_nllb else "no",
-            "Normalization": self.normalization,
-            "Versification": ";".join(str(v) for v in self.versification),
-            "Versification Error Count": self.versification_error_count if self.versification_error_count else "",
-            "Verse Count": self.verse_count,
-            "Alignment with Main": self.alignment,
-            "Key Terms Type": self.key_terms_type,
-            "Key Terms Count": self.key_terms_count,
-            "Key Terms Glosses Exist": "yes" if self.key_terms_glosses_exist else "no",
-            "Mean Tokens Per Verse": f"{self.mean_tokens_per_verse:.2f}" if self.mean_tokens_per_verse else "",
-            "Mean Char Per Token": f"{self.mean_char_per_token:.3f}" if self.mean_char_per_token else "",
-            "Number of Added Tokens": self.num_added_tokens,
-            "Number of Verses Truncated": self.num_verses_truncated,
-        }
-
-
 class OnboardingProject:
 
     def __init__(self, project_name: str, project_type: ProjectType, overwrite: bool, environment: SilNlpEnv) -> None:
@@ -98,11 +47,13 @@ class OnboardingProject:
         self.local_project_path: Path | None = None
         self.output_folder: Path | None = None
         self.extract_file: Path | None = None
+        self.extract_output: ExtractOutput | None = None
+        self.settings: ParatextProjectSettings | None = None
         self.iso_code: str = ""
         self.resource: bool | None = None
         self.overwrite: bool = overwrite
         self.environment: SilNlpEnv = environment
-        self.report: OnboardingReport = OnboardingReport(project_type)
+        self.report: OnboardingReport = OnboardingReport(project=self, project_type=project_type)
         self.completed_books: List[str] = []
 
     def get_extract_path(self) -> Path | None:
@@ -113,6 +64,21 @@ class OnboardingProject:
             return None
         self.extract_file = extract_paths[0]
         return self.extract_file
+
+    def get_settings_parser(self, project_path: Path = None) -> ParatextProjectSettings:
+        if self.settings is not None:
+            return self.settings
+        if project_path is None:
+            project_path = self.environment.pt_projects_dir / self.project_name
+        settings_file = project_path / "Settings.xml"
+        if settings_file.exists():
+            settings = FileParatextProjectSettingsParser(project_path).parse()
+            self.settings = settings
+            return self.settings
+        else:
+            raise FileNotFoundError(
+                f"The Settings.xml file was not found in the project folder '{project_path}'. Please ensure this is a valid Paratext project folder."
+            )
 
     def extract_corpora_wrapper(self, extract_config: dict) -> None:
         extract_path = self.get_extract_path()
@@ -133,10 +99,7 @@ class OnboardingProject:
             environment=self.environment,
         )
         self.extract_file = extract_output.corpus_filename
-
-        self.report.versification = extract_output.check_versification_output.detected_versification
-        self.report.versification_error_count = extract_output.check_versification_output.versification_error_count
-        self.report.key_terms_count = extract_output.terms_count
+        self.extract_output = extract_output
 
     def wildebeest_analysis_wrapper(self, wildebeest_config: dict) -> None:
         extract_path = self.get_extract_path()
@@ -328,7 +291,7 @@ class OnboardingProject:
                     f"The Settings.xml file was not found in the project folder '{self.local_project_path}'. Please ensure this is a valid Paratext project folder."
                 )
 
-            settings = FileParatextProjectSettingsParser(self.local_project_path).parse()
+            settings = self.get_settings_parser(self.local_project_path)
 
             if settings.translation_type != "Standard":
                 LOGGER.warning(f"{self.project_name} is a non-Standard project. Type is '{settings.translation_type}'.")
@@ -436,32 +399,94 @@ class OnboardingProject:
             project_name = append_datestamp(project_name)
         return project_name
 
-    def generate_report(self) -> dict:
-        self.report.name_on_bucket = self.project_name
 
-        stats_file = self.output_folder / "tokenization_stats.csv"
+class OnboardingReport:
+
+    def __init__(self, project: OnboardingProject, project_type: ProjectType) -> None:
+        self.project = project
+        self.project_type: ProjectType = project_type
+        self.name_on_bucket: str = ""
+        self.short_name: str = ""
+        self.name: str = ""
+        self.iso_code: str = ""
+        self.language: str = ""
+        self.lang_in_nllb: bool = False
+        self.script: str = ""
+        self.script_in_nllb: bool = False
+        self.normalization: str = ""
+        self.versification: List[int] = []
+        self.versification_error_count: int = 0
+        self.verse_count: int = 0
+        self.alignment: str = ""
+        self.key_terms_type: str = ""
+        self.key_terms_count: int = 0
+        self.key_terms_glosses_exist: bool = False
+        self.mean_tokens_per_verse: float = 0.0
+        self.mean_char_per_token: float = 0.0
+        self.num_added_tokens: int = 0
+        self.num_verses_truncated: int = 0
+
+    def generate_dict(self) -> dict:
+        return {
+            "Project Type": self.project_type.value,
+            "Name on Bucket": self.name_on_bucket,
+            "Short Name": self.short_name,
+            "Name": self.name,
+            "ISO Code": self.iso_code,
+            "Language": self.language,
+            "Language in NLLB": "yes" if self.lang_in_nllb else "no",
+            "Script": self.script,
+            "Script in NLLB": "yes" if self.script_in_nllb else "no",
+            "Normalization": self.normalization,
+            "Versification": ";".join(str(v) for v in self.versification),
+            "Versification Error Count": self.versification_error_count if self.versification_error_count else "",
+            "Verse Count": self.verse_count,
+            "Alignment with Main": self.alignment,
+            "Key Terms Type": self.key_terms_type,
+            "Key Terms Count": self.key_terms_count,
+            "Key Terms Glosses Exist": "yes" if self.key_terms_glosses_exist else "no",
+            "Mean Tokens Per Verse": f"{self.mean_tokens_per_verse:.2f}" if self.mean_tokens_per_verse else "",
+            "Mean Char Per Token": f"{self.mean_char_per_token:.3f}" if self.mean_char_per_token else "",
+            "Number of Added Tokens": self.num_added_tokens,
+            "Number of Verses Truncated": self.num_verses_truncated,
+        }
+
+    def generate_report(self) -> dict:
+        self.name_on_bucket = self.project.project_name
+
+        stats_file = self.project.output_folder / "tokenization_stats.csv"
         if stats_file.exists():
             stats_df = pd.read_csv(stats_file, header=[0, 1])
             target_stats = stats_df[stats_df[(" ", "Translation Side")] == "Target"]
 
-            self.report.mean_tokens_per_verse = target_stats[("Tokens/Verse", "Mean")].values[0]
-            self.report.mean_char_per_token = target_stats[("Characters/Token", "Mean")].values[0]
-            self.report.num_added_tokens = target_stats[(" ", "Num Tokens Added to Vocab")].values[0]
-            self.report.num_verses_truncated = target_stats[("Tokens/Verse", "Num Verses >= 200 Tokens")].values[0]
+            self.mean_tokens_per_verse = target_stats[("Tokens/Verse", "Mean")].values[0]
+            self.mean_char_per_token = target_stats[("Characters/Token", "Mean")].values[0]
+            self.num_added_tokens = target_stats[(" ", "Num Tokens Added to Vocab")].values[0]
+            self.num_verses_truncated = target_stats[("Tokens/Verse", "Num Verses >= 200 Tokens")].values[0]
 
-        verse_counts_file = self.output_folder / "verse_counts.csv"
+        versification = self.project.extract_output.check_versification_output.detected_versification
+        self.versification = [v.value for v in versification]
+
+        self.versification_error_count = (
+            self.project.extract_output.check_versification_output.versification_error_count
+        )
+        self.key_terms_count = self.project.extract_output.terms_count
+
+        verse_counts_file = self.project.output_folder / "verse_counts.csv"
         if Path(verse_counts_file).exists():
             verse_counts_df = pd.read_csv(verse_counts_file)
 
-            extract_verse_counts = verse_counts_df[verse_counts_df["file"] == self.extract_file.stem]
+            extract_verse_counts = verse_counts_df[verse_counts_df["file"] == self.project.extract_file.stem]
 
-            self.report.verse_count = extract_verse_counts["Total"].values[0]
+            self.verse_count = extract_verse_counts["Total"].values[0]
 
-        verse_percentages_file = self.output_folder / "verse_percentages.csv"
+        verse_percentages_file = self.project.output_folder / "verse_percentages.csv"
         if Path(verse_percentages_file).exists():
             verse_percentages_df = pd.read_csv(verse_percentages_file)
 
-            extract_verse_percentages = verse_percentages_df[verse_percentages_df["file"] == self.extract_file.stem]
+            extract_verse_percentages = verse_percentages_df[
+                verse_percentages_df["file"] == self.project.extract_file.stem
+            ]
 
             self.completed_books = sorted(
                 [
@@ -472,40 +497,39 @@ class OnboardingProject:
                 key=book_id_to_number,
             )
 
-        settings_file = self.environment.pt_projects_dir / self.project_name
-        if settings_file.exists():
-            settings = FileParatextProjectSettingsParser(self.environment.pt_projects_dir / self.project_name).parse()
+        settings = self.project.get_settings_parser()
 
-            self.report.name = settings.full_name
-            self.report.short_name = settings.name
-            self.report.iso_code = settings.language_code
-            self.report.key_terms_glosses_exist = (
-                self.report.iso_code in SUPPORTED_GLOSS_ISOS
-                or ALT_ISO.get_alternative(self.report.iso_code) in SUPPORTED_GLOSS_ISOS
-            )
-            self.report.key_terms_type = settings.biblical_terms_list_type
+        self.name = settings.full_name
+        self.short_name = settings.name
+        self.iso_code = settings.language_code
+        self.key_terms_glosses_exist = (
+            self.iso_code in SUPPORTED_GLOSS_ISOS or ALT_ISO.get_alternative(self.iso_code) in SUPPORTED_GLOSS_ISOS
+        )
+        self.key_terms_type = settings.biblical_terms_list_type
 
-            self.report.normalization = settings.normalization_form
-            self.report.language = settings.language
+        self.normalization = settings.normalization_form
+        self.language = settings.language
 
-        corpus_stats_file = self.output_folder / "corpus-stats.csv"
+        corpus_stats_file = self.project.output_folder / "corpus-stats.csv"
         if Path(corpus_stats_file).exists():
             corpus_stats_df = pd.read_csv(corpus_stats_file)
-            alignment_row = corpus_stats_df[corpus_stats_df["trg_project"] == self.extract_file.stem]
+            alignment_row = corpus_stats_df[corpus_stats_df["trg_project"] == self.project.extract_file.stem]
             if not alignment_row.empty:
-                self.report.alignment = alignment_row["align_score"].values[0]
-                self.report.script = alignment_row["trg_script"].values[0]
+                self.alignment = alignment_row["align_score"].values[0]
+                self.script = alignment_row["trg_script"].values[0]
             else:
-                alignment_row = corpus_stats_df[corpus_stats_df["src_project"] == self.extract_file.stem].head(1)
+                alignment_row = corpus_stats_df[corpus_stats_df["src_project"] == self.project.extract_file.stem].head(
+                    1
+                )
                 if not alignment_row.empty:
-                    self.report.script = alignment_row["src_script"].values[0]
+                    self.script = alignment_row["src_script"].values[0]
 
-        nllb_tag = NLLB_TAG_FROM_ISO.get(self.report.iso_code, None)
-        self.report.lang_in_nllb = nllb_tag is not None
-        self.report.script = nllb_tag.split("_")[1] if nllb_tag and self.report.script == "" else self.report.script
-        self.report.script_in_nllb = self.report.script in NLLB_SCRIPT_SET
+        nllb_tag = NLLB_TAG_FROM_ISO.get(self.iso_code, None)
+        self.lang_in_nllb = nllb_tag is not None
+        self.script = nllb_tag.split("_")[1] if nllb_tag and self.script == "" else self.script
+        self.script_in_nllb = self.script in NLLB_SCRIPT_SET
 
-        return self.report.generate_dict()
+        return self.generate_dict()
 
 
 class OnboardingRequest:
@@ -780,7 +804,7 @@ class OnboardingRequest:
         report_path = self.output_folder / "onboarding_report.csv"
 
         projects = [self.main_project] + self.reference_projects
-        formatted_reports = [p.generate_report() for p in projects]
+        formatted_reports = [p.report.generate_report() for p in projects]
 
         self.report_df = pd.DataFrame(formatted_reports)
 

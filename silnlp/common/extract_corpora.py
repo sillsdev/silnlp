@@ -134,7 +134,7 @@ def extract_corpora(
             )
             LOGGER.info(f"# of Terms: {terms_count}")
             LOGGER.info("Done.")
-            return ExtractOutput(corpus_filename, check_versification_output, terms_count)
+            return ExtractOutput(check_versification_output, corpus_filename, terms_count)
     else:
         LOGGER.warning(f"Couldn't find any data to process for any project in {environment.pt_projects_dir}.")
         return ExtractOutput(None, None, 0)
