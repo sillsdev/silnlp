@@ -1885,14 +1885,15 @@ class SilTranslationPipeline(TranslationPipeline):
 
     @staticmethod
     def _move_scores_and_beam_indices_to_cpu_for_long_sequences(
-        output_scores: Tuple[Tensor, ...], beam_indices: Optional[Tensor]
-    ) -> Tuple[Tuple[Tensor, ...], Optional[Tensor]]:
+        output_ids: Tensor, output_scores: Tuple[Tensor, ...], beam_indices: Optional[Tensor]
+    ) -> Tuple[Tensor, Tuple[Tensor, ...], Optional[Tensor]]:
         if max(len(score) for score in output_scores) > 200:
             return (
+                output_ids.to("cpu"),
                 tuple(score.to("cpu") for score in output_scores),
                 beam_indices.to("cpu") if beam_indices is not None else None,
             )
-        return output_scores, beam_indices
+        return output_ids, output_scores, beam_indices
 
     def postprocess(self, model_outputs, return_type=None, clean_up_tokenization_spaces=False):
         if self.tokenizer is None:
