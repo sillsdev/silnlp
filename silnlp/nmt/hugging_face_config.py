@@ -1845,8 +1845,10 @@ class SilTranslationPipeline(TranslationPipeline):
         )
 
         output_ids = output.sequences.to("cpu")
-        output_scores = tuple(score.to("cpu") for score in output.scores)
-        beam_indices = output.beam_indices.to("cpu") if "beam_indices" in output else None
+        raw_beam_indices = output.beam_indices if "beam_indices" in output else None
+        output_scores, beam_indices = self._move_scores_and_beam_indices_to_cpu_for_long_sequences(
+            output.scores, raw_beam_indices
+        )
         transition_scores = self.model.compute_transition_scores(
             output_ids,
             output_scores,
@@ -1881,6 +1883,18 @@ class SilTranslationPipeline(TranslationPipeline):
             "scores": token_logprobs,
             "sequences_scores": sequences_scores,
         }
+    
+    @staticmethod
+    def _move_scores_and_beam_indices_to_cpu_for_long_sequences(
+        output_scores: Tuple[Tensor, ...], beam_indices: Optional[Tensor]
+    ) -> Tuple[Tuple[Tensor, ...], Optional[Tensor]]:
+        if max(len(score) for score in output_scores) > 200:
+            return (
+                tuple(score.to("cpu") for score in output_scores),
+                beam_indices.to("cpu") if beam_indices is not None else None,
+            )
+        return output_scores, beam_indices
+
 
     def postprocess(self, model_outputs, return_type=None, clean_up_tokenization_spaces=False):
         if self.tokenizer is None:
