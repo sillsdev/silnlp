@@ -65,7 +65,7 @@ class OnboardingProject:
         self.extract_file = extract_paths[0]
         return self.extract_file
 
-    def get_settings_parser(self, project_path: Path = None) -> ParatextProjectSettings:
+    def get_project_settings(self, project_path: Path = None) -> ParatextProjectSettings:
         if self.settings is not None:
             return self.settings
         if project_path is None:
@@ -291,7 +291,7 @@ class OnboardingProject:
                     f"The Settings.xml file was not found in the project folder '{self.local_project_path}'. Please ensure this is a valid Paratext project folder."
                 )
 
-            settings = self.get_settings_parser(self.local_project_path)
+            settings = self.get_project_settings(self.local_project_path)
 
             if settings.translation_type != "Standard":
                 LOGGER.warning(f"{self.project_name} is a non-Standard project. Type is '{settings.translation_type}'.")
@@ -497,7 +497,7 @@ class OnboardingReport:
                 key=book_id_to_number,
             )
 
-        settings = self.project.get_settings_parser()
+        settings = self.project.get_project_settings()
 
         self.name = settings.full_name
         self.short_name = settings.name
