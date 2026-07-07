@@ -1844,16 +1844,26 @@ class SilTranslationPipeline(TranslationPipeline):
             return_dict_in_generate=True,
         )
 
-        raw_beam_indices = output.beam_indices if "beam_indices" in output else None
-        output_ids, output_scores, beam_indices = self._move_scores_and_beam_indices_to_cpu_for_long_sequences(
-            output.sequences, output.scores, raw_beam_indices
-        )
-        transition_scores = self.model.compute_transition_scores(
-            output_ids,
-            output_scores,
-            beam_indices,
-            normalize_logits=True,
-        )
+        output_ids = output.sequences
+        output_scores = output.scores
+        beam_indices = output.beam_indices if "beam_indices" in output else None
+        try:
+            transition_scores = self.model.compute_transition_scores(
+                output_ids,
+                output_scores,
+                beam_indices,
+                normalize_logits=True,
+            )
+        except Exception:
+            output_ids = output_ids.to("cpu")
+            output_scores = tuple(score.to("cpu") for score in output_scores)
+            beam_indices = beam_indices.to("cpu") if beam_indices is not None else None
+            transition_scores = self.model.compute_transition_scores(
+                output_ids,
+                output_scores,
+                beam_indices,
+                normalize_logits=True,
+            )
         sequences_scores = getattr(output, "sequences_scores", None)
 
         out_b, seq_len = output_ids.shape
@@ -1882,18 +1892,6 @@ class SilTranslationPipeline(TranslationPipeline):
             "scores": token_logprobs,
             "sequences_scores": sequences_scores,
         }
-
-    @staticmethod
-    def _move_scores_and_beam_indices_to_cpu_for_long_sequences(
-        output_ids: Tensor, output_scores: Tuple[Tensor, ...], beam_indices: Optional[Tensor]
-    ) -> Tuple[Tensor, Tuple[Tensor, ...], Optional[Tensor]]:
-        if max(len(score) for score in output_scores) > 125:
-            return (
-                output_ids.to("cpu"),
-                tuple(score.to("cpu") for score in output_scores),
-                beam_indices.to("cpu") if beam_indices is not None else None,
-            )
-        return output_ids, output_scores, beam_indices
 
     def postprocess(self, model_outputs, return_type=None, clean_up_tokenization_spaces=False):
         if self.tokenizer is None:
