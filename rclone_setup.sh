@@ -1,5 +1,5 @@
 #!/bin/bash
-
+curl https://rclone.org/install.sh | bash
 BUCKET_TYPE=$1
 
 # Pick the mountpoint / remote for the requested bucket type.
