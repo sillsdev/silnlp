@@ -1887,7 +1887,7 @@ class SilTranslationPipeline(TranslationPipeline):
     def _move_scores_and_beam_indices_to_cpu_for_long_sequences(
         output_ids: Tensor, output_scores: Tuple[Tensor, ...], beam_indices: Optional[Tensor]
     ) -> Tuple[Tensor, Tuple[Tensor, ...], Optional[Tensor]]:
-        if max(len(score) for score in output_scores) > 200:
+        if max(len(score) for score in output_scores) > 150:
             return (
                 output_ids.to("cpu"),
                 tuple(score.to("cpu") for score in output_scores),
