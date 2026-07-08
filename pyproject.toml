@@ -77,7 +77,7 @@ python-docx = "^0.8.11"
 iso639-lang = "^2.1.0"
 eflomal = { version = "^2.0.0", optional = true }
 accelerate = "^1.0.0"
-transformers = "^4.48"
+transformers = "^4.50"
 optimum = "^1.16.0"
 peft = "0.8.0"
 attrs = "^22.2.0"
