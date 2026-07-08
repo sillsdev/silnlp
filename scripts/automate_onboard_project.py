@@ -109,13 +109,13 @@ try:
                 ]
             )
 
-        if len(args.ref_projects) > 0:
+        if args.ref_projects and len(args.ref_projects) > 0:
             onboarding_args.extend(["--ref-projects", *args.ref_projects])
 
-        if len(args.completed_books) > 0:
+        if args.completed_books and len(args.completed_books) > 0:
             onboarding_args.extend(["--completed-books", *args.completed_books])
 
-        if len(args.planned_books) > 0:
+        if args.planned_books and len(args.planned_books) > 0:
             onboarding_args.extend(["--planned-books", *args.planned_books])
 
         sys.argv = onboarding_args

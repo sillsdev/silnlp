@@ -963,7 +963,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--ref-projects",
-        help="The Reference Paratext project name(s) for onboarding the Main Pproject(s). The project(s) will be stored on the bucket at Paratext/projects/<project>.",
+        help="The Reference Paratext project name(s) for onboarding the Main Project(s). The project(s) will be stored on the bucket at Paratext/projects/<project>.",
         nargs="+",
         default=None,
     )
