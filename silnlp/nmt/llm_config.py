@@ -25,7 +25,9 @@ from typing import Any, Dict, Generator, Iterable, List, Optional, Tuple, Union
 import torch
 from datasets import Dataset
 from transformers import (
+    AutoConfig,
     AutoModelForCausalLM,
+    AutoModelForImageTextToText,
     AutoTokenizer,
     EarlyStoppingCallback,
     HfArgumentParser,
@@ -94,6 +96,12 @@ TRAINING_ARGS_CONFIG_MAPPING = {
 }
 
 LABEL_PAD_TOKEN_ID = -100
+
+
+def is_image_text_to_text_model(model_name_or_path: str, trust_remote_code: bool = False) -> bool:
+    """Return True if the checkpoint is a multimodal image-text-to-text model."""
+    config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=trust_remote_code)
+    return type(config) in AutoModelForImageTextToText._model_mapping
 
 
 class LLMConfig(Config):
@@ -298,6 +306,11 @@ class CausalLMProvider:
             return "auto"
         return getattr(torch, self.config.params["torch_dtype"], torch.bfloat16)
 
+    def _determine_auto_model_class(self, model_name_or_path: str) -> type:
+        if is_image_text_to_text_model(model_name_or_path, self.config.params["trust_remote_code"]):
+            return AutoModelForImageTextToText
+        return AutoModelForCausalLM
+
     def create_model_for_training(self) -> PreTrainedModel:
         params = self.config.params
         method = self.config.finetune_method
@@ -313,7 +326,8 @@ class CausalLMProvider:
                 bnb_4bit_use_double_quant=True,
             )
             device_map = {"": 0}
-        model = AutoModelForCausalLM.from_pretrained(
+        model_class = self._determine_auto_model_class(self.config.model)
+        model = model_class.from_pretrained(
             self.config.model,
             quantization_config=quantization_config,
             torch_dtype=self._dtype(),
@@ -332,15 +346,18 @@ class CausalLMProvider:
             trust_remote_code=params["trust_remote_code"],
         )
         if checkpoint_path is None:
-            return AutoModelForCausalLM.from_pretrained(self.config.model, **load_kwargs)
+            model_class = self._determine_auto_model_class(self.config.model)
+            return model_class.from_pretrained(self.config.model, **load_kwargs)
 
         if (checkpoint_path / "adapter_config.json").is_file():
             from peft import PeftModel
 
-            base_model = AutoModelForCausalLM.from_pretrained(self.config.model, **load_kwargs)
+            model_class = self._determine_auto_model_class(self.config.model)
+            base_model = model_class.from_pretrained(self.config.model, **load_kwargs)
             model = PeftModel.from_pretrained(base_model, str(checkpoint_path))
             return model.merge_and_unload()
-        return AutoModelForCausalLM.from_pretrained(str(checkpoint_path), **load_kwargs)
+        model_class = self._determine_auto_model_class(str(checkpoint_path))
+        return model_class.from_pretrained(str(checkpoint_path), **load_kwargs)
 
 
 class CausalLMProviderFactory:
