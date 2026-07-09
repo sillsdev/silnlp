@@ -46,6 +46,7 @@ def create_mock_pretrained_model(
         model_stats.total_number_of_training_data_elements += (
             input_ids.shape[0] * input_ids.shape[1] if input_ids is not None else 0
         )
+        kwargs.pop("num_items_in_batch", None)
         return underlying_model_forward(
             input_ids=input_ids,
             *args,
