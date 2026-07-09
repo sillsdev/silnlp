@@ -109,7 +109,7 @@ def perform_enhanced_linear_regression(x: List[float], y: List[float]) -> Linear
     weighting_scheme = InverseDensityPointWeightingScheme()
 
     bootstrap_results = []
-    for _ in range(100):
+    for _ in range(1000):
         sampled_x, sampled_y = sampler.sample(num_samples=len(x))
         result = perform_weighted_linear_regression(sampled_x, sampled_y, point_weighting_scheme=weighting_scheme)
         bootstrap_results.append(result)
