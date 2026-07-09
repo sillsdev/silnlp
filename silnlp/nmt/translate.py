@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Generator, Iterable, List, Optional, Tuple, Union
 
 from machine.corpora import UsfmFileTextCorpus, create_versification_ref_corpus, extract_scripture_corpus
-from machine.scripture import VerseRef, book_number_to_id, get_chapters
+from machine.scripture import book_number_to_id, get_chapters
 
 from ..common.environment import SilNlpEnv
 from ..common.paratext import book_file_name_digits
@@ -99,7 +99,7 @@ class TranslationTask:
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
         quality_estimation: bool = False,
-        verse_test_scores_path: Optional[Path] = None,
+        linregress_path: Optional[Path] = None,
         postprocess_handler: Optional[PostprocessHandler] = None,
         tags: Optional[List[str]] = None,
         vref: bool = False,
@@ -180,9 +180,14 @@ class TranslationTask:
                 raise RuntimeError(f"Some books failed to translate: {' '.join(translation_failed)}")
 
         if quality_estimation and len(confidence_files) > 0:
-            LOGGER.info("Running quality estimation...")
-            estimate_quality(verse_test_scores_path, confidence_files)
-            LOGGER.info("Quality estimation completed.")
+            if linregress_path is None:
+                LOGGER.warning(
+                    "Skipping quality estimation because no linear regression file was provided."
+                )
+            else:
+                LOGGER.info("Running quality estimation...")
+                estimate_quality(linregress_path, confidence_files)
+                LOGGER.info("Quality estimation completed.")
 
     def translate_files(
         self,
@@ -193,7 +198,7 @@ class TranslationTask:
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
         quality_estimation: bool = False,
-        verse_test_scores_path: Optional[Path] = None,
+        linregress_path: Optional[Path] = None,
         postprocess_handler: Optional[PostprocessHandler] = None,
         tags: Optional[List[str]] = None,
         vref: bool = False,
@@ -288,9 +293,14 @@ class TranslationTask:
                     confidence_files.extend(trg_file_path.parent.glob(f"{trg_file_path.stem}*{CONFIDENCE_SUFFIX}"))
 
         if quality_estimation and len(confidence_files) > 0:
-            LOGGER.info("Running quality estimation...")
-            estimate_quality(verse_test_scores_path, confidence_files)
-            LOGGER.info("Quality estimation completed.")
+            if linregress_path is None:
+                LOGGER.warning(
+                    "Skipping quality estimation because no linear regression file was provided."
+                )
+            else:
+                LOGGER.info("Running quality estimation...")
+                estimate_quality(linregress_path, confidence_files)
+                LOGGER.info("Quality estimation completed.")
 
     def _init_translation_task(self, experiment_suffix: str) -> Tuple[Translator, Config, str]:
         clearml = SILClearML(
@@ -438,12 +448,12 @@ def main() -> None:
         help="Run quality estimation after translation completes. Requires --save-confidences.",
     )
     parser.add_argument(
-        "--verse-test-scores-file",
+        "--linregress-file",
         type=str,
         default=None,
-        help="The tsv file relative to MT/experiments containing the verse-level test scores to determine "
-        + "line of best fit, e.g., `project_folder/exp_folder/test.trg-predictions.detok.txt.5000.scores.tsv`. "
-        + "If not provided, the experiment directory will be used to locate the test scores file.",
+        help="The linregress.json file relative to MT/experiments containing the confidence-to-chrF3 line of best fit "
+        + "coefficients produced by the test step, e.g., `project_folder/exp_folder/linregress.json`. "
+        + "If not provided, the experiment directory will be used to locate linregress.json.",
     )
     parser.add_argument(
         "--debug",
@@ -462,14 +472,14 @@ def main() -> None:
         if not args.save_confidences:
             args.save_confidences = True
 
-        if args.verse_test_scores_file is None:
-            verse_test_scores_path = environment.get_mt_exp_dir(args.experiment)
+        if args.linregress_file is None:
+            linregress_path = environment.get_mt_exp_dir(args.experiment)
         else:
-            verse_test_scores_path = environment.get_mt_exp_dir(args.verse_test_scores_file)
-            if not verse_test_scores_path.exists():
-                parser.error(f"The verse test scores path {verse_test_scores_path} does not exist.")
+            linregress_path = environment.get_mt_exp_dir(args.linregress_file)
+            if not linregress_path.exists():
+                parser.error(f"The linear regression path {linregress_path} does not exist.")
     else:
-        verse_test_scores_path = None
+        linregress_path = None
 
     get_git_revision_hash()
 
@@ -501,7 +511,7 @@ def main() -> None:
             args.multiple_translations,
             args.save_confidences,
             args.quality_estimation,
-            verse_test_scores_path,
+            linregress_path,
             postprocess_handler,
             vref=args.vref,
         )
@@ -521,7 +531,7 @@ def main() -> None:
             args.multiple_translations,
             args.save_confidences,
             args.quality_estimation,
-            verse_test_scores_path,
+            linregress_path,
             postprocess_handler,
             vref=args.vref,
         )

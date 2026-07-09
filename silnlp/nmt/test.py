@@ -13,6 +13,7 @@ from sacrebleu.metrics import BLEUScore
 from scipy.stats import gmean
 
 from ..common.environment import SilNlpEnv
+from ..common.linear_regression import perform_enhanced_linear_regression
 from ..common.translator import CONFIDENCE_SUFFIX
 from ..common.utils import get_git_revision_hash
 from .clearml_connection import TAGS_LIST, SILClearML
@@ -50,6 +51,7 @@ SUPPORTED_SENTENCE_SCORERS = [
 
 TEST_TRG_PREDICTIONS_PREFIX = "test.trg-predictions"
 VERSE_SCORES_SUFFIX = ".scores.tsv"
+LINREGRESS_FILENAME = "linregress.json"
 
 
 class PairScore:
@@ -280,6 +282,9 @@ def write_pair_verse_scores(
             header.append("Reference")
         writer.writerow(header)
         spbleu_metric = sacrebleu.metrics.BLEU(tokenize="flores200", lowercase=True) if "spbleu" in scorers else None
+        compute_linregress = "chrf3" in scorers and "confidence" in scorers and confidences is not None
+        linregress_chrf3_scores: List[float] = []
+        linregress_confidence_scores: List[float] = []
         for index, pred in enumerate(pair_sys):
             sentences: List[str] = []
             for ref in pair_refs:
@@ -322,6 +327,10 @@ def write_pair_verse_scores(
             if "confidence" in scorers and confidences is not None:
                 other_verse_scores["Confidence"] = confidences[index]
 
+            if compute_linregress:
+                linregress_chrf3_scores.append(other_verse_scores["chrF3"])
+                linregress_confidence_scores.append(other_verse_scores["Confidence"])
+
             row: List[str] = [f"{index + 1}"]
 
             if "bleu" in scorers:
@@ -343,6 +352,17 @@ def write_pair_verse_scores(
             for sentence in sentences:
                 row.append(sentence.rstrip("\n"))
             writer.writerow(row)
+
+    if compute_linregress:
+        write_linregress(linregress_chrf3_scores, linregress_confidence_scores, config.exp_dir / LINREGRESS_FILENAME)
+
+
+def write_linregress(chrf3_scores: List[float], confidence_scores: List[float], output_path: Path) -> None:
+    linear_regression_result = perform_enhanced_linear_regression(confidence_scores, chrf3_scores)
+    LOGGER.info(f"Linear regression data:\n{linear_regression_result.toJSON()}")
+    LOGGER.info(f"Saving linear regression data to {output_path}")
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(linear_regression_result.toJSON())
 
 
 def score_individual_books(
