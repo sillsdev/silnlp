@@ -451,9 +451,10 @@ def main() -> None:
         "--linregress-file",
         type=str,
         default=None,
-        help="The linregress.json file relative to MT/experiments containing the confidence-to-chrF3 line of best fit "
-        + "coefficients produced by the test step, e.g., `project_folder/exp_folder/linregress.json`. "
-        + "If not provided, the experiment directory will be used to locate linregress.json.",
+        help="A linregress.*.json file relative to MT/experiments containing the confidence-to-chrF3 line of best "
+        + "fit coefficients produced by the test step, e.g., `project_folder/exp_folder/linregress.5000.json` (or "
+        + "`linregress.eng.fra.5000.json` for an experiment with multiple language pairs). "
+        + "If not provided, the experiment directory will be searched for a linregress.*.json file.",
     )
     parser.add_argument(
         "--debug",

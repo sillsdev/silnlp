@@ -12,7 +12,7 @@ from machine.scripture import ALL_BOOK_IDS, VerseRef
 from ..common.environment import SilNlpEnv
 from ..common.linear_regression import LinearRegressionResult
 from ..common.translator import CONFIDENCE_SUFFIX, ConfidenceFile, TxtConfidenceFile, UsfmConfidenceFile
-from .test import LINREGRESS_FILENAME
+from .test import LINREGRESS_PREFIX
 
 LOGGER = logging.getLogger(__package__ + ".quality_estimation")
 CANONICAL_ORDER = {book: i for i, book in enumerate(ALL_BOOK_IDS)}
@@ -161,11 +161,12 @@ def validate_inputs(
     if not linregress_path.exists():
         raise FileNotFoundError(f"Linear regression file {linregress_path} does not exist.")
     elif linregress_path.is_dir():
-        LOGGER.info(f"Searching for {LINREGRESS_FILENAME} in directory {linregress_path}.")
-        linregress_file = linregress_path / LINREGRESS_FILENAME
-        if not linregress_file.is_file():
-            raise ValueError(f"No {LINREGRESS_FILENAME} file found in directory {linregress_path}.")
-        linregress_path = linregress_file
+        pattern = f"{LINREGRESS_PREFIX}.*.json"
+        LOGGER.info(f"Searching for files matching {pattern} in directory {linregress_path}.")
+        linregress_files = list(linregress_path.glob(pattern))
+        if not linregress_files:
+            raise ValueError(f"No file matching {pattern} found in directory {linregress_path}.")
+        linregress_path = linregress_files[0]
         LOGGER.info(f"Using linear regression file {linregress_path}.")
 
     if len(confidence_file_paths) == 0:
@@ -412,9 +413,10 @@ def main() -> None:
     parser.add_argument(
         "linregress_file",
         type=str,
-        help="Path relative to MT/experiments to a linregress.json file containing the confidence-to-chrF3 line of "
-        + "best fit produced by the test step, e.g., project_folder/exp_folder/linregress.json. "
-        + "If a directory is provided instead, linregress.json within it is used.",
+        help="Path relative to MT/experiments to a linregress file containing the confidence-to-chrF3 line of best "
+        + f"fit produced by the test step, e.g., project_folder/exp_folder/{LINREGRESS_PREFIX}.5000.json (or "
+        + f"{LINREGRESS_PREFIX}.eng.fra.5000.json for an experiment with multiple language pairs). "
+        + f"If a directory is provided instead, the first {LINREGRESS_PREFIX}.*.json match is used.",
     )
     parser.add_argument(
         "confidence_files",

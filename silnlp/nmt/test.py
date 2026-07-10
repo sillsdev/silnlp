@@ -51,7 +51,7 @@ SUPPORTED_SENTENCE_SCORERS = [
 
 TEST_TRG_PREDICTIONS_PREFIX = "test.trg-predictions"
 VERSE_SCORES_SUFFIX = ".scores.tsv"
-LINREGRESS_FILENAME = "linregress.json"
+LINREGRESS_PREFIX = "linregress"
 
 
 class PairScore:
@@ -122,6 +122,7 @@ def score_pair(
     ref_projects: Set[str],
     draft_index: int = 1,
     pair_confs: Optional[List[float]] = None,
+    linregress_file_name: Optional[str] = None,
 ) -> PairScore:
     bleu_score = None
     if "bleu" in scorers:
@@ -244,6 +245,7 @@ def score_pair(
             other_scores,
             config,
             confidences if "confidence" in scorers else None,
+            linregress_file_name,
         )
 
     return PairScore(book, src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores, draft_index)
@@ -258,6 +260,7 @@ def write_pair_verse_scores(
     other_scores: Dict[str, float],
     config: Config,
     confidences: Optional[List[float]],
+    linregress_file_name: Optional[str] = None,
 ) -> None:
     scorers = scorers.intersection(SUPPORTED_SENTENCE_SCORERS)
     other_scores = {k: v for k, v in other_scores.items() if k.lower() in scorers}
@@ -353,8 +356,12 @@ def write_pair_verse_scores(
                 row.append(sentence.rstrip("\n"))
             writer.writerow(row)
 
-    if compute_linregress:
-        write_linregress(linregress_chrf3_scores, linregress_confidence_scores, config.exp_dir / LINREGRESS_FILENAME)
+    if compute_linregress and linregress_file_name is not None:
+        write_linregress(
+            linregress_chrf3_scores,
+            linregress_confidence_scores,
+            config.exp_dir / linregress_file_name,
+        )
 
 
 def write_linregress(chrf3_scores: List[float], confidence_scores: List[float], output_path: Path) -> None:
@@ -558,10 +565,11 @@ def test_checkpoint(
     refs_patterns: List[str] = []
     translation_detok_file_names: List[str] = []
     translation_conf_file_names: List[str] = []
+    step_token = "avg" if step == -1 else str(step)
     suffix_str = "_".join(map(lambda n: book_number_to_id(n), sorted(books.keys())))
     if len(suffix_str) > 0:
         suffix_str += "-"
-    suffix_str += "avg" if step == -1 else str(step)
+    suffix_str += step_token
 
     features_file_name = "test.src.txt"
     if (config.exp_dir / features_file_name).is_file():
@@ -653,10 +661,19 @@ def test_checkpoint(
     ):
         src_iso = config.default_test_src_iso
         trg_iso = config.default_test_trg_iso
-        if features_file_name != "test.src.txt":
+        split_by_pair = features_file_name != "test.src.txt"
+        if split_by_pair:
             parts = features_file_name.split(".")
             src_iso = parts[1]
             trg_iso = parts[2]
+
+        linregress_name_parts: List[str] = [LINREGRESS_PREFIX]
+        if split_by_pair:
+            linregress_name_parts.extend([src_iso, trg_iso])
+        linregress_name_parts.append(step_token)
+        if produce_multiple_translations:
+            linregress_name_parts.append(str(draft_index))
+        linregress_file_name = ".".join(linregress_name_parts) + ".json"
 
         pair_sys, pair_refs, book_dict = load_test_data(
             tokenizer,
@@ -694,6 +711,7 @@ def test_checkpoint(
                 config,
                 ref_projects,
                 draft_index,
+                linregress_file_name=linregress_file_name,
             )
         )
 
