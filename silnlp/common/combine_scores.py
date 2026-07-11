@@ -82,6 +82,8 @@ def check_for_lock_file(folder: Path, filename: str, file_type: str):
         lockfile = folder / f".~lock.{filename}.{file_type}#"
     elif file_type.lower() == "xlsx":
         lockfile = folder / f"~${filename}.{file_type}"
+    else:
+        raise ValueError(f"Unsupported file_type for lock file check: {file_type}")
 
     if lockfile.is_file():
         print(f"Found lock file: {lockfile}")
@@ -114,8 +116,10 @@ def aggregate_scores(folder):
     # Dictionary to store rows by header type
     data_by_header = defaultdict(list)
 
-    # Iterate over all CSV files in the folder and its subfolders
-    csv_files = list(folder.rglob("*/scores-*.csv"))
+    # Iterate over the scores files, which live at folder/<series>/<experiment>/scores-*.csv.
+    # Use a fixed-depth glob so parts[-3]/parts[-2] reliably map to series/experiment
+    # (a recursive rglob would match other depths and mislabel these fields).
+    csv_files = list(folder.glob("*/*/scores-*.csv"))
     for csv_file in csv_files:
         print(csv_file)
     if not csv_files:
@@ -128,28 +132,37 @@ def aggregate_scores(folder):
         steps = csv_file.stem.split("-")[-1]  # Extract steps from file name
 
         # Read the CSV file and add new columns
-        with open(csv_file, "r") as f:
+        with open(csv_file, "r", newline="") as f:
             reader = csv.reader(f)
             rows = list(reader)
-            header = list(rows[0])  # Use list for easier manipulation
 
-            # Add columns to the beginning of each row
-            print(f"Processing {csv_file}")
-            if is_current_style(header):
-                # Transform header and rows for current style
-                transformed_header, transformed_rows = transform_current_style_rows(header, rows[1:])
-                # Add Series, Experiment, Steps to the beginning
-                new_header = ["Series", "Experiment", "Steps"] + transformed_header
-                if tuple(new_header) not in data_by_header:
-                    data_by_header[tuple(new_header)].append(new_header)
-                for row in transformed_rows:
-                    data_by_header[tuple(new_header)].append([series, experiment, steps] + row)
-            else:
-                # Old style: keep as is
-                if tuple(header) not in data_by_header:
-                    data_by_header[tuple(header)].append(["Series", "Experiment", "Steps"] + header)
-                for row in rows[1:]:
-                    data_by_header[tuple(header)].append([series, experiment, steps] + row)
+        if not rows:
+            print(f"Skipping empty file {csv_file}")
+            continue
+
+        # Strip surrounding whitespace so column lookups stay consistent with is_current_style,
+        # which also strips before matching.
+        header = [col.strip() for col in rows[0]]
+
+        # Add columns to the beginning of each row
+        print(f"Processing {csv_file}")
+        if is_current_style(header):
+            # Transform header and rows for current style
+            transformed_header, transformed_rows = transform_current_style_rows(header, rows[1:])
+            # Add Series, Experiment, Steps to the beginning
+            new_header = ["Series", "Experiment", "Steps"] + transformed_header
+            if tuple(new_header) not in data_by_header:
+                data_by_header[tuple(new_header)].append(new_header)
+            for row in transformed_rows:
+                data_by_header[tuple(new_header)].append([series, experiment, steps] + row)
+        else:
+            # Old style: keep as is
+            if tuple(header) not in data_by_header:
+                data_by_header[tuple(header)].append(["Series", "Experiment", "Steps"] + header)
+            for row in rows[1:]:
+                if len(row) < len(header):
+                    continue  # skip incomplete or blank rows
+                data_by_header[tuple(header)].append([series, experiment, steps] + row)
 
     return data_by_header
 
