@@ -98,7 +98,6 @@ class TranslationTask:
         trg_iso: Optional[str],
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
-        quality_estimation: bool = False,
         linregress_path: Optional[Path] = None,
         postprocess_handler: Optional[PostprocessHandler] = None,
         tags: Optional[List[str]] = None,
@@ -179,15 +178,10 @@ class TranslationTask:
             if len(translation_failed) > 0:
                 raise RuntimeError(f"Some books failed to translate: {' '.join(translation_failed)}")
 
-        if quality_estimation and len(confidence_files) > 0:
-            if linregress_path is None:
-                LOGGER.warning(
-                    "Skipping quality estimation because no linear regression file was provided."
-                )
-            else:
-                LOGGER.info("Running quality estimation...")
-                estimate_quality(linregress_path, confidence_files)
-                LOGGER.info("Quality estimation completed.")
+        if linregress_path is not None:
+            LOGGER.info("Running quality estimation...")
+            estimate_quality(linregress_path, confidence_files)
+            LOGGER.info("Quality estimation completed.")
 
     def translate_files(
         self,
@@ -197,7 +191,6 @@ class TranslationTask:
         trg_iso: Optional[str],
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
-        quality_estimation: bool = False,
         linregress_path: Optional[Path] = None,
         postprocess_handler: Optional[PostprocessHandler] = None,
         tags: Optional[List[str]] = None,
@@ -292,15 +285,10 @@ class TranslationTask:
                 if save_confidences:
                     confidence_files.extend(trg_file_path.parent.glob(f"{trg_file_path.stem}*{CONFIDENCE_SUFFIX}"))
 
-        if quality_estimation and len(confidence_files) > 0:
-            if linregress_path is None:
-                LOGGER.warning(
-                    "Skipping quality estimation because no linear regression file was provided."
-                )
-            else:
-                LOGGER.info("Running quality estimation...")
-                estimate_quality(linregress_path, confidence_files)
-                LOGGER.info("Quality estimation completed.")
+        if linregress_path is not None:
+            LOGGER.info("Running quality estimation...")
+            estimate_quality(linregress_path, confidence_files)
+            LOGGER.info("Quality estimation completed.")
 
     def _init_translation_task(self, experiment_suffix: str) -> Tuple[Translator, Config, str]:
         clearml = SILClearML(
@@ -511,7 +499,6 @@ def main() -> None:
             args.trg_iso,
             args.multiple_translations,
             args.save_confidences,
-            args.quality_estimation,
             linregress_path,
             postprocess_handler,
             vref=args.vref,
@@ -531,7 +518,6 @@ def main() -> None:
             args.trg_iso,
             args.multiple_translations,
             args.save_confidences,
-            args.quality_estimation,
             linregress_path,
             postprocess_handler,
             vref=args.vref,
