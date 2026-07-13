@@ -101,11 +101,13 @@ def check_for_lock_file(folder: Path, filename: str, file_type: str) -> None:
 def load_scores(folder: Path) -> pd.DataFrame:
     """Read every folder/<series>/<experiment>/scores-*.csv file into one DataFrame.
 
-    The fixed-depth glob guarantees parts[-3]/parts[-2] map to series/experiment.
+    Scores files live in per-experiment subfolders (folder/<experiment>/scores-*.csv),
+    and may be nested more deeply, so recurse. parts[-2]/parts[-3] are the file's
+    immediate parent (experiment) and grandparent (series) directories.
     ``skipinitialspace`` drops the leading blanks in the comma-space separated files,
     and reading everything as strings preserves the raw values for later coercion.
     """
-    csv_files = sorted(folder.glob("*/*/scores-*.csv"))
+    csv_files = sorted(folder.rglob("*/scores-*.csv"))
     if not csv_files:
         print(f"No scores csv files were found in folder {folder.resolve()}")
         sys.exit(0)
