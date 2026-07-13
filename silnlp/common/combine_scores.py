@@ -1,7 +1,5 @@
 import argparse
-import csv
 import sys
-from collections import defaultdict
 from pathlib import Path
 
 import openpyxl
@@ -9,7 +7,8 @@ import pandas as pd
 
 from ..common.environment import SilNlpEnv
 
-# Columns for current style detection and transformation (match actual input files)
+# Canonical column set and order for the combined output. Series/Experiment/Steps
+# are synthesized by this script; the rest come from the input scores files.
 CURRENT_STYLE_COLUMNS = [
     "Series",
     "Experiment",
@@ -56,23 +55,31 @@ COLUMNS_TO_HIDE = [
     "confidence",
 ]
 
-# Final column order for current style
-CURRENT_STYLE_OUTPUT_COLUMNS = [
-    "src_iso",
-    "trg_iso",
+# Columns that should be treated as numbers (for coercion and sorting).
+NUMERIC_COLUMNS = [
     "BLEU",
+    "BLEU_1gram_prec",
+    "BLEU_2gram_prec",
+    "BLEU_3gram_prec",
+    "BLEU_4gram_prec",
+    "BLEU_brevity_penalty",
+    "BLEU_total_sys_len",
+    "BLEU_total_ref_len",
+    "chrF3",
+    "chrF3+",
     "chrF3++",
-    "book",
-    "draft_index",
-    "num_refs",
-    "references",
-    "sent_len",
     "spBLEU",
     "confidence",
+    "num_refs",
+    "sent_len",
+    "draft_index",
 ]
 
+# Columns that should be treated as free text.
+STRING_COLUMNS = ["Series", "Experiment", "Steps", "book", "src_iso", "trg_iso", "references"]
 
-def check_for_lock_file(folder: Path, filename: str, file_type: str):
+
+def check_for_lock_file(folder: Path, filename: str, file_type: str) -> None:
     """Check for lock files and ask the user to close them then exit."""
 
     if file_type[0] == ".":
@@ -91,139 +98,72 @@ def check_for_lock_file(folder: Path, filename: str, file_type: str):
         sys.exit()
 
 
-def is_current_style(header):
-    """Check if the header matches the current style (all columns present, additional columns accepted)."""
-    header = [col.strip() for col in header]
-    return set(CURRENT_STYLE_COLUMNS).issubset(set(header))
+def load_scores(folder: Path) -> pd.DataFrame:
+    """Read every folder/<series>/<experiment>/scores-*.csv file into one DataFrame.
 
-
-def transform_current_style_rows(header, rows):
-    """Remove and reorder columns for current style."""
-    # Map column name to index
-    col_idx = {col: i for i, col in enumerate(header)}
-    # Only keep columns in CURRENT_STYLE_OUTPUT_COLUMNS
-    new_header = [col for col in CURRENT_STYLE_OUTPUT_COLUMNS if col in col_idx]
-    new_rows = []
-    for row in rows:
-        if len(row) < len(header):
-            continue  # skip incomplete or blank rows
-        new_row = [row[col_idx[col]] for col in new_header]
-        new_rows.append(new_row)
-    return new_header, new_rows
-
-
-def aggregate_scores(folder):
-    # Dictionary to store rows by header type
-    data_by_header = defaultdict(list)
-
-    # Iterate over the scores files, which live at folder/<series>/<experiment>/scores-*.csv.
-    # Use a fixed-depth glob so parts[-3]/parts[-2] reliably map to series/experiment
-    # (a recursive rglob would match other depths and mislabel these fields).
-    csv_files = list(folder.glob("*/*/scores-*.csv"))
-    for csv_file in csv_files:
-        print(csv_file)
+    The fixed-depth glob guarantees parts[-3]/parts[-2] map to series/experiment.
+    ``skipinitialspace`` drops the leading blanks in the comma-space separated files,
+    and reading everything as strings preserves the raw values for later coercion.
+    """
+    csv_files = sorted(folder.glob("*/*/scores-*.csv"))
     if not csv_files:
         print(f"No scores csv files were found in folder {folder.resolve()}")
         sys.exit(0)
 
+    frames = []
     for csv_file in csv_files:
-        series = csv_file.parts[-3]  # Extract series folder name
-        experiment = csv_file.parts[-2]  # Extract experiment folder name
-        steps = csv_file.stem.split("-")[-1]  # Extract steps from file name
-
-        # Read the CSV file and add new columns
-        with open(csv_file, "r", newline="") as f:
-            reader = csv.reader(f)
-            rows = list(reader)
-
-        if not rows:
+        print(f"Processing {csv_file}")
+        try:
+            df = pd.read_csv(csv_file, dtype=str, skipinitialspace=True, skip_blank_lines=True, on_bad_lines="warn")
+        except pd.errors.EmptyDataError:
             print(f"Skipping empty file {csv_file}")
             continue
 
-        # Strip surrounding whitespace so column lookups stay consistent with is_current_style,
-        # which also strips before matching.
-        header = [col.strip() for col in rows[0]]
+        # Strip any whitespace left around header names so column lookups are reliable.
+        df.columns = df.columns.astype(str).str.strip()
+        df.insert(0, "Series", csv_file.parts[-3])
+        df.insert(1, "Experiment", csv_file.parts[-2])
+        df.insert(2, "Steps", csv_file.stem.split("-")[-1])
+        frames.append(df)
 
-        # Add columns to the beginning of each row
-        print(f"Processing {csv_file}")
-        if is_current_style(header):
-            # Transform header and rows for current style
-            transformed_header, transformed_rows = transform_current_style_rows(header, rows[1:])
-            # Add Series, Experiment, Steps to the beginning
-            new_header = ["Series", "Experiment", "Steps"] + transformed_header
-            if tuple(new_header) not in data_by_header:
-                data_by_header[tuple(new_header)].append(new_header)
-            for row in transformed_rows:
-                data_by_header[tuple(new_header)].append([series, experiment, steps] + row)
-        else:
-            # Old style: keep as is
-            if tuple(header) not in data_by_header:
-                data_by_header[tuple(header)].append(["Series", "Experiment", "Steps"] + header)
-            for row in rows[1:]:
-                if len(row) < len(header):
-                    continue  # skip incomplete or blank rows
-                data_by_header[tuple(header)].append([series, experiment, steps] + row)
+    if not frames:
+        # Return an empty DataFrame with expected columns so downstream code is safe.
+        return pd.DataFrame(columns=CURRENT_STYLE_COLUMNS)
 
-    return data_by_header
+    combined = pd.concat(frames, ignore_index=True, sort=False)
+    # Normalize to the canonical column set/order; missing columns become NaN.
+    return combined.reindex(columns=CURRENT_STYLE_COLUMNS)
 
 
-def clean_dataframe(df):
+def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     cleaned_df = df.copy()
-    cleaned_df = cleaned_df[
-        ~((cleaned_df["trg_iso"] == "ALL") & (cleaned_df["chrF3++"].isna() | (cleaned_df["chrF3++"] == "")))
-    ]
-    numeric_cols = [
-        "BLEU",
-        "BLEU_1gram_prec",
-        "BLEU_2gram_prec",
-        "BLEU_3gram_prec",
-        "BLEU_4gram_prec",
-        "BLEU_brevity_penalty",
-        "BLEU_total_sys_len",
-        "BLEU_total_ref_len",
-        "chrF3",
-        "chrF3+",
-        "chrF3++",
-        "spBLEU",
-        "confidence",
-        "num_refs",
-        "sent_len",
-        "draft_index",
-    ]
-    for col in numeric_cols:
-        if col in cleaned_df.columns:
-            cleaned_df[col] = pd.to_numeric(cleaned_df[col], errors="coerce")
-    string_cols = ["Series", "Experiment", "Steps", "book", "src_iso", "trg_iso", "references"]
-    for col in string_cols:
+
+    # Strip string columns BEFORE any value comparison so whitespace-padded values
+    # (e.g. " ALL") are matched correctly by the filter below.
+    for col in STRING_COLUMNS:
         if col in cleaned_df.columns:
             cleaned_df[col] = cleaned_df[col].astype(str).str.strip()
+
+    # Rows with 'ALL' in trg_iso and no chrF3++ score are not useful, so drop them.
+    if "trg_iso" in cleaned_df.columns and "chrF3++" in cleaned_df.columns:
+        chrf3pp = cleaned_df["chrF3++"]
+        missing_chrf3pp = chrf3pp.isna() | (chrf3pp.astype(str).str.strip() == "")
+        cleaned_df = cleaned_df[~((cleaned_df["trg_iso"] == "ALL") & missing_chrf3pp)]
+
+    for col in NUMERIC_COLUMNS:
+        if col in cleaned_df.columns:
+            cleaned_df[col] = pd.to_numeric(cleaned_df[col], errors="coerce")
+
     return cleaned_df
 
 
-def merge_all_data(data_by_header):
-    all_dfs = []
-    for header, rows in data_by_header.items():
-        if len(rows) > 1:
-            df = pd.DataFrame(rows[1:], columns=rows[0])
-            all_dfs.append(df)
-    final_columns = CURRENT_STYLE_COLUMNS
-    if not all_dfs:
-        # Return empty DataFrame with expected columns so downstream code can access them safely
-        return pd.DataFrame(columns=final_columns)
-    combined = pd.concat(all_dfs, ignore_index=True, sort=False)
-    for col in final_columns:
-        if col not in combined.columns:
-            combined[col] = None
-    return combined[final_columns]
-
-
-def sort_dataframe(df, sort_by):
+def sort_dataframe(df: pd.DataFrame, sort_by) -> pd.DataFrame:
     sort_cols = [col for col, _ in sort_by]
     sort_ascending = [asc for _, asc in sort_by]
     return df.sort_values(by=sort_cols, ascending=sort_ascending, na_position="last")
 
 
-def write_to_excel(df, folder, output_filename):
+def write_to_excel(df: pd.DataFrame, folder: Path, output_filename: str) -> None:
     output_file = folder / f"{output_filename}.xlsx"
     with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
         df.to_excel(writer, sheet_name="Scores", index=False)
@@ -250,7 +190,7 @@ def write_to_excel(df, folder, output_filename):
     print(f"Wrote scores to {output_file}")
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Aggregate CSV files in a folder.")
     parser.add_argument("folder", type=Path, help="Path to the folder containing CSV files.")
     parser.add_argument(
@@ -272,11 +212,8 @@ def main():
     # Check for lock files and ask the user to close them.
     check_for_lock_file(folder, base_filename, "xlsx")
 
-    # Aggregate the data from all the scores files.
-    data = aggregate_scores(folder)
-    combined_df = merge_all_data(data)
-
-    # Clean and sort the data
+    # Read, clean and sort the scores.
+    combined_df = load_scores(folder)
     clean_df = clean_dataframe(combined_df)
     sorted_df = sort_dataframe(clean_df, sort_by=[("Series", True), ("chrF3++", False), ("BLEU", False)])
 
