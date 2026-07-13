@@ -372,6 +372,23 @@ def write_linregress(chrf3_scores: List[float], confidence_scores: List[float], 
         f.write(linear_regression_result.toJSON())
 
 
+def get_linregress_file_name(
+    step_token: str,
+    split_by_pair: bool,
+    src_iso: str,
+    trg_iso: str,
+    produce_multiple_translations: bool,
+    draft_index: int,
+) -> str:
+    parts = [LINREGRESS_PREFIX]
+    if split_by_pair:
+        parts.extend([src_iso, trg_iso])
+    parts.append(step_token)
+    if produce_multiple_translations:
+        parts.append(str(draft_index))
+    return ".".join(parts) + ".json"
+
+
 def score_individual_books(
     book_dict: Dict[str, Tuple[List[str], List[List[str]], List[float]]],
     src_iso: str,
@@ -667,13 +684,9 @@ def test_checkpoint(
             src_iso = parts[1]
             trg_iso = parts[2]
 
-        linregress_name_parts: List[str] = [LINREGRESS_PREFIX]
-        if split_by_pair:
-            linregress_name_parts.extend([src_iso, trg_iso])
-        linregress_name_parts.append(step_token)
-        if produce_multiple_translations:
-            linregress_name_parts.append(str(draft_index))
-        linregress_file_name = ".".join(linregress_name_parts) + ".json"
+        linregress_file_name = get_linregress_file_name(
+            step_token, split_by_pair, src_iso, trg_iso, produce_multiple_translations, draft_index
+        )
 
         pair_sys, pair_refs, book_dict = load_test_data(
             tokenizer,
