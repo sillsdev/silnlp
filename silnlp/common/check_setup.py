@@ -75,6 +75,7 @@ class Result(NamedTuple):
     status: str
     detail: str
     hint: str = ""
+    source: str = ""  # where the value is defined, shown in the "Defined In" column
 
 
 def is_placeholder(value: str) -> bool:
@@ -142,20 +143,21 @@ def check_one_var(results: List[Result], group: str, var: str, show_secrets: boo
             Result(
                 var,
                 FAIL,
-                "placeholder value" + (f" — defined at {source}" if source else ""),
+                "placeholder value",
                 "Replace the 'xxxx' placeholder from the README template with your real credential.",
+                source,
             )
         )
     elif value:
-        where = f"defined at {source}" if source else "set in this session only (not found in any profile file)"
-        results.append(Result(var, OK, f"{display_value(var, value, show_secrets)} — {where}"))
+        results.append(Result(var, OK, display_value(var, value, show_secrets), "", source or "(this session only)"))
     elif source:
         results.append(
             Result(
                 var,
                 FAIL,
-                f"defined at {source} but not set in the current environment",
+                "not set in the current environment",
                 f"Open a new terminal, or run 'source {source.rsplit(':', 1)[0]}' so the export takes effect.",
+                source,
             )
         )
     else:
@@ -174,15 +176,15 @@ def check_env_vars(results: List[Result], show_secrets: bool) -> None:
     data_path = os.getenv("SIL_NLP_DATA_PATH", "")
     source = find_definition("SIL_NLP_DATA_PATH")
     if data_path:
-        where = f"defined at {source}" if source else "set in this session only (not found in any profile file)"
-        results.append(Result("SIL_NLP_DATA_PATH", OK, f"{data_path} — {where}"))
+        results.append(Result("SIL_NLP_DATA_PATH", OK, data_path, "", source or "(this session only)"))
     elif source:
         results.append(
             Result(
                 "SIL_NLP_DATA_PATH",
                 FAIL,
-                f"defined at {source} but not set in the current environment",
+                "not set in the current environment",
                 f"Open a new terminal, or run 'source {source.rsplit(':', 1)[0]}' so the export takes effect.",
+                source,
             )
         )
     else:
@@ -196,7 +198,9 @@ def check_env_vars(results: List[Result], show_secrets: bool) -> None:
     for group, variables in VAR_GROUPS.items():
         if not any(os.getenv(v) or find_definition(v) for v in variables):
             if group == "ClearML" and (Path.home() / "clearml.conf").exists():
-                results.append(Result("ClearML env vars", OK, "not set — using ~/clearml.conf instead"))
+                results.append(
+                    Result("ClearML env vars", OK, "not set — using clearml.conf instead", "", "~/clearml.conf")
+                )
             else:
                 results.append(Result(f"{group} env vars", SKIP, "none set", f"Fine if you do not use {group}."))
             continue
@@ -346,9 +350,11 @@ def check_rclone(results: List[Result]) -> None:
             )
 
     if problems:
-        results.append(Result("rclone MinIO credentials", FAIL, "; ".join(problems), " ".join(hints)))
+        results.append(Result("rclone MinIO credentials", FAIL, "; ".join(problems), " ".join(hints), tilde(conf_path)))
     else:
-        results.append(Result("rclone MinIO credentials", OK, "field names and values look consistent"))
+        results.append(
+            Result("rclone MinIO credentials", OK, "field names and values look consistent", "", tilde(conf_path))
+        )
 
 
 def check_data_path(results: List[Result]) -> None:
@@ -452,9 +458,7 @@ def check_clearml(results: List[Result]) -> None:
         )
         return
     if status == 200:
-        results.append(
-            Result("ClearML authentication", OK, f"authenticated against {api_host} (credentials from {source})")
-        )
+        results.append(Result("ClearML authentication", OK, f"authenticated against {api_host}", "", source))
     elif status == 401:
         results.append(
             Result(
@@ -470,7 +474,13 @@ def check_clearml(results: List[Result]) -> None:
 
 
 def print_report(results: List[Result], show_secrets: bool) -> int:
-    width = max(len(r.name) for r in results)
+    detail_cap = 66
+    name_w = max(max(len(r.name) for r in results), len("Check"))
+    detail_w = max(
+        max(len(line) for r in results for line in _wrap(r.detail, detail_cap)),
+        len("Result"),
+    )
+    total_w = 3 + name_w + 2 + detail_w + 2 + max(len(r.source) for r in results)
     print()
     print("SILNLP setup check")
     print(
@@ -478,15 +488,21 @@ def print_report(results: List[Result], show_secrets: bool) -> int:
         f"({', '.join(tilde(f) for f in PROFILE_FILES if f.is_file())}).\n"
         f"ClearML also falls back to ~/clearml.conf; rclone reads {tilde(rclone_config_path())}."
     )
-    print("=" * (width + 50))
+    print()
+    print(f"   {'Check'.ljust(name_w)}  {'Result'.ljust(detail_w)}  Defined In")
+    print("=" * total_w)
     for r in results:
-        print(f"{ICONS[r.status]} {r.name.ljust(width)}  {r.detail}")
+        detail_lines = _wrap(r.detail, detail_cap) or [""]
+        first = f"{ICONS[r.status]} {r.name.ljust(name_w)}  {detail_lines[0].ljust(detail_w)}  {r.source}"
+        print(first.rstrip())
+        for extra in detail_lines[1:]:
+            print(f"   {' ' * name_w}  {extra}")
         if r.hint and r.status in (FAIL, WARN):
             for line in _wrap(r.hint, 100):
-                print(f"   {' ' * width}  {line}")
+                print(f"   {' ' * name_w}  {line}")
     failures = [r for r in results if r.status == FAIL]
     warnings = [r for r in results if r.status == WARN]
-    print("=" * (width + 50))
+    print("=" * total_w)
     print(f"{len(failures)} failure(s), {len(warnings)} warning(s)")
     if not show_secrets:
         print("Secret values are partially masked — run with --show-secrets to print them in full.")

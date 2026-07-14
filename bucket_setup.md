@@ -63,3 +63,5 @@ Now your MinIO or B2 bucket should be mounted as M: or B: drive, respectively, w
 * Reboot Linux / macOS
 
 Now your MinIO or B2 bucket should be mounted as ~/M or ~/B respectively when you start Linux / macOS.
+You can use the check_setup script to verify these settings, run:
+poetry run python -m silnlp.common.check_setup 
