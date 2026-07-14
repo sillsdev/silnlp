@@ -13,6 +13,7 @@ poetry/conda environment is broken or missing:
 Exit code is 0 if no check fails (warnings are allowed), 1 otherwise.
 """
 
+import argparse
 import base64
 import configparser
 import os
@@ -80,10 +81,110 @@ def is_placeholder(value: str) -> bool:
     return bool(re.fullmatch(r"x+", value.strip(), re.IGNORECASE))
 
 
-def check_env_vars(results: List[Result]) -> None:
+# Values that are masked in the report unless --show-secrets is given (people paste
+# diagnostic output into issues and chat when asking for help).
+SECRET_VARS = {"MINIO_SECRET_KEY", "B2_APPLICATION_KEY", "CLEARML_API_SECRET_KEY"}
+
+# Files where the variables are typically defined, in lookup order.
+PROFILE_FILES = [
+    Path.home() / ".bashrc",
+    Path.home() / ".bash_profile",
+    Path.home() / ".profile",
+    Path.home() / ".zshrc",
+    Path.home() / "env_vars.txt",
+    Path(__file__).resolve().parents[2] / ".env",
+]
+
+VAR_GROUPS = {
+    "MinIO": ["MINIO_ENDPOINT_URL", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY"],
+    "Backblaze B2": ["B2_ENDPOINT_URL", "B2_KEY_ID", "B2_APPLICATION_KEY"],
+    "ClearML": ["CLEARML_API_HOST", "CLEARML_API_ACCESS_KEY", "CLEARML_API_SECRET_KEY"],
+}
+
+
+def tilde(path: Path) -> str:
+    try:
+        return "~/" + str(path.relative_to(Path.home()))
+    except ValueError:
+        return str(path)
+
+
+def find_definition(var: str) -> str:
+    """Return 'file:line' of the first profile file that defines var, or ''."""
+    pattern = re.compile(rf"^\s*(?:export\s+)?{re.escape(var)}=")
+    for profile in PROFILE_FILES:
+        try:
+            if not profile.is_file():
+                continue
+            for line_no, line in enumerate(profile.read_text(errors="replace").splitlines(), 1):
+                if pattern.match(line):
+                    return f"{tilde(profile)}:{line_no}"
+        except OSError:
+            continue
+    return ""
+
+
+def display_value(var: str, value: str, show_secrets: bool) -> str:
+    if show_secrets or var not in SECRET_VARS:
+        return value
+    if len(value) <= 8:
+        return f"{'*' * len(value)} ({len(value)} chars)"
+    return f"{value[:4]}…{value[-4:]} ({len(value)} chars)"
+
+
+def check_one_var(results: List[Result], group: str, var: str, show_secrets: bool) -> None:
+    value = os.getenv(var, "")
+    source = find_definition(var)
+    if var == "CLEARML_API_HOST" and not value and not source:
+        results.append(Result(var, OK, f"not set — defaults to {DEFAULT_CLEARML_API_HOST}"))
+    elif value and is_placeholder(value):
+        results.append(
+            Result(
+                var,
+                FAIL,
+                "placeholder value" + (f" — defined at {source}" if source else ""),
+                "Replace the 'xxxx' placeholder from the README template with your real credential.",
+            )
+        )
+    elif value:
+        where = f"defined at {source}" if source else "set in this session only (not found in any profile file)"
+        results.append(Result(var, OK, f"{display_value(var, value, show_secrets)} — {where}"))
+    elif source:
+        results.append(
+            Result(
+                var,
+                FAIL,
+                f"defined at {source} but not set in the current environment",
+                f"Open a new terminal, or run 'source {source.rsplit(':', 1)[0]}' so the export takes effect.",
+            )
+        )
+    else:
+        results.append(
+            Result(
+                var,
+                FAIL,
+                "not set",
+                f"Other {group} variables are set but this one is missing — add 'export {var}=<value>' "
+                "to your shell profile (e.g. ~/.bashrc) and open a new terminal.",
+            )
+        )
+
+
+def check_env_vars(results: List[Result], show_secrets: bool) -> None:
     data_path = os.getenv("SIL_NLP_DATA_PATH", "")
+    source = find_definition("SIL_NLP_DATA_PATH")
     if data_path:
-        results.append(Result("SIL_NLP_DATA_PATH", OK, data_path))
+        where = f"defined at {source}" if source else "set in this session only (not found in any profile file)"
+        results.append(Result("SIL_NLP_DATA_PATH", OK, f"{data_path} — {where}"))
+    elif source:
+        results.append(
+            Result(
+                "SIL_NLP_DATA_PATH",
+                FAIL,
+                f"defined at {source} but not set in the current environment",
+                f"Open a new terminal, or run 'source {source.rsplit(':', 1)[0]}' so the export takes effect.",
+            )
+        )
     else:
         hint = "Add 'export SIL_NLP_DATA_PATH=<path>' to your shell profile (e.g. ~/.bashrc) and open a new terminal."
         for misspelling in ("SILNLP_DATA_PATH", "SIL_NLP_DATA", "SILNLP_DATA"):
@@ -92,41 +193,15 @@ def check_env_vars(results: List[Result]) -> None:
                 break
         results.append(Result("SIL_NLP_DATA_PATH", FAIL, "not set", hint))
 
-    groups = {
-        "MinIO": ["MINIO_ENDPOINT_URL", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY"],
-        "Backblaze B2": ["B2_ENDPOINT_URL", "B2_KEY_ID", "B2_APPLICATION_KEY"],
-        "ClearML": ["CLEARML_API_ACCESS_KEY", "CLEARML_API_SECRET_KEY"],
-    }
-    for group, variables in groups.items():
-        values = {v: os.getenv(v, "") for v in variables}
-        missing = [v for v, val in values.items() if not val]
-        placeholders = [v for v, val in values.items() if val and is_placeholder(val)]
-        if placeholders:
-            results.append(
-                Result(
-                    f"{group} env vars",
-                    FAIL,
-                    f"placeholder value in {', '.join(placeholders)}",
-                    "Replace the 'xxxx' placeholder with your real credentials in your shell profile.",
-                )
-            )
-        elif not missing:
-            results.append(Result(f"{group} env vars", OK, "all set"))
-        elif len(missing) == len(variables):
-            hint = ""
+    for group, variables in VAR_GROUPS.items():
+        if not any(os.getenv(v) or find_definition(v) for v in variables):
             if group == "ClearML" and (Path.home() / "clearml.conf").exists():
-                results.append(Result(f"{group} env vars", OK, "not set, but ~/clearml.conf exists"))
-                continue
-            results.append(Result(f"{group} env vars", SKIP, "not set", f"Fine if you do not use {group}."))
-        else:
-            results.append(
-                Result(
-                    f"{group} env vars",
-                    FAIL,
-                    f"missing {', '.join(missing)}",
-                    f"Some {group} variables are set but not all — add the missing ones to your shell profile.",
-                )
-            )
+                results.append(Result("ClearML env vars", OK, "not set — using ~/clearml.conf instead"))
+            else:
+                results.append(Result(f"{group} env vars", SKIP, "none set", f"Fine if you do not use {group}."))
+            continue
+        for var in variables:
+            check_one_var(results, group, var, show_secrets)
 
 
 def check_minio_connectivity(results: List[Result]) -> bool:
@@ -394,10 +469,15 @@ def check_clearml(results: List[Result]) -> None:
         results.append(Result("ClearML authentication", WARN, f"unexpected HTTP {status} from {api_host}"))
 
 
-def print_report(results: List[Result]) -> int:
+def print_report(results: List[Result], show_secrets: bool) -> int:
     width = max(len(r.name) for r in results)
     print()
     print("SILNLP setup check")
+    print(
+        "Variables are read from the process environment — normally exported from a shell profile "
+        f"({', '.join(tilde(f) for f in PROFILE_FILES if f.is_file())}).\n"
+        f"ClearML also falls back to ~/clearml.conf; rclone reads {tilde(rclone_config_path())}."
+    )
     print("=" * (width + 50))
     for r in results:
         print(f"{ICONS[r.status]} {r.name.ljust(width)}  {r.detail}")
@@ -408,6 +488,8 @@ def print_report(results: List[Result]) -> int:
     warnings = [r for r in results if r.status == WARN]
     print("=" * (width + 50))
     print(f"{len(failures)} failure(s), {len(warnings)} warning(s)")
+    if not show_secrets:
+        print("Secret values are partially masked — run with --show-secrets to print them in full.")
     return 1 if failures else 0
 
 
@@ -427,13 +509,21 @@ def _wrap(text: str, width: int) -> List[str]:
 
 
 def main() -> int:
+    arg_parser = argparse.ArgumentParser(description="Diagnose a local SILNLP setup.")
+    arg_parser.add_argument(
+        "--show-secrets",
+        action="store_true",
+        help="print full credential values instead of masked ones (avoid pasting that output into shared channels)",
+    )
+    args = arg_parser.parse_args()
+
     results: List[Result] = []
-    check_env_vars(results)
+    check_env_vars(results, args.show_secrets)
     check_minio_connectivity(results)
     check_rclone(results)
     check_data_path(results)
     check_clearml(results)
-    return print_report(results)
+    return print_report(results, args.show_secrets)
 
 
 if __name__ == "__main__":

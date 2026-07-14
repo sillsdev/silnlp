@@ -13,7 +13,7 @@ Diagnose why a local SILNLP setup is not working. Supported platforms: Ubuntu/Li
 python3 silnlp/common/check_setup.py
 ```
 
-It is stdlib-only, so it runs even when the poetry/conda environment is broken. Every failed check prints a remediation hint. If all checks pass but the user still has a problem, ask what command or workflow fails and investigate from there.
+It is stdlib-only, so it runs even when the poetry/conda environment is broken. Every failed check prints a remediation hint. The report lists each credential variable individually with its value and where it is defined (e.g. `~/.bashrc:142`); secret values are partially masked — `--show-secrets` prints them in full, but never paste that output into shared channels. If all checks pass but the user still has a problem, ask what command or workflow fails and investigate from there.
 
 Do not stop at the first failure — read the whole report. Failures cascade (e.g. a down VPN fails DNS, TCP, health, and mount checks at once); fix the earliest check in the chain first.
 
