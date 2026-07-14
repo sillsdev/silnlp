@@ -172,6 +172,16 @@ The rest of these instructions are to be carried out in a WSL/Linux terminal as 
 
 * You will need to run the `source ./rclone_setup.sh minio` command each time you start your Linux environment. Every other step in these instructions should only be needed one time during initial setup.
 
+## Checking Your Setup
+
+To diagnose common configuration problems (missing or misspelled environment variables, VPN/MinIO connectivity, rclone configuration, the bucket mount, and ClearML credentials), run:
+
+```
+python3 silnlp/common/check_setup.py
+```
+
+The script only uses the Python standard library, so it works even if the poetry/conda environment is broken. Every failed check prints a hint with the likely fix. If you use [Claude Code](https://claude.com/claude-code), the `/diagnose-setup` skill runs this script and investigates any failures further.
+
 ## Setting Up and Running Experiments
 
 See the [wiki](../../wiki) for information on setting up and running experiments. The most important pages for getting started are the ones on [file structure](../../wiki/Folder-structure-and-file-naming-conventions), [model configuration](../../wiki/Configure-a-model), and [running experiments](../../wiki/NMT:-Usage). A lot of the instructions are specific to NMT, but are still helpful starting points for doing other things like [alignment](../../wiki/Alignment:-Usage).
