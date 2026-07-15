@@ -1,4 +1,5 @@
 import logging
+import os
 import shutil
 from dataclasses import dataclass
 from typing import Optional
@@ -53,16 +54,24 @@ class SILClearML:
             if not self.skip_config:
                 self._load_config()
 
+            hf_token = os.environ.get("HF_TOKEN")
+            if hf_token is None:
+                LOGGER.warning("HF_TOKEN not found in environment; gated HuggingFace models may fail remotely.")
+
+            docker_arguments = [
+                "--env TOKENIZERS_PARALLELISM='false'",
+                "--cap-add SYS_ADMIN",
+                "--device /dev/fuse",
+                "--security-opt apparmor=docker-apparmor",
+                "--env CHECK_TRANSFERS=1",
+                "--env SIL_NLP_DATA_PATH=/root/M",
+            ]
+            if hf_token:
+                docker_arguments.append(f"--env HF_TOKEN={hf_token}")
+
             self.task.set_base_docker(
                 docker_image="ghcr.io/sillsdev/silnlp:latest",
-                docker_arguments=[
-                    "--env TOKENIZERS_PARALLELISM='false'",
-                    "--cap-add SYS_ADMIN",
-                    "--device /dev/fuse",
-                    "--security-opt apparmor=docker-apparmor",
-                    "--env CHECK_TRANSFERS=1",
-                    "--env SIL_NLP_DATA_PATH=/root/M",
-                ],
+                docker_arguments=docker_arguments,
                 docker_setup_bash_script=[
                     "apt install -y python3-venv",
                     "python3 -m pip install --user pipx",

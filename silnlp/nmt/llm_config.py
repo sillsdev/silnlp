@@ -17,6 +17,7 @@ model's native chat template and a configurable translation instruction.
 """
 
 import logging
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,7 @@ from typing import Any, Dict, Generator, Iterable, List, Optional, Tuple, Union
 
 import torch
 from datasets import Dataset
+from jinja2.exceptions import UndefinedError
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
@@ -97,10 +99,38 @@ TRAINING_ARGS_CONFIG_MAPPING = {
 
 LABEL_PAD_TOKEN_ID = -100
 
+# HF Hub model-name prefixes that are gated behind a license acceptance (as opposed to
+# LLM_MODEL_PREFIXES in config_utils.py, which also includes ungated families like Hunyuan).
+GATED_MODEL_PREFIXES = ("google/gemma", "google/translate-gemma", "google/translategemma")
 
-def is_image_text_to_text_model(model_name_or_path: str, trust_remote_code: bool = False) -> bool:
+# TranslateGemma's chat template rejects a plain-text user turn: it requires `content` to be a
+# single-item list of {type, source_lang_code, target_lang_code, text|image}, and it renders the
+# natural-language instruction itself from a fixed table of ~55 supported language codes.
+TRANSLATE_GEMMA_MODEL_PREFIXES = ("google/translate-gemma", "google/translategemma")
+
+
+def get_hf_token(model_name_or_path: str) -> Optional[str]:
+    """Resolve the HuggingFace Hub token from the environment, raising a clear error up front
+    if it's missing for a model known to require one. Without this check, a missing/unpropagated
+    token surfaces much later as a cryptic TypeError deep inside sentencepiece, because transformers
+    treats an unauthorized fetch of an optional tokenizer file as "file not found" rather than as
+    an auth error."""
+    token = os.environ.get("HF_TOKEN")
+    if token is None and model_name_or_path.lower().startswith(GATED_MODEL_PREFIXES):
+        raise RuntimeError(
+            f"'{model_name_or_path}' is a gated HuggingFace model, but the HF_TOKEN environment "
+            "variable is not set. Set HF_TOKEN to a token from an account that has accepted the "
+            "model's license on huggingface.co, and make sure it reaches the ClearML worker "
+            "(e.g. via SILClearML's docker_arguments)."
+        )
+    return token
+
+
+def is_image_text_to_text_model(
+    model_name_or_path: str, trust_remote_code: bool = False, token: Optional[str] = None
+) -> bool:
     """Return True if the checkpoint is a multimodal image-text-to-text model."""
-    config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=trust_remote_code)
+    config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=trust_remote_code, token=token)
     return type(config) in AutoModelForImageTextToText._model_mapping
 
 
@@ -205,9 +235,15 @@ class LLMConfig(Config):
         # predictions/references; for LLMs both are raw text, so a no-op tokenizer suffices.
         return NullTokenizer()
 
+    @property
+    def hf_token(self) -> Optional[str]:
+        return get_hf_token(self.model)
+
     def get_hf_tokenizer(self) -> PreTrainedTokenizerBase:
         if self._hf_tokenizer is None:
-            tokenizer = AutoTokenizer.from_pretrained(self.model, trust_remote_code=self.params["trust_remote_code"])
+            tokenizer = AutoTokenizer.from_pretrained(
+                self.model, trust_remote_code=self.params["trust_remote_code"], token=self.hf_token
+            )
             if tokenizer.pad_token_id is None:
                 tokenizer.pad_token = tokenizer.eos_token
             self._hf_tokenizer = tokenizer
@@ -225,15 +261,29 @@ class LLMConfig(Config):
         return self.default_test_trg_iso or (next(iter(self.trg_isos)) if len(self.trg_isos) > 0 else "")
 
     def build_prompt_messages(
-        self, source: str, src_lang: str, trg_lang: str, target: Optional[str] = None
-    ) -> List[Dict[str, str]]:
-        prompt_config: dict = self.params["prompt"]
-        instruction = prompt_config["instruction_template"].format(src_lang=src_lang, trg_lang=trg_lang, source=source)
-        messages: List[Dict[str, str]] = []
-        system_message: str = prompt_config.get("system_message", "")
-        if system_message:
-            messages.append({"role": "system", "content": system_message})
-        messages.append({"role": "user", "content": instruction})
+        self, source: str, src_iso: str, trg_iso: str, target: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        messages: List[Dict[str, Any]]
+        if self.model.lower().startswith(TRANSLATE_GEMMA_MODEL_PREFIXES):
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "source_lang_code": src_iso, "target_lang_code": trg_iso, "text": source}
+                    ],
+                }
+            ]
+        else:
+            prompt_config: dict = self.params["prompt"]
+            src_lang, trg_lang = self.lang_name(src_iso), self.lang_name(trg_iso)
+            instruction = prompt_config["instruction_template"].format(
+                src_lang=src_lang, trg_lang=trg_lang, source=source
+            )
+            messages = []
+            system_message: str = prompt_config.get("system_message", "")
+            if system_message:
+                messages.append({"role": "system", "content": system_message})
+            messages.append({"role": "user", "content": instruction})
         if target is not None:
             messages.append({"role": "assistant", "content": target})
         return messages
@@ -241,7 +291,7 @@ class LLMConfig(Config):
     def apply_prompt_template(
         self,
         tokenizer: PreTrainedTokenizerBase,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         add_generation_prompt: bool,
         tokenize: bool,
     ) -> Union[str, List[int]]:
@@ -252,6 +302,17 @@ class LLMConfig(Config):
                 return tokenizer.apply_chat_template(
                     messages, add_generation_prompt=add_generation_prompt, tokenize=tokenize
                 )
+            except UndefinedError:
+                # TranslateGemma's template only recognizes its fixed ~55-language lookup table
+                # and raises UndefinedError for any other code -- which is the common case when
+                # fine-tuning to extend coverage to a new language. Render the same instruction
+                # ourselves, using our own configured language name instead of the template's.
+                if self.model.lower().startswith(TRANSLATE_GEMMA_MODEL_PREFIXES):
+                    text = self._render_translate_gemma_prompt(tokenizer, messages, add_generation_prompt)
+                    if tokenize:
+                        return tokenizer(text, add_special_tokens=False)["input_ids"]
+                    return text
+                raise
             except Exception:
                 # Some chat templates (e.g. Gemma) reject a separate system role; fold the
                 # system message into the first user turn and retry.
@@ -266,6 +327,33 @@ class LLMConfig(Config):
         text = "".join(f"{m['content']}\n" for m in messages)
         if tokenize:
             return tokenizer(text, add_special_tokens=True)["input_ids"]
+        return text
+
+    def _render_translate_gemma_prompt(
+        self, tokenizer: PreTrainedTokenizerBase, messages: List[Dict[str, Any]], add_generation_prompt: bool
+    ) -> str:
+        """Reimplementation of TranslateGemma's chat template, minus its language-code lookup
+        table, for language codes that table doesn't recognize (see apply_prompt_template)."""
+        turns = []
+        for message in messages:
+            if message["role"] == "assistant":
+                turns.append(f"<start_of_turn>model\n{message['content'].strip()}<end_of_turn>\n")
+                continue
+            content = message["content"][0]
+            src_lang = self.lang_name(content["source_lang_code"])
+            trg_lang = self.lang_name(content["target_lang_code"])
+            instruction = (
+                f"You are a professional {src_lang} ({content['source_lang_code']}) to {trg_lang} "
+                f"({content['target_lang_code']}) translator. Your goal is to accurately convey the meaning "
+                f"and nuances of the original {src_lang} text while adhering to {trg_lang} grammar, vocabulary, "
+                "and cultural sensitivities.\n"
+                f"Produce only the {trg_lang} translation, without any additional explanations or commentary. "
+                f"Please translate the following {src_lang} text into {trg_lang}:\n\n\n{content['text'].strip()}"
+            )
+            turns.append(f"<start_of_turn>user\n{instruction}<end_of_turn>\n")
+        text = (tokenizer.bos_token or "") + "".join(turns)
+        if add_generation_prompt:
+            text += "<start_of_turn>model\n"
         return text
 
     @staticmethod
@@ -307,9 +395,22 @@ class CausalLMProvider:
         return getattr(torch, self.config.params["torch_dtype"], torch.bfloat16)
 
     def _determine_auto_model_class(self, model_name_or_path: str) -> type:
-        if is_image_text_to_text_model(model_name_or_path, self.config.params["trust_remote_code"]):
+        if is_image_text_to_text_model(
+            model_name_or_path, self.config.params["trust_remote_code"], self.config.hf_token
+        ):
             return AutoModelForImageTextToText
         return AutoModelForCausalLM
+
+    def _set_use_cache(self, model: PreTrainedModel, use_cache: bool) -> None:
+        # Composite configs (e.g. Gemma3's image-text-to-text wrapper) only expose use_cache on
+        # the nested text_config, not on the top-level config, so passing use_cache directly to
+        # from_pretrained() leaves it unconsumed there and it gets forwarded as an invalid
+        # constructor kwarg to models whose __init__ takes only `config`.
+        if hasattr(model.config, "use_cache"):
+            model.config.use_cache = use_cache
+        text_config = getattr(model.config, "text_config", None)
+        if text_config is not None and hasattr(text_config, "use_cache"):
+            text_config.use_cache = use_cache
 
     def create_model_for_training(self) -> PreTrainedModel:
         params = self.config.params
@@ -333,9 +434,10 @@ class CausalLMProvider:
             torch_dtype=self._dtype(),
             attn_implementation=params["attn_implementation"],
             trust_remote_code=params["trust_remote_code"],
+            token=self.config.hf_token,
             device_map=device_map,
-            use_cache=not self.config.train["gradient_checkpointing"],
         )
+        self._set_use_cache(model, not self.config.train["gradient_checkpointing"])
         return model
 
     def create_model_for_inference(self, checkpoint_path: Optional[Path]) -> PreTrainedModel:
@@ -344,6 +446,7 @@ class CausalLMProvider:
             torch_dtype=self._dtype(),
             attn_implementation=params["attn_implementation"],
             trust_remote_code=params["trust_remote_code"],
+            token=self.config.hf_token,
         )
         if checkpoint_path is None:
             model_class = self._determine_auto_model_class(self.config.model)
@@ -456,14 +559,14 @@ class LLMModel(NMTModel):
         model = self._apply_finetuning(model)
 
         max_seq_length: int = self._config.params["max_seq_length"]
-        src_lang = self._config.lang_name(self._config.train_src_iso)
-        trg_lang = self._config.lang_name(self._config.train_trg_iso)
+        src_iso = self._config.train_src_iso
+        trg_iso = self._config.train_trg_iso
         eos_token_id = tokenizer.eos_token_id
 
         def encode(example: dict) -> dict:
             prompt_ids = self._config.apply_prompt_template(
                 tokenizer,
-                self._config.build_prompt_messages(example["src"], src_lang, trg_lang),
+                self._config.build_prompt_messages(example["src"], src_iso, trg_iso),
                 add_generation_prompt=True,
                 tokenize=True,
             )
@@ -618,7 +721,7 @@ class LLMModel(NMTModel):
         trg_lang = self._config.lang_name(trg_iso)
         model = self._get_inference_model(ckpt, src_lang, trg_lang)
         tokenizer = self._config.get_hf_tokenizer()
-        yield from self._generate(model, tokenizer, sentences, src_lang, trg_lang, produce_multiple_translations, False)
+        yield from self._generate(model, tokenizer, sentences, src_iso, trg_iso, produce_multiple_translations, False)
 
     def translate_test_files(
         self,
@@ -629,12 +732,14 @@ class LLMModel(NMTModel):
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
         tokenizer = self._config.get_hf_tokenizer()
-        src_lang = self._config.lang_name(self._config.train_src_iso)
-        trg_lang = self._config.lang_name(self._config.train_trg_iso)
+        src_iso = self._config.train_src_iso
+        trg_iso = self._config.train_trg_iso
+        src_lang = self._config.lang_name(src_iso)
+        trg_lang = self._config.lang_name(trg_iso)
         model = self._get_inference_model(ckpt, src_lang, trg_lang)
 
         for input_path, translation_path in zip(input_paths, translation_paths):
-            file_src_lang, file_trg_lang = self._langs_for_test_file(input_path, src_lang, trg_lang)
+            file_src_iso, file_trg_iso = self._isos_for_test_file(input_path, src_iso, trg_iso)
             with open(input_path, "r", encoding="utf-8-sig") as src_file:
                 sentences = [line.strip() for line in src_file]
             sentence_translation_groups = list(
@@ -642,8 +747,8 @@ class LLMModel(NMTModel):
                     model,
                     tokenizer,
                     sentences,
-                    file_src_lang,
-                    file_trg_lang,
+                    file_src_iso,
+                    file_trg_iso,
                     produce_multiple_translations,
                     save_confidences,
                 )
@@ -659,20 +764,19 @@ class LLMModel(NMTModel):
                 if save_confidences:
                     generate_confidence_files(translated_draft, translation_draft_path)
 
-    def _langs_for_test_file(self, input_path: Path, default_src_lang: str, default_trg_lang: str) -> Tuple[str, str]:
+    def _isos_for_test_file(self, input_path: Path, default_src_iso: str, default_trg_iso: str) -> Tuple[str, str]:
         match = re.match(r"^test\.([a-z]{2,3})\.([a-z]{2,3})\..*", input_path.name)
         if match:
-            src_iso, trg_iso = match.groups()
-            return self._config.lang_name(src_iso), self._config.lang_name(trg_iso)
-        return default_src_lang, default_trg_lang
+            return match.groups()
+        return default_src_iso, default_trg_iso
 
     def _generate(
         self,
         model: PreTrainedModel,
         tokenizer: PreTrainedTokenizerBase,
         sentences: Iterable[str],
-        src_lang: str,
-        trg_lang: str,
+        src_iso: str,
+        trg_iso: str,
         produce_multiple_translations: bool,
         save_confidences: bool,
     ) -> Iterable[SentenceTranslationGroup]:
@@ -696,7 +800,7 @@ class LLMModel(NMTModel):
             prompts = [
                 self._config.apply_prompt_template(
                     tokenizer,
-                    self._config.build_prompt_messages(sentence, src_lang, trg_lang),
+                    self._config.build_prompt_messages(sentence, src_iso, trg_iso),
                     add_generation_prompt=True,
                     tokenize=False,
                 )
