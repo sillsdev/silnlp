@@ -1,17 +1,22 @@
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
 import yaml
 
 from silnlp.common.create_onboarding_experiments import (
+    EXPERIMENT_ARGS,
     NT_CANON,
+    Experiment,
     find_existing,
     folder_name,
     nllb_tag,
     parse_log,
     resolve_corpus_books,
     run,
+    submit_experiments,
 )
 
 ASSETS_DIR = Path(__file__).parent.parent / "silnlp" / "assets"
@@ -115,7 +120,7 @@ def test_find_existing(tmp_path: Path):
     assert existing == folder
 
 
-def test_run_creates_experiments(request_dir: Path, tmp_path: Path):
+def test_run_creates_experiments(request_dir: Path, tmp_path: Path, capsys):
     experiments = run(
         request_dir=request_dir,
         experiments_dir=tmp_path,
@@ -163,7 +168,9 @@ def test_run_creates_experiments(request_dir: Path, tmp_path: Path):
         "postprocess": [{"paragraph_behavior": "place"}],
     }
 
-    # Running again skips everything: identical configs already exist.
+    # Running again creates nothing (identical configs already exist), but the
+    # existing experiments are still offered for running.
+    capsys.readouterr()
     again = run(
         request_dir=request_dir,
         experiments_dir=tmp_path,
@@ -174,6 +181,33 @@ def test_run_creates_experiments(request_dir: Path, tmp_path: Path):
         min_alignment=0.2,
     )
     assert again == []
+    output = capsys.readouterr().out
+    assert "To run the experiments:" in output
+    for name in ["NIV11R_sdl_1", "HINCLBSI_sdl_1", "NIV11R_HINCLBSI_sdl_1"]:
+        assert f"Saudi_Arabia/Saudi_Arabian_Sign_Language/{name}" in output
+
+
+def test_submit_experiments(monkeypatch, capsys, tmp_path: Path):
+    experiment = Experiment(
+        sources=[], folder=tmp_path / "Country" / "Lang" / "NIV11R_sdl_1", config={}, translate_config={}
+    )
+    calls = []
+    monkeypatch.setattr(
+        "silnlp.common.create_onboarding_experiments.subprocess.run",
+        lambda cmd: calls.append(cmd) or SimpleNamespace(returncode=0),
+    )
+
+    submit_experiments([experiment], tmp_path, submit=False)
+    output = capsys.readouterr().out
+    assert f"poetry run python {' '.join(EXPERIMENT_ARGS)} Country/Lang/NIV11R_sdl_1" in output
+    assert calls == []
+
+    submit_experiments([experiment], tmp_path, submit=True)
+    assert calls == [[sys.executable] + EXPERIMENT_ARGS + ["Country/Lang/NIV11R_sdl_1"]]
+
+    monkeypatch.setattr("builtins.input", lambda prompt: "n")
+    submit_experiments([experiment], tmp_path, submit=None)
+    assert len(calls) == 1  # declined at the prompt, nothing new ran
 
 
 def test_run_dry_run(request_dir: Path, tmp_path: Path):

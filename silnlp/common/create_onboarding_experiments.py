@@ -12,6 +12,8 @@ import itertools
 import json
 import logging
 import re
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -45,6 +47,22 @@ SEED = 111
 MODEL = "facebook/nllb-200-distilled-1.3B"
 BOOK_COMPLETENESS_THRESHOLD = 0.98
 MAX_UNPROMPTED_MIXED = 3
+
+EXPERIMENT_ARGS = [
+    "-m",
+    "silnlp.nmt.experiment",
+    "--save-checkpoints",
+    "--save-confidences",
+    "--clearml-queue",
+    "jobs_urgent",
+    "--clearml-tag",
+    "eitl",
+    "--preprocess",
+    "--stats",
+    "--train",
+    "--test",
+    "--translate",
+]
 
 
 @dataclass
@@ -310,6 +328,37 @@ def write_yaml(path: Path, content: dict) -> None:
         yaml.dump(content, file, sort_keys=False, default_flow_style=False, allow_unicode=True)
 
 
+def submit_experiments(experiments: List[Experiment], experiments_dir: Path, submit: Optional[bool]) -> None:
+    """Print the run command for each experiment and optionally execute them.
+
+    submit: True runs without asking, None asks first, False only prints the commands.
+    """
+    names = [experiment.folder.relative_to(experiments_dir).as_posix() for experiment in experiments]
+    print("\nTo run the experiments:")
+    for name in names:
+        print(f"  poetry run python {' '.join(EXPERIMENT_ARGS)} {name}")
+    if submit is None:
+        try:
+            reply = input(f"\nRun {len(names)} experiment(s) now? [y/N]: ").strip().lower()
+        except EOFError:
+            reply = ""
+        submit = reply in ("y", "yes")
+    if not submit:
+        return
+
+    failures = []
+    for name in names:
+        print(f"\nRunning experiment {name}")
+        result = subprocess.run([sys.executable] + EXPERIMENT_ARGS + [name])
+        if result.returncode != 0:
+            failures.append(name)
+            print(f"Experiment {name} exited with code {result.returncode}.")
+    if failures:
+        print(f"\n{len(failures)} of {len(names)} experiment(s) failed: {', '.join(failures)}")
+    else:
+        print(f"\nAll {len(names)} experiment(s) completed.")
+
+
 def resolve_request_dir(request: str, experiments_dir: Path) -> Path:
     requests_dir = experiments_dir / "_OnboardingRequests"
     for name in [request, f"{request}_Request"]:
@@ -328,6 +377,7 @@ def run(
     min_parallel: int,
     min_alignment: float,
     dry_run: bool = False,
+    submit: Optional[bool] = False,
 ) -> List[Experiment]:
     log_path = request_dir / "onboarding.log"
     if not log_path.is_file():
@@ -356,6 +406,7 @@ def run(
     mixed = select_mixed_pairs([list(pair) for pair in itertools.combinations(passing, 2)], dry_run)
 
     experiments: List[Experiment] = []
+    existing_experiments: List[Experiment] = []
     print()
     for sources in [[c] for c in passing] + mixed:
         label = " + ".join(source.name for source in sources)
@@ -372,6 +423,14 @@ def run(
         existing, index = find_existing(lang_dir, prefix, config)
         if existing is not None:
             print(f"Skipped {label}: {existing} already contains an identical config.yml.")
+            existing_experiments.append(
+                Experiment(
+                    sources=sources,
+                    folder=existing,
+                    config=config,
+                    translate_config=build_translate_config(sources, translate_books),
+                )
+            )
             continue
         folder = lang_dir / f"{prefix}_{index}"
         experiment = Experiment(
@@ -388,6 +447,11 @@ def run(
             write_yaml(folder / "config.yml", experiment.config)
             write_yaml(folder / "translate_config.yml", experiment.translate_config)
             print(f"Created {folder} (corpus_books: {corpus_books})")
+    if experiments or existing_experiments:
+        # Existing folders with an identical config are offered too: their creation was
+        # skipped, but the experiments themselves may not have been run yet.
+        # In a dry run nothing new exists to execute, so only print the commands.
+        submit_experiments(experiments + existing_experiments, experiments_dir, submit=False if dry_run else submit)
     return experiments
 
 
@@ -408,6 +472,11 @@ def main() -> None:
         help="Book or semicolon-separated list of books for translate_config.yml",
     )
     parser.add_argument("--dry-run", action="store_true", help="Report without creating folders or files")
+    parser.add_argument(
+        "--run",
+        action="store_true",
+        help="Run each created experiment (silnlp.nmt.experiment) without asking first",
+    )
     args = parser.parse_args()
 
     environment = SilNlpEnv.create_standard_environment()
@@ -421,6 +490,7 @@ def main() -> None:
         min_parallel=args.min_parallel,
         min_alignment=args.min_alignment,
         dry_run=args.dry_run,
+        submit=True if args.run else None,
     )
 
 
