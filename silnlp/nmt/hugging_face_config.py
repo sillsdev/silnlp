@@ -12,7 +12,10 @@ from enum import Enum
 from itertools import repeat
 from math import prod
 from pathlib import Path
-from typing import Any, Callable, Dict, Generator, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
+from typing import TYPE_CHECKING, Any, Callable, Dict, Generator, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
+
+if TYPE_CHECKING:
+    from .translation_scorer import ScoredTranslation
 
 import datasets.utils.logging as datasets_logging
 import evaluate
@@ -1877,6 +1880,57 @@ class HuggingFaceNMTModel(NMTModel):
     def clear_cache(self) -> None:
         self._cached_inference_model = None
         self._inference_model_params = None
+
+    def score_translation(
+        self,
+        source: str,
+        translation: str,
+        src_iso: str,
+        trg_iso: str,
+        ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
+        low_prob_threshold: float = -3.0,
+        top_k_suggestions: int = 5,
+    ) -> "ScoredTranslation":
+        """Score a translation using forced decoding.
+
+        Computes the conditional probability P(y_t | y_1, ..., y_{t-1}, x) for each
+        target token in the translation, groups subword tokens into words, flags
+        low-probability words, and provides top-k alternative suggestions for them.
+
+        Args:
+            source: The source sentence.
+            translation: The translation to score.
+            src_iso: Source language ISO code.
+            trg_iso: Target language ISO code.
+            ckpt: Checkpoint to use for the model.
+            low_prob_threshold: Log-probability threshold below which a word is flagged.
+            top_k_suggestions: Number of alternative suggestions per low-probability word.
+
+        Returns:
+            A ScoredTranslation with per-word scores and suggestions.
+        """
+        from .translation_scorer import AbsoluteThresholdAnomalyDetector, TranslationScorer
+
+        src_lang = self._config.data["lang_codes"].get(src_iso, src_iso)
+        trg_lang = self._config.data["lang_codes"].get(trg_iso, trg_iso)
+        inference_model_params = InferenceModelParams(ckpt, src_lang, trg_lang)
+        tokenizer = self._config.get_tokenizer()
+        if self._inference_model_params == inference_model_params and self._cached_inference_model is not None:
+            model = self._cached_inference_model
+        else:
+            model = self._cached_inference_model = self._create_inference_model(ckpt, tokenizer, src_lang, trg_lang)
+            self._inference_model_params = inference_model_params
+
+        if isinstance(tokenizer, (NllbTokenizer, NllbTokenizerFast)):
+            tokenizer = PunctuationNormalizingTokenizer(tokenizer)
+
+        scorer = TranslationScorer(
+            model,
+            tokenizer,
+            anomaly_detector=AbsoluteThresholdAnomalyDetector(low_prob_threshold),
+            top_k_suggestions=top_k_suggestions,
+        )
+        return scorer.score(source, translation)
 
     def _create_training_arguments(self) -> Seq2SeqTrainingArguments:
         parser = HfArgumentParser(Seq2SeqTrainingArguments)

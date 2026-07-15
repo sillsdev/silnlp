@@ -8,7 +8,10 @@ from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum, auto
 from pathlib import Path
 from statistics import mean, median, stdev
-from typing import Dict, Generator, Iterable, List, Optional, Set, TextIO, Tuple, Union, cast
+from typing import TYPE_CHECKING, Dict, Generator, Iterable, List, Optional, Set, TextIO, Tuple, Union, cast
+
+if TYPE_CHECKING:
+    from .translation_scorer import ScoredTranslation
 
 import pandas as pd
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books
@@ -108,6 +111,18 @@ class NMTModel(ABC):
 
     @abstractmethod
     def get_num_drafts(self) -> int: ...
+
+    @abstractmethod
+    def score_translation(
+        self,
+        source: str,
+        translation: str,
+        src_iso: str,
+        trg_iso: str,
+        ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
+        low_prob_threshold: float = -3.0,
+        top_k_suggestions: int = 5,
+    ) -> "ScoredTranslation": ...
 
 
 class TranslationSuggester(ABC):
