@@ -16,8 +16,10 @@ from silnlp.common.create_onboarding_experiments import (
     load_language_entries,
     nllb_tag,
     parse_book_list,
+    parse_corpus_stats,
     parse_log,
     resolve_corpus_books,
+    resolve_request_dir,
     run,
     submit_experiments,
     synthesize_trg_iso,
@@ -186,6 +188,131 @@ def test_find_existing(tmp_path: Path):
     (folder / "config.yml").write_text(yaml.dump(config), encoding="utf-8")
     existing, _ = find_existing(lang_dir, "NIV11R_sdl", config)
     assert existing == folder
+
+
+def make_corpus_stats(path: Path, main_is_trg: bool = True) -> None:
+    """Write a corpus-stats.csv in the analyze format, matching the fixture log's stats."""
+    main_stem, main_script = "sdl-A33_2026_07_02", "Arab"
+    refs = [
+        ("en-NIV11R", 31096, 5070, 0.3388, "Latn"),
+        ("hi-HINCLBSI", 30998, 5068, 0.2605, "Deva"),
+        ("arb-a55_2026_07_02", 5258, 1, 0.4000, "Arab"),
+    ]
+    records = []
+    for ref_stem, count, parallel, score, script in refs:
+        main_entry = {"project": main_stem, "script": main_script}
+        ref_entry = {"project": ref_stem, "script": script}
+        src, trg = (ref_entry, main_entry) if main_is_trg else (main_entry, ref_entry)
+        records.append(
+            {
+                "src_project": src["project"],
+                "trg_project": trg["project"],
+                "count": count,
+                "src_only": 0,
+                "trg_only": 0,
+                "parallel": parallel,
+                "align_score": score,
+                "filtered_count": 0,
+                "filtered_align_score": score,
+                "src_script": src["script"],
+                "src_script_in_model": True,
+                "trg_script": trg["script"],
+                "trg_script_in_model": True,
+            }
+        )
+    pd.DataFrame(records).to_csv(path, index=False)
+
+
+def test_parse_corpus_stats(tmp_path: Path):
+    # Both directions parse to the same result: main as trg (alignment run) or src (analyze run).
+    for main_is_trg in (True, False):
+        stats_path = tmp_path / f"corpus-stats-{main_is_trg}.csv"
+        make_corpus_stats(stats_path, main_is_trg=main_is_trg)
+        main, candidates = parse_corpus_stats(stats_path)
+        assert (main.name, main.stem, main.iso, main.script) == (
+            "A33_2026_07_02",
+            "sdl-A33_2026_07_02",
+            "sdl",
+            "Arab",
+        )
+        by_name = {c.name: c for c in candidates}
+        assert set(by_name) == {"NIV11R", "HINCLBSI", "a55_2026_07_02"}
+        niv = by_name["NIV11R"]
+        assert (niv.stem, niv.iso, niv.count, niv.parallel, niv.alignment, niv.script) == (
+            "en-NIV11R",
+            "en",
+            31096,
+            5070,
+            0.3388,
+            "Latn",
+        )
+        assert by_name["HINCLBSI"].script == "Deva"
+
+    # Neither column constant -> the main project cannot be determined.
+    ambiguous = pd.DataFrame(
+        {
+            "src_project": ["en-NIV11R", "hi-HINCLBSI"],
+            "trg_project": ["sdl-A", "sdl-B"],
+            "count": [1, 1],
+            "parallel": [1, 1],
+            "align_score": [0.5, 0.5],
+            "src_script": ["Latn", "Deva"],
+            "trg_script": ["Arab", "Arab"],
+        }
+    )
+    ambiguous.to_csv(tmp_path / "ambiguous.csv", index=False)
+    with pytest.raises(ValueError, match="Cannot determine the main project"):
+        parse_corpus_stats(tmp_path / "ambiguous.csv")
+
+
+def test_run_from_corpus_stats_folder(tmp_path: Path, capsys):
+    # A stats folder inside the experiments tree creates experiments next to itself,
+    # keeping the existing country/language folder naming (e.g. PNG/Taupota).
+    experiments_dir = tmp_path
+    align_dir = experiments_dir / "KSA" / "SignLang" / "Align"
+    align_dir.mkdir(parents=True)
+    make_corpus_stats(align_dir / "corpus-stats.csv")
+    make_verse_counts(align_dir / "verse_counts.csv")
+
+    assert resolve_request_dir("KSA/SignLang/Align", experiments_dir) == align_dir
+
+    experiments = run(
+        request_dir=align_dir,
+        experiments_dir=experiments_dir,
+        assets_dir=ASSETS_DIR,
+        training_books="complete",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+    )
+    folders = sorted(e.folder.name for e in experiments)
+    assert folders == ["HINCLBSI_sdl_1", "NIV11R_HINCLBSI_sdl_1", "NIV11R_sdl_1"]
+    # Created next to the Align folder, not under the derived Saudi_Arabia/... location.
+    assert (experiments_dir / "KSA" / "SignLang" / "NIV11R_sdl_1" / "config.yml").is_file()
+    assert not (experiments_dir / "Saudi_Arabia").exists()
+    with open(experiments_dir / "KSA" / "SignLang" / "NIV11R_sdl_1" / "config.yml", "r", encoding="utf-8") as file:
+        config = yaml.safe_load(file)
+    pair = config["data"]["corpus_pairs"][0]
+    assert (pair["src"], pair["trg"], pair["corpus_books"]) == ("en-NIV11R", "sdl-A33_2026_07_02", "MRK")
+
+    # A stats folder outside the experiments tree falls back to the derived location.
+    outside = tmp_path / "outside_tree"
+    outside.mkdir()
+    make_corpus_stats(outside / "corpus-stats.csv")
+    make_verse_counts(outside / "verse_counts.csv")
+    experiments_dir2 = tmp_path / "experiments2"
+    experiments_dir2.mkdir()
+    capsys.readouterr()
+    run(
+        request_dir=outside,
+        experiments_dir=experiments_dir2,
+        assets_dir=ASSETS_DIR,
+        training_books="complete",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+    )
+    assert (experiments_dir2 / "Saudi_Arabia" / "Saudi_Arabian_Sign_Language" / "NIV11R_sdl_1").is_dir()
 
 
 def test_run_creates_experiments(request_dir: Path, tmp_path: Path, capsys):

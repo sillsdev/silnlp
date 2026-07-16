@@ -1,8 +1,9 @@
-"""Create NMT experiment folders from a production onboarding request.
+"""Create NMT experiment folders from a production onboarding request or analyze run.
 
 Parses the onboarding.log written by silnlp.common.onboard_project in a
-MT/experiments/_OnboardingRequests/<request> folder, selects the reference
-projects whose alignment stats pass the thresholds, and creates
+MT/experiments/_OnboardingRequests/<request> folder — or the corpus-stats.csv
+written by silnlp.common.analyze in any experiment folder (e.g. PNG/Taupota/Align) —
+selects the reference projects whose alignment stats pass the thresholds, and creates
 <Country>/<Language>/<experiment> folders containing config.yml and
 translate_config.yml. See create_onboarding_experiments_plan.md for details.
 """
@@ -160,6 +161,51 @@ def parse_log(log_path: Path) -> Tuple[MainProject, List[Candidate]]:
         iso=stem_to_iso(main_stem),
         verses=verses.get(main_stem),
         script=main_script,
+    )
+    return main, list(candidates.values())
+
+
+def parse_corpus_stats(stats_path: Path) -> Tuple[MainProject, List[Candidate]]:
+    """Parse a corpus-stats.csv written by silnlp.common.analyze.
+
+    The main project is the stem appearing in every row on one side: trg for alignment
+    runs (e.g. <Country>/<Language>/Align), src for onboarding analyze runs. With a
+    single row both sides are constant; the trg side is assumed to be the main project
+    (the alignment convention; onboarding folders are parsed from onboarding.log instead).
+    """
+    df = pd.read_csv(stats_path)
+    if df.empty:
+        raise ValueError(f"{stats_path} contains no rows.")
+    if df["trg_project"].nunique() == 1:
+        main_col, ref_col = "trg_project", "src_project"
+    elif df["src_project"].nunique() == 1:
+        main_col, ref_col = "src_project", "trg_project"
+    else:
+        raise ValueError(
+            f"Cannot determine the main project in {stats_path}: neither src_project nor trg_project is constant."
+        )
+    main_script_col, ref_script_col = (f"{col.split('_')[0]}_script" for col in (main_col, ref_col))
+
+    candidates: Dict[str, Candidate] = {}
+    for _, row in df.iterrows():
+        ref_stem = row[ref_col]
+        candidates[stem_to_project(ref_stem)] = Candidate(
+            name=stem_to_project(ref_stem),
+            stem=ref_stem,
+            iso=stem_to_iso(ref_stem),
+            count=int(row["count"]),
+            parallel=int(row["parallel"]),
+            alignment=float(row["align_score"]),
+            script=str(row[ref_script_col]).strip(),
+        )
+
+    main_stem = df[main_col].iloc[0]
+    main = MainProject(
+        name=stem_to_project(main_stem),
+        stem=main_stem,
+        iso=stem_to_iso(main_stem),
+        verses=None,
+        script=str(df[main_script_col].iloc[0]).strip(),
     )
     return main, list(candidates.values())
 
@@ -459,11 +505,13 @@ def submit_experiments(
 
 def resolve_request_dir(request: str, experiments_dir: Path) -> Path:
     requests_dir = experiments_dir / "_OnboardingRequests"
-    for name in [request, f"{request}_Request"]:
-        candidate = requests_dir / name
+    for candidate in [requests_dir / request, requests_dir / f"{request}_Request", experiments_dir / request]:
         if candidate.is_dir():
             return candidate
-    raise FileNotFoundError(f"No request folder '{request}' or '{request}_Request' found in {requests_dir}.")
+    raise FileNotFoundError(
+        f"No request folder '{request}' or '{request}_Request' found in {requests_dir},"
+        f" and '{request}' is not a folder in {experiments_dir}."
+    )
 
 
 def run(
@@ -483,13 +531,22 @@ def run(
     if test_variant not in (None, "notest", "test100"):
         raise ValueError(f"Unknown test_variant '{test_variant}'; expected None, 'notest' or 'test100'.")
     log_path = request_dir / "onboarding.log"
-    if not log_path.is_file():
-        raise FileNotFoundError(f"No onboarding.log found in {request_dir}.")
-    main, candidates = parse_log(log_path)
+    stats_path = request_dir / "corpus-stats.csv"
+    lang_dir_override: Optional[Path] = None
+    if log_path.is_file():
+        main, candidates = parse_log(log_path)
+    elif stats_path.is_file():
+        main, candidates = parse_corpus_stats(stats_path)
+        # A stats folder inside the experiments tree (e.g. PNG/Taupota/Align) creates its
+        # experiments next to itself, keeping whatever country/language naming already exists.
+        if experiments_dir.resolve() in request_dir.resolve().parents:
+            lang_dir_override = request_dir.parent
+    else:
+        raise FileNotFoundError(f"No onboarding.log or corpus-stats.csv found in {request_dir}.")
 
     language_entries = load_language_entries(assets_dir)
     language, country = lookup_language(main.iso, language_entries)
-    lang_dir = experiments_dir / folder_name(country) / folder_name(language)
+    lang_dir = lang_dir_override or experiments_dir / folder_name(country) / folder_name(language)
     print(f"Main project: {main.name} ({main.stem}), language: {language} [{main.iso}], country: {country}")
     print(f"Experiment location: {lang_dir}")
 
@@ -626,7 +683,11 @@ def run(
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")
     parser = argparse.ArgumentParser(description="Create experiment folders from an onboarding request.")
-    parser.add_argument("request", help="Request folder name in MT/experiments/_OnboardingRequests")
+    parser.add_argument(
+        "request",
+        help="Request folder name in MT/experiments/_OnboardingRequests, or a folder relative to"
+        " MT/experiments containing a corpus-stats.csv from an analyze run (e.g. PNG/Taupota/Align)",
+    )
     parser.add_argument("--min-parallel", type=int, default=2000, help="Minimum parallel verse count (default 2000)")
     parser.add_argument("--min-alignment", type=float, default=0.2, help="Minimum alignment score (default 0.2)")
     book_list_syntax = (
