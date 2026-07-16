@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 import yaml
+from machine.scripture import book_id_to_number
 
 from silnlp.common.create_onboarding_experiments import (
     EXPERIMENT_ARGS,
@@ -12,12 +13,16 @@ from silnlp.common.create_onboarding_experiments import (
     Experiment,
     find_existing,
     folder_name,
+    load_language_entries,
     nllb_tag,
+    parse_book_list,
     parse_log,
     resolve_corpus_books,
     run,
     submit_experiments,
+    synthesize_trg_iso,
 )
+from silnlp.common.iso_info import NLLB_TAG_FROM_ISO
 
 ASSETS_DIR = Path(__file__).parent.parent / "silnlp" / "assets"
 SAMPLE_LOG_PATH = Path(__file__).parent / "data" / "create_onboarding_experiments" / "onboarding.log"
@@ -84,23 +89,86 @@ def test_nllb_tag():
     assert nllb_tag("sdl", "Arab") == "sdl_Arab"  # not in NLLB: iso3 + script from the log
 
 
+def test_parse_book_list():
+    assert parse_book_list("GEN;RUT") == "GEN;RUT"
+    assert parse_book_list("GEN,RUT") == "GEN,RUT"  # already valid downstream syntax, kept verbatim
+    assert parse_book_list("GEN RUT") == "GEN;RUT"
+    assert parse_book_list("gen rut") == "GEN;RUT"
+    assert parse_book_list(" GEN, RUT ;JON ") == "GEN;RUT;JON"  # internal spaces force normalisation
+    assert parse_book_list("GEN") == "GEN"
+    # Full get_chapters syntax is preserved verbatim (ranges, chapters, subtraction).
+    assert parse_book_list("MAT 1-4") == "MAT 1-4"
+    assert parse_book_list("mat 1-4") == "MAT 1-4"
+    assert parse_book_list("NT;-REV") == "NT;-REV"
+    assert parse_book_list("GEN-DEU") == "GEN-DEU"
+    # Invalid book lists are rejected at the CLI instead of failing at preprocess time.
+    with pytest.raises(ValueError, match="not a valid book list"):
+        parse_book_list("GEN;MTT")
+    with pytest.raises(ValueError, match="not a valid book list"):
+        parse_book_list("")
+
+
 def test_resolve_corpus_books_verbatim():
-    assert resolve_corpus_books("GEN;EXO;NT", [], None) == "GEN;EXO;NT"
+    assert resolve_corpus_books("GEN;EXO;NT", [], None) == ("GEN;EXO;NT", [])
 
 
 def test_resolve_corpus_books_complete(request_dir: Path):
     df = pd.read_csv(request_dir / "verse_counts.csv", index_col="file")
-    books = resolve_corpus_books("complete", ["en-NIV11R", "sdl-A33_2026_07_02"], df)
-    assert books == "MAT;MRK"
+    books, removed = resolve_corpus_books("complete", ["en-NIV11R", "sdl-A33_2026_07_02"], df)
+    assert (books, removed) == ("MAT;MRK", [])
     # arb-a55 has partial MRK (179 < 98% of 678), so nothing qualifies with it as a source.
-    assert resolve_corpus_books("complete", ["arb-a55_2026_07_02", "sdl-A33_2026_07_02"], df) == ""
+    assert resolve_corpus_books("complete", ["arb-a55_2026_07_02", "sdl-A33_2026_07_02"], df) == ("", [])
 
 
 def test_resolve_corpus_books_nt_compaction():
     stems = ["en-NIV11R", "sdl-TRG"]
     df = pd.DataFrame(100, index=["complete"] + stems, columns=NT_CANON)
     df.index.name = "file"
-    assert resolve_corpus_books("complete", stems, df) == "NT"
+    assert resolve_corpus_books("complete", stems, df) == ("NT", [])
+
+
+def test_resolve_corpus_books_excludes_translate_books():
+    mat = {book_id_to_number("MAT")}
+    # Explicit lists are kept verbatim, with subtraction selections appended for excluded books.
+    assert resolve_corpus_books("GEN;EXO;MAT", [], None, exclude=mat) == ("GEN;EXO;MAT;-MAT", ["MAT"])
+    assert resolve_corpus_books("NT", [], None, exclude=mat) == ("NT;-MAT", ["MAT"])
+    assert resolve_corpus_books("OT;NT", [], None, exclude=mat) == ("OT;NT;-MAT", ["MAT"])
+    # Books hidden inside ranges are excluded too.
+    exo = {book_id_to_number("EXO")}
+    assert resolve_corpus_books("GEN-DEU", [], None, exclude=exo) == ("GEN-DEU;-EXO", ["EXO"])
+    # Chapter-level selections subtract exactly the selected chapters.
+    assert resolve_corpus_books("GEN;MAT 1-4", [], None, exclude=mat) == ("GEN;MAT 1-4;-MAT1,2,3,4", ["MAT"])
+    # Excluding everything empties the list.
+    assert resolve_corpus_books("MAT", [], None, exclude=mat) == ("", ["MAT"])
+    # Books not in the list are not reported as removed.
+    assert resolve_corpus_books("GEN;EXO", [], None, exclude=mat) == ("GEN;EXO", [])
+    # Case-insensitive: exclusion works regardless of how the CLI value was cased (numbers, not strings).
+    books, removed = resolve_corpus_books("complete", ["en-NIV11R", "sdl-TRG"], _nt_counts(), exclude=mat)
+    assert removed == ["MAT"]
+
+
+def _nt_counts() -> pd.DataFrame:
+    df = pd.DataFrame(100, index=["complete", "en-NIV11R", "sdl-TRG"], columns=NT_CANON)
+    df.index.name = "file"
+    return df
+
+
+def test_resolve_corpus_books_complete_excludes_translate_books(request_dir: Path):
+    df = pd.read_csv(request_dir / "verse_counts.csv", index_col="file")
+    books, removed = resolve_corpus_books(
+        "complete", ["en-NIV11R", "sdl-A33_2026_07_02"], df, exclude={book_id_to_number("MAT")}
+    )
+    assert (books, removed) == ("MRK", ["MAT"])
+
+
+def test_synthesize_trg_iso():
+    real_isos = {entry["isoCode"] for entry in load_language_entries(ASSETS_DIR)}
+    code = synthesize_trg_iso("sdl", real_isos)
+    assert len(code) == 3 and code[0] == "s" and code != "sdl"
+    assert code not in real_isos
+    assert code not in NLLB_TAG_FROM_ISO
+    # Deterministic: same input gives the same code on re-runs.
+    assert synthesize_trg_iso("sdl", real_isos) == code
 
 
 def test_find_existing(tmp_path: Path):
@@ -125,8 +193,8 @@ def test_run_creates_experiments(request_dir: Path, tmp_path: Path, capsys):
         request_dir=request_dir,
         experiments_dir=tmp_path,
         assets_dir=ASSETS_DIR,
-        books="complete",
-        translate_books="MAT;MRK",
+        training_books="complete",
+        translate_books="MAT",
         min_parallel=2000,
         min_alignment=0.2,
     )
@@ -134,13 +202,17 @@ def test_run_creates_experiments(request_dir: Path, tmp_path: Path, capsys):
     folders = sorted(e.folder.name for e in experiments)
     assert folders == ["HINCLBSI_sdl_1", "NIV11R_HINCLBSI_sdl_1", "NIV11R_sdl_1"]
 
+    # The translated book MAT is excluded from corpus_books (complete would give MAT;MRK).
+    output = capsys.readouterr().out
+    assert "excluded the books being translated from corpus_books: MAT" in output
+
     with open(lang_dir / "NIV11R_sdl_1" / "config.yml", "r", encoding="utf-8") as file:
         config = yaml.safe_load(file)
     assert config == {
         "data": {
             "corpus_pairs": [
                 {
-                    "corpus_books": "MAT;MRK",
+                    "corpus_books": "MRK",
                     "mapping": "mixed_src",
                     "src": "en-NIV11R",
                     "trg": "sdl-A33_2026_07_02",
@@ -162,21 +234,20 @@ def test_run_creates_experiments(request_dir: Path, tmp_path: Path, capsys):
         translate = yaml.safe_load(file)
     assert translate == {
         "translate": [
-            {"books": "MAT;MRK", "src_project": "NIV11R", "checkpoint": 5000},
-            {"books": "MAT;MRK", "src_project": "HINCLBSI", "checkpoint": 5000},
+            {"books": "MAT", "src_project": "NIV11R", "checkpoint": 5000},
+            {"books": "MAT", "src_project": "HINCLBSI", "checkpoint": 5000},
         ],
         "postprocess": [{"paragraph_behavior": "place"}],
     }
 
     # Running again creates nothing (identical configs already exist), but the
     # existing experiments are still offered for running.
-    capsys.readouterr()
     again = run(
         request_dir=request_dir,
         experiments_dir=tmp_path,
         assets_dir=ASSETS_DIR,
-        books="complete",
-        translate_books="MAT;MRK",
+        training_books="complete",
+        translate_books="MAT",
         min_parallel=2000,
         min_alignment=0.2,
     )
@@ -185,6 +256,182 @@ def test_run_creates_experiments(request_dir: Path, tmp_path: Path, capsys):
     assert "To run the experiments:" in output
     for name in ["NIV11R_sdl_1", "HINCLBSI_sdl_1", "NIV11R_HINCLBSI_sdl_1"]:
         assert f"Saudi_Arabia/Saudi_Arabian_Sign_Language/{name}" in output
+
+
+def test_run_translating_all_training_books_skips(request_dir: Path, tmp_path: Path, capsys):
+    experiments = run(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="complete",
+        translate_books="MAT;MRK",
+        min_parallel=2000,
+        min_alignment=0.2,
+    )
+    assert experiments == []
+    output = capsys.readouterr().out
+    assert "no training books remain" in output
+
+
+def test_run_test_variants(request_dir: Path, tmp_path: Path):
+    for variant, expected_type in [("notest", "train"), ("test100", "train,test")]:
+        experiments = run(
+            request_dir=request_dir,
+            experiments_dir=tmp_path,
+            assets_dir=ASSETS_DIR,
+            training_books="complete",
+            translate_books="MAT",
+            min_parallel=2000,
+            min_alignment=0.2,
+            test_variant=variant,
+        )
+        folders = sorted(e.folder.name for e in experiments)
+        assert folders == [f"HINCLBSI_sdl_{variant}_1", f"NIV11R_HINCLBSI_sdl_{variant}_1", f"NIV11R_sdl_{variant}_1"]
+        pair = experiments[0].config["data"]["corpus_pairs"][0]
+        assert pair["type"] == expected_type
+        if variant == "test100":
+            assert pair["test_size"] == 100
+        else:
+            assert "test_size" not in pair
+
+
+def test_run_iso_clash_renames_and_uses_synthetic_code(request_dir: Path, tmp_path: Path, capsys):
+    # Make NIV11R clash with the main project by giving it the same iso prefix.
+    log_path = request_dir / "onboarding.log"
+    log_path.write_text(log_path.read_text(encoding="utf-8").replace("en-NIV11R", "sdl-NIV11R"), encoding="utf-8")
+    counts_path = request_dir / "verse_counts.csv"
+    counts_path.write_text(counts_path.read_text(encoding="utf-8").replace("en-NIV11R", "sdl-NIV11R"), encoding="utf-8")
+
+    scripture_dir = tmp_path / "scripture"
+    scripture_dir.mkdir()
+    (scripture_dir / "sdl-A33_2026_07_02.txt").write_text("verses\n", encoding="utf-8")
+    terms_dir = tmp_path / "terms"
+    terms_dir.mkdir()
+    (terms_dir / "sdl-A33_2026_07_02-Major-renderings.txt").write_text("terms\n", encoding="utf-8")
+
+    # A dry run reports the clash and the would-be rename without touching anything,
+    # even when no scripture directory is available.
+    dry = run(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="complete",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+        scripture_dir=scripture_dir,
+        terms_dir=terms_dir,
+        dry_run=True,
+    )
+    assert len(dry) == 3
+    assert "Would rename sdl-A33_2026_07_02.txt" in capsys.readouterr().out
+    assert (scripture_dir / "sdl-A33_2026_07_02.txt").is_file()
+    run(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="complete",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+        scripture_dir=None,
+        dry_run=True,
+    )
+    assert (scripture_dir / "sdl-A33_2026_07_02.txt").is_file()
+    capsys.readouterr()
+
+    experiments = run(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="complete",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+        scripture_dir=scripture_dir,
+        terms_dir=terms_dir,
+    )
+    output = capsys.readouterr().out
+    assert "shares iso code 'sdl' with the target project" in output
+
+    real_isos = {entry["isoCode"] for entry in load_language_entries(ASSETS_DIR)}
+    synthetic = synthesize_trg_iso("sdl", real_isos)
+    # The extract and terms files were renamed and the configs use the synthetic stem and lang code.
+    assert not (scripture_dir / "sdl-A33_2026_07_02.txt").exists()
+    assert (scripture_dir / f"{synthetic}-A33_2026_07_02.txt").is_file()
+    assert not (terms_dir / "sdl-A33_2026_07_02-Major-renderings.txt").exists()
+    assert (terms_dir / f"{synthetic}-A33_2026_07_02-Major-renderings.txt").is_file()
+    by_folder = {e.folder.name: e for e in experiments}
+    assert f"NIV11R_{synthetic}_1" in by_folder
+    pair = by_folder[f"NIV11R_{synthetic}_1"].config["data"]["corpus_pairs"][0]
+    assert pair["src"] == "sdl-NIV11R"
+    assert pair["trg"] == f"{synthetic}-A33_2026_07_02"
+    lang_codes = by_folder[f"NIV11R_{synthetic}_1"].config["data"]["lang_codes"]
+    assert lang_codes["sdl"] == "sdl_Latn"  # the source keeps its own (Latn) script tag
+    assert lang_codes[synthetic] == f"{synthetic}_Arab"
+
+    # Re-running with the file already renamed reuses the code recorded by the file on disk.
+    again = run(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="complete",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+        scripture_dir=scripture_dir,
+    )
+    assert again == []
+
+    # Even when no clash is detectable any more (here: the log no longer contains the
+    # clashing stem), the prior rename recorded by the file on disk is adopted so the
+    # configs keep matching the file that actually exists.
+    log_path.write_text(log_path.read_text(encoding="utf-8").replace("sdl-NIV11R", "en-NIV11R"), encoding="utf-8")
+    counts_path.write_text(counts_path.read_text(encoding="utf-8").replace("sdl-NIV11R", "en-NIV11R"), encoding="utf-8")
+    capsys.readouterr()
+    adopted = run(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="complete",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+        scripture_dir=scripture_dir,
+        dry_run=True,
+    )
+    assert "previously renamed extract file" in capsys.readouterr().out
+    assert adopted  # dry run still proposes experiments
+    for experiment in adopted:
+        assert experiment.config["data"]["corpus_pairs"][0]["trg"] == f"{synthetic}-A33_2026_07_02"
+
+    # If the original extract reappears next to the renamed one, the ambiguity is an error.
+    (scripture_dir / "sdl-A33_2026_07_02.txt").write_text("verses\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="remove the stale one"):
+        run(
+            request_dir=request_dir,
+            experiments_dir=tmp_path,
+            assets_dir=ASSETS_DIR,
+            training_books="complete",
+            translate_books="MAT",
+            min_parallel=2000,
+            min_alignment=0.2,
+            scripture_dir=scripture_dir,
+        )
+
+
+def test_run_rejects_unknown_test_variant(request_dir: Path, tmp_path: Path):
+    with pytest.raises(ValueError, match="Unknown test_variant"):
+        run(
+            request_dir=request_dir,
+            experiments_dir=tmp_path,
+            assets_dir=ASSETS_DIR,
+            training_books="complete",
+            translate_books="MAT",
+            min_parallel=2000,
+            min_alignment=0.2,
+            test_variant="no-test",
+        )
 
 
 def test_submit_experiments(monkeypatch, capsys, tmp_path: Path):
@@ -209,17 +456,24 @@ def test_submit_experiments(monkeypatch, capsys, tmp_path: Path):
     submit_experiments([experiment], tmp_path, submit=None)
     assert len(calls) == 1  # declined at the prompt, nothing new ran
 
+    # no_test drops the --test stage from both the printed and executed command.
+    capsys.readouterr()
+    submit_experiments([experiment], tmp_path, submit=True, no_test=True)
+    assert calls[-1] == [sys.executable] + [a for a in EXPERIMENT_ARGS if a != "--test"] + ["Country/Lang/NIV11R_sdl_1"]
+    assert "--test" not in capsys.readouterr().out
+
 
 def test_run_dry_run(request_dir: Path, tmp_path: Path):
     experiments = run(
         request_dir=request_dir,
         experiments_dir=tmp_path,
         assets_dir=ASSETS_DIR,
-        books="MAT",
+        training_books="MAT;MRK",
         translate_books="MAT",
         min_parallel=2000,
         min_alignment=0.2,
         dry_run=True,
     )
     assert len(experiments) == 3
+    assert all(e.config["data"]["corpus_pairs"][0]["corpus_books"] == "MAT;MRK;-MAT" for e in experiments)
     assert not (tmp_path / "Saudi_Arabia").exists()
