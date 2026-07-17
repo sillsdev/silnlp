@@ -1,4 +1,6 @@
+import os
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -59,8 +61,8 @@ def request_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def select_all(monkeypatch):
-    """Answer the experiment-selection prompt with 'all' and the rename confirmation with 'y'."""
-    monkeypatch.setattr("builtins.input", lambda prompt: "y" if "Rename" in prompt else "all")
+    """Answer the experiment-selection prompt with 'all' and the copy confirmation with 'y'."""
+    monkeypatch.setattr("builtins.input", lambda prompt: "y" if "Copy" in prompt else "all")
 
 
 def test_parse_log(request_dir: Path):
@@ -438,7 +440,7 @@ def test_run_stats_folder_directly_under_experiments_uses_derived_location(tmp_p
     assert f"Experiment location: {tmp_path / 'Saudi_Arabia' / 'Saudi_Arabian_Sign_Language'}" in output
 
 
-def test_run_rename_declined_aborts(request_dir: Path, tmp_path: Path, capsys, monkeypatch):
+def test_run_copy_declined_aborts(request_dir: Path, tmp_path: Path, capsys, monkeypatch):
     log_path = request_dir / "onboarding.log"
     log_path.write_text(log_path.read_text(encoding="utf-8").replace("en-NIV11R", "sdl-NIV11R"), encoding="utf-8")
     counts_path = request_dir / "verse_counts.csv"
@@ -447,7 +449,7 @@ def test_run_rename_declined_aborts(request_dir: Path, tmp_path: Path, capsys, m
     scripture_dir.mkdir()
     (scripture_dir / "sdl-A33_2026_07_02.txt").write_text("verses\n", encoding="utf-8")
 
-    monkeypatch.setattr("builtins.input", lambda prompt: "n" if "Rename" in prompt else "all")
+    monkeypatch.setattr("builtins.input", lambda prompt: "n" if "Copy" in prompt else "all")
     experiments = run(
         request_dir=request_dir,
         experiments_dir=tmp_path,
@@ -459,8 +461,8 @@ def test_run_rename_declined_aborts(request_dir: Path, tmp_path: Path, capsys, m
         scripture_dir=scripture_dir,
     )
     assert experiments == []
-    assert "Aborted: the rename is required" in capsys.readouterr().out
-    # Nothing was renamed and nothing was created.
+    assert "Aborted: the copy is required" in capsys.readouterr().out
+    # Nothing was copied and nothing was created.
     assert (scripture_dir / "sdl-A33_2026_07_02.txt").is_file()
     assert not (tmp_path / "Saudi_Arabia").exists()
 
@@ -708,7 +710,7 @@ def test_run_test_variants(request_dir: Path, tmp_path: Path, select_all):
             assert "test_size" not in pair
 
 
-def test_run_iso_clash_renames_and_uses_synthetic_code(request_dir: Path, tmp_path: Path, capsys, select_all):
+def test_run_iso_clash_copies_and_uses_synthetic_code(request_dir: Path, tmp_path: Path, capsys, caplog, select_all):
     # Make NIV11R clash with the main project by giving it the same iso prefix.
     log_path = request_dir / "onboarding.log"
     log_path.write_text(log_path.read_text(encoding="utf-8").replace("en-NIV11R", "sdl-NIV11R"), encoding="utf-8")
@@ -722,7 +724,7 @@ def test_run_iso_clash_renames_and_uses_synthetic_code(request_dir: Path, tmp_pa
     terms_dir.mkdir()
     (terms_dir / "sdl-A33_2026_07_02-Major-renderings.txt").write_text("terms\n", encoding="utf-8")
 
-    # A dry run reports the clash and the would-be rename without touching anything,
+    # A dry run reports the clash and the would-be copy without touching anything,
     # even when no scripture directory is available.
     dry = run(
         request_dir=request_dir,
@@ -737,7 +739,7 @@ def test_run_iso_clash_renames_and_uses_synthetic_code(request_dir: Path, tmp_pa
         dry_run=True,
     )
     assert len(dry) == 3
-    assert "Would rename sdl-A33_2026_07_02.txt" in capsys.readouterr().out
+    assert "Would copy sdl-A33_2026_07_02.txt" in capsys.readouterr().out
     assert (scripture_dir / "sdl-A33_2026_07_02.txt").is_file()
     run(
         request_dir=request_dir,
@@ -769,10 +771,11 @@ def test_run_iso_clash_renames_and_uses_synthetic_code(request_dir: Path, tmp_pa
 
     real_isos = {entry["isoCode"] for entry in load_language_entries(ASSETS_DIR)}
     synthetic = synthesize_trg_iso("sdl", real_isos)
-    # The extract and terms files were renamed and the configs use the synthetic stem and lang code.
-    assert not (scripture_dir / "sdl-A33_2026_07_02.txt").exists()
+    # The extract and terms files were copied (originals kept) and the configs use the
+    # synthetic stem and lang code.
+    assert (scripture_dir / "sdl-A33_2026_07_02.txt").is_file()
     assert (scripture_dir / f"{synthetic}-A33_2026_07_02.txt").is_file()
-    assert not (terms_dir / "sdl-A33_2026_07_02-Major-renderings.txt").exists()
+    assert (terms_dir / "sdl-A33_2026_07_02-Major-renderings.txt").is_file()
     assert (terms_dir / f"{synthetic}-A33_2026_07_02-Major-renderings.txt").is_file()
     by_folder = {e.folder.name: e for e in experiments}
     assert f"NIV11R_{synthetic}_1" in by_folder
@@ -783,7 +786,7 @@ def test_run_iso_clash_renames_and_uses_synthetic_code(request_dir: Path, tmp_pa
     assert lang_codes["sdl"] == "sdl_Latn"  # the source keeps its own (Latn) script tag
     assert lang_codes[synthetic] == f"{synthetic}_Arab"
 
-    # Re-running with the file already renamed reuses the code recorded by the file on disk.
+    # Re-running with the copy already made reuses the code recorded by the file on disk.
     again = run(
         request_dir=request_dir,
         experiments_dir=tmp_path,
@@ -797,7 +800,7 @@ def test_run_iso_clash_renames_and_uses_synthetic_code(request_dir: Path, tmp_pa
     assert again == []
 
     # Even when no clash is detectable any more (here: the log no longer contains the
-    # clashing stem), the prior rename recorded by the file on disk is adopted so the
+    # clashing stem), the prior copy recorded by the file on disk is adopted so the
     # configs keep matching the file that actually exists.
     log_path.write_text(log_path.read_text(encoding="utf-8").replace("sdl-NIV11R", "en-NIV11R"), encoding="utf-8")
     counts_path.write_text(counts_path.read_text(encoding="utf-8").replace("sdl-NIV11R", "en-NIV11R"), encoding="utf-8")
@@ -813,14 +816,15 @@ def test_run_iso_clash_renames_and_uses_synthetic_code(request_dir: Path, tmp_pa
         scripture_dir=scripture_dir,
         dry_run=True,
     )
-    assert "previously renamed extract file" in capsys.readouterr().out
+    assert "previously copied extract file" in capsys.readouterr().out
     assert adopted  # dry run still proposes experiments
     for experiment in adopted:
         assert experiment.config["data"]["corpus_pairs"][0]["trg"] == f"{synthetic}-A33_2026_07_02"
 
-    # If the original extract reappears next to the renamed one, the ambiguity is an error.
-    (scripture_dir / "sdl-A33_2026_07_02.txt").write_text("verses\n", encoding="utf-8")
-    with pytest.raises(RuntimeError, match="remove the stale one"):
+    # If the original is re-extracted after the copy was made, warn that the copy may be stale.
+    now = time.time()
+    os.utime(scripture_dir / "sdl-A33_2026_07_02.txt", (now + 60, now + 60))
+    with caplog.at_level("WARNING"):
         run(
             request_dir=request_dir,
             experiments_dir=tmp_path,
@@ -830,7 +834,9 @@ def test_run_iso_clash_renames_and_uses_synthetic_code(request_dir: Path, tmp_pa
             min_parallel=2000,
             min_alignment=0.2,
             scripture_dir=scripture_dir,
+            dry_run=True,
         )
+    assert any("may be outdated" in record.message for record in caplog.records)
 
 
 def test_run_rejects_unknown_test_variant(request_dir: Path, tmp_path: Path):
@@ -876,7 +882,7 @@ def test_submit_experiments(monkeypatch, capsys, tmp_path: Path):
     assert "--test" not in capsys.readouterr().out
 
 
-def test_run_dry_run(request_dir: Path, tmp_path: Path):
+def test_run_dry_run(request_dir: Path, tmp_path: Path, capsys):
     experiments = run(
         request_dir=request_dir,
         experiments_dir=tmp_path,
@@ -890,3 +896,7 @@ def test_run_dry_run(request_dir: Path, tmp_path: Path):
     assert len(experiments) == 3
     assert all(e.config["data"]["corpus_pairs"][0]["corpus_books"] == "MAT;MRK;-MAT" for e in experiments)
     assert not (tmp_path / "Saudi_Arabia").exists()
+    # A dry run lists what would be created but does not print run commands.
+    output = capsys.readouterr().out
+    assert "Would create" in output
+    assert "To run the experiments:" not in output

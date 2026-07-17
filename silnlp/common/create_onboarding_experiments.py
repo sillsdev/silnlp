@@ -14,6 +14,7 @@ import itertools
 import json
 import logging
 import re
+import shutil
 import string
 import subprocess
 import sys
@@ -342,10 +343,10 @@ def synthesize_trg_iso(iso3: str, real_isos: AbstractSet[str]) -> str:
     raise ValueError(f"Could not synthesize a target iso code from '{iso3}'.")
 
 
-def find_prior_rename(scripture_dir: Optional[Path], main: MainProject, real_isos: AbstractSet[str]) -> Optional[str]:
-    """Return the synthetic iso of an extract file renamed by a previous run, if one exists.
+def find_prior_copy(scripture_dir: Optional[Path], main: MainProject, real_isos: AbstractSet[str]) -> Optional[str]:
+    """Return the synthetic iso of an extract copy made by a previous run, if one exists.
 
-    The renamed file on disk is the durable record of the code chosen earlier, so re-runs
+    The copied file on disk is the durable record of the code chosen earlier, so re-runs
     reuse it instead of deriving a possibly different code from the current iso tables.
     """
     if scripture_dir is None or not scripture_dir.is_dir():
@@ -357,16 +358,19 @@ def find_prior_rename(scripture_dir: Optional[Path], main: MainProject, real_iso
     return None
 
 
-def execute_rename(scripture_dir: Path, terms_dir: Optional[Path], old_stem: str, new_stem: str) -> None:
-    """Rename the target extract file (and its terms renderings files) to the synthetic stem."""
+def execute_copy(scripture_dir: Path, terms_dir: Optional[Path], old_stem: str, new_stem: str) -> None:
+    """Copy the target extract file (and its terms renderings files) to the synthetic stem.
+
+    The original files are kept: they may be referenced by other experiments and tools.
+    """
     old_path = scripture_dir / f"{old_stem}.txt"
-    old_path.rename(scripture_dir / f"{new_stem}.txt")
-    print(f"Renamed {old_path.name} to {new_stem}.txt in {scripture_dir}")
+    shutil.copyfile(old_path, scripture_dir / f"{new_stem}.txt")
+    print(f"Copied {old_path.name} to {new_stem}.txt in {scripture_dir}")
     if terms_dir is not None and terms_dir.is_dir():
         for path in sorted(terms_dir.glob(f"{old_stem}-*-renderings.txt")):
             target = f"{new_stem}{path.name[len(old_stem):]}"
-            path.rename(terms_dir / target)
-            print(f"Renamed {path.name} to {target} in {terms_dir}")
+            shutil.copyfile(path, terms_dir / target)
+            print(f"Copied {path.name} to {target} in {terms_dir}")
 
 
 def folder_name(name: str) -> str:
@@ -685,15 +689,16 @@ def run(
 
     # The src and trg isos of a corpus pair must differ. When a passing reference shares the
     # main project's iso, switch the main project to a synthetic code (not a real iso, not in
-    # NLLB) and rename its extract file to match. The rename is deferred until an experiment
-    # is actually created; a run that creates nothing leaves MT/scripture untouched. A rename
-    # done by a previous run (recorded by the file on disk) is reused even when the current
-    # thresholds no longer surface the clash, so the configs always match the file that exists.
+    # NLLB) and copy its extract file to the new stem, keeping the original. The copy is
+    # deferred until an experiment is actually created; a run that creates nothing leaves
+    # MT/scripture untouched. A copy made by a previous run (recorded by the file on disk) is
+    # reused even when the current thresholds no longer surface the clash, so the configs
+    # always match a file that exists.
     counts_stem = main.stem  # verse_counts.csv is keyed by the original stem
     real_isos = {entry["isoCode"] for entry in language_entries}
-    prior_iso = find_prior_rename(scripture_dir, main, real_isos)
+    prior_iso = find_prior_copy(scripture_dir, main, real_isos)
     clashing = [c for c in passing if to_iso3(c.iso) == to_iso3(main.iso)]
-    pending_rename: Optional[Tuple[str, str]] = None  # (old stem, new stem), executed on first creation
+    pending_copy: Optional[Tuple[str, str]] = None  # (old stem, new stem), executed on first creation
     if clashing or prior_iso is not None:
         synthetic = prior_iso or synthesize_trg_iso(to_iso3(main.iso) or main.iso, real_isos)
         if clashing:
@@ -703,38 +708,38 @@ def run(
                 f" project; using synthetic target code '{synthetic}' instead."
             )
         else:
-            print(f"\nUsing synthetic target code '{synthetic}' from the previously renamed extract file.")
+            print(f"\nUsing synthetic target code '{synthetic}' from the previously copied extract file.")
         new_stem = f"{synthetic}-{stem_to_project(main.stem)}"
         if scripture_dir is None:
             if not dry_run:
-                raise ValueError("No scripture directory available to rename the target extract file in.")
-            print(f"Would rename {main.stem}.txt to {new_stem}.txt in the MT scripture folder.")
+                raise ValueError("No scripture directory available to copy the target extract file in.")
+            print(f"Would copy {main.stem}.txt to {new_stem}.txt in the MT scripture folder.")
         else:
-            old_exists = (scripture_dir / f"{main.stem}.txt").is_file()
-            new_exists = (scripture_dir / f"{new_stem}.txt").is_file()
-            if old_exists and new_exists:
-                raise RuntimeError(
-                    f"Both {main.stem}.txt and {new_stem}.txt exist in {scripture_dir} (the original was"
-                    " probably re-extracted after an earlier rename); remove the stale one before re-running."
-                )
-            if old_exists:
-                pending_rename = (main.stem, new_stem)
+            old_path = scripture_dir / f"{main.stem}.txt"
+            new_path = scripture_dir / f"{new_stem}.txt"
+            if new_path.is_file():
+                if old_path.is_file() and old_path.stat().st_mtime > new_path.stat().st_mtime:
+                    LOGGER.warning(
+                        f"{new_path.name} may be outdated: {old_path.name} is newer (probably re-extracted)."
+                        f" Delete {new_path.name} and re-run to refresh the copy."
+                    )
+            elif old_path.is_file():
+                pending_copy = (main.stem, new_stem)
                 if dry_run:
                     print(
-                        f"Would rename {main.stem}.txt to {new_stem}.txt in {scripture_dir}"
+                        f"Would copy {main.stem}.txt to {new_stem}.txt in {scripture_dir}"
                         " (and matching terms renderings files)."
                     )
                 else:
-                    # Renaming touches the shared MT/scripture store — always confirm first.
+                    # The copy adds files to the shared MT/scripture store — always confirm first.
                     print(
-                        f"The target extract file {main.stem}.txt (and matching terms renderings files)"
-                        f" must be renamed to {new_stem}.txt in {scripture_dir}."
+                        f"{main.stem}.txt (and matching terms renderings files) will be copied to"
+                        f" {new_stem}.txt in {scripture_dir}; the originals are kept."
                     )
                     if flipped:
                         print(
-                            "Warning: the target was overridden with --target. Renaming a shared"
-                            " reference Bible's extract file would break every other experiment"
-                            " that uses it — only continue if this is the minority-language project."
+                            "Warning: the target was overridden with --target; make sure"
+                            f" {main.stem} really is the intended target project."
                         )
                     elif to_iso3(main.iso) in NLLB_TAG_FROM_ISO:
                         print(
@@ -742,13 +747,13 @@ def run(
                             " minority-language project sharing that code, not a shared reference Bible."
                         )
                     try:
-                        reply = input("Rename it when the first experiment is created? [y/N]: ").strip().lower()
+                        reply = input("Copy the file when the first experiment is created? [y/N]: ").strip().lower()
                     except EOFError:
                         reply = ""
                     if reply not in ("y", "yes"):
-                        print("Aborted: the rename is required to create these experiments.")
+                        print("Aborted: the copy is required to create these experiments.")
                         return []
-            elif not new_exists and not dry_run:
+            elif not dry_run:
                 raise FileNotFoundError(f"Neither {main.stem}.txt nor {new_stem}.txt found in {scripture_dir}.")
         main.iso, main.stem = synthetic, new_stem
 
@@ -808,22 +813,22 @@ def run(
         if dry_run:
             print(f"Would create {folder} (corpus_books: {corpus_books})")
         else:
-            if pending_rename is not None:
+            if pending_copy is not None:
                 assert scripture_dir is not None
-                execute_rename(scripture_dir, terms_dir, *pending_rename)
-                pending_rename = None
+                execute_copy(scripture_dir, terms_dir, *pending_copy)
+                pending_copy = None
             folder.mkdir(parents=True, exist_ok=True)
             write_yaml(folder / "config.yml", experiment.config)
             write_yaml(folder / "translate_config.yml", experiment.translate_config)
             print(f"Created {folder} (corpus_books: {corpus_books})")
-    if experiments or existing_experiments:
+    if (experiments or existing_experiments) and not dry_run:
         # Existing folders with an identical config are offered too: their creation was
-        # skipped, but the experiments themselves may not have been run yet.
-        # In a dry run nothing new exists to execute, so only print the commands.
+        # skipped, but the experiments themselves may not have been run yet. A dry run
+        # only lists what would be created, without the run commands.
         submit_experiments(
             experiments + existing_experiments,
             experiments_dir,
-            submit=False if dry_run else submit,
+            submit=submit,
             no_test=test_variant == "notest",
         )
     return experiments
