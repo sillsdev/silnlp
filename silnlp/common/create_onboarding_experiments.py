@@ -1,11 +1,12 @@
 """Create NMT experiment folders from a production onboarding request or analyze run.
 
-Parses the onboarding.log written by silnlp.common.onboard_project in a
-MT/experiments/_OnboardingRequests/<request> folder — or the corpus-stats.csv
-written by silnlp.common.analyze in any experiment folder (e.g. PNG/Taupota/Align) —
-selects the reference projects whose alignment stats pass the thresholds, and creates
-<Country>/<Language>/<experiment> folders containing config.yml and
-translate_config.yml. See create_onboarding_experiments_plan.md for details.
+Parses the corpus-stats.csv written by silnlp.common.analyze — found either in a
+MT/experiments/_OnboardingRequests/<request> folder (top level or alignments/) or in
+any experiment folder (e.g. PNG/Taupota/Align) — falling back to scraping the
+onboarding.log for older request folders without one. It then selects the reference
+projects whose alignment stats pass the thresholds, offers the top experiments for
+selection, and creates <Country>/<Language>/<experiment> folders containing config.yml
+and translate_config.yml. See create_onboarding_experiments_plan.md for details.
 """
 
 import argparse
@@ -48,7 +49,7 @@ CHECKPOINT = 5000
 SEED = 111
 MODEL = "facebook/nllb-200-distilled-1.3B"
 BOOK_COMPLETENESS_THRESHOLD = 0.98
-MAX_UNPROMPTED_MIXED = 3
+TOP_EXPERIMENTS = 20
 
 EXPERIMENT_ARGS = [
     "-m",
@@ -165,30 +166,54 @@ def parse_log(log_path: Path) -> Tuple[MainProject, List[Candidate]]:
     return main, list(candidates.values())
 
 
-def parse_corpus_stats(stats_path: Path) -> Tuple[MainProject, List[Candidate]]:
+def stem_matches(stem: str, target: str) -> bool:
+    """Case-insensitive match of a target against a stem, its iso prefix, or its project name."""
+    return target.lower() in (stem.lower(), stem_to_iso(stem).lower(), stem_to_project(stem).lower())
+
+
+def parse_corpus_stats(stats_path: Path, target: Optional[str] = None) -> Tuple[MainProject, List[Candidate]]:
     """Parse a corpus-stats.csv written by silnlp.common.analyze.
 
     The main project is the stem appearing in every row on one side: trg for alignment
-    runs (e.g. <Country>/<Language>/Align), src for onboarding analyze runs. With a
-    single row both sides are constant; the trg side is assumed to be the main project
-    (the alignment convention; onboarding folders are parsed from onboarding.log instead).
+    runs (e.g. <Country>/<Language>/Align), src for onboarding analyze runs. `target`
+    (an iso code, project name or stem) overrides the detection; it may match either
+    side per row, and rows not involving it are ignored.
     """
     df = pd.read_csv(stats_path)
     if df.empty:
         raise ValueError(f"{stats_path} contains no rows.")
-    if df["trg_project"].nunique() == 1:
-        main_col, ref_col = "trg_project", "src_project"
-    elif df["src_project"].nunique() == 1:
-        main_col, ref_col = "src_project", "trg_project"
+
+    oriented = []  # (main stem, main script, ref stem, ref script, row)
+    if target is not None:
+        skipped = 0
+        for _, row in df.iterrows():
+            if stem_matches(row["src_project"], target):
+                oriented.append((row["src_project"], row["src_script"], row["trg_project"], row["trg_script"], row))
+            elif stem_matches(row["trg_project"], target):
+                oriented.append((row["trg_project"], row["trg_script"], row["src_project"], row["src_script"], row))
+            else:
+                skipped += 1
+        if not oriented:
+            raise ValueError(f"'{target}' does not match any project in {stats_path}.")
+        main_stems = sorted({entry[0] for entry in oriented})
+        if len(main_stems) > 1:
+            raise ValueError(
+                f"'{target}' matches more than one project in {stats_path} ({', '.join(main_stems)});"
+                " use the project name to disambiguate."
+            )
+        if skipped:
+            LOGGER.warning(f"Ignoring {skipped} row(s) in {stats_path.name} that do not involve '{target}'.")
+    elif df["trg_project"].nunique() == 1 and df["src_project"].nunique() > 1:
+        for _, row in df.iterrows():
+            oriented.append((row["trg_project"], row["trg_script"], row["src_project"], row["src_script"], row))
+    elif df["src_project"].nunique() == 1 and df["trg_project"].nunique() > 1:
+        for _, row in df.iterrows():
+            oriented.append((row["src_project"], row["src_script"], row["trg_project"], row["trg_script"], row))
     else:
-        raise ValueError(
-            f"Cannot determine the main project in {stats_path}: neither src_project nor trg_project is constant."
-        )
-    main_script_col, ref_script_col = (f"{col.split('_')[0]}_script" for col in (main_col, ref_col))
+        raise ValueError(f"Cannot determine the main project in {stats_path}; specify it with --target.")
 
     candidates: Dict[str, Candidate] = {}
-    for _, row in df.iterrows():
-        ref_stem = row[ref_col]
+    for _, _, ref_stem, ref_script, row in oriented:
         candidates[stem_to_project(ref_stem)] = Candidate(
             name=stem_to_project(ref_stem),
             stem=ref_stem,
@@ -196,18 +221,27 @@ def parse_corpus_stats(stats_path: Path) -> Tuple[MainProject, List[Candidate]]:
             count=int(row["count"]),
             parallel=int(row["parallel"]),
             alignment=float(row["align_score"]),
-            script=str(row[ref_script_col]).strip(),
+            script=str(ref_script).strip(),
         )
 
-    main_stem = df[main_col].iloc[0]
+    main_stem, main_script = oriented[0][0], oriented[0][1]
     main = MainProject(
         name=stem_to_project(main_stem),
         stem=main_stem,
         iso=stem_to_iso(main_stem),
         verses=None,
-        script=str(df[main_script_col].iloc[0]).strip(),
+        script=str(main_script).strip(),
     )
     return main, list(candidates.values())
+
+
+def parse_log_main_name(log_path: Path) -> Optional[str]:
+    """Return the main project name from onboarding.log, if the log names one."""
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        m = MAIN_PROJECT_RE.search(line)
+        if m is not None:
+            return m.group(1)
+    return None
 
 
 def stem_to_iso(stem: str) -> str:
@@ -439,25 +473,35 @@ def find_existing(lang_dir: Path, prefix: str, config: dict) -> Tuple[Optional[P
     return None, max_index + 1
 
 
-def select_mixed_pairs(pairs: List[List[Candidate]], dry_run: bool) -> List[List[Candidate]]:
-    if len(pairs) <= MAX_UNPROMPTED_MIXED:
-        return pairs
-    print(f"\n{len(pairs)} mixed-source experiments pass the thresholds:")
-    for i, pair in enumerate(pairs, start=1):
-        names = " + ".join(f"{source.name} ({source.alignment:.4f})" for source in pair)
-        print(f"  {i}. {names}")
+def select_experiments(
+    singles: List[List[Candidate]], mixed: List[List[Candidate]], dry_run: bool
+) -> List[List[Candidate]]:
+    """Show the top possible experiments (singles first) and ask which to create.
+
+    Under dry_run the list is only displayed and every displayed experiment is returned.
+    """
+    total = len(singles) + len(mixed)
+    displayed = (singles + mixed)[:TOP_EXPERIMENTS]
+    shown = f"top {len(displayed)} of {total}" if total > len(displayed) else f"{total}"
+    print(f"\nPossible experiments ({shown}, single sources first):")
+    for i, sources in enumerate(displayed, start=1):
+        names = " + ".join(f"{source.name} ({source.alignment:.4f})" for source in sources)
+        print(f"  {i:>2}. {names}")
     if dry_run:
-        print("Dry run: all listed pairs are included in the report below.")
-        return pairs
-    reply = input("Enter the numbers to create (e.g. 1,3), 'all' or 'none': ").strip().lower()
+        print("Dry run: all listed experiments are included in the report below.")
+        return displayed
+    try:
+        reply = input("Enter the numbers to create (e.g. 1,3), 'all' or 'none': ").strip().lower()
+    except EOFError:
+        reply = ""
     if reply in ("", "none"):
         return []
     if reply == "all":
-        return pairs
+        return displayed
     chosen = []
     for token in re.split(r"[,\s]+", reply):
-        if token.isdigit() and 1 <= int(token) <= len(pairs):
-            chosen.append(pairs[int(token) - 1])
+        if token.isdigit() and 1 <= int(token) <= len(displayed):
+            chosen.append(displayed[int(token) - 1])
         else:
             LOGGER.warning(f"Ignoring invalid selection '{token}'.")
     return chosen
@@ -525,24 +569,36 @@ def run(
     scripture_dir: Optional[Path] = None,
     terms_dir: Optional[Path] = None,
     test_variant: Optional[str] = None,
+    target: Optional[str] = None,
     dry_run: bool = False,
     submit: Optional[bool] = False,
 ) -> List[Experiment]:
     if test_variant not in (None, "notest", "test100"):
         raise ValueError(f"Unknown test_variant '{test_variant}'; expected None, 'notest' or 'test100'.")
     log_path = request_dir / "onboarding.log"
-    stats_path = request_dir / "corpus-stats.csv"
+    stats_paths = [request_dir / "corpus-stats.csv", request_dir / "alignments" / "corpus-stats.csv"]
+    stats_path = next((path for path in stats_paths if path.is_file()), None)
     lang_dir_override: Optional[Path] = None
-    if log_path.is_file():
-        main, candidates = parse_log(log_path)
-    elif stats_path.is_file():
-        main, candidates = parse_corpus_stats(stats_path)
+    if stats_path is not None:
+        # The CSV is the stable machine-readable artifact, so it is preferred over scraping
+        # the log; an explicit --target wins over the log's main-project line as the hint
+        # for which side of the CSV is the target.
+        main_hint = target or (parse_log_main_name(log_path) if log_path.is_file() else None)
+        main, candidates = parse_corpus_stats(stats_path, target=main_hint)
         # A stats folder inside the experiments tree (e.g. PNG/Taupota/Align) creates its
-        # experiments next to itself, keeping whatever country/language naming already exists.
-        if experiments_dir.resolve() in request_dir.resolve().parents:
+        # experiments next to itself, keeping whatever country/language naming already
+        # exists — but never inside _OnboardingRequests, where the derived location applies.
+        request_parents = request_dir.resolve().parents
+        if experiments_dir.resolve() in request_parents and (
+            (experiments_dir / "_OnboardingRequests").resolve() not in request_parents
+        ):
             lang_dir_override = request_dir.parent
+    elif log_path.is_file():
+        main, candidates = parse_log(log_path)
+        if target is not None and not stem_matches(main.stem, target):
+            raise ValueError(f"--target '{target}' does not match the main project '{main.stem}' in {log_path}.")
     else:
-        raise FileNotFoundError(f"No onboarding.log or corpus-stats.csv found in {request_dir}.")
+        raise FileNotFoundError(f"No corpus-stats.csv or onboarding.log found in {request_dir}.")
 
     language_entries = load_language_entries(assets_dir)
     language, country = lookup_language(main.iso, language_entries)
@@ -610,13 +666,15 @@ def run(
         verse_counts = load_verse_counts(request_dir, experiments_dir)
     translate_set = frozenset(get_chapters(translate_books))
 
-    mixed = select_mixed_pairs([list(pair) for pair in itertools.combinations(passing, 2)], dry_run)
+    chosen = select_experiments(
+        [[c] for c in passing], [list(pair) for pair in itertools.combinations(passing, 2)], dry_run
+    )
 
     experiments: List[Experiment] = []
     existing_experiments: List[Experiment] = []
     warned_removals: set = set()
     print()
-    for sources in [[c] for c in passing] + mixed:
+    for sources in chosen:
         label = " + ".join(source.name for source in sources)
         try:
             corpus_books, removed = resolve_corpus_books(
@@ -690,6 +748,11 @@ def main() -> None:
     )
     parser.add_argument("--min-parallel", type=int, default=2000, help="Minimum parallel verse count (default 2000)")
     parser.add_argument("--min-alignment", type=float, default=0.2, help="Minimum alignment score (default 0.2)")
+    parser.add_argument(
+        "--target",
+        help="Iso code or project name of the target language, overriding its detection from"
+        " corpus-stats.csv (it may appear in either column) or onboarding.log",
+    )
     book_list_syntax = (
         "separated by commas, semicolons or spaces, including silnlp selections like ranges and"
         ' subtractions (quote semicolons and spaces: "GEN;RUT", "GEN RUT", "NT;-REV", "GEN-DEU")'
@@ -742,6 +805,7 @@ def main() -> None:
         scripture_dir=Path(environment.mt_scripture_dir),
         terms_dir=Path(environment.mt_terms_dir),
         test_variant="notest" if args.no_test else "test100" if args.test100 else None,
+        target=args.target,
         dry_run=args.dry_run,
         submit=True if args.run else None,
     )

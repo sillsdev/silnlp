@@ -10,6 +10,8 @@ from machine.scripture import book_id_to_number
 from silnlp.common.create_onboarding_experiments import (
     EXPERIMENT_ARGS,
     NT_CANON,
+    TOP_EXPERIMENTS,
+    Candidate,
     Experiment,
     find_existing,
     folder_name,
@@ -21,6 +23,7 @@ from silnlp.common.create_onboarding_experiments import (
     resolve_corpus_books,
     resolve_request_dir,
     run,
+    select_experiments,
     submit_experiments,
     synthesize_trg_iso,
 )
@@ -52,6 +55,12 @@ def request_dir(tmp_path: Path) -> Path:
     (request / "onboarding.log").write_text(SAMPLE_LOG_PATH.read_text(encoding="utf-8"), encoding="utf-8")
     make_verse_counts(request / "verse_counts.csv")
     return request
+
+
+@pytest.fixture
+def select_all(monkeypatch):
+    """Answer the experiment-selection prompt with 'all'."""
+    monkeypatch.setattr("builtins.input", lambda prompt: "all")
 
 
 def test_parse_log(request_dir: Path):
@@ -265,7 +274,134 @@ def test_parse_corpus_stats(tmp_path: Path):
         parse_corpus_stats(tmp_path / "ambiguous.csv")
 
 
-def test_run_from_corpus_stats_folder(tmp_path: Path, capsys):
+def test_parse_corpus_stats_target(tmp_path: Path):
+    stats_path = tmp_path / "corpus-stats.csv"
+    make_corpus_stats(stats_path)
+
+    # The target may be given as an iso code, a project name, or a full stem.
+    for target in ("sdl", "A33_2026_07_02", "sdl-A33_2026_07_02", "SDL"):
+        main, candidates = parse_corpus_stats(stats_path, target=target)
+        assert main.stem == "sdl-A33_2026_07_02"
+        assert {c.name for c in candidates} == {"NIV11R", "HINCLBSI", "a55_2026_07_02"}
+
+    # The target may sit on either side per row, and rows not involving it are ignored.
+    mixed_direction = pd.DataFrame(
+        {
+            "src_project": ["en-NIV11R", "sdl-A33_2026_07_02", "en-NIV11R"],
+            "trg_project": ["sdl-A33_2026_07_02", "hi-HINCLBSI", "fr-BDS"],
+            "count": [10, 20, 30],
+            "parallel": [5, 6, 7],
+            "align_score": [0.5, 0.4, 0.3],
+            "src_script": ["Latn", "Arab", "Latn"],
+            "trg_script": ["Arab", "Deva", "Latn"],
+        }
+    )
+    mixed_direction.to_csv(tmp_path / "mixed.csv", index=False)
+    main, candidates = parse_corpus_stats(tmp_path / "mixed.csv", target="sdl")
+    assert main.stem == "sdl-A33_2026_07_02"
+    by_name = {c.name: c for c in candidates}
+    assert set(by_name) == {"NIV11R", "HINCLBSI"}  # the NIV11R/BDS row is ignored
+    assert by_name["HINCLBSI"].alignment == 0.4
+
+    # A target matching two different projects (shared iso) is an error.
+    two_projects = mixed_direction.copy()
+    two_projects.loc[2, "trg_project"] = "sdl-OtherProject"
+    two_projects.to_csv(tmp_path / "two.csv", index=False)
+    with pytest.raises(ValueError, match="matches more than one project"):
+        parse_corpus_stats(tmp_path / "two.csv", target="sdl")
+
+    # A target matching nothing is an error.
+    with pytest.raises(ValueError, match="does not match any project"):
+        parse_corpus_stats(stats_path, target="xyz")
+
+    # A single row is ambiguous without a target...
+    single = mixed_direction.iloc[[0]]
+    single.to_csv(tmp_path / "single.csv", index=False)
+    with pytest.raises(ValueError, match="specify it with --target"):
+        parse_corpus_stats(tmp_path / "single.csv")
+    # ...and fine with one.
+    main, candidates = parse_corpus_stats(tmp_path / "single.csv", target="sdl")
+    assert main.stem == "sdl-A33_2026_07_02" and [c.name for c in candidates] == ["NIV11R"]
+
+
+def make_candidate(name: str, alignment: float) -> Candidate:
+    return Candidate(name=name, stem=f"en-{name}", iso="en", count=1, parallel=1, alignment=alignment, script="Latn")
+
+
+def test_select_experiments(monkeypatch, capsys):
+    singles = [[make_candidate(f"S{i:02}", 0.9 - i / 100)] for i in range(15)]
+    mixed = [[s[0], t[0]] for s, t in zip(singles, singles[1:])]  # 14 pairs
+
+    # Capped at TOP_EXPERIMENTS with singles listed first.
+    monkeypatch.setattr("builtins.input", lambda prompt: "all")
+    chosen = select_experiments(singles, mixed, dry_run=False)
+    assert len(chosen) == TOP_EXPERIMENTS
+    assert chosen[:15] == singles and chosen[15:] == mixed[:5]
+    output = capsys.readouterr().out
+    assert f"top {TOP_EXPERIMENTS} of 29" in output
+    assert "S00 (0.9000)" in output
+
+    # Number selection picks from the displayed list; 'none' selects nothing.
+    monkeypatch.setattr("builtins.input", lambda prompt: "1, 16")
+    assert select_experiments(singles, mixed, dry_run=False) == [singles[0], mixed[0]]
+    monkeypatch.setattr("builtins.input", lambda prompt: "none")
+    assert select_experiments(singles, mixed, dry_run=False) == []
+
+    # Dry run returns everything displayed without prompting.
+    monkeypatch.setattr("builtins.input", lambda prompt: pytest.fail("dry run must not prompt"))
+    assert len(select_experiments(singles, mixed, dry_run=True)) == TOP_EXPERIMENTS
+
+
+def test_run_prefers_corpus_stats_over_log(request_dir: Path, tmp_path: Path, capsys, select_all):
+    # A single-row CSV in alignments/ is preferred over the log; the log's main-project
+    # line orients it (a lone row is otherwise ambiguous).
+    alignments = request_dir / "alignments"
+    alignments.mkdir()
+    pd.DataFrame(
+        {
+            "src_project": ["sdl-A33_2026_07_02"],
+            "trg_project": ["en-NIV11R"],
+            "count": [31096],
+            "parallel": [5070],
+            "align_score": [0.5555],  # differs from the log's 0.3388 to prove the CSV is used
+            "src_script": ["Arab"],
+            "trg_script": ["Latn"],
+        }
+    ).to_csv(alignments / "corpus-stats.csv", index=False)
+
+    experiments = run(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="complete",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+    )
+    output = capsys.readouterr().out
+    assert "0.5555" in output  # CSV numbers, not the log's
+    # Experiments still go to the derived location, never into _OnboardingRequests.
+    assert [e.folder for e in experiments] == [
+        tmp_path / "Saudi_Arabia" / "Saudi_Arabian_Sign_Language" / "NIV11R_sdl_1"
+    ]
+    assert not (request_dir / "NIV11R_sdl_1").exists()
+
+
+def test_run_target_mismatch_on_log_only(request_dir: Path, tmp_path: Path):
+    with pytest.raises(ValueError, match="does not match the main project"):
+        run(
+            request_dir=request_dir,
+            experiments_dir=tmp_path,
+            assets_dir=ASSETS_DIR,
+            training_books="complete",
+            translate_books="MAT",
+            min_parallel=2000,
+            min_alignment=0.2,
+            target="nonexistent",
+        )
+
+
+def test_run_from_corpus_stats_folder(tmp_path: Path, capsys, select_all):
     # A stats folder inside the experiments tree creates experiments next to itself,
     # keeping the existing country/language folder naming (e.g. PNG/Taupota).
     experiments_dir = tmp_path
@@ -315,7 +451,7 @@ def test_run_from_corpus_stats_folder(tmp_path: Path, capsys):
     assert (experiments_dir2 / "Saudi_Arabia" / "Saudi_Arabian_Sign_Language" / "NIV11R_sdl_1").is_dir()
 
 
-def test_run_creates_experiments(request_dir: Path, tmp_path: Path, capsys):
+def test_run_creates_experiments(request_dir: Path, tmp_path: Path, capsys, select_all):
     experiments = run(
         request_dir=request_dir,
         experiments_dir=tmp_path,
@@ -385,7 +521,7 @@ def test_run_creates_experiments(request_dir: Path, tmp_path: Path, capsys):
         assert f"Saudi_Arabia/Saudi_Arabian_Sign_Language/{name}" in output
 
 
-def test_run_translating_all_training_books_skips(request_dir: Path, tmp_path: Path, capsys):
+def test_run_translating_all_training_books_skips(request_dir: Path, tmp_path: Path, capsys, select_all):
     experiments = run(
         request_dir=request_dir,
         experiments_dir=tmp_path,
@@ -400,7 +536,7 @@ def test_run_translating_all_training_books_skips(request_dir: Path, tmp_path: P
     assert "no training books remain" in output
 
 
-def test_run_test_variants(request_dir: Path, tmp_path: Path):
+def test_run_test_variants(request_dir: Path, tmp_path: Path, select_all):
     for variant, expected_type in [("notest", "train"), ("test100", "train,test")]:
         experiments = run(
             request_dir=request_dir,
@@ -422,7 +558,7 @@ def test_run_test_variants(request_dir: Path, tmp_path: Path):
             assert "test_size" not in pair
 
 
-def test_run_iso_clash_renames_and_uses_synthetic_code(request_dir: Path, tmp_path: Path, capsys):
+def test_run_iso_clash_renames_and_uses_synthetic_code(request_dir: Path, tmp_path: Path, capsys, select_all):
     # Make NIV11R clash with the main project by giving it the same iso prefix.
     log_path = request_dir / "onboarding.log"
     log_path.write_text(log_path.read_text(encoding="utf-8").replace("en-NIV11R", "sdl-NIV11R"), encoding="utf-8")
