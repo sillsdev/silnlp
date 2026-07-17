@@ -167,8 +167,18 @@ def parse_log(log_path: Path) -> Tuple[MainProject, List[Candidate]]:
 
 
 def stem_matches(stem: str, target: str) -> bool:
-    """Case-insensitive match of a target against a stem, its iso prefix, or its project name."""
-    return target.lower() in (stem.lower(), stem_to_iso(stem).lower(), stem_to_project(stem).lower())
+    """Case-insensitive match of a target against a stem, its iso prefix, or its project name.
+
+    Iso codes match across their 2- and 3-letter forms (e.g. 'fra' matches an 'fr-' stem).
+    """
+    target = target.lower()
+    if target in (stem.lower(), stem_to_project(stem).lower()):
+        return True
+    stem_iso = stem_to_iso(stem).lower()
+    if target == stem_iso:
+        return True
+    target_iso3 = to_iso3(target) if len(target) in (2, 3) else None
+    return target_iso3 is not None and target_iso3 == to_iso3(stem_iso)
 
 
 def parse_corpus_stats(stats_path: Path, target: Optional[str] = None) -> Tuple[MainProject, List[Candidate]]:
@@ -187,9 +197,16 @@ def parse_corpus_stats(stats_path: Path, target: Optional[str] = None) -> Tuple[
     if target is not None:
         skipped = 0
         for _, row in df.iterrows():
-            if stem_matches(row["src_project"], target):
+            src_match = stem_matches(row["src_project"], target)
+            trg_match = stem_matches(row["trg_project"], target)
+            if src_match and trg_match and row["src_project"] != row["trg_project"]:
+                raise ValueError(
+                    f"'{target}' matches both sides of a row in {stats_path}"
+                    f" ({row['src_project']} and {row['trg_project']}); use the project name to disambiguate."
+                )
+            if src_match:
                 oriented.append((row["src_project"], row["src_script"], row["trg_project"], row["trg_script"], row))
-            elif stem_matches(row["trg_project"], target):
+            elif trg_match:
                 oriented.append((row["trg_project"], row["trg_script"], row["src_project"], row["src_script"], row))
             else:
                 skipped += 1
@@ -213,7 +230,11 @@ def parse_corpus_stats(stats_path: Path, target: Optional[str] = None) -> Tuple[
         raise ValueError(f"Cannot determine the main project in {stats_path}; specify it with --target.")
 
     candidates: Dict[str, Candidate] = {}
+    incomplete = 0
     for _, _, ref_stem, ref_script, row in oriented:
+        if any(pd.isna(row[column]) for column in ("count", "parallel", "align_score")):
+            incomplete += 1
+            continue
         candidates[stem_to_project(ref_stem)] = Candidate(
             name=stem_to_project(ref_stem),
             stem=ref_stem,
@@ -223,6 +244,8 @@ def parse_corpus_stats(stats_path: Path, target: Optional[str] = None) -> Tuple[
             alignment=float(row["align_score"]),
             script=str(ref_script).strip(),
         )
+    if incomplete:
+        LOGGER.warning(f"Skipping {incomplete} row(s) in {stats_path.name} with missing statistics.")
 
     main_stem, main_script = oriented[0][0], oriented[0][1]
     main = MainProject(
@@ -237,10 +260,11 @@ def parse_corpus_stats(stats_path: Path, target: Optional[str] = None) -> Tuple[
 
 def parse_log_main_name(log_path: Path) -> Optional[str]:
     """Return the main project name from onboarding.log, if the log names one."""
-    for line in log_path.read_text(encoding="utf-8").splitlines():
-        m = MAIN_PROJECT_RE.search(line)
-        if m is not None:
-            return m.group(1)
+    with open(log_path, "r", encoding="utf-8", errors="replace") as file:
+        for line in file:
+            m = MAIN_PROJECT_RE.search(line)
+            if m is not None:
+                return m.group(1)
     return None
 
 
@@ -474,19 +498,21 @@ def find_existing(lang_dir: Path, prefix: str, config: dict) -> Tuple[Optional[P
 
 
 def select_experiments(
-    singles: List[List[Candidate]], mixed: List[List[Candidate]], dry_run: bool
+    singles: List[List[Candidate]], mixed: List[List[Candidate]], dry_run: bool, top: int = TOP_EXPERIMENTS
 ) -> List[List[Candidate]]:
     """Show the top possible experiments (singles first) and ask which to create.
 
     Under dry_run the list is only displayed and every displayed experiment is returned.
     """
     total = len(singles) + len(mixed)
-    displayed = (singles + mixed)[:TOP_EXPERIMENTS]
+    displayed = (singles + mixed)[:top]
     shown = f"top {len(displayed)} of {total}" if total > len(displayed) else f"{total}"
     print(f"\nPossible experiments ({shown}, single sources first):")
     for i, sources in enumerate(displayed, start=1):
         names = " + ".join(f"{source.name} ({source.alignment:.4f})" for source in sources)
         print(f"  {i:>2}. {names}")
+    if total > len(displayed):
+        print(f"Use --top to list more than {top} experiments.")
     if dry_run:
         print("Dry run: all listed experiments are included in the report below.")
         return displayed
@@ -495,15 +521,20 @@ def select_experiments(
     except EOFError:
         reply = ""
     if reply in ("", "none"):
+        print("No experiments selected.")
         return []
     if reply == "all":
         return displayed
     chosen = []
     for token in re.split(r"[,\s]+", reply):
         if token.isdigit() and 1 <= int(token) <= len(displayed):
-            chosen.append(displayed[int(token) - 1])
+            selection = displayed[int(token) - 1]
+            if selection not in chosen:
+                chosen.append(selection)
         else:
             LOGGER.warning(f"Ignoring invalid selection '{token}'.")
+    if not chosen:
+        print("No experiments selected.")
     return chosen
 
 
@@ -570,6 +601,7 @@ def run(
     terms_dir: Optional[Path] = None,
     test_variant: Optional[str] = None,
     target: Optional[str] = None,
+    top: int = TOP_EXPERIMENTS,
     dry_run: bool = False,
     submit: Optional[bool] = False,
 ) -> List[Experiment]:
@@ -579,18 +611,53 @@ def run(
     stats_paths = [request_dir / "corpus-stats.csv", request_dir / "alignments" / "corpus-stats.csv"]
     stats_path = next((path for path in stats_paths if path.is_file()), None)
     lang_dir_override: Optional[Path] = None
+    flipped = False
     if stats_path is not None:
         # The CSV is the stable machine-readable artifact, so it is preferred over scraping
-        # the log; an explicit --target wins over the log's main-project line as the hint
-        # for which side of the CSV is the target.
-        main_hint = target or (parse_log_main_name(log_path) if log_path.is_file() else None)
-        main, candidates = parse_corpus_stats(stats_path, target=main_hint)
+        # the log. An explicit --target is authoritative; the log's main-project line is only
+        # a soft hint — if it does not fit the CSV, fall back to auto-detection and finally to
+        # parsing the log itself, so a stale or partial CSV never breaks a working folder.
+        log_hint = parse_log_main_name(log_path) if log_path.is_file() and target is None else None
+        try:
+            main, candidates = parse_corpus_stats(stats_path, target=target or log_hint)
+        except ValueError as stats_error:
+            if target is not None:
+                raise
+            try:
+                if log_hint is None:
+                    raise stats_error
+                LOGGER.warning(f"{stats_error} Falling back to auto-detection.")
+                main, candidates = parse_corpus_stats(stats_path)
+            except ValueError as auto_error:
+                if not log_path.is_file():
+                    raise
+                LOGGER.warning(f"{auto_error} Falling back to {log_path.name}.")
+                main, candidates = parse_log(log_path)
+
+        # Report when the chosen target differs from what the analyze run itself would give
+        # (--target flipped the direction); the folder-derived location must not apply then.
+        detected_stem: Optional[str] = main.stem
+        if target is not None:
+            natural_hint = parse_log_main_name(log_path) if log_path.is_file() else None
+            try:
+                detected_stem = parse_corpus_stats(stats_path, target=natural_hint)[0].stem
+            except ValueError:
+                detected_stem = None
+        flipped = detected_stem is not None and detected_stem != main.stem
+        if flipped:
+            print(f"Note: --target overrides the analyze run's own target project ({detected_stem}).")
+
         # A stats folder inside the experiments tree (e.g. PNG/Taupota/Align) creates its
         # experiments next to itself, keeping whatever country/language naming already
-        # exists — but never inside _OnboardingRequests, where the derived location applies.
+        # exists — but not for request folders (which use the derived location), not directly
+        # under MT/experiments itself, and not when --target flipped the target language.
         request_parents = request_dir.resolve().parents
-        if experiments_dir.resolve() in request_parents and (
-            (experiments_dir / "_OnboardingRequests").resolve() not in request_parents
+        if (
+            experiments_dir.resolve() in request_parents
+            and request_dir.resolve().parent != experiments_dir.resolve()
+            and (experiments_dir / "_OnboardingRequests").resolve() not in request_parents
+            and not log_path.is_file()
+            and not flipped
         ):
             lang_dir_override = request_dir.parent
     elif log_path.is_file():
@@ -657,6 +724,30 @@ def run(
                         f"Would rename {main.stem}.txt to {new_stem}.txt in {scripture_dir}"
                         " (and matching terms renderings files)."
                     )
+                else:
+                    # Renaming touches the shared MT/scripture store — always confirm first.
+                    print(
+                        f"The target extract file {main.stem}.txt (and matching terms renderings files)"
+                        f" must be renamed to {new_stem}.txt in {scripture_dir}."
+                    )
+                    if flipped:
+                        print(
+                            "Warning: the target was overridden with --target. Renaming a shared"
+                            " reference Bible's extract file would break every other experiment"
+                            " that uses it — only continue if this is the minority-language project."
+                        )
+                    elif to_iso3(main.iso) in NLLB_TAG_FROM_ISO:
+                        print(
+                            f"Caution: '{main.iso}' is an NLLB language code; make sure {main.stem} is the"
+                            " minority-language project sharing that code, not a shared reference Bible."
+                        )
+                    try:
+                        reply = input("Rename it when the first experiment is created? [y/N]: ").strip().lower()
+                    except EOFError:
+                        reply = ""
+                    if reply not in ("y", "yes"):
+                        print("Aborted: the rename is required to create these experiments.")
+                        return []
             elif not new_exists and not dry_run:
                 raise FileNotFoundError(f"Neither {main.stem}.txt nor {new_stem}.txt found in {scripture_dir}.")
         main.iso, main.stem = synthetic, new_stem
@@ -667,7 +758,7 @@ def run(
     translate_set = frozenset(get_chapters(translate_books))
 
     chosen = select_experiments(
-        [[c] for c in passing], [list(pair) for pair in itertools.combinations(passing, 2)], dry_run
+        [[c] for c in passing], [list(pair) for pair in itertools.combinations(passing, 2)], dry_run, top=top
     )
 
     experiments: List[Experiment] = []
@@ -751,7 +842,14 @@ def main() -> None:
     parser.add_argument(
         "--target",
         help="Iso code or project name of the target language, overriding its detection from"
-        " corpus-stats.csv (it may appear in either column) or onboarding.log",
+        " corpus-stats.csv (it may appear in either column); with only an onboarding.log the"
+        " value must match the log's main project",
+    )
+    parser.add_argument(
+        "--top",
+        type=int,
+        default=TOP_EXPERIMENTS,
+        help=f"Maximum number of experiments listed for selection (default {TOP_EXPERIMENTS})",
     )
     book_list_syntax = (
         "separated by commas, semicolons or spaces, including silnlp selections like ranges and"
@@ -806,6 +904,7 @@ def main() -> None:
         terms_dir=Path(environment.mt_terms_dir),
         test_variant="notest" if args.no_test else "test100" if args.test100 else None,
         target=args.target,
+        top=args.top,
         dry_run=args.dry_run,
         submit=True if args.run else None,
     )

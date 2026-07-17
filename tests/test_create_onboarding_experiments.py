@@ -59,8 +59,8 @@ def request_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def select_all(monkeypatch):
-    """Answer the experiment-selection prompt with 'all'."""
-    monkeypatch.setattr("builtins.input", lambda prompt: "all")
+    """Answer the experiment-selection prompt with 'all' and the rename confirmation with 'y'."""
+    monkeypatch.setattr("builtins.input", lambda prompt: "y" if "Rename" in prompt else "all")
 
 
 def test_parse_log(request_dir: Path):
@@ -324,6 +324,147 @@ def test_parse_corpus_stats_target(tmp_path: Path):
     assert main.stem == "sdl-A33_2026_07_02" and [c.name for c in candidates] == ["NIV11R"]
 
 
+def test_parse_corpus_stats_skips_incomplete_rows(tmp_path: Path):
+    # analyze.py writes empty count cells when original extracts are missing; such rows
+    # must not crash the parse, only drop the affected candidate.
+    stats_path = tmp_path / "corpus-stats.csv"
+    stats_path.write_text(
+        "src_project,trg_project,count,src_only,trg_only,parallel,align_score,filtered_count,"
+        "filtered_align_score,src_script,src_script_in_model,trg_script,trg_script_in_model\n"
+        "sdl-MAIN,en-REF1,10,0,0,5,0.5,0,0.5,Arab,True,Latn,True\n"
+        "sdl-MAIN,en-REF2,,,,,,,,Arab,True,Latn,True\n",
+        encoding="utf-8",
+    )
+    main, candidates = parse_corpus_stats(stats_path)
+    assert main.stem == "sdl-MAIN"
+    assert [c.name for c in candidates] == ["REF1"]
+
+
+def test_parse_corpus_stats_target_matching_both_sides_of_a_row(tmp_path: Path):
+    stats_path = tmp_path / "corpus-stats.csv"
+    stats_path.write_text(
+        "src_project,trg_project,count,src_only,trg_only,parallel,align_score,filtered_count,"
+        "filtered_align_score,src_script,src_script_in_model,trg_script,trg_script_in_model\n"
+        "sdl-A33,sdl-BackTrans,10,0,0,5,0.5,0,0.5,Arab,True,Arab,True\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="matches both sides"):
+        parse_corpus_stats(stats_path, target="sdl")
+    # The project name still disambiguates.
+    main, _ = parse_corpus_stats(stats_path, target="BackTrans")
+    assert main.stem == "sdl-BackTrans"
+
+
+def test_stem_matches_iso_equivalence():
+    from silnlp.common.create_onboarding_experiments import stem_matches
+
+    assert stem_matches("fr-BDS", "fra")  # 3-letter target matches the 2-letter stem prefix
+    assert stem_matches("fra-BDS", "fr")
+    assert stem_matches("en-NIV11R", "ENG")
+    assert not stem_matches("fr-BDS", "deu")
+    assert stem_matches("fr-BDS", "bds")  # project-name leg is unaffected
+
+
+def test_run_falls_back_to_log_when_csv_is_unusable(request_dir: Path, tmp_path: Path, capsys, select_all):
+    # A stale/partial CSV that neither fits the log's main project nor auto-detects must
+    # not brick a folder that previously worked from onboarding.log.
+    alignments = request_dir / "alignments"
+    alignments.mkdir()
+    pd.DataFrame(
+        {
+            "src_project": ["en-X", "fr-Y"],
+            "trg_project": ["de-P", "es-Q"],  # neither column constant, no A33 stem
+            "count": [1, 1],
+            "parallel": [1, 1],
+            "align_score": [0.5, 0.5],
+            "src_script": ["Latn", "Latn"],
+            "trg_script": ["Latn", "Latn"],
+        }
+    ).to_csv(alignments / "corpus-stats.csv", index=False)
+
+    experiments = run(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="complete",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+    )
+    # Falls back to the log and behaves exactly like a log-only folder.
+    assert sorted(e.folder.name for e in experiments) == ["HINCLBSI_sdl_1", "NIV11R_HINCLBSI_sdl_1", "NIV11R_sdl_1"]
+
+
+def test_run_target_flip_uses_derived_location(tmp_path: Path, capsys):
+    # When --target flips the direction, the create-next-to-stats rule must not file the
+    # experiments under the stats folder's (different) language.
+    align_dir = tmp_path / "KSA" / "SignLang" / "Align"
+    align_dir.mkdir(parents=True)
+    make_corpus_stats(align_dir / "corpus-stats.csv")
+    make_verse_counts(align_dir / "verse_counts.csv")
+    run(
+        request_dir=align_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="complete",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+        target="NIV11R",
+        dry_run=True,
+    )
+    output = capsys.readouterr().out
+    assert "Note: --target overrides the analyze run's own target project (sdl-A33_2026_07_02)." in output
+    assert "Experiment location: " + str(tmp_path / "KSA" / "SignLang") not in output
+
+
+def test_run_stats_folder_directly_under_experiments_uses_derived_location(tmp_path: Path, capsys):
+    stats_dir = tmp_path / "MyAlignRun"
+    stats_dir.mkdir()
+    make_corpus_stats(stats_dir / "corpus-stats.csv")
+    make_verse_counts(stats_dir / "verse_counts.csv")
+    run(
+        request_dir=stats_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="complete",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+        dry_run=True,
+    )
+    output = capsys.readouterr().out
+    # Not dumped at the experiments root: the derived Country/Language location is used.
+    assert f"Experiment location: {tmp_path / 'Saudi_Arabia' / 'Saudi_Arabian_Sign_Language'}" in output
+
+
+def test_run_rename_declined_aborts(request_dir: Path, tmp_path: Path, capsys, monkeypatch):
+    log_path = request_dir / "onboarding.log"
+    log_path.write_text(log_path.read_text(encoding="utf-8").replace("en-NIV11R", "sdl-NIV11R"), encoding="utf-8")
+    counts_path = request_dir / "verse_counts.csv"
+    counts_path.write_text(counts_path.read_text(encoding="utf-8").replace("en-NIV11R", "sdl-NIV11R"), encoding="utf-8")
+    scripture_dir = tmp_path / "scripture"
+    scripture_dir.mkdir()
+    (scripture_dir / "sdl-A33_2026_07_02.txt").write_text("verses\n", encoding="utf-8")
+
+    monkeypatch.setattr("builtins.input", lambda prompt: "n" if "Rename" in prompt else "all")
+    experiments = run(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="complete",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+        scripture_dir=scripture_dir,
+    )
+    assert experiments == []
+    assert "Aborted: the rename is required" in capsys.readouterr().out
+    # Nothing was renamed and nothing was created.
+    assert (scripture_dir / "sdl-A33_2026_07_02.txt").is_file()
+    assert not (tmp_path / "Saudi_Arabia").exists()
+
+
 def make_candidate(name: str, alignment: float) -> Candidate:
     return Candidate(name=name, stem=f"en-{name}", iso="en", count=1, parallel=1, alignment=alignment, script="Latn")
 
@@ -346,6 +487,15 @@ def test_select_experiments(monkeypatch, capsys):
     assert select_experiments(singles, mixed, dry_run=False) == [singles[0], mixed[0]]
     monkeypatch.setattr("builtins.input", lambda prompt: "none")
     assert select_experiments(singles, mixed, dry_run=False) == []
+
+    # Duplicate tokens are deduplicated (a repeat would otherwise be submitted twice).
+    monkeypatch.setattr("builtins.input", lambda prompt: "1,1 2")
+    assert select_experiments(singles, mixed, dry_run=False) == [singles[0], singles[1]]
+
+    # --top widens (or narrows) the display cap.
+    monkeypatch.setattr("builtins.input", lambda prompt: "all")
+    assert len(select_experiments(singles, mixed, dry_run=False, top=25)) == 25
+    assert select_experiments(singles, mixed, dry_run=False, top=2) == singles[:2]
 
     # Dry run returns everything displayed without prompting.
     monkeypatch.setattr("builtins.input", lambda prompt: pytest.fail("dry run must not prompt"))
