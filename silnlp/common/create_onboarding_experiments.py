@@ -24,6 +24,7 @@ from typing import AbstractSet, Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
 import yaml
+from machine.corpora import FileParatextProjectSettingsParser
 from machine.scripture import ALL_BOOK_IDS, book_id_to_number, book_number_to_id, get_chapters, is_nt, is_ot
 
 from .environment import SilNlpEnv
@@ -472,13 +473,75 @@ def build_config(
     }
 
 
-def build_translate_config(sources: List[Candidate], translate_books: str) -> dict:
+def build_translate_config(
+    sources: List[Candidate], translate_books: str, source_projects: Optional[Dict[str, str]] = None
+) -> dict:
+    source_projects = source_projects or {}
     return {
         "translate": [
-            {"books": translate_books, "src_project": source.name, "checkpoint": CHECKPOINT} for source in sources
+            {
+                "books": translate_books,
+                "src_project": source_projects.get(source.name, source.name),
+                "checkpoint": CHECKPOINT,
+            }
+            for source in sources
         ],
         "postprocess": [{"paragraph_behavior": "place"}],
     }
+
+
+def check_translate_source(projects_dir: Path, project: str, books: Sequence[str]) -> Optional[str]:
+    """Return why `project` cannot supply `books` for translation, or None if it can.
+
+    The books' file names come from the project's Settings.xml naming convention.
+    """
+    project_dir = projects_dir / project
+    if not project_dir.is_dir():
+        return f"there is no project folder '{project}' in {projects_dir}"
+    try:
+        settings = FileParatextProjectSettingsParser(project_dir).parse()
+    except Exception as e:
+        return f"the settings of project '{project}' could not be read ({e})"
+    missing = [book for book in books if not (project_dir / settings.get_book_file_name(book)).is_file()]
+    if missing:
+        return f"project '{project}' does not contain {';'.join(missing)}"
+    return None
+
+
+def resolve_translate_sources(
+    source_names: Sequence[str], books: Sequence[str], projects_dir: Optional[Path], dry_run: bool
+) -> Dict[str, str]:
+    """Check that each translation source project contains the books to be translated.
+
+    Warns about a missing project or missing books and asks for a different project to
+    translate from (checked too), so the user can decide how to proceed. Returns a mapping
+    of source name -> project to use as src_project in translate_config.yml.
+    """
+    replacements: Dict[str, str] = {}
+    if projects_dir is None:
+        return replacements
+    for name in source_names:
+        current = name
+        while True:
+            problem = check_translate_source(projects_dir, current, books)
+            if problem is None:
+                break
+            print(f"Warning: cannot translate {';'.join(books)} from '{current}': {problem}.")
+            if dry_run:
+                break
+            try:
+                reply = input(
+                    f"Enter a different project to translate from (or press Enter to keep '{current}'): "
+                ).strip()
+            except EOFError:
+                reply = ""
+            if not reply or reply == current:
+                break
+            current = reply
+        if current != name:
+            print(f"Translating from '{current}' instead of '{name}'.")
+            replacements[name] = current
+    return replacements
 
 
 def find_existing(lang_dir: Path, prefix: str, config: dict) -> Tuple[Optional[Path], int]:
@@ -603,6 +666,7 @@ def run(
     min_alignment: float,
     scripture_dir: Optional[Path] = None,
     terms_dir: Optional[Path] = None,
+    projects_dir: Optional[Path] = None,
     test_variant: Optional[str] = None,
     target: Optional[str] = None,
     top: int = TOP_EXPERIMENTS,
@@ -766,6 +830,12 @@ def run(
         [[c] for c in passing], [list(pair) for pair in itertools.combinations(passing, 2)], dry_run, top=top
     )
 
+    # The chosen sources double as the projects to translate from; make sure each project
+    # folder and every book to be translated actually exists before writing the configs.
+    translate_book_ids = [book_number_to_id(number) for number in sorted(translate_set)]
+    source_names = list(dict.fromkeys(source.name for sources in chosen for source in sources))
+    source_projects = resolve_translate_sources(source_names, translate_book_ids, projects_dir, dry_run)
+
     experiments: List[Experiment] = []
     existing_experiments: List[Experiment] = []
     warned_removals: set = set()
@@ -798,7 +868,7 @@ def run(
                     sources=sources,
                     folder=existing,
                     config=config,
-                    translate_config=build_translate_config(sources, translate_books),
+                    translate_config=build_translate_config(sources, translate_books, source_projects),
                 )
             )
             continue
@@ -807,7 +877,7 @@ def run(
             sources=sources,
             folder=folder,
             config=config,
-            translate_config=build_translate_config(sources, translate_books),
+            translate_config=build_translate_config(sources, translate_books, source_projects),
         )
         experiments.append(experiment)
         if dry_run:
@@ -907,6 +977,7 @@ def main() -> None:
         min_alignment=args.min_alignment,
         scripture_dir=Path(environment.mt_scripture_dir),
         terms_dir=Path(environment.mt_terms_dir),
+        projects_dir=Path(environment.pt_projects_dir),
         test_variant="notest" if args.no_test else "test100" if args.test100 else None,
         target=args.target,
         top=args.top,

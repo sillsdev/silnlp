@@ -61,8 +61,38 @@ def request_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def select_all(monkeypatch):
-    """Answer the experiment-selection prompt with 'all' and the copy confirmation with 'y'."""
-    monkeypatch.setattr("builtins.input", lambda prompt: "y" if "Copy" in prompt else "all")
+    """Answer the selection prompt with 'all', the copy confirmation with 'y', keep translate sources."""
+
+    def answer(prompt: str) -> str:
+        if "Copy" in prompt:
+            return "y"
+        if "different project" in prompt:
+            return ""
+        return "all"
+
+    monkeypatch.setattr("builtins.input", answer)
+
+
+def make_paratext_project(projects_dir: Path, name: str, books: list) -> None:
+    """Create a minimal Paratext project folder with a Settings.xml and the given book files."""
+    from machine.corpora import FileParatextProjectSettingsParser
+
+    project_dir = projects_dir / name
+    project_dir.mkdir(parents=True)
+    (project_dir / "Settings.xml").write_text(
+        "<ScriptureText>\n"
+        "  <Versification>4</Versification>\n"
+        "  <LanguageIsoCode>en:::</LanguageIsoCode>\n"
+        "  <Language>English</Language>\n"
+        "  <Encoding>65001</Encoding>\n"
+        f"  <Name>{name}</Name>\n"
+        f'  <Naming PrePart="" BookNameForm="41MAT" PostPart="{name}.SFM" />\n'
+        "</ScriptureText>\n",
+        encoding="utf-8",
+    )
+    settings = FileParatextProjectSettingsParser(project_dir).parse()
+    for book in books:
+        (project_dir / settings.get_book_file_name(book)).write_text(f"\\id {book}\n", encoding="utf-8")
 
 
 def test_parse_log(request_dir: Path):
@@ -837,6 +867,76 @@ def test_run_iso_clash_copies_and_uses_synthetic_code(request_dir: Path, tmp_pat
             dry_run=True,
         )
     assert any("may be outdated" in record.message for record in caplog.records)
+
+
+def test_check_translate_source(tmp_path: Path):
+    from silnlp.common.create_onboarding_experiments import check_translate_source
+
+    projects_dir = tmp_path / "projects"
+    make_paratext_project(projects_dir, "NIV11R", ["MAT"])
+    assert check_translate_source(projects_dir, "NIV11R", ["MAT"]) is None
+    assert "does not contain RUT" in check_translate_source(projects_dir, "NIV11R", ["MAT", "RUT"])
+    assert "no project folder 'MISSING'" in check_translate_source(projects_dir, "MISSING", ["MAT"])
+    # A project folder without a readable Settings.xml is reported, not crashed on.
+    (projects_dir / "BROKEN").mkdir()
+    assert "could not be read" in check_translate_source(projects_dir, "BROKEN", ["MAT"])
+
+
+def test_run_checks_translate_sources(request_dir: Path, tmp_path: Path, capsys, monkeypatch):
+    # NIV11R has MAT; HINCLBSI's project folder is missing. The user first tries a project
+    # that lacks MAT (warned again), then one that has it; translate_config uses the choice.
+    projects_dir = tmp_path / "projects"
+    make_paratext_project(projects_dir, "NIV11R", ["MAT"])
+    make_paratext_project(projects_dir, "NOMAT", ["RUT"])
+    make_paratext_project(projects_dir, "HINDI2", ["MAT"])
+
+    answers = iter(["NOMAT", "HINDI2"])
+
+    def answer(prompt: str) -> str:
+        if "different project" in prompt:
+            return next(answers)
+        return "all"
+
+    monkeypatch.setattr("builtins.input", answer)
+    experiments = run(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="complete",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+        projects_dir=projects_dir,
+    )
+    output = capsys.readouterr().out
+    assert "cannot translate MAT from 'HINCLBSI': there is no project folder 'HINCLBSI'" in output
+    assert "cannot translate MAT from 'NOMAT': project 'NOMAT' does not contain MAT" in output
+    assert "Translating from 'HINDI2' instead of 'HINCLBSI'." in output
+
+    by_folder = {e.folder.name: e for e in experiments}
+    translate = by_folder["NIV11R_HINCLBSI_sdl_1"].translate_config["translate"]
+    assert [entry["src_project"] for entry in translate] == ["NIV11R", "HINDI2"]
+    # The training config still uses the original extract stems.
+    assert by_folder["NIV11R_HINCLBSI_sdl_1"].config["data"]["corpus_pairs"][0]["src"] == ["en-NIV11R", "hi-HINCLBSI"]
+
+
+def test_run_translate_source_warnings_only_in_dry_run(request_dir: Path, tmp_path: Path, capsys, monkeypatch):
+    projects_dir = tmp_path / "projects"
+    make_paratext_project(projects_dir, "NIV11R", ["MAT"])
+    monkeypatch.setattr("builtins.input", lambda prompt: pytest.fail("dry run must not prompt for translate sources"))
+    run(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="complete",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+        projects_dir=projects_dir,
+        dry_run=True,
+    )
+    output = capsys.readouterr().out
+    assert "cannot translate MAT from 'HINCLBSI'" in output
 
 
 def test_run_rejects_unknown_test_variant(request_dir: Path, tmp_path: Path):
