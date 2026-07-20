@@ -17,7 +17,6 @@ model's native chat template and a configurable translation instruction.
 """
 
 import logging
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -99,38 +98,15 @@ TRAINING_ARGS_CONFIG_MAPPING = {
 
 LABEL_PAD_TOKEN_ID = -100
 
-# HF Hub model-name prefixes that are gated behind a license acceptance (as opposed to
-# LLM_MODEL_PREFIXES in config_utils.py, which also includes ungated families like Hunyuan).
-GATED_MODEL_PREFIXES = ("google/gemma", "google/translate-gemma", "google/translategemma")
-
 # TranslateGemma's chat template rejects a plain-text user turn: it requires `content` to be a
 # single-item list of {type, source_lang_code, target_lang_code, text|image}, and it renders the
 # natural-language instruction itself from a fixed table of ~55 supported language codes.
 TRANSLATE_GEMMA_MODEL_PREFIXES = ("google/translate-gemma", "google/translategemma")
 
 
-def get_hf_token(model_name_or_path: str) -> Optional[str]:
-    """Resolve the HuggingFace Hub token from the environment, raising a clear error up front
-    if it's missing for a model known to require one. Without this check, a missing/unpropagated
-    token surfaces much later as a cryptic TypeError deep inside sentencepiece, because transformers
-    treats an unauthorized fetch of an optional tokenizer file as "file not found" rather than as
-    an auth error."""
-    token = os.environ.get("HF_TOKEN")
-    if token is None and model_name_or_path.lower().startswith(GATED_MODEL_PREFIXES):
-        raise RuntimeError(
-            f"'{model_name_or_path}' is a gated HuggingFace model, but the HF_TOKEN environment "
-            "variable is not set. Set HF_TOKEN to a token from an account that has accepted the "
-            "model's license on huggingface.co, and make sure it reaches the ClearML worker "
-            "(e.g. via SILClearML's docker_arguments)."
-        )
-    return token
-
-
-def is_image_text_to_text_model(
-    model_name_or_path: str, trust_remote_code: bool = False, token: Optional[str] = None
-) -> bool:
+def is_image_text_to_text_model(model_name_or_path: str, trust_remote_code: bool = False) -> bool:
     """Return True if the checkpoint is a multimodal image-text-to-text model."""
-    config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=trust_remote_code, token=token)
+    config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=trust_remote_code)
     return type(config) in AutoModelForImageTextToText._model_mapping
 
 
@@ -235,15 +211,9 @@ class LLMConfig(Config):
         # predictions/references; for LLMs both are raw text, so a no-op tokenizer suffices.
         return NullTokenizer()
 
-    @property
-    def hf_token(self) -> Optional[str]:
-        return get_hf_token(self.model)
-
     def get_hf_tokenizer(self) -> PreTrainedTokenizerBase:
         if self._hf_tokenizer is None:
-            tokenizer = AutoTokenizer.from_pretrained(
-                self.model, trust_remote_code=self.params["trust_remote_code"], token=self.hf_token
-            )
+            tokenizer = AutoTokenizer.from_pretrained(self.model, trust_remote_code=self.params["trust_remote_code"])
             if tokenizer.pad_token_id is None:
                 tokenizer.pad_token = tokenizer.eos_token
             self._hf_tokenizer = tokenizer
@@ -395,9 +365,7 @@ class CausalLMProvider:
         return getattr(torch, self.config.params["torch_dtype"], torch.bfloat16)
 
     def _determine_auto_model_class(self, model_name_or_path: str) -> type:
-        if is_image_text_to_text_model(
-            model_name_or_path, self.config.params["trust_remote_code"], self.config.hf_token
-        ):
+        if is_image_text_to_text_model(model_name_or_path, self.config.params["trust_remote_code"]):
             return AutoModelForImageTextToText
         return AutoModelForCausalLM
 
@@ -434,7 +402,6 @@ class CausalLMProvider:
             torch_dtype=self._dtype(),
             attn_implementation=params["attn_implementation"],
             trust_remote_code=params["trust_remote_code"],
-            token=self.config.hf_token,
             device_map=device_map,
         )
         self._set_use_cache(model, not self.config.train["gradient_checkpointing"])
@@ -446,7 +413,6 @@ class CausalLMProvider:
             torch_dtype=self._dtype(),
             attn_implementation=params["attn_implementation"],
             trust_remote_code=params["trust_remote_code"],
-            token=self.config.hf_token,
         )
         if checkpoint_path is None:
             model_class = self._determine_auto_model_class(self.config.model)
