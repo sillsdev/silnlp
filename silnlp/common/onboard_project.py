@@ -1,5 +1,4 @@
 import argparse
-import pandas as pd
 import getpass
 import hashlib
 import logging
@@ -10,14 +9,15 @@ import sys
 import zipfile
 from contextlib import contextmanager
 from datetime import datetime
-from pathlib import Path
 from enum import Enum
+from pathlib import Path
 from typing import Iterator, List
 
+import pandas as pd
 import wildebeest.wb_analysis as wb_ana
 import yaml
 from machine.corpora import FileParatextProjectSettingsParser, ParatextProjectSettings
-from machine.scripture.canon import book_number_to_id, book_id_to_number
+from machine.scripture.canon import book_id_to_number, book_number_to_id
 
 from silnlp.common.analyze import analyze
 from silnlp.common.clean_projects import process_single_project_for_cleaning
@@ -532,6 +532,119 @@ class OnboardingReport:
         return self.generate_dict()
 
 
+class OnboardingReportCreator:
+
+    def __init__(
+        self,
+        report_path: Path,
+        planned_books: List[str],
+        completed_books: List[str],
+        main_project: OnboardingProject,
+        reference_projects: List[OnboardingProject],
+    ) -> None:
+        self.report_path = report_path
+        self.planned_books = planned_books
+        self.completed_books = completed_books
+        self.main_project = main_project
+        self.reference_projects = reference_projects
+        self.report_df: pd.DataFrame = pd.DataFrame()
+
+    def add_flag(self, condition: pd.Series | bool, column_name: str, flag_message: str) -> None:
+        if isinstance(condition, pd.Series):
+            mask = condition.reindex(self.report_df.index, fill_value=False)
+            if "Project Type" in self.report_df.columns:
+                mask = mask & (self.report_df["Project Type"] != "Notes and Flags")
+            if not mask.any():
+                return
+        elif not condition:
+            return
+        else:
+            mask = None
+
+        notes_idx = self.report_df[self.report_df["Project Type"] == "Notes and Flags"].index[0]
+        current = self.report_df.at[notes_idx, column_name]
+        if current is None or current == "" or (isinstance(current, float) and pd.isna(current)):
+            self.report_df.at[notes_idx, column_name] = flag_message
+        else:
+            self.report_df.at[notes_idx, column_name] = f"{current}; {flag_message}"
+
+    def _non_empty_string_series(self, series: pd.Series) -> pd.Series:
+        series = series.fillna("").astype(str).str.strip()
+        return series[series != ""]
+
+    def create_report_flags(self) -> None:
+        self.report_df.loc[len(self.report_df)] = ["Notes and Flags"] + [""] * (len(self.report_df.columns) - 1)
+
+        self.add_flag(self.report_df["Normalization"] != "NFC", "Normalization", "Normalization is not NFC")
+
+        main_versification = self.report_df.loc[
+            self.report_df["Project Type"] == ProjectType.MAIN.value, "Versification"
+        ].values[0]
+        draft_source_mask = self.report_df["Project Type"] == ProjectType.DRAFT_SOURCE.value
+        self.add_flag(
+            self.report_df["Versification"].where(draft_source_mask, "") != main_versification,
+            "Versification",
+            "Draft Source Versification does not match Main Project",
+        )
+
+        reference_mask = self.report_df["Project Type"] != ProjectType.MAIN.value
+        if reference_mask.any():
+            if self._non_empty_string_series(self.report_df.loc[reference_mask, "Books for Training"]).eq("no").all():
+                self.add_flag(True, "Books for Training", "Books for Training is 'no' for all Source projects")
+
+            if self._non_empty_string_series(self.report_df.loc[reference_mask, "Language in NLLB"]).eq("no").all():
+                self.add_flag(True, "Language in NLLB", "Source Language is not in NLLB for all Source projects")
+
+            if self._non_empty_string_series(self.report_df.loc[reference_mask, "Script in NLLB"]).eq("no").all():
+                self.add_flag(True, "Script in NLLB", "Script is not in NLLB for all Source projects")
+
+    def create_report_csv(self) -> None:
+
+        projects = [self.main_project] + self.reference_projects
+        formatted_reports = [p.report.generate_report() for p in projects]
+
+        self.report_df: pd.DataFrame = pd.DataFrame(formatted_reports)
+
+        self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Books for Training"] = ";".join(
+            self.completed_books
+        )
+        self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Books to Translate"] = ";".join(
+            self.planned_books
+        )
+        self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Books Missing/Incomplete"] = (
+            ";".join([book for book in self.completed_books if book not in self.main_project.completed_books])
+        )
+        self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Extra Books"] = ";".join(
+            [book for book in self.main_project.completed_books if book not in self.completed_books]
+        )
+
+        for project in self.reference_projects:
+            books_missing = [
+                book for book in self.completed_books + self.planned_books if book not in project.completed_books
+            ]
+            extra_books = [
+                book for book in project.completed_books if book not in self.completed_books + self.planned_books
+            ]
+            self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Books for Training"] = (
+                "yes" if len(books_missing) == 0 else "no"
+            )
+            self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Books to Translate"] = (
+                "yes" if len(books_missing) == 0 else "no"
+            )
+            self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Books Missing/Incomplete"] = (
+                ";".join(books_missing)
+            )
+            self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Extra Books"] = ";".join(
+                extra_books
+            )
+
+        self.create_report_flags()
+
+        self.report_df = (
+            self.report_df.set_index("Project Type").T.reset_index().rename(columns={"index": "Project Type"})
+        ).to_csv(self.report_path, index=False)
+
+
 class OnboardingRequest:
 
     def __init__(
@@ -635,7 +748,18 @@ class OnboardingRequest:
             if self.align:
                 self.align_main_project()
 
-            self.create_report()
+            LOGGER.info("Creating onboarding report.")
+            report_path = self.output_folder / "onboarding_report.csv"
+
+            report_creator = OnboardingReportCreator(
+                report_path=report_path,
+                completed_books=self.main_project.completed_books,
+                planned_books=self.planned_books,
+                main_project=self.main_project,
+                reference_projects=self.reference_projects,
+            )
+
+            report_creator.create_report_csv()
 
     def align_main_project(self) -> None:
         iso_codes = set()
@@ -798,52 +922,6 @@ class OnboardingRequest:
             yield
         finally:
             close_logger(log_file_path)
-
-    def create_report(self) -> None:
-        LOGGER.info("Creating onboarding report.")
-        report_path = self.output_folder / "onboarding_report.csv"
-
-        projects = [self.main_project] + self.reference_projects
-        formatted_reports = [p.report.generate_report() for p in projects]
-
-        self.report_df = pd.DataFrame(formatted_reports)
-
-        self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Books for Training"] = ";".join(
-            self.completed_books
-        )
-        self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Books to Translate"] = ";".join(
-            self.planned_books
-        )
-        self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Books Missing/Incomplete"] = (
-            ";".join([book for book in self.completed_books if book not in self.main_project.completed_books])
-        )
-        self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Extra Books"] = ";".join(
-            [book for book in self.main_project.completed_books if book not in self.completed_books]
-        )
-
-        for project in self.reference_projects:
-            books_missing = [
-                book for book in self.completed_books + self.planned_books if book not in project.completed_books
-            ]
-            extra_books = [
-                book for book in project.completed_books if book not in self.completed_books + self.planned_books
-            ]
-            self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Books for Training"] = (
-                "yes" if len(books_missing) == 0 else "no"
-            )
-            self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Books to Translate"] = (
-                "yes" if len(books_missing) == 0 else "no"
-            )
-            self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Books Missing/Incomplete"] = (
-                ";".join(books_missing)
-            )
-            self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Extra Books"] = ";".join(
-                extra_books
-            )
-
-        self.report_df.set_index("Project Type").T.reset_index().rename(columns={"index": "Project Type"}).to_csv(
-            report_path, index=False
-        )
 
 
 def create_paratext_project_folder_if_not_exists(project_name: str, environment: SilNlpEnv) -> Path:
