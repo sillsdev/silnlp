@@ -587,16 +587,24 @@ class OnboardingReportCreator:
             "Draft Source Versification does not match Main Project",
         )
 
-        reference_mask = self.report_df["Project Type"] != ProjectType.MAIN.value
-        if reference_mask.any():
-            if self._non_empty_string_series(self.report_df.loc[reference_mask, "Books for Training"]).eq("no").all():
-                self.add_flag(True, "Books for Training", "Books for Training is 'no' for all Source projects")
+        project_mask = (
+            self.report_df["Project Type"] != "Notes and Flags"
+            and self.report_df["Project Type"] != ProjectType.MAIN.value
+        )
+        if project_mask.any():
+            if self._non_empty_string_series(self.report_df.loc[project_mask, "Books for Training"]).eq("no").all():
+                self.add_flag(True, "Books for Training", "No ReferenceProject has all the books needed for training")
 
-            if self._non_empty_string_series(self.report_df.loc[reference_mask, "Language in NLLB"]).eq("no").all():
-                self.add_flag(True, "Language in NLLB", "Source Language is not in NLLB for all Source projects")
+            if self._non_empty_string_series(self.report_df.loc[project_mask, "Books to Translate"]).eq("no").all():
+                self.add_flag(
+                    True, "Books to Translate", "No Reference Project has all the books needed for translation"
+                )
 
-            if self._non_empty_string_series(self.report_df.loc[reference_mask, "Script in NLLB"]).eq("no").all():
-                self.add_flag(True, "Script in NLLB", "Script is not in NLLB for all Source projects")
+            if self._non_empty_string_series(self.report_df.loc[project_mask, "Language in NLLB"]).eq("no").all():
+                self.add_flag(True, "Language in NLLB", "Source Language is not in NLLB for all Reference Projects")
+
+            if self._non_empty_string_series(self.report_df.loc[project_mask, "Script in NLLB"]).eq("no").all():
+                self.add_flag(True, "Script in NLLB", "Script is not in NLLB for all Reference Projects")
 
     def create_report_csv(self) -> None:
 
