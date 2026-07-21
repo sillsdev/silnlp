@@ -86,7 +86,7 @@ class _StubTranslateGemmaTokenizer:
 
     def apply_chat_template(self, messages, add_generation_prompt, tokenize):
         # Mimics the real template's behavior for a language code outside its fixed lookup table.
-        raise UndefinedError("'dict object' has no attribute 'ded'")
+        raise UndefinedError("'dict object' has no attribute 'tst'")
 
     def __call__(self, text, add_special_tokens):
         assert not add_special_tokens
@@ -97,19 +97,19 @@ def test_apply_prompt_template_translate_gemma_falls_back_for_unrecognized_langu
     config = _StubLLMConfig(
         model="google/translategemma-4b-it",
         params={"prompt": {"instruction_template": "unused"}},
-        data={"lang_codes": {"en": "English"}},
+        data={"lang_codes": {"en": "English", "tst": "Test Language"}},
     )
     tokenizer = _StubTranslateGemmaTokenizer()
-    messages = config.build_prompt_messages("hello", "en", "ded")
+    messages = config.build_prompt_messages("hello", "en", "tst")
 
     text = config.apply_prompt_template(tokenizer, messages, add_generation_prompt=True, tokenize=False)
     assert text == (
         "<bos><start_of_turn>user\n"
-        "You are a professional English (en) to ded (ded) translator. Your goal is to accurately convey "
-        "the meaning and nuances of the original English text while adhering to ded grammar, vocabulary, "
+        "You are a professional English (en) to Test Language (tst) translator. Your goal is to accurately convey "
+        "the meaning and nuances of the original English text while adhering to Test Language grammar, vocabulary, "
         "and cultural sensitivities.\n"
-        "Produce only the ded translation, without any additional explanations or commentary. Please "
-        "translate the following English text into ded:\n\n\nhello<end_of_turn>\n"
+        "Produce only the Test Language translation, without any additional explanations or commentary. Please "
+        "translate the following English text into Test Language:\n\n\nhello<end_of_turn>\n"
         "<start_of_turn>model\n"
     )
 
