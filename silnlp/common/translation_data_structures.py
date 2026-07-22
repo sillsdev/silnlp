@@ -18,11 +18,15 @@ class SentenceTranslation:
         tokens: List[str],
         token_scores: List[float],
         sequence_score: Optional[float],
+        starts_with_special_token: bool = True,
     ):
         self._translation = translation
         self._tokens = tokens
         self._token_scores = token_scores
         self._sequence_score = sequence_score
+        # Seq2seq models emit the forced decoder start/language token as tokens[0]; it must be
+        # excluded from test files. Decoder-only LLM output has no such token.
+        self._starts_with_special_token = starts_with_special_token
 
     @classmethod
     def combine(cls, translations: List["SentenceTranslation"]) -> "SentenceTranslation":
@@ -37,7 +41,13 @@ class SentenceTranslation:
             if all(t.has_sequence_confidence_score() for t in translations)
             else None
         )
-        return cls(combined_translation, combined_tokens, combined_token_scores, combined_sequence_score)
+        return cls(
+            combined_translation,
+            combined_tokens,
+            combined_token_scores,
+            combined_sequence_score,
+            translations[0]._starts_with_special_token,
+        )
 
     def get_translation(self) -> str:
         return self._translation
@@ -49,7 +59,8 @@ class SentenceTranslation:
         return exp(self._sequence_score) if self._sequence_score is not None else None
 
     def join_tokens_for_test_file(self) -> str:
-        return " ".join([token for token in self._tokens[1:] if token != "<pad>"])
+        tokens = self._tokens[1:] if self._starts_with_special_token else self._tokens
+        return " ".join([token for token in tokens if token != "<pad>"])
 
     def join_tokens_for_confidence_file(self) -> str:
         return "\t".join(self._tokens)

@@ -24,6 +24,7 @@ from typing import Any, Dict, Generator, Iterable, List, Optional, Tuple, Union
 
 import torch
 from datasets import Dataset
+from machine.corpora import TextFileTextCorpus
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
@@ -42,7 +43,15 @@ from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup
 from ..common.translator import generate_confidence_files
 from ..common.utils import merge_dict
-from .config import CheckpointType, Config, InferenceModelParams, NMTModel, find_last_checkpoint, write_effective_config
+from .config import (
+    CheckpointType,
+    Config,
+    InferenceModelParams,
+    NMTModel,
+    collect_training_args,
+    find_last_checkpoint,
+    write_effective_config,
+)
 from .corpora import DataFile
 from .seq2seq_config import batch_sentences, find_executable_batch_size
 from .tokenizer import NullTokenizer, Tokenizer
@@ -102,6 +111,57 @@ def is_image_text_to_text_model(model_name_or_path: str, trust_remote_code: bool
     """Return True if the checkpoint is a multimodal image-text-to-text model."""
     config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=trust_remote_code)
     return type(config) in AutoModelForImageTextToText._model_mapping
+
+
+def build_generation_kwargs(infer: dict, num_return_sequences: int, pad_token_id: Optional[int]) -> Dict[str, Any]:
+    gen_kwargs: Dict[str, Any] = {
+        "max_new_tokens": infer["max_new_tokens"],
+        "num_return_sequences": num_return_sequences,
+        "pad_token_id": pad_token_id,
+    }
+    if infer.get("do_sample"):
+        gen_kwargs["do_sample"] = True
+        gen_kwargs["temperature"] = infer["temperature"]
+    else:
+        num_beams: int = infer["num_beams"]
+        if num_return_sequences > num_beams:
+            raise RuntimeError(
+                f"Beam search cannot return {num_return_sequences} drafts with num_beams set to {num_beams}. "
+                "Increase num_beams to at least num_drafts or set do_sample to true."
+            )
+        gen_kwargs["num_beams"] = num_beams
+    return gen_kwargs
+
+
+@dataclass
+class PromptMessages:
+    """The chat messages for a translation prompt: an optional system message, a user
+    instruction, and, for training examples, the target translation as the assistant turn."""
+
+    system_message: str
+    instruction: str
+    target: Optional[str] = None
+
+    def to_chat_messages(self) -> List[Dict[str, str]]:
+        messages: List[Dict[str, str]] = []
+        if self.system_message:
+            messages.append({"role": "system", "content": self.system_message})
+        messages.append({"role": "user", "content": self.instruction})
+        if self.target is not None:
+            messages.append({"role": "assistant", "content": self.target})
+        return messages
+
+    def to_folded_chat_messages(self) -> List[Dict[str, str]]:
+        """Chat messages with the system message folded into the user turn, for chat
+        templates that reject a separate system role (e.g. Gemma)."""
+        instruction = f"{self.system_message}\n\n{self.instruction}" if self.system_message else self.instruction
+        messages: List[Dict[str, str]] = [{"role": "user", "content": instruction}]
+        if self.target is not None:
+            messages.append({"role": "assistant", "content": self.target})
+        return messages
+
+    def to_plain_text(self) -> str:
+        return "".join(f"{m['content']}\n" for m in self.to_chat_messages())
 
 
 class LLMConfig(Config):
@@ -183,6 +243,9 @@ class LLMConfig(Config):
 
         super().__init__(exp_dir, config, environment)
 
+        if len(self.src_isos) > 1 or len(self.trg_isos) > 1:
+            raise RuntimeError("LLM experiments only support a single source language and a single target language.")
+
         self._disable_eval_if_no_val_split()
 
     @property
@@ -194,7 +257,7 @@ class LLMConfig(Config):
         mixed_precision: bool = True,
         num_devices: int = 1,
         clearml_queue: Optional[str] = None,
-        pretrained_model_provider_factory: "CausalLMProviderFactory" = None,  # type: ignore[assignment]
+        pretrained_model_provider_factory: Optional["CausalLMProviderFactory"] = None,
     ) -> NMTModel:
         if pretrained_model_provider_factory is None:
             pretrained_model_provider_factory = FileCausalLMProviderFactory()
@@ -226,22 +289,15 @@ class LLMConfig(Config):
 
     def build_prompt_messages(
         self, source: str, src_lang: str, trg_lang: str, target: Optional[str] = None
-    ) -> List[Dict[str, str]]:
+    ) -> PromptMessages:
         prompt_config: dict = self.params["prompt"]
         instruction = prompt_config["instruction_template"].format(src_lang=src_lang, trg_lang=trg_lang, source=source)
-        messages: List[Dict[str, str]] = []
-        system_message: str = prompt_config.get("system_message", "")
-        if system_message:
-            messages.append({"role": "system", "content": system_message})
-        messages.append({"role": "user", "content": instruction})
-        if target is not None:
-            messages.append({"role": "assistant", "content": target})
-        return messages
+        return PromptMessages(prompt_config.get("system_message", ""), instruction, target)
 
     def apply_prompt_template(
         self,
         tokenizer: PreTrainedTokenizerBase,
-        messages: List[Dict[str, str]],
+        prompt: PromptMessages,
         add_generation_prompt: bool,
         tokenize: bool,
     ) -> Union[str, List[int]]:
@@ -250,35 +306,22 @@ class LLMConfig(Config):
         if tokenizer.chat_template is not None:
             try:
                 return tokenizer.apply_chat_template(
-                    messages, add_generation_prompt=add_generation_prompt, tokenize=tokenize
+                    prompt.to_chat_messages(), add_generation_prompt=add_generation_prompt, tokenize=tokenize
                 )
             except Exception:
                 # Some chat templates (e.g. Gemma) reject a separate system role; fold the
                 # system message into the first user turn and retry.
-                folded = self._fold_system_message(messages)
-                if folded is not None:
+                if prompt.system_message:
                     return tokenizer.apply_chat_template(
-                        folded, add_generation_prompt=add_generation_prompt, tokenize=tokenize
+                        prompt.to_folded_chat_messages(), add_generation_prompt=add_generation_prompt, tokenize=tokenize
                     )
                 raise
 
         LOGGER.warning("Tokenizer for %s has no chat template; falling back to a plain text prompt.", self.model)
-        text = "".join(f"{m['content']}\n" for m in messages)
+        text = prompt.to_plain_text()
         if tokenize:
             return tokenizer(text, add_special_tokens=True)["input_ids"]
         return text
-
-    @staticmethod
-    def _fold_system_message(messages: List[Dict[str, str]]) -> Optional[List[Dict[str, str]]]:
-        if len(messages) == 0 or messages[0]["role"] != "system":
-            return None
-        system_content = messages[0]["content"]
-        rest = messages[1:]
-        if len(rest) == 0 or rest[0]["role"] != "user":
-            return None
-        folded = [dict(m) for m in rest]
-        folded[0]["content"] = f"{system_content}\n\n{folded[0]['content']}"
-        return folded
 
     def _build_vocabs(self, stats: bool = False) -> None:
         # No vocabulary surgery for decoder-only LLMs; they use their own tokenizer.
@@ -453,7 +496,7 @@ class LLMModel(NMTModel):
         tokenizer.padding_side = "right"
 
         model = self._provider.create_model_for_training()
-        model = self._apply_finetuning(model)
+        model = self._apply_finetuning_config(model)
 
         max_seq_length: int = self._config.params["max_seq_length"]
         src_lang = self._config.lang_name(self._config.train_src_iso)
@@ -516,7 +559,7 @@ class LLMModel(NMTModel):
         trainer.save_metrics("train", metrics)
         trainer.save_state()
 
-    def _apply_finetuning(self, model: PreTrainedModel) -> PreTrainedModel:
+    def _apply_finetuning_config(self, model: PreTrainedModel) -> PreTrainedModel:
         method = self._config.finetune_method
         if method == "full":
             return model
@@ -545,38 +588,28 @@ class LLMModel(NMTModel):
     def _load_text_dataset(self, src_path: Path, trg_path: Path) -> Optional[Dataset]:
         if not src_path.is_file() or not trg_path.is_file():
             return None
+        corpus = TextFileTextCorpus(src_path).align_rows(TextFileTextCorpus(trg_path))
         sources: List[str] = []
         targets: List[str] = []
-        with (
-            open(src_path, "r", encoding="utf-8-sig") as src_file,
-            open(trg_path, "r", encoding="utf-8-sig") as trg_file,
-        ):
-            for src_line, trg_line in zip(src_file, trg_file):
-                sources.append(src_line.strip())
-                targets.append(trg_line.strip())
+        for row in corpus:
+            sources.append(row.source_text)
+            targets.append(row.target_text)
         if len(sources) == 0:
             return None
         return Dataset.from_dict({"src": sources, "trg": targets})
 
     def _create_training_arguments(self) -> TrainingArguments:
-        parser = HfArgumentParser(TrainingArguments)
-        args: dict = {}
-        for section, params in TRAINING_ARGS_CONFIG_MAPPING.items():
-            section_config: dict = self._config.root[section]
-            for param in params:
-                if param in section_config and section_config[param] is not None:
-                    args[param] = section_config[param]
         dtype = self._config.params["torch_dtype"]
-        merge_dict(
-            args,
+        args = collect_training_args(
+            self._config.root,
+            TRAINING_ARGS_CONFIG_MAPPING,
             {
                 "bf16": self._mixed_precision and dtype == "bfloat16",
                 "fp16": self._mixed_precision and dtype == "float16",
             },
+            self._clearml_queue,
         )
-        if self._clearml_queue is None:
-            args["report_to"] = "none"
-        return parser.parse_dict(args)[0]
+        return HfArgumentParser(TrainingArguments).parse_dict(args)[0]
 
     def save_effective_config(self, path: Path) -> None:
         write_effective_config(path, self._config.root, self._create_training_arguments(), TRAINING_ARGS_CONFIG_MAPPING)
@@ -681,15 +714,7 @@ class LLMModel(NMTModel):
         num_return_sequences = num_drafts if (produce_multiple_translations and num_drafts > 1) else 1
 
         infer = self._config.infer
-        gen_kwargs: Dict[str, Any] = {
-            "max_new_tokens": infer["max_new_tokens"],
-            "num_beams": infer["num_beams"],
-            "num_return_sequences": num_return_sequences,
-            "pad_token_id": tokenizer.pad_token_id,
-        }
-        if num_return_sequences > 1 or infer.get("do_sample"):
-            gen_kwargs["do_sample"] = True
-            gen_kwargs["temperature"] = infer["temperature"]
+        gen_kwargs = build_generation_kwargs(infer, num_return_sequences, tokenizer.pad_token_id)
 
         device = model.device
         for batch in batch_sentences(sentences, infer["infer_batch_size"]):
@@ -714,9 +739,11 @@ class LLMModel(NMTModel):
             generated = output.sequences[:, prompt_length:]
 
             transition_scores = None
+            beam_indices = None
             if save_confidences and getattr(output, "scores", None) is not None:
+                beam_indices = getattr(output, "beam_indices", None)
                 transition_scores = model.compute_transition_scores(
-                    output.sequences, output.scores, normalize_logits=True
+                    output.sequences, output.scores, beam_indices, normalize_logits=True
                 )
 
             for i in range(len(batch)):
@@ -728,11 +755,17 @@ class LLMModel(NMTModel):
                     token_scores: List[float] = []
                     sequence_score: Optional[float] = None
                     if transition_scores is not None:
-                        valid = [s for s in transition_scores[seq_index].tolist() if s != float("-inf")]
+                        scores_row = transition_scores[seq_index].tolist()
+                        if beam_indices is not None:
+                            # With beam search, compute_transition_scores() marks padded positions
+                            # with a beam index of -1 and a transition score of 0.
+                            valid = [s for s, b in zip(scores_row, beam_indices[seq_index].tolist()) if b >= 0]
+                        else:
+                            valid = [s for s in scores_row if s != float("-inf")]
                         token_scores = valid
                         if len(valid) > 0:
                             sequence_score = sum(valid) / len(valid)
-                    # tokens=["", text] so join_tokens_for_test_file() (which drops tokens[0])
-                    # yields the full completion, and the NullTokenizer detokenize leaves it intact.
-                    translations.append(SentenceTranslation(text, ["", text], token_scores, sequence_score))
+                    translations.append(
+                        SentenceTranslation(text, [text], token_scores, sequence_score, starts_with_special_token=False)
+                    )
                 yield SentenceTranslationGroup(translations)

@@ -68,7 +68,15 @@ from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup
 from ..common.translator import generate_confidence_files
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
-from .config import SUPPORTED_GLOSS_ISOS, CheckpointType, Config, InferenceModelParams, NMTModel, write_effective_config
+from .config import (
+    SUPPORTED_GLOSS_ISOS,
+    CheckpointType,
+    Config,
+    InferenceModelParams,
+    NMTModel,
+    collect_training_args,
+    write_effective_config,
+)
 from .corpora import DataFile
 from .token_occurrence_logger import TokenOccurrenceLogger
 from .tokenizer import NullTokenizer, Tokenizer
@@ -1309,25 +1317,18 @@ class Seq2SeqNMTModel(NMTModel):
             yield model_output_group.convert_to_sentence_translation_group(tokenizer)
 
     def _create_training_arguments(self) -> Seq2SeqTrainingArguments:
-        parser = HfArgumentParser(Seq2SeqTrainingArguments)
-        args: dict = {}
-        for section, params in TRAINING_ARGS_CONFIG_MAPPING.items():
-            section_config: dict = self._config.root[section]
-            for param in params:
-                if param in section_config:
-                    args[param] = section_config[param]
-        # For context on floating point precision, see https://github.com/sillsdev/silnlp/issues/647
-        merge_dict(
-            args,
+        args = collect_training_args(
+            self._config.root,
+            TRAINING_ARGS_CONFIG_MAPPING,
+            # For context on floating point precision, see https://github.com/sillsdev/silnlp/issues/647
             {
                 "fp16": self._mixed_precision and not self._is_t5,
                 "bf16": self._mixed_precision and self._is_t5,
                 "tf32": self._mixed_precision,
             },
+            self._clearml_queue,
         )
-        if self._clearml_queue is None:
-            args["report_to"] = "none"
-        return parser.parse_dict(args)[0]
+        return HfArgumentParser(Seq2SeqTrainingArguments).parse_dict(args)[0]
 
     # Untie full embedding modules and instead tie embedding weights
     def _create_tied_embedding_weights(self, model: PreTrainedModel) -> PreTrainedModel:

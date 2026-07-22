@@ -144,6 +144,27 @@ class InferenceModelParams:
             raise ValueError("trg_lang must be a string")
 
 
+def collect_training_args(
+    config_root: dict,
+    mapping: Dict[str, Set[str]],
+    precision_args: Dict[str, Any],
+    clearml_queue: Optional[str],
+) -> Dict[str, Any]:
+    """Collect the experiment config values named in ``mapping`` into a flat dict of
+    TrainingArguments fields, with ``precision_args`` merged on top. Shared by the seq2seq and
+    LLM models, which differ only in the args class, the mapping, and the precision flags."""
+    args: Dict[str, Any] = {}
+    for section, params in mapping.items():
+        section_config: dict = config_root[section]
+        for param in params:
+            if param in section_config and section_config[param] is not None:
+                args[param] = section_config[param]
+    args.update(precision_args)
+    if clearml_queue is None:
+        args["report_to"] = "none"
+    return args
+
+
 def write_effective_config(path: Path, config_root: dict, training_args: Any, mapping: Dict[str, Set[str]]) -> None:
     """Write the resolved experiment config, overlaying the effective values from ``training_args``
     (per ``mapping``) onto a copy of ``config_root``. Shared by the seq2seq and LLM models, which
