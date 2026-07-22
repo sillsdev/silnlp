@@ -118,6 +118,7 @@ def extract_corpora(
             # check if the number of lines in the file is correct (the same as vref.txt)
             LOGGER.info(f"# of Verses: {verse_count}")
             LOGGER.info(f"# of Lines: {line_count}")
+            LOGGER.info(f"# of Range Lines: {range_line_count}")
             if verse_count != expected_verse_count:
                 LOGGER.info(
                     f"The number of completed verses is {verse_count} (out of the expected {expected_verse_count})."

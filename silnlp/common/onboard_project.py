@@ -54,7 +54,6 @@ class OnboardingProject:
         self.overwrite: bool = overwrite
         self.environment: SilNlpEnv = environment
         self.report: OnboardingReport = OnboardingReport(project=self, project_type=project_type)
-        self.completed_books: List[str] = []
 
     def get_extract_path(self) -> Path | None:
         if self.extract_file is not None:
@@ -400,6 +399,13 @@ class OnboardingProject:
         return project_name
 
 
+class OnboardingReportFlag:
+
+    def __init__(self, column_name: str, flag_message: str) -> None:
+        self.column_name = column_name
+        self.flag_message = flag_message
+
+
 class OnboardingReport:
 
     def __init__(self, project: OnboardingProject, project_type: ProjectType) -> None:
@@ -426,6 +432,7 @@ class OnboardingReport:
         self.mean_char_per_token: float = 0.0
         self.num_added_tokens: int = None
         self.num_verses_truncated: int = None
+        self.completed_books: List[str] = []
 
     def generate_dict(self) -> dict:
         return {
@@ -451,9 +458,10 @@ class OnboardingReport:
             "Mean Char Per Token": f"{self.mean_char_per_token:.3f}" if self.mean_char_per_token else None,
             "Number of Added Tokens": self.num_added_tokens if self.num_added_tokens is not None else None,
             "Number of Verses Truncated": self.num_verses_truncated if self.num_verses_truncated is not None else None,
+            "Completed Books": ";".join(self.completed_books) if self.completed_books else None,
         }
 
-    def generate_report(self) -> dict:
+    def generate_report(self) -> None:
         self.name_on_bucket = self.project.project_name
 
         stats_file = self.project.output_folder / "tokenization_stats.csv"
@@ -534,8 +542,6 @@ class OnboardingReport:
         self.script = nllb_tag.split("_")[1] if nllb_tag and self.script == "" else self.script
         self.script_in_nllb = self.script in NLLB_SCRIPT_SET
 
-        return self.generate_dict()
-
 
 class OnboardingReportCreator:
 
@@ -552,71 +558,56 @@ class OnboardingReportCreator:
         self.completed_books = completed_books
         self.main_project = main_project
         self.reference_projects = reference_projects
+        self.flags: List[OnboardingReportFlag] = []
         self.report_df: pd.DataFrame = pd.DataFrame()
 
-    def add_flag(self, condition: pd.Series | bool, column_name: str, flag_message: str) -> None:
-        if isinstance(condition, pd.Series):
-            mask = condition.reindex(self.report_df.index, fill_value=False)
-            if "Project Type" in self.report_df.columns:
-                mask = mask & (self.report_df["Project Type"] != "Notes and Flags")
-            if not mask.any():
-                return
-        elif not condition:
-            return
-        else:
-            mask = None
+    def add_flags(self) -> None:
+        projects = [self.main_project] + self.reference_projects
+        if any(p.report.normalization != "NFC" for p in projects):
+            self.flags.append(OnboardingReportFlag("Normalization", "Normalization is not NFC"))
 
-        notes_idx = self.report_df[self.report_df["Project Type"] == "Notes and Flags"].index[0]
-        current = self.report_df.at[notes_idx, column_name]
-        if current is None or current == "" or (isinstance(current, float) and pd.isna(current)):
-            self.report_df.at[notes_idx, column_name] = flag_message
-        else:
-            self.report_df.at[notes_idx, column_name] = f"{current}; {flag_message}"
-
-    def _non_empty_string_series(self, series: pd.Series) -> pd.Series:
-        series = series.fillna("").astype(str).str.strip()
-        return series[series != ""]
-
-    def create_report_flags(self) -> None:
-        self.report_df.loc[len(self.report_df)] = ["Notes and Flags"] + [""] * (len(self.report_df.columns) - 1)
-
-        self.add_flag(self.report_df["Normalization"] != "NFC", "Normalization", "Normalization is not NFC")
-
-        main_versification = self.report_df.loc[
-            self.report_df["Project Type"] == ProjectType.MAIN.value, "Versification"
-        ].values[0]
-        draft_source_versification = self.report_df.loc[
-            self.report_df["Project Type"] == ProjectType.DRAFT_SOURCE.value, "Versification"
-        ].values[0]
-        self.add_flag(
-            draft_source_versification != main_versification,
-            "Versification",
-            "Draft Source Versification does not match Main Project",
+        draft_source_project = next(
+            (p for p in self.reference_projects if p.report.project_type == ProjectType.DRAFT_SOURCE), None
         )
+        if draft_source_project and draft_source_project.report.versification != self.main_project.report.versification:
+            self.flags.append(
+                OnboardingReportFlag("Versification", "Draft Source Versification does not match Main Project")
+            )
 
-        project_mask = self.report_df["Project Type"].ne("Notes and Flags") & self.report_df["Project Type"].ne(
-            ProjectType.MAIN.value
-        )
-        if project_mask.any():
-            if self._non_empty_string_series(self.report_df.loc[project_mask, "Books for Training"]).eq("no").all():
-                self.add_flag(True, "Books for Training", "No Reference Project has all the books needed for training")
+        if all(p.report.lang_in_nllb is False for p in self.reference_projects):
+            self.flags.append(
+                OnboardingReportFlag("Language in NLLB", "Source Language is not in NLLB for all Reference Projects.")
+            )
 
-            if self._non_empty_string_series(self.report_df.loc[project_mask, "Books to Translate"]).eq("no").all():
-                self.add_flag(
-                    True, "Books to Translate", "No Reference Project has all the books needed for translation"
+        if all(p.report.script_in_nllb is False for p in projects):
+            self.flags.append(OnboardingReportFlag("Script in NLLB", "Script is not in NLLB for all Projects"))
+
+        if all(
+            not (set(self.main_project.report.completed_books).issubset(set(p.report.completed_books)))
+            for p in self.reference_projects
+        ):
+            self.flags.append(
+                OnboardingReportFlag(
+                    "Books for Training",
+                    "No Reference project has all books needed for training.",
                 )
+            )
 
-            if self._non_empty_string_series(self.report_df.loc[project_mask, "Language in NLLB"]).eq("no").all():
-                self.add_flag(True, "Language in NLLB", "Source Language is not in NLLB for all Reference Projects")
-
-            if self._non_empty_string_series(self.report_df.loc[project_mask, "Script in NLLB"]).eq("no").all():
-                self.add_flag(True, "Script in NLLB", "Script is not in NLLB for all Reference Projects")
+        if all(not (set(self.planned_books).issubset(set(p.report.completed_books))) for p in self.reference_projects):
+            self.flags.append(
+                OnboardingReportFlag(
+                    "Books to Translate",
+                    "No Reference project has all books needed for translation.",
+                )
+            )
 
     def create_report_csv(self) -> None:
-
         projects = [self.main_project] + self.reference_projects
-        formatted_reports = [p.report.generate_report() for p in projects]
+        [p.report.generate_report() for p in projects]
 
+        self.add_flags()
+
+        formatted_reports = [p.report.generate_dict() for p in projects]
         self.report_df: pd.DataFrame = pd.DataFrame(formatted_reports)
 
         self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Books for Training"] = ";".join(
@@ -626,18 +617,18 @@ class OnboardingReportCreator:
             self.planned_books
         )
         self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Books Missing/Incomplete"] = (
-            ";".join([book for book in self.completed_books if book not in self.main_project.completed_books])
+            ";".join([book for book in self.completed_books if book not in self.main_project.report.completed_books])
         )
         self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Extra Books"] = ";".join(
-            [book for book in self.main_project.completed_books if book not in self.completed_books]
+            [book for book in self.main_project.report.completed_books if book not in self.completed_books]
         )
 
         for project in self.reference_projects:
             books_missing = [
-                book for book in self.completed_books + self.planned_books if book not in project.completed_books
+                book for book in self.completed_books + self.planned_books if book not in project.report.completed_books
             ]
             extra_books = [
-                book for book in project.completed_books if book not in self.completed_books + self.planned_books
+                book for book in project.report.completed_books if book not in self.completed_books + self.planned_books
             ]
             self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Books for Training"] = (
                 "yes" if len(books_missing) == 0 else "no"
@@ -652,7 +643,11 @@ class OnboardingReportCreator:
                 extra_books
             )
 
-        self.create_report_flags()
+        self.report_df.loc[len(self.report_df)] = ["Notes and Flags"] + [""] * (len(self.report_df.columns) - 1)
+        for flag in self.flags:
+            self.report_df.loc[self.report_df["Project Type"] == "Notes and Flags", flag.column_name] = (
+                flag.flag_message
+            )
 
         self.report_df = (
             self.report_df.set_index("Project Type").T.reset_index().rename(columns={"index": "Project Type"})
@@ -769,7 +764,7 @@ class OnboardingRequest:
 
             report_creator = OnboardingReportCreator(
                 report_path=report_path,
-                completed_books=self.main_project.completed_books,
+                completed_books=self.completed_books,
                 planned_books=self.planned_books,
                 main_project=self.main_project,
                 reference_projects=self.reference_projects,
