@@ -5,9 +5,7 @@ import os
 import re
 from abc import ABC, abstractmethod
 from contextlib import ExitStack
-from copy import deepcopy
 from dataclasses import dataclass
-from enum import Enum
 from itertools import repeat
 from math import prod
 from pathlib import Path
@@ -62,13 +60,7 @@ from transformers.modeling_utils import unwrap_model
 from transformers.tokenization_utils import BatchEncoding, TruncationStrategy
 from transformers.trainer import TRAINING_ARGS_NAME
 from transformers.trainer_utils import get_last_checkpoint
-from transformers.utils import (
-    SAFE_WEIGHTS_NAME,
-    WEIGHTS_NAME,
-    PaddingStrategy,
-    is_safetensors_available,
-    to_py_obj,
-)
+from transformers.utils import SAFE_WEIGHTS_NAME, WEIGHTS_NAME, PaddingStrategy, is_safetensors_available, to_py_obj
 from transformers.utils.logging import tqdm
 
 from ..common.corpus import Term, count_lines, get_terms
@@ -76,7 +68,15 @@ from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup
 from ..common.translator import generate_confidence_files
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
-from .config import SUPPORTED_GLOSS_ISOS, CheckpointType, Config, NMTModel
+from .config import (
+    SUPPORTED_GLOSS_ISOS,
+    CheckpointType,
+    Config,
+    InferenceModelParams,
+    NMTModel,
+    collect_training_args,
+    write_effective_config,
+)
 from .corpora import DataFile
 from .token_occurrence_logger import TokenOccurrenceLogger
 from .tokenizer import NullTokenizer, Tokenizer
@@ -295,17 +295,20 @@ class PreTrainedModelProvider(ABC):
     @abstractmethod
     def create_model_for_training(
         self, model_name: str, model_config: Any, device_map: dict[str, int]
-    ) -> PreTrainedModel: ...
+    ) -> PreTrainedModel:
+        ...
 
     @abstractmethod
-    def create_model_for_inference(self, model_name: str) -> PreTrainedModel: ...
+    def create_model_for_inference(self, model_name: str) -> PreTrainedModel:
+        ...
 
 
 class PreTrainedModelProviderFactory(ABC):
     @abstractmethod
     def create_pretrained_model_provider(
-        self, config: "HuggingFaceConfig", mixed_precision: bool = False
-    ) -> PreTrainedModelProvider: ...
+        self, config: "Seq2SeqConfig", mixed_precision: bool = False
+    ) -> PreTrainedModelProvider:
+        ...
 
 
 class FilePreTrainedModelProvider(PreTrainedModelProvider):
@@ -334,7 +337,7 @@ class FilePreTrainedModelProvider(PreTrainedModelProvider):
 
 class FilePreTrainedModelProviderFactory(PreTrainedModelProviderFactory):
     def create_pretrained_model_provider(
-        self, config: "HuggingFaceConfig", mixed_precision: bool = False
+        self, config: "Seq2SeqConfig", mixed_precision: bool = False
     ) -> PreTrainedModelProvider:
         attention_implementation = config.params.get("attn_implementation", "sdpa")
         dtype = torch.bfloat16 if config.model_prefix in SUPPORTED_T5_MODELS else torch.float16
@@ -343,7 +346,7 @@ class FilePreTrainedModelProviderFactory(PreTrainedModelProviderFactory):
         return FilePreTrainedModelProvider(attention_implementation, dtype)
 
 
-class HuggingFaceConfig(Config):
+class Seq2SeqConfig(Config):
     def __init__(self, exp_dir: Path, config: dict, environment: SilNlpEnv) -> None:
         self.environment = environment
         config = merge_dict(
@@ -438,20 +441,11 @@ class HuggingFaceConfig(Config):
             self.train["max_source_length"] = 256
             self.train["max_target_length"] = 256
 
-        # disable evaluation if there is no validation split
-        if not self.has_val_split:
-            config["eval"]["eval_strategy"] = "no"
-            config["eval"]["load_best_model_at_end"] = False
-            config["eval"]["early_stopping"] = None
-            config["eval"]["metric_for_best_model"] = None
+        self._disable_eval_if_no_val_split()
 
         if config["train"]["auto_grad_acc"]:
             config["train"]["per_device_train_batch_size"] = 64
             config["train"]["gradient_accumulation_steps"] = 1
-
-    @property
-    def model_dir(self) -> Path:
-        return Path(self.train["output_dir"])
 
     @property
     def val_src_lang(self) -> str:
@@ -473,10 +467,6 @@ class HuggingFaceConfig(Config):
         lang_codes: Dict[str, str] = self.data["lang_codes"]
         return lang_codes.get(self.default_test_trg_iso, self.default_test_trg_iso)
 
-    @property
-    def has_best_checkpoint(self) -> bool:
-        return has_best_checkpoint(self.model_dir)
-
     def create_model(
         self,
         mixed_precision: bool = True,
@@ -484,7 +474,7 @@ class HuggingFaceConfig(Config):
         clearml_queue: Optional[str] = None,
         pretrained_model_provider_factory: PreTrainedModelProviderFactory = FilePreTrainedModelProviderFactory(),
     ) -> NMTModel:
-        return HuggingFaceNMTModel(self, mixed_precision, num_devices, clearml_queue, pretrained_model_provider_factory)
+        return Seq2SeqNMTModel(self, mixed_precision, num_devices, clearml_queue, pretrained_model_provider_factory)
 
     def create_tokenizer(self) -> Tokenizer:
         if not self.data["tokenize"]:
@@ -919,38 +909,22 @@ class ModelOutputGroup:
         )
 
 
-@dataclass
-class InferenceModelParams:
-    checkpoint: Union[CheckpointType, str, int]
-    src_lang: str
-    trg_lang: str
-
-    def __post_init__(self):
-        if not isinstance(self.checkpoint, (CheckpointType, str, int)):
-            raise ValueError("checkpoint must be a CheckpointType, string, or integer")
-        if not isinstance(self.src_lang, str):
-            raise ValueError("src_lang must be a string")
-        if not isinstance(self.trg_lang, str):
-            raise ValueError("trg_lang must be a string")
-
-
-class HuggingFaceNMTModel(NMTModel):
+class Seq2SeqNMTModel(NMTModel):
     def __init__(
         self,
-        config: HuggingFaceConfig,
+        config: Seq2SeqConfig,
         mixed_precision: bool,
         num_devices: int,
         clearml_queue: Optional[str] = None,
         pretrained_model_provider_factory: PreTrainedModelProviderFactory = FilePreTrainedModelProviderFactory(),
     ) -> None:
-        self._config = config
+        super().__init__(config)
+        self._config: Seq2SeqConfig = config
         self._mixed_precision = mixed_precision
         set_seed(self._config.data["seed"])
         self._dictionary: Optional[Dict[VerseRef, Set[str]]] = None
         self._is_t5 = self._config.model_prefix in SUPPORTED_T5_MODELS
         self._num_devices = num_devices
-        self._cached_inference_model: Optional[PreTrainedModel] = None
-        self._inference_model_params: Optional[InferenceModelParams] = None
         self._clearml_queue = clearml_queue
         self._pretrained_model_provider = pretrained_model_provider_factory.create_pretrained_model_provider(
             config, mixed_precision
@@ -1201,20 +1175,7 @@ class HuggingFaceNMTModel(NMTModel):
                         delete_tokenizer(child)
 
     def save_effective_config(self, path: Path) -> None:
-        training_args = self._create_training_arguments()
-        config = deepcopy(self._config.root)
-        for section, params in TRAINING_ARGS_CONFIG_MAPPING.items():
-            section_config: dict = config[section]
-            for param in params:
-                value = getattr(training_args, param)
-                if isinstance(value, Enum):
-                    value = value.value
-                if value is None:
-                    section_config.pop(param, None)
-                else:
-                    section_config[param] = value
-        with path.open("w") as file:
-            yaml.dump(config, file)
+        write_effective_config(path, self._config.root, self._create_training_arguments(), TRAINING_ARGS_CONFIG_MAPPING)
 
     def translate_test_files(
         self,
@@ -1307,10 +1268,6 @@ class HuggingFaceNMTModel(NMTModel):
         ):
             yield model_output_group.convert_to_sentence_translation_group(tokenizer)
 
-    def get_num_drafts(self) -> int:
-        num_drafts = self._config.infer.get("num_drafts", 1)
-        return num_drafts
-
     def translate(
         self,
         sentences: Iterable[str],
@@ -1361,59 +1318,19 @@ class HuggingFaceNMTModel(NMTModel):
         ):
             yield model_output_group.convert_to_sentence_translation_group(tokenizer)
 
-    def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
-        step: Optional[int] = None
-        if isinstance(ckpt, str):
-            ckpt = ckpt.lower()
-            if "avg" in ckpt:
-                ckpt = CheckpointType.AVERAGE
-            elif "best" in ckpt:
-                ckpt = CheckpointType.BEST
-            elif "last" in ckpt:
-                ckpt = CheckpointType.LAST
-            else:
-                step = int(ckpt)
-                ckpt = CheckpointType.OTHER
-        elif isinstance(ckpt, int):
-            step = ckpt
-            ckpt = CheckpointType.OTHER
-
-        if ckpt is CheckpointType.BEST:
-            ckpt_path = get_best_checkpoint(self._config.model_dir)
-            step = int(ckpt_path.name[11:])
-        elif ckpt is CheckpointType.LAST:
-            ckpt_path = Path(get_last_checkpoint(self._config.model_dir))
-            step = int(ckpt_path.name[11:])
-        elif ckpt is CheckpointType.OTHER and step is not None:
-            ckpt_path = self._config.model_dir / f"checkpoint-{step}"
-        else:
-            raise ValueError(f"Unsupported checkpoint type: {ckpt}.")
-        return ckpt_path, step
-
-    def clear_cache(self) -> None:
-        self._cached_inference_model = None
-        self._inference_model_params = None
-
     def _create_training_arguments(self) -> Seq2SeqTrainingArguments:
-        parser = HfArgumentParser(Seq2SeqTrainingArguments)
-        args: dict = {}
-        for section, params in TRAINING_ARGS_CONFIG_MAPPING.items():
-            section_config: dict = self._config.root[section]
-            for param in params:
-                if param in section_config:
-                    args[param] = section_config[param]
-        # For context on floating point precision, see https://github.com/sillsdev/silnlp/issues/647
-        merge_dict(
-            args,
+        args = collect_training_args(
+            self._config.root,
+            TRAINING_ARGS_CONFIG_MAPPING,
+            # For context on floating point precision, see https://github.com/sillsdev/silnlp/issues/647
             {
                 "fp16": self._mixed_precision and not self._is_t5,
                 "bf16": self._mixed_precision and self._is_t5,
                 "tf32": self._mixed_precision,
             },
+            self._clearml_queue,
         )
-        if self._clearml_queue is None:
-            args["report_to"] = "none"
-        return parser.parse_dict(args)[0]
+        return HfArgumentParser(Seq2SeqTrainingArguments).parse_dict(args)[0]
 
     # Untie full embedding modules and instead tie embedding weights
     def _create_tied_embedding_weights(self, model: PreTrainedModel) -> PreTrainedModel:

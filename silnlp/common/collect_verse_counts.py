@@ -9,7 +9,7 @@ import yaml
 from machine.scripture import ALL_BOOK_IDS, book_id_to_number, is_nt, is_ot
 from tqdm import tqdm
 
-from ..nmt.hugging_face_config import HuggingFaceConfig
+from ..nmt.seq2seq_config import Seq2SeqConfig
 from .environment import SilNlpEnv
 
 LOGGER = logging.getLogger(__package__ + ".collect_verse_counts")
@@ -324,7 +324,7 @@ def main() -> None:
         if config is None or len(config.keys()) == 0:
             LOGGER.error("Config file has no contents.")
             return
-        config = HuggingFaceConfig(folder, config, environment)
+        config = Seq2SeqConfig(folder, config, environment)
         files: Set[Path] = set()
         for pair in config.corpus_pairs:
             files.update([f.path for f in pair.src_files] + [f.path for f in pair.trg_files])
