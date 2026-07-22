@@ -440,17 +440,17 @@ class OnboardingReport:
             "Script in NLLB": "yes" if self.script_in_nllb else "no",
             "Normalization": self.normalization,
             "Versification": ";".join(str(v) for v in self.versification),
-            "Versification Error Count": self.versification_error_count if self.versification_error_count else "",
+            "Versification Error Count": self.versification_error_count if self.versification_error_count else None,
             "Verse Count": self.verse_count,
             "Range Line Count": self.range_line_count,
             "Alignment with Main": self.alignment,
             "Key Terms Type": self.key_terms_type,
             "Key Terms Count": self.key_terms_count,
             "Key Terms Glosses Exist": "yes" if self.key_terms_glosses_exist else "no",
-            "Mean Tokens Per Verse": f"{self.mean_tokens_per_verse:.2f}" if self.mean_tokens_per_verse else "",
-            "Mean Char Per Token": f"{self.mean_char_per_token:.3f}" if self.mean_char_per_token else "",
-            "Number of Added Tokens": self.num_added_tokens if self.num_added_tokens is not None else "",
-            "Number of Verses Truncated": self.num_verses_truncated if self.num_verses_truncated is not None else "",
+            "Mean Tokens Per Verse": f"{self.mean_tokens_per_verse:.2f}" if self.mean_tokens_per_verse else None,
+            "Mean Char Per Token": f"{self.mean_char_per_token:.3f}" if self.mean_char_per_token else None,
+            "Number of Added Tokens": self.num_added_tokens if self.num_added_tokens is not None else None,
+            "Number of Verses Truncated": self.num_verses_truncated if self.num_verses_truncated is not None else None,
         }
 
     def generate_report(self) -> dict:
@@ -703,7 +703,7 @@ class OnboardingRequest:
 
         reference_project_names = onboarding_config.get("ref_projects", [])
         for ref_project_name in reference_project_names:
-            if ref_project_name in [ref_project.project_name for ref_project in self.reference_projects]:
+            if any(p.project_name == ref_project_name for p in self.reference_projects):
                 continue
             reference_project = OnboardingProject(
                 project_name=ref_project_name,

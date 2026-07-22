@@ -1,5 +1,6 @@
 import argparse
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Set
 
@@ -16,18 +17,12 @@ from .paratext import (
 LOGGER = logging.getLogger(__package__ + ".extract_corpora")
 
 
+@dataclass
 class ExtractOutput:
-    def __init__(
-        self,
-        check_versification_output: CheckVersificationOutput,
-        corpus_filename: Optional[Path],
-        terms_count: int,
-        range_line_count: int,
-    ):
-        self.corpus_filename = corpus_filename
-        self.check_versification_output = check_versification_output
-        self.terms_count = terms_count
-        self.range_line_count = range_line_count
+    check_versification_output: CheckVersificationOutput
+    corpus_filename: Optional[Path]
+    terms_count: int
+    range_line_count: int
 
 
 def main() -> None:
