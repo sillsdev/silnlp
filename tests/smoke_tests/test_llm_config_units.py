@@ -1,9 +1,10 @@
 from dataclasses import dataclass
 
+import pytest
 from jinja2.exceptions import UndefinedError
 
 from silnlp.nmt.config_utils import is_llm_config
-from silnlp.nmt.llm_config import DataCollatorForCausalLM, LLMConfig
+from silnlp.nmt.llm_config import DataCollatorForCausalLM, LLMConfig, LLMModel
 
 
 def test_is_llm_config_explicit_model_type():
@@ -115,6 +116,99 @@ def test_apply_prompt_template_translate_gemma_falls_back_for_unrecognized_langu
 
     token_ids = config.apply_prompt_template(tokenizer, messages, add_generation_prompt=True, tokenize=True)
     assert token_ids == [ord(c) for c in text]
+
+
+def _peft_supports_dora() -> bool:
+    import inspect
+
+    from peft import LoraConfig
+
+    return "use_dora" in inspect.signature(LoraConfig.__init__).parameters
+
+
+def test_build_adapter_config_plain_lora():
+    peft_config = LLMModel._build_adapter_config(
+        {"rank": 16, "alpha": 32, "dropout": 0.05, "target_modules": "all-linear"}, use_dora=False
+    )
+    assert peft_config.r == 16
+    assert peft_config.lora_alpha == 32
+    assert peft_config.modules_to_save is None
+    # use_dora is never forwarded when a plain-LoRA method is selected, so it works on peft < 0.9.0 too.
+    assert getattr(peft_config, "use_dora", False) is False
+
+
+def test_build_adapter_config_passes_through_modules_to_save():
+    peft_config = LLMModel._build_adapter_config(
+        {
+            "rank": 64,
+            "alpha": 256,
+            "dropout": 0.05,
+            "target_modules": "all-linear",
+            "modules_to_save": ["embed_tokens", "lm_head"],
+        },
+        use_dora=False,
+    )
+    assert peft_config.r == 64
+    assert peft_config.lora_alpha == 256
+    assert peft_config.modules_to_save == ["embed_tokens", "lm_head"]
+
+
+def test_build_adapter_config_dora_requires_supported_peft():
+    adapter = {"rank": 64, "alpha": 256, "dropout": 0.05, "target_modules": "all-linear"}
+    if _peft_supports_dora():
+        peft_config = LLMModel._build_adapter_config(adapter, use_dora=True)
+        assert peft_config.use_dora is True
+    else:
+        with pytest.raises(ValueError, match="requires peft"):
+            LLMModel._build_adapter_config(adapter, use_dora=True)
+
+
+@dataclass
+class _MethodStub:
+    params: dict
+
+    finetune_method = LLMConfig.finetune_method
+    uses_quantization = LLMConfig.uses_quantization
+    uses_dora = LLMConfig.uses_dora
+
+
+def test_finetune_method_axes():
+    # (method, quantized, dora)
+    cases = [
+        ("full", False, False),
+        ("lora", False, False),
+        ("qlora", True, False),
+        ("dora", False, True),
+        ("qdora", True, True),
+    ]
+    for method, quantized, dora in cases:
+        stub = _MethodStub(params={"finetune_method": method})
+        assert stub.finetune_method == method
+        assert stub.uses_quantization is quantized
+        assert stub.uses_dora is dora
+
+
+def test_finetune_method_is_case_insensitive():
+    assert _MethodStub(params={"finetune_method": "QDoRA"}).uses_dora is True
+
+
+def test_finetune_method_invalid_raises():
+    with pytest.raises(ValueError, match="Unknown finetune_method"):
+        _ = _MethodStub(params={"finetune_method": "bogus"}).finetune_method
+
+
+def test_normalize_deprecated_keys_renames_lora_to_adapter():
+    config = {"params": {"finetune_method": "lora", "lora": {"rank": 8}}}
+    LLMConfig._normalize_deprecated_keys(config)
+    assert "lora" not in config["params"]
+    assert config["params"]["adapter"] == {"rank": 8}
+
+
+def test_normalize_deprecated_keys_prefers_explicit_adapter():
+    config = {"params": {"lora": {"rank": 8}, "adapter": {"rank": 64}}}
+    LLMConfig._normalize_deprecated_keys(config)
+    # An explicit adapter wins; the deprecated lora key is left untouched rather than clobbering it.
+    assert config["params"]["adapter"] == {"rank": 64}
 
 
 @dataclass

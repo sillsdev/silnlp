@@ -3430,18 +3430,18 @@ files = [
 
 [[package]]
 name = "peft"
-version = "0.8.0"
+version = "0.15.2"
 description = "Parameter-Efficient Fine-Tuning (PEFT)"
 optional = false
-python-versions = ">=3.8.0"
+python-versions = ">=3.9.0"
 files = [
-    {file = "peft-0.8.0-py3-none-any.whl", hash = "sha256:c4f7d7dd2a6e1b11a1cb06b501c32ba254dfe96ccb4cdd30182ee8ce9b374725"},
-    {file = "peft-0.8.0.tar.gz", hash = "sha256:138ad8bbea64bc95ede981c48b7283498a81e43dfc55e9cc0b51fabd9586538e"},
+    {file = "peft-0.15.2-py3-none-any.whl", hash = "sha256:0dfc942b03b7af4b7267cd4e30b15e3a4a1d277adc581ce6245fc13f1f93d0a0"},
+    {file = "peft-0.15.2.tar.gz", hash = "sha256:7059029f4d42a092ded1aa117dd366a46084aef638bdd593f6ab0195d5427fcd"},
 ]
 
 [package.dependencies]
 accelerate = ">=0.21.0"
-huggingface-hub = ">=0.17.0"
+huggingface_hub = ">=0.25.0"
 numpy = ">=1.17"
 packaging = ">=20.0"
 psutil = "*"
@@ -3452,10 +3452,10 @@ tqdm = "*"
 transformers = "*"
 
 [package.extras]
-dev = ["black (>=22.0,<23.0)", "hf-doc-builder", "ruff (>=0.0.241)", "urllib3 (<=2.0.0)"]
-docs-specific = ["hf-doc-builder"]
-quality = ["black (>=22.0,<23.0)", "ruff (>=0.0.241)", "urllib3 (<=2.0.0)"]
-test = ["black (>=22.0,<23.0)", "datasets", "diffusers (<0.21.0)", "hf-doc-builder", "parameterized", "pytest", "pytest-cov", "pytest-xdist", "ruff (>=0.0.241)", "scipy", "urllib3 (<=2.0.0)"]
+dev = ["black", "black", "hf-doc-builder", "hf-doc-builder", "ruff (>=0.9.2,<0.10.0)"]
+docs-specific = ["black", "hf-doc-builder"]
+quality = ["black", "hf-doc-builder", "ruff (>=0.9.2,<0.10.0)"]
+test = ["black", "black", "datasets", "diffusers", "hf-doc-builder", "hf-doc-builder", "parameterized", "protobuf", "pytest", "pytest-cov", "pytest-xdist", "ruff (>=0.9.2,<0.10.0)", "scipy", "sentencepiece"]
 
 [[package]]
 name = "pexpect"
@@ -6165,4 +6165,4 @@ llm = ["bitsandbytes"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.11"
-content-hash = "30e1964a584da6fa88129d8fb9e6be0283199f4f6440bdbcd561e5fe9888ee54"
+content-hash = "badc49a0ba3e6d0decb2b69d63101b9319f0f08dafda67e4aa87c50a38365aa6"

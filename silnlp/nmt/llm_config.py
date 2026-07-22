@@ -11,9 +11,10 @@ reuses the model-agnostic parts of the pipeline:
 * evaluation (:mod:`silnlp.nmt.test`) and inference orchestration
   (:mod:`silnlp.nmt.translate`), which depend only on the :class:`NMTModel` interface.
 
-Training supports full fine-tuning as well as LoRA/QLoRA via ``peft`` (and ``bitsandbytes``
-for 4-bit quantization), selected with ``params.finetune_method``. Prompts are built with the
-model's native chat template and a configurable translation instruction.
+Training supports full fine-tuning as well as low-rank adapters (LoRA and DoRA) via ``peft``,
+optionally with 4-bit quantization via ``bitsandbytes`` (QLoRA/QDoRA), selected with
+``params.finetune_method``. Adapter hyperparameters live under ``params.adapter``. Prompts are
+built with the model's native chat template and a configurable translation instruction.
 """
 
 import logging
@@ -98,6 +99,12 @@ TRAINING_ARGS_CONFIG_MAPPING = {
 
 LABEL_PAD_TOKEN_ID = -100
 
+FULL_FINETUNE_METHOD = "full"
+ADAPTER_METHODS = ("lora", "qlora", "dora", "qdora")
+QUANTIZED_METHODS = ("qlora", "qdora")
+DORA_METHODS = ("dora", "qdora")
+VALID_FINETUNE_METHODS = (FULL_FINETUNE_METHOD,) + ADAPTER_METHODS
+
 # TranslateGemma's chat template rejects a plain-text user turn: it requires `content` to be a
 # single-item list of {type, source_lang_code, target_lang_code, text|image}, and it renders the
 # natural-language instruction itself from a fixed table of ~55 supported language codes.
@@ -112,6 +119,7 @@ def is_image_text_to_text_model(model_name_or_path: str, trust_remote_code: bool
 
 class LLMConfig(Config):
     def __init__(self, exp_dir: Path, config: dict, environment: SilNlpEnv) -> None:
+        self._normalize_deprecated_keys(config)
         config = merge_dict(
             {
                 "data": {
@@ -159,7 +167,7 @@ class LLMConfig(Config):
                     "temperature": 0.7,
                 },
                 "params": {
-                    "finetune_method": "qlora",  # full | lora | qlora
+                    "finetune_method": "qlora",  # full | lora | qlora | dora | qdora
                     "torch_dtype": "bfloat16",
                     "attn_implementation": "sdpa",
                     "trust_remote_code": False,
@@ -168,11 +176,19 @@ class LLMConfig(Config):
                     "learning_rate": 0.0002,
                     "lr_scheduler_type": "cosine",
                     "warmup_ratio": 0.03,
-                    "lora": {
+                    # Low-rank adapter hyperparameters, shared by all adapter methods
+                    # (lora/qlora/dora/qdora). LoRA vs DoRA is selected via finetune_method.
+                    "adapter": {
                         "rank": 16,
                         "alpha": 32,
                         "dropout": 0.05,
                         "target_modules": "all-linear",
+                        # Layers to train in full (unadapted) alongside the adapters. A list of
+                        # module-name suffixes matched against the model's modules; None (or an
+                        # empty list) trains only the adapters. Possible choices are:
+                        #   "embed_tokens" - the input token-embedding matrix
+                        #   "lm_head"      - the output (vocabulary projection) head
+                        "modules_to_save": None,
                     },
                     "prompt": {
                         "system_message": "",
@@ -191,9 +207,33 @@ class LLMConfig(Config):
 
         self._disable_eval_if_no_val_split()
 
+    @staticmethod
+    def _normalize_deprecated_keys(config: dict) -> None:
+        # ``params.lora`` was renamed to ``params.adapter`` when DoRA was added, since the same
+        # hyperparameters now back both LoRA and DoRA. Accept the old key for backward compatibility.
+        params = config.get("params")
+        if isinstance(params, dict) and "lora" in params and "adapter" not in params:
+            LOGGER.warning("params.lora is deprecated; rename it to params.adapter.")
+            params["adapter"] = params.pop("lora")
+
     @property
     def finetune_method(self) -> str:
-        return self.params["finetune_method"].lower()
+        method = self.params["finetune_method"].lower()
+        if method not in VALID_FINETUNE_METHODS:
+            raise ValueError(f"Unknown finetune_method '{method}'. Valid options: {', '.join(VALID_FINETUNE_METHODS)}.")
+        return method
+
+    @property
+    def uses_quantization(self) -> bool:
+        return self.finetune_method in QUANTIZED_METHODS
+
+    @property
+    def uses_dora(self) -> bool:
+        return self.finetune_method in DORA_METHODS
+
+    @property
+    def adapter(self) -> dict:
+        return self.params["adapter"]
 
     def create_model(
         self,
@@ -382,10 +422,9 @@ class CausalLMProvider:
 
     def create_model_for_training(self) -> PreTrainedModel:
         params = self.config.params
-        method = self.config.finetune_method
         quantization_config = None
         device_map = None
-        if method == "qlora":
+        if self.config.uses_quantization:
             from transformers import BitsAndBytesConfig
 
             quantization_config = BitsAndBytesConfig(
@@ -586,30 +625,49 @@ class LLMModel(NMTModel):
         trainer.save_state()
 
     def _apply_finetuning(self, model: PreTrainedModel) -> PreTrainedModel:
-        method = self._config.finetune_method
-        if method == "full":
+        if self._config.finetune_method == FULL_FINETUNE_METHOD:
             return model
 
-        from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
+        from peft import get_peft_model, prepare_model_for_kbit_training
 
         gradient_checkpointing = self._config.train["gradient_checkpointing"]
-        if method == "qlora":
+        if self._config.uses_quantization:
             model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=gradient_checkpointing)
         elif gradient_checkpointing:
             model.enable_input_require_grads()
 
-        lora: dict = self._config.params["lora"]
-        peft_config = LoraConfig(
-            r=lora["rank"],
-            lora_alpha=lora["alpha"],
-            lora_dropout=lora["dropout"],
-            target_modules=lora["target_modules"],
-            bias="none",
-            task_type=TaskType.CAUSAL_LM,
-        )
+        peft_config = self._build_adapter_config(self._config.adapter, use_dora=self._config.uses_dora)
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
         return model
+
+    @staticmethod
+    def _build_adapter_config(adapter: dict, use_dora: bool) -> Any:
+        import inspect
+
+        import peft
+        from peft import LoraConfig, TaskType
+
+        kwargs: Dict[str, Any] = dict(
+            r=adapter["rank"],
+            lora_alpha=adapter["alpha"],
+            lora_dropout=adapter["dropout"],
+            target_modules=adapter["target_modules"],
+            modules_to_save=adapter.get("modules_to_save"),
+            bias="none",
+            task_type=TaskType.CAUSAL_LM,
+        )
+        # DoRA (use_dora) was added in peft 0.9.0. Only forward it when a dora/qdora method is
+        # selected so that plain-LoRA configs keep working on older peft, and fail with a clear
+        # message (rather than an opaque TypeError) when DoRA is requested but unavailable.
+        if use_dora:
+            if "use_dora" not in inspect.signature(LoraConfig.__init__).parameters:
+                raise ValueError(
+                    f"finetune_method 'dora'/'qdora' requires peft>=0.9.0, but the installed peft "
+                    f"({peft.__version__}) does not support DoRA. Upgrade peft to enable it."
+                )
+            kwargs["use_dora"] = True
+        return LoraConfig(**kwargs)
 
     def _load_text_dataset(self, src_path: Path, trg_path: Path) -> Optional[Dataset]:
         if not src_path.is_file() or not trg_path.is_file():
