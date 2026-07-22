@@ -645,9 +645,7 @@ class OnboardingReportCreator:
 
         self.report_df.loc[len(self.report_df)] = ["Notes and Flags"] + [""] * (len(self.report_df.columns) - 1)
         for flag in self.flags:
-            self.report_df.loc[self.report_df["Project Type"] == "Notes and Flags", flag.column_name] = (
-                flag.flag_message
-            )
+            self.report_df.loc[self.report_df["Project Type"] == "Notes and Flags", flag.column_name] = flag.message
 
         self.report_df = (
             self.report_df.set_index("Project Type").T.reset_index().rename(columns={"index": "Project Type"})
