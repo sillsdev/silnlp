@@ -22,10 +22,12 @@ class ExtractOutput:
         check_versification_output: CheckVersificationOutput,
         corpus_filename: Optional[Path],
         terms_count: int,
+        range_line_count: int,
     ):
         self.corpus_filename = corpus_filename
         self.check_versification_output = check_versification_output
         self.terms_count = terms_count
+        self.range_line_count = range_line_count
 
 
 def main() -> None:
@@ -109,7 +111,7 @@ def extract_corpora(
             check_versification_output: CheckVersificationOutput = check_versification(
                 project_dir, parent_project_dir, versification_error_output_path, environment
             )
-            corpus_filename, verse_count, line_count = extract_project(
+            corpus_filename, verse_count, line_count, range_line_count = extract_project(
                 project_dir,
                 environment.mt_scripture_dir,
                 include_markers,
@@ -134,10 +136,12 @@ def extract_corpora(
             )
             LOGGER.info(f"# of Terms: {terms_count}")
             LOGGER.info("Done.")
-            return ExtractOutput(check_versification_output, corpus_filename, terms_count)
+            return ExtractOutput(
+                check_versification_output, corpus_filename, terms_count, range_line_count=range_line_count
+            )
     else:
         LOGGER.warning(f"Couldn't find any data to process for any project in {environment.pt_projects_dir}.")
-        return ExtractOutput(None, None, 0)
+        return ExtractOutput(None, None, 0, 0)
 
 
 if __name__ == "__main__":

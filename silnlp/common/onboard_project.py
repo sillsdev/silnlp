@@ -417,14 +417,15 @@ class OnboardingReport:
         self.versification: List[int] = []
         self.versification_error_count: int = 0
         self.verse_count: int = 0
+        self.range_line_count: int = 0
         self.alignment: str = ""
         self.key_terms_type: str = ""
         self.key_terms_count: int = 0
         self.key_terms_glosses_exist: bool = False
         self.mean_tokens_per_verse: float = 0.0
         self.mean_char_per_token: float = 0.0
-        self.num_added_tokens: int = 0
-        self.num_verses_truncated: int = 0
+        self.num_added_tokens: int = None
+        self.num_verses_truncated: int = None
 
     def generate_dict(self) -> dict:
         return {
@@ -441,14 +442,15 @@ class OnboardingReport:
             "Versification": ";".join(str(v) for v in self.versification),
             "Versification Error Count": self.versification_error_count if self.versification_error_count else "",
             "Verse Count": self.verse_count,
+            "Range Line Count": self.range_line_count,
             "Alignment with Main": self.alignment,
             "Key Terms Type": self.key_terms_type,
             "Key Terms Count": self.key_terms_count,
             "Key Terms Glosses Exist": "yes" if self.key_terms_glosses_exist else "no",
             "Mean Tokens Per Verse": f"{self.mean_tokens_per_verse:.2f}" if self.mean_tokens_per_verse else "",
             "Mean Char Per Token": f"{self.mean_char_per_token:.3f}" if self.mean_char_per_token else "",
-            "Number of Added Tokens": self.num_added_tokens,
-            "Number of Verses Truncated": self.num_verses_truncated,
+            "Number of Added Tokens": self.num_added_tokens if self.num_added_tokens is not None else "",
+            "Number of Verses Truncated": self.num_verses_truncated if self.num_verses_truncated is not None else "",
         }
 
     def generate_report(self) -> dict:
@@ -457,12 +459,13 @@ class OnboardingReport:
         stats_file = self.project.output_folder / "tokenization_stats.csv"
         if stats_file.exists():
             stats_df = pd.read_csv(stats_file, header=[0, 1])
-            target_stats = stats_df[stats_df[(" ", "Translation Side")] == "Target"]
+            if self.project_type == ProjectType.MAIN:
+                target_stats = stats_df[stats_df[(" ", "Translation Side")] == "Target"]
 
-            self.mean_tokens_per_verse = target_stats[("Tokens/Verse", "Mean")].values[0]
-            self.mean_char_per_token = target_stats[("Characters/Token", "Mean")].values[0]
-            self.num_added_tokens = target_stats[(" ", "Num Tokens Added to Vocab")].values[0]
-            self.num_verses_truncated = target_stats[("Tokens/Verse", "Num Verses >= 200 Tokens")].values[0]
+                self.mean_tokens_per_verse = target_stats[("Tokens/Verse", "Mean")].values[0]
+                self.mean_char_per_token = target_stats[("Characters/Token", "Mean")].values[0]
+                self.num_added_tokens = target_stats[(" ", "Num Tokens Added to Vocab")].values[0]
+                self.num_verses_truncated = target_stats[("Tokens/Verse", "Num Verses >= 200 Tokens")].values[0]
 
         versification = self.project.extract_output.check_versification_output.detected_versification
         self.versification = [v.value for v in versification]
@@ -471,6 +474,8 @@ class OnboardingReport:
             self.project.extract_output.check_versification_output.versification_error_count
         )
         self.key_terms_count = self.project.extract_output.terms_count
+
+        self.range_line_count = self.project.extract_output.range_line_count
 
         verse_counts_file = self.project.output_folder / "verse_counts.csv"
         if Path(verse_counts_file).exists():
@@ -580,20 +585,21 @@ class OnboardingReportCreator:
         main_versification = self.report_df.loc[
             self.report_df["Project Type"] == ProjectType.MAIN.value, "Versification"
         ].values[0]
-        draft_source_mask = self.report_df["Project Type"] == ProjectType.DRAFT_SOURCE.value
+        draft_source_versification = self.report_df.loc[
+            self.report_df["Project Type"] == ProjectType.DRAFT_SOURCE.value, "Versification"
+        ].values[0]
         self.add_flag(
-            self.report_df["Versification"].where(draft_source_mask, "") != main_versification,
+            draft_source_versification != main_versification,
             "Versification",
             "Draft Source Versification does not match Main Project",
         )
 
-        project_mask = (
-            self.report_df["Project Type"] != "Notes and Flags"
-            and self.report_df["Project Type"] != ProjectType.MAIN.value
+        project_mask = self.report_df["Project Type"].ne("Notes and Flags") & self.report_df["Project Type"].ne(
+            ProjectType.MAIN.value
         )
         if project_mask.any():
             if self._non_empty_string_series(self.report_df.loc[project_mask, "Books for Training"]).eq("no").all():
-                self.add_flag(True, "Books for Training", "No ReferenceProject has all the books needed for training")
+                self.add_flag(True, "Books for Training", "No Reference Project has all the books needed for training")
 
             if self._non_empty_string_series(self.report_df.loc[project_mask, "Books to Translate"]).eq("no").all():
                 self.add_flag(
@@ -697,6 +703,8 @@ class OnboardingRequest:
 
         reference_project_names = onboarding_config.get("ref_projects", [])
         for ref_project_name in reference_project_names:
+            if ref_project_name in [ref_project.project_name for ref_project in self.reference_projects]:
+                continue
             reference_project = OnboardingProject(
                 project_name=ref_project_name,
                 project_type=ProjectType.REFERENCE,

@@ -78,7 +78,7 @@ def extract_project(
     extract_lemmas: bool = False,
     output_project_vrefs: bool = False,
     parent_project_dir: Optional[Path] = None,
-) -> Tuple[Path, int, int]:
+) -> Tuple[Path, int, int, int]:
     iso = get_iso(project_dir)
 
     ref_corpus: TextCorpus = create_versification_ref_corpus()
@@ -103,6 +103,7 @@ def extract_project(
     try:
         verse_count = 0
         line_count = 0
+        range_line_count = 0
         with ExitStack() as stack:
             output_stream = stack.enter_context(output_filename.open("w", encoding="utf-8", newline="\n"))
             output = stack.enter_context(extract_scripture_corpus(project_corpus, ref_corpus))
@@ -118,13 +119,15 @@ def extract_project(
                 stripped_line = line.strip()
                 if stripped_line != "<range>" and len(stripped_line) > 0 and stripped_line != "...":
                     verse_count += 1
+                if stripped_line == "<range>":
+                    range_line_count += 1
         if verse_count == 0:
             if output_filename.is_file():
                 output_filename.unlink()
             if output_vref_filename.is_file():
                 output_vref_filename.unlink()
-            return None, verse_count, line_count
-        return output_filename, verse_count, line_count
+            return None, verse_count, line_count, range_line_count
+        return output_filename, verse_count, line_count, range_line_count
     except Exception:
         if output_filename.is_file():
             output_filename.unlink()
