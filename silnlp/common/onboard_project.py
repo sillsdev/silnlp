@@ -8,6 +8,7 @@ import shutil
 import sys
 import zipfile
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -399,13 +400,6 @@ class OnboardingProject:
         return project_name
 
 
-class OnboardingReportFlag:
-
-    def __init__(self, column_name: str, flag_message: str) -> None:
-        self.column_name = column_name
-        self.flag_message = flag_message
-
-
 class OnboardingReport:
 
     def __init__(self, project: OnboardingProject, project_type: ProjectType) -> None:
@@ -541,6 +535,12 @@ class OnboardingReport:
         self.lang_in_nllb = nllb_tag is not None
         self.script = nllb_tag.split("_")[1] if nllb_tag and self.script == "" else self.script
         self.script_in_nllb = self.script in NLLB_SCRIPT_SET
+
+
+@dataclass
+class OnboardingReportFlag:
+    column_name: str
+    message: str
 
 
 class OnboardingReportCreator:
