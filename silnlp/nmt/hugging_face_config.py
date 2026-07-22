@@ -1847,13 +1847,25 @@ class SilTranslationPipeline(TranslationPipeline):
         )
 
         output_ids = output.sequences
-        beam_indices = getattr(output, "beam_indices", None)
-        transition_scores = self.model.compute_transition_scores(
-            output_ids,
-            output.scores,
-            beam_indices,
-            normalize_logits=True,
-        )
+        output_scores = output.scores
+        beam_indices = output.beam_indices if "beam_indices" in output else None
+        try:
+            transition_scores = self.model.compute_transition_scores(
+                output_ids,
+                output_scores,
+                beam_indices,
+                normalize_logits=True,
+            )
+        except Exception:
+            output_ids = output_ids.to("cpu")
+            output_scores = tuple(score.to("cpu") for score in output_scores)
+            beam_indices = beam_indices.to("cpu") if beam_indices is not None else None
+            transition_scores = self.model.compute_transition_scores(
+                output_ids,
+                output_scores,
+                beam_indices,
+                normalize_logits=True,
+            )
         sequences_scores = getattr(output, "sequences_scores", None)
 
         out_b, seq_len = output_ids.shape
