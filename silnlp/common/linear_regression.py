@@ -19,6 +19,14 @@ class LinearRegressionResult:
     def toJSON(self) -> str:
         return json.dumps({"version": self.version, "slope": self.slope, "intercept": self.intercept}, indent=2)
 
+    @classmethod
+    def fromJSON(cls, json_str: str) -> "LinearRegressionResult":
+        data = json.loads(json_str)
+        try:
+            return cls(version=data["version"], slope=float(data["slope"]), intercept=float(data["intercept"]))
+        except (KeyError, TypeError, ValueError) as e:
+            raise ValueError(f"Invalid linear regression data: {json_str}") from e
+
 
 class PointWeightingScheme:
     def weight_points(self, _x: List[float], _y: List[float]) -> List[float]: ...
@@ -109,7 +117,7 @@ def perform_enhanced_linear_regression(x: List[float], y: List[float]) -> Linear
     weighting_scheme = InverseDensityPointWeightingScheme()
 
     bootstrap_results = []
-    for _ in range(100):
+    for _ in range(1000):
         sampled_x, sampled_y = sampler.sample(num_samples=len(x))
         result = perform_weighted_linear_regression(sampled_x, sampled_y, point_weighting_scheme=weighting_scheme)
         bootstrap_results.append(result)

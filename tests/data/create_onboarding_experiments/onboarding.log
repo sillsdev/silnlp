@@ -1,0 +1,16 @@
+2026-07-02 13:06:38,608 - silnlp.common.onboard_project - INFO - Processing onboarding request for main project 'A33_2026_07_02'
+2026-07-02 13:06:38,608 - silnlp.common.onboard_project - INFO - Onboarding main project 'A33_2026_07_02'
+2026-07-02 13:06:45,890 - silnlp.common.extract_corpora - INFO - Extracted corpus file: /root/M/MT/scripture/sdl-A33_2026_07_02.txt
+2026-07-02 13:06:45,891 - silnlp.common.extract_corpora - INFO - # of Verses: 5084
+2026-07-02 13:06:58,558 - silnlp.common.onboard_project - INFO - Onboarding reference project 'HINCLBSI'
+2026-07-02 13:07:14,630 - silnlp.common.extract_corpora - INFO - Extracted corpus file: /root/M/MT/scripture/hi-HINCLBSI.txt
+2026-07-02 13:07:14,631 - silnlp.common.extract_corpora - INFO - # of Verses: 30997
+2026-07-02 13:08:13,559 - silnlp.common.onboard_project - INFO - Onboarding reference project 'a55_2026_07_02'
+2026-07-02 13:08:18,376 - silnlp.common.extract_corpora - INFO - Extracted corpus file: /root/M/MT/scripture/arb-a55_2026_07_02.txt
+2026-07-02 13:08:18,377 - silnlp.common.extract_corpora - INFO - # of Verses: 179
+2026-07-02 13:08:55,839 - silnlp.common.analyze - INFO - Computing alignment beteween sdl-A33_2026_07_02 and en-NIV11R using Eflomal
+2026-07-02 13:09:03,178 - silnlp.common.analyze - INFO - A33_2026_07_02 -> NIV11R stats - count: 31096, source only count: 14 target only count: 26012 parallel count: 5070 alignment: 0.3388, filtered count: 0, alignment (filtered): 0.3388, source script: Arab, source script in model: True, target script: Latn, target script in model: True
+2026-07-02 13:09:03,624 - silnlp.common.analyze - INFO - Computing alignment beteween sdl-A33_2026_07_02 and hi-HINCLBSI using Eflomal
+2026-07-02 13:09:11,418 - silnlp.common.analyze - INFO - A33_2026_07_02 -> HINCLBSI stats - count: 30998, source only count: 1 target only count: 25929 parallel count: 5068 alignment: 0.2605, filtered count: 0, alignment (filtered): 0.2605, source script: Arab, source script in model: True, target script: Deva, target script in model: True
+2026-07-02 13:09:19,570 - silnlp.common.analyze - INFO - Computing alignment beteween sdl-A33_2026_07_02 and arb-a55_2026_07_02 using Eflomal
+2026-07-02 13:09:28,254 - silnlp.common.analyze - INFO - A33_2026_07_02 -> a55_2026_07_02 stats - count: 5258, source only count: 5079 target only count: 178 parallel count: 1 alignment: 0.4000, filtered count: 0, alignment (filtered): 0.4000, source script: Arab, source script in model: True, target script: Arab, target script in model: True
