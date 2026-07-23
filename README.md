@@ -155,7 +155,8 @@ The rest of these instructions are to be carried out in a WSL/Linux terminal as 
 
 ## Bucket Setup
 1. For MinIO, enable your VPN. On Windows this should be done outside of WSL:
-   * To access the MinIO bucket, you will need VPN access. Reach out to a SILNLP dev team member for access. You will receive a configuration file for the WireGuard VPN as well as an ip address to add to the list of AllowedIPs.
+   * To access the MinIO bucket, you will need VPN access. Reach out to a SILNLP dev team member for access. You will receive a configuration file for the WireGuard VPN as well as an ip address to add to the list of AllowedIPs. You will need to add the ip address to the list of AllowedIPs in the configuration file, use a comma and a space to separate the AllowedIPs, so the line might look something like:
+   AllowedIPS = 10.0.0.0/8 172.???.???.???, <ipv6 address>
 
 2. In a terminal (WSL) at the silnlp repo, run the commands cooresponding to the bucket you are using:
 
