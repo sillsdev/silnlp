@@ -10,9 +10,9 @@ from typing import Dict, List, Optional, Set, Tuple
 from machine.scripture import ALL_BOOK_IDS, VerseRef
 
 from ..common.environment import SilNlpEnv
-from ..common.linear_regression import perform_enhanced_linear_regression
+from ..common.linear_regression import LinearRegressionResult
 from ..common.translator import CONFIDENCE_SUFFIX, ConfidenceFile, TxtConfidenceFile, UsfmConfidenceFile
-from .test import VERSE_SCORES_SUFFIX
+from .test import LINREGRESS_PREFIX
 
 LOGGER = logging.getLogger(__package__ + ".quality_estimation")
 CANONICAL_ORDER = {book: i for i, book in enumerate(ALL_BOOK_IDS)}
@@ -95,7 +95,7 @@ class BookScores:
 
 @dataclass
 class SequenceScore(Score):
-    sequence_num: str
+    sequence_num: int
     trg_draft_file_stem: str
 
     @classmethod
@@ -140,10 +140,10 @@ class TxtFileScores:
                 self.add_score(trg_draft_file_stem, score)
 
 
-def estimate_quality(verse_test_scores_path: Path, confidence_file_paths: List[Path]) -> None:
-    verse_test_scores_path, confidence_files = validate_inputs(verse_test_scores_path, confidence_file_paths)
+def estimate_quality(linregress_path: Path, confidence_file_paths: List[Path]) -> None:
+    linear_regression_result, confidence_files = validate_inputs(linregress_path, confidence_file_paths)
     verse_scores, chapter_scores, book_scores, sequence_scores, txt_file_scores = project_chrf3(
-        verse_test_scores_path, confidence_files
+        linear_regression_result, confidence_files
     )
     compute_usable_proportions(
         verse_scores,
@@ -156,19 +156,18 @@ def estimate_quality(verse_test_scores_path: Path, confidence_file_paths: List[P
 
 
 def validate_inputs(
-    verse_test_scores_path: Path, confidence_file_paths: List[Path]
-) -> Tuple[Path, List[ConfidenceFile]]:
-    if not verse_test_scores_path.exists():
-        raise FileNotFoundError(f"Test data file {verse_test_scores_path} does not exist.")
-    elif verse_test_scores_path.is_dir():
-        LOGGER.info(f"Searching for files with suffix {VERSE_SCORES_SUFFIX} in directory {verse_test_scores_path}.")
-        test_files = list(verse_test_scores_path.glob(f"*{VERSE_SCORES_SUFFIX}"))
-        if not test_files:
-            raise ValueError(
-                f"No test data file with the {VERSE_SCORES_SUFFIX} suffix found in directory {verse_test_scores_path}."
-            )
-        verse_test_scores_path = test_files[0]
-        LOGGER.info(f"Using test data file {verse_test_scores_path}.")
+    linregress_path: Path, confidence_file_paths: List[Path]
+) -> Tuple[LinearRegressionResult, List[ConfidenceFile]]:
+    if not linregress_path.exists():
+        raise FileNotFoundError(f"Linear regression file {linregress_path} does not exist.")
+    elif linregress_path.is_dir():
+        pattern = f"{LINREGRESS_PREFIX}.*.json"
+        LOGGER.info(f"Searching for files matching {pattern} in directory {linregress_path}.")
+        linregress_files = list(linregress_path.glob(pattern))
+        if not linregress_files:
+            raise ValueError(f"No file matching {pattern} found in directory {linregress_path}.")
+        linregress_path = linregress_files[0]
+        LOGGER.info(f"Using linear regression file {linregress_path}.")
 
     if len(confidence_file_paths) == 0:
         raise ValueError("At least one confidence file must be provided.")
@@ -176,32 +175,22 @@ def validate_inputs(
         missing_files = [str(cf) for cf in confidence_file_paths if not cf.is_file()]
         raise FileNotFoundError(f"The following confidence files do not exist: {', '.join(missing_files)}")
 
+    with open(linregress_path, "r", encoding="utf-8") as f:
+        linear_regression_result = LinearRegressionResult.fromJSON(f.read())
+
     confidence_files: List[ConfidenceFile] = []
     for cf in confidence_file_paths:
         confidence_files.append(ConfidenceFile.from_confidence_file_path(cf))
 
-    return verse_test_scores_path, confidence_files
+    return linear_regression_result, confidence_files
 
 
 def project_chrf3(
-    verse_test_scores_path: Path, confidence_files: List[ConfidenceFile]
+    linear_regression_result: LinearRegressionResult, confidence_files: List[ConfidenceFile]
 ) -> Tuple[List[VerseScore], ChapterScores, BookScores, List[SequenceScore], TxtFileScores]:
-    chrf3_scores, confidence_scores = extract_test_data(verse_test_scores_path)
-    if len(chrf3_scores) != len(confidence_scores):
-        raise ValueError(
-            f"The number of chrF3 scores ({len(chrf3_scores)}) and confidence scores ({len(confidence_scores)}) "
-            f"in {verse_test_scores_path} do not match."
-        )
-
-    linear_regression_result = perform_enhanced_linear_regression(confidence_scores, chrf3_scores)
     slope = linear_regression_result.slope
     intercept = linear_regression_result.intercept
     LOGGER.info(f"Linear regression data:\n{linear_regression_result.toJSON()}")
-    output_dir = confidence_files[0].get_path().parent
-    output_file = output_dir / "linregress.json"
-    with open(output_file, "w", encoding="utf-8") as f:
-        LOGGER.info(f"Saving linear regression data to {output_file}")
-        f.write(linear_regression_result.toJSON())
 
     verse_scores: List[VerseScore] = []
     chapter_scores: ChapterScores = ChapterScores()
@@ -229,34 +218,6 @@ def project_chrf3(
             sequence_scores += file_sequence_scores
             txt_file_scores.add_scores_from_confidence_file(confidence_file, slope, intercept)
     return verse_scores, chapter_scores, book_scores, sequence_scores, txt_file_scores
-
-
-def extract_test_data(verse_test_scores_path: Path) -> Tuple[List[float], List[float]]:
-    chrf3_scores: List[float] = []
-    confidence_scores: List[float] = []
-    with open(verse_test_scores_path, "r", encoding="utf-8") as f:
-        header = next(f).strip().lower().split("\t")
-        try:
-            chrf3_index = header.index("chrf3")
-            confidence_index = header.index("confidence")
-        except ValueError as e:
-            raise ValueError(
-                f"Could not find 'chrF3' and/or 'confidence' columns in header of {verse_test_scores_path}: {header}"
-            ) from e
-        for line_num, line in enumerate(f, start=2):
-            cols = line.strip().split("\t")
-            try:
-                chrf3 = float(cols[chrf3_index])
-                confidence = float(cols[confidence_index])
-                chrf3_scores.append(chrf3)
-                confidence_scores.append(confidence)
-            except (ValueError, IndexError) as e:
-                raise ValueError(
-                    f"Error parsing line {line_num} in {verse_test_scores_path}: {line.strip()}"
-                    f" (chrF3 index: {chrf3_index}, confidence index: {confidence_index})"
-                ) from e
-
-    return chrf3_scores, confidence_scores
 
 
 @dataclass
@@ -450,11 +411,12 @@ def compute_txt_file_usability(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Estimate the quality of drafts created by an NMT model.")
     parser.add_argument(
-        "verse_test_scores_file",
+        "linregress_file",
         type=str,
-        help="Path relative to MT/experiments to a verse-level test score file, which is used to find line of best fit "
-        + "for confidence and chrF3, e.g., project_folder/exp_folder/test.trg-predictions.detok.txt.5000.scores.tsv. "
-        + "If a directory is provided instead, the first *.scores.tsv match is used.",
+        help="Path relative to MT/experiments to a linregress file containing the confidence-to-chrF3 line of best "
+        + f"fit produced by the test step, e.g., project_folder/exp_folder/{LINREGRESS_PREFIX}.5000.json (or "
+        + f"{LINREGRESS_PREFIX}.eng.fra.5000.json for an experiment with multiple language pairs). "
+        + f"If a directory is provided instead, the first {LINREGRESS_PREFIX}.*.json match is used.",
     )
     parser.add_argument(
         "confidence_files",
@@ -523,7 +485,7 @@ def main() -> None:
         for book_id in args.books:
             confidence_file_paths.extend(confidence_dir.glob(f"[0-9]*{book_id}{draft_suffix}.*{CONFIDENCE_SUFFIX}"))
 
-    estimate_quality(environment.get_mt_exp_dir(args.verse_test_scores_file), confidence_file_paths)
+    estimate_quality(environment.get_mt_exp_dir(args.linregress_file), confidence_file_paths)
 
 
 if __name__ == "__main__":

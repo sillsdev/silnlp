@@ -7,7 +7,7 @@ from transformers import AutoModelForSeq2SeqLM, PretrainedConfig, PreTrainedMode
 from transformers.generation.utils import GenerateBeamEncoderDecoderOutput
 from transformers.modeling_outputs import Seq2SeqLMOutput
 
-from silnlp.nmt.hugging_face_config import HuggingFaceConfig, PreTrainedModelProvider, PreTrainedModelProviderFactory
+from silnlp.nmt.seq2seq_config import PreTrainedModelProvider, PreTrainedModelProviderFactory, Seq2SeqConfig
 
 _TINY_MODEL_NAME = "hf-internal-testing/tiny-random-nllb"
 
@@ -32,7 +32,7 @@ def create_mock_pretrained_model(
     if model_stats is None:
         model_stats = ModelTrainingStats()
 
-    underlying_model = cast(PreTrainedModel, AutoModelForSeq2SeqLM.from_pretrained(_TINY_MODEL_NAME))
+    underlying_model = cast(PreTrainedModel, AutoModelForSeq2SeqLM.from_pretrained(_TINY_MODEL_NAME, token=False))
     underlying_model_forward = underlying_model.forward
     last_transition_scores: torch.Tensor | None = None
 
@@ -46,6 +46,7 @@ def create_mock_pretrained_model(
         model_stats.total_number_of_training_data_elements += (
             input_ids.shape[0] * input_ids.shape[1] if input_ids is not None else 0
         )
+        kwargs.pop("num_items_in_batch", None)
         return underlying_model_forward(
             input_ids=input_ids,
             *args,
@@ -119,6 +120,6 @@ class MockPreTrainedModelProviderFactory(PreTrainedModelProviderFactory):
         return self._model_stats
 
     def create_pretrained_model_provider(
-        self, config: HuggingFaceConfig, mixed_precision: bool = False
+        self, config: Seq2SeqConfig, mixed_precision: bool = False
     ) -> PreTrainedModelProvider:
         return MockPretrainedModelProvider(iter(self._mock_outputs), self._model_stats)

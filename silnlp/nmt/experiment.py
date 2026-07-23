@@ -99,13 +99,13 @@ class SILExperiment:
         quality_estimation = translate_configs.get("quality_estimation", False)
 
         if quality_estimation:
-            verse_test_scores_path = self.environment.get_mt_exp_dir(
-                quality_estimation.get("verse_test_scores_file")
-                if isinstance(quality_estimation, dict) and quality_estimation.get("verse_test_scores_file")
-                else self.config.exp_dir
+            linregress_path = self.environment.get_mt_exp_dir(
+                str(quality_estimation.get("linregress_file"))
+                if isinstance(quality_estimation, dict) and quality_estimation.get("linregress_file")
+                else str(self.config.exp_dir)
             )
         else:
-            verse_test_scores_path = None
+            linregress_path = None
         if quality_estimation and not self.save_confidences:
             self.save_confidences = True
 
@@ -135,8 +135,7 @@ class SILExperiment:
                     translate_config.get("trg_iso"),
                     self.produce_multiple_translations,
                     self.save_confidences,
-                    bool(quality_estimation),
-                    verse_test_scores_path,
+                    linregress_path,
                     postprocess_handler,
                     translate_config.get("tags"),
                 )
@@ -148,8 +147,7 @@ class SILExperiment:
                     translate_config.get("trg_iso"),
                     self.produce_multiple_translations,
                     self.save_confidences,
-                    bool(quality_estimation),
-                    verse_test_scores_path,
+                    linregress_path,
                     postprocess_handler,
                     translate_config.get("tags"),
                 )
@@ -198,7 +196,8 @@ def main() -> None:
         "--multiple-translations",
         default=False,
         action="store_true",
-        help='Produce multiple translations of each verse. These will be saved in separate files with suffixes like ".1.txt", ".2.txt", etc.',
+        help='Produce multiple translations of each verse. '
+        + 'These will be saved in separate files with suffixes like ".1.txt", ".2.txt", etc.',
     )
     parser.add_argument(
         "--save-confidences",
