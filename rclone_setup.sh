@@ -47,7 +47,7 @@ if [ "$BUCKET_TYPE" = "minio" ]; then
     sed -i -e "s#secret_access_key = x*#secret_access_key = $MINIO_SECRET_KEY#" /root/.config/rclone/rclone.conf
 
     echo "Mounting MinIO bucket..."
-    rclone mount --daemon --log-file=rclone_log.txt --log-file-max-size 10M --log-file-max-age 1d --log-level=DEBUG  --vfs-cache-mode full --use-server-modtime "$REMOTE" "$MOUNTPOINT"
+    rclone mount --daemon --dir-cache-time 1m --log-file=rclone_log.txt --log-file-max-size 10M --log-file-max-age 1d --log-level=DEBUG  --vfs-cache-mode full --use-server-modtime "$REMOTE" "$MOUNTPOINT"
     echo "Done"
 elif [ "$BUCKET_TYPE" = "backblaze" ]; then
     export SIL_NLP_DATA_PATH="$MOUNTPOINT"
@@ -56,6 +56,6 @@ elif [ "$BUCKET_TYPE" = "backblaze" ]; then
     sed -i -e "s#key = x*#key = $B2_APPLICATION_KEY#" /root/.config/rclone/rclone.conf
 
     echo "Mounting Backblaze bucket..."
-    rclone mount --daemon --log-file=rclone_log.txt --log-file-max-size 10M --log-file-max-age 1d --log-level=DEBUG  --vfs-cache-mode full --use-server-modtime "$REMOTE" "$MOUNTPOINT"
+    rclone mount --daemon --dir-cache-time 1m --log-file=rclone_log.txt --log-file-max-size 10M --log-file-max-age 1d --log-level=DEBUG  --vfs-cache-mode full --use-server-modtime "$REMOTE" "$MOUNTPOINT"
     echo "Done"
 fi
