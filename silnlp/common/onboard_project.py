@@ -561,18 +561,22 @@ class OnboardingReportCreator:
         self.flags: List[OnboardingReportFlag] = []
         self.report_df: pd.DataFrame = pd.DataFrame()
 
+    def _ref_project_has_all_completed_books(self) -> bool:
+        return any(
+            set(self.main_project.report.completed_books).issubset(set(p.report.completed_books))
+            for p in self.reference_projects
+        )
+
+    def _ref_project_has_all_planned_books(self) -> bool:
+        return any(set(self.planned_books).issubset(set(p.report.completed_books)) for p in self.reference_projects)
+
     def add_flags(self) -> None:
         projects = [self.main_project] + self.reference_projects
         if any(p.report.normalization != "NFC" for p in projects):
             self.flags.append(OnboardingReportFlag("Normalization", "Normalization is not NFC"))
 
-        draft_source_project = next(
-            (p for p in self.reference_projects if p.report.project_type == ProjectType.DRAFT_SOURCE), None
-        )
-        if draft_source_project and draft_source_project.report.versification != self.main_project.report.versification:
-            self.flags.append(
-                OnboardingReportFlag("Versification", "Draft Source Versification does not match Main Project")
-            )
+        if any(p.report.versification != self.main_project.report.versification for p in self.reference_projects):
+            self.flags.append(OnboardingReportFlag("Versification", "Source Versification does not match Main Project"))
 
         if all(p.report.lang_in_nllb is False for p in self.reference_projects):
             self.flags.append(
@@ -582,10 +586,7 @@ class OnboardingReportCreator:
         if all(p.report.script_in_nllb is False for p in projects):
             self.flags.append(OnboardingReportFlag("Script in NLLB", "Script is not in NLLB for all Projects"))
 
-        if all(
-            not (set(self.main_project.report.completed_books).issubset(set(p.report.completed_books)))
-            for p in self.reference_projects
-        ):
+        if not self._ref_project_has_all_completed_books():
             self.flags.append(
                 OnboardingReportFlag(
                     "Books for Training",
@@ -593,7 +594,7 @@ class OnboardingReportCreator:
                 )
             )
 
-        if all(not (set(self.planned_books).issubset(set(p.report.completed_books))) for p in self.reference_projects):
+        if not self._ref_project_has_all_planned_books():
             self.flags.append(
                 OnboardingReportFlag(
                     "Books to Translate",
