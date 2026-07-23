@@ -2706,6 +2706,35 @@ files = [
 ]
 
 [[package]]
+name = "peft"
+version = "0.8.0"
+description = "Parameter-Efficient Fine-Tuning (PEFT)"
+optional = false
+python-versions = ">=3.8.0"
+files = [
+    {file = "peft-0.8.0-py3-none-any.whl", hash = "sha256:c4f7d7dd2a6e1b11a1cb06b501c32ba254dfe96ccb4cdd30182ee8ce9b374725"},
+    {file = "peft-0.8.0.tar.gz", hash = "sha256:138ad8bbea64bc95ede981c48b7283498a81e43dfc55e9cc0b51fabd9586538e"},
+]
+
+[package.dependencies]
+accelerate = ">=0.21.0"
+huggingface-hub = ">=0.17.0"
+numpy = ">=1.17"
+packaging = ">=20.0"
+psutil = "*"
+pyyaml = "*"
+safetensors = "*"
+torch = ">=1.13.0"
+tqdm = "*"
+transformers = "*"
+
+[package.extras]
+dev = ["black (>=22.0,<23.0)", "hf-doc-builder", "ruff (>=0.0.241)", "urllib3 (<=2.0.0)"]
+docs-specific = ["hf-doc-builder"]
+quality = ["black (>=22.0,<23.0)", "ruff (>=0.0.241)", "urllib3 (<=2.0.0)"]
+test = ["black (>=22.0,<23.0)", "datasets", "diffusers (<0.21.0)", "hf-doc-builder", "parameterized", "pytest", "pytest-cov", "pytest-xdist", "ruff (>=0.0.241)", "scipy", "urllib3 (<=2.0.0)"]
+
+[[package]]
 name = "pexpect"
 version = "4.9.0"
 description = "Pexpect allows easy control of interactive console applications."
@@ -5111,4 +5140,4 @@ llm = ["bitsandbytes"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.11"
-content-hash = "8202be8f532b326e4595e05478dcfbbf8a6cac3c0f220a2c05a3f432a78aca74"
+content-hash = "7238b91e23d2857377ee313e55edf3676ae895d212b647f0e9304fb10a4b2530"
