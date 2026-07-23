@@ -64,4 +64,4 @@ Now your MinIO or B2 bucket should be mounted as M: or B: drive, respectively, w
 
 Now your MinIO or B2 bucket should be mounted as ~/M or ~/B respectively when you start Linux / macOS.
 You can use the check_bucket_setup script to verify these settings, run:
-python3 scripts/check_bucket_setup.py
+poetry run python -m scripts/check_bucket_setup
