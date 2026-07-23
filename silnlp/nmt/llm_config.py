@@ -462,8 +462,10 @@ class CausalLMProvider:
 
             model_class = self._determine_auto_model_class(self.config.model)
             base_model = model_class.from_pretrained(self.config.model, **load_kwargs)
+            base_dtype = next(base_model.parameters()).dtype
             model = PeftModel.from_pretrained(base_model, str(checkpoint_path))
-            return model.merge_and_unload()
+            merged = model.merge_and_unload()
+            return merged.to(base_dtype)
         model_class = self._determine_auto_model_class(str(checkpoint_path))
         return model_class.from_pretrained(str(checkpoint_path), **load_kwargs)
 
