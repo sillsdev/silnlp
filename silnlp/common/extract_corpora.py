@@ -1,5 +1,6 @@
 import argparse
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Set
 
@@ -16,16 +17,12 @@ from .paratext import (
 LOGGER = logging.getLogger(__package__ + ".extract_corpora")
 
 
+@dataclass
 class ExtractOutput:
-    def __init__(
-        self,
-        check_versification_output: CheckVersificationOutput,
-        corpus_filename: Optional[Path],
-        terms_count: int,
-    ):
-        self.corpus_filename = corpus_filename
-        self.check_versification_output = check_versification_output
-        self.terms_count = terms_count
+    check_versification_output: CheckVersificationOutput
+    corpus_filename: Optional[Path]
+    terms_count: int
+    range_line_count: int
 
 
 def main() -> None:
@@ -109,7 +106,7 @@ def extract_corpora(
             check_versification_output: CheckVersificationOutput = check_versification(
                 project_dir, parent_project_dir, versification_error_output_path, environment
             )
-            corpus_filename, verse_count, line_count = extract_project(
+            corpus_filename, verse_count, line_count, range_line_count = extract_project(
                 project_dir,
                 environment.mt_scripture_dir,
                 include_markers,
@@ -121,6 +118,7 @@ def extract_corpora(
             # check if the number of lines in the file is correct (the same as vref.txt)
             LOGGER.info(f"# of Verses: {verse_count}")
             LOGGER.info(f"# of Lines: {line_count}")
+            LOGGER.info(f"# of Range Lines: {range_line_count}")
             if verse_count != expected_verse_count:
                 LOGGER.info(
                     f"The number of completed verses is {verse_count} (out of the expected {expected_verse_count})."
@@ -134,10 +132,12 @@ def extract_corpora(
             )
             LOGGER.info(f"# of Terms: {terms_count}")
             LOGGER.info("Done.")
-            return ExtractOutput(check_versification_output, corpus_filename, terms_count)
+            return ExtractOutput(
+                check_versification_output, corpus_filename, terms_count, range_line_count=range_line_count
+            )
     else:
         LOGGER.warning(f"Couldn't find any data to process for any project in {environment.pt_projects_dir}.")
-        return ExtractOutput(None, None, 0)
+        return ExtractOutput(None, None, 0, 0)
 
 
 if __name__ == "__main__":
