@@ -180,6 +180,10 @@ To diagnose common configuration problems (missing or misspelled environment var
 ```
 python3 scripts/check_bucket_setup.py
 ```
+or
+```
+poetry run python -m scripts.check_bucket_setup
+```
 
 The script only uses the Python standard library, so it works even if the poetry/conda environment is broken. Every failed check prints a hint with the likely fix. If you use [Claude Code](https://claude.com/claude-code), the `/diagnose-bucket-setup` skill runs this script and investigates any failures further.
 
