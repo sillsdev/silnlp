@@ -53,6 +53,19 @@
 			// Set *default* container specific settings.json values on container create.
 			"settings": {
 				"python.defaultInterpreterPath": "/workspaces/silnlp/.venv/bin/python",
+				"python.useEnvironmentsExtension": false,
+				"isort.interpreter": [
+					"/workspaces/silnlp/.venv/bin/python"
+				],
+				"pylint.interpreter": [
+					"/workspaces/silnlp/.venv/bin/python"
+				],
+				"flake8.interpreter": [
+					"/workspaces/silnlp/.venv/bin/python"
+				],
+				"black-formatter.interpreter": [
+					"/workspaces/silnlp/.venv/bin/python"
+				],
 				"[python]": {
 					"editor.defaultFormatter": "ms-python.black-formatter",
 					"editor.codeActionsOnSave": {
@@ -77,7 +90,9 @@
 				"ms-python.flake8",
 				"ms-python.isort",
 				"eamodio.gitlens",
-				"donjayamanne.githistory"
+				"donjayamanne.githistory",
+				"anthropic.claude-code"
+
 			]
 		}
 	},
