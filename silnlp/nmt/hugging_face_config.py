@@ -1000,8 +1000,6 @@ class HuggingFaceNMTModel(NMTModel):
             model.generation_config.max_length = model.config.max_length
             model.config.max_length = None
 
-        if self._config.train.get("better_transformer"):
-            model = model.to_bettertransformer()
         tokenizer = self._config.get_tokenizer()
 
         old_embeddings = model.get_input_embeddings()
@@ -1166,7 +1164,6 @@ class HuggingFaceNMTModel(NMTModel):
             processing_class=tokenizer,
             compute_metrics=None if metric_name in DEFAULT_METRICS else compute_metrics,
             sequential_sampling=self._config.train.get("sequential_sampling", False),
-            better_transformer=self._config.train.get("better_transformer", False),
             auto_grad_acc=self._config.train.get("auto_grad_acc", False),
             model_prefix=self._config.model_prefix,
         )
@@ -1642,8 +1639,6 @@ class HuggingFaceNMTModel(NMTModel):
             model_name = self._config.model
 
         model: PreTrainedModel = self._pretrained_model_provider.create_model_for_inference(model_name)
-        if self._config.infer.get("better_transformer"):
-            model = model.to_bettertransformer()
         model, tokenizer = self._configure_model(model, tokenizer, src_lang, trg_lang)
 
         if model.generation_config is not None and (
@@ -2003,7 +1998,6 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         optimizers: Tuple[Optional[optim.Optimizer], Optional[optim.lr_scheduler.LambdaLR]] = (None, None),
         preprocess_logits_for_metrics: Optional[Callable[[Tensor, Tensor], Tensor]] = None,
         sequential_sampling: bool = False,
-        better_transformer: bool = False,
         auto_grad_acc: bool = False,
         model_prefix: Optional[str] = None,
     ):
@@ -2021,7 +2015,6 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
             preprocess_logits_for_metrics=preprocess_logits_for_metrics,
         )
         self._sequential_sampling = sequential_sampling
-        self._better_transformer = better_transformer
         self._auto_grac_acc = auto_grad_acc
         self.model_prefix = model_prefix
 
@@ -2073,15 +2066,11 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
                 else:
                     torch.save(state_dict, os.path.join(output_dir, WEIGHTS_NAME))
         else:
-            if self._better_transformer:
-                self.model = self.model.reverse_bettertransformer()
             self.model.save_pretrained(
                 output_dir,
                 state_dict=state_dict,
                 safe_serialization=self.args.save_safetensors,
             )
-            if self._better_transformer:
-                self.model = self.model.to_bettertransformer()
         if self.processing_class is not None:
             self.processing_class.save_pretrained(output_dir)
 
