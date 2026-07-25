@@ -33,7 +33,7 @@ from .clearml_connection import TAGS_LIST, SILClearML
 from .config import Config
 from .config_utils import load_config
 from .corpora import CorpusPair
-from .hugging_face_config import get_best_checkpoint
+from .seq2seq_config import get_best_checkpoint
 
 LOGGER = logging.getLogger(__package__ + ".postprocess")
 

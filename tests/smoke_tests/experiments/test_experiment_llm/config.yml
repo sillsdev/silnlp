@@ -1,0 +1,28 @@
+model_type: llm
+model: hf-internal-testing/tiny-random-LlamaForCausalLM
+data:
+  corpus_pairs:
+  - src: en-BSB
+    trg: es-LBLA
+    test_size: 16
+  lang_codes:
+    en: English
+    es: Spanish
+eval:
+  per_device_eval_batch_size: 8
+infer:
+  infer_batch_size: 8
+  max_new_tokens: 8
+train:
+  gradient_accumulation_steps: 8
+  per_device_train_batch_size: 8
+  max_steps: 8
+  gradient_checkpointing: false
+params:
+  finetune_method: lora
+  torch_dtype: float32
+  lora:
+    rank: 8
+    alpha: 16
+    dropout: 0.0
+    target_modules: all-linear

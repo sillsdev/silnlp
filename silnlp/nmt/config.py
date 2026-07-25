@@ -1,16 +1,20 @@
 import itertools
+import json
 import logging
 import random
 import re
 from abc import ABC, abstractmethod
 from contextlib import ExitStack
+from copy import deepcopy
+from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum, auto
 from pathlib import Path
 from statistics import mean, median, stdev
-from typing import Dict, Generator, Iterable, List, Optional, Set, TextIO, Tuple, Union, cast
+from typing import Any, Dict, Generator, Iterable, List, Optional, Set, TextIO, Tuple, Union, cast
 
 import pandas as pd
+import yaml
 from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, get_books
 from machine.tokenization import LatinWordTokenizer
 from tqdm import tqdm
@@ -61,12 +65,140 @@ class CheckpointType(Enum):
     OTHER = auto()
 
 
+_CHECKPOINT_PREFIX = "checkpoint-"
+
+
+def read_trainer_state(model_dir: Path) -> dict:
+    with (model_dir / "trainer_state.json").open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def model_has_best_checkpoint(model_dir: Path) -> bool:
+    trainer_state_path = model_dir / "trainer_state.json"
+    if not trainer_state_path.is_file():
+        return False
+    trainer_state = read_trainer_state(model_dir)
+    return trainer_state.get("best_model_checkpoint") is not None
+
+
+def find_last_checkpoint(model_dir: Path) -> Optional[Path]:
+    checkpoints = [p for p in model_dir.glob(f"{_CHECKPOINT_PREFIX}*") if p.is_dir()]
+    if len(checkpoints) == 0:
+        return None
+    return max(checkpoints, key=lambda p: int(p.name[len(_CHECKPOINT_PREFIX) :]))
+
+
+def resolve_checkpoint_path(model_dir: Path, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
+    """Resolve a checkpoint specifier to a (path, step) pair based purely on the
+    HuggingFace ``checkpoint-<step>`` directory convention and ``trainer_state.json``.
+
+    This is shared by both the seq2seq and decoder-only model implementations. ``AVERAGE``
+    is not supported (checkpoint averaging is not meaningful for these checkpoints) and
+    raises a ``ValueError``, which the test harness handles gracefully.
+    """
+    step: Optional[int] = None
+    if isinstance(ckpt, str):
+        ckpt_str = ckpt.lower()
+        if "avg" in ckpt_str:
+            ckpt = CheckpointType.AVERAGE
+        elif "best" in ckpt_str:
+            ckpt = CheckpointType.BEST
+        elif "last" in ckpt_str:
+            ckpt = CheckpointType.LAST
+        else:
+            step = int(ckpt)
+            ckpt = CheckpointType.OTHER
+    elif isinstance(ckpt, int):
+        step = ckpt
+        ckpt = CheckpointType.OTHER
+
+    if ckpt is CheckpointType.BEST:
+        trainer_state = read_trainer_state(model_dir)
+        ckpt_path = model_dir / Path(trainer_state["best_model_checkpoint"]).name
+        step = int(ckpt_path.name[len(_CHECKPOINT_PREFIX) :])
+    elif ckpt is CheckpointType.LAST:
+        last_checkpoint = find_last_checkpoint(model_dir)
+        if last_checkpoint is None:
+            raise ValueError(f"No checkpoints found in {model_dir}.")
+        ckpt_path = last_checkpoint
+        step = int(ckpt_path.name[len(_CHECKPOINT_PREFIX) :])
+    elif ckpt is CheckpointType.OTHER and step is not None:
+        ckpt_path = model_dir / f"{_CHECKPOINT_PREFIX}{step}"
+    else:
+        raise ValueError(f"Unsupported checkpoint type: {ckpt}.")
+    return ckpt_path, step
+
+
+@dataclass
+class InferenceModelParams:
+    checkpoint: Union[CheckpointType, str, int]
+    src_lang: str
+    trg_lang: str
+
+    def __post_init__(self):
+        if not isinstance(self.checkpoint, (CheckpointType, str, int)):
+            raise ValueError("checkpoint must be a CheckpointType, string, or integer")
+        if not isinstance(self.src_lang, str):
+            raise ValueError("src_lang must be a string")
+        if not isinstance(self.trg_lang, str):
+            raise ValueError("trg_lang must be a string")
+
+
+def collect_training_args(
+    config_root: dict,
+    mapping: Dict[str, Set[str]],
+    precision_args: Dict[str, Any],
+    clearml_queue: Optional[str],
+) -> Dict[str, Any]:
+    """Collect the experiment config values named in ``mapping`` into a flat dict of
+    TrainingArguments fields, with ``precision_args`` merged on top. Shared by the seq2seq and
+    LLM models, which differ only in the args class, the mapping, and the precision flags."""
+    args: Dict[str, Any] = {}
+    for section, params in mapping.items():
+        section_config: dict = config_root[section]
+        for param in params:
+            if param in section_config and section_config[param] is not None:
+                args[param] = section_config[param]
+    args.update(precision_args)
+    if clearml_queue is None:
+        args["report_to"] = "none"
+    return args
+
+
+def write_effective_config(path: Path, config_root: dict, training_args: Any, mapping: Dict[str, Set[str]]) -> None:
+    """Write the resolved experiment config, overlaying the effective values from ``training_args``
+    (per ``mapping``) onto a copy of ``config_root``. Shared by the seq2seq and LLM models, which
+    differ only in the args class and the mapping they pass in."""
+    config = deepcopy(config_root)
+    for section, params in mapping.items():
+        section_config: dict = config[section]
+        for param in params:
+            value = getattr(training_args, param)
+            if isinstance(value, Enum):
+                value = value.value
+            if value is None:
+                section_config.pop(param, None)
+            else:
+                section_config[param] = value
+    with path.open("w") as file:
+        yaml.dump(config, file)
+
+
 class NMTModel(ABC):
-    @abstractmethod
-    def train(self) -> None: ...
+    def __init__(self, config: "Config") -> None:
+        self._config = config
+        # The cached inference model is framework-specific (a torch model), so it is typed loosely
+        # here to keep this base module free of transformers/torch imports.
+        self._cached_inference_model: Optional[Any] = None
+        self._inference_model_params: Optional[InferenceModelParams] = None
 
     @abstractmethod
-    def save_effective_config(self, path: Path) -> None: ...
+    def train(self) -> None:
+        ...
+
+    @abstractmethod
+    def save_effective_config(self, path: Path) -> None:
+        ...
 
     @abstractmethod
     def translate_test_files(
@@ -76,7 +208,8 @@ class NMTModel(ABC):
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
-    ) -> None: ...
+    ) -> None:
+        ...
 
     @abstractmethod
     def translate(
@@ -86,16 +219,18 @@ class NMTModel(ABC):
         trg_iso: str,
         produce_multiple_translations: bool = False,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
-    ) -> Generator[SentenceTranslationGroup, None, None]: ...
+    ) -> Generator[SentenceTranslationGroup, None, None]:
+        ...
 
-    @abstractmethod
-    def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]: ...
+    def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
+        return resolve_checkpoint_path(self._config.model_dir, ckpt)
 
-    @abstractmethod
-    def clear_cache(self) -> None: ...
+    def clear_cache(self) -> None:
+        self._cached_inference_model = None
+        self._inference_model_params = None
 
-    @abstractmethod
-    def get_num_drafts(self) -> int: ...
+    def get_num_drafts(self) -> int:
+        return self._config.infer.get("num_drafts", 1)
 
 
 class Config(ABC):
@@ -197,8 +332,8 @@ class Config(ABC):
         return self.root["model"]
 
     @property
-    @abstractmethod
-    def model_dir(self) -> Path: ...
+    def model_dir(self) -> Path:
+        return Path(self.train["output_dir"])
 
     @property
     def params(self) -> dict:
@@ -243,8 +378,18 @@ class Config(ABC):
         )
 
     @property
-    @abstractmethod
-    def has_best_checkpoint(self) -> bool: ...
+    def has_best_checkpoint(self) -> bool:
+        return model_has_best_checkpoint(self.model_dir)
+
+    def _disable_eval_if_no_val_split(self) -> None:
+        """Turn off evaluation-related settings when there is no validation split. Shared by
+        Config subclasses, which call this after merging their defaults."""
+        if not self.has_val_split:
+            eval_config: dict = self.root["eval"]
+            eval_config["eval_strategy"] = "no"
+            eval_config["load_best_model_at_end"] = False
+            eval_config["early_stopping"] = None
+            eval_config["metric_for_best_model"] = None
 
     def set_seed(self) -> None:
         seed = self.data["seed"]
@@ -266,10 +411,12 @@ class Config(ABC):
     @abstractmethod
     def create_model(
         self, mixed_precision: bool = True, num_devices: int = 1, clearml_queue: Optional[str] = None
-    ) -> NMTModel: ...
+    ) -> NMTModel:
+        ...
 
     @abstractmethod
-    def create_tokenizer(self) -> Tokenizer: ...
+    def create_tokenizer(self) -> Tokenizer:
+        ...
 
     def is_train_project(self, ref_file_path: Path) -> bool:
         trg_iso, trg_project = self._parse_ref_file_path(ref_file_path)
@@ -1221,7 +1368,8 @@ class Config(ABC):
         return self._iso_pairs[(src_iso, trg_iso)].has_multiple_test_projects
 
     @abstractmethod
-    def _build_vocabs(self, stats: bool = False) -> None: ...
+    def _build_vocabs(self, stats: bool = False) -> None:
+        ...
 
     @abstractmethod
     def _write_dictionary(
@@ -1229,4 +1377,5 @@ class Config(ABC):
         tokenizer: Tokenizer,
         src_terms_files: List[Tuple[DataFile, List[str]]],
         trg_terms_files: List[Tuple[DataFile, List[str]]],
-    ) -> int: ...
+    ) -> int:
+        ...

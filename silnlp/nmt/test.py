@@ -13,6 +13,7 @@ from sacrebleu.metrics import BLEUScore
 from scipy.stats import gmean
 
 from ..common.environment import SilNlpEnv
+from ..common.linear_regression import perform_enhanced_linear_regression
 from ..common.translator import CONFIDENCE_SUFFIX
 from ..common.utils import get_git_revision_hash
 from .clearml_connection import TAGS_LIST, SILClearML
@@ -50,6 +51,7 @@ SUPPORTED_SENTENCE_SCORERS = [
 
 TEST_TRG_PREDICTIONS_PREFIX = "test.trg-predictions"
 VERSE_SCORES_SUFFIX = ".scores.tsv"
+LINREGRESS_PREFIX = "linregress"
 
 
 class PairScore:
@@ -120,6 +122,7 @@ def score_pair(
     ref_projects: Set[str],
     draft_index: int = 1,
     pair_confs: Optional[List[float]] = None,
+    linregress_file_name: Optional[str] = None,
 ) -> PairScore:
     bleu_score = None
     if "bleu" in scorers:
@@ -242,6 +245,7 @@ def score_pair(
             other_scores,
             config,
             confidences if "confidence" in scorers else None,
+            linregress_file_name,
         )
 
     return PairScore(book, src_iso, trg_iso, bleu_score, len(pair_sys), ref_projects, other_scores, draft_index)
@@ -256,6 +260,7 @@ def write_pair_verse_scores(
     other_scores: Dict[str, float],
     config: Config,
     confidences: Optional[List[float]],
+    linregress_file_name: Optional[str] = None,
 ) -> None:
     scorers = scorers.intersection(SUPPORTED_SENTENCE_SCORERS)
     other_scores = {k: v for k, v in other_scores.items() if k.lower() in scorers}
@@ -280,6 +285,9 @@ def write_pair_verse_scores(
             header.append("Reference")
         writer.writerow(header)
         spbleu_metric = sacrebleu.metrics.BLEU(tokenize="flores200", lowercase=True) if "spbleu" in scorers else None
+        compute_linregress = "chrf3" in scorers and "confidence" in scorers and confidences is not None
+        linregress_chrf3_scores: List[float] = []
+        linregress_confidence_scores: List[float] = []
         for index, pred in enumerate(pair_sys):
             sentences: List[str] = []
             for ref in pair_refs:
@@ -322,6 +330,10 @@ def write_pair_verse_scores(
             if "confidence" in scorers and confidences is not None:
                 other_verse_scores["Confidence"] = confidences[index]
 
+            if compute_linregress:
+                linregress_chrf3_scores.append(other_verse_scores["chrF3"])
+                linregress_confidence_scores.append(other_verse_scores["Confidence"])
+
             row: List[str] = [f"{index + 1}"]
 
             if "bleu" in scorers:
@@ -343,6 +355,38 @@ def write_pair_verse_scores(
             for sentence in sentences:
                 row.append(sentence.rstrip("\n"))
             writer.writerow(row)
+
+    if compute_linregress and linregress_file_name is not None:
+        write_linregress(
+            linregress_chrf3_scores,
+            linregress_confidence_scores,
+            config.exp_dir / linregress_file_name,
+        )
+
+
+def write_linregress(chrf3_scores: List[float], confidence_scores: List[float], output_path: Path) -> None:
+    linear_regression_result = perform_enhanced_linear_regression(confidence_scores, chrf3_scores)
+    LOGGER.info(f"Linear regression data:\n{linear_regression_result.toJSON()}")
+    LOGGER.info(f"Saving linear regression data to {output_path}")
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(linear_regression_result.toJSON())
+
+
+def get_linregress_file_name(
+    step_token: str,
+    split_by_pair: bool,
+    src_iso: str,
+    trg_iso: str,
+    produce_multiple_translations: bool,
+    draft_index: int,
+) -> str:
+    parts = [LINREGRESS_PREFIX]
+    if split_by_pair:
+        parts.extend([src_iso, trg_iso])
+    parts.append(step_token)
+    if produce_multiple_translations:
+        parts.append(str(draft_index))
+    return ".".join(parts) + ".json"
 
 
 def score_individual_books(
@@ -538,10 +582,11 @@ def test_checkpoint(
     refs_patterns: List[str] = []
     translation_detok_file_names: List[str] = []
     translation_conf_file_names: List[str] = []
+    step_token = "avg" if step == -1 else str(step)
     suffix_str = "_".join(map(lambda n: book_number_to_id(n), sorted(books.keys())))
     if len(suffix_str) > 0:
         suffix_str += "-"
-    suffix_str += "avg" if step == -1 else str(step)
+    suffix_str += step_token
 
     features_file_name = "test.src.txt"
     if (config.exp_dir / features_file_name).is_file():
@@ -633,10 +678,15 @@ def test_checkpoint(
     ):
         src_iso = config.default_test_src_iso
         trg_iso = config.default_test_trg_iso
-        if features_file_name != "test.src.txt":
+        split_by_pair = features_file_name != "test.src.txt"
+        if split_by_pair:
             parts = features_file_name.split(".")
             src_iso = parts[1]
             trg_iso = parts[2]
+
+        linregress_file_name = get_linregress_file_name(
+            step_token, split_by_pair, src_iso, trg_iso, produce_multiple_translations, draft_index
+        )
 
         pair_sys, pair_refs, book_dict = load_test_data(
             tokenizer,
@@ -674,6 +724,7 @@ def test_checkpoint(
                 config,
                 ref_projects,
                 draft_index,
+                linregress_file_name=linregress_file_name,
             )
         )
 
