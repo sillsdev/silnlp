@@ -13,11 +13,17 @@ from silnlp.common.create_onboarding_experiments import (
     EXPERIMENT_ARGS,
     NT_CANON,
     TOP_EXPERIMENTS,
+    BookCoverage,
     Candidate,
     Experiment,
+    drafting_qualified,
+    extract_book_counts,
     find_existing,
     folder_name,
+    format_books,
     load_language_entries,
+    load_vref_books,
+    missing_books,
     nllb_tag,
     parse_book_list,
     parse_corpus_stats,
@@ -1000,3 +1006,602 @@ def test_run_dry_run(request_dir: Path, tmp_path: Path, capsys):
     output = capsys.readouterr().out
     assert "Would create" in output
     assert "To run the experiments:" not in output
+
+
+def test_missing_books():
+    complete = {"GEN": 100, "MAT": 100}
+    assert missing_books({"GEN": 100, "MAT": 97}, ["GEN", "MAT"], complete) == ["MAT"]
+    assert missing_books({"GEN": 98}, ["GEN", "MAT"], complete) == ["MAT"]  # 98 >= 98% of 100
+    assert missing_books({}, ["GEN", "MAT"], complete) == ["GEN", "MAT"]
+    # A book with no complete count cannot be required.
+    assert missing_books({}, ["XXA"], complete) == []
+
+
+def test_format_books():
+    assert format_books(["GEN", "EXO"]) == "GEN;EXO"
+    many = [f"B{i:02}" for i in range(15)]
+    assert format_books(many) == ";".join(many[:10]) + " (+5 more)"
+
+
+def test_drafting_qualified():
+    complete = {"GEN": 100, "MAT": 100, "MRK": 100}
+    mat = {book_id_to_number("MAT")}
+    gen = {book_id_to_number("GEN")}
+    # A full Bible qualifies for any book selection.
+    full = {"GEN": 100, "MAT": 100, "MRK": 100}
+    assert drafting_qualified(full, complete, mat | gen)
+    # A published NT qualifies only when all the translate books are NT (and likewise the OT).
+    nt_only = {"GEN": 0, "MAT": 100, "MRK": 98}
+    assert drafting_qualified(nt_only, complete, mat)
+    assert not drafting_qualified(nt_only, complete, gen)
+    assert not drafting_qualified(nt_only, complete, mat | gen)
+    ot_only = {"GEN": 99, "MAT": 0, "MRK": 0}
+    assert drafting_qualified(ot_only, complete, gen)
+    assert not drafting_qualified(ot_only, complete, mat)
+    # The 98% boundary is inclusive.
+    assert drafting_qualified({"GEN": 98, "MAT": 98, "MRK": 98}, complete, mat | gen)
+    assert not drafting_qualified({"GEN": 97, "MAT": 98, "MRK": 98}, complete, mat | gen)
+
+
+def test_book_coverage_extract_fallback(tmp_path: Path):
+    # A stem with no verse_counts row falls back to counting its vref-aligned extract file.
+    assets_dir = tmp_path / "assets"
+    assets_dir.mkdir()
+    (assets_dir / "vref.txt").write_text("GEN 1:1\nGEN 1:2\nMAT 1:1\n", encoding="utf-8")
+    scripture_dir = tmp_path / "scripture"
+    scripture_dir.mkdir()
+    (scripture_dir / "en-EXTRACT.txt").write_text("In the beginning\n\n<range>\n", encoding="utf-8")
+
+    assert extract_book_counts(scripture_dir / "en-EXTRACT.txt", load_vref_books(assets_dir)) == {"GEN": 1, "MAT": 1}
+
+    counts_df = pd.DataFrame({"file": ["complete", "en-ROW"], "GEN": [2, 1], "MAT": [1, 0]}).set_index("file")
+    coverage = BookCoverage(counts_df, scripture_dir, assets_dir)
+    assert coverage.counts("en-ROW") == {"GEN": 1, "MAT": 0}  # csv row wins
+    assert coverage.counts("en-EXTRACT") == {"GEN": 1, "MAT": 1}  # extract fallback
+    assert coverage.counts("en-NOWHERE") is None
+    assert coverage.complete() == {"GEN": 2, "MAT": 1}  # the csv's complete row
+
+    # Without verse counts the complete counts come from vref.txt itself.
+    coverage = BookCoverage(None, scripture_dir, assets_dir)
+    assert coverage.complete() == {"GEN": 2, "MAT": 1}
+
+
+def test_run_primary_filter_reorders_pair(request_dir: Path, tmp_path: Path, capsys, select_all):
+    # NIV11R misses MRK, which the target contains, so it cannot be the primary source
+    # (back-translation guard): no NIV11R single, and HINCLBSI leads the pair despite its
+    # lower alignment. NIV11R is not a published Bible/NT either, so it gets no translate entry.
+    counts_path = request_dir / "verse_counts.csv"
+    df = pd.read_csv(counts_path)
+    df.loc[df["file"] == "en-NIV11R", "MRK"] = 0
+    df.to_csv(counts_path, index=False)
+
+    experiments = run(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="MRK",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+    )
+    output = capsys.readouterr().out
+    assert "Note: NIV11R cannot be the primary training source; it is missing MRK." in output
+    folders = sorted(e.folder.name for e in experiments)
+    assert folders == ["HINCLBSI_NIV11R_sdl_1", "HINCLBSI_sdl_1"]
+    by_folder = {e.folder.name: e for e in experiments}
+    pair = by_folder["HINCLBSI_NIV11R_sdl_1"].config["data"]["corpus_pairs"][0]
+    assert pair["src"] == ["hi-HINCLBSI", "en-NIV11R"]
+    translate = by_folder["HINCLBSI_NIV11R_sdl_1"].translate_config["translate"]
+    assert [entry["src_project"] for entry in translate] == ["HINCLBSI"]
+
+
+def test_run_no_primary_eligible_aborts(request_dir: Path, tmp_path: Path, capsys, monkeypatch):
+    # When every passing reference misses books of the target, nothing can be created.
+    counts_path = request_dir / "verse_counts.csv"
+    df = pd.read_csv(counts_path)
+    df.loc[df["file"].isin(["en-NIV11R", "hi-HINCLBSI"]), "MRK"] = 0
+    df.to_csv(counts_path, index=False)
+
+    monkeypatch.setattr("builtins.input", lambda prompt: pytest.fail("nothing should be asked"))
+    experiments = run(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="MRK",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+    )
+    assert experiments == []
+    assert "none can be the primary training source" in capsys.readouterr().out
+
+
+def test_run_secondary_threshold_blocks_pairs(request_dir: Path, tmp_path: Path, capsys, select_all):
+    # The second source needs parallel verses >= max(1000, 25% of the target's verses):
+    # with a 40000-verse target the references' ~5000 parallel verses are not worth a pair.
+    df = pd.DataFrame(
+        {
+            "file": ["complete", "sdl-A33_2026_07_02", "en-NIV11R", "hi-HINCLBSI", "arb-a55_2026_07_02"],
+            "MAT": [20000, 20000, 20000, 20000, 0],
+            "MRK": [20000, 20000, 20000, 20000, 0],
+        }
+    )
+    df.to_csv(request_dir / "verse_counts.csv", index=False)
+
+    experiments = run(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="MRK",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+    )
+    output = capsys.readouterr().out
+    assert "Note: NIV11R cannot be the second source of a mixed pair; 5070 parallel verses is below 10000" in output
+    assert sorted(e.folder.name for e in experiments) == ["HINCLBSI_sdl_1", "NIV11R_sdl_1"]
+
+
+def test_run_extract_fallback_for_missing_counts_row(request_dir: Path, tmp_path: Path, select_all):
+    # HINCLBSI has no verse_counts row; its book coverage is computed from the extract file.
+    counts_path = request_dir / "verse_counts.csv"
+    df = pd.read_csv(counts_path)
+    df[df["file"] != "hi-HINCLBSI"].to_csv(counts_path, index=False)
+
+    scripture_dir = tmp_path / "scripture"
+    scripture_dir.mkdir()
+    vref_books = load_vref_books(ASSETS_DIR)
+    lines = ["text" if book in ("MAT", "MRK") else "" for book in vref_books]
+    (scripture_dir / "hi-HINCLBSI.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    experiments = run(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="MRK",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+        scripture_dir=scripture_dir,
+    )
+    folders = sorted(e.folder.name for e in experiments)
+    assert folders == ["HINCLBSI_sdl_1", "NIV11R_HINCLBSI_sdl_1", "NIV11R_sdl_1"]
+    # The extract holds a complete NT (MAT;MRK of the fixture canon), so HINCLBSI also
+    # qualifies as a drafting source for an NT book.
+    by_folder = {e.folder.name: e for e in experiments}
+    translate = by_folder["NIV11R_HINCLBSI_sdl_1"].translate_config["translate"]
+    assert [entry["src_project"] for entry in translate] == ["NIV11R", "HINCLBSI"]
+
+
+def test_run_unknown_coverage_kept_with_warning(request_dir: Path, tmp_path: Path, caplog, select_all):
+    # No verse_counts row and no extract file: fail open with a warning instead of
+    # silently dropping a possibly good reference.
+    counts_path = request_dir / "verse_counts.csv"
+    df = pd.read_csv(counts_path)
+    df[df["file"] != "hi-HINCLBSI"].to_csv(counts_path, index=False)
+
+    with caplog.at_level("WARNING"):
+        experiments = run(
+            request_dir=request_dir,
+            experiments_dir=tmp_path,
+            assets_dir=ASSETS_DIR,
+            training_books="MRK",
+            translate_books="MAT",
+            min_parallel=2000,
+            min_alignment=0.2,
+        )
+    assert any("cannot verify its book coverage" in record.message for record in caplog.records)
+    folders = sorted(e.folder.name for e in experiments)
+    assert folders == ["HINCLBSI_sdl_1", "NIV11R_HINCLBSI_sdl_1", "NIV11R_sdl_1"]
+
+
+def test_run_translate_scripture_overrides(request_dir: Path, tmp_path: Path, capsys, select_all):
+    # --translate-scripture replaces the automatic drafting choice for every experiment;
+    # a missing project or missing books is warned about but never dropped.
+    projects_dir = tmp_path / "projects"
+    make_paratext_project(projects_dir, "NIV11R", ["MAT"])
+
+    experiments = run(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="complete",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+        projects_dir=projects_dir,
+        translate_scripture=["MYDRAFT"],
+    )
+    output = capsys.readouterr().out
+    assert "cannot translate MAT from 'MYDRAFT': there is no project folder 'MYDRAFT'" in output
+    assert "Including it anyway" in output
+    assert len(experiments) == 3
+    for experiment in experiments:
+        assert [entry["src_project"] for entry in experiment.translate_config["translate"]] == ["MYDRAFT"]
+
+
+def test_run_translate_scripture_incomplete_books_warns(request_dir: Path, tmp_path: Path, capsys, select_all):
+    # A specified drafting scripture that is less than 98% complete in some translate books
+    # is warned about but included anyway.
+    counts_path = request_dir / "verse_counts.csv"
+    df = pd.read_csv(counts_path)
+    df.loc[df["file"] == "hi-HINCLBSI", "MAT"] = 500
+    df.to_csv(counts_path, index=False)
+
+    experiments = run(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="MRK",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+        translate_scripture=["HINCLBSI"],
+    )
+    output = capsys.readouterr().out
+    assert "'HINCLBSI' is less than 98% complete in MAT" in output
+    assert "Including it anyway" in output
+    assert experiments
+    for experiment in experiments:
+        assert [entry["src_project"] for entry in experiment.translate_config["translate"]] == ["HINCLBSI"]
+
+
+def make_unpublished_source_scenario(tmp_path: Path, ref2_parallel: int = 10) -> Path:
+    """A target and reference(s) that are eligible primaries but not published Bibles/testaments.
+
+    The target contains GEN, EXO and MAT; each reference contains exactly the same books, so
+    it passes the primary filter but is neither 98% of a Bible nor of the NT (MRK and LUK are
+    missing) nor of the OT for an NT translate book.
+    """
+    stats_dir = tmp_path / "Scenario"
+    stats_dir.mkdir(parents=True)
+    pd.DataFrame(
+        {
+            "src_project": ["en-REF1", "fr-REF2"],
+            "trg_project": ["sdl-MAIN", "sdl-MAIN"],
+            "count": [30000, 30000],
+            "parallel": [5000, ref2_parallel],
+            "align_score": [0.5, 0.4],
+            "src_script": ["Latn", "Latn"],
+            "trg_script": ["Arab", "Arab"],
+        }
+    ).to_csv(stats_dir / "corpus-stats.csv", index=False)
+    pd.DataFrame(
+        {
+            "file": ["complete", "sdl-MAIN", "en-REF1", "fr-REF2"],
+            "GEN": [1533, 1533, 1533, 1533],
+            "EXO": [1213, 1213, 1213, 1213],
+            "MAT": [1071, 1071, 1071, 1071],
+            "MRK": [678, 0, 0, 0],
+            "LUK": [1000, 0, 0, 0],
+        }
+    ).to_csv(stats_dir / "verse_counts.csv", index=False)
+    return stats_dir
+
+
+def test_run_no_drafter_prompt_accepts_project(tmp_path: Path, capsys, monkeypatch):
+    stats_dir = make_unpublished_source_scenario(tmp_path)
+
+    def answer(prompt: str) -> str:
+        if "numbers to create" in prompt:
+            return "all"
+        if "project to draft from" in prompt:
+            return "DRAFTPROJ"
+        pytest.fail(f"Unexpected prompt: {prompt}")
+
+    monkeypatch.setattr("builtins.input", answer)
+    experiments = run(
+        request_dir=stats_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="GEN;EXO",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+    )
+    output = capsys.readouterr().out
+    assert "no training source of REF1 qualifies as a drafting source" in output
+    assert len(experiments) == 1
+    assert experiments[0].translate_config["translate"] == [
+        {"books": "MAT", "src_project": "DRAFTPROJ", "checkpoint": 5000}
+    ]
+    assert experiments[0].config["data"]["corpus_pairs"][0]["corpus_books"] == "GEN;EXO"
+
+
+def test_run_no_drafter_prompt_checks_project(tmp_path: Path, capsys, monkeypatch):
+    # A named project is checked; a repeated entry forces it through anyway.
+    stats_dir = make_unpublished_source_scenario(tmp_path)
+    projects_dir = tmp_path / "projects"
+    make_paratext_project(projects_dir, "NOMAT", ["RUT"])
+
+    answers = iter(["all", "NOMAT", "NOMAT"])
+    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+    experiments = run(
+        request_dir=stats_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="GEN;EXO",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+        projects_dir=projects_dir,
+    )
+    output = capsys.readouterr().out
+    assert "cannot translate MAT from 'NOMAT': project 'NOMAT' does not contain MAT" in output
+    assert "Enter the same project again to use it anyway" in output
+    assert len(experiments) == 1
+    assert experiments[0].translate_config["translate"][0]["src_project"] == "NOMAT"
+
+
+def test_run_no_drafter_prompt_new_books_this_experiment(tmp_path: Path, capsys, monkeypatch):
+    # Pressing Enter moves on to choosing different translate books; an invalid list and a
+    # selection that still qualifies nothing are both re-asked, and the accepted OT selection
+    # requalifies REF1 (a complete OT here) and is excluded from the training books.
+    stats_dir = make_unpublished_source_scenario(tmp_path)
+
+    book_answers = iter(["XYZ", "MRK", "GEN"])
+
+    def answer(prompt: str) -> str:
+        if "numbers to create" in prompt:
+            return "all"
+        if "project to draft from" in prompt:
+            return ""
+        if "different selection of books" in prompt:
+            return next(book_answers)
+        if "all experiments or only this one" in prompt:
+            return "one"
+        pytest.fail(f"Unexpected prompt: {prompt}")
+
+    monkeypatch.setattr("builtins.input", answer)
+    experiments = run(
+        request_dir=stats_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="GEN;EXO",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+    )
+    output = capsys.readouterr().out
+    assert "not a valid book list" in output  # XYZ
+    assert "Still no training source qualifies" in output  # MRK is still NT
+    assert "excluded the books being translated from corpus_books: GEN" in output
+    assert len(experiments) == 1
+    assert experiments[0].translate_config["translate"] == [{"books": "GEN", "src_project": "REF1", "checkpoint": 5000}]
+    assert experiments[0].config["data"]["corpus_pairs"][0]["corpus_books"] == "GEN;EXO;-GEN"
+
+
+def test_run_no_drafter_prompt_new_books_all_experiments(tmp_path: Path, monkeypatch):
+    # Applying the new selection to all experiments requalifies the later ones without
+    # asking again.
+    stats_dir = make_unpublished_source_scenario(tmp_path, ref2_parallel=5000)
+
+    prompted = []
+
+    def answer(prompt: str) -> str:
+        if "numbers to create" in prompt:
+            return "all"
+        if "project to draft from" in prompt:
+            prompted.append(prompt)
+            return ""
+        if "different selection of books" in prompt:
+            return "GEN"
+        if "all experiments or only this one" in prompt:
+            return "all"
+        pytest.fail(f"Unexpected prompt: {prompt}")
+
+    monkeypatch.setattr("builtins.input", answer)
+    experiments = run(
+        request_dir=stats_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="GEN;EXO",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+    )
+    assert len(prompted) == 1  # only the first experiment asked
+    assert sorted(e.folder.name for e in experiments) == ["REF1_REF2_sdl_1", "REF1_sdl_1", "REF2_sdl_1"]
+    by_folder = {e.folder.name: e for e in experiments}
+    for experiment in experiments:
+        assert all(entry["books"] == "GEN" for entry in experiment.translate_config["translate"])
+        assert experiment.config["data"]["corpus_pairs"][0]["corpus_books"] == "GEN;EXO;-GEN"
+    translate = by_folder["REF1_REF2_sdl_1"].translate_config["translate"]
+    assert [entry["src_project"] for entry in translate] == ["REF1", "REF2"]
+
+
+def test_run_no_drafter_prompt_skip(tmp_path: Path, capsys, monkeypatch):
+    stats_dir = make_unpublished_source_scenario(tmp_path)
+
+    def answer(prompt: str) -> str:
+        if "numbers to create" in prompt:
+            return "all"
+        if "project to draft from" in prompt or "different selection of books" in prompt:
+            return ""
+        pytest.fail(f"Unexpected prompt: {prompt}")
+
+    monkeypatch.setattr("builtins.input", answer)
+    experiments = run(
+        request_dir=stats_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="GEN;EXO",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+    )
+    assert experiments == []
+    assert "Skipped REF1: no drafting source was chosen." in capsys.readouterr().out
+
+
+def test_run_no_drafter_dry_run_warns_only(tmp_path: Path, capsys, monkeypatch):
+    stats_dir = make_unpublished_source_scenario(tmp_path)
+    monkeypatch.setattr("builtins.input", lambda prompt: pytest.fail("dry run must not prompt"))
+    experiments = run(
+        request_dir=stats_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="GEN;EXO",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+        dry_run=True,
+    )
+    output = capsys.readouterr().out
+    assert "no training source of REF1 qualifies as a drafting source" in output
+    assert len(experiments) == 1
+    assert experiments[0].translate_config["translate"] == []
+
+
+def test_run_rerun_updates_translate_config(request_dir: Path, tmp_path: Path, capsys, select_all):
+    # config.yml is unchanged by --translate-scripture, so a re-run skips the identical
+    # folders — but the on-disk translate_config.yml must still be brought in line, or the
+    # override would be a silent no-op.
+    run_args = dict(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="complete",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+    )
+    run(**run_args)
+    config_path = tmp_path / "Saudi_Arabia" / "Saudi_Arabian_Sign_Language" / "NIV11R_sdl_1" / "translate_config.yml"
+    with open(config_path, "r", encoding="utf-8") as file:
+        assert yaml.safe_load(file)["translate"][0]["src_project"] == "NIV11R"
+
+    capsys.readouterr()
+    again = run(**run_args, translate_scripture=["MYDRAFT"])
+    assert again == []  # nothing new created
+    output = capsys.readouterr().out
+    assert "already contains an identical config.yml" in output
+    assert "Updated" in output and "translate_config.yml" in output
+    with open(config_path, "r", encoding="utf-8") as file:
+        assert yaml.safe_load(file)["translate"][0]["src_project"] == "MYDRAFT"
+
+
+def test_run_books_all_replans_earlier_experiments(tmp_path: Path, monkeypatch):
+    # REF1 is a published NT (qualifies for MAT); REF2 is a complete OT plus MAT (qualifies
+    # only for OT books). When REF2's prompt switches the run to GEN for all experiments,
+    # REF1's already-made MAT plan must be replanned too — and REF1, which does not qualify
+    # for GEN, is then prompted about like any other.
+    stats_dir = tmp_path / "Scenario"
+    stats_dir.mkdir()
+    pd.DataFrame(
+        {
+            "src_project": ["en-REF1", "fr-REF2"],
+            "trg_project": ["sdl-MAIN", "sdl-MAIN"],
+            "count": [30000, 30000],
+            "parallel": [5000, 5000],
+            "align_score": [0.5, 0.4],
+            "src_script": ["Latn", "Latn"],
+            "trg_script": ["Arab", "Arab"],
+        }
+    ).to_csv(stats_dir / "corpus-stats.csv", index=False)
+    pd.DataFrame(
+        {
+            "file": ["complete", "sdl-MAIN", "en-REF1", "fr-REF2"],
+            "GEN": [1533, 0, 0, 1533],
+            "EXO": [1213, 0, 0, 1213],
+            "MAT": [1071, 1071, 1071, 1071],
+            "MRK": [678, 0, 678, 0],
+            "LUK": [1000, 0, 1000, 0],
+        }
+    ).to_csv(stats_dir / "verse_counts.csv", index=False)
+
+    project_answers = iter(["", "DRAFTPROJ"])  # REF2's prompt (round 1), REF1's prompt (round 2)
+
+    def answer(prompt: str) -> str:
+        if "numbers to create" in prompt:
+            return "all"
+        if "project to draft from" in prompt:
+            return next(project_answers)
+        if "different selection of books" in prompt:
+            return "GEN"
+        if "all experiments or only this one" in prompt:
+            return "all"
+        pytest.fail(f"Unexpected prompt: {prompt}")
+
+    monkeypatch.setattr("builtins.input", answer)
+    experiments = run(
+        request_dir=stats_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="GEN;EXO",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+    )
+    assert sorted(e.folder.name for e in experiments) == ["REF1_REF2_sdl_1", "REF1_sdl_1", "REF2_sdl_1"]
+    by_folder = {e.folder.name: e for e in experiments}
+    for experiment in experiments:
+        assert all(entry["books"] == "GEN" for entry in experiment.translate_config["translate"])
+        assert experiment.config["data"]["corpus_pairs"][0]["corpus_books"] == "GEN;EXO;-GEN"
+    assert [e["src_project"] for e in by_folder["REF1_sdl_1"].translate_config["translate"]] == ["DRAFTPROJ"]
+    assert [e["src_project"] for e in by_folder["REF2_sdl_1"].translate_config["translate"]] == ["REF2"]
+    assert [e["src_project"] for e in by_folder["REF1_REF2_sdl_1"].translate_config["translate"]] == ["REF2"]
+
+
+def test_run_unusable_clashing_candidate_does_not_trigger_copy(tmp_path: Path, capsys, select_all):
+    # A back translation sharing the target's iso that can appear in no experiment (not
+    # primary-eligible, below the secondary minimum) must not switch the run to a synthetic
+    # target code or require the extract copy.
+    stats_dir = tmp_path / "Scenario"
+    stats_dir.mkdir()
+    pd.DataFrame(
+        {
+            "src_project": ["en-REF1", "sdl-BT"],
+            "trg_project": ["sdl-MAIN", "sdl-MAIN"],
+            "count": [40000, 5500],
+            "parallel": [20000, 5000],
+            "align_score": [0.5, 0.9],
+            "src_script": ["Latn", "Arab"],
+            "trg_script": ["Arab", "Arab"],
+        }
+    ).to_csv(stats_dir / "corpus-stats.csv", index=False)
+    pd.DataFrame(
+        {
+            "file": ["complete", "sdl-MAIN", "en-REF1", "sdl-BT"],
+            "MAT": [20000, 20000, 20000, 500],
+            "MRK": [20000, 20000, 20000, 0],
+        }
+    ).to_csv(stats_dir / "verse_counts.csv", index=False)
+
+    experiments = run(
+        request_dir=stats_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="MRK",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+    )
+    output = capsys.readouterr().out
+    assert "Note: BT cannot be the primary training source" in output
+    assert "Note: BT cannot be the second source of a mixed pair" in output
+    assert "synthetic" not in output
+    assert [e.folder.name for e in experiments] == ["REF1_sdl_1"]
+    assert experiments[0].config["data"]["corpus_pairs"][0]["trg"] == "sdl-MAIN"
+
+
+def test_run_nt_source_qualifies_for_nt_books(request_dir: Path, tmp_path: Path, select_all):
+    # A source that is a complete NT (of the fixture canon) but not a full Bible still
+    # qualifies as a drafting source when all the translate books are NT books.
+    counts_path = request_dir / "verse_counts.csv"
+    df = pd.read_csv(counts_path)
+    df.loc[df["file"] == "en-NIV11R", ["GEN", "EXO"]] = 0
+    df.to_csv(counts_path, index=False)
+
+    experiments = run(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="MRK",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+    )
+    by_folder = {e.folder.name: e for e in experiments}
+    translate = by_folder["NIV11R_sdl_1"].translate_config["translate"]
+    assert [entry["src_project"] for entry in translate] == ["NIV11R"]

@@ -18,9 +18,10 @@ import shutil
 import string
 import subprocess
 import sys
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import AbstractSet, Dict, List, Optional, Sequence, Tuple
+from typing import AbstractSet, Callable, Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
 import yaml
@@ -394,6 +395,112 @@ def load_verse_counts(request_dir: Path, experiments_dir: Path) -> pd.DataFrame:
     return df[~df.index.duplicated(keep="first")]
 
 
+def load_vref_books(assets_dir: Path) -> List[str]:
+    """The book id of each line of vref.txt (the verse layout of every extract file)."""
+    with open(assets_dir / "vref.txt", "r", encoding="utf-8") as file:
+        return [line.split(" ", 1)[0] for line in file if line.strip()]
+
+
+def extract_book_counts(extract_path: Path, vref_books: Sequence[str]) -> Dict[str, int]:
+    """Per-book verse counts of a vref-aligned extract file, counting the non-blank lines.
+
+    collect_verse_counts counts any line that is not exactly a newline; treating a
+    whitespace-only line as missing only differs from that at the margin, conservatively.
+    """
+    counts: Dict[str, int] = Counter()
+    with open(extract_path, "r", encoding="utf-8") as file:
+        for book, line in zip(vref_books, file):
+            if line.strip():
+                counts[book] += 1
+    return dict(counts)
+
+
+class BookCoverage:
+    """Per-book verse counts for extract stems.
+
+    Counts come from verse_counts.csv rows, falling back to counting the vref-aligned
+    extract file in MT/scripture, so a stem missing from the counts files never misreports
+    a scripture's book coverage.
+    """
+
+    def __init__(self, verse_counts: Optional[pd.DataFrame], scripture_dir: Optional[Path], assets_dir: Path):
+        self._verse_counts = verse_counts
+        self._scripture_dir = scripture_dir
+        self._assets_dir = assets_dir
+        self._vref_books: Optional[List[str]] = None
+        self._cache: Dict[str, Optional[Dict[str, int]]] = {}
+
+    def counts(self, stem: str) -> Optional[Dict[str, int]]:
+        """Verse counts per book id, or None when the stem has no counts row and no extract file."""
+        if stem not in self._cache:
+            self._cache[stem] = self._load(stem)
+        return self._cache[stem]
+
+    def complete(self) -> Dict[str, int]:
+        """The full canon's verse count per book: the 'complete' row, or computed from vref.txt."""
+        if self._verse_counts is not None and "complete" in self._verse_counts.index:
+            return self._row_counts("complete")
+        return dict(Counter(self._books()))
+
+    def _load(self, stem: str) -> Optional[Dict[str, int]]:
+        if self._verse_counts is not None and stem in self._verse_counts.index:
+            return self._row_counts(stem)
+        if self._scripture_dir is not None and (self._scripture_dir / f"{stem}.txt").is_file():
+            return extract_book_counts(self._scripture_dir / f"{stem}.txt", self._books())
+        return None
+
+    def _row_counts(self, index: str) -> Dict[str, int]:
+        assert self._verse_counts is not None
+        row = self._verse_counts.loc[index]
+        return {
+            book: int(row[book])
+            for book in self._verse_counts.columns
+            if book in ALL_BOOK_IDS and not pd.isna(row[book])
+        }
+
+    def _books(self) -> List[str]:
+        if self._vref_books is None:
+            self._vref_books = load_vref_books(self._assets_dir)
+        return self._vref_books
+
+
+def missing_books(counts: Dict[str, int], required: Sequence[str], complete: Dict[str, int]) -> List[str]:
+    """The required books that `counts` does not contain (>= 98% of the complete count)."""
+    return [
+        book
+        for book in required
+        if complete.get(book, 0) > 0 and counts.get(book, 0) < BOOK_COMPLETENESS_THRESHOLD * complete.get(book, 0)
+    ]
+
+
+def format_books(books: Sequence[str], limit: int = 10) -> str:
+    if len(books) <= limit:
+        return ";".join(books)
+    return ";".join(books[:limit]) + f" (+{len(books) - limit} more)"
+
+
+def drafting_qualified(counts: Dict[str, int], complete: Dict[str, int], book_set: AbstractSet[int]) -> bool:
+    """Whether a training source looks like a published scripture that is safe to draft from.
+
+    True when it holds at least 98% of a full Bible, or of the NT/OT when all the books
+    to translate are in that testament (a published New/Old Testament).
+    """
+
+    def coverage(canon: Sequence[str]) -> float:
+        complete_total = sum(complete.get(book, 0) for book in canon)
+        if complete_total <= 0:
+            return 0.0
+        return sum(counts.get(book, 0) for book in canon) / complete_total
+
+    if coverage(OT_CANON + NT_CANON) >= BOOK_COMPLETENESS_THRESHOLD:
+        return True
+    if all(is_nt(number) for number in book_set) and coverage(NT_CANON) >= BOOK_COMPLETENESS_THRESHOLD:
+        return True
+    if all(is_ot(number) for number in book_set) and coverage(OT_CANON) >= BOOK_COMPLETENESS_THRESHOLD:
+        return True
+    return False
+
+
 def resolve_corpus_books(
     books_arg: str,
     stems: Sequence[str],
@@ -473,21 +580,91 @@ def build_config(
     }
 
 
-def build_translate_config(
-    sources: List[Candidate], translate_books: str, source_projects: Optional[Dict[str, str]] = None
-) -> dict:
-    source_projects = source_projects or {}
+def build_translate_config(projects: Sequence[str], translate_books: str) -> dict:
     return {
         "translate": [
             {
                 "books": translate_books,
-                "src_project": source_projects.get(source.name, source.name),
+                "src_project": project,
                 "checkpoint": CHECKPOINT,
             }
-            for source in sources
+            for project in projects
         ],
         "postprocess": [{"paragraph_behavior": "place"}],
     }
+
+
+@dataclass
+class DraftingPlan:
+    """The drafting sources and translate books of one experiment."""
+
+    projects: List[str]  # drafting project names (before any Paratext replacement)
+    books: str  # translate book selection for translate_config.yml
+    book_set: AbstractSet[int]  # the same selection as canon book numbers
+    auto: bool  # chosen automatically, so subject to the Paratext replacement prompt
+
+
+def prompt_drafting_source(
+    sources: Sequence[Candidate],
+    books: str,
+    book_set: AbstractSet[int],
+    qualifies: Callable[[Candidate, AbstractSet[int]], bool],
+    projects_dir: Optional[Path],
+) -> Optional[Tuple[DraftingPlan, bool]]:
+    """Ask for a drafting source when no training source qualifies as one.
+
+    The user may name a project to draft from (checked, and accepted anyway when entered a
+    second time), or pick a different selection of translate books, in which case the
+    training sources are re-qualified and the user chooses whether the new selection applies
+    to the whole run. Returns (plan, applies to all experiments) or None to skip the experiment.
+    """
+    last_project: Optional[str] = None
+    while True:
+        try:
+            reply = input("Enter a project to draft from (or press Enter to choose different translate books): ")
+        except EOFError:
+            reply = ""
+        reply = reply.strip()
+        if reply:
+            book_ids = [book_number_to_id(number) for number in sorted(book_set)]
+            problem = check_translate_source(projects_dir, reply, book_ids) if projects_dir is not None else None
+            if problem is not None and reply != last_project:
+                print(
+                    f"Warning: cannot translate {';'.join(book_ids)} from '{reply}': {problem}."
+                    " Enter the same project again to use it anyway."
+                )
+                last_project = reply
+                continue
+            return DraftingPlan([reply], books, book_set, auto=False), False
+        try:
+            books_reply = input(
+                "Enter a different selection of books to translate (or press Enter to skip this experiment): "
+            )
+        except EOFError:
+            books_reply = ""
+        books_reply = books_reply.strip()
+        if not books_reply:
+            return None
+        try:
+            new_books = parse_book_list(books_reply)
+        except ValueError as e:
+            print(str(e))
+            continue
+        new_set = frozenset(get_chapters(new_books))
+        drafting = [source.name for source in sources if qualifies(source, new_set)]
+        if not drafting:
+            print("Still no training source qualifies as a drafting source with those books.")
+            continue
+        while True:
+            try:
+                scope = input("Apply the new translate books to all experiments or only this one? [all/one]: ")
+            except EOFError:
+                scope = "one"
+            scope = scope.strip().lower()
+            if scope in ("all", "a", "one", "o", ""):
+                break
+            print("Please answer 'all' or 'one'.")
+        return DraftingPlan(drafting, new_books, new_set, auto=True), scope in ("all", "a")
 
 
 def check_translate_source(projects_dir: Path, project: str, books: Sequence[str]) -> Optional[str]:
@@ -610,6 +787,29 @@ def write_yaml(path: Path, content: dict) -> None:
         yaml.dump(content, file, sort_keys=False, default_flow_style=False, allow_unicode=True)
 
 
+def update_translate_config(folder: Path, translate_config: dict, dry_run: bool) -> None:
+    """Bring an existing experiment's translate_config.yml in line with the current drafting choice.
+
+    An identical config.yml does not mean an identical translate_config.yml:
+    --translate-scripture and the drafting prompts change only the latter.
+    """
+    path = folder / "translate_config.yml"
+    on_disk: Optional[dict] = None
+    if path.is_file():
+        try:
+            with open(path, "r", encoding="utf-8") as file:
+                on_disk = yaml.safe_load(file)
+        except yaml.YAMLError:
+            LOGGER.warning(f"Could not parse {path}; it will be rewritten.")
+    if on_disk == translate_config:
+        return
+    if dry_run:
+        print(f"Would update {path} with the current drafting configuration.")
+    else:
+        write_yaml(path, translate_config)
+        print(f"Updated {path} with the current drafting configuration.")
+
+
 def submit_experiments(
     experiments: List[Experiment], experiments_dir: Path, submit: Optional[bool], no_test: bool = False
 ) -> None:
@@ -669,6 +869,7 @@ def run(
     projects_dir: Optional[Path] = None,
     test_variant: Optional[str] = None,
     target: Optional[str] = None,
+    translate_scripture: Optional[Sequence[str]] = None,
     top: int = TOP_EXPERIMENTS,
     dry_run: bool = False,
     submit: Optional[bool] = False,
@@ -751,6 +952,67 @@ def run(
         print(f"\nNo references passed the thresholds (parallel >= {min_parallel}, alignment >= {min_alignment}).")
         return []
 
+    # The primary (first) training source doubles as the drafting source, so it must not be a
+    # back translation. Book coverage is the reliable signal: a primary source must contain
+    # every book present in the target scripture plus every book to be translated. See
+    # create_onboarding_experiments_brief.md for the rationale.
+    verse_counts: Optional[pd.DataFrame] = None
+    try:
+        verse_counts = load_verse_counts(request_dir, experiments_dir)
+    except FileNotFoundError:
+        if training_books.lower() == "complete":
+            raise
+    except Exception as e:  # a malformed counts file must not break runs that never needed it
+        if training_books.lower() == "complete":
+            raise
+        LOGGER.warning(f"Could not read verse counts ({e}); book coverage will use extract files only.")
+    coverage = BookCoverage(verse_counts, scripture_dir, assets_dir)
+    complete_counts = coverage.complete()
+    translate_set = frozenset(get_chapters(translate_books))
+    translate_book_ids = [book_number_to_id(number) for number in sorted(translate_set)]
+
+    target_counts = coverage.counts(main.stem)
+    if target_counts is None:
+        LOGGER.warning(
+            f"No verse counts or extract file found for the target '{main.stem}'; only the translate"
+            " books can be required of a primary training source."
+        )
+    required_books = [
+        book for book in OT_CANON + NT_CANON if (target_counts or {}).get(book, 0) > 0 or book in translate_book_ids
+    ]
+    required_books += [book for book in translate_book_ids if book not in required_books]
+
+    target_total = sum(target_counts.values()) if target_counts is not None else main.verses
+    secondary_min = max(1000.0, 0.25 * target_total) if target_total else 1000.0
+
+    primary_pool: List[Candidate] = []
+    for c in passing:
+        counts = coverage.counts(c.stem)
+        if counts is None:
+            LOGGER.warning(
+                f"No verse counts or extract file found for '{c.stem}'; cannot verify its book"
+                " coverage — keeping it as a possible primary training source."
+            )
+            primary_pool.append(c)
+            continue
+        missing = missing_books(counts, required_books, complete_counts)
+        if missing:
+            print(f"Note: {c.name} cannot be the primary training source; it is missing {format_books(missing)}.")
+        else:
+            primary_pool.append(c)
+    for c in passing:
+        if c.parallel < secondary_min:
+            print(
+                f"Note: {c.name} cannot be the second source of a mixed pair; {c.parallel} parallel"
+                f" verses is below {secondary_min:.0f} (max of 1000 and 25% of the target's verses)."
+            )
+    if not primary_pool:
+        print(
+            "\nNo passing reference contains all the books of the target scripture plus the"
+            " translate books, so none can be the primary training source. Nothing to create."
+        )
+        return []
+
     # The src and trg isos of a corpus pair must differ. When a passing reference shares the
     # main project's iso, switch the main project to a synthetic code (not a real iso, not in
     # NLLB) and copy its extract file to the new stem, keeping the original. The copy is
@@ -761,7 +1023,15 @@ def run(
     counts_stem = main.stem  # verse_counts.csv is keyed by the original stem
     real_isos = {entry["isoCode"] for entry in language_entries}
     prior_iso = find_prior_copy(scripture_dir, main, real_isos)
-    clashing = [c for c in passing if to_iso3(c.iso) == to_iso3(main.iso)]
+    # Only candidates that can still appear in an experiment can cause a clash: one that is
+    # excluded from the primary pool and too small to be a second source is never written
+    # to a config, so it must not trigger the synthetic code and the extract copy.
+    usable = [
+        c
+        for c in passing
+        if c in primary_pool or (c.parallel >= secondary_min and any(p is not c for p in primary_pool))
+    ]
+    clashing = [c for c in usable if to_iso3(c.iso) == to_iso3(main.iso)]
     pending_copy: Optional[Tuple[str, str]] = None  # (old stem, new stem), executed on first creation
     if clashing or prior_iso is not None:
         synthetic = prior_iso or synthesize_trg_iso(to_iso3(main.iso) or main.iso, real_isos)
@@ -821,30 +1091,106 @@ def run(
                 raise FileNotFoundError(f"Neither {main.stem}.txt nor {new_stem}.txt found in {scripture_dir}.")
         main.iso, main.stem = synthetic, new_stem
 
-    verse_counts = None
-    if training_books.lower() == "complete":
-        verse_counts = load_verse_counts(request_dir, experiments_dir)
-    translate_set = frozenset(get_chapters(translate_books))
+    def order_pair(a: Candidate, b: Candidate) -> Optional[List[Candidate]]:
+        # The higher-alignment member leads when it can; swap when only the other can be primary.
+        for first, second in ((a, b), (b, a)):
+            if first in primary_pool and second.parallel >= secondary_min:
+                return [first, second]
+        return None
 
-    chosen = select_experiments(
-        [[c] for c in passing], [list(pair) for pair in itertools.combinations(passing, 2)], dry_run, top=top
-    )
+    singles = [[c] for c in primary_pool]
+    mixed = [pair for a, b in itertools.combinations(passing, 2) if (pair := order_pair(a, b)) is not None]
+    chosen = select_experiments(singles, mixed, dry_run, top=top)
 
-    # The chosen sources double as the projects to translate from; make sure each project
-    # folder and every book to be translated actually exists before writing the configs.
-    translate_book_ids = [book_number_to_id(number) for number in sorted(translate_set)]
-    source_names = list(dict.fromkeys(source.name for sources in chosen for source in sources))
-    source_projects = resolve_translate_sources(source_names, translate_book_ids, projects_dir, dry_run)
+    # Decide the drafting source(s) of each experiment: --translate-scripture wins, otherwise
+    # the training sources that look like published scriptures; when none qualifies the user
+    # is asked for a project or for a different selection of translate books.
+    if translate_scripture and chosen:
+        for project in translate_scripture:
+            problem = check_translate_source(projects_dir, project, translate_book_ids) if projects_dir else None
+            if problem is not None:
+                print(
+                    f"Warning: cannot translate {';'.join(translate_book_ids)} from '{project}': {problem}."
+                    " Including it anyway: it was explicitly requested with --translate-scripture."
+                )
+            stem = next((c.stem for c in candidates if c.name == project), None)
+            counts = coverage.counts(stem) if stem is not None else None
+            if counts is not None:
+                incomplete_books = missing_books(counts, translate_book_ids, complete_counts)
+                if incomplete_books:
+                    print(
+                        f"Warning: '{project}' is less than {BOOK_COMPLETENESS_THRESHOLD:.0%} complete in"
+                        f" {format_books(incomplete_books)}. Including it anyway: it was explicitly"
+                        " requested with --translate-scripture."
+                    )
+
+    def qualifies(source: Candidate, book_set: AbstractSet[int]) -> bool:
+        counts = coverage.counts(source.stem)
+        return counts is None or drafting_qualified(counts, complete_counts, book_set)
+
+    plans: List[Optional[DraftingPlan]] = []
+    current_books: str = translate_books
+    current_set: AbstractSet[int] = translate_set
+    replan = True
+    while replan:
+        # A run-wide book change applies to every experiment, including those already planned
+        # with the old selection, so the whole run is replanned with the new books (sources
+        # that no longer qualify under them are prompted about like any other).
+        replan = False
+        plans = []
+        for sources in chosen:
+            if translate_scripture:
+                plans.append(DraftingPlan(list(translate_scripture), current_books, current_set, auto=False))
+                continue
+            drafting = [source.name for source in sources if qualifies(source, current_set)]
+            if drafting:
+                plans.append(DraftingPlan(drafting, current_books, current_set, auto=True))
+                continue
+            label = " + ".join(source.name for source in sources)
+            print(
+                f"Warning: no training source of {label} qualifies as a drafting source (a published"
+                " Bible, or a complete testament containing all the books to translate)."
+            )
+            if dry_run:
+                plans.append(DraftingPlan([], current_books, current_set, auto=False))
+                continue
+            resolution = prompt_drafting_source(sources, current_books, current_set, qualifies, projects_dir)
+            if resolution is None:
+                print(f"Skipped {label}: no drafting source was chosen.")
+                plans.append(None)
+                continue
+            chosen_plan, run_wide = resolution
+            if run_wide:
+                current_books, current_set = chosen_plan.books, chosen_plan.book_set
+                replan = True
+                break
+            plans.append(chosen_plan)
+
+    # The automatically chosen drafting projects double as the projects to translate from;
+    # make sure each project folder and every book to be translated actually exists before
+    # writing the configs (once per distinct book selection).
+    names_by_books: Dict[str, List[str]] = {}
+    for plan in plans:
+        if plan is not None and plan.auto:
+            project_names = names_by_books.setdefault(plan.books, [])
+            project_names.extend(name for name in plan.projects if name not in project_names)
+    source_projects: Dict[Tuple[str, str], str] = {}
+    for plan_books, project_names in names_by_books.items():
+        book_ids = [book_number_to_id(number) for number in sorted(get_chapters(plan_books))]
+        for name, project in resolve_translate_sources(project_names, book_ids, projects_dir, dry_run).items():
+            source_projects[(plan_books, name)] = project
 
     experiments: List[Experiment] = []
     existing_experiments: List[Experiment] = []
     warned_removals: set = set()
     print()
-    for sources in chosen:
+    for sources, plan in zip(chosen, plans):
+        if plan is None:
+            continue  # skipped at the drafting prompt, already reported
         label = " + ".join(source.name for source in sources)
         try:
             corpus_books, removed = resolve_corpus_books(
-                training_books, [s.stem for s in sources] + [counts_stem], verse_counts, exclude=translate_set
+                training_books, [s.stem for s in sources] + [counts_stem], verse_counts, exclude=plan.book_set
             )
         except ValueError as e:
             print(f"Skipped {label}: {e}")
@@ -859,16 +1205,19 @@ def run(
             )
             continue
         config = build_config(sources, main, corpus_books, test_variant)
+        translate_projects = [source_projects.get((plan.books, name), name) for name in plan.projects]
+        translate_config = build_translate_config(translate_projects, plan.books)
         prefix = "_".join([source.name for source in sources] + [main.iso] + ([test_variant] if test_variant else []))
         existing, index = find_existing(lang_dir, prefix, config)
         if existing is not None:
             print(f"Skipped {label}: {existing} already contains an identical config.yml.")
+            update_translate_config(existing, translate_config, dry_run)
             existing_experiments.append(
                 Experiment(
                     sources=sources,
                     folder=existing,
                     config=config,
-                    translate_config=build_translate_config(sources, translate_books, source_projects),
+                    translate_config=translate_config,
                 )
             )
             continue
@@ -877,7 +1226,7 @@ def run(
             sources=sources,
             folder=folder,
             config=config,
-            translate_config=build_translate_config(sources, translate_books, source_projects),
+            translate_config=translate_config,
         )
         experiments.append(experiment)
         if dry_run:
@@ -940,6 +1289,13 @@ def main() -> None:
         required=True,
         help=f"Book or list of books for translate_config.yml, {book_list_syntax}",
     )
+    parser.add_argument(
+        "--translate-scripture",
+        nargs="+",
+        metavar="PROJECT",
+        help="Paratext project name(s) to draft from, overriding the automatic choice of drafting"
+        " sources (the training sources that are published Bibles or complete testaments)",
+    )
     test_group = parser.add_mutually_exclusive_group()
     test_group.add_argument(
         "--no-test",
@@ -980,6 +1336,7 @@ def main() -> None:
         projects_dir=Path(environment.pt_projects_dir),
         test_variant="notest" if args.no_test else "test100" if args.test100 else None,
         target=args.target,
+        translate_scripture=args.translate_scripture,
         top=args.top,
         dry_run=args.dry_run,
         submit=True if args.run else None,
