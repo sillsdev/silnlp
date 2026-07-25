@@ -1,6 +1,6 @@
 ---
-name: diagnose-setup
-description: Diagnose a local SILNLP environment setup — environment variables, VPN/MinIO connectivity, rclone configuration and mount, and ClearML authentication. Use when setup fails, the M drive / MinIO bucket is unreachable, ClearML gives auth errors, or when onboarding a new machine. Invoke with /diagnose-setup.
+name: diagnose-bucket-setup
+description: Diagnose a local SILNLP bucket setup — environment variables, VPN/MinIO connectivity, rclone configuration and mount, and ClearML authentication. Use when setup fails, the M drive / MinIO bucket is unreachable, ClearML gives auth errors, or when onboarding a new machine. Invoke with /diagnose-bucket-setup.
 ---
 
 # Diagnose SILNLP setup
@@ -10,7 +10,7 @@ Diagnose why a local SILNLP setup is not working. Supported platforms: Ubuntu/Li
 ## Step 1: Run the deterministic checker
 
 ```
-python3 silnlp/common/check_setup.py
+python3 scripts/check_bucket_setup.py
 ```
 
 It is stdlib-only, so it runs even when the poetry/conda environment is broken. Every failed check prints a remediation hint. The report lists each credential variable individually with its value and where it is defined (e.g. `~/.bashrc:142`); secret values are partially masked — `--show-secrets` prints them in full, but never paste that output into shared channels. If all checks pass but the user still has a problem, ask what command or workflow fails and investigate from there.

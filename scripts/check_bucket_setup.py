@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Diagnose a local SILNLP setup.
+"""Diagnose a local SILNLP bucket setup.
 
 Checks environment variables, connectivity to the MinIO bucket (usually over a VPN),
 the rclone configuration and mount, and ClearML credentials, then prints a report
@@ -8,7 +8,7 @@ with a remediation hint for every failure.
 The script uses only the Python standard library so that it runs even when the
 poetry/conda environment is broken or missing:
 
-    python silnlp/common/check_setup.py
+    python scripts/check_bucket_setup.py
 
 Exit code is 0 if no check fails (warnings are allowed), 1 otherwise.
 """
