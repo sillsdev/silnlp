@@ -645,31 +645,18 @@ class LLMModel(NMTModel):
 
     @staticmethod
     def _build_adapter_config(adapter: dict, use_dora: bool) -> Any:
-        import inspect
-
-        import peft
         from peft import LoraConfig, TaskType
 
-        kwargs: Dict[str, Any] = dict(
+        return LoraConfig(
             r=adapter["rank"],
             lora_alpha=adapter["alpha"],
             lora_dropout=adapter["dropout"],
             target_modules=adapter["target_modules"],
             modules_to_save=adapter.get("modules_to_save"),
+            use_dora=use_dora,
             bias="none",
             task_type=TaskType.CAUSAL_LM,
         )
-        # DoRA (use_dora) was added in peft 0.9.0. Only forward it when a dora/qdora method is
-        # selected so that plain-LoRA configs keep working on older peft, and fail with a clear
-        # message (rather than an opaque TypeError) when DoRA is requested but unavailable.
-        if use_dora:
-            if "use_dora" not in inspect.signature(LoraConfig.__init__).parameters:
-                raise ValueError(
-                    f"finetune_method 'dora'/'qdora' requires peft>=0.9.0, but the installed peft "
-                    f"({peft.__version__}) does not support DoRA. Upgrade peft to enable it."
-                )
-            kwargs["use_dora"] = True
-        return LoraConfig(**kwargs)
 
     def _load_text_dataset(self, src_path: Path, trg_path: Path) -> Optional[Dataset]:
         if not src_path.is_file() or not trg_path.is_file():

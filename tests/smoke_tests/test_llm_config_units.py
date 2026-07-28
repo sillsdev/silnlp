@@ -118,14 +118,6 @@ def test_apply_prompt_template_translate_gemma_falls_back_for_unrecognized_langu
     assert token_ids == [ord(c) for c in text]
 
 
-def _peft_supports_dora() -> bool:
-    import inspect
-
-    from peft import LoraConfig
-
-    return "use_dora" in inspect.signature(LoraConfig.__init__).parameters
-
-
 def test_build_adapter_config_plain_lora():
     peft_config = LLMModel._build_adapter_config(
         {"rank": 16, "alpha": 32, "dropout": 0.05, "target_modules": "all-linear"}, use_dora=False
@@ -133,8 +125,7 @@ def test_build_adapter_config_plain_lora():
     assert peft_config.r == 16
     assert peft_config.lora_alpha == 32
     assert peft_config.modules_to_save is None
-    # use_dora is never forwarded when a plain-LoRA method is selected, so it works on peft < 0.9.0 too.
-    assert getattr(peft_config, "use_dora", False) is False
+    assert peft_config.use_dora is False
 
 
 def test_build_adapter_config_passes_through_modules_to_save():
@@ -153,14 +144,10 @@ def test_build_adapter_config_passes_through_modules_to_save():
     assert peft_config.modules_to_save == ["embed_tokens", "lm_head"]
 
 
-def test_build_adapter_config_dora_requires_supported_peft():
+def test_build_adapter_config_dora():
     adapter = {"rank": 64, "alpha": 256, "dropout": 0.05, "target_modules": "all-linear"}
-    if _peft_supports_dora():
-        peft_config = LLMModel._build_adapter_config(adapter, use_dora=True)
-        assert peft_config.use_dora is True
-    else:
-        with pytest.raises(ValueError, match="requires peft"):
-            LLMModel._build_adapter_config(adapter, use_dora=True)
+    peft_config = LLMModel._build_adapter_config(adapter, use_dora=True)
+    assert peft_config.use_dora is True
 
 
 @dataclass
