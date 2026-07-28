@@ -68,7 +68,15 @@ from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup
 from ..common.translator import generate_confidence_files
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
-from .config import SUPPORTED_GLOSS_ISOS, CheckpointType, Config, InferenceModelParams, NMTModel, write_effective_config
+from .config import (
+    SUPPORTED_GLOSS_ISOS,
+    CheckpointType,
+    Config,
+    InferenceModelParams,
+    NMTModel,
+    collect_training_args,
+    write_effective_config,
+)
 from .corpora import DataFile
 from .token_occurrence_logger import TokenOccurrenceLogger
 from .tokenizer import NullTokenizer, Tokenizer
@@ -314,7 +322,7 @@ class FilePreTrainedModelProvider(PreTrainedModelProvider):
     ) -> PreTrainedModel:
         model = cast(
             PreTrainedModel,
-            AutoModelForSeq2SeqLM.from_pretrained(model_name, config=model_config, device_map=device_map),
+            AutoModelForSeq2SeqLM.from_pretrained(model_name, config=model_config, device_map=device_map, token=False),
         )
         return model
 
@@ -323,6 +331,7 @@ class FilePreTrainedModelProvider(PreTrainedModelProvider):
             model_name,
             torch_dtype=self._dtype,
             attn_implementation=self._attention_implementation,
+            token=False,
         )
 
 
@@ -514,7 +523,7 @@ class Seq2SeqConfig(Config):
             file.seek(0)
             json.dump(data, file, ensure_ascii=False, indent=4)
             file.truncate()
-        self._tokenizer = AutoTokenizer.from_pretrained(str(self.exp_dir), use_fast=True)
+        self._tokenizer = AutoTokenizer.from_pretrained(str(self.exp_dir), use_fast=True, token=False)
         return
 
     def _train_sp_tokenizer(self, files, vocab_size) -> Union[SentencePieceBPETokenizer, SentencePieceUnigramTokenizer]:
@@ -683,12 +692,12 @@ class Seq2SeqConfig(Config):
                 and not (self.exp_dir / "tokenizer_config.json").is_file()
             ):
                 if self.model_prefix == "facebook/nllb-200":
-                    self._tokenizer = NllbTokenizer.from_pretrained(str(self.exp_dir))
+                    self._tokenizer = NllbTokenizer.from_pretrained(str(self.exp_dir), token=False)
                     self._tokenizer = convert_slow_tokenizer(self._tokenizer)
                     self._tokenizer = NllbTokenizerFast(tokenizer_object=self._tokenizer)
                     self._tokenizer.save_pretrained(str(self.exp_dir))
                 elif self.model_prefix == "google/madlad400":
-                    self._tokenizer = T5Tokenizer.from_pretrained(str(self.exp_dir))
+                    self._tokenizer = T5Tokenizer.from_pretrained(str(self.exp_dir), token=False)
                     self._tokenizer = convert_slow_tokenizer(self._tokenizer)
                     self._tokenizer = T5TokenizerFast(tokenizer_object=self._tokenizer)
                     self._tokenizer.add_special_tokens(
@@ -710,7 +719,7 @@ class Seq2SeqConfig(Config):
                     model_name_or_path = str(parent_dir)
                 else:
                     model_name_or_path = self.model
-                self._tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True)
+                self._tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True, token=False)
             self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
         return self._tokenizer
 
@@ -725,7 +734,7 @@ class Seq2SeqConfig(Config):
             else:
                 model_name_or_path = self.model
 
-            self._tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True)
+            self._tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True, token=False)
             self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
         return self._tokenizer
 
@@ -944,6 +953,7 @@ class Seq2SeqNMTModel(NMTModel):
             id2label={},
             num_labels=0,
             attn_implementation=self._config.params["attn_implementation"],
+            token=False,
         )
         if self._num_devices == 2 and self._config.model_prefix == "facebook/nllb-200":
             device_map = {
@@ -966,8 +976,6 @@ class Seq2SeqNMTModel(NMTModel):
             model.generation_config.max_length = model.config.max_length
             model.config.max_length = None
 
-        if self._config.train.get("better_transformer"):
-            model = model.to_bettertransformer()
         tokenizer = self._config.get_tokenizer()
 
         old_embeddings = model.get_input_embeddings()
@@ -1132,7 +1140,6 @@ class Seq2SeqNMTModel(NMTModel):
             processing_class=tokenizer,
             compute_metrics=None if metric_name in DEFAULT_METRICS else compute_metrics,
             sequential_sampling=self._config.train.get("sequential_sampling", False),
-            better_transformer=self._config.train.get("better_transformer", False),
             auto_grad_acc=self._config.train.get("auto_grad_acc", False),
             model_prefix=self._config.model_prefix,
         )
@@ -1309,25 +1316,18 @@ class Seq2SeqNMTModel(NMTModel):
             yield model_output_group.convert_to_sentence_translation_group(tokenizer)
 
     def _create_training_arguments(self) -> Seq2SeqTrainingArguments:
-        parser = HfArgumentParser(Seq2SeqTrainingArguments)
-        args: dict = {}
-        for section, params in TRAINING_ARGS_CONFIG_MAPPING.items():
-            section_config: dict = self._config.root[section]
-            for param in params:
-                if param in section_config:
-                    args[param] = section_config[param]
-        # For context on floating point precision, see https://github.com/sillsdev/silnlp/issues/647
-        merge_dict(
-            args,
+        args = collect_training_args(
+            self._config.root,
+            TRAINING_ARGS_CONFIG_MAPPING,
+            # For context on floating point precision, see https://github.com/sillsdev/silnlp/issues/647
             {
                 "fp16": self._mixed_precision and not self._is_t5,
                 "bf16": self._mixed_precision and self._is_t5,
                 "tf32": self._mixed_precision,
             },
+            self._clearml_queue,
         )
-        if self._clearml_queue is None:
-            args["report_to"] = "none"
-        return parser.parse_dict(args)[0]
+        return HfArgumentParser(Seq2SeqTrainingArguments).parse_dict(args)[0]
 
     # Untie full embedding modules and instead tie embedding weights
     def _create_tied_embedding_weights(self, model: PreTrainedModel) -> PreTrainedModel:
@@ -1558,8 +1558,6 @@ class Seq2SeqNMTModel(NMTModel):
             model_name = self._config.model
 
         model: PreTrainedModel = self._pretrained_model_provider.create_model_for_inference(model_name)
-        if self._config.infer.get("better_transformer"):
-            model = model.to_bettertransformer()
         model, tokenizer = self._configure_model(model, tokenizer, src_lang, trg_lang)
 
         if model.generation_config is not None and (
@@ -1761,13 +1759,25 @@ class SilTranslationPipeline(TranslationPipeline):
         )
 
         output_ids = output.sequences
-        beam_indices = getattr(output, "beam_indices", None)
-        transition_scores = self.model.compute_transition_scores(
-            output_ids,
-            output.scores,
-            beam_indices,
-            normalize_logits=True,
-        )
+        output_scores = output.scores
+        beam_indices = output.beam_indices if "beam_indices" in output else None
+        try:
+            transition_scores = self.model.compute_transition_scores(
+                output_ids,
+                output_scores,
+                beam_indices,
+                normalize_logits=True,
+            )
+        except Exception:
+            output_ids = output_ids.to("cpu")
+            output_scores = tuple(score.to("cpu") for score in output_scores)
+            beam_indices = beam_indices.to("cpu") if beam_indices is not None else None
+            transition_scores = self.model.compute_transition_scores(
+                output_ids,
+                output_scores,
+                beam_indices,
+                normalize_logits=True,
+            )
         sequences_scores = getattr(output, "sequences_scores", None)
 
         out_b, seq_len = output_ids.shape
@@ -1919,7 +1929,6 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         optimizers: Tuple[Optional[optim.Optimizer], Optional[optim.lr_scheduler.LambdaLR]] = (None, None),
         preprocess_logits_for_metrics: Optional[Callable[[Tensor, Tensor], Tensor]] = None,
         sequential_sampling: bool = False,
-        better_transformer: bool = False,
         auto_grad_acc: bool = False,
         model_prefix: Optional[str] = None,
     ):
@@ -1937,7 +1946,6 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
             preprocess_logits_for_metrics=preprocess_logits_for_metrics,
         )
         self._sequential_sampling = sequential_sampling
-        self._better_transformer = better_transformer
         self._auto_grac_acc = auto_grad_acc
         self.model_prefix = model_prefix
 
@@ -1989,15 +1997,11 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
                 else:
                     torch.save(state_dict, os.path.join(output_dir, WEIGHTS_NAME))
         else:
-            if self._better_transformer:
-                self.model = self.model.reverse_bettertransformer()
             self.model.save_pretrained(
                 output_dir,
                 state_dict=state_dict,
                 safe_serialization=self.args.save_safetensors,
             )
-            if self._better_transformer:
-                self.model = self.model.to_bettertransformer()
         if self.processing_class is not None:
             self.processing_class.save_pretrained(output_dir)
 

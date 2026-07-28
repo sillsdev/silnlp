@@ -32,7 +32,7 @@ def create_mock_pretrained_model(
     if model_stats is None:
         model_stats = ModelTrainingStats()
 
-    underlying_model = cast(PreTrainedModel, AutoModelForSeq2SeqLM.from_pretrained(_TINY_MODEL_NAME))
+    underlying_model = cast(PreTrainedModel, AutoModelForSeq2SeqLM.from_pretrained(_TINY_MODEL_NAME, token=False))
     underlying_model_forward = underlying_model.forward
     last_transition_scores: torch.Tensor | None = None
 

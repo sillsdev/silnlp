@@ -4,7 +4,15 @@ import pytest
 from jinja2.exceptions import UndefinedError
 
 from silnlp.nmt.config_utils import is_llm_config
-from silnlp.nmt.llm_config import DataCollatorForCausalLM, LLMConfig, LLMModel
+from silnlp.nmt.llm_config import (
+    DataCollatorForCausalLM,
+    Language,
+    LLMConfig,
+    LLMModel,
+    PromptMessages,
+    TranslateGemmaPromptMessages,
+    build_generation_kwargs,
+)
 
 
 def test_is_llm_config_explicit_model_type():
@@ -19,23 +27,94 @@ def test_is_llm_config_prefix_fallback():
     assert not is_llm_config({"model": "google/madlad400-3b-mt"})
 
 
-def test_fold_system_message_merges_into_user_turn():
-    messages = [
+def test_prompt_messages_to_chat_messages():
+    prompt = PromptMessages(system_message="You are a translator.", instruction="Translate: hello", target="bonjour")
+    assert prompt.to_chat_messages() == [
         {"role": "system", "content": "You are a translator."},
         {"role": "user", "content": "Translate: hello"},
+        {"role": "assistant", "content": "bonjour"},
     ]
-    folded = LLMConfig._fold_system_message(messages)
-    assert folded is not None
-    assert len(folded) == 1
-    assert folded[0]["role"] == "user"
-    assert folded[0]["content"] == "You are a translator.\n\nTranslate: hello"
-    # The original messages must not be mutated.
-    assert messages[0]["role"] == "system"
 
 
-def test_fold_system_message_no_system_returns_none():
-    messages = [{"role": "user", "content": "Translate: hello"}]
-    assert LLMConfig._fold_system_message(messages) is None
+def test_prompt_messages_folds_system_message_into_user_turn():
+    prompt = PromptMessages(system_message="You are a translator.", instruction="Translate: hello")
+    assert prompt.to_folded_chat_messages() == [
+        {"role": "user", "content": "You are a translator.\n\nTranslate: hello"}
+    ]
+
+
+def test_prompt_messages_without_system_message():
+    prompt = PromptMessages(system_message="", instruction="Translate: hello")
+    assert prompt.to_chat_messages() == [{"role": "user", "content": "Translate: hello"}]
+    assert prompt.to_folded_chat_messages() == [{"role": "user", "content": "Translate: hello"}]
+
+
+def test_translate_gemma_prompt_messages_is_a_prompt_messages():
+    prompt = TranslateGemmaPromptMessages(
+        source_language=Language("en", "English"), target_language=Language("fr", "French"), text="hello"
+    )
+    assert isinstance(prompt, PromptMessages)
+
+
+def test_translate_gemma_prompt_messages_has_no_folding_or_plain_text_fallback():
+    prompt = TranslateGemmaPromptMessages(
+        source_language=Language("en", "English"), target_language=Language("fr", "French"), text="hello"
+    )
+    with pytest.raises(NotImplementedError):
+        prompt.to_folded_chat_messages()
+    with pytest.raises(NotImplementedError):
+        prompt.to_plain_text()
+
+
+@dataclass
+class _StubTokenizer:
+    pad_token_id: int = 0
+
+
+def test_data_collator_right_pads_inputs_and_masks_label_padding():
+    collator = DataCollatorForCausalLM(_StubTokenizer(pad_token_id=0))
+    features = [
+        {"input_ids": [5, 6, 7], "labels": [-100, 6, 7], "attention_mask": [1, 1, 1]},
+        {"input_ids": [8, 9], "labels": [-100, 9], "attention_mask": [1, 1]},
+    ]
+    batch = collator(features)
+
+    assert batch["input_ids"].tolist() == [[5, 6, 7], [8, 9, 0]]
+    assert batch["attention_mask"].tolist() == [[1, 1, 1], [1, 1, 0]]
+    # Padding positions in labels are masked with -100 so they are ignored by the loss.
+    assert batch["labels"].tolist() == [[-100, 6, 7], [-100, 9, -100]]
+
+
+def test_build_generation_kwargs_beam_search():
+    infer = {"max_new_tokens": 256, "num_beams": 4, "do_sample": False, "temperature": 0.7}
+    gen_kwargs = build_generation_kwargs(infer, num_return_sequences=2, pad_token_id=0)
+    assert gen_kwargs["num_beams"] == 4
+    assert gen_kwargs["num_return_sequences"] == 2
+    assert "do_sample" not in gen_kwargs
+    assert "temperature" not in gen_kwargs
+
+
+def test_build_generation_kwargs_sampling_does_not_set_num_beams():
+    infer = {"max_new_tokens": 256, "num_beams": 4, "do_sample": True, "temperature": 0.7}
+    gen_kwargs = build_generation_kwargs(infer, num_return_sequences=3, pad_token_id=0)
+    assert gen_kwargs["do_sample"] is True
+    assert gen_kwargs["temperature"] == 0.7
+    assert gen_kwargs["num_return_sequences"] == 3
+    assert "num_beams" not in gen_kwargs
+
+
+def test_build_generation_kwargs_rejects_more_drafts_than_beams():
+    infer = {"max_new_tokens": 256, "num_beams": 1, "do_sample": False, "temperature": 0.7}
+    with pytest.raises(RuntimeError, match="num_beams"):
+        build_generation_kwargs(infer, num_return_sequences=2, pad_token_id=0)
+
+
+def test_data_collator_pad_to_multiple_of():
+    collator = DataCollatorForCausalLM(_StubTokenizer(pad_token_id=0), pad_to_multiple_of=4)
+    features = [{"input_ids": [5, 6, 7], "labels": [-100, 6, 7], "attention_mask": [1, 1, 1]}]
+    batch = collator(features)
+    assert batch["input_ids"].shape[1] == 4
+    assert batch["labels"].tolist() == [[-100, 6, 7, -100]]
 
 
 @dataclass
@@ -45,9 +124,14 @@ class _StubLLMConfig:
     data: dict
 
     lang_name = LLMConfig.lang_name
+    language = LLMConfig.language
     build_prompt_messages = LLMConfig.build_prompt_messages
-    apply_prompt_template = LLMConfig.apply_prompt_template
-    _render_translate_gemma_prompt = LLMConfig._render_translate_gemma_prompt
+
+
+def test_language_resolves_configured_name_and_falls_back_to_iso():
+    config = _StubLLMConfig(model="google/gemma-2-2b-it", params={}, data={"lang_codes": {"en": "English"}})
+    assert config.language("en") == Language("en", "English")
+    assert config.language("fr") == Language("fr", "fr")
 
 
 def test_build_prompt_messages_translate_gemma_uses_structured_content():
@@ -56,8 +140,12 @@ def test_build_prompt_messages_translate_gemma_uses_structured_content():
         params={"prompt": {"instruction_template": "Translate from {src_lang} to {trg_lang}.\n\n{source}"}},
         data={"lang_codes": {}},
     )
-    messages = config.build_prompt_messages("hello", "en", "fr", target="bonjour")
-    assert messages == [
+    prompt = config.build_prompt_messages("hello", config.language("en"), config.language("fr"), target="bonjour")
+    assert prompt == TranslateGemmaPromptMessages(
+        source_language=Language("en", "en"), target_language=Language("fr", "fr"), text="hello", target="bonjour"
+    )
+    assert isinstance(prompt, TranslateGemmaPromptMessages)
+    assert prompt.to_chat_messages() == [
         {
             "role": "user",
             "content": [{"type": "text", "source_lang_code": "en", "target_lang_code": "fr", "text": "hello"}],
@@ -77,8 +165,10 @@ def test_build_prompt_messages_generic_model_uses_instruction_template():
         },
         data={"lang_codes": {"en": "English", "fr": "French"}},
     )
-    messages = config.build_prompt_messages("hello", "en", "fr")
-    assert messages == [{"role": "user", "content": "Translate from English to French.\n\nhello"}]
+    prompt = config.build_prompt_messages("hello", config.language("en"), config.language("fr"))
+    assert prompt == PromptMessages(
+        system_message="", instruction="Translate from English to French.\n\nhello", target=None
+    )
 
 
 class _StubTranslateGemmaTokenizer:
@@ -101,9 +191,9 @@ def test_apply_prompt_template_translate_gemma_falls_back_for_unrecognized_langu
         data={"lang_codes": {"en": "English", "tst": "Test Language"}},
     )
     tokenizer = _StubTranslateGemmaTokenizer()
-    messages = config.build_prompt_messages("hello", "en", "tst")
+    prompt = config.build_prompt_messages("hello", config.language("en"), config.language("tst"))
 
-    text = config.apply_prompt_template(tokenizer, messages, add_generation_prompt=True, tokenize=False)
+    text = prompt.apply_prompt_template(tokenizer, add_generation_prompt=True, tokenize=False)
     assert text == (
         "<bos><start_of_turn>user\n"
         "You are a professional English (en) to Test Language (tst) translator. Your goal is to accurately convey "
@@ -114,7 +204,7 @@ def test_apply_prompt_template_translate_gemma_falls_back_for_unrecognized_langu
         "<start_of_turn>model\n"
     )
 
-    token_ids = config.apply_prompt_template(tokenizer, messages, add_generation_prompt=True, tokenize=True)
+    token_ids = prompt.apply_prompt_template(tokenizer, add_generation_prompt=True, tokenize=True)
     assert token_ids == [ord(c) for c in text]
 
 
@@ -196,30 +286,3 @@ def test_normalize_deprecated_keys_prefers_explicit_adapter():
     LLMConfig._normalize_deprecated_keys(config)
     # An explicit adapter wins; the deprecated lora key is left untouched rather than clobbering it.
     assert config["params"]["adapter"] == {"rank": 64}
-
-
-@dataclass
-class _StubTokenizer:
-    pad_token_id: int = 0
-
-
-def test_data_collator_right_pads_inputs_and_masks_label_padding():
-    collator = DataCollatorForCausalLM(_StubTokenizer(pad_token_id=0))
-    features = [
-        {"input_ids": [5, 6, 7], "labels": [-100, 6, 7], "attention_mask": [1, 1, 1]},
-        {"input_ids": [8, 9], "labels": [-100, 9], "attention_mask": [1, 1]},
-    ]
-    batch = collator(features)
-
-    assert batch["input_ids"].tolist() == [[5, 6, 7], [8, 9, 0]]
-    assert batch["attention_mask"].tolist() == [[1, 1, 1], [1, 1, 0]]
-    # Padding positions in labels are masked with -100 so they are ignored by the loss.
-    assert batch["labels"].tolist() == [[-100, 6, 7], [-100, 9, -100]]
-
-
-def test_data_collator_pad_to_multiple_of():
-    collator = DataCollatorForCausalLM(_StubTokenizer(pad_token_id=0), pad_to_multiple_of=4)
-    features = [{"input_ids": [5, 6, 7], "labels": [-100, 6, 7], "attention_mask": [1, 1, 1]}]
-    batch = collator(features)
-    assert batch["input_ids"].shape[1] == 4
-    assert batch["labels"].tolist() == [[-100, 6, 7, -100]]
