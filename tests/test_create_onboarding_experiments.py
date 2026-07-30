@@ -378,6 +378,75 @@ def test_parse_corpus_stats_skips_incomplete_rows(tmp_path: Path):
     assert [c.name for c in candidates] == ["REF1"]
 
 
+def test_clean_script():
+    from silnlp.common.create_onboarding_experiments import clean_script
+
+    assert clean_script("Arab") == "Arab"
+    assert clean_script("  Latn ") == "Latn"
+    assert clean_script(None) is None
+    assert clean_script("") is None
+    assert clean_script("nan") is None  # str(pandas NaN)
+    assert clean_script("None") is None  # predict_script_code's empty-text result
+    assert clean_script(float("nan")) is None
+
+
+@pytest.mark.parametrize("main_is_trg", [True, False])
+@pytest.mark.parametrize("use_target", [True, False])
+def test_parse_corpus_stats_main_script_skips_empty_rows(tmp_path: Path, main_is_trg: bool, use_target: bool):
+    # A pair with no parallel data has an empty ('None'/'nan') script; when such a row sorts
+    # first it must not become the main project's script (that produced '<iso>_nan' configs).
+    # pandas reads both 'None' and 'nan' as NaN. The main may sit in either physical column
+    # (the headers are always src_project/trg_project), so both orientations are checked, with
+    # and without an explicit --target.
+    header = (
+        "src_project,trg_project,count,src_only,trg_only,parallel,align_score,filtered_count,"
+        "filtered_align_score,src_script,src_script_in_model,trg_script,trg_script_in_model"
+    )
+
+    def row(other: str, count: str, stats: str, other_script: str, other_in_model: str, main_script: str) -> str:
+        main_cell = (f"{count},{stats}", main_script, "True" if main_script == "Arab" else "False")
+        # The main project sits in whichever column the caller chose; the other project fills
+        # the remaining side. Scripts travel with their own side.
+        if main_is_trg:
+            return f"{other},arz-NGT,{main_cell[0]},{other_script},{other_in_model},{main_cell[1]},{main_cell[2]}"
+        return f"arz-NGT,{other},{main_cell[0]},{main_cell[1]},{main_cell[2]},{other_script},{other_in_model}"
+
+    # Leading no-data row (empty scripts on both sides) then a real aligned row.
+    empty_row = row("en-EMPTY", "10337", "0,10337,0,nan,0,nan", "None", "False", "None")
+    real_row = row("arb-REF", "10327", "0,5982,4345,0.52,0,0.52", "Arab", "True", "Arab")
+    stats_path = tmp_path / "corpus-stats.csv"
+    stats_path.write_text("\n".join([header, empty_row, real_row]) + "\n", encoding="utf-8")
+
+    main, candidates = parse_corpus_stats(stats_path, target="arz-NGT" if use_target else None)
+    assert main.stem == "arz-NGT"
+    assert main.script == "Arab"  # from the row with data, not the leading empty row
+    # The empty-data row is dropped as a candidate, the real one is kept.
+    assert [c.name for c in candidates] == ["REF"]
+
+    # The built config's lang_codes then use the real script even after a synthetic rename.
+    assert nllb_tag("aaj", main.script or "") == "aaj_Arab"
+
+
+def test_parse_log_main_script_skips_empty_rows(tmp_path: Path):
+    # The log path is vulnerable too: analyze logs 'source script: nan' for a no-data pair.
+    log = (
+        "Processing onboarding request for main project 'NGT'\n"
+        "Extracted corpus file: /x/arz-NGT.txt\n"
+        "# of Verses: 5000\n"
+        "Computing alignment beteween arz-NGT and en-EMPTY using Eflomal\n"
+        "Computing alignment beteween arz-NGT and arb-REF using Eflomal\n"
+        "NGT -> en-EMPTY stats - count: 100, parallel count: 0 alignment: 0.0,"
+        " source script: nan, source script in model: False, target script: nan, x\n"
+        "NGT -> arb-REF stats - count: 100, parallel count: 5000 alignment: 0.5,"
+        " source script: Arab, source script in model: True, target script: Arab, x\n"
+    )
+    log_path = tmp_path / "onboarding.log"
+    log_path.write_text(log, encoding="utf-8")
+    main, candidates = parse_log(log_path)
+    assert main.stem == "arz-NGT"
+    assert main.script == "Arab"  # not 'nan' from the first stats row
+
+
 def test_parse_corpus_stats_target_matching_both_sides_of_a_row(tmp_path: Path):
     stats_path = tmp_path / "corpus-stats.csv"
     stats_path.write_text(

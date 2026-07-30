@@ -143,7 +143,8 @@ def parse_log(log_path: Path) -> Tuple[MainProject, List[Candidate]]:
     for entry in stats:
         if entry["main"] != main_name:
             continue
-        main_script = entry["src_script"].strip()
+        # Keep the first row that reports a real script; a no-parallel-data row logs 'None'/'nan'.
+        main_script = main_script or clean_script(entry["src_script"])
         ref_name = entry["ref"]
         ref_stem = stems.get(ref_name)
         if ref_stem is None:
@@ -250,13 +251,17 @@ def parse_corpus_stats(stats_path: Path, target: Optional[str] = None) -> Tuple[
     if incomplete:
         LOGGER.warning(f"Skipping {incomplete} row(s) in {stats_path.name} with missing statistics.")
 
-    main_stem, main_script = oriented[0][0], oriented[0][1]
+    # Take the main project's script from the first row that actually reports one: a pair with
+    # no parallel data has an empty ('None'/'nan') script, and such a row must not decide the
+    # main script just because it sorts first (this is what produced '<iso>_nan' configs).
+    main_stem = oriented[0][0]
+    main_script = next((script for entry in oriented if (script := clean_script(entry[1])) is not None), None)
     main = MainProject(
         name=stem_to_project(main_stem),
         stem=main_stem,
         iso=stem_to_iso(main_stem),
         verses=None,
-        script=str(main_script).strip(),
+        script=main_script,
     )
     return main, list(candidates.values())
 
@@ -269,6 +274,21 @@ def parse_log_main_name(log_path: Path) -> Optional[str]:
             if m is not None:
                 return m.group(1)
     return None
+
+
+def clean_script(value: object) -> Optional[str]:
+    """A usable script abbreviation, or None for a missing/placeholder value.
+
+    analyze writes 'None' (predict_script_code's empty-text result) and 'nan' for pairs with
+    no parallel data; pandas also reads both as NaN. Treat all of these as "no script" so a
+    stray empty row never becomes a literal '<iso>_nan' language tag.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    if text.lower() in ("", "nan", "none"):
+        return None
+    return text
 
 
 def stem_to_iso(stem: str) -> str:
