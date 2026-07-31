@@ -579,6 +579,20 @@ def warn_missing_verses(source_name: str, kind: str, selection_str: str, presenc
     )
 
 
+def overlapping_books(training: Dict[int, List[int]], translate: Dict[int, List[int]]) -> List[str]:
+    """Book ids whose verses fall in both a training and a translate selection.
+
+    Each argument is a get_chapters result ({book number: [chapters]}, [] = whole book). A book
+    overlaps when either side takes the whole book, or their chapter lists intersect.
+    """
+    overlap = []
+    for number in sorted(set(training) & set(translate)):
+        train_chapters, translate_chapters = training[number], translate[number]
+        if not train_chapters or not translate_chapters or set(train_chapters) & set(translate_chapters):
+            overlap.append(book_number_to_id(number))
+    return overlap
+
+
 def resolve_corpus_books(
     books_arg: str,
     stems: Sequence[str],
@@ -1171,6 +1185,7 @@ def run(
     existing_experiments: List[Experiment] = []
     warned_removals: set = set()
     warned_missing: set = set()  # (stem, kind) pairs already warned about
+    warned_overlap: set = set()  # training selections already checked for translate-book overlap
     print()
     for sources in chosen:
         label = " + ".join(source.name for source in sources)
@@ -1192,9 +1207,20 @@ def run(
         if not corpus_books:
             print(f"Skipped {label}: no training books remain in '{training_books}' after the exclusions.")
             continue
+        # Warn (once per selection) when the training and translate books overlap: the model
+        # would train on text it is also meant to draft/test. Not blocked — the user decides.
+        training_selection = get_chapters(corpus_books)
+        if corpus_books not in warned_overlap:
+            warned_overlap.add(corpus_books)
+            overlap = overlapping_books(training_selection, translate_selection)
+            if overlap:
+                shown = ";".join(overlap[:10]) + (f" (+{len(overlap) - 10} more)" if len(overlap) > 10 else "")
+                print(
+                    f"Warning: the training books '{corpus_books}' and translate books '{translate_books}'"
+                    f" overlap in {shown}; the model would train on text it is meant to translate."
+                )
         # Warn (once per source) when a source is missing a quarter or more of the verses the
         # translate or training selection specifies (chapter-level; only where an extract exists).
-        training_selection = get_chapters(corpus_books)
         for source in sources:
             if (source.stem, "translate") not in warned_missing:
                 warned_missing.add((source.stem, "translate"))

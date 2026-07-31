@@ -24,6 +24,7 @@ from silnlp.common.create_onboarding_experiments import (
     load_vref_books,
     load_vref_chapters,
     nllb_tag,
+    overlapping_books,
     parse_book_list,
     parse_corpus_stats,
     parse_log,
@@ -1188,6 +1189,19 @@ def test_book_coverage_presence_chapter_level(tmp_path: Path):
     assert BookCoverage(None, None, assets_dir).presence("en-SRC", get_chapters("GEN")) is None
 
 
+def test_overlapping_books():
+    from machine.scripture import get_chapters
+
+    assert overlapping_books(get_chapters("NT"), get_chapters("MAT")) == ["MAT"]
+    assert overlapping_books(get_chapters("NT;-MAT"), get_chapters("MAT")) == []  # MAT subtracted from training
+    assert overlapping_books(get_chapters("GEN"), get_chapters("MAT")) == []  # disjoint books
+    # Chapter-level: same book, disjoint chapters -> no overlap; intersecting -> overlap.
+    assert overlapping_books(get_chapters("MAT 1-5"), get_chapters("MAT 6-10")) == []
+    assert overlapping_books(get_chapters("MAT 1-5"), get_chapters("MAT 4-8")) == ["MAT"]
+    # A whole book on either side overlaps a chapter selection of it.
+    assert overlapping_books(get_chapters("MAT"), get_chapters("MAT 6-10")) == ["MAT"]
+
+
 def test_candidate_table_render(request_dir: Path, tmp_path: Path, capsys):
     # Pin the table the user specified: each candidate once, a heading row with 'total' (not
     # 'count'), the train/draft/trg-only columns in order, then one three-state column per
@@ -1404,6 +1418,37 @@ def test_run_warns_missing_specified_verses(request_dir: Path, tmp_path: Path, c
     # HINCLBSI has the translate books, so it is not warned about for translation.
     assert "'HINCLBSI' is missing" not in output.split("translate verses")[0]
     assert experiments  # the warning does not block creation
+
+
+def test_run_warns_training_translate_overlap(request_dir: Path, tmp_path: Path, capsys, select_all):
+    # Training on and translating the same books is warned about (once), but not blocked.
+    experiments = run(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="MAT;MRK",  # overlaps the translate book MAT
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+    )
+    output = capsys.readouterr().out
+    assert "the training books 'MAT;MRK' and translate books 'MAT' overlap in MAT" in output
+    assert output.count("overlap in MAT") == 1  # warned once, not per experiment
+    assert experiments  # not blocked
+
+
+def test_run_no_overlap_warning_when_disjoint(request_dir: Path, tmp_path: Path, capsys, select_all):
+    # Subtracting the translate book from training removes the overlap and the warning.
+    run(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="MAT;MRK;-MAT",  # MAT excluded from training
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+    )
+    assert "and translate books" not in capsys.readouterr().out  # the overlap warning did not fire
 
 
 def test_run_rerun_updates_translate_config(request_dir: Path, tmp_path: Path, capsys, select_all):
