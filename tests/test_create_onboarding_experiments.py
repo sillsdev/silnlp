@@ -16,6 +16,7 @@ from silnlp.common.create_onboarding_experiments import (
     BookCoverage,
     Candidate,
     Experiment,
+    book_mark,
     drafting_qualified,
     extract_book_counts,
     find_existing,
@@ -388,6 +389,62 @@ def test_clean_script():
     assert clean_script("nan") is None  # str(pandas NaN)
     assert clean_script("None") is None  # predict_script_code's empty-text result
     assert clean_script(float("nan")) is None
+
+
+def test_book_mark():
+    complete = {"MAT": 100, "MRK": 100}
+    assert book_mark({"MAT": 100}, "MAT", complete) == "✓"
+    assert book_mark({"MAT": 98}, "MAT", complete) == "✓"  # 98% boundary is inclusive
+    assert book_mark({"MAT": 97}, "MAT", complete) == "~"  # partial
+    assert book_mark({"MAT": 0}, "MAT", complete) == "X"  # present column, no verses
+    assert book_mark({}, "MAT", complete) == "X"
+    assert book_mark(None, "MAT", complete) == "X"  # no coverage data at all
+    assert book_mark({"XYZ": 5}, "XYZ", complete) == "~"  # no complete count -> at best partial
+
+
+BOOK_STATS_HEADER = (
+    "src_project,trg_project,count,src_only,trg_only,parallel,align_score,filtered_count,"
+    "filtered_align_score,src_script,src_script_in_model,trg_script,trg_script_in_model"
+)
+
+
+@pytest.mark.parametrize("main_is_trg", [True, False])
+def test_parse_corpus_stats_src_trg_only(tmp_path: Path, main_is_trg: bool):
+    # 'source only' verses are the reference's own (drafting potential); the parser must read
+    # the right physical column for the row's orientation. The scenario is fixed: the reference
+    # has 30 verses of its own, the target 50, and 20 are parallel.
+    if main_is_trg:  # reference is the src column, so src_only is the reference's own
+        row = "en-REF,arz-NGT,100,30,50,20,0.5,0,0.5,Latn,True,Arab,True"
+    else:  # reference is the trg column, so trg_only is the reference's own
+        row = "arz-NGT,en-REF,100,50,30,20,0.5,0,0.5,Arab,True,Latn,True"
+    stats_path = tmp_path / "corpus-stats.csv"
+    stats_path.write_text(f"{BOOK_STATS_HEADER}\n{row}\n", encoding="utf-8")
+    _, candidates = parse_corpus_stats(stats_path, target="arz-NGT")
+    c = candidates[0]
+    assert (c.name, c.parallel, c.src_only, c.trg_only) == ("REF", 20, 30, 50)
+
+
+def test_parse_log_src_trg_only(tmp_path: Path):
+    # In the log the main is the alignment source, so the reference's own verses are logged as
+    # 'target only count'. Older logs without these counts fall back to 0.
+    log = (
+        "Processing onboarding request for main project 'NGT'\n"
+        "Extracted corpus file: /x/arz-NGT.txt\n"
+        "# of Verses: 100\n"
+        "Computing alignment beteween arz-NGT and en-REF using Eflomal\n"
+        "Computing alignment beteween arz-NGT and en-OLD using Eflomal\n"
+        "NGT -> REF stats - count: 100, source only count: 50 target only count: 30"
+        " parallel count: 20 alignment: 0.5, source script: Arab, source script in model: True,"
+        " target script: Latn, x\n"
+        "NGT -> OLD stats - count: 100, parallel count: 20 alignment: 0.4,"
+        " source script: Arab, source script in model: True, target script: Latn, x\n"
+    )
+    log_path = tmp_path / "onboarding.log"
+    log_path.write_text(log, encoding="utf-8")
+    _, candidates = parse_log(log_path)
+    by_name = {c.name: c for c in candidates}
+    assert (by_name["REF"].parallel, by_name["REF"].src_only, by_name["REF"].trg_only) == (20, 30, 50)
+    assert (by_name["OLD"].src_only, by_name["OLD"].trg_only) == (0, 0)  # counts absent -> 0
 
 
 @pytest.mark.parametrize("main_is_trg", [True, False])
@@ -1135,10 +1192,41 @@ def test_book_coverage_extract_fallback(tmp_path: Path):
     assert coverage.complete() == {"GEN": 2, "MAT": 1}
 
 
-def test_run_primary_filter_reorders_pair(request_dir: Path, tmp_path: Path, capsys, select_all):
-    # NIV11R misses MRK, which the target contains, so it cannot be the primary source
-    # (back-translation guard): no NIV11R single, and HINCLBSI leads the pair despite its
-    # lower alignment. NIV11R is not a published Bible/NT either, so it gets no translate entry.
+def test_candidate_table_render(request_dir: Path, tmp_path: Path, capsys):
+    # Pin the table the user specified: each candidate once, a heading row with 'total' (not
+    # 'count'), the train/draft/trg-only columns in order, then one three-state column per
+    # --translate-book. NIV11R has full MAT (✓) and partial MRK (~); HINCLBSI has no MRK (X).
+    counts_path = request_dir / "verse_counts.csv"
+    df = pd.read_csv(counts_path)
+    df.loc[df["file"] == "en-NIV11R", "MRK"] = 300  # partial (< 98% of 678)
+    df.loc[df["file"] == "hi-HINCLBSI", "MRK"] = 0  # none
+    df.to_csv(counts_path, index=False)
+
+    run(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="GEN;EXO",
+        translate_books="MAT;MRK",
+        min_parallel=2000,
+        min_alignment=0.2,
+        dry_run=True,
+    )
+    lines = capsys.readouterr().out.splitlines()
+    header = next(line for line in lines if "Candidate" in line and "align" in line)
+    assert header.split() == ["#", "Candidate", "align", "total", "train", "draft", "trg-only", "script", "MAT", "MRK"]
+
+    def row_for(name: str) -> list:
+        return next(line.split() for line in lines if line.split()[1:2] == [name])
+
+    assert row_for("NIV11R")[-2:] == ["✓", "~"]  # MAT full, MRK partial
+    assert row_for("HINCLBSI")[-2:] == ["✓", "X"]  # MAT full, MRK none
+
+
+def test_run_selection_overrides_book_filter(request_dir: Path, tmp_path: Path, select_all):
+    # NIV11R misses MRK, which the target contains — the old book-coverage filter would have
+    # excluded it as a primary source. Now the user can pick it from the table, so it is used
+    # as a single/primary source, leading the pair by its higher alignment.
     counts_path = request_dir / "verse_counts.csv"
     df = pd.read_csv(counts_path)
     df.loc[df["file"] == "en-NIV11R", "MRK"] = 0
@@ -1152,26 +1240,26 @@ def test_run_primary_filter_reorders_pair(request_dir: Path, tmp_path: Path, cap
         translate_books="MAT",
         min_parallel=2000,
         min_alignment=0.2,
+        translate_scripture=["NGT"],  # fix the drafting source so no drafter prompt is needed
     )
-    output = capsys.readouterr().out
-    assert "Note: NIV11R cannot be the primary training source; it is missing MRK." in output
     folders = sorted(e.folder.name for e in experiments)
-    assert folders == ["HINCLBSI_NIV11R_sdl_1", "HINCLBSI_sdl_1"]
+    assert folders == ["HINCLBSI_sdl_1", "NIV11R_HINCLBSI_sdl_1", "NIV11R_sdl_1"]
     by_folder = {e.folder.name: e for e in experiments}
-    pair = by_folder["HINCLBSI_NIV11R_sdl_1"].config["data"]["corpus_pairs"][0]
-    assert pair["src"] == ["hi-HINCLBSI", "en-NIV11R"]
-    translate = by_folder["HINCLBSI_NIV11R_sdl_1"].translate_config["translate"]
-    assert [entry["src_project"] for entry in translate] == ["HINCLBSI"]
+    # NIV11R (higher alignment) now leads the pair rather than being demoted for missing MRK.
+    assert by_folder["NIV11R_HINCLBSI_sdl_1"].config["data"]["corpus_pairs"][0]["src"] == [
+        "en-NIV11R",
+        "hi-HINCLBSI",
+    ]
 
 
-def test_run_no_primary_eligible_aborts(request_dir: Path, tmp_path: Path, capsys, monkeypatch):
-    # When every passing reference misses books of the target, nothing can be created.
-    counts_path = request_dir / "verse_counts.csv"
-    df = pd.read_csv(counts_path)
-    df.loc[df["file"].isin(["en-NIV11R", "hi-HINCLBSI"]), "MRK"] = 0
-    df.to_csv(counts_path, index=False)
+def test_run_select_none_creates_nothing(request_dir: Path, tmp_path: Path, capsys, monkeypatch):
+    # Selecting no candidates from the table creates nothing and asks nothing further.
+    def answer(prompt: str) -> str:
+        if "candidates to use" in prompt:
+            return "none"
+        pytest.fail(f"nothing else should be asked: {prompt}")
 
-    monkeypatch.setattr("builtins.input", lambda prompt: pytest.fail("nothing should be asked"))
+    monkeypatch.setattr("builtins.input", answer)
     experiments = run(
         request_dir=request_dir,
         experiments_dir=tmp_path,
@@ -1182,12 +1270,13 @@ def test_run_no_primary_eligible_aborts(request_dir: Path, tmp_path: Path, capsy
         min_alignment=0.2,
     )
     assert experiments == []
-    assert "none can be the primary training source" in capsys.readouterr().out
+    assert "No candidates selected" in capsys.readouterr().out
 
 
 def test_run_secondary_threshold_blocks_pairs(request_dir: Path, tmp_path: Path, capsys, select_all):
-    # The second source needs parallel verses >= max(1000, 25% of the target's verses):
-    # with a 40000-verse target the references' ~5000 parallel verses are not worth a pair.
+    # The second source of a pair still needs parallel verses >= max(1000, 25% of the target's
+    # verses): with a 40000-verse target the references' ~5000 parallel verses are not worth a
+    # pair, so only single-source experiments are offered.
     df = pd.DataFrame(
         {
             "file": ["complete", "sdl-A33_2026_07_02", "en-NIV11R", "hi-HINCLBSI", "arb-a55_2026_07_02"],
@@ -1207,7 +1296,8 @@ def test_run_secondary_threshold_blocks_pairs(request_dir: Path, tmp_path: Path,
         min_alignment=0.2,
     )
     output = capsys.readouterr().out
-    assert "Note: NIV11R cannot be the second source of a mixed pair; 5070 parallel verses is below 10000" in output
+    assert "Note: NIV11R can be a single source or the primary of a pair, but not a pair's second source" in output
+    assert "5070 parallel verses are below 10000" in output
     assert sorted(e.folder.name for e in experiments) == ["HINCLBSI_sdl_1", "NIV11R_sdl_1"]
 
 
@@ -1242,24 +1332,25 @@ def test_run_extract_fallback_for_missing_counts_row(request_dir: Path, tmp_path
     assert [entry["src_project"] for entry in translate] == ["NIV11R", "HINCLBSI"]
 
 
-def test_run_unknown_coverage_kept_with_warning(request_dir: Path, tmp_path: Path, caplog, select_all):
-    # No verse_counts row and no extract file: fail open with a warning instead of
-    # silently dropping a possibly good reference.
+def test_run_unknown_coverage_still_offered(request_dir: Path, tmp_path: Path, capsys, select_all):
+    # A candidate with no verse_counts row and no extract file (unknown coverage) is still
+    # listed in the table with 'X' marks and can be selected and used.
     counts_path = request_dir / "verse_counts.csv"
     df = pd.read_csv(counts_path)
     df[df["file"] != "hi-HINCLBSI"].to_csv(counts_path, index=False)
 
-    with caplog.at_level("WARNING"):
-        experiments = run(
-            request_dir=request_dir,
-            experiments_dir=tmp_path,
-            assets_dir=ASSETS_DIR,
-            training_books="MRK",
-            translate_books="MAT",
-            min_parallel=2000,
-            min_alignment=0.2,
-        )
-    assert any("cannot verify its book coverage" in record.message for record in caplog.records)
+    experiments = run(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="MRK",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+    )
+    lines = capsys.readouterr().out.splitlines()
+    hinclbsi_row = next(line.split() for line in lines if line.split()[1:2] == ["HINCLBSI"])
+    assert hinclbsi_row[-1] == "X"  # unknown coverage (no counts, no extract) -> no-data mark
     folders = sorted(e.folder.name for e in experiments)
     assert folders == ["HINCLBSI_sdl_1", "NIV11R_HINCLBSI_sdl_1", "NIV11R_sdl_1"]
 
@@ -1352,6 +1443,8 @@ def test_run_no_drafter_prompt_accepts_project(tmp_path: Path, capsys, monkeypat
     stats_dir = make_unpublished_source_scenario(tmp_path)
 
     def answer(prompt: str) -> str:
+        if "candidates to use" in prompt:
+            return "all"
         if "numbers to create" in prompt:
             return "all"
         if "project to draft from" in prompt:
@@ -1383,8 +1476,14 @@ def test_run_no_drafter_prompt_checks_project(tmp_path: Path, capsys, monkeypatc
     projects_dir = tmp_path / "projects"
     make_paratext_project(projects_dir, "NOMAT", ["RUT"])
 
-    answers = iter(["all", "NOMAT", "NOMAT"])
-    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+    def answer(prompt: str) -> str:
+        if "candidates to use" in prompt or "numbers to create" in prompt:
+            return "all"
+        if "project to draft from" in prompt:
+            return "NOMAT"  # entered again on the re-ask to force it through
+        pytest.fail(f"Unexpected prompt: {prompt}")
+
+    monkeypatch.setattr("builtins.input", answer)
     experiments = run(
         request_dir=stats_dir,
         experiments_dir=tmp_path,
@@ -1411,7 +1510,7 @@ def test_run_no_drafter_prompt_new_books_this_experiment(tmp_path: Path, capsys,
     book_answers = iter(["XYZ", "MRK", "GEN"])
 
     def answer(prompt: str) -> str:
-        if "numbers to create" in prompt:
+        if "candidates to use" in prompt or "numbers to create" in prompt:
             return "all"
         if "project to draft from" in prompt:
             return ""
@@ -1448,7 +1547,7 @@ def test_run_no_drafter_prompt_new_books_all_experiments(tmp_path: Path, monkeyp
     prompted = []
 
     def answer(prompt: str) -> str:
-        if "numbers to create" in prompt:
+        if "candidates to use" in prompt or "numbers to create" in prompt:
             return "all"
         if "project to draft from" in prompt:
             prompted.append(prompt)
@@ -1483,7 +1582,7 @@ def test_run_no_drafter_prompt_skip(tmp_path: Path, capsys, monkeypatch):
     stats_dir = make_unpublished_source_scenario(tmp_path)
 
     def answer(prompt: str) -> str:
-        if "numbers to create" in prompt:
+        if "candidates to use" in prompt or "numbers to create" in prompt:
             return "all"
         if "project to draft from" in prompt or "different selection of books" in prompt:
             return ""
@@ -1582,7 +1681,7 @@ def test_run_books_all_replans_earlier_experiments(tmp_path: Path, monkeypatch):
     project_answers = iter(["", "DRAFTPROJ"])  # REF2's prompt (round 1), REF1's prompt (round 2)
 
     def answer(prompt: str) -> str:
-        if "numbers to create" in prompt:
+        if "candidates to use" in prompt or "numbers to create" in prompt:
             return "all"
         if "project to draft from" in prompt:
             return next(project_answers)
@@ -1612,10 +1711,10 @@ def test_run_books_all_replans_earlier_experiments(tmp_path: Path, monkeypatch):
     assert [e["src_project"] for e in by_folder["REF1_REF2_sdl_1"].translate_config["translate"]] == ["REF2"]
 
 
-def test_run_unusable_clashing_candidate_does_not_trigger_copy(tmp_path: Path, capsys, select_all):
-    # A back translation sharing the target's iso that can appear in no experiment (not
-    # primary-eligible, below the secondary minimum) must not switch the run to a synthetic
-    # target code or require the extract copy.
+def test_run_clash_only_from_selected_candidates(tmp_path: Path, capsys, monkeypatch):
+    # A back translation sharing the target's iso only forces a synthetic target code (and the
+    # extract copy) if the user actually selects it. Choosing REF1 alone leaves the target
+    # code untouched, even though BT shares the target's iso.
     stats_dir = tmp_path / "Scenario"
     stats_dir.mkdir()
     pd.DataFrame(
@@ -1637,6 +1736,15 @@ def test_run_unusable_clashing_candidate_does_not_trigger_copy(tmp_path: Path, c
         }
     ).to_csv(stats_dir / "verse_counts.csv", index=False)
 
+    # The table lists BT first (higher alignment) then REF1; pick only REF1.
+    def answer(prompt: str) -> str:
+        if "candidates to use" in prompt:
+            return "2"
+        if "numbers to create" in prompt:
+            return "all"
+        pytest.fail(f"Unexpected prompt: {prompt}")
+
+    monkeypatch.setattr("builtins.input", answer)
     experiments = run(
         request_dir=stats_dir,
         experiments_dir=tmp_path,
@@ -1647,8 +1755,6 @@ def test_run_unusable_clashing_candidate_does_not_trigger_copy(tmp_path: Path, c
         min_alignment=0.2,
     )
     output = capsys.readouterr().out
-    assert "Note: BT cannot be the primary training source" in output
-    assert "Note: BT cannot be the second source of a mixed pair" in output
     assert "synthetic" not in output
     assert [e.folder.name for e in experiments] == ["REF1_sdl_1"]
     assert experiments[0].config["data"]["corpus_pairs"][0]["trg"] == "sdl-MAIN"

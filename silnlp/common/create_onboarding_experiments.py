@@ -47,6 +47,8 @@ STATS_RE = re.compile(
     r".*?source script: (?P<src_script>[^,]+),"
     r".*?target script: (?P<trg_script>[^,]+),"
 )
+# Optional in older logs; the main is the alignment source, so 'target only' is the reference's.
+ONLY_COUNTS_RE = re.compile(r"source only count: (?P<src_only>\d+) target only count: (?P<trg_only>\d+)")
 
 CHECKPOINT = 5000
 SEED = 111
@@ -82,6 +84,8 @@ class Candidate:
     parallel: int
     alignment: float
     script: str
+    src_only: int = 0  # verses only in this reference (drafting-source-only verses)
+    trg_only: int = 0  # verses only in the target
 
 
 @dataclass
@@ -130,7 +134,10 @@ def parse_log(log_path: Path) -> Tuple[MainProject, List[Candidate]]:
             continue
         m = STATS_RE.search(line)
         if m is not None:
-            stats.append(m.groupdict())
+            entry = m.groupdict()
+            only = ONLY_COUNTS_RE.search(line)
+            entry.update(only.groupdict() if only is not None else {"src_only": None, "trg_only": None})
+            stats.append(entry)
 
     if main_name is None:
         raise ValueError(f"No 'Processing onboarding request for main project' line found in {log_path}.")
@@ -158,6 +165,9 @@ def parse_log(log_path: Path) -> Tuple[MainProject, List[Candidate]]:
             parallel=int(entry["parallel"]),
             alignment=float(entry["alignment"]),
             script=entry["trg_script"].strip(),
+            # The main is the alignment source, so the reference's own verses are 'target only'.
+            src_only=int(entry["trg_only"]) if entry.get("trg_only") is not None else 0,
+            trg_only=int(entry["src_only"]) if entry.get("src_only") is not None else 0,
         )
 
     main = MainProject(
@@ -239,6 +249,11 @@ def parse_corpus_stats(stats_path: Path, target: Optional[str] = None) -> Tuple[
         if any(pd.isna(row[column]) for column in ("count", "parallel", "align_score")):
             incomplete += 1
             continue
+        # 'source only' verses are the reference's own; which physical column that is depends
+        # on the row's orientation (the reference may be the CSV's src or trg project).
+        ref_is_src = ref_stem == row["src_project"]
+        ref_col = "src_only" if ref_is_src else "trg_only"
+        target_col = "trg_only" if ref_is_src else "src_only"
         candidates[stem_to_project(ref_stem)] = Candidate(
             name=stem_to_project(ref_stem),
             stem=ref_stem,
@@ -247,6 +262,8 @@ def parse_corpus_stats(stats_path: Path, target: Optional[str] = None) -> Tuple[
             parallel=int(row["parallel"]),
             alignment=float(row["align_score"]),
             script=str(ref_script).strip(),
+            src_only=int(row[ref_col]) if ref_col in row.index and not pd.isna(row[ref_col]) else 0,
+            trg_only=int(row[target_col]) if target_col in row.index and not pd.isna(row[target_col]) else 0,
         )
     if incomplete:
         LOGGER.warning(f"Skipping {incomplete} row(s) in {stats_path.name} with missing statistics.")
@@ -497,6 +514,15 @@ def format_books(books: Sequence[str], limit: int = 10) -> str:
     if len(books) <= limit:
         return ";".join(books)
     return ";".join(books[:limit]) + f" (+{len(books) - limit} more)"
+
+
+def book_mark(counts: Optional[Dict[str, int]], book: str, complete: Dict[str, int]) -> str:
+    """Three-state coverage of a single book in a source: full '✓', partial '~', or none 'X'."""
+    have = 0 if counts is None else counts.get(book, 0)
+    if have <= 0:
+        return "X"
+    full = complete.get(book, 0)
+    return "✓" if full > 0 and have >= BOOK_COMPLETENESS_THRESHOLD * full else "~"
 
 
 def drafting_qualified(counts: Dict[str, int], complete: Dict[str, int], book_set: AbstractSet[int]) -> bool:
@@ -761,6 +787,61 @@ def find_existing(lang_dir: Path, prefix: str, config: dict) -> Tuple[Optional[P
     return None, max_index + 1
 
 
+def select_candidates(
+    candidates: List[Candidate],
+    coverage: "BookCoverage",
+    complete_counts: Dict[str, int],
+    translate_book_ids: Sequence[str],
+    dry_run: bool,
+) -> List[Candidate]:
+    """Show a table of candidates and ask which to use as training/drafting sources.
+
+    Each candidate appears once with its corpus-stats data (alignment, total, parallel
+    'train' verses, source-only 'draft' verses, target-only, script) and a per-translate-book
+    coverage mark. Manual selection replaces the book-coverage filter: whatever is chosen may
+    be a primary source regardless of its coverage. Under dry_run the table is displayed and
+    every candidate is returned without prompting.
+    """
+    name_w = max([len("Candidate")] + [len(c.name) for c in candidates])
+    book_w = {book: max(3, len(book)) for book in translate_book_ids}
+    marks_header = "".join(f"  {book:>{book_w[book]}}" for book in translate_book_ids)
+    print("\nCandidates (train = parallel/training verses, draft = source-only/drafting verses):")
+    print(
+        f"  # {'Candidate':<{name_w}}  {'align':>6}  {'total':>7}  {'train':>7}  {'draft':>7}"
+        f"  {'trg-only':>8}  {'script':<6}{marks_header}"
+    )
+    for i, c in enumerate(candidates, start=1):
+        counts = coverage.counts(c.stem)
+        marks = "".join(f"  {book_mark(counts, book, complete_counts):>{book_w[book]}}" for book in translate_book_ids)
+        print(
+            f"  {i:>2} {c.name:<{name_w}}  {c.alignment:>6.3f}  {c.count:>7}  {c.parallel:>7}  {c.src_only:>7}"
+            f"  {c.trg_only:>8}  {(c.script or ''):<6}{marks}"
+        )
+    print("Marks: ✓ = source has ≥98% of the book, ~ = partial, X = none.")
+    if dry_run:
+        print("Dry run: all candidates are included.")
+        return candidates
+    try:
+        reply = input("Enter the candidates to use (e.g. 1,3), 'all' or 'none': ").strip().lower()
+    except EOFError:
+        reply = ""
+    if reply in ("", "none"):
+        print("No candidates selected.")
+        return []
+    if reply != "all":
+        chosen: List[Candidate] = []
+        for token in re.split(r"[,\s]+", reply):
+            if token.isdigit() and 1 <= int(token) <= len(candidates):
+                if candidates[int(token) - 1] not in chosen:
+                    chosen.append(candidates[int(token) - 1])
+            else:
+                LOGGER.warning(f"Ignoring invalid selection '{token}'.")
+        if not chosen:
+            print("No candidates selected.")
+        return chosen
+    return candidates
+
+
 def select_experiments(
     singles: List[List[Candidate]], mixed: List[List[Candidate]], dry_run: bool, top: int = TOP_EXPERIMENTS
 ) -> List[List[Candidate]]:
@@ -972,10 +1053,10 @@ def run(
         print(f"\nNo references passed the thresholds (parallel >= {min_parallel}, alignment >= {min_alignment}).")
         return []
 
-    # The primary (first) training source doubles as the drafting source, so it must not be a
-    # back translation. Book coverage is the reliable signal: a primary source must contain
-    # every book present in the target scripture plus every book to be translated. See
-    # create_onboarding_experiments_brief.md for the rationale.
+    # Verse counts drive the candidate table below: per source it shows the parallel (training)
+    # and source-only (drafting) verse counts and a coverage mark for each --translate-book, so
+    # the user can judge which sources to use — including whether one looks like a back
+    # translation (narrow book coverage). See create_onboarding_experiments_brief.md.
     verse_counts: Optional[pd.DataFrame] = None
     try:
         verse_counts = load_verse_counts(request_dir, experiments_dir)
@@ -992,46 +1073,27 @@ def run(
     translate_book_ids = [book_number_to_id(number) for number in sorted(translate_set)]
 
     target_counts = coverage.counts(main.stem)
-    if target_counts is None:
-        LOGGER.warning(
-            f"No verse counts or extract file found for the target '{main.stem}'; only the translate"
-            " books can be required of a primary training source."
-        )
-    required_books = [
-        book for book in OT_CANON + NT_CANON if (target_counts or {}).get(book, 0) > 0 or book in translate_book_ids
-    ]
-    required_books += [book for book in translate_book_ids if book not in required_books]
-
     target_total = sum(target_counts.values()) if target_counts is not None else main.verses
     secondary_min = max(1000.0, 0.25 * target_total) if target_total else 1000.0
+    if not target_total:
+        LOGGER.warning(
+            f"No verse count found for the target '{main.stem}'; the second-source threshold"
+            f" falls back to {secondary_min:.0f} parallel verses (25% of the target is unknown)."
+        )
 
-    primary_pool: List[Candidate] = []
-    for c in passing:
-        counts = coverage.counts(c.stem)
-        if counts is None:
-            LOGGER.warning(
-                f"No verse counts or extract file found for '{c.stem}'; cannot verify its book"
-                " coverage — keeping it as a possible primary training source."
-            )
-            primary_pool.append(c)
-            continue
-        missing = missing_books(counts, required_books, complete_counts)
-        if missing:
-            print(f"Note: {c.name} cannot be the primary training source; it is missing {format_books(missing)}.")
-        else:
-            primary_pool.append(c)
-    for c in passing:
+    # The user picks which candidates to use from the table; this manual choice replaces the
+    # automatic book-coverage filter (which over-excluded sources narrower than a partial
+    # target). A chosen candidate may be a primary/single source regardless of its coverage.
+    selected = select_candidates(passing, coverage, complete_counts, translate_book_ids, dry_run)
+    if not selected:
+        return []
+    for c in selected:
         if c.parallel < secondary_min:
             print(
-                f"Note: {c.name} cannot be the second source of a mixed pair; {c.parallel} parallel"
-                f" verses is below {secondary_min:.0f} (max of 1000 and 25% of the target's verses)."
+                f"Note: {c.name} can be a single source or the primary of a pair, but not a pair's"
+                f" second source: its {c.parallel} parallel verses are below {secondary_min:.0f}"
+                " (max of 1000 and 25% of the target's verses)."
             )
-    if not primary_pool:
-        print(
-            "\nNo passing reference contains all the books of the target scripture plus the"
-            " translate books, so none can be the primary training source. Nothing to create."
-        )
-        return []
 
     # The src and trg isos of a corpus pair must differ. When a passing reference shares the
     # main project's iso, switch the main project to a synthetic code (not a real iso, not in
@@ -1043,15 +1105,9 @@ def run(
     counts_stem = main.stem  # verse_counts.csv is keyed by the original stem
     real_isos = {entry["isoCode"] for entry in language_entries}
     prior_iso = find_prior_copy(scripture_dir, main, real_isos)
-    # Only candidates that can still appear in an experiment can cause a clash: one that is
-    # excluded from the primary pool and too small to be a second source is never written
-    # to a config, so it must not trigger the synthetic code and the extract copy.
-    usable = [
-        c
-        for c in passing
-        if c in primary_pool or (c.parallel >= secondary_min and any(p is not c for p in primary_pool))
-    ]
-    clashing = [c for c in usable if to_iso3(c.iso) == to_iso3(main.iso)]
+    # Every selected candidate appears at least as a single-source experiment, so any of them
+    # sharing the target's iso forces the synthetic code and the extract copy.
+    clashing = [c for c in selected if to_iso3(c.iso) == to_iso3(main.iso)]
     pending_copy: Optional[Tuple[str, str]] = None  # (old stem, new stem), executed on first creation
     if clashing or prior_iso is not None:
         synthetic = prior_iso or synthesize_trg_iso(to_iso3(main.iso) or main.iso, real_isos)
@@ -1112,14 +1168,16 @@ def run(
         main.iso, main.stem = synthetic, new_stem
 
     def order_pair(a: Candidate, b: Candidate) -> Optional[List[Candidate]]:
-        # The higher-alignment member leads when it can; swap when only the other can be primary.
-        for first, second in ((a, b), (b, a)):
-            if first in primary_pool and second.parallel >= secondary_min:
+        # The higher-alignment source leads; the other must clear the second-source minimum.
+        lead, other = sorted((a, b), key=lambda c: c.alignment, reverse=True)
+        for first, second in ((lead, other), (other, lead)):
+            if second.parallel >= secondary_min:
                 return [first, second]
         return None
 
-    singles = [[c] for c in primary_pool]
-    mixed = [pair for a, b in itertools.combinations(passing, 2) if (pair := order_pair(a, b)) is not None]
+    ordered = sorted(selected, key=lambda c: c.alignment, reverse=True)
+    singles = [[c] for c in ordered]
+    mixed = [pair for a, b in itertools.combinations(ordered, 2) if (pair := order_pair(a, b)) is not None]
     chosen = select_experiments(singles, mixed, dry_run, top=top)
 
     # Decide the drafting source(s) of each experiment: --translate-scripture wins, otherwise
