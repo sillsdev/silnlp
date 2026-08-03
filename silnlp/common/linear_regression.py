@@ -114,12 +114,11 @@ class AverageLinearRegressionResultAggregator(LinearRegressionResultAggregator):
 
 def perform_enhanced_linear_regression(x: List[float], y: List[float]) -> LinearRegressionResult:
     sampler = BootstrapSampler(x, y)
-    weighting_scheme = InverseDensityPointWeightingScheme()
 
     bootstrap_results = []
     for _ in range(1000):
         sampled_x, sampled_y = sampler.sample(num_samples=len(x))
-        result = perform_weighted_linear_regression(sampled_x, sampled_y, point_weighting_scheme=weighting_scheme)
+        result = perform_simple_linear_regression(sampled_x, sampled_y)
         bootstrap_results.append(result)
 
     filtered_results = SlopePercentileLinearRegressionResultFilter(percentile=90.0).filter(bootstrap_results)
