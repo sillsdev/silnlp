@@ -88,6 +88,11 @@ def find_last_checkpoint(model_dir: Path) -> Optional[Path]:
     return max(checkpoints, key=lambda p: int(p.name[len(_CHECKPOINT_PREFIX) :]))
 
 
+def find_all_checkpoints(model_dir: Path) -> List[int]:
+    checkpoints = [p for p in model_dir.glob(f"{_CHECKPOINT_PREFIX}*") if p.is_dir()]
+    return sorted(int(p.name[len(_CHECKPOINT_PREFIX) :]) for p in checkpoints)
+
+
 def resolve_checkpoint_path(model_dir: Path, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
     """Resolve a checkpoint specifier to a (path, step) pair based purely on the
     HuggingFace ``checkpoint-<step>`` directory convention and ``trainer_state.json``.
@@ -380,6 +385,10 @@ class Config(ABC):
     @property
     def has_best_checkpoint(self) -> bool:
         return model_has_best_checkpoint(self.model_dir)
+
+    @property
+    def all_checkpoint_steps(self) -> List[int]:
+        return find_all_checkpoints(self.model_dir)
 
     def _disable_eval_if_no_val_split(self) -> None:
         """Turn off evaluation-related settings when there is no validation split. Shared by
