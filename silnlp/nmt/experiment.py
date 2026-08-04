@@ -37,6 +37,7 @@ class SILExperiment:
     commit: Optional[str] = None
     clearml_tag: Optional[str] = None
     force_infer: bool = False
+    test_all_checkpoints: bool = False
 
     def __post_init__(self):
         self.rev_hash = get_git_revision_hash()
@@ -78,6 +79,7 @@ class SILExperiment:
             config=self.config,
             last=self.config.model_dir.exists(),
             best=self.config.model_dir.exists(),
+            all_checkpoints=self.test_all_checkpoints,
             by_book=self.score_by_book,
             scorers=self.scorers,
             produce_multiple_translations=self.produce_multiple_translations,
@@ -191,6 +193,12 @@ def main() -> None:
     parser.add_argument("--preprocess", default=False, action="store_true", help="Run the preprocess step.")
     parser.add_argument("--train", default=False, action="store_true", help="Run the train step.")
     parser.add_argument("--test", default=False, action="store_true", help="Run the test step.")
+    parser.add_argument(
+        "--test-all-checkpoints",
+        default=False,
+        action="store_true",
+        help="When running the test step, test all saved checkpoints instead of just the last/best checkpoint.",
+    )
     parser.add_argument("--translate", default=False, action="store_true", help="Create drafts.")
     parser.add_argument(
         "--multiple-translations",
@@ -291,6 +299,7 @@ def main() -> None:
         scorers=set(s.lower() for s in args.scorers),
         score_by_book=args.score_by_book,
         force_infer=args.force_infer,
+        test_all_checkpoints=args.test_all_checkpoints,
     )
 
     if args.train and not args.save_checkpoints:

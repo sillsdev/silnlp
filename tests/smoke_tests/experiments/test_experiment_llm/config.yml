@@ -21,7 +21,7 @@ train:
 params:
   finetune_method: lora
   torch_dtype: float32
-  lora:
+  adapter:
     rank: 8
     alpha: 16
     dropout: 0.0

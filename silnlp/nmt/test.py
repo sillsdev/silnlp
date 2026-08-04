@@ -17,7 +17,7 @@ from ..common.linear_regression import perform_enhanced_linear_regression
 from ..common.translator import CONFIDENCE_SUFFIX
 from ..common.utils import get_git_revision_hash
 from .clearml_connection import TAGS_LIST, SILClearML
-from .config import CheckpointType, Config, NMTModel
+from .config import CheckpointType, Config, NMTModel, find_all_checkpoints
 from .config_utils import load_config
 from .tokenizer import Tokenizer
 
@@ -765,6 +765,7 @@ def test(
     last: bool = False,
     avg: bool = False,
     best: bool = False,
+    all_checkpoints: bool = False,
     force_infer: bool = False,
     scorers: Set[str] = set(),
     ref_projects: Set[str] = set(),
@@ -810,6 +811,27 @@ def test(
             produce_multiple_translations,
             save_confidences,
         )
+
+    if all_checkpoints:
+        all_steps = find_all_checkpoints(config.model_dir)
+        if len(all_steps) == 0:
+            LOGGER.warning("No checkpoints found to test.")
+        for step in all_steps:
+            if step not in results:
+                results[step] = test_checkpoint(
+                    config,
+                    model,
+                    tokenizer,
+                    force_infer,
+                    by_book,
+                    ref_projects,
+                    CheckpointType.OTHER,
+                    step,
+                    scorers,
+                    books_nums,
+                    produce_multiple_translations,
+                    save_confidences,
+                )
 
     if avg:
         try:
@@ -926,6 +948,7 @@ def main() -> None:
     parser.add_argument("--last", default=False, action="store_true", help="Test last checkpoint")
     parser.add_argument("--best", default=False, action="store_true", help="Test best evaluated checkpoint")
     parser.add_argument("--avg", default=False, action="store_true", help="Test averaged checkpoint")
+    parser.add_argument("--all-checkpoints", default=False, action="store_true", help="Test all saved checkpoints")
     parser.add_argument("--ref-projects", nargs="*", metavar="project", default=[], help="Reference projects")
     parser.add_argument("--force-infer", default=False, action="store_true", help="Force inferencing")
     parser.add_argument(
@@ -990,6 +1013,7 @@ def main() -> None:
         last=args.last,
         best=args.best,
         avg=args.avg,
+        all_checkpoints=args.all_checkpoints,
         ref_projects=set(args.ref_projects),
         force_infer=args.force_infer,
         scorers=set(s.lower() for s in args.scorers),

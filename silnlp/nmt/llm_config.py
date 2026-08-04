@@ -11,9 +11,10 @@ reuses the model-agnostic parts of the pipeline:
 * evaluation (:mod:`silnlp.nmt.test`) and inference orchestration
   (:mod:`silnlp.nmt.translate`), which depend only on the :class:`NMTModel` interface.
 
-Training supports full fine-tuning as well as LoRA/QLoRA via ``peft`` (and ``bitsandbytes``
-for 4-bit quantization), selected with ``params.finetune_method``. Prompts are built with the
-model's native chat template and a configurable translation instruction.
+Training supports full fine-tuning as well as low-rank adapters (LoRA and DoRA) via ``peft``,
+optionally with 4-bit quantization via ``bitsandbytes`` (QLoRA/QDoRA), selected with
+``params.finetune_method``. Adapter hyperparameters live under ``params.adapter``. Prompts are
+built with the model's native chat template and a configurable translation instruction.
 """
 
 import logging
@@ -24,6 +25,7 @@ from typing import Any, Dict, Generator, Iterable, List, Optional, Tuple, Union
 
 import torch
 from datasets import Dataset
+from jinja2.exceptions import UndefinedError
 from machine.corpora import TextFileTextCorpus
 from transformers import (
     AutoConfig,
@@ -106,6 +108,17 @@ TRAINING_ARGS_CONFIG_MAPPING = {
 
 LABEL_PAD_TOKEN_ID = -100
 
+FULL_FINETUNE_METHOD = "full"
+ADAPTER_METHODS = ("lora", "qlora", "dora", "qdora")
+QUANTIZED_METHODS = ("qlora", "qdora")
+DORA_METHODS = ("dora", "qdora")
+VALID_FINETUNE_METHODS = (FULL_FINETUNE_METHOD,) + ADAPTER_METHODS
+
+# TranslateGemma's chat template rejects a plain-text user turn: it requires `content` to be a
+# single-item list of {type, source_lang_code, target_lang_code, text|image}, and it renders the
+# natural-language instruction itself from a fixed table of ~55 supported language codes.
+TRANSLATE_GEMMA_MODEL_PREFIXES = ("google/translate-gemma", "google/translategemma")
+
 
 def is_image_text_to_text_model(model_name_or_path: str, trust_remote_code: bool = False) -> bool:
     """Return True if the checkpoint is a multimodal image-text-to-text model."""
@@ -133,10 +146,16 @@ def build_generation_kwargs(infer: dict, num_return_sequences: int, pad_token_id
     return gen_kwargs
 
 
+@dataclass(frozen=True)
+class Language:
+    iso: str
+    name: str
+
+
 @dataclass
 class PromptMessages:
-    """The chat messages for a translation prompt: an optional system message, a user
-    instruction, and, for training examples, the target translation as the assistant turn."""
+    """The chat messages for a translation prompt: an optional system message, a plain-text
+    user instruction, and, for training examples, the target translation as the assistant turn."""
 
     system_message: str
     instruction: str
@@ -163,9 +182,126 @@ class PromptMessages:
     def to_plain_text(self) -> str:
         return "".join(f"{m['content']}\n" for m in self.to_chat_messages())
 
+    def apply_prompt_template(
+        self, tokenizer: PreTrainedTokenizerBase, add_generation_prompt: bool, tokenize: bool
+    ) -> Union[str, List[int]]:
+        """Apply the model's chat template, with fallbacks for templates that lack a
+        system role and for base checkpoints with no chat template at all."""
+        if tokenizer.chat_template is not None:
+            try:
+                return tokenizer.apply_chat_template(
+                    self.to_chat_messages(), add_generation_prompt=add_generation_prompt, tokenize=tokenize
+                )
+            except Exception:
+                # Some chat templates (e.g. Gemma) reject a separate system role; fold the
+                # system message into the first user turn and retry.
+                if self.system_message:
+                    return tokenizer.apply_chat_template(
+                        self.to_folded_chat_messages(), add_generation_prompt=add_generation_prompt, tokenize=tokenize
+                    )
+                raise
+
+        LOGGER.warning(
+            "Tokenizer for %s has no chat template; falling back to a plain text prompt.", tokenizer.name_or_path
+        )
+        text = self.to_plain_text()
+        if tokenize:
+            return tokenizer(text, add_special_tokens=True)["input_ids"]
+        return text
+
+
+@dataclass(init=False)
+class TranslateGemmaPromptMessages(PromptMessages):
+    """TranslateGemma's chat template rejects a plain-text user turn: it requires ``content``
+    to be a single-item list of {type, source_lang_code, target_lang_code, text}, so this
+    subclass carries that structured content instead of a plain-text instruction. It has no
+    system message, and -- since TranslateGemma always ships a chat template -- never needs
+    the system-message-folding or no-chat-template fallbacks of the base class."""
+
+    source_language: Language
+    target_language: Language
+    text: str
+
+    def __init__(
+        self, source_language: Language, target_language: Language, text: str, target: Optional[str] = None
+    ) -> None:
+        super().__init__(system_message="", instruction="", target=target)
+        self.source_language = source_language
+        self.target_language = target_language
+        self.text = text
+
+    def to_chat_messages(self) -> List[Dict[str, Any]]:
+        messages: List[Dict[str, Any]] = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "source_lang_code": self.source_language.iso,
+                        "target_lang_code": self.target_language.iso,
+                        "text": self.text,
+                    }
+                ],
+            }
+        ]
+        if self.target is not None:
+            messages.append({"role": "assistant", "content": self.target})
+        return messages
+
+    def to_folded_chat_messages(self) -> List[Dict[str, str]]:
+        raise NotImplementedError("TranslateGemma's structured content is never folded.")
+
+    def to_plain_text(self) -> str:
+        raise NotImplementedError("TranslateGemma always has a chat template; there is no plain-text fallback.")
+
+    def apply_prompt_template(
+        self, tokenizer: PreTrainedTokenizerBase, add_generation_prompt: bool, tokenize: bool
+    ) -> Union[str, List[int]]:
+        if tokenizer.chat_template is not None:
+            try:
+                return tokenizer.apply_chat_template(
+                    self.to_chat_messages(), add_generation_prompt=add_generation_prompt, tokenize=tokenize
+                )
+            except UndefinedError:
+                # TranslateGemma's template only recognizes its fixed ~55-language lookup table
+                # and raises UndefinedError for any other code -- which is the common case when
+                # fine-tuning to extend coverage to a new language. Render the same instruction
+                # ourselves, using our own configured language name instead of the template's.
+                text = self._render_fallback_prompt(tokenizer, add_generation_prompt)
+                if tokenize:
+                    return tokenizer(text, add_special_tokens=False)["input_ids"]
+                return text
+
+        LOGGER.warning(
+            "Tokenizer for %s has no chat template; falling back to a plain text prompt.", tokenizer.name_or_path
+        )
+        text = self._render_fallback_prompt(tokenizer, add_generation_prompt)
+        if tokenize:
+            return tokenizer(text, add_special_tokens=False)["input_ids"]
+        return text
+
+    def _render_fallback_prompt(self, tokenizer: PreTrainedTokenizerBase, add_generation_prompt: bool) -> str:
+        """Reimplementation of TranslateGemma's chat template, minus its language-code lookup
+        table, for language codes that table doesn't recognize (see apply_prompt_template)."""
+        src, trg = self.source_language, self.target_language
+        instruction = (
+            f"You are a professional {src.name} ({src.iso}) to {trg.name} ({trg.iso}) translator. Your goal is "
+            f"to accurately convey the meaning and nuances of the original {src.name} text while adhering to "
+            f"{trg.name} grammar, vocabulary, and cultural sensitivities.\n"
+            f"Produce only the {trg.name} translation, without any additional explanations or commentary. "
+            f"Please translate the following {src.name} text into {trg.name}:\n\n\n{self.text.strip()}"
+        )
+        text = (tokenizer.bos_token or "") + f"<start_of_turn>user\n{instruction}<end_of_turn>\n"
+        if self.target is not None:
+            text += f"<start_of_turn>model\n{self.target.strip()}<end_of_turn>\n"
+        if add_generation_prompt:
+            text += "<start_of_turn>model\n"
+        return text
+
 
 class LLMConfig(Config):
     def __init__(self, exp_dir: Path, config: dict, environment: SilNlpEnv) -> None:
+        self._normalize_deprecated_keys(config)
         config = merge_dict(
             {
                 "data": {
@@ -213,7 +349,7 @@ class LLMConfig(Config):
                     "temperature": 0.7,
                 },
                 "params": {
-                    "finetune_method": "qlora",  # full | lora | qlora
+                    "finetune_method": "qlora",  # full | lora | qlora | dora | qdora
                     "torch_dtype": "bfloat16",
                     "attn_implementation": "sdpa",
                     "trust_remote_code": False,
@@ -222,11 +358,19 @@ class LLMConfig(Config):
                     "learning_rate": 0.0002,
                     "lr_scheduler_type": "cosine",
                     "warmup_ratio": 0.03,
-                    "lora": {
+                    # Low-rank adapter hyperparameters, shared by all adapter methods
+                    # (lora/qlora/dora/qdora). LoRA vs DoRA is selected via finetune_method.
+                    "adapter": {
                         "rank": 16,
                         "alpha": 32,
                         "dropout": 0.05,
                         "target_modules": "all-linear",
+                        # Layers to train in full (unadapted) alongside the adapters. A list of
+                        # module-name suffixes matched against the model's modules; None (or an
+                        # empty list) trains only the adapters. Possible choices are:
+                        #   "embed_tokens" - the input token-embedding matrix
+                        #   "lm_head"      - the output (vocabulary projection) head
+                        "modules_to_save": None,
                     },
                     "prompt": {
                         "system_message": "",
@@ -248,9 +392,33 @@ class LLMConfig(Config):
 
         self._disable_eval_if_no_val_split()
 
+    @staticmethod
+    def _normalize_deprecated_keys(config: dict) -> None:
+        # ``params.lora`` was renamed to ``params.adapter`` when DoRA was added, since the same
+        # hyperparameters now back both LoRA and DoRA. Accept the old key for backward compatibility.
+        params = config.get("params")
+        if isinstance(params, dict) and "lora" in params and "adapter" not in params:
+            LOGGER.warning("params.lora is deprecated; rename it to params.adapter.")
+            params["adapter"] = params.pop("lora")
+
     @property
     def finetune_method(self) -> str:
-        return self.params["finetune_method"].lower()
+        method = self.params["finetune_method"].lower()
+        if method not in VALID_FINETUNE_METHODS:
+            raise ValueError(f"Unknown finetune_method '{method}'. Valid options: {', '.join(VALID_FINETUNE_METHODS)}.")
+        return method
+
+    @property
+    def uses_quantization(self) -> bool:
+        return self.finetune_method in QUANTIZED_METHODS
+
+    @property
+    def uses_dora(self) -> bool:
+        return self.finetune_method in DORA_METHODS
+
+    @property
+    def adapter(self) -> dict:
+        return self.params["adapter"]
 
     def create_model(
         self,
@@ -279,6 +447,9 @@ class LLMConfig(Config):
     def lang_name(self, iso: str) -> str:
         return self.data["lang_codes"].get(iso, iso)
 
+    def language(self, iso: str) -> Language:
+        return Language(iso=iso, name=self.lang_name(iso))
+
     @property
     def train_src_iso(self) -> str:
         return self.default_test_src_iso or (next(iter(self.src_isos)) if len(self.src_isos) > 0 else "")
@@ -288,40 +459,18 @@ class LLMConfig(Config):
         return self.default_test_trg_iso or (next(iter(self.trg_isos)) if len(self.trg_isos) > 0 else "")
 
     def build_prompt_messages(
-        self, source: str, src_lang: str, trg_lang: str, target: Optional[str] = None
+        self, source: str, src_lang: Language, trg_lang: Language, target: Optional[str] = None
     ) -> PromptMessages:
+        if self.model.lower().startswith(TRANSLATE_GEMMA_MODEL_PREFIXES):
+            return TranslateGemmaPromptMessages(
+                source_language=src_lang, target_language=trg_lang, text=source, target=target
+            )
+
         prompt_config: dict = self.params["prompt"]
-        instruction = prompt_config["instruction_template"].format(src_lang=src_lang, trg_lang=trg_lang, source=source)
+        instruction = prompt_config["instruction_template"].format(
+            src_lang=src_lang.name, trg_lang=trg_lang.name, source=source
+        )
         return PromptMessages(prompt_config.get("system_message", ""), instruction, target)
-
-    def apply_prompt_template(
-        self,
-        tokenizer: PreTrainedTokenizerBase,
-        prompt: PromptMessages,
-        add_generation_prompt: bool,
-        tokenize: bool,
-    ) -> Union[str, List[int]]:
-        """Apply the model's chat template, with fallbacks for templates that lack a
-        system role and for base checkpoints with no chat template at all."""
-        if tokenizer.chat_template is not None:
-            try:
-                return tokenizer.apply_chat_template(
-                    prompt.to_chat_messages(), add_generation_prompt=add_generation_prompt, tokenize=tokenize
-                )
-            except Exception:
-                # Some chat templates (e.g. Gemma) reject a separate system role; fold the
-                # system message into the first user turn and retry.
-                if prompt.system_message:
-                    return tokenizer.apply_chat_template(
-                        prompt.to_folded_chat_messages(), add_generation_prompt=add_generation_prompt, tokenize=tokenize
-                    )
-                raise
-
-        LOGGER.warning("Tokenizer for %s has no chat template; falling back to a plain text prompt.", self.model)
-        text = prompt.to_plain_text()
-        if tokenize:
-            return tokenizer(text, add_special_tokens=True)["input_ids"]
-        return text
 
     def _build_vocabs(self, stats: bool = False) -> None:
         # No vocabulary surgery for decoder-only LLMs; they use their own tokenizer.
@@ -354,12 +503,22 @@ class CausalLMProvider:
             return AutoModelForImageTextToText
         return AutoModelForCausalLM
 
+    def _set_use_cache(self, model: PreTrainedModel, use_cache: bool) -> None:
+        # Composite configs (e.g. Gemma3's image-text-to-text wrapper) only expose use_cache on
+        # the nested text_config, not on the top-level config, so passing use_cache directly to
+        # from_pretrained() leaves it unconsumed there and it gets forwarded as an invalid
+        # constructor kwarg to models whose __init__ takes only `config`.
+        if hasattr(model.config, "use_cache"):
+            model.config.use_cache = use_cache
+        text_config = getattr(model.config, "text_config", None)
+        if text_config is not None and hasattr(text_config, "use_cache"):
+            text_config.use_cache = use_cache
+
     def create_model_for_training(self) -> PreTrainedModel:
         params = self.config.params
-        method = self.config.finetune_method
         quantization_config = None
         device_map = None
-        if method == "qlora":
+        if self.config.uses_quantization:
             from transformers import BitsAndBytesConfig
 
             quantization_config = BitsAndBytesConfig(
@@ -377,8 +536,8 @@ class CausalLMProvider:
             attn_implementation=params["attn_implementation"],
             trust_remote_code=params["trust_remote_code"],
             device_map=device_map,
-            use_cache=not self.config.train["gradient_checkpointing"],
         )
+        self._set_use_cache(model, not self.config.train["gradient_checkpointing"])
         return model
 
     def create_model_for_inference(self, checkpoint_path: Optional[Path]) -> PreTrainedModel:
@@ -397,8 +556,10 @@ class CausalLMProvider:
 
             model_class = self._determine_auto_model_class(self.config.model)
             base_model = model_class.from_pretrained(self.config.model, **load_kwargs)
+            base_dtype = next(base_model.parameters()).dtype
             model = PeftModel.from_pretrained(base_model, str(checkpoint_path))
-            return model.merge_and_unload()
+            merged = model.merge_and_unload()
+            return merged.to(base_dtype)
         model_class = self._determine_auto_model_class(str(checkpoint_path))
         return model_class.from_pretrained(str(checkpoint_path), **load_kwargs)
 
@@ -499,17 +660,13 @@ class LLMModel(NMTModel):
         model = self._apply_finetuning_config(model)
 
         max_seq_length: int = self._config.params["max_seq_length"]
-        src_lang = self._config.lang_name(self._config.train_src_iso)
-        trg_lang = self._config.lang_name(self._config.train_trg_iso)
+        src_lang = self._config.language(self._config.train_src_iso)
+        trg_lang = self._config.language(self._config.train_trg_iso)
         eos_token_id = tokenizer.eos_token_id
 
         def encode(example: dict) -> dict:
-            prompt_ids = self._config.apply_prompt_template(
-                tokenizer,
-                self._config.build_prompt_messages(example["src"], src_lang, trg_lang),
-                add_generation_prompt=True,
-                tokenize=True,
-            )
+            prompt = self._config.build_prompt_messages(example["src"], src_lang, trg_lang)
+            prompt_ids = prompt.apply_prompt_template(tokenizer, add_generation_prompt=True, tokenize=True)
             completion_ids = tokenizer(example["trg"], add_special_tokens=False)["input_ids"] + [eos_token_id]
             input_ids = (prompt_ids + completion_ids)[:max_seq_length]
             labels = ([LABEL_PAD_TOKEN_ID] * len(prompt_ids) + completion_ids)[:max_seq_length]
@@ -560,30 +717,36 @@ class LLMModel(NMTModel):
         trainer.save_state()
 
     def _apply_finetuning_config(self, model: PreTrainedModel) -> PreTrainedModel:
-        method = self._config.finetune_method
-        if method == "full":
+        if self._config.finetune_method == FULL_FINETUNE_METHOD:
             return model
 
-        from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
+        from peft import get_peft_model, prepare_model_for_kbit_training
 
         gradient_checkpointing = self._config.train["gradient_checkpointing"]
-        if method == "qlora":
+        if self._config.uses_quantization:
             model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=gradient_checkpointing)
         elif gradient_checkpointing:
             model.enable_input_require_grads()
 
-        lora: dict = self._config.params["lora"]
-        peft_config = LoraConfig(
-            r=lora["rank"],
-            lora_alpha=lora["alpha"],
-            lora_dropout=lora["dropout"],
-            target_modules=lora["target_modules"],
-            bias="none",
-            task_type=TaskType.CAUSAL_LM,
-        )
+        peft_config = self._build_adapter_config(self._config.adapter, use_dora=self._config.uses_dora)
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
         return model
+
+    @staticmethod
+    def _build_adapter_config(adapter: dict, use_dora: bool) -> Any:
+        from peft import LoraConfig, TaskType
+
+        return LoraConfig(
+            r=adapter["rank"],
+            lora_alpha=adapter["alpha"],
+            lora_dropout=adapter["dropout"],
+            target_modules=adapter["target_modules"],
+            modules_to_save=adapter.get("modules_to_save"),
+            use_dora=use_dora,
+            bias="none",
+            task_type=TaskType.CAUSAL_LM,
+        )
 
     def _load_text_dataset(self, src_path: Path, trg_path: Path) -> Optional[Dataset]:
         if not src_path.is_file() or not trg_path.is_file():
@@ -647,9 +810,9 @@ class LLMModel(NMTModel):
         produce_multiple_translations: bool = False,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Generator[SentenceTranslationGroup, None, None]:
-        src_lang = self._config.lang_name(src_iso)
-        trg_lang = self._config.lang_name(trg_iso)
-        model = self._get_inference_model(ckpt, src_lang, trg_lang)
+        src_lang = self._config.language(src_iso)
+        trg_lang = self._config.language(trg_iso)
+        model = self._get_inference_model(ckpt, src_lang.name, trg_lang.name)
         tokenizer = self._config.get_hf_tokenizer()
         yield from self._generate(model, tokenizer, sentences, src_lang, trg_lang, produce_multiple_translations, False)
 
@@ -662,12 +825,16 @@ class LLMModel(NMTModel):
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
         tokenizer = self._config.get_hf_tokenizer()
-        src_lang = self._config.lang_name(self._config.train_src_iso)
-        trg_lang = self._config.lang_name(self._config.train_trg_iso)
-        model = self._get_inference_model(ckpt, src_lang, trg_lang)
+        src_iso = self._config.train_src_iso
+        trg_iso = self._config.train_trg_iso
+        src_lang = self._config.language(src_iso)
+        trg_lang = self._config.language(trg_iso)
+        model = self._get_inference_model(ckpt, src_lang.name, trg_lang.name)
 
         for input_path, translation_path in zip(input_paths, translation_paths):
-            file_src_lang, file_trg_lang = self._langs_for_test_file(input_path, src_lang, trg_lang)
+            file_src_iso, file_trg_iso = self._isos_for_test_file(input_path, src_iso, trg_iso)
+            file_src_lang = self._config.language(file_src_iso)
+            file_trg_lang = self._config.language(file_trg_iso)
             with open(input_path, "r", encoding="utf-8-sig") as src_file:
                 sentences = [line.strip() for line in src_file]
             sentence_translation_groups = list(
@@ -692,20 +859,19 @@ class LLMModel(NMTModel):
                 if save_confidences:
                     generate_confidence_files(translated_draft, translation_draft_path)
 
-    def _langs_for_test_file(self, input_path: Path, default_src_lang: str, default_trg_lang: str) -> Tuple[str, str]:
+    def _isos_for_test_file(self, input_path: Path, default_src_iso: str, default_trg_iso: str) -> Tuple[str, str]:
         match = re.match(r"^test\.([a-z]{2,3})\.([a-z]{2,3})\..*", input_path.name)
         if match:
-            src_iso, trg_iso = match.groups()
-            return self._config.lang_name(src_iso), self._config.lang_name(trg_iso)
-        return default_src_lang, default_trg_lang
+            return match.groups()
+        return default_src_iso, default_trg_iso
 
     def _generate(
         self,
         model: PreTrainedModel,
         tokenizer: PreTrainedTokenizerBase,
         sentences: Iterable[str],
-        src_lang: str,
-        trg_lang: str,
+        src_lang: Language,
+        trg_lang: Language,
         produce_multiple_translations: bool,
         save_confidences: bool,
     ) -> Iterable[SentenceTranslationGroup]:
@@ -719,11 +885,8 @@ class LLMModel(NMTModel):
         device = model.device
         for batch in batch_sentences(sentences, infer["infer_batch_size"]):
             prompts = [
-                self._config.apply_prompt_template(
-                    tokenizer,
-                    self._config.build_prompt_messages(sentence, src_lang, trg_lang),
-                    add_generation_prompt=True,
-                    tokenize=False,
+                self._config.build_prompt_messages(sentence, src_lang, trg_lang).apply_prompt_template(
+                    tokenizer, add_generation_prompt=True, tokenize=False
                 )
                 for sentence in batch
             ]
