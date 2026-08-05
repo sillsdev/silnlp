@@ -302,6 +302,10 @@ class TranslateGemmaPromptMessages(PromptMessages):
 class LLMConfig(Config):
     def __init__(self, exp_dir: Path, config: dict, environment: SilNlpEnv) -> None:
         self._normalize_deprecated_keys(config)
+        # Captured before the defaults are merged in, so that the sequence length limits are only
+        # scaled for context windows when the experiment has not chosen its own limits.
+        explicit_max_seq_length = "max_seq_length" in (config.get("params") or {})
+        explicit_max_new_tokens = "max_new_tokens" in (config.get("infer") or {})
         config = merge_dict(
             {
                 "data": {
@@ -311,6 +315,7 @@ class LLMConfig(Config):
                     # consume the raw (detokenized) parallel text written during preprocessing.
                     "tokenize": False,
                     "aligner": "fast_align",
+                    "context_size": 0,
                     "stats_max_size": 100000,
                     "terms": {"train": False, "categories": "PN", "include_glosses": False, "dictionary": False},
                     "lang_codes": {},
@@ -390,7 +395,32 @@ class LLMConfig(Config):
         if len(self.src_isos) > 1 or len(self.trg_isos) > 1:
             raise RuntimeError("LLM experiments only support a single source language and a single target language.")
 
+        self._explicit_length_keys = {
+            "max_seq_length": explicit_max_seq_length,
+            "max_new_tokens": explicit_max_new_tokens,
+        }
+        self._single_sentence_lengths = {
+            "max_seq_length": self.params["max_seq_length"],
+            "max_new_tokens": self.infer["max_new_tokens"],
+        }
+        self._apply_context_size()
+
         self._disable_eval_if_no_val_split()
+
+    def _apply_context_size(self) -> None:
+        # A context window holds context_window_size sentences instead of one, and both the prompt and
+        # the generated completion carry the surrounding context, so the length limits have to grow
+        # with the window or the marked sentence gets truncated away.
+        scale = self.context_window_size if self.use_context else 1
+        if not self._explicit_length_keys["max_seq_length"]:
+            self.params["max_seq_length"] = self._single_sentence_lengths["max_seq_length"] * scale
+        if not self._explicit_length_keys["max_new_tokens"]:
+            self.infer["max_new_tokens"] = self._single_sentence_lengths["max_new_tokens"] * scale
+        if self.use_context:
+            LOGGER.info(
+                f"Translating with {self.context_size} sentence(s) of context on each side. "
+                f"max_seq_length={self.params['max_seq_length']}, max_new_tokens={self.infer['max_new_tokens']}"
+            )
 
     @staticmethod
     def _normalize_deprecated_keys(config: dict) -> None:

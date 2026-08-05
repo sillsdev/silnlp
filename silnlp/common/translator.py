@@ -29,6 +29,7 @@ from .corpus import load_corpus, write_corpus
 from .environment import SilNlpEnv
 from .paratext import get_book_path, get_iso, get_parent_project_dir
 from .postprocesser import NoDetectedQuoteConventionException, PostprocessHandler, UnknownQuoteConventionException
+from .sentence_context import CONTEXT_END_TOKEN, CONTEXT_START_TOKEN, build_context_windows, find_central_segment
 from .translation_data_structures import DraftGroup, SentenceTranslationGroup, TranslatedDraft, UsfmTextRowCollection
 from .utils import NLTKSentenceTokenizer
 
@@ -284,8 +285,11 @@ def generate_confidence_files(
 
 
 class Translator(AbstractContextManager["Translator"], ABC):
-    def __init__(self, environment: SilNlpEnv):
+    def __init__(self, environment: SilNlpEnv, context_size: int = 0):
         self._environment = environment
+        # Models trained with sentence context expect each sentence to arrive surrounded by its
+        # neighbors, and they translate the surrounding context along with it.
+        self._context_size = context_size
 
     @abstractmethod
     def translate(
@@ -296,6 +300,30 @@ class Translator(AbstractContextManager["Translator"], ABC):
         produce_multiple_translations: bool = False,
     ) -> Generator[SentenceTranslationGroup, None, None]:
         pass
+
+    def _add_context(self, sentences: List[str]) -> List[str]:
+        """Surround each sentence with its neighbors, leaving one window per input sentence."""
+        return build_context_windows(sentences, self._context_size)
+
+    def _extract_central_segments(
+        self, translation_groups: List[SentenceTranslationGroup], description: str
+    ) -> List[SentenceTranslationGroup]:
+        """Reduce each translated window to just the sentence between the context markers."""
+        if self._context_size <= 0:
+            return translation_groups
+        num_total = 0
+        num_missing = 0
+        for group in translation_groups:
+            for translation in group:
+                num_total += 1
+                if find_central_segment(translation.get_translation()) is None:
+                    num_missing += 1
+        if num_missing > 0:
+            LOGGER.warning(
+                f"{num_missing} of {num_total} translations of {description} did not contain a well-formed "
+                f"{CONTEXT_START_TOKEN} ... {CONTEXT_END_TOKEN} span. The whole output was used for those."
+            )
+        return [group.extract_central_segments() for group in translation_groups]
 
     def translate_text(
         self,
@@ -309,9 +337,14 @@ class Translator(AbstractContextManager["Translator"], ABC):
         tags: Optional[List[str]] = None,
     ) -> None:
 
-        sentences = [add_tags_to_sentence(tags, sentence) for sentence in load_corpus(src_file_path)]
-        sentence_translation_groups: List[SentenceTranslationGroup] = list(
-            self.translate(sentences, src_iso, trg_iso, produce_multiple_translations)
+        # Windows are built before tagging so that the corpus tags are applied once, to the front of
+        # the whole window, exactly as preprocessing applies them to the training data.
+        sentences = [
+            add_tags_to_sentence(tags, sentence) for sentence in self._add_context(list(load_corpus(src_file_path)))
+        ]
+        sentence_translation_groups: List[SentenceTranslationGroup] = self._extract_central_segments(
+            list(self.translate(sentences, src_iso, trg_iso, produce_multiple_translations)),
+            src_file_path.name,
         )
         draft_set = DraftGroup(sentence_translation_groups)
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):
@@ -407,7 +440,9 @@ class Translator(AbstractContextManager["Translator"], ABC):
 
             src_file_text = UsfmFileText(stylesheet, "utf-8-sig", book_id, src_file_path, include_all_text=True)
 
-        sentences = UsfmTextRowCollection(src_file_text, src_iso, stylesheet, chapters, tags)
+        sentences = UsfmTextRowCollection(
+            src_file_text, src_iso, stylesheet, chapters, tags, context_size=self._context_size
+        )
         LOGGER.info(f"File {src_file_path} parsed correctly.")
         sentences_to_translate = sentences.get_sentences_for_translation()
 
@@ -415,13 +450,16 @@ class Translator(AbstractContextManager["Translator"], ABC):
             LOGGER.warning(f"No sentences found to translate. Skipping translation for {book_id}.")
             return
 
-        sentence_translation_groups: List[SentenceTranslationGroup] = list(
-            self.translate(
-                sentences_to_translate,
-                src_iso,
-                trg_iso,
-                produce_multiple_translations,
-            )
+        sentence_translation_groups: List[SentenceTranslationGroup] = self._extract_central_segments(
+            list(
+                self.translate(
+                    sentences_to_translate,
+                    src_iso,
+                    trg_iso,
+                    produce_multiple_translations,
+                )
+            ),
+            book_id,
         )
 
         text_behavior = (
@@ -560,11 +598,18 @@ class Translator(AbstractContextManager["Translator"], ABC):
 
         for i, paragraph in enumerate(doc.paragraphs):
             for sentence in NLTKSentenceTokenizer.for_iso(src_iso).tokenize(paragraph.text):
-                sentences.append(add_tags_to_sentence(tags, sentence))
+                sentences.append(sentence)
                 paras.append(i)
 
+        # Windows are built before tagging so that the corpus tags are applied once, to the front of
+        # the whole window, exactly as preprocessing applies them to the training data.
+        sentences = [add_tags_to_sentence(tags, sentence) for sentence in self._add_context(sentences)]
+
         draft_set: DraftGroup = DraftGroup(
-            list(self.translate(sentences, src_iso, trg_iso, produce_multiple_translations))
+            self._extract_central_segments(
+                list(self.translate(sentences, src_iso, trg_iso, produce_multiple_translations)),
+                src_file_path.name,
+            )
         )
 
         for draft_index, translated_draft in enumerate(draft_set.get_drafts(), 1):

@@ -8,6 +8,7 @@ from attr import dataclass
 from machine.corpora import ScriptureRef, TextRow, UsfmFileText, UsfmStylesheet, UsfmTextType
 
 from .postprocesser import PostprocessHandler
+from .sentence_context import build_context_windows, find_central_segment, find_central_token_span
 from .utils import NLTKSentenceTokenizer, add_tags_to_sentence
 
 
@@ -52,6 +53,36 @@ class SentenceTranslation:
     def get_translation(self) -> str:
         return self._translation
 
+    def extract_central_segment(self) -> "SentenceTranslation":
+        """Return a copy holding only the translation between the context markers.
+
+        A model trained with sentence context generates the surrounding target context alongside the
+        sentence that was asked for, and only the marked sentence belongs in the draft. Tokens and
+        token scores are sliced to the same span so that confidence scores describe the text that is
+        actually kept. If the output has no well-formed span there is nothing to slice, and the whole
+        translation is kept unchanged.
+        """
+        translation = find_central_segment(self._translation)
+        if translation is None:
+            return self
+
+        span = find_central_token_span(self._tokens)
+        if span is None:
+            return SentenceTranslation(
+                translation, self._tokens, self._token_scores, self._sequence_score, self._starts_with_special_token
+            )
+
+        start, end = span
+        tokens = self._tokens[start:end]
+        token_scores = self._token_scores
+        sequence_score = self._sequence_score
+        if len(self._token_scores) == len(self._tokens):
+            token_scores = self._token_scores[start:end]
+            scores = [ts for ts in token_scores if ts is not None]
+            sequence_score = sum(scores) / len(scores) if len(scores) > 0 else None
+        # The forced decoder start token is outside the sliced span, so it is no longer tokens[0].
+        return SentenceTranslation(translation, tokens, token_scores, sequence_score, False)
+
     def has_sequence_confidence_score(self) -> bool:
         return self._sequence_score is not None
 
@@ -88,6 +119,9 @@ class SentenceTranslationGroup:
             combined_translations.append(SentenceTranslation.combine([g._translations[n] for g in groups]))
 
         return cls(combined_translations)
+
+    def extract_central_segments(self) -> "SentenceTranslationGroup":
+        return SentenceTranslationGroup([t.extract_central_segment() for t in self._translations])
 
     def __iter__(self):
         return iter(self._translations)
@@ -186,11 +220,13 @@ class UsfmTextRowCollection:
         stylesheet: UsfmStylesheet,
         selected_chapters: Optional[List[int]] = None,
         tags: Optional[List[str]] = None,
+        context_size: int = 0,
     ):
         self._src_iso = src_iso
         self._stylesheet = stylesheet
         self._selected_chapters = selected_chapters
         self._tags = tags
+        self._context_size = context_size
         self._text_rows = self._skip_unneeded_rows([s for s in file_text])
 
         self._empty_row_indices: Set[int] = self._find_indices_of_empty_rows()
@@ -232,8 +268,11 @@ class UsfmTextRowCollection:
         return NLTKSentenceTokenizer.for_iso(self._src_iso).tokenize(text)
 
     def get_sentences_for_translation(self) -> List[str]:
-        sentences = self._match_all_sentences()
-        return [self._clean_and_tag_sentence(s) for s in sentences]
+        sentences = [self._clean_sentence(s) for s in self._match_all_sentences()]
+        # Windows are built before tagging so that the corpus tags are applied once, to the front of
+        # the whole window, exactly as preprocessing applies them to the training data.
+        sentences = build_context_windows(sentences, self._context_size)
+        return [self._tag_sentence(s) for s in sentences]
 
     def _filter_out_empty_rows(self) -> List[TextRow]:
         return [s for i, s in enumerate(self._text_rows) if i not in self._empty_row_indices]
@@ -249,11 +288,13 @@ class UsfmTextRowCollection:
                 sentences.append(row.text)
         return sentences
 
-    def _clean_and_tag_sentence(self, sentence: str) -> str:
+    def _clean_sentence(self, sentence: str) -> str:
+        return re.sub(" +", " ", sentence.strip())
+
+    def _tag_sentence(self, sentence: str) -> str:
         if self._tags is None:
-            return re.sub(" +", " ", sentence.strip())
-        else:
-            return re.sub(" +", " ", add_tags_to_sentence(self._tags, sentence.strip()))
+            return sentence
+        return add_tags_to_sentence(self._tags, sentence)
 
     def get_book(self) -> str:
         if len(self._text_rows) == 0:

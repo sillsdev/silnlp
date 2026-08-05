@@ -190,6 +190,14 @@ def main() -> None:
         action="store_true",
         help="Save checkpoints to bucket. Only used if running the train step.",
     )
+    parser.add_argument(
+        "--context-size",
+        type=int,
+        default=None,
+        help="Number of neighboring sentences to include on each side of the sentence being translated. "
+        + "0 (the default) trains and translates one sentence at a time. Overrides and updates "
+        + "data.context_size in the experiment's config.yml.",
+    )
     parser.add_argument("--preprocess", default=False, action="store_true", help="Run the preprocess step.")
     parser.add_argument("--train", default=False, action="store_true", help="Run the train step.")
     parser.add_argument("--test", default=False, action="store_true", help="Run the test step.")
@@ -272,6 +280,9 @@ def main() -> None:
         tag=args.clearml_tag,
         environment=environment,
     )
+    if args.context_size is not None:
+        clearml.config.set_context_size(args.context_size)
+
     model = clearml.config.create_model(
         mixed_precision=not args.disable_mixed_precision,
         num_devices=args.num_devices,

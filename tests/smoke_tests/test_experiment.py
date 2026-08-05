@@ -57,6 +57,8 @@ def clean_experiment_directory(experiment_directory: Path):
         file.unlink()
     for file in experiment_directory.glob("effective-config*"):
         file.unlink()
+    for file in experiment_directory.glob("added_tokens*"):
+        file.unlink()
 
     run_dir = experiment_directory / "run"
     if run_dir.exists() and run_dir.is_dir():

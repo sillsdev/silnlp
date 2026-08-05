@@ -15,6 +15,14 @@ def main() -> None:
     parser.add_argument(
         "--force-align", default=False, action="store_true", help="Force recalculation of all alignment scores"
     )
+    parser.add_argument(
+        "--context-size",
+        type=int,
+        default=None,
+        help="Number of neighboring sentences to include on each side of the sentence being translated. "
+        + "0 (the default) trains and translates one sentence at a time. Overrides and updates "
+        + "data.context_size in the experiment's config.yml.",
+    )
     args = parser.parse_args()
 
     get_git_revision_hash()
@@ -22,6 +30,8 @@ def main() -> None:
     exp_name = args.experiment
     environment = SilNlpEnv.create_standard_environment()
     config = load_config(exp_name, environment)
+    if args.context_size is not None:
+        config.set_context_size(args.context_size)
 
     config.set_seed()
     config.preprocess(args.stats, args.force_align)

@@ -36,6 +36,7 @@ from ..common.corpus import (
     write_corpus,
 )
 from ..common.environment import SilNlpEnv
+from ..common.sentence_context import build_context_windows, iterate_context_windows
 from ..common.translation_data_structures import SentenceTranslationGroup
 from ..common.utils import NoiseMethod, Side, add_tags_to_dataframe, add_tags_to_sentence, set_seed
 from .corpora import (
@@ -56,6 +57,12 @@ LOGGER = logging.getLogger((__package__ or "") + ".config")
 ALIGNMENT_SCORES_FILE = re.compile(r"([a-z]{2,3}-.+)_([a-z]{2,3}-.+)")
 
 SUPPORTED_GLOSS_ISOS = ["fr", "en", "id", "es", "pt"]
+
+# Columns holding the multi-sentence context windows while a corpus is being prepared. They are
+# deliberately not prefixed with "source"/"target", because several places in this module select
+# the per-project sentence columns by that prefix.
+CONTEXT_SRC_COLUMN = "context_src"
+CONTEXT_TRG_COLUMN = "context_trg"
 
 
 class CheckpointType(Enum):
@@ -373,6 +380,50 @@ class Config(ABC):
         return self.data["stats_max_size"]
 
     @property
+    def context_size(self) -> int:
+        """The number of neighboring sentences included on each side of the sentence being translated."""
+        return int(self.data.get("context_size") or 0)
+
+    @property
+    def use_context(self) -> bool:
+        return self.context_size > 0
+
+    @property
+    def context_window_size(self) -> int:
+        """The total number of sentences in a context window."""
+        return 2 * self.context_size + 1
+
+    def set_context_size(self, context_size: int) -> None:
+        """Override the configured context size and record it in the experiment's config file.
+
+        The value has to outlive the preprocessing run: the test step needs it to score only the
+        marked sentence, and the translate step needs it to build inputs in the shape the model was
+        trained on. Both can be invoked as separate processes, so a command-line override is written
+        back to config.yml rather than only living in memory.
+        """
+        if context_size < 0:
+            raise ValueError(f"The context size must not be negative, but {context_size} was given.")
+        if self.context_size == context_size:
+            return
+        self.data["context_size"] = context_size
+        self._apply_context_size()
+
+        config_path = self.exp_dir / "config.yml"
+        with config_path.open("r", encoding="utf-8") as file:
+            stored_config: dict = yaml.safe_load(file) or {}
+        stored_config.setdefault("data", {})["context_size"] = context_size
+        with config_path.open("w", encoding="utf-8") as file:
+            yaml.safe_dump(stored_config, file)
+        LOGGER.info(f"Set data.context_size to {context_size} in {config_path}")
+
+    def _apply_context_size(self) -> None:
+        """Re-derive any settings that depend on the context size.
+
+        Subclasses scale their sequence length limits here. It must be safe to call more than once,
+        since the context size can be overridden after the config has been constructed.
+        """
+
+    @property
     def has_parent(self) -> bool:
         return "parent" in self.data
 
@@ -596,6 +647,35 @@ class Config(ABC):
         for old_file_path in self.exp_dir.glob(pattern):
             old_file_path.unlink()
 
+    def _add_context_columns(self, corpus: pd.DataFrame) -> None:
+        """Add context window columns to a scripture corpus, in place.
+
+        The windows are built here, from the whole corpus, before any splitting or filtering happens,
+        so that a verse still gets its real neighbors even when those neighbors end up in a different
+        split. Windows cross chapter boundaries but never book boundaries. Verses that are missing
+        from the corpus - because either side was empty - are simply not available as context, so a
+        window reaches over the gap to the next verse that is present.
+        """
+        if not self.use_context or len(corpus) == 0:
+            return
+        book_nums = [vref.book_num for vref in corpus["vref"]]
+        corpus[CONTEXT_SRC_COLUMN] = build_context_windows(corpus["source"], self.context_size, book_nums)
+        corpus[CONTEXT_TRG_COLUMN] = build_context_windows(corpus["target"], self.context_size, book_nums)
+
+    def _apply_context_columns(self, corpus: pd.DataFrame) -> pd.DataFrame:
+        """Move the context windows into the "source"/"target" columns and drop the extra columns.
+
+        Called on each data set just before it is handed off to be written, so that everything
+        upstream - alignment scoring, score threshold filtering, splitting - still sees single
+        sentences, and everything downstream needs no knowledge of context at all.
+        """
+        if CONTEXT_SRC_COLUMN not in corpus.columns:
+            return corpus
+        corpus = corpus.copy()
+        corpus["source"] = corpus[CONTEXT_SRC_COLUMN]
+        corpus["target"] = corpus[CONTEXT_TRG_COLUMN]
+        return corpus.drop(columns=[CONTEXT_SRC_COLUMN, CONTEXT_TRG_COLUMN])
+
     def _write_scripture_data_sets(
         self,
         tokenizer: Tokenizer,
@@ -633,6 +713,7 @@ class Config(ABC):
             corpus = get_scripture_parallel_corpus(src_file.path, trg_file.path, environment=self._environment)
             if len(pair.src_noise) > 0:
                 corpus["source"] = [self._noise(pair.src_noise, x) for x in corpus["source"]]
+            self._add_context_columns(corpus)
 
             if len(pair.corpus_books) > 0:
                 cur_train = include_chapters(corpus, pair.corpus_books)
@@ -658,7 +739,9 @@ class Config(ABC):
                     aligner_id = self.data["aligner"]
                     LOGGER.info(f"Computing alignment scores using {get_aligner_name(aligner_id)}")
                     add_alignment_scores(cur_train, aligner_id)
-                    cur_train.to_csv(pair_align_path, index=False)
+                    cur_train.drop(columns=[CONTEXT_SRC_COLUMN, CONTEXT_TRG_COLUMN], errors="ignore").to_csv(
+                        pair_align_path, index=False
+                    )
 
             if pair.is_test:
                 if len(pair.test_books) > 0:
@@ -696,7 +779,7 @@ class Config(ABC):
                         pair.tags,
                         test,
                         pair_test_indices,
-                        cur_test,
+                        self._apply_context_columns(cur_test),
                     )
 
             if pair.is_train and pair.score_threshold > 0:
@@ -722,10 +805,17 @@ class Config(ABC):
                 )
 
                 self._add_to_eval_data_set(
-                    src_file.iso, trg_file.iso, trg_file.project, pair.tags, val, pair_val_indices, cur_val
+                    src_file.iso,
+                    trg_file.iso,
+                    trg_file.project,
+                    pair.tags,
+                    val,
+                    pair_val_indices,
+                    self._apply_context_columns(cur_val),
                 )
 
             if pair.is_train:
+                cur_train = self._apply_context_columns(cur_train)
                 cur_train["source_lang"] = src_file.iso
                 cur_train["target_lang"] = trg_file.iso
 
@@ -1195,15 +1285,31 @@ class Config(ABC):
                 dict_trg_file = stack.enter_context(self._open_append(self.dict_trg_filename()))
                 dict_vref_file = stack.enter_context(self._open_append(self.dict_vref_filename()))
 
-            index = 0
-            for src_line, trg_line in tqdm(zip(input_src_file, input_trg_file)):
-                src_line = src_line.strip()
-                trg_line = trg_line.strip()
-                if len(src_line) == 0 or len(trg_line) == 0:
-                    continue
+            def aligned_lines() -> Iterable[Tuple[str, str, str, str]]:
+                for raw_src_line, raw_trg_line in zip(input_src_file, input_trg_file):
+                    raw_src_line = raw_src_line.strip()
+                    raw_trg_line = raw_trg_line.strip()
+                    if len(raw_src_line) == 0 or len(raw_trg_line) == 0:
+                        continue
+                    # The noised variants are carried alongside the originals so that their context
+                    # windows are built from noised sentences too, matching the scripture path.
+                    yield (
+                        raw_src_line,
+                        raw_trg_line,
+                        self._noise(pair.src_noise, raw_src_line),
+                        self._noise(pair.src_noise, raw_trg_line),
+                    )
 
-                src_sentence = add_tags_to_sentence(pair.tags, src_line)
-                trg_sentence = trg_line
+            # Lexical data is a list of individual words and phrases, so surrounding lines are not context.
+            context_size = 0 if pair.is_lexical_data else self.context_size
+
+            index = 0
+            for lines, windows in tqdm(iterate_context_windows(aligned_lines(), context_size)):
+                src_line, trg_line, _, _ = lines
+                src_window, trg_window, noised_src_window, noised_trg_window = windows
+
+                src_sentence = add_tags_to_sentence(pair.tags, src_window)
+                trg_sentence = trg_window
 
                 if pair.is_test and (test_indices is None or index in test_indices):
                     test_src_file.write(tokenizer.tokenize(Side.SOURCE, src_sentence) + "\n")
@@ -1222,7 +1328,7 @@ class Config(ABC):
                         val_trg_ref_file.write("\n")
                     val_count += 1
                 elif pair.is_train and (train_indices is None or index in train_indices):
-                    noised_src_sentence = add_tags_to_sentence(pair.tags, self._noise(pair.src_noise, src_line))
+                    noised_src_sentence = add_tags_to_sentence(pair.tags, noised_src_window)
                     train_count += self._write_train_sentence_pair(
                         train_src_file,
                         train_trg_file,
@@ -1235,8 +1341,8 @@ class Config(ABC):
                     if self.mirror:
                         tokenizer.set_src_lang(trg_file.iso)
                         tokenizer.set_trg_lang(src_file.iso)
-                        mirror_src_sentence = add_tags_to_sentence(pair.tags, self._noise(pair.src_noise, trg_line))
-                        mirror_trg_sentence = src_line
+                        mirror_src_sentence = add_tags_to_sentence(pair.tags, noised_trg_window)
+                        mirror_trg_sentence = src_window
                         train_count += self._write_train_sentence_pair(
                             train_src_file,
                             train_trg_file,
@@ -1255,13 +1361,20 @@ class Config(ABC):
                     and dict_trg_file is not None
                     and dict_vref_file is not None
                 ):
+                    # Dictionary entries are matched against individual words and phrases, so they are
+                    # always written without surrounding context.
+                    dict_src_sentence = add_tags_to_sentence(pair.tags, src_line)
                     src_variants = [
-                        tokenizer.tokenize(Side.SOURCE, src_sentence, add_dummy_prefix=True, add_special_tokens=False),
-                        tokenizer.tokenize(Side.SOURCE, src_sentence, add_dummy_prefix=False, add_special_tokens=False),
+                        tokenizer.tokenize(
+                            Side.SOURCE, dict_src_sentence, add_dummy_prefix=True, add_special_tokens=False
+                        ),
+                        tokenizer.tokenize(
+                            Side.SOURCE, dict_src_sentence, add_dummy_prefix=False, add_special_tokens=False
+                        ),
                     ]
                     trg_variants = [
-                        tokenizer.tokenize(Side.TARGET, trg_sentence, add_dummy_prefix=True, add_special_tokens=False),
-                        tokenizer.tokenize(Side.TARGET, trg_sentence, add_dummy_prefix=False, add_special_tokens=False),
+                        tokenizer.tokenize(Side.TARGET, trg_line, add_dummy_prefix=True, add_special_tokens=False),
+                        tokenizer.tokenize(Side.TARGET, trg_line, add_dummy_prefix=False, add_special_tokens=False),
                     ]
                     dict_src_file.write("\t".join(src_variants) + "\n")
                     dict_trg_file.write("\t".join(trg_variants) + "\n")

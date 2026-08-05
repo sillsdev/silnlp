@@ -60,10 +60,11 @@ class NMTTranslator(Translator):
         model: NMTModel,
         checkpoint: Union[CheckpointType, str, int],
         environment: SilNlpEnv,
+        context_size: int = 0,
     ) -> None:
         self._model: NMTModel = model
         self._checkpoint = checkpoint
-        super().__init__(environment)
+        super().__init__(environment, context_size)
 
     def translate(
         self,
@@ -305,7 +306,7 @@ class TranslationTask:
         clearml.config.set_seed()
 
         model = self.model if self.model is not None else clearml.config.create_model()
-        translator = NMTTranslator(model, self.checkpoint, self.environment)
+        translator = NMTTranslator(model, self.checkpoint, self.environment, clearml.config.context_size)
         if clearml.config.model_dir.exists():
             _, step = model.get_checkpoint_path(self.checkpoint)
             step_str = "avg" if step == -1 else str(step)

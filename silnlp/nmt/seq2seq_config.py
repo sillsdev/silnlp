@@ -65,6 +65,7 @@ from transformers.utils.logging import tqdm
 
 from ..common.corpus import Term, count_lines, get_terms
 from ..common.environment import SilNlpEnv
+from ..common.sentence_context import CONTEXT_TOKENS
 from ..common.translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup
 from ..common.translator import generate_confidence_files
 from ..common.utils import NoiseMethod, ReplaceRandomToken, Side, create_noise_methods, merge_dict
@@ -349,6 +350,11 @@ class FilePreTrainedModelProviderFactory(PreTrainedModelProviderFactory):
 class Seq2SeqConfig(Config):
     def __init__(self, exp_dir: Path, config: dict, environment: SilNlpEnv) -> None:
         self.environment = environment
+        # Captured before the defaults are merged in, so that the sequence length limits are only
+        # scaled for context windows when the experiment has not chosen its own limits.
+        explicit_length_keys = {
+            key for key in ("max_source_length", "max_target_length") if key in (config.get("train") or {})
+        }
         config = merge_dict(
             {
                 "data": {
@@ -356,6 +362,7 @@ class Seq2SeqConfig(Config):
                     "seed": 111,
                     "tokenize": True,
                     "aligner": "fast_align",
+                    "context_size": 0,
                     "stats_max_size": 100000,  # a little over the size of the bible
                     "terms": {"train": True, "categories": "PN", "include_glosses": True, "dictionary": False},
                     "lang_codes": {},
@@ -441,11 +448,29 @@ class Seq2SeqConfig(Config):
             self.train["max_source_length"] = 256
             self.train["max_target_length"] = 256
 
+        self._explicit_length_keys = explicit_length_keys
+        self._single_sentence_lengths = {key: self.train[key] for key in ("max_source_length", "max_target_length")}
+        self._apply_context_size()
+
         self._disable_eval_if_no_val_split()
 
         if config["train"]["auto_grad_acc"]:
             config["train"]["per_device_train_batch_size"] = 64
             config["train"]["gradient_accumulation_steps"] = 1
+
+    def _apply_context_size(self) -> None:
+        # A context window holds context_window_size sentences instead of one, and the tokenizer
+        # truncates silently, which would cut off trailing context or even the <end> marker.
+        scale = self.context_window_size if self.use_context else 1
+        for key, single_sentence_length in self._single_sentence_lengths.items():
+            if key not in self._explicit_length_keys:
+                self.train[key] = single_sentence_length * scale
+        if self.use_context:
+            LOGGER.info(
+                f"Translating with {self.context_size} sentence(s) of context on each side. "
+                f"max_source_length={self.train['max_source_length']}, "
+                f"max_target_length={self.train['max_target_length']}"
+            )
 
     @property
     def val_src_lang(self) -> str:
@@ -678,6 +703,13 @@ class Seq2SeqConfig(Config):
                     updated = True
             if updated:
                 self._tokenizer.save_pretrained(self.exp_dir)
+
+        if self.use_context:
+            # Unlike corpus tags, the context markers are added as ordinary (non-special) tokens:
+            # they appear in the target text the model generates, and decoding a draft strips special
+            # tokens, which would leave nothing to mark the boundaries of the translated sentence.
+            self._tokenizer.add_tokens([AddedToken(token, normalized=False, special=False) for token in CONTEXT_TOKENS])
+            self._tokenizer.save_pretrained(self.exp_dir)
 
         if len(self._tags) > 0:
             self._tokenizer.add_tokens([AddedToken(tag, rstrip=True, special=True) for tag in self._tags])
@@ -1560,12 +1592,23 @@ class Seq2SeqNMTModel(NMTModel):
         model: PreTrainedModel = self._pretrained_model_provider.create_model_for_inference(model_name)
         model, tokenizer = self._configure_model(model, tokenizer, src_lang, trg_lang)
 
+        min_generation_length = self._min_generation_length()
         if model.generation_config is not None and (
-            model.generation_config.max_length is None or model.generation_config.max_length < 512
+            model.generation_config.max_length is None or model.generation_config.max_length < min_generation_length
         ):
-            model.generation_config.max_length = 512
+            model.generation_config.max_length = min_generation_length
 
         return model
+
+    def _min_generation_length(self) -> int:
+        """The shortest generation limit that can hold a complete output.
+
+        With sentence context the model has to generate the surrounding target context as well as the
+        translated sentence, so the usual 512 token floor is not enough to reach the <end> marker.
+        """
+        if not self._config.use_context:
+            return 512
+        return max(512, self._config.train["max_target_length"])
 
     def _configure_model(
         self, model: PreTrainedModel, tokenizer: PreTrainedTokenizer, src_lang: str, trg_lang: str
@@ -1582,10 +1625,11 @@ class Seq2SeqNMTModel(NMTModel):
                 model.config.decoder_start_token_id = tokenizer.convert_tokens_to_ids(trg_lang)
 
         if self._config.model_prefix == "google/madlad400":
+            max_length = max(256, self._config.train["max_target_length"]) if self._config.use_context else 256
             model.config.decoder_start_token_id = tokenizer.pad_token_id
             model.generation_config.decoder_start_token_id = tokenizer.pad_token_id
-            model.generation_config.max_length = 256
-            model.generation_config.max_new_tokens = 256
+            model.generation_config.max_length = max_length
+            model.generation_config.max_new_tokens = max_length
             tokenizer.tgt_lang = trg_lang
 
         if model.config.decoder_start_token_id is None:

@@ -14,6 +14,7 @@ from scipy.stats import gmean
 
 from ..common.environment import SilNlpEnv
 from ..common.linear_regression import perform_enhanced_linear_regression
+from ..common.sentence_context import CentralSegmentExtractor
 from ..common.translator import CONFIDENCE_SUFFIX
 from ..common.utils import get_git_revision_hash
 from .clearml_connection import TAGS_LIST, SILClearML
@@ -433,9 +434,12 @@ def process_individual_books(
     conf_file_path: Path,
     select_rand_ref_line: bool,
     books: Dict[int, List[int]],
+    use_context: bool = False,
 ) -> Dict[str, Tuple[List[str], List[List[str]], List[float]]]:
     # Output data structure
     book_dict: Dict[str, Tuple[List[str], List[List[str]], List[float]]] = {}
+    pred_extractor = CentralSegmentExtractor(use_context, "predictions")
+    ref_extractor = CentralSegmentExtractor(use_context, "references")
     with ExitStack() as stack:
         # Get all references
         ref_files: List[TextIO] = []
@@ -449,7 +453,9 @@ def process_individual_books(
 
         for lines in zip(pred_file, vref_file, conf_list, *ref_files):
             # Get file lines
-            pred_line = lines[0].strip()
+            # The central segment is extracted before detokenizing, because detokenizing drops the
+            # special tokens that mark where the sentence being translated starts and ends.
+            pred_line = pred_extractor.extract(lines[0].strip())
             detok_pred = tokenizer.detokenize(pred_line)
             vref = lines[1].strip()
             confidence = lines[2]
@@ -472,17 +478,19 @@ def process_individual_books(
             if select_rand_ref_line:
                 ref_lines: List[str] = [line.strip() for line in lines[3:] if len(line.strip()) > 0]
                 ref_index = random.randint(0, len(ref_lines) - 1)
-                ref_line = ref_lines[ref_index + 3].strip()
+                ref_line = ref_extractor.extract(ref_lines[ref_index + 3].strip())
                 if len(book_refs) == 0:
                     book_refs.append([])
                 book_refs[0].append(ref_line)
             else:
                 # For each reference text, add to book_refs
                 for ref_index in range(len(ref_files)):
-                    ref_line = lines[ref_index + 3].strip()
+                    ref_line = ref_extractor.extract(lines[ref_index + 3].strip())
                     if len(book_refs) == ref_index:
                         book_refs.append([])
                     book_refs[ref_index].append(ref_line)
+    pred_extractor.report()
+    ref_extractor.report()
     return book_dict
 
 
@@ -503,6 +511,10 @@ def load_test_data(
     book_dict: Dict[str, Tuple[List[str], List[List[str]], List[float]]] = {}
     pred_file_path = config.exp_dir / pred_file_name
     conf_file_path = config.exp_dir / conf_file_name
+    # Training runs over whole context windows, but only the sentence between the markers is scored.
+    use_context = config.use_context
+    pred_extractor = CentralSegmentExtractor(use_context, f"predictions in {pred_file_name}")
+    ref_extractor = CentralSegmentExtractor(use_context, f"references for {pred_file_name}")
     with ExitStack() as stack:
         pred_file = stack.enter_context(pred_file_path.open("r", encoding="utf-8"))
         out_file = stack.enter_context((config.exp_dir / output_file_name).open("w", encoding="utf-8"))
@@ -531,23 +543,27 @@ def load_test_data(
                     vref = VerseRef.from_string(vref_line, ORIGINAL_VERSIFICATION)
                     if vref.book_num not in books:
                         continue
-            pred_line = lines[0].strip()
+            # The central segment is extracted before detokenizing, because detokenizing drops the
+            # special tokens that mark where the sentence being translated starts and ends.
+            pred_line = pred_extractor.extract(lines[0].strip())
             detok_pred_line = tokenizer.detokenize(pred_line)
             sys.append(detok_pred_line)
             if select_rand_ref_line:
                 ref_lines: List[str] = [line.strip() for line in lines[1:] if len(line.strip()) > 0]
                 ref_index = random.randint(0, len(ref_lines) - 1)
-                ref_line = ref_lines[ref_index]
+                ref_line = ref_extractor.extract(ref_lines[ref_index])
                 if len(refs) == 0:
                     refs.append([])
                 refs[0].append(ref_line)
             else:
                 for ref_index in range(len(ref_files)):
-                    ref_line = lines[ref_index + 1].strip()
+                    ref_line = ref_extractor.extract(lines[ref_index + 1].strip())
                     if len(refs) == ref_index:
                         refs.append([])
                     refs[ref_index].append(ref_line)
             out_file.write(detok_pred_line + "\n")
+        pred_extractor.report()
+        ref_extractor.report()
         if by_book:
             book_dict = process_individual_books(
                 tokenizer,
@@ -557,6 +573,7 @@ def load_test_data(
                 conf_file_path,
                 select_rand_ref_line,
                 books,
+                use_context,
             )
     return sys, refs, book_dict
 
