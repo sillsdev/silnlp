@@ -345,7 +345,11 @@ def main() -> None:
         confidence_dirs = sorted({cf.parent for cf in infer_dir.rglob(f"*{CONFIDENCE_SUFFIX}")})
         if not confidence_dirs:
             raise ValueError(f"No confidence files found under {infer_dir}.")
-        LOGGER.info(f"Auto-detecting confidence files in {len(confidence_dirs)} directories under {infer_dir}.")
+        num_dirs = len(confidence_dirs)
+        LOGGER.info(
+            f"Auto-detecting confidence files in {num_dirs} director{'y' if num_dirs == 1 else 'ies'} "
+            + f"under {infer_dir}."
+        )
         confidence_files_per_directory = [sorted(d.glob(f"*{CONFIDENCE_SUFFIX}")) for d in confidence_dirs]
     else:
         if not using_files and args.confidence_dir is None:
