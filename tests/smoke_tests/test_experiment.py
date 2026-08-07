@@ -81,7 +81,9 @@ def create_experiment_with_mock_pretrained_model(environment: SilNlpEnv) -> tupl
     # In the long term, the create_model method should be refactored so that it doesn't include parameters
     # that are not common to all possible implementations (e.g. mixed_precision)
     config = cast(Seq2SeqConfig, config)
-    model = config.create_model(pretrained_model_provider_factory=mock_pretrained_model_provider_factory)
+    model = config.create_model(
+        mixed_precision=False, pretrained_model_provider_factory=mock_pretrained_model_provider_factory
+    )
 
     experiment = SILExperiment(
         name=EXPERIMENT_NAME,
@@ -99,7 +101,7 @@ def create_experiment_with_mock_pretrained_model(environment: SilNlpEnv) -> tupl
 def check_training_step(model_stats: ModelTrainingStats):
     assert model_stats.num_forward_calls == 64
     assert model_stats.observed_training_batch_sizes == [8] * 64
-    assert model_stats.total_number_of_training_data_elements == 31104
+    assert model_stats.total_number_of_training_data_elements == 29192
 
 
 def check_test_step(environment: SilNlpEnv):

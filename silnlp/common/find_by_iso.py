@@ -196,6 +196,8 @@ def main():
 
     environment = SilNlpEnv.create_standard_environment()
 
+    scripture_dir = Path(args.scripture_dir) if args.scripture_dir else environment.mt_scripture_dir
+
     resolved_config_file = resolve_config_file(args.config_folder, environment) if args.config_folder else None
 
     logger = logging.getLogger(__name__)
@@ -232,10 +234,10 @@ def main():
                 logger.info(f"\nFound {len(codes_to_find)} specified or related languages:\n{codes_to_find}")
 
         all_possible_codes = get_equivalent_isocodes(codes_to_find)
-        source_files.extend(get_files_by_iso(all_possible_codes, args.scripture_dir))
+        source_files.extend(get_files_by_iso(all_possible_codes, scripture_dir))
 
     if file_patterns:
-        pattern_files = [args.scripture_dir / f"{pattern}.txt" for pattern in file_patterns]
+        pattern_files = [scripture_dir / f"{pattern}.txt" for pattern in file_patterns]
         existing_files = [f for f in pattern_files if f.exists()]
         source_files.extend(existing_files)
         if len(existing_files) < len(pattern_files):

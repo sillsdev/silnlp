@@ -1,9 +1,18 @@
 from dataclasses import dataclass
 
 import pytest
+from jinja2.exceptions import UndefinedError
 
 from silnlp.nmt.config_utils import is_llm_config
-from silnlp.nmt.llm_config import DataCollatorForCausalLM, PromptMessages, build_generation_kwargs
+from silnlp.nmt.llm_config import (
+    DataCollatorForCausalLM,
+    Language,
+    LLMConfig,
+    LLMModel,
+    PromptMessages,
+    TranslateGemmaPromptMessages,
+    build_generation_kwargs,
+)
 
 
 def test_is_llm_config_explicit_model_type():
@@ -38,6 +47,23 @@ def test_prompt_messages_without_system_message():
     prompt = PromptMessages(system_message="", instruction="Translate: hello")
     assert prompt.to_chat_messages() == [{"role": "user", "content": "Translate: hello"}]
     assert prompt.to_folded_chat_messages() == [{"role": "user", "content": "Translate: hello"}]
+
+
+def test_translate_gemma_prompt_messages_is_a_prompt_messages():
+    prompt = TranslateGemmaPromptMessages(
+        source_language=Language("en", "English"), target_language=Language("fr", "French"), text="hello"
+    )
+    assert isinstance(prompt, PromptMessages)
+
+
+def test_translate_gemma_prompt_messages_has_no_folding_or_plain_text_fallback():
+    prompt = TranslateGemmaPromptMessages(
+        source_language=Language("en", "English"), target_language=Language("fr", "French"), text="hello"
+    )
+    with pytest.raises(NotImplementedError):
+        prompt.to_folded_chat_messages()
+    with pytest.raises(NotImplementedError):
+        prompt.to_plain_text()
 
 
 @dataclass
@@ -89,3 +115,174 @@ def test_data_collator_pad_to_multiple_of():
     batch = collator(features)
     assert batch["input_ids"].shape[1] == 4
     assert batch["labels"].tolist() == [[-100, 6, 7, -100]]
+
+
+@dataclass
+class _StubLLMConfig:
+    model: str
+    params: dict
+    data: dict
+
+    lang_name = LLMConfig.lang_name
+    language = LLMConfig.language
+    build_prompt_messages = LLMConfig.build_prompt_messages
+
+
+def test_language_resolves_configured_name_and_falls_back_to_iso():
+    config = _StubLLMConfig(model="google/gemma-2-2b-it", params={}, data={"lang_codes": {"en": "English"}})
+    assert config.language("en") == Language("en", "English")
+    assert config.language("fr") == Language("fr", "fr")
+
+
+def test_build_prompt_messages_translate_gemma_uses_structured_content():
+    config = _StubLLMConfig(
+        model="google/translategemma-4b-it",
+        params={"prompt": {"instruction_template": "Translate from {src_lang} to {trg_lang}.\n\n{source}"}},
+        data={"lang_codes": {}},
+    )
+    prompt = config.build_prompt_messages("hello", config.language("en"), config.language("fr"), target="bonjour")
+    assert prompt == TranslateGemmaPromptMessages(
+        source_language=Language("en", "en"), target_language=Language("fr", "fr"), text="hello", target="bonjour"
+    )
+    assert isinstance(prompt, TranslateGemmaPromptMessages)
+    assert prompt.to_chat_messages() == [
+        {
+            "role": "user",
+            "content": [{"type": "text", "source_lang_code": "en", "target_lang_code": "fr", "text": "hello"}],
+        },
+        {"role": "assistant", "content": "bonjour"},
+    ]
+
+
+def test_build_prompt_messages_generic_model_uses_instruction_template():
+    config = _StubLLMConfig(
+        model="google/gemma-2-2b-it",
+        params={
+            "prompt": {
+                "instruction_template": "Translate from {src_lang} to {trg_lang}.\n\n{source}",
+                "system_message": "",
+            }
+        },
+        data={"lang_codes": {"en": "English", "fr": "French"}},
+    )
+    prompt = config.build_prompt_messages("hello", config.language("en"), config.language("fr"))
+    assert prompt == PromptMessages(
+        system_message="", instruction="Translate from English to French.\n\nhello", target=None
+    )
+
+
+class _StubTranslateGemmaTokenizer:
+    chat_template = "{# a real chat template would render this #}"
+    bos_token = "<bos>"
+
+    def apply_chat_template(self, messages, add_generation_prompt, tokenize):
+        # Mimics the real template's behavior for a language code outside its fixed lookup table.
+        raise UndefinedError("'dict object' has no attribute 'tst'")
+
+    def __call__(self, text, add_special_tokens):
+        assert not add_special_tokens
+        return {"input_ids": [ord(c) for c in text]}
+
+
+def test_apply_prompt_template_translate_gemma_falls_back_for_unrecognized_language_code():
+    config = _StubLLMConfig(
+        model="google/translategemma-4b-it",
+        params={"prompt": {"instruction_template": "unused"}},
+        data={"lang_codes": {"en": "English", "tst": "Test Language"}},
+    )
+    tokenizer = _StubTranslateGemmaTokenizer()
+    prompt = config.build_prompt_messages("hello", config.language("en"), config.language("tst"))
+
+    text = prompt.apply_prompt_template(tokenizer, add_generation_prompt=True, tokenize=False)
+    assert text == (
+        "<bos><start_of_turn>user\n"
+        "You are a professional English (en) to Test Language (tst) translator. Your goal is to accurately convey "
+        "the meaning and nuances of the original English text while adhering to Test Language grammar, vocabulary, "
+        "and cultural sensitivities.\n"
+        "Produce only the Test Language translation, without any additional explanations or commentary. Please "
+        "translate the following English text into Test Language:\n\n\nhello<end_of_turn>\n"
+        "<start_of_turn>model\n"
+    )
+
+    token_ids = prompt.apply_prompt_template(tokenizer, add_generation_prompt=True, tokenize=True)
+    assert token_ids == [ord(c) for c in text]
+
+
+def test_build_adapter_config_plain_lora():
+    peft_config = LLMModel._build_adapter_config(
+        {"rank": 16, "alpha": 32, "dropout": 0.05, "target_modules": "all-linear"}, use_dora=False
+    )
+    assert peft_config.r == 16
+    assert peft_config.lora_alpha == 32
+    assert peft_config.modules_to_save is None
+    assert peft_config.use_dora is False
+
+
+def test_build_adapter_config_passes_through_modules_to_save():
+    peft_config = LLMModel._build_adapter_config(
+        {
+            "rank": 64,
+            "alpha": 256,
+            "dropout": 0.05,
+            "target_modules": "all-linear",
+            "modules_to_save": ["embed_tokens", "lm_head"],
+        },
+        use_dora=False,
+    )
+    assert peft_config.r == 64
+    assert peft_config.lora_alpha == 256
+    assert peft_config.modules_to_save == ["embed_tokens", "lm_head"]
+
+
+def test_build_adapter_config_dora():
+    adapter = {"rank": 64, "alpha": 256, "dropout": 0.05, "target_modules": "all-linear"}
+    peft_config = LLMModel._build_adapter_config(adapter, use_dora=True)
+    assert peft_config.use_dora is True
+
+
+@dataclass
+class _MethodStub:
+    params: dict
+
+    finetune_method = LLMConfig.finetune_method
+    uses_quantization = LLMConfig.uses_quantization
+    uses_dora = LLMConfig.uses_dora
+
+
+def test_finetune_method_axes():
+    # (method, quantized, dora)
+    cases = [
+        ("full", False, False),
+        ("lora", False, False),
+        ("qlora", True, False),
+        ("dora", False, True),
+        ("qdora", True, True),
+    ]
+    for method, quantized, dora in cases:
+        stub = _MethodStub(params={"finetune_method": method})
+        assert stub.finetune_method == method
+        assert stub.uses_quantization is quantized
+        assert stub.uses_dora is dora
+
+
+def test_finetune_method_is_case_insensitive():
+    assert _MethodStub(params={"finetune_method": "QDoRA"}).uses_dora is True
+
+
+def test_finetune_method_invalid_raises():
+    with pytest.raises(ValueError, match="Unknown finetune_method"):
+        _ = _MethodStub(params={"finetune_method": "bogus"}).finetune_method
+
+
+def test_normalize_deprecated_keys_renames_lora_to_adapter():
+    config = {"params": {"finetune_method": "lora", "lora": {"rank": 8}}}
+    LLMConfig._normalize_deprecated_keys(config)
+    assert "lora" not in config["params"]
+    assert config["params"]["adapter"] == {"rank": 8}
+
+
+def test_normalize_deprecated_keys_prefers_explicit_adapter():
+    config = {"params": {"lora": {"rank": 8}, "adapter": {"rank": 64}}}
+    LLMConfig._normalize_deprecated_keys(config)
+    # An explicit adapter wins; the deprecated lora key is left untouched rather than clobbering it.
+    assert config["params"]["adapter"] == {"rank": 64}
