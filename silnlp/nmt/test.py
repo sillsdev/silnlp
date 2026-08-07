@@ -453,8 +453,8 @@ def process_individual_books(
 
         for lines in zip(pred_file, vref_file, conf_list, *ref_files):
             # Get file lines
-            # The central segment is extracted before detokenizing, because detokenizing drops the
-            # special tokens that mark where the sentence being translated starts and ends.
+            # These predictions are only used for scoring, so they are reduced to the marked sentence.
+            # The span is located in the tokenized line, where the markers are standalone tokens.
             pred_line = pred_extractor.extract(lines[0].strip())
             detok_pred = tokenizer.detokenize(pred_line)
             vref = lines[1].strip()
@@ -543,10 +543,14 @@ def load_test_data(
                     vref = VerseRef.from_string(vref_line, ORIGINAL_VERSIFICATION)
                     if vref.book_num not in books:
                         continue
-            # The central segment is extracted before detokenizing, because detokenizing drops the
-            # special tokens that mark where the sentence being translated starts and ends.
-            pred_line = pred_extractor.extract(lines[0].strip())
-            detok_pred_line = tokenizer.detokenize(pred_line)
+            # The predictions file keeps the whole translated window, matching the references; only
+            # the marked sentence is scored. The span is located in the tokenized line, where the
+            # markers are guaranteed to be standalone tokens, and detokenized afterwards.
+            pred_line = lines[0].strip()
+            detok_pred_window = tokenizer.detokenize(pred_line)
+            detok_pred_line = (
+                tokenizer.detokenize(pred_extractor.extract(pred_line)) if use_context else detok_pred_window
+            )
             sys.append(detok_pred_line)
             if select_rand_ref_line:
                 ref_lines: List[str] = [line.strip() for line in lines[1:] if len(line.strip()) > 0]
@@ -561,7 +565,7 @@ def load_test_data(
                     if len(refs) == ref_index:
                         refs.append([])
                     refs[ref_index].append(ref_line)
-            out_file.write(detok_pred_line + "\n")
+            out_file.write(detok_pred_window + "\n")
         pred_extractor.report()
         ref_extractor.report()
         if by_book:

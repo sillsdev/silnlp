@@ -64,10 +64,18 @@ def test_only_the_central_sentence_is_scored(tmp_path: Path):
     assert refs == [["ref one", "ref two", "ref three"]]
 
 
-def test_the_written_predictions_hold_the_central_sentence(tmp_path: Path):
+def test_the_written_predictions_hold_the_whole_window(tmp_path: Path):
+    # The predictions file mirrors the reference file, which also stores whole windows, so the two can
+    # be lined up; only the metrics use the marked sentence.
     run_load_test_data(tmp_path, context_size=1)
     written = (tmp_path / "test.trg-predictions.detok.txt.100").read_text(encoding="utf-8").splitlines()
-    assert written == ["pred one", "pred two", "pred three with no markers at all"]
+    assert written == PREDICTIONS
+
+
+def test_the_written_predictions_are_unchanged_when_context_is_off(tmp_path: Path):
+    run_load_test_data(tmp_path, context_size=0)
+    written = (tmp_path / "test.trg-predictions.detok.txt.100").read_text(encoding="utf-8").splitlines()
+    assert written == PREDICTIONS
 
 
 def test_windows_are_left_alone_when_context_is_off(tmp_path: Path):
