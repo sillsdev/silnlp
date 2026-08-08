@@ -21,9 +21,11 @@ from silnlp.common.create_onboarding_experiments import (
     find_existing,
     folder_name,
     load_language_entries,
+    load_name_overrides,
     load_vref_books,
     load_vref_chapters,
     nllb_tag,
+    old_name_folder_warning,
     overlapping_books,
     parse_book_list,
     parse_corpus_stats,
@@ -130,6 +132,77 @@ def test_folder_name():
     assert folder_name("Arabic, Standard") == "Arabic_Standard"
     assert folder_name("Mari-Hill") == "Mari_Hill"
     assert folder_name("Saudi Arabian Sign Language") == "Saudi_Arabian_Sign_Language"
+    # keep_case preserves acronyms/interior caps that capitalize() would mangle
+    assert folder_name("DR Congo") == "Dr_Congo"
+    assert folder_name("DR Congo", keep_case=True) == "DR_Congo"
+
+
+def test_name_overrides_keys_exist_in_language_families():
+    # Guards against a refreshed languageFamilies.json orphaning an override key.
+    entries = load_language_entries(ASSETS_DIR)
+    overrides = load_name_overrides(ASSETS_DIR)
+    countries = {entry["langCountry"] for entry in entries}
+    languages = {entry["language"] for entry in entries}
+    assert not [key for key in overrides["countries"] if key not in countries]
+    assert not [key for key in overrides["languages"] if key not in languages]
+
+
+def test_name_override_applied():
+    overrides = load_name_overrides(ASSETS_DIR)
+    assert overrides["countries"]["Tanzania, United Republic of"] == "Tanzania"
+    assert folder_name(overrides["countries"]["Russian Federation"], keep_case=True) == "Russia"
+    assert folder_name(overrides["countries"]["Virgin Islands, U.S."], keep_case=True) == "US_Virgin_Islands"
+    assert folder_name(overrides["countries"]["Congo, The Democratic Republic of the"], keep_case=True) == "DR_Congo"
+    assert folder_name(overrides["languages"]["German, Standard"], keep_case=True) == "German"
+    assert folder_name(overrides["languages"]["German, Swiss"], keep_case=True) == "Swiss_German"
+    # an unmapped country is not in the override map (passes through unchanged)
+    assert "Peru" not in overrides["countries"]
+
+
+def test_name_override_values_non_blank():
+    # The shipped asset must not carry a blank value. At runtime a blank override is ignored
+    # (falls back to the official name — see run()), but this keeps the seed data clean.
+    overrides = load_name_overrides(ASSETS_DIR)
+    for group in ("countries", "languages"):
+        for key, value in overrides[group].items():
+            assert value and value.strip(), f"blank override value for {group!r} key {key!r}"
+
+
+def test_old_name_folder_warning_country_rename(tmp_path: Path):
+    # A renamed country warns at the country level (covers every language under it).
+    (tmp_path / "Russian_Federation").mkdir()
+    warning = old_name_folder_warning(tmp_path, "Russian Federation", "Abaza", "Russia", "Abaza")
+    assert warning is not None
+    assert str(tmp_path / "Russian_Federation") in warning
+    assert str(tmp_path / "Russia") in warning
+
+
+def test_old_name_folder_warning_language_rename(tmp_path: Path):
+    # A language-only rename (country unchanged) must still warn on the old language folder,
+    # otherwise find_existing never sees the prior experiments and creates duplicates.
+    (tmp_path / "Germany" / "German_Standard").mkdir(parents=True)
+    warning = old_name_folder_warning(tmp_path, "Germany", "German, Standard", "Germany", "German")
+    assert warning is not None
+    assert str(tmp_path / "Germany" / "German_Standard") in warning
+    assert str(tmp_path / "Germany" / "German") in warning
+
+
+def test_old_name_folder_warning_language_rename_under_overridden_country(tmp_path: Path):
+    # Country already overridden (Russia) so prior runs live under the override folder; a later
+    # language rename must be detected under the *current* country segment, not the official one.
+    (tmp_path / "Russia" / "German_Standard").mkdir(parents=True)
+    warning = old_name_folder_warning(tmp_path, "Russian Federation", "German, Standard", "Russia", "German")
+    assert warning is not None
+    assert str(tmp_path / "Russia" / "German_Standard") in warning
+    assert str(tmp_path / "Russia" / "German") in warning
+
+
+def test_old_name_folder_warning_none(tmp_path: Path):
+    # No old folder present -> no warning.
+    assert old_name_folder_warning(tmp_path, "Georgia", "Abkhaz", "Georgia", "Abkhaz") is None
+    # Nothing remapped (old == new) -> no warning even if the folder exists.
+    (tmp_path / "Peru" / "Quechua").mkdir(parents=True)
+    assert old_name_folder_warning(tmp_path, "Peru", "Quechua", "Peru", "Quechua") is None
 
 
 def test_nllb_tag():
@@ -602,6 +675,88 @@ def test_run_stats_folder_directly_under_experiments_uses_derived_location(tmp_p
     )
     output = capsys.readouterr().out
     # Not dumped at the experiments root: the derived Country/Language location is used.
+    assert f"Experiment location: {tmp_path / 'Saudi_Arabia' / 'Saudi_Arabian_Sign_Language'}" in output
+
+
+def test_run_applies_country_override_to_location(tmp_path: Path, capsys, monkeypatch):
+    # End-to-end wiring: an overridden country must reach both the folder path and the report.
+    import silnlp.common.create_onboarding_experiments as coe
+
+    monkeypatch.setattr(
+        coe,
+        "load_name_overrides",
+        lambda assets_dir: {"countries": {"Saudi Arabia": "KSA Common"}, "languages": {}},
+    )
+    stats_dir = tmp_path / "MyAlignRun"
+    stats_dir.mkdir()
+    make_corpus_stats(stats_dir / "corpus-stats.csv")
+    make_verse_counts(stats_dir / "verse_counts.csv")
+    run(
+        request_dir=stats_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="complete",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+        dry_run=True,
+    )
+    output = capsys.readouterr().out
+    assert f"Experiment location: {tmp_path / 'KSA_Common' / 'Saudi_Arabian_Sign_Language'}" in output
+    assert "country: KSA Common" in output
+
+
+def test_run_ignores_blank_country_override(tmp_path: Path, capsys, monkeypatch):
+    # A whitespace-only override must be ignored, not collapse the country path level.
+    import silnlp.common.create_onboarding_experiments as coe
+
+    monkeypatch.setattr(
+        coe,
+        "load_name_overrides",
+        lambda assets_dir: {"countries": {"Saudi Arabia": "  "}, "languages": {}},
+    )
+    stats_dir = tmp_path / "MyAlignRun"
+    stats_dir.mkdir()
+    make_corpus_stats(stats_dir / "corpus-stats.csv")
+    make_verse_counts(stats_dir / "verse_counts.csv")
+    run(
+        request_dir=stats_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="complete",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+        dry_run=True,
+    )
+    output = capsys.readouterr().out
+    assert f"Experiment location: {tmp_path / 'Saudi_Arabia' / 'Saudi_Arabian_Sign_Language'}" in output
+
+
+def test_run_ignores_non_string_country_override(tmp_path: Path, capsys, monkeypatch):
+    # A malformed (non-string) override value must degrade gracefully, not crash the run.
+    import silnlp.common.create_onboarding_experiments as coe
+
+    monkeypatch.setattr(
+        coe,
+        "load_name_overrides",
+        lambda assets_dir: {"countries": {"Saudi Arabia": 5}, "languages": {}},
+    )
+    stats_dir = tmp_path / "MyAlignRun"
+    stats_dir.mkdir()
+    make_corpus_stats(stats_dir / "corpus-stats.csv")
+    make_verse_counts(stats_dir / "verse_counts.csv")
+    run(
+        request_dir=stats_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="complete",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+        dry_run=True,
+    )
+    output = capsys.readouterr().out
     assert f"Experiment location: {tmp_path / 'Saudi_Arabia' / 'Saudi_Arabian_Sign_Language'}" in output
 
 

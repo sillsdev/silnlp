@@ -363,6 +363,22 @@ def load_language_entries(assets_dir: Path) -> List[dict]:
         return json.load(file)
 
 
+def load_name_overrides(assets_dir: Path) -> Dict[str, Dict[str, str]]:
+    """Map official country/language names (as in languageFamilies.json) to common names.
+
+    languageFamilies.json is kept as a verbatim Ethnologue snapshot, so friendlier folder
+    names live in a separate nameOverrides.json. A missing file yields empty maps, so the
+    tool still works without it; unmapped names pass through unchanged.
+    """
+    path = assets_dir / "nameOverrides.json"
+    if not path.exists():
+        return {"countries": {}, "languages": {}}
+    with open(path, "r", encoding="utf-8") as file:
+        data = json.load(file)
+    # `or {}` (not a get-default) so an explicit null in a hand-edited file is tolerated too.
+    return {"countries": data.get("countries") or {}, "languages": data.get("languages") or {}}
+
+
 def lookup_language(iso: str, entries: List[dict]) -> Tuple[str, str]:
     """Return (language name, country) for an iso code from the languageFamilies.json entries."""
     iso3 = to_iso3(iso)
@@ -413,9 +429,39 @@ def execute_copy(scripture_dir: Path, terms_dir: Optional[Path], old_stem: str, 
             print(f"Copied {path.name} to {target} in {terms_dir}")
 
 
-def folder_name(name: str) -> str:
-    name = name.replace(",", "").replace("-", " ")
-    return "_".join(word.capitalize() for word in name.split())
+def folder_name(name: str, keep_case: bool = False) -> str:
+    parts = name.replace(",", "").replace("-", " ").split()
+    return "_".join(parts) if keep_case else "_".join(word.capitalize() for word in parts)
+
+
+def old_name_folder_warning(
+    experiments_dir: Path, raw_country: str, raw_language: str, country_seg: str, language_seg: str
+) -> Optional[str]:
+    """Message to print when experiments already exist under the old official name(s).
+
+    Covers both a country rename (which orphans every language under the old country folder)
+    and a language-only rename (which orphans the old language folder). Non-destructive: it
+    only advises a manual merge, so `find_existing` never re-uses the orphaned folder and
+    silently creates duplicates. Returns None when nothing was remapped or no old folder exists.
+    """
+    old_country_dir = experiments_dir / folder_name(raw_country)
+    new_country_dir = experiments_dir / country_seg
+    if old_country_dir != new_country_dir and old_country_dir.exists():
+        # The whole country folder moved, so warn at that level (all languages under it).
+        old, new = old_country_dir, new_country_dir
+    else:
+        # Language-only rename: prior experiments live under the *current* country segment
+        # (which may itself be an override), so look there — not under the official country.
+        old_lang_dir = new_country_dir / folder_name(raw_language)
+        new_lang_dir = new_country_dir / language_seg
+        if old_lang_dir == new_lang_dir or not old_lang_dir.exists():
+            return None
+        old, new = old_lang_dir, new_lang_dir
+    return (
+        f"WARNING: a folder under the official name already exists: {old}\n"
+        f"         new experiments will go under the common name: {new}\n"
+        "         consider merging the old folder into the new location manually."
+    )
 
 
 def load_verse_counts(request_dir: Path, experiments_dir: Path) -> pd.DataFrame:
@@ -1011,10 +1057,34 @@ def run(
         raise FileNotFoundError(f"No corpus-stats.csv or onboarding.log found in {request_dir}.")
 
     language_entries = load_language_entries(assets_dir)
-    language, country = lookup_language(main.iso, language_entries)
-    lang_dir = lang_dir_override or experiments_dir / folder_name(country) / folder_name(language)
-    print(f"Main project: {main.name} ({main.stem}), language: {language} [{main.iso}], country: {country}")
+    overrides = load_name_overrides(assets_dir)
+    raw_language, raw_country = lookup_language(main.iso, language_entries)
+
+    # Map official names to common ones for friendlier folders; keep the official
+    # (raw) names to detect and warn about folders created under the old naming. A blank
+    # (whitespace-only) override is ignored so it cannot collapse a path level.
+    country_override = overrides["countries"].get(raw_country)
+    language_override = overrides["languages"].get(raw_language)
+    use_country = isinstance(country_override, str) and bool(country_override.strip())
+    use_language = isinstance(language_override, str) and bool(language_override.strip())
+    country = country_override if use_country else raw_country
+    language = language_override if use_language else raw_language
+    # keep_case only for override values (already human-chosen); official names keep the
+    # default title-casing so a blank/absent override collapses to the original behaviour.
+    country_seg = folder_name(country, keep_case=use_country)
+    language_seg = folder_name(language, keep_case=use_language)
+
+    lang_dir = lang_dir_override or experiments_dir / country_seg / language_seg
+    print(f"Main project: {main.name} ({main.stem}), language: {language} " f"[{main.iso}], country: {country}")
     print(f"Experiment location: {lang_dir}")
+
+    # Warn (non-destructive) when a folder under the old official name(s) already exists, so it
+    # can be merged manually. Only in the derived-location case — the corpus-stats override path
+    # deliberately reuses whatever naming already exists.
+    if lang_dir_override is None:
+        warning = old_name_folder_warning(experiments_dir, raw_country, raw_language, country_seg, language_seg)
+        if warning is not None:
+            print(warning)
 
     candidates.sort(key=lambda c: c.alignment, reverse=True)
     passing = [c for c in candidates if c.parallel >= min_parallel and c.alignment >= min_alignment]

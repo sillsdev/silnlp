@@ -1,0 +1,24 @@
+{
+    "countries": {
+        "Bolivia, Plurinational State of": "Bolivia",
+        "Congo, The Democratic Republic of the": "DRC",
+        "Iran, Islamic Republic of": "Iran",
+        "Lao People's Democratic Republic": "Laos",
+        "Macedonia, The Former Yugoslav Republic of": "North Macedonia",
+        "Micronesia, Federated States of": "Micronesia",
+        "Moldova, Republic of": "Moldova",
+        "Papua New Guinea": "PNG",
+        "Russian Federation": "Russia",
+        "Korea, Republic of": "South Korea",
+        "Syrian Arab Republic": "Syria",
+        "Taiwan, Province of China": "Taiwan",
+        "Tanzania, United Republic of": "Tanzania",
+        "Holy See (Vatican City State)": "Vatican City",
+        "Venezuela, Bolivarian Republic of": "Venezuela",
+        "Virgin Islands, U.S.": "US Virgin Islands",
+    },
+    "languages": {
+        "German, Standard": "German",
+        "German, Swiss": "Swiss German"
+    }
+}
