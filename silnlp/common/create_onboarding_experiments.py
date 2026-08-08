@@ -18,6 +18,7 @@ import shutil
 import string
 import subprocess
 import sys
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import AbstractSet, Dict, List, Optional, Sequence, Tuple
@@ -46,11 +47,14 @@ STATS_RE = re.compile(
     r".*?source script: (?P<src_script>[^,]+),"
     r".*?target script: (?P<trg_script>[^,]+),"
 )
+# Optional in older logs; the main is the alignment source, so 'target only' is the reference's.
+ONLY_COUNTS_RE = re.compile(r"source only count: (?P<src_only>\d+) target only count: (?P<trg_only>\d+)")
 
 CHECKPOINT = 5000
 SEED = 111
 MODEL = "facebook/nllb-200-distilled-1.3B"
 BOOK_COMPLETENESS_THRESHOLD = 0.98
+MISSING_VERSE_WARN = 0.25  # warn when this fraction or more of the specified verses are absent
 TOP_EXPERIMENTS = 20
 
 EXPERIMENT_ARGS = [
@@ -81,6 +85,8 @@ class Candidate:
     parallel: int
     alignment: float
     script: str
+    src_only: int = 0  # verses only in this reference (drafting-source-only verses)
+    trg_only: int = 0  # verses only in the target
 
 
 @dataclass
@@ -129,7 +135,10 @@ def parse_log(log_path: Path) -> Tuple[MainProject, List[Candidate]]:
             continue
         m = STATS_RE.search(line)
         if m is not None:
-            stats.append(m.groupdict())
+            entry = m.groupdict()
+            only = ONLY_COUNTS_RE.search(line)
+            entry.update(only.groupdict() if only is not None else {"src_only": None, "trg_only": None})
+            stats.append(entry)
 
     if main_name is None:
         raise ValueError(f"No 'Processing onboarding request for main project' line found in {log_path}.")
@@ -142,7 +151,8 @@ def parse_log(log_path: Path) -> Tuple[MainProject, List[Candidate]]:
     for entry in stats:
         if entry["main"] != main_name:
             continue
-        main_script = entry["src_script"].strip()
+        # Keep the first row that reports a real script; a no-parallel-data row logs 'None'/'nan'.
+        main_script = main_script or clean_script(entry["src_script"])
         ref_name = entry["ref"]
         ref_stem = stems.get(ref_name)
         if ref_stem is None:
@@ -156,6 +166,9 @@ def parse_log(log_path: Path) -> Tuple[MainProject, List[Candidate]]:
             parallel=int(entry["parallel"]),
             alignment=float(entry["alignment"]),
             script=entry["trg_script"].strip(),
+            # The main is the alignment source, so the reference's own verses are 'target only'.
+            src_only=int(entry["trg_only"]) if entry.get("trg_only") is not None else 0,
+            trg_only=int(entry["src_only"]) if entry.get("src_only") is not None else 0,
         )
 
     main = MainProject(
@@ -237,6 +250,11 @@ def parse_corpus_stats(stats_path: Path, target: Optional[str] = None) -> Tuple[
         if any(pd.isna(row[column]) for column in ("count", "parallel", "align_score")):
             incomplete += 1
             continue
+        # 'source only' verses are the reference's own; which physical column that is depends
+        # on the row's orientation (the reference may be the CSV's src or trg project).
+        ref_is_src = ref_stem == row["src_project"]
+        ref_col = "src_only" if ref_is_src else "trg_only"
+        target_col = "trg_only" if ref_is_src else "src_only"
         candidates[stem_to_project(ref_stem)] = Candidate(
             name=stem_to_project(ref_stem),
             stem=ref_stem,
@@ -245,17 +263,23 @@ def parse_corpus_stats(stats_path: Path, target: Optional[str] = None) -> Tuple[
             parallel=int(row["parallel"]),
             alignment=float(row["align_score"]),
             script=str(ref_script).strip(),
+            src_only=int(row[ref_col]) if ref_col in row.index and not pd.isna(row[ref_col]) else 0,
+            trg_only=int(row[target_col]) if target_col in row.index and not pd.isna(row[target_col]) else 0,
         )
     if incomplete:
         LOGGER.warning(f"Skipping {incomplete} row(s) in {stats_path.name} with missing statistics.")
 
-    main_stem, main_script = oriented[0][0], oriented[0][1]
+    # Take the main project's script from the first row that actually reports one: a pair with
+    # no parallel data has an empty ('None'/'nan') script, and such a row must not decide the
+    # main script just because it sorts first (this is what produced '<iso>_nan' configs).
+    main_stem = oriented[0][0]
+    main_script = next((script for entry in oriented if (script := clean_script(entry[1])) is not None), None)
     main = MainProject(
         name=stem_to_project(main_stem),
         stem=main_stem,
         iso=stem_to_iso(main_stem),
         verses=None,
-        script=str(main_script).strip(),
+        script=main_script,
     )
     return main, list(candidates.values())
 
@@ -268,6 +292,21 @@ def parse_log_main_name(log_path: Path) -> Optional[str]:
             if m is not None:
                 return m.group(1)
     return None
+
+
+def clean_script(value: object) -> Optional[str]:
+    """A usable script abbreviation, or None for a missing/placeholder value.
+
+    analyze writes 'None' (predict_script_code's empty-text result) and 'nan' for pairs with
+    no parallel data; pandas also reads both as NaN. Treat all of these as "no script" so a
+    stray empty row never becomes a literal '<iso>_nan' language tag.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    if text.lower() in ("", "nan", "none"):
+        return None
+    return text
 
 
 def stem_to_iso(stem: str) -> str:
@@ -324,6 +363,22 @@ def load_language_entries(assets_dir: Path) -> List[dict]:
         return json.load(file)
 
 
+def load_name_overrides(assets_dir: Path) -> Dict[str, Dict[str, str]]:
+    """Map official country/language names (as in languageFamilies.json) to common names.
+
+    languageFamilies.json is kept as a verbatim Ethnologue snapshot, so friendlier folder
+    names live in a separate nameOverrides.json. A missing file yields empty maps, so the
+    tool still works without it; unmapped names pass through unchanged.
+    """
+    path = assets_dir / "nameOverrides.json"
+    if not path.exists():
+        return {"countries": {}, "languages": {}}
+    with open(path, "r", encoding="utf-8") as file:
+        data = json.load(file)
+    # `or {}` (not a get-default) so an explicit null in a hand-edited file is tolerated too.
+    return {"countries": data.get("countries") or {}, "languages": data.get("languages") or {}}
+
+
 def lookup_language(iso: str, entries: List[dict]) -> Tuple[str, str]:
     """Return (language name, country) for an iso code from the languageFamilies.json entries."""
     iso3 = to_iso3(iso)
@@ -374,9 +429,39 @@ def execute_copy(scripture_dir: Path, terms_dir: Optional[Path], old_stem: str, 
             print(f"Copied {path.name} to {target} in {terms_dir}")
 
 
-def folder_name(name: str) -> str:
-    name = name.replace(",", "").replace("-", " ")
-    return "_".join(word.capitalize() for word in name.split())
+def folder_name(name: str, keep_case: bool = False) -> str:
+    parts = name.replace(",", "").replace("-", " ").split()
+    return "_".join(parts) if keep_case else "_".join(word.capitalize() for word in parts)
+
+
+def old_name_folder_warning(
+    experiments_dir: Path, raw_country: str, raw_language: str, country_seg: str, language_seg: str
+) -> Optional[str]:
+    """Message to print when experiments already exist under the old official name(s).
+
+    Covers both a country rename (which orphans every language under the old country folder)
+    and a language-only rename (which orphans the old language folder). Non-destructive: it
+    only advises a manual merge, so `find_existing` never re-uses the orphaned folder and
+    silently creates duplicates. Returns None when nothing was remapped or no old folder exists.
+    """
+    old_country_dir = experiments_dir / folder_name(raw_country)
+    new_country_dir = experiments_dir / country_seg
+    if old_country_dir != new_country_dir and old_country_dir.exists():
+        # The whole country folder moved, so warn at that level (all languages under it).
+        old, new = old_country_dir, new_country_dir
+    else:
+        # Language-only rename: prior experiments live under the *current* country segment
+        # (which may itself be an override), so look there — not under the official country.
+        old_lang_dir = new_country_dir / folder_name(raw_language)
+        new_lang_dir = new_country_dir / language_seg
+        if old_lang_dir == new_lang_dir or not old_lang_dir.exists():
+            return None
+        old, new = old_lang_dir, new_lang_dir
+    return (
+        f"WARNING: a folder under the official name already exists: {old}\n"
+        f"         new experiments will go under the common name: {new}\n"
+        "         consider merging the old folder into the new location manually."
+    )
 
 
 def load_verse_counts(request_dir: Path, experiments_dir: Path) -> pd.DataFrame:
@@ -392,6 +477,166 @@ def load_verse_counts(request_dir: Path, experiments_dir: Path) -> pd.DataFrame:
         )
     df = pd.concat(frames)
     return df[~df.index.duplicated(keep="first")]
+
+
+def load_vref_books(assets_dir: Path) -> List[str]:
+    """The book id of each line of vref.txt (the verse layout of every extract file)."""
+    with open(assets_dir / "vref.txt", "r", encoding="utf-8") as file:
+        return [line.split(" ", 1)[0] for line in file if line.strip()]
+
+
+def load_vref_chapters(assets_dir: Path) -> List[Tuple[str, int]]:
+    """The (book id, chapter number) of each vref.txt line, for chapter-level presence checks."""
+    result: List[Tuple[str, int]] = []
+    with open(assets_dir / "vref.txt", "r", encoding="utf-8") as file:
+        for line in file:
+            if not line.strip():
+                continue
+            book, ref = line.split(" ", 1)
+            result.append((book, int(ref.split(":", 1)[0])))
+    return result
+
+
+def selection_by_book(selection: Dict[int, List[int]]) -> Dict[str, Optional[AbstractSet[int]]]:
+    """Turn a get_chapters selection ({book number: [chapters]}) into {book id: chapters or None}.
+
+    An empty chapter list means the whole book, represented here as None (all chapters).
+    """
+    return {book_number_to_id(number): (set(chapters) if chapters else None) for number, chapters in selection.items()}
+
+
+def extract_book_counts(extract_path: Path, vref_books: Sequence[str]) -> Dict[str, int]:
+    """Per-book verse counts of a vref-aligned extract file, counting the non-blank lines.
+
+    collect_verse_counts counts any line that is not exactly a newline; treating a
+    whitespace-only line as missing only differs from that at the margin, conservatively.
+    """
+    counts: Dict[str, int] = Counter()
+    with open(extract_path, "r", encoding="utf-8") as file:
+        for book, line in zip(vref_books, file):
+            if line.strip():
+                counts[book] += 1
+    return dict(counts)
+
+
+class BookCoverage:
+    """Per-book verse counts for extract stems.
+
+    Counts come from verse_counts.csv rows, falling back to counting the vref-aligned
+    extract file in MT/scripture, so a stem missing from the counts files never misreports
+    a scripture's book coverage.
+    """
+
+    def __init__(self, verse_counts: Optional[pd.DataFrame], scripture_dir: Optional[Path], assets_dir: Path):
+        self._verse_counts = verse_counts
+        self._scripture_dir = scripture_dir
+        self._assets_dir = assets_dir
+        self._vref_books: Optional[List[str]] = None
+        self._vref_chapters: Optional[List[Tuple[str, int]]] = None
+        self._cache: Dict[str, Optional[Dict[str, int]]] = {}
+
+    def counts(self, stem: str) -> Optional[Dict[str, int]]:
+        """Verse counts per book id, or None when the stem has no counts row and no extract file."""
+        if stem not in self._cache:
+            self._cache[stem] = self._load(stem)
+        return self._cache[stem]
+
+    def complete(self) -> Dict[str, int]:
+        """The full canon's verse count per book: the 'complete' row, or computed from vref.txt."""
+        if self._verse_counts is not None and "complete" in self._verse_counts.index:
+            return self._row_counts("complete")
+        return dict(Counter(self._books()))
+
+    def _load(self, stem: str) -> Optional[Dict[str, int]]:
+        if self._verse_counts is not None and stem in self._verse_counts.index:
+            return self._row_counts(stem)
+        if self._scripture_dir is not None and (self._scripture_dir / f"{stem}.txt").is_file():
+            return extract_book_counts(self._scripture_dir / f"{stem}.txt", self._books())
+        return None
+
+    def _row_counts(self, index: str) -> Dict[str, int]:
+        assert self._verse_counts is not None
+        row = self._verse_counts.loc[index]
+        return {
+            book: int(row[book])
+            for book in self._verse_counts.columns
+            if book in ALL_BOOK_IDS and not pd.isna(row[book])
+        }
+
+    def _books(self) -> List[str]:
+        if self._vref_books is None:
+            self._vref_books = load_vref_books(self._assets_dir)
+        return self._vref_books
+
+    def _chapters(self) -> List[Tuple[str, int]]:
+        if self._vref_chapters is None:
+            self._vref_chapters = load_vref_chapters(self._assets_dir)
+        return self._vref_chapters
+
+    def presence(self, stem: str, selection: Dict[int, List[int]]) -> Optional[Tuple[int, int]]:
+        """(present, total) specified verses of a get_chapters selection in the stem's extract.
+
+        `total` is how many verses the selection covers in the full vref layout; `present` is
+        how many of those are non-blank in the extract. Chapter-level: honours selections like
+        `GEN 1-10`. Returns None when the extract file is unavailable (so no check can be made).
+        """
+        if self._scripture_dir is None:
+            return None
+        extract_path = self._scripture_dir / f"{stem}.txt"
+        if not extract_path.is_file():
+            return None
+        wanted = selection_by_book(selection)
+        flags = [
+            book in wanted and (wanted[book] is None or chapter in (wanted[book] or ()))
+            for book, chapter in self._chapters()
+        ]
+        total = sum(flags)
+        present = 0
+        with open(extract_path, "r", encoding="utf-8") as file:
+            for in_scope, line in zip(flags, file):
+                if in_scope and line.strip():
+                    present += 1
+        return present, total
+
+
+def book_mark(counts: Optional[Dict[str, int]], book: str, complete: Dict[str, int]) -> str:
+    """Three-state coverage of a single book in a source: full '✓', partial '~', or none 'X'."""
+    have = 0 if counts is None else counts.get(book, 0)
+    if have <= 0:
+        return "X"
+    full = complete.get(book, 0)
+    return "✓" if full > 0 and have >= BOOK_COMPLETENESS_THRESHOLD * full else "~"
+
+
+def warn_missing_verses(source_name: str, kind: str, selection_str: str, presence: Optional[Tuple[int, int]]) -> None:
+    """Warn when at least MISSING_VERSE_WARN of the verses a selection specifies are absent.
+
+    `presence` is (present, total) from BookCoverage.presence, or None when it could not be
+    measured (no extract file), in which case nothing is printed.
+    """
+    if presence is None:
+        return
+    present, total = presence
+    if total == 0 or present / total > 1 - MISSING_VERSE_WARN:
+        return
+    print(
+        f"Warning: '{source_name}' is missing {100 * (1 - present / total):.0f}% of the {kind} verses"
+        f" specified by '{selection_str}' ({present} of {total} present); check before running."
+    )
+
+
+def overlapping_books(training: Dict[int, List[int]], translate: Dict[int, List[int]]) -> List[str]:
+    """Book ids whose verses fall in both a training and a translate selection.
+
+    Each argument is a get_chapters result ({book number: [chapters]}, [] = whole book). A book
+    overlaps when either side takes the whole book, or their chapter lists intersect.
+    """
+    overlap = []
+    for number in sorted(set(training) & set(translate)):
+        train_chapters, translate_chapters = training[number], translate[number]
+        if not train_chapters or not translate_chapters or set(train_chapters) & set(translate_chapters):
+            overlap.append(book_number_to_id(number))
+    return overlap
 
 
 def resolve_corpus_books(
@@ -473,18 +718,15 @@ def build_config(
     }
 
 
-def build_translate_config(
-    sources: List[Candidate], translate_books: str, source_projects: Optional[Dict[str, str]] = None
-) -> dict:
-    source_projects = source_projects or {}
+def build_translate_config(projects: Sequence[str], translate_books: str) -> dict:
     return {
         "translate": [
             {
                 "books": translate_books,
-                "src_project": source_projects.get(source.name, source.name),
+                "src_project": project,
                 "checkpoint": CHECKPOINT,
             }
-            for source in sources
+            for project in projects
         ],
         "postprocess": [{"paragraph_behavior": "place"}],
     }
@@ -564,6 +806,61 @@ def find_existing(lang_dir: Path, prefix: str, config: dict) -> Tuple[Optional[P
     return None, max_index + 1
 
 
+def select_candidates(
+    candidates: List[Candidate],
+    coverage: "BookCoverage",
+    complete_counts: Dict[str, int],
+    translate_book_ids: Sequence[str],
+    dry_run: bool,
+) -> List[Candidate]:
+    """Show a table of candidates and ask which to use as training/drafting sources.
+
+    Each candidate appears once with its corpus-stats data (alignment, total, parallel
+    'train' verses, source-only 'draft' verses, target-only, script) and a per-translate-book
+    coverage mark. Manual selection replaces the book-coverage filter: whatever is chosen may
+    be a primary source regardless of its coverage. Under dry_run the table is displayed and
+    every candidate is returned without prompting.
+    """
+    name_w = max([len("Candidate")] + [len(c.name) for c in candidates])
+    book_w = {book: max(3, len(book)) for book in translate_book_ids}
+    marks_header = "".join(f"  {book:>{book_w[book]}}" for book in translate_book_ids)
+    print("\nCandidates (train = parallel/training verses, draft = source-only/drafting verses):")
+    print(
+        f"  # {'Candidate':<{name_w}}  {'align':>6}  {'total':>7}  {'train':>7}  {'draft':>7}"
+        f"  {'trg-only':>8}  {'script':<6}{marks_header}"
+    )
+    for i, c in enumerate(candidates, start=1):
+        counts = coverage.counts(c.stem)
+        marks = "".join(f"  {book_mark(counts, book, complete_counts):>{book_w[book]}}" for book in translate_book_ids)
+        print(
+            f"  {i:>2} {c.name:<{name_w}}  {c.alignment:>6.3f}  {c.count:>7}  {c.parallel:>7}  {c.src_only:>7}"
+            f"  {c.trg_only:>8}  {(c.script or ''):<6}{marks}"
+        )
+    print("Marks: ✓ = source has ≥98% of the book, ~ = partial, X = none.")
+    if dry_run:
+        print("Dry run: all candidates are included.")
+        return candidates
+    try:
+        reply = input("Enter the candidates to use (e.g. 1,3), 'all' or 'none': ").strip().lower()
+    except EOFError:
+        reply = ""
+    if reply in ("", "none"):
+        print("No candidates selected.")
+        return []
+    if reply != "all":
+        chosen: List[Candidate] = []
+        for token in re.split(r"[,\s]+", reply):
+            if token.isdigit() and 1 <= int(token) <= len(candidates):
+                if candidates[int(token) - 1] not in chosen:
+                    chosen.append(candidates[int(token) - 1])
+            else:
+                LOGGER.warning(f"Ignoring invalid selection '{token}'.")
+        if not chosen:
+            print("No candidates selected.")
+        return chosen
+    return candidates
+
+
 def select_experiments(
     singles: List[List[Candidate]], mixed: List[List[Candidate]], dry_run: bool, top: int = TOP_EXPERIMENTS
 ) -> List[List[Candidate]]:
@@ -608,6 +905,29 @@ def select_experiments(
 def write_yaml(path: Path, content: dict) -> None:
     with open(path, "w", encoding="utf-8") as file:
         yaml.dump(content, file, sort_keys=False, default_flow_style=False, allow_unicode=True)
+
+
+def update_translate_config(folder: Path, translate_config: dict, dry_run: bool) -> None:
+    """Bring an existing experiment's translate_config.yml in line with the current drafting choice.
+
+    An identical config.yml does not mean an identical translate_config.yml:
+    --translate-scripture and a replaced drafting project change only the latter.
+    """
+    path = folder / "translate_config.yml"
+    on_disk: Optional[dict] = None
+    if path.is_file():
+        try:
+            with open(path, "r", encoding="utf-8") as file:
+                on_disk = yaml.safe_load(file)
+        except yaml.YAMLError:
+            LOGGER.warning(f"Could not parse {path}; it will be rewritten.")
+    if on_disk == translate_config:
+        return
+    if dry_run:
+        print(f"Would update {path} with the current drafting configuration.")
+    else:
+        write_yaml(path, translate_config)
+        print(f"Updated {path} with the current drafting configuration.")
 
 
 def submit_experiments(
@@ -669,6 +989,7 @@ def run(
     projects_dir: Optional[Path] = None,
     test_variant: Optional[str] = None,
     target: Optional[str] = None,
+    translate_scripture: Optional[Sequence[str]] = None,
     top: int = TOP_EXPERIMENTS,
     dry_run: bool = False,
     submit: Optional[bool] = False,
@@ -736,10 +1057,34 @@ def run(
         raise FileNotFoundError(f"No corpus-stats.csv or onboarding.log found in {request_dir}.")
 
     language_entries = load_language_entries(assets_dir)
-    language, country = lookup_language(main.iso, language_entries)
-    lang_dir = lang_dir_override or experiments_dir / folder_name(country) / folder_name(language)
-    print(f"Main project: {main.name} ({main.stem}), language: {language} [{main.iso}], country: {country}")
+    overrides = load_name_overrides(assets_dir)
+    raw_language, raw_country = lookup_language(main.iso, language_entries)
+
+    # Map official names to common ones for friendlier folders; keep the official
+    # (raw) names to detect and warn about folders created under the old naming. A blank
+    # (whitespace-only) override is ignored so it cannot collapse a path level.
+    country_override = overrides["countries"].get(raw_country)
+    language_override = overrides["languages"].get(raw_language)
+    use_country = isinstance(country_override, str) and bool(country_override.strip())
+    use_language = isinstance(language_override, str) and bool(language_override.strip())
+    country = country_override if use_country else raw_country
+    language = language_override if use_language else raw_language
+    # keep_case only for override values (already human-chosen); official names keep the
+    # default title-casing so a blank/absent override collapses to the original behaviour.
+    country_seg = folder_name(country, keep_case=use_country)
+    language_seg = folder_name(language, keep_case=use_language)
+
+    lang_dir = lang_dir_override or experiments_dir / country_seg / language_seg
+    print(f"Main project: {main.name} ({main.stem}), language: {language} " f"[{main.iso}], country: {country}")
     print(f"Experiment location: {lang_dir}")
+
+    # Warn (non-destructive) when a folder under the old official name(s) already exists, so it
+    # can be merged manually. Only in the derived-location case — the corpus-stats override path
+    # deliberately reuses whatever naming already exists.
+    if lang_dir_override is None:
+        warning = old_name_folder_warning(experiments_dir, raw_country, raw_language, country_seg, language_seg)
+        if warning is not None:
+            print(warning)
 
     candidates.sort(key=lambda c: c.alignment, reverse=True)
     passing = [c for c in candidates if c.parallel >= min_parallel and c.alignment >= min_alignment]
@@ -751,6 +1096,48 @@ def run(
         print(f"\nNo references passed the thresholds (parallel >= {min_parallel}, alignment >= {min_alignment}).")
         return []
 
+    # Verse counts drive the candidate table below: per source it shows the parallel (training)
+    # and source-only (drafting) verse counts and a coverage mark for each --translate-book, so
+    # the user can judge which sources to use — including whether one looks like a back
+    # translation (narrow book coverage). See create_onboarding_experiments_brief.md.
+    verse_counts: Optional[pd.DataFrame] = None
+    try:
+        verse_counts = load_verse_counts(request_dir, experiments_dir)
+    except FileNotFoundError:
+        if training_books.lower() == "complete":
+            raise
+    except Exception as e:  # a malformed counts file must not break runs that never needed it
+        if training_books.lower() == "complete":
+            raise
+        LOGGER.warning(f"Could not read verse counts ({e}); book coverage will use extract files only.")
+    coverage = BookCoverage(verse_counts, scripture_dir, assets_dir)
+    complete_counts = coverage.complete()
+    translate_set = frozenset(get_chapters(translate_books))
+    translate_book_ids = [book_number_to_id(number) for number in sorted(translate_set)]
+
+    target_counts = coverage.counts(main.stem)
+    target_total = sum(target_counts.values()) if target_counts is not None else main.verses
+    secondary_min = max(1000.0, 0.25 * target_total) if target_total else 1000.0
+    if not target_total:
+        LOGGER.warning(
+            f"No verse count found for the target '{main.stem}'; the second-source threshold"
+            f" falls back to {secondary_min:.0f} parallel verses (25% of the target is unknown)."
+        )
+
+    # The user picks which candidates to use from the table; this manual choice replaces the
+    # automatic book-coverage filter (which over-excluded sources narrower than a partial
+    # target). A chosen candidate may be a primary/single source regardless of its coverage.
+    selected = select_candidates(passing, coverage, complete_counts, translate_book_ids, dry_run)
+    if not selected:
+        return []
+    for c in selected:
+        if c.parallel < secondary_min:
+            print(
+                f"Note: {c.name} can be a single source or the primary of a pair, but not a pair's"
+                f" second source: its {c.parallel} parallel verses are below {secondary_min:.0f}"
+                " (max of 1000 and 25% of the target's verses)."
+            )
+
     # The src and trg isos of a corpus pair must differ. When a passing reference shares the
     # main project's iso, switch the main project to a synthetic code (not a real iso, not in
     # NLLB) and copy its extract file to the new stem, keeping the original. The copy is
@@ -761,7 +1148,9 @@ def run(
     counts_stem = main.stem  # verse_counts.csv is keyed by the original stem
     real_isos = {entry["isoCode"] for entry in language_entries}
     prior_iso = find_prior_copy(scripture_dir, main, real_isos)
-    clashing = [c for c in passing if to_iso3(c.iso) == to_iso3(main.iso)]
+    # Every selected candidate appears at least as a single-source experiment, so any of them
+    # sharing the target's iso forces the synthetic code and the extract copy.
+    clashing = [c for c in selected if to_iso3(c.iso) == to_iso3(main.iso)]
     pending_copy: Optional[Tuple[str, str]] = None  # (old stem, new stem), executed on first creation
     if clashing or prior_iso is not None:
         synthetic = prior_iso or synthesize_trg_iso(to_iso3(main.iso) or main.iso, real_isos)
@@ -821,30 +1210,63 @@ def run(
                 raise FileNotFoundError(f"Neither {main.stem}.txt nor {new_stem}.txt found in {scripture_dir}.")
         main.iso, main.stem = synthetic, new_stem
 
-    verse_counts = None
-    if training_books.lower() == "complete":
-        verse_counts = load_verse_counts(request_dir, experiments_dir)
-    translate_set = frozenset(get_chapters(translate_books))
+    def order_pair(a: Candidate, b: Candidate) -> Optional[List[Candidate]]:
+        # The higher-alignment source leads; the other must clear the second-source minimum.
+        lead, other = sorted((a, b), key=lambda c: c.alignment, reverse=True)
+        for first, second in ((lead, other), (other, lead)):
+            if second.parallel >= secondary_min:
+                return [first, second]
+        return None
 
-    chosen = select_experiments(
-        [[c] for c in passing], [list(pair) for pair in itertools.combinations(passing, 2)], dry_run, top=top
-    )
+    ordered = sorted(selected, key=lambda c: c.alignment, reverse=True)
+    singles = [[c] for c in ordered]
+    mixed = [pair for a, b in itertools.combinations(ordered, 2) if (pair := order_pair(a, b)) is not None]
+    chosen = select_experiments(singles, mixed, dry_run, top=top)
 
-    # The chosen sources double as the projects to translate from; make sure each project
-    # folder and every book to be translated actually exists before writing the configs.
-    translate_book_ids = [book_number_to_id(number) for number in sorted(translate_set)]
-    source_names = list(dict.fromkeys(source.name for sources in chosen for source in sources))
-    source_projects = resolve_translate_sources(source_names, translate_book_ids, projects_dir, dry_run)
+    # Every source of an experiment is also asked to draft; --translate-scripture overrides the
+    # drafting projects for all experiments. There is no drafting-qualification gate — a source
+    # sparse in the translate selection is warned about below, not excluded.
+    translate_selection = get_chapters(translate_books)
+    training_is_complete = training_books.lower() == "complete"
+
+    # Verify the drafting projects as Paratext translate sources (their book files are present),
+    # prompting for a different project when one is missing. --translate-scripture projects are
+    # used exactly as given (warned about, never replaced).
+    source_projects: Dict[str, str] = {}
+    if translate_scripture:
+        if chosen and projects_dir is not None:
+            for project in translate_scripture:
+                problem = check_translate_source(projects_dir, project, translate_book_ids)
+                if problem is not None:
+                    print(
+                        f"Warning: cannot translate {';'.join(translate_book_ids)} from '{project}': {problem}."
+                        " Including it anyway: it was explicitly requested with --translate-scripture."
+                    )
+    else:
+        source_names = list(dict.fromkeys(source.name for exp in chosen for source in exp))
+        source_projects = resolve_translate_sources(source_names, translate_book_ids, projects_dir, dry_run)
+
+    def drafting_projects_for(sources: List[Candidate]) -> List[str]:
+        if translate_scripture:
+            return list(translate_scripture)
+        return [source_projects.get(source.name, source.name) for source in sources]
 
     experiments: List[Experiment] = []
     existing_experiments: List[Experiment] = []
     warned_removals: set = set()
+    warned_missing: set = set()  # (stem, kind) pairs already warned about
+    warned_overlap: set = set()  # training selections already checked for translate-book overlap
     print()
     for sources in chosen:
         label = " + ".join(source.name for source in sources)
+        # corpus_books is the user's --training-books spec verbatim (they subtract what they
+        # want, e.g. NT;-MRK); only the auto-derived 'complete' list removes the translate books.
         try:
             corpus_books, removed = resolve_corpus_books(
-                training_books, [s.stem for s in sources] + [counts_stem], verse_counts, exclude=translate_set
+                training_books,
+                [s.stem for s in sources] + [counts_stem],
+                verse_counts,
+                exclude=translate_set if training_is_complete else frozenset(),
             )
         except ValueError as e:
             print(f"Skipped {label}: {e}")
@@ -853,22 +1275,47 @@ def run(
             warned_removals.add(tuple(removed))
             print(f"Warning: excluded the books being translated from corpus_books: {';'.join(removed)}")
         if not corpus_books:
-            print(
-                f"Skipped {label}: no training books remain after the {BOOK_COMPLETENESS_THRESHOLD:.0%}"
-                " completeness rule and the translate-book exclusion."
-            )
+            print(f"Skipped {label}: no training books remain in '{training_books}' after the exclusions.")
             continue
+        # Warn (once per selection) when the training and translate books overlap: the model
+        # would train on text it is also meant to draft/test. Not blocked — the user decides.
+        training_selection = get_chapters(corpus_books)
+        if corpus_books not in warned_overlap:
+            warned_overlap.add(corpus_books)
+            overlap = overlapping_books(training_selection, translate_selection)
+            if overlap:
+                shown = ";".join(overlap[:10]) + (f" (+{len(overlap) - 10} more)" if len(overlap) > 10 else "")
+                print(
+                    f"Warning: the training books '{corpus_books}' and translate books '{translate_books}'"
+                    f" overlap in {shown}; the model would train on text it is meant to translate."
+                )
+        # Warn (once per source) when a source is missing a quarter or more of the verses the
+        # translate or training selection specifies (chapter-level; only where an extract exists).
+        for source in sources:
+            if (source.stem, "translate") not in warned_missing:
+                warned_missing.add((source.stem, "translate"))
+                warn_missing_verses(
+                    source.name, "translate", translate_books, coverage.presence(source.stem, translate_selection)
+                )
+            if (source.stem, corpus_books) not in warned_missing:
+                warned_missing.add((source.stem, corpus_books))
+                warn_missing_verses(
+                    source.name, "training", corpus_books, coverage.presence(source.stem, training_selection)
+                )
         config = build_config(sources, main, corpus_books, test_variant)
+        translate_projects = drafting_projects_for(sources)
+        translate_config = build_translate_config(translate_projects, translate_books)
         prefix = "_".join([source.name for source in sources] + [main.iso] + ([test_variant] if test_variant else []))
         existing, index = find_existing(lang_dir, prefix, config)
         if existing is not None:
             print(f"Skipped {label}: {existing} already contains an identical config.yml.")
+            update_translate_config(existing, translate_config, dry_run)
             existing_experiments.append(
                 Experiment(
                     sources=sources,
                     folder=existing,
                     config=config,
-                    translate_config=build_translate_config(sources, translate_books, source_projects),
+                    translate_config=translate_config,
                 )
             )
             continue
@@ -877,7 +1324,7 @@ def run(
             sources=sources,
             folder=folder,
             config=config,
-            translate_config=build_translate_config(sources, translate_books, source_projects),
+            translate_config=translate_config,
         )
         experiments.append(experiment)
         if dry_run:
@@ -940,6 +1387,13 @@ def main() -> None:
         required=True,
         help=f"Book or list of books for translate_config.yml, {book_list_syntax}",
     )
+    parser.add_argument(
+        "--translate-scripture",
+        nargs="+",
+        metavar="PROJECT",
+        help="Paratext project name(s) to draft from for every experiment, overriding the default"
+        " of drafting from each experiment's own training sources",
+    )
     test_group = parser.add_mutually_exclusive_group()
     test_group.add_argument(
         "--no-test",
@@ -980,6 +1434,7 @@ def main() -> None:
         projects_dir=Path(environment.pt_projects_dir),
         test_variant="notest" if args.no_test else "test100" if args.test100 else None,
         target=args.target,
+        translate_scripture=args.translate_scripture,
         top=args.top,
         dry_run=args.dry_run,
         submit=True if args.run else None,
