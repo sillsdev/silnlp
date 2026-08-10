@@ -6,7 +6,6 @@ import re
 from abc import ABC, abstractmethod
 from contextlib import ExitStack
 from dataclasses import dataclass
-from itertools import repeat
 from math import prod
 from pathlib import Path
 from typing import Any, Callable, Dict, Generator, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
@@ -15,17 +14,19 @@ import datasets.utils.logging as datasets_logging
 import evaluate
 import numpy as np
 import pandas as pd
+import safetensors.torch
 import torch
 import transformers.utils.logging as transformers_logging
 import yaml
 from accelerate.utils.memory import should_reduce_batch_size
 from datasets import Dataset
-from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef
+from machine.scripture import VerseRef
 from sacremoses import MosesPunctNormalizer
 from tokenizers import AddedToken, NormalizedString, Regex
 from tokenizers.implementations import SentencePieceBPETokenizer, SentencePieceUnigramTokenizer
 from tokenizers.normalizers import Normalizer
 from torch import Tensor, nn, optim
+from torch.utils.data import Dataset as TorchDataset
 from torch.utils.data import Sampler
 from transformers import (
     AutoConfig,
@@ -39,28 +40,24 @@ from transformers import (
     M2M100Tokenizer,
     MBart50Tokenizer,
     MBartTokenizer,
-    MBartTokenizerFast,
     NllbTokenizer,
-    NllbTokenizerFast,
     PreTrainedModel,
-    PreTrainedTokenizer,
     PreTrainedTokenizerBase,
     PreTrainedTokenizerFast,
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
     T5Tokenizer,
-    T5TokenizerFast,
     TensorType,
     TrainerCallback,
-    TranslationPipeline,
     set_seed,
 )
 from transformers.convert_slow_tokenizer import convert_slow_tokenizer
 from transformers.modeling_utils import unwrap_model
-from transformers.tokenization_utils import BatchEncoding, TruncationStrategy
+from transformers.tokenization_utils_base import BatchEncoding, TruncationStrategy
 from transformers.trainer import TRAINING_ARGS_NAME
 from transformers.trainer_utils import get_last_checkpoint
-from transformers.utils import SAFE_WEIGHTS_NAME, WEIGHTS_NAME, PaddingStrategy, is_safetensors_available, to_py_obj
+from transformers.utils import SAFE_WEIGHTS_NAME
+from transformers.utils.generic import PaddingStrategy, to_py_obj
 from transformers.utils.logging import tqdm
 
 from ..common.corpus import Term, count_lines, get_terms
@@ -75,14 +72,12 @@ from .config import (
     InferenceModelParams,
     NMTModel,
     collect_training_args,
+    warn_about_renamed_keys,
     write_effective_config,
 )
 from .corpora import DataFile
 from .token_occurrence_logger import TokenOccurrenceLogger
 from .tokenizer import NullTokenizer, Tokenizer
-
-if is_safetensors_available():
-    import safetensors.torch
 
 LOGGER = logging.getLogger(__name__)
 
@@ -109,9 +104,7 @@ TRAINING_ARGS_CONFIG_MAPPING = {
         "gradient_accumulation_steps",
         "gradient_checkpointing",
         "gradient_checkpointing_kwargs",
-        "group_by_length",
         "log_level",
-        "logging_dir",
         "logging_first_step",
         "logging_nan_inf_filter",
         "logging_steps",
@@ -124,6 +117,7 @@ TRAINING_ARGS_CONFIG_MAPPING = {
         "save_steps",
         "save_strategy",
         "save_total_limit",
+        "train_sampling_strategy",
     },
     "eval": {
         "eval_accumulation_steps",
@@ -131,7 +125,7 @@ TRAINING_ARGS_CONFIG_MAPPING = {
         "eval_steps",
         "eval_strategy",
         "greater_is_better",
-        "include_inputs_for_metrics",
+        "include_for_metrics",
         "load_best_model_at_end",
         "metric_for_best_model",
         "per_device_eval_batch_size",
@@ -149,10 +143,17 @@ TRAINING_ARGS_CONFIG_MAPPING = {
         "lr_scheduler_type",
         "max_grad_norm",
         "optim",
-        "warmup_ratio",
         "warmup_steps",
         "weight_decay",
     },
+}
+
+# Config keys renamed from huggingface 4.x to 5.x, so we need to warn team members if they have them in their config
+# rather than silently dropping the arguments. Can be removed once team is accustomed to 5.x.
+RENAMED_CONFIG_KEYS = {
+    "train": {"group_by_length": "train_sampling_strategy"},
+    "eval": {"include_inputs_for_metrics": "include_for_metrics"},
+    "params": {"warmup_ratio": "warmup_steps"},
 }
 
 SP_TOKENIZER_CONFIG = {
@@ -225,11 +226,11 @@ def delete_tokenizer(checkpoint_path: Path) -> None:
             path.unlink()
 
 
-def add_lang_code_to_tokenizer(tokenizer: PreTrainedTokenizer, lang_code: str) -> None:
+def add_lang_code_to_tokenizer(tokenizer: PreTrainedTokenizerBase, lang_code: str) -> None:
     # Huggingface does not follow its own type hints with this function and expects Dict[str, List[str]]
     tokenizer.add_special_tokens(
         {"additional_special_tokens": [lang_code]},  # pyright: ignore[reportArgumentType]
-        replace_additional_special_tokens=False,
+        replace_extra_special_tokens=False,
     )
     lang_id = tokenizer.convert_tokens_to_ids(lang_code)
     if isinstance(tokenizer, (MBart50Tokenizer, MBartTokenizer)):
@@ -349,6 +350,7 @@ class FilePreTrainedModelProviderFactory(PreTrainedModelProviderFactory):
 class Seq2SeqConfig(Config):
     def __init__(self, exp_dir: Path, config: dict, environment: SilNlpEnv) -> None:
         self.environment = environment
+        warn_about_renamed_keys(config, RENAMED_CONFIG_KEYS)
         config = merge_dict(
             {
                 "data": {
@@ -382,7 +384,7 @@ class Seq2SeqConfig(Config):
                     "gradient_accumulation_steps": 4,
                     "auto_grad_acc": False,
                     "max_steps": 5000,
-                    "group_by_length": True,
+                    "train_sampling_strategy": "group_by_length",
                     "output_dir": str(exp_dir / "run"),
                     "delete_checkpoint_optimizer_state": True,
                     "delete_checkpoint_tokenizer": True,
@@ -405,7 +407,6 @@ class Seq2SeqConfig(Config):
                     "num_drafts": 3,
                     "multiple_translations_method": "hybrid",
                     "temperature": 0.75,
-                    "diversity_penalty": 1.0,
                 },
                 "params": {
                     "optim": "adamw_torch",
@@ -422,7 +423,7 @@ class Seq2SeqConfig(Config):
             },
             config,
         )
-        self._tokenizer: Optional[PreTrainedTokenizer] = None
+        self._tokenizer: Optional[PreTrainedTokenizerBase] = None
         self.model_prefix = get_model_prefix(config.get("model", ""))
 
         if "parent" in config["data"]:
@@ -662,15 +663,15 @@ class Seq2SeqConfig(Config):
             updated = False
             for iso in self.src_isos | self.trg_isos:
                 lang_code = lang_codes.get(iso, iso)
-                if isinstance(self._tokenizer, (T5Tokenizer, T5TokenizerFast)):
+                if isinstance(self._tokenizer, T5Tokenizer):
                     if lang_code not in self._tokenizer.all_special_tokens and iso in self.trg_isos:
                         add_lang_code_to_tokenizer(self._tokenizer, lang_code)
                         updated = True
-                elif isinstance(self._tokenizer, (MBartTokenizer, MBartTokenizerFast)):
+                elif isinstance(self._tokenizer, MBartTokenizer):
                     if lang_code not in self._tokenizer.lang_code_to_id:
                         add_lang_code_to_tokenizer(self._tokenizer, lang_code)
                         updated = True
-                elif isinstance(self._tokenizer, (NllbTokenizer, NllbTokenizerFast)):
+                elif isinstance(self._tokenizer, NllbTokenizer):
                     add_lang_code_to_tokenizer(self._tokenizer, lang_code)
                     updated = True
                 elif lang_code not in self._tokenizer.lang_code_to_id:
@@ -682,7 +683,7 @@ class Seq2SeqConfig(Config):
         if len(self._tags) > 0:
             self._tokenizer.add_tokens([AddedToken(tag, rstrip=True, special=True) for tag in self._tags])
 
-    def get_or_create_tokenizer(self) -> PreTrainedTokenizer:
+    def get_or_create_tokenizer(self) -> PreTrainedTokenizerBase:
         if self._tokenizer is None:
             tok_dict = self.data.get("tokenizer")
             if (
@@ -694,14 +695,14 @@ class Seq2SeqConfig(Config):
                 if self.model_prefix == "facebook/nllb-200":
                     self._tokenizer = NllbTokenizer.from_pretrained(str(self.exp_dir), token=False)
                     self._tokenizer = convert_slow_tokenizer(self._tokenizer)
-                    self._tokenizer = NllbTokenizerFast(tokenizer_object=self._tokenizer)
+                    self._tokenizer = NllbTokenizer(tokenizer_object=self._tokenizer)
                     self._tokenizer.save_pretrained(str(self.exp_dir))
                 elif self.model_prefix == "google/madlad400":
                     self._tokenizer = T5Tokenizer.from_pretrained(str(self.exp_dir), token=False)
                     self._tokenizer = convert_slow_tokenizer(self._tokenizer)
-                    self._tokenizer = T5TokenizerFast(tokenizer_object=self._tokenizer)
+                    self._tokenizer = T5Tokenizer(tokenizer_object=self._tokenizer)
                     self._tokenizer.add_special_tokens(
-                        {"additional_special_tokens": ["<s>"]}, replace_additional_special_tokens=False
+                        {"additional_special_tokens": ["<s>"]}, replace_extra_special_tokens=False
                     )
                     self._tokenizer.save_pretrained(str(self.exp_dir))
             else:
@@ -723,7 +724,7 @@ class Seq2SeqConfig(Config):
             self._tokenizer.deprecation_warnings["Asking-to-pad-a-fast-tokenizer"] = True
         return self._tokenizer
 
-    def get_tokenizer(self) -> PreTrainedTokenizer:
+    def get_tokenizer(self) -> PreTrainedTokenizerBase:
         if self._tokenizer is None:
             if (self.exp_dir / "tokenizer_config.json").is_file():
                 model_name_or_path = str(self.exp_dir)
@@ -837,20 +838,12 @@ class Seq2SeqConfig(Config):
 
 
 def batch_prepare_for_model(
-    tokenizer: PreTrainedTokenizer,
+    tokenizer: PreTrainedTokenizerBase,
     batch_tokens: List[List[str]],
     return_tensors: Optional[Union[str, TensorType]] = None,
 ) -> BatchEncoding:
-    batch_outputs: Dict[str, Any] = {}
-    for tokens in batch_tokens:
-        ids = tokenizer.convert_tokens_to_ids(tokens)
-        outputs = tokenizer.prepare_for_model(ids, add_special_tokens=False)
-
-        for key, value in outputs.items():
-            if key not in batch_outputs:
-                batch_outputs[key] = []
-            batch_outputs[key].append(value)
-    return BatchEncoding(batch_outputs, tensor_type=return_tensors)
+    input_ids = [cast(List[int], tokenizer.convert_tokens_to_ids(tokens)) for tokens in batch_tokens]
+    return tokenizer.pad({"input_ids": input_ids}, padding=False, return_tensors=return_tensors)
 
 
 TSent = TypeVar("TSent")
@@ -877,7 +870,7 @@ class ModelOutput:
     token_scores: List[float]
     sequence_score: Optional[float]
 
-    def convert_to_sentence_translation(self, tokenizer: PreTrainedTokenizer) -> SentenceTranslation:
+    def convert_to_sentence_translation(self, tokenizer: PreTrainedTokenizerBase) -> SentenceTranslation:
         tokens = tokenizer.convert_ids_to_tokens(self.translation_token_ids)
         return SentenceTranslation(
             to_py_obj(self.translated_text),
@@ -903,7 +896,7 @@ class ModelOutputGroup:
             for output in self._outputs
         ]
 
-    def convert_to_sentence_translation_group(self, tokenizer: PreTrainedTokenizer) -> SentenceTranslationGroup:
+    def convert_to_sentence_translation_group(self, tokenizer: PreTrainedTokenizerBase) -> SentenceTranslationGroup:
         return SentenceTranslationGroup(
             [model_output.convert_to_sentence_translation(tokenizer) for model_output in self._get_model_outputs()]
         )
@@ -1190,7 +1183,7 @@ class Seq2SeqNMTModel(NMTModel):
             input_paths,
             translation_paths,
         ):
-            pipeline = self._create_pipeline_for_test_file(input_path, model, compiled_model, tokenizer)
+            translator = self._create_translator_for_test_file(input_path, compiled_model, tokenizer)
 
             length = count_lines(input_path)
             with ExitStack() as stack:
@@ -1198,7 +1191,7 @@ class Seq2SeqNMTModel(NMTModel):
                 sentences = (line.strip().split() for line in src_file)
                 sentence_translation_groups: List[SentenceTranslationGroup] = list(
                     self._translate_test_sentences(
-                        tokenizer, pipeline, sentences, length, produce_multiple_translations
+                        tokenizer, translator, sentences, length, produce_multiple_translations
                     )
                 )
                 draft_group = DraftGroup(sentence_translation_groups)
@@ -1219,9 +1212,9 @@ class Seq2SeqNMTModel(NMTModel):
                             translation_draft_path,
                         )
 
-    def _create_pipeline_for_test_file(
-        self, input_path: Path, model: PreTrainedModel, compiled_model: PreTrainedModel, tokenizer: PreTrainedTokenizer
-    ) -> "PretokenizedTranslationPipeline":
+    def _create_translator_for_test_file(
+        self, input_path: Path, model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase
+    ) -> "PretokenizedTranslator":
         iso_specified_file_pattern = re.compile(r"^test\.([a-z]{2,3})\.([a-z]{2,3})\..*")
         if iso_specified_file_pattern.match(input_path.name):
             src_iso, trg_iso = iso_specified_file_pattern.match(input_path.name).groups()
@@ -1231,20 +1224,12 @@ class Seq2SeqNMTModel(NMTModel):
             src_lang = self._config.test_src_lang
             trg_lang = self._config.test_trg_lang
 
-        pipeline = PretokenizedTranslationPipeline(
-            model=model,
-            tokenizer=tokenizer,
-            src_lang=src_lang,
-            tgt_lang=trg_lang,
-            device=0,
-        )
-        pipeline.model = compiled_model
-        return pipeline
+        return PretokenizedTranslator(model=model, tokenizer=tokenizer, src_lang=src_lang, tgt_lang=trg_lang)
 
     def _translate_test_sentences(
         self,
-        tokenizer: PreTrainedTokenizer,
-        pipeline: TranslationPipeline,
+        tokenizer: PreTrainedTokenizerBase,
+        translator: "SilTranslator",
         sentences: Iterable[List[str]],
         length: int,
         produce_multiple_translations: bool = False,
@@ -1259,7 +1244,7 @@ class Seq2SeqNMTModel(NMTModel):
             )
 
         for model_output_group in tqdm(
-            self._translate_sentences(pipeline, sentences, produce_multiple_translations, return_tensors=True),
+            self._translate_sentences(translator, sentences, produce_multiple_translations),
             total=length,
             unit="ex",
         ):
@@ -1285,15 +1270,14 @@ class Seq2SeqNMTModel(NMTModel):
 
         # The tokenizer isn't wrapped until after calling _create_inference_model,
         # because the tokenizer's input/output language codes are set there
-        if isinstance(tokenizer, (NllbTokenizer, NllbTokenizerFast)):
+        if isinstance(tokenizer, NllbTokenizer):
             tokenizer = PunctuationNormalizingTokenizer(tokenizer)
 
-        pipeline = SilTranslationPipeline(
-            model=model,
+        translator = SilTranslator(
+            model=cast(PreTrainedModel, torch.compile(model)),
             tokenizer=tokenizer,
             src_lang=src_lang,
             tgt_lang=trg_lang,
-            device=0,
         )
 
         num_drafts = self.get_num_drafts()
@@ -1305,11 +1289,10 @@ class Seq2SeqNMTModel(NMTModel):
                 "Falling back to a single translation."
             )
 
-        pipeline.model = torch.compile(pipeline.model)
         if not isinstance(sentences, list):
             sentences = list(sentences)
         for model_output_group in tqdm(
-            self._translate_sentences(pipeline, sentences, produce_multiple_translations),
+            self._translate_sentences(translator, sentences, produce_multiple_translations),
             total=len(sentences),
             unit="ex",
         ):
@@ -1352,28 +1335,21 @@ class Seq2SeqNMTModel(NMTModel):
 
     def _translate_sentences(
         self,
-        pipeline: TranslationPipeline,
+        translator: "SilTranslator",
         sentences: Iterable[TSent],
         produce_multiple_translations: bool = False,
-        return_tensors: bool = False,
     ) -> Iterable[ModelOutputGroup]:
-        batch_size: int = self._config.infer["infer_batch_size"]
-
-        for batch in batch_sentences(sentences, batch_size):
+        for batch in batch_sentences(sentences, self._config.infer["infer_batch_size"]):
             yield from self._translate_sentence_helper(
-                pipeline,
+                translator,
                 batch,
-                batch_size,
-                return_tensors,
                 produce_multiple_translations=produce_multiple_translations,
             )
 
     def _translate_sentence_helper(
         self,
-        pipeline: TranslationPipeline,
+        translator: "SilTranslator",
         sentences: Iterable[TSent],
-        batch_size: int,
-        return_tensors: bool,
         produce_multiple_translations: bool = False,
     ) -> Iterable[ModelOutputGroup]:
 
@@ -1384,19 +1360,15 @@ class Seq2SeqNMTModel(NMTModel):
             sentences = list(sentences)
 
             if multiple_translations_method == "hybrid":
-                beam_search_results: List[dict] = self._translate_with_beam_search(
-                    pipeline,
+                beam_search_results: List[List[dict]] = self._translate_with_beam_search(
+                    translator,
                     sentences,
-                    batch_size,
-                    return_tensors,
                     num_return_sequences=1,
                 )
 
-                sampling_results: List[dict] = self._translate_with_sampling(
-                    pipeline,
+                sampling_results: List[List[dict]] = self._translate_with_sampling(
+                    translator,
                     sentences,
-                    batch_size,
-                    return_tensors,
                     num_return_sequences=num_drafts - 1,
                 )
 
@@ -1410,10 +1382,8 @@ class Seq2SeqNMTModel(NMTModel):
                 yield from [
                     ModelOutputGroup(result)
                     for result in self._translate_with_sampling(
-                        pipeline,
+                        translator,
                         sentences,
-                        batch_size,
-                        return_tensors,
                         num_return_sequences=num_drafts,
                     )
                 ]
@@ -1422,25 +1392,18 @@ class Seq2SeqNMTModel(NMTModel):
                 yield from [
                     ModelOutputGroup(result)
                     for result in self._translate_with_beam_search(
-                        pipeline,
+                        translator,
                         sentences,
-                        batch_size,
-                        return_tensors,
                         num_return_sequences=num_drafts,
                     )
                 ]
 
             elif multiple_translations_method == "diverse_beam_search":
-                yield from [
-                    ModelOutputGroup(result)
-                    for result in self._translate_with_diverse_beam_search(
-                        pipeline,
-                        sentences,
-                        batch_size,
-                        return_tensors,
-                        num_return_sequences=num_drafts,
-                    )
-                ]
+                raise RuntimeError(
+                    'infer.multiple_translations_method: "diverse_beam_search" is no longer supported, because '
+                    'transformers moved group beam search out of the library. Use "hybrid" (the default), '
+                    '"beam_search", or "sampling" instead.'
+                )
             else:
                 LOGGER.error('Unrecognized value for multiple_translations_method: "%s"', multiple_translations_method)
 
@@ -1448,105 +1411,47 @@ class Seq2SeqNMTModel(NMTModel):
             yield from [
                 ModelOutputGroup([translated_sentence[0]])
                 for translated_sentence in self._translate_with_beam_search(
-                    pipeline,
+                    translator,
                     sentences,
-                    batch_size,
-                    return_tensors,
                     num_return_sequences=1,
                 )
             ]
 
-    # When translating tokenized sentences, for some reason the Huggingface pipeline
-    # returns List[List[dict]] instead of List[dict]. Each nested list is a
-    # singleton. This function flattens the structure.
-    def _flatten_tokenized_translations(self, pipeline_output) -> List[dict]:
-        return [[i if isinstance(i, dict) else i[0] for i in translation] for translation in pipeline_output]
-
     def _translate_with_beam_search(
         self,
-        pipeline: TranslationPipeline,
+        translator: "SilTranslator",
         sentences: Iterable[TSent],
-        batch_size: int,
-        return_tensors: bool,
         num_return_sequences: int = 1,
     ) -> List[List[dict]]:
         num_beams: Optional[int] = self._config.infer.get("num_beams")
         if num_beams is None:
             num_beams = self._config.params.get("generation_num_beams")
 
-        translations = pipeline(
+        return translator(
             sentences,
             num_beams=num_beams,
             num_return_sequences=num_return_sequences,
-            batch_size=batch_size,
-            return_text=not return_tensors,
-            return_tensors=return_tensors,
         )
-
-        if num_return_sequences == 1:
-            translations = [[t] for t in translations]
-
-        return self._flatten_tokenized_translations(translations)
 
     def _translate_with_sampling(
         self,
-        pipeline: TranslationPipeline,
+        translator: "SilTranslator",
         sentences: Iterable[TSent],
-        batch_size: int,
-        return_tensors: bool,
         num_return_sequences: int = 1,
     ) -> List[List[dict]]:
-
         temperature: Optional[int] = self._config.infer.get("temperature")
 
-        translations = pipeline(
+        return translator(
             sentences,
             do_sample=True,
             temperature=temperature,
             num_return_sequences=num_return_sequences,
-            batch_size=batch_size,
-            return_text=not return_tensors,
-            return_tensors=return_tensors,
         )
-
-        if num_return_sequences == 1:
-            translations = [[t] for t in translations]
-
-        return self._flatten_tokenized_translations(translations)
-
-    def _translate_with_diverse_beam_search(
-        self,
-        pipeline: TranslationPipeline,
-        sentences: Iterable[TSent],
-        batch_size: int,
-        return_tensors: bool,
-        num_return_sequences: int = 1,
-    ) -> List[List[dict]]:
-        num_beams: Optional[int] = self._config.infer.get("num_beams")
-        if num_beams is None:
-            num_beams = self._config.params.get("generation_num_beams")
-        diversity_penalty: Optional[float] = self._config.infer.get("diversity_penalty")
-
-        translations = pipeline(
-            sentences,
-            num_beams=num_beams,
-            num_beam_groups=num_beams,
-            num_return_sequences=num_return_sequences,
-            diversity_penalty=diversity_penalty,
-            batch_size=batch_size,
-            return_text=not return_tensors,
-            return_tensors=return_tensors,
-        )
-
-        if num_return_sequences == 1:
-            translations = [[t] for t in translations]
-
-        return self._flatten_tokenized_translations(translations)
 
     def _create_inference_model(
         self,
         ckpt: Union[CheckpointType, str, int],
-        tokenizer: PreTrainedTokenizer,
+        tokenizer: PreTrainedTokenizerBase,
         src_lang: str,
         trg_lang: str,
     ) -> PreTrainedModel:
@@ -1568,18 +1473,10 @@ class Seq2SeqNMTModel(NMTModel):
         return model
 
     def _configure_model(
-        self, model: PreTrainedModel, tokenizer: PreTrainedTokenizer, src_lang: str, trg_lang: str
-    ) -> Tuple[PreTrainedModel, PreTrainedTokenizer]:
-        # Set decoder_start_token_id
-        if (
-            trg_lang != ""
-            and model.config.decoder_start_token_id is None
-            and isinstance(tokenizer, (MBartTokenizer, MBartTokenizerFast))
-        ):
-            if isinstance(tokenizer, MBartTokenizer):
-                model.config.decoder_start_token_id = tokenizer.lang_code_to_id[trg_lang]
-            else:
-                model.config.decoder_start_token_id = tokenizer.convert_tokens_to_ids(trg_lang)
+        self, model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, src_lang: str, trg_lang: str
+    ) -> Tuple[PreTrainedModel, PreTrainedTokenizerBase]:
+        if trg_lang != "" and model.config.decoder_start_token_id is None and isinstance(tokenizer, MBartTokenizer):
+            model.config.decoder_start_token_id = tokenizer.convert_tokens_to_ids(trg_lang)
 
         if self._config.model_prefix == "google/madlad400":
             model.config.decoder_start_token_id = tokenizer.pad_token_id
@@ -1594,9 +1491,7 @@ class Seq2SeqNMTModel(NMTModel):
         if (
             src_lang != ""
             and trg_lang != ""
-            and isinstance(
-                tokenizer, (MBartTokenizer, MBartTokenizerFast, M2M100Tokenizer, NllbTokenizer, NllbTokenizerFast)
-            )
+            and isinstance(tokenizer, (MBartTokenizer, M2M100Tokenizer, NllbTokenizer))
         ):
             tokenizer.src_lang = src_lang
             tokenizer.tgt_lang = trg_lang
@@ -1659,7 +1554,7 @@ class PunctuationNormalizingTokenizer(PreTrainedTokenizerFast):
 class HuggingFaceTokenizer(Tokenizer):
     def __init__(
         self,
-        tokenizer: PreTrainedTokenizer,
+        tokenizer: PreTrainedTokenizerBase,
         lang_codes: Dict[str, str],
         max_source_length: int,
         max_target_length: int,
@@ -1686,13 +1581,13 @@ class HuggingFaceTokenizer(Tokenizer):
         sample_subwords: bool = False,
         add_special_tokens: bool = True,
     ) -> str:
-        if isinstance(self._tokenizer, (NllbTokenizer, NllbTokenizerFast)):
+        if isinstance(self._tokenizer, NllbTokenizer):
             line = self._mpn.normalize(line)
         if not add_dummy_prefix:
             line = "\ufffc" + line
         if side == Side.SOURCE:
             max_length = self._max_source_length
-            if isinstance(self._tokenizer, (T5Tokenizer, T5TokenizerFast)):
+            if isinstance(self._tokenizer, T5Tokenizer):
                 line = self._tokenizer.tgt_lang + " " + line
                 max_length += 1
             if not add_dummy_prefix:
@@ -1716,12 +1611,12 @@ class HuggingFaceTokenizer(Tokenizer):
         return " ".join(t.strip() for t in tokens)
 
     def normalize_normalized_string(self, line: NormalizedString) -> None:
-        if isinstance(self._tokenizer, (NllbTokenizer, NllbTokenizerFast)):
+        if isinstance(self._tokenizer, NllbTokenizer):
             line.replace(Regex(".+"), self._mpn.normalize(str(line.normalized)))
         self._tokenizer.backend_tokenizer.normalizer.normalize(line)
 
     def normalize(self, side: Side, line: str) -> str:
-        if isinstance(self._tokenizer, (NllbTokenizer, NllbTokenizerFast)):
+        if isinstance(self._tokenizer, NllbTokenizer):
             line = self._mpn.normalize(line)
         return self._tokenizer.backend_tokenizer.normalizer.normalize_str(line)
 
@@ -1739,7 +1634,41 @@ class CustomNormalizerWrapper:
         self._tokenizer.normalize_normalized_string(line)
 
 
-class SilTranslationPipeline(TranslationPipeline):
+class SilTranslator:
+    def __init__(
+        self,
+        model: PreTrainedModel,
+        tokenizer: PreTrainedTokenizerBase,
+        src_lang: str,
+        tgt_lang: str,
+    ) -> None:
+        self.device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+        self.model = model.to(self.device)
+        self.tokenizer = tokenizer
+        self.src_lang = src_lang
+        self.tgt_lang = tgt_lang
+
+    def __call__(self, sentences: Iterable[Any], **generate_kwargs) -> List[List[dict]]:
+        model_inputs = self.preprocess(list(sentences)).to(self.device)
+        with torch.no_grad():
+            model_outputs = self._forward(model_inputs, **generate_kwargs)
+        return self.postprocess(model_outputs)
+
+    def preprocess(self, sentences: List[Any]) -> BatchEncoding:
+        build_translation_inputs = getattr(self.tokenizer, "_build_translation_inputs", None)
+        if build_translation_inputs is not None:
+            return build_translation_inputs(
+                sentences,
+                return_tensors="pt",
+                truncation=TruncationStrategy.DO_NOT_TRUNCATE,
+                src_lang=self.src_lang,
+                tgt_lang=self.tgt_lang,
+                padding=True,
+            )
+        return self.tokenizer(
+            sentences, return_tensors="pt", truncation=TruncationStrategy.DO_NOT_TRUNCATE, padding=True
+        )
+
     def _forward(self, model_inputs, **generate_kwargs):
         in_b, input_length = model_inputs["input_ids"].shape
 
@@ -1749,11 +1678,16 @@ class SilTranslationPipeline(TranslationPipeline):
             config = self.model.config
         generate_kwargs["min_length"] = generate_kwargs.get("min_length", config.min_length)
         generate_kwargs["max_length"] = generate_kwargs.get("max_length", config.max_length)
-        self.check_inputs(input_length, generate_kwargs["min_length"], generate_kwargs["max_length"])
+        if input_length > 0.9 * generate_kwargs["max_length"]:
+            LOGGER.warning(
+                "Input length (%i) is close to or longer than max_length (%i), so translations may be truncated. "
+                "Consider increasing max_length.",
+                input_length,
+                generate_kwargs["max_length"],
+            )
         output = self.model.generate(
             **model_inputs,
             **generate_kwargs,
-            generation_config=config,
             output_scores=True,
             return_dict_in_generate=True,
         )
@@ -1799,57 +1733,46 @@ class SilTranslationPipeline(TranslationPipeline):
                 f"Unexpected transition_scores length {ts_len} for sequences length {seq_len}. "
                 "Cannot align token scores robustly."
             )
-        output_ids = output_ids.reshape(in_b, n_sequences, seq_len)
-        token_logprobs = token_logprobs.reshape(in_b, n_sequences, seq_len)
         return {
-            "output_ids": output_ids,
-            "scores": token_logprobs,
-            "sequences_scores": sequences_scores,
+            "output_ids": output_ids.reshape(in_b, n_sequences, seq_len),
+            "scores": token_logprobs.reshape(in_b, n_sequences, seq_len),
+            "sequences_scores": None if sequences_scores is None else sequences_scores.reshape(in_b, n_sequences),
         }
 
-    def postprocess(self, model_outputs, return_type=None, clean_up_tokenization_spaces=False):
+    def postprocess(self, model_outputs) -> List[List[dict]]:
         if self.tokenizer is None:
             raise RuntimeError("No tokenizer is specified.")
 
-        records = []
-        output_ids: torch.Tensor
-        scores: torch.Tensor
-        for output_ids, scores in zip(
-            model_outputs["output_ids"][0],
-            model_outputs["scores"][0],
-        ):
-            output_tokens: List[str] = []
-            output_token_ids: List[str] = []
-            output_indices: List[int] = []
-            for i, output_id in enumerate(output_ids):
-                id = cast(int, output_id.item())
-                output_tokens.append(self.tokenizer.convert_ids_to_tokens(id))
-                output_token_ids.append(id)
-                output_indices.append(i)
-            scores = scores[output_indices]
-            records.append(
-                {
-                    "translation_tokens": output_tokens,
-                    "translation_token_ids": output_token_ids,
-                    "token_scores": scores,
-                    "sequence_score": (
-                        model_outputs["sequences_scores"][0] if model_outputs["sequences_scores"] is not None else None
-                    ),
-                    "translation_text": self.tokenizer.decode(
-                        output_ids,
-                        skip_special_tokens=True,
-                        clean_up_tokenization_spaces=clean_up_tokenization_spaces,
-                    ),
-                }
-            )
-        return records
+        output_ids: torch.Tensor = model_outputs["output_ids"]
+        token_scores: torch.Tensor = model_outputs["scores"]
+        sequences_scores: Optional[torch.Tensor] = model_outputs["sequences_scores"]
+
+        translations: List[List[dict]] = []
+        for sentence_index in range(output_ids.size(dim=0)):
+            records: List[dict] = []
+            for sequence_index in range(output_ids.size(dim=1)):
+                sequence_ids = output_ids[sentence_index][sequence_index]
+                records.append(
+                    {
+                        "translation_token_ids": sequence_ids.tolist(),
+                        "token_scores": token_scores[sentence_index][sequence_index],
+                        "sequence_score": (
+                            None if sequences_scores is None else sequences_scores[sentence_index][sequence_index]
+                        ),
+                        "translation_text": self.tokenizer.decode(
+                            sequence_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
+                        ),
+                    }
+                )
+            translations.append(records)
+        return translations
 
 
-class PretokenizedTranslationPipeline(SilTranslationPipeline):
-    def preprocess(self, *args, truncation=TruncationStrategy.DO_NOT_TRUNCATE, src_lang=None, tgt_lang=None):
-        model_inputs = batch_prepare_for_model(self.tokenizer, args, return_tensors=self.framework)
-        tgt_lang_id = self.tokenizer.convert_tokens_to_ids(tgt_lang)
-        model_inputs["forced_bos_token_id"] = tgt_lang_id
+class PretokenizedTranslator(SilTranslator):
+    def preprocess(self, sentences: List[Any]) -> BatchEncoding:
+        model_inputs = batch_prepare_for_model(self.tokenizer, sentences)
+        model_inputs = self.tokenizer.pad(model_inputs, padding=True, return_tensors="pt")
+        model_inputs["forced_bos_token_id"] = self.tokenizer.convert_tokens_to_ids(self.tgt_lang)
         return model_inputs
 
 
@@ -1888,7 +1811,7 @@ def torch_gather_nd(params: torch.Tensor, indices: torch.Tensor, batch_dim: int 
 class DataCollatorForSeq2SeqNoising:
     def __init__(
         self,
-        tokenizer: PreTrainedTokenizer,
+        tokenizer: PreTrainedTokenizerBase,
         model: Optional[Any] = None,
         padding: Union[bool, str, PaddingStrategy] = True,
         max_length: Optional[int] = None,
@@ -1949,10 +1872,10 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         self._auto_grac_acc = auto_grad_acc
         self.model_prefix = model_prefix
 
-    def _get_train_sampler(self) -> Optional[Sampler]:
+    def _get_train_sampler(self, train_dataset: Optional[TorchDataset] = None) -> Optional[Sampler]:
         if self._sequential_sampling:
             return None
-        return super()._get_train_sampler()
+        return super()._get_train_sampler(train_dataset)
 
     def _inner_training_loop(
         self, batch_size=None, args=None, resume_from_checkpoint=None, trial=None, ignore_keys_for_eval=None
@@ -1973,40 +1896,6 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
                 trial=trial,
                 ignore_keys_for_eval=ignore_keys_for_eval,
             )
-
-    def _save(self, output_dir: Optional[str] = None, state_dict=None):
-        # If we are executing this function, we are the process zero, so we don't check for that.
-        output_dir = output_dir if output_dir is not None else self.args.output_dir
-        os.makedirs(output_dir, exist_ok=True)
-        LOGGER.info(f"Saving model checkpoint to {output_dir} using custom _save function")
-
-        # Save a trained model and configuration using `save_pretrained()`.
-        # They can then be reloaded using `from_pretrained()`
-        if not isinstance(self.model, PreTrainedModel):
-            if state_dict is None:
-                state_dict = self.model.state_dict()
-
-            if isinstance(unwrap_model(self.model), PreTrainedModel):
-                unwrap_model(self.model).save_pretrained(
-                    output_dir, state_dict=state_dict, safe_serialization=self.args.save_safetensors
-                )
-            else:
-                LOGGER.info("Trainer.model is not a `PreTrainedModel`, only saving its state dict.")
-                if self.args.save_safetensors:
-                    safetensors.torch.save_file(state_dict, os.path.join(output_dir, SAFE_WEIGHTS_NAME))
-                else:
-                    torch.save(state_dict, os.path.join(output_dir, WEIGHTS_NAME))
-        else:
-            self.model.save_pretrained(
-                output_dir,
-                state_dict=state_dict,
-                safe_serialization=self.args.save_safetensors,
-            )
-        if self.processing_class is not None:
-            self.processing_class.save_pretrained(output_dir)
-
-        # Good practice: save your training arguments together with the trained model
-        torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
 
 
 def find_executable_batch_size(function: callable = None, starting_batch_size: int = 64, accelerator=None):

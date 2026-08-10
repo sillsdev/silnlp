@@ -57,7 +57,7 @@ def create_mock_pretrained_model(
         nonlocal last_transition_scores
         output = next(output_iterator)
 
-        # SilTranslationPipeline calls compute_transition_scores and requires a shape that
+        # SilTranslator calls compute_transition_scores and requires a shape that
         # matches the generated sequences/scores
         assert output.scores is not None
         last_transition_scores = output.scores[0]

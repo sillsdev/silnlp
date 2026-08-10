@@ -149,6 +149,21 @@ class InferenceModelParams:
             raise ValueError("trg_lang must be a string")
 
 
+def warn_about_renamed_keys(config: dict, renamed: Dict[str, Dict[str, str]]) -> None:
+    # Some config keys were renamed from huggingface 4.x to 5.x, so we need to warn team members if they have them in their config
+    # rather than silently dropping the arguments. Can be removed once team is accustomed to 5.x.
+    for section, keys in renamed.items():
+        section_config = config.get(section)
+        if not isinstance(section_config, dict):
+            continue
+        for old_name, new_name in keys.items():
+            if old_name in section_config:
+                LOGGER.warning(
+                    f"{section}.{old_name} was renamed to {section}.{new_name} and is being ignored. "
+                    f"Rename it to keep its effect.",
+                )
+
+
 def collect_training_args(
     config_root: dict,
     mapping: Dict[str, Set[str]],

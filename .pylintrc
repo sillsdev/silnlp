@@ -1,0 +1,9 @@
+[MESSAGES CONTROL]
+disable =
+    missing-module-docstring,
+    missing-class-docstring,
+    missing-function-docstring,
+
+[FORMAT]
+# Matches line_length in pyproject.toml for black formatter
+max-line-length = 120
