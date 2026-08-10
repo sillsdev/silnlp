@@ -309,67 +309,71 @@ def main() -> None:
         help="Zero or more confidence file paths (.confidences.tsv suffix, e.g., "
         + "project_folder/exp_folder/infer/5000/source/631JN.SFM.confidences.tsv'). Paths are relative to "
         + "MT/experiments by default or to MT/experiments/--confidence-dir if --confidence-dir is specified. "
-        + "Ignored when --books is used. If zero paths are provided and --books is not specified, "
-        + "confidence files are auto detected in the --confidence-dir.",
+        + "If zero paths are provided, either --confidence-dir or --experiment-dir must be used to autodetect files.",
     )
     parser.add_argument(
         "--confidence-dir",
         type=str,
         default=None,
-        help="Directory relative to MT/experiments containing confidence files. "
-        + "Required when using --books or when auto-detecting confidence files.",
+        help="Directory relative to MT/experiments containing confidence files.",
     )
     parser.add_argument(
-        "--books",
-        nargs="+",
-        metavar="book_ids",
-        help="Provide book ids (e.g. 1JN LUK) to select confidence files rather than providing file paths with "
-        + "the confidence_files positional argument.",
-    )
-    parser.add_argument(
-        "--draft-index",
-        type=int,
+        "--experiment-dir",
+        type=str,
         default=None,
-        help="If using --books with multiple drafts, optionally specify the draft index.",
+        help="Directory relative to MT/experiments to an experiment folder. Quality estimation is run "
+        + "for every directory under <experiment-dir>/infer that contains confidence files.",
     )
     args = parser.parse_args()
 
     environment = SilNlpEnv.create_standard_environment()
+    linregress_path = environment.get_mt_exp_dir(args.linregress_file)
 
+    using_experiment_dir = args.experiment_dir is not None
     using_files = bool(args.confidence_files)
-    using_books = bool(args.books)
-    using_auto_detect = not using_files and not using_books
 
-    if using_files and using_books:
-        raise ValueError("Specify either confidence_files or --books, not both.")
+    if using_experiment_dir and (using_files or args.confidence_dir is not None):
+        raise ValueError(
+            "--experiment-dir cannot be combined with confidence_files positional arg or --confidence-dir."
+        )
 
-    if (using_books or using_auto_detect) and args.confidence_dir is None:
-        raise ValueError("When using --books or auto-detecting confidence files, --confidence-dir must be specified.")
-    confidence_dir = environment.get_mt_exp_dir(args.confidence_dir or "")
-    if not confidence_dir.is_dir():
-        raise ValueError(f"Confidence directory {confidence_dir} does not exist or is not a directory.")
+    confidence_files_per_directory: List[List[Path]]
+    if using_experiment_dir:
+        infer_dir = environment.get_mt_exp_dir(args.experiment_dir) / "infer"
+        if not infer_dir.is_dir():
+            raise ValueError(f"Infer directory {infer_dir} does not exist or is not a directory.")
+        confidence_dirs = sorted({cf.parent for cf in infer_dir.rglob(f"*{CONFIDENCE_SUFFIX}")})
+        if not confidence_dirs:
+            raise ValueError(f"No confidence files found under {infer_dir}.")
+        num_dirs = len(confidence_dirs)
+        LOGGER.info(
+            f"Auto-detecting confidence files in {num_dirs} director{'y' if num_dirs == 1 else 'ies'} "
+            + f"under {infer_dir}."
+        )
+        confidence_files_per_directory = [sorted(d.glob(f"*{CONFIDENCE_SUFFIX}")) for d in confidence_dirs]
+    else:
+        if not using_files and args.confidence_dir is None:
+            raise ValueError(
+                "Did not provide one of these args: confidence_files, --confidence-dir, or --experiment-dir."
+            )
+        confidence_dir = environment.get_mt_exp_dir(args.confidence_dir or "")
+        if not confidence_dir.is_dir():
+            raise ValueError(f"Confidence directory {confidence_dir} does not exist or is not a directory.")
 
-    if using_auto_detect:
-        LOGGER.info(f"Auto-detecting confidence files in directory {confidence_dir}")
-        confidence_file_paths = list(confidence_dir.glob(f"*{CONFIDENCE_SUFFIX}"))
-    elif using_files:
-        if len(args.confidence_files) == 0:
-            raise ValueError("Please provide at least one confidence file for the confidence_files argument.")
-        confidence_file_paths = [confidence_dir / confidence_file for confidence_file in args.confidence_files]
-    elif using_books:
-        if len(args.books) == 0:
-            raise ValueError("Please provide at least one book for the --books argument.")
-        if args.draft_index is not None:
-            if not isinstance(args.draft_index, int) or args.draft_index < 0:
-                raise ValueError("Draft index must be a non-negative integer.")
-            draft_suffix = "." + str(args.draft_index)
+        if using_files:
+            confidence_file_paths = [confidence_dir / confidence_file for confidence_file in args.confidence_files]
         else:
-            draft_suffix = ""
-        confidence_file_paths = []
-        for book_id in args.books:
-            confidence_file_paths.extend(confidence_dir.glob(f"[0-9]*{book_id}{draft_suffix}.*{CONFIDENCE_SUFFIX}"))
+            LOGGER.info(f"Auto-detecting confidence files in directory {confidence_dir}")
+            confidence_file_paths = list(confidence_dir.glob(f"*{CONFIDENCE_SUFFIX}"))
+            if not confidence_file_paths:
+                raise ValueError(f"No confidence files found in {confidence_dir}.")
+        confidence_files_per_directory = [confidence_file_paths]
 
-    estimate_quality(environment.get_mt_exp_dir(args.linregress_file), confidence_file_paths)
+    for confidence_file_paths in confidence_files_per_directory:
+        try:
+            estimate_quality(linregress_path, confidence_file_paths)
+        except Exception:
+            LOGGER.exception(f"Quality estimation failed for {confidence_file_paths[0].parent}.")
 
 
 if __name__ == "__main__":
