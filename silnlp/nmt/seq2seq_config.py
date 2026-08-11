@@ -964,11 +964,6 @@ class Seq2SeqNMTModel(NMTModel):
             self._config.model, model_config, device_map=device_map
         )
 
-        # NLLB models incorrectly set max_length in the model config instead of the generation config
-        if self._config.model_prefix == "facebook/nllb-200" and model.generation_config is not None:
-            model.generation_config.max_length = model.config.max_length
-            model.config.max_length = None
-
         tokenizer = self._config.get_tokenizer()
 
         old_embeddings = model.get_input_embeddings()
@@ -1881,6 +1876,7 @@ class SilSeq2SeqTrainer(Seq2SeqTrainer):
         self, batch_size=None, args=None, resume_from_checkpoint=None, trial=None, ignore_keys_for_eval=None
     ):
         if self._auto_grac_acc:
+            (args if args is not None else self.args).auto_find_batch_size = True
             inner_training_loop = find_executable_batch_size(super()._inner_training_loop, batch_size, self.accelerator)
             return inner_training_loop(
                 args=args,
@@ -1905,14 +1901,22 @@ def find_executable_batch_size(function: callable = None, starting_batch_size: i
         nonlocal batch_size
         gc.collect()
         torch.cuda.empty_cache()
+        last_exception = None
 
         while True:
             if batch_size == 0:
-                raise RuntimeError("No executable batch size found, reached zero.")
+                raise RuntimeError("No executable batch size found, reached zero.") from last_exception
             try:
                 return function(batch_size, *args, **kwargs)
             except Exception as e:
                 if _should_reduce_batch_size(e):
+                    last_exception = e
+                    LOGGER.warning(
+                        f"Reducing batch size from {batch_size} to {batch_size // 2} after exception: {e}. "
+                        f"CUDA memory allocated={torch.cuda.memory_allocated() / 1e9:.2f}GB, "
+                        f"reserved={torch.cuda.memory_reserved() / 1e9:.2f}GB, "
+                        f"max allocated={torch.cuda.max_memory_allocated() / 1e9:.2f}GB"
+                    )
                     gc.collect()
                     torch.cuda.empty_cache()
                     batch_size //= 2

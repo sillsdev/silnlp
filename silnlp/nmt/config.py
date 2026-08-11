@@ -180,8 +180,7 @@ def collect_training_args(
             if param in section_config and section_config[param] is not None:
                 args[param] = section_config[param]
     args.update(precision_args)
-    if clearml_queue is None:
-        args["report_to"] = "none"
+    args["report_to"] = "none" if clearml_queue is None else "all"
     return args
 
 
