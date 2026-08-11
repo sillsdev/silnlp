@@ -66,7 +66,7 @@ tqdm = "^4.70.0"
 sacrebleu = "^2.6.0"
 sil-machine = {extras = ["thot"], version = "1.8.11"}
 datasets = "^5.0.1"
-torch = {version = "^2.5", source = "torch"}
+torch = {version = "^2.6", source = "torch"}
 sacremoses = "^0.0.53"
 evaluate = "^0.3.0"
 python-docx = "^0.8.11"
@@ -105,6 +105,6 @@ llm = ["bitsandbytes"]
 
 [[tool.poetry.source]]
 name = "torch"
-url = "https://download.pytorch.org/whl/cu121"
+url = "https://download.pytorch.org/whl/cu124"
 priority = "explicit"
 
