@@ -5272,4 +5272,4 @@ llm = ["bitsandbytes"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.11"
-content-hash = "33bd61d8830fd749db6957d184a2f7b50bc6b2df1568f233c03f39816c796757"
+content-hash = "4b8fd31744dc903e63bf5edce1ad1521aa4a4b7a47b44d5b7cfd5ae00d1afdb4"
