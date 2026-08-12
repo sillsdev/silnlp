@@ -28,6 +28,7 @@ from tokenizers.normalizers import Normalizer
 from torch import Tensor, nn, optim
 from torch.utils.data import Dataset as TorchDataset
 from torch.utils.data import Sampler
+from tqdm.std import tqdm as std_tqdm
 from transformers import (
     AutoConfig,
     AutoModelForSeq2SeqLM,
@@ -1906,11 +1907,13 @@ def find_executable_batch_size(function: callable = None, starting_batch_size: i
         while True:
             if batch_size == 0:
                 raise RuntimeError("No executable batch size found, reached zero.") from last_exception
+            open_bars = set(getattr(std_tqdm, "_instances", []))
             try:
                 return function(batch_size, *args, **kwargs)
             except Exception as e:
                 if _should_reduce_batch_size(e):
                     last_exception = e
+                    _close_orphaned_progress_bars(open_bars)
                     LOGGER.warning(
                         f"Reducing batch size from {batch_size} to {batch_size // 2} after exception: {e}. "
                         f"CUDA memory allocated={torch.cuda.memory_allocated() / 1e9:.2f}GB, "
@@ -1926,6 +1929,15 @@ def find_executable_batch_size(function: callable = None, starting_batch_size: i
                     raise
 
     return decorator
+
+
+def _close_orphaned_progress_bars(open_bars: Set[Any]) -> None:
+    for bar in list(getattr(std_tqdm, "_instances", [])):
+        if bar not in open_bars:
+            try:
+                bar.close()
+            except Exception:
+                pass
 
 
 def _should_reduce_batch_size(exception: Exception) -> bool:
