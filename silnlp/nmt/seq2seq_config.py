@@ -1726,24 +1726,25 @@ class SilTranslator:
             raise RuntimeError("No tokenizer is specified.")
 
         output_ids: torch.Tensor = model_outputs["output_ids"]
-        token_scores: torch.Tensor = model_outputs["scores"]
+        scores: torch.Tensor = model_outputs["scores"]
         sequences_scores: Optional[torch.Tensor] = model_outputs["sequences_scores"]
 
         translations: List[List[dict]] = []
         for sentence_index in range(output_ids.size(dim=0)):
             records: List[dict] = []
             for sequence_index in range(output_ids.size(dim=1)):
-                sequence_ids = output_ids[sentence_index][sequence_index]
+                sequence_ids = output_ids[sentence_index][sequence_index].tolist()
+                token_scores = scores[sentence_index][sequence_index]
+                sequence_score = None if sequences_scores is None else sequences_scores[sentence_index][sequence_index]
+                translation_text = self.tokenizer.decode(
+                    sequence_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
+                )
                 records.append(
                     {
-                        "translation_token_ids": sequence_ids.tolist(),
-                        "token_scores": token_scores[sentence_index][sequence_index],
-                        "sequence_score": (
-                            None if sequences_scores is None else sequences_scores[sentence_index][sequence_index]
-                        ),
-                        "translation_text": self.tokenizer.decode(
-                            sequence_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
-                        ),
+                        "translation_token_ids": sequence_ids,
+                        "token_scores": token_scores,
+                        "sequence_score": sequence_score,
+                        "translation_text": translation_text,
                     }
                 )
             translations.append(records)
