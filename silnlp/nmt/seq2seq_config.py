@@ -1664,19 +1664,9 @@ class SilTranslator:
     def _forward(self, model_inputs, **generate_kwargs):
         in_b, input_length = model_inputs["input_ids"].shape
 
-        if hasattr(self.model, "generation_config") and self.model.generation_config is not None:
-            config = self.model.generation_config
-        else:
-            config = self.model.config
+        config = self.model.generation_config
         generate_kwargs["min_length"] = generate_kwargs.get("min_length", config.min_length)
         generate_kwargs["max_length"] = generate_kwargs.get("max_length", config.max_length)
-        if input_length > 0.9 * generate_kwargs["max_length"]:
-            LOGGER.warning(
-                "Input length (%i) is close to or longer than max_length (%i), so translations may be truncated. "
-                "Consider increasing max_length.",
-                input_length,
-                generate_kwargs["max_length"],
-            )
         output = self.model.generate(
             **model_inputs,
             **generate_kwargs,
