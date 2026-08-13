@@ -1,11 +1,6 @@
-import shutil
-from pathlib import Path
-from typing import cast
-
 import torch
 
 from silnlp.common.environment import SilNlpEnv
-from silnlp.nmt.config_utils import load_config_from_exp_dir
 from silnlp.nmt.experiment import SILExperiment
 from silnlp.nmt.seq2seq_config import Seq2SeqConfig
 from tests.smoke_tests.mock_pretrained_model import (
@@ -13,14 +8,24 @@ from tests.smoke_tests.mock_pretrained_model import (
     MockPreTrainedModelProviderFactory,
     ModelTrainingStats,
 )
+from tests.smoke_tests.smoke_test_utils import (
+    PIPELINE_OUTPUT_PATTERNS,
+    TEST_MT_DIR,
+    create_full_pipeline_experiment,
+    create_model_with_mock_pretrained_model,
+    delete_generated_paths,
+    load_experiment_config,
+    read_lines,
+    set_up_environment,
+)
 
-TEST_MT_DIR = Path(__file__).parent
 EXPERIMENT_NAME = "test_experiment"
 
 
 def test_experiment_full_pipeline():
     environment = set_up_environment()
-    clean_experiment_directory(environment.get_mt_exp_dir(EXPERIMENT_NAME))
+    exp_dir = environment.get_mt_exp_dir(EXPERIMENT_NAME)
+    delete_generated_paths(exp_dir, PIPELINE_OUTPUT_PATTERNS)
 
     experiment, model_stats = create_experiment_with_mock_pretrained_model(environment)
     experiment.run()
@@ -29,73 +34,19 @@ def test_experiment_full_pipeline():
     check_test_step(environment)
     check_translate_step(environment)
 
-    clean_experiment_directory(environment.get_mt_exp_dir(EXPERIMENT_NAME))
-
-
-def set_up_environment() -> SilNlpEnv:
-    # To avoid keeping large numbers of files in the repository, the tests assume that there is an
-    # active connection to the MinIO bucket and use file from the "Scripture" and "Paratext" directories.
-    # The experiments used in the tests are stored in the repository, to avoid having them accidentally
-    # changed or deleted
-    return SilNlpEnv.create_environment_with_mt_experiments_dir(TEST_MT_DIR / "experiments")
-
-
-def clean_experiment_directory(experiment_directory: Path):
-    for file in experiment_directory.glob("train*"):
-        file.unlink()
-    for file in experiment_directory.glob("test*"):
-        file.unlink()
-    for file in experiment_directory.glob("val*"):
-        file.unlink()
-    for file in experiment_directory.glob("tokenizer*"):
-        file.unlink()
-    for file in experiment_directory.glob("special_tokens*"):
-        file.unlink()
-    for file in experiment_directory.glob("sentencepiece*"):
-        file.unlink()
-    for file in experiment_directory.glob("scores*"):
-        file.unlink()
-    for file in experiment_directory.glob("effective-config*"):
-        file.unlink()
-
-    run_dir = experiment_directory / "run"
-    if run_dir.exists() and run_dir.is_dir():
-        shutil.rmtree(run_dir)
-
-    infer_dir = experiment_directory / "infer"
-    if infer_dir.exists() and infer_dir.is_dir():
-        shutil.rmtree(infer_dir)
+    delete_generated_paths(exp_dir, PIPELINE_OUTPUT_PATTERNS)
 
 
 def create_experiment_with_mock_pretrained_model(environment: SilNlpEnv) -> tuple[SILExperiment, ModelTrainingStats]:
-    mock_test_outputs = get_test_mock_outputs()
-    mock_translate_outputs = get_translate_mock_outputs()
-    model_stats = ModelTrainingStats()
     mock_pretrained_model_provider_factory = MockPreTrainedModelProviderFactory(
-        [mock_test_outputs, mock_translate_outputs], model_stats
+        [get_test_mock_outputs(), get_translate_mock_outputs()]
     )
 
-    config = load_config_from_exp_dir(environment.get_mt_exp_dir(EXPERIMENT_NAME), environment)
+    config = load_experiment_config(environment, EXPERIMENT_NAME, Seq2SeqConfig)
+    model = create_model_with_mock_pretrained_model(config, mock_pretrained_model_provider_factory)
 
-    # This cast is a temporary fix
-    # In the long term, the create_model method should be refactored so that it doesn't include parameters
-    # that are not common to all possible implementations (e.g. mixed_precision)
-    config = cast(Seq2SeqConfig, config)
-    model = config.create_model(
-        mixed_precision=False, pretrained_model_provider_factory=mock_pretrained_model_provider_factory
-    )
-
-    experiment = SILExperiment(
-        name=EXPERIMENT_NAME,
-        config=config,
-        model=model,
-        environment=environment,
-        run_prep=True,
-        run_train=True,
-        run_test=True,
-        run_translate=True,
-    )
-    return experiment, model_stats
+    experiment = create_full_pipeline_experiment(EXPERIMENT_NAME, config, model, environment)
+    return experiment, mock_pretrained_model_provider_factory.stats
 
 
 def check_training_step(model_stats: ModelTrainingStats):
@@ -109,7 +60,7 @@ def check_test_step(environment: SilNlpEnv):
     assert actual_test_path.exists()
 
     expected_test_path = TEST_MT_DIR / "expected_outputs" / "test_experiment" / "test_output.txt"
-    assert actual_test_path.read_text(encoding="utf-8") == expected_test_path.read_text(encoding="utf-8")
+    assert read_lines(actual_test_path) == read_lines(expected_test_path)
 
 
 def check_translate_step(environment: SilNlpEnv):
@@ -120,8 +71,8 @@ def check_translate_step(environment: SilNlpEnv):
     expected_translated_path = TEST_MT_DIR / "expected_outputs" / "test_experiment" / "translate_output.txt"
 
     # The actual output will contain a remark, so we check the different parts separately
-    actual_lines = actual_translated_path.read_text(encoding="utf-8").splitlines()
-    expected_lines = expected_translated_path.read_text(encoding="utf-8").splitlines()
+    actual_lines = read_lines(actual_translated_path)
+    expected_lines = read_lines(expected_translated_path)
     assert actual_lines[0] == expected_lines[0]
     assert actual_lines[2:5] == expected_lines[2:5]
     assert actual_lines[6].startswith("\\rem This draft of 3JN 1 was generated by AI from project BSB on ")

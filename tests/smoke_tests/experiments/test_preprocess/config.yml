@@ -1,0 +1,14 @@
+data:
+  corpus_pairs:
+  - src: en-BSB
+    trg: es-LBLA
+    test_size: 16
+    val_size: 16
+  lang_codes:
+    en: eng_Latn
+    es: spa_Latn
+  tokenizer:
+    trained_tokens: false
+    update_src: false
+    update_trg: false
+model: facebook/nllb-200-distilled-1.3B
