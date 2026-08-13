@@ -631,8 +631,8 @@ class SilCausalTrainer(Trainer):
     def _inner_training_loop(
         self, batch_size=None, args=None, resume_from_checkpoint=None, trial=None, ignore_keys_for_eval=None
     ):
-        if self._auto_grad_acc:
-            (args if args is not None else self.args).auto_find_batch_size = True
+        if self._auto_grad_acc and args is not None:
+            args.auto_find_batch_size = True
             inner_training_loop = find_executable_batch_size(super()._inner_training_loop, batch_size, self.accelerator)
             return inner_training_loop(
                 args=args,
