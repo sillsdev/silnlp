@@ -228,11 +228,7 @@ def delete_tokenizer(checkpoint_path: Path) -> None:
 
 
 def add_lang_code_to_tokenizer(tokenizer: PreTrainedTokenizerBase, lang_code: str) -> None:
-    # Huggingface does not follow its own type hints with this function and expects Dict[str, List[str]]
-    tokenizer.add_special_tokens(
-        {"additional_special_tokens": [lang_code]},  # pyright: ignore[reportArgumentType]
-        replace_extra_special_tokens=False,
-    )
+    tokenizer.add_special_tokens({"extra_special_tokens": [lang_code]}, replace_extra_special_tokens=False)
     lang_id = tokenizer.convert_tokens_to_ids(lang_code)
     if isinstance(tokenizer, (MBart50Tokenizer, MBartTokenizer)):
         tokenizer.id_to_lang_code[lang_id] = lang_code
@@ -703,7 +699,7 @@ class Seq2SeqConfig(Config):
                     self._tokenizer = convert_slow_tokenizer(self._tokenizer)
                     self._tokenizer = T5Tokenizer(tokenizer_object=self._tokenizer)
                     self._tokenizer.add_special_tokens(
-                        {"additional_special_tokens": ["<s>"]}, replace_extra_special_tokens=False
+                        {"extra_special_tokens": ["<s>"]}, replace_extra_special_tokens=False
                     )
                     self._tokenizer.save_pretrained(str(self.exp_dir))
             else:
