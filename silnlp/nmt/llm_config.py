@@ -101,7 +101,6 @@ TRAINING_ARGS_CONFIG_MAPPING = {
         "lr_scheduler_type",
         "max_grad_norm",
         "optim",
-        "warmup_ratio",
         "warmup_steps",
         "weight_decay",
     },
@@ -110,6 +109,7 @@ TRAINING_ARGS_CONFIG_MAPPING = {
 # Config keys renamed in transformers 5.0, can remove after users have gotten used to the transition
 RENAMED_CONFIG_KEYS = {
     "train": {"group_by_length": "train_sampling_strategy"},
+    "params": {"warmup_ratio": "warmup_steps"},
 }
 
 LABEL_PAD_TOKEN_ID = -100
@@ -150,17 +150,6 @@ def build_generation_kwargs(infer: dict, num_return_sequences: int, pad_token_id
             )
         gen_kwargs["num_beams"] = num_beams
     return gen_kwargs
-
-
-def apply_chat_template(
-    tokenizer: PreTrainedTokenizerBase,
-    messages: List[Dict[str, Any]],
-    add_generation_prompt: bool,
-    tokenize: bool,
-) -> Union[str, List[int]]:
-    return tokenizer.apply_chat_template(
-        messages, add_generation_prompt=add_generation_prompt, tokenize=tokenize, return_dict=False
-    )
 
 
 @dataclass(frozen=True)
@@ -206,13 +195,21 @@ class PromptMessages:
         system role and for base checkpoints with no chat template at all."""
         if tokenizer.chat_template is not None:
             try:
-                return apply_chat_template(tokenizer, self.to_chat_messages(), add_generation_prompt, tokenize)
+                return tokenizer.apply_chat_template(
+                    self.to_chat_messages(),
+                    add_generation_prompt=add_generation_prompt,
+                    tokenize=tokenize,
+                    return_dict=False,
+                )
             except Exception:
                 # Some chat templates (e.g. Gemma) reject a separate system role; fold the
                 # system message into the first user turn and retry.
                 if self.system_message:
-                    return apply_chat_template(
-                        tokenizer, self.to_folded_chat_messages(), add_generation_prompt, tokenize
+                    return tokenizer.apply_chat_template(
+                        self.to_folded_chat_messages(),
+                        add_generation_prompt=add_generation_prompt,
+                        tokenize=tokenize,
+                        return_dict=False,
                     )
                 raise
 
@@ -274,7 +271,12 @@ class TranslateGemmaPromptMessages(PromptMessages):
     ) -> Union[str, List[int]]:
         if tokenizer.chat_template is not None:
             try:
-                return apply_chat_template(tokenizer, self.to_chat_messages(), add_generation_prompt, tokenize)
+                return tokenizer.apply_chat_template(
+                    self.to_chat_messages(),
+                    add_generation_prompt=add_generation_prompt,
+                    tokenize=tokenize,
+                    return_dict=False,
+                )
             except UndefinedError:
                 # TranslateGemma's template only recognizes its fixed ~55-language lookup table
                 # and raises UndefinedError for any other code -- which is the common case when
@@ -370,7 +372,7 @@ class LLMConfig(Config):
                     "optim": "adamw_torch",
                     "learning_rate": 0.0002,
                     "lr_scheduler_type": "cosine",
-                    "warmup_ratio": 0.03,
+                    "warmup_steps": 150,
                     # Low-rank adapter hyperparameters, shared by all adapter methods
                     # (lora/qlora/dora/qdora). LoRA vs DoRA is selected via finetune_method.
                     "adapter": {
