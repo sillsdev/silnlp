@@ -266,3 +266,7 @@ class Ibm3MachineAligner(MachineAligner):
 class Ibm4MachineAligner(MachineAligner):
     def __init__(self, model_dir: Path) -> None:
         super().__init__("ibm4", ThotWordAlignmentModelType.IBM4, model_dir)
+
+class EflomalAligner(MachineAligner):
+    def __init__(self, model_dir: Path) -> None:
+        super().__init__("eflomal", ThotWordAlignmentModelType.EFLOMAL, model_dir)
