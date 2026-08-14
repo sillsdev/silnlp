@@ -19,6 +19,7 @@ from machine.corpora import (
 from machine.scripture import book_number_to_id, get_chapters
 from transformers.trainer_utils import get_last_checkpoint
 
+from ..common.corpus import load_corpus
 from ..common.environment import SilNlpEnv
 from ..common.paratext import book_file_name_digits, get_book_path
 from ..common.postprocesser import (
@@ -153,6 +154,8 @@ def postprocess_draft(
     out_dir: Optional[Path] = None,
     training_corpus_pairs: Optional[List[CorpusPair]] = None,
     environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+    train_src_filename: str | Path | None = None,
+    train_trg_filename: str | Path | None = None
 ) -> None:
     if training_corpus_pairs is None:
         training_corpus_pairs = []
@@ -190,10 +193,18 @@ def postprocess_draft(
 
     source_usfm = None
     if any(config.is_marker_processing_required() for config in postprocess_handler.configs):
+        train_src_sentences = []
+        train_trg_sentences = []
+        if train_src_filename is not None and train_trg_filename is not None:
+            train_src_sentences = list(load_corpus(train_src_filename))
+            train_trg_sentences = list(load_corpus(train_trg_filename))
+
         postprocess_handler.construct_rows(
             [s.ref for s in src_sentences.sentences],
             [s.text for s in src_sentences.sentences],
             [s.text for s in draft_sentences.sentences],
+            train_src_sentences,
+            train_trg_sentences
         )
 
         with draft_metadata.source_path.open(encoding=encoding) as f:
@@ -267,6 +278,8 @@ def postprocess_experiment(
                 out_dir=out_dir,
                 training_corpus_pairs=config.corpus_pairs,
                 environment=environment,
+                train_src_filename=config.train_src_detok_filename(),
+                train_trg_filename=config.train_trg_detok_filename()
             )
 
 
