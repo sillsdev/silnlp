@@ -52,8 +52,8 @@ from transformers import (
     TrainerCallback,
     set_seed,
 )
-from transformers.convert_slow_tokenizer import convert_slow_tokenizer
 from transformers.modeling_utils import unwrap_model
+from transformers.models.nllb.tokenization_nllb import FAIRSEQ_LANGUAGE_CODES
 from transformers.tokenization_utils_base import BatchEncoding, TruncationStrategy
 from transformers.trainer import TRAINING_ARGS_NAME
 from transformers.trainer_utils import get_last_checkpoint
@@ -690,14 +690,16 @@ class Seq2SeqConfig(Config):
                 and not (self.exp_dir / "tokenizer_config.json").is_file()
             ):
                 if self.model_prefix == "facebook/nllb-200":
-                    self._tokenizer = NllbTokenizer.from_pretrained(str(self.exp_dir), token=False)
-                    self._tokenizer = convert_slow_tokenizer(self._tokenizer)
-                    self._tokenizer = NllbTokenizer(tokenizer_object=self._tokenizer)
+                    # NllbTokenizer normally falls back to FAIRSEQ_LANGUAGE_CODES, but only when
+                    # additional_special_tokens is None. When loading from a SentencePiece model,
+                    # SentencePieceExtractor.extract always sets it to the control symbols in the model (<s> and
+                    # </s>), so the fallback never runs and the language codes have to be passed in explicitly.
+                    self._tokenizer = NllbTokenizer.from_pretrained(
+                        str(self.exp_dir), token=False, extra_special_tokens=FAIRSEQ_LANGUAGE_CODES
+                    )
                     self._tokenizer.save_pretrained(str(self.exp_dir))
                 elif self.model_prefix == "google/madlad400":
                     self._tokenizer = T5Tokenizer.from_pretrained(str(self.exp_dir), token=False)
-                    self._tokenizer = convert_slow_tokenizer(self._tokenizer)
-                    self._tokenizer = T5Tokenizer(tokenizer_object=self._tokenizer)
                     self._tokenizer.add_special_tokens(
                         {"extra_special_tokens": ["<s>"]}, replace_extra_special_tokens=False
                     )
@@ -1483,7 +1485,7 @@ class Seq2SeqNMTModel(NMTModel):
         if (
             src_lang != ""
             and trg_lang != ""
-            and isinstance(tokenizer, (MBartTokenizer, M2M100Tokenizer, NllbTokenizer))
+            and isinstance(tokenizer, (MBartTokenizer, MBart50Tokenizer, M2M100Tokenizer, NllbTokenizer))
         ):
             tokenizer.src_lang = src_lang
             tokenizer.tgt_lang = trg_lang
@@ -1538,9 +1540,6 @@ class PunctuationNormalizingTokenizer(PreTrainedTokenizerFast):
             raise ValueError('"text" input to PunctuationNormalizingTokenizer cannot be None')
 
         return self._wrapped_tokenizer(self._normalize_text(text), **kwargs)
-
-    def _build_translation_inputs(self, text, *args, **kwargs):
-        return self._wrapped_tokenizer._build_translation_inputs(self._normalize_text(text), *args, **kwargs)
 
 
 class HuggingFaceTokenizer(Tokenizer):
@@ -1647,16 +1646,8 @@ class SilTranslator:
         return self.postprocess(model_outputs)
 
     def preprocess(self, sentences: List[Any]) -> BatchEncoding:
-        build_translation_inputs = getattr(self.tokenizer, "_build_translation_inputs", None)
-        if build_translation_inputs is not None:
-            return build_translation_inputs(
-                sentences,
-                return_tensors="pt",
-                truncation=TruncationStrategy.DO_NOT_TRUNCATE,
-                src_lang=self.src_lang,
-                tgt_lang=self.tgt_lang,
-                padding=True,
-            )
+        # The source language prefix and the forced target language token are configured on the tokenizer and the
+        # generation config in _configure_model, so a plain tokenizer call is all that is needed here.
         return self.tokenizer(
             sentences, return_tensors="pt", truncation=TruncationStrategy.DO_NOT_TRUNCATE, padding=True
         )
