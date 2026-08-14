@@ -70,7 +70,6 @@ TRAINING_ARGS_CONFIG_MAPPING = {
         "gradient_checkpointing",
         "gradient_checkpointing_kwargs",
         "log_level",
-        "logging_dir",
         "logging_first_step",
         "logging_steps",
         "logging_strategy",
