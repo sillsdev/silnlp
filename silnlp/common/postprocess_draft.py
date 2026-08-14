@@ -6,7 +6,7 @@ from ..common.environment import SilNlpEnv
 from ..nmt.clearml_connection import TAGS_LIST, SILClearML
 from ..nmt.config_utils import load_config
 from ..nmt.postprocess import postprocess_experiment
-from .postprocesser import PostprocessConfig, PostprocessHandler
+from .postprocessor import PostprocessConfig, PostprocessHandler
 
 LOGGER = logging.getLogger((__package__ or "") + ".postprocess_draft")
 

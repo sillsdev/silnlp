@@ -12,6 +12,7 @@ from machine.translation import (
     SymmetrizedWordAlignmentModelTrainer,
 )
 from machine.translation.thot import (
+    ThotEflomalWordAlignmentModel,
     ThotFastAlignWordAlignmentModel,
     ThotHmmWordAlignmentModel,
     ThotIbm1WordAlignmentModel,
@@ -213,6 +214,8 @@ class MachineAligner(Aligner):
             return ThotIbm4WordAlignmentModel(model_path)
         elif self.model_type is ThotWordAlignmentModelType.FAST_ALIGN:
             return ThotFastAlignWordAlignmentModel(model_path)
+        elif self.model_type is ThotWordAlignmentModelType.EFLOMAL:
+            return ThotEflomalWordAlignmentModel(model_path)
         else:
             raise ValueError("An invalid model type was specified.")
 
@@ -266,3 +269,7 @@ class Ibm3MachineAligner(MachineAligner):
 class Ibm4MachineAligner(MachineAligner):
     def __init__(self, model_dir: Path) -> None:
         super().__init__("ibm4", ThotWordAlignmentModelType.IBM4, model_dir)
+
+class EflomalAligner(MachineAligner):
+    def __init__(self, model_dir: Path) -> None:
+        super().__init__("eflomal", ThotWordAlignmentModelType.EFLOMAL, model_dir)

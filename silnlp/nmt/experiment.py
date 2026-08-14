@@ -7,7 +7,7 @@ from typing import Optional, Set, Union
 import yaml
 
 from ..common.environment import SilNlpEnv
-from ..common.postprocesser import PostprocessConfig, PostprocessHandler
+from ..common.postprocessor import PostprocessConfig, PostprocessHandler
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
 from .config import Config, NMTModel
