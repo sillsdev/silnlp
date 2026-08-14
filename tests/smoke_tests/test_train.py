@@ -3,16 +3,14 @@ from pathlib import Path
 
 import yaml
 
-from silnlp.nmt.seq2seq_config import Seq2SeqConfig
+from silnlp.common.utils import get_git_revision_hash
+from silnlp.nmt.config_utils import load_config
 from tests.smoke_tests.mock_pretrained_model import FixedTranslationPreTrainedModelProviderFactory, ModelTrainingStats
 from tests.smoke_tests.smoke_test_utils import (
-    PREPROCESS_OUTPUT_PATTERNS,
     TRAIN_OUTPUT_PATTERNS,
+    count_lines,
     create_model_with_mock_pretrained_model,
     delete_generated_paths,
-    load_experiment_config,
-    run_preprocess_step,
-    run_train_step,
     set_up_environment,
 )
 
@@ -24,25 +22,27 @@ TRAIN_BATCH_SIZE = 4
 
 
 def test_train_creates_checkpoint():
+    # The train step is run against the training and validation data that are stored in the
+    # experiment directory, instead of running the preprocess step first.
     environment = set_up_environment()
     exp_dir = environment.get_mt_exp_dir(EXPERIMENT_NAME)
-    delete_generated_paths(exp_dir, PREPROCESS_OUTPUT_PATTERNS + TRAIN_OUTPUT_PATTERNS)
-
-    # The train step needs the data sets that the preprocess step creates.
-    run_preprocess_step(load_experiment_config(environment, EXPERIMENT_NAME, Seq2SeqConfig))
+    delete_generated_paths(exp_dir, TRAIN_OUTPUT_PATTERNS)
 
     # The pretrained model is replaced with a mock, so that no model is downloaded and the
     # forward passes are done by a tiny randomly initialized model.
-    config = load_experiment_config(environment, EXPERIMENT_NAME, Seq2SeqConfig)
+    config = load_config(EXPERIMENT_NAME, environment)
     model_provider_factory = FixedTranslationPreTrainedModelProviderFactory()
     model = create_model_with_mock_pretrained_model(config, model_provider_factory)
-    run_train_step(config, model)
+    config.set_seed()
+    model.save_effective_config(config.exp_dir / f"effective-config-{get_git_revision_hash()}.yml")
+    model.train()
 
     check_training_step(model_provider_factory.stats)
+    check_training_data_was_used(exp_dir)
     check_effective_config(exp_dir)
     check_checkpoint(exp_dir)
 
-    delete_generated_paths(exp_dir, PREPROCESS_OUTPUT_PATTERNS + TRAIN_OUTPUT_PATTERNS)
+    delete_generated_paths(exp_dir, TRAIN_OUTPUT_PATTERNS)
 
 
 def check_training_step(model_stats: ModelTrainingStats):
@@ -53,24 +53,32 @@ def check_training_step(model_stats: ModelTrainingStats):
     assert model_stats.total_number_of_training_data_elements > 0
 
 
+def check_training_data_was_used(exp_dir: Path):
+    # The trainer reports how many training examples it loaded, which is the number of lines in the
+    # training data that is stored in the experiment directory.
+    with (exp_dir / "run" / "train_results.json").open("r", encoding="utf-8") as file:
+        train_results = json.load(file)
+    assert train_results["train_samples"] == count_lines(exp_dir / "train.src.txt")
+
+
 def check_effective_config(exp_dir: Path):
     effective_config_paths = list(exp_dir.glob("effective-config-*.yml"))
     assert len(effective_config_paths) == 1
 
     with effective_config_paths[0].open("r", encoding="utf-8") as file:
         effective_config = yaml.safe_load(file)
+
+    # The effective config records the model that the experiment is configured to train,
+    # the real NLLB model instead of the tiny version that is actually used
     assert effective_config["model"] == "facebook/nllb-200-distilled-1.3B"
     assert effective_config["train"]["max_steps"] == MAX_STEPS
     assert effective_config["train"]["per_device_train_batch_size"] == TRAIN_BATCH_SIZE
     assert effective_config["train"]["output_dir"] == str(exp_dir / "run")
-    # The effective config also contains the training arguments that the experiment's config file
-    # does not set, e.g. the defaults of the Huggingface trainer
     assert effective_config["params"]["max_grad_norm"] == 1.0
 
 
 def check_checkpoint(exp_dir: Path):
     model_dir = exp_dir / "run"
-    assert (model_dir / "train_results.json").is_file()
 
     with (model_dir / "trainer_state.json").open("r", encoding="utf-8") as file:
         trainer_state = json.load(file)

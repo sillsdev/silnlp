@@ -7,7 +7,7 @@ from typing import Dict, List
 import pytest
 
 from silnlp.nmt import test as nmt_test
-from silnlp.nmt.seq2seq_config import Seq2SeqConfig
+from silnlp.nmt.config_utils import load_config
 from tests.smoke_tests.mock_pretrained_model import (
     FixedTranslationPreTrainedModelProviderFactory,
     mock_sequence_log_prob,
@@ -16,7 +16,6 @@ from tests.smoke_tests.smoke_test_utils import (
     TEST_OUTPUT_PATTERNS,
     create_model_with_mock_pretrained_model,
     delete_generated_paths,
-    load_experiment_config,
     read_lines,
     set_up_environment,
 )
@@ -38,7 +37,7 @@ def test_test_scores_the_last_checkpoint():
 
     # Inferencing is done by a mock model that "translates" every sentence to the same fixed
     # sentence.
-    config = load_experiment_config(environment, EXPERIMENT_NAME, Seq2SeqConfig)
+    config = load_config(EXPERIMENT_NAME, environment)
     model_provider_factory = FixedTranslationPreTrainedModelProviderFactory()
     model = create_model_with_mock_pretrained_model(config, model_provider_factory)
 

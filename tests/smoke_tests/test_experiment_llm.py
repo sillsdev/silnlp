@@ -1,4 +1,5 @@
 from silnlp.common.environment import SilNlpEnv
+from silnlp.nmt.config_utils import load_config
 from silnlp.nmt.experiment import SILExperiment
 from silnlp.nmt.llm_config import LLMConfig
 from tests.smoke_tests.mock_causal_model import CausalModelTrainingStats, MockCausalLMProviderFactory
@@ -7,7 +8,6 @@ from tests.smoke_tests.smoke_test_utils import (
     count_lines,
     create_full_pipeline_experiment,
     delete_generated_paths,
-    load_experiment_config,
     set_up_environment,
 )
 
@@ -34,7 +34,9 @@ def test_llm_experiment_full_pipeline():
 def create_experiment_with_mock_model(environment: SilNlpEnv) -> tuple[SILExperiment, CausalModelTrainingStats]:
     factory = MockCausalLMProviderFactory()
 
-    config = load_experiment_config(environment, EXPERIMENT_NAME, LLMConfig)
+    config = load_config(EXPERIMENT_NAME, environment)
+    assert isinstance(config, LLMConfig)
+
     # A decoder-only model takes a different kind of provider factory than a seq2seq model, so the
     # model cannot be created with create_model_with_mock_pretrained_model
     model = config.create_model(pretrained_model_provider_factory=factory)

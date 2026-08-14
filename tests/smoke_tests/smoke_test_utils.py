@@ -12,16 +12,12 @@ deletes the output of the steps that it runs before and after running them.
 
 import shutil
 from pathlib import Path
-from typing import Iterable, List, Type, TypeVar
+from typing import Iterable, List
 
 from silnlp.common.environment import SilNlpEnv
-from silnlp.common.utils import get_git_revision_hash
 from silnlp.nmt.config import Config, NMTModel
-from silnlp.nmt.config_utils import load_config
 from silnlp.nmt.experiment import SILExperiment
 from silnlp.nmt.seq2seq_config import PreTrainedModelProviderFactory, Seq2SeqConfig
-
-TConfig = TypeVar("TConfig", bound=Config)
 
 TEST_MT_DIR = Path(__file__).parent
 
@@ -63,19 +59,8 @@ def delete_generated_paths(experiment_directory: Path, patterns: Iterable[str]) 
                 path.unlink()
 
 
-def load_experiment_config(environment: SilNlpEnv, experiment_name: str, config_type: Type[TConfig]) -> TConfig:
-    """Load an experiment's config, in the same way that the commands do.
-
-    Every step loads its own config, because every step is a separate command. The expected type
-    of the config is passed in, so that the type of the model that it creates is known.
-    """
-    config = load_config(experiment_name, environment)
-    assert isinstance(config, config_type)
-    return config
-
-
 def create_model_with_mock_pretrained_model(
-    config: Seq2SeqConfig, model_provider_factory: PreTrainedModelProviderFactory
+    config: Config, model_provider_factory: PreTrainedModelProviderFactory
 ) -> NMTModel:
     """Create the model that a command would create, but with a mock pretrained model inside it.
 
@@ -83,9 +68,10 @@ def create_model_with_mock_pretrained_model(
     downloads and runs the real pretrained model. Mixed precision is disabled, as the
     --disable-mixed-precision option does, because the tests run on the CPU.
 
-    This takes a Seq2SeqConfig, rather than a Config, because neither the factory nor the mixed
-    precision parameter is part of the create_model signature that all configs have in common.
+    The config has to be a Seq2SeqConfig, because neither the factory nor the mixed precision
+    parameter is part of the create_model signature that all configs have in common.
     """
+    assert isinstance(config, Seq2SeqConfig)
     return config.create_model(mixed_precision=False, pretrained_model_provider_factory=model_provider_factory)
 
 
@@ -103,19 +89,6 @@ def create_full_pipeline_experiment(
         run_test=True,
         run_translate=True,
     )
-
-
-def run_preprocess_step(config: Config, make_stats: bool = False) -> None:
-    """Preprocess an experiment, i.e. do what silnlp.nmt.preprocess.main does."""
-    config.set_seed()
-    config.preprocess(make_stats, force_align=False)
-
-
-def run_train_step(config: Config, model: NMTModel) -> None:
-    """Train an experiment's model, i.e. do what silnlp.nmt.train.main does."""
-    config.set_seed()
-    model.save_effective_config(config.exp_dir / f"effective-config-{get_git_revision_hash()}.yml")
-    model.train()
 
 
 def read_lines(path: Path) -> List[str]:

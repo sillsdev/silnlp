@@ -5,8 +5,7 @@ from typing import Dict, List
 import pytest
 
 from silnlp.common.environment import SilNlpEnv
-from silnlp.common.postprocesser import PostprocessHandler
-from silnlp.nmt.seq2seq_config import Seq2SeqConfig
+from silnlp.nmt.config_utils import load_config
 from silnlp.nmt.translate import TranslationTask
 from tests.smoke_tests.mock_pretrained_model import (
     FixedTranslationPreTrainedModelProviderFactory,
@@ -16,7 +15,6 @@ from tests.smoke_tests.smoke_test_utils import (
     TRANSLATE_OUTPUT_PATTERNS,
     create_model_with_mock_pretrained_model,
     delete_generated_paths,
-    load_experiment_config,
     read_lines,
     set_up_environment,
 )
@@ -29,6 +27,7 @@ EXPERIMENT_NAME = "test_translate"
 CHECKPOINT_STEP = 2
 
 BOOK = "3JN"
+BOOK_NUMBER = "65"
 SOURCE_PROJECT = "BSB"
 SOURCE_FILE_NAME = "input_sentences.txt"
 
@@ -49,7 +48,7 @@ def test_translate_book():
         trg_project=None,
         trg_iso=None,
         save_confidences=True,
-        postprocess_handler=PostprocessHandler(environment=environment),
+        postprocess_handler=None,
         vref=True,
     )
 
@@ -76,7 +75,7 @@ def test_translate_text_file():
         src_iso=None,
         trg_iso=None,
         save_confidences=True,
-        postprocess_handler=PostprocessHandler(environment=environment),
+        postprocess_handler=None,
     )
 
     check_last_checkpoint_was_used(model_provider_factory, exp_dir)
@@ -90,7 +89,7 @@ def create_translation_task(
     environment: SilNlpEnv, model_provider_factory: FixedTranslationPreTrainedModelProviderFactory
 ) -> TranslationTask:
     # The translation task seeds the config and resolves the checkpoint itself
-    config = load_experiment_config(environment, EXPERIMENT_NAME, Seq2SeqConfig)
+    config = load_config(EXPERIMENT_NAME, environment)
     return TranslationTask(
         name=EXPERIMENT_NAME,
         checkpoint="last",
@@ -136,15 +135,16 @@ def check_vref_export(exp_dir: Path, num_verses: int):
 
 def check_book_confidences(exp_dir: Path, num_verses: int):
     confidences_path = get_book_draft_path(exp_dir).with_suffix(".SFM.confidences.tsv")
-    assert confidences_path.is_file()
 
-    # The verse confidences of a book draft are keyed by verse reference. The sentence confidences
-    # are not checked against the mock model's scores, because a draft also contains translations
-    # of the non-verse text, e.g. the section headings.
+    sentence_confidences = read_verse_confidences(confidences_path)
+    assert len(sentence_confidences) > num_verses
+    for sentence_index, confidence in enumerate(sentence_confidences):
+        assert confidence == pytest.approx(math.exp(mock_sequence_log_prob(sentence_index)), abs=1e-6)
+
     verse_confidences = read_confidences(confidences_path.with_suffix(".verses.tsv"), "VRef")
     assert len(verse_confidences) == num_verses
     assert all(key.startswith(f"{BOOK} 1:") for key in verse_confidences)
-    assert all(0 < confidence < 1 for confidence in verse_confidences.values())
+    assert set(verse_confidences.values()) <= set(sentence_confidences)
 
     chapter_confidences = read_confidences(confidences_path.with_suffix(".chapters.tsv"), "Chapter")
     assert list(chapter_confidences.keys()) == ["1"]
@@ -178,7 +178,14 @@ def get_infer_dir(exp_dir: Path) -> Path:
 
 def get_book_draft_path(exp_dir: Path) -> Path:
     # The digits in the file name are the Paratext book number of the book
-    return get_infer_dir(exp_dir) / SOURCE_PROJECT / f"65{BOOK}.SFM"
+    return get_infer_dir(exp_dir) / SOURCE_PROJECT / f"{BOOK_NUMBER}{BOOK}.SFM"
+
+
+def read_verse_confidences(path: Path) -> List[float]:
+    rows: List[List[str]] = [line.split("\t") for line in read_lines(path)]
+    assert rows[0][0] == "VRef"
+    assert rows[1][0] == "Sequence Score"
+    return [float(row[0]) for row in rows[3::2]]
 
 
 def read_confidences(path: Path, expected_key_header: str) -> Dict[str, float]:

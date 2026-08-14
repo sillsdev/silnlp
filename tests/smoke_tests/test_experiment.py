@@ -1,8 +1,8 @@
 import torch
 
 from silnlp.common.environment import SilNlpEnv
+from silnlp.nmt.config_utils import load_config
 from silnlp.nmt.experiment import SILExperiment
-from silnlp.nmt.seq2seq_config import Seq2SeqConfig
 from tests.smoke_tests.mock_pretrained_model import (
     MockModelOutput,
     MockPreTrainedModelProviderFactory,
@@ -14,7 +14,6 @@ from tests.smoke_tests.smoke_test_utils import (
     create_full_pipeline_experiment,
     create_model_with_mock_pretrained_model,
     delete_generated_paths,
-    load_experiment_config,
     read_lines,
     set_up_environment,
 )
@@ -42,7 +41,7 @@ def create_experiment_with_mock_pretrained_model(environment: SilNlpEnv) -> tupl
         [get_test_mock_outputs(), get_translate_mock_outputs()]
     )
 
-    config = load_experiment_config(environment, EXPERIMENT_NAME, Seq2SeqConfig)
+    config = load_config(EXPERIMENT_NAME, environment)
     model = create_model_with_mock_pretrained_model(config, mock_pretrained_model_provider_factory)
 
     experiment = create_full_pipeline_experiment(EXPERIMENT_NAME, config, model, environment)

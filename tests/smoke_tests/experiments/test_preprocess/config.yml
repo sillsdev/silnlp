@@ -4,6 +4,7 @@ data:
     trg: es-LBLA
     test_size: 16
     val_size: 16
+    corpus_books: 3JN,2JN,PHM
   lang_codes:
     en: eng_Latn
     es: spa_Latn
