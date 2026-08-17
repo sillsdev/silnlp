@@ -1,14 +1,16 @@
-import shutil
-from pathlib import Path
-from typing import cast
-
 from silnlp.common.environment import SilNlpEnv
-from silnlp.nmt.config_utils import load_config_from_exp_dir
+from silnlp.nmt.config_utils import load_config
 from silnlp.nmt.experiment import SILExperiment
 from silnlp.nmt.llm_config import LLMConfig
 from tests.smoke_tests.mock_causal_model import CausalModelTrainingStats, MockCausalLMProviderFactory
+from tests.smoke_tests.smoke_test_utils import (
+    PIPELINE_OUTPUT_PATTERNS,
+    count_lines,
+    create_full_pipeline_experiment,
+    delete_generated_paths,
+    set_up_environment,
+)
 
-TEST_MT_DIR = Path(__file__).parent
 EXPERIMENT_NAME = "test_experiment_llm"
 
 
@@ -16,7 +18,8 @@ def test_llm_experiment_full_pipeline():
     # Like test_experiment.py, this exercises the full pipeline (preprocess -> train -> test ->
     # translate) and assumes an active MinIO connection for the "Scripture"/"Paratext" data.
     environment = set_up_environment()
-    clean_experiment_directory(environment.get_mt_exp_dir(EXPERIMENT_NAME))
+    exp_dir = environment.get_mt_exp_dir(EXPERIMENT_NAME)
+    delete_generated_paths(exp_dir, PIPELINE_OUTPUT_PATTERNS)
 
     experiment, model_stats = create_experiment_with_mock_model(environment)
     experiment.run()
@@ -25,40 +28,20 @@ def test_llm_experiment_full_pipeline():
     check_test_step(environment)
     check_translate_step(environment)
 
-    clean_experiment_directory(environment.get_mt_exp_dir(EXPERIMENT_NAME))
-
-
-def set_up_environment() -> SilNlpEnv:
-    return SilNlpEnv.create_environment_with_mt_experiments_dir(TEST_MT_DIR / "experiments")
-
-
-def clean_experiment_directory(experiment_directory: Path):
-    for pattern in ("train*", "test*", "val*", "scores*", "effective-config*"):
-        for file in experiment_directory.glob(pattern):
-            file.unlink()
-    for sub in ("run", "infer"):
-        sub_dir = experiment_directory / sub
-        if sub_dir.is_dir():
-            shutil.rmtree(sub_dir)
+    delete_generated_paths(exp_dir, PIPELINE_OUTPUT_PATTERNS)
 
 
 def create_experiment_with_mock_model(environment: SilNlpEnv) -> tuple[SILExperiment, CausalModelTrainingStats]:
     factory = MockCausalLMProviderFactory()
 
-    config = cast(LLMConfig, load_config_from_exp_dir(environment.get_mt_exp_dir(EXPERIMENT_NAME), environment))
+    config = load_config(EXPERIMENT_NAME, environment)
     assert isinstance(config, LLMConfig)
 
+    # A decoder-only model takes a different kind of provider factory than a seq2seq model, so the
+    # model cannot be created with create_model_with_mock_pretrained_model
     model = config.create_model(pretrained_model_provider_factory=factory)
-    experiment = SILExperiment(
-        name=EXPERIMENT_NAME,
-        config=config,
-        model=model,
-        environment=environment,
-        run_prep=True,
-        run_train=True,
-        run_test=True,
-        run_translate=True,
-    )
+
+    experiment = create_full_pipeline_experiment(EXPERIMENT_NAME, config, model, environment)
     return experiment, factory.stats
 
 
@@ -72,9 +55,7 @@ def check_test_step(environment: SilNlpEnv):
     assert predictions_path.exists()
 
     # There should be exactly one prediction line per test source sentence.
-    num_sources = sum(1 for _ in (exp_dir / "test.src.txt").open("r", encoding="utf-8-sig"))
-    num_predictions = sum(1 for _ in predictions_path.open("r", encoding="utf-8"))
-    assert num_predictions == num_sources
+    assert count_lines(predictions_path) == count_lines(exp_dir / "test.src.txt")
 
 
 def check_translate_step(environment: SilNlpEnv):

@@ -1,0 +1,4 @@
+ , ,Tokens/Verse,Tokens/Verse,Tokens/Verse,Tokens/Verse,Tokens/Verse,Tokens/Verse,Characters/Verse,Characters/Verse,Characters/Verse,Characters/Verse,Characters/Verse,Characters/Token,Characters/Token,Characters/Token,Characters/Token,Characters/Token,Words/Verse,Words/Verse,Words/Verse,Words/Verse,Words/Verse,Characters/Word,Characters/Word,Characters/Word,Characters/Word,Characters/Word
+Translation Side,Num Tokens Added to Vocab,Min,Max,Median,Mean,Std Dev,Num Verses >= 200 Tokens,Min,Max,Median,Mean,Std Dev,Min,Max,Median,Mean,Std Dev,Min,Max,Median,Mean,Std Dev,Min,Max,Median,Mean,Std Dev
+Source,0,14,54,27.0,27.462,8.628,0,51,209,102.0,104.096,35.199,1,11,4.0,4.235,1.971,10,44,22.5,23.212,7.991,1,13,3,3.612,2.170
+Target,0,14,42,27.0,27.028,8.168,0,45,246,98.0,103.019,37.002,1,14,4.0,4.169,2.209,9,51,20.5,21.750,7.921,1,14,3,3.868,2.637

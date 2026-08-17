@@ -1,7 +1,7 @@
 {
     "countries": {
         "Bolivia, Plurinational State of": "Bolivia",
-        "Congo, The Democratic Republic of the": "DRC",
+        "Congo, The Democratic Republic of the": "DR Congo",
         "Iran, Islamic Republic of": "Iran",
         "Lao People's Democratic Republic": "Laos",
         "Macedonia, The Former Yugoslav Republic of": "North Macedonia",
@@ -15,7 +15,7 @@
         "Tanzania, United Republic of": "Tanzania",
         "Holy See (Vatican City State)": "Vatican City",
         "Venezuela, Bolivarian Republic of": "Venezuela",
-        "Virgin Islands, U.S.": "US Virgin Islands",
+        "Virgin Islands, U.S.": "US Virgin Islands"
     },
     "languages": {
         "German, Standard": "German",

@@ -1,0 +1,18 @@
+# The translate step is run against the source project in the bucket, the input file in this
+# experiment directory and the checkpoint directory that is stored in it, instead of running the
+# preprocess and train steps first. run/checkpoint-2 is empty, because the test only needs the
+# translate step to resolve it - the mock model that does the inferencing never reads the
+# checkpoint.
+data:
+  corpus_pairs:
+  - src: en-BSB
+    trg: es-LBLA
+  lang_codes:
+    en: eng_Latn
+    es: spa_Latn
+  terms:
+    train: false
+    include_glosses: false
+infer:
+  infer_batch_size: 4
+model: facebook/nllb-200-distilled-1.3B
