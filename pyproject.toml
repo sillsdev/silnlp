@@ -48,7 +48,7 @@ silnlp-alignment-aggregate-results = "silnlp.alignment.aggregate_results:main"
 [tool.poetry.dependencies]
 python = ">=3.10,<3.11"
 pandas = "^2.2"
-sentencepiece = "^0.1.97"
+sentencepiece = "^0.2.0"
 nltk = "^3.5"
 python-dotenv = "0.20.0"
 seaborn = "0.11.2"
@@ -62,22 +62,22 @@ clearml = ">=1.4.1"
 XlsxWriter = "^3.2.0"
 python-Levenshtein = "^0.27.1"
 lxml = "^4.6.3"
-tqdm = "^4.62.2"
-sacrebleu = "^2.3.1"
+tqdm = "4.67.3"
+sacrebleu = "^2.6.0"
 sil-machine = {extras = ["thot"], version = "1.8.11"}
-datasets = "^2.7.1"
-torch = {version = "^2.4", source = "torch"}
+datasets = "^5.0.1"
+torch = {version = "^2.6", source = "torch"}
 sacremoses = "^0.0.53"
 evaluate = "^0.3.0"
 python-docx = "^0.8.11"
 iso639-lang = "^2.1.0"
 eflomal = { version = "^2.0.0", optional = true }
-accelerate = "^1.0.0"
-transformers = "^4.50"
-bitsandbytes = { version = "^0.43", optional = true }
+accelerate = "^1.14.0"
+transformers = "^5.14.1"
+bitsandbytes = { version = "^0.50", optional = true }
 jinja2 = "^3.1.2"
-peft = "^0.15.0"
-attrs = "^22.2.0"
+peft = "^0.20.0"
+attrs = "^24.3.0"
 jsonschema = "^4.18.0"
 requests = "^2.31"
 openpyxl = "^3.1.2"
@@ -92,7 +92,7 @@ black = "^22.6.0"
 flake8 = "^3.9.0"
 ipykernel = "^6.4.1"
 pylint = "^2.8.3"
-pytest = "^6.2.4"
+pytest = "^9.1.1"
 types-tqdm = "^4.62.4"
 pandas-stubs = "^1.0.4"
 types-regex = "^2023.10.3.0"
@@ -105,6 +105,6 @@ llm = ["bitsandbytes"]
 
 [[tool.poetry.source]]
 name = "torch"
-url = "https://download.pytorch.org/whl/cu121"
+url = "https://download.pytorch.org/whl/cu124"
 priority = "explicit"
 

@@ -52,6 +52,7 @@ from .config import (
     NMTModel,
     collect_training_args,
     find_last_checkpoint,
+    warn_about_renamed_keys,
     write_effective_config,
 )
 from .corpora import DataFile
@@ -68,9 +69,7 @@ TRAINING_ARGS_CONFIG_MAPPING = {
         "gradient_accumulation_steps",
         "gradient_checkpointing",
         "gradient_checkpointing_kwargs",
-        "group_by_length",
         "log_level",
-        "logging_dir",
         "logging_first_step",
         "logging_steps",
         "logging_strategy",
@@ -81,6 +80,7 @@ TRAINING_ARGS_CONFIG_MAPPING = {
         "save_steps",
         "save_strategy",
         "save_total_limit",
+        "train_sampling_strategy",
     },
     "eval": {
         "eval_accumulation_steps",
@@ -100,10 +100,15 @@ TRAINING_ARGS_CONFIG_MAPPING = {
         "lr_scheduler_type",
         "max_grad_norm",
         "optim",
-        "warmup_ratio",
         "warmup_steps",
         "weight_decay",
     },
+}
+
+# Config keys renamed in transformers 5.0, can remove after users have gotten used to the transition
+RENAMED_CONFIG_KEYS = {
+    "train": {"group_by_length": "train_sampling_strategy"},
+    "params": {"warmup_ratio": "warmup_steps"},
 }
 
 LABEL_PAD_TOKEN_ID = -100
@@ -190,14 +195,20 @@ class PromptMessages:
         if tokenizer.chat_template is not None:
             try:
                 return tokenizer.apply_chat_template(
-                    self.to_chat_messages(), add_generation_prompt=add_generation_prompt, tokenize=tokenize
+                    self.to_chat_messages(),
+                    add_generation_prompt=add_generation_prompt,
+                    tokenize=tokenize,
+                    return_dict=False,
                 )
             except Exception:
                 # Some chat templates (e.g. Gemma) reject a separate system role; fold the
                 # system message into the first user turn and retry.
                 if self.system_message:
                     return tokenizer.apply_chat_template(
-                        self.to_folded_chat_messages(), add_generation_prompt=add_generation_prompt, tokenize=tokenize
+                        self.to_folded_chat_messages(),
+                        add_generation_prompt=add_generation_prompt,
+                        tokenize=tokenize,
+                        return_dict=False,
                     )
                 raise
 
@@ -260,7 +271,10 @@ class TranslateGemmaPromptMessages(PromptMessages):
         if tokenizer.chat_template is not None:
             try:
                 return tokenizer.apply_chat_template(
-                    self.to_chat_messages(), add_generation_prompt=add_generation_prompt, tokenize=tokenize
+                    self.to_chat_messages(),
+                    add_generation_prompt=add_generation_prompt,
+                    tokenize=tokenize,
+                    return_dict=False,
                 )
             except UndefinedError:
                 # TranslateGemma's template only recognizes its fixed ~55-language lookup table
@@ -326,7 +340,7 @@ class LLMConfig(Config):
                     "gradient_accumulation_steps": 8,
                     "auto_grad_acc": False,
                     "max_steps": 5000,
-                    "group_by_length": True,
+                    "train_sampling_strategy": "group_by_length",
                     "output_dir": str(exp_dir / "run"),
                     "log_level": "info",
                 },
@@ -357,7 +371,7 @@ class LLMConfig(Config):
                     "optim": "adamw_torch",
                     "learning_rate": 0.0002,
                     "lr_scheduler_type": "cosine",
-                    "warmup_ratio": 0.03,
+                    "warmup_steps": 150,
                     # Low-rank adapter hyperparameters, shared by all adapter methods
                     # (lora/qlora/dora/qdora). LoRA vs DoRA is selected via finetune_method.
                     "adapter": {
@@ -400,6 +414,7 @@ class LLMConfig(Config):
         if isinstance(params, dict) and "lora" in params and "adapter" not in params:
             LOGGER.warning("params.lora is deprecated; rename it to params.adapter.")
             params["adapter"] = params.pop("lora")
+        warn_about_renamed_keys(config, RENAMED_CONFIG_KEYS)
 
     @property
     def finetune_method(self) -> str:
@@ -615,7 +630,8 @@ class SilCausalTrainer(Trainer):
     def _inner_training_loop(
         self, batch_size=None, args=None, resume_from_checkpoint=None, trial=None, ignore_keys_for_eval=None
     ):
-        if self._auto_grad_acc:
+        if self._auto_grad_acc and args is not None:
+            args.auto_find_batch_size = True
             inner_training_loop = find_executable_batch_size(super()._inner_training_loop, batch_size, self.accelerator)
             return inner_training_loop(
                 args=args,
