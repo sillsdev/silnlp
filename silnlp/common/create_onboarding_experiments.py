@@ -728,6 +728,7 @@ def build_translate_config(projects: Sequence[str], translate_books: str) -> dic
             }
             for project in projects
         ],
+        "quality_estimation" : True,
         "postprocess": [{"paragraph_behavior": "place"}],
     }
 
