@@ -32,8 +32,10 @@ or a folder relative to `MT/experiments` that holds a `corpus-stats.csv`.
 
 The tool is **interactive**: it prints a candidate table, asks you to choose
 which experiments to create, asks for `y/N` confirmation before copying any
-shared extract files, and (unless `--dry-run`) offers to run each experiment
-after the folders are created.
+shared extract files, and offers to run each experiment after the folders are
+created. Create the folders and decline that last prompt for the preview
+`--dry-run` used to give; select `none` at the experiments prompt to write nothing
+at all.
 
 ## Options
 
@@ -47,7 +49,6 @@ after the folders are created.
 | `--top <n>` | `20` | Maximum number of experiments offered for selection. |
 | `--translate-scripture <projects>` | auto | Override the drafting source(s) entirely (each validated like any source). |
 | `--no-test` / `--test100` | 250-verse test set | Alternative test-set sizing (mutually exclusive). |
-| `--dry-run` | off | Report everything that would be created without touching the filesystem. |
 | `--run` | off | Run each created experiment without asking first. |
 
 Book lists (`--training-books`, `--translate-books`) accept any silnlp book
@@ -62,7 +63,7 @@ Experiments are placed under `<Country>/<Language>/`. Country and language names
 come from `silnlp/assets/languageFamilies.json`, which uses official
 Ethnologue/ISO forms (e.g. `Tanzania, United Republic of`). To keep folders easy
 to find, `silnlp/assets/nameOverrides.json` maps those to common names
-(`Tanzania`, `Russia`, `DR Congo`, …). Names not listed pass through unchanged.
+(`Tanzania`, `Russia`, `DRC`, …). Names not listed pass through unchanged.
 
 **To add or change a common name**, edit `nameOverrides.json` — add an entry
 under `"countries"` or `"languages"` whose *key* is the exact string from
@@ -102,5 +103,3 @@ MT/experiments/
 - **Source-project / translate-books warnings** — the chosen drafting source is
   missing from `MT/Paratext/projects` or lacks some `--translate-books`; the tool
   offers an alternative or you can pass `--translate-scripture`.
-- Use `--dry-run` first to preview the full set of folders and configs without
-  writing anything.
