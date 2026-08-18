@@ -175,7 +175,7 @@ class _StubTranslateGemmaTokenizer:
     chat_template = "{# a real chat template would render this #}"
     bos_token = "<bos>"
 
-    def apply_chat_template(self, messages, add_generation_prompt, tokenize):
+    def apply_chat_template(self, messages, add_generation_prompt, tokenize, return_dict):
         # Mimics the real template's behavior for a language code outside its fixed lookup table.
         raise UndefinedError("'dict object' has no attribute 'tst'")
 

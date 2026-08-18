@@ -12,6 +12,9 @@ data:
     update_trg: false
 eval:
   per_device_eval_batch_size: 8
+  eval_strategy: "no"
+  load_best_model_at_end: false
+  metric_for_best_model: null
 infer:
   infer_batch_size: 8
 model: facebook/nllb-200-distilled-1.3B

@@ -1,4 +1,5 @@
 import logging
+import re
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from contextlib import AbstractContextManager
@@ -441,7 +442,13 @@ class Translator(AbstractContextManager["Translator"], ABC):
                 remarks: List[Tuple[int, str]] = []
                 paragraph_remark = config.get_paragraph_marker_remark()
                 generated_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
-                draft_src_str = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
+
+                if src_from_project:
+                    draft_src_str = re.sub(r"_\d{4}_\d{2}_\d{2}$", "", src_file_path.parent.name)
+                    draft_src_str = f"project {draft_src_str}"
+                else:
+                    draft_src_str = f"file {src_file_path.name}"
+
                 chapters_for_remarks = (
                     chapters
                     if chapters
