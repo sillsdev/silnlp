@@ -728,7 +728,7 @@ def build_translate_config(projects: Sequence[str], translate_books: str) -> dic
             }
             for project in projects
         ],
-        "quality_estimation" : True,
+        "quality_estimation": True,
         "postprocess": [{"paragraph_behavior": "place"}],
     }
 
@@ -752,7 +752,7 @@ def check_translate_source(projects_dir: Path, project: str, books: Sequence[str
 
 
 def resolve_translate_sources(
-    source_names: Sequence[str], books: Sequence[str], projects_dir: Optional[Path], dry_run: bool
+    source_names: Sequence[str], books: Sequence[str], projects_dir: Optional[Path]
 ) -> Dict[str, str]:
     """Check that each translation source project contains the books to be translated.
 
@@ -770,8 +770,6 @@ def resolve_translate_sources(
             if problem is None:
                 break
             print(f"Warning: cannot translate {';'.join(books)} from '{current}': {problem}.")
-            if dry_run:
-                break
             try:
                 reply = input(
                     f"Enter a different project to translate from (or press Enter to keep '{current}'): "
@@ -812,15 +810,13 @@ def select_candidates(
     coverage: "BookCoverage",
     complete_counts: Dict[str, int],
     translate_book_ids: Sequence[str],
-    dry_run: bool,
 ) -> List[Candidate]:
     """Show a table of candidates and ask which to use as training/drafting sources.
 
     Each candidate appears once with its corpus-stats data (alignment, total, parallel
     'train' verses, source-only 'draft' verses, target-only, script) and a per-translate-book
     coverage mark. Manual selection replaces the book-coverage filter: whatever is chosen may
-    be a primary source regardless of its coverage. Under dry_run the table is displayed and
-    every candidate is returned without prompting.
+    be a primary source regardless of its coverage.
     """
     name_w = max([len("Candidate")] + [len(c.name) for c in candidates])
     book_w = {book: max(3, len(book)) for book in translate_book_ids}
@@ -838,9 +834,6 @@ def select_candidates(
             f"  {c.trg_only:>8}  {(c.script or ''):<6}{marks}"
         )
     print("Marks: ✓ = source has ≥98% of the book, ~ = partial, X = none.")
-    if dry_run:
-        print("Dry run: all candidates are included.")
-        return candidates
     try:
         reply = input("Enter the candidates to use (e.g. 1,3), 'all' or 'none': ").strip().lower()
     except EOFError:
@@ -863,12 +856,9 @@ def select_candidates(
 
 
 def select_experiments(
-    singles: List[List[Candidate]], mixed: List[List[Candidate]], dry_run: bool, top: int = TOP_EXPERIMENTS
+    singles: List[List[Candidate]], mixed: List[List[Candidate]], top: int = TOP_EXPERIMENTS
 ) -> List[List[Candidate]]:
-    """Show the top possible experiments (singles first) and ask which to create.
-
-    Under dry_run the list is only displayed and every displayed experiment is returned.
-    """
+    """Show the top possible experiments (singles first) and ask which to create."""
     total = len(singles) + len(mixed)
     displayed = (singles + mixed)[:top]
     shown = f"top {len(displayed)} of {total}" if total > len(displayed) else f"{total}"
@@ -878,9 +868,6 @@ def select_experiments(
         print(f"  {i:>2}. {names}")
     if total > len(displayed):
         print(f"Use --top to list more than {top} experiments.")
-    if dry_run:
-        print("Dry run: all listed experiments are included in the report below.")
-        return displayed
     try:
         reply = input("Enter the numbers to create (e.g. 1,3), 'all' or 'none': ").strip().lower()
     except EOFError:
@@ -908,7 +895,7 @@ def write_yaml(path: Path, content: dict) -> None:
         yaml.dump(content, file, sort_keys=False, default_flow_style=False, allow_unicode=True)
 
 
-def update_translate_config(folder: Path, translate_config: dict, dry_run: bool) -> None:
+def update_translate_config(folder: Path, translate_config: dict) -> None:
     """Bring an existing experiment's translate_config.yml in line with the current drafting choice.
 
     An identical config.yml does not mean an identical translate_config.yml:
@@ -924,11 +911,8 @@ def update_translate_config(folder: Path, translate_config: dict, dry_run: bool)
             LOGGER.warning(f"Could not parse {path}; it will be rewritten.")
     if on_disk == translate_config:
         return
-    if dry_run:
-        print(f"Would update {path} with the current drafting configuration.")
-    else:
-        write_yaml(path, translate_config)
-        print(f"Updated {path} with the current drafting configuration.")
+    write_yaml(path, translate_config)
+    print(f"Updated {path} with the current drafting configuration.")
 
 
 def submit_experiments(
@@ -992,7 +976,6 @@ def run(
     target: Optional[str] = None,
     translate_scripture: Optional[Sequence[str]] = None,
     top: int = TOP_EXPERIMENTS,
-    dry_run: bool = False,
     submit: Optional[bool] = False,
 ) -> List[Experiment]:
     if test_variant not in (None, "notest", "test100"):
@@ -1128,7 +1111,7 @@ def run(
     # The user picks which candidates to use from the table; this manual choice replaces the
     # automatic book-coverage filter (which over-excluded sources narrower than a partial
     # target). A chosen candidate may be a primary/single source regardless of its coverage.
-    selected = select_candidates(passing, coverage, complete_counts, translate_book_ids, dry_run)
+    selected = select_candidates(passing, coverage, complete_counts, translate_book_ids)
     if not selected:
         return []
     for c in selected:
@@ -1165,50 +1148,41 @@ def run(
             print(f"\nUsing synthetic target code '{synthetic}' from the previously copied extract file.")
         new_stem = f"{synthetic}-{stem_to_project(main.stem)}"
         if scripture_dir is None:
-            if not dry_run:
-                raise ValueError("No scripture directory available to copy the target extract file in.")
-            print(f"Would copy {main.stem}.txt to {new_stem}.txt in the MT scripture folder.")
+            raise ValueError("No scripture directory available to copy the target extract file in.")
+        old_path = scripture_dir / f"{main.stem}.txt"
+        new_path = scripture_dir / f"{new_stem}.txt"
+        if new_path.is_file():
+            if old_path.is_file() and old_path.stat().st_mtime > new_path.stat().st_mtime:
+                LOGGER.warning(
+                    f"{new_path.name} may be outdated: {old_path.name} is newer (probably re-extracted)."
+                    f" Delete {new_path.name} and re-run to refresh the copy."
+                )
+        elif old_path.is_file():
+            pending_copy = (main.stem, new_stem)
+            # The copy adds files to the shared MT/scripture store — always confirm first.
+            print(
+                f"{main.stem}.txt (and matching terms renderings files) will be copied to"
+                f" {new_stem}.txt in {scripture_dir}; the originals are kept."
+            )
+            if flipped:
+                print(
+                    "Warning: the target was overridden with --target; make sure"
+                    f" {main.stem} really is the intended target project."
+                )
+            elif to_iso3(main.iso) in NLLB_TAG_FROM_ISO:
+                print(
+                    f"Caution: '{main.iso}' is an NLLB language code; make sure {main.stem} is the"
+                    " minority-language project sharing that code, not a shared reference Bible."
+                )
+            try:
+                reply = input("Copy the file when the first experiment is created? [y/N]: ").strip().lower()
+            except EOFError:
+                reply = ""
+            if reply not in ("y", "yes"):
+                print("Aborted: the copy is required to create these experiments.")
+                return []
         else:
-            old_path = scripture_dir / f"{main.stem}.txt"
-            new_path = scripture_dir / f"{new_stem}.txt"
-            if new_path.is_file():
-                if old_path.is_file() and old_path.stat().st_mtime > new_path.stat().st_mtime:
-                    LOGGER.warning(
-                        f"{new_path.name} may be outdated: {old_path.name} is newer (probably re-extracted)."
-                        f" Delete {new_path.name} and re-run to refresh the copy."
-                    )
-            elif old_path.is_file():
-                pending_copy = (main.stem, new_stem)
-                if dry_run:
-                    print(
-                        f"Would copy {main.stem}.txt to {new_stem}.txt in {scripture_dir}"
-                        " (and matching terms renderings files)."
-                    )
-                else:
-                    # The copy adds files to the shared MT/scripture store — always confirm first.
-                    print(
-                        f"{main.stem}.txt (and matching terms renderings files) will be copied to"
-                        f" {new_stem}.txt in {scripture_dir}; the originals are kept."
-                    )
-                    if flipped:
-                        print(
-                            "Warning: the target was overridden with --target; make sure"
-                            f" {main.stem} really is the intended target project."
-                        )
-                    elif to_iso3(main.iso) in NLLB_TAG_FROM_ISO:
-                        print(
-                            f"Caution: '{main.iso}' is an NLLB language code; make sure {main.stem} is the"
-                            " minority-language project sharing that code, not a shared reference Bible."
-                        )
-                    try:
-                        reply = input("Copy the file when the first experiment is created? [y/N]: ").strip().lower()
-                    except EOFError:
-                        reply = ""
-                    if reply not in ("y", "yes"):
-                        print("Aborted: the copy is required to create these experiments.")
-                        return []
-            elif not dry_run:
-                raise FileNotFoundError(f"Neither {main.stem}.txt nor {new_stem}.txt found in {scripture_dir}.")
+            raise FileNotFoundError(f"Neither {main.stem}.txt nor {new_stem}.txt found in {scripture_dir}.")
         main.iso, main.stem = synthetic, new_stem
 
     def order_pair(a: Candidate, b: Candidate) -> Optional[List[Candidate]]:
@@ -1222,7 +1196,7 @@ def run(
     ordered = sorted(selected, key=lambda c: c.alignment, reverse=True)
     singles = [[c] for c in ordered]
     mixed = [pair for a, b in itertools.combinations(ordered, 2) if (pair := order_pair(a, b)) is not None]
-    chosen = select_experiments(singles, mixed, dry_run, top=top)
+    chosen = select_experiments(singles, mixed, top=top)
 
     # Every source of an experiment is also asked to draft; --translate-scripture overrides the
     # drafting projects for all experiments. There is no drafting-qualification gate — a source
@@ -1245,7 +1219,7 @@ def run(
                     )
     else:
         source_names = list(dict.fromkeys(source.name for exp in chosen for source in exp))
-        source_projects = resolve_translate_sources(source_names, translate_book_ids, projects_dir, dry_run)
+        source_projects = resolve_translate_sources(source_names, translate_book_ids, projects_dir)
 
     def drafting_projects_for(sources: List[Candidate]) -> List[str]:
         if translate_scripture:
@@ -1310,7 +1284,7 @@ def run(
         existing, index = find_existing(lang_dir, prefix, config)
         if existing is not None:
             print(f"Skipped {label}: {existing} already contains an identical config.yml.")
-            update_translate_config(existing, translate_config, dry_run)
+            update_translate_config(existing, translate_config)
             existing_experiments.append(
                 Experiment(
                     sources=sources,
@@ -1328,21 +1302,17 @@ def run(
             translate_config=translate_config,
         )
         experiments.append(experiment)
-        if dry_run:
-            print(f"Would create {folder} (corpus_books: {corpus_books})")
-        else:
-            if pending_copy is not None:
-                assert scripture_dir is not None
-                execute_copy(scripture_dir, terms_dir, *pending_copy)
-                pending_copy = None
-            folder.mkdir(parents=True, exist_ok=True)
-            write_yaml(folder / "config.yml", experiment.config)
-            write_yaml(folder / "translate_config.yml", experiment.translate_config)
-            print(f"Created {folder} (corpus_books: {corpus_books})")
-    if (experiments or existing_experiments) and not dry_run:
+        if pending_copy is not None:
+            assert scripture_dir is not None
+            execute_copy(scripture_dir, terms_dir, *pending_copy)
+            pending_copy = None
+        folder.mkdir(parents=True, exist_ok=True)
+        write_yaml(folder / "config.yml", experiment.config)
+        write_yaml(folder / "translate_config.yml", experiment.translate_config)
+        print(f"Created {folder} (corpus_books: {corpus_books})")
+    if experiments or existing_experiments:
         # Existing folders with an identical config are offered too: their creation was
-        # skipped, but the experiments themselves may not have been run yet. A dry run
-        # only lists what would be created, without the run commands.
+        # skipped, but the experiments themselves may not have been run yet.
         submit_experiments(
             experiments + existing_experiments,
             experiments_dir,
@@ -1406,7 +1376,6 @@ def main() -> None:
         action="store_true",
         help="Use a 100-verse test set (test_size: 100); folder names gain _test100",
     )
-    parser.add_argument("--dry-run", action="store_true", help="Report without creating folders or files")
     parser.add_argument(
         "--run",
         action="store_true",
@@ -1437,7 +1406,6 @@ def main() -> None:
         target=args.target,
         translate_scripture=args.translate_scripture,
         top=args.top,
-        dry_run=args.dry_run,
         submit=True if args.run else None,
     )
 
