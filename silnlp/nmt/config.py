@@ -134,6 +134,12 @@ def resolve_checkpoint_path(model_dir: Path, ckpt: Union[CheckpointType, str, in
     return ckpt_path, step
 
 
+@dataclass(frozen=True)
+class Language:
+    iso: str
+    name: str
+
+
 @dataclass
 class InferenceModelParams:
     checkpoint: Union[CheckpointType, str, int]

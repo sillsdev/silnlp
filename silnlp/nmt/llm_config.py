@@ -49,6 +49,7 @@ from .config import (
     CheckpointType,
     Config,
     InferenceModelParams,
+    Language,
     NMTModel,
     collect_training_args,
     find_last_checkpoint,
@@ -149,12 +150,6 @@ def build_generation_kwargs(infer: dict, num_return_sequences: int, pad_token_id
             )
         gen_kwargs["num_beams"] = num_beams
     return gen_kwargs
-
-
-@dataclass(frozen=True)
-class Language:
-    iso: str
-    name: str
 
 
 @dataclass
