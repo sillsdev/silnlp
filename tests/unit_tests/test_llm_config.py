@@ -1,11 +1,17 @@
 from dataclasses import dataclass
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from datasets import Dataset
 from jinja2.exceptions import UndefinedError
 
+from silnlp.common.environment import SilNlpEnv
+from silnlp.nmt.config import CheckpointType, Config
 from silnlp.nmt.config_utils import is_llm_config
 from silnlp.nmt.llm_config import (
     DataCollatorForCausalLM,
+    InterleavedTrainDataset,
     Language,
     LLMConfig,
     LLMModel,
@@ -286,3 +292,250 @@ def test_normalize_deprecated_keys_prefers_explicit_adapter():
     LLMConfig._normalize_deprecated_keys(config)
     # An explicit adapter wins; the deprecated lora key is left untouched rather than clobbering it.
     assert config["params"]["adapter"] == {"rank": 64}
+
+
+@dataclass
+class _InstructionDataStub:
+    params: dict
+    _environment: SilNlpEnv
+    exp_dir: Path = Path(".")
+
+    instruction_datasets = LLMConfig.instruction_datasets
+    instruction_data_size = LLMConfig.instruction_data_size
+    instruction_mix_ratio = LLMConfig.instruction_mix_ratio
+    instruction_data_paths = LLMConfig.instruction_data_paths
+    instruction_src_filename = Config.instruction_src_filename
+    instruction_trg_filename = Config.instruction_trg_filename
+    _open_append = Config._open_append
+    _write_instruction_data = LLMConfig._write_instruction_data
+
+
+def test_instruction_datasets_defaults_to_empty():
+    stub = _InstructionDataStub(params={"instruction_data": {"datasets": [], "size": 100000}}, _environment=None)
+    assert stub.instruction_datasets == []
+    assert stub.instruction_data_size == 100000
+    assert stub.instruction_data_paths() == []
+    assert stub._write_instruction_data() == 0
+
+
+def test_instruction_data_paths_resolved_under_mt_dir_instructions(tmp_path):
+    environment = SilNlpEnv.create_environment_with_mt_dir(tmp_path)
+    stub = _InstructionDataStub(
+        params={"instruction_data": {"datasets": ["dolly", "no_robots"], "size": 100000}},
+        _environment=environment,
+    )
+    assert stub.instruction_data_paths() == [
+        (tmp_path / "instructions" / "dolly.input.txt", tmp_path / "instructions" / "dolly.output.txt"),
+        (tmp_path / "instructions" / "no_robots.input.txt", tmp_path / "instructions" / "no_robots.output.txt"),
+    ]
+
+
+def test_instruction_data_size_rejects_negative():
+    stub = _InstructionDataStub(params={"instruction_data": {"datasets": [], "size": -1}}, _environment=None)
+    with pytest.raises(ValueError, match="non-negative"):
+        stub.instruction_data_size
+
+
+def test_instruction_mix_ratio_default():
+    stub = _InstructionDataStub(params={"instruction_data": {"mix_ratio": 0.1}}, _environment=None)
+    assert stub.instruction_mix_ratio == 0.1
+
+
+def test_instruction_mix_ratio_rejects_negative():
+    stub = _InstructionDataStub(params={"instruction_data": {"mix_ratio": -0.1}}, _environment=None)
+    with pytest.raises(ValueError, match="non-negative"):
+        stub.instruction_mix_ratio
+
+
+def _make_tagged_dataset(prefix: str, size: int) -> Dataset:
+    return Dataset.from_dict({"input_ids": [[i] for i in range(size)], "tag": [f"{prefix}{i}" for i in range(size)]})
+
+
+def test_interleaved_train_dataset_length_is_sum_of_both_counts():
+    dataset = InterleavedTrainDataset(
+        _make_tagged_dataset("t", 5), _make_tagged_dataset("i", 100), translation_count=12, instruction_count=7, seed=0
+    )
+    assert len(dataset) == 19
+
+
+def test_interleaved_train_dataset_routes_indices_to_the_right_pool():
+    dataset = InterleavedTrainDataset(
+        _make_tagged_dataset("t", 5), _make_tagged_dataset("i", 100), translation_count=12, instruction_count=7, seed=0
+    )
+    tags = [dataset[i]["tag"] for i in range(len(dataset))]
+    assert all(tag.startswith("t") for tag in tags[:12])
+    assert all(tag.startswith("i") for tag in tags[12:])
+
+
+def test_interleaved_train_dataset_does_not_repeat_within_a_lap():
+    # 12 translation slots from a pool of 5 is 2 full laps (0-4, 5-9) plus a partial lap (10-11);
+    # each full lap must be a permutation of all 5 rows -- no repeats until the pool is exhausted.
+    dataset = InterleavedTrainDataset(
+        _make_tagged_dataset("t", 5), _make_tagged_dataset("i", 100), translation_count=12, instruction_count=0, seed=0
+    )
+    tags = [dataset[i]["tag"] for i in range(12)]
+    assert sorted(tags[0:5]) == sorted(f"t{i}" for i in range(5))
+    assert sorted(tags[5:10]) == sorted(f"t{i}" for i in range(5))
+    assert set(tags[10:12]).issubset({f"t{i}" for i in range(5)})
+
+
+def test_interleaved_train_dataset_instruction_pool_does_not_repeat_when_it_fits():
+    dataset = InterleavedTrainDataset(
+        _make_tagged_dataset("t", 5), _make_tagged_dataset("i", 20), translation_count=0, instruction_count=20, seed=0
+    )
+    tags = [dataset[i]["tag"] for i in range(20)]
+    assert sorted(tags) == sorted(f"i{i}" for i in range(20))
+
+
+def test_interleaved_train_dataset_is_deterministic_across_repeated_access():
+    dataset = InterleavedTrainDataset(
+        _make_tagged_dataset("t", 5), _make_tagged_dataset("i", 20), translation_count=12, instruction_count=20, seed=0
+    )
+    first_pass = [dataset[i]["tag"] for i in range(len(dataset))]
+    second_pass = [dataset[i]["tag"] for i in range(len(dataset))]
+    assert first_pass == second_pass
+
+
+def test_interleaved_train_dataset_raises_index_error_out_of_range():
+    dataset = InterleavedTrainDataset(
+        _make_tagged_dataset("t", 5), _make_tagged_dataset("i", 5), translation_count=5, instruction_count=5, seed=0
+    )
+    with pytest.raises(IndexError):
+        dataset[10]
+
+
+def test_interleaved_train_dataset_supports_getitem_based_fallback_iteration():
+    # No __iter__ is defined; this exercises Python's __getitem__-based fallback iteration
+    # protocol, the same path transformers' LengthGroupedSampler relies on to measure lengths.
+    dataset = InterleavedTrainDataset(
+        _make_tagged_dataset("t", 3), _make_tagged_dataset("i", 3), translation_count=3, instruction_count=3, seed=0
+    )
+    tags = [row["tag"] for row in dataset]
+    assert len(tags) == 6
+
+
+@dataclass
+class _TotalTrainExamplesStub:
+    _num_devices: int
+
+    _estimate_total_train_examples = LLMModel._estimate_total_train_examples
+
+
+def test_estimate_total_train_examples_uses_max_steps_when_set():
+    stub = _TotalTrainExamplesStub(_num_devices=2)
+    training_args = SimpleNamespace(
+        max_steps=100, per_device_train_batch_size=4, gradient_accumulation_steps=8, num_train_epochs=3.0
+    )
+    assert stub._estimate_total_train_examples(training_args, translation_size=1000) == 100 * 4 * 8 * 2
+
+
+def test_estimate_total_train_examples_falls_back_to_num_train_epochs_when_max_steps_unset():
+    stub = _TotalTrainExamplesStub(_num_devices=1)
+    training_args = SimpleNamespace(
+        max_steps=-1, per_device_train_batch_size=4, gradient_accumulation_steps=8, num_train_epochs=3.0
+    )
+    assert stub._estimate_total_train_examples(training_args, translation_size=1000) == 3000
+
+
+def _write_lines(path: Path, lines: list) -> None:
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_write_instruction_data_mixes_evenly_and_uses_undersized_datasets_whole(tmp_path):
+    mt_dir = tmp_path / "mt"
+    instructions_dir = mt_dir / "instructions"
+    instructions_dir.mkdir(parents=True)
+    exp_dir = tmp_path / "exp"
+    exp_dir.mkdir()
+
+    _write_lines(instructions_dir / "a.input.txt", [f"a-in-{i}" for i in range(10)])
+    _write_lines(instructions_dir / "a.output.txt", [f"a-out-{i}" for i in range(10)])
+    # "b" has fewer lines than its even share of the requested size (4), so all of it is used.
+    _write_lines(instructions_dir / "b.input.txt", [f"b-in-{i}" for i in range(3)])
+    _write_lines(instructions_dir / "b.output.txt", [f"b-out-{i}" for i in range(3)])
+
+    stub = _InstructionDataStub(
+        params={"instruction_data": {"datasets": ["a", "b"], "size": 8}},
+        _environment=SilNlpEnv.create_environment_with_mt_dir(mt_dir),
+        exp_dir=exp_dir,
+    )
+
+    count = stub._write_instruction_data()
+    assert count == 4 + 3
+
+    src_lines = (exp_dir / "instruction.src.txt").read_text(encoding="utf-8").splitlines()
+    trg_lines = (exp_dir / "instruction.trg.txt").read_text(encoding="utf-8").splitlines()
+    assert len(src_lines) == len(trg_lines) == count
+    # inputs and outputs stay aligned line-for-line
+    for src_line, trg_line in zip(src_lines, trg_lines):
+        assert src_line.split("-in-")[0] == trg_line.split("-out-")[0]
+
+    a_selected = {line for line in src_lines if line.startswith("a-in-")}
+    b_selected = {line for line in src_lines if line.startswith("b-in-")}
+    assert len(a_selected) == 4
+    assert a_selected.issubset({f"a-in-{i}" for i in range(10)})
+    assert b_selected == {f"b-in-{i}" for i in range(3)}
+
+
+def test_write_instruction_data_missing_file_raises(tmp_path):
+    mt_dir = tmp_path / "mt"
+    (mt_dir / "instructions").mkdir(parents=True)
+    exp_dir = tmp_path / "exp"
+    exp_dir.mkdir()
+    stub = _InstructionDataStub(
+        params={"instruction_data": {"datasets": ["missing"], "size": 10}},
+        _environment=SilNlpEnv.create_environment_with_mt_dir(mt_dir),
+        exp_dir=exp_dir,
+    )
+    with pytest.raises(RuntimeError, match="does not exist"):
+        stub._write_instruction_data()
+
+
+class _StubInferenceModel:
+    def eval(self):
+        return self
+
+    def to(self, device):
+        return self
+
+
+class _StubInferenceProvider:
+    def __init__(self):
+        self.last_checkpoint_path = "unset"
+
+    def create_model_for_inference(self, checkpoint_path):
+        self.last_checkpoint_path = checkpoint_path
+        return _StubInferenceModel()
+
+
+@dataclass
+class _InferenceModelStub:
+    _config: SimpleNamespace
+    _provider: _StubInferenceProvider
+
+    _create_inference_model = LLMModel._create_inference_model
+
+    def get_checkpoint_path(self, ckpt):
+        return (Path("/fake/checkpoint-999"), 999)
+
+
+def test_create_inference_model_resolves_checkpoint_when_model_dir_exists(tmp_path):
+    model_dir = tmp_path / "run"
+    model_dir.mkdir()
+    provider = _StubInferenceProvider()
+    stub = _InferenceModelStub(_config=SimpleNamespace(model_dir=model_dir), _provider=provider)
+
+    stub._create_inference_model(CheckpointType.LAST)
+
+    assert provider.last_checkpoint_path == Path("/fake/checkpoint-999")
+
+
+def test_create_inference_model_falls_back_to_base_model_with_no_checkpoints(tmp_path):
+    # This is what lets the chat script load a bare model name (with no experiment directory,
+    # so model_dir can never exist) as the pristine pretrained model.
+    provider = _StubInferenceProvider()
+    stub = _InferenceModelStub(_config=SimpleNamespace(model_dir=tmp_path / "run"), _provider=provider)
+
+    stub._create_inference_model(CheckpointType.LAST)
+
+    assert provider.last_checkpoint_path is None
