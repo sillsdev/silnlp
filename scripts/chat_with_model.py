@@ -67,7 +67,7 @@ def main() -> None:
 
         messages.append({"role": "user", "content": user_input})
         input_ids = tokenizer.apply_chat_template(
-            messages, add_generation_prompt=True, tokenize=True, return_tensors="pt"
+            messages, add_generation_prompt=True, tokenize=True, return_tensors="pt", return_dict=False
         ).to(model.device)
 
         gen_kwargs = {"max_new_tokens": args.max_new_tokens, "pad_token_id": tokenizer.pad_token_id}
