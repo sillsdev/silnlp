@@ -975,6 +975,13 @@ class LLMModel(NMTModel):
         model.eval()
         return model
 
+    def load_for_inference(
+        self, ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST
+    ) -> Tuple[PreTrainedModel, PreTrainedTokenizerBase]:
+        """Load the model and tokenizer for a checkpoint with no translation-specific prompt
+        building, for callers (e.g. an interactive chat script) that want raw generation access."""
+        return self._create_inference_model(ckpt), self._config.get_hf_tokenizer()
+
     def _get_inference_model(
         self, ckpt: Union[CheckpointType, str, int], src_lang: str, trg_lang: str
     ) -> PreTrainedModel:
