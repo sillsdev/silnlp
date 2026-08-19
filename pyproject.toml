@@ -85,6 +85,8 @@ packaging = "^22.0"
 hanzidentifier = "^1.2.0"
 jarowinkler = "^2.0.1"
 wildebeest-nlp = ">=0.9.0"
+litellm = { version = "^1.77", optional = true }
+rank-bm25 = { version = "^0.2.2", optional = true }
 
 [tool.poetry.group.dev.dependencies]
 types-pyyaml = "^6.0.12.12"
@@ -102,6 +104,7 @@ mypy = "^1.7.1"
 [tool.poetry.extras]
 eflomal = ["eflomal"]
 llm = ["bitsandbytes"]
+icl = ["litellm", "rank-bm25"]
 
 [[tool.poetry.source]]
 name = "torch"

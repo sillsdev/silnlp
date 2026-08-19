@@ -11,7 +11,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum, auto
 from pathlib import Path
 from statistics import mean, median, stdev
-from typing import Any, Dict, Generator, Iterable, List, Optional, Set, TextIO, Tuple, Union, cast
+from typing import Any, Dict, Generator, Iterable, List, Optional, Sequence, Set, TextIO, Tuple, Union, cast
 
 import pandas as pd
 import yaml
@@ -134,6 +134,12 @@ def resolve_checkpoint_path(model_dir: Path, ckpt: Union[CheckpointType, str, in
     return ckpt_path, step
 
 
+@dataclass(frozen=True)
+class Language:
+    iso: str
+    name: str
+
+
 @dataclass
 class InferenceModelParams:
     checkpoint: Union[CheckpointType, str, int]
@@ -238,8 +244,15 @@ class NMTModel(ABC):
         trg_iso: str,
         produce_multiple_translations: bool = False,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
+        vrefs: Optional[Sequence[str]] = None,
     ) -> Generator[SentenceTranslationGroup, None, None]:
-        ...
+        """Translate ``sentences``, yielding one group per sentence, in order.
+
+        ``vrefs``, when supplied, holds the verse reference of each sentence (e.g. "GEN 1:1"),
+        line-parallel with ``sentences``. Models that group sentences by chapter use it; the
+        rest ignore it. It is not always available - plain text and Word documents have no
+        verse references - so it must stay optional.
+        """
 
     def get_checkpoint_path(self, ckpt: Union[CheckpointType, str, int]) -> Tuple[Path, int]:
         return resolve_checkpoint_path(self._config.model_dir, ckpt)

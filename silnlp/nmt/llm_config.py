@@ -21,7 +21,7 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Generator, Iterable, List, Optional, Tuple, Union
+from typing import Any, Dict, Generator, Iterable, List, Optional, Sequence, Tuple, Union
 
 import torch
 from datasets import Dataset
@@ -49,6 +49,7 @@ from .config import (
     CheckpointType,
     Config,
     InferenceModelParams,
+    Language,
     NMTModel,
     collect_training_args,
     find_last_checkpoint,
@@ -149,12 +150,6 @@ def build_generation_kwargs(infer: dict, num_return_sequences: int, pad_token_id
             )
         gen_kwargs["num_beams"] = num_beams
     return gen_kwargs
-
-
-@dataclass(frozen=True)
-class Language:
-    iso: str
-    name: str
 
 
 @dataclass
@@ -825,6 +820,7 @@ class LLMModel(NMTModel):
         trg_iso: str,
         produce_multiple_translations: bool = False,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
+        vrefs: Optional[Sequence[str]] = None,  # unused: this model translates one sentence at a time
     ) -> Generator[SentenceTranslationGroup, None, None]:
         src_lang = self._config.language(src_iso)
         trg_lang = self._config.language(trg_iso)

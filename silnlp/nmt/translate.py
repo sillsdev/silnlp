@@ -3,7 +3,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generator, Iterable, List, Optional, Tuple, Union
+from typing import Generator, Iterable, List, Optional, Sequence, Tuple, Union
 
 from machine.corpora import UsfmFileTextCorpus, create_versification_ref_corpus, extract_scripture_corpus
 from machine.scripture import book_number_to_id, get_chapters
@@ -71,8 +71,11 @@ class NMTTranslator(Translator):
         src_iso: str,
         trg_iso: str,
         produce_multiple_translations: bool = False,
+        vrefs: Optional[Sequence[str]] = None,
     ) -> Generator[SentenceTranslationGroup, None, None]:
-        yield from self._model.translate(sentences, src_iso, trg_iso, produce_multiple_translations, self._checkpoint)
+        yield from self._model.translate(
+            sentences, src_iso, trg_iso, produce_multiple_translations, self._checkpoint, vrefs
+        )
 
     def __exit__(
         self, exc_type, exc_value, traceback  # pyright: ignore[reportUnknownParameterType, reportMissingParameterType]

@@ -235,6 +235,22 @@ class UsfmTextRowCollection:
         sentences = self._match_all_sentences()
         return [self._clean_and_tag_sentence(s) for s in sentences]
 
+    def get_refs_for_translation(self) -> List[str]:
+        """The scripture reference of each sentence get_sentences_for_translation() returns.
+
+        The two lists are line-parallel: empty rows are skipped in both, and a row that was
+        split into several sentences repeats its reference once per sentence. The references
+        are formatted like the vref files (e.g. "GEN 1:1", or "GEN 1:0/1:s" for a heading), so
+        that a model can group them by book and chapter the same way in either path.
+        """
+        refs: List[str] = []
+        for i, row in enumerate(self._text_rows):
+            if i in self._empty_row_indices:
+                continue
+            num_sentences = len(self._subdivided_row_texts.get(i, [""]))
+            refs.extend([str(row.ref)] * num_sentences)
+        return refs
+
     def _filter_out_empty_rows(self) -> List[TextRow]:
         return [s for i, s in enumerate(self._text_rows) if i not in self._empty_row_indices]
 

@@ -48,7 +48,22 @@ def is_llm_config(config: dict) -> bool:
     return any(model.startswith(prefix) for prefix in LLM_MODEL_PREFIXES)
 
 
+def is_icl_config(config: dict) -> bool:
+    """Decide whether a config targets in-context learning with a hosted LLM.
+
+    This requires an explicit ``model_type: icl``: the model name is a LiteLLM model string
+    (e.g. "anthropic/claude-sonnet-4-5", "gpt-4o"), which is arbitrary and cannot be recognized
+    by a prefix match the way the local decoder-only model names can.
+    """
+    return str(config.get("model_type", "")).lower() == "icl"
+
+
 def create_config(exp_dir: Path, config: dict, environment: SilNlpEnv) -> Config:
+    if is_icl_config(config):
+        # Imported lazily so the litellm import cost is only paid for ICL experiments.
+        from .icl_config import ICLConfig
+
+        return ICLConfig(exp_dir, config, environment)
     if is_llm_config(config):
         # Imported lazily so the peft/bitsandbytes import cost is only paid for LLM experiments.
         from .llm_config import LLMConfig

@@ -6,7 +6,7 @@ from contextlib import AbstractContextManager
 from datetime import datetime, timezone
 from itertools import groupby
 from pathlib import Path
-from typing import DefaultDict, Dict, Generator, Generic, Iterable, List, Optional, Tuple, TypeVar
+from typing import DefaultDict, Dict, Generator, Generic, Iterable, List, Optional, Sequence, Tuple, TypeVar
 
 import docx
 from machine.corpora import (
@@ -295,8 +295,13 @@ class Translator(AbstractContextManager["Translator"], ABC):
         src_iso: str,
         trg_iso: str,
         produce_multiple_translations: bool = False,
+        vrefs: Optional[Sequence[str]] = None,
     ) -> Generator[SentenceTranslationGroup, None, None]:
-        pass
+        """Translate ``sentences``, yielding one group per sentence, in order.
+
+        ``vrefs``, when supplied, holds the verse reference of each sentence, line-parallel with
+        ``sentences``. Only the USFM path has them.
+        """
 
     def translate_text(
         self,
@@ -422,6 +427,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
                 src_iso,
                 trg_iso,
                 produce_multiple_translations,
+                sentences.get_refs_for_translation(),
             )
         )
 

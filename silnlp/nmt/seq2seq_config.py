@@ -8,7 +8,7 @@ from contextlib import ExitStack
 from dataclasses import dataclass
 from math import prod
 from pathlib import Path
-from typing import Any, Callable, Dict, Generator, Iterable, List, Optional, Set, Tuple, TypeVar, Union, cast
+from typing import Any, Callable, Dict, Generator, Iterable, List, Optional, Sequence, Set, Tuple, TypeVar, Union, cast
 
 import datasets.utils.logging as datasets_logging
 import evaluate
@@ -1251,6 +1251,7 @@ class Seq2SeqNMTModel(NMTModel):
         trg_iso: str,
         produce_multiple_translations: bool = False,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
+        vrefs: Optional[Sequence[str]] = None,  # unused: this model translates one sentence at a time
     ) -> Generator[SentenceTranslationGroup, None, None]:
         src_lang = self._config.data["lang_codes"].get(src_iso, src_iso)
         trg_lang = self._config.data["lang_codes"].get(trg_iso, trg_iso)

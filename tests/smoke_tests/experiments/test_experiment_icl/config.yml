@@ -1,0 +1,21 @@
+model_type: icl
+# Never actually called: the smoke test injects a mock completion client. The string is a
+# realistic LiteLLM model name so that the config is representative.
+model: anthropic/claude-sonnet-4-5
+data:
+  corpus_pairs:
+  - src: en-BSB
+    trg: es-LBLA
+    test_size: 16
+  lang_codes:
+    en: English
+    es: Spanish
+infer:
+  context_mode: rag
+  retrieval:
+    method: tfidf
+    num_examples: 3
+  batch:
+    granularity: chapter
+    max_size: 8
+  concurrency: 2
