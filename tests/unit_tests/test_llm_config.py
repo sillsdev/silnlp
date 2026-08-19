@@ -7,7 +7,7 @@ from datasets import Dataset
 from jinja2.exceptions import UndefinedError
 
 from silnlp.common.environment import SilNlpEnv
-from silnlp.nmt.config import Config
+from silnlp.nmt.config import CheckpointType, Config
 from silnlp.nmt.config_utils import is_llm_config
 from silnlp.nmt.llm_config import (
     DataCollatorForCausalLM,
@@ -489,3 +489,53 @@ def test_write_instruction_data_missing_file_raises(tmp_path):
     )
     with pytest.raises(RuntimeError, match="does not exist"):
         stub._write_instruction_data()
+
+
+class _StubInferenceModel:
+    def eval(self):
+        return self
+
+    def to(self, device):
+        return self
+
+
+class _StubInferenceProvider:
+    def __init__(self):
+        self.last_checkpoint_path = "unset"
+
+    def create_model_for_inference(self, checkpoint_path):
+        self.last_checkpoint_path = checkpoint_path
+        return _StubInferenceModel()
+
+
+@dataclass
+class _InferenceModelStub:
+    _config: SimpleNamespace
+    _provider: _StubInferenceProvider
+
+    _create_inference_model = LLMModel._create_inference_model
+
+    def get_checkpoint_path(self, ckpt):
+        return (Path("/fake/checkpoint-999"), 999)
+
+
+def test_create_inference_model_resolves_checkpoint_when_model_dir_exists(tmp_path):
+    model_dir = tmp_path / "run"
+    model_dir.mkdir()
+    provider = _StubInferenceProvider()
+    stub = _InferenceModelStub(_config=SimpleNamespace(model_dir=model_dir), _provider=provider)
+
+    stub._create_inference_model(CheckpointType.LAST)
+
+    assert provider.last_checkpoint_path == Path("/fake/checkpoint-999")
+
+
+def test_create_inference_model_falls_back_to_base_model_with_no_checkpoints(tmp_path):
+    # This is what lets the chat script load a bare model name (with no experiment directory,
+    # so model_dir can never exist) as the pristine pretrained model.
+    provider = _StubInferenceProvider()
+    stub = _InferenceModelStub(_config=SimpleNamespace(model_dir=tmp_path / "run"), _provider=provider)
+
+    stub._create_inference_model(CheckpointType.LAST)
+
+    assert provider.last_checkpoint_path is None

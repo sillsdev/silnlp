@@ -979,7 +979,9 @@ class LLMModel(NMTModel):
         self, ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST
     ) -> Tuple[PreTrainedModel, PreTrainedTokenizerBase]:
         """Load the model and tokenizer for a checkpoint with no translation-specific prompt
-        building, for callers (e.g. an interactive chat script) that want raw generation access."""
+        building, for callers (e.g. an interactive chat script) that want raw generation access.
+        A config with no checkpoints on disk (e.g. one built for a bare model name with no
+        experiment directory) naturally loads that pristine pretrained model instead."""
         return self._create_inference_model(ckpt), self._config.get_hf_tokenizer()
 
     def _get_inference_model(

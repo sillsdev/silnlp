@@ -1,9 +1,14 @@
 """Interactively chat with a fine-tuned LLM checkpoint from the terminal -- useful for spot
 checking how well general instruction-following survived translation fine-tuning, since that
-isn't something the translation eval/test metrics can tell you.
+isn't something the translation eval/test metrics can tell you. `target` can be either an
+experiment name (chats with its fine-tuned checkpoint) or a bare HuggingFace model id/path (chats
+with that model's un-fine-tuned weights directly, e.g. for a before/after comparison); whichever
+it is gets detected automatically.
 """
 
 import argparse
+import tempfile
+from pathlib import Path
 
 import torch
 
@@ -16,8 +21,8 @@ RESET_COMMANDS = {"/reset", "/new"}
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Chat with a fine-tuned LLM checkpoint")
-    parser.add_argument("experiment", help="Experiment name")
+    parser = argparse.ArgumentParser(description="Chat with a fine-tuned LLM checkpoint, or a base LLM")
+    parser.add_argument("target", help="Experiment name, or a bare HuggingFace model id/path")
     parser.add_argument("--checkpoint", default="last", help="Checkpoint to use (last, best, or a checkpoint step #)")
     parser.add_argument("--system-message", default="", help="Optional system message for the conversation")
     parser.add_argument("--max-new-tokens", type=int, default=512, help="Max tokens to generate per reply")
@@ -27,9 +32,19 @@ def main() -> None:
     args = parser.parse_args()
 
     environment = SilNlpEnv.create_standard_environment()
-    config = load_config(args.experiment, environment)
-    if not isinstance(config, LLMConfig):
-        parser.error(f"Experiment '{args.experiment}' is not an LLM experiment.")
+    is_experiment = (environment.get_mt_exp_dir(args.target) / "config.yml").is_file()
+
+    if is_experiment:
+        config = load_config(args.target, environment)
+        if not isinstance(config, LLMConfig):
+            parser.error(f"Experiment '{args.target}' is not an LLM experiment.")
+        label = f"'{args.target}' (checkpoint={args.checkpoint})"
+    else:
+        # A config for a bare model name, with no experiment directory behind it: its model_dir
+        # can never exist, so load_for_inference naturally loads the pristine pretrained model
+        # instead of looking for a checkpoint.
+        config = LLMConfig(Path(tempfile.gettempdir()) / "silnlp-chat-base", {"model": args.target}, environment)
+        label = f"base model '{args.target}'"
 
     if config.model.lower().startswith(TRANSLATE_GEMMA_MODEL_PREFIXES):
         print(
@@ -47,7 +62,7 @@ def main() -> None:
     base_messages = [{"role": "system", "content": args.system_message}] if args.system_message else []
     messages = list(base_messages)
 
-    print(f"Chatting with '{args.experiment}' (checkpoint={args.checkpoint}).")
+    print(f"Chatting with {label}.")
     print("Commands: /reset to clear history, /exit to quit.\n")
 
     while True:
