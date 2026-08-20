@@ -64,7 +64,7 @@ python-Levenshtein = "^0.27.1"
 lxml = "^4.6.3"
 tqdm = "^4.62.2"
 sacrebleu = "^2.3.1"
-sil-machine = {extras = ["thot"], version = "1.8.11"}
+sil-machine = {extras = ["thot"], version = "1.9.2"}
 datasets = "^2.7.1"
 torch = {version = "^2.4", source = "torch"}
 sacremoses = "^0.0.53"
