@@ -1,6 +1,6 @@
 [tool.black]
 line-length = 120
-target-version = ['py310']
+target-version = ['py312']
 include = '\.pyi?$'
 exclude = '''
 /(
@@ -46,7 +46,7 @@ silnlp-alignment-test = "silnlp.alignment.test:main"
 silnlp-alignment-aggregate-results = "silnlp.alignment.aggregate_results:main"
 
 [tool.poetry.dependencies]
-python = ">=3.10,<3.11"
+python = ">=3.12,<3.13"
 pandas = "^2.2"
 sentencepiece = "^0.2.0"
 nltk = "^3.5"
