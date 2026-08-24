@@ -114,6 +114,23 @@ class TokenOccurrenceLogger:
         for token in missing_tokens:
             self._log_token(token)
 
+    def log_learned_tokens(self, tokens: List[str], merges: List[Tuple[str, str]], counts: List[int]) -> None:
+        """Log details for tokens learned by merging pieces of the existing tokenization.
+
+        Unlike log(), this does not scan the corpus. The pair each token was built from and the
+        number of times that pair occurred are already known from training, and searching the raw
+        text for a token that is only part of a word would over-count it: the merge fires only
+        where the tokenizer happened to leave those pieces adjacent.
+        """
+        if not tokens:
+            return
+        self._log_message(f"\nLogging details for {len(tokens)} learned tokens...")
+        for token, (left, right), count in zip(tokens, merges, counts):
+            self._log_message(
+                f"\nToken: {repr(token)}\nUnicode: [{_get_unicode_details(token)}]\n"
+                f"  Merged from: {repr(left)} + {repr(right)}\n  Occurrences: {count}\n"
+            )
+
     def _log_token(self, token: str) -> None:
         self._log_message(f"\nToken: {repr(token)}\nUnicode: [{_get_unicode_details(token)}]\n")
         pattern = _build_search_pattern(token)

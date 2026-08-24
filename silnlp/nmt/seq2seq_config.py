@@ -4,6 +4,7 @@ import logging
 import os
 import re
 from abc import ABC, abstractmethod
+from collections import Counter
 from contextlib import ExitStack
 from dataclasses import dataclass
 from math import prod
@@ -23,7 +24,7 @@ from datasets import Dataset
 from machine.scripture import VerseRef
 from sacremoses import MosesPunctNormalizer
 from tokenizers import AddedToken, NormalizedString, Regex
-from tokenizers.implementations import SentencePieceBPETokenizer, SentencePieceUnigramTokenizer
+from tokenizers.implementations import SentencePieceUnigramTokenizer
 from tokenizers.normalizers import Normalizer
 from torch import Tensor, nn, optim
 from torch.utils.data import Dataset as TorchDataset
@@ -79,6 +80,18 @@ from .config import (
 from .corpora import DataFile
 from .token_occurrence_logger import TokenOccurrenceLogger
 from .tokenizer import NullTokenizer, Tokenizer
+from .vocab_extension import (
+    DEFAULT_MIN_FREQUENCY,
+    Merge,
+    WordCounts,
+    add_bpe_tokens_and_merges,
+    build_extended_bpe_tokenizer,
+    find_missing_characters,
+    learn_bpe_merges,
+    normalize_merges,
+    split_added_token_counts,
+    tokenize_words,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -158,9 +171,31 @@ RENAMED_CONFIG_KEYS = {
 }
 
 SP_TOKENIZER_CONFIG = {
-    "facebook/nllb-200": {"type": "BPE", "special_tokens": ["<s>", "<pad>", "</s>", "<unk>", "<mask>"]},
+    # BPE models extend their vocabulary by learning merges on top of the base tokenization
+    # (see vocab_extension), so they need no from-scratch trainer settings.
+    "facebook/nllb-200": {"type": "BPE"},
     "google/madlad400": {"type": "Unigram", "special_tokens": ["<unk>", "<s>", "</s>"], "unk_token": "<unk>"},
 }
+
+# data.tokenizer keys whose meaning changed when trained tokens moved to the NLLB-first scheme.
+RENAMED_TOKENIZER_KEYS = {"src_vocab_size": "src_add_tokens", "trg_vocab_size": "trg_add_tokens"}
+
+
+def migrate_renamed_tokenizer_keys(config: dict) -> None:
+    tok_dict = config.get("data", {}).get("tokenizer")
+    if not isinstance(tok_dict, dict):
+        return
+    for old_name, new_name in RENAMED_TOKENIZER_KEYS.items():
+        if old_name not in tok_dict:
+            continue
+        value = tok_dict.pop(old_name)
+        LOGGER.warning(
+            f"data.tokenizer.{old_name} was renamed to data.tokenizer.{new_name} and now directly sets the number of "
+            f"tokens added to the vocabulary rather than the size of a tokenizer trained from scratch. "
+            f"Carrying the value {value} over to data.tokenizer.{new_name}."
+        )
+        tok_dict.setdefault(new_name, value)
+
 
 # "loss" and "eval_loss" are both evaluation loss
 # The early stopping callback adds "eval_" to all metrics that don't already start with it
@@ -348,6 +383,7 @@ class Seq2SeqConfig(Config):
     def __init__(self, exp_dir: Path, config: dict, environment: SilNlpEnv) -> None:
         self.environment = environment
         warn_about_renamed_keys(config, RENAMED_CONFIG_KEYS)
+        migrate_renamed_tokenizer_keys(config)
         config = merge_dict(
             {
                 "data": {
@@ -361,10 +397,11 @@ class Seq2SeqConfig(Config):
                     "add_new_lang_code": True,
                     "tokenizer": {
                         "init_unk": False,
+                        "min_frequency": DEFAULT_MIN_FREQUENCY,
                         "share_vocab": False,
-                        "src_vocab_size": 500,
+                        "src_add_tokens": 500,
                         "trained_tokens": False,
-                        "trg_vocab_size": 500,
+                        "trg_add_tokens": 500,
                         "update_src": True,
                         "update_trg": True,
                     },
@@ -486,23 +523,16 @@ class Seq2SeqConfig(Config):
 
     def _add_tokens(
         self,
-        missing_tokens: List[str],
-        trained_tokenizers: Optional[List[Union[SentencePieceBPETokenizer, SentencePieceUnigramTokenizer]]] = None,
+        new_tokens: List[str],
+        trained_tokenizers: Optional[List[SentencePieceUnigramTokenizer]] = None,
+        new_merges: Optional[List[Merge]] = None,
     ) -> None:
         assert self._tokenizer is not None
         self._tokenizer.save_pretrained(str(self.exp_dir))
         with open(self.exp_dir / "tokenizer.json", "r+", encoding="utf-8") as file:
             data = json.load(file)
             if data["model"]["type"] == "BPE":
-                vocab_len = len(data["model"]["vocab"].keys())
-                for i, token in enumerate(missing_tokens):
-                    data["model"]["vocab"][token] = vocab_len + i
-                if trained_tokenizers:
-                    for trained_tok in trained_tokenizers:
-                        trained_tok.save(str(self.exp_dir / "tokenizer_trained.json"))
-                        with open(self.exp_dir / "tokenizer_trained.json", "r+", encoding="utf-8") as trained_file:
-                            trained_data = json.load(trained_file)
-                            data["model"]["merges"] = trained_data["model"]["merges"] + data["model"]["merges"]
+                add_bpe_tokens_and_merges(data, new_tokens, new_merges or [])
             elif data["model"]["type"] == "Unigram":
                 if trained_tokenizers:
                     for trained_tok in trained_tokenizers:
@@ -516,7 +546,7 @@ class Seq2SeqConfig(Config):
                                     del trained_data["model"]["vocab"][i]
                             data["model"]["vocab"] = data["model"]["vocab"] + trained_data["model"]["vocab"]
                 else:
-                    for token in missing_tokens:
+                    for token in new_tokens:
                         data["model"]["vocab"].append([token, -18])
             file.seek(0)
             json.dump(data, file, ensure_ascii=False, indent=4)
@@ -524,125 +554,240 @@ class Seq2SeqConfig(Config):
         self._tokenizer = AutoTokenizer.from_pretrained(str(self.exp_dir), use_fast=True, token=False)
         return
 
-    def _train_sp_tokenizer(self, files, vocab_size) -> Union[SentencePieceBPETokenizer, SentencePieceUnigramTokenizer]:
+    def _train_unigram_tokenizer(self, files, vocab_size) -> SentencePieceUnigramTokenizer:
         assert self._tokenizer is not None
         sp_tok_config = SP_TOKENIZER_CONFIG[self.model_prefix]
-        sp_tok = SentencePieceBPETokenizer() if sp_tok_config["type"] == "BPE" else SentencePieceUnigramTokenizer()
+        sp_tok = SentencePieceUnigramTokenizer()
         hf_tokenizer = HuggingFaceTokenizer(
             self._tokenizer, self.data["lang_codes"], self.train["max_source_length"], self.train["max_target_length"]
         )
         sp_tok.normalizer = Normalizer.custom(CustomNormalizerWrapper(hf_tokenizer))
-
-        if sp_tok_config["type"] == "BPE":
-            sp_tok.train(files, vocab_size=vocab_size, min_frequency=2, special_tokens=sp_tok_config["special_tokens"])
-        elif sp_tok_config["type"] == "Unigram":
-            sp_tok: SentencePieceUnigramTokenizer
-            sp_tok.train(
-                files,
-                vocab_size=vocab_size,
-                special_tokens=sp_tok_config["special_tokens"],
-                unk_token=sp_tok_config["unk_token"],
-            )
+        sp_tok.train(
+            files,
+            vocab_size=vocab_size,
+            special_tokens=sp_tok_config["special_tokens"],
+            unk_token=sp_tok_config["unk_token"],
+        )
         sp_tok.normalizer = self._tokenizer.backend_tokenizer.normalizer
         return sp_tok
 
-    def _create_trained_tokens(
-        self, file_paths, vocab_size
-    ) -> Tuple[List[str], Union[SentencePieceBPETokenizer, SentencePieceUnigramTokenizer]]:
+    def _create_trained_unigram_tokens(self, file_paths, vocab_size) -> Tuple[List[str], SentencePieceUnigramTokenizer]:
         assert self._tokenizer is not None
         files = [str(f) for f in file_paths]
-        sp_tokenizer = self._train_sp_tokenizer(files, vocab_size)
+        sp_tokenizer = self._train_unigram_tokenizer(files, vocab_size)
         sp_keys, tok_keys = sp_tokenizer.get_vocab().keys(), self._tokenizer.get_vocab().keys()
         missing_tokens = sorted(list(set(sp_keys) - set(tok_keys)))
         with TokenOccurrenceLogger(list(file_paths), self.exp_dir) as token_occurrence_logger:
             token_occurrence_logger.log(missing_tokens)
         return missing_tokens, sp_tokenizer
 
-    def _find_missing_characters(self, corpus: List[Path]) -> List[str]:
+    def _count_corpus_words(self, file_paths: Iterable[Path]) -> WordCounts:
+        """Count how often each word occurs, normalized and split the way the tokenizer splits it.
+
+        This is the only pass over the corpus files; everything downstream works from the counts.
+        """
         assert self._tokenizer is not None
-        vocab = self._tokenizer.get_vocab().keys()
-        charset: Set[str] = set()
         hf_tokenizer = HuggingFaceTokenizer(
             self._tokenizer, self.data["lang_codes"], self.train["max_source_length"], self.train["max_target_length"]
         )
-        for file in corpus:
-            with file.open("r", encoding="utf-8-sig") as f:
+        pre_tokenize = self._tokenizer.backend_tokenizer.pre_tokenizer.pre_tokenize_str
+        counts: WordCounts = Counter()
+        for file_path in sorted(file_paths):
+            with file_path.open("r", encoding="utf-8-sig") as f:
                 for line in f:
-                    charset = charset | set(hf_tokenizer.normalize(Side.TARGET, line))
+                    for word, _span in pre_tokenize(hf_tokenizer.normalize(Side.TARGET, line)):
+                        counts[word] += 1
+        return counts
 
-        charset = set(filter(None, {char.strip() for char in charset}))
-        missing_characters = sorted(list(charset - vocab))
+    def _find_missing_characters(
+        self, corpus: List[Path], vocab: Set[str], word_counts: Optional[WordCounts] = None
+    ) -> List[str]:
+        """Return the corpus characters missing from ``vocab``, logging where each one occurs.
+
+        Pass ``word_counts`` when the corpus has already been counted, to skip normalizing and
+        splitting every line again -- the slowest part of the scan. ``corpus`` is still required
+        either way: the occurrence log reports which files and lines each character came from.
+        """
+        if word_counts is None:
+            word_counts = self._count_corpus_words(corpus)
+        missing_characters = find_missing_characters(word_counts, vocab)
         with TokenOccurrenceLogger(corpus, self.exp_dir) as token_occurrence_logger:
             token_occurrence_logger.log(missing_characters)
         return missing_characters
 
-    def _build_vocabs(self, stats: bool = False) -> None:
-        tok_dict = self.data.get("tokenizer")
-        self._tokenizer = self.get_or_create_tokenizer()
+    def _extend_bpe_vocab(self, tok_dict: dict) -> Tuple[int, int]:
+        """Learn new tokens on top of the base tokenization and add them to the tokenizer.
+
+        The base tokenizer segments the corpus first. Merges are then learned over the tokens it
+        produced and appended after every base rule, so the base segmentation is preserved and only
+        what it left unmerged gets combined further. Each learned merge adds exactly one token, so
+        the configured counts are the counts actually added.
+
+        Returns the number of tokens added on behalf of each side.
+        """
+        assert self._tokenizer is not None
+        update_src = bool(tok_dict.get("update_src"))
+        update_trg = bool(tok_dict.get("update_trg"))
+        share_vocab = self._shares_vocab(tok_dict)
+        min_frequency = tok_dict.get("min_frequency", DEFAULT_MIN_FREQUENCY)
+
+        src_words = self._count_corpus_words(self.src_file_paths) if update_src else WordCounts()
+        trg_words = self._count_corpus_words(self.trg_file_paths) if update_trg else WordCounts()
+        all_words = src_words + trg_words
+
+        base_json = json.loads(self._tokenizer.backend_tokenizer.to_str())
+        base_pairs = {tuple(merge) for merge in normalize_merges(base_json["model"]["merges"])}
+
+        # A character the base model does not know becomes <unk> and takes the rest of its word with
+        # it, so every missing character has to be in the vocabulary before anything is segmented.
+        scanned_files = (self.src_file_paths if update_src else set()) | (self.trg_file_paths if update_trg else set())
+        # The model vocabulary, not the tokenizer's, because that is what model.tokenize consults.
+        missing_chars = self._find_missing_characters(
+            sorted(scanned_files), set(base_json["model"]["vocab"]), all_words
+        )
+        staged, staged_json = build_extended_bpe_tokenizer(base_json, missing_chars, [])
+
+        def learn(words: WordCounts, num_tokens: int, side: str) -> Tuple[List[Merge], List[str]]:
+            if not words or num_tokens <= 0:
+                return [], []
+            tokenized, rejected = tokenize_words(staged, words)
+            if rejected:
+                LOGGER.warning(
+                    f"{len(rejected)} distinct {side} words could not be tokenized and were skipped, "
+                    f"for example: {sorted(rejected)[:5]}"
+                )
+            merges, tokens, counts = learn_bpe_merges(tokenized, num_tokens, set(staged.get_vocab()), min_frequency)
+            # Re-appending a rule the base tokenizer already has would demote it to the bottom of
+            # the list and silently change how the base model segments text. The base tokenization
+            # is a fixed point so no learned pair can collide, but the damage would be invisible.
+            colliding = base_pairs.intersection(merges)
+            assert not colliding, f"learned merges duplicate base merges: {sorted(colliding)[:5]}"
+            if len(merges) < num_tokens:
+                LOGGER.warning(f"Requested {num_tokens} new {side} tokens but the corpus only supports {len(merges)}.")
+            LOGGER.info(f"Learned {len(merges)} new {side} tokens.")
+            with TokenOccurrenceLogger([], self.exp_dir) as logger:
+                logger.log_learned_tokens(tokens, merges, counts)
+            return merges, tokens
+
+        new_merges: List[Merge] = []
+        shared_tokens: List[str] = []
+        src_tokens: List[str] = []
+        trg_tokens: List[str] = []
+        if share_vocab:
+            merges, shared_tokens = learn(all_words, tok_dict["src_add_tokens"] + tok_dict["trg_add_tokens"], "shared")
+            new_merges += merges
+        else:
+            if update_src:
+                merges, src_tokens = learn(src_words, tok_dict["src_add_tokens"], "source")
+                new_merges += merges
+                if update_trg and merges:
+                    # Stage the source merges so the target pass sees what is genuinely left
+                    # unmerged rather than relearning rules the source pass already added.
+                    staged, staged_json = build_extended_bpe_tokenizer(staged_json, src_tokens, merges)
+            if update_trg:
+                merges, trg_tokens = learn(trg_words, tok_dict["trg_add_tokens"], "target")
+                new_merges += merges
+
+        added_tokens = missing_chars + shared_tokens + src_tokens + trg_tokens
+        if added_tokens or new_merges:
+            self._add_tokens(added_tokens, new_merges=new_merges)
+
+        src_charset = {char for word in src_words for char in word}
+        src_chars = [char for char in missing_chars if char in src_charset]
+        trg_chars = [char for char in missing_chars if char not in src_charset]
+        return split_added_token_counts(shared_tokens, src_chars + src_tokens, trg_chars + trg_tokens)
+
+    def _extend_unigram_vocab(self, tok_dict: dict) -> Tuple[int, int]:
+        """Add tokens from a Unigram tokenizer trained from scratch on the raw corpus.
+
+        Unigram models have no merge rules, so they cannot be extended the way BPE models are.
+        """
         trained_tokenizers = []
         missing_tokens: List[str] = []
         src_missing_tokens: List[str] = []
         trg_missing_tokens: List[str] = []
-        if tok_dict and (tok_dict.get("update_src") or tok_dict.get("update_trg")):
-            if (
-                tok_dict.get("trained_tokens")
-                and (self.environment.assets_dir / "tokenizers" / self.model_prefix / "tokenizer_config.json").is_file()
-            ):
-                if not tok_dict.get("share_vocab") and tok_dict.get("update_src") and tok_dict.get("update_trg"):
-                    src_missing_tokens, src_trained_tokenizer = self._create_trained_tokens(
-                        list(self.src_file_paths), tok_dict.get("src_vocab_size")
-                    )
-                    trg_missing_tokens, trg_trained_tokenizer = self._create_trained_tokens(
-                        list(self.trg_file_paths), tok_dict.get("trg_vocab_size")
-                    )
-                    trg_missing_tokens = sorted(list(set(trg_missing_tokens) - set(src_missing_tokens)))
-                    missing_tokens = src_missing_tokens + trg_missing_tokens
-                    trained_tokenizers = [src_trained_tokenizer] + [trg_trained_tokenizer]
-                else:
-                    if tok_dict.get("share_vocab") and tok_dict.get("update_src") and tok_dict.get("update_trg"):
-                        missing_tokens, trained_tokenizer = self._create_trained_tokens(
-                            list(self.src_file_paths) + list(self.trg_file_paths),
-                            tok_dict.get("src_vocab_size") + tok_dict.get("trg_vocab_size"),
-                        )
-                    elif tok_dict.get("update_src"):
-                        missing_tokens, trained_tokenizer = self._create_trained_tokens(
-                            list(self.src_file_paths), tok_dict.get("src_vocab_size")
-                        )
-                        src_missing_tokens = missing_tokens
-                    elif tok_dict.get("update_trg"):
-                        missing_tokens, trained_tokenizer = self._create_trained_tokens(
-                            list(self.trg_file_paths), tok_dict.get("trg_vocab_size")
-                        )
-                        trg_missing_tokens = missing_tokens
-                    trained_tokenizers.append(trained_tokenizer)
-            else:
-                if tok_dict.get("update_src"):
-                    missing_tokens = src_missing_tokens = self._find_missing_characters(list(self.src_file_paths))
-                if tok_dict.get("update_trg"):
-                    missing_tokens = trg_missing_tokens = self._find_missing_characters(list(self.trg_file_paths))
-                if tok_dict.get("update_src") and tok_dict.get("update_trg"):
-                    trg_missing_tokens = sorted(list(set(trg_missing_tokens) - set(src_missing_tokens)))
-                    missing_tokens = src_missing_tokens + trg_missing_tokens
-
-            if missing_tokens:
-                self._add_tokens(missing_tokens, trained_tokenizers)
-
-            if tok_dict.get("share_vocab") and tok_dict.get("update_src") and tok_dict.get("update_trg"):
-                # TODO: Calculate representative split of tokens for shared vocab case
-                stats_data = [
-                    ["Source", int(len(missing_tokens) / 2)],
-                    ["Target", len(missing_tokens) - int(len(missing_tokens) / 2)],
-                ]
-            else:
-                stats_data = [
-                    ["Source", len(src_missing_tokens)],
-                    ["Target", len(trg_missing_tokens)],
-                ]
+        if not self._shares_vocab(tok_dict) and tok_dict.get("update_src") and tok_dict.get("update_trg"):
+            src_missing_tokens, src_trained_tokenizer = self._create_trained_unigram_tokens(
+                list(self.src_file_paths), tok_dict.get("src_add_tokens")
+            )
+            trg_missing_tokens, trg_trained_tokenizer = self._create_trained_unigram_tokens(
+                list(self.trg_file_paths), tok_dict.get("trg_add_tokens")
+            )
+            trg_missing_tokens = sorted(list(set(trg_missing_tokens) - set(src_missing_tokens)))
+            missing_tokens = src_missing_tokens + trg_missing_tokens
+            trained_tokenizers = [src_trained_tokenizer] + [trg_trained_tokenizer]
         else:
-            stats_data = [
-                ["Source", 0],
-                ["Target", 0],
-            ]
+            if self._shares_vocab(tok_dict):
+                missing_tokens, trained_tokenizer = self._create_trained_unigram_tokens(
+                    list(self.src_file_paths) + list(self.trg_file_paths),
+                    tok_dict.get("src_add_tokens") + tok_dict.get("trg_add_tokens"),
+                )
+            elif tok_dict.get("update_src"):
+                missing_tokens, trained_tokenizer = self._create_trained_unigram_tokens(
+                    list(self.src_file_paths), tok_dict.get("src_add_tokens")
+                )
+                src_missing_tokens = missing_tokens
+            elif tok_dict.get("update_trg"):
+                missing_tokens, trained_tokenizer = self._create_trained_unigram_tokens(
+                    list(self.trg_file_paths), tok_dict.get("trg_add_tokens")
+                )
+                trg_missing_tokens = missing_tokens
+            trained_tokenizers.append(trained_tokenizer)
+
+        if missing_tokens:
+            self._add_tokens(missing_tokens, trained_tokenizers)
+        if self._shares_vocab(tok_dict):
+            return split_added_token_counts(missing_tokens, [], [])
+        return split_added_token_counts([], src_missing_tokens, trg_missing_tokens)
+
+    def _add_missing_characters(self, tok_dict: dict) -> Tuple[int, int]:
+        """Add only the characters the tokenizer does not already have."""
+        missing_tokens: List[str] = []
+        src_missing_tokens: List[str] = []
+        trg_missing_tokens: List[str] = []
+        if tok_dict.get("update_src"):
+            missing_tokens = src_missing_tokens = self._find_missing_characters(
+                list(self.src_file_paths), set(self._tokenizer.get_vocab())
+            )
+        if tok_dict.get("update_trg"):
+            missing_tokens = trg_missing_tokens = self._find_missing_characters(
+                list(self.trg_file_paths), set(self._tokenizer.get_vocab())
+            )
+        if tok_dict.get("update_src") and tok_dict.get("update_trg"):
+            trg_missing_tokens = sorted(list(set(trg_missing_tokens) - set(src_missing_tokens)))
+            missing_tokens = src_missing_tokens + trg_missing_tokens
+
+        if missing_tokens:
+            self._add_tokens(missing_tokens)
+        if self._shares_vocab(tok_dict):
+            return split_added_token_counts(missing_tokens, [], [])
+        return split_added_token_counts([], src_missing_tokens, trg_missing_tokens)
+
+    @staticmethod
+    def _shares_vocab(tok_dict: dict) -> bool:
+        """Whether both sides are updated and draw from a single shared pool of added tokens."""
+        return bool(tok_dict.get("share_vocab") and tok_dict.get("update_src") and tok_dict.get("update_trg"))
+
+    def _build_vocabs(self, stats: bool = False) -> None:
+        tok_dict = self.data.get("tokenizer")
+        self._tokenizer = self.get_or_create_tokenizer()
+        src_added = 0
+        trg_added = 0
+        if tok_dict and (tok_dict.get("update_src") or tok_dict.get("update_trg")):
+            base_tokenizer_available = (
+                self.environment.assets_dir / "tokenizers" / self.model_prefix / "tokenizer_config.json"
+            ).is_file()
+            if tok_dict.get("trained_tokens") and base_tokenizer_available:
+                if SP_TOKENIZER_CONFIG.get(self.model_prefix, {}).get("type") == "BPE":
+                    src_added, trg_added = self._extend_bpe_vocab(tok_dict)
+                else:
+                    src_added, trg_added = self._extend_unigram_vocab(tok_dict)
+            else:
+                src_added, trg_added = self._add_missing_characters(tok_dict)
+        stats_data = [
+            ["Source", src_added],
+            ["Target", trg_added],
+        ]
 
         if stats and self.data["tokenize"]:
             stats_columns = pd.MultiIndex.from_tuples(
