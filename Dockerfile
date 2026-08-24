@@ -1,5 +1,5 @@
-ARG PYTHON_VERSION=3.10
-ARG POETRY_VERSION=1.7.1
+ARG PYTHON_VERSION=3.12
+ARG POETRY_VERSION=2.4.1
 
 FROM python:$PYTHON_VERSION-slim AS builder
 ARG POETRY_VERSION
@@ -22,9 +22,7 @@ RUN poetry export --without-hashes -f requirements.txt > requirements.txt
 COPY . /src
 RUN poetry build
 
-FROM ubuntu:22.04
-
-ARG PYTHON_VERSION=3.10
+FROM ubuntu:24.04
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=on
 ENV TZ=America/New_York
