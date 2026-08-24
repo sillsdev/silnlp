@@ -1,6 +1,6 @@
-ARG PYTHON_VERSION=3.10
-ARG POETRY_VERSION=1.7.1
-FROM ubuntu:22.04
+ARG PYTHON_VERSION=3.12
+ARG POETRY_VERSION=2.4.1
+FROM ubuntu:24.04
 ARG PYTHON_VERSION
 ARG POETRY_VERSION
 WORKDIR /app
@@ -41,5 +41,5 @@ RUN poetry config virtualenvs.create true && \
 RUN rm -rf /var/lib/apt/lists/*
 # Set environment variables
 ENV CLEARML_API_HOST="https://api.sil.hosted.allegro.ai"
-ENV EFLOMAL_PATH=/workspaces/silnlp/.venv/lib/python3.10/site-packages/eflomal/bin
+ENV EFLOMAL_PATH=/workspaces/silnlp/.venv/lib/python3.12/site-packages/eflomal/bin
 CMD ["bash"]
