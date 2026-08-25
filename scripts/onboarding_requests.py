@@ -9,8 +9,8 @@ from enum import Enum
 from pathlib import Path
 from typing import List
 
-from requests import Response, post, get
 from clearml import Task
+from requests import Response, get, post
 
 LOGGER = logging.getLogger(__name__)
 
@@ -210,13 +210,29 @@ def add_comment(request_id: str, comment: str):
     )
 
 
+def get_request_by_id(request_id: str) -> dict:
+    response = send_request(
+        RequestType.GET,
+        OnboardingEnvironment.ONBOARDING_REQUESTS_URL,
+        "getRequestById",
+        {"requestId": request_id},
+    )
+    if response.status_code != 200:
+        raise Exception(f"Failed to get request by ID {request_id}. Status code: {response.status_code}")
+    return response.json().get("result", {})
+
+
 def get_onboarding_requests() -> List[dict]:
     all_requests = (
         send_request(RequestType.GET, OnboardingEnvironment.ONBOARDING_REQUESTS_URL, "getAllRequests", {})
         .json()
         .get("result", [])
     )
-    return [request for request in all_requests if request["status"] == "new"] if all_requests else []
+    return (
+        [get_request_by_id(request["id"]) for request in all_requests if request["status"] == "new"]
+        if all_requests
+        else []
+    )
 
 
 def append_datestamp(project_name: str) -> str:
