@@ -687,7 +687,7 @@ class Config(ABC):
                     split_size = test_size
                     if isinstance(split_size, float):
                         split_size = int(split_size if split_size > 1 else corpus_count * split_size)
-                    test_indices = set(random.sample(indices, min(split_size, len(indices))))
+                    test_indices = set(random.sample(sorted(indices), min(split_size, len(indices))))
 
                 if len(pair.test_books) > 0:
                     if test_size > 0:
@@ -729,7 +729,7 @@ class Config(ABC):
                     split_size = val_size
                     if isinstance(split_size, float):
                         split_size = int(split_size if split_size > 1 else corpus_count * split_size)
-                    val_indices = set(random.sample(indices, min(split_size, len(indices))))
+                    val_indices = set(random.sample(sorted(indices), min(split_size, len(indices))))
 
                 cur_train, cur_val = split_parallel_corpus(
                     cur_train, val_size, pair_val_indices.get((src_file.iso, trg_file.iso), val_indices)
