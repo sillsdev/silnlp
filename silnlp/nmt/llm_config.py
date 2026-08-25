@@ -18,6 +18,7 @@ built with the model's native chat template and a configurable translation instr
 """
 
 import logging
+import random
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +28,7 @@ import torch
 from datasets import Dataset
 from jinja2.exceptions import UndefinedError
 from machine.corpora import TextFileTextCorpus
+from torch.utils.data import Dataset as TorchDataset
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
@@ -41,6 +43,7 @@ from transformers import (
     set_seed,
 )
 
+from ..common.corpus import split_corpus
 from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup
 from ..common.translator import generate_confidence_files
@@ -55,7 +58,7 @@ from .config import (
     warn_about_renamed_keys,
     write_effective_config,
 )
-from .corpora import DataFile
+from .corpora import DataFile, get_parallel_corpus_size
 from .seq2seq_config import batch_sentences, find_executable_batch_size
 from .tokenizer import NullTokenizer, Tokenizer
 
@@ -392,6 +395,15 @@ class LLMConfig(Config):
                             "Translate the following text from {src_lang} to {trg_lang}.\n\n{source}"
                         ),
                     },
+                    "instruction_data": {
+                        # Names of datasets to mix in. Each name must have a matching
+                        # <name>.input.txt / <name>.output.txt pair under <mt_dir>/instructions
+                        # (see scripts/prepare_instruction_data.py).
+                        "datasets": [],
+                        "size": 100000,
+                        # Rate at which instruction examples are mixed into training batches
+                        "mix_ratio": 0.1,
+                    },
                 },
                 "model": "google/gemma-2-2b-it",
             },
@@ -434,6 +446,77 @@ class LLMConfig(Config):
     @property
     def adapter(self) -> dict:
         return self.params["adapter"]
+
+    @property
+    def instruction_datasets(self) -> List[str]:
+        return list(self.params["instruction_data"]["datasets"])
+
+    @property
+    def instruction_data_size(self) -> int:
+        size = int(self.params["instruction_data"]["size"])
+        if size < 0:
+            raise ValueError(f"params.instruction_data.size must be non-negative, got {size}.")
+        return size
+
+    @property
+    def instruction_mix_ratio(self) -> float:
+        ratio = float(self.params["instruction_data"]["mix_ratio"])
+        if ratio < 0:
+            raise ValueError(f"params.instruction_data.mix_ratio must be non-negative, got {ratio}.")
+        return ratio
+
+    def instruction_data_paths(self) -> List[Tuple[Path, Path]]:
+        """Resolve each configured instruction dataset name to its (input, output) file pair
+        under <mt_dir>/instructions. Kept separate from src_file_paths/trg_file_paths so
+        preprocessing never writes instruction data into train.src.txt/train.trg.txt."""
+        datasets = self.instruction_datasets
+        if not datasets:
+            return []
+        instructions_dir = self._environment.mt_dir / "instructions"
+        return [(instructions_dir / f"{name}.input.txt", instructions_dir / f"{name}.output.txt") for name in datasets]
+
+    def _write_instruction_data(self) -> int:
+        dataset_paths = self.instruction_data_paths()
+        if not dataset_paths:
+            return 0
+
+        base_share, remainder = divmod(self.instruction_data_size, len(dataset_paths))
+
+        count = 0
+        with (
+            self._open_append(self.instruction_src_filename()) as instruction_src_file,
+            self._open_append(self.instruction_trg_filename()) as instruction_trg_file,
+        ):
+            for i, (input_path, output_path) in enumerate(dataset_paths):
+                if not input_path.is_file() or not output_path.is_file():
+                    raise RuntimeError(
+                        f"Instruction data file {input_path} or {output_path} does not exist. Run "
+                        "scripts/prepare_instruction_data.py to generate it."
+                    )
+                # Datasets mix evenly regardless of their original relative sizes; a dataset
+                # smaller than its even share is used in full, without repetition (see split_corpus).
+                share = base_share + (1 if i < remainder else 0)
+                corpus_size = get_parallel_corpus_size(input_path, output_path)
+                selected_indices = split_corpus(corpus_size, share)
+
+                index = 0
+                with (
+                    input_path.open("r", encoding="utf-8") as in_file,
+                    output_path.open("r", encoding="utf-8") as out_file,
+                ):
+                    for in_line, out_line in zip(in_file, out_file):
+                        in_line = in_line.strip()
+                        out_line = out_line.strip()
+                        if len(in_line) == 0 or len(out_line) == 0:
+                            continue
+                        if selected_indices is None or index in selected_indices:
+                            instruction_src_file.write(in_line + "\n")
+                            instruction_trg_file.write(out_line + "\n")
+                            count += 1
+                        index += 1
+
+        LOGGER.info(f"instruction data size: {count}")
+        return count
 
     def create_model(
         self,
@@ -622,6 +705,55 @@ class DataCollatorForCausalLM:
         }
 
 
+class InterleavedTrainDataset(TorchDataset):
+    """Presents two encoded datasets (translation, instruction) of different lengths as one
+    combined training set that repeats each component dataset with a new shuffle each time that
+    dataset is exhausted.
+    """
+
+    def __init__(
+        self,
+        translation_dataset: Dataset,
+        instruction_dataset: Dataset,
+        translation_count: int,
+        instruction_count: int,
+        seed: Optional[int] = None,
+    ) -> None:
+        self._translation_dataset = translation_dataset
+        self._instruction_dataset = instruction_dataset
+        self._translation_count = translation_count
+        self._instruction_count = instruction_count
+        self._seed = random.randrange(2**31) if seed is None else seed
+        self._lap_cache: Dict[Tuple[int, int], List[int]] = {}
+
+    def __len__(self) -> int:
+        return self._translation_count + self._instruction_count
+
+    def __getitem__(self, index: int) -> dict:
+        if index < 0 or index >= len(self):
+            raise IndexError(index)
+        if index < self._translation_count:
+            return self._lap_item(self._translation_dataset, salt=0, index=index)
+        return self._lap_item(self._instruction_dataset, salt=1, index=index - self._translation_count)
+
+    # This function keeps track of multiple cycles ("laps") through the dataset, shuffling it differently each time.
+    def _lap_item(self, dataset: Dataset, salt: int, index: int) -> dict:
+        pool_size = len(dataset)
+        lap, position = divmod(index, pool_size)
+        return dataset[self._lap_permutation(pool_size, salt, lap)[position]]
+
+    # To avoid storing a potentially huge permutation for every lap, we derive it from the seed, salt, and lap number.
+    def _lap_permutation(self, pool_size: int, salt: int, lap: int) -> List[int]:
+        key = (salt, lap)
+        permutation = self._lap_cache.get(key)
+        if permutation is None:
+            rng = random.Random(self._seed + salt * 2_147_483_647 + lap * 999_999_937)
+            permutation = list(range(pool_size))
+            rng.shuffle(permutation)
+            self._lap_cache[key] = permutation
+        return permutation
+
+
 class SilCausalTrainer(Trainer):
     def __init__(self, *args, auto_grad_acc: bool = False, **kwargs):
         super().__init__(*args, **kwargs)
@@ -680,13 +812,22 @@ class LLMModel(NMTModel):
         trg_lang = self._config.language(self._config.train_trg_iso)
         eos_token_id = tokenizer.eos_token_id
 
-        def encode(example: dict) -> dict:
-            prompt = self._config.build_prompt_messages(example["src"], src_lang, trg_lang)
-            prompt_ids = prompt.apply_prompt_template(tokenizer, add_generation_prompt=True, tokenize=True)
-            completion_ids = tokenizer(example["trg"], add_special_tokens=False)["input_ids"] + [eos_token_id]
+        def encode_completion(prompt_ids: List[int], target: str) -> dict:
+            completion_ids = tokenizer(target, add_special_tokens=False)["input_ids"] + [eos_token_id]
             input_ids = (prompt_ids + completion_ids)[:max_seq_length]
             labels = ([LABEL_PAD_TOKEN_ID] * len(prompt_ids) + completion_ids)[:max_seq_length]
             return {"input_ids": input_ids, "labels": labels, "attention_mask": [1] * len(input_ids)}
+
+        def encode(example: dict) -> dict:
+            prompt = self._config.build_prompt_messages(example["src"], src_lang, trg_lang)
+            prompt_ids = prompt.apply_prompt_template(tokenizer, add_generation_prompt=True, tokenize=True)
+            return encode_completion(prompt_ids, example["trg"])
+
+        def encode_instruction(example: dict) -> dict:
+            # Instruction examples already have a complete instruction
+            prompt = PromptMessages(system_message="", instruction=example["src"])
+            prompt_ids = prompt.apply_prompt_template(tokenizer, add_generation_prompt=True, tokenize=True)
+            return encode_completion(prompt_ids, example["trg"])
 
         train_dataset = self._load_text_dataset(
             self._config.exp_dir / self._config.train_src_filename(),
@@ -700,6 +841,23 @@ class LLMModel(NMTModel):
             train_dataset = train_dataset.map(encode, remove_columns=train_dataset.column_names)
         if eval_dataset is not None:
             eval_dataset = eval_dataset.map(encode, remove_columns=eval_dataset.column_names)
+
+        # Instruction data is mixed into training only
+        instruction_dataset = self._load_text_dataset(
+            self._config.exp_dir / self._config.instruction_src_filename(),
+            self._config.exp_dir / self._config.instruction_trg_filename(),
+        )
+        mix_ratio = self._config.instruction_mix_ratio
+        if instruction_dataset is not None and train_dataset is not None and mix_ratio > 0:
+            instruction_dataset = instruction_dataset.map(
+                encode_instruction, remove_columns=instruction_dataset.column_names
+            )
+            total_length = self._estimate_total_train_examples(training_args, len(train_dataset))
+            translation_count = round(total_length / (1 + mix_ratio))
+            instruction_count = total_length - translation_count
+            train_dataset = InterleavedTrainDataset(
+                train_dataset, instruction_dataset, translation_count, instruction_count, seed=self._config.data["seed"]
+            )
 
         data_collator = DataCollatorForCausalLM(
             tokenizer, pad_to_multiple_of=8 if (training_args.fp16 or training_args.bf16) else None
@@ -764,6 +922,16 @@ class LLMModel(NMTModel):
             task_type=TaskType.CAUSAL_LM,
         )
 
+    def _estimate_total_train_examples(self, training_args: TrainingArguments, translation_size: int) -> int:
+        """Estimate the total number of training examples the run will consume."""
+        num_devices = max(1, self._num_devices)
+        effective_batch_size = (
+            training_args.per_device_train_batch_size * training_args.gradient_accumulation_steps * num_devices
+        )
+        if training_args.max_steps and training_args.max_steps > 0:
+            return training_args.max_steps * effective_batch_size
+        return round(training_args.num_train_epochs * translation_size)
+
     def _load_text_dataset(self, src_path: Path, trg_path: Path) -> Optional[Dataset]:
         if not src_path.is_file() or not trg_path.is_file():
             return None
@@ -806,6 +974,15 @@ class LLMModel(NMTModel):
             model = model.to("cuda")
         model.eval()
         return model
+
+    def load_for_inference(
+        self, ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST
+    ) -> Tuple[PreTrainedModel, PreTrainedTokenizerBase]:
+        """Load the model and tokenizer for a checkpoint with no translation-specific prompt
+        building, for callers (e.g. an interactive chat script) that want raw generation access.
+        A config with no checkpoints on disk (e.g. one built for a bare model name with no
+        experiment directory) naturally loads that pristine pretrained model instead."""
+        return self._create_inference_model(ckpt), self._config.get_hf_tokenizer()
 
     def _get_inference_model(
         self, ckpt: Union[CheckpointType, str, int], src_lang: str, trg_lang: str

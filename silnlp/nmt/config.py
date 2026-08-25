@@ -466,6 +466,7 @@ class Config(ABC):
         self._delete_files("val.*.txt")
         self._delete_files("test.*.txt")
         self._delete_files("dict.*.txt")
+        self._delete_files("instruction.*.txt")
 
         train_count = 0
         terms_config = self.data["terms"]
@@ -493,6 +494,8 @@ class Config(ABC):
         if terms_config["dictionary"]:
             dict_count = self._write_dictionary(tokenizer, src_terms_files, trg_terms_files)
             LOGGER.info(f"dictionary size: {dict_count}")
+
+        train_count += self._write_instruction_data()
 
         if stats and self.data["tokenize"]:
             self._calculate_tokenization_stats()
@@ -1386,6 +1389,17 @@ class Config(ABC):
 
     def dict_vref_filename(self) -> str:
         return "dict.vref.txt"
+
+    def instruction_src_filename(self) -> str:
+        return "instruction.src.txt"
+
+    def instruction_trg_filename(self) -> str:
+        return "instruction.trg.txt"
+
+    def _write_instruction_data(self) -> int:
+        """Hook for general instruction-following data mixed into training only, kept separate
+        from the translation corpora. No-op here; overridden by LLMConfig."""
+        return 0
 
     def _has_multiple_test_projects(self, src_iso: str, trg_iso: str) -> bool:
         return self._iso_pairs[(src_iso, trg_iso)].has_multiple_test_projects
