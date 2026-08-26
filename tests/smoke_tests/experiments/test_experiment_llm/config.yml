@@ -26,3 +26,7 @@ params:
     alpha: 16
     dropout: 0.0
     target_modules: all-linear
+  prompt:
+    num_examples: 2
+    example_selection:
+      method: lexical

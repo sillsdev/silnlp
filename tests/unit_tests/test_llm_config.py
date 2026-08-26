@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -123,11 +124,24 @@ def test_data_collator_pad_to_multiple_of():
     assert batch["labels"].tolist() == [[-100, 6, 7, -100]]
 
 
+class _FakeExamplePromptBuilder:
+    """Verifies delegation, not retrieval (see test_example_retrieval.py for that)."""
+
+    def __init__(self, text: str = ""):
+        self._text = text
+        self.calls = []
+
+    def render(self, source, src_lang_name, trg_lang_name, pool_index=None):
+        self.calls.append((source, src_lang_name, trg_lang_name, pool_index))
+        return self._text
+
+
 @dataclass
 class _StubLLMConfig:
     model: str
     params: dict
     data: dict
+    _example_prompt_builder: object = field(default_factory=_FakeExamplePromptBuilder)
 
     lang_name = LLMConfig.lang_name
     language = LLMConfig.language
@@ -177,6 +191,54 @@ def test_build_prompt_messages_generic_model_uses_instruction_template():
     )
 
 
+def test_build_prompt_messages_zero_examples_matches_legacy_output_exactly():
+    # Pins the exact zero-shot text, since existing fine-tuned checkpoints depend on it.
+    config = _StubLLMConfig(
+        model="google/gemma-2-2b-it",
+        params={
+            "prompt": {
+                "system_message": "",
+                "instruction_template": "Translate the following text from {src_lang} to {trg_lang}.\n\n{examples}{source}",
+            }
+        },
+        data={"lang_codes": {"en": "English", "fr": "French"}},
+    )
+    prompt = config.build_prompt_messages("hello", config.language("en"), config.language("fr"))
+    assert prompt.instruction == "Translate the following text from English to French.\n\nhello"
+
+
+def test_build_prompt_messages_splices_example_prompt_builder_output_before_source():
+    builder = _FakeExamplePromptBuilder(text="Source: cat\nTarget: chat\n\nSource: dog\nTarget: chien\n\n")
+    config = _StubLLMConfig(
+        model="google/gemma-2-2b-it",
+        params={
+            "prompt": {
+                "system_message": "",
+                "instruction_template": "Translate from {src_lang} to {trg_lang}.\n\n{examples}{source}",
+            }
+        },
+        data={"lang_codes": {"en": "English", "fr": "French"}},
+        _example_prompt_builder=builder,
+    )
+    prompt = config.build_prompt_messages("hello", config.language("en"), config.language("fr"))
+    assert prompt.instruction == (
+        "Translate from English to French.\n\n" "Source: cat\nTarget: chat\n\n" "Source: dog\nTarget: chien\n\n" "hello"
+    )
+    assert builder.calls == [("hello", "English", "French", None)]
+
+
+def test_build_prompt_messages_passes_pool_index_through_to_example_prompt_builder():
+    builder = _FakeExamplePromptBuilder()
+    config = _StubLLMConfig(
+        model="google/gemma-2-2b-it",
+        params={"prompt": {"system_message": "", "instruction_template": "{examples}{source}"}},
+        data={"lang_codes": {}},
+        _example_prompt_builder=builder,
+    )
+    config.build_prompt_messages("hello", config.language("en"), config.language("fr"), example_pool_index=3)
+    assert builder.calls == [("hello", "en", "fr", 3)]
+
+
 class _StubTranslateGemmaTokenizer:
     chat_template = "{# a real chat template would render this #}"
     bos_token = "<bos>"
@@ -212,6 +274,40 @@ def test_apply_prompt_template_translate_gemma_falls_back_for_unrecognized_langu
 
     token_ids = prompt.apply_prompt_template(tokenizer, add_generation_prompt=True, tokenize=True)
     assert token_ids == [ord(c) for c in text]
+
+
+def _construct_llm_config(tmp_path: Path, prompt_overrides: dict, model: str = "google/gemma-2-2b-it") -> LLMConfig:
+    environment = SilNlpEnv.create_environment_with_mt_dir(tmp_path)
+    return LLMConfig(
+        tmp_path,
+        {"data": {"corpus_pairs": []}, "model": model, "params": {"prompt": prompt_overrides}},
+        environment,
+    )
+
+
+def test_llm_config_rejects_translate_gemma_with_num_examples(tmp_path):
+    with pytest.raises(RuntimeError, match="TranslateGemma"):
+        _construct_llm_config(tmp_path, {"num_examples": 2}, model="google/translategemma-4b-it")
+
+
+def test_llm_config_warns_when_num_examples_set_without_examples_placeholder(tmp_path, caplog):
+    with caplog.at_level(logging.WARNING):
+        _construct_llm_config(
+            tmp_path, {"num_examples": 2, "instruction_template": "Translate {src_lang} to {trg_lang}: {source}"}
+        )
+    assert any("{examples}" in record.message for record in caplog.records)
+
+
+def test_llm_config_rejects_unknown_example_selection_method(tmp_path):
+    with pytest.raises(ValueError, match="Unknown params.prompt.example_selection.method"):
+        _construct_llm_config(
+            tmp_path,
+            {
+                "num_examples": 2,
+                "instruction_template": "Translate {src_lang} to {trg_lang}.\n\n{examples}{source}",
+                "example_selection": {"method": "bogus"},
+            },
+        )
 
 
 def test_build_adapter_config_plain_lora():
