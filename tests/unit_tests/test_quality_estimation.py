@@ -18,11 +18,9 @@ def write_tsv(path: Path, header: str, rows: Dict[str, float]) -> None:
 
 
 def make_confidence_files(directory: Path) -> List[Path]:
-    """Write the confidence files the translate step produces for two drafted books."""
     confidence_file_paths: List[Path] = []
     for book, confidence in (("MAT", HIGH_BOOK_CONFIDENCE), ("MRK", LOW_BOOK_CONFIDENCE)):
         confidence_file_path = directory / f"41{book}.SFM.confidences.tsv"
-        # Quality estimation only checks that this file exists; it reads the siblings below.
         confidence_file_path.touch()
         write_tsv(
             confidence_file_path.with_suffix(".verses.tsv"),
