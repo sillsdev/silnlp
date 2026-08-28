@@ -87,6 +87,7 @@ class Candidate:
     script: str
     src_only: int = 0  # verses only in this reference (drafting-source-only verses)
     trg_only: int = 0  # verses only in the target
+    back_translation: bool = False  # a back translation of the target, set after selection
 
 
 @dataclass
@@ -752,27 +753,36 @@ def check_translate_source(projects_dir: Path, project: str, books: Sequence[str
 
 
 def resolve_translate_sources(
-    source_names: Sequence[str], books: Sequence[str], projects_dir: Optional[Path]
-) -> Dict[str, str]:
-    """Check that each translation source project contains the books to be translated.
+    label: str,
+    source_names: Sequence[str],
+    books: Sequence[str],
+    projects_dir: Optional[Path],
+    checked: Dict[str, Optional[str]],
+) -> List[str]:
+    """Return the projects one model drafts from, asking about any that cannot supply the books.
 
     Warns about a missing project or missing books and asks for a different project to
-    translate from (checked too), so the user can decide how to proceed. Returns a mapping
-    of source name -> project to use as src_project in translate_config.yml.
+    translate from (checked too), so the user can decide how to proceed. `label` names the
+    model being asked about: each model gets its own answer, since the same source may suit
+    one model and not another. `checked` caches check_translate_source by project name (the
+    books are fixed for the run), so Settings.xml is parsed once; the prompts are not cached.
     """
-    replacements: Dict[str, str] = {}
     if projects_dir is None:
-        return replacements
+        return list(source_names)
+    projects: List[str] = []
     for name in source_names:
         current = name
         while True:
-            problem = check_translate_source(projects_dir, current, books)
+            if current not in checked:
+                checked[current] = check_translate_source(projects_dir, current, books)
+            problem = checked[current]
             if problem is None:
                 break
-            print(f"Warning: cannot translate {';'.join(books)} from '{current}': {problem}.")
+            print(f"Warning: {label}: cannot translate {';'.join(books)} from '{current}': {problem}.")
             try:
                 reply = input(
-                    f"Enter a different project to translate from (or press Enter to keep '{current}'): "
+                    f"Enter a different project for {label} to translate from"
+                    f" (or press Enter to keep '{current}'): "
                 ).strip()
             except EOFError:
                 reply = ""
@@ -780,9 +790,9 @@ def resolve_translate_sources(
                 break
             current = reply
         if current != name:
-            print(f"Translating from '{current}' instead of '{name}'.")
-            replacements[name] = current
-    return replacements
+            print(f"Translating from '{current}' instead of '{name}' for {label}.")
+        projects.append(current)
+    return projects
 
 
 def find_existing(lang_dir: Path, prefix: str, config: dict) -> Tuple[Optional[Path], int]:
@@ -851,8 +861,52 @@ def select_candidates(
                 LOGGER.warning(f"Ignoring invalid selection '{token}'.")
         if not chosen:
             print("No candidates selected.")
+        select_back_translations(candidates, chosen)
         return chosen
+    select_back_translations(candidates, candidates)
     return candidates
+
+
+def select_back_translations(candidates: List[Candidate], selected: List[Candidate]) -> None:
+    """Ask which of the selected candidates are back translations of the target, and mark them.
+
+    A back translation tracks the target verse for verse, so it takes the top alignment score
+    and would otherwise lead the candidate list — becoming the first training source and hence
+    the drafting source. It can hold the books to be translated, so coverage cannot spot one:
+    only the user knows. The numbers are the table's, and the flag is set in place on the
+    selected candidates, which build_config never reads.
+    """
+    if not selected:
+        return
+    try:
+        reply = (
+            input("Enter the numbers of any back translations of the target (e.g. 2), or press Enter for none: ")
+            .strip()
+            .lower()
+        )
+    except EOFError:
+        reply = ""
+    if reply in ("", "none"):
+        return
+    marked: List[Candidate] = []
+    for token in re.split(r"[,\s]+", reply):
+        if not token.isdigit() or not 1 <= int(token) <= len(candidates):
+            LOGGER.warning(f"Ignoring '{token}': only the numbers of the candidates above are allowed here.")
+            continue
+        candidate = candidates[int(token) - 1]
+        if candidate not in selected:
+            LOGGER.warning(f"Ignoring '{token}': {candidate.name} is not one of the selected candidates.")
+            continue
+        if candidate not in marked:
+            marked.append(candidate)
+    for candidate in marked:
+        candidate.back_translation = True
+    if marked:
+        names = ", ".join(candidate.name for candidate in marked)
+        print(
+            f"Back translation(s): {names} — used only as a pair's second source, never as a single"
+            " or primary source, and never as a drafting source."
+        )
 
 
 def select_experiments(
@@ -1115,12 +1169,27 @@ def run(
     if not selected:
         return []
     for c in selected:
-        if c.parallel < secondary_min:
+        if c.parallel >= secondary_min:
+            continue
+        if c.back_translation:
+            print(
+                f"Note: {c.name} cannot be used at all: a back translation is only ever a pair's second"
+                f" source, and its {c.parallel} parallel verses are below {secondary_min:.0f}"
+                " (max of 1000 and 25% of the target's verses)."
+            )
+        else:
             print(
                 f"Note: {c.name} can be a single source or the primary of a pair, but not a pair's"
                 f" second source: its {c.parallel} parallel verses are below {secondary_min:.0f}"
                 " (max of 1000 and 25% of the target's verses)."
             )
+    usable = [c for c in selected if not c.back_translation or c.parallel >= secondary_min]
+    if not any(not c.back_translation for c in usable):
+        print(
+            "No experiments are possible: every selected candidate is a back translation, and a back"
+            " translation can only be a pair's second source. Select at least one other candidate."
+        )
+        return []
 
     # The src and trg isos of a corpus pair must differ. When a passing reference shares the
     # main project's iso, switch the main project to a synthetic code (not a real iso, not in
@@ -1134,7 +1203,7 @@ def run(
     prior_iso = find_prior_copy(scripture_dir, main, real_isos)
     # Every selected candidate appears at least as a single-source experiment, so any of them
     # sharing the target's iso forces the synthetic code and the extract copy.
-    clashing = [c for c in selected if to_iso3(c.iso) == to_iso3(main.iso)]
+    clashing = [c for c in usable if to_iso3(c.iso) == to_iso3(main.iso)]
     pending_copy: Optional[Tuple[str, str]] = None  # (old stem, new stem), executed on first creation
     if clashing or prior_iso is not None:
         synthetic = prior_iso or synthesize_trg_iso(to_iso3(main.iso) or main.iso, real_isos)
@@ -1187,14 +1256,19 @@ def run(
 
     def order_pair(a: Candidate, b: Candidate) -> Optional[List[Candidate]]:
         # The higher-alignment source leads; the other must clear the second-source minimum.
+        # A back translation never leads, so a pair of them has no valid ordering.
+        if a.back_translation and b.back_translation:
+            return None
         lead, other = sorted((a, b), key=lambda c: c.alignment, reverse=True)
         for first, second in ((lead, other), (other, lead)):
+            if first.back_translation:
+                continue
             if second.parallel >= secondary_min:
                 return [first, second]
         return None
 
-    ordered = sorted(selected, key=lambda c: c.alignment, reverse=True)
-    singles = [[c] for c in ordered]
+    ordered = sorted(usable, key=lambda c: c.alignment, reverse=True)
+    singles = [[c] for c in ordered if not c.back_translation]
     mixed = [pair for a, b in itertools.combinations(ordered, 2) if (pair := order_pair(a, b)) is not None]
     chosen = select_experiments(singles, mixed, top=top)
 
@@ -1204,10 +1278,11 @@ def run(
     translate_selection = get_chapters(translate_books)
     training_is_complete = training_books.lower() == "complete"
 
-    # Verify the drafting projects as Paratext translate sources (their book files are present),
-    # prompting for a different project when one is missing. --translate-scripture projects are
-    # used exactly as given (warned about, never replaced).
-    source_projects: Dict[str, str] = {}
+    # --translate-scripture projects are used exactly as given: verified as Paratext translate
+    # sources once for the run (their book files are present), warned about, never replaced.
+    # Otherwise each model's own sources are verified in the loop below, where a missing one can
+    # be replaced per model.
+    checked_sources: Dict[str, Optional[str]] = {}  # project name -> check_translate_source result
     if translate_scripture:
         if chosen and projects_dir is not None:
             for project in translate_scripture:
@@ -1217,14 +1292,6 @@ def run(
                         f"Warning: cannot translate {';'.join(translate_book_ids)} from '{project}': {problem}."
                         " Including it anyway: it was explicitly requested with --translate-scripture."
                     )
-    else:
-        source_names = list(dict.fromkeys(source.name for exp in chosen for source in exp))
-        source_projects = resolve_translate_sources(source_names, translate_book_ids, projects_dir)
-
-    def drafting_projects_for(sources: List[Candidate]) -> List[str]:
-        if translate_scripture:
-            return list(translate_scripture)
-        return [source_projects.get(source.name, source.name) for source in sources]
 
     experiments: List[Experiment] = []
     existing_experiments: List[Experiment] = []
@@ -1267,7 +1334,7 @@ def run(
         # Warn (once per source) when a source is missing a quarter or more of the verses the
         # translate or training selection specifies (chapter-level; only where an extract exists).
         for source in sources:
-            if (source.stem, "translate") not in warned_missing:
+            if not source.back_translation and (source.stem, "translate") not in warned_missing:
                 warned_missing.add((source.stem, "translate"))
                 warn_missing_verses(
                     source.name, "translate", translate_books, coverage.presence(source.stem, translate_selection)
@@ -1278,7 +1345,18 @@ def run(
                     source.name, "training", corpus_books, coverage.presence(source.stem, training_selection)
                 )
         config = build_config(sources, main, corpus_books, test_variant)
-        translate_projects = drafting_projects_for(sources)
+        # A back translation is not asked to draft, and each model is asked about its own
+        # sources: the same source may suit one model's books and not another's.
+        if translate_scripture:
+            translate_projects = list(translate_scripture)
+        else:
+            translate_projects = resolve_translate_sources(
+                label,
+                [source.name for source in sources if not source.back_translation],
+                translate_book_ids,
+                projects_dir,
+                checked_sources,
+            )
         translate_config = build_translate_config(translate_projects, translate_books)
         prefix = "_".join([source.name for source in sources] + [main.iso] + ([test_variant] if test_variant else []))
         existing, index = find_existing(lang_dir, prefix, config)

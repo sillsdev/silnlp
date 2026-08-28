@@ -9,6 +9,7 @@ import pytest
 import yaml
 from machine.scripture import book_id_to_number
 
+from silnlp.common import create_onboarding_experiments
 from silnlp.common.create_onboarding_experiments import (
     EXPERIMENT_ARGS,
     NT_CANON,
@@ -33,6 +34,7 @@ from silnlp.common.create_onboarding_experiments import (
     resolve_corpus_books,
     resolve_request_dir,
     run,
+    select_back_translations,
     select_experiments,
     submit_experiments,
     synthesize_trg_iso,
@@ -69,12 +71,18 @@ def request_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def select_all(monkeypatch):
-    """Answer the selection prompt with 'all', the copy confirmation with 'y', keep translate sources."""
+    """Answer the selection prompt with 'all', the copy confirmation with 'y', keep translate sources.
+
+    The back-translation prompt gets Enter: no candidate is a back translation unless a test
+    says so.
+    """
 
     def answer(prompt: str) -> str:
         if "Copy" in prompt:
             return "y"
         if "different project" in prompt:
+            return ""
+        if "back translation" in prompt:
             return ""
         return "all"
 
@@ -771,7 +779,9 @@ def test_run_copy_declined_aborts(request_dir: Path, tmp_path: Path, capsys, mon
     scripture_dir.mkdir()
     (scripture_dir / "sdl-A33_2026_07_02.txt").write_text("verses\n", encoding="utf-8")
 
-    monkeypatch.setattr("builtins.input", lambda prompt: "n" if "Copy" in prompt else "all")
+    monkeypatch.setattr(
+        "builtins.input", lambda prompt: "" if "back translation" in prompt else ("n" if "Copy" in prompt else "all")
+    )
     experiments = run(
         request_dir=request_dir,
         experiments_dir=tmp_path,
@@ -791,6 +801,41 @@ def test_run_copy_declined_aborts(request_dir: Path, tmp_path: Path, capsys, mon
 
 def make_candidate(name: str, alignment: float) -> Candidate:
     return Candidate(name=name, stem=f"en-{name}", iso="en", count=1, parallel=1, alignment=alignment, script="Latn")
+
+
+def test_select_back_translations(monkeypatch, capsys, caplog):
+    candidates = [make_candidate(f"S{i}", 0.9 - i / 100) for i in range(3)]
+
+    def mark(reply: str, selected=None):
+        for c in candidates:
+            c.back_translation = False
+        monkeypatch.setattr("builtins.input", lambda prompt: reply)
+        select_back_translations(candidates, candidates if selected is None else selected)
+        return [c.name for c in candidates if c.back_translation]
+
+    # The numbers are the table's; duplicates and separators are tolerated.
+    assert mark("2") == ["S1"]
+    assert mark("1, 3 3") == ["S0", "S2"]
+    output = capsys.readouterr().out
+    assert "Back translation(s): S0, S2 — used only as a pair's second source" in output
+
+    # Enter and 'none' mark nothing, and say nothing.
+    assert mark("") == [] and mark("none") == []
+    assert capsys.readouterr().out == ""
+
+    # Only numbers are allowed here: 'all' is an input error, named and ignored.
+    with caplog.at_level("WARNING"):
+        assert mark("all") == []
+        assert any("Ignoring 'all': only the numbers" in record.message for record in caplog.records)
+
+        # A number outside the selection is reported by name rather than as an invalid number.
+        caplog.clear()
+        assert mark("1 2", selected=candidates[:1]) == ["S0"]
+        assert any("Ignoring '2': S1 is not one of the selected" in record.message for record in caplog.records)
+
+    # Nothing selected, nothing asked.
+    monkeypatch.setattr("builtins.input", lambda prompt: pytest.fail(f"Unexpected prompt: {prompt}"))
+    select_back_translations(candidates, [])
 
 
 def test_select_experiments(monkeypatch, capsys):
@@ -1151,7 +1196,9 @@ def test_run_iso_clash_declining_the_copy_creates_nothing(request_dir: Path, tmp
     scripture_dir.mkdir()
     (scripture_dir / "sdl-A33_2026_07_02.txt").write_text("verses\n", encoding="utf-8")
 
-    monkeypatch.setattr("builtins.input", lambda prompt: "n" if "Copy" in prompt else "all")
+    monkeypatch.setattr(
+        "builtins.input", lambda prompt: "" if "back translation" in prompt else ("n" if "Copy" in prompt else "all")
+    )
     assert (
         run(
             request_dir=request_dir,
@@ -1187,16 +1234,28 @@ def test_check_translate_source(tmp_path: Path):
 def test_run_checks_translate_sources(request_dir: Path, tmp_path: Path, capsys, monkeypatch):
     # NIV11R has MAT; HINCLBSI's project folder is missing. The user first tries a project
     # that lacks MAT (warned again), then one that has it; translate_config uses the choice.
+    # HINCLBSI drafts for two models and each is asked separately, so the answers can differ.
     projects_dir = tmp_path / "projects"
     make_paratext_project(projects_dir, "NIV11R", ["MAT"])
     make_paratext_project(projects_dir, "NOMAT", ["RUT"])
     make_paratext_project(projects_dir, "HINDI2", ["MAT"])
+    make_paratext_project(projects_dir, "HINDI3", ["MAT"])
 
-    answers = iter(["NOMAT", "HINDI2"])
+    calls: list = []
+    real_check = create_onboarding_experiments.check_translate_source
+    monkeypatch.setattr(
+        create_onboarding_experiments,
+        "check_translate_source",
+        lambda projects, project, books: (calls.append(project), real_check(projects, project, books))[1],
+    )
+
+    answers = iter(["NOMAT", "HINDI2", "HINDI3"])
 
     def answer(prompt: str) -> str:
         if "different project" in prompt:
             return next(answers)
+        if "back translation" in prompt:
+            return ""
         return "all"
 
     monkeypatch.setattr("builtins.input", answer)
@@ -1213,13 +1272,66 @@ def test_run_checks_translate_sources(request_dir: Path, tmp_path: Path, capsys,
     output = capsys.readouterr().out
     assert "cannot translate MAT from 'HINCLBSI': there is no project folder 'HINCLBSI'" in output
     assert "cannot translate MAT from 'NOMAT': project 'NOMAT' does not contain MAT" in output
-    assert "Translating from 'HINDI2' instead of 'HINCLBSI'." in output
+    assert "Translating from 'HINDI2' instead of 'HINCLBSI' for HINCLBSI." in output
+    # The warning names the model being asked about.
+    assert "Warning: NIV11R + HINCLBSI: cannot translate MAT from 'HINCLBSI'" in output
 
     by_folder = {e.folder.name: e for e in experiments}
-    translate = by_folder["NIV11R_HINCLBSI_sdl_1"].translate_config["translate"]
-    assert [entry["src_project"] for entry in translate] == ["NIV11R", "HINDI2"]
+    single = by_folder["HINCLBSI_sdl_1"].translate_config["translate"]
+    pair = by_folder["NIV11R_HINCLBSI_sdl_1"].translate_config["translate"]
+    assert [entry["src_project"] for entry in single] == ["HINDI2"]
+    assert [entry["src_project"] for entry in pair] == ["NIV11R", "HINDI3"]
     # The training config still uses the original extract stems.
     assert by_folder["NIV11R_HINCLBSI_sdl_1"].config["data"]["corpus_pairs"][0]["src"] == ["en-NIV11R", "hi-HINCLBSI"]
+    # Settings.xml is parsed once per project, though each model is prompted: NIV11R drafts for
+    # two models and HINCLBSI is rejected by three separate answers.
+    assert sorted(calls) == ["HINCLBSI", "HINDI2", "HINDI3", "NIV11R", "NOMAT"]
+
+
+def test_run_existing_experiment_still_asks_for_a_drafting_source(
+    request_dir: Path, tmp_path: Path, capsys, monkeypatch
+):
+    # An experiment whose config.yml already exists is skipped, but its drafting source is still
+    # resolved: the answer goes into the translate_config.yml update.
+    projects_dir = tmp_path / "projects"
+    make_paratext_project(projects_dir, "NIV11R", ["MAT"])
+    make_paratext_project(projects_dir, "HINDI2", ["MAT"])
+    make_paratext_project(projects_dir, "HINDI3", ["MAT"])
+    run_args = dict(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="complete",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+        projects_dir=projects_dir,
+    )
+
+    def replace_with(project: str):
+        def answer(prompt: str) -> str:
+            if "different project" in prompt:
+                return project
+            if "back translation" in prompt:
+                return ""
+            return "all"
+
+        return answer
+
+    monkeypatch.setattr("builtins.input", replace_with("HINDI2"))
+    run(**run_args)
+    config_path = tmp_path / "Saudi_Arabia" / "Saudi_Arabian_Sign_Language" / "HINCLBSI_sdl_1" / "translate_config.yml"
+    with open(config_path, "r", encoding="utf-8") as file:
+        assert yaml.safe_load(file)["translate"][0]["src_project"] == "HINDI2"
+
+    capsys.readouterr()
+    monkeypatch.setattr("builtins.input", replace_with("HINDI3"))
+    again = run(**run_args)
+    output = capsys.readouterr().out
+    assert again == []  # nothing new created
+    assert "already contains an identical config.yml" in output
+    with open(config_path, "r", encoding="utf-8") as file:
+        assert yaml.safe_load(file)["translate"][0]["src_project"] == "HINDI3"
 
 
 def test_run_rejects_unknown_test_variant(request_dir: Path, tmp_path: Path):
@@ -1622,6 +1734,198 @@ def test_run_rerun_updates_translate_config(request_dir: Path, tmp_path: Path, c
         assert yaml.safe_load(file)["translate"][0]["src_project"] == "MYDRAFT"
 
 
+def bt_answer(numbers: str):
+    """Answer the prompts of a plain run, specifying `numbers` as the back translations."""
+
+    def answer(prompt: str) -> str:
+        if "back translation" in prompt:
+            return numbers
+        if "different project" in prompt:
+            return ""
+        if "Copy" in prompt:
+            pytest.fail(f"Unexpected prompt: {prompt}")
+        return "all"
+
+    return answer
+
+
+def test_run_back_translation_is_never_single_primary_or_drafting(
+    request_dir: Path, tmp_path: Path, capsys, monkeypatch
+):
+    # NIV11R leads the table on alignment (0.339 against HINCLBSI's 0.261), which is exactly how a
+    # back translation behaves. Specified as one, it gets no single-source experiment, takes second
+    # place in the pair despite the higher score, and is not asked to draft.
+    monkeypatch.setattr("builtins.input", bt_answer("1"))
+    experiments = run(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="complete",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+    )
+    output = capsys.readouterr().out
+    assert "Back translation(s): NIV11R" in output
+    assert [e.folder.name for e in experiments] == ["HINCLBSI_sdl_1", "HINCLBSI_NIV11R_sdl_1"]
+    pair = experiments[1]
+    assert pair.config["data"]["corpus_pairs"][0]["src"] == ["hi-HINCLBSI", "en-NIV11R"]
+    assert [entry["src_project"] for entry in pair.translate_config["translate"]] == ["HINCLBSI"]
+
+
+def test_run_back_translation_prompt_follows_a_numeric_selection(
+    request_dir: Path, tmp_path: Path, capsys, monkeypatch
+):
+    # The prompt follows every selection branch, not just 'all': candidates picked by number are
+    # asked about too.
+    def answer(prompt: str) -> str:
+        if "back translation" in prompt:
+            return "1"
+        if "different project" in prompt:
+            return ""
+        if "Copy" in prompt:
+            pytest.fail(f"Unexpected prompt: {prompt}")
+        return "1,2"
+
+    monkeypatch.setattr("builtins.input", answer)
+    experiments = run(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="complete",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+    )
+    assert "Back translation(s): NIV11R" in capsys.readouterr().out
+    assert [e.folder.name for e in experiments] == ["HINCLBSI_sdl_1", "HINCLBSI_NIV11R_sdl_1"]
+
+
+def test_run_all_back_translations_creates_nothing(request_dir: Path, tmp_path: Path, capsys, monkeypatch):
+    # Two back translations cannot be paired with each other, so nothing is possible.
+    monkeypatch.setattr("builtins.input", bt_answer("1 2"))
+    experiments = run(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="complete",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+    )
+    assert experiments == []
+    assert "No experiments are possible: every selected candidate is a back translation" in capsys.readouterr().out
+    assert not (tmp_path / "Saudi_Arabia").exists()
+
+
+def test_run_no_translate_warning_for_a_back_translation(request_dir: Path, tmp_path: Path, capsys, monkeypatch):
+    # A back translation never drafts, so the missing-translate-verses warning is pointless for
+    # one. The training warning still applies: it is training data.
+    scripture_dir = tmp_path / "scripture"
+    scripture_dir.mkdir()
+    vref_books = load_vref_books(ASSETS_DIR)
+    niv_lines = ["text" if book == "GEN" else "" for book in vref_books]
+    (scripture_dir / "en-NIV11R.txt").write_text("\n".join(niv_lines) + "\n", encoding="utf-8")
+    hin_lines = ["text" if book in ("MAT", "MRK") else "" for book in vref_books]
+    (scripture_dir / "hi-HINCLBSI.txt").write_text("\n".join(hin_lines) + "\n", encoding="utf-8")
+
+    monkeypatch.setattr("builtins.input", bt_answer("1"))
+    experiments = run(
+        request_dir=request_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="MAT;MRK",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+        scripture_dir=scripture_dir,
+    )
+    output = capsys.readouterr().out
+    assert "'NIV11R' is missing 100% of the translate verses" not in output
+    assert "'NIV11R' is missing 100% of the training verses" in output
+    assert experiments
+
+
+def test_run_never_pairs_two_back_translations(tmp_path: Path, capsys, monkeypatch):
+    # Two back translations are each usable as a second source, but not with each other:
+    # whichever led the pair would be the drafting source.
+    stats_dir = tmp_path / "Scenario"
+    stats_dir.mkdir()
+    pd.DataFrame(
+        {
+            "src_project": ["en-REF1", "hi-BT1", "fr-BT2"],
+            "trg_project": ["sdl-MAIN"] * 3,
+            "count": [40000, 30000, 30000],
+            "parallel": [20000, 20000, 20000],
+            "align_score": [0.5, 0.9, 0.85],
+            "src_script": ["Latn", "Deva", "Latn"],
+            "trg_script": ["Arab"] * 3,
+        }
+    ).to_csv(stats_dir / "corpus-stats.csv", index=False)
+    pd.DataFrame(
+        {
+            "file": ["complete", "sdl-MAIN", "en-REF1", "hi-BT1", "fr-BT2"],
+            "MAT": [20000] * 5,
+            "MRK": [20000] * 5,
+        }
+    ).to_csv(stats_dir / "verse_counts.csv", index=False)
+
+    monkeypatch.setattr("builtins.input", bt_answer("1 2"))  # BT1 and BT2 lead the table
+    experiments = run(
+        request_dir=stats_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="MRK",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+    )
+    output = capsys.readouterr().out
+    assert "BT1 (0.9000) + BT2" not in output and "BT2 (0.8500) + BT1" not in output
+    assert [e.folder.name for e in experiments] == ["REF1_sdl_1", "REF1_BT1_sdl_1", "REF1_BT2_sdl_1"]
+
+
+def test_run_sub_threshold_back_translation_is_unusable(tmp_path: Path, capsys, monkeypatch):
+    # A back translation below the second-source minimum has nowhere left to go: it cannot be a
+    # single or a primary either. It drops out entirely, so its iso clash with the target forces
+    # no synthetic code and no extract copy.
+    stats_dir = tmp_path / "Scenario"
+    stats_dir.mkdir()
+    pd.DataFrame(
+        {
+            "src_project": ["en-REF1", "sdl-BT"],
+            "trg_project": ["sdl-MAIN", "sdl-MAIN"],
+            "count": [40000, 5500],
+            "parallel": [20000, 5000],
+            "align_score": [0.5, 0.9],
+            "src_script": ["Latn", "Arab"],
+            "trg_script": ["Arab", "Arab"],
+        }
+    ).to_csv(stats_dir / "corpus-stats.csv", index=False)
+    pd.DataFrame(
+        {
+            "file": ["complete", "sdl-MAIN", "en-REF1", "sdl-BT"],
+            "MAT": [20000, 20000, 20000, 500],
+            "MRK": [20000, 20000, 20000, 0],
+        }
+    ).to_csv(stats_dir / "verse_counts.csv", index=False)
+
+    monkeypatch.setattr("builtins.input", bt_answer("1"))  # BT leads the table on alignment
+    experiments = run(
+        request_dir=stats_dir,
+        experiments_dir=tmp_path,
+        assets_dir=ASSETS_DIR,
+        training_books="MRK",
+        translate_books="MAT",
+        min_parallel=2000,
+        min_alignment=0.2,
+    )
+    output = capsys.readouterr().out
+    assert "Note: BT cannot be used at all: a back translation is only ever a pair's second source" in output
+    assert "synthetic" not in output
+    assert [e.folder.name for e in experiments] == ["REF1_sdl_1"]
+
+
 def test_run_clash_only_from_selected_candidates(tmp_path: Path, capsys, monkeypatch):
     # A back translation sharing the target's iso only forces a synthetic target code (and the
     # extract copy) if the user actually selects it. Choosing REF1 alone leaves the target
@@ -1651,6 +1955,8 @@ def test_run_clash_only_from_selected_candidates(tmp_path: Path, capsys, monkeyp
     def answer(prompt: str) -> str:
         if "candidates to use" in prompt:
             return "2"
+        if "back translation" in prompt:
+            return ""
         if "numbers to create" in prompt:
             return "all"
         pytest.fail(f"Unexpected prompt: {prompt}")
