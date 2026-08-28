@@ -162,6 +162,18 @@ def test_create_example_formatter_rejects_unknown_type():
         create_example_formatter({"type": "bogus"})
 
 
+def test_create_example_formatter_accepts_bare_string_shorthand():
+    assert isinstance(create_example_formatter("json"), JsonExampleFormatter)
+    assert isinstance(create_example_formatter("xml"), XmlExampleFormatter)
+
+
+def test_create_example_formatter_bare_text_string_matches_explicit_default():
+    examples = _examples(("cat", "chat"))
+    from_shorthand = create_example_formatter("text").format(examples, "English", "French")
+    explicit_default = TextExampleFormatter().format(examples, "English", "French")
+    assert from_shorthand == explicit_default
+
+
 def _make_example_config(
     num_examples=0,
     formatter=None,
@@ -193,6 +205,23 @@ def test_prompt_example_config_from_params_parses_and_lowercases_method():
     assert config.num_examples == 3
     assert isinstance(config.formatter, TextExampleFormatter)
     assert config.selection_method == "lexical"
+    assert config.selection_model is None
+
+
+def test_prompt_example_config_from_params_accepts_bare_string_example_format_and_selection():
+    # merge_dict() replaces rather than merges when a bare-string override lands on a dict
+    # default, so both keys must accept a bare string, not only the nested-dict form.
+    config = PromptExampleConfig.from_params(
+        {
+            "num_examples": 3,
+            "example_format": "json",
+            "example_selection": "embedding",
+            "instruction_template": "{examples}{source}",
+        },
+        model="google/gemma-2-2b-it",
+    )
+    assert isinstance(config.formatter, JsonExampleFormatter)
+    assert config.selection_method == "embedding"
     assert config.selection_model is None
 
 

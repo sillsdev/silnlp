@@ -391,15 +391,9 @@ class LLMConfig(Config):
                         "instruction_template": (
                             "Translate the following text from {src_lang} to {trg_lang}.\n\n{examples}{source}"
                         ),
-                        "example_format": {
-                            "type": "text",  # text | json | xml
-                            "template": "Source ({src_lang}): {source}\nTranslation ({trg_lang}): {target}\n\n",
-                        },
+                        "example_format": "text",  # text | json | xml
                         "num_examples": 0,
-                        "example_selection": {
-                            "method": "lexical",  # lexical | embedding
-                            "model": None,  # sentence-transformers model id; only used when method: embedding
-                        },
+                        "example_selection": "lexical",  # lexical | embedding
                     },
                     "instruction_data": {
                         # Names of datasets to mix in. Each name must have a matching

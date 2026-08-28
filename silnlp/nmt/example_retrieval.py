@@ -6,7 +6,7 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Protocol, Sequence
+from typing import List, Optional, Protocol, Sequence, Union
 from xml.sax.saxutils import escape as xml_escape
 
 import numpy as np
@@ -32,8 +32,7 @@ class _EmbeddingModel(Protocol):
 
     def encode(
         self, texts: Sequence[str], convert_to_numpy: bool, normalize_embeddings: bool, show_progress_bar: bool
-    ) -> np.ndarray:
-        ...
+    ) -> np.ndarray: ...
 
 
 def _top_k_indices(scores: np.ndarray, k: int, exclude: Optional[int] = None) -> List[int]:
@@ -74,12 +73,10 @@ class ExampleRetriever(ABC):
         return [self._examples[i] for i in self._top_indices_for_pool_index(index, k)]
 
     @abstractmethod
-    def _top_indices_for_query(self, query: str, k: int) -> List[int]:
-        ...
+    def _top_indices_for_query(self, query: str, k: int) -> List[int]: ...
 
     @abstractmethod
-    def _top_indices_for_pool_index(self, index: int, k: int) -> List[int]:
-        ...
+    def _top_indices_for_pool_index(self, index: int, k: int) -> List[int]: ...
 
 
 class TfidfExampleRetriever(ExampleRetriever):
@@ -158,14 +155,15 @@ class ExampleFormatter(ABC):
     """Renders retrieved examples into the text that fills {examples} in instruction_template."""
 
     @abstractmethod
-    def format(self, examples: Sequence[Example], src_lang_name: str, trg_lang_name: str) -> str:
-        ...
+    def format(self, examples: Sequence[Example], src_lang_name: str, trg_lang_name: str) -> str: ...
 
 
 class TextExampleFormatter(ExampleFormatter):
     """Unlike JsonExampleFormatter/XmlExampleFormatter, does not escape the template output."""
 
-    def __init__(self, template: str) -> None:
+    DEFAULT_TEMPLATE = "Source ({src_lang}): {source}\nTranslation ({trg_lang}): {target}\n\n"
+
+    def __init__(self, template: str = DEFAULT_TEMPLATE) -> None:
         self._template = template
 
     def format(self, examples: Sequence[Example], src_lang_name: str, trg_lang_name: str) -> str:
@@ -194,10 +192,13 @@ class XmlExampleFormatter(ExampleFormatter):
         )
 
 
-def create_example_formatter(format_params: dict) -> ExampleFormatter:
+def create_example_formatter(format_params: Union[str, dict]) -> ExampleFormatter:
+    # A bare string is shorthand for {"type": <string>}
+    if isinstance(format_params, str):
+        format_params = {"type": format_params}
     format_type = str(format_params.get("type", "text")).lower()
     if format_type == "text":
-        return TextExampleFormatter(format_params["template"])
+        return TextExampleFormatter(format_params.get("template", TextExampleFormatter.DEFAULT_TEMPLATE))
     if format_type == "json":
         return JsonExampleFormatter()
     if format_type == "xml":
@@ -245,11 +246,14 @@ class PromptExampleConfig:
 
     @staticmethod
     def from_params(prompt_params: dict, model: str) -> "PromptExampleConfig":
+        example_selection = prompt_params["example_selection"]
+        if isinstance(example_selection, str):
+            example_selection = {"method": example_selection}
         return PromptExampleConfig(
             num_examples=int(prompt_params["num_examples"]),
             formatter=create_example_formatter(prompt_params["example_format"]),
-            selection_method=str(prompt_params["example_selection"]["method"]),
-            selection_model=prompt_params["example_selection"].get("model"),
+            selection_method=str(example_selection["method"]),
+            selection_model=example_selection.get("model"),
             instruction_template=prompt_params["instruction_template"],
             model=model,
         )
