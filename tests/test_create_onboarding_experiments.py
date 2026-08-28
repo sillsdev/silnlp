@@ -972,6 +972,7 @@ def test_run_creates_experiments(request_dir: Path, tmp_path: Path, capsys, sele
             {"books": "MAT", "src_project": "NIV11R", "checkpoint": 5000},
             {"books": "MAT", "src_project": "HINCLBSI", "checkpoint": 5000},
         ],
+        "quality_estimation": True,
         "postprocess": [{"paragraph_behavior": "place"}],
     }
 

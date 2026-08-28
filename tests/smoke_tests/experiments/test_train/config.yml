@@ -23,6 +23,9 @@ data:
     update_trg: false
 eval:
   per_device_eval_batch_size: 4
+  eval_strategy: "no"
+  load_best_model_at_end: false
+  metric_for_best_model: null
 model: facebook/nllb-200-distilled-1.3B
 train:
   gradient_accumulation_steps: 1
