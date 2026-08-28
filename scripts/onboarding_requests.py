@@ -4,7 +4,7 @@ import logging
 import os
 import subprocess
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import List
@@ -236,7 +236,7 @@ def get_onboarding_requests() -> List[dict]:
 
 
 def append_datestamp(project_name: str) -> str:
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     datestamp = now.strftime("%Y_%m_%d")
     return f"{project_name}_{datestamp}"
 
