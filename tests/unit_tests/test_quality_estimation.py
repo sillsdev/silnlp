@@ -57,7 +57,6 @@ def test_books_report_confidence_and_low_confidence_flag(tmp_path: Path) -> None
 
     header, *rows = read_rows(tmp_path / "usability_books.tsv")
     assert header == ["Book", "Confidence", "Low Confidence", "Projected chrF3", "Label"]
-    # 50.0 * 0.8 + 20.0 = 60.0 (Green); 50.0 * 0.3 + 20.0 = 35.0 (Red)
     assert rows == [
         ["MAT", "0.8000", "False", "60.00", "Green"],
         ["MRK", "0.3000", "True", "35.00", "Red"],
