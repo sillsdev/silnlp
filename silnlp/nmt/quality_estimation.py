@@ -239,11 +239,11 @@ class Thresholds:
             return cls.RED_LABEL
 
 
-def chrf3_headers(include_projected_chrf3: bool) -> List[str]:
+def get_chrf3_headers(include_projected_chrf3: bool) -> List[str]:
     return ["Projected chrF3", "Label"] if include_projected_chrf3 else []
 
 
-def chrf3_cells(projected_chrf3: Optional[float], include_projected_chrf3: bool) -> List[str]:
+def get_chrf3_cells(projected_chrf3: Optional[float], include_projected_chrf3: bool) -> List[str]:
     if not include_projected_chrf3:
         return []
     if projected_chrf3 is None:
@@ -266,7 +266,9 @@ def compute_quality_labels(
 ) -> None:
     if verse_scores:
         with open(output_dir / "usability_verses.tsv", "w", encoding="utf-8", newline="\n") as verse_file:
-            write_row(verse_file, ["Book", "Chapter", "Verse", "Confidence"] + chrf3_headers(include_projected_chrf3))
+            write_row(
+                verse_file, ["Book", "Chapter", "Verse", "Confidence"] + get_chrf3_headers(include_projected_chrf3)
+            )
             for verse_score in verse_scores:
                 vref = verse_score.vref
                 if vref.verse_num == 0:
@@ -278,7 +280,7 @@ def compute_quality_labels(
                 write_row(
                     verse_file,
                     [str(vref.book), str(vref.chapter_num), str(vref.verse_num), f"{verse_score.confidence:.4f}"]
-                    + chrf3_cells(verse_score.projected_chrf3, include_projected_chrf3),
+                    + get_chrf3_cells(verse_score.projected_chrf3, include_projected_chrf3),
                 )
         compute_chapter_labels(chapter_scores, output_dir, include_projected_chrf3)
         compute_book_labels(book_scores, output_dir, include_projected_chrf3)
@@ -286,7 +288,7 @@ def compute_quality_labels(
         with open(output_dir / "usability_sequences.tsv", "w", encoding="utf-8", newline="\n") as sequence_file:
             write_row(
                 sequence_file,
-                ["Trg Draft File", "Sequence Number", "Confidence"] + chrf3_headers(include_projected_chrf3),
+                ["Trg Draft File", "Sequence Number", "Confidence"] + get_chrf3_headers(include_projected_chrf3),
             )
             for sequence_score in sequence_scores:
                 if include_projected_chrf3 and sequence_score.projected_chrf3 is None:
@@ -300,7 +302,7 @@ def compute_quality_labels(
                         str(sequence_score.sequence_num),
                         f"{sequence_score.confidence:.4f}",
                     ]
-                    + chrf3_cells(sequence_score.projected_chrf3, include_projected_chrf3),
+                    + get_chrf3_cells(sequence_score.projected_chrf3, include_projected_chrf3),
                 )
         compute_txt_file_labels(txt_file_scores, output_dir, include_projected_chrf3)
 
@@ -311,14 +313,14 @@ def compute_chapter_labels(
     include_projected_chrf3: bool,
 ) -> None:
     with open(output_dir / "usability_chapters.tsv", "w", encoding="utf-8", newline="\n") as chapter_file:
-        write_row(chapter_file, ["Book", "Chapter", "Confidence"] + chrf3_headers(include_projected_chrf3))
+        write_row(chapter_file, ["Book", "Chapter", "Confidence"] + get_chrf3_headers(include_projected_chrf3))
         for book in sorted(chapter_scores.scores, key=lambda b: CANONICAL_ORDER[b]):
             for chapter in sorted(chapter_scores.scores[book]):
                 score = chapter_scores.scores[book][chapter]
                 write_row(
                     chapter_file,
                     [book, str(chapter), f"{score.confidence:.4f}"]
-                    + chrf3_cells(score.projected_chrf3, include_projected_chrf3),
+                    + get_chrf3_cells(score.projected_chrf3, include_projected_chrf3),
                 )
 
 
@@ -328,14 +330,14 @@ def compute_book_labels(
     include_projected_chrf3: bool,
 ) -> None:
     with open(output_dir / "usability_books.tsv", "w", encoding="utf-8", newline="\n") as book_file:
-        write_row(book_file, ["Book", "Confidence", "Low Confidence"] + chrf3_headers(include_projected_chrf3))
+        write_row(book_file, ["Book", "Confidence", "Low Confidence"] + get_chrf3_headers(include_projected_chrf3))
         for book in sorted(book_scores.scores, key=lambda b: CANONICAL_ORDER[b]):
             score = book_scores.scores[book]
             low_confidence = is_book_confidence_unusually_low(score.confidence, book_id=book)
             write_row(
                 book_file,
                 [book, f"{score.confidence:.4f}", str(low_confidence)]
-                + chrf3_cells(score.projected_chrf3, include_projected_chrf3),
+                + get_chrf3_cells(score.projected_chrf3, include_projected_chrf3),
             )
 
 
@@ -345,13 +347,13 @@ def compute_txt_file_labels(
     include_projected_chrf3: bool,
 ) -> None:
     with open(output_dir / "usability_txt_files.tsv", "w", encoding="utf-8", newline="\n") as txt_file:
-        write_row(txt_file, ["Trg Draft File", "Confidence"] + chrf3_headers(include_projected_chrf3))
+        write_row(txt_file, ["Trg Draft File", "Confidence"] + get_chrf3_headers(include_projected_chrf3))
         for trg_draft_file_stem in sorted(txt_file_scores.scores):
             score = txt_file_scores.scores[trg_draft_file_stem]
             write_row(
                 txt_file,
                 [trg_draft_file_stem, f"{score.confidence:.4f}"]
-                + chrf3_cells(score.projected_chrf3, include_projected_chrf3),
+                + get_chrf3_cells(score.projected_chrf3, include_projected_chrf3),
             )
 
 
