@@ -19,8 +19,6 @@
         "Virgin Islands, U.S.": "US Virgin Islands"
     },
     "languages": {
-        "German, Standard": "German",
-        "German, Swiss": "Swiss German",
         "Arabic, Sudanese Spoken": "Sudanese Arabic",
         "Arabic, Tajiki Spoken": "Tajiki Arabic",
         "Arabic, Ta’izzi-Adeni Spoken": "Ta-izzi-Adeni Arabic",
@@ -52,6 +50,9 @@
         "Arabic, Sa’idi Spoken": "Sa-idi Arabic",
         "Arabic, Shihhi Spoken": "Shihhi Arabic",
         "Arabic, South Levantine Spoken": "South Levantine Arabic",
-        "Arabic, Standard": "Standard Arabic"
+        "Arabic, Standard": "Standard Arabic",
+        "Bamanankan": "Bambara",
+        "German, Standard": "German",
+        "German, Swiss": "Swiss German"
     }
 }

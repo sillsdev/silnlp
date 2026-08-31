@@ -1408,7 +1408,7 @@ def main() -> None:
         help="Request folder name in MT/experiments/_OnboardingRequests, or a folder relative to"
         " MT/experiments containing a corpus-stats.csv from an analyze run (e.g. PNG/Taupota/Align)",
     )
-    parser.add_argument("--min-parallel", type=int, default=2000, help="Minimum parallel verse count (default 2000)")
+    parser.add_argument("--min-parallel", type=int, default=1000, help="Minimum parallel verse count (default 2000)")
     parser.add_argument("--min-alignment", type=float, default=0.2, help="Minimum alignment score (default 0.2)")
     parser.add_argument(
         "--target",
