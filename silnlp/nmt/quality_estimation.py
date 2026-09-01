@@ -21,12 +21,6 @@ NO_LINREGRESS_WARNING = (
 )
 
 
-def project_chrf3(linear_regression_result: Optional[LinearRegressionResult], confidence: float) -> Optional[float]:
-    if linear_regression_result is None:
-        return None
-    return linear_regression_result.slope * confidence + linear_regression_result.intercept
-
-
 @dataclass
 class Score:
     confidence: float
@@ -43,7 +37,10 @@ class VerseScore(Score):
     ) -> List["VerseScore"]:
         verse_scores: List[VerseScore] = []
         for vref, confidence in confidence_file.verse_confidence_iterator():
-            verse_scores.append(cls(confidence, project_chrf3(linear_regression_result, confidence), vref))
+            projected_chrf3 = (
+                None if linear_regression_result is None else linear_regression_result.project_chrf3(confidence)
+            )
+            verse_scores.append(cls(confidence, projected_chrf3, vref))
         return verse_scores
 
 
@@ -64,7 +61,10 @@ class ChapterScores:
         linear_regression_result: Optional[LinearRegressionResult],
     ) -> None:
         for chapter, confidence in confidence_file.chapter_confidence_iterator():
-            score = Score(confidence, project_chrf3(linear_regression_result, confidence))
+            projected_chrf3 = (
+                None if linear_regression_result is None else linear_regression_result.project_chrf3(confidence)
+            )
+            score = Score(confidence, projected_chrf3)
             self.add_score(book, chapter, score)
 
 
@@ -86,7 +86,10 @@ class BookScores:
     ) -> None:
         confidence = confidence_file.get_book_confidence(book)
         if confidence is not None:
-            self.add_score(book, Score(confidence, project_chrf3(linear_regression_result, confidence)))
+            projected_chrf3 = (
+                None if linear_regression_result is None else linear_regression_result.project_chrf3(confidence)
+            )
+            self.add_score(book, Score(confidence, projected_chrf3))
 
 
 @dataclass
@@ -101,10 +104,13 @@ class SequenceScore(Score):
         trg_draft_file_stem = confidence_file.get_trg_draft_file_path().stem
         sequence_scores: List[SequenceScore] = []
         for sequence_num, confidence in confidence_file.verse_confidence_iterator():
+            projected_chrf3 = (
+                None if linear_regression_result is None else linear_regression_result.project_chrf3(confidence)
+            )
             sequence_scores.append(
                 cls(
                     confidence,
-                    project_chrf3(linear_regression_result, confidence),
+                    projected_chrf3,
                     sequence_num,
                     trg_draft_file_stem,
                 )
@@ -130,7 +136,10 @@ class TxtFileScores:
         if files_path.is_file() and files_path not in self.seen_files:
             self.seen_files.add(files_path)
             for trg_draft_file_stem, confidence in confidence_file.file_confidence_iterator():
-                score = Score(confidence, project_chrf3(linear_regression_result, confidence))
+                projected_chrf3 = (
+                    None if linear_regression_result is None else linear_regression_result.project_chrf3(confidence)
+                )
+                score = Score(confidence, projected_chrf3)
                 self.add_score(trg_draft_file_stem, score)
 
 
