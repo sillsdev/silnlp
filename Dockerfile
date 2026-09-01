@@ -18,6 +18,7 @@ ENV PATH="${PATH}:${POETRY_VENV}/bin"
 
 WORKDIR /src
 COPY poetry.lock pyproject.toml /src/
+RUN poetry self add poetry-plugin-export
 RUN poetry export -E eflomal --without-hashes -f requirements.txt > requirements.txt
 COPY . /src
 RUN poetry build
