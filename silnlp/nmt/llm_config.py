@@ -27,7 +27,6 @@ from typing import Any, Dict, Generator, Iterable, List, Optional, Tuple, Union
 import torch
 from datasets import Dataset
 from jinja2.exceptions import UndefinedError
-from machine.corpora import TextFileTextCorpus
 from torch.utils.data import Dataset as TorchDataset
 from transformers import (
     AutoConfig,
@@ -58,7 +57,8 @@ from .config import (
     warn_about_renamed_keys,
     write_effective_config,
 )
-from .corpora import DataFile
+from .corpora import DataFile, read_parallel_text_pairs
+from .example_retrieval import TRANSLATE_GEMMA_MODEL_PREFIXES, ExamplePromptBuilder, PromptExampleConfig
 from .seq2seq_config import batch_sentences, find_executable_batch_size
 from .tokenizer import NullTokenizer, Tokenizer
 
@@ -121,11 +121,6 @@ ADAPTER_METHODS = ("lora", "qlora", "dora", "qdora")
 QUANTIZED_METHODS = ("qlora", "qdora")
 DORA_METHODS = ("dora", "qdora")
 VALID_FINETUNE_METHODS = (FULL_FINETUNE_METHOD,) + ADAPTER_METHODS
-
-# TranslateGemma's chat template rejects a plain-text user turn: it requires `content` to be a
-# single-item list of {type, source_lang_code, target_lang_code, text|image}, and it renders the
-# natural-language instruction itself from a fixed table of ~55 supported language codes.
-TRANSLATE_GEMMA_MODEL_PREFIXES = ("google/translate-gemma", "google/translategemma")
 
 
 def _count_nonblank_lines(path: Path) -> int:
@@ -396,9 +391,14 @@ class LLMConfig(Config):
                     },
                     "prompt": {
                         "system_message": "",
+                        # {examples} renders as "" when disabled, so this is byte-identical to the
+                        # pre-few-shot default.
                         "instruction_template": (
-                            "Translate the following text from {src_lang} to {trg_lang}.\n\n{source}"
+                            "Translate the following text from {src_lang} to {trg_lang}.\n\n{examples}{source}"
                         ),
+                        "example_format": "text",  # text | json | xml
+                        "num_examples": 0,
+                        "example_selection": "lexical",  # lexical | embedding
                     },
                     "instruction_data": {
                         # Each name must have a matching <name>.jsonl under <mt_dir>/instructions
@@ -418,6 +418,11 @@ class LLMConfig(Config):
 
         if len(self.src_isos) > 1 or len(self.trg_isos) > 1:
             raise RuntimeError("LLM experiments only support a single source language and a single target language.")
+
+        example_config = PromptExampleConfig.from_params(self.params["prompt"], self.model)
+        self._example_prompt_builder = ExamplePromptBuilder(
+            example_config, exp_dir / self.train_src_filename(), exp_dir / self.train_trg_filename()
+        )
 
         self._disable_eval_if_no_val_split()
 
@@ -551,7 +556,12 @@ class LLMConfig(Config):
         return self.default_test_trg_iso or (next(iter(self.trg_isos)) if len(self.trg_isos) > 0 else "")
 
     def build_prompt_messages(
-        self, source: str, src_lang: Language, trg_lang: Language, target: Optional[str] = None
+        self,
+        source: str,
+        src_lang: Language,
+        trg_lang: Language,
+        target: Optional[str] = None,
+        example_pool_index: Optional[int] = None,
     ) -> PromptMessages:
         if self.model.lower().startswith(TRANSLATE_GEMMA_MODEL_PREFIXES):
             return TranslateGemmaPromptMessages(
@@ -559,8 +569,9 @@ class LLMConfig(Config):
             )
 
         prompt_config: dict = self.params["prompt"]
+        examples_text = self._example_prompt_builder.render(source, src_lang.name, trg_lang.name, example_pool_index)
         instruction = prompt_config["instruction_template"].format(
-            src_lang=src_lang.name, trg_lang=trg_lang.name, source=source
+            src_lang=src_lang.name, trg_lang=trg_lang.name, source=source, examples=examples_text
         )
         return PromptMessages(prompt_config.get("system_message", ""), instruction, target)
 
@@ -825,7 +836,14 @@ class LLMModel(NMTModel):
             labels = ([LABEL_PAD_TOKEN_ID] * len(prompt_ids) + completion_ids)[:max_seq_length]
             return {"input_ids": input_ids, "labels": labels, "attention_mask": [1] * len(input_ids)}
 
-        def encode(example: dict) -> dict:
+        def encode(example: dict, idx: int) -> dict:
+            # idx locates this row in the example pool (same corpus, same order) for leave-one-out.
+            prompt = self._config.build_prompt_messages(example["src"], src_lang, trg_lang, example_pool_index=idx)
+            prompt_ids = prompt.apply_prompt_template(tokenizer, add_generation_prompt=True, tokenize=True)
+            return encode_completion(prompt_ids, example["trg"])
+
+        def encode_eval(example: dict) -> dict:
+            # Eval rows aren't in the example pool, so no pool index -- unlike encode() above.
             prompt = self._config.build_prompt_messages(example["src"], src_lang, trg_lang)
             prompt_ids = prompt.apply_prompt_template(tokenizer, add_generation_prompt=True, tokenize=True)
             return encode_completion(prompt_ids, example["trg"])
@@ -843,9 +861,9 @@ class LLMModel(NMTModel):
             self._config.exp_dir / self._config.val_trg_filename(),
         )
         if train_dataset is not None:
-            train_dataset = train_dataset.map(encode, remove_columns=train_dataset.column_names)
+            train_dataset = train_dataset.map(encode, with_indices=True, remove_columns=train_dataset.column_names)
         if eval_dataset is not None:
-            eval_dataset = eval_dataset.map(encode, remove_columns=eval_dataset.column_names)
+            eval_dataset = eval_dataset.map(encode_eval, remove_columns=eval_dataset.column_names)
 
         # Instruction data is mixed into training only
         instruction_dataset = self._load_instruction_dataset(
@@ -937,16 +955,10 @@ class LLMModel(NMTModel):
         return round(training_args.num_train_epochs * translation_size)
 
     def _load_text_dataset(self, src_path: Path, trg_path: Path) -> Optional[Dataset]:
-        if not src_path.is_file() or not trg_path.is_file():
+        pairs = read_parallel_text_pairs(src_path, trg_path)
+        if pairs is None:
             return None
-        corpus = TextFileTextCorpus(src_path).align_rows(TextFileTextCorpus(trg_path))
-        sources: List[str] = []
-        targets: List[str] = []
-        for row in corpus:
-            sources.append(row.source_text)
-            targets.append(row.target_text)
-        if len(sources) == 0:
-            return None
+        sources, targets = pairs
         return Dataset.from_dict({"src": sources, "trg": targets})
 
     def _load_instruction_dataset(self, path: Path) -> Optional[Dataset]:
