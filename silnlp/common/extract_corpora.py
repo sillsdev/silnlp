@@ -52,7 +52,8 @@ def main() -> None:
         from clearml import Task
 
         Task.init(
-            project_name="LangTech_ExtractCorpora", task_name=str(args.projects) + "_" + str(datetime.datetime.now())
+            project_name="LangTech_ExtractCorpora",
+            task_name=str(args.projects) + "_" + str(datetime.datetime.now(datetime.timezone.utc)),
         )
 
     # Which projects have data we can find?

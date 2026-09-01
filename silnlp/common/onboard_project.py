@@ -9,7 +9,7 @@ import sys
 import zipfile
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Iterator, List
@@ -42,7 +42,6 @@ class ProjectType(Enum):
 
 
 class OnboardingProject:
-
     def __init__(self, project_name: str, project_type: ProjectType, overwrite: bool, environment: SilNlpEnv) -> None:
         self.project_name: str = project_name
         self.local_project_path: Path | None = None
@@ -401,7 +400,6 @@ class OnboardingProject:
 
 
 class OnboardingReport:
-
     def __init__(self, project: OnboardingProject, project_type: ProjectType) -> None:
         self.project = project
         self.project_type: ProjectType = project_type
@@ -544,7 +542,6 @@ class OnboardingReportFlag:
 
 
 class OnboardingReportCreator:
-
     def __init__(
         self,
         report_path: Path,
@@ -617,9 +614,9 @@ class OnboardingReportCreator:
         self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Books to Translate"] = ";".join(
             self.planned_books
         )
-        self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Books Missing/Incomplete"] = (
-            ";".join([book for book in self.completed_books if book not in self.main_project.report.completed_books])
-        )
+        self.report_df.loc[
+            self.report_df["Project Type"] == ProjectType.MAIN.value, "Books Missing/Incomplete"
+        ] = ";".join([book for book in self.completed_books if book not in self.main_project.report.completed_books])
         self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Extra Books"] = ";".join(
             [book for book in self.main_project.report.completed_books if book not in self.completed_books]
         )
@@ -637,9 +634,9 @@ class OnboardingReportCreator:
             self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Books to Translate"] = (
                 "yes" if len(books_missing) == 0 else "no"
             )
-            self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Books Missing/Incomplete"] = (
-                ";".join(books_missing)
-            )
+            self.report_df.loc[
+                self.report_df["Name on Bucket"] == project.project_name, "Books Missing/Incomplete"
+            ] = ";".join(books_missing)
             self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Extra Books"] = ";".join(
                 extra_books
             )
@@ -654,7 +651,6 @@ class OnboardingReportCreator:
 
 
 class OnboardingRequest:
-
     def __init__(
         self,
         config: dict,
@@ -1023,7 +1019,7 @@ def copy_directory(source_dir: Path, target_dir: Path, overwrite=False) -> None:
 
 
 def append_datestamp(project_name: str) -> str:
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     datestamp = now.strftime("%Y_%m_%d")
     return f"{project_name}_{datestamp}"
 
