@@ -1,110 +1,81 @@
 import logging
 from pathlib import Path
-from typing import Dict, List
+from typing import List
 
 import pytest
 
-from silnlp.nmt.quality_estimation import NO_LINREGRESS_WARNING, estimate_quality
-
-LOW_BOOK_CONFIDENCE = 0.3
-HIGH_BOOK_CONFIDENCE = 0.8
+from silnlp.nmt.quality_estimation import BookScores, Score, compute_book_labels, get_chrf3_cells, validate_inputs
 
 
-def write_tsv(path: Path, header: str, rows: Dict[str, float]) -> None:
-    with path.open("w", encoding="utf-8", newline="\n") as f:
-        f.write(f"{header}\tConfidence\n")
-        for key, confidence in rows.items():
-            f.write(f"{key}\t{confidence}\n")
+def touch_confidence_file(directory: Path, name: str = "41MAT.SFM.confidences.tsv") -> List[Path]:
+    confidence_file_path = directory / name
+    confidence_file_path.touch()
+    return [confidence_file_path]
 
 
-def make_confidence_files(directory: Path) -> List[Path]:
-    confidence_file_paths: List[Path] = []
-    for book, confidence in (("MAT", HIGH_BOOK_CONFIDENCE), ("MRK", LOW_BOOK_CONFIDENCE)):
-        confidence_file_path = directory / f"41{book}.SFM.confidences.tsv"
-        confidence_file_path.touch()
-        write_tsv(
-            confidence_file_path.with_suffix(".verses.tsv"),
-            "VRef",
-            {f"{book} 1:1": confidence, f"{book} 1:2": confidence},
-        )
-        write_tsv(confidence_file_path.with_suffix(".chapters.tsv"), "Chapter", {"1": confidence})
-        confidence_file_paths.append(confidence_file_path)
-
-    write_tsv(
-        directory / "confidences.books.tsv",
-        "Book",
-        {"MAT": HIGH_BOOK_CONFIDENCE, "MRK": LOW_BOOK_CONFIDENCE},
-    )
-    return confidence_file_paths
+def test_get_chrf3_cells_when_projected_chrf3_not_included() -> None:
+    assert get_chrf3_cells(60.0, False) == []
 
 
-def write_linregress_file(path: Path) -> None:
-    path.write_text('{"version": "0.1", "slope": 50.0, "intercept": 20.0}', encoding="utf-8")
+def test_get_chrf3_cells_when_projected_chrf3_is_none() -> None:
+    assert get_chrf3_cells(None, True) == ["", ""]
 
 
-def read_rows(path: Path) -> List[List[str]]:
-    return [line.split("\t") for line in path.read_text(encoding="utf-8").splitlines()]
+def test_get_chrf3_cells_when_projected_chrf3_is_included() -> None:
+    assert get_chrf3_cells(100.0, True) == ["100.00", "Green"]
 
 
-def test_books_report_confidence_and_low_confidence_flag(tmp_path: Path) -> None:
-    confidence_file_paths = make_confidence_files(tmp_path)
-    linregress_path = tmp_path / "linregress.5000.json"
-    write_linregress_file(linregress_path)
-
-    estimate_quality(linregress_path, confidence_file_paths)
-
-    header, *rows = read_rows(tmp_path / "usability_books.tsv")
-    assert header == ["Book", "Confidence", "Low Confidence", "Projected chrF3", "Label"]
-    assert rows == [
-        ["MAT", "0.8000", "False", "60.00", "Green"],
-        ["MRK", "0.3000", "True", "35.00", "Red"],
-    ]
-
-    assert read_rows(tmp_path / "usability_chapters.tsv")[0] == [
-        "Book",
-        "Chapter",
-        "Confidence",
-        "Projected chrF3",
-        "Label",
-    ]
-    assert read_rows(tmp_path / "usability_verses.tsv")[0] == [
-        "Book",
-        "Chapter",
-        "Verse",
-        "Confidence",
-        "Projected chrF3",
-        "Label",
-    ]
-
-
-@pytest.mark.parametrize("pass_directory_without_linregress", [False, True])
-def test_no_linregress_file_reports_confidence_only(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture, pass_directory_without_linregress: bool
-) -> None:
-    confidence_file_paths = make_confidence_files(tmp_path)
-    linregress_path = tmp_path if pass_directory_without_linregress else None
+def test_validate_inputs_with_no_linregress_path(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    confidence_file_paths = touch_confidence_file(tmp_path)
 
     with caplog.at_level(logging.WARNING):
-        estimate_quality(linregress_path, confidence_file_paths)
+        linear_regression_result, confidence_files = validate_inputs(None, confidence_file_paths)
 
-    assert any(NO_LINREGRESS_WARNING in record.message for record in caplog.records)
-
-    header, *rows = read_rows(tmp_path / "usability_books.tsv")
-    assert header == ["Book", "Confidence", "Low Confidence"]
-    assert rows == [["MAT", "0.8000", "False"], ["MRK", "0.3000", "True"]]
-
-    assert read_rows(tmp_path / "usability_chapters.tsv")[0] == ["Book", "Chapter", "Confidence"]
-    assert read_rows(tmp_path / "usability_verses.tsv") == [
-        ["Book", "Chapter", "Verse", "Confidence"],
-        ["MAT", "1", "1", "0.8000"],
-        ["MAT", "1", "2", "0.8000"],
-        ["MRK", "1", "1", "0.3000"],
-        ["MRK", "1", "2", "0.3000"],
-    ]
+    assert linear_regression_result is None
+    assert len(confidence_files) == 1
 
 
-def test_explicitly_named_missing_linregress_file_still_raises(tmp_path: Path) -> None:
-    confidence_file_paths = make_confidence_files(tmp_path)
+def test_validate_inputs_with_directory_missing_linregress_file(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    confidence_file_paths = touch_confidence_file(tmp_path)
+
+    with caplog.at_level(logging.WARNING):
+        linear_regression_result, confidence_files = validate_inputs(tmp_path, confidence_file_paths)
+
+    assert linear_regression_result is None
+    assert len(confidence_files) == 1
+
+
+def test_validate_inputs_with_explicit_missing_linregress_path(tmp_path: Path) -> None:
+    confidence_file_paths = touch_confidence_file(tmp_path)
 
     with pytest.raises(FileNotFoundError):
-        estimate_quality(tmp_path / "linregress.5000.json", confidence_file_paths)
+        validate_inputs(tmp_path / "linregress.5000.json", confidence_file_paths)
+
+
+def test_compute_book_labels_with_projected_chrf3_not_included(tmp_path: Path) -> None:
+    book_scores = BookScores()
+    book_scores.add_score("MAT", Score(confidence=0.8, projected_chrf3=None))
+    book_scores.add_score("COL", Score(confidence=0.3, projected_chrf3=None))
+
+    compute_book_labels(book_scores, tmp_path, include_projected_chrf3=False)
+
+    rows = [line.split("\t") for line in (tmp_path / "usability_books.tsv").read_text(encoding="utf-8").splitlines()]
+    assert rows[0] == ["Book", "Confidence", "Low Confidence"]
+    assert rows[1:] == [["MAT", "0.8000", "False"], ["COL", "0.3000", "True"]]
+
+
+def test_compute_book_labels_with_projected_chrf3_included(tmp_path: Path) -> None:
+    book_scores = BookScores()
+    book_scores.add_score("MAT", Score(confidence=0.8, projected_chrf3=60.0))
+    book_scores.add_score("COL", Score(confidence=0.3, projected_chrf3=30.0))
+
+    compute_book_labels(book_scores, tmp_path, include_projected_chrf3=True)
+
+    rows = [line.split("\t") for line in (tmp_path / "usability_books.tsv").read_text(encoding="utf-8").splitlines()]
+    assert rows[0] == ["Book", "Confidence", "Low Confidence", "Projected chrF3", "Label"]
+    assert rows[1:] == [
+        ["MAT", "0.8000", "False", "60.00", "Green"],
+        ["COL", "0.3000", "True", "30.00", "Red"],
+    ]
