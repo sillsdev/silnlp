@@ -23,6 +23,7 @@ COPY . /src
 RUN poetry build
 
 FROM ubuntu:24.04
+ARG PYTHON_VERSION
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=on
 ENV TZ=America/New_York
