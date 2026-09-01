@@ -108,3 +108,5 @@ name = "torch"
 url = "https://download.pytorch.org/whl/cu124"
 priority = "explicit"
 
+[tool.poetry.requires-plugins]
+poetry-plugin-export = ">=1.8"
