@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,6 +18,7 @@ from silnlp.nmt.llm_config import (
     LLMModel,
     PromptMessages,
     TranslateGemmaPromptMessages,
+    _render_turns,
     build_generation_kwargs,
 )
 
@@ -304,8 +306,7 @@ class _InstructionDataStub:
     instruction_data_size = LLMConfig.instruction_data_size
     instruction_mix_ratio = LLMConfig.instruction_mix_ratio
     instruction_data_paths = LLMConfig.instruction_data_paths
-    instruction_src_filename = Config.instruction_src_filename
-    instruction_trg_filename = Config.instruction_trg_filename
+    instruction_jsonl_filename = Config.instruction_jsonl_filename
     _open_append = Config._open_append
     _write_instruction_data = LLMConfig._write_instruction_data
 
@@ -325,8 +326,8 @@ def test_instruction_data_paths_resolved_under_mt_dir_instructions(tmp_path):
         _environment=environment,
     )
     assert stub.instruction_data_paths() == [
-        (tmp_path / "instructions" / "dolly.input.txt", tmp_path / "instructions" / "dolly.output.txt"),
-        (tmp_path / "instructions" / "no_robots.input.txt", tmp_path / "instructions" / "no_robots.output.txt"),
+        tmp_path / "instructions" / "dolly.jsonl",
+        tmp_path / "instructions" / "no_robots.jsonl",
     ]
 
 
@@ -345,6 +346,52 @@ def test_instruction_mix_ratio_rejects_negative():
     stub = _InstructionDataStub(params={"instruction_data": {"mix_ratio": -0.1}}, _environment=None)
     with pytest.raises(ValueError, match="non-negative"):
         stub.instruction_mix_ratio
+
+
+class _StubRejectingSystemTokenizer:
+    chat_template = "some template"
+
+    def apply_chat_template(self, messages, add_generation_prompt, tokenize, return_dict):
+        assert tokenize is True
+        assert return_dict is False
+        if any(m["role"] == "system" for m in messages):
+            raise ValueError("this template does not support a separate system role")
+        return [len(m["content"]) for m in messages]
+
+
+def test_render_turns_happy_path():
+    turns = [{"role": "user", "content": "hi"}]
+    assert _render_turns(_StubRejectingSystemTokenizer(), turns, add_generation_prompt=True) == [2]
+
+
+def test_render_turns_folds_leading_system_turn_into_first_user_turn_on_failure():
+    turns = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "yo"},
+    ]
+    result = _render_turns(_StubRejectingSystemTokenizer(), turns, add_generation_prompt=True)
+    # folded: [{"role": "user", "content": "sys\n\nhi"}, {"role": "assistant", "content": "yo"}]
+    assert result == [len("sys\n\nhi"), len("yo")]
+
+
+class _AlwaysFailingTokenizer:
+    chat_template = "some template"
+
+    def apply_chat_template(self, *args, **kwargs):
+        raise RuntimeError("boom")
+
+
+def test_render_turns_reraises_when_there_is_no_system_turn_to_fold():
+    with pytest.raises(RuntimeError, match="boom"):
+        _render_turns(_AlwaysFailingTokenizer(), [{"role": "user", "content": "hi"}], add_generation_prompt=True)
+
+
+def test_render_turns_reraises_when_system_turn_has_nothing_to_fold_into():
+    with pytest.raises(RuntimeError, match="boom"):
+        _render_turns(
+            _AlwaysFailingTokenizer(), [{"role": "system", "content": "sys"}], add_generation_prompt=True
+        )
 
 
 def _make_tagged_dataset(prefix: str, size: int) -> Dataset:
@@ -437,8 +484,10 @@ def test_estimate_total_train_examples_falls_back_to_num_train_epochs_when_max_s
     assert stub._estimate_total_train_examples(training_args, translation_size=1000) == 3000
 
 
-def _write_lines(path: Path, lines: list) -> None:
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+def _write_jsonl_fixture(path: Path, examples: list) -> None:
+    with path.open("w", encoding="utf-8") as f:
+        for turns, output in examples:
+            f.write(json.dumps({"turns": turns, "output": output}) + "\n")
 
 
 def test_write_instruction_data_mixes_evenly_and_uses_undersized_datasets_whole(tmp_path):
@@ -448,11 +497,15 @@ def test_write_instruction_data_mixes_evenly_and_uses_undersized_datasets_whole(
     exp_dir = tmp_path / "exp"
     exp_dir.mkdir()
 
-    _write_lines(instructions_dir / "a.input.txt", [f"a-in-{i}" for i in range(10)])
-    _write_lines(instructions_dir / "a.output.txt", [f"a-out-{i}" for i in range(10)])
+    _write_jsonl_fixture(
+        instructions_dir / "a.jsonl",
+        [([{"role": "user", "content": f"a-in-{i}"}], f"a-out-{i}") for i in range(10)],
+    )
     # "b" has fewer lines than its even share of the requested size (4), so all of it is used.
-    _write_lines(instructions_dir / "b.input.txt", [f"b-in-{i}" for i in range(3)])
-    _write_lines(instructions_dir / "b.output.txt", [f"b-out-{i}" for i in range(3)])
+    _write_jsonl_fixture(
+        instructions_dir / "b.jsonl",
+        [([{"role": "user", "content": f"b-in-{i}"}], f"b-out-{i}") for i in range(3)],
+    )
 
     stub = _InstructionDataStub(
         params={"instruction_data": {"datasets": ["a", "b"], "size": 8}},
@@ -463,18 +516,19 @@ def test_write_instruction_data_mixes_evenly_and_uses_undersized_datasets_whole(
     count = stub._write_instruction_data()
     assert count == 4 + 3
 
-    src_lines = (exp_dir / "instruction.src.txt").read_text(encoding="utf-8").splitlines()
-    trg_lines = (exp_dir / "instruction.trg.txt").read_text(encoding="utf-8").splitlines()
-    assert len(src_lines) == len(trg_lines) == count
-    # inputs and outputs stay aligned line-for-line
-    for src_line, trg_line in zip(src_lines, trg_lines):
-        assert src_line.split("-in-")[0] == trg_line.split("-out-")[0]
+    lines = (exp_dir / "instruction.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == count
+    examples = [json.loads(line) for line in lines]
 
-    a_selected = {line for line in src_lines if line.startswith("a-in-")}
-    b_selected = {line for line in src_lines if line.startswith("b-in-")}
+    a_selected = {e["output"] for e in examples if e["output"].startswith("a-out-")}
+    b_selected = {e["output"] for e in examples if e["output"].startswith("b-out-")}
     assert len(a_selected) == 4
-    assert a_selected.issubset({f"a-in-{i}" for i in range(10)})
-    assert b_selected == {f"b-in-{i}" for i in range(3)}
+    assert a_selected.issubset({f"a-out-{i}" for i in range(10)})
+    assert b_selected == {f"b-out-{i}" for i in range(3)}
+
+    # inputs and outputs stay aligned within each example
+    for e in examples:
+        assert e["turns"][0]["content"].split("-in-")[1] == e["output"].split("-out-")[1]
 
 
 def test_write_instruction_data_missing_file_raises(tmp_path):

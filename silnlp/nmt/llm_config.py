@@ -58,7 +58,7 @@ from .config import (
     warn_about_renamed_keys,
     write_effective_config,
 )
-from .corpora import DataFile, get_parallel_corpus_size
+from .corpora import DataFile
 from .seq2seq_config import batch_sentences, find_executable_batch_size
 from .tokenizer import NullTokenizer, Tokenizer
 
@@ -126,6 +126,11 @@ VALID_FINETUNE_METHODS = (FULL_FINETUNE_METHOD,) + ADAPTER_METHODS
 # single-item list of {type, source_lang_code, target_lang_code, text|image}, and it renders the
 # natural-language instruction itself from a fixed table of ~55 supported language codes.
 TRANSLATE_GEMMA_MODEL_PREFIXES = ("google/translate-gemma", "google/translategemma")
+
+
+def _count_nonblank_lines(path: Path) -> int:
+    with path.open("r", encoding="utf-8") as f:
+        return sum(1 for line in f if line.strip())
 
 
 def is_image_text_to_text_model(model_name_or_path: str, trust_remote_code: bool = False) -> bool:
@@ -396,12 +401,10 @@ class LLMConfig(Config):
                         ),
                     },
                     "instruction_data": {
-                        # Names of datasets to mix in. Each name must have a matching
-                        # <name>.input.txt / <name>.output.txt pair under <mt_dir>/instructions
+                        # Each name must have a matching <name>.jsonl under <mt_dir>/instructions
                         # (see scripts/prepare_instruction_data.py).
                         "datasets": [],
                         "size": 100000,
-                        # Rate at which instruction examples are mixed into training batches
                         "mix_ratio": 0.1,
                     },
                 },
@@ -465,15 +468,14 @@ class LLMConfig(Config):
             raise ValueError(f"params.instruction_data.mix_ratio must be non-negative, got {ratio}.")
         return ratio
 
-    def instruction_data_paths(self) -> List[Tuple[Path, Path]]:
-        """Resolve each configured instruction dataset name to its (input, output) file pair
-        under <mt_dir>/instructions. Kept separate from src_file_paths/trg_file_paths so
-        preprocessing never writes instruction data into train.src.txt/train.trg.txt."""
+    def instruction_data_paths(self) -> List[Path]:
+        """Resolves each dataset name to its JSONL file under <mt_dir>/instructions -- kept separate from
+        src_file_paths/trg_file_paths so it never merges into the translation corpora."""
         datasets = self.instruction_datasets
         if not datasets:
             return []
         instructions_dir = self._environment.mt_dir / "instructions"
-        return [(instructions_dir / f"{name}.input.txt", instructions_dir / f"{name}.output.txt") for name in datasets]
+        return [instructions_dir / f"{name}.jsonl" for name in datasets]
 
     def _write_instruction_data(self) -> int:
         dataset_paths = self.instruction_data_paths()
@@ -483,35 +485,27 @@ class LLMConfig(Config):
         base_share, remainder = divmod(self.instruction_data_size, len(dataset_paths))
 
         count = 0
-        with (
-            self._open_append(self.instruction_src_filename()) as instruction_src_file,
-            self._open_append(self.instruction_trg_filename()) as instruction_trg_file,
-        ):
-            for i, (input_path, output_path) in enumerate(dataset_paths):
-                if not input_path.is_file() or not output_path.is_file():
+        with self._open_append(self.instruction_jsonl_filename()) as out_file:
+            for i, dataset_path in enumerate(dataset_paths):
+                if not dataset_path.is_file():
                     raise RuntimeError(
-                        f"Instruction data file {input_path} or {output_path} does not exist. Run "
+                        f"Instruction data file {dataset_path} does not exist. Run "
                         "scripts/prepare_instruction_data.py to generate it."
                     )
                 # Datasets mix evenly regardless of their original relative sizes; a dataset
                 # smaller than its even share is used in full, without repetition (see split_corpus).
                 share = base_share + (1 if i < remainder else 0)
-                corpus_size = get_parallel_corpus_size(input_path, output_path)
+                corpus_size = _count_nonblank_lines(dataset_path)
                 selected_indices = split_corpus(corpus_size, share)
 
                 index = 0
-                with (
-                    input_path.open("r", encoding="utf-8") as in_file,
-                    output_path.open("r", encoding="utf-8") as out_file,
-                ):
-                    for in_line, out_line in zip(in_file, out_file):
-                        in_line = in_line.strip()
-                        out_line = out_line.strip()
-                        if len(in_line) == 0 or len(out_line) == 0:
+                with dataset_path.open("r", encoding="utf-8") as in_file:
+                    for raw_line in in_file:
+                        line = raw_line.strip()
+                        if not line:
                             continue
                         if selected_indices is None or index in selected_indices:
-                            instruction_src_file.write(in_line + "\n")
-                            instruction_trg_file.write(out_line + "\n")
+                            out_file.write(line + "\n")
                             count += 1
                         index += 1
 
@@ -706,10 +700,7 @@ class DataCollatorForCausalLM:
 
 
 class InterleavedTrainDataset(TorchDataset):
-    """Presents two encoded datasets (translation, instruction) of different lengths as one
-    combined training set that repeats each component dataset with a new shuffle each time that
-    dataset is exhausted.
-    """
+    """Combines two datasets of different lengths into one, reshuffling each whenever it's exhausted."""
 
     def __init__(
         self,
@@ -736,13 +727,11 @@ class InterleavedTrainDataset(TorchDataset):
             return self._lap_item(self._translation_dataset, salt=0, index=index)
         return self._lap_item(self._instruction_dataset, salt=1, index=index - self._translation_count)
 
-    # This function keeps track of multiple cycles ("laps") through the dataset, shuffling it differently each time.
     def _lap_item(self, dataset: Dataset, salt: int, index: int) -> dict:
         pool_size = len(dataset)
         lap, position = divmod(index, pool_size)
         return dataset[self._lap_permutation(pool_size, salt, lap)[position]]
 
-    # To avoid storing a potentially huge permutation for every lap, we derive it from the seed, salt, and lap number.
     def _lap_permutation(self, pool_size: int, salt: int, lap: int) -> List[int]:
         key = (salt, lap)
         permutation = self._lap_cache.get(key)
@@ -778,6 +767,24 @@ class SilCausalTrainer(Trainer):
             trial=trial,
             ignore_keys_for_eval=ignore_keys_for_eval,
         )
+
+
+def _render_turns(
+    tokenizer: PreTrainedTokenizerBase, turns: List[Dict[str, str]], add_generation_prompt: bool
+) -> List[int]:
+    """Render turns through the tokenizer's chat template, the same way a live conversation is tokenized."""
+    try:
+        return tokenizer.apply_chat_template(
+            turns, add_generation_prompt=add_generation_prompt, tokenize=True, return_dict=False
+        )
+    except Exception:
+        # Some chat templates (e.g. Gemma) reject a separate system role; fold it into the first user turn and retry.
+        if turns and turns[0]["role"] == "system" and len(turns) > 1:
+            folded = [{"role": "user", "content": f"{turns[0]['content']}\n\n{turns[1]['content']}"}] + list(turns[2:])
+            return tokenizer.apply_chat_template(
+                folded, add_generation_prompt=add_generation_prompt, tokenize=True, return_dict=False
+            )
+        raise
 
 
 class LLMModel(NMTModel):
@@ -824,10 +831,8 @@ class LLMModel(NMTModel):
             return encode_completion(prompt_ids, example["trg"])
 
         def encode_instruction(example: dict) -> dict:
-            # Instruction examples already have a complete instruction
-            prompt = PromptMessages(system_message="", instruction=example["src"])
-            prompt_ids = prompt.apply_prompt_template(tokenizer, add_generation_prompt=True, tokenize=True)
-            return encode_completion(prompt_ids, example["trg"])
+            prompt_ids = _render_turns(tokenizer, list(example["turns"]), add_generation_prompt=True)
+            return encode_completion(prompt_ids, example["output"])
 
         train_dataset = self._load_text_dataset(
             self._config.exp_dir / self._config.train_src_filename(),
@@ -843,9 +848,8 @@ class LLMModel(NMTModel):
             eval_dataset = eval_dataset.map(encode, remove_columns=eval_dataset.column_names)
 
         # Instruction data is mixed into training only
-        instruction_dataset = self._load_text_dataset(
-            self._config.exp_dir / self._config.instruction_src_filename(),
-            self._config.exp_dir / self._config.instruction_trg_filename(),
+        instruction_dataset = self._load_instruction_dataset(
+            self._config.exp_dir / self._config.instruction_jsonl_filename()
         )
         mix_ratio = self._config.instruction_mix_ratio
         if instruction_dataset is not None and train_dataset is not None and mix_ratio > 0:
@@ -945,6 +949,11 @@ class LLMModel(NMTModel):
             return None
         return Dataset.from_dict({"src": sources, "trg": targets})
 
+    def _load_instruction_dataset(self, path: Path) -> Optional[Dataset]:
+        if not path.is_file() or path.stat().st_size == 0:
+            return None
+        return Dataset.from_json(str(path))
+
     def _create_training_arguments(self) -> TrainingArguments:
         dtype = self._config.params["torch_dtype"]
         args = collect_training_args(
@@ -978,10 +987,7 @@ class LLMModel(NMTModel):
     def load_for_inference(
         self, ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST
     ) -> Tuple[PreTrainedModel, PreTrainedTokenizerBase]:
-        """Load the model and tokenizer for a checkpoint with no translation-specific prompt
-        building, for callers (e.g. an interactive chat script) that want raw generation access.
-        A config with no checkpoints on disk (e.g. one built for a bare model name with no
-        experiment directory) naturally loads that pristine pretrained model instead."""
+        """Loads the model and tokenizer for a checkpoint without any translation-specific prompt building."""
         return self._create_inference_model(ckpt), self._config.get_hf_tokenizer()
 
     def _get_inference_model(

@@ -466,7 +466,7 @@ class Config(ABC):
         self._delete_files("val.*.txt")
         self._delete_files("test.*.txt")
         self._delete_files("dict.*.txt")
-        self._delete_files("instruction.*.txt")
+        self._delete_files("instruction.*")
 
         train_count = 0
         terms_config = self.data["terms"]
@@ -1390,11 +1390,8 @@ class Config(ABC):
     def dict_vref_filename(self) -> str:
         return "dict.vref.txt"
 
-    def instruction_src_filename(self) -> str:
-        return "instruction.src.txt"
-
-    def instruction_trg_filename(self) -> str:
-        return "instruction.trg.txt"
+    def instruction_jsonl_filename(self) -> str:
+        return "instruction.jsonl"
 
     def _write_instruction_data(self) -> int:
         """Hook for general instruction-following data mixed into training only, kept separate
