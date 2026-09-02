@@ -354,8 +354,6 @@ def main():
     else:
         OnboardingEnvironment.create_production_environment()
     onboarding_requests = get_onboarding_requests()
-    print(onboarding_requests)
-    return
     if not onboarding_requests or len(onboarding_requests) == 0:
         display_message("No new onboarding requests found.", MessageType.INFO)
         return
