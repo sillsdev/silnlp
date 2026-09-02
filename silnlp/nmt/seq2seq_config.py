@@ -1333,12 +1333,32 @@ class Seq2SeqNMTModel(NMTModel):
         sentences: Iterable[TSent],
         produce_multiple_translations: bool = False,
     ) -> Iterable[ModelOutputGroup]:
-        for batch in batch_sentences(sentences, self._config.infer["infer_batch_size"]):
-            yield from self._translate_sentence_helper(
-                translator,
-                batch,
-                produce_multiple_translations=produce_multiple_translations,
-            )
+        batch_size: int = self._config.infer["infer_batch_size"]
+
+        current_batch_size = batch_size
+        for batch in batch_sentences(sentences, batch_size):
+            index = 0
+            while index < len(batch):
+                effective_size = min(current_batch_size, len(batch) - index)
+                sub_batch = batch[index : index + effective_size]
+                try:
+                    yield from self._translate_sentence_helper(
+                        translator,
+                        sub_batch,
+                        produce_multiple_translations=produce_multiple_translations,
+                    )
+                    index += effective_size
+                except RuntimeError as e:
+                    if not _should_reduce_batch_size(e) or current_batch_size <= 1:
+                        raise
+                    current_batch_size //= 2
+                    LOGGER.warning(
+                        "OOM during translation inference; reducing batch size to %d and retrying current batch.",
+                        current_batch_size,
+                    )
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
 
     def _translate_sentence_helper(
         self,
@@ -1346,12 +1366,9 @@ class Seq2SeqNMTModel(NMTModel):
         sentences: Iterable[TSent],
         produce_multiple_translations: bool = False,
     ) -> Iterable[ModelOutputGroup]:
-
         num_drafts = self.get_num_drafts()
         if produce_multiple_translations and num_drafts > 1:
             multiple_translations_method: str = self._config.infer.get("multiple_translations_method")
-
-            sentences = list(sentences)
 
             if multiple_translations_method == "hybrid":
                 beam_search_results: List[List[dict]] = self._translate_with_beam_search(
