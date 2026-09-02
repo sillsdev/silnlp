@@ -1,7 +1,7 @@
 import argparse
 import csv
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from tqdm import tqdm
@@ -50,7 +50,7 @@ def find_items_to_delete(root_path: Path, delete_subfolders: bool):
 
 
 def clean_projects(args):
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     now_filestamp = now.strftime("%Y%m%d_%H%M%S")
     now_csv_date = now.strftime("%Y %m %d")
     now_csv_time = now.strftime("%H:%M:%S")

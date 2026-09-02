@@ -1,8 +1,12 @@
+from typing import cast
+from unittest.mock import Mock
+
 import torch
 
 from silnlp.common.environment import SilNlpEnv
 from silnlp.nmt.config_utils import load_config
 from silnlp.nmt.experiment import SILExperiment
+from silnlp.nmt.seq2seq_config import Seq2SeqConfig, Seq2SeqNMTModel
 from tests.smoke_tests.mock_pretrained_model import (
     MockModelOutput,
     MockPreTrainedModelProviderFactory,
@@ -19,6 +23,7 @@ from tests.smoke_tests.smoke_test_utils import (
 )
 
 EXPERIMENT_NAME = "test_experiment"
+OOM_ERROR_MESSAGE = "CUDA out of memory. Tried to allocate 7.00 GiB."
 
 
 def test_experiment_full_pipeline():
@@ -34,6 +39,53 @@ def test_experiment_full_pipeline():
     check_translate_step(environment)
 
     delete_generated_paths(exp_dir, PIPELINE_OUTPUT_PATTERNS)
+
+
+def test_translate_sentences_uses_full_batch_size():
+    model = cast(Seq2SeqNMTModel, Mock(spec=Seq2SeqNMTModel))
+    model._config = cast(Seq2SeqConfig, Mock(infer={"infer_batch_size": 4}))
+    captured_sub_batch_size = {}
+
+    def fake_translate_sentence_helper(translator, sentences, produce_multiple_translations=False):
+        captured_sub_batch_size["value"] = len(sentences)
+        return iter(())
+
+    model._translate_sentence_helper = fake_translate_sentence_helper
+
+    list(
+        Seq2SeqNMTModel._translate_sentences(
+            model,
+            translator=Mock(),
+            sentences=[["a"], ["b"], ["c"], ["d"]],
+        )
+    )
+
+    assert captured_sub_batch_size["value"] == 4
+
+
+def test_translate_sentences_retries_with_smaller_batch():
+    model = cast(Seq2SeqNMTModel, Mock(spec=Seq2SeqNMTModel))
+    model._config = cast(Seq2SeqConfig, Mock(infer={"infer_batch_size": 4, "num_beams": 2}, params={}))
+    call_sub_batch_sizes: list[int] = []
+
+    def fake_translate_sentence_helper(translator, sentences, produce_multiple_translations=False):
+        call_sub_batch_sizes.append(len(sentences))
+        if len(sentences) > 2:
+            raise RuntimeError(OOM_ERROR_MESSAGE)
+        return iter(())
+
+    model._translate_sentence_helper = fake_translate_sentence_helper
+
+    list(
+        Seq2SeqNMTModel._translate_sentences(
+            model,
+            translator=Mock(),
+            sentences=[["a"], ["b"], ["c"], ["d"]],
+        )
+    )
+
+    # First call is batch-of-4 (OOM), then two calls of batch-of-2 succeed
+    assert call_sub_batch_sizes == [4, 2, 2]
 
 
 def create_experiment_with_mock_pretrained_model(environment: SilNlpEnv) -> tuple[SILExperiment, ModelTrainingStats]:

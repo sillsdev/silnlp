@@ -27,6 +27,9 @@ class LinearRegressionResult:
         except (KeyError, TypeError, ValueError) as e:
             raise ValueError(f"Invalid linear regression data: {json_str}") from e
 
+    def project_chrf3(self, confidence: float) -> float:
+        return self.slope * confidence + self.intercept
+
 
 class PointWeightingScheme:
     def weight_points(self, _x: List[float], _y: List[float]) -> List[float]: ...
