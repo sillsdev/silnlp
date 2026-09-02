@@ -39,6 +39,7 @@ RUN apt-get upgrade -y
 RUN apt-get install --no-install-recommends -y \
     git \
     python$PYTHON_VERSION \
+    python$PYTHON_VERSION-venv \
     python3-pip \
     python3-dev \
     wget \
@@ -51,6 +52,9 @@ RUN apt-get install --no-install-recommends -y \
     tar \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
+
+RUN python${PYTHON_VERSION} -m venv /opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
 
 # Make some useful symlinks that are expected to exist
 RUN ln -sfn /usr/bin/python${PYTHON_VERSION} /usr/bin/python3  & \
