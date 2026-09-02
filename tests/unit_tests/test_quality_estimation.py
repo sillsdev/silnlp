@@ -1,4 +1,3 @@
-import logging
 from pathlib import Path
 from typing import List
 
@@ -25,23 +24,19 @@ def test_get_chrf3_cells_when_projected_chrf3_is_included() -> None:
     assert get_chrf3_cells(100.0, True) == ["100.00", "Green"]
 
 
-def test_validate_inputs_with_no_linregress_path(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_validate_inputs_with_no_linregress_path(tmp_path: Path) -> None:
     confidence_file_paths = touch_confidence_file(tmp_path)
 
-    with caplog.at_level(logging.WARNING):
-        linear_regression_result, confidence_files = validate_inputs(None, confidence_file_paths)
+    linear_regression_result, confidence_files = validate_inputs(None, confidence_file_paths)
 
     assert linear_regression_result is None
     assert len(confidence_files) == 1
 
 
-def test_validate_inputs_with_directory_missing_linregress_file(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_validate_inputs_with_directory_missing_linregress_file(tmp_path: Path) -> None:
     confidence_file_paths = touch_confidence_file(tmp_path)
 
-    with caplog.at_level(logging.WARNING):
-        linear_regression_result, confidence_files = validate_inputs(tmp_path, confidence_file_paths)
+    linear_regression_result, confidence_files = validate_inputs(tmp_path, confidence_file_paths)
 
     assert linear_regression_result is None
     assert len(confidence_files) == 1
