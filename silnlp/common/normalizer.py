@@ -158,24 +158,24 @@ class Normalizer:
         }
         self.supported_punctuation: Set[str] = set(self.punctuation_char_2_normalization_rule.keys())
 
-        self.consecutive_spaces = regex.compile("\\s+")
+        self.consecutive_spaces = regex.compile(r"\s+")
 
         # Regex escape all the punctuation characters defined in the rules so that they be shoved into a regex
         escaped_punctuation_chars = "".join(regex.escape(rule.character) for rule in punctuation_normalization_rules)
         # Matches a single punctuation character with optional whitespace before and after
         # Negative look behind and ahead is used to stop it matching punctuation that's part of a multiple punctuation group
         self.single_punctuation_with_optional_whitespace_regex = regex.compile(
-            f"(?<![{escaped_punctuation_chars}\s])\s*[{escaped_punctuation_chars}]\s*(?![{escaped_punctuation_chars}\s])"
+            rf"(?<![{escaped_punctuation_chars}\s])\s*[{escaped_punctuation_chars}]\s*(?![{escaped_punctuation_chars}\s])"
         )
         # Matches a starting punctuation char, then any number of punctuation/whitespace, then a closing punctuation character
         self.multiple_punctuation_regex = regex.compile(
-            f"[{escaped_punctuation_chars}][{escaped_punctuation_chars}\s]*[{escaped_punctuation_chars}]"
+            rf"[{escaped_punctuation_chars}][{escaped_punctuation_chars}\s]*[{escaped_punctuation_chars}]"
         )
 
-        self.not_letters_or_numbers_or_whitespace_regex = regex.compile("""[^\p{N}\p{L}\s]""")
+        self.not_letters_or_numbers_or_whitespace_regex = regex.compile(r"[^\p{N}\p{L}\s]")
 
         self.single_punctuation_surrounded_by_nonwhitepace_nonpunctuation_regex = regex.compile(
-            f"(?<=[^\s{escaped_punctuation_chars}])[{escaped_punctuation_chars}](?=[^\s{escaped_punctuation_chars}])"
+            rf"(?<=[^\s{escaped_punctuation_chars}])[{escaped_punctuation_chars}](?=[^\s{escaped_punctuation_chars}])"
         )
 
         right_clinging_punctuation: Set[str] = set(
@@ -187,7 +187,7 @@ class Normalizer:
             regex.escape(character) for character in right_clinging_punctuation
         )
         self.right_clinging_character_starting_sentence_regex = regex.compile(
-            f"(?<=^\s*)[{escaped_right_clinging_punctuation_chars}]"
+            rf"(?<=^\s*)[{escaped_right_clinging_punctuation_chars}]"
         )
 
         left_clinging_punctuation: Set[str] = set(
@@ -199,7 +199,7 @@ class Normalizer:
             regex.escape(character) for character in left_clinging_punctuation
         )
         self.left_clinging_character_ending_sentence_regex = regex.compile(
-            f"[{escaped_left_clinging_punctuation_chars}](?=\s*$)"
+            rf"[{escaped_left_clinging_punctuation_chars}](?=\s*$)"
         )
 
         left_right_clinging_punctuation: Set[str] = set(
@@ -211,7 +211,7 @@ class Normalizer:
             regex.escape(character) for character in left_right_clinging_punctuation
         )
         self.left_right_clinging_character_not_touching_anything_regex = regex.compile(
-            f"(?<=\S\s+)[{escaped_left_right_clinging_punctuation_chars}](?=\s+\S)"
+            rf"(?<=\S\s+)[{escaped_left_right_clinging_punctuation_chars}](?=\s+\S)"
         )
 
     def validate_normalization_rules(self, punctuation_normalization_rules: List[PunctuationNormalizationRule]) -> None:
