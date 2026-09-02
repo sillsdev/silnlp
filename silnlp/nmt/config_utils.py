@@ -48,7 +48,22 @@ def is_llm_config(config: dict) -> bool:
     return any(model.startswith(prefix) for prefix in LLM_MODEL_PREFIXES)
 
 
+def is_remote_llm_config(config: dict) -> bool:
+    """Decide whether a config targets a remote LLM prompted with in-context examples.
+
+    This requires an explicit ``model_type: remote_llm``: the model name is a LiteLLM model string
+    (e.g. "anthropic/claude-sonnet-4-5", "gpt-4o"), which is arbitrary and cannot be recognized
+    by a prefix match the way the local decoder-only model names can.
+    """
+    return str(config.get("model_type", "")).lower() == "remote_llm"
+
+
 def create_config(exp_dir: Path, config: dict, environment: SilNlpEnv) -> Config:
+    if is_remote_llm_config(config):
+        # Imported lazily so the litellm import cost is only paid for remote LLM experiments.
+        from .remote_llm_config import RemoteLLMConfig
+
+        return RemoteLLMConfig(exp_dir, config, environment)
     if is_llm_config(config):
         # Imported lazily so the peft/bitsandbytes import cost is only paid for LLM experiments.
         from .llm_config import LLMConfig

@@ -3,10 +3,12 @@
 
 import json
 import logging
+import pickle
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Protocol, Sequence, Union
+from typing import Any, List, Optional, Protocol, Sequence, Union
 from xml.sax.saxutils import escape as xml_escape
 
 import numpy as np
@@ -15,16 +17,32 @@ from .corpora import read_parallel_text_pairs
 
 LOGGER = logging.getLogger(__name__)
 
+TFIDF_METHOD = "tfidf"
+BM25_METHOD = "bm25"
+EMBEDDING_METHOD = "embedding"
+VALID_SELECTION_METHODS = (TFIDF_METHOD, BM25_METHOD, EMBEDDING_METHOD)
+
+DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+
+RETRIEVER_FILENAME = "retrieval.pkl"
+RETRIEVER_META_FILENAME = "retrieval_meta.json"
+
+# Shared by tfidf and bm25 so that switching between them doesn't also change tokenization.
+_TOKEN_PATTERN = r"\w+"
+
+# TranslateGemma's chat template requires structured {type, lang_code, text} content instead of
+# free text, so it cannot carry few-shot examples.
+TRANSLATE_GEMMA_MODEL_PREFIXES = ("google/translate-gemma", "google/translategemma")
+
+
+def tokenize_for_retrieval(text: str) -> List[str]:
+    return re.findall(_TOKEN_PATTERN, text.lower())
+
 
 @dataclass(frozen=True)
 class Example:
     source: str
     target: str
-
-
-# TranslateGemma's chat template requires structured {type, lang_code, text} content instead of
-# free text, so it cannot carry few-shot examples.
-TRANSLATE_GEMMA_MODEL_PREFIXES = ("google/translate-gemma", "google/translategemma")
 
 
 class _EmbeddingModel(Protocol):
@@ -52,11 +70,27 @@ def _top_k_indices(scores: np.ndarray, k: int, exclude: Optional[int] = None) ->
 
 
 class ExampleRetriever(ABC):
-    def __init__(self, examples: Sequence[Example]) -> None:
-        self._examples: List[Example] = list(examples)
+    """A fitted index over the source side of an example pool."""
+
+    method: str = ""
+
+    def __init__(self) -> None:
+        self._examples: List[Example] = []
 
     def __len__(self) -> int:
         return len(self._examples)
+
+    @property
+    def examples(self) -> List[Example]:
+        return self._examples
+
+    @property
+    def model_name(self) -> Optional[str]:
+        return None
+
+    def fit(self, examples: Sequence[Example]) -> None:
+        self._examples = list(examples)
+        self._fit_index([example.source for example in self._examples])
 
     def retrieve(self, query: str, k: int) -> List[Example]:
         """Top-k most similar pool examples to an arbitrary query string not in the pool
@@ -67,40 +101,157 @@ class ExampleRetriever(ABC):
 
     def retrieve_for_pool_index(self, index: int, k: int) -> List[Example]:
         """Top-k most similar pool examples to the pool entry at `index`, excluding itself
-        (leave-one-out; used during training)."""
+        (leave-one-out; used during training, where the pool contains the row being translated)."""
         if k <= 0 or len(self._examples) == 0:
             return []
         return [self._examples[i] for i in self._top_indices_for_pool_index(index, k)]
 
     @abstractmethod
-    def _top_indices_for_query(self, query: str, k: int) -> List[int]: ...
+    def _fit_index(self, sources: List[str]) -> None: ...
 
     @abstractmethod
-    def _top_indices_for_pool_index(self, index: int, k: int) -> List[int]: ...
+    def _top_indices_for_query(self, query: str, k: int) -> List[int]: ...
+
+    def _top_indices_for_pool_index(self, index: int, k: int) -> List[int]:
+        # Asks for k + 1 so that dropping the pool entry itself still leaves k results.
+        indices = self._top_indices_for_query(self._examples[index].source, k + 1)
+        return [i for i in indices if i != index][:k]
+
+    def save(self, directory: Path) -> None:
+        directory.mkdir(parents=True, exist_ok=True)
+        with (directory / RETRIEVER_FILENAME).open("wb") as file:
+            pickle.dump(self, file)
+        meta = {"method": self.method, "model_name": self.model_name, "num_examples": len(self._examples)}
+        with (directory / RETRIEVER_META_FILENAME).open("w", encoding="utf-8") as file:
+            json.dump(meta, file, indent=2)
+
+    @staticmethod
+    def load(directory: Path) -> Optional["ExampleRetriever"]:
+        """Load a previously saved index, or return None if it is missing or unreadable.
+
+        A None return is not an error: the caller rebuilds. The index often will not be there,
+        since the ``run`` directory is deleted unless ``--save-checkpoints`` is set, and it may
+        not unpickle across a scikit-learn upgrade.
+        """
+        path = directory / RETRIEVER_FILENAME
+        try:
+            with path.open("rb") as file:
+                retriever = pickle.load(file)
+        except FileNotFoundError:
+            return None
+        except Exception:
+            LOGGER.warning("Could not load the retrieval index at %s; it will be rebuilt.", path, exc_info=True)
+            return None
+        if not isinstance(retriever, ExampleRetriever):
+            LOGGER.warning("The file at %s is not a retrieval index; it will be rebuilt.", path)
+            return None
+        return retriever
 
 
 class TfidfExampleRetriever(ExampleRetriever):
-    def __init__(self, examples: Sequence[Example]) -> None:
-        super().__init__(examples)
+    method = TFIDF_METHOD
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._vectorizer: Optional[Any] = None
+        self._matrix: Optional[Any] = None
+
+    def _fit_index(self, sources: List[str]) -> None:
         from sklearn.feature_extraction.text import TfidfVectorizer
 
-        self._vectorizer = TfidfVectorizer()
-        sources = [ex.source for ex in self._examples]
+        if len(sources) == 0:
+            self._vectorizer = None
+            self._matrix = None
+            return
+        self._vectorizer = TfidfVectorizer(lowercase=True, token_pattern=_TOKEN_PATTERN)
         # Rows are L2-normalized by default, so a dot product against the matrix is cosine similarity.
-        self._matrix = self._vectorizer.fit_transform(sources) if sources else None
+        self._matrix = self._vectorizer.fit_transform(sources)
 
     def _scores_for_vector(self, vector) -> np.ndarray:
         return (self._matrix @ vector.T).toarray().ravel()
 
     def _top_indices_for_query(self, query: str, k: int) -> List[int]:
-        vector = self._vectorizer.transform([query])
-        return _top_k_indices(self._scores_for_vector(vector), k)
+        if self._vectorizer is None or self._matrix is None:
+            return []
+        return _top_k_indices(self._scores_for_vector(self._vectorizer.transform([query])), k)
 
     def _top_indices_for_pool_index(self, index: int, k: int) -> List[int]:
         # Guarded by retrieve_for_pool_index()'s empty-pool check, so this is always fit here.
         assert self._matrix is not None
-        vector = self._matrix[index]
-        return _top_k_indices(self._scores_for_vector(vector), k, exclude=index)
+        return _top_k_indices(self._scores_for_vector(self._matrix[index]), k, exclude=index)
+
+
+class BM25ExampleRetriever(ExampleRetriever):
+    method = BM25_METHOD
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._index: Optional[Any] = None
+
+    def _fit_index(self, sources: List[str]) -> None:
+        bm25_okapi = _import_bm25()
+        tokenized = [tokenize_for_retrieval(source) for source in sources]
+        # BM25Okapi rejects an empty corpus and divides by zero on all-empty documents.
+        if sum(len(tokens) for tokens in tokenized) == 0:
+            self._index = None
+            return
+        self._index = bm25_okapi(tokenized)
+
+    def _top_indices_for_query(self, query: str, k: int) -> List[int]:
+        if self._index is None:
+            return []
+        return _top_k_indices(self._index.get_scores(tokenize_for_retrieval(query)), k)
+
+
+class EmbeddingExampleRetriever(ExampleRetriever):
+    method = EMBEDDING_METHOD
+
+    def __init__(self, model_name: Optional[str] = None, model: Optional[_EmbeddingModel] = None) -> None:
+        """`model` is the test injection seam; production passes only `model_name`."""
+        super().__init__()
+        self._model_name = model_name or DEFAULT_EMBEDDING_MODEL
+        self._model = model
+        self._embeddings: np.ndarray = np.zeros((0, 0), dtype=np.float32)
+
+    @property
+    def model_name(self) -> Optional[str]:
+        return self._model_name
+
+    def _get_model(self) -> _EmbeddingModel:
+        if self._model is None:
+            self._model = _load_sentence_transformer(self._model_name)
+        return self._model
+
+    def _encode(self, texts: Sequence[str]) -> np.ndarray:
+        return self._get_model().encode(
+            texts, convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=False
+        )
+
+    def _fit_index(self, sources: List[str]) -> None:
+        self._embeddings = self._encode(sources) if sources else np.zeros((0, 0), dtype=np.float32)
+
+    def _top_indices_for_query(self, query: str, k: int) -> List[int]:
+        if self._embeddings.shape[0] == 0:
+            return []
+        return _top_k_indices(self._embeddings @ self._encode([query])[0], k)
+
+    def _top_indices_for_pool_index(self, index: int, k: int) -> List[int]:
+        return _top_k_indices(self._embeddings @ self._embeddings[index], k, exclude=index)
+
+    def __getstate__(self) -> dict:
+        # The embeddings are the expensive part worth caching; the model reloads by name.
+        return {**self.__dict__, "_model": None}
+
+
+def _import_bm25():
+    try:
+        from rank_bm25 import BM25Okapi
+    except ImportError as e:
+        raise ImportError(
+            f"example_selection.method: {BM25_METHOD} requires the 'rank_bm25' package. "
+            "Install it with `poetry install -E llm`."
+        ) from e
+    return BM25Okapi
 
 
 def _load_sentence_transformer(model_name: str) -> _EmbeddingModel:
@@ -108,47 +259,24 @@ def _load_sentence_transformer(model_name: str) -> _EmbeddingModel:
         from sentence_transformers import SentenceTransformer
     except ImportError as e:
         raise ImportError(
-            "params.prompt.example_selection.method: embedding requires the "
-            "'sentence-transformers' package. Install it with `poetry install -E llm`."
+            f"example_selection.method: {EMBEDDING_METHOD} requires the 'sentence-transformers' "
+            "package. Install it with `poetry install -E llm`."
         ) from e
     return SentenceTransformer(model_name)
 
 
-class EmbeddingExampleRetriever(ExampleRetriever):
-    DEFAULT_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-
-    def __init__(self, examples: Sequence[Example], model: Optional[_EmbeddingModel] = None) -> None:
-        """`model` is the test injection seam; production leaves it unset."""
-        super().__init__(examples)
-        self._model = model if model is not None else _load_sentence_transformer(self.DEFAULT_MODEL)
-
-        sources = [ex.source for ex in self._examples]
-        self._embeddings: np.ndarray = (
-            self._model.encode(sources, convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=False)
-            if sources
-            else np.zeros((0, 0), dtype=np.float32)
-        )
-
-    def _top_indices_for_query(self, query: str, k: int) -> List[int]:
-        vector = self._model.encode([query], convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=False)[
-            0
-        ]
-        return _top_k_indices(self._embeddings @ vector, k)
-
-    def _top_indices_for_pool_index(self, index: int, k: int) -> List[int]:
-        vector = self._embeddings[index]
-        return _top_k_indices(self._embeddings @ vector, k, exclude=index)
-
-
-def create_example_retriever(
-    method: str, examples: Sequence[Example], model_name: Optional[str] = None
-) -> ExampleRetriever:
-    if method == "lexical":
-        return TfidfExampleRetriever(examples)
-    if method == "embedding":
-        model = _load_sentence_transformer(model_name) if model_name else None
-        return EmbeddingExampleRetriever(examples, model=model)
-    raise ValueError(f"Unknown example_selection.method '{method}'. Valid options: lexical, embedding.")
+def create_example_retriever(method: str, model_name: Optional[str] = None) -> ExampleRetriever:
+    """Create an unfitted retriever; the caller supplies the pool with `fit`."""
+    normalized = method.lower()
+    if normalized == TFIDF_METHOD:
+        return TfidfExampleRetriever()
+    if normalized == BM25_METHOD:
+        return BM25ExampleRetriever()
+    if normalized == EMBEDDING_METHOD:
+        return EmbeddingExampleRetriever(model_name)
+    raise ValueError(
+        f"Unknown example_selection.method '{method}'. Valid options: {', '.join(VALID_SELECTION_METHODS)}."
+    )
 
 
 class ExampleFormatter(ABC):
@@ -203,11 +331,11 @@ def create_example_formatter(format_params: Union[str, dict]) -> ExampleFormatte
         return JsonExampleFormatter()
     if format_type == "xml":
         return XmlExampleFormatter()
-    raise ValueError(f"Unknown params.prompt.example_format.type '{format_type}'. Valid options: text, json, xml.")
+    raise ValueError(f"Unknown example_format.type '{format_type}'. Valid options: text, json, xml.")
 
 
 class PromptExampleConfig:
-    """Parsed params.prompt config for few-shot examples."""
+    """Parsed prompt config for few-shot examples."""
 
     def __init__(
         self,
@@ -219,24 +347,25 @@ class PromptExampleConfig:
         model: str,
     ) -> None:
         if num_examples < 0:
-            raise ValueError(f"params.prompt.num_examples must be non-negative, got {num_examples}.")
+            raise ValueError(f"prompt.num_examples must be non-negative, got {num_examples}.")
 
         selection_method = selection_method.lower()
-        if selection_method not in ("lexical", "embedding"):
+        if selection_method not in VALID_SELECTION_METHODS:
             raise ValueError(
-                f"Unknown params.prompt.example_selection.method '{selection_method}'. "
-                "Valid options: lexical, embedding."
+                f"Unknown example_selection.method '{selection_method}'. "
+                f"Valid options: {', '.join(VALID_SELECTION_METHODS)}."
             )
 
         if num_examples > 0:
             if "{examples}" not in instruction_template:
                 LOGGER.warning(
-                    "params.prompt.num_examples > 0 requires '{examples}' in params.prompt.instruction_template, "
+                    "prompt.num_examples > 0 requires '{examples}' in prompt.instruction_template, "
                     "otherwise the retrieved examples are silently discarded."
                 )
             if model.lower().startswith(TRANSLATE_GEMMA_MODEL_PREFIXES):
                 raise RuntimeError(
-                    "TranslateGemma models do not support few-shot examples in the prompt. Set params.prompt.num_examples to 0 or use a different model."
+                    "TranslateGemma models do not support few-shot examples in the prompt. "
+                    "Set prompt.num_examples to 0 or use a different model."
                 )
 
         self.num_examples = num_examples
@@ -289,9 +418,10 @@ class ExamplePromptBuilder:
         pairs = read_parallel_text_pairs(self._pool_src_path, self._pool_trg_path)
         if pairs is None:
             raise RuntimeError(
-                f"params.prompt.num_examples > 0 requires the training corpus at {self._pool_src_path} and "
+                f"prompt.num_examples > 0 requires the training corpus at {self._pool_src_path} and "
                 f"{self._pool_trg_path}. Run preprocessing (--preprocess) first."
             )
         sources, targets = pairs
-        examples = [Example(source=s, target=t) for s, t in zip(sources, targets)]
-        return create_example_retriever(self.config.selection_method, examples, model_name=self.config.selection_model)
+        retriever = create_example_retriever(self.config.selection_method, self.config.selection_model)
+        retriever.fit([Example(source=s, target=t) for s, t in zip(sources, targets)])
+        return retriever

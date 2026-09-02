@@ -51,6 +51,7 @@ from .config import (
     CheckpointType,
     Config,
     InferenceModelParams,
+    Language,
     NMTModel,
     collect_training_args,
     find_last_checkpoint,
@@ -152,12 +153,6 @@ def build_generation_kwargs(infer: dict, num_return_sequences: int, pad_token_id
             )
         gen_kwargs["num_beams"] = num_beams
     return gen_kwargs
-
-
-@dataclass(frozen=True)
-class Language:
-    iso: str
-    name: str
 
 
 @dataclass
@@ -398,7 +393,7 @@ class LLMConfig(Config):
                         ),
                         "example_format": "text",  # text | json | xml
                         "num_examples": 0,
-                        "example_selection": "lexical",  # lexical | embedding
+                        "example_selection": "tfidf",  # tfidf | bm25 | embedding
                     },
                     "instruction_data": {
                         # Each name must have a matching <name>.jsonl under <mt_dir>/instructions

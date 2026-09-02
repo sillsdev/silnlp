@@ -303,7 +303,7 @@ def test_llm_config_warns_when_num_examples_set_without_examples_placeholder(tmp
 
 
 def test_llm_config_rejects_unknown_example_selection_method(tmp_path):
-    with pytest.raises(ValueError, match="Unknown params.prompt.example_selection.method"):
+    with pytest.raises(ValueError, match="Unknown example_selection.method"):
         _construct_llm_config(
             tmp_path,
             {
