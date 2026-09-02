@@ -16,9 +16,9 @@ Monolingual data filtering hard rules, including:
 10. sentences with html address and html tags
 11. optional: non english characters > 0.25
 """
-import time
-import re
 import argparse
+import re
+import time
 from string import punctuation
 
 parser = argparse.ArgumentParser()
@@ -85,7 +85,7 @@ def specific_punc_remove(x_in):
             return False
         if sent.count("-") > 5:
             return False
-        if len(re.findall("[\d\-\|/]", sent)) / len(sent) > 0.5:
+        if len(re.findall(r"[\d\-\|/]", sent)) / len(sent) > 0.5:
             return False
         return True
 
@@ -156,7 +156,7 @@ def html_remove(x_in):
         sent = sent.strip()
         detector = re.compile("<.*?>")
         sent = re.sub(detector, "", sent)
-        sent = re.sub("https?:\/\/.*[ \r\n]", "", x, flags=re.MULTILINE)
+        sent = re.sub(r"https?:\/\/.*[ \r\n]", "", x, flags=re.MULTILINE)
         return sent
 
     for x in x_in:
