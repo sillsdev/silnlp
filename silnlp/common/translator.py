@@ -1,8 +1,9 @@
 import logging
+import re
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from contextlib import AbstractContextManager
-from datetime import date
+from datetime import datetime, timezone
 from itertools import groupby
 from pathlib import Path
 from typing import DefaultDict, Dict, Generator, Generic, Iterable, List, Optional, Tuple, TypeVar
@@ -26,7 +27,8 @@ from silnlp.common.utils import add_tags_to_sentence
 from silnlp.nmt.corpora import CorpusPair
 
 from .corpus import load_corpus, write_corpus
-from .paratext import get_book_path, get_iso, get_parent_project_dir, get_project_dir
+from .environment import SilNlpEnv
+from .paratext import get_book_path, get_iso, get_parent_project_dir
 from .postprocesser import NoDetectedQuoteConventionException, PostprocessHandler, UnknownQuoteConventionException
 from .translation_data_structures import DraftGroup, SentenceTranslationGroup, TranslatedDraft, UsfmTextRowCollection
 from .utils import NLTKSentenceTokenizer
@@ -283,6 +285,9 @@ def generate_confidence_files(
 
 
 class Translator(AbstractContextManager["Translator"], ABC):
+    def __init__(self, environment: SilNlpEnv):
+        self._environment = environment
+
     @abstractmethod
     def translate(
         self,
@@ -290,7 +295,6 @@ class Translator(AbstractContextManager["Translator"], ABC):
         src_iso: str,
         trg_iso: str,
         produce_multiple_translations: bool = False,
-        vrefs: Optional[Iterable[VerseRef]] = None,
     ) -> Generator[SentenceTranslationGroup, None, None]:
         pass
 
@@ -332,14 +336,14 @@ class Translator(AbstractContextManager["Translator"], ABC):
         trg_iso: str,
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
-        chapters: List[int] = [],
+        chapters: Optional[List[int]] = None,
         trg_project: Optional[str] = None,
-        postprocess_handler: PostprocessHandler = PostprocessHandler(),
+        postprocess_handler: Optional[PostprocessHandler] = None,
         experiment_ckpt_str: str = "",
         training_corpus_pairs: List[CorpusPair] = [],
         tags: Optional[List[str]] = None,
     ) -> None:
-        book_path = get_book_path(src_project, book)
+        book_path = get_book_path(src_project, book, self._environment)
         if not book_path.is_file():
             raise RuntimeError(f"Can't find file {book_path} for book {book}")
         else:
@@ -348,7 +352,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
         self.translate_usfm(
             book_path,
             output_path,
-            get_iso(get_project_dir(src_project)),
+            get_iso(self._environment.get_paratext_project_dir(src_project)),
             trg_iso,
             produce_multiple_translations,
             save_confidences,
@@ -368,9 +372,9 @@ class Translator(AbstractContextManager["Translator"], ABC):
         trg_iso: str,
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
-        chapters: List[int] = [],
+        chapters: Optional[List[int]] = None,
         trg_project: Optional[str] = None,
-        postprocess_handler: PostprocessHandler = PostprocessHandler(),
+        postprocess_handler: Optional[PostprocessHandler] = None,
         experiment_ckpt_str: str = "",
         training_corpus_pairs: List[CorpusPair] = [],
         tags: Optional[List[str]] = None,
@@ -379,7 +383,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
         src_from_project = False
         src_settings: Optional[ParatextProjectSettings] = None
         stylesheet = UsfmStylesheet("usfm.sty")
-        if str(src_file_path).startswith(str(get_project_dir(""))):
+        if str(src_file_path).startswith(str(self._environment.get_paratext_project_dir(""))):
             src_from_project = True
             src_settings = FileParatextProjectSettingsParser(src_file_path.parent).parse()
             stylesheet = src_settings.stylesheet
@@ -406,7 +410,7 @@ class Translator(AbstractContextManager["Translator"], ABC):
 
         sentences = UsfmTextRowCollection(src_file_text, src_iso, stylesheet, chapters, tags)
         LOGGER.info(f"File {src_file_path} parsed correctly.")
-        sentences_to_translate, scripture_refs = sentences.get_sentences_and_vrefs_for_translation()
+        sentences_to_translate = sentences.get_sentences_for_translation()
 
         if len(sentences_to_translate) == 0:
             LOGGER.warning(f"No sentences found to translate. Skipping translation for {book_id}.")
@@ -418,7 +422,6 @@ class Translator(AbstractContextManager["Translator"], ABC):
                 src_iso,
                 trg_iso,
                 produce_multiple_translations,
-                [sr.verse_ref for sr in scripture_refs],
             )
         )
 
@@ -428,30 +431,54 @@ class Translator(AbstractContextManager["Translator"], ABC):
 
         translated_text_rows = sentences.to_translated_text_row_collection(sentence_translation_groups)
 
+        if postprocess_handler is None:
+            postprocess_handler = PostprocessHandler(environment=self._environment)
         for draft_index, translated_draft in enumerate(translated_text_rows.get_translated_drafts(), 1):
             translated_text_rows.construct_postprocessing_rows_for_draft_index(postprocess_handler, draft_index)
 
             for config in postprocess_handler.configs:
 
                 # Compile draft remarks
-                draft_src_str = f"project {src_file_text.project}" if src_from_project else f"file {src_file_path.name}"
-                draft_remark = f"This draft of {sentences.get_book()} was machine translated on {date.today()} from {draft_src_str} using model {experiment_ckpt_str}. It should be reviewed and edited carefully."
-                postprocess_remark = config.get_postprocess_remark()
-                remarks = [draft_remark] + ([postprocess_remark] if postprocess_remark else [])
+                remarks: List[Tuple[int, str]] = []
+                paragraph_remark = config.get_paragraph_marker_remark()
+                generated_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+
+                if src_from_project:
+                    draft_src_str = re.sub(r"_\d{4}_\d{2}_\d{2}$", "", src_file_path.parent.name)
+                    draft_src_str = f"project {draft_src_str}"
+                else:
+                    draft_src_str = f"file {src_file_path.name}"
+
+                chapters_for_remarks = (
+                    chapters
+                    if chapters
+                    else sorted({sr.verse_ref.chapter_num for sr in translated_text_rows.get_scripture_refs()})
+                )
+                for chapter_num in chapters_for_remarks:
+                    draft_remark = (
+                        f"This draft of {sentences.get_book()} {chapter_num} was generated by AI from {draft_src_str} "
+                        f"on {generated_timestamp}. It should be reviewed carefully for errors before use."
+                    )
+                    if paragraph_remark:
+                        draft_remark += " " + paragraph_remark
+                    remarks.append((chapter_num, draft_remark))
 
                 # Insert translation into the USFM structure of an existing project
                 # If the target project is not the same as the translated file's original project,
                 # no verses outside of the ones translated will be overwritten
                 if trg_project is not None or src_from_project:
-                    project_dir = get_project_dir(trg_project if trg_project is not None else src_file_path.parent.name)
+                    project_dir = self._environment.get_paratext_project_dir(
+                        trg_project if trg_project is not None else src_file_path.parent.name
+                    )
                     parent_settings = None
-                    parent_project_dir = get_parent_project_dir(project_dir)
+                    parent_project_dir = get_parent_project_dir(project_dir, environment=self._environment)
                     if parent_project_dir is not None:
                         parent_settings = FileParatextProjectSettingsParser(parent_project_dir).parse()
                     dest_updater = FileParatextProjectTextUpdater(project_dir, parent_settings)
                     usfm_out = dest_updater.update_usfm(
                         book_id=src_file_text.id,
                         rows=config.rows,
+                        chapters=chapters,
                         text_behavior=text_behavior,
                         paragraph_behavior=config.get_paragraph_behavior(),
                         embed_behavior=config.get_embed_behavior(),
@@ -494,7 +521,9 @@ class Translator(AbstractContextManager["Translator"], ABC):
                         quotation_denormalization_postprocessor = (
                             config.create_denormalize_quotation_marks_postprocessor(training_corpus_pairs)
                         )
-                        usfm_out = quotation_denormalization_postprocessor.postprocess_usfm(usfm_out)
+                        usfm_out = quotation_denormalization_postprocessor.postprocess_usfm(
+                            usfm_out, stylesheet=stylesheet
+                        )
                     except (UnknownQuoteConventionException, NoDetectedQuoteConventionException) as e:
                         LOGGER.warning(str(e) + " Skipping quotation mark denormalization.")
                         continue

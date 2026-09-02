@@ -6,16 +6,16 @@ from pathlib import Path
 from typing import Generator, Iterable, List, Optional, Tuple, Union
 
 from machine.corpora import UsfmFileTextCorpus, create_versification_ref_corpus, extract_scripture_corpus
-from machine.scripture import VerseRef, book_number_to_id, get_chapters
+from machine.scripture import book_number_to_id, get_chapters
 
-from ..common.environment import SIL_NLP_ENV, SilNlpEnv
-from ..common.paratext import book_file_name_digits, get_project_dir
+from ..common.environment import SilNlpEnv
+from ..common.paratext import book_file_name_digits
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.translation_data_structures import SentenceTranslationGroup
 from ..common.translator import CONFIDENCE_SUFFIX, Translator
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
-from .config import CheckpointType, Config, NMTModel, get_mt_exp_dir
+from .config import CheckpointType, Config, NMTModel
 from .quality_estimation import estimate_quality
 
 LOGGER = logging.getLogger((__package__ or "") + ".translate")
@@ -55,9 +55,15 @@ def convert_usfm_to_vref(usfm_path: Path, vref_path: Path) -> None:
 
 
 class NMTTranslator(Translator):
-    def __init__(self, model: NMTModel, checkpoint: Union[CheckpointType, str, int]) -> None:
+    def __init__(
+        self,
+        model: NMTModel,
+        checkpoint: Union[CheckpointType, str, int],
+        environment: SilNlpEnv,
+    ) -> None:
         self._model: NMTModel = model
         self._checkpoint = checkpoint
+        super().__init__(environment)
 
     def translate(
         self,
@@ -65,11 +71,8 @@ class NMTTranslator(Translator):
         src_iso: str,
         trg_iso: str,
         produce_multiple_translations: bool = False,
-        vrefs: Optional[Iterable[VerseRef]] = None,
     ) -> Generator[SentenceTranslationGroup, None, None]:
-        yield from self._model.translate(
-            sentences, src_iso, trg_iso, produce_multiple_translations, vrefs, self._checkpoint
-        )
+        yield from self._model.translate(sentences, src_iso, trg_iso, produce_multiple_translations, self._checkpoint)
 
     def __exit__(
         self, exc_type, exc_value, traceback  # pyright: ignore[reportUnknownParameterType, reportMissingParameterType]
@@ -85,7 +88,7 @@ class TranslationTask:
     commit: Optional[str] = None
     clearml_tag: Optional[str] = None
     model: Optional[NMTModel] = None
-    environment: SilNlpEnv = SIL_NLP_ENV
+    environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
 
     def translate_books(
         self,
@@ -95,9 +98,8 @@ class TranslationTask:
         trg_iso: Optional[str],
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
-        quality_estimation: bool = False,
-        verse_test_scores_path: Optional[Path] = None,
-        postprocess_handler: PostprocessHandler = PostprocessHandler(),
+        linregress_path: Optional[Path] = None,
+        postprocess_handler: Optional[PostprocessHandler] = None,
         tags: Optional[List[str]] = None,
         vref: bool = False,
     ) -> None:
@@ -112,13 +114,13 @@ class TranslationTask:
                     raise RuntimeError("A source project must be specified.")
                 src_project = next(iter(config.src_projects))
 
-            src_project_dir = get_project_dir(src_project)
+            src_project_dir = self.environment.get_paratext_project_dir(src_project)
             if not src_project_dir.is_dir():
                 raise FileNotFoundError(f"Source project {src_project} not found in projects folder {src_project_dir}")
 
             if any(len(book_nums[book]) > 0 for book in book_nums) and trg_project is not None:
 
-                trg_project_dir = get_project_dir(trg_project)
+                trg_project_dir = self.environment.get_paratext_project_dir(trg_project)
                 if not trg_project_dir.is_dir():
                     raise FileNotFoundError(
                         f"Target project {trg_project} not found in projects folder {trg_project_dir}"
@@ -157,7 +159,7 @@ class TranslationTask:
                         trg_iso,
                         produce_multiple_translations,
                         save_confidences,
-                        chapters,
+                        chapters if chapters else None,
                         trg_project,
                         postprocess_handler,
                         experiment_ckpt_str,
@@ -176,9 +178,9 @@ class TranslationTask:
             if len(translation_failed) > 0:
                 raise RuntimeError(f"Some books failed to translate: {' '.join(translation_failed)}")
 
-        if quality_estimation and len(confidence_files) > 0:
+        if linregress_path is not None:
             LOGGER.info("Running quality estimation...")
-            estimate_quality(verse_test_scores_path, confidence_files)
+            estimate_quality(linregress_path, confidence_files)
             LOGGER.info("Quality estimation completed.")
 
     def translate_files(
@@ -189,9 +191,8 @@ class TranslationTask:
         trg_iso: Optional[str],
         produce_multiple_translations: bool = False,
         save_confidences: bool = False,
-        quality_estimation: bool = False,
-        verse_test_scores_path: Optional[Path] = None,
-        postprocess_handler: PostprocessHandler = PostprocessHandler(),
+        linregress_path: Optional[Path] = None,
+        postprocess_handler: Optional[PostprocessHandler] = None,
         tags: Optional[List[str]] = None,
         vref: bool = False,
     ) -> None:
@@ -284,9 +285,9 @@ class TranslationTask:
                 if save_confidences:
                     confidence_files.extend(trg_file_path.parent.glob(f"{trg_file_path.stem}*{CONFIDENCE_SUFFIX}"))
 
-        if quality_estimation and len(confidence_files) > 0:
+        if linregress_path is not None:
             LOGGER.info("Running quality estimation...")
-            estimate_quality(verse_test_scores_path, confidence_files)
+            estimate_quality(linregress_path, confidence_files)
             LOGGER.info("Quality estimation completed.")
 
     def _init_translation_task(self, experiment_suffix: str) -> Tuple[Translator, Config, str]:
@@ -304,7 +305,7 @@ class TranslationTask:
         clearml.config.set_seed()
 
         model = self.model if self.model is not None else clearml.config.create_model()
-        translator = NMTTranslator(model, self.checkpoint)
+        translator = NMTTranslator(model, self.checkpoint, self.environment)
         if clearml.config.model_dir.exists():
             _, step = model.get_checkpoint_path(self.checkpoint)
             step_str = "avg" if step == -1 else str(step)
@@ -435,12 +436,13 @@ def main() -> None:
         help="Run quality estimation after translation completes. Requires --save-confidences.",
     )
     parser.add_argument(
-        "--verse-test-scores-file",
+        "--linregress-file",
         type=str,
         default=None,
-        help="The tsv file relative to MT/experiments containing the verse-level test scores to determine "
-        + "line of best fit, e.g., `project_folder/exp_folder/test.trg-predictions.detok.txt.5000.scores.tsv`. "
-        + "If not provided, the experiment directory will be used to locate the test scores file.",
+        help="A linregress.*.json file relative to MT/experiments containing the confidence-to-chrF3 line of best "
+        + "fit coefficients produced by the test step, e.g., `project_folder/exp_folder/linregress.5000.json` (or "
+        + "`linregress.eng.fra.5000.json` for an experiment with multiple language pairs). "
+        + "If not provided, the experiment directory will be searched for a linregress.*.json file.",
     )
     parser.add_argument(
         "--debug",
@@ -450,6 +452,7 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+    environment = SilNlpEnv.create_standard_environment()
 
     if args.clearml_queue is not None and args.clearml_tag is None:
         parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
@@ -458,14 +461,14 @@ def main() -> None:
         if not args.save_confidences:
             args.save_confidences = True
 
-        if args.verse_test_scores_file is None:
-            verse_test_scores_path = get_mt_exp_dir(args.experiment)
+        if args.linregress_file is None:
+            linregress_path = environment.get_mt_exp_dir(args.experiment)
         else:
-            verse_test_scores_path = get_mt_exp_dir(args.verse_test_scores_file)
-            if not verse_test_scores_path.exists():
-                parser.error(f"The verse test scores path {verse_test_scores_path} does not exist.")
+            linregress_path = environment.get_mt_exp_dir(args.linregress_file)
+            if not linregress_path.exists():
+                parser.error(f"The linear regression path {linregress_path} does not exist.")
     else:
-        verse_test_scores_path = None
+        linregress_path = None
 
     get_git_revision_hash()
 
@@ -476,13 +479,18 @@ def main() -> None:
         clearml_queue=args.clearml_queue,
         commit=args.commit,
         clearml_tag=args.clearml_tag,
+        environment=environment,
     )
 
-    postprocess_handler = PostprocessHandler([PostprocessConfig(vars(args))])
+    postprocess_handler = PostprocessHandler([PostprocessConfig(vars(args), environment)], environment=environment)
 
     if len(args.books) > 0:
         if args.debug:
-            show_attrs(cli_args=args, actions=[f"Will attempt to translate books {args.books} into {args.trg_iso}"])
+            show_attrs(
+                cli_args=args,
+                envs=environment,
+                actions=[f"Will attempt to translate books {args.books} into {args.trg_iso}"],
+            )
             exit()
         translator.translate_books(
             ";".join(args.books),
@@ -491,8 +499,7 @@ def main() -> None:
             args.trg_iso,
             args.multiple_translations,
             args.save_confidences,
-            args.quality_estimation,
-            verse_test_scores_path,
+            linregress_path,
             postprocess_handler,
             vref=args.vref,
         )
@@ -500,6 +507,7 @@ def main() -> None:
         if args.debug:
             show_attrs(
                 cli_args=args,
+                envs=environment,
                 actions=[f"Will attempt to translate {args.src} from {args.src_iso} into {args.trg_iso}."],
             )
             exit()
@@ -510,8 +518,7 @@ def main() -> None:
             args.trg_iso,
             args.multiple_translations,
             args.save_confidences,
-            args.quality_estimation,
-            verse_test_scores_path,
+            linregress_path,
             postprocess_handler,
             vref=args.vref,
         )

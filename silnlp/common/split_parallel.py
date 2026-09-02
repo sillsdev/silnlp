@@ -1,13 +1,15 @@
-import os
 import argparse
-import yaml
 import json
+import os
 from pathlib import Path
-from sklearn.model_selection import train_test_split
-import pandas as pd
 
-from ..common.utils import get_git_revision_hash, get_mt_exp_dir, merge_dict, set_seed
+import pandas as pd
+import yaml
+from sklearn.model_selection import train_test_split
+
 from ..common.corpus import load_corpus, write_corpus
+from ..common.environment import SilNlpEnv
+from ..common.utils import get_git_revision_hash, merge_dict, set_seed
 
 _DEFAULT_SPLIT_CONFIG: dict = {
     "split": {},
@@ -59,7 +61,9 @@ def main() -> None:
     rev_hash = get_git_revision_hash()
 
     exp_name: str = args.experiment
-    exp_dir = get_mt_exp_dir(exp_name)
+    environment = SilNlpEnv.create_standard_environment()
+
+    exp_dir = environment.get_mt_exp_dir(exp_name)
     config = load_config(exp_dir, args.config)
     split_config = config.get("split")
     write_config(exp_dir, f"effective_config-{rev_hash}.split.yml", split_config)

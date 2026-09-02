@@ -1,6 +1,6 @@
 default:
-- eng-BSB
-- eng-NIV11R
+- en-BSB
+- en-NIV11R
 - en-NLT07
 - fr-BDS
 - es-NVI_S
@@ -17,14 +17,14 @@ ben:
 eng:
 - en-CEVUS06
 - en-ESVUS16
-- eng-GNBDC
-- eng-GNTD
+- en-GNBDC
+- en-GNTD
 - en-LSV
 - en-NASB
 - en-NET08
 - en-NIV84
 - en-NIrV
-- eng-NRSV
+- en-NRSV
 - en-WEB
 fra:
 - fra-TOB

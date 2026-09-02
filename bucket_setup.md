@@ -56,9 +56,12 @@ Put a shortcut to the mount_minio_to_m.bat and/or mount_b2_to_b.bat file in the 
 Now your MinIO or B2 bucket should be mounted as M: or B: drive, respectively, when you start Windows.
 
 **Linux / macOS**
+* Find the full path to rclone with `which rclone` (e.g. `/home/<user>/.local/bin/rclone`). The crontab entry must use the full path — cron runs with a minimal PATH that may not include the rclone install location, in which case the mount fails silently at boot.
 * Run `crontab -e`
-* For MinIO, paste `@reboot rclone mount --vfs-cache-mode full --use-server-modtime miniosilnlp:nlp-research ~/M` into the file, save and exit
-* For B2, paste `@reboot rclone mount --vfs-cache-mode full --use-server-modtime b2silnlp:silnlp ~/B` into the file, save and exit
+* For MinIO, paste `@reboot <full path to rclone> mount --daemon --vfs-cache-mode full --use-server-modtime miniosilnlp:nlp-research ~/M` into the file, save and exit
+* For B2, paste `@reboot <full path to rclone> mount --daemon --vfs-cache-mode full --use-server-modtime b2silnlp:silnlp ~/B` into the file, save and exit
 * Reboot Linux / macOS
 
 Now your MinIO or B2 bucket should be mounted as ~/M or ~/B respectively when you start Linux / macOS.
+You can use the check_bucket_setup script to verify these settings, run:
+poetry run python -m scripts/check_bucket_setup

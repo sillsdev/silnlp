@@ -11,14 +11,14 @@ from machine.corpora import (
     DictionaryTextCorpus,
     FileParatextProjectSettingsParser,
     FileParatextProjectTermsParser,
-    FileParatextProjectVersificationErrorDetector,
+    FileUsfmVersificationAnalyzer,
     MemoryText,
     ParatextTextCorpus,
     Text,
     TextCorpus,
     TextRow,
     UsfmFileTextCorpus,
-    UsfmVersificationErrorType,
+    UsfmVersificationDiagnosticType,
     create_versification_ref_corpus,
     extract_scripture_corpus,
 )
@@ -26,7 +26,7 @@ from machine.scripture import ORIGINAL_VERSIFICATION, VerseRef, VersificationTyp
 from machine.tokenization import WhitespaceTokenizer
 
 from .corpus import get_terms_glosses_path, get_terms_metadata_path, load_corpus
-from .environment import SIL_NLP_ENV
+from .environment import SilNlpEnv
 from .utils import unique_list
 
 _MORPH_INFO_PATTERN = re.compile(r"<[^>]+>")
@@ -36,15 +36,11 @@ _NON_LETTER_PATTERN = re.compile(r"([^\p{L}\p{M}]*)[\p{L}\p{M}]+([^\p{L}\p{M}]*)
 LOGGER = logging.getLogger(__name__)
 
 
-def get_project_dir(project: str) -> Path:
-    return SIL_NLP_ENV.pt_projects_dir / project
-
-
-def get_parent_project_dir(project_dir: Path) -> Optional[Path]:
+def get_parent_project_dir(project_dir: Path, environment: SilNlpEnv) -> Optional[Path]:
     settings = FileParatextProjectSettingsParser(project_dir).parse()
     if settings.has_parent:
         LOGGER.info(f"Searching for parent project {settings.parent_name} in the Paratext directory...")
-        parent_project_path = SIL_NLP_ENV.pt_projects_dir / settings.parent_name
+        parent_project_path = environment.pt_projects_dir / settings.parent_name
         if parent_project_path.exists():
             try:
                 parent_project_settings = FileParatextProjectSettingsParser(parent_project_path).parse()
@@ -54,7 +50,7 @@ def get_parent_project_dir(project_dir: Path) -> Optional[Path]:
                 pass
         parent_name = settings.parent_name.lower().replace("-", "_")
         for parent_project_path in [
-            p for p in SIL_NLP_ENV.pt_projects_dir.iterdir() if parent_name in p.name.lower().replace("-", "_")
+            p for p in environment.pt_projects_dir.iterdir() if parent_name in p.name.lower().replace("-", "_")
         ]:
             try:
                 parent_project_settings = FileParatextProjectSettingsParser(parent_project_path).parse()
@@ -82,7 +78,7 @@ def extract_project(
     extract_lemmas: bool = False,
     output_project_vrefs: bool = False,
     parent_project_dir: Optional[Path] = None,
-) -> Tuple[Path, int, int]:
+) -> Tuple[Path, int, int, int]:
     iso = get_iso(project_dir)
 
     ref_corpus: TextCorpus = create_versification_ref_corpus()
@@ -107,6 +103,7 @@ def extract_project(
     try:
         verse_count = 0
         line_count = 0
+        range_line_count = 0
         with ExitStack() as stack:
             output_stream = stack.enter_context(output_filename.open("w", encoding="utf-8", newline="\n"))
             output = stack.enter_context(extract_scripture_corpus(project_corpus, ref_corpus))
@@ -118,18 +115,19 @@ def extract_project(
                 output_stream.write(line + "\n")
                 if output_vref_stream is not None:
                     output_vref_stream.write(("" if project_vref is None else str(project_vref)) + "\n")
+                line_count += 1
                 stripped_line = line.strip()
-                if stripped_line != "<range>":
-                    line_count += 1
-                    if len(stripped_line) > 0 and stripped_line != "...":
-                        verse_count += 1
+                if stripped_line != "<range>" and len(stripped_line) > 0 and stripped_line != "...":
+                    verse_count += 1
+                if stripped_line == "<range>":
+                    range_line_count += 1
         if verse_count == 0:
             if output_filename.is_file():
                 output_filename.unlink()
             if output_vref_filename.is_file():
                 output_vref_filename.unlink()
-            return None, verse_count, line_count
-        return output_filename, verse_count, line_count
+            return None, verse_count, line_count, range_line_count
+        return output_filename, verse_count, line_count, range_line_count
     except Exception:
         if output_filename.is_file():
             output_filename.unlink()
@@ -209,9 +207,9 @@ def clean_term(term_str: str) -> str:
     return " ".join(term_str.split())
 
 
-def extract_major_terms_per_language(iso: str) -> None:
+def extract_major_terms_per_language(iso: str, environment: SilNlpEnv) -> None:
     # extract Biblical Terms for the langauage
-    terms_xml_path = SIL_NLP_ENV.pt_terms_dir / f"BiblicalTerms{iso.capitalize()}.xml"
+    terms_xml_path = environment.pt_terms_dir / f"BiblicalTerms{iso.capitalize()}.xml"
     with terms_xml_path.open("rb") as terms_file:
         terms_tree = etree.parse(terms_file)
 
@@ -223,11 +221,11 @@ def extract_major_terms_per_language(iso: str) -> None:
             continue
         terms_dict[escape_id(id)] = _process_gloss_string(term_elem.get("Gloss", ""))
 
-    terms_glosses_path = get_terms_glosses_path(list_name="Major", iso=iso)
+    terms_glosses_path = get_terms_glosses_path(list_name="Major", iso=iso, environment=environment)
 
     with terms_glosses_path.open("w", encoding="utf-8", newline="\n") as terms_glosses_file:
         # import major metadata to line up terms to it
-        with (SIL_NLP_ENV.assets_dir / "Major-metadata.txt").open("r", encoding="utf-8", newline="\n") as mm_file:
+        with (environment.assets_dir / "Major-metadata.txt").open("r", encoding="utf-8", newline="\n") as mm_file:
             major_metadata = mm_file.readlines()
         for line in major_metadata:
             id = line.split("\t")[0]
@@ -251,12 +249,17 @@ def _process_gloss_string(gloss_str: str) -> List[str]:
 
 
 def extract_term_renderings(
-    project_dir: Path, corpus_filename: Path, output_dir: Path, extract_surface_forms: bool
+    project_dir: Path,
+    corpus_filename: Path,
+    terms_output_dir: Optional[Path],
+    extract_surface_forms: bool,
+    environment: SilNlpEnv,
 ) -> int:
     """
     :return: The number of term renderings extracted
     :rtype: int
     """
+
     settings = FileParatextProjectSettingsParser(project_dir).parse()
     list_type = settings.biblical_terms_list_type
     list_name = list_type
@@ -275,14 +278,15 @@ def extract_term_renderings(
     corpus: Dict[VerseRef, str] = {}
     if extract_surface_forms:
         prev_verse_str = ""
-        for ref_str, verse_str in zip(load_corpus(SIL_NLP_ENV.assets_dir / "vref.txt"), load_corpus(corpus_filename)):
+        for ref_str, verse_str in zip(load_corpus(environment.assets_dir / "vref.txt"), load_corpus(corpus_filename)):
             if verse_str == "<range>":
                 verse_str = prev_verse_str
             corpus[VerseRef.from_string(ref_str, ORIGINAL_VERSIFICATION)] = verse_str
             prev_verse_str = verse_str
 
-    terms_metadata_path = get_terms_metadata_path(list_name, mt_terms_dir=output_dir)
-    terms_renderings_path = output_dir / f"{settings.language_code}-{project_dir.name}-{list_type}-renderings.txt"
+    target_terms_dir = terms_output_dir if terms_output_dir is not None else environment.mt_terms_dir
+    terms_metadata_path = get_terms_metadata_path(list_name, target_terms_dir, environment=environment)
+    terms_renderings_path = target_terms_dir / f"{settings.language_code}-{project_dir.name}-{list_type}-renderings.txt"
     count = 0
 
     key_terms = {k.id: k for k in FileParatextProjectTermsParser(project_dir).parse([], use_term_glosses=False)}
@@ -340,17 +344,17 @@ def book_file_name_digits(book_num: int) -> str:
     return f"C{book_num - 120}"
 
 
-def get_book_path(project: str, book: str) -> Path:
-    project_dir = get_project_dir(project)
+def get_book_path(project: str, book: str, environment: SilNlpEnv) -> Path:
+    project_dir = environment.get_paratext_project_dir(project)
     settings = FileParatextProjectSettingsParser(project_dir).parse()
     book_file_name = settings.get_book_file_name(book)
 
-    return SIL_NLP_ENV.pt_projects_dir / project / book_file_name
+    return environment.pt_projects_dir / project / book_file_name
 
 
-def get_last_verse(project_dir: str, book: str, chapter: int) -> int:
+def get_last_verse(project_dir: str, book: str, chapter: int, environment: SilNlpEnv) -> int:
     last_verse = "0"
-    book_path = get_book_path(project_dir, book)
+    book_path = get_book_path(project_dir, book, environment)
     try:
         with book_path.open("r", encoding="utf-8-sig", newline="\n", errors="ignore") as book_file:
             in_chapter = False
@@ -373,10 +377,10 @@ def get_last_verse(project_dir: str, book: str, chapter: int) -> int:
 
 # OT versification detection algorithm from:
 # https://github.com/BibleNLP/ebible/blob/main/code/notebooks/eBible%20-%20Extract%20projects.ipynb
-def detect_OT_versification(project_dir: str) -> Tuple[VersificationType, List[str]]:
-    dan_3 = get_last_verse(project_dir, "DAN", 3)
-    dan_5 = get_last_verse(project_dir, "DAN", 5)
-    dan_13 = get_last_verse(project_dir, "DAN", 13)
+def detect_OT_versification(project_dir: str, environment: SilNlpEnv) -> Tuple[VersificationType, List[str]]:
+    dan_3 = get_last_verse(project_dir, "DAN", 3, environment)
+    dan_5 = get_last_verse(project_dir, "DAN", 5, environment)
+    dan_13 = get_last_verse(project_dir, "DAN", 13, environment)
 
     key_last_verses = []
 
@@ -409,10 +413,10 @@ def detect_OT_versification(project_dir: str) -> Tuple[VersificationType, List[s
 
 # NT versification detection algorithm from:
 # https://github.com/BibleNLP/ebible/blob/main/code/notebooks/eBible%20-%20Extract%20projects.ipynb
-def detect_NT_versification(project_dir: str) -> Tuple[List[VersificationType], List[str]]:
-    jhn_6 = get_last_verse(project_dir, "JHN", 6)
-    act_19 = get_last_verse(project_dir, "ACT", 19)
-    rom_16 = get_last_verse(project_dir, "ROM", 16)
+def detect_NT_versification(project_dir: str, environment: SilNlpEnv) -> Tuple[List[VersificationType], List[str]]:
+    jhn_6 = get_last_verse(project_dir, "JHN", 6, environment)
+    act_19 = get_last_verse(project_dir, "ACT", 19, environment)
+    rom_16 = get_last_verse(project_dir, "ROM", 16, environment)
 
     key_last_verses = []
 
@@ -435,9 +439,27 @@ def detect_NT_versification(project_dir: str) -> Tuple[List[VersificationType], 
     return versification, key_last_verses
 
 
+class CheckVersificationOutput:
+    def __init__(
+        self,
+        matching: bool,
+        detected_versification: List[VersificationType],
+        versification_error_count: int,
+        number_of_affected_verses: int
+    ):
+        self.matching = matching
+        self.detected_versification = detected_versification
+        self.versification_error_count = versification_error_count
+        self.number_of_affected_verses = number_of_affected_verses
+
+
 def check_versification(
-    project_dir: str, parent_project_dir: Optional[str], versification_error_output_path: str
-) -> Tuple[bool, List[VersificationType]]:
+    project_dir: str,
+    parent_project_dir: Optional[str],
+    versification_error_output_path: str,
+    environment: SilNlpEnv,
+) -> CheckVersificationOutput:
+
     parent_settings = None
     if parent_project_dir is not None:
         parent_settings = FileParatextProjectSettingsParser(parent_project_dir).parse()
@@ -445,26 +467,26 @@ def check_versification(
 
     check_ot, check_nt, matching = False, False, False
 
-    dan_book_path = get_book_path(project_dir, "DAN")
+    dan_book_path = get_book_path(project_dir, "DAN", environment)
     check_ot = bool(dan_book_path.is_file())
 
-    jhn_book_path = get_book_path(project_dir, "JHN")
-    act_book_path = get_book_path(project_dir, "ACT")
-    rom_book_path = get_book_path(project_dir, "ROM")
+    jhn_book_path = get_book_path(project_dir, "JHN", environment)
+    act_book_path = get_book_path(project_dir, "ACT", environment)
+    rom_book_path = get_book_path(project_dir, "ROM", environment)
     check_nt = bool(jhn_book_path.is_file() and act_book_path.is_file() and rom_book_path.is_file())
 
     if check_ot:
         ot_versification: VersificationType
-        ot_versification, key_ot_verses = detect_OT_versification(project_dir)
+        ot_versification, key_ot_verses = detect_OT_versification(project_dir, environment)
         if ot_versification == VersificationType.UNKNOWN:
             LOGGER.warning(f"Unknown versification detected for {project_dir}.")
-            return (matching, [ot_versification])
+            return CheckVersificationOutput(matching, [ot_versification], 0, 0)
     if check_nt:
         nt_versification: List[VersificationType]
-        nt_versification, key_nt_verses = detect_NT_versification(project_dir)
+        nt_versification, key_nt_verses = detect_NT_versification(project_dir, environment)
         if nt_versification[0] == VersificationType.UNKNOWN:
             LOGGER.warning(f"Unknown versification detected for {project_dir}.")
-            return (matching, nt_versification)
+            return CheckVersificationOutput(matching, nt_versification, 0, 0)
 
     detected_versification: List[VersificationType] = [VersificationType.UNKNOWN]
     if check_ot and check_nt:
@@ -475,7 +497,7 @@ def check_versification(
                 f"The detected versifications were based on {', '.join(key_ot_verses + key_nt_verses)} "
                 "being the last verse of their respective chapters."
             )
-            return (matching, [ot_versification] + nt_versification)
+            return CheckVersificationOutput(matching, [ot_versification] + nt_versification, 0, 0)
         detected_versification = [ot_versification]
         key_verses = key_ot_verses + key_nt_verses
     elif not check_ot and check_nt:
@@ -490,7 +512,7 @@ def check_versification(
             "Versification detection for the OT requires the book of Daniel. "
             "Versification detection for the NT requires the books of John, Acts, and Romans."
         )
-        return (matching, detected_versification)
+        return CheckVersificationOutput(matching, detected_versification, 0, 0)
 
     if settings.versification.type not in detected_versification:
         if not (
@@ -504,27 +526,37 @@ def check_versification(
                 f"being the last verse of {'their' if len(key_verses)>=2 else 'its'} "
                 f"respective chapter{'s' if len(key_verses)>=2 else ''}."
             )
-            return (matching, detected_versification)
+            return CheckVersificationOutput(matching, detected_versification, 0, 0)
 
-    errors = FileParatextProjectVersificationErrorDetector(project_dir).get_usfm_versification_errors()
-    if len(errors) > 0:
+    analysis = FileUsfmVersificationAnalyzer(project_dir).analyze_usfm_versification()
+    if len(analysis.diagnostics) > 0:
         LOGGER.warning(
-            f"Detected {len(errors)} versification errors. See {versification_error_output_path} for more details."
+            f"Detected {len(analysis.diagnostics)} versification errors affecting {analysis.total_num_affected_verses} verses. See {versification_error_output_path} for more details."
         )
         with open(versification_error_output_path, "w", encoding="utf-8") as f:
-            for error in errors:
-                if error.type == UsfmVersificationErrorType.INVALID_CHAPTER_NUMBER:
+            for diagnostic in analysis.diagnostics:
+                diagnostic_location = f"in project {analysis.project_settings.name} at {Path(project_dir) / diagnostic.filename}:{str(diagnostic.line_numbers[0]) + ('-' + str(diagnostic.line_numbers[-1]) if len(diagnostic.line_numbers) > 1 else '')}"
+                diagnostic_references = [str(r) for r in diagnostic.references]
+                if diagnostic.type == UsfmVersificationDiagnosticType.INVALID:
                     f.write(
-                        f"Invalid chapter number error in project {error.project_name} at “{error.actual_verse_ref}”.\n"
+                        f"Invalid reference {diagnostic_references[0]} {diagnostic_location}.\n"
                     )
-                elif error.type == UsfmVersificationErrorType.INVALID_VERSE_NUMBER:
+                elif diagnostic.type == UsfmVersificationDiagnosticType.EXTRA:
                     f.write(
-                        f"Invalid verse number error in project {error.project_name} at “{error.actual_verse_ref}”.\n"
+                        f"Extra {diagnostic.num_affected_verses} verse{'s' if diagnostic.num_affected_verses > 1 else ''} {diagnostic_location}, references {diagnostic_references}.\n"
                     )
-                else:
+                elif diagnostic.type == UsfmVersificationDiagnosticType.MISSING:
                     f.write(
-                        f"USFM versification error in project {error.project_name}, expected verse “{error.expected_verse_ref}”, actual verse “{error.actual_verse_ref}”, mismatch type {error.type.name}.\n"
+                        f"Missing {diagnostic.num_affected_verses} verse{'s' if diagnostic.num_affected_verses > 1 else ''} {diagnostic_location}, references {diagnostic_references}.\n"
                     )
+                elif diagnostic.type == UsfmVersificationDiagnosticType.UNSUPPORTED_VERSE_RANGE:
+                    f.write(
+                        f"Unsupported verse range {diagnostic_references[0]} {diagnostic_location}. This verse range would cross a chapter boundary in Original versification and thus may not be properly handled. \n"
+                    )  
+                elif diagnostic.type == UsfmVersificationDiagnosticType.INCORRECT_VERSE_SEGMENT:
+                    f.write(
+                        f"Incorrect verse segment {diagnostic_references[0]} {diagnostic_location}.\n"
+                    )  
 
     matching = True
-    return (matching, detected_versification)
+    return CheckVersificationOutput(matching, detected_versification, len(analysis.diagnostics), analysis.total_num_affected_verses)

@@ -15,8 +15,8 @@ from ..common.corpus import (
     split_parallel_corpus,
     write_corpus,
 )
-from ..common.environment import SIL_NLP_ENV
-from ..common.utils import get_git_revision_hash, get_mt_exp_dir, set_seed
+from ..common.environment import SilNlpEnv
+from ..common.utils import get_git_revision_hash, set_seed
 from .config import load_config
 
 LOGGER = logging.getLogger(__package__ + ".preprocess")
@@ -27,19 +27,19 @@ def parse_lang(lang: str) -> Tuple[str, str]:
     return lang[:index], lang[index + 1 :]
 
 
-def get_test_indices(config: dict) -> Optional[Set[int]]:
+def get_test_indices(config: dict, environment: SilNlpEnv) -> Optional[Set[int]]:
     exp_name = config.get("use_test_set_from")
     if exp_name is None:
         return None
 
-    exp_dir = get_mt_exp_dir(exp_name)
+    exp_dir = environment.get_mt_exp_dir(exp_name)
     vref_path = exp_dir / "test.vref.txt"
     if not vref_path.is_file():
         LOGGER.warning(f'The experiment specified in "use_test_set_from" does not contain test.vref.txt.')
         return None
 
     vrefs: Dict[str, int] = {}
-    for i, vref_str in enumerate(load_corpus(SIL_NLP_ENV.assets_dir / "vref.txt")):
+    for i, vref_str in enumerate(load_corpus(environment.assets_dir / "vref.txt")):
         vrefs[vref_str] = i
 
     test_indices: Set[int] = set()
@@ -62,21 +62,23 @@ def main() -> None:
     get_git_revision_hash()
 
     exp_name: str = args.experiment
-    exp_dir = get_mt_exp_dir(exp_name)
-    config = load_config(exp_name)
+    environment = SilNlpEnv.create_standard_environment()
+
+    exp_dir = environment.get_mt_exp_dir(exp_name)
+    config = load_config(exp_name, environment)
 
     set_seed(config["seed"])
 
     src_iso, src_project = parse_lang(config["src_lang"])
     trg_iso, trg_project = parse_lang(config["trg_lang"])
 
-    src_file_path = get_scripture_path(src_iso, src_project)
-    trg_file_path = get_scripture_path(trg_iso, trg_project)
+    src_file_path = environment.get_scripture_path(src_iso, src_project)
+    trg_file_path = environment.get_scripture_path(trg_iso, trg_project)
 
     corpus_books = get_books(config.get("corpus_books", []))
     test_books = get_books(config.get("test_books", []))
 
-    corpus = get_scripture_parallel_corpus(src_file_path, trg_file_path)
+    corpus = get_scripture_parallel_corpus(src_file_path, trg_file_path, environment=environment)
     if len(corpus_books) > 0:
         train = include_books(corpus, corpus_books)
         if len(corpus_books.intersection(test_books)) > 0:
@@ -94,7 +96,7 @@ def main() -> None:
         print(f"- count: {corpus_len}")
         print(f"- alignment: {alignment_score:.4f}")
 
-    test_indices = get_test_indices(config)
+    test_indices = get_test_indices(config, environment)
     test_size: int = config["test_size"]
     if len(test_books) > 0:
         test = include_books(corpus, test_books)

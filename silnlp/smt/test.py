@@ -9,9 +9,8 @@ from machine.translation.thot import ThotSmtModel
 from tqdm import tqdm
 
 from ..common.corpus import load_corpus
-from ..common.environment import SIL_NLP_ENV
-from ..common.metrics import compute_meteor_score
-from ..common.utils import get_git_revision_hash, get_mt_exp_dir
+from ..common.environment import SilNlpEnv
+from ..common.utils import get_git_revision_hash
 from .config import create_word_detokenizer, create_word_tokenizer, get_thot_word_alignment_type, load_config
 
 SUPPORTED_SCORERS = {"bleu", "spbleu", "chrf3", "meteor", "ter"}
@@ -49,8 +48,10 @@ def main() -> None:
     scorers.sort()
 
     exp_name = args.experiment
-    exp_dir = get_mt_exp_dir(exp_name)
-    config = load_config(exp_name)
+    environment = SilNlpEnv.create_standard_environment()
+
+    exp_dir = environment.get_mt_exp_dir(exp_name)
+    config = load_config(exp_name, environment)
     src_iso = get_iso(config["src_lang"])
     trg_iso = get_iso(config["trg_lang"])
 
@@ -110,12 +111,6 @@ def main() -> None:
                 chrf3_score: float = chrf3.score
                 scorer_name = "chrF3"
                 score_str = f"{chrf3_score:.2f}"
-            elif scorer == "meteor":
-                meteor_score = compute_meteor_score(trg_iso, sys, [ref])
-                if meteor_score is None:
-                    continue
-                scorer_name = "METEOR"
-                score_str = f"{meteor_score:.2f}"
             elif scorer == "ter":
                 ter_score = sacrebleu.corpus_ter(sys, [ref])
                 if ter_score.score >= 0:

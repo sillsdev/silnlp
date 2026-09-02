@@ -1,11 +1,28 @@
 import argparse
-import os
+from pathlib import Path
 
 from clearml import Task
 from clearml.backend_api.session.session import LoginError
 
 parser = argparse.ArgumentParser()
-parser.add_argument("project", type=str, help="The name of the main Paratext project to onboard.")
+parser.add_argument("project", type=str, help="The name of the Main Paratext project to onboard.")
+parser.add_argument(
+    "--draft-source",
+    type=str,
+    help="The name of the Drafting Source Paratext project to onboard.",
+)
+parser.add_argument(
+    "--bt-project",
+    type=str,
+    help="The name of the Back Translation Paratext project to onboard.",
+)
+parser.add_argument(
+    "--ref-projects",
+    nargs="+",
+    help="The names of the Reference Paratext projects to onboard.",
+)
+parser.add_argument("--completed-books", nargs="+", help="The ids of books that have been completed.")
+parser.add_argument("--planned-books", nargs="+", help="The ids of books planned for translation")
 parser.add_argument(
     "--dir",
     type=str,
@@ -62,14 +79,10 @@ try:
 
     old_argv = sys.argv
     onboard_projects_dir = f"/root/OnboardingProjects/{args.dir}"
-    ref_projects = os.listdir(onboard_projects_dir)
-    ref_projects.remove(args.project)
     try:
-        sys.argv = [
+        onboarding_args = [
             "",
             args.project,
-            "--ref-projects",
-            *ref_projects,
             "--copy-from",
             onboard_projects_dir,
             "--extract-corpora",
@@ -80,6 +93,32 @@ try:
             "--align",
             "--overwrite",
         ]
+
+        if args.draft_source:
+            onboarding_args.extend(
+                [
+                    "--draft-source",
+                    args.draft_source if args.draft_source else None,
+                ]
+            )
+        if args.bt_project:
+            onboarding_args.extend(
+                [
+                    "--bt-project",
+                    args.bt_project if args.bt_project else None,
+                ]
+            )
+
+        if args.ref_projects and len(args.ref_projects) > 0:
+            onboarding_args.extend(["--ref-projects", *args.ref_projects])
+
+        if args.completed_books and len(args.completed_books) > 0:
+            onboarding_args.extend(["--completed-books", *args.completed_books])
+
+        if args.planned_books and len(args.planned_books) > 0:
+            onboarding_args.extend(["--planned-books", *args.planned_books])
+
+        sys.argv = onboarding_args
         onboard_project()
     finally:
         sys.argv = old_argv

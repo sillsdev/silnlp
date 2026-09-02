@@ -1,31 +1,17 @@
 import logging
 import tempfile
-from pathlib import Path, PurePath
+from pathlib import Path
 from statistics import mean
 from typing import List, Optional, Set
 
 import pandas as pd
 
 from ..common.corpus import load_corpus, tokenize_corpus, write_corpus
-from ..common.environment import SIL_NLP_ENV
 from .config import get_aligner
 from .lexicon import Lexicon
 from .machine_aligner import MachineAligner
 
 LOGGER = logging.getLogger(__name__)
-
-
-def get_experiment_dirs(exp_pattern: str) -> List[Path]:
-    exp_dirs: List[Path] = []
-    for path in SIL_NLP_ENV.align_experiments_dir.glob(str(PurePath(exp_pattern) / "**" / "config.yml")):
-        dir = path.parent
-        if len(list(dir.rglob("config.yml"))) == 1:
-            exp_dirs.append(dir)
-    return exp_dirs
-
-
-def get_experiment_name(exp_dir: Path) -> str:
-    return exp_dir.as_posix()[len(SIL_NLP_ENV.align_experiments_dir.as_posix()) + 1 :]
 
 
 def compute_alignment_score(

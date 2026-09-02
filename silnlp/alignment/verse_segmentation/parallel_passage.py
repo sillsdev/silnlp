@@ -8,6 +8,7 @@ from machine.scripture import VerseRef
 from machine.tokenization import LatinWordTokenizer
 from tqdm import tqdm
 
+from ...common.environment import SilNlpEnv
 from .alignment_generators import AbstractAlignmentGeneratorFactory, AlignmentGenerator
 from .break_scorers import AbstractBreakScorerFactory
 from .paratext_project_reader import ParatextProjectReader
@@ -220,11 +221,13 @@ class ParatextParallelPassageCollectionCreator(ParallelPassageCollectionCreator)
         break_scorer_factory: AbstractBreakScorerFactory,
         save_alignments: bool = False,
         subdivide_passages: bool = False,
+        environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
     ):
         self._save_alignments = save_alignments
         self._subdivide_passages = subdivide_passages
         self._alignment_generator_factory = alignment_generator_factory
         self._break_scorer_factory = break_scorer_factory
+        self._environment = environment
 
     def create(self, source_project_name: str, target_passage_file: Path) -> "ParallelPassageCollection":
         target_passages = PassageReader(target_passage_file).get_passages()
@@ -246,7 +249,7 @@ class ParatextParallelPassageCollectionCreator(ParallelPassageCollectionCreator)
     def _collect_parallel_passages(
         self, source_project_name: str, target_passages: List[Passage]
     ) -> List[ParallelPassageBuilder]:
-        paratext_project_reader: ParatextProjectReader = ParatextProjectReader(source_project_name)
+        paratext_project_reader: ParatextProjectReader = ParatextProjectReader(source_project_name, self._environment)
         parallel_passage_builders = [ParallelPassageBuilder(t.start_ref, t.end_ref, t.text) for t in target_passages]
         return paratext_project_reader.collect_verses(parallel_passage_builders)
 
@@ -289,10 +292,6 @@ class ParatextParallelPassageCollectionCreator(ParallelPassageCollectionCreator)
 class SavedParallelPassageCollectionCreator(ParallelPassageCollectionCreator):
 
     def create(self, source_project_name: str, target_passage_file: Path) -> "ParallelPassageCollection":
-        with open(target_passage_file.with_suffix(".saved.json"), "r", encoding="utf-8") as f:
-            saved_passages_json = json.load(f)
-            saved_passages = [ParallelPassage.from_json(p) for p in saved_passages_json]
-            return ParallelPassageCollection(saved_passages)
         with open(target_passage_file.with_suffix(".saved.json"), "r", encoding="utf-8") as f:
             saved_passages_json = json.load(f)
             saved_passages = [ParallelPassage.from_json(p) for p in saved_passages_json]

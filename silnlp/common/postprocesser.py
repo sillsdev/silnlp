@@ -11,6 +11,10 @@ from machine.corpora import (
     UpdateUsfmParserHandler,
     UpdateUsfmRow,
     UpdateUsfmTextBehavior,
+    UsfmStylesheet,
+    UsfmToken,
+    UsfmTokenizer,
+    UsfmTokenType,
     UsfmUpdateBlockHandler,
     parse_usfm,
 )
@@ -27,12 +31,11 @@ from machine.punctuation_analysis import (
 from machine.tokenization import LatinWordTokenizer
 from machine.translation import WordAlignmentMatrix
 
-from silnlp.common.paratext import get_project_dir
-from silnlp.nmt.corpora import CorpusPair
-
 from ..alignment.eflomal import to_word_alignment_matrix
 from ..alignment.utils import compute_alignment_scores
+from ..nmt.corpora import CorpusPair
 from .corpus import load_corpus, write_corpus
+from .environment import SilNlpEnv
 
 LOGGER = logging.getLogger((__package__ or "") + ".translate")
 
@@ -52,18 +55,22 @@ POSTPROCESS_SUFFIX_CHARS = {
 
 
 class PlaceMarkersPostprocessor:
-    _BEHAVIOR_DESCRIPTION_MAP = {
-        UpdateUsfmMarkerBehavior.PRESERVE: " have positions preserved.",
-        UpdateUsfmMarkerBehavior.STRIP: " were removed.",
+    _PARAGRAPH_MARKER_REMARKS = {
+        "end": "Paragraph break positions were moved to the end of the verse.",
+        "place": "Paragraph break positions were preserved.",
+        "strip": "Paragraph breaks were removed.",
     }
 
     def __init__(
         self,
-        paragraph_behavior: UpdateUsfmMarkerBehavior,
+        paragraph_behavior: str,
         embed_behavior: UpdateUsfmMarkerBehavior,
         style_behavior: UpdateUsfmMarkerBehavior,
     ):
         self._paragraph_behavior = paragraph_behavior
+        self._paragraph_marker_behavior = (
+            UpdateUsfmMarkerBehavior.STRIP if paragraph_behavior == "strip" else UpdateUsfmMarkerBehavior.PRESERVE
+        )
         self._embed_behavior = embed_behavior
         self._style_behavior = style_behavior
         self._update_block_handlers = [PlaceMarkersUsfmUpdateBlockHandler()]
@@ -71,52 +78,36 @@ class PlaceMarkersPostprocessor:
     def get_update_block_handlers(self) -> Sequence[UsfmUpdateBlockHandler]:
         return self._update_block_handlers
 
-    def _create_remark(self) -> str:
-        behavior_map: Dict[UpdateUsfmMarkerBehavior, List[str]] = {
-            UpdateUsfmMarkerBehavior.PRESERVE: [],
-            UpdateUsfmMarkerBehavior.STRIP: [],
-        }
-        behavior_map[self._paragraph_behavior].append("paragraph markers")
-        behavior_map[self._embed_behavior].append("embed markers")
-        behavior_map[self._style_behavior].append("style markers")
+    def get_paragraph_marker_remark(self) -> Optional[str]:
+        return self._PARAGRAPH_MARKER_REMARKS.get(self._paragraph_behavior)
 
-        remark_sentences = [
-            self._create_remark_sentence_for_behavior(behavior, items)
-            for behavior, items in behavior_map.items()
-            if len(items) > 0
-        ]
-        return " ".join(remark_sentences)
-
-    def _create_remark_sentence_for_behavior(self, behavior: UpdateUsfmMarkerBehavior, items: List[str]) -> str:
-        return self._format_group_of_items_for_remark(items) + self._BEHAVIOR_DESCRIPTION_MAP[behavior]
-
-    def _format_group_of_items_for_remark(self, items: List[str]) -> str:
-        if len(items) == 1:
-            return items[0].capitalize()
-        elif len(items) == 2:
-            return f"{items[0].capitalize()} and {items[1]}"
-        return f"{items[0].capitalize()}, {', '.join(items[1:-1])}, and {items[-1]}"
+    def replace_paragraph_marker_remark(self, remark: str) -> str:
+        if not any(sentence in remark for sentence in self._PARAGRAPH_MARKER_REMARKS.values()):
+            return remark
+        for sentence in self._PARAGRAPH_MARKER_REMARKS.values():
+            remark = remark.replace(f" {sentence}", "").replace(sentence, "")
+        remark = remark.strip()
+        paragraph_remark = self.get_paragraph_marker_remark()
+        return f"{remark} {paragraph_remark}".strip() if paragraph_remark else remark
 
     def postprocess_usfm(
         self,
         usfm: str,
         rows: List[UpdateUsfmRow],
-        remarks: Optional[List[str]] = None,
+        remarks: Optional[List[Tuple[int, str]]] = None,
+        stylesheet: str | UsfmStylesheet = "usfm.sty",
     ) -> str:
-        if remarks is None:
-            remarks = []
-
         handler = UpdateUsfmParserHandler(
             rows=rows,
             text_behavior=UpdateUsfmTextBehavior.STRIP_EXISTING,
-            paragraph_behavior=self._paragraph_behavior,
+            paragraph_behavior=self._paragraph_marker_behavior,
             embed_behavior=self._embed_behavior,
             style_behavior=self._style_behavior,
             update_block_handlers=self._update_block_handlers,
-            remarks=remarks + [self._create_remark()],
+            remarks=remarks or [],
         )
-        parse_usfm(usfm, handler)
-        return handler.get_usfm()
+        parse_usfm(usfm, handler, stylesheet)
+        return handler.get_usfm(stylesheet)
 
 
 class UnknownQuoteConventionException(Exception):
@@ -137,13 +128,8 @@ class NoDetectedQuoteConventionException(Exception):
 
 
 class DenormalizeQuotationMarksPostprocessor:
-    _NO_CHAPTERS_REMARK_SENTENCE = "Quotation marks were not denormalized in any chapters due to errors."
-    _ALL_CHAPTERS_REMARK_SENTENCE = "Quotation marks in all chapters were automatically denormalized."
-    _DENORMALIZED_CHAPTERS_REMARK_SENTENCE = (
-        "Quotation marks in the following chapters have been automatically denormalized after translation: "
-    )
-    _SKIPPED_CHAPTERS_REMARK_SENTENCE = (
-        "Quotation marks in the following chapters could not be successfully denormalized: "
+    _DENORMALIZED_CHAPTER_REMARK_SENTENCE = (
+        "Quotation marks have been adjusted automatically to match the rest of the project."
     )
     _project_convention_cache: Dict[str, QuoteConvention] = {}
 
@@ -152,7 +138,9 @@ class DenormalizeQuotationMarksPostprocessor:
         target_quote_convention_name: str | None,
         target_project_name: str | None = None,
         include_chapters: Optional[Dict[int, List[int]]] = None,
+        environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
     ):
+        self._environment = environment
         self._target_quote_convention = self._get_target_quote_convention(
             target_quote_convention_name, target_project_name, include_chapters
         )
@@ -166,7 +154,8 @@ class DenormalizeQuotationMarksPostprocessor:
         if convention_name is None or convention_name == "detect":
             if project_name is None:
                 raise ValueError(
-                    "The experiment's config.yml must exist and specify a target project name, since an explicit target quote convention name was not provided."
+                    "The experiment's config.yml must exist and specify a target project name, "
+                    "since an explicit target quote convention name was not provided."
                 )
             return self._detect_quote_convention(project_name, include_chapters)
         return self._get_named_quote_convention(convention_name)
@@ -187,7 +176,9 @@ class DenormalizeQuotationMarksPostprocessor:
         quote_convention_detector = QuoteConventionDetector()
 
         try:
-            quote_convention_detector = FileParatextProjectQuoteConventionDetector(get_project_dir(project_name))
+            quote_convention_detector = FileParatextProjectQuoteConventionDetector(
+                self._environment.get_paratext_project_dir(project_name)
+            )
             quote_convention_analysis = quote_convention_detector.get_quote_convention_analysis(
                 include_chapters=include_chapters
             )
@@ -215,88 +206,72 @@ class DenormalizeQuotationMarksPostprocessor:
             )
         ]
 
-    def _get_best_chapter_strategies(self, usfm: str) -> List[QuotationMarkUpdateStrategy]:
+    def _get_best_chapter_strategies(self, usfm: str, stylesheet: UsfmStylesheet) -> List[QuotationMarkUpdateStrategy]:
         quotation_mark_update_first_pass = QuotationMarkDenormalizationFirstPass(self._target_quote_convention)
+        parse_usfm(usfm, quotation_mark_update_first_pass, stylesheet)
 
-        parse_usfm(usfm, quotation_mark_update_first_pass)
-        return quotation_mark_update_first_pass.find_best_chapter_strategies()
+        chapter_strategies = quotation_mark_update_first_pass.find_best_chapter_strategies()
+        max_chapter = max((n for n, _ in chapter_strategies), default=0)
+        padded_chapter_strategies = [QuotationMarkUpdateStrategy.APPLY_FULL] * max_chapter
+        for chapter_num, strategy in chapter_strategies:
+            padded_chapter_strategies[chapter_num - 1] = strategy
+        return padded_chapter_strategies
 
-    def _create_remark(self, best_chapter_strategies: List[QuotationMarkUpdateStrategy]) -> str:
-        processed_chapters: List[int] = [
-            chapter_num
-            for chapter_num, strategy in enumerate(best_chapter_strategies, 1)
+    def _create_chapter_remarks(self, chapter_strategies: List[QuotationMarkUpdateStrategy]) -> Dict[int, str]:
+        return {
+            chapter_num: self._DENORMALIZED_CHAPTER_REMARK_SENTENCE
+            for chapter_num, strategy in enumerate(chapter_strategies, 1)
             if strategy != QuotationMarkUpdateStrategy.SKIP
-        ]
-        skipped_chapters: List[int] = [
-            chapter_num
-            for chapter_num, strategy in enumerate(best_chapter_strategies, 1)
-            if strategy == QuotationMarkUpdateStrategy.SKIP
-        ]
+        }
 
-        return self._create_remark_from_processed_and_skipped_chapters(processed_chapters, skipped_chapters)
+    @staticmethod
+    def _append_sentences_to_last_rem(tokens: List[UsfmToken], chapter_quotation_remarks: Dict[int, str]) -> None:
+        last_rem_index_by_chapter: Dict[int, int] = {}
+        current_chapter = 0
+        for index, token in enumerate(tokens):
+            if token.type == UsfmTokenType.CHAPTER:
+                data = str(token.data).strip() if token.data is not None else ""
+                if data.isdigit():
+                    current_chapter = int(data)
+            elif token.type == UsfmTokenType.PARAGRAPH and token.marker == "rem":
+                last_rem_index_by_chapter[current_chapter] = index
 
-    def _create_remark_from_processed_and_skipped_chapters(
-        self, processed_chapters: List[int], skipped_chapters: List[int]
-    ) -> str:
-        if len(processed_chapters) == 0:
-            return self._NO_CHAPTERS_REMARK_SENTENCE
-        if len(skipped_chapters) == 0:
-            return self._ALL_CHAPTERS_REMARK_SENTENCE
-        return (
-            self._DENORMALIZED_CHAPTERS_REMARK_SENTENCE
-            + self.join_items_for_remark(self._create_ranges_from_consecutive_chapter_numbers(processed_chapters))
-            + ". "
-            + self._SKIPPED_CHAPTERS_REMARK_SENTENCE
-            + self.join_items_for_remark(self._create_ranges_from_consecutive_chapter_numbers(skipped_chapters))
-            + "."
-        )
-
-    def _create_ranges_from_consecutive_chapter_numbers(self, chapters: List[int]) -> List[str]:
-        joined_chapters: List[str] = []
-        start = chapters[0]
-        end = chapters[0]
-
-        for chapter in chapters[1:]:
-            if chapter == end + 1:
-                end = chapter
+        for chapter_num in sorted(last_rem_index_by_chapter, reverse=True):
+            if chapter_num == 0:
+                continue
+            quotation_remark = chapter_quotation_remarks.get(chapter_num)
+            if not quotation_remark:
+                continue
+            next_index = last_rem_index_by_chapter[chapter_num] + 1
+            if next_index < len(tokens) and tokens[next_index].type == UsfmTokenType.TEXT:
+                existing_text = tokens[next_index].text or ""
+                separator = "" if existing_text == "" or existing_text.endswith(" ") else " "
+                tokens[next_index].text = existing_text + separator + quotation_remark
             else:
-                if start == end:
-                    joined_chapters.append(str(start))
-                else:
-                    joined_chapters.append(f"{start}-{end}")
-                start = chapter
-                end = chapter
+                tokens.insert(next_index, UsfmToken(UsfmTokenType.TEXT, text=quotation_remark))
 
-        if start == end:
-            joined_chapters.append(str(start))
-        else:
-            joined_chapters.append(f"{start}-{end}")
+    def postprocess_usfm(self, usfm: str, stylesheet: str | UsfmStylesheet = "usfm.sty") -> str:
+        if isinstance(stylesheet, str):
+            stylesheet = UsfmStylesheet(stylesheet)
 
-        return joined_chapters
+        best_chapter_strategies = self._get_best_chapter_strategies(usfm, stylesheet)
+        chapter_quotation_remarks = self._create_chapter_remarks(best_chapter_strategies)
 
-    def join_items_for_remark(self, items: List[str]) -> str:
-        if len(items) == 1:
-            return items[0]
-        elif len(items) == 2:
-            return f"{items[0]} and {items[1]}"
-        return f"{', '.join(items[:-1])}, and {items[-1]}"
-
-    def postprocess_usfm(
-        self,
-        usfm: str,
-    ) -> str:
-        best_chapter_strategies = self._get_best_chapter_strategies(usfm)
         handler = UpdateUsfmParserHandler(
             update_block_handlers=self._create_update_block_handlers(best_chapter_strategies),
-            remarks=[self._create_remark(best_chapter_strategies)],
         )
-        parse_usfm(usfm, handler)
-        return handler.get_usfm()
+        parse_usfm(usfm, handler, stylesheet)
+
+        tokenizer = UsfmTokenizer(stylesheet)
+        out_tokens = tokenizer.tokenize(handler.get_usfm(stylesheet))
+        self._append_sentences_to_last_rem(out_tokens, chapter_quotation_remarks)
+        return tokenizer.detokenize(out_tokens)
 
 
 class PostprocessConfig:
-    def __init__(self, config: dict = {}) -> None:
+    def __init__(self, config: dict = {}, environment: SilNlpEnv = SilNlpEnv.create_standard_environment()) -> None:
         self._config = {}
+        self._environment = environment
         for option, default in POSTPROCESS_DEFAULTS.items():
             self._config[option] = config.get(option, default)
 
@@ -335,21 +310,21 @@ class PostprocessConfig:
 
         return suffix if len(suffix) > 1 else ""
 
-    def get_postprocess_remark(self) -> Optional[str]:
-        used = []
-        for option, default in POSTPROCESS_DEFAULTS.items():
-            if self._config[option] != default:
-                used.append(option)
-                if isinstance(default, str):
-                    used[-1] += f":{self._config[option]}"
-
-        return f"Post-processing options used: {' '.join(used)}" if len(used) > 0 else None
+    def get_paragraph_marker_remark(self) -> Optional[str]:
+        return self.create_place_markers_postprocessor().get_paragraph_marker_remark()
 
     def is_base_config(self) -> bool:
         return self._config == POSTPROCESS_DEFAULTS
 
     def is_marker_placement_required(self) -> bool:
         return self._config["paragraph_behavior"] == "place" or self._config["include_style_markers"]
+
+    def is_marker_processing_required(self) -> bool:
+        return (
+            self._config["paragraph_behavior"] != "end"
+            or self._config["include_style_markers"]
+            or self._config["include_embeds"]
+        )
 
     def is_quotation_mark_denormalization_required(self) -> bool:
         return self._config["denormalize_quotation_marks"]
@@ -361,7 +336,7 @@ class PostprocessConfig:
 
     def create_place_markers_postprocessor(self) -> PlaceMarkersPostprocessor:
         return PlaceMarkersPostprocessor(
-            paragraph_behavior=self.get_paragraph_behavior(),
+            paragraph_behavior=self._config["paragraph_behavior"],
             embed_behavior=self.get_embed_behavior(),
             style_behavior=self.get_style_behavior(),
         )
@@ -376,7 +351,10 @@ class PostprocessConfig:
 
             try:
                 return DenormalizeQuotationMarksPostprocessor(
-                    self._config["target_quote_convention"], training_target_project_name, include_chapters
+                    self._config["target_quote_convention"],
+                    training_target_project_name,
+                    include_chapters,
+                    self._environment,
                 )
             except NoDetectedQuoteConventionException:
                 LOGGER.warning("No quote convention was detected for project %s" % training_target_project_name)
@@ -393,15 +371,18 @@ class PostprocessConfig:
         if self.is_quote_convention_detection_required():
             if len(training_corpus_pairs) > 1:
                 LOGGER.warning(
-                    "The experiment has multiple corpus pairs. Quotation mark denormalization is unlikely to work correctly in this scenario."
+                    "The experiment has multiple corpus pairs. "
+                    "Quotation mark denormalization is unlikely to work correctly in this scenario."
                 )
             if len(training_corpus_pairs) > 0 and len(training_corpus_pairs[0].src_files) > 1:
                 LOGGER.warning(
-                    "The experiment has multiple source projects. Quotation mark denormalization is unlikely to work correctly in this scenario."
+                    "The experiment has multiple source projects. "
+                    "Quotation mark denormalization is unlikely to work correctly in this scenario."
                 )
             if len(training_corpus_pairs) > 0 and len(training_corpus_pairs[0].trg_files) > 1:
                 LOGGER.warning(
-                    "The experiment has multiple target projects. Quotation mark denormalization is unlikely to work correctly in this scenario."
+                    "The experiment has multiple target projects. "
+                    "Quotation mark denormalization is unlikely to work correctly in this scenario."
                 )
 
             if len(training_corpus_pairs) > 0 and len(training_corpus_pairs[0].trg_files) > 0:
@@ -417,16 +398,21 @@ class PostprocessConfig:
 
 
 class PostprocessHandler:
-    def __init__(self, configs: Optional[List[PostprocessConfig]] = None, include_base: bool = True) -> None:
+    def __init__(
+        self,
+        configs: Optional[List[PostprocessConfig]] = None,
+        include_base: bool = True,
+        environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+    ) -> None:
         if configs is None:
             configs = []
 
-        self.configs = ([PostprocessConfig()] if include_base else []) + configs
+        self.configs = ([PostprocessConfig({}, environment)] if include_base else []) + configs
 
     # NOTE: Row metadata may need to be created/recreated at different times
-    # For example, the marker placement metadata needs to be recreated for each new draft because it uses text alignment,
-    # but other metadata may only need to be created once overall, or once per source project.
-    # This may change what part of the process we want this function to be called at
+    # For example, the marker placement metadata needs to be recreated for each new draft
+    # because it uses text alignment, but other metadata may only need to be created once overall,
+    # or once per source project. This may change what part of the process we want this function to be called at
     def construct_rows(self, refs: List[ScriptureRef], source: List[str], translation: List[str]) -> None:
         for config in self.configs:
             config.rows = [UpdateUsfmRow([ref], t, {}) for ref, t in zip(refs, translation)]

@@ -8,47 +8,76 @@ import shutil
 import sys
 import zipfile
 from contextlib import contextmanager
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from typing import Iterator, List
 
+import pandas as pd
 import wildebeest.wb_analysis as wb_ana
 import yaml
-from machine.corpora import FileParatextProjectSettingsParser
+from machine.corpora import FileParatextProjectSettingsParser, ParatextProjectSettings
+from machine.scripture.canon import book_id_to_number, book_number_to_id
 
 from silnlp.common.analyze import analyze
 from silnlp.common.clean_projects import process_single_project_for_cleaning
 from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML
-from silnlp.nmt.config import Config
+from silnlp.nmt.config import SUPPORTED_GLOSS_ISOS, Config
 
 from ..nmt.config_utils import create_config
 from .collect_verse_counts import collect_verse_counts
-from .environment import SIL_NLP_ENV
-from .extract_corpora import extract_corpora
-from .iso_info import ALT_ISO, NLLB_TAG_FROM_ISO
+from .environment import SilNlpEnv
+from .extract_corpora import ExtractOutput, extract_corpora
+from .iso_info import ALT_ISO, NLLB_SCRIPT_SET, NLLB_TAG_FROM_ISO
 
 LOGGER = logging.getLogger(__package__ + ".onboard_project")
 
 
-class OnboardingProject:
+class ProjectType(Enum):
+    MAIN = "Main"
+    BT = "Back Translation"
+    DRAFT_SOURCE = "Draft Source"
+    REFERENCE = "Reference"
 
-    def __init__(self, project_name: str, overwrite: bool) -> None:
+
+class OnboardingProject:
+    def __init__(self, project_name: str, project_type: ProjectType, overwrite: bool, environment: SilNlpEnv) -> None:
         self.project_name: str = project_name
         self.local_project_path: Path | None = None
         self.output_folder: Path | None = None
         self.extract_file: Path | None = None
+        self.extract_output: ExtractOutput | None = None
+        self.settings: ParatextProjectSettings | None = None
         self.iso_code: str = ""
         self.resource: bool | None = None
         self.overwrite: bool = overwrite
+        self.environment: SilNlpEnv = environment
+        self.report: OnboardingReport = OnboardingReport(project=self, project_type=project_type)
 
     def get_extract_path(self) -> Path | None:
         if self.extract_file is not None:
             return self.extract_file
-        extract_paths = list(SIL_NLP_ENV.mt_scripture_dir.glob(f"*-{self.project_name}.txt"))
+        extract_paths = list(self.environment.mt_scripture_dir.glob(f"*-{self.project_name}.txt"))
         if not extract_paths:
             return None
         self.extract_file = extract_paths[0]
         return self.extract_file
+
+    def get_project_settings(self, project_path: Path = None) -> ParatextProjectSettings:
+        if self.settings is not None:
+            return self.settings
+        if project_path is None:
+            project_path = self.environment.pt_projects_dir / self.project_name
+        settings_file = project_path / "Settings.xml"
+        if settings_file.exists():
+            settings = FileParatextProjectSettingsParser(project_path).parse()
+            self.settings = settings
+            return self.settings
+        else:
+            raise FileNotFoundError(
+                f"The Settings.xml file was not found in the project folder '{project_path}'. Please ensure this is a valid Paratext project folder."
+            )
 
     def extract_corpora_wrapper(self, extract_config: dict) -> None:
         extract_path = self.get_extract_path()
@@ -58,7 +87,7 @@ class OnboardingProject:
         LOGGER.info(f"Extracting corpora for project '{self.project_name}'")
 
         versification_error_output_path = Path(self.output_folder / f"versification_errors_{self.project_name}.txt")
-        extract_path = extract_corpora(
+        extract_output: ExtractOutput = extract_corpora(
             projects={self.project_name},
             include_markers=extract_config.get("markers", False),
             extract_lemmas=extract_config.get("lemmas", False),
@@ -66,8 +95,10 @@ class OnboardingProject:
             extract_surface_forms=extract_config.get("surface-forms", False),
             parent_project=extract_config.get("parent_project", None),
             versification_error_output_path=versification_error_output_path,
+            environment=self.environment,
         )
-        self.extract_file = extract_path
+        self.extract_file = extract_output.corpus_filename
+        self.extract_output = extract_output
 
     def wildebeest_analysis_wrapper(self, wildebeest_config: dict) -> None:
         extract_path = self.get_extract_path()
@@ -155,7 +186,7 @@ class OnboardingProject:
         LOGGER.info(f"Calculating tokenization stats for project '{self.project_name}'")
         with open(stats_dir / "config.yml", "w", encoding="utf-8") as f:
             yaml.dump(stats_config, f, allow_unicode=True)
-        config = create_config(exp_dir=stats_dir, config=stats_config)
+        config = create_config(exp_dir=stats_dir, config=stats_config, environment=self.environment)
 
         config.set_seed()
         config.preprocess(stats=True, force_align=True)
@@ -237,14 +268,16 @@ class OnboardingProject:
 
         with open(align_output_dir / "config.yml", "w", encoding="utf-8") as f:
             yaml.dump(align_config, f, allow_unicode=True)
-        align_config: Config = create_config(exp_dir=align_output_dir, config=align_config)
+        align_config: Config = create_config(
+            exp_dir=align_output_dir, config=align_config, environment=self.environment
+        )
         exp_name = f"{self.output_folder.stem}/{self.project_name}/alignments"
-        analyze(config=align_config, exp_name=exp_name, create_summaries=True)
-        corpus_stats_csv = align_output_dir / "corpus_stats.csv"
+        analyze(config=align_config, exp_name=exp_name, create_summaries=True, environment=self.environment)
+        corpus_stats_csv = align_output_dir / "corpus-stats.csv"
         if corpus_stats_csv.exists():
             shutil.move(
                 str(corpus_stats_csv),
-                str(self.output_folder / "corpus_stats.csv"),
+                str(self.output_folder / "corpus-stats.csv"),
             )
 
     def check_for_project_errors(self) -> None:
@@ -257,7 +290,7 @@ class OnboardingProject:
                     f"The Settings.xml file was not found in the project folder '{self.local_project_path}'. Please ensure this is a valid Paratext project folder."
                 )
 
-            settings = FileParatextProjectSettingsParser(self.local_project_path).parse()
+            settings = self.get_project_settings(self.local_project_path)
 
             if settings.translation_type != "Standard":
                 LOGGER.warning(f"{self.project_name} is a non-Standard project. Type is '{settings.translation_type}'.")
@@ -322,21 +355,23 @@ class OnboardingProject:
 
         resource_hash = resource_hash.hexdigest()
         resource_hash_path = resource_path / ".resource_hash"
-        resource_hash_path.parent.touch(exist_ok=True)
+        resource_hash_path.parent.mkdir(parents=True, exist_ok=True)
         with open(resource_hash_path, "w") as f:
             f.write(resource_hash)
         return resource_hash
 
     def check_resource_hash(self) -> bool:
+        if self.local_project_path is None:
+            return False
         new_resource_hash = self.generate_resource_hash(self.local_project_path)
-        old_resource_path = SIL_NLP_ENV.pt_projects_dir / self.project_name
+        old_resource_path = self.environment.pt_projects_dir / self.project_name
         if not old_resource_path.exists():
             return False
-        old_resource_hash = self.generate_resource_hash(SIL_NLP_ENV.pt_projects_dir / self.project_name)
+        old_resource_hash = self.generate_resource_hash(old_resource_path)
         return new_resource_hash == old_resource_hash
 
     def update_resource(self) -> None:
-        old_resource_path = SIL_NLP_ENV.pt_projects_dir / self.project_name
+        old_resource_path = self.environment.pt_projects_dir / self.project_name
         if not old_resource_path.exists():
             LOGGER.info(
                 f"Resource '{self.project_name}' does not exist in the Paratext projects directory. Uploading new resource."
@@ -364,24 +399,316 @@ class OnboardingProject:
         return project_name
 
 
-class OnboardingRequest:
+class OnboardingReport:
+    def __init__(self, project: OnboardingProject, project_type: ProjectType) -> None:
+        self.project = project
+        self.project_type: ProjectType = project_type
+        self.name_on_bucket: str = ""
+        self.short_name: str = ""
+        self.name: str = ""
+        self.iso_code: str = ""
+        self.language: str = ""
+        self.lang_in_nllb: bool = False
+        self.script: str = ""
+        self.script_in_nllb: bool = False
+        self.normalization: str = ""
+        self.versification: List[int] = []
+        self.versification_error_count: int = 0
+        self.verse_count: int = 0
+        self.range_line_count: int = 0
+        self.alignment: str = ""
+        self.key_terms_type: str = ""
+        self.key_terms_count: int = 0
+        self.key_terms_glosses_exist: bool = False
+        self.mean_tokens_per_verse: float = 0.0
+        self.mean_char_per_token: float = 0.0
+        self.num_added_tokens: int = None
+        self.num_verses_truncated: int = None
+        self.completed_books: List[str] = []
 
+    def generate_dict(self) -> dict:
+        return {
+            "Project Type": self.project_type.value,
+            "Name on Bucket": self.name_on_bucket,
+            "Short Name": self.short_name,
+            "Name": self.name,
+            "ISO Code": self.iso_code,
+            "Language": self.language,
+            "Language in NLLB": "yes" if self.lang_in_nllb else "no",
+            "Script": self.script,
+            "Script in NLLB": "yes" if self.script_in_nllb else "no",
+            "Normalization": self.normalization,
+            "Versification": ";".join(str(v) for v in self.versification),
+            "Versification Error Count": self.versification_error_count if self.versification_error_count else None,
+            "Verse Count": self.verse_count,
+            "Range Line Count": self.range_line_count,
+            "Alignment with Main": self.alignment,
+            "Key Terms Type": self.key_terms_type,
+            "Key Terms Count": self.key_terms_count,
+            "Key Terms Glosses Exist": "yes" if self.key_terms_glosses_exist else "no",
+            "Mean Tokens Per Verse": f"{self.mean_tokens_per_verse:.2f}" if self.mean_tokens_per_verse else None,
+            "Mean Char Per Token": f"{self.mean_char_per_token:.3f}" if self.mean_char_per_token else None,
+            "Number of Added Tokens": self.num_added_tokens if self.num_added_tokens is not None else None,
+            "Number of Verses Truncated": self.num_verses_truncated if self.num_verses_truncated is not None else None,
+            "Completed Books": ";".join(self.completed_books) if self.completed_books else None,
+        }
+
+    def generate_report(self) -> None:
+        self.name_on_bucket = self.project.project_name
+
+        stats_file = self.project.output_folder / "tokenization_stats.csv"
+        if stats_file.exists():
+            stats_df = pd.read_csv(stats_file, header=[0, 1])
+            if self.project_type == ProjectType.MAIN:
+                target_stats = stats_df[stats_df[(" ", "Translation Side")] == "Target"]
+
+                self.mean_tokens_per_verse = target_stats[("Tokens/Verse", "Mean")].values[0]
+                self.mean_char_per_token = target_stats[("Characters/Token", "Mean")].values[0]
+                self.num_added_tokens = target_stats[(" ", "Num Tokens Added to Vocab")].values[0]
+                self.num_verses_truncated = target_stats[("Tokens/Verse", "Num Verses >= 200 Tokens")].values[0]
+
+        versification = self.project.extract_output.check_versification_output.detected_versification
+        self.versification = [v.value for v in versification]
+
+        self.versification_error_count = (
+            self.project.extract_output.check_versification_output.versification_error_count
+        )
+        self.key_terms_count = self.project.extract_output.terms_count
+
+        self.range_line_count = self.project.extract_output.range_line_count
+
+        verse_counts_file = self.project.output_folder / "verse_counts.csv"
+        if Path(verse_counts_file).exists():
+            verse_counts_df = pd.read_csv(verse_counts_file)
+
+            extract_verse_counts = verse_counts_df[verse_counts_df["file"] == self.project.extract_file.stem]
+
+            self.verse_count = extract_verse_counts["Total"].values[0]
+
+        verse_percentages_file = self.project.output_folder / "verse_percentages.csv"
+        if Path(verse_percentages_file).exists():
+            verse_percentages_df = pd.read_csv(verse_percentages_file)
+
+            extract_verse_percentages = verse_percentages_df[
+                verse_percentages_df["file"] == self.project.extract_file.stem
+            ]
+
+            self.completed_books = sorted(
+                [
+                    book
+                    for book in extract_verse_percentages.columns
+                    if extract_verse_percentages[book].iloc[0] == 100 and book not in ["NT", "OT", "Total"]
+                ],
+                key=book_id_to_number,
+            )
+
+        settings = self.project.get_project_settings()
+
+        self.name = settings.full_name
+        self.short_name = settings.name
+        self.iso_code = settings.language_code
+        self.key_terms_glosses_exist = (
+            self.iso_code in SUPPORTED_GLOSS_ISOS or ALT_ISO.get_alternative(self.iso_code) in SUPPORTED_GLOSS_ISOS
+        )
+        self.key_terms_type = settings.biblical_terms_list_type
+
+        self.normalization = settings.normalization_form
+        self.language = settings.language
+
+        corpus_stats_file = self.project.output_folder / "corpus-stats.csv"
+        if Path(corpus_stats_file).exists():
+            corpus_stats_df = pd.read_csv(corpus_stats_file)
+            alignment_row = corpus_stats_df[corpus_stats_df["trg_project"] == self.project.extract_file.stem]
+            if not alignment_row.empty:
+                self.alignment = alignment_row["align_score"].values[0]
+                self.script = alignment_row["trg_script"].values[0]
+            else:
+                alignment_row = corpus_stats_df[corpus_stats_df["src_project"] == self.project.extract_file.stem].head(
+                    1
+                )
+                if not alignment_row.empty:
+                    self.script = alignment_row["src_script"].values[0]
+
+        nllb_tag = NLLB_TAG_FROM_ISO.get(self.iso_code, None)
+        self.lang_in_nllb = nllb_tag is not None
+        self.script = nllb_tag.split("_")[1] if nllb_tag and self.script == "" else self.script
+        self.script_in_nllb = self.script in NLLB_SCRIPT_SET
+
+
+@dataclass
+class OnboardingReportFlag:
+    column_name: str
+    message: str
+
+
+class OnboardingReportCreator:
+    def __init__(
+        self,
+        report_path: Path,
+        planned_books: List[str],
+        completed_books: List[str],
+        main_project: OnboardingProject,
+        reference_projects: List[OnboardingProject],
+    ) -> None:
+        self.report_path = report_path
+        self.planned_books = planned_books
+        self.completed_books = completed_books
+        self.main_project = main_project
+        self.reference_projects = reference_projects
+        self.flags: List[OnboardingReportFlag] = []
+        self.report_df: pd.DataFrame = pd.DataFrame()
+
+    def _ref_project_has_all_completed_books(self) -> bool:
+        return any(
+            set(self.main_project.report.completed_books).issubset(set(p.report.completed_books))
+            for p in self.reference_projects
+        )
+
+    def _ref_project_has_all_planned_books(self) -> bool:
+        return any(set(self.planned_books).issubset(set(p.report.completed_books)) for p in self.reference_projects)
+
+    def add_flags(self) -> None:
+        projects = [self.main_project] + self.reference_projects
+        if any(p.report.normalization != "NFC" for p in projects):
+            self.flags.append(OnboardingReportFlag("Normalization", "Normalization is not NFC"))
+
+        if any(p.report.versification != self.main_project.report.versification for p in self.reference_projects):
+            self.flags.append(OnboardingReportFlag("Versification", "Source Versification does not match Main Project"))
+
+        if all(p.report.lang_in_nllb is False for p in self.reference_projects):
+            self.flags.append(
+                OnboardingReportFlag("Language in NLLB", "Source Language is not in NLLB for all Reference Projects.")
+            )
+
+        if all(p.report.script_in_nllb is False for p in projects):
+            self.flags.append(OnboardingReportFlag("Script in NLLB", "Script is not in NLLB for all Projects"))
+
+        if not self._ref_project_has_all_completed_books():
+            self.flags.append(
+                OnboardingReportFlag(
+                    "Books for Training",
+                    "No Reference project has all books needed for training.",
+                )
+            )
+
+        if not self._ref_project_has_all_planned_books():
+            self.flags.append(
+                OnboardingReportFlag(
+                    "Books to Translate",
+                    "No Reference project has all books needed for translation.",
+                )
+            )
+
+    def create_report_csv(self) -> None:
+        projects = [self.main_project] + self.reference_projects
+        [p.report.generate_report() for p in projects]
+
+        self.add_flags()
+
+        formatted_reports = [p.report.generate_dict() for p in projects]
+        self.report_df: pd.DataFrame = pd.DataFrame(formatted_reports)
+
+        self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Books for Training"] = ";".join(
+            self.completed_books
+        )
+        self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Books to Translate"] = ";".join(
+            self.planned_books
+        )
+        self.report_df.loc[
+            self.report_df["Project Type"] == ProjectType.MAIN.value, "Books Missing/Incomplete"
+        ] = ";".join([book for book in self.completed_books if book not in self.main_project.report.completed_books])
+        self.report_df.loc[self.report_df["Project Type"] == ProjectType.MAIN.value, "Extra Books"] = ";".join(
+            [book for book in self.main_project.report.completed_books if book not in self.completed_books]
+        )
+
+        for project in self.reference_projects:
+            books_missing = [
+                book for book in self.completed_books + self.planned_books if book not in project.report.completed_books
+            ]
+            extra_books = [
+                book for book in project.report.completed_books if book not in self.completed_books + self.planned_books
+            ]
+            self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Books for Training"] = (
+                "yes" if len(books_missing) == 0 else "no"
+            )
+            self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Books to Translate"] = (
+                "yes" if len(books_missing) == 0 else "no"
+            )
+            self.report_df.loc[
+                self.report_df["Name on Bucket"] == project.project_name, "Books Missing/Incomplete"
+            ] = ";".join(books_missing)
+            self.report_df.loc[self.report_df["Name on Bucket"] == project.project_name, "Extra Books"] = ";".join(
+                extra_books
+            )
+
+        self.report_df.loc[len(self.report_df)] = ["Notes and Flags"] + [""] * (len(self.report_df.columns) - 1)
+        for flag in self.flags:
+            self.report_df.loc[self.report_df["Project Type"] == "Notes and Flags", flag.column_name] = flag.message
+
+        self.report_df = (
+            self.report_df.set_index("Project Type").T.reset_index().rename(columns={"index": "Project Type"})
+        ).to_csv(self.report_path, index=False)
+
+
+class OnboardingRequest:
     def __init__(
         self,
         config: dict,
+        environment: SilNlpEnv,
     ):
         self.config = config
+        self.environment = environment
         onboarding_config = config.get("onboarding", {})
         self.overwrite = onboarding_config.get("overwrite", False)
         main_project_name = onboarding_config.get("main_project", None)
         self.main_project: OnboardingProject = OnboardingProject(
-            project_name=main_project_name, overwrite=self.overwrite
+            project_name=main_project_name,
+            project_type=ProjectType.MAIN,
+            overwrite=self.overwrite,
+            environment=self.environment,
         )
-        reference_project_names = onboarding_config.get("ref_projects", [])
         self.reference_projects: List[OnboardingProject] = []
+
+        draft_source_project_name = onboarding_config.get("draft_source", None)
+        if draft_source_project_name is not None:
+            self.reference_projects.append(
+                OnboardingProject(
+                    project_name=draft_source_project_name,
+                    project_type=ProjectType.DRAFT_SOURCE,
+                    overwrite=self.overwrite,
+                    environment=self.environment,
+                )
+            )
+
+        bt_project_name = onboarding_config.get("bt_project", None)
+        if bt_project_name is not None:
+            self.reference_projects.append(
+                OnboardingProject(
+                    project_name=bt_project_name,
+                    project_type=ProjectType.BT,
+                    overwrite=self.overwrite,
+                    environment=self.environment,
+                )
+            )
+
+        reference_project_names = onboarding_config.get("ref_projects", [])
         for ref_project_name in reference_project_names:
-            reference_project = OnboardingProject(project_name=ref_project_name, overwrite=self.overwrite)
+            if any(p.project_name == ref_project_name for p in self.reference_projects):
+                continue
+            reference_project = OnboardingProject(
+                project_name=ref_project_name,
+                project_type=ProjectType.REFERENCE,
+                overwrite=self.overwrite,
+                environment=self.environment,
+            )
             self.reference_projects.append(reference_project)
+
+        self.completed_books: List[str] = [
+            book_number_to_id(int(book)) for book in sorted(onboarding_config.get("completed_books", []))
+        ]
+        self.planned_books: List[str] = [
+            book_number_to_id(int(book)) for book in onboarding_config.get("planned_books", [])
+        ]
         self.no_clean: bool = onboarding_config.get("no_clean", False)
         self.copy_from: Path | None = onboarding_config.get("copy_from", None)
         self.datestamp: bool = onboarding_config.get("datestamp", False)
@@ -427,6 +754,19 @@ class OnboardingRequest:
             if self.align:
                 self.align_main_project()
 
+            LOGGER.info("Creating onboarding report.")
+            report_path = self.output_folder / "onboarding_report.csv"
+
+            report_creator = OnboardingReportCreator(
+                report_path=report_path,
+                completed_books=self.completed_books,
+                planned_books=self.planned_books,
+                main_project=self.main_project,
+                reference_projects=self.reference_projects,
+            )
+
+            report_creator.create_report_csv()
+
     def align_main_project(self) -> None:
         iso_codes = set()
         if self.align_isos:
@@ -462,6 +802,10 @@ class OnboardingRequest:
                     LOGGER.error(f"Error occurred while uploading reference project '{project.project_name}': {e}")
                     LOGGER.error(f"Continuing with onboarding without reference project '{project.project_name}'.")
                     reference_projects_to_remove.append(project)
+                else:
+                    LOGGER.error(f"Error occurred while uploading main project '{project.project_name}': {e}")
+                    LOGGER.error("Main project upload failed. Stopping onboarding process.")
+                    raise e
 
         for project in reference_projects_to_remove:
             self.reference_projects.remove(project)
@@ -474,6 +818,18 @@ class OnboardingRequest:
         self.config["onboarding"]["datestamp"] = False
         self.config["onboarding"]["no_clean"] = False
         self.config["onboarding"]["output_folder"] = str(self.output_folder)
+
+        if self.config["onboarding"]["draft_source"]:
+            for ref_project in self.reference_projects:
+                if ref_project.report.project_type == ProjectType.DRAFT_SOURCE:
+                    self.config["onboarding"]["draft_source"] = ref_project.project_name
+                    break
+
+        if self.config["onboarding"]["bt_project"]:
+            for ref_project in self.reference_projects:
+                if ref_project.report.project_type == ProjectType.BT:
+                    self.config["onboarding"]["bt_project"] = ref_project.project_name
+                    break
 
         with open(self.get_config_path(), "w") as f:
             yaml.dump(self.config, f)
@@ -497,13 +853,17 @@ class OnboardingRequest:
 
         if self.copy_from:
             LOGGER.info(
-                f"Copying project: {onboarding_project.project_name} from {self.copy_from} to {SIL_NLP_ENV.pt_projects_dir}/{onboarding_project.project_name}"
+                f"Copying project: {onboarding_project.project_name} from {self.copy_from} to {self.environment.pt_projects_dir}/{onboarding_project.project_name}"
             )
             source_path = Path(self.copy_from)
             if source_path.name != onboarding_project.project_name:
                 source_path = Path(source_path / onboarding_project.project_name)
-            paratext_project_dir: Path = create_paratext_project_folder_if_not_exists(onboarding_project.project_name)
-            copy_paratext_project_folder(source_path, paratext_project_dir, overwrite=self.overwrite)
+            paratext_project_dir: Path = create_paratext_project_folder_if_not_exists(
+                onboarding_project.project_name, self.environment
+            )
+            copy_paratext_project_folder(
+                source_path, paratext_project_dir, overwrite=self.overwrite, environment=self.environment
+            )
             if onboarding_project.project_name != original_project_name:
                 shutil.rmtree(source_path)
 
@@ -520,7 +880,7 @@ class OnboardingRequest:
             onboarding_project.wildebeest_analysis_wrapper(self.config.get("wildebeest", {}))
 
     def collect_verse_counts_wrapper(self, verse_counts_config: dict) -> None:
-        input_folder = verse_counts_config.get("input_folder", SIL_NLP_ENV.mt_scripture_dir)
+        input_folder = verse_counts_config.get("input_folder", self.environment.mt_scripture_dir)
 
         file_patterns = verse_counts_config.get("files", None)
         if file_patterns is None:
@@ -544,6 +904,7 @@ class OnboardingRequest:
             file_patterns=file_patterns,
             deutero=verse_counts_config.get("deutero", False),
             recount=verse_counts_config.get("recount", False),
+            environment=self.environment,
         )
 
     def get_config_path(self) -> Path:
@@ -551,7 +912,7 @@ class OnboardingRequest:
 
     def setup_output(self) -> None:
         self.output_folder = Path(
-            SIL_NLP_ENV.mt_experiments_dir / "_OnboardingRequests" / f"{self.main_project.project_name}_Request"
+            self.environment.mt_experiments_dir / "_OnboardingRequests" / f"{self.main_project.project_name}_Request"
         )
         self.output_folder.mkdir(parents=True, exist_ok=True)
         for project in [self.main_project] + self.reference_projects:
@@ -569,12 +930,8 @@ class OnboardingRequest:
             close_logger(log_file_path)
 
 
-def get_paratext_project_dir(project: str) -> Path:
-    return SIL_NLP_ENV.pt_projects_dir / project
-
-
-def create_paratext_project_folder_if_not_exists(project_name: str) -> Path:
-    pt_project_path = get_paratext_project_dir(project_name)
+def create_paratext_project_folder_if_not_exists(project_name: str, environment: SilNlpEnv) -> Path:
+    pt_project_path = environment.get_paratext_project_dir(project_name)
     if pt_project_path.exists():
         LOGGER.info(f"Paratext project folder '{pt_project_path}' already exists.")
     else:
@@ -583,8 +940,13 @@ def create_paratext_project_folder_if_not_exists(project_name: str) -> Path:
     return pt_project_path
 
 
-def copy_paratext_project_folder(source_dir: Path, project_name: str, overwrite=False) -> None:
-    pt_project_path = get_paratext_project_dir(project_name)
+def copy_paratext_project_folder(
+    source_dir: Path,
+    project_name: str,
+    overwrite=False,
+    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
+) -> None:
+    pt_project_path = environment.get_paratext_project_dir(project_name)
 
     if not any(source_dir.iterdir()):
         LOGGER.warning(f"Source directory '{source_dir}' is empty.")
@@ -657,7 +1019,7 @@ def copy_directory(source_dir: Path, target_dir: Path, overwrite=False) -> None:
 
 
 def append_datestamp(project_name: str) -> str:
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     datestamp = now.strftime("%Y_%m_%d")
     return f"{project_name}_{datestamp}"
 
@@ -674,8 +1036,18 @@ def main() -> None:
         default=None,
     )
     parser.add_argument(
+        "--draft-source",
+        help="The Drafting Source Paratext project name for onboarding the Main Project(s). The project will be stored on the bucket at Paratext/projects/<project>.",
+        default=None,
+    )
+    parser.add_argument(
+        "--bt-project",
+        help="The Back Translation Paratext project name for onboarding the Main Project(s). The project will be stored on the bucket at Paratext/projects/<project>.",
+        default=None,
+    )
+    parser.add_argument(
         "--ref-projects",
-        help="The Reference Paratext project name(s) for onboarding the main project(s). The project(s) will be stored on the bucket at Paratext/projects/<project>.",
+        help="The Reference Paratext project name(s) for onboarding the Main Project(s). The project(s) will be stored on the bucket at Paratext/projects/<project>.",
         nargs="+",
         default=None,
     )
@@ -730,13 +1102,13 @@ def main() -> None:
         "--stats",
         default=False,
         action="store_true",
-        help="Compute tokenization statistics on the main project and reference projects.",
+        help="Compute tokenization statistics on the Main Project and reference projects.",
     )
     parser.add_argument(
         "--align",
         default=False,
         action="store_true",
-        help="Run alignments between the main project and reference projects.",
+        help="Run alignments between the Main Project and reference projects.",
     )
     parser.add_argument(
         "--align-isos",
@@ -744,6 +1116,8 @@ def main() -> None:
         nargs="+",
         help="List of ISO codes to use for determining standard alignment projects to include in the alignments step, along with the reference project isos.",
     )
+    parser.add_argument("--completed-books", nargs="+", help="The ids of books that have been completed.")
+    parser.add_argument("--planned-books", nargs="+", help="The ids of books planned for translation.")
     parser.add_argument(
         "--clearml-queue",
         default=None,
@@ -761,6 +1135,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    environment = SilNlpEnv.create_standard_environment()
+
     if args.clearml_queue is not None:
         if "cpu" not in args.clearml_queue:
             LOGGER.warning("Running this script on a GPU queue will not speed it up. Please only use CPU queues.")
@@ -775,7 +1151,7 @@ def main() -> None:
         args.collect_verse_counts = True
 
     if args.config and len(args.main_projects) != len(args.config):
-        parser.errror("Number of config paths does not match number of main projects.")
+        parser.error("Number of config paths does not match number of Main Projects.")
 
     project_configs = {}
     if args.config:
@@ -797,6 +1173,8 @@ def main() -> None:
                 args.align = True
             config["onboarding"] = {
                 "main_project": main_project,
+                "draft_source": args.draft_source if args.draft_source else None,
+                "bt_project": args.bt_project if args.bt_project else None,
                 "ref_projects": args.ref_projects if args.ref_projects else [],
                 "copy_from": str(args.copy_from) if args.copy_from else None,
                 "datestamp": args.datestamp,
@@ -808,11 +1186,11 @@ def main() -> None:
                 "align": args.align,
                 "align_isos": args.align_isos if args.align_isos else [],
                 "output_folder": None,
+                "completed_books": args.completed_books if args.completed_books else [],
+                "planned_books": args.planned_books if args.planned_books else [],
             }
 
-        onboarding_request = OnboardingRequest(
-            config=config,
-        )
+        onboarding_request = OnboardingRequest(config=config, environment=environment)
         onboarding_request.prepare_and_upload_projects()
         onboarding_requests.append(onboarding_request)
 
@@ -830,7 +1208,13 @@ def main() -> None:
             *project_names,
         ]
         task_name = f"Onboarding - {', '.join([req.main_project.project_name for req in onboarding_requests])}"
-        clearml = SILClearML(task_name, args.clearml_queue, tag=args.clearml_tag, skip_config=True)
+        clearml = SILClearML(
+            task_name,
+            args.clearml_queue,
+            tag=args.clearml_tag,
+            skip_config=True,
+            environment=environment,
+        )
 
     for onboarding_request in onboarding_requests:
         onboarding_request.process_onboarding_request()

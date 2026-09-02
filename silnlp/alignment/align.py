@@ -6,10 +6,9 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from silnlp.nmt.clearml_connection import TAGS_LIST, SILClearML
-
+from ..common.environment import SilNlpEnv
+from ..nmt.clearml_connection import TAGS_LIST, SILClearML
 from .config import ALIGNERS, get_aligner, get_aligner_name, get_all_book_paths, load_config
-from .utils import get_experiment_dirs, get_experiment_name
 
 LOGGER = logging.getLogger(__package__ + ".align")
 
@@ -91,6 +90,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    environment = SilNlpEnv.create_standard_environment()
     experiments = args.experiments
 
     aligner_ids = list(ALIGNERS.keys() if len(args.aligners) == 0 else args.aligners)
@@ -106,14 +106,20 @@ def main() -> None:
             LOGGER.warning(
                 "The .NET aligners cannot be used on remote ClearML queues. They have been removed from the list of aligners to run."
             )
-        clearml = SILClearML(experiments, args.clearml_queue, tag=args.clearml_tag, skip_config=True)
+        clearml = SILClearML(
+            experiments,
+            args.clearml_queue,
+            tag=args.clearml_tag,
+            skip_config=True,
+            environment=environment,
+        )
         experiments = clearml.name
 
-    for exp_dir in get_experiment_dirs(experiments):
-        exp_name = get_experiment_name(exp_dir)
+    for exp_dir in environment.get_align_experiment_dirs(experiments):
+        exp_name = environment.get_align_experiment_name(exp_dir)
         if not args.skip_align:
             LOGGER.info(f"Aligning {exp_name}")
-            config = load_config(exp_dir)
+            config = load_config(exp_dir, environment)
 
             if config["by_book"]:
                 for book, book_exp_dir in get_all_book_paths(exp_dir):

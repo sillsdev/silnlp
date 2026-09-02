@@ -6,7 +6,7 @@ from typing import Optional, Set, Union
 
 import yaml
 
-from ..common.environment import SIL_NLP_ENV, SilNlpEnv
+from ..common.environment import SilNlpEnv
 from ..common.postprocesser import PostprocessConfig, PostprocessHandler
 from ..common.utils import get_git_revision_hash, show_attrs
 from .clearml_connection import TAGS_LIST, SILClearML
@@ -20,7 +20,7 @@ class SILExperiment:
     name: str
     config: Config
     model: NMTModel
-    environment: SilNlpEnv = SIL_NLP_ENV
+    environment: SilNlpEnv
     make_stats: bool = False
     force_align: bool = False
     mixed_precision: bool = True
@@ -37,6 +37,7 @@ class SILExperiment:
     commit: Optional[str] = None
     clearml_tag: Optional[str] = None
     force_infer: bool = False
+    test_all_checkpoints: bool = False
 
     def __post_init__(self):
         self.rev_hash = get_git_revision_hash()
@@ -78,6 +79,7 @@ class SILExperiment:
             config=self.config,
             last=self.config.model_dir.exists(),
             best=self.config.model_dir.exists(),
+            all_checkpoints=self.test_all_checkpoints,
             by_book=self.score_by_book,
             scorers=self.scorers,
             produce_multiple_translations=self.produce_multiple_translations,
@@ -92,18 +94,20 @@ class SILExperiment:
             translate_configs = yaml.safe_load(file)
 
         postprocess_configs = translate_configs.get("postprocess", [])
-        postprocess_handler = PostprocessHandler([PostprocessConfig(pc) for pc in postprocess_configs])
+        postprocess_handler = PostprocessHandler(
+            [PostprocessConfig(pc, self.environment) for pc in postprocess_configs], environment=self.environment
+        )
 
         quality_estimation = translate_configs.get("quality_estimation", False)
 
         if quality_estimation:
-            verse_test_scores_path = self.environment.get_mt_exp_dir(
-                quality_estimation.get("verse_test_scores_file")
-                if isinstance(quality_estimation, dict) and quality_estimation.get("verse_test_scores_file")
-                else self.config.exp_dir
+            linregress_path = self.environment.get_mt_exp_dir(
+                str(quality_estimation.get("linregress_file"))
+                if isinstance(quality_estimation, dict) and quality_estimation.get("linregress_file")
+                else str(self.config.exp_dir)
             )
         else:
-            verse_test_scores_path = None
+            linregress_path = None
         if quality_estimation and not self.save_confidences:
             self.save_confidences = True
 
@@ -118,7 +122,7 @@ class SILExperiment:
             )
 
             if not postprocess_configs:
-                postprocess_handler = PostprocessHandler([])
+                postprocess_handler = PostprocessHandler([], environment=self.environment)
 
             if "tags" in translate_config and isinstance(translate_config["tags"], list):
                 translate_config["tags"] = ",".join(translate_config["tags"])
@@ -133,8 +137,7 @@ class SILExperiment:
                     translate_config.get("trg_iso"),
                     self.produce_multiple_translations,
                     self.save_confidences,
-                    bool(quality_estimation),
-                    verse_test_scores_path,
+                    linregress_path,
                     postprocess_handler,
                     translate_config.get("tags"),
                 )
@@ -146,8 +149,7 @@ class SILExperiment:
                     translate_config.get("trg_iso"),
                     self.produce_multiple_translations,
                     self.save_confidences,
-                    bool(quality_estimation),
-                    verse_test_scores_path,
+                    linregress_path,
                     postprocess_handler,
                     translate_config.get("tags"),
                 )
@@ -191,12 +193,19 @@ def main() -> None:
     parser.add_argument("--preprocess", default=False, action="store_true", help="Run the preprocess step.")
     parser.add_argument("--train", default=False, action="store_true", help="Run the train step.")
     parser.add_argument("--test", default=False, action="store_true", help="Run the test step.")
+    parser.add_argument(
+        "--test-all-checkpoints",
+        default=False,
+        action="store_true",
+        help="When running the test step, test all saved checkpoints instead of just the last/best checkpoint.",
+    )
     parser.add_argument("--translate", default=False, action="store_true", help="Create drafts.")
     parser.add_argument(
         "--multiple-translations",
         default=False,
         action="store_true",
-        help='Produce multiple translations of each verse. These will be saved in separate files with suffixes like ".1.txt", ".2.txt", etc.',
+        help='Produce multiple translations of each verse. '
+        + 'These will be saved in separate files with suffixes like ".1.txt", ".2.txt", etc.',
     )
     parser.add_argument(
         "--save-confidences",
@@ -242,12 +251,13 @@ def main() -> None:
     if args.clearml_queue is not None and args.clearml_tag is None:
         parser.error("Missing ClearML tag. Add a tag using --clearml-tag. Possible tags: " + f"{TAGS_LIST}")
 
-    environment = SilNlpEnv()
     if args.mt_dir is not None:
-        environment.set_machine_translation_dir(environment.data_dir / args.mt_dir)
+        environment = SilNlpEnv.create_environment_with_mt_dir(Path(args.mt_dir))
+    else:
+        environment = SilNlpEnv.create_standard_environment()
 
     if args.debug:
-        show_attrs(cli_args=args)
+        show_attrs(cli_args=args, envs=environment)
         exit()
 
     if not (args.preprocess or args.train or args.test or args.translate):
@@ -260,6 +270,7 @@ def main() -> None:
         args.clearml_queue,
         commit=args.commit,
         tag=args.clearml_tag,
+        environment=environment,
     )
     model = clearml.config.create_model(
         mixed_precision=not args.disable_mixed_precision,
@@ -271,6 +282,7 @@ def main() -> None:
         name=clearml.name,
         config=clearml.config,
         model=model,
+        environment=environment,
         make_stats=args.stats,
         force_align=args.force_align,
         mixed_precision=not args.disable_mixed_precision,
@@ -287,6 +299,7 @@ def main() -> None:
         scorers=set(s.lower() for s in args.scorers),
         score_by_book=args.score_by_book,
         force_infer=args.force_infer,
+        test_all_checkpoints=args.test_all_checkpoints,
     )
 
     if args.train and not args.save_checkpoints:

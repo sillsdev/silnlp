@@ -7,14 +7,12 @@ from typing import Dict, List, Set, Tuple
 
 import yaml
 
-from .environment import SIL_NLP_ENV
+from .environment import SilNlpEnv
 from .iso_info import ALT_ISO, NLLB_ISO_SET
 
 IsoCode = str
 IsoCodeList = List[IsoCode]
 IsoCodeSet = Set[IsoCode]
-
-LANGUAGE_FAMILY_FILE = SIL_NLP_ENV.assets_dir / "languageFamilies.json"
 
 
 def is_file_pattern(input_str: str) -> bool:
@@ -130,33 +128,38 @@ def create_alignment_config(source_files: List[Path], target_files: List[str]) -
     return config
 
 
-def resolve_config_file(output_path: str) -> Path:
+def resolve_config_file(output_path: str, environment: SilNlpEnv) -> Path:
     "Resolve config folder/file path, creating the config folder if needed."
     path = Path(output_path)
     if path.suffix:
         config_file_name = path.name
         folder_part = path.parent
-        if config_file_name != 'config.yml':
-            resp = input(f"Warning: filename '{config_file_name}' is not 'config.yml'. Use 'config.yml' instead? [Y/n] ")
-            if resp.strip().lower() != 'n': config_file_name = 'config.yml'
+        if config_file_name != "config.yml":
+            resp = input(
+                f"Warning: filename '{config_file_name}' is not 'config.yml'. Use 'config.yml' instead? [Y/n] "
+            )
+            if resp.strip().lower() != "n":
+                config_file_name = "config.yml"
     else:
-        config_file_name = 'config.yml'
+        config_file_name = "config.yml"
         folder_part = path
 
     if folder_part.is_absolute():
         config_folder = folder_part
         if not config_folder.parent.is_dir():
-            raise argparse.ArgumentTypeError(
-                f"Parent directory does not exist: {config_folder.parent}")
-        try: config_folder.mkdir(parents=True, exist_ok=True)
+            raise argparse.ArgumentTypeError(f"Parent directory does not exist: {config_folder.parent}")
+        try:
+            config_folder.mkdir(parents=True, exist_ok=True)
         except PermissionError:
             raise argparse.ArgumentTypeError(f"Permission denied creating directory: {config_folder}")
     else:
         if len(folder_part.parts) < 2:
             raise argparse.ArgumentTypeError(
-                f"Relative path '{folder_part}' must include a subfolder inside Experiments (e.g. 'country/analyze').")
-        config_folder = (SIL_NLP_ENV.mt_experiments_dir / folder_part).resolve()
-        try: config_folder.mkdir(parents=True, exist_ok=True)
+                f"Relative path '{folder_part}' must include a subfolder inside Experiments (e.g. 'country/analyze')."
+            )
+        config_folder = (environment.mt_experiments_dir / folder_part).resolve()
+        try:
+            config_folder.mkdir(parents=True, exist_ok=True)
         except PermissionError:
             raise argparse.ArgumentTypeError(f"Permission denied creating directory: {config_folder}")
 
@@ -168,8 +171,8 @@ def main():
     parser.add_argument("inputs", nargs="+", help="ISO codes or file patterns (e.g., 'fra' or 'en-NIV')")
     parser.add_argument(
         "--scripture-dir",
-        type=Path,
-        default=Path(SIL_NLP_ENV.mt_scripture_dir),
+        type=str,
+        default=None,
         help="Directory containing scripture files",
     )
     parser.add_argument(
@@ -183,9 +186,19 @@ def main():
         help="Only list scriptures in the specified languages and not in related languages",
     )
     parser.add_argument("--targets", nargs="+", help="List of target files in format <iso_code>-<project_name>")
-    parser.add_argument("--config-folder", type=resolve_config_file, help=f"Existing folder, or folder relative to the Experiments folder: {SIL_NLP_ENV.mt_experiments_dir}")
+    parser.add_argument(
+        "--config-folder",
+        type=str,
+        help=f"Existing folder, or folder relative to the Experiments folder",
+    )
 
     args = parser.parse_args()
+
+    environment = SilNlpEnv.create_standard_environment()
+
+    scripture_dir = Path(args.scripture_dir) if args.scripture_dir else environment.mt_scripture_dir
+
+    resolved_config_file = resolve_config_file(args.config_folder, environment) if args.config_folder else None
 
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.INFO)
@@ -199,7 +212,8 @@ def main():
 
     source_files = []
     if iso_codes:
-        language_data, country_data, family_data = load_language_data(LANGUAGE_FAMILY_FILE)
+        language_family_file = environment.assets_dir / "languageFamilies.json"
+        language_data, country_data, family_data = load_language_data(language_family_file)
         if not language_data:
             logging.error("Failed to load language data.")
             return
@@ -220,10 +234,10 @@ def main():
                 logger.info(f"\nFound {len(codes_to_find)} specified or related languages:\n{codes_to_find}")
 
         all_possible_codes = get_equivalent_isocodes(codes_to_find)
-        source_files.extend(get_files_by_iso(all_possible_codes, args.scripture_dir))
+        source_files.extend(get_files_by_iso(all_possible_codes, scripture_dir))
 
     if file_patterns:
-        pattern_files = [args.scripture_dir / f"{pattern}.txt" for pattern in file_patterns]
+        pattern_files = [scripture_dir / f"{pattern}.txt" for pattern in file_patterns]
         existing_files = [f for f in pattern_files if f.exists()]
         source_files.extend(existing_files)
         if len(existing_files) < len(pattern_files):
@@ -240,11 +254,10 @@ def main():
     sources = sorted([source for source in set(sources)])
     config = create_alignment_config(sources, targets)
 
-    if args.config_folder:
-        config_file = args.config_folder
-        with open(config_file, "w") as f:
+    if resolved_config_file:
+        with open(resolved_config_file, "w") as f:
             yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-        logger.info(f"\nCreated alignment configuration in: {config_file}")
+        logger.info(f"\nCreated alignment configuration in: {resolved_config_file}")
     else:
         logger.info("\nAlignment configuration:")
         logger.info(yaml.dump(config, default_flow_style=False, sort_keys=False))

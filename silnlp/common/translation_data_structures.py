@@ -2,7 +2,7 @@ import re
 from math import exp
 from pathlib import Path
 from statistics import mean
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set
 
 from attr import dataclass
 from machine.corpora import ScriptureRef, TextRow, UsfmFileText, UsfmStylesheet, UsfmTextType
@@ -18,11 +18,15 @@ class SentenceTranslation:
         tokens: List[str],
         token_scores: List[float],
         sequence_score: Optional[float],
+        starts_with_special_token: bool = True,
     ):
         self._translation = translation
         self._tokens = tokens
         self._token_scores = token_scores
         self._sequence_score = sequence_score
+        # Seq2seq models emit the forced decoder start/language token as tokens[0]; it must be
+        # excluded from test files. Decoder-only LLM output has no such token.
+        self._starts_with_special_token = starts_with_special_token
 
     @classmethod
     def combine(cls, translations: List["SentenceTranslation"]) -> "SentenceTranslation":
@@ -37,7 +41,13 @@ class SentenceTranslation:
             if all(t.has_sequence_confidence_score() for t in translations)
             else None
         )
-        return cls(combined_translation, combined_tokens, combined_token_scores, combined_sequence_score)
+        return cls(
+            combined_translation,
+            combined_tokens,
+            combined_token_scores,
+            combined_sequence_score,
+            translations[0]._starts_with_special_token,
+        )
 
     def get_translation(self) -> str:
         return self._translation
@@ -49,7 +59,8 @@ class SentenceTranslation:
         return exp(self._sequence_score) if self._sequence_score is not None else None
 
     def join_tokens_for_test_file(self) -> str:
-        return " ".join([token for token in self._tokens[1:] if token != "<pad>"])
+        tokens = self._tokens[1:] if self._starts_with_special_token else self._tokens
+        return " ".join([token for token in tokens if token != "<pad>"])
 
     def join_tokens_for_confidence_file(self) -> str:
         return "\t".join(self._tokens)
@@ -220,26 +231,23 @@ class UsfmTextRowCollection:
     def _split_sentences(self, text) -> List[str]:
         return NLTKSentenceTokenizer.for_iso(self._src_iso).tokenize(text)
 
-    def get_sentences_and_vrefs_for_translation(self) -> Tuple[List[str], List[ScriptureRef]]:
-        sentences, scripture_refs = self._match_all_sentences_with_scripture_refs()
-        return ([self._clean_and_tag_sentence(s) for s in sentences], scripture_refs)
+    def get_sentences_for_translation(self) -> List[str]:
+        sentences = self._match_all_sentences()
+        return [self._clean_and_tag_sentence(s) for s in sentences]
 
     def _filter_out_empty_rows(self) -> List[TextRow]:
         return [s for i, s in enumerate(self._text_rows) if i not in self._empty_row_indices]
 
-    def _match_all_sentences_with_scripture_refs(self) -> Tuple[List[str], List[ScriptureRef]]:
+    def _match_all_sentences(self) -> List[str]:
         sentences: List[str] = []
-        scripture_refs: List[ScriptureRef] = []
         for i, row in enumerate(self._text_rows):
             if i in self._empty_row_indices:
                 continue
             elif i in self._subdivided_row_texts:
                 sentences.extend(self._subdivided_row_texts[i])
-                scripture_refs.extend([row.ref] * len(self._subdivided_row_texts[i]))
             else:
                 sentences.append(row.text)
-                scripture_refs.append(row.ref)
-        return sentences, scripture_refs
+        return sentences
 
     def _clean_and_tag_sentence(self, sentence: str) -> str:
         if self._tags is None:

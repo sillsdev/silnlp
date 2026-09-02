@@ -7,9 +7,8 @@ import yaml
 from clearml import Task
 from clearml.backend_api.session.session import LoginError
 
-from silnlp.common.environment import SIL_NLP_ENV, SilNlpEnv
+from silnlp.common.environment import SilNlpEnv
 
-from .config import get_mt_exp_dir
 from .config_utils import create_config
 
 LOGGER = logging.getLogger(__name__)
@@ -28,7 +27,7 @@ class SILClearML:
     commit: Optional[str] = None
     tag: Optional[str] = None
     skip_config: bool = False
-    environment: SilNlpEnv = SIL_NLP_ENV
+    environment: SilNlpEnv = SilNlpEnv.create_standard_environment()
 
     def __post_init__(self) -> None:
         self.name = self.name.replace("\\", "/")
@@ -130,7 +129,7 @@ class SILClearML:
                 config = yaml.safe_load(file)
             if config is None or len(config.keys()) == 0:
                 raise RuntimeError("Config file has no contents.")
-            self.config = create_config(exp_dir, config)
+            self.config = create_config(exp_dir, config, self.environment)
             return
         # There is a ClearML task - lets' do more complex importing.
         proj_dir = self.environment.get_mt_exp_dir(self.clearml_project_folder)
@@ -156,4 +155,4 @@ class SILClearML:
         exp_dir.mkdir(parents=True, exist_ok=True)
         with (exp_dir / "config.yml").open("w+", encoding="utf-8") as file:
             yaml.safe_dump(data=config, stream=file)
-        self.config = create_config(exp_dir, config)
+        self.config = create_config(exp_dir, config, self.environment)

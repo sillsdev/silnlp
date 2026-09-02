@@ -1,8 +1,9 @@
-import os
 import logging
+import os
 from pathlib import Path
 
 from silnlp.alignment.bulk_align import process_alignments
+from silnlp.common.environment import SilNlpEnv
 
 LOGGER = logging.getLogger("silnlp")
 
@@ -22,4 +23,5 @@ if __name__ == "__main__":
         trg_paths=list(target_dir.glob("*.txt")),
         aligner=aligner,
         output_dir=output_dir / (aligner + "_" + src_basename),
+        environment=SilNlpEnv.create_standard_environment(),
     )

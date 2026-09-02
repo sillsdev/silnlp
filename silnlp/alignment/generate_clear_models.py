@@ -3,9 +3,9 @@ import logging
 from pathlib import Path
 from typing import Set
 
+from ..common.environment import SilNlpEnv
 from .config import get_aligner
 from .lexicon import Lexicon
-from .utils import get_experiment_dirs, get_experiment_name
 
 LOGGER = logging.getLogger(__package__ + ".generate_clear_models")
 
@@ -17,8 +17,10 @@ def main() -> None:
     parser.add_argument("--output", type=str, help="The output directory")
     args = parser.parse_args()
 
-    for exp_dir in get_experiment_dirs(args.experiments):
-        exp_name = get_experiment_name(exp_dir)
+    environment = SilNlpEnv.create_standard_environment()
+
+    for exp_dir in environment.get_align_experiment_dirs(args.experiments):
+        exp_name = environment.get_align_experiment_name(exp_dir)
         LOGGER.info(f"Generating models for {exp_name}")
         aligner = get_aligner(args.aligner, exp_dir)
         output_dir = Path(args.output, exp_name)

@@ -1,6 +1,7 @@
 import argparse
 import logging
 
+from ..common.environment import SilNlpEnv
 from ..common.utils import get_git_revision_hash
 from .clearml_connection import TAGS_LIST, SILClearML
 from .config_utils import load_config
@@ -34,17 +35,24 @@ def main() -> None:
     )
     args = parser.parse_args()
     experiments = args.experiments
+    environment = SilNlpEnv.create_standard_environment()
 
     if args.clearml_queue is not None:
         experiments_str = ", ".join(experiments)
-        clearml = SILClearML(experiments_str, args.clearml_queue, tag=args.clearml_tag, skip_config=True)
+        clearml = SILClearML(
+            experiments_str,
+            args.clearml_queue,
+            tag=args.clearml_tag,
+            skip_config=True,
+            environment=environment,
+        )
         experiments_str = clearml.name
         experiments = experiments_str.split(", ")
 
     rev_hash = get_git_revision_hash()
 
     for exp_name in experiments:
-        config = load_config(exp_name)
+        config = load_config(exp_name, environment)
         config.set_seed()
         model = config.create_model(not args.disable_mixed_precision, args.num_devices, args.clearml_queue)
         model.save_effective_config(config.exp_dir / f"effective-config-{rev_hash}.yml")

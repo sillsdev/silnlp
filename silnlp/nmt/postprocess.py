@@ -2,15 +2,25 @@ import argparse
 import logging
 import re
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import yaml
 from attr import dataclass
-from machine.corpora import FileParatextProjectSettingsParser, ScriptureRef, UsfmFileText, UsfmStylesheet, UsfmTextType
+from machine.corpora import (
+    FileParatextProjectSettingsParser,
+    ScriptureRef,
+    UsfmFileText,
+    UsfmStylesheet,
+    UsfmTextType,
+    UsfmToken,
+    UsfmTokenizer,
+    UsfmTokenType,
+)
 from machine.scripture import book_number_to_id, get_chapters
 from transformers.trainer_utils import get_last_checkpoint
 
-from ..common.paratext import book_file_name_digits, get_book_path, get_project_dir
+from ..common.environment import SilNlpEnv
+from ..common.paratext import book_file_name_digits, get_book_path
 from ..common.postprocesser import (
     NoDetectedQuoteConventionException,
     PostprocessConfig,
@@ -23,9 +33,29 @@ from .clearml_connection import TAGS_LIST, SILClearML
 from .config import Config
 from .config_utils import load_config
 from .corpora import CorpusPair
-from .hugging_face_config import get_best_checkpoint
+from .seq2seq_config import get_best_checkpoint
 
 LOGGER = logging.getLogger(__package__ + ".postprocess")
+
+
+# Replicating machine.py's filter_tokens_by_chapter function here since it's not currently public
+def filter_tokens_by_chapter(tokens: List[UsfmToken], chapters: List[int]) -> List[UsfmToken]:
+    filtered: List[UsfmToken] = []
+    in_chapter = False
+    in_id_marker = False
+    for index, token in enumerate(tokens):
+        if index == 0 and token.marker == "id":
+            in_id_marker = True
+            if 1 in chapters:
+                in_chapter = True
+        elif in_id_marker and token.marker is not None and token.marker != "id":
+            in_id_marker = False
+        elif token.type == UsfmTokenType.CHAPTER:
+            data = str(token.data).strip() if token.data is not None else ""
+            in_chapter = data.isdigit() and int(data) in chapters
+        if in_id_marker or in_chapter:
+            filtered.append(token)
+    return filtered
 
 
 @dataclass
@@ -37,12 +67,12 @@ class Sentence:
 @dataclass
 class DraftSentences:
     sentences: List[Sentence]
-    remarks: List[str]
+    remarks: List[Tuple[int, str]]
 
 
 # Takes the path to a USFM file and the relevant info to parse it
 # and returns the text of all non-embed sentences and their respective references,
-# along with any remarks (\rem) that were inserted at the beginning of the file
+# along with any remarks (\rem), paired with the chapter they appear in (0 for book-level remarks)
 def get_sentences(
     book_path: Path, stylesheet: UsfmStylesheet, encoding: str, book: str, chapters: List[int] = []
 ) -> DraftSentences:
@@ -50,8 +80,8 @@ def get_sentences(
 
     for sent in UsfmFileText(stylesheet, encoding, book, book_path, include_all_text=True):
         marker = sent.ref.path[-1].name if len(sent.ref.path) > 0 else ""
-        if marker == "rem" and len(draft_sentences.sentences) == 0:
-            draft_sentences.remarks.append(sent.text)
+        if marker == "rem":
+            draft_sentences.remarks.append((sent.ref.chapter_num, sent.text))
             continue
         if (
             marker in PARAGRAPH_TYPE_EMBEDS
@@ -73,7 +103,7 @@ class DraftMetadata:
 
 
 # Get the paths of all drafts that would be produced by an experiment's translate config and that exist
-def get_draft_paths_from_exp(config: Config) -> List[DraftMetadata]:
+def get_draft_paths_from_exp(config: Config, environment: SilNlpEnv) -> List[DraftMetadata]:
     with (config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as translate_config_file:
         translate_requests = yaml.safe_load(translate_config_file).get("translate", [])
 
@@ -93,7 +123,7 @@ def get_draft_paths_from_exp(config: Config) -> List[DraftMetadata]:
         for book_num in book_nums:
             book = book_number_to_id(book_num)
 
-            src_path = get_book_path(src_project, book)
+            src_path = get_book_path(src_project, book, environment)
             draft_path = (
                 config.exp_dir / "infer" / step_str / src_project / f"{book_file_name_digits(book_num)}{book}.SFM"
             )
@@ -122,11 +152,12 @@ def postprocess_draft(
     book: Optional[str] = None,
     out_dir: Optional[Path] = None,
     training_corpus_pairs: Optional[List[CorpusPair]] = None,
+    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
 ) -> None:
     if training_corpus_pairs is None:
         training_corpus_pairs = []
 
-    if str(draft_metadata.source_path).startswith(str(get_project_dir(""))):
+    if str(draft_metadata.source_path).startswith(str(environment.get_paratext_project_dir(""))):
         settings = FileParatextProjectSettingsParser(draft_metadata.source_path.parent).parse()
         stylesheet = settings.stylesheet
         encoding = settings.encoding
@@ -135,37 +166,55 @@ def postprocess_draft(
         stylesheet = UsfmStylesheet("usfm.sty")
         encoding = "utf-8-sig"
 
-    src_sentences = get_sentences(draft_metadata.source_path, stylesheet, encoding, book)
-    draft_sentences = get_sentences(draft_metadata.draft_path, stylesheet, encoding, book)
+    draft_sentences: DraftSentences = get_sentences(draft_metadata.draft_path, stylesheet, encoding, book)
+    draft_chapters: List[int] = sorted({sentence.ref.chapter_num for sentence in draft_sentences.sentences})
+    src_sentences: DraftSentences = get_sentences(
+        draft_metadata.source_path, stylesheet, encoding, book, draft_chapters
+    )
 
     # Verify reference parity
     if len(src_sentences.sentences) != len(draft_sentences.sentences):
         LOGGER.warning(
-            f"Can't process {draft_metadata.source_path} and {draft_metadata.draft_path}: Unequal number of verses/references"
+            f"Can't process {draft_metadata.source_path} and {draft_metadata.draft_path}: "
+            f"Unequal number of verses/references"
         )
         return
     for src_sentence, draft_sentence in zip(src_sentences.sentences, draft_sentences.sentences):
         if src_sentence.ref.to_relaxed() != draft_sentence.ref.to_relaxed():
             LOGGER.warning(
-                f"Can't process {draft_metadata.source_path} and {draft_metadata.draft_path}: Mismatched ref, {src_sentence.ref} != {draft_sentence.ref}. Files must have the exact same USFM structure"
+                f"Can't process {draft_metadata.source_path} and {draft_metadata.draft_path}: "
+                f"Mismatched ref, {src_sentence.ref} != {draft_sentence.ref}. "
+                f"Files must have the exact same USFM structure"
             )
             return
 
-    if any(config.is_marker_placement_required() for config in postprocess_handler.configs):
+    source_usfm = None
+    if any(config.is_marker_processing_required() for config in postprocess_handler.configs):
         postprocess_handler.construct_rows(
             [s.ref for s in src_sentences.sentences],
             [s.text for s in src_sentences.sentences],
             [s.text for s in draft_sentences.sentences],
         )
 
-    with draft_metadata.source_path.open(encoding=encoding) as f:
-        source_usfm = f.read()
+        with draft_metadata.source_path.open(encoding=encoding) as f:
+            source_usfm = f.read()
+        if draft_chapters:
+            tokenizer = UsfmTokenizer(stylesheet)
+            source_usfm = tokenizer.detokenize(
+                filter_tokens_by_chapter(tokenizer.tokenize(source_usfm), draft_chapters)
+            )
 
     for config in postprocess_handler.configs:
-        if config.is_marker_placement_required():
+        if config.is_marker_processing_required():
             place_markers_postprocessor = config.create_place_markers_postprocessor()
+            source_remark_texts = {text.strip() for _, text in src_sentences.remarks}
+            remarks = [
+                (chapter_num, place_markers_postprocessor.replace_paragraph_marker_remark(text))
+                for chapter_num, text in draft_sentences.remarks
+                if text.strip() not in source_remark_texts
+            ]
             target_usfm = place_markers_postprocessor.postprocess_usfm(
-                source_usfm, config.rows, draft_sentences.remarks
+                source_usfm, config.rows, remarks, stylesheet=stylesheet
             )
         else:
             with draft_metadata.draft_path.open(encoding=encoding) as f:
@@ -176,7 +225,9 @@ def postprocess_draft(
                 quotation_denormalization_postprocessor = config.create_denormalize_quotation_marks_postprocessor(
                     training_corpus_pairs,
                 )
-                target_usfm = quotation_denormalization_postprocessor.postprocess_usfm(target_usfm)
+                target_usfm = quotation_denormalization_postprocessor.postprocess_usfm(
+                    target_usfm, stylesheet=stylesheet
+                )
             except (UnknownQuoteConventionException, NoDetectedQuoteConventionException) as e:
                 LOGGER.warning(str(e) + " Skipping quotation mark denormalization.")
                 continue
@@ -194,16 +245,19 @@ def postprocess_draft(
 
 
 def postprocess_experiment(
-    config: Config, postprocess_handler: Optional[PostprocessHandler] = None, out_dir: Optional[Path] = None
+    config: Config,
+    postprocess_handler: Optional[PostprocessHandler] = None,
+    out_dir: Optional[Path] = None,
+    environment: SilNlpEnv = SilNlpEnv.create_standard_environment(),
 ) -> None:
-    draft_metadata_list = get_draft_paths_from_exp(config)
+    draft_metadata_list = get_draft_paths_from_exp(config, environment)
 
     with (config.exp_dir / "translate_config.yml").open("r", encoding="utf-8") as file:
         translate_config = yaml.safe_load(file)
-        postprocess_configs = [PostprocessConfig(pc) for pc in translate_config.get("postprocess", [])]
+        postprocess_configs = [PostprocessConfig(pc, environment) for pc in translate_config.get("postprocess", [])]
 
     if postprocess_handler is None:
-        postprocess_handler = PostprocessHandler(postprocess_configs, include_base=False)
+        postprocess_handler = PostprocessHandler(postprocess_configs, include_base=False, environment=environment)
 
     for draft_metadata in draft_metadata_list:
         if postprocess_configs:
@@ -212,6 +266,7 @@ def postprocess_experiment(
                 postprocess_handler,
                 out_dir=out_dir,
                 training_corpus_pairs=config.corpus_pairs,
+                environment=environment,
             )
 
 
@@ -242,14 +297,16 @@ def main() -> None:
 
     get_git_revision_hash()
 
+    environment = SilNlpEnv.create_standard_environment()
+
     if args.clearml_queue is not None:
-        clearml = SILClearML(args.experiment, args.clearml_queue)
+        clearml = SILClearML(args.experiment, args.clearml_queue, environment=environment)
         config = clearml.config
     else:
-        config = load_config(args.experiment.replace("\\", "/"))
+        config = load_config(args.experiment.replace("\\", "/"), environment)
     config.set_seed()
 
-    postprocess_experiment(config)
+    postprocess_experiment(config, environment=environment)
 
 
 if __name__ == "__main__":
