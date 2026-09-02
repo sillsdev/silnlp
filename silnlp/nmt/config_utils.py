@@ -34,16 +34,19 @@ LLM_MODEL_PREFIXES = (
 )
 
 
-def is_llm_config(config: dict) -> bool:
-    """Decide whether a config targets a decoder-only LLM.
+LOCAL_LLM_MODEL_TYPES = ("local_llm", "llm")
 
-    An explicit ``model_type: llm`` wins; otherwise fall back to a string prefix match on the
-    model name. Detection is string-only by design - we never load the model's AutoConfig here,
-    since create_config is on the hot path of every CLI command.
+
+def is_local_llm_config(config: dict) -> bool:
+    """Decide whether a config targets a decoder-only LLM fine-tuned and run locally.
+
+    An explicit ``model_type`` wins; otherwise fall back to a string prefix match on the model
+    name. Detection is string-only by design - we never load the model's AutoConfig here, since
+    create_config is on the hot path of every CLI command.
     """
     model_type = config.get("model_type")
     if model_type is not None:
-        return str(model_type).lower() == "llm"
+        return str(model_type).lower() in LOCAL_LLM_MODEL_TYPES
     model: str = config.get("model", "")
     return any(model.startswith(prefix) for prefix in LLM_MODEL_PREFIXES)
 
@@ -64,9 +67,9 @@ def create_config(exp_dir: Path, config: dict, environment: SilNlpEnv) -> Config
         from .remote_llm_config import RemoteLLMConfig
 
         return RemoteLLMConfig(exp_dir, config, environment)
-    if is_llm_config(config):
+    if is_local_llm_config(config):
         # Imported lazily so the peft/bitsandbytes import cost is only paid for LLM experiments.
-        from .llm_config import LLMConfig
+        from .local_llm_config import LocalLLMConfig
 
-        return LLMConfig(exp_dir, config, environment)
+        return LocalLLMConfig(exp_dir, config, environment)
     return Seq2SeqConfig(exp_dir, config, environment)

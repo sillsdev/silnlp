@@ -1,5 +1,5 @@
-"""Few-shot examples for LLM translation prompts: retrieval (ExampleRetriever), formatting
-(ExampleFormatter), and prompt assembly (PromptExampleConfig, ExamplePromptBuilder)."""
+"""Few-shot examples for LLM translation prompts: the example corpus (ExamplePool), retrieval
+(ExampleRetriever) and formatting (ExampleFormatter)."""
 
 import json
 import logging
@@ -334,94 +334,94 @@ def create_example_formatter(format_params: Union[str, dict]) -> ExampleFormatte
     raise ValueError(f"Unknown example_format.type '{format_type}'. Valid options: text, json, xml.")
 
 
-class PromptExampleConfig:
-    """Parsed prompt config for few-shot examples."""
+class ExamplePool:
+    """The parallel corpus that few-shot examples are drawn from, and its retrieval index."""
 
     def __init__(
         self,
-        num_examples: int,
-        formatter: ExampleFormatter,
-        selection_method: str,
-        selection_model: Optional[str],
-        instruction_template: str,
-        model: str,
+        src_path: Path,
+        trg_path: Path,
+        method: str,
+        model_name: Optional[str] = None,
+        require_corpus: bool = True,
     ) -> None:
-        if num_examples < 0:
-            raise ValueError(f"prompt.num_examples must be non-negative, got {num_examples}.")
-
-        selection_method = selection_method.lower()
-        if selection_method not in VALID_SELECTION_METHODS:
-            raise ValueError(
-                f"Unknown example_selection.method '{selection_method}'. "
-                f"Valid options: {', '.join(VALID_SELECTION_METHODS)}."
-            )
-
-        if num_examples > 0:
-            if "{examples}" not in instruction_template:
-                LOGGER.warning(
-                    "prompt.num_examples > 0 requires '{examples}' in prompt.instruction_template, "
-                    "otherwise the retrieved examples are silently discarded."
-                )
-            if model.lower().startswith(TRANSLATE_GEMMA_MODEL_PREFIXES):
-                raise RuntimeError(
-                    "TranslateGemma models do not support few-shot examples in the prompt. "
-                    "Set prompt.num_examples to 0 or use a different model."
-                )
-
-        self.num_examples = num_examples
-        self.formatter = formatter
-        self.selection_method = selection_method
-        self.selection_model = selection_model
-
-    @staticmethod
-    def from_params(prompt_params: dict, model: str) -> "PromptExampleConfig":
-        example_selection = prompt_params["example_selection"]
-        if isinstance(example_selection, str):
-            example_selection = {"method": example_selection}
-        return PromptExampleConfig(
-            num_examples=int(prompt_params["num_examples"]),
-            formatter=create_example_formatter(prompt_params["example_format"]),
-            selection_method=str(example_selection["method"]),
-            selection_model=example_selection.get("model"),
-            instruction_template=prompt_params["instruction_template"],
-            model=model,
-        )
-
-
-class ExamplePromptBuilder:
-    """Builds the {examples} text block for a translation prompt."""
-
-    def __init__(self, config: PromptExampleConfig, pool_src_path: Path, pool_trg_path: Path) -> None:
-        self.config = config
-        self._pool_src_path = pool_src_path
-        self._pool_trg_path = pool_trg_path
+        self._src_path = src_path
+        self._trg_path = trg_path
+        self._method = method
+        self._model_name = model_name
+        self._require_corpus = require_corpus
+        self._examples: Optional[List[Example]] = None
         self._retriever: Optional[ExampleRetriever] = None
 
-    def render(self, source: str, src_lang_name: str, trg_lang_name: str, pool_index: Optional[int] = None) -> str:
-        if self.config.num_examples <= 0:
-            return ""
-        retriever = self._get_retriever()
-        examples = (
-            retriever.retrieve_for_pool_index(pool_index, self.config.num_examples)
-            if pool_index is not None
-            else retriever.retrieve(source, self.config.num_examples)
-        )
-        return self.config.formatter.format(examples, src_lang_name, trg_lang_name)
+    def __len__(self) -> int:
+        return len(self.examples)
 
-    def _get_retriever(self) -> ExampleRetriever:
-        # Built on first use rather than in __init__, so num_examples: 0 never touches the corpus.
+    @property
+    def method(self) -> str:
+        return self._method
+
+    @property
+    def examples(self) -> List[Example]:
+        # Read on first use rather than in __init__, so num_examples: 0 never touches the corpus.
+        if self._examples is None:
+            pairs = read_parallel_text_pairs(self._src_path, self._trg_path)
+            if pairs is None:
+                if self._require_corpus:
+                    raise RuntimeError(
+                        f"num_examples > 0 requires the training corpus at {self._src_path} and "
+                        f"{self._trg_path}. Run preprocessing (--preprocess) first."
+                    )
+                LOGGER.warning(
+                    "No training corpus was found at %s and %s, so no examples are available.",
+                    self._src_path,
+                    self._trg_path,
+                )
+                pairs = ([], [])
+            self._examples = [Example(source=s, target=t) for s, t in zip(*pairs)]
+        return self._examples
+
+    def covers_whole_pool(self, k: int) -> bool:
+        return k > 0 and k >= len(self)
+
+    def select(self, query: str, k: int, pool_index: Optional[int] = None) -> List[Example]:
+        """Up to k examples for one request, most relevant last so the best sit nearest the source text.
+
+        `pool_index` identifies the pool entry being translated, whose own target would otherwise
+        leak into the prompt; passing it excludes that entry.
+        """
+        if k <= 0 or len(self) == 0:
+            return []
+        if self.covers_whole_pool(k):
+            # Every example fits, so keep them in corpus order and never build an index.
+            return [ex for i, ex in enumerate(self.examples) if i != pool_index]
+        retriever = self.get_retriever()
+        ranked = (
+            retriever.retrieve_for_pool_index(pool_index, k) if pool_index is not None else retriever.retrieve(query, k)
+        )
+        return list(reversed(ranked))
+
+    def get_retriever(self) -> ExampleRetriever:
         if self._retriever is None:
-            self._retriever = self._build_retriever()
+            retriever = create_example_retriever(self._method, self._model_name)
+            retriever.fit(self.examples)
+            self._retriever = retriever
         return self._retriever
 
-    def _build_retriever(self) -> ExampleRetriever:
-        pairs = read_parallel_text_pairs(self._pool_src_path, self._pool_trg_path)
-        if pairs is None:
-            raise RuntimeError(
-                f"prompt.num_examples > 0 requires the training corpus at {self._pool_src_path} and "
-                f"{self._pool_trg_path}. Run preprocessing (--preprocess) first."
+    def save_index(self, directory: Path) -> None:
+        self.get_retriever().save(directory)
+
+    def load_index(self, directory: Path) -> bool:
+        """Adopt a previously saved index, or report that one has to be built."""
+        retriever = ExampleRetriever.load(directory)
+        if retriever is None:
+            return False
+        if retriever.method != self._method or retriever.model_name != self._model_name:
+            LOGGER.info(
+                "The saved retrieval index uses '%s' but the config asks for '%s'; rebuilding it.",
+                retriever.method,
+                self._method,
             )
-        sources, targets = pairs
-        retriever = create_example_retriever(self.config.selection_method, self.config.selection_model)
-        retriever.fit([Example(source=s, target=t) for s, t in zip(sources, targets)])
-        return retriever
+            return False
+        self._retriever = retriever
+        self._examples = retriever.examples
+        return True

@@ -1,5 +1,4 @@
 import json
-import logging
 
 import numpy as np
 import pytest
@@ -9,10 +8,9 @@ from silnlp.nmt.example_retrieval import (
     BM25ExampleRetriever,
     EmbeddingExampleRetriever,
     Example,
-    ExamplePromptBuilder,
+    ExamplePool,
     ExampleRetriever,
     JsonExampleFormatter,
-    PromptExampleConfig,
     TextExampleFormatter,
     TfidfExampleRetriever,
     XmlExampleFormatter,
@@ -195,160 +193,72 @@ def test_create_example_formatter_bare_text_string_matches_explicit_default():
     assert from_shorthand == explicit_default
 
 
-def _make_example_config(
-    num_examples=0,
-    formatter=None,
-    selection_method="tfidf",
-    selection_model=None,
-    instruction_template="{examples}{source}",
-    model="google/gemma-2-2b-it",
-):
-    return PromptExampleConfig(
-        num_examples=num_examples,
-        formatter=formatter if formatter is not None else TextExampleFormatter("{source}->{target}\n"),
-        selection_method=selection_method,
-        selection_model=selection_model,
-        instruction_template=instruction_template,
-        model=model,
-    )
-
-
-def test_prompt_example_config_from_params_parses_and_lowercases_method():
-    config = PromptExampleConfig.from_params(
-        {
-            "num_examples": 3,
-            "example_format": {"type": "text", "template": "{source}->{target}\n"},
-            "example_selection": {"method": "TFIDF", "model": None},
-            "instruction_template": "{examples}{source}",
-        },
-        model="google/gemma-2-2b-it",
-    )
-    assert config.num_examples == 3
-    assert isinstance(config.formatter, TextExampleFormatter)
-    assert config.selection_method == "tfidf"
-    assert config.selection_model is None
-
-
-def test_prompt_example_config_from_params_accepts_bare_string_example_format_and_selection():
-    # merge_dict() replaces rather than merges when a bare-string override lands on a dict
-    # default, so both keys must accept a bare string, not only the nested-dict form.
-    config = PromptExampleConfig.from_params(
-        {
-            "num_examples": 3,
-            "example_format": "json",
-            "example_selection": "embedding",
-            "instruction_template": "{examples}{source}",
-        },
-        model="google/gemma-2-2b-it",
-    )
-    assert isinstance(config.formatter, JsonExampleFormatter)
-    assert config.selection_method == "embedding"
-    assert config.selection_model is None
-
-
-def test_prompt_example_config_from_params_supports_json_format():
-    config = PromptExampleConfig.from_params(
-        {
-            "num_examples": 3,
-            "example_format": {"type": "json"},
-            "example_selection": {"method": "tfidf"},
-            "instruction_template": "{examples}{source}",
-        },
-        model="google/gemma-2-2b-it",
-    )
-    assert isinstance(config.formatter, JsonExampleFormatter)
-
-
-def test_prompt_example_config_rejects_negative_num_examples():
-    with pytest.raises(ValueError, match="non-negative"):
-        _make_example_config(num_examples=-1)
-
-
-def test_prompt_example_config_rejects_unknown_selection_method():
-    with pytest.raises(ValueError, match="Unknown example_selection.method"):
-        _make_example_config(num_examples=1, selection_method="bogus")
-
-
-def test_prompt_example_config_warns_when_placeholder_missing(caplog):
-    with caplog.at_level(logging.WARNING):
-        _make_example_config(num_examples=2, instruction_template="Translate: {source}")
-    assert any("{examples}" in record.message for record in caplog.records)
-
-
-def test_prompt_example_config_no_warning_when_placeholder_present(caplog):
-    with caplog.at_level(logging.WARNING):
-        _make_example_config(num_examples=2, instruction_template="{examples}{source}")
-    assert caplog.records == []
-
-
-def test_prompt_example_config_no_warning_when_disabled(caplog):
-    with caplog.at_level(logging.WARNING):
-        _make_example_config(num_examples=0, instruction_template="Translate: {source}")
-    assert caplog.records == []
-
-
-def test_prompt_example_config_rejects_translate_gemma_when_enabled():
-    with pytest.raises(RuntimeError, match="TranslateGemma"):
-        _make_example_config(num_examples=2, model="google/translategemma-4b-it")
-
-
-def test_prompt_example_config_allows_translate_gemma_when_disabled():
-    _make_example_config(num_examples=0, model="google/translategemma-4b-it")  # no raise
-
-
-def test_example_prompt_builder_returns_empty_string_and_touches_no_files_when_disabled(tmp_path):
-    config = _make_example_config(num_examples=0)
-    builder = ExamplePromptBuilder(config, tmp_path / "missing.src.txt", tmp_path / "missing.trg.txt")
-    assert builder.render("hello", "English", "French") == ""
-
-
-def test_example_prompt_builder_renders_retrieved_examples(tmp_path):
+def _write_pool(tmp_path, sources, targets, method="tfidf"):
     src_path = tmp_path / "train.src.txt"
     trg_path = tmp_path / "train.trg.txt"
-    src_path.write_text("the cat sat\nsomething unrelated\n", encoding="utf-8")
-    trg_path.write_text("le chat assis\nquelque chose\n", encoding="utf-8")
-    config = _make_example_config(
-        num_examples=1, formatter=TextExampleFormatter("Source: {source}\nTarget: {target}\n\n")
+    src_path.write_text("".join(line + "\n" for line in sources), encoding="utf-8")
+    trg_path.write_text("".join(line + "\n" for line in targets), encoding="utf-8")
+    return ExamplePool(src_path, trg_path, method)
+
+
+def test_example_pool_selects_the_most_relevant_example_last(tmp_path):
+    pool = _write_pool(
+        tmp_path,
+        ["the cat sat", "a cat sat here", "something unrelated"],
+        ["le chat assis", "un chat assis", "quelque chose"],
     )
-    builder = ExamplePromptBuilder(config, src_path, trg_path)
-
-    text = builder.render("the cat sat here", "English", "French")
-
-    assert text == "Source: the cat sat\nTarget: le chat assis\n\n"
+    assert [ex.target for ex in pool.select("the cat sat", k=2)] == ["un chat assis", "le chat assis"]
 
 
-def test_example_prompt_builder_supports_json_formatter(tmp_path):
-    src_path = tmp_path / "train.src.txt"
-    trg_path = tmp_path / "train.trg.txt"
-    src_path.write_text("the cat sat\n", encoding="utf-8")
-    trg_path.write_text("le chat assis\n", encoding="utf-8")
-    config = _make_example_config(num_examples=1, formatter=JsonExampleFormatter())
-    builder = ExamplePromptBuilder(config, src_path, trg_path)
-
-    text = builder.render("the cat sat here", "English", "French")
-
-    assert json.loads(text) == [{"source": "the cat sat", "target": "le chat assis"}]
+def test_example_pool_returns_nothing_and_touches_no_files_when_k_is_zero(tmp_path):
+    pool = ExamplePool(tmp_path / "missing.src.txt", tmp_path / "missing.trg.txt", "tfidf")
+    assert pool.select("hello", k=0) == []
 
 
-def test_example_prompt_builder_leave_one_out_by_pool_index(tmp_path):
-    src_path = tmp_path / "train.src.txt"
-    trg_path = tmp_path / "train.trg.txt"
-    src_path.write_text("the cat sat\nthe cat sat\ntotally different words\n", encoding="utf-8")
-    trg_path.write_text("1\n2\n3\n", encoding="utf-8")
-    config = _make_example_config(num_examples=2)
-    builder = ExamplePromptBuilder(config, src_path, trg_path)
-
-    text = builder.render("unused", "English", "French", pool_index=0)
-
-    assert text == "the cat sat->2\ntotally different words->3\n"
+def test_example_pool_leave_one_out_excludes_the_pool_entry(tmp_path):
+    pool = _write_pool(tmp_path, ["the cat sat", "the cat sat", "totally different words"], ["1", "2", "3"])
+    assert [ex.target for ex in pool.select("unused", k=2, pool_index=0)] == ["3", "2"]
 
 
-def test_example_prompt_builder_raises_clear_error_when_corpus_missing(tmp_path):
-    config = _make_example_config(num_examples=1, formatter=TextExampleFormatter("{source}"))
-    builder = ExamplePromptBuilder(config, tmp_path / "missing.src.txt", tmp_path / "missing.trg.txt")
+def test_example_pool_uses_the_whole_pool_in_corpus_order_when_k_covers_it(tmp_path):
+    pool = _write_pool(tmp_path, ["b sentence", "a sentence", "c sentence"], ["1", "2", "3"])
+    assert [ex.target for ex in pool.select("a sentence", k=99)] == ["1", "2", "3"]
+    assert pool.covers_whole_pool(99)
 
+
+def test_example_pool_whole_pool_path_still_leaves_out_the_pool_entry(tmp_path):
+    pool = _write_pool(tmp_path, ["one", "two", "three"], ["1", "2", "3"])
+    assert [ex.target for ex in pool.select("unused", k=99, pool_index=1)] == ["1", "3"]
+
+
+def test_example_pool_whole_pool_path_builds_no_index(tmp_path):
+    pool = _write_pool(tmp_path, ["one", "two"], ["1", "2"], method="bogus")
+    # An unknown method would raise if an index were built, so this also pins the shortcut.
+    assert len(pool.select("one", k=99)) == 2
+
+
+def test_example_pool_raises_a_clear_error_when_the_corpus_is_missing(tmp_path):
+    pool = ExamplePool(tmp_path / "missing.src.txt", tmp_path / "missing.trg.txt", "tfidf")
     with pytest.raises(RuntimeError, match="preprocessing"):
-        builder.render("hello", "English", "French")
+        pool.select("hello", k=1)
+
+
+def test_example_pool_saves_and_reloads_its_index(tmp_path):
+    pool = _write_pool(tmp_path, ["the cat sat", "something unrelated"], ["1", "2"])
+    pool.save_index(tmp_path)
+
+    reloaded = _write_pool(tmp_path, ["the cat sat", "something unrelated"], ["1", "2"])
+    assert reloaded.load_index(tmp_path)
+    assert [ex.target for ex in reloaded.select("the cat sat here", k=1)] == ["1"]
+
+
+def test_example_pool_rejects_a_saved_index_built_with_another_method(tmp_path):
+    _write_pool(tmp_path, ["a", "b"], ["1", "2"], method="tfidf").save_index(tmp_path)
+    assert not _write_pool(tmp_path, ["a", "b"], ["1", "2"], method="embedding").load_index(tmp_path)
+
+
+def test_example_pool_reports_a_missing_index(tmp_path):
+    assert not _write_pool(tmp_path, ["a"], ["1"]).load_index(tmp_path / "nowhere")
 
 
 class _RankedStubRetriever(ExampleRetriever):

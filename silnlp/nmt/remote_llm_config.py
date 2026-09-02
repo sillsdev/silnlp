@@ -12,15 +12,15 @@ unchanged.
 
 Three things are configurable:
 
-* **Context mode** (``infer.context_mode``): ``rag`` retrieves the most relevant examples per
-  request; ``full_corpus`` puts the entire parallel training corpus in the prompt.
-* **Retrieval method** (``infer.retrieval.method``): ``bm25`` or ``tfidf``; see
-  :mod:`silnlp.nmt.example_retrieval`.
+* **Examples** (``infer.prompt.num_examples``): how many parallel examples go in each prompt. A
+  number at or above the corpus size puts the whole corpus in every prompt.
+* **Selection method** (``infer.prompt.example_selection.method``): ``tfidf``, ``bm25`` or
+  ``embedding``; see :mod:`silnlp.nmt.example_retrieval`.
 * **Batch size** (``infer.infer_batch_size``): how many consecutive segments go in one request.
 
 The default prompts are written for scripture: they cast the model as a member of the
 translation team and have it infer the team's style, key terms, exegesis, and orthography from
-the examples, which are that team's own work. All are overridable through ``params.prompt``.
+the examples, which are that team's own work. All are overridable through ``infer.prompt``.
 
 The train step does no fine-tuning, but it is not a no-op: it builds the retrieval index and
 writes ``run/checkpoint-1``, so the checkpoint machinery the test and translate steps rely on
@@ -48,22 +48,11 @@ from ..common.environment import SilNlpEnv
 from ..common.translation_data_structures import DraftGroup, SentenceTranslation, SentenceTranslationGroup
 from ..common.translator import generate_confidence_files
 from ..common.utils import merge_dict
-from .config import CheckpointType, Config, Language, NMTModel
-from .corpora import DataFile
-from .example_retrieval import (
-    TFIDF_METHOD,
-    VALID_SELECTION_METHODS,
-    Example,
-    ExampleRetriever,
-    create_example_retriever,
-)
-from .tokenizer import NullTokenizer, Tokenizer
+from .config import CheckpointType, Language, NMTModel
+from .example_retrieval import TFIDF_METHOD, Example
+from .llm_config import LLMConfig, PromptBuilder
 
 LOGGER = logging.getLogger(__name__)
-
-CONTEXT_MODE_RAG = "rag"
-CONTEXT_MODE_FULL_CORPUS = "full_corpus"
-VALID_CONTEXT_MODES = (CONTEXT_MODE_RAG, CONTEXT_MODE_FULL_CORPUS)
 
 # The train step writes this checkpoint so that CheckpointType.LAST resolves to step 1.
 CHECKPOINT_STEP = 1
@@ -71,7 +60,7 @@ MODEL_INFO_FILENAME = "remote_llm_model.json"
 
 # The prompts cast the model as a member of the translation team, because consistency with this
 # team's decisions matters more than general translation competence. All are overridable through
-# params.prompt.
+# infer.prompt.
 DEFAULT_SYSTEM_MESSAGE_TEMPLATE = (
     "You are a member of a Bible translation team translating from {src_lang} into {trg_lang}. "
     "Your job is to produce the translation this team would produce, not a translation of your "
@@ -95,11 +84,11 @@ DEFAULT_SYSTEM_MESSAGE_TEMPLATE = (
     "Reply with only the translation itself - no commentary, notes, alternatives, explanations, "
     "or verse numbers."
 )
-DEFAULT_SINGLE_INSTRUCTION_TEMPLATE = (
+SINGLE_INSTRUCTION = (
     "Translate this {src_lang} passage into {trg_lang} as the team would translate it. Reply with "
     "only the translation.\n\n{source}"
 )
-DEFAULT_BATCH_INSTRUCTION_TEMPLATE = (
+BATCH_INSTRUCTION = (
     "Translate the following {num_segments} consecutive {src_lang} passages into {trg_lang} as the "
     "team would translate them. Some may be section headings rather than verses. Read them "
     "together, so that participants, pronouns, and the flow of the passage stay consistent across "
@@ -108,15 +97,20 @@ DEFAULT_BATCH_INSTRUCTION_TEMPLATE = (
     "as `<number>. <translation>`. Do not merge, split, reorder, or omit passages, and do not add "
     "any other text.\n\n{source}"
 )
-DEFAULT_EXAMPLE_TEMPLATE = "{src_lang}: {source}\n{trg_lang}: {target}"
 EXAMPLES_HEADING = (
     "The team has already translated these passages. They are your model for this team's style, "
-    "terminology, and exegesis:"
+    "terminology, and exegesis:\n\n{examples}"
 )
 CORPUS_HEADING = (
     "This is everything the team has translated so far. It is your reference for this team's "
     "style, terminology, exegesis, spelling, and punctuation:"
 )
+
+DEFAULT_SINGLE_INSTRUCTION_TEMPLATE = SINGLE_INSTRUCTION
+DEFAULT_BATCH_INSTRUCTION_TEMPLATE = BATCH_INSTRUCTION
+DEFAULT_FEW_SHOT_SINGLE_INSTRUCTION_TEMPLATE = EXAMPLES_HEADING + SINGLE_INSTRUCTION
+DEFAULT_FEW_SHOT_BATCH_INSTRUCTION_TEMPLATE = EXAMPLES_HEADING + BATCH_INSTRUCTION
+DEFAULT_EXAMPLE_FORMAT = {"type": "text", "template": "{src_lang}: {source}\n{trg_lang}: {target}\n\n"}
 
 _CODE_FENCE = re.compile(r"^\s*```[^\n]*\n(.*?)\n?\s*```\s*$", re.DOTALL)
 _NUMBERED_LINE = re.compile(r"^\s*(\d{1,4})\s*[.):\]]\s*(.*)$")
@@ -351,21 +345,23 @@ class LiteLLMCompletionClientFactory(CompletionClientFactory):
         return LiteLLMCompletionClient(config.model, config.infer, config.params.get("litellm"))
 
 
-class RemoteLLMConfig(Config):
+class RemoteLLMConfig(LLMConfig):
+    REQUIRE_EXAMPLE_CORPUS = False
+    DEFAULT_SYSTEM_MESSAGE = DEFAULT_SYSTEM_MESSAGE_TEMPLATE
+    DEFAULT_INSTRUCTION_TEMPLATE = DEFAULT_SINGLE_INSTRUCTION_TEMPLATE
+    DEFAULT_FEW_SHOT_INSTRUCTION_TEMPLATE = DEFAULT_FEW_SHOT_SINGLE_INSTRUCTION_TEMPLATE
+    DEFAULT_EXAMPLE_FORMAT = DEFAULT_EXAMPLE_FORMAT
+
     def __init__(self, exp_dir: Path, config: dict, environment: SilNlpEnv) -> None:
-        config = merge_dict(
+        super().__init__(exp_dir, config, environment)
+        self._validate()
+        self._batch_prompt_builder = self._create_batch_prompt_builder()
+        self._disable_eval_if_no_val_split()
+
+    def _default_config(self, exp_dir: Path) -> dict:
+        return merge_dict(
+            super()._default_config(exp_dir),
             {
-                "data": {
-                    "mirror": False,
-                    "seed": 111,
-                    # The hosted model tokenizes for itself; use the raw parallel text.
-                    "tokenize": False,
-                    "aligner": "fast_align",
-                    "stats_max_size": 100000,
-                    "terms": {"train": False, "categories": "PN", "include_glosses": False, "dictionary": False},
-                    "lang_codes": {},
-                    "add_new_lang_code": False,
-                },
                 "train": {
                     "output_dir": str(exp_dir / "run"),
                 },
@@ -380,12 +376,12 @@ class RemoteLLMConfig(Config):
                     "multi_ref_eval": False,
                 },
                 "infer": {
-                    "context_mode": CONTEXT_MODE_RAG,
-                    "retrieval": {
-                        # TF-IDF by default so a plain install works; BM25 generally ranks
-                        # better but needs rank_bm25 from the 'remote_llm' extra.
-                        "method": TFIDF_METHOD,
+                    "prompt": {
                         "num_examples": 10,
+                        # TF-IDF by default so a plain install works; BM25 generally ranks
+                        # better but needs rank_bm25 from the 'llm' extra.
+                        "example_selection": {"method": TFIDF_METHOD, "model": None},
+                        "batch_instruction_template": None,
                     },
                     "infer_batch_size": 1,
                     "num_drafts": 1,
@@ -397,44 +393,41 @@ class RemoteLLMConfig(Config):
                     "max_context_tokens": 180000,
                 },
                 "params": {
-                    "prompt": {
-                        "system_message": DEFAULT_SYSTEM_MESSAGE_TEMPLATE,
-                        "instruction_template": DEFAULT_SINGLE_INSTRUCTION_TEMPLATE,
-                        "batch_instruction_template": DEFAULT_BATCH_INSTRUCTION_TEMPLATE,
-                        "example_template": DEFAULT_EXAMPLE_TEMPLATE,
-                    },
                     # Passed straight through to litellm.completion (api_base, extra_headers, ...).
                     "litellm": {},
                 },
                 "model": "",
             },
-            config,
         )
 
-        super().__init__(exp_dir, config, environment)
-
-        if len(self.src_isos) > 1 or len(self.trg_isos) > 1:
-            raise RuntimeError(
-                "In-context learning experiments only support a single source language and a single " "target language."
+    def _resolve_infer_prompt_defaults(self, prompt: dict) -> None:
+        # A hoisted corpus brings its own heading, so keep the wording that has none for it to
+        # use; the few-shot defaults would otherwise head an examples block that renders empty.
+        self._corpus_single_instruction_template = (
+            prompt.get("instruction_template") or DEFAULT_SINGLE_INSTRUCTION_TEMPLATE
+        )
+        self._corpus_batch_instruction_template = (
+            prompt.get("batch_instruction_template") or DEFAULT_BATCH_INSTRUCTION_TEMPLATE
+        )
+        super()._resolve_infer_prompt_defaults(prompt)
+        if prompt["batch_instruction_template"] is None:
+            prompt["batch_instruction_template"] = (
+                DEFAULT_FEW_SHOT_BATCH_INSTRUCTION_TEMPLATE
+                if int(prompt["num_examples"]) > 0
+                else DEFAULT_BATCH_INSTRUCTION_TEMPLATE
             )
-        self._validate()
-        self._disable_eval_if_no_val_split()
+
+    def _create_batch_prompt_builder(self) -> PromptBuilder:
+        """A second builder whose instruction template numbers several segments in one request."""
+        batch_prompt = dict(self.prompt)
+        batch_prompt["instruction_template"] = self.prompt["batch_instruction_template"]
+        return self._create_prompt_builder(batch_prompt, "infer.prompt.batch_instruction_template")
 
     def _validate(self) -> None:
         if not str(self.model).strip():
             raise ValueError(
                 "An in-context learning experiment needs a 'model' in LiteLLM format, "
                 "e.g. 'anthropic/claude-sonnet-4-5', 'gpt-4o', or 'gemini/gemini-2.5-pro'."
-            )
-        if self.context_mode not in VALID_CONTEXT_MODES:
-            raise ValueError(
-                f"Unknown infer.context_mode '{self.infer['context_mode']}'. "
-                f"Valid options: {', '.join(VALID_CONTEXT_MODES)}."
-            )
-        if self.retrieval_method not in VALID_SELECTION_METHODS:
-            raise ValueError(
-                f"Unknown infer.retrieval.method '{self.retrieval['method']}'. "
-                f"Valid options: {', '.join(VALID_SELECTION_METHODS)}."
             )
         for name, value in (
             ("infer.infer_batch_size", self.infer_batch_size),
@@ -443,24 +436,10 @@ class RemoteLLMConfig(Config):
         ):
             if not isinstance(value, int) or value < 1:
                 raise ValueError(f"{name} must be an integer of at least 1, but it is {value!r}.")
-        if self.num_examples < 0:
-            raise ValueError(f"infer.retrieval.num_examples cannot be negative, but it is {self.num_examples}.")
-
-    @property
-    def context_mode(self) -> str:
-        return str(self.infer["context_mode"]).lower()
-
-    @property
-    def retrieval(self) -> dict:
-        return self.infer["retrieval"]
-
-    @property
-    def retrieval_method(self) -> str:
-        return str(self.retrieval["method"]).lower()
 
     @property
     def num_examples(self) -> int:
-        return self.retrieval["num_examples"]
+        return self.infer_prompt_builder.num_examples
 
     @property
     def infer_batch_size(self) -> int:
@@ -468,62 +447,10 @@ class RemoteLLMConfig(Config):
 
     @property
     def prompt(self) -> dict:
-        return self.params["prompt"]
+        return self.infer["prompt"]
 
-    def lang_name(self, iso: str) -> str:
-        return self.data["lang_codes"].get(iso, iso)
-
-    def language(self, iso: str) -> Language:
-        return Language(iso=iso, name=self.lang_name(iso))
-
-    @property
-    def train_src_iso(self) -> str:
-        return self.default_test_src_iso or (next(iter(self.src_isos)) if len(self.src_isos) > 0 else "")
-
-    @property
-    def train_trg_iso(self) -> str:
-        return self.default_test_trg_iso or (next(iter(self.trg_isos)) if len(self.trg_isos) > 0 else "")
-
-    def render_examples(self, examples: Sequence[Example], src_lang: Language, trg_lang: Language) -> str:
-        template: str = self.prompt["example_template"]
-        return "\n\n".join(
-            template.format(
-                src_lang=src_lang.name, trg_lang=trg_lang.name, source=example.source, target=example.target
-            )
-            for example in examples
-        )
-
-    def build_system_message(self, src_lang: Language, trg_lang: Language, corpus_block: Optional[str] = None) -> str:
-        system_message: str = self.prompt["system_message"].format(src_lang=src_lang.name, trg_lang=trg_lang.name)
-        if corpus_block:
-            system_message = f"{system_message}\n\n{corpus_block}"
-        return system_message
-
-    def build_user_message(
-        self,
-        sources: Sequence[str],
-        examples: Sequence[Example],
-        src_lang: Language,
-        trg_lang: Language,
-    ) -> str:
-        parts: List[str] = []
-        if len(examples) > 0:
-            parts.append(f"{EXAMPLES_HEADING}\n\n{self.render_examples(examples, src_lang, trg_lang)}")
-        if len(sources) == 1:
-            template: str = self.prompt["instruction_template"]
-            parts.append(template.format(src_lang=src_lang.name, trg_lang=trg_lang.name, source=sources[0]))
-        else:
-            numbered = "\n".join(f"{i}. {source}" for i, source in enumerate(sources, 1))
-            batch_template: str = self.prompt["batch_instruction_template"]
-            parts.append(
-                batch_template.format(
-                    src_lang=src_lang.name,
-                    trg_lang=trg_lang.name,
-                    num_segments=len(sources),
-                    source=numbered,
-                )
-            )
-        return "\n\n".join(parts)
+    def prompt_builder_for(self, num_segments: int) -> PromptBuilder:
+        return self.infer_prompt_builder if num_segments == 1 else self._batch_prompt_builder
 
     def build_messages(
         self,
@@ -535,16 +462,43 @@ class RemoteLLMConfig(Config):
     ) -> List[Dict[str, str]]:
         """Build the chat messages for one translation request.
 
-        In full-corpus mode the corpus goes in the system message, ahead of everything that
+        When the whole corpus is in play it goes in the system message, ahead of everything that
         varies per request, so the prompt prefix is byte-identical across requests and
         provider-side prompt caching can apply.
         """
+        builder = self.prompt_builder_for(len(sources))
+        if len(sources) == 1:
+            source, extra_fields = sources[0], {}
+        else:
+            source = "\n".join(f"{i}. {text}" for i, text in enumerate(sources, 1))
+            extra_fields = {"num_segments": len(sources)}
+        template = builder.template_for(None)
+        if corpus_block:
+            instruction_template = (
+                self._corpus_single_instruction_template
+                if len(sources) == 1
+                else self._corpus_batch_instruction_template
+            )
+        else:
+            instruction_template = template.instruction_template
+        instruction = instruction_template.format(
+            src_lang=src_lang.name,
+            trg_lang=trg_lang.name,
+            source=source,
+            examples="" if corpus_block else builder.render_examples(examples, src_lang, trg_lang),
+            **extra_fields,
+        )
+        system_message = template.system_message.format(src_lang=src_lang.name, trg_lang=trg_lang.name)
+        if corpus_block:
+            system_message = f"{system_message}\n\n{corpus_block}" if system_message else corpus_block
         messages: List[Dict[str, str]] = []
-        system_message = self.build_system_message(src_lang, trg_lang, corpus_block)
         if system_message:
             messages.append({"role": "system", "content": system_message})
-        messages.append({"role": "user", "content": self.build_user_message(sources, examples, src_lang, trg_lang)})
+        messages.append({"role": "user", "content": instruction})
         return messages
+
+    def render_examples(self, examples: Sequence[Example], src_lang: Language, trg_lang: Language) -> str:
+        return self.infer_prompt_builder.render_examples(examples, src_lang, trg_lang)
 
     def create_model(
         self,
@@ -557,22 +511,6 @@ class RemoteLLMConfig(Config):
             completion_client_factory = LiteLLMCompletionClientFactory()
         return RemoteLLMModel(self, completion_client_factory)
 
-    def create_tokenizer(self) -> Tokenizer:
-        # Data prep and test.py only tokenize and detokenize with this; both are raw text here.
-        return NullTokenizer()
-
-    def _build_vocabs(self, stats: bool = False) -> None:
-        # The hosted model has its own vocabulary.
-        return
-
-    def _write_dictionary(
-        self,
-        tokenizer: Tokenizer,
-        src_terms_files: List[Tuple[DataFile, List[str]]],
-        trg_terms_files: List[Tuple[DataFile, List[str]]],
-    ) -> int:
-        return 0
-
 
 class RemoteLLMModel(NMTModel):
     def __init__(
@@ -584,7 +522,6 @@ class RemoteLLMModel(NMTModel):
         self._config: RemoteLLMConfig = config
         self._client_factory = completion_client_factory or LiteLLMCompletionClientFactory()
         self._client: Optional[CompletionClient] = None
-        self._retriever: Optional[ExampleRetriever] = None
         self._corpus_block: Optional[str] = None
         # Requests run on a thread pool; guards the lazily built client, index, and corpus block.
         self._lock = threading.Lock()
@@ -598,41 +535,31 @@ class RemoteLLMModel(NMTModel):
         checkpoint_dir = self._checkpoint_dir()
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-        pairs = self._load_training_pairs()
-        info: Dict[str, Any] = {
-            "context_mode": self._config.context_mode,
-            "model": self._config.model,
-            "num_training_pairs": len(pairs),
-        }
-        if self._config.context_mode == CONTEXT_MODE_RAG:
-            if len(pairs) == 0:
-                LOGGER.warning(
-                    "No training examples were found, so translation will run with no in-context "
-                    "examples. Check that the preprocess step ran and produced a training corpus."
-                )
-            retriever = create_example_retriever(self._config.retrieval_method)
-            retriever.fit(pairs)
-            retriever.save(checkpoint_dir)
-            with self._lock:
-                self._retriever = retriever
-            info["retrieval_method"] = self._config.retrieval_method
-            LOGGER.info(
-                "Built a %s retrieval index over %d training examples.", self._config.retrieval_method, len(pairs)
-            )
-        else:
+        builder = self._config.infer_prompt_builder
+        info: Dict[str, Any] = {"model": self._config.model, "num_examples": builder.num_examples}
+        pool = builder.pool
+        if pool is None:
+            LOGGER.info("No in-context examples are configured, so there is no retrieval index to build.")
+        elif builder.covers_whole_pool():
             rendered = self._config.render_examples(
-                pairs,
+                pool.examples,
                 self._config.language(self._config.train_src_iso),
                 self._config.language(self._config.train_trg_iso),
             )
             corpus_tokens = count_tokens(self._config.model, rendered)
+            info["num_training_pairs"] = len(pool)
             info["corpus_tokens"] = corpus_tokens
             LOGGER.info(
-                "Full-corpus mode: %d training examples (%s tokens) go in every request.",
-                len(pairs),
+                "num_examples covers the whole corpus: %d training examples (%s tokens) go in every request.",
+                len(pool),
                 corpus_tokens if corpus_tokens is not None else "an unknown number of",
             )
             self._warn_if_corpus_too_large(corpus_tokens)
+        else:
+            pool.save_index(checkpoint_dir)
+            info["num_training_pairs"] = len(pool)
+            info["retrieval_method"] = pool.method
+            LOGGER.info("Built a %s retrieval index over %d training examples.", pool.method, len(pool))
 
         with (checkpoint_dir / MODEL_INFO_FILENAME).open("w", encoding="utf-8") as file:
             json.dump(info, file, indent=2)
@@ -650,41 +577,11 @@ class RemoteLLMModel(NMTModel):
         if corpus_tokens is not None and corpus_tokens > limit:
             LOGGER.warning(
                 "The training corpus is %d tokens, which exceeds infer.max_context_tokens (%d). "
-                "Requests may be rejected for exceeding the model's context window. Consider using "
-                "context_mode 'rag' instead.",
+                "Requests may be rejected for exceeding the model's context window. Lower "
+                "infer.prompt.num_examples so that only the most relevant examples are sent.",
                 corpus_tokens,
                 limit,
             )
-
-    def _load_training_pairs(self) -> List[Example]:
-        src_path = self._resolve_train_path(self._config.train_src_detok_filename(), self._config.train_src_filename())
-        trg_path = self._resolve_train_path(self._config.train_trg_detok_filename(), self._config.train_trg_filename())
-        if src_path is None or trg_path is None:
-            LOGGER.warning(
-                "No training corpus was found in %s, so no in-context examples are available.",
-                self._config.exp_dir,
-            )
-            return []
-        sources = _read_lines(src_path)
-        targets = _read_lines(trg_path)
-        if len(sources) != len(targets):
-            LOGGER.warning(
-                "The training corpus files are not the same length (%d vs %d lines); using the "
-                "first %d aligned pairs.",
-                len(sources),
-                len(targets),
-                min(len(sources), len(targets)),
-            )
-        return [
-            Example(source, target) for source, target in zip(sources, targets) if source != "" and target != ""
-        ]
-
-    def _resolve_train_path(self, *filenames: str) -> Optional[Path]:
-        for filename in filenames:
-            path = self._config.exp_dir / filename
-            if path.is_file():
-                return path
-        return None
 
     def _get_client(self) -> CompletionClient:
         with self._lock:
@@ -692,33 +589,22 @@ class RemoteLLMModel(NMTModel):
                 self._client = self._client_factory.create(self._config)
             return self._client
 
-    def _get_retriever(self) -> Optional[ExampleRetriever]:
-        if self._config.context_mode != CONTEXT_MODE_RAG:
-            return None
-        with self._lock:
-            if self._retriever is None:
-                retriever = ExampleRetriever.load(self._checkpoint_dir())
-                if retriever is None or retriever.method != self._config.retrieval_method:
-                    if retriever is not None:
-                        LOGGER.info(
-                            "The saved retrieval index uses '%s' but the config asks for '%s'; rebuilding it.",
-                            retriever.method,
-                            self._config.retrieval_method,
-                        )
-                    retriever = create_example_retriever(self._config.retrieval_method)
-                    retriever.fit(self._load_training_pairs())
-                self._retriever = retriever
-            return self._retriever
-
     def _get_corpus_block(self, src_lang: Language, trg_lang: Language) -> Optional[str]:
-        if self._config.context_mode != CONTEXT_MODE_FULL_CORPUS:
+        """The whole corpus, for the system message, when num_examples covers all of it."""
+        builder = self._config.infer_prompt_builder
+        if builder.pool is None or not builder.covers_whole_pool():
             return None
         with self._lock:
             if self._corpus_block is None:
-                rendered = self._config.render_examples(self._load_training_pairs(), src_lang, trg_lang)
+                rendered = self._config.render_examples(builder.pool.examples, src_lang, trg_lang)
                 self._warn_if_corpus_too_large(count_tokens(self._config.model, rendered))
                 self._corpus_block = f"{CORPUS_HEADING}\n\n{rendered}" if rendered else ""
             return self._corpus_block
+
+    def _load_saved_index(self) -> None:
+        pool = self._config.infer_prompt_builder.pool
+        if pool is not None:
+            pool.load_index(self._checkpoint_dir())
 
     def translate(
         self,
@@ -728,6 +614,7 @@ class RemoteLLMModel(NMTModel):
         produce_multiple_translations: bool = False,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Generator[SentenceTranslationGroup, None, None]:
+        self._load_saved_index()
         sentence_list = list(sentences)
         batches = self._batch_indices(len(sentence_list))
         yield from self._translate_batches(
@@ -750,6 +637,7 @@ class RemoteLLMModel(NMTModel):
             # Fail before paying for inference; test.py would otherwise fail later with a
             # confusing FileNotFoundError for the missing confidences file.
             self._check_confidences_supported()
+        self._load_saved_index()
 
         default_src_iso = self._config.train_src_iso
         default_trg_iso = self._config.train_trg_iso
@@ -944,21 +832,12 @@ class RemoteLLMModel(NMTModel):
         return completion
 
     def _build_messages(self, texts: Sequence[str], src_lang: Language, trg_lang: Language) -> List[Dict[str, str]]:
-        return self._config.build_messages(
-            texts,
-            self._retrieve_examples(texts),
-            src_lang,
-            trg_lang,
-            self._get_corpus_block(src_lang, trg_lang),
-        )
+        corpus_block = self._get_corpus_block(src_lang, trg_lang)
+        examples = [] if corpus_block else self._retrieve_examples(texts)
+        return self._config.build_messages(texts, examples, src_lang, trg_lang, corpus_block)
 
     def _retrieve_examples(self, texts: Sequence[str]) -> List[Example]:
-        retriever = self._get_retriever()
-        if retriever is None:
-            return []
-        examples = retriever.retrieve("\n".join(texts), self._config.num_examples)
-        # Render the most relevant example last, nearest the text to be translated.
-        return list(reversed(examples))
+        return self._config.infer_prompt_builder.select_examples("\n".join(texts))
 
 
 def _to_sentence_translation(completion: Completion) -> SentenceTranslation:

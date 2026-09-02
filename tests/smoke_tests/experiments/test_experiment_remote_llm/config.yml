@@ -11,9 +11,9 @@ data:
     en: English
     es: Spanish
 infer:
-  context_mode: rag
-  retrieval:
-    method: tfidf
+  prompt:
     num_examples: 3
+    example_selection:
+      method: tfidf
   infer_batch_size: 4
   concurrency: 2

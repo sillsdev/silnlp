@@ -10,7 +10,7 @@ import pytest
 import yaml
 
 from silnlp.nmt.config import Language
-from silnlp.nmt.config_utils import is_llm_config, is_remote_llm_config
+from silnlp.nmt.config_utils import is_local_llm_config, is_remote_llm_config
 from silnlp.nmt.example_retrieval import (
     BM25ExampleRetriever,
     Example,
@@ -20,8 +20,6 @@ from silnlp.nmt.example_retrieval import (
     tokenize_for_retrieval,
 )
 from silnlp.nmt.remote_llm_config import (
-    CONTEXT_MODE_FULL_CORPUS,
-    CONTEXT_MODE_RAG,
     Completion,
     CompletionClient,
     CompletionClientFactory,
@@ -55,7 +53,7 @@ def test_an_remote_llm_config_is_not_claimed_by_the_llm_dispatch():
     # google/gemma matches LLM_MODEL_PREFIXES, but the explicit model_type has to win.
     config = {"model_type": "remote_llm", "model": "google/gemma-2-2b-it"}
     assert is_remote_llm_config(config)
-    assert not is_llm_config(config)
+    assert not is_local_llm_config(config)
 
 
 # --- response parsing -------------------------------------------------------------------
@@ -213,8 +211,7 @@ def make_config(exp_dir: Path, **overrides) -> RemoteLLMConfig:
 
 def test_config_defaults(tmp_path: Path):
     config = make_config(tmp_path)
-    assert config.context_mode == CONTEXT_MODE_RAG
-    assert config.retrieval_method == "tfidf"
+    assert config.infer_prompt_builder.pool.method == "tfidf"
     assert config.num_examples == 10
     assert config.infer_batch_size == 1
     # The hosted model tokenizes for itself, so preprocessing writes raw text.
@@ -230,12 +227,11 @@ def test_config_requires_a_model(tmp_path: Path):
 @pytest.mark.parametrize(
     "infer, message",
     [
-        ({"context_mode": "magic"}, "Unknown infer.context_mode"),
-        ({"retrieval": {"method": "embeddings"}}, "Unknown infer.retrieval.method"),
+        ({"prompt": {"example_selection": {"method": "embeddings"}}}, "Unknown example_selection.method"),
         ({"infer_batch_size": 0}, "infer.infer_batch_size"),
         ({"num_drafts": 0}, "infer.num_drafts"),
         ({"concurrency": 0}, "infer.concurrency"),
-        ({"retrieval": {"num_examples": -1}}, "num_examples"),
+        ({"prompt": {"num_examples": -1}}, "num_examples"),
     ],
 )
 def test_config_validation(tmp_path: Path, infer: dict, message: str):
@@ -308,7 +304,7 @@ def test_examples_are_presented_as_the_team_own_work(tmp_path: Path):
 
 
 def test_full_corpus_block_is_presented_as_the_team_own_work(tmp_path: Path):
-    model, client = make_model(tmp_path, lambda messages: "hola", infer={"context_mode": CONTEXT_MODE_FULL_CORPUS})
+    model, client = make_model(tmp_path, lambda messages: "hola", infer={"prompt": {"num_examples": 1000000}})
     write_training_corpus(tmp_path)
     list(model.translate(["anything"], "en", "es"))
 
@@ -332,13 +328,15 @@ def test_prompt_includes_retrieved_examples(tmp_path: Path):
 
 
 def test_example_template_is_configurable(tmp_path: Path):
-    config = make_config(tmp_path, params={"prompt": {"example_template": "{source} => {target}"}})
+    config = make_config(
+        tmp_path, infer={"prompt": {"example_format": {"type": "text", "template": "{source} => {target}"}}}
+    )
     user = config.build_messages(["hello"], [Example("greeting", "saludo")], EN, ES)[1]["content"]
     assert "greeting => saludo" in user
 
 
 def test_system_message_is_configurable(tmp_path: Path):
-    config = make_config(tmp_path, params={"prompt": {"system_message": "Be terse."}})
+    config = make_config(tmp_path, infer={"prompt": {"system_message": "Be terse."}})
     assert config.build_messages(["hello"], [], EN, ES)[0]["content"] == "Be terse."
 
 
@@ -539,13 +537,13 @@ def test_translate_test_files_writes_one_file_per_draft(tmp_path: Path):
 
 
 def write_training_corpus(exp_dir: Path) -> None:
-    (exp_dir / "train.src.detok.txt").write_text("in the beginning\nlet there be light\n", encoding="utf-8")
-    (exp_dir / "train.trg.detok.txt").write_text("en el principio\nsea la luz\n", encoding="utf-8")
+    (exp_dir / "train.src.txt").write_text("in the beginning\nlet there be light\n", encoding="utf-8")
+    (exp_dir / "train.trg.txt").write_text("en el principio\nsea la luz\n", encoding="utf-8")
 
 
 def test_train_builds_and_saves_the_retrieval_index(tmp_path: Path):
     write_training_corpus(tmp_path)
-    model, _ = make_model(tmp_path, lambda messages: "hola")
+    model, _ = make_model(tmp_path, lambda messages: "hola", infer={"prompt": {"num_examples": 1}})
 
     model.train()
 
@@ -568,7 +566,7 @@ def test_train_writes_a_checkpoint_so_the_last_checkpoint_resolves(tmp_path: Pat
 
 def test_train_in_full_corpus_mode_writes_a_checkpoint_but_no_index(tmp_path: Path):
     write_training_corpus(tmp_path)
-    model, _ = make_model(tmp_path, lambda messages: "hola", infer={"context_mode": CONTEXT_MODE_FULL_CORPUS})
+    model, _ = make_model(tmp_path, lambda messages: "hola", infer={"prompt": {"num_examples": 1000000}})
 
     model.train()
 
@@ -585,7 +583,7 @@ def test_train_tolerates_a_missing_training_corpus(tmp_path: Path):
 
 def test_retrieved_examples_reach_the_prompt(tmp_path: Path):
     write_training_corpus(tmp_path)
-    model, client = make_model(tmp_path, lambda messages: "hola", infer={"retrieval": {"num_examples": 1}})
+    model, client = make_model(tmp_path, lambda messages: "hola", infer={"prompt": {"num_examples": 1}})
     model.train()
 
     list(model.translate(["let there be light"], "en", "es"))
@@ -599,7 +597,7 @@ def test_the_index_is_rebuilt_when_the_checkpoint_is_gone(tmp_path: Path):
     # experiment.py deletes the run directory unless --save-checkpoints is passed, so the saved
     # index is only a cache; inference has to rebuild it from the training corpus.
     write_training_corpus(tmp_path)
-    model, client = make_model(tmp_path, lambda messages: "hola", infer={"retrieval": {"num_examples": 1}})
+    model, client = make_model(tmp_path, lambda messages: "hola", infer={"prompt": {"num_examples": 1}})
 
     list(model.translate(["let there be light"], "en", "es"))
 
@@ -608,7 +606,7 @@ def test_the_index_is_rebuilt_when_the_checkpoint_is_gone(tmp_path: Path):
 
 def test_full_corpus_mode_puts_the_whole_corpus_in_the_system_message(tmp_path: Path):
     write_training_corpus(tmp_path)
-    model, client = make_model(tmp_path, lambda messages: "hola", infer={"context_mode": CONTEXT_MODE_FULL_CORPUS})
+    model, client = make_model(tmp_path, lambda messages: "hola", infer={"prompt": {"num_examples": 1000000}})
 
     list(model.translate(["anything"], "en", "es"))
 
@@ -625,7 +623,7 @@ def test_save_effective_config_writes_the_merged_config(tmp_path: Path):
     with path.open(encoding="utf-8") as file:
         written = yaml.safe_load(file)
     assert written["model"] == "gpt-4o"
-    assert written["infer"]["context_mode"] == CONTEXT_MODE_RAG
+    assert written["infer"]["prompt"]["num_examples"] == 10
 
 
 # --- confidence scores from log probabilities ---------------------------------------------
@@ -764,7 +762,7 @@ def test_scores_are_dropped_when_a_code_fence_is_stripped(tmp_path: Path):
 
 
 def test_an_empty_system_message_is_omitted_rather_than_sent_blank(tmp_path: Path):
-    config = make_config(tmp_path, params={"prompt": {"system_message": ""}})
+    config = make_config(tmp_path, infer={"prompt": {"system_message": ""}})
     messages = config.build_messages(["hello"], [], EN, ES)
     assert [message["role"] for message in messages] == ["user"]
 
@@ -775,7 +773,7 @@ def test_the_effective_config_records_the_prompts_actually_used(tmp_path: Path):
     path = tmp_path / "effective-config.yml"
     model.save_effective_config(path)
 
-    prompt = yaml.safe_load(path.read_text(encoding="utf-8"))["params"]["prompt"]
+    prompt = yaml.safe_load(path.read_text(encoding="utf-8"))["infer"]["prompt"]
     assert "Bible translation team" in prompt["system_message"]
     assert "{source}" in prompt["instruction_template"]
     assert "{num_segments}" in prompt["batch_instruction_template"]
@@ -806,7 +804,7 @@ def test_full_corpus_mode_warns_when_the_corpus_exceeds_the_context_limit(tmp_pa
     model, _ = make_model(
         tmp_path,
         lambda messages: "hola",
-        infer={"context_mode": CONTEXT_MODE_FULL_CORPUS, "max_context_tokens": 1},
+        infer={"prompt": {"num_examples": 1000000}, "max_context_tokens": 1},
     )
 
     with caplog.at_level("WARNING"):
@@ -821,7 +819,7 @@ def test_full_corpus_mode_is_quiet_when_the_corpus_fits(tmp_path: Path, caplog):
     model, _ = make_model(
         tmp_path,
         lambda messages: "hola",
-        infer={"context_mode": CONTEXT_MODE_FULL_CORPUS, "max_context_tokens": 100000},
+        infer={"prompt": {"num_examples": 1000000}, "max_context_tokens": 100000},
     )
 
     with caplog.at_level("WARNING"):
@@ -893,3 +891,47 @@ def test_translating_logs_the_usage_and_cost(tmp_path: Path, caplog):
     assert "Translated 2 segments using 2 requests" in caplog.text
     assert "1,000 prompt + 10 completion tokens" in caplog.text
     assert "$0.0040" in caplog.text
+
+
+def test_a_hoisted_corpus_does_not_leave_a_dangling_examples_heading(tmp_path: Path):
+    model, client = make_model(tmp_path, lambda messages: "hola", infer={"prompt": {"num_examples": 1000000}})
+    write_training_corpus(tmp_path)
+    list(model.translate(["anything"], "en", "es"))
+
+    system, user = client.calls[0][0]["content"], client.calls[0][1]["content"]
+    assert "everything the team has translated so far" in system
+    assert "The team has already translated these passages" not in user
+
+
+def test_a_hoisted_corpus_keeps_a_custom_instruction_template(tmp_path: Path):
+    model, client = make_model(
+        tmp_path,
+        lambda messages: "hola",
+        infer={"prompt": {"num_examples": 1000000, "instruction_template": "Mine: {source}"}},
+    )
+    write_training_corpus(tmp_path)
+    list(model.translate(["anything"], "en", "es"))
+
+    assert client.calls[0][1]["content"] == "Mine: anything"
+
+
+def test_retrieved_examples_keep_their_heading_when_the_corpus_is_not_hoisted(tmp_path: Path):
+    model, client = make_model(tmp_path, lambda messages: "hola", infer={"prompt": {"num_examples": 1}})
+    write_training_corpus(tmp_path)
+    list(model.translate(["let there be light"], "en", "es"))
+
+    assert "The team has already translated these passages" in client.calls[0][1]["content"]
+
+
+def test_the_batch_prompt_drops_its_examples_heading_when_the_corpus_is_hoisted(tmp_path: Path):
+    model, client = make_model(
+        tmp_path,
+        lambda messages: "1. hola\n2. adios",
+        infer={"prompt": {"num_examples": 1000000}, "infer_batch_size": 2},
+    )
+    write_training_corpus(tmp_path)
+    list(model.translate(["one", "two"], "en", "es"))
+
+    user = client.calls[0][1]["content"]
+    assert "The team has already translated these passages" not in user
+    assert "consecutive" in user
