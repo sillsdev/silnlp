@@ -229,7 +229,7 @@ def get_onboarding_requests() -> List[dict]:
         .get("result", [])
     )
     return (
-        [get_request_by_id(request["id"]) for request in all_requests if request["status"] == "new"]
+        [get_request_by_id(request["id"]) for request in all_requests if request["status"] in ["new", "in_progress"]]
         if all_requests
         else []
     )
@@ -354,7 +354,9 @@ def main():
     else:
         OnboardingEnvironment.create_production_environment()
     onboarding_requests = get_onboarding_requests()
-    if not onboarding_requests:
+    print(onboarding_requests)
+    return
+    if not onboarding_requests or len(onboarding_requests) == 0:
         display_message("No new onboarding requests found.", MessageType.INFO)
         return
     onboarded_projects = []
