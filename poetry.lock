@@ -4309,6 +4309,38 @@ pandas = ">=0.23"
 scipy = ">=1.0"
 
 [[package]]
+name = "sentence-transformers"
+version = "6.0.1"
+description = "Embeddings, Retrieval, and Reranking"
+optional = true
+python-versions = ">=3.10"
+files = [
+    {file = "sentence_transformers-6.0.1-py3-none-any.whl", hash = "sha256:b8888d72c707ba33c63aa30845850702dd5acadf1dd0d051436380bcebe4fd0f"},
+    {file = "sentence_transformers-6.0.1.tar.gz", hash = "sha256:1c3b8d9403f87ad0c879638554f36cc85744f38a6a70d150fd7e964ca0e9935b"},
+]
+
+[package.dependencies]
+huggingface-hub = ">=1.3.0,<2.0.0"
+numpy = ">=1.24.0"
+scikit-learn = ">=1.1.0"
+scipy = ">=1.0.0"
+tokenizers = ">=0.19"
+torch = ">=2.2"
+tqdm = ">=4.0.0"
+transformers = ">=5.0.0,<6.0.0"
+typing_extensions = ">=4.10.0"
+
+[package.extras]
+audio = ["transformers[audio]"]
+dev = ["accelerate (>=1.3.0)", "datasets (>=2.16.0)", "peft", "pre-commit", "pytest", "pytest-cov", "pytest-env", "pytest-subtests", "pytest-xdist", "transformers[audio,video,vision]"]
+image = ["transformers[vision]"]
+onnx = ["optimum-onnx[onnxruntime]"]
+onnx-gpu = ["optimum-onnx[onnxruntime-gpu]"]
+openvino = ["optimum-intel[openvino] (>=2.0.0)"]
+train = ["accelerate (>=1.3.0)", "datasets (>=2.16.0)"]
+video = ["transformers[video]"]
+
+[[package]]
 name = "sentencepiece"
 version = "0.2.2"
 description = "Unsupervised text tokenizer and detokenizer."
@@ -5268,9 +5300,9 @@ files = [
 
 [extras]
 eflomal = ["eflomal"]
-llm = ["bitsandbytes"]
+llm = ["bitsandbytes", "sentence-transformers"]
 
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.11"
-content-hash = "7d274a1e125c3c1651411b887e028b4258448e399a2c34b7d501dddb5dce7333"
+content-hash = "c7d1f21b43259b953332f08508d2ad1464f5c315dd43bbe4d432b76025a1478a"
