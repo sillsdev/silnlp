@@ -296,8 +296,6 @@ def process_request(request_dict: dict):
         task: Task = Task.get_task(project_name="Onboarding", task_name=task_name, tags=["silnlp-auto-onboarding"])
         with open(OnboardingEnvironment.ONBOARDING_LOG_PATH, "a") as f:
             f.write(f"{request.id}\n")
-        with open(OnboardingEnvironment.ONBOARDING_CLEANUP_PATH, "a") as f:
-            f.write(f"{OnboardingEnvironment.ONBOARDING_PATH}/{request.main_project.short_name}_Request\n")
 
         display_message(
             f"This request is being automatically onboarded.\nClearML task: {task_name}.\nLink: {task.get_output_log_web_page()}",
@@ -323,6 +321,9 @@ def process_request(request_dict: dict):
         display_message(
             f"Automatic onboarding failed. See ClearML task for details.\n {e}", MessageType.ERROR, request.id
         )
+    finally:
+        with open(OnboardingEnvironment.ONBOARDING_CLEANUP_PATH, "a") as f:
+            f.write(f"{OnboardingEnvironment.ONBOARDING_PATH}/{request.main_project.short_name}_Request\n")
 
 
 class MessageType(Enum):
