@@ -8,7 +8,7 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Optional, Protocol, Sequence, Union
+from typing import Any, List, Optional, Protocol, Sequence, Tuple, Union
 from xml.sax.saxutils import escape as xml_escape
 
 import numpy as np
@@ -339,14 +339,12 @@ class ExamplePool:
 
     def __init__(
         self,
-        src_path: Path,
-        trg_path: Path,
+        corpus_paths: Sequence[Tuple[Path, Path]],
         method: str,
         model_name: Optional[str] = None,
         require_corpus: bool = True,
     ) -> None:
-        self._src_path = src_path
-        self._trg_path = trg_path
+        self._corpus_paths = list(corpus_paths)
         self._method = method
         self._model_name = model_name
         self._require_corpus = require_corpus
@@ -364,21 +362,31 @@ class ExamplePool:
     def examples(self) -> List[Example]:
         # Read on first use rather than in __init__, so num_examples: 0 never touches the corpus.
         if self._examples is None:
-            pairs = read_parallel_text_pairs(self._src_path, self._trg_path)
+            pairs = self._read_first_available_corpus()
             if pairs is None:
                 if self._require_corpus:
                     raise RuntimeError(
-                        f"num_examples > 0 requires the training corpus at {self._src_path} and "
-                        f"{self._trg_path}. Run preprocessing (--preprocess) first."
+                        f"num_examples > 0 requires the training corpus at {self._describe_corpus_paths()}. "
+                        "Run preprocessing (--preprocess) first."
                     )
                 LOGGER.warning(
-                    "No training corpus was found at %s and %s, so no examples are available.",
-                    self._src_path,
-                    self._trg_path,
+                    "No training corpus was found at %s, so no examples are available.",
+                    self._describe_corpus_paths(),
                 )
                 pairs = ([], [])
             self._examples = [Example(source=s, target=t) for s, t in zip(*pairs)]
         return self._examples
+
+    def _read_first_available_corpus(self) -> Optional[Tuple[List[str], List[str]]]:
+        """Read the first candidate pair that is present, so a caller can state a preference."""
+        for src_path, trg_path in self._corpus_paths:
+            pairs = read_parallel_text_pairs(src_path, trg_path)
+            if pairs is not None:
+                return pairs
+        return None
+
+    def _describe_corpus_paths(self) -> str:
+        return " or ".join(f"{src_path} and {trg_path}" for src_path, trg_path in self._corpus_paths)
 
     def covers_whole_pool(self, k: int) -> bool:
         return k > 0 and k >= len(self)

@@ -935,3 +935,23 @@ def test_the_batch_prompt_drops_its_examples_heading_when_the_corpus_is_hoisted(
     user = client.calls[0][1]["content"]
     assert "The team has already translated these passages" not in user
     assert "consecutive" in user
+
+
+def test_the_remote_model_prefers_the_detokenized_corpus(tmp_path: Path):
+    # An experiment preprocessed for a tokenized model leaves readable text only in the detok files.
+    (tmp_path / "train.src.txt").write_text("let ▁there ▁be ▁light\n", encoding="utf-8")
+    (tmp_path / "train.trg.txt").write_text("sea ▁la ▁luz\n", encoding="utf-8")
+    (tmp_path / "train.src.detok.txt").write_text("let there be light\n", encoding="utf-8")
+    (tmp_path / "train.trg.detok.txt").write_text("sea la luz\n", encoding="utf-8")
+
+    config = make_config(tmp_path, infer={"prompt": {"num_examples": 1}})
+    assert [example.target for example in config.infer_prompt_builder.pool.examples] == ["sea la luz"]
+
+
+def test_the_remote_model_falls_back_to_the_plain_corpus(tmp_path: Path):
+    write_training_corpus(tmp_path)
+    config = make_config(tmp_path, infer={"prompt": {"num_examples": 1}})
+    assert [example.target for example in config.infer_prompt_builder.pool.examples] == [
+        "en el principio",
+        "sea la luz",
+    ]

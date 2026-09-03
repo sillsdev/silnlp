@@ -400,6 +400,15 @@ class RemoteLLMConfig(LLMConfig):
             },
         )
 
+    def _example_corpus_paths(self) -> List[Tuple[Path, Path]]:
+        """Prefer the detokenized corpus, so an experiment preprocessed for a tokenized model
+        still yields readable examples."""
+        detokenized = (
+            self.exp_dir / self.train_src_detok_filename(),
+            self.exp_dir / self.train_trg_detok_filename(),
+        )
+        return [detokenized, *super()._example_corpus_paths()]
+
     def _resolve_infer_prompt_defaults(self, prompt: dict) -> None:
         # A hoisted corpus brings its own heading, so keep the wording that has none for it to
         # use; the few-shot defaults would otherwise head an examples block that renders empty.

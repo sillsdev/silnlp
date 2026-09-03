@@ -570,6 +570,7 @@ class LocalLLMConfig(LLMConfig):
         trg_lang: Language,
         target: Optional[str] = None,
         example_pool_index: Optional[int] = None,
+        rotation_index: Optional[int] = None,
         training: bool = False,
     ) -> ChatPromptMessages:
         if self.model.lower().startswith(TRANSLATE_GEMMA_MODEL_PREFIXES):
@@ -577,7 +578,7 @@ class LocalLLMConfig(LLMConfig):
                 source_language=src_lang, target_language=trg_lang, text=source, target=target
             )
         builder = self._train_prompt_builder if training else self._infer_prompt_builder
-        return builder.build(source, src_lang, trg_lang, target, example_pool_index)
+        return builder.build(source, src_lang, trg_lang, target, example_pool_index, rotation_index)
 
 
 @dataclass
@@ -836,9 +837,12 @@ class LocalLLMModel(NMTModel):
             prompt_ids = prompt.apply_prompt_template(tokenizer, add_generation_prompt=True, tokenize=True)
             return encode_completion(prompt_ids, example["trg"])
 
-        def encode_eval(example: dict) -> dict:
-            # Eval rows aren't in the example pool, so no pool index -- unlike encode() above.
-            prompt = self._config.build_prompt_messages(example["src"], src_lang, trg_lang, training=True)
+        def encode_eval(example: dict, idx: int) -> dict:
+            # Eval rows aren't in the example pool, so idx only rotates the prompt template here,
+            # where in encode() above it also drives leave-one-out.
+            prompt = self._config.build_prompt_messages(
+                example["src"], src_lang, trg_lang, rotation_index=idx, training=True
+            )
             prompt_ids = prompt.apply_prompt_template(tokenizer, add_generation_prompt=True, tokenize=True)
             return encode_completion(prompt_ids, example["trg"])
 
@@ -857,7 +861,9 @@ class LocalLLMModel(NMTModel):
         if train_dataset is not None:
             train_dataset = train_dataset.map(encode, with_indices=True, remove_columns=train_dataset.column_names)
         if eval_dataset is not None:
-            eval_dataset = eval_dataset.map(encode_eval, remove_columns=eval_dataset.column_names)
+            eval_dataset = eval_dataset.map(
+                encode_eval, with_indices=True, remove_columns=eval_dataset.column_names
+            )
 
         # Instruction data is mixed into training only
         instruction_dataset = self._load_instruction_dataset(

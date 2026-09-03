@@ -1,4 +1,5 @@
 import json
+import logging
 
 import numpy as np
 import pytest
@@ -198,7 +199,7 @@ def _write_pool(tmp_path, sources, targets, method="tfidf"):
     trg_path = tmp_path / "train.trg.txt"
     src_path.write_text("".join(line + "\n" for line in sources), encoding="utf-8")
     trg_path.write_text("".join(line + "\n" for line in targets), encoding="utf-8")
-    return ExamplePool(src_path, trg_path, method)
+    return ExamplePool([(src_path, trg_path)], method)
 
 
 def test_example_pool_selects_the_most_relevant_example_last(tmp_path):
@@ -211,7 +212,7 @@ def test_example_pool_selects_the_most_relevant_example_last(tmp_path):
 
 
 def test_example_pool_returns_nothing_and_touches_no_files_when_k_is_zero(tmp_path):
-    pool = ExamplePool(tmp_path / "missing.src.txt", tmp_path / "missing.trg.txt", "tfidf")
+    pool = ExamplePool([(tmp_path / "missing.src.txt", tmp_path / "missing.trg.txt")], "tfidf")
     assert pool.select("hello", k=0) == []
 
 
@@ -238,7 +239,7 @@ def test_example_pool_whole_pool_path_builds_no_index(tmp_path):
 
 
 def test_example_pool_raises_a_clear_error_when_the_corpus_is_missing(tmp_path):
-    pool = ExamplePool(tmp_path / "missing.src.txt", tmp_path / "missing.trg.txt", "tfidf")
+    pool = ExamplePool([(tmp_path / "missing.src.txt", tmp_path / "missing.trg.txt")], "tfidf")
     with pytest.raises(RuntimeError, match="preprocessing"):
         pool.select("hello", k=1)
 
@@ -305,3 +306,46 @@ def test_retriever_meta_records_the_method_and_model_name(tmp_path):
     _fitted(retriever, _examples(("a", "1"))).save(tmp_path)
     meta = json.loads((tmp_path / "retrieval_meta.json").read_text(encoding="utf-8"))
     assert meta == {"method": "embedding", "model_name": "some/model", "num_examples": 1}
+
+
+def test_example_pool_prefers_the_first_candidate_corpus(tmp_path):
+    (tmp_path / "preferred.src.txt").write_text("preferred\n", encoding="utf-8")
+    (tmp_path / "preferred.trg.txt").write_text("1\n", encoding="utf-8")
+    (tmp_path / "fallback.src.txt").write_text("fallback\n", encoding="utf-8")
+    (tmp_path / "fallback.trg.txt").write_text("2\n", encoding="utf-8")
+    pool = ExamplePool(
+        [
+            (tmp_path / "preferred.src.txt", tmp_path / "preferred.trg.txt"),
+            (tmp_path / "fallback.src.txt", tmp_path / "fallback.trg.txt"),
+        ],
+        "tfidf",
+    )
+    assert [ex.source for ex in pool.examples] == ["preferred"]
+
+
+def test_example_pool_falls_back_to_a_later_candidate_corpus(tmp_path):
+    (tmp_path / "fallback.src.txt").write_text("fallback\n", encoding="utf-8")
+    (tmp_path / "fallback.trg.txt").write_text("2\n", encoding="utf-8")
+    pool = ExamplePool(
+        [
+            (tmp_path / "missing.src.txt", tmp_path / "missing.trg.txt"),
+            (tmp_path / "fallback.src.txt", tmp_path / "fallback.trg.txt"),
+        ],
+        "tfidf",
+    )
+    assert [ex.source for ex in pool.examples] == ["fallback"]
+
+
+def test_example_pool_names_every_candidate_when_none_are_present(tmp_path):
+    pool = ExamplePool(
+        [(tmp_path / "a.src.txt", tmp_path / "a.trg.txt"), (tmp_path / "b.src.txt", tmp_path / "b.trg.txt")], "tfidf"
+    )
+    with pytest.raises(RuntimeError, match="a.src.txt and .*a.trg.txt or .*b.src.txt and .*b.trg.txt"):
+        pool.examples
+
+
+def test_example_pool_can_tolerate_a_missing_corpus(tmp_path, caplog):
+    pool = ExamplePool([(tmp_path / "a.src.txt", tmp_path / "a.trg.txt")], "tfidf", require_corpus=False)
+    with caplog.at_level(logging.WARNING):
+        assert pool.select("anything", k=3) == []
+    assert any("no examples are available" in record.message for record in caplog.records)

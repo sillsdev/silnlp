@@ -860,3 +860,30 @@ def test_prompts_can_always_be_rendered_through_the_chat_template(tmp_path, prom
     for training in (True, False):
         prompt = config.build_prompt_messages("hello", config.language("en"), config.language("fr"), training=training)
         assert isinstance(prompt, ChatPromptMessages)
+
+
+def test_the_local_model_reads_the_plain_training_corpus(tmp_path):
+    # Local fine-tuning always preprocesses with tokenize: false, so the plain files are the
+    # detokenized ones; a stale detok file from another model must not be picked up.
+    (tmp_path / "train.src.txt").write_text("the cat sat\n", encoding="utf-8")
+    (tmp_path / "train.trg.txt").write_text("le chat\n", encoding="utf-8")
+    (tmp_path / "train.src.detok.txt").write_text("something else\n", encoding="utf-8")
+    (tmp_path / "train.trg.detok.txt").write_text("autre chose\n", encoding="utf-8")
+
+    config = _construct_llm_config(tmp_path, {"num_examples": 1})
+    assert [example.target for example in config.train_prompt_builder.pool.examples] == ["le chat"]
+
+
+def test_rotating_train_prompt_rotates_eval_rows_too(tmp_path):
+    _write_templates(
+        tmp_path / "templates.jsonl",
+        [{"instruction_template": "A: {source}"}, {"instruction_template": "B: {source}"}],
+    )
+    config = _construct_llm_config(tmp_path, {"type": "rotating", "template_file": "templates.jsonl"})
+    instructions = [
+        config.build_prompt_messages(
+            "hello", config.language("en"), config.language("fr"), rotation_index=i, training=True
+        ).instruction
+        for i in range(3)
+    ]
+    assert instructions == ["A: hello", "B: hello", "A: hello"]

@@ -95,11 +95,12 @@ class PromptBuilder:
     def pool(self) -> Optional[ExamplePool]:
         return self._pool
 
-    def template_for(self, pool_index: Optional[int]) -> PromptTemplate:
-        # Rotating templates are keyed off the pool index so a re-run renders the same prompts.
-        if pool_index is None or len(self._templates) == 1:
+    def template_for(self, rotation_index: Optional[int]) -> PromptTemplate:
+        # Rotating templates are keyed off the row index so a re-run renders the same prompts,
+        # and so a given row's loss stays comparable from one evaluation to the next.
+        if rotation_index is None or len(self._templates) == 1:
             return self._templates[0]
-        return self._templates[pool_index % len(self._templates)]
+        return self._templates[rotation_index % len(self._templates)]
 
     def covers_whole_pool(self) -> bool:
         return self._pool is not None and self._pool.covers_whole_pool(self._num_examples)
@@ -110,9 +111,9 @@ class PromptBuilder:
         return self._pool.select(query, self._num_examples, pool_index)
 
     def render_examples(
-        self, examples: Sequence[Example], src_lang: Language, trg_lang: Language, pool_index: Optional[int] = None
+        self, examples: Sequence[Example], src_lang: Language, trg_lang: Language, rotation_index: Optional[int] = None
     ) -> str:
-        return self.template_for(pool_index).formatter.format(examples, src_lang.name, trg_lang.name)
+        return self.template_for(rotation_index).formatter.format(examples, src_lang.name, trg_lang.name)
 
     def build(
         self,
@@ -121,15 +122,21 @@ class PromptBuilder:
         trg_lang: Language,
         target: Optional[str] = None,
         pool_index: Optional[int] = None,
+        rotation_index: Optional[int] = None,
         **instruction_fields: Any,
     ) -> PromptMessages:
-        template = self.template_for(pool_index)
+        """`pool_index` is the row's position in the example pool, which is excluded from its own
+        examples; `rotation_index` picks the template, and defaults to it. Rows outside the pool
+        still rotate by passing only `rotation_index`."""
+        if rotation_index is None:
+            rotation_index = pool_index
+        template = self.template_for(rotation_index)
         examples = self.select_examples(source, pool_index)
         instruction = template.instruction_template.format(
             src_lang=src_lang.name,
             trg_lang=trg_lang.name,
             source=source,
-            examples=self.render_examples(examples, src_lang, trg_lang, pool_index),
+            examples=self.render_examples(examples, src_lang, trg_lang, rotation_index),
             **instruction_fields,
         )
         system_message = template.system_message.format(src_lang=src_lang.name, trg_lang=trg_lang.name)
@@ -286,12 +293,11 @@ class LLMConfig(Config):
             return None
         method, model_name = parse_example_selection(prompt)
         return ExamplePool(
-            self.exp_dir / self.train_src_filename(),
-            self.exp_dir / self.train_trg_filename(),
-            method,
-            model_name,
-            require_corpus=self.REQUIRE_EXAMPLE_CORPUS,
+            self._example_corpus_paths(), method, model_name, require_corpus=self.REQUIRE_EXAMPLE_CORPUS
         )
+
+    def _example_corpus_paths(self) -> List[Tuple[Path, Path]]:
+        return [(self.exp_dir / self.train_src_filename(), self.exp_dir / self.train_trg_filename())]
 
     @property
     def infer_prompt_builder(self) -> PromptBuilder:

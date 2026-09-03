@@ -275,3 +275,21 @@ def test_read_prompt_template_file_rejects_unknown_fields(tmp_path):
     path = _write_templates(tmp_path / "templates.jsonl", [{"num_examples": 3}])
     with pytest.raises(RuntimeError, match="unknown field"):
         read_prompt_template_file(path, DEFAULTS)
+
+
+def test_prompt_builder_rotation_index_overrides_the_pool_index():
+    pool = _FakePool([Example("cat", "chat")])
+    builder = PromptBuilder([_template("A: {source}"), _template("B: {source}")], 1, pool)
+    # The pool entry is still excluded from its own examples even though another template is used.
+    assert builder.build("x", EN, FR, pool_index=0, rotation_index=1).instruction == "B: x"
+    assert pool.calls == [("x", 1, 0)]
+
+
+def test_prompt_builder_rotates_rows_outside_the_pool():
+    builder = PromptBuilder([_template("A: {source}"), _template("B: {source}")], 0, None)
+    assert [builder.build("x", EN, FR, rotation_index=i).instruction for i in range(3)] == ["A: x", "B: x", "A: x"]
+
+
+def test_prompt_builder_rotation_index_zero_is_not_treated_as_unset():
+    builder = PromptBuilder([_template("A: {source}"), _template("B: {source}")], 0, None)
+    assert builder.build("x", EN, FR, pool_index=1, rotation_index=0).instruction == "A: x"
