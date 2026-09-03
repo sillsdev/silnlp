@@ -256,8 +256,6 @@ def rename_project(project_name: str, datestamp: bool) -> str:
 def process_request(request_dict: dict):
     try:
         display_message("Processing this onboarding request...", MessageType.INFO, request_dict["id"])
-        with open(OnboardingEnvironment.ONBOARDING_LOG_PATH, "a") as f:
-            f.write(f"{request_dict['id']}\n")
 
         request = OnboardingRequest(request_dict)
         request.download_projects()
