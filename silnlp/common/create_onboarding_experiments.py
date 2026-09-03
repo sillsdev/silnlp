@@ -63,7 +63,7 @@ EXPERIMENT_ARGS = [
     "--save-checkpoints",
     "--save-confidences",
     "--clearml-queue",
-    "jobs_urgent",
+    "jobs_backlog",
     "--clearml-tag",
     "eitl",
     "--preprocess",
