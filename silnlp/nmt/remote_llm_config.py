@@ -49,8 +49,8 @@ from ..common.translation_data_structures import DraftGroup, SentenceTranslation
 from ..common.translator import generate_confidence_files
 from ..common.utils import merge_dict
 from .config import CheckpointType, Language, NMTModel
-from .example_retrieval import TFIDF_METHOD, Example
-from .llm_config import LLMConfig, PromptBuilder
+from .example_retrieval import TFIDF_METHOD, Example, create_example_formatter
+from .llm_config import LLMConfig, PromptBuilder, PromptTemplate, warn_about_examples_placeholder
 
 LOGGER = logging.getLogger(__name__)
 
@@ -346,7 +346,6 @@ class LiteLLMCompletionClientFactory(CompletionClientFactory):
 
 
 class RemoteLLMConfig(LLMConfig):
-    REQUIRE_EXAMPLE_CORPUS = False
     DEFAULT_SYSTEM_MESSAGE = DEFAULT_SYSTEM_MESSAGE_TEMPLATE
     DEFAULT_INSTRUCTION_TEMPLATE = DEFAULT_SINGLE_INSTRUCTION_TEMPLATE
     DEFAULT_FEW_SHOT_INSTRUCTION_TEMPLATE = DEFAULT_FEW_SHOT_SINGLE_INSTRUCTION_TEMPLATE
@@ -427,10 +426,20 @@ class RemoteLLMConfig(LLMConfig):
             )
 
     def _create_batch_prompt_builder(self) -> PromptBuilder:
-        """A second builder whose instruction template numbers several segments in one request."""
-        batch_prompt = dict(self.prompt)
-        batch_prompt["instruction_template"] = self.prompt["batch_instruction_template"]
-        return self._create_prompt_builder(batch_prompt, "infer.prompt.batch_instruction_template")
+        """A second builder whose instruction template numbers several segments in one request.
+
+        It shares the single-segment builder's example pool, so the corpus is read and indexed
+        once however the requests are batched.
+        """
+        builder = self.infer_prompt_builder
+        name = "infer.prompt.batch_instruction_template"
+        template = PromptTemplate(
+            system_message=self.prompt["system_message"],
+            instruction_template=self.prompt["batch_instruction_template"],
+            formatter=create_example_formatter(self.prompt["example_format"]),
+        )
+        warn_about_examples_placeholder([template], builder.num_examples, name)
+        return self.PROMPT_BUILDER_CLASS([template], builder.num_examples, builder.pool)
 
     def _validate(self) -> None:
         if not str(self.model).strip():
@@ -541,6 +550,7 @@ class RemoteLLMModel(NMTModel):
         The saved index is only a cache: ``experiment.py`` deletes the ``run`` directory unless
         ``--save-checkpoints`` is passed, so inference rebuilds it when it is missing.
         """
+        self._config.check_example_corpora()
         checkpoint_dir = self._checkpoint_dir()
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
@@ -611,6 +621,7 @@ class RemoteLLMModel(NMTModel):
             return self._corpus_block
 
     def _load_saved_index(self) -> None:
+        self._config.check_example_corpora()
         pool = self._config.infer_prompt_builder.pool
         if pool is not None:
             pool.load_index(self._checkpoint_dir())

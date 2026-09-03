@@ -338,16 +338,11 @@ class ExamplePool:
     """The parallel corpus that few-shot examples are drawn from, and its retrieval index."""
 
     def __init__(
-        self,
-        corpus_paths: Sequence[Tuple[Path, Path]],
-        method: str,
-        model_name: Optional[str] = None,
-        require_corpus: bool = True,
+        self, corpus_paths: Sequence[Tuple[Path, Path]], method: str, model_name: Optional[str] = None
     ) -> None:
         self._corpus_paths = list(corpus_paths)
         self._method = method
         self._model_name = model_name
-        self._require_corpus = require_corpus
         self._examples: Optional[List[Example]] = None
         self._retriever: Optional[ExampleRetriever] = None
 
@@ -364,16 +359,10 @@ class ExamplePool:
         if self._examples is None:
             pairs = self._read_first_available_corpus()
             if pairs is None:
-                if self._require_corpus:
-                    raise RuntimeError(
-                        f"num_examples > 0 requires the training corpus at {self._describe_corpus_paths()}. "
-                        "Run preprocessing (--preprocess) first."
-                    )
-                LOGGER.warning(
-                    "No training corpus was found at %s, so no examples are available.",
-                    self._describe_corpus_paths(),
+                raise RuntimeError(
+                    f"num_examples > 0 requires the training corpus at {self._describe_corpus_paths()}. "
+                    "Run preprocessing (--preprocess) first."
                 )
-                pairs = ([], [])
             self._examples = [Example(source=s, target=t) for s, t in zip(*pairs)]
         return self._examples
 
@@ -387,6 +376,10 @@ class ExamplePool:
 
     def _describe_corpus_paths(self) -> str:
         return " or ".join(f"{src_path} and {trg_path}" for src_path, trg_path in self._corpus_paths)
+
+    def ensure_available(self) -> None:
+        """Read the corpus now, so a missing one is reported before an expensive step starts."""
+        self.examples
 
     def covers_whole_pool(self, k: int) -> bool:
         return k > 0 and k >= len(self)

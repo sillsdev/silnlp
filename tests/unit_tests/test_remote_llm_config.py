@@ -407,8 +407,11 @@ def make_model(
     responder,
     logprobs_supported: bool = False,
     token_logprobs: Optional[List[TokenLogprob]] = None,
+    with_corpus: bool = True,
     **overrides,
 ) -> Tuple[RemoteLLMModel, ScriptedClient]:
+    if with_corpus and not (tmp_path / "train.src.txt").is_file():
+        write_training_corpus(tmp_path)
     client = ScriptedClient(responder, logprobs_supported, token_logprobs)
     config = make_config(tmp_path, **overrides)
     return RemoteLLMModel(config, ScriptedClientFactory(client)), client
@@ -575,10 +578,25 @@ def test_train_in_full_corpus_mode_writes_a_checkpoint_but_no_index(tmp_path: Pa
     assert not (checkpoint_dir / "retrieval.pkl").exists()
 
 
-def test_train_tolerates_a_missing_training_corpus(tmp_path: Path):
-    model, _ = make_model(tmp_path, lambda messages: "hola")
+def test_train_rejects_a_missing_training_corpus(tmp_path: Path):
+    # Prompting with no examples when examples were asked for is a silent quality loss, so it
+    # fails here rather than after a run's worth of requests has been paid for.
+    model, _ = make_model(tmp_path, lambda messages: "hola", with_corpus=False)
+    with pytest.raises(RuntimeError, match="Run preprocessing"):
+        model.train()
+
+
+def test_translate_rejects_a_missing_training_corpus(tmp_path: Path):
+    model, _ = make_model(tmp_path, lambda messages: "hola", with_corpus=False)
+    with pytest.raises(RuntimeError, match="Run preprocessing"):
+        list(model.translate(["anything"], "en", "es"))
+
+
+def test_a_missing_training_corpus_is_fine_without_examples(tmp_path: Path):
+    model, _ = make_model(tmp_path, lambda messages: "hola", with_corpus=False, infer={"prompt": {"num_examples": 0}})
     model.train()
     assert (tmp_path / "run" / "checkpoint-1").is_dir()
+    assert translations_of(model.translate(["anything"], "en", "es")) == ["hola"]
 
 
 def test_retrieved_examples_reach_the_prompt(tmp_path: Path):
@@ -882,6 +900,7 @@ def test_translating_logs_the_usage_and_cost(tmp_path: Path, caplog):
     client.complete = lambda messages, logprobs=False: Completion(  # type: ignore[method-assign]
         "hola", [], prompt_tokens=500, completion_tokens=5, cost=0.002
     )
+    write_training_corpus(tmp_path)
     config = make_config(tmp_path, infer={"concurrency": 1})
     model = RemoteLLMModel(config, ScriptedClientFactory(client))
 
@@ -955,3 +974,22 @@ def test_the_remote_model_falls_back_to_the_plain_corpus(tmp_path: Path):
         "en el principio",
         "sea la luz",
     ]
+
+
+def test_the_batch_prompt_shares_the_single_prompt_example_pool(tmp_path: Path):
+    # Two pools would index the corpus twice, and the batch one would never see the saved index.
+    config = make_config(tmp_path, infer={"prompt": {"num_examples": 1}})
+    assert config.prompt_builder_for(1).pool is config.prompt_builder_for(4).pool
+
+
+def test_a_saved_index_is_reused_for_batched_requests(tmp_path: Path):
+    write_training_corpus(tmp_path)
+    model, _ = make_model(
+        tmp_path, lambda messages: "1. hola\n2. adios", infer={"prompt": {"num_examples": 1}, "infer_batch_size": 2}
+    )
+    model.train()
+
+    saved = ExampleRetriever.load(tmp_path / "run" / "checkpoint-1")
+    assert saved is not None
+    list(model.translate(["one", "two"], "en", "es"))
+    assert model._config.prompt_builder_for(2).pool.get_retriever().examples == saved.examples

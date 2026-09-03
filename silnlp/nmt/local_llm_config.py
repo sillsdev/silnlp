@@ -563,6 +563,9 @@ class LocalLLMConfig(LLMConfig):
     def train_prompt_builder(self) -> PromptBuilder:
         return self._train_prompt_builder
 
+    def prompt_builders(self) -> List[PromptBuilder]:
+        return [*super().prompt_builders(), self._train_prompt_builder]
+
     def build_prompt_messages(
         self,
         source: str,
@@ -811,6 +814,7 @@ class LocalLLMModel(NMTModel):
     # --- training -----------------------------------------------------------------
 
     def train(self) -> None:
+        self._config.check_example_corpora()
         training_args = self._create_training_arguments()
         tokenizer = self._config.get_hf_tokenizer()
         tokenizer.padding_side = "right"
@@ -1021,6 +1025,7 @@ class LocalLLMModel(NMTModel):
         produce_multiple_translations: bool = False,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> Generator[SentenceTranslationGroup, None, None]:
+        self._config.check_example_corpora()
         src_lang = self._config.language(src_iso)
         trg_lang = self._config.language(trg_iso)
         model = self._get_inference_model(ckpt, src_lang.name, trg_lang.name)
@@ -1035,6 +1040,7 @@ class LocalLLMModel(NMTModel):
         save_confidences: bool = False,
         ckpt: Union[CheckpointType, str, int] = CheckpointType.LAST,
     ) -> None:
+        self._config.check_example_corpora()
         tokenizer = self._config.get_hf_tokenizer()
         src_iso = self._config.train_src_iso
         trg_iso = self._config.train_trg_iso

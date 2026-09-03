@@ -1,5 +1,4 @@
 import json
-import logging
 
 import numpy as np
 import pytest
@@ -344,8 +343,6 @@ def test_example_pool_names_every_candidate_when_none_are_present(tmp_path):
         pool.examples
 
 
-def test_example_pool_can_tolerate_a_missing_corpus(tmp_path, caplog):
-    pool = ExamplePool([(tmp_path / "a.src.txt", tmp_path / "a.trg.txt")], "tfidf", require_corpus=False)
-    with caplog.at_level(logging.WARNING):
-        assert pool.select("anything", k=3) == []
-    assert any("no examples are available" in record.message for record in caplog.records)
+def test_example_pool_ensure_available_reads_the_corpus_up_front(tmp_path):
+    with pytest.raises(RuntimeError, match="Run preprocessing"):
+        ExamplePool([(tmp_path / "a.src.txt", tmp_path / "a.trg.txt")], "tfidf").ensure_available()

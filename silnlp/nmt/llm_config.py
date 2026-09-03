@@ -230,9 +230,6 @@ class LLMConfig(Config):
     )
     DEFAULT_EXAMPLE_FORMAT: Union[str, dict] = "text"
     PROMPT_BUILDER_CLASS = PromptBuilder
-    # Fine-tuning against a corpus that is not there is always a mistake; prompting a hosted
-    # model without examples is merely worse.
-    REQUIRE_EXAMPLE_CORPUS = True
 
     def __init__(self, exp_dir: Path, config: dict, environment: SilNlpEnv) -> None:
         config = merge_dict(self._default_config(exp_dir), config)
@@ -292,9 +289,7 @@ class LLMConfig(Config):
         if num_examples <= 0:
             return None
         method, model_name = parse_example_selection(prompt)
-        return ExamplePool(
-            self._example_corpus_paths(), method, model_name, require_corpus=self.REQUIRE_EXAMPLE_CORPUS
-        )
+        return ExamplePool(self._example_corpus_paths(), method, model_name)
 
     def _example_corpus_paths(self) -> List[Tuple[Path, Path]]:
         return [(self.exp_dir / self.train_src_filename(), self.exp_dir / self.train_trg_filename())]
@@ -302,6 +297,14 @@ class LLMConfig(Config):
     @property
     def infer_prompt_builder(self) -> PromptBuilder:
         return self._infer_prompt_builder
+
+    def prompt_builders(self) -> List[PromptBuilder]:
+        return [self._infer_prompt_builder]
+
+    def check_example_corpora(self) -> None:
+        for builder in self.prompt_builders():
+            if builder.pool is not None:
+                builder.pool.ensure_available()
 
     def lang_name(self, iso: str) -> str:
         return self.data["lang_codes"].get(iso, iso)

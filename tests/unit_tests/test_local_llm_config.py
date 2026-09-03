@@ -887,3 +887,27 @@ def test_rotating_train_prompt_rotates_eval_rows_too(tmp_path):
         for i in range(3)
     ]
     assert instructions == ["A: hello", "B: hello", "A: hello"]
+
+
+def test_check_example_corpora_rejects_a_missing_training_corpus(tmp_path):
+    # A fine-tune whose examples silently vanished trains on the wrong prompt shape, so this
+    # fails before the model is loaded rather than when the first row is encoded.
+    config = _construct_llm_config(tmp_path, {"num_examples": 2})
+    with pytest.raises(RuntimeError, match="Run preprocessing"):
+        config.check_example_corpora()
+
+
+def test_check_example_corpora_checks_the_infer_prompt_too(tmp_path):
+    config = _construct_llm_config(tmp_path, {"num_examples": 2}, section="infer")
+    with pytest.raises(RuntimeError, match="Run preprocessing"):
+        config.check_example_corpora()
+
+
+def test_check_example_corpora_passes_without_examples(tmp_path):
+    _construct_llm_config(tmp_path, {"num_examples": 0}).check_example_corpora()
+
+
+def test_check_example_corpora_passes_once_the_corpus_is_there(tmp_path):
+    (tmp_path / "train.src.txt").write_text("the cat sat\n", encoding="utf-8")
+    (tmp_path / "train.trg.txt").write_text("le chat\n", encoding="utf-8")
+    _construct_llm_config(tmp_path, {"num_examples": 1}).check_example_corpora()
