@@ -16,6 +16,7 @@ from silnlp.nmt.example_retrieval import (
     XmlExampleFormatter,
     create_example_formatter,
     create_example_retriever,
+    tokenize_for_retrieval,
 )
 
 
@@ -346,3 +347,10 @@ def test_example_pool_names_every_candidate_when_none_are_present(tmp_path):
 def test_example_pool_ensure_available_reads_the_corpus_up_front(tmp_path):
     with pytest.raises(RuntimeError, match="Run preprocessing"):
         ExamplePool([(tmp_path / "a.src.txt", tmp_path / "a.trg.txt")], "tfidf").ensure_available()
+
+
+def test_tfidf_and_bm25_tokenize_identically(tmp_path):
+    # Switching selection method should change the ranking, not what counts as a word.
+    text = "Don't stop, Jesus-like 12,345"
+    vectorizer = _fitted(TfidfExampleRetriever(), _examples((text, "1")))._vectorizer
+    assert vectorizer.build_analyzer()(text) == tokenize_for_retrieval(text)

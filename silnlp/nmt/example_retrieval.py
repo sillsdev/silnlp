@@ -4,7 +4,6 @@
 import json
 import logging
 import pickle
-import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +11,7 @@ from typing import Any, List, Optional, Protocol, Sequence, Tuple, Union
 from xml.sax.saxutils import escape as xml_escape
 
 import numpy as np
+from machine.tokenization import LatinWordTokenizer
 
 from .corpora import read_parallel_text_pairs
 
@@ -28,15 +28,16 @@ RETRIEVER_FILENAME = "retrieval.pkl"
 RETRIEVER_META_FILENAME = "retrieval_meta.json"
 
 # Shared by tfidf and bm25 so that switching between them doesn't also change tokenization.
-_TOKEN_PATTERN = r"\w+"
+# Its per-call state is local, so one instance is safe to share across threads.
+_WORD_TOKENIZER = LatinWordTokenizer()
 
 # TranslateGemma's chat template requires structured {type, lang_code, text} content instead of
 # free text, so it cannot carry few-shot examples.
-TRANSLATE_GEMMA_MODEL_PREFIXES = ("google/translate-gemma", "google/translategemma")
+FIXED_PROMPT_MODEL_PREFIXES = ("google/translate-gemma", "google/translategemma")
 
 
 def tokenize_for_retrieval(text: str) -> List[str]:
-    return re.findall(_TOKEN_PATTERN, text.lower())
+    return list(_WORD_TOKENIZER.tokenize(text.lower()))
 
 
 @dataclass(frozen=True)
@@ -163,7 +164,8 @@ class TfidfExampleRetriever(ExampleRetriever):
             self._vectorizer = None
             self._matrix = None
             return
-        self._vectorizer = TfidfVectorizer(lowercase=True, token_pattern=_TOKEN_PATTERN)
+        # token_pattern=None keeps scikit-learn from warning that it is unused.
+        self._vectorizer = TfidfVectorizer(lowercase=False, tokenizer=tokenize_for_retrieval, token_pattern=None)
         # Rows are L2-normalized by default, so a dot product against the matrix is cosine similarity.
         self._matrix = self._vectorizer.fit_transform(sources)
 
