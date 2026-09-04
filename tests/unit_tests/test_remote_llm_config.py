@@ -1,5 +1,4 @@
 import math
-import pickle
 import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -11,13 +10,7 @@ import yaml
 
 from silnlp.nmt.config import Language
 from silnlp.nmt.config_utils import is_local_llm_config, is_remote_llm_config
-from silnlp.nmt.example_retrieval import (
-    BM25ExampleRetriever,
-    Example,
-    ExampleRetriever,
-    TfidfExampleRetriever,
-    create_example_retriever,
-)
+from silnlp.nmt.example_retrieval import Example, ExampleRetriever
 from silnlp.nmt.remote_llm_config import (
     Completion,
     CompletionClient,
@@ -107,83 +100,6 @@ def test_group_indices_by_size():
     assert group_indices_by_size(0, 4) == []
     # A nonsensical size still yields usable batches rather than an empty or infinite grouping.
     assert group_indices_by_size(3, 0) == [[0], [1], [2]]
-
-
-# --- retrieval --------------------------------------------------------------------------
-
-
-PAIRS = [
-    Example("In the beginning God created the heavens and the earth.", "target one"),
-    Example("And God said, Let there be light, and there was light.", "target two"),
-    Example("Jesus wept.", "target three"),
-]
-
-
-def make_retriever(method: str) -> ExampleRetriever:
-    if method == "bm25":
-        pytest.importorskip("rank_bm25")
-    return create_example_retriever(method)
-
-
-@pytest.mark.parametrize("method", ["tfidf", "bm25"])
-def test_retriever_ranks_the_most_similar_example_first(method: str):
-    retriever = make_retriever(method)
-    retriever.fit(PAIRS)
-    assert retriever.retrieve("let there be light", 1) == [PAIRS[1]]
-
-
-@pytest.mark.parametrize("method", ["tfidf", "bm25"])
-def test_retriever_returns_at_most_the_whole_corpus(method: str):
-    retriever = make_retriever(method)
-    retriever.fit(PAIRS)
-    assert len(retriever.retrieve("light", 99)) == len(PAIRS)
-    assert retriever.retrieve("light", 0) == []
-
-
-@pytest.mark.parametrize("method", ["tfidf", "bm25"])
-def test_retriever_handles_an_empty_corpus(method: str):
-    retriever = make_retriever(method)
-    retriever.fit([])
-    assert retriever.retrieve("anything", 5) == []
-
-
-def test_retriever_classes_report_their_method():
-    assert TfidfExampleRetriever.method == "tfidf"
-    assert BM25ExampleRetriever.method == "bm25"
-
-
-def test_retriever_save_and_load_roundtrip(tmp_path: Path):
-    retriever = create_example_retriever("tfidf")
-    retriever.fit(PAIRS)
-    retriever.save(tmp_path)
-
-    loaded = ExampleRetriever.load(tmp_path)
-    assert loaded is not None
-    assert loaded.method == "tfidf"
-    assert loaded.examples == PAIRS
-    assert loaded.retrieve("let there be light", 1) == [PAIRS[1]]
-
-
-def test_retriever_load_returns_none_when_missing(tmp_path: Path):
-    assert ExampleRetriever.load(tmp_path) is None
-
-
-def test_retriever_load_returns_none_for_a_corrupt_index(tmp_path: Path):
-    # An unreadable index is a signal to rebuild, not an error: it can be left behind by a
-    # scikit-learn upgrade.
-    (tmp_path / "retrieval.pkl").write_bytes(b"not a pickle")
-    assert ExampleRetriever.load(tmp_path) is None
-
-
-def test_retriever_load_returns_none_for_an_unrelated_pickle(tmp_path: Path):
-    with (tmp_path / "retrieval.pkl").open("wb") as file:
-        pickle.dump({"not": "a retriever"}, file)
-    assert ExampleRetriever.load(tmp_path) is None
-
-
-def test_create_example_retriever_rejects_an_unknown_method():
-    with pytest.raises(ValueError, match="Unknown example_selection.method"):
-        create_example_retriever("embeddings")
 
 
 # --- config -----------------------------------------------------------------------------
@@ -548,7 +464,7 @@ def test_train_builds_and_saves_the_retrieval_index(tmp_path: Path):
     checkpoint_dir = tmp_path / "run" / "checkpoint-1"
     assert (checkpoint_dir / "retrieval.pkl").is_file()
     loaded = ExampleRetriever.load(checkpoint_dir)
-    assert loaded is not None and len(loaded.examples) == 2
+    assert loaded is not None and loaded.source_count == 2
 
 
 def test_train_writes_a_checkpoint_so_the_last_checkpoint_resolves(tmp_path: Path):
@@ -984,7 +900,11 @@ def test_a_saved_index_is_reused_for_batched_requests(tmp_path: Path):
     )
     model.train()
 
-    saved = ExampleRetriever.load(tmp_path / "run" / "checkpoint-1")
-    assert saved is not None
+    assert ExampleRetriever.load(tmp_path / "run" / "checkpoint-1") is not None
+    pool = model._config.prompt_builder_for(2).pool
+    injected = pool._retriever
+
     list(model.translate(["one", "two"], "en", "es"))
-    assert model._config.prompt_builder_for(2).pool.get_retriever().examples == saved.examples
+
+    # The pool swapped in the index it read from disk rather than fitting the one it was given.
+    assert pool._retriever is not injected

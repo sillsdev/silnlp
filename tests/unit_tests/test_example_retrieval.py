@@ -23,44 +23,36 @@ def _examples(*pairs):
     return [Example(source=s, target=t) for s, t in pairs]
 
 
-def _fitted(retriever, examples):
-    retriever.fit(examples)
+def _fitted(retriever, sources):
+    retriever.fit(sources)
     return retriever
 
 
 def test_tfidf_retriever_ranks_most_similar_source_first():
-    examples = _examples(
-        ("the cat sat on the mat", "1"), ("completely unrelated sentence", "2"), ("a cat sat here", "3")
-    )
-    retriever = _fitted(TfidfExampleRetriever(), examples)
-    results = retriever.retrieve("the cat sat", k=2)
-    assert [ex.target for ex in results] == ["1", "3"]
+    sources = ["the cat sat on the mat", "completely unrelated sentence", "a cat sat here"]
+    assert _fitted(TfidfExampleRetriever(), sources).rank("the cat sat", k=2) == [0, 2]
 
 
 def test_tfidf_retriever_respects_k():
-    examples = _examples(("apple pie", "1"), ("apple pie", "2"), ("apple pie", "3"))
-    retriever = _fitted(TfidfExampleRetriever(), examples)
-    assert len(retriever.retrieve("apple pie", k=2)) == 2
+    retriever = _fitted(TfidfExampleRetriever(), ["apple pie"] * 3)
+    assert len(retriever.rank("apple pie", k=2)) == 2
 
 
-def test_tfidf_retriever_retrieve_for_pool_index_excludes_self():
-    examples = _examples(("the cat sat", "1"), ("the cat sat", "2"), ("totally different words", "3"))
-    retriever = _fitted(TfidfExampleRetriever(), examples)
-    results = retriever.retrieve_for_pool_index(0, k=3)
-    assert examples[0] not in results
-    assert len(results) == 2
+def test_tfidf_retriever_rank_excluding_leaves_out_its_own_position():
+    sources = ["the cat sat", "the cat sat", "totally different words"]
+    ranked = _fitted(TfidfExampleRetriever(), sources).rank_excluding(sources[0], 0, k=3)
+    assert ranked == [1, 2]
 
 
-def test_tfidf_retriever_k_larger_than_pool_returns_whole_pool():
-    examples = _examples(("apple pie", "1"), ("banana split", "2"))
-    retriever = _fitted(TfidfExampleRetriever(), examples)
-    assert len(retriever.retrieve("apple pie", k=10)) == 2
+def test_tfidf_retriever_k_larger_than_the_corpus_returns_every_position():
+    retriever = _fitted(TfidfExampleRetriever(), ["apple pie", "banana split"])
+    assert len(retriever.rank("apple pie", k=10)) == 2
 
 
-def test_tfidf_retriever_empty_pool_returns_empty_list():
+def test_tfidf_retriever_empty_corpus_returns_no_positions():
     retriever = _fitted(TfidfExampleRetriever(), [])
-    assert retriever.retrieve("anything", k=5) == []
-    assert retriever.retrieve_for_pool_index(0, k=5) == []
+    assert retriever.rank("anything", k=5) == []
+    assert retriever.rank_excluding("anything", 0, k=5) == []
 
 
 class _StubEmbeddingModel:
@@ -75,18 +67,15 @@ class _StubEmbeddingModel:
 
 def test_embedding_retriever_uses_injected_model_stub():
     vectors = {"cat": [1.0, 0.0], "dog": [0.0, 1.0], "kitten": [0.9, 0.1]}
-    examples = _examples(("cat", "chat"), ("dog", "chien"))
-    retriever = _fitted(EmbeddingExampleRetriever(model=_StubEmbeddingModel(vectors)), examples)
-    results = retriever.retrieve("kitten", k=1)
-    assert [ex.target for ex in results] == ["chat"]
+    retriever = _fitted(EmbeddingExampleRetriever(model=_StubEmbeddingModel(vectors)), ["cat", "dog"])
+    assert retriever.rank("kitten", k=1) == [0]
 
 
-def test_embedding_retriever_retrieve_for_pool_index_excludes_self():
+def test_embedding_retriever_rank_excluding_leaves_out_its_own_position():
     vectors = {"cat": [1.0, 0.0], "kitten": [0.9, 0.1], "dog": [0.0, 1.0]}
-    examples = _examples(("cat", "1"), ("kitten", "2"), ("dog", "3"))
-    retriever = _fitted(EmbeddingExampleRetriever(model=_StubEmbeddingModel(vectors)), examples)
-    results = retriever.retrieve_for_pool_index(0, k=2)
-    assert [ex.target for ex in results] == ["2", "3"]
+    sources = ["cat", "kitten", "dog"]
+    retriever = _fitted(EmbeddingExampleRetriever(model=_StubEmbeddingModel(vectors)), sources)
+    assert retriever.rank_excluding(sources[0], 0, k=2) == [1, 2]
 
 
 def test_create_example_retriever_dispatches_each_method():
@@ -111,7 +100,7 @@ def test_create_example_retriever_defers_the_embedding_dependency_until_it_is_fi
     # sentence-transformers ships in the optional 'llm' extra, so constructing must not import it.
     retriever = create_example_retriever("embedding")
     pytest.importorskip("sentence_transformers")
-    retriever.fit(_examples(("cat", "chat")))
+    retriever.fit(["cat"])
 
 
 def test_create_example_retriever_rejects_unknown_method():
@@ -281,38 +270,36 @@ class _RankedStubRetriever(ExampleRetriever):
         return list(range(len(self._sources)))[:k]
 
 
-def test_generic_leave_one_out_drops_the_pool_entry_and_still_returns_k():
-    retriever = _fitted(_RankedStubRetriever(), _examples(("a", "1"), ("b", "2"), ("c", "3")))
-    assert [ex.target for ex in retriever.retrieve_for_pool_index(0, k=2)] == ["2", "3"]
-    assert [ex.target for ex in retriever.retrieve_for_pool_index(1, k=2)] == ["1", "3"]
+def test_generic_leave_one_out_drops_its_own_position_and_still_returns_k():
+    retriever = _fitted(_RankedStubRetriever(), ["a", "b", "c"])
+    assert retriever.rank_excluding("a", 0, k=2) == [1, 2]
+    assert retriever.rank_excluding("b", 1, k=2) == [0, 2]
 
 
-def test_generic_leave_one_out_returns_fewer_than_k_when_the_pool_is_too_small():
-    retriever = _fitted(_RankedStubRetriever(), _examples(("a", "1"), ("b", "2")))
-    assert [ex.target for ex in retriever.retrieve_for_pool_index(0, k=5)] == ["2"]
+def test_generic_leave_one_out_returns_fewer_than_k_when_the_corpus_is_too_small():
+    retriever = _fitted(_RankedStubRetriever(), ["a", "b"])
+    assert retriever.rank_excluding("a", 0, k=5) == [1]
 
 
 def test_embedding_retriever_pickles_without_the_model_but_keeps_the_embeddings(tmp_path):
     vectors = {"cat": [1.0, 0.0], "dog": [0.0, 1.0], "kitten": [0.9, 0.1]}
-    retriever = _fitted(
-        EmbeddingExampleRetriever(model=_StubEmbeddingModel(vectors)), _examples(("cat", "chat"), ("dog", "chien"))
-    )
+    retriever = _fitted(EmbeddingExampleRetriever(model=_StubEmbeddingModel(vectors)), ["cat", "dog"])
     retriever.save(tmp_path)
 
     loaded = ExampleRetriever.load(tmp_path)
     assert loaded is not None
-    assert loaded.examples == retriever.examples
+    assert loaded.source_count == 2
     assert loaded._model is None
     # A query still needs the model, but ranking against the cached embeddings does not.
     loaded._model = _StubEmbeddingModel(vectors)
-    assert [ex.target for ex in loaded.retrieve("kitten", k=1)] == ["chat"]
+    assert loaded.rank("kitten", k=1) == [0]
 
 
 def test_retriever_meta_records_the_method_and_model_name(tmp_path):
     retriever = EmbeddingExampleRetriever("some/model", model=_StubEmbeddingModel({"a": [1.0]}))
-    _fitted(retriever, _examples(("a", "1"))).save(tmp_path)
+    _fitted(retriever, ["a"]).save(tmp_path)
     meta = json.loads((tmp_path / "retrieval_meta.json").read_text(encoding="utf-8"))
-    assert meta == {"method": "embedding", "model_name": "some/model", "num_examples": 1}
+    assert meta == {"method": "embedding", "model_name": "some/model", "num_sources": 1}
 
 
 def test_example_pool_prefers_the_first_candidate_corpus(tmp_path):
@@ -376,18 +363,18 @@ def test_tokenize_for_retrieval_yields_nothing_for_punctuation_only_text():
 
 def test_tfidf_retriever_handles_a_corpus_with_no_word_tokens():
     # TfidfVectorizer rejects an empty vocabulary outright, where bm25 returns nothing.
-    retriever = _fitted(TfidfExampleRetriever(), _examples(("!!!", "1"), ("...", "2")))
-    assert retriever.retrieve("anything", k=1) == []
-    assert retriever.retrieve_for_pool_index(0, k=1) == []
+    retriever = _fitted(TfidfExampleRetriever(), ["!!!", "..."])
+    assert retriever.rank("anything", k=1) == []
+    assert retriever.rank_excluding("!!!", 0, k=1) == []
 
 
-def test_tfidf_retriever_ignores_sources_with_no_word_tokens(tmp_path):
-    retriever = _fitted(TfidfExampleRetriever(), _examples(("!!!", "1"), ("let there be light", "2")))
-    assert [ex.target for ex in retriever.retrieve("light", k=1)] == ["2"]
+def test_tfidf_retriever_ignores_sources_with_no_word_tokens():
+    retriever = _fitted(TfidfExampleRetriever(), ["!!!", "let there be light"])
+    assert retriever.rank("light", k=1) == [1]
 
 
 def test_tfidf_and_bm25_tokenize_identically(tmp_path):
     # Switching selection method should change the ranking, not what counts as a word.
     text = "Don't stop, Jesus-like 12,345"
-    vectorizer = _fitted(TfidfExampleRetriever(), _examples((text, "1")))._vectorizer
+    vectorizer = _fitted(TfidfExampleRetriever(), [text])._vectorizer
     assert vectorizer.build_analyzer()(text) == _tokenize(text)

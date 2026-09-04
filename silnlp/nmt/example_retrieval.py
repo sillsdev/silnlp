@@ -63,39 +63,36 @@ def _top_k_indices(scores: np.ndarray, k: int, exclude: Optional[int] = None) ->
 
 
 class ExampleRetriever(ABC):
-    """A fitted index over the source side of an example pool."""
+    """Ranks source texts by position; ExamplePool owns the examples they came from."""
 
     method: str = ""
 
     def __init__(self) -> None:
-        self._examples: List[Example] = []
-
-    def __len__(self) -> int:
-        return len(self._examples)
-
-    @property
-    def examples(self) -> List[Example]:
-        return self._examples
+        self._source_count = 0
 
     @property
     def model_name(self) -> Optional[str]:
         return None
 
-    def fit(self, examples: Sequence[Example]) -> None:
-        self._examples = list(examples)
-        self._fit_index([example.source for example in self._examples])
+    @property
+    def source_count(self) -> int:
+        return self._source_count
 
-    def retrieve(self, query: str, k: int) -> List[Example]:
-        # Used for inference, where the text is not drawn from the same pool as examples
-        if k <= 0 or len(self._examples) == 0:
-            return []
-        return [self._examples[i] for i in self._top_indices_for_query(query, k)]
+    def fit(self, sources: Sequence[str]) -> None:
+        self._source_count = len(sources)
+        self._fit_index(list(sources))
 
-    def retrieve_for_pool_index(self, index: int, k: int) -> List[Example]:
-        # Used for training, to exclude the example being translated from the retrieved examples
-        if k <= 0 or len(self._examples) == 0:
+    def rank(self, query: str, k: int) -> List[int]:
+        """Positions of the k best-matching sources, most relevant first."""
+        if k <= 0 or self._source_count == 0:
             return []
-        return [self._examples[i] for i in self._top_indices_for_pool_index(index, k)]
+        return self._top_indices_for_query(query, k)
+
+    def rank_excluding(self, source: str, index: int, k: int) -> List[int]:
+        """Ranks `source`, which is the entry at `index`, against every entry but itself."""
+        if k <= 0 or self._source_count == 0:
+            return []
+        return self._top_indices_excluding(source, index, k)
 
     @abstractmethod
     def _fit_index(self, sources: List[str]) -> None: ...
@@ -103,16 +100,15 @@ class ExampleRetriever(ABC):
     @abstractmethod
     def _top_indices_for_query(self, query: str, k: int) -> List[int]: ...
 
-    def _top_indices_for_pool_index(self, index: int, k: int) -> List[int]:
-        # Asks for k + 1 so that dropping the pool entry itself still leaves k results.
-        indices = self._top_indices_for_query(self._examples[index].source, k + 1)
-        return [i for i in indices if i != index][:k]
+    def _top_indices_excluding(self, source: str, index: int, k: int) -> List[int]:
+        # Asks for k + 1 so that dropping the entry itself still leaves k results.
+        return [i for i in self._top_indices_for_query(source, k + 1) if i != index][:k]
 
     def save(self, directory: Path) -> None:
         directory.mkdir(parents=True, exist_ok=True)
         with (directory / RETRIEVER_FILENAME).open("wb") as file:
             pickle.dump(self, file)
-        meta = {"method": self.method, "model_name": self.model_name, "num_examples": len(self._examples)}
+        meta = {"method": self.method, "model_name": self.model_name, "num_sources": self._source_count}
         with (directory / RETRIEVER_META_FILENAME).open("w", encoding="utf-8") as file:
             json.dump(meta, file, indent=2)
 
@@ -177,7 +173,7 @@ class TfidfExampleRetriever(LexicalExampleRetriever):
             return []
         return _top_k_indices(self._scores_for_vector(self._vectorizer.transform([query])), k)
 
-    def _top_indices_for_pool_index(self, index: int, k: int) -> List[int]:
+    def _top_indices_excluding(self, source: str, index: int, k: int) -> List[int]:
         if self._matrix is None:
             return []
         return _top_k_indices(self._scores_for_vector(self._matrix[index]), k, exclude=index)
@@ -240,7 +236,7 @@ class EmbeddingExampleRetriever(ExampleRetriever):
             return []
         return _top_k_indices(self._embeddings @ self._encode([query])[0], k)
 
-    def _top_indices_for_pool_index(self, index: int, k: int) -> List[int]:
+    def _top_indices_excluding(self, source: str, index: int, k: int) -> List[int]:
         return _top_k_indices(self._embeddings @ self._embeddings[index], k, exclude=index)
 
     def __getstate__(self) -> dict:
@@ -249,7 +245,7 @@ class EmbeddingExampleRetriever(ExampleRetriever):
 
 
 def create_example_retriever(method: str, model_name: Optional[str] = None) -> ExampleRetriever:
-    """Create an unfitted retriever; the caller supplies the pool with `fit`."""
+    """Creates it unfitted; ExamplePool fits it with its own sources."""
     normalized = method.lower()
     if normalized == TFIDF_METHOD:
         return TfidfExampleRetriever()
@@ -370,14 +366,15 @@ class ExamplePool:
             # Every example fits, so keep them in corpus order and never build an index.
             return [ex for i, ex in enumerate(self.examples) if i != pool_index]
         retriever = self.get_retriever()
-        ranked = (
-            retriever.retrieve_for_pool_index(pool_index, k) if pool_index is not None else retriever.retrieve(query, k)
-        )
-        return list(reversed(ranked))
+        if pool_index is None:
+            ranked = retriever.rank(query, k)
+        else:
+            ranked = retriever.rank_excluding(self.examples[pool_index].source, pool_index, k)
+        return [self.examples[i] for i in reversed(ranked)]
 
     def get_retriever(self) -> ExampleRetriever:
         if not self._fitted:
-            self._retriever.fit(self.examples)
+            self._retriever.fit([example.source for example in self.examples])
             self._fitted = True
         return self._retriever
 
@@ -396,7 +393,13 @@ class ExamplePool:
                 self._retriever.method,
             )
             return False
+        if saved.source_count != len(self):
+            LOGGER.info(
+                "The saved retrieval index covers %d examples but the corpus has %d; rebuilding it.",
+                saved.source_count,
+                len(self),
+            )
+            return False
         self._retriever = saved
-        self._examples = saved.examples
         self._fitted = True
         return True
