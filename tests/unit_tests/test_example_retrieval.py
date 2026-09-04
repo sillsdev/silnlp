@@ -16,7 +16,6 @@ from silnlp.nmt.example_retrieval import (
     XmlExampleFormatter,
     create_example_formatter,
     create_example_retriever,
-    tokenize_for_retrieval,
 )
 
 
@@ -108,17 +107,11 @@ def test_create_example_retriever_embedding_defaults_the_model_name():
     assert create_example_retriever("embedding").model_name == DEFAULT_EMBEDDING_MODEL
 
 
-def test_create_example_retriever_embedding_without_dependency_raises_clear_error():
-    # sentence-transformers is optional; missing it should fail with actionable guidance.
-    try:
-        import sentence_transformers  # noqa: F401
-
-        return  # dependency is installed in this environment; nothing to assert here
-    except ImportError:
-        pass
-
-    with pytest.raises(ImportError, match="poetry install -E llm"):
-        create_example_retriever("embedding").fit(_examples(("cat", "chat")))
+def test_create_example_retriever_defers_the_embedding_dependency_until_it_is_fitted():
+    # sentence-transformers ships in the optional 'llm' extra, so constructing must not import it.
+    retriever = create_example_retriever("embedding")
+    pytest.importorskip("sentence_transformers")
+    retriever.fit(_examples(("cat", "chat")))
 
 
 def test_create_example_retriever_rejects_unknown_method():
@@ -194,12 +187,26 @@ def test_create_example_formatter_bare_text_string_matches_explicit_default():
     assert from_shorthand == explicit_default
 
 
-def _write_pool(tmp_path, sources, targets, method="tfidf"):
+def _tokenize(text):
+    return TfidfExampleRetriever()._tokenize_for_retrieval(text)
+
+
+class _NeverFitRetriever(ExampleRetriever):
+    method = "never-fit"
+
+    def _fit_index(self, sources):
+        raise AssertionError("the pool built an index it did not need")
+
+    def _top_indices_for_query(self, query, k):
+        raise AssertionError("the pool queried an index it did not need")
+
+
+def _write_pool(tmp_path, sources, targets, retriever=None):
     src_path = tmp_path / "train.src.txt"
     trg_path = tmp_path / "train.trg.txt"
     src_path.write_text("".join(line + "\n" for line in sources), encoding="utf-8")
     trg_path.write_text("".join(line + "\n" for line in targets), encoding="utf-8")
-    return ExamplePool([(src_path, trg_path)], method)
+    return ExamplePool([(src_path, trg_path)], retriever if retriever is not None else create_example_retriever("tfidf"))
 
 
 def test_example_pool_selects_the_most_relevant_example_last(tmp_path):
@@ -212,7 +219,7 @@ def test_example_pool_selects_the_most_relevant_example_last(tmp_path):
 
 
 def test_example_pool_returns_nothing_and_touches_no_files_when_k_is_zero(tmp_path):
-    pool = ExamplePool([(tmp_path / "missing.src.txt", tmp_path / "missing.trg.txt")], "tfidf")
+    pool = ExamplePool([(tmp_path / "missing.src.txt", tmp_path / "missing.trg.txt")], create_example_retriever("tfidf"))
     assert pool.select("hello", k=0) == []
 
 
@@ -233,13 +240,12 @@ def test_example_pool_whole_pool_path_still_leaves_out_the_pool_entry(tmp_path):
 
 
 def test_example_pool_whole_pool_path_builds_no_index(tmp_path):
-    pool = _write_pool(tmp_path, ["one", "two"], ["1", "2"], method="bogus")
-    # An unknown method would raise if an index were built, so this also pins the shortcut.
+    pool = _write_pool(tmp_path, ["one", "two"], ["1", "2"], retriever=_NeverFitRetriever())
     assert len(pool.select("one", k=99)) == 2
 
 
 def test_example_pool_raises_a_clear_error_when_the_corpus_is_missing(tmp_path):
-    pool = ExamplePool([(tmp_path / "missing.src.txt", tmp_path / "missing.trg.txt")], "tfidf")
+    pool = ExamplePool([(tmp_path / "missing.src.txt", tmp_path / "missing.trg.txt")], create_example_retriever("tfidf"))
     with pytest.raises(RuntimeError, match="preprocessing"):
         pool.select("hello", k=1)
 
@@ -254,8 +260,9 @@ def test_example_pool_saves_and_reloads_its_index(tmp_path):
 
 
 def test_example_pool_rejects_a_saved_index_built_with_another_method(tmp_path):
-    _write_pool(tmp_path, ["a", "b"], ["1", "2"], method="tfidf").save_index(tmp_path)
-    assert not _write_pool(tmp_path, ["a", "b"], ["1", "2"], method="embedding").load_index(tmp_path)
+    _write_pool(tmp_path, ["a", "b"], ["1", "2"]).save_index(tmp_path)
+    embedding = _write_pool(tmp_path, ["a", "b"], ["1", "2"], retriever=create_example_retriever("embedding"))
+    assert not embedding.load_index(tmp_path)
 
 
 def test_example_pool_reports_a_missing_index(tmp_path):
@@ -318,7 +325,7 @@ def test_example_pool_prefers_the_first_candidate_corpus(tmp_path):
             (tmp_path / "preferred.src.txt", tmp_path / "preferred.trg.txt"),
             (tmp_path / "fallback.src.txt", tmp_path / "fallback.trg.txt"),
         ],
-        "tfidf",
+        create_example_retriever("tfidf"),
     )
     assert [ex.source for ex in pool.examples] == ["preferred"]
 
@@ -331,14 +338,15 @@ def test_example_pool_falls_back_to_a_later_candidate_corpus(tmp_path):
             (tmp_path / "missing.src.txt", tmp_path / "missing.trg.txt"),
             (tmp_path / "fallback.src.txt", tmp_path / "fallback.trg.txt"),
         ],
-        "tfidf",
+        create_example_retriever("tfidf"),
     )
     assert [ex.source for ex in pool.examples] == ["fallback"]
 
 
 def test_example_pool_names_every_candidate_when_none_are_present(tmp_path):
     pool = ExamplePool(
-        [(tmp_path / "a.src.txt", tmp_path / "a.trg.txt"), (tmp_path / "b.src.txt", tmp_path / "b.trg.txt")], "tfidf"
+        [(tmp_path / "a.src.txt", tmp_path / "a.trg.txt"), (tmp_path / "b.src.txt", tmp_path / "b.trg.txt")],
+        create_example_retriever("tfidf"),
     )
     with pytest.raises(RuntimeError, match="a.src.txt and .*a.trg.txt or .*b.src.txt and .*b.trg.txt"):
         pool.examples
@@ -346,24 +354,24 @@ def test_example_pool_names_every_candidate_when_none_are_present(tmp_path):
 
 def test_example_pool_ensure_available_reads_the_corpus_up_front(tmp_path):
     with pytest.raises(RuntimeError, match="Run preprocessing"):
-        ExamplePool([(tmp_path / "a.src.txt", tmp_path / "a.trg.txt")], "tfidf").ensure_available()
+        ExamplePool([(tmp_path / "a.src.txt", tmp_path / "a.trg.txt")], create_example_retriever("tfidf")).ensure_available()
 
 
 def test_tokenize_for_retrieval_drops_punctuation_only_tokens():
-    assert tokenize_for_retrieval("Let there be LIGHT!") == ["let", "there", "be", "light"]
-    assert tokenize_for_retrieval('"Come," he said -- and went...') == ["come", "he", "said", "and", "went"]
+    assert _tokenize("Let there be LIGHT!") == ["let", "there", "be", "light"]
+    assert _tokenize('"Come," he said -- and went...') == ["come", "he", "said", "and", "went"]
 
 
 def test_tokenize_for_retrieval_keeps_words_that_contain_punctuation():
-    assert tokenize_for_retrieval("Don't stop, Jesus-like 12,345.") == ["don't", "stop", "jesus-like", "12,345"]
+    assert _tokenize("Don't stop, Jesus-like 12,345.") == ["don't", "stop", "jesus-like", "12,345"]
 
 
 def test_tokenize_for_retrieval_keeps_non_latin_words():
-    assert tokenize_for_retrieval("Se dijo: \u00abvengan\u00bb \u0663\u0664") == ["se", "dijo", "vengan", "\u0663\u0664"]
+    assert _tokenize("Se dijo: \u00abvengan\u00bb \u0663\u0664") == ["se", "dijo", "vengan", "\u0663\u0664"]
 
 
 def test_tokenize_for_retrieval_yields_nothing_for_punctuation_only_text():
-    assert tokenize_for_retrieval("!!! ???") == []
+    assert _tokenize("!!! ???") == []
 
 
 def test_tfidf_retriever_handles_a_corpus_with_no_word_tokens():
@@ -382,4 +390,4 @@ def test_tfidf_and_bm25_tokenize_identically(tmp_path):
     # Switching selection method should change the ranking, not what counts as a word.
     text = "Don't stop, Jesus-like 12,345"
     vectorizer = _fitted(TfidfExampleRetriever(), _examples((text, "1")))._vectorizer
-    assert vectorizer.build_analyzer()(text) == tokenize_for_retrieval(text)
+    assert vectorizer.build_analyzer()(text) == _tokenize(text)

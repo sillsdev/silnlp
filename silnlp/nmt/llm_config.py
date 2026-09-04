@@ -19,6 +19,7 @@ from .example_retrieval import (
     ExampleFormatter,
     ExamplePool,
     create_example_formatter,
+    create_example_retriever,
 )
 from .tokenizer import NullTokenizer, Tokenizer
 
@@ -281,7 +282,7 @@ class LLMConfig(Config):
         if num_examples <= 0:
             return None
         method, model_name = parse_example_selection(prompt)
-        return ExamplePool(self._example_corpus_paths(), method, model_name)
+        return ExamplePool(self._example_corpus_paths(), create_example_retriever(method, model_name))
 
     def _example_corpus_paths(self) -> List[Tuple[Path, Path]]:
         return [(self.exp_dir / self.train_src_filename(), self.exp_dir / self.train_trg_filename())]

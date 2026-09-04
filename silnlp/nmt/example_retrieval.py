@@ -7,11 +7,12 @@ import pickle
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Optional, Protocol, Sequence, Tuple, Union
+from typing import Any, Iterable, List, Optional, Protocol, Sequence, Tuple, Union
 from xml.sax.saxutils import escape as xml_escape
 
 import numpy as np
 from machine.tokenization import LatinWordTokenizer
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 from .corpora import read_parallel_text_pairs
 
@@ -27,17 +28,8 @@ DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-
 RETRIEVER_FILENAME = "retrieval.pkl"
 RETRIEVER_META_FILENAME = "retrieval_meta.json"
 
-# Shared by tfidf and bm25 so that switching between them doesn't also change tokenization.
-# Its per-call state is local, so one instance is safe to share across threads.
-_WORD_TOKENIZER = LatinWordTokenizer()
-
 # Certain LLMs like Translate Gemma do not support arbitrary prompts
 FIXED_PROMPT_MODEL_PREFIXES = ("google/translate-gemma", "google/translategemma")
-
-
-def tokenize_for_retrieval(text: str) -> List[str]:
-    # Punctuation tokens carry no retrieval signal and skew BM25, which scores against length.
-    return [token for token in _WORD_TOKENIZER.tokenize(text.lower()) if any(c.isalnum() for c in token)]
 
 
 @dataclass(frozen=True)
@@ -94,15 +86,13 @@ class ExampleRetriever(ABC):
         self._fit_index([example.source for example in self._examples])
 
     def retrieve(self, query: str, k: int) -> List[Example]:
-        """Top-k most similar pool examples to an arbitrary query string not in the pool
-        (used at eval/test/translate time)."""
+        # Used for inference, where the text is not drawn from the same pool as examples
         if k <= 0 or len(self._examples) == 0:
             return []
         return [self._examples[i] for i in self._top_indices_for_query(query, k)]
 
     def retrieve_for_pool_index(self, index: int, k: int) -> List[Example]:
-        """Top-k most similar pool examples to the pool entry at `index`, excluding itself
-        (leave-one-out; used during training, where the pool contains the row being translated)."""
+        # Used for training, to exclude the example being translated from the retrieved examples
         if k <= 0 or len(self._examples) == 0:
             return []
         return [self._examples[i] for i in self._top_indices_for_pool_index(index, k)]
@@ -128,12 +118,7 @@ class ExampleRetriever(ABC):
 
     @staticmethod
     def load(directory: Path) -> Optional["ExampleRetriever"]:
-        """Load a previously saved index, or return None if it is missing or unreadable.
-
-        A None return is not an error: the caller rebuilds. The index often will not be there,
-        since the ``run`` directory is deleted unless ``--save-checkpoints`` is set, and it may
-        not unpickle across a scikit-learn upgrade.
-        """
+        """Load a previously saved index, or return None if it is missing or unreadable."""
         path = directory / RETRIEVER_FILENAME
         try:
             with path.open("rb") as file:
@@ -149,7 +134,23 @@ class ExampleRetriever(ABC):
         return retriever
 
 
-class TfidfExampleRetriever(ExampleRetriever):
+class LexicalExampleRetriever(ExampleRetriever):
+    """Shares one tokenizer, so switching between tfidf and bm25 changes the ranking rather than
+    what counts as a word."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._tokenizer = LatinWordTokenizer()
+
+    def _filter_tokens_for_retrieval(self, tokens: Iterable[str]) -> List[str]:
+        return [token for token in tokens if any(c.isalnum() for c in token)]
+
+    def _tokenize_for_retrieval(self, text: str) -> List[str]:
+        tokens = self._tokenizer.tokenize(text.lower())
+        return self._filter_tokens_for_retrieval(tokens)
+
+
+class TfidfExampleRetriever(LexicalExampleRetriever):
     method = TFIDF_METHOD
 
     def __init__(self) -> None:
@@ -158,16 +159,14 @@ class TfidfExampleRetriever(ExampleRetriever):
         self._matrix: Optional[Any] = None
 
     def _fit_index(self, sources: List[str]) -> None:
-        from sklearn.feature_extraction.text import TfidfVectorizer
-
         # TfidfVectorizer rejects a corpus with nothing to put in its vocabulary.
-        if not any(tokenize_for_retrieval(source) for source in sources):
+        if not any(self._tokenize_for_retrieval(source) for source in sources):
             self._vectorizer = None
             self._matrix = None
             return
-        # token_pattern=None keeps scikit-learn from warning that it is unused.
-        self._vectorizer = TfidfVectorizer(lowercase=False, tokenizer=tokenize_for_retrieval, token_pattern=None)
-        # Rows are L2-normalized by default, so a dot product against the matrix is cosine similarity.
+        self._vectorizer = TfidfVectorizer(
+            lowercase=False, tokenizer=self._tokenize_for_retrieval, token_pattern=None
+        )
         self._matrix = self._vectorizer.fit_transform(sources)
 
     def _scores_for_vector(self, vector) -> np.ndarray:
@@ -184,7 +183,7 @@ class TfidfExampleRetriever(ExampleRetriever):
         return _top_k_indices(self._scores_for_vector(self._matrix[index]), k, exclude=index)
 
 
-class BM25ExampleRetriever(ExampleRetriever):
+class BM25ExampleRetriever(LexicalExampleRetriever):
     method = BM25_METHOD
 
     def __init__(self) -> None:
@@ -192,18 +191,19 @@ class BM25ExampleRetriever(ExampleRetriever):
         self._index: Optional[Any] = None
 
     def _fit_index(self, sources: List[str]) -> None:
-        bm25_okapi = _import_bm25()
-        tokenized = [tokenize_for_retrieval(source) for source in sources]
+        from rank_bm25 import BM25Okapi
+
+        tokenized = [self._tokenize_for_retrieval(source) for source in sources]
         # BM25Okapi rejects an empty corpus and divides by zero on all-empty documents.
         if sum(len(tokens) for tokens in tokenized) == 0:
             self._index = None
             return
-        self._index = bm25_okapi(tokenized)
+        self._index = BM25Okapi(tokenized)
 
     def _top_indices_for_query(self, query: str, k: int) -> List[int]:
         if self._index is None:
             return []
-        return _top_k_indices(self._index.get_scores(tokenize_for_retrieval(query)), k)
+        return _top_k_indices(self._index.get_scores(self._tokenize_for_retrieval(query)), k)
 
 
 class EmbeddingExampleRetriever(ExampleRetriever):
@@ -222,7 +222,9 @@ class EmbeddingExampleRetriever(ExampleRetriever):
 
     def _get_model(self) -> _EmbeddingModel:
         if self._model is None:
-            self._model = _load_sentence_transformer(self._model_name)
+            from sentence_transformers import SentenceTransformer
+
+            self._model = SentenceTransformer(self._model_name)
         return self._model
 
     def _encode(self, texts: Sequence[str]) -> np.ndarray:
@@ -244,28 +246,6 @@ class EmbeddingExampleRetriever(ExampleRetriever):
     def __getstate__(self) -> dict:
         # The embeddings are the expensive part worth caching; the model reloads by name.
         return {**self.__dict__, "_model": None}
-
-
-def _import_bm25():
-    try:
-        from rank_bm25 import BM25Okapi
-    except ImportError as e:
-        raise ImportError(
-            f"example_selection.method: {BM25_METHOD} requires the 'rank_bm25' package. "
-            "Install it with `poetry install -E llm`."
-        ) from e
-    return BM25Okapi
-
-
-def _load_sentence_transformer(model_name: str) -> _EmbeddingModel:
-    try:
-        from sentence_transformers import SentenceTransformer
-    except ImportError as e:
-        raise ImportError(
-            f"example_selection.method: {EMBEDDING_METHOD} requires the 'sentence-transformers' "
-            "package. Install it with `poetry install -E llm`."
-        ) from e
-    return SentenceTransformer(model_name)
 
 
 def create_example_retriever(method: str, model_name: Optional[str] = None) -> ExampleRetriever:
@@ -308,9 +288,7 @@ class JsonExampleFormatter(ExampleFormatter):
     def format(self, examples: Sequence[Example], src_lang_name: str, trg_lang_name: str) -> str:
         if not examples:
             return ""
-        # Fixed field names (not language-named) so the schema is stable across experiments.
         payload = [{"source": ex.source, "target": ex.target} for ex in examples]
-        # ensure_ascii=False avoids \uXXXX-escaping non-Latin target text.
         return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
 
 
@@ -340,21 +318,18 @@ def create_example_formatter(format_params: Union[str, dict]) -> ExampleFormatte
 class ExamplePool:
     """The parallel corpus that few-shot examples are drawn from, and its retrieval index."""
 
-    def __init__(
-        self, corpus_paths: Sequence[Tuple[Path, Path]], method: str, model_name: Optional[str] = None
-    ) -> None:
+    def __init__(self, corpus_paths: Sequence[Tuple[Path, Path]], retriever: ExampleRetriever) -> None:
         self._corpus_paths = list(corpus_paths)
-        self._method = method
-        self._model_name = model_name
+        self._retriever = retriever
         self._examples: Optional[List[Example]] = None
-        self._retriever: Optional[ExampleRetriever] = None
+        self._fitted = False
 
     def __len__(self) -> int:
         return len(self.examples)
 
     @property
     def method(self) -> str:
-        return self._method
+        return self._retriever.method
 
     @property
     def examples(self) -> List[Example]:
@@ -401,10 +376,9 @@ class ExamplePool:
         return list(reversed(ranked))
 
     def get_retriever(self) -> ExampleRetriever:
-        if self._retriever is None:
-            retriever = create_example_retriever(self._method, self._model_name)
-            retriever.fit(self.examples)
-            self._retriever = retriever
+        if not self._fitted:
+            self._retriever.fit(self.examples)
+            self._fitted = True
         return self._retriever
 
     def save_index(self, directory: Path) -> None:
@@ -412,16 +386,17 @@ class ExamplePool:
 
     def load_index(self, directory: Path) -> bool:
         """Adopt a previously saved index, or report that one has to be built."""
-        retriever = ExampleRetriever.load(directory)
-        if retriever is None:
+        saved = ExampleRetriever.load(directory)
+        if saved is None:
             return False
-        if retriever.method != self._method or retriever.model_name != self._model_name:
+        if saved.method != self._retriever.method or saved.model_name != self._retriever.model_name:
             LOGGER.info(
                 "The saved retrieval index uses '%s' but the config asks for '%s'; rebuilding it.",
-                retriever.method,
-                self._method,
+                saved.method,
+                self._retriever.method,
             )
             return False
-        self._retriever = retriever
-        self._examples = retriever.examples
+        self._retriever = saved
+        self._examples = saved.examples
+        self._fitted = True
         return True
