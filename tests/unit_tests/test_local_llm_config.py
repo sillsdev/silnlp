@@ -133,16 +133,13 @@ def test_data_collator_pad_to_multiple_of():
     assert batch["labels"].tolist() == [[-100, 6, 7, -100]]
 
 
-@dataclass
-class _StubLocalLLMConfig:
-    model: str
-    data: dict
-    _train_prompt_builder: object = None
-    _infer_prompt_builder: object = None
+class _StubLocalLLMConfig(LocalLLMConfig):
+    """Skips Config.__init__, which would need a corpus, and supplies only what a prompt needs."""
 
-    lang_name = LocalLLMConfig.lang_name
-    language = LocalLLMConfig.language
-    build_prompt_messages = LocalLLMConfig.build_prompt_messages
+    def __init__(self, model, data, _train_prompt_builder=None, _infer_prompt_builder=None) -> None:
+        self.root = {"model": model, "data": data}
+        self._train_prompt_builder = _train_prompt_builder
+        self._infer_prompt_builder = _infer_prompt_builder
 
 
 def _stub_config(model="google/gemma-2-2b-it", lang_codes=None, **prompt_overrides):
@@ -368,13 +365,9 @@ def test_build_adapter_config_dora():
     assert peft_config.use_dora is True
 
 
-@dataclass
-class _MethodStub:
-    params: dict
-
-    finetune_method = LocalLLMConfig.finetune_method
-    uses_quantization = LocalLLMConfig.uses_quantization
-    uses_dora = LocalLLMConfig.uses_dora
+class _MethodStub(LocalLLMConfig):
+    def __init__(self, params: dict) -> None:
+        self.root = {"params": params}
 
 
 def test_finetune_method_axes():

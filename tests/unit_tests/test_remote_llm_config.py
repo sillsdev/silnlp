@@ -21,9 +21,8 @@ from silnlp.nmt.remote_llm_config import (
     UsageTotals,
     count_tokens,
     extract_token_logprobs,
+    NumberedReply,
     group_indices_by_size,
-    parse_numbered_response,
-    strip_code_fence,
 )
 
 EN = Language("en", "English")
@@ -52,43 +51,43 @@ def test_an_remote_llm_config_is_not_claimed_by_the_llm_dispatch():
 
 
 def test_parse_numbered_response_reads_one_translation_per_line():
-    assert parse_numbered_response("1. uno\n2. dos\n3. tres", 3) == ["uno", "dos", "tres"]
+    assert NumberedReply.parse("1. uno\n2. dos\n3. tres", 3) == ["uno", "dos", "tres"]
 
 
 @pytest.mark.parametrize("delimiter", [".", ")", ":", "]"])
 def test_parse_numbered_response_accepts_common_delimiters(delimiter: str):
-    assert parse_numbered_response(f"1{delimiter} uno\n2{delimiter} dos", 2) == ["uno", "dos"]
+    assert NumberedReply.parse(f"1{delimiter} uno\n2{delimiter} dos", 2) == ["uno", "dos"]
 
 
 def test_parse_numbered_response_ignores_preamble_and_reorders():
-    assert parse_numbered_response("Certainly! Here you go:\n\n2. dos\n1. uno", 2) == ["uno", "dos"]
+    assert NumberedReply.parse("Certainly! Here you go:\n\n2. dos\n1. uno", 2) == ["uno", "dos"]
 
 
 def test_parse_numbered_response_strips_code_fences():
-    assert parse_numbered_response("```text\n1. uno\n2. dos\n```", 2) == ["uno", "dos"]
+    assert NumberedReply.parse("```text\n1. uno\n2. dos\n```", 2) == ["uno", "dos"]
 
 
 def test_parse_numbered_response_treats_unnumbered_lines_as_continuations():
-    assert parse_numbered_response("1. uno\nand more\n2. dos", 2) == ["uno and more", "dos"]
+    assert NumberedReply.parse("1. uno\nand more\n2. dos", 2) == ["uno and more", "dos"]
 
 
 def test_parse_numbered_response_rejects_a_miscount():
-    assert parse_numbered_response("1. uno\n2. dos", 3) is None
-    assert parse_numbered_response("1. uno\n2. dos\n3. tres", 2) is None
+    assert NumberedReply.parse("1. uno\n2. dos", 3) is None
+    assert NumberedReply.parse("1. uno\n2. dos\n3. tres", 2) is None
 
 
 def test_parse_numbered_response_rejects_gaps_and_duplicates():
-    assert parse_numbered_response("1. uno\n3. tres", 2) is None
-    assert parse_numbered_response("1. uno\n1. otro", 2) is None
+    assert NumberedReply.parse("1. uno\n3. tres", 2) is None
+    assert NumberedReply.parse("1. uno\n1. otro", 2) is None
 
 
 def test_parse_numbered_response_rejects_unnumbered_prose():
-    assert parse_numbered_response("uno dos tres", 3) is None
+    assert NumberedReply.parse("uno dos tres", 3) is None
 
 
 def test_strip_code_fence_leaves_unfenced_text_alone():
-    assert strip_code_fence("plain text") == "plain text"
-    assert strip_code_fence("```\nfenced\n```") == "fenced"
+    assert NumberedReply.strip_code_fence("plain text") == "plain text"
+    assert NumberedReply.strip_code_fence("```\nfenced\n```") == "fenced"
 
 
 # --- batching ---------------------------------------------------------------------------

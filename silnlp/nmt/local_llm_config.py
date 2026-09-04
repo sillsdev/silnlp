@@ -58,7 +58,7 @@ from .config import (
     write_effective_config,
 )
 from .corpora import read_parallel_text_pairs
-from .example_retrieval import FIXED_PROMPT_MODEL_PREFIXES, TFIDF_METHOD
+from .example_retrieval import ExampleRetrieverFactory
 from .llm_config import (
     LLMConfig,
     PromptBuilder,
@@ -71,64 +71,6 @@ from .llm_config import (
 from .seq2seq_config import batch_sentences, find_executable_batch_size
 
 LOGGER = logging.getLogger(__name__)
-
-# Which config sections/keys map onto transformers.TrainingArguments fields. Mirrors
-# TRAINING_ARGS_CONFIG_MAPPING in seq2seq_config.py but without the seq2seq-only
-# generation keys (generation_max_length, generation_num_beams, predict_with_generate).
-TRAINING_ARGS_CONFIG_MAPPING = {
-    "train": {
-        "gradient_accumulation_steps",
-        "gradient_checkpointing",
-        "gradient_checkpointing_kwargs",
-        "log_level",
-        "logging_first_step",
-        "logging_steps",
-        "logging_strategy",
-        "max_steps",
-        "num_train_epochs",
-        "output_dir",
-        "per_device_train_batch_size",
-        "save_steps",
-        "save_strategy",
-        "save_total_limit",
-        "train_sampling_strategy",
-    },
-    "eval": {
-        "eval_accumulation_steps",
-        "eval_delay",
-        "eval_steps",
-        "eval_strategy",
-        "greater_is_better",
-        "load_best_model_at_end",
-        "metric_for_best_model",
-        "per_device_eval_batch_size",
-    },
-    "params": {
-        "adam_beta1",
-        "adam_beta2",
-        "adam_epsilon",
-        "learning_rate",
-        "lr_scheduler_type",
-        "max_grad_norm",
-        "optim",
-        "warmup_steps",
-        "weight_decay",
-    },
-}
-
-# Config keys renamed in transformers 5.0, can remove after users have gotten used to the transition
-RENAMED_CONFIG_KEYS = {
-    "train": {"group_by_length": "train_sampling_strategy"},
-    "params": {"warmup_ratio": "warmup_steps"},
-}
-
-LABEL_PAD_TOKEN_ID = -100
-
-FULL_FINETUNE_METHOD = "full"
-ADAPTER_METHODS = ("lora", "qlora", "dora", "qdora")
-QUANTIZED_METHODS = ("qlora", "qdora")
-DORA_METHODS = ("dora", "qdora")
-VALID_FINETUNE_METHODS = (FULL_FINETUNE_METHOD,) + ADAPTER_METHODS
 
 
 def _count_nonblank_lines(path: Path) -> int:
@@ -295,16 +237,30 @@ class TranslateGemmaPromptMessages(ChatPromptMessages):
         return text
 
 
-PROMPT_TYPE_FIXED = "fixed"
-PROMPT_TYPE_ROTATING = "rotating"
-VALID_PROMPT_TYPES = (PROMPT_TYPE_FIXED, PROMPT_TYPE_ROTATING)
-
-# Only meaningful for a fixed prompt; a rotating one takes them from its template file.
-FIXED_ONLY_PROMPT_KEYS = ("system_message", "instruction_template", "example_format")
-
-
 class LocalLLMConfig(LLMConfig):
     PROMPT_BUILDER_CLASS = ChatPromptBuilder
+
+    # Config keys renamed in transformers 5.0, can remove after users have gotten used to the transition
+    _RENAMED_CONFIG_KEYS = {
+        "train": {"group_by_length": "train_sampling_strategy"},
+        "params": {"warmup_ratio": "warmup_steps"},
+    }
+
+    _FULL_FINETUNE_METHOD = "full"
+    _ADAPTER_METHODS = ("lora", "qlora", "dora", "qdora")
+    _QUANTIZED_METHODS = ("qlora", "qdora")
+    _DORA_METHODS = ("dora", "qdora")
+    _VALID_FINETUNE_METHODS = (_FULL_FINETUNE_METHOD,) + _ADAPTER_METHODS
+
+    _PROMPT_TYPE_FIXED = "fixed"
+    _PROMPT_TYPE_ROTATING = "rotating"
+    _VALID_PROMPT_TYPES = (_PROMPT_TYPE_FIXED, _PROMPT_TYPE_ROTATING)
+
+    # Only meaningful for a fixed prompt; a rotating one takes them from its template file.
+    _FIXED_ONLY_PROMPT_KEYS = ("system_message", "instruction_template", "example_format")
+
+    # These build the prompt from their own chat template, so a configured one cannot be used.
+    _FIXED_PROMPT_MODEL_PREFIXES = ("google/translate-gemma", "google/translategemma")
 
     def __init__(self, exp_dir: Path, config: dict, environment: SilNlpEnv) -> None:
         self._normalize_deprecated_keys(config)
@@ -334,12 +290,12 @@ class LocalLLMConfig(LLMConfig):
                     "log_level": "info",
                     # None means "unset"; resolve_prompt_defaults() fills these in.
                     "prompt": {
-                        "type": PROMPT_TYPE_FIXED,
+                        "type": self._PROMPT_TYPE_FIXED,
                         "system_message": None,
                         "instruction_template": None,
                         "example_format": None,
                         "num_examples": 0,
-                        "example_selection": {"method": TFIDF_METHOD, "model": None},
+                        "example_selection": {"method": ExampleRetrieverFactory.DEFAULT_METHOD, "model": None},
                         "template_file": None,
                     },
                     "instruction_data": {
@@ -405,18 +361,18 @@ class LocalLLMConfig(LLMConfig):
     def _create_train_prompt_builder(self) -> PromptBuilder:
         prompt: dict = self.train["prompt"]
         prompt_type = str(prompt["type"]).lower()
-        if prompt_type not in VALID_PROMPT_TYPES:
+        if prompt_type not in self._VALID_PROMPT_TYPES:
             raise ValueError(
-                f"Unknown train.prompt.type '{prompt['type']}'. Valid options: {', '.join(VALID_PROMPT_TYPES)}."
+                f"Unknown train.prompt.type '{prompt['type']}'. Valid options: {', '.join(self._VALID_PROMPT_TYPES)}."
             )
 
-        if prompt_type == PROMPT_TYPE_FIXED:
+        if prompt_type == self._PROMPT_TYPE_FIXED:
             if prompt["template_file"] is not None:
                 raise ValueError('train.prompt.template_file is only valid with train.prompt.type: "rotating".')
             resolve_prompt_defaults(prompt, type(self))
             return self._create_prompt_builder(prompt, "train.prompt")
 
-        set_keys = [key for key in FIXED_ONLY_PROMPT_KEYS if prompt[key] is not None]
+        set_keys = [key for key in self._FIXED_ONLY_PROMPT_KEYS if prompt[key] is not None]
         if set_keys:
             raise ValueError(
                 f"train.prompt.{', train.prompt.'.join(set_keys)} "
@@ -442,8 +398,12 @@ class LocalLLMConfig(LLMConfig):
                 return candidate
         return Path(template_file)
 
+    @property
+    def has_fixed_prompt(self) -> bool:
+        return self.model.lower().startswith(self._FIXED_PROMPT_MODEL_PREFIXES)
+
     def _reject_examples_for_translate_gemma(self, num_examples: int, name: str) -> None:
-        if num_examples > 0 and self.model.lower().startswith(FIXED_PROMPT_MODEL_PREFIXES):
+        if num_examples > 0 and self.has_fixed_prompt:
             raise RuntimeError(
                 "TranslateGemma models do not support few-shot examples in the prompt. "
                 f"Set {name}.num_examples to 0 or use a different model."
@@ -457,22 +417,26 @@ class LocalLLMConfig(LLMConfig):
         if isinstance(params, dict) and "lora" in params and "adapter" not in params:
             LOGGER.warning("params.lora is deprecated; rename it to params.adapter.")
             params["adapter"] = params.pop("lora")
-        warn_about_renamed_keys(config, RENAMED_CONFIG_KEYS)
+        warn_about_renamed_keys(config, LocalLLMConfig._RENAMED_CONFIG_KEYS)
 
     @property
     def finetune_method(self) -> str:
         method = self.params["finetune_method"].lower()
-        if method not in VALID_FINETUNE_METHODS:
-            raise ValueError(f"Unknown finetune_method '{method}'. Valid options: {', '.join(VALID_FINETUNE_METHODS)}.")
+        if method not in self._VALID_FINETUNE_METHODS:
+            raise ValueError(f"Unknown finetune_method '{method}'. Valid options: {', '.join(self._VALID_FINETUNE_METHODS)}.")
         return method
 
     @property
+    def uses_full_finetune(self) -> bool:
+        return self.finetune_method == self._FULL_FINETUNE_METHOD
+
+    @property
     def uses_quantization(self) -> bool:
-        return self.finetune_method in QUANTIZED_METHODS
+        return self.finetune_method in self._QUANTIZED_METHODS
 
     @property
     def uses_dora(self) -> bool:
-        return self.finetune_method in DORA_METHODS
+        return self.finetune_method in self._DORA_METHODS
 
     @property
     def adapter(self) -> dict:
@@ -576,7 +540,7 @@ class LocalLLMConfig(LLMConfig):
         rotation_index: Optional[int] = None,
         training: bool = False,
     ) -> ChatPromptMessages:
-        if self.model.lower().startswith(FIXED_PROMPT_MODEL_PREFIXES):
+        if self.has_fixed_prompt:
             return TranslateGemmaPromptMessages(
                 source_language=src_lang, target_language=trg_lang, text=source, target=target
             )
@@ -675,8 +639,10 @@ class FileCausalLMProviderFactory(CausalLMProviderFactory):
 
 @dataclass
 class DataCollatorForCausalLM:
+    IGNORED_LABEL_ID = -100
+
     tokenizer: PreTrainedTokenizerBase
-    label_pad_token_id: int = LABEL_PAD_TOKEN_ID
+    label_pad_token_id: int = IGNORED_LABEL_ID
     pad_to_multiple_of: Optional[int] = None
 
     def __call__(self, features: List[Dict[str, List[int]]]) -> Dict[str, torch.Tensor]:
@@ -795,6 +761,49 @@ def _render_turns(
 
 
 class LocalLLMModel(NMTModel):
+    # Mirrors TRAINING_ARGS_CONFIG_MAPPING in seq2seq_config.py but without the seq2seq-only
+    # generation keys (generation_max_length, generation_num_beams, predict_with_generate).
+    _TRAINING_ARGS_CONFIG_MAPPING = {
+        "train": {
+            "gradient_accumulation_steps",
+            "gradient_checkpointing",
+            "gradient_checkpointing_kwargs",
+            "log_level",
+            "logging_first_step",
+            "logging_steps",
+            "logging_strategy",
+            "max_steps",
+            "num_train_epochs",
+            "output_dir",
+            "per_device_train_batch_size",
+            "save_steps",
+            "save_strategy",
+            "save_total_limit",
+            "train_sampling_strategy",
+        },
+        "eval": {
+            "eval_accumulation_steps",
+            "eval_delay",
+            "eval_steps",
+            "eval_strategy",
+            "greater_is_better",
+            "load_best_model_at_end",
+            "metric_for_best_model",
+            "per_device_eval_batch_size",
+        },
+        "params": {
+            "adam_beta1",
+            "adam_beta2",
+            "adam_epsilon",
+            "learning_rate",
+            "lr_scheduler_type",
+            "max_grad_norm",
+            "optim",
+            "warmup_steps",
+            "weight_decay",
+        },
+    }
+
     def __init__(
         self,
         config: LocalLLMConfig,
@@ -830,7 +839,7 @@ class LocalLLMModel(NMTModel):
         def encode_completion(prompt_ids: List[int], target: str) -> dict:
             completion_ids = tokenizer(target, add_special_tokens=False)["input_ids"] + [eos_token_id]
             input_ids = (prompt_ids + completion_ids)[:max_seq_length]
-            labels = ([LABEL_PAD_TOKEN_ID] * len(prompt_ids) + completion_ids)[:max_seq_length]
+            labels = ([DataCollatorForCausalLM.IGNORED_LABEL_ID] * len(prompt_ids) + completion_ids)[:max_seq_length]
             return {"input_ids": input_ids, "labels": labels, "attention_mask": [1] * len(input_ids)}
 
         def encode(example: dict, idx: int) -> dict:
@@ -917,7 +926,7 @@ class LocalLLMModel(NMTModel):
         trainer.save_state()
 
     def _apply_finetuning_config(self, model: PreTrainedModel) -> PreTrainedModel:
-        if self._config.finetune_method == FULL_FINETUNE_METHOD:
+        if self._config.uses_full_finetune:
             return model
 
         from peft import get_peft_model, prepare_model_for_kbit_training
@@ -974,7 +983,7 @@ class LocalLLMModel(NMTModel):
         dtype = self._config.params["torch_dtype"]
         args = collect_training_args(
             self._config.root,
-            TRAINING_ARGS_CONFIG_MAPPING,
+            self._TRAINING_ARGS_CONFIG_MAPPING,
             {
                 "bf16": self._mixed_precision and dtype == "bfloat16",
                 "fp16": self._mixed_precision and dtype == "float16",
@@ -984,7 +993,9 @@ class LocalLLMModel(NMTModel):
         return HfArgumentParser(TrainingArguments).parse_dict(args)[0]
 
     def save_effective_config(self, path: Path) -> None:
-        write_effective_config(path, self._config.root, self._create_training_arguments(), TRAINING_ARGS_CONFIG_MAPPING)
+        write_effective_config(
+            path, self._config.root, self._create_training_arguments(), self._TRAINING_ARGS_CONFIG_MAPPING
+        )
 
     # --- inference ----------------------------------------------------------------
 

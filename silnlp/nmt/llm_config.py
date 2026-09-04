@@ -13,19 +13,15 @@ from ..common.utils import merge_dict
 from .config import Config, Language
 from .corpora import DataFile
 from .example_retrieval import (
-    TFIDF_METHOD,
-    VALID_SELECTION_METHODS,
     Example,
     ExampleFormatter,
     ExamplePool,
+    ExampleRetrieverFactory,
     create_example_formatter,
-    create_example_retriever,
 )
 from .tokenizer import NullTokenizer, Tokenizer
 
 LOGGER = logging.getLogger(__name__)
-
-EXAMPLES_PLACEHOLDER = "{examples}"
 
 
 @dataclass
@@ -61,13 +57,23 @@ class PromptMessages:
 
 @dataclass(frozen=True)
 class PromptTemplate:
+    _EXAMPLES_PLACEHOLDER = "{examples}"
+
     system_message: str
     instruction_template: str
     formatter: ExampleFormatter
 
     @property
     def has_examples_placeholder(self) -> bool:
-        return EXAMPLES_PLACEHOLDER in self.instruction_template
+        return self._EXAMPLES_PLACEHOLDER in self.instruction_template
+
+    def describe_examples_mismatch(self, num_examples: int) -> Optional[str]:
+        """How this template disagrees with num_examples about few-shot examples, if it does."""
+        if num_examples > 0 and not self.has_examples_placeholder:
+            return f"has no '{self._EXAMPLES_PLACEHOLDER}', so the retrieved examples are silently discarded"
+        if num_examples == 0 and self.has_examples_placeholder:
+            return f"has an '{self._EXAMPLES_PLACEHOLDER}', which always renders as nothing"
+        return None
 
 
 class PromptBuilder:
@@ -141,20 +147,10 @@ class PromptBuilder:
 
 def warn_about_examples_placeholder(templates: Sequence[PromptTemplate], num_examples: int, source: str) -> None:
     for i, template in enumerate(templates):
-        where = f"{source}[{i}]" if len(templates) > 1 else source
-        if num_examples > 0 and not template.has_examples_placeholder:
-            LOGGER.warning(
-                "num_examples is %d but %s has no '%s', so the retrieved examples are silently discarded.",
-                num_examples,
-                where,
-                EXAMPLES_PLACEHOLDER,
-            )
-        elif num_examples == 0 and template.has_examples_placeholder:
-            LOGGER.warning(
-                "num_examples is 0 but %s has an '%s', which always renders as nothing.",
-                where,
-                EXAMPLES_PLACEHOLDER,
-            )
+        mismatch = template.describe_examples_mismatch(num_examples)
+        if mismatch is not None:
+            where = f"{source}[{i}]" if len(templates) > 1 else source
+            LOGGER.warning("num_examples is %d but %s %s.", num_examples, where, mismatch)
 
 
 def read_prompt_template_file(path: Path, defaults: dict) -> List[PromptTemplate]:
@@ -195,12 +191,7 @@ def parse_example_selection(prompt: dict) -> Tuple[str, Optional[str]]:
     # merge_dict() replaces rather than merges when a bare-string override lands on a dict default.
     if isinstance(selection, str):
         selection = {"method": selection}
-    method = str(selection["method"]).lower()
-    if method not in VALID_SELECTION_METHODS:
-        raise ValueError(
-            f"Unknown example_selection.method '{method}'. Valid options: {', '.join(VALID_SELECTION_METHODS)}."
-        )
-    return method, selection.get("model")
+    return str(selection["method"]), selection.get("model")
 
 
 def parse_num_examples(prompt: dict, name: str) -> int:
@@ -261,7 +252,7 @@ class LLMConfig(Config):
                     "instruction_template": None,
                     "example_format": None,
                     "num_examples": 0,
-                    "example_selection": {"method": TFIDF_METHOD, "model": None},
+                    "example_selection": {"method": ExampleRetrieverFactory.DEFAULT_METHOD, "model": None},
                 },
             },
         }
@@ -282,7 +273,7 @@ class LLMConfig(Config):
         if num_examples <= 0:
             return None
         method, model_name = parse_example_selection(prompt)
-        return ExamplePool(self._example_corpus_paths(), create_example_retriever(method, model_name))
+        return ExamplePool(self._example_corpus_paths(), ExampleRetrieverFactory.create(method, model_name))
 
     def _example_corpus_paths(self) -> List[Tuple[Path, Path]]:
         return [(self.exp_dir / self.train_src_filename(), self.exp_dir / self.train_trg_filename())]

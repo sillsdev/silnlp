@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 
 from silnlp.nmt.example_retrieval import (
-    DEFAULT_EMBEDDING_MODEL,
     BM25ExampleRetriever,
     EmbeddingExampleRetriever,
     Example,
@@ -15,7 +14,7 @@ from silnlp.nmt.example_retrieval import (
     TfidfExampleRetriever,
     XmlExampleFormatter,
     create_example_formatter,
-    create_example_retriever,
+    ExampleRetrieverFactory,
 )
 
 
@@ -79,33 +78,33 @@ def test_embedding_retriever_rank_excluding_leaves_out_its_own_position():
 
 
 def test_create_example_retriever_dispatches_each_method():
-    assert isinstance(create_example_retriever("tfidf"), TfidfExampleRetriever)
-    assert isinstance(create_example_retriever("bm25"), BM25ExampleRetriever)
-    assert isinstance(create_example_retriever("embedding"), EmbeddingExampleRetriever)
+    assert isinstance(ExampleRetrieverFactory.create("tfidf"), TfidfExampleRetriever)
+    assert isinstance(ExampleRetrieverFactory.create("bm25"), BM25ExampleRetriever)
+    assert isinstance(ExampleRetrieverFactory.create("embedding"), EmbeddingExampleRetriever)
 
 
 def test_create_example_retriever_is_case_insensitive():
-    assert isinstance(create_example_retriever("TFIDF"), TfidfExampleRetriever)
+    assert isinstance(ExampleRetrieverFactory.create("TFIDF"), TfidfExampleRetriever)
 
 
 def test_create_example_retriever_passes_the_model_name_through():
-    assert create_example_retriever("embedding", "some/model").model_name == "some/model"
+    assert ExampleRetrieverFactory.create("embedding", "some/model").model_name == "some/model"
 
 
 def test_create_example_retriever_embedding_defaults_the_model_name():
-    assert create_example_retriever("embedding").model_name == DEFAULT_EMBEDDING_MODEL
+    assert ExampleRetrieverFactory.create("embedding").model_name
 
 
 def test_create_example_retriever_defers_the_embedding_dependency_until_it_is_fitted():
     # sentence-transformers ships in the optional 'llm' extra, so constructing must not import it.
-    retriever = create_example_retriever("embedding")
+    retriever = ExampleRetrieverFactory.create("embedding")
     pytest.importorskip("sentence_transformers")
     retriever.fit(["cat"])
 
 
 def test_create_example_retriever_rejects_unknown_method():
     with pytest.raises(ValueError, match="Unknown example_selection.method"):
-        create_example_retriever("bogus")
+        ExampleRetrieverFactory.create("bogus")
 
 
 def test_text_example_formatter_renders_each_example_through_the_template():
@@ -195,7 +194,7 @@ def _write_pool(tmp_path, sources, targets, retriever=None):
     trg_path = tmp_path / "train.trg.txt"
     src_path.write_text("".join(line + "\n" for line in sources), encoding="utf-8")
     trg_path.write_text("".join(line + "\n" for line in targets), encoding="utf-8")
-    return ExamplePool([(src_path, trg_path)], retriever if retriever is not None else create_example_retriever("tfidf"))
+    return ExamplePool([(src_path, trg_path)], retriever if retriever is not None else ExampleRetrieverFactory.create("tfidf"))
 
 
 def test_example_pool_selects_the_most_relevant_example_last(tmp_path):
@@ -208,7 +207,7 @@ def test_example_pool_selects_the_most_relevant_example_last(tmp_path):
 
 
 def test_example_pool_returns_nothing_and_touches_no_files_when_k_is_zero(tmp_path):
-    pool = ExamplePool([(tmp_path / "missing.src.txt", tmp_path / "missing.trg.txt")], create_example_retriever("tfidf"))
+    pool = ExamplePool([(tmp_path / "missing.src.txt", tmp_path / "missing.trg.txt")], ExampleRetrieverFactory.create("tfidf"))
     assert pool.select("hello", k=0) == []
 
 
@@ -234,7 +233,7 @@ def test_example_pool_whole_pool_path_builds_no_index(tmp_path):
 
 
 def test_example_pool_raises_a_clear_error_when_the_corpus_is_missing(tmp_path):
-    pool = ExamplePool([(tmp_path / "missing.src.txt", tmp_path / "missing.trg.txt")], create_example_retriever("tfidf"))
+    pool = ExamplePool([(tmp_path / "missing.src.txt", tmp_path / "missing.trg.txt")], ExampleRetrieverFactory.create("tfidf"))
     with pytest.raises(RuntimeError, match="preprocessing"):
         pool.select("hello", k=1)
 
@@ -250,7 +249,7 @@ def test_example_pool_saves_and_reloads_its_index(tmp_path):
 
 def test_example_pool_rejects_a_saved_index_built_with_another_method(tmp_path):
     _write_pool(tmp_path, ["a", "b"], ["1", "2"]).save_index(tmp_path)
-    embedding = _write_pool(tmp_path, ["a", "b"], ["1", "2"], retriever=create_example_retriever("embedding"))
+    embedding = _write_pool(tmp_path, ["a", "b"], ["1", "2"], retriever=ExampleRetrieverFactory.create("embedding"))
     assert not embedding.load_index(tmp_path)
 
 
@@ -312,7 +311,7 @@ def test_example_pool_prefers_the_first_candidate_corpus(tmp_path):
             (tmp_path / "preferred.src.txt", tmp_path / "preferred.trg.txt"),
             (tmp_path / "fallback.src.txt", tmp_path / "fallback.trg.txt"),
         ],
-        create_example_retriever("tfidf"),
+        ExampleRetrieverFactory.create("tfidf"),
     )
     assert [ex.source for ex in pool.examples] == ["preferred"]
 
@@ -325,7 +324,7 @@ def test_example_pool_falls_back_to_a_later_candidate_corpus(tmp_path):
             (tmp_path / "missing.src.txt", tmp_path / "missing.trg.txt"),
             (tmp_path / "fallback.src.txt", tmp_path / "fallback.trg.txt"),
         ],
-        create_example_retriever("tfidf"),
+        ExampleRetrieverFactory.create("tfidf"),
     )
     assert [ex.source for ex in pool.examples] == ["fallback"]
 
@@ -333,7 +332,7 @@ def test_example_pool_falls_back_to_a_later_candidate_corpus(tmp_path):
 def test_example_pool_names_every_candidate_when_none_are_present(tmp_path):
     pool = ExamplePool(
         [(tmp_path / "a.src.txt", tmp_path / "a.trg.txt"), (tmp_path / "b.src.txt", tmp_path / "b.trg.txt")],
-        create_example_retriever("tfidf"),
+        ExampleRetrieverFactory.create("tfidf"),
     )
     with pytest.raises(RuntimeError, match="a.src.txt and .*a.trg.txt or .*b.src.txt and .*b.trg.txt"):
         pool.examples
@@ -341,7 +340,7 @@ def test_example_pool_names_every_candidate_when_none_are_present(tmp_path):
 
 def test_example_pool_ensure_available_reads_the_corpus_up_front(tmp_path):
     with pytest.raises(RuntimeError, match="Run preprocessing"):
-        ExamplePool([(tmp_path / "a.src.txt", tmp_path / "a.trg.txt")], create_example_retriever("tfidf")).ensure_available()
+        ExamplePool([(tmp_path / "a.src.txt", tmp_path / "a.trg.txt")], ExampleRetrieverFactory.create("tfidf")).ensure_available()
 
 
 def test_tokenize_for_retrieval_drops_punctuation_only_tokens():

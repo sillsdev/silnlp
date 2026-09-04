@@ -121,18 +121,13 @@ def test_prompt_template_reports_its_examples_placeholder():
 # --- config parsing ----------------------------------------------------------------------
 
 
-def test_parse_example_selection_lowercases_the_method_and_reads_the_model():
-    assert parse_example_selection({"example_selection": {"method": "TFIDF", "model": "m"}}) == ("tfidf", "m")
+def test_parse_example_selection_reads_the_method_and_the_model():
+    assert parse_example_selection({"example_selection": {"method": "tfidf", "model": "m"}}) == ("tfidf", "m")
 
 
 def test_parse_example_selection_accepts_a_bare_string():
     # merge_dict() replaces rather than merges when a bare-string override lands on a dict default.
     assert parse_example_selection({"example_selection": "embedding"}) == ("embedding", None)
-
-
-def test_parse_example_selection_rejects_an_unknown_method():
-    with pytest.raises(ValueError, match="Unknown example_selection.method"):
-        parse_example_selection({"example_selection": {"method": "bogus"}})
 
 
 def test_parse_num_examples_rejects_a_negative_count():

@@ -24,26 +24,16 @@ def load_config_from_exp_dir(exp_dir: Path, environment: SilNlpEnv) -> Config:
     return create_config(exp_dir, config, environment)
 
 
-# Decoder-only LLM model name prefixes used as a fallback when "model_type" is not set.
-LLM_MODEL_PREFIXES = (
-    "google/gemma",
-    "google/translate-gemma",
-    "google/translategemma",
-    "tencent/Hunyuan",
-    "Hunyuan-MT",
-)
-
-
-# "local_llm" is the preferred label, but "llm" is supported for backward compatibility
-LOCAL_LLM_MODEL_TYPES = ("local_llm", "llm")
-
-
 def is_local_llm_config(config: dict) -> bool:
     model_type = config.get("model_type")
     if model_type is not None:
-        return str(model_type).lower() in LOCAL_LLM_MODEL_TYPES
+        # "local_llm" is the preferred label, but "llm" is supported for backward compatibility
+        return str(model_type).lower() in ("local_llm", "llm")
+    # Matching the model name is a fallback when "model_type" is not set.
     model: str = config.get("model", "")
-    return any(model.startswith(prefix) for prefix in LLM_MODEL_PREFIXES)
+    return model.startswith(
+        ("google/gemma", "google/translate-gemma", "google/translategemma", "tencent/Hunyuan", "Hunyuan-MT")
+    )
 
 
 def is_remote_llm_config(config: dict) -> bool:

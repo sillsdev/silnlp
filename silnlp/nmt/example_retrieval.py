@@ -18,19 +18,6 @@ from .corpora import read_parallel_text_pairs
 
 LOGGER = logging.getLogger(__name__)
 
-TFIDF_METHOD = "tfidf"
-BM25_METHOD = "bm25"
-EMBEDDING_METHOD = "embedding"
-VALID_SELECTION_METHODS = (TFIDF_METHOD, BM25_METHOD, EMBEDDING_METHOD)
-
-DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-
-RETRIEVER_FILENAME = "retrieval.pkl"
-RETRIEVER_META_FILENAME = "retrieval_meta.json"
-
-# Certain LLMs like Translate Gemma do not support arbitrary prompts
-FIXED_PROMPT_MODEL_PREFIXES = ("google/translate-gemma", "google/translategemma")
-
 
 @dataclass(frozen=True)
 class Example:
@@ -66,6 +53,9 @@ class ExampleRetriever(ABC):
     """Ranks source texts by position; ExamplePool owns the examples they came from."""
 
     method: str = ""
+
+    _INDEX_FILENAME = "retrieval.pkl"
+    _META_FILENAME = "retrieval_meta.json"
 
     def __init__(self) -> None:
         self._source_count = 0
@@ -106,16 +96,16 @@ class ExampleRetriever(ABC):
 
     def save(self, directory: Path) -> None:
         directory.mkdir(parents=True, exist_ok=True)
-        with (directory / RETRIEVER_FILENAME).open("wb") as file:
+        with (directory / self._INDEX_FILENAME).open("wb") as file:
             pickle.dump(self, file)
         meta = {"method": self.method, "model_name": self.model_name, "num_sources": self._source_count}
-        with (directory / RETRIEVER_META_FILENAME).open("w", encoding="utf-8") as file:
+        with (directory / self._META_FILENAME).open("w", encoding="utf-8") as file:
             json.dump(meta, file, indent=2)
 
-    @staticmethod
-    def load(directory: Path) -> Optional["ExampleRetriever"]:
+    @classmethod
+    def load(cls, directory: Path) -> Optional["ExampleRetriever"]:
         """Load a previously saved index, or return None if it is missing or unreadable."""
-        path = directory / RETRIEVER_FILENAME
+        path = directory / cls._INDEX_FILENAME
         try:
             with path.open("rb") as file:
                 retriever = pickle.load(file)
@@ -147,7 +137,7 @@ class LexicalExampleRetriever(ExampleRetriever):
 
 
 class TfidfExampleRetriever(LexicalExampleRetriever):
-    method = TFIDF_METHOD
+    method = "tfidf"
 
     def __init__(self) -> None:
         super().__init__()
@@ -180,7 +170,7 @@ class TfidfExampleRetriever(LexicalExampleRetriever):
 
 
 class BM25ExampleRetriever(LexicalExampleRetriever):
-    method = BM25_METHOD
+    method = "bm25"
 
     def __init__(self) -> None:
         super().__init__()
@@ -203,12 +193,14 @@ class BM25ExampleRetriever(LexicalExampleRetriever):
 
 
 class EmbeddingExampleRetriever(ExampleRetriever):
-    method = EMBEDDING_METHOD
+    method = "embedding"
+
+    _DEFAULT_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
     def __init__(self, model_name: Optional[str] = None, model: Optional[_EmbeddingModel] = None) -> None:
         """`model` is the test injection seam; production passes only `model_name`."""
         super().__init__()
-        self._model_name = model_name or DEFAULT_EMBEDDING_MODEL
+        self._model_name = model_name or self._DEFAULT_MODEL
         self._model = model
         self._embeddings: np.ndarray = np.zeros((0, 0), dtype=np.float32)
 
@@ -244,18 +236,26 @@ class EmbeddingExampleRetriever(ExampleRetriever):
         return {**self.__dict__, "_model": None}
 
 
-def create_example_retriever(method: str, model_name: Optional[str] = None) -> ExampleRetriever:
-    """Creates it unfitted; ExamplePool fits it with its own sources."""
-    normalized = method.lower()
-    if normalized == TFIDF_METHOD:
-        return TfidfExampleRetriever()
-    if normalized == BM25_METHOD:
-        return BM25ExampleRetriever()
-    if normalized == EMBEDDING_METHOD:
-        return EmbeddingExampleRetriever(model_name)
-    raise ValueError(
-        f"Unknown example_selection.method '{method}'. Valid options: {', '.join(VALID_SELECTION_METHODS)}."
-    )
+class ExampleRetrieverFactory:
+    """Creates the retriever named by a config's example_selection.method."""
+
+    DEFAULT_METHOD = TfidfExampleRetriever.method
+
+    _BY_METHOD = {
+        TfidfExampleRetriever.method: lambda model_name: TfidfExampleRetriever(),
+        BM25ExampleRetriever.method: lambda model_name: BM25ExampleRetriever(),
+        EmbeddingExampleRetriever.method: EmbeddingExampleRetriever,
+    }
+
+    @classmethod
+    def create(cls, method: str, model_name: Optional[str] = None) -> ExampleRetriever:
+        """Creates it unfitted; ExamplePool fits it with its own sources."""
+        build = cls._BY_METHOD.get(method.lower())
+        if build is None:
+            raise ValueError(
+                f"Unknown example_selection.method '{method}'. Valid options: {', '.join(cls._BY_METHOD)}."
+            )
+        return build(model_name)
 
 
 class ExampleFormatter(ABC):

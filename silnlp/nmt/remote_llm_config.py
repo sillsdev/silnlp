@@ -49,103 +49,47 @@ from ..common.translation_data_structures import DraftGroup, SentenceTranslation
 from ..common.translator import generate_confidence_files
 from ..common.utils import merge_dict
 from .config import CheckpointType, Language, NMTModel
-from .example_retrieval import TFIDF_METHOD, Example, create_example_formatter
+from .example_retrieval import Example, ExampleRetrieverFactory, create_example_formatter
 from .llm_config import LLMConfig, PromptBuilder, PromptTemplate, warn_about_examples_placeholder
 
 LOGGER = logging.getLogger(__name__)
 
-# The train step writes this checkpoint so that CheckpointType.LAST resolves to step 1.
-CHECKPOINT_STEP = 1
-MODEL_INFO_FILENAME = "remote_llm_model.json"
 
-# The prompts cast the model as a member of the translation team, because consistency with this
-# team's decisions matters more than general translation competence. All are overridable through
-# infer.prompt.
-DEFAULT_SYSTEM_MESSAGE_TEMPLATE = (
-    "You are a member of a Bible translation team translating from {src_lang} into {trg_lang}. "
-    "Your job is to produce the translation this team would produce, not a translation of your "
-    "own.\n\n"
-    "Any examples you are given are the team's own completed work, and they are your authority. "
-    "Study them and follow what they show you about:\n"
-    "- Style: how closely the team follows the source wording rather than restructuring it into "
-    "natural {trg_lang}, their sentence length and register, and how much implicit information "
-    "they make explicit.\n"
-    "- Key terms: the rendering the team has settled on for recurring theological terms, and "
-    "their spelling of the names of people, places, and peoples. Reuse these exactly; never "
-    "substitute a synonym or a variant spelling.\n"
-    "- Exegesis: where the source is ambiguous, resolve it the way the team resolved comparable "
-    "passages.\n"
-    "- Orthography: their spelling conventions, punctuation, and the way they mark direct "
-    "speech.\n\n"
-    "Follow the examples in preference to any published {trg_lang} translation you may recall. "
-    "Where they do not settle a question, make the choice a careful member of this team would "
-    "make, and stay consistent with it. Translate what the source says: add nothing it does not "
-    "say, and leave out nothing it does.\n\n"
-    "Reply with only the translation itself - no commentary, notes, alternatives, explanations, "
-    "or verse numbers."
-)
-SINGLE_INSTRUCTION = (
-    "Translate this {src_lang} passage into {trg_lang} as the team would translate it. Reply with "
-    "only the translation.\n\n{source}"
-)
-BATCH_INSTRUCTION = (
-    "Translate the following {num_segments} consecutive {src_lang} passages into {trg_lang} as the "
-    "team would translate them. Some may be section headings rather than verses. Read them "
-    "together, so that participants, pronouns, and the flow of the passage stay consistent across "
-    "them, but translate each one on its own.\n"
-    "Reply with exactly {num_segments} lines, one per passage, in the same order, each formatted "
-    "as `<number>. <translation>`. Do not merge, split, reorder, or omit passages, and do not add "
-    "any other text.\n\n{source}"
-)
-EXAMPLES_HEADING = (
-    "The team has already translated these passages. They are your model for this team's style, "
-    "terminology, and exegesis:\n\n{examples}"
-)
-CORPUS_HEADING = (
-    "This is everything the team has translated so far. It is your reference for this team's "
-    "style, terminology, exegesis, spelling, and punctuation:"
-)
+class NumberedReply:
+    """A reply to a batched request, which the prompt asks for as one numbered line per segment."""
 
-DEFAULT_SINGLE_INSTRUCTION_TEMPLATE = SINGLE_INSTRUCTION
-DEFAULT_BATCH_INSTRUCTION_TEMPLATE = BATCH_INSTRUCTION
-DEFAULT_FEW_SHOT_SINGLE_INSTRUCTION_TEMPLATE = EXAMPLES_HEADING + SINGLE_INSTRUCTION
-DEFAULT_FEW_SHOT_BATCH_INSTRUCTION_TEMPLATE = EXAMPLES_HEADING + BATCH_INSTRUCTION
-DEFAULT_EXAMPLE_FORMAT = {"type": "text", "template": "{src_lang}: {source}\n{trg_lang}: {target}\n\n"}
+    _CODE_FENCE = re.compile(r"^\s*```[^\n]*\n(.*?)\n?\s*```\s*$", re.DOTALL)
+    _NUMBERED_LINE = re.compile(r"^\s*(\d{1,4})\s*[.):\]]\s*(.*)$")
 
-_CODE_FENCE = re.compile(r"^\s*```[^\n]*\n(.*?)\n?\s*```\s*$", re.DOTALL)
-_NUMBERED_LINE = re.compile(r"^\s*(\d{1,4})\s*[.):\]]\s*(.*)$")
+    @classmethod
+    def strip_code_fence(cls, text: str) -> str:
+        match = cls._CODE_FENCE.match(text.strip())
+        return match.group(1) if match is not None else text
 
+    @classmethod
+    def parse(cls, text: str, num_segments: int) -> Optional[List[str]]:
+        """None when the reply is malformed, which is the signal for the caller's recovery ladder.
 
-def strip_code_fence(text: str) -> str:
-    match = _CODE_FENCE.match(text.strip())
-    return match.group(1) if match is not None else text
-
-
-def parse_numbered_response(text: str, num_segments: int) -> Optional[List[str]]:
-    """Parse a numbered list of translations, or return None if the reply is malformed.
-
-    A None return is the signal for the caller's recovery ladder (correct, then split the batch,
-    then fall back to one request per segment). Lines that are not numbered are treated as
-    continuations of the preceding translation, and any preamble before the first numbered line
-    is ignored.
-    """
-    if num_segments <= 0:
-        return []
-    parsed: Dict[int, List[str]] = {}
-    current: Optional[int] = None
-    for line in strip_code_fence(text).splitlines():
-        match = _NUMBERED_LINE.match(line)
-        if match is not None:
-            index = int(match.group(1))
-            if index in parsed:
-                return None
-            current = index
-            parsed[index] = [match.group(2).strip()]
-        elif current is not None and line.strip() != "":
-            parsed[current].append(line.strip())
-    if set(parsed) != set(range(1, num_segments + 1)):
-        return None
-    return [" ".join(part for part in parsed[i] if part != "").strip() for i in range(1, num_segments + 1)]
+        Lines that are not numbered continue the preceding translation, and any preamble before
+        the first numbered line is ignored.
+        """
+        if num_segments <= 0:
+            return []
+        parsed: Dict[int, List[str]] = {}
+        current: Optional[int] = None
+        for line in cls.strip_code_fence(text).splitlines():
+            match = cls._NUMBERED_LINE.match(line)
+            if match is not None:
+                index = int(match.group(1))
+                if index in parsed:
+                    return None
+                current = index
+                parsed[index] = [match.group(2).strip()]
+            elif current is not None and line.strip() != "":
+                parsed[current].append(line.strip())
+        if set(parsed) != set(range(1, num_segments + 1)):
+            return None
+        return [" ".join(part for part in parsed[i] if part != "").strip() for i in range(1, num_segments + 1)]
 
 
 def group_indices_by_size(count: int, size: int) -> List[List[int]]:
@@ -346,10 +290,61 @@ class LiteLLMCompletionClientFactory(CompletionClientFactory):
 
 
 class RemoteLLMConfig(LLMConfig):
-    DEFAULT_SYSTEM_MESSAGE = DEFAULT_SYSTEM_MESSAGE_TEMPLATE
-    DEFAULT_INSTRUCTION_TEMPLATE = DEFAULT_SINGLE_INSTRUCTION_TEMPLATE
-    DEFAULT_FEW_SHOT_INSTRUCTION_TEMPLATE = DEFAULT_FEW_SHOT_SINGLE_INSTRUCTION_TEMPLATE
-    DEFAULT_EXAMPLE_FORMAT = DEFAULT_EXAMPLE_FORMAT
+    # The prompts cast the model as a member of the translation team, because consistency with
+    # this team's decisions matters more than general translation competence.
+    _SYSTEM_MESSAGE = (
+        "You are a member of a Bible translation team translating from {src_lang} into {trg_lang}. "
+        "Your job is to produce the translation this team would produce, not a translation of your "
+        "own.\n\n"
+        "Any examples you are given are the team's own completed work, and they are your authority. "
+        "Study them and follow what they show you about:\n"
+        "- Style: how closely the team follows the source wording rather than restructuring it into "
+        "natural {trg_lang}, their sentence length and register, and how much implicit information "
+        "they make explicit.\n"
+        "- Key terms: the rendering the team has settled on for recurring theological terms, and "
+        "their spelling of the names of people, places, and peoples. Reuse these exactly; never "
+        "substitute a synonym or a variant spelling.\n"
+        "- Exegesis: where the source is ambiguous, resolve it the way the team resolved comparable "
+        "passages.\n"
+        "- Orthography: their spelling conventions, punctuation, and the way they mark direct "
+        "speech.\n\n"
+        "Follow the examples in preference to any published {trg_lang} translation you may recall. "
+        "Where they do not settle a question, make the choice a careful member of this team would "
+        "make, and stay consistent with it. Translate what the source says: add nothing it does not "
+        "say, and leave out nothing it does.\n\n"
+        "Reply with only the translation itself - no commentary, notes, alternatives, explanations, "
+        "or verse numbers."
+    )
+
+    _SINGLE_INSTRUCTION = (
+        "Translate this {src_lang} passage into {trg_lang} as the team would translate it. Reply with "
+        "only the translation.\n\n{source}"
+    )
+
+    _BATCH_INSTRUCTION = (
+        "Translate the following {num_segments} consecutive {src_lang} passages into {trg_lang} as the "
+        "team would translate them. Some may be section headings rather than verses. Read them "
+        "together, so that participants, pronouns, and the flow of the passage stay consistent across "
+        "them, but translate each one on its own.\n"
+        "Reply with exactly {num_segments} lines, one per passage, in the same order, each formatted "
+        "as `<number>. <translation>`. Do not merge, split, reorder, or omit passages, and do not add "
+        "any other text.\n\n{source}"
+    )
+
+    _EXAMPLES_HEADING = (
+        "The team has already translated these passages. They are your model for this team's style, "
+        "terminology, and exegesis:\n\n{examples}"
+    )
+
+    _CORPUS_HEADING = (
+        "This is everything the team has translated so far. It is your reference for this team's "
+        "style, terminology, exegesis, spelling, and punctuation:"
+    )
+
+    DEFAULT_SYSTEM_MESSAGE = _SYSTEM_MESSAGE
+    DEFAULT_INSTRUCTION_TEMPLATE = _SINGLE_INSTRUCTION
+    DEFAULT_FEW_SHOT_INSTRUCTION_TEMPLATE = _EXAMPLES_HEADING + _SINGLE_INSTRUCTION
+    DEFAULT_EXAMPLE_FORMAT = {"type": "text", "template": "{src_lang}: {source}\n{trg_lang}: {target}\n\n"}
 
     def __init__(self, exp_dir: Path, config: dict, environment: SilNlpEnv) -> None:
         super().__init__(exp_dir, config, environment)
@@ -379,7 +374,7 @@ class RemoteLLMConfig(LLMConfig):
                         "num_examples": 10,
                         # TF-IDF by default so a plain install works; BM25 generally ranks
                         # better but needs rank_bm25 from the 'llm' extra.
-                        "example_selection": {"method": TFIDF_METHOD, "model": None},
+                        "example_selection": {"method": ExampleRetrieverFactory.DEFAULT_METHOD, "model": None},
                         "batch_instruction_template": None,
                     },
                     "infer_batch_size": 1,
@@ -408,21 +403,24 @@ class RemoteLLMConfig(LLMConfig):
         )
         return [detokenized, *super()._example_corpus_paths()]
 
+    def build_corpus_block(self, rendered_examples: str) -> str:
+        return f"{self._CORPUS_HEADING}\n\n{rendered_examples}" if rendered_examples else ""
+
     def _resolve_infer_prompt_defaults(self, prompt: dict) -> None:
         # A hoisted corpus brings its own heading, so keep the wording that has none for it to
         # use; the few-shot defaults would otherwise head an examples block that renders empty.
         self._corpus_single_instruction_template = (
-            prompt.get("instruction_template") or DEFAULT_SINGLE_INSTRUCTION_TEMPLATE
+            prompt.get("instruction_template") or self._SINGLE_INSTRUCTION
         )
         self._corpus_batch_instruction_template = (
-            prompt.get("batch_instruction_template") or DEFAULT_BATCH_INSTRUCTION_TEMPLATE
+            prompt.get("batch_instruction_template") or self._BATCH_INSTRUCTION
         )
         super()._resolve_infer_prompt_defaults(prompt)
         if prompt["batch_instruction_template"] is None:
             prompt["batch_instruction_template"] = (
-                DEFAULT_FEW_SHOT_BATCH_INSTRUCTION_TEMPLATE
+                self._EXAMPLES_HEADING + self._BATCH_INSTRUCTION
                 if int(prompt["num_examples"]) > 0
-                else DEFAULT_BATCH_INSTRUCTION_TEMPLATE
+                else self._BATCH_INSTRUCTION
             )
 
     def _create_batch_prompt_builder(self) -> PromptBuilder:
@@ -528,6 +526,10 @@ class RemoteLLMConfig(LLMConfig):
 
 
 class RemoteLLMModel(NMTModel):
+    # The train step writes this checkpoint so that CheckpointType.LAST resolves to step 1.
+    _CHECKPOINT_STEP = 1
+    _MODEL_INFO_FILENAME = "remote_llm_model.json"
+
     def __init__(
         self,
         config: RemoteLLMConfig,
@@ -577,7 +579,7 @@ class RemoteLLMModel(NMTModel):
             info["retrieval_method"] = pool.method
             LOGGER.info("Built a %s retrieval index over %d training examples.", pool.method, len(pool))
 
-        with (checkpoint_dir / MODEL_INFO_FILENAME).open("w", encoding="utf-8") as file:
+        with (checkpoint_dir / self._MODEL_INFO_FILENAME).open("w", encoding="utf-8") as file:
             json.dump(info, file, indent=2)
 
     def save_effective_config(self, path: Path) -> None:
@@ -586,7 +588,7 @@ class RemoteLLMModel(NMTModel):
             yaml.dump(deepcopy(self._config.root), file)
 
     def _checkpoint_dir(self) -> Path:
-        return self._config.model_dir / f"checkpoint-{CHECKPOINT_STEP}"
+        return self._config.model_dir / f"checkpoint-{self._CHECKPOINT_STEP}"
 
     def _warn_if_corpus_too_large(self, corpus_tokens: Optional[int]) -> None:
         limit: int = self._config.infer["max_context_tokens"]
@@ -614,7 +616,7 @@ class RemoteLLMModel(NMTModel):
             if self._corpus_block is None:
                 rendered = self._config.render_examples(builder.pool.examples, src_lang, trg_lang)
                 self._warn_if_corpus_too_large(count_tokens(self._config.model, rendered))
-                self._corpus_block = f"{CORPUS_HEADING}\n\n{rendered}" if rendered else ""
+                self._corpus_block = self._config.build_corpus_block(rendered)
             return self._corpus_block
 
     def _load_saved_index(self) -> None:
@@ -798,7 +800,7 @@ class RemoteLLMModel(NMTModel):
 
         messages = self._build_messages(texts, src_lang, trg_lang)
         response = self._complete(messages, usage=usage).text
-        parsed = parse_numbered_response(response, len(texts))
+        parsed = NumberedReply.parse(response, len(texts))
         if parsed is None:
             correction = messages + [
                 {"role": "assistant", "content": response},
@@ -811,7 +813,7 @@ class RemoteLLMModel(NMTModel):
                     ),
                 },
             ]
-            parsed = parse_numbered_response(self._complete(correction, usage=usage).text, len(texts))
+            parsed = NumberedReply.parse(self._complete(correction, usage=usage).text, len(texts))
         if parsed is not None:
             return [Completion(text) for text in parsed]
 
@@ -832,7 +834,7 @@ class RemoteLLMModel(NMTModel):
         usage: Optional[UsageTotals] = None,
     ) -> Completion:
         completion = self._complete(self._build_messages([text], src_lang, trg_lang), want_logprobs, usage)
-        stripped = strip_code_fence(completion.text).strip()
+        stripped = NumberedReply.strip_code_fence(completion.text).strip()
         if stripped == completion.text:
             return completion
         # Stripping a code fence or surrounding whitespace leaves the per-token scores covering
