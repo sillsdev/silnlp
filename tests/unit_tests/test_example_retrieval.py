@@ -349,6 +349,35 @@ def test_example_pool_ensure_available_reads_the_corpus_up_front(tmp_path):
         ExamplePool([(tmp_path / "a.src.txt", tmp_path / "a.trg.txt")], "tfidf").ensure_available()
 
 
+def test_tokenize_for_retrieval_drops_punctuation_only_tokens():
+    assert tokenize_for_retrieval("Let there be LIGHT!") == ["let", "there", "be", "light"]
+    assert tokenize_for_retrieval('"Come," he said -- and went...') == ["come", "he", "said", "and", "went"]
+
+
+def test_tokenize_for_retrieval_keeps_words_that_contain_punctuation():
+    assert tokenize_for_retrieval("Don't stop, Jesus-like 12,345.") == ["don't", "stop", "jesus-like", "12,345"]
+
+
+def test_tokenize_for_retrieval_keeps_non_latin_words():
+    assert tokenize_for_retrieval("Se dijo: \u00abvengan\u00bb \u0663\u0664") == ["se", "dijo", "vengan", "\u0663\u0664"]
+
+
+def test_tokenize_for_retrieval_yields_nothing_for_punctuation_only_text():
+    assert tokenize_for_retrieval("!!! ???") == []
+
+
+def test_tfidf_retriever_handles_a_corpus_with_no_word_tokens():
+    # TfidfVectorizer rejects an empty vocabulary outright, where bm25 returns nothing.
+    retriever = _fitted(TfidfExampleRetriever(), _examples(("!!!", "1"), ("...", "2")))
+    assert retriever.retrieve("anything", k=1) == []
+    assert retriever.retrieve_for_pool_index(0, k=1) == []
+
+
+def test_tfidf_retriever_ignores_sources_with_no_word_tokens(tmp_path):
+    retriever = _fitted(TfidfExampleRetriever(), _examples(("!!!", "1"), ("let there be light", "2")))
+    assert [ex.target for ex in retriever.retrieve("light", k=1)] == ["2"]
+
+
 def test_tfidf_and_bm25_tokenize_identically(tmp_path):
     # Switching selection method should change the ranking, not what counts as a word.
     text = "Don't stop, Jesus-like 12,345"

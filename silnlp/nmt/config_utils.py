@@ -34,16 +34,11 @@ LLM_MODEL_PREFIXES = (
 )
 
 
+# "local_llm" is the preferred label, but "llm" is supported for backward compatibility
 LOCAL_LLM_MODEL_TYPES = ("local_llm", "llm")
 
 
 def is_local_llm_config(config: dict) -> bool:
-    """Decide whether a config targets a decoder-only LLM fine-tuned and run locally.
-
-    An explicit ``model_type`` wins; otherwise fall back to a string prefix match on the model
-    name. Detection is string-only by design - we never load the model's AutoConfig here, since
-    create_config is on the hot path of every CLI command.
-    """
     model_type = config.get("model_type")
     if model_type is not None:
         return str(model_type).lower() in LOCAL_LLM_MODEL_TYPES
@@ -52,12 +47,6 @@ def is_local_llm_config(config: dict) -> bool:
 
 
 def is_remote_llm_config(config: dict) -> bool:
-    """Decide whether a config targets a remote LLM prompted with in-context examples.
-
-    This requires an explicit ``model_type: remote_llm``: the model name is a LiteLLM model string
-    (e.g. "anthropic/claude-sonnet-4-5", "gpt-4o"), which is arbitrary and cannot be recognized
-    by a prefix match the way the local decoder-only model names can.
-    """
     return str(config.get("model_type", "")).lower() == "remote_llm"
 
 

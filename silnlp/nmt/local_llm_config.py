@@ -58,7 +58,7 @@ from .config import (
     write_effective_config,
 )
 from .corpora import read_parallel_text_pairs
-from .example_retrieval import TFIDF_METHOD, TRANSLATE_GEMMA_MODEL_PREFIXES
+from .example_retrieval import FIXED_PROMPT_MODEL_PREFIXES, TFIDF_METHOD
 from .llm_config import (
     LLMConfig,
     PromptBuilder,
@@ -443,7 +443,7 @@ class LocalLLMConfig(LLMConfig):
         return Path(template_file)
 
     def _reject_examples_for_translate_gemma(self, num_examples: int, name: str) -> None:
-        if num_examples > 0 and self.model.lower().startswith(TRANSLATE_GEMMA_MODEL_PREFIXES):
+        if num_examples > 0 and self.model.lower().startswith(FIXED_PROMPT_MODEL_PREFIXES):
             raise RuntimeError(
                 "TranslateGemma models do not support few-shot examples in the prompt. "
                 f"Set {name}.num_examples to 0 or use a different model."
@@ -576,7 +576,7 @@ class LocalLLMConfig(LLMConfig):
         rotation_index: Optional[int] = None,
         training: bool = False,
     ) -> ChatPromptMessages:
-        if self.model.lower().startswith(TRANSLATE_GEMMA_MODEL_PREFIXES):
+        if self.model.lower().startswith(FIXED_PROMPT_MODEL_PREFIXES):
             return TranslateGemmaPromptMessages(
                 source_language=src_lang, target_language=trg_lang, text=source, target=target
             )

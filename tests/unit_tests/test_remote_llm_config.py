@@ -121,11 +121,11 @@ PAIRS = [
 
 
 def test_tokenize_for_retrieval_lowercases_and_splits_into_words():
-    assert tokenize_for_retrieval("Let there be LIGHT!") == ["let", "there", "be", "light", "!"]
+    assert tokenize_for_retrieval("Let there be LIGHT!") == ["let", "there", "be", "light"]
 
 
 def test_tokenize_for_retrieval_keeps_words_that_a_word_character_split_would_break_up():
-    assert tokenize_for_retrieval("Don't stop, Jesus-like") == ["don't", "stop", ",", "jesus-like"]
+    assert tokenize_for_retrieval("Don't stop, Jesus-like") == ["don't", "stop", "jesus-like"]
     assert tokenize_for_retrieval("12,345 sheep") == ["12,345", "sheep"]
 
 

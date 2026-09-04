@@ -31,13 +31,14 @@ RETRIEVER_META_FILENAME = "retrieval_meta.json"
 # Its per-call state is local, so one instance is safe to share across threads.
 _WORD_TOKENIZER = LatinWordTokenizer()
 
-# TranslateGemma's chat template requires structured {type, lang_code, text} content instead of
-# free text, so it cannot carry few-shot examples.
+# Certain LLMs like Translate Gemma do not support arbitrary prompts
 FIXED_PROMPT_MODEL_PREFIXES = ("google/translate-gemma", "google/translategemma")
 
 
 def tokenize_for_retrieval(text: str) -> List[str]:
-    return list(_WORD_TOKENIZER.tokenize(text.lower()))
+    # The tokenizer emits punctuation as tokens of its own. They carry no retrieval signal, and
+    # they skew BM25, which scores against a document's length in tokens.
+    return [token for token in _WORD_TOKENIZER.tokenize(text.lower()) if any(c.isalnum() for c in token)]
 
 
 @dataclass(frozen=True)
@@ -160,7 +161,9 @@ class TfidfExampleRetriever(ExampleRetriever):
     def _fit_index(self, sources: List[str]) -> None:
         from sklearn.feature_extraction.text import TfidfVectorizer
 
-        if len(sources) == 0:
+        # TfidfVectorizer rejects a corpus with nothing to put in its vocabulary; any() stops at
+        # the first source that has tokens, so this costs one extra tokenization.
+        if not any(tokenize_for_retrieval(source) for source in sources):
             self._vectorizer = None
             self._matrix = None
             return
@@ -178,8 +181,8 @@ class TfidfExampleRetriever(ExampleRetriever):
         return _top_k_indices(self._scores_for_vector(self._vectorizer.transform([query])), k)
 
     def _top_indices_for_pool_index(self, index: int, k: int) -> List[int]:
-        # Guarded by retrieve_for_pool_index()'s empty-pool check, so this is always fit here.
-        assert self._matrix is not None
+        if self._matrix is None:
+            return []
         return _top_k_indices(self._scores_for_vector(self._matrix[index]), k, exclude=index)
 
 
