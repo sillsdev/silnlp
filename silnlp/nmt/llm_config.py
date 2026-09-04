@@ -60,8 +60,6 @@ class PromptMessages:
 
 @dataclass(frozen=True)
 class PromptTemplate:
-    """One prompt's wording: the system message, the instruction, and how examples are rendered."""
-
     system_message: str
     instruction_template: str
     formatter: ExampleFormatter
@@ -96,8 +94,7 @@ class PromptBuilder:
         return self._pool
 
     def template_for(self, rotation_index: Optional[int]) -> PromptTemplate:
-        # Rotating templates are keyed off the row index so a re-run renders the same prompts,
-        # and so a given row's loss stays comparable from one evaluation to the next.
+        # Keyed off the row index so a re-run, and each evaluation, renders the same prompts.
         if rotation_index is None or len(self._templates) == 1:
             return self._templates[0]
         return self._templates[rotation_index % len(self._templates)]
@@ -125,9 +122,7 @@ class PromptBuilder:
         rotation_index: Optional[int] = None,
         **instruction_fields: Any,
     ) -> PromptMessages:
-        """`pool_index` is the row's position in the example pool, which is excluded from its own
-        examples; `rotation_index` picks the template, and defaults to it. Rows outside the pool
-        still rotate by passing only `rotation_index`."""
+        # Separate indices so rows outside the pool, which get no pool_index, still rotate.
         if rotation_index is None:
             rotation_index = pool_index
         template = self.template_for(rotation_index)
@@ -144,7 +139,6 @@ class PromptBuilder:
 
 
 def warn_about_examples_placeholder(templates: Sequence[PromptTemplate], num_examples: int, source: str) -> None:
-    """Warn when the instruction templates and num_examples disagree about few-shot examples."""
     for i, template in enumerate(templates):
         where = f"{source}[{i}]" if len(templates) > 1 else source
         if num_examples > 0 and not template.has_examples_placeholder:
@@ -163,8 +157,7 @@ def warn_about_examples_placeholder(templates: Sequence[PromptTemplate], num_exa
 
 
 def read_prompt_template_file(path: Path, defaults: dict) -> List[PromptTemplate]:
-    """Read prompt templates from a JSON Lines file, one {system_message, instruction_template,
-    example_format} object per line, with any omitted field taken from `defaults`."""
+    """One {system_message, instruction_template, example_format} object per line."""
     if not path.is_file():
         raise RuntimeError(f"The prompt template file {path} does not exist.")
     templates: List[PromptTemplate] = []
@@ -197,7 +190,6 @@ def read_prompt_template_file(path: Path, defaults: dict) -> List[PromptTemplate
 
 
 def parse_example_selection(prompt: dict) -> Tuple[str, Optional[str]]:
-    """Read the selection method and optional embedding model name out of a prompt config."""
     selection = prompt["example_selection"]
     # merge_dict() replaces rather than merges when a bare-string override lands on a dict default.
     if isinstance(selection, str):
@@ -338,8 +330,8 @@ class LLMConfig(Config):
 
 
 def resolve_prompt_defaults(prompt: dict, config_class: type) -> None:
-    """Fill in the wording the user left unset. The default instruction template depends on
-    num_examples, so that a zero-shot prompt has no dangling examples placeholder."""
+    """The default instruction template depends on num_examples, so a zero-shot prompt has no
+    dangling examples placeholder."""
     if prompt.get("system_message") is None:
         prompt["system_message"] = config_class.DEFAULT_SYSTEM_MESSAGE
     if prompt.get("example_format") is None:

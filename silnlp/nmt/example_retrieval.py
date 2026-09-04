@@ -36,8 +36,7 @@ FIXED_PROMPT_MODEL_PREFIXES = ("google/translate-gemma", "google/translategemma"
 
 
 def tokenize_for_retrieval(text: str) -> List[str]:
-    # The tokenizer emits punctuation as tokens of its own. They carry no retrieval signal, and
-    # they skew BM25, which scores against a document's length in tokens.
+    # Punctuation tokens carry no retrieval signal and skew BM25, which scores against length.
     return [token for token in _WORD_TOKENIZER.tokenize(text.lower()) if any(c.isalnum() for c in token)]
 
 
@@ -161,8 +160,7 @@ class TfidfExampleRetriever(ExampleRetriever):
     def _fit_index(self, sources: List[str]) -> None:
         from sklearn.feature_extraction.text import TfidfVectorizer
 
-        # TfidfVectorizer rejects a corpus with nothing to put in its vocabulary; any() stops at
-        # the first source that has tokens, so this costs one extra tokenization.
+        # TfidfVectorizer rejects a corpus with nothing to put in its vocabulary.
         if not any(tokenize_for_retrieval(source) for source in sources):
             self._vectorizer = None
             self._matrix = None
@@ -372,7 +370,6 @@ class ExamplePool:
         return self._examples
 
     def _read_first_available_corpus(self) -> Optional[Tuple[List[str], List[str]]]:
-        """Read the first candidate pair that is present, so a caller can state a preference."""
         for src_path, trg_path in self._corpus_paths:
             pairs = read_parallel_text_pairs(src_path, trg_path)
             if pairs is not None:
@@ -390,11 +387,8 @@ class ExamplePool:
         return k > 0 and k >= len(self)
 
     def select(self, query: str, k: int, pool_index: Optional[int] = None) -> List[Example]:
-        """Up to k examples for one request, most relevant last so the best sit nearest the source text.
-
-        `pool_index` identifies the pool entry being translated, whose own target would otherwise
-        leak into the prompt; passing it excludes that entry.
-        """
+        """Most relevant last, so the best examples sit nearest the source text. Excluding
+        `pool_index` keeps the entry being translated from leaking its own target into the prompt."""
         if k <= 0 or len(self) == 0:
             return []
         if self.covers_whole_pool(k):

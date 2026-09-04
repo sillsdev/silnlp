@@ -426,11 +426,8 @@ class RemoteLLMConfig(LLMConfig):
             )
 
     def _create_batch_prompt_builder(self) -> PromptBuilder:
-        """A second builder whose instruction template numbers several segments in one request.
-
-        It shares the single-segment builder's example pool, so the corpus is read and indexed
-        once however the requests are batched.
-        """
+        """Numbers several segments into one request, sharing the single-segment builder's
+        example pool so the corpus is read and indexed once however requests are batched."""
         builder = self.infer_prompt_builder
         name = "infer.prompt.batch_instruction_template"
         template = PromptTemplate(
