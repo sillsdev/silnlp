@@ -120,20 +120,27 @@ class ExampleRetriever(ABC):
         return retriever
 
 
+class RetrievalTokenizer:
+    """Splits text into the words a lexical index scores against."""
+
+    def __init__(self) -> None:
+        self._tokenizer = LatinWordTokenizer()
+
+    def tokenize(self, text: str) -> List[str]:
+        return self._keep_words(self._tokenizer.tokenize(text.lower()))
+
+    def _keep_words(self, tokens: Iterable[str]) -> List[str]:
+        # Punctuation tokens carry no retrieval signal and skew BM25, which scores against length.
+        return [token for token in tokens if any(c.isalnum() for c in token)]
+
+
 class LexicalExampleRetriever(ExampleRetriever):
     """Shares one tokenizer, so switching between tfidf and bm25 changes the ranking rather than
     what counts as a word."""
 
     def __init__(self) -> None:
         super().__init__()
-        self._tokenizer = LatinWordTokenizer()
-
-    def _filter_tokens_for_retrieval(self, tokens: Iterable[str]) -> List[str]:
-        return [token for token in tokens if any(c.isalnum() for c in token)]
-
-    def _tokenize_for_retrieval(self, text: str) -> List[str]:
-        tokens = self._tokenizer.tokenize(text.lower())
-        return self._filter_tokens_for_retrieval(tokens)
+        self._tokenizer = RetrievalTokenizer()
 
 
 class TfidfExampleRetriever(LexicalExampleRetriever):
@@ -146,12 +153,12 @@ class TfidfExampleRetriever(LexicalExampleRetriever):
 
     def _fit_index(self, sources: List[str]) -> None:
         # TfidfVectorizer rejects a corpus with nothing to put in its vocabulary.
-        if not any(self._tokenize_for_retrieval(source) for source in sources):
+        if not any(self._tokenizer.tokenize(source) for source in sources):
             self._vectorizer = None
             self._matrix = None
             return
         self._vectorizer = TfidfVectorizer(
-            lowercase=False, tokenizer=self._tokenize_for_retrieval, token_pattern=None
+            lowercase=False, tokenizer=self._tokenizer.tokenize, token_pattern=None
         )
         self._matrix = self._vectorizer.fit_transform(sources)
 
@@ -179,7 +186,7 @@ class BM25ExampleRetriever(LexicalExampleRetriever):
     def _fit_index(self, sources: List[str]) -> None:
         from rank_bm25 import BM25Okapi
 
-        tokenized = [self._tokenize_for_retrieval(source) for source in sources]
+        tokenized = [self._tokenizer.tokenize(source) for source in sources]
         # BM25Okapi rejects an empty corpus and divides by zero on all-empty documents.
         if sum(len(tokens) for tokens in tokenized) == 0:
             self._index = None
@@ -189,7 +196,7 @@ class BM25ExampleRetriever(LexicalExampleRetriever):
     def _top_indices_for_query(self, query: str, k: int) -> List[int]:
         if self._index is None:
             return []
-        return _top_k_indices(self._index.get_scores(self._tokenize_for_retrieval(query)), k)
+        return _top_k_indices(self._index.get_scores(self._tokenizer.tokenize(query)), k)
 
 
 class EmbeddingExampleRetriever(ExampleRetriever):

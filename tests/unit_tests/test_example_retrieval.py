@@ -15,6 +15,7 @@ from silnlp.nmt.example_retrieval import (
     XmlExampleFormatter,
     create_example_formatter,
     ExampleRetrieverFactory,
+    RetrievalTokenizer,
 )
 
 
@@ -175,10 +176,6 @@ def test_create_example_formatter_bare_text_string_matches_explicit_default():
     assert from_shorthand == explicit_default
 
 
-def _tokenize(text):
-    return TfidfExampleRetriever()._tokenize_for_retrieval(text)
-
-
 class _NeverFitRetriever(ExampleRetriever):
     method = "never-fit"
 
@@ -280,7 +277,7 @@ def test_generic_leave_one_out_returns_fewer_than_k_when_the_corpus_is_too_small
     assert retriever.rank_excluding("a", 0, k=5) == [1]
 
 
-def test_embedding_retriever_pickles_without_the_model_but_keeps_the_embeddings(tmp_path):
+def test_embedding_retriever_pickles_the_embeddings_but_not_the_model(tmp_path):
     vectors = {"cat": [1.0, 0.0], "dog": [0.0, 1.0], "kitten": [0.9, 0.1]}
     retriever = _fitted(EmbeddingExampleRetriever(model=_StubEmbeddingModel(vectors)), ["cat", "dog"])
     retriever.save(tmp_path)
@@ -288,10 +285,9 @@ def test_embedding_retriever_pickles_without_the_model_but_keeps_the_embeddings(
     loaded = ExampleRetriever.load(tmp_path)
     assert loaded is not None
     assert loaded.source_count == 2
-    assert loaded._model is None
-    # A query still needs the model, but ranking against the cached embeddings does not.
-    loaded._model = _StubEmbeddingModel(vectors)
-    assert loaded.rank("kitten", k=1) == [0]
+    # Ranking a known position uses the cached embeddings, so it works without the model that
+    # was deliberately left out of the pickle.
+    assert loaded.rank_excluding("cat", 0, k=1) == [1]
 
 
 def test_retriever_meta_records_the_method_and_model_name(tmp_path):
@@ -344,20 +340,20 @@ def test_example_pool_ensure_available_reads_the_corpus_up_front(tmp_path):
 
 
 def test_tokenize_for_retrieval_drops_punctuation_only_tokens():
-    assert _tokenize("Let there be LIGHT!") == ["let", "there", "be", "light"]
-    assert _tokenize('"Come," he said -- and went...') == ["come", "he", "said", "and", "went"]
+    assert RetrievalTokenizer().tokenize("Let there be LIGHT!") == ["let", "there", "be", "light"]
+    assert RetrievalTokenizer().tokenize('"Come," he said -- and went...') == ["come", "he", "said", "and", "went"]
 
 
 def test_tokenize_for_retrieval_keeps_words_that_contain_punctuation():
-    assert _tokenize("Don't stop, Jesus-like 12,345.") == ["don't", "stop", "jesus-like", "12,345"]
+    assert RetrievalTokenizer().tokenize("Don't stop, Jesus-like 12,345.") == ["don't", "stop", "jesus-like", "12,345"]
 
 
 def test_tokenize_for_retrieval_keeps_non_latin_words():
-    assert _tokenize("Se dijo: \u00abvengan\u00bb \u0663\u0664") == ["se", "dijo", "vengan", "\u0663\u0664"]
+    assert RetrievalTokenizer().tokenize("Se dijo: \u00abvengan\u00bb \u0663\u0664") == ["se", "dijo", "vengan", "\u0663\u0664"]
 
 
 def test_tokenize_for_retrieval_yields_nothing_for_punctuation_only_text():
-    assert _tokenize("!!! ???") == []
+    assert RetrievalTokenizer().tokenize("!!! ???") == []
 
 
 def test_tfidf_retriever_handles_a_corpus_with_no_word_tokens():
@@ -372,8 +368,10 @@ def test_tfidf_retriever_ignores_sources_with_no_word_tokens():
     assert retriever.rank("light", k=1) == [1]
 
 
-def test_tfidf_and_bm25_tokenize_identically(tmp_path):
-    # Switching selection method should change the ranking, not what counts as a word.
-    text = "Don't stop, Jesus-like 12,345"
-    vectorizer = _fitted(TfidfExampleRetriever(), [text])._vectorizer
-    assert vectorizer.build_analyzer()(text) == _tokenize(text)
+def test_tfidf_and_bm25_agree_on_what_counts_as_a_word():
+    # Switching selection method should change the ranking, not how the text is split.
+    pytest.importorskip("rank_bm25")
+    sources = ["do not stop", "don't stop now", "something else entirely"]
+    tfidf = _fitted(TfidfExampleRetriever(), sources).rank("don't", k=3)
+    bm25 = _fitted(BM25ExampleRetriever(), sources).rank("don't", k=3)
+    assert tfidf[0] == bm25[0] == 1
